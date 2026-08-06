@@ -2,9 +2,10 @@
  * USD → TWD 即時匯率（點數 1 點 = NT$1 政策下，Fal USD 餘額換算成可花點數的來源）。
  * - 優先：ExchangeRate-API Open Access（免金鑰、涵蓋 TWD）
  * - 失敗：退回 shared/models 的 USD_TO_TWD（目錄校準常數 31）
- * - 快取 30 分鐘，避免每次扣點打外部
+ * - 快取 30 分鐘，避免每次扣點打外部（有 Redis 時跨實例共用，見 services/cache）
  */
 import { USD_TO_TWD } from "../../shared/models";
+import { cacheGet, cacheSet, cacheDelete } from "./cache";
 import { proxyFetch } from "./http";
 
 export const FX_CACHE_TTL_MS = 30 * 60_000;
@@ -16,16 +17,14 @@ export type FxRateResult = {
   cached: boolean;
 };
 
-type CacheEntry = {
-  result: Omit<FxRateResult, "cached">;
-  expiresAt: number;
-};
-
-let cache: CacheEntry | null = null;
+/** 快取鍵（services/cache 會自動加上 Redis 前綴） */
+const CACHE_KEY = "fx:usd-twd";
+/** 上游掛掉時的短快取：避免每次扣點都重打一次已知會失敗的外部服務 */
+const FX_FALLBACK_TTL_MS = 5 * 60_000;
 
 /** 單元測試用 */
 export function resetFxRateCacheForTests(): void {
-  cache = null;
+  void cacheDelete(CACHE_KEY);
 }
 
 function clampRate(n: number): number | null {
@@ -62,9 +61,9 @@ async function fetchLiveUsdTwd(): Promise<number | null> {
  * force=true 略過快取（管理頁手動重整用）。
  */
 export async function getUsdToTwd(opts?: { force?: boolean }): Promise<FxRateResult> {
-  const now = Date.now();
-  if (!opts?.force && cache && cache.expiresAt > now) {
-    return { ...cache.result, cached: true };
+  if (!opts?.force) {
+    const hit = await cacheGet<Omit<FxRateResult, "cached">>(CACHE_KEY);
+    if (hit) return { ...hit, cached: true };
   }
 
   const live = await fetchLiveUsdTwd();
@@ -74,7 +73,7 @@ export async function getUsdToTwd(opts?: { force?: boolean }): Promise<FxRateRes
       source: "live",
       fetchedAt: new Date().toISOString(),
     };
-    cache = { result, expiresAt: now + FX_CACHE_TTL_MS };
+    await cacheSet(CACHE_KEY, result, FX_CACHE_TTL_MS);
     return { ...result, cached: false };
   }
 
@@ -83,8 +82,8 @@ export async function getUsdToTwd(opts?: { force?: boolean }): Promise<FxRateRes
     source: "fallback",
     fetchedAt: new Date().toISOString(),
   };
-  // 失敗也短快取 5 分鐘，避免上游掛掉時每次扣點狂打
-  cache = { result, expiresAt: now + 5 * 60_000 };
+  // 失敗也短快取，避免上游掛掉時每次扣點狂打
+  await cacheSet(CACHE_KEY, result, FX_FALLBACK_TTL_MS);
   return { ...result, cached: false };
 }
 

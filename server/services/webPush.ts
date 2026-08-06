@@ -116,7 +116,7 @@ export async function pushToUsers(userIds: string[], payload: PushPayload): Prom
 }
 
 /**
- * 組長（含）以上的成員 id（審批/待核事件的收件人）；可排除觸發者本人（自己不用通知自己）。
+ * 組長（含）以上的成員 id（待核事件的收件人）；可排除觸發者本人（自己不用通知自己）。
  * 與 requireLeader 的裁決權對齊：組長列（group_members role='leader'）＋該組所屬團隊的管理員
  * （team_members role='admin'——auth 對他們合成 'admin' 角色，同樣有裁決權；沒有組長的組
  * 常態上正是由團隊管理員看著，漏掉他們＝待審事件推給空集合）。開發者（isSuperAdmin）刻意

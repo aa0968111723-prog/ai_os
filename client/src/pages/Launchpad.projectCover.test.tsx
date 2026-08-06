@@ -109,7 +109,7 @@ function seed(projects: ProjectRow[]) {
   h.queryData.set("auth.me", { user: { id: "u1", name: "阿光" }, groups: [{ groupId: GROUP, role: "leader" }] });
   h.queryData.set("projects.list", projects);
   h.queryData.set("options.byGroup", []);
-  h.queryData.set("approvals.pendingSummary", { projects: [], totalPendingApprovals: 0, totalAwaitingGenerations: 0 });
+  h.queryData.set("generation.pendingSummary", { projects: [], totalAwaitingGenerations: 0 });
   h.queryData.set("teamAssistant.agentOverview", {
     runs: [], totalRuns: 0, listLimit: 30,
     summary: {

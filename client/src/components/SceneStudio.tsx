@@ -74,14 +74,6 @@ export function SceneStudio({
   propIds,
   onClose,
   onChanged,
-  isLeader = false,
-  meLoading = false,
-  sceneStatus,
-  pendingApprovalId,
-  rejectReason,
-  approvalsError = false,
-  deciding = false,
-  onDecide,
 }: {
   sceneId: string;
   projectId: string;
@@ -96,24 +88,6 @@ export function SceneStudio({
   onClose: () => void;
   /** 這一格被改動（存檔／送生成／切版本）時通知外層刷新分鏡列 */
   onChanged: () => void;
-  /* ── 就地裁決（全部選配）───────────────────────────────────────────────
-   * 組長改完一鏡要通過／退回，過去得先關掉工作室回分鏡列才找得到按鈕。
-   * 審批資料與 mutation 都留在 SceneList，這裡只收「現況」與一個回呼——
-   * 工作室因此不必碰 trpc.approvals，既有測試的 mock（只有 scenes.*）不受影響。 */
-  /** 是否為組長（後端 approvals.decide 另有把關，這裡只決定要不要畫） */
-  isLeader?: boolean;
-  /** auth.me 尚未回來：先不畫裁決區，避免按鈕先缺後補的閃爍 */
-  meLoading?: boolean;
-  /** 這一鏡的最新狀態（取自分鏡列的活資料，裁決後會自己更新） */
-  sceneStatus?: string;
-  /** 待裁決的審批 id；沒有就不畫裁決鈕 */
-  pendingApprovalId?: string;
-  /** 最近一次被退回的理由（status=needs_work 時顯示） */
-  rejectReason?: string | null;
-  /** 審批清單讀取失敗：據此解釋「為什麼沒有裁決鈕」，而不是預設沉默 */
-  approvalsError?: boolean;
-  deciding?: boolean;
-  onDecide?: (decision: "approved" | "needs_work", reason?: string) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, true, onClose);
@@ -241,45 +215,6 @@ export function SceneStudio({
           </p>
         )}
         {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
-
-        {/* 就地裁決：改完這一鏡不必回分鏡列才能通過／退回。
-            退回理由沿用分鏡列同一組常用句，組長在手機上全程可不打字。 */}
-        {!meLoading && isLeader && sceneStatus === "pending" && pendingApprovalId && onDecide && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: "var(--sp-8)" }}>
-            <Meta as="span">這一鏡待你裁決</Meta>
-            <Button
-              variant="neutral"
-              size="sm"
-              style={{ color: "var(--success-ink)", borderColor: "var(--success)" }}
-              disabled={deciding}
-              onClick={() => onDecide("approved")}
-            >
-              <Icon name="Check" size={15} /> 通過
-            </Button>
-            <ConfirmButton
-              triggerStyle={{ color: "var(--danger-ink)", borderColor: "var(--danger)" }}
-              disabled={deciding}
-              title="退回這一鏡"
-              reason={{
-                label: "退回理由（會通知提交人）",
-                placeholder: "說明需要修改的地方…",
-                required: true,
-                presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
-              }}
-              confirmLabel="退回"
-              onConfirm={(reason) => onDecide("needs_work", reason)}
-            >
-              <Icon name="Undo2" size={15} /> 退回
-            </ConfirmButton>
-          </div>
-        )}
-        {/* 讀不到審批清單時說清楚，否則組長只會看到「裁決鈕不見了」而無從判斷 */}
-        {!meLoading && isLeader && sceneStatus === "pending" && !pendingApprovalId && approvalsError && (
-          <Hint layer="always">審批狀態讀不到，通過／退回暫時無法顯示——可回分鏡列再試一次。</Hint>
-        )}
-        {sceneStatus === "needs_work" && rejectReason && (
-          <Meta as="p" role="status">退回理由：{rejectReason}</Meta>
-        )}
 
         <div className="scene-studio__body">
           {/* ── 舞台：這一格現在長什麼樣（或正在看的那一版） ───────────────── */}

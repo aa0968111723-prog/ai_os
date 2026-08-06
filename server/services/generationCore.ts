@@ -14,7 +14,7 @@ import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
 import { getModelContract } from "./modelContractStore";
-import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
+import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta, type GenerationBenchMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -214,6 +214,8 @@ export interface SubmitCoreInput {
   seed?: number;
   /** 消融實測分組標記：落 params 內部欄位，送 provider 前會被移除 */
   ablation?: GenerationAblationMeta;
+  /** 同題並跑（模型競技場）分組標記：同一次比較的每顆模型共用 runId */
+  bench?: GenerationBenchMeta;
   /** 預設開啟：凍結設定卡版本，並在 provider 支援時附上多張參考圖。 */
   continuityMode?: boolean;
   /** 只供伺服器重試沿用資料庫快照；不得直接暴露成公開 API payload。 */
@@ -686,6 +688,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   const storedParams = storeGenerationSourceMeta(falInput, {
     secondarySourceUrl,
     ablation: input.ablation,
+    bench: input.bench,
     usedUserKey: usedUserKey || undefined,
   });
 
@@ -741,7 +744,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           summary: "等待成本核准，尚未送出 provider",
         }).catch(() => undefined);
       }
-      // 系統訊息通知組內（比照審批三態機）；失敗不擋主流程
+      // 系統訊息通知組內；失敗不擋主流程
       await db
         .insert(schema.messages)
         .values({

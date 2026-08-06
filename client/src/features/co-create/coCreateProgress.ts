@@ -5,7 +5,7 @@
  * - theme    ≈ 世界觀就緒 isWorldviewReady／logline 達標
  * - structure ≈ scenes.length >= 1（建議 >= 3，完成門檻用 1）
  * - visuals   ≈ 至少一格有畫面／旁白素材
- * - wrap      ≈ 至少一格已通過送審（approved）；無送審流程時可不視為強制
+ * - wrap      ≈ 每一格都有畫面／旁白素材，可以打包交付
  *
  * session 可覆寫 phase；進度條「已完成」標記只讀伺服器資料。
  */
@@ -23,8 +23,6 @@ export type CoCreateProgressInput = {
   sceneCount: number;
   /** 有主畫面或旁白素材的格數 */
   scenesWithMedia: number;
-  /** 已通過審核的格數 */
-  approvedCount: number;
 };
 
 export function isThemeComplete(p: CoCreateProgressInput): boolean {
@@ -41,7 +39,7 @@ export function isVisualsComplete(p: CoCreateProgressInput): boolean {
 }
 
 export function isWrapComplete(p: CoCreateProgressInput): boolean {
-  return p.approvedCount >= 1;
+  return p.sceneCount >= 1 && p.scenesWithMedia >= p.sceneCount;
 }
 
 export function isPhaseComplete(id: CoCreatePhaseId, p: CoCreateProgressInput): boolean {
@@ -108,7 +106,6 @@ export function formatCoCreateWorkSummary(p: CoCreateProgressInput): string {
   } else {
     bits.push(`畫面 ${p.scenesWithMedia}/${p.sceneCount}（缺 ${missing}）`);
   }
-  if (p.approvedCount > 0) bits.push(`已過審 ${p.approvedCount}`);
   return bits.join(" · ");
 }
 
@@ -116,10 +113,4 @@ export function countScenesWithMedia(
   scenes: ReadonlyArray<{ assetId?: string | null; narrationAssetId?: string | null }>,
 ): number {
   return scenes.filter((s) => Boolean(s.assetId || s.narrationAssetId)).length;
-}
-
-export function countApprovedScenes(
-  scenes: ReadonlyArray<{ status?: string | null }>,
-): number {
-  return scenes.filter((s) => s.status === "approved").length;
 }

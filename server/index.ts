@@ -44,7 +44,7 @@ import {
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
-  assessStoragePersistence, verifyVolumeIdentity,
+  assessStoragePersistence, verifyVolumeIdentity, storageBackend, storageBackendNote, openStoredObject,
 } from "./services/storage";
 import { setStorageDegraded } from "./services/storageHealth";
 import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
@@ -221,9 +221,13 @@ app.get("/api/ready", async (_req, res) => {
     const { saveBuffer, removeStoredFile } = await import("./services/storage");
     const probe = await saveBuffer(Buffer.from("ready-probe"), "text/plain");
     await removeStoredFile(probe.storagePath);
+    // 物件儲存模式下素材不在本機磁碟上，Volume 判定不適用——探針寫讀成功就是綠燈。
+    const usingObjectStore = storageBackend() === "object";
     const usingVolume = STORAGE_ROOT === "/data" || !!process.env.ASSET_DIR;
-    if (isProd && !usingVolume) {
-      components.storage = { ok: false, note: "fallback（正式環境未掛持久 Volume，素材重啟即遺失）——請掛 /data 或設 ASSET_DIR" };
+    if (usingObjectStore) {
+      components.storage = { ok: true, note: "ok（物件儲存可寫讀）" };
+    } else if (isProd && !usingVolume) {
+      components.storage = { ok: false, note: "fallback（正式環境未掛持久 Volume，素材重啟即遺失）——請掛 /data 或設 ASSET_DIR，或改用物件儲存（S3_ENDPOINT）" };
     } else {
       components.storage = { ok: true, note: usingVolume ? "ok（持久 Volume 可寫讀）" : "ok（本機模式可寫讀）" };
     }
@@ -391,7 +395,7 @@ app.get("/api/export/jobs/:jobId/download", async (req, res) => {
     }
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
-    sendStoredFile(res, absPathOf(job.storagePath), {}, "交付包檔案遺失（可能是伺服器重啟前的舊檔，請重新打包）");
+    sendStoredFile(req, res, job.storagePath, {}, "交付包檔案遺失（可能是伺服器重啟前的舊檔，請重新打包）");
   } catch (err) {
     console.error("[export-job:download]", err);
     recordError("export-job:download", err);
@@ -661,11 +665,24 @@ app.use("/api/upload", (err: unknown, _req: express.Request, res: express.Respon
  * 誤以為「稍後再試」而一直重打同一張破圖。（self-healing：舊素材遺失時優雅降級，不再整批噴 500）
  */
 function sendStoredFile(
+  req: express.Request,
   res: express.Response,
-  absPath: string,
+  relPath: string,
   options: Parameters<express.Response["sendFile"]>[1] = {},
   notFoundMsg = "檔案遺失（可能是伺服器重啟前的舊檔，已無法取得）",
 ): void {
+  if (storageBackend() === "object") {
+    void streamStoredObject(req, res, relPath, options, notFoundMsg);
+    return;
+  }
+  let absPath: string;
+  try {
+    absPath = absPathOf(relPath);
+  } catch {
+    // 非法相對路徑（跳脫）：當成找不到，不回報路徑細節
+    res.status(404).json({ error: notFoundMsg });
+    return;
+  }
   res.sendFile(absPath, options, (err) => {
     if (!err || res.headersSent) return; // 成功（err 為空）或已開始送內容：不改狀態碼
     const code = (err as NodeJS.ErrnoException).code;
@@ -676,6 +693,46 @@ function sendStoredFile(
       res.status(500).json({ error: "讀取檔案失敗" });
     }
   });
+}
+
+/**
+ * 物件儲存版的送檔：Range 標頭原樣轉給後端，回應（含 206／Content-Range）直通瀏覽器。
+ * 這樣影音 seek 由物件儲存自己處理，本服務只是管道，不必把檔案讀進記憶體。
+ */
+async function streamStoredObject(
+  req: express.Request,
+  res: express.Response,
+  relPath: string,
+  options: Parameters<express.Response["sendFile"]>[1],
+  notFoundMsg: string,
+): Promise<void> {
+  try {
+    const range = typeof req.headers.range === "string" ? req.headers.range : undefined;
+    const body = await openStoredObject(relPath, range);
+    if (!body) {
+      if (!res.headersSent) res.status(404).json({ error: notFoundMsg });
+      return;
+    }
+    // 呼叫端指定的 Content-Type 優先（素材的權威 MIME 在資料庫，不是物件儲存的中繼資料）
+    const declared = (options?.headers as Record<string, string> | undefined)?.["Content-Type"];
+    res.status(body.status === 206 ? 206 : 200);
+    res.setHeader("Content-Type", declared ?? body.contentType ?? "application/octet-stream");
+    res.setHeader("Accept-Ranges", "bytes");
+    if (body.size !== null) res.setHeader("Content-Length", String(body.size));
+    if (body.contentRange) res.setHeader("Content-Range", body.contentRange);
+
+    // 瀏覽器中途取消（換頁、暫停影片）時要主動收掉上游串流，否則連線會一直掛著
+    res.on("close", () => body.stream.destroy());
+    body.stream.on("error", (err) => {
+      console.error("[sendStoredFile:object]", err);
+      if (!res.headersSent) res.status(500).json({ error: "讀取檔案失敗" });
+      else res.destroy();
+    });
+    body.stream.pipe(res);
+  } catch (err) {
+    console.error("[sendStoredFile:object]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取檔案失敗" });
+  }
 }
 
 app.get("/api/assets/:id/file", async (req, res) => {
@@ -705,8 +762,9 @@ app.get("/api/assets/:id/file", async (req, res) => {
       const thumbPath = (asset.meta as { thumbPath?: string } | null)?.thumbPath;
       if (thumbPath) {
         sendStoredFile(
+          req,
           res,
-          absPathOf(thumbPath),
+          thumbPath,
           { headers: { "Content-Type": "image/jpeg" } },
           "縮圖遺失",
         );
@@ -718,7 +776,7 @@ app.get("/api/assets/:id/file", async (req, res) => {
     // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
     // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
-    sendStoredFile(res, absPathOf(asset.storagePath), { headers: { "Content-Type": mime } }, "素材檔案遺失（可能是伺服器重啟前的舊素材，已無法取得）");
+    sendStoredFile(req, res, asset.storagePath, { headers: { "Content-Type": mime } }, "素材檔案遺失（可能是伺服器重啟前的舊素材，已無法取得）");
   } catch (err) {
     console.error("[assets:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取素材失敗" });
@@ -813,7 +871,7 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
     const mime = att.mime ?? "application/octet-stream";
     // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG 強制下載，擋內嵌渲染的 XSS/嗅探
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
-    sendStoredFile(res, absPathOf(att.storagePath), { headers: { "Content-Type": mime } }, "附件檔案遺失（可能是伺服器重啟前的舊檔）");
+    sendStoredFile(req, res, att.storagePath, { headers: { "Content-Type": mime } }, "附件檔案遺失（可能是伺服器重啟前的舊檔）");
   } catch (err) {
     console.error("[dm:attachment:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取附件失敗" });
@@ -939,7 +997,7 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (shouldForceAttachment(file.mime)) res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
-    sendStoredFile(res, absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } }, "文件檔案遺失（可能是伺服器重啟前的舊檔）");
+    sendStoredFile(req, res, file.storagePath, { headers: { "Content-Type": file.mime } }, "文件檔案遺失（可能是伺服器重啟前的舊檔）");
   } catch (err) {
     console.error("[databases:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取文件失敗" });
@@ -1135,6 +1193,10 @@ app.get("/api/avatars/:userId", async (req, res) => {
   }
   res.setHeader("Content-Type", file.mime);
   res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400");
+  if (file.kind === "object") {
+    sendStoredFile(req, res, file.rel, { headers: { "Content-Type": file.mime } }, "頭像檔案遺失");
+    return;
+  }
   return res.sendFile(file.abs);
 });
 
@@ -1567,10 +1629,16 @@ app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 // 串流 tar.gz（內含 assets/），並寫 backup_runs → system.storageStatus.lastBackupAt
 app.get("/api/admin/backup/assets.tar.gz", async (req, res) => {
   try {
-    const { authorizeAssetBackup, streamAssetsTarGz } = await import("./services/assetBackup");
+    const { authorizeAssetBackup, streamAssetsTarGz, assetBackupUnsupportedReason } = await import("./services/assetBackup");
     const gate = await authorizeAssetBackup(req);
     if (!gate.ok) {
       res.status(gate.status).json({ error: gate.error });
+      return;
+    }
+    // 物件儲存模式下這個端點備不到東西——寧可回錯誤，也不要吐一包空檔讓人以為有備份
+    const unsupported = assetBackupUnsupportedReason();
+    if (unsupported) {
+      res.status(409).json({ error: unsupported });
       return;
     }
     await streamAssetsTarGz(res, gate.triggeredBy);
@@ -1647,20 +1715,29 @@ app.get("/api/selftest", async (req, res) => {
     await archive.finalize();
     return "archiver OK";
   });
-  await run("儲存層(Volume)", async () => {
+  await run("儲存層(Volume/物件儲存)", async () => {
     const { saveBuffer, removeStoredFile } = await import("./services/storage");
     const guard = await checkDiskSpace(1024);
     if (guard) throw new Error(guard);
     const probe = await saveBuffer(Buffer.from("selftest"), "text/plain");
     await removeStoredFile(probe.storagePath);
+    // 物件儲存模式：素材不在本機磁碟上，Volume 的持久性判定整套不適用，寫讀成功即可。
+    if (storageBackend() === "object") return `${storageBackendNote()} 可讀寫`;
     // 持久性判定：掛 Volume 到 /data 或明設 ASSET_DIR 才算持久；否則落在容器本地磁碟，重新部署即遺失舊素材。
     // 正式環境用非持久磁碟＝定時炸彈（重啟後圖/旁白/成片全 404），自檢直接亮紅並給可執行修法。
     const persistent = !!process.env.ASSET_DIR || STORAGE_ROOT === "/data";
     if (!persistent && process.env.NODE_ENV === "production") {
-      throw new Error(`素材存在容器本地磁碟（${STORAGE_ROOT}）非持久——重新部署會遺失所有舊素材（圖/旁白/成片）。請到 Zeabur 掛載 Volume 到 /data，或設環境變數 ASSET_DIR 指向持久磁碟`);
+      throw new Error(`素材存在容器本地磁碟（${STORAGE_ROOT}）非持久——重新部署會遺失所有舊素材（圖/旁白/成片）。請到 Zeabur 掛載 Volume 到 /data，或設環境變數 ASSET_DIR 指向持久磁碟，或設 S3_ENDPOINT 改用物件儲存`);
     }
     const volume = STORAGE_ROOT === "/data" ? "Volume /data" : process.env.ASSET_DIR ? `ASSET_DIR ${STORAGE_ROOT}` : `本機 ${STORAGE_ROOT}（非持久，僅供開發）`;
     return `${volume} 可讀寫`;
+  });
+  await run("快取／跨實例協調(Redis)", async () => {
+    // 未設 REDIS_URL 不算故障：單實例部署本來就不需要 Redis，只是少了跨實例共用。
+    const { redisStatus } = await import("./services/redis");
+    const status = await redisStatus();
+    if (status.enabled && !status.connected) throw new Error(status.note);
+    return status.note;
   });
   await run("近期錯誤", async () => {
     // 錯誤環形緩衝（services/errlog）：記憶體態、重啟歸零——外接 Sentry 前的最低限度觀測。
@@ -1835,8 +1912,9 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     // 合並並行 PR #105：沿用其 sendStoredFile（檔案遺失優雅處理），但 Content-Type 用動態嗅探（本修復）。
     const shotMime = mimeFromPath(report.screenshotPath);
     sendStoredFile(
+      req,
       res,
-      absPathOf(report.screenshotPath),
+      report.screenshotPath,
       { headers: { "Content-Type": shotMime.startsWith("image/") ? shotMime : "image/png" } },
       "截圖檔案遺失",
     );
@@ -1951,7 +2029,11 @@ const httpServer = app.listen(port, () => {
   }
   try {
     ensureStorageDirs();
-    console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
+    console.log(
+      storageBackend() === "object"
+        ? `[server] 儲存層：${storageBackendNote()}（S3 相容物件儲存）`
+        : `[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`,
+    );
     // 素材保全：先判「這個路徑到底持不持久」（不是看目錄在不在——映像層裡本來就有 /data，
     // 那正是過去假綠燈的來源），再核對磁碟與資料庫兩側的卷指紋抓「換卷」。
     const persistence = assessStoragePersistence();
@@ -1991,6 +2073,8 @@ const httpServer = app.listen(port, () => {
   let bootRetryTimer: NodeJS.Timeout | undefined;
   onShutdown(() => {
     if (bootRetryTimer) clearTimeout(bootRetryTimer);
+    // Redis 是長連線：不主動收線的話 socket 會讓行程遲遲不退出，優雅關機被拖成強制終止
+    void import("./services/redis").then(({ closeRedis }) => closeRedis()).catch(() => {});
   });
   const bootstrap = async (): Promise<void> => {
     try {

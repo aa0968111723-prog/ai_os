@@ -204,7 +204,7 @@ function label(map: Record<string, string>, key: string): string {
 const FEEDBACK_LABELS: Record<string, string> = {
   context: "AI 懂不懂我們的素材（不用重複解釋）",
   cost: "額度夠用、花費看得懂",
-  collab: "協作／審批比試算表好用",
+  collab: "協作比試算表好用",
   ai: "AI 導演的 idea 有沒有用",
   daily: "能融入平常剪輯流程",
   usability: "不用教也會用",

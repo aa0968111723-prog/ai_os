@@ -7,7 +7,7 @@ import { Card, Chip, Hint, Skeleton } from "../components/ui";
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
   { key: "cost", label: "額度夠用、花費看得懂" },
-  { key: "collab", label: "協作/審批比試算表好用" },
+  { key: "collab", label: "協作比試算表好用" },
   { key: "ai", label: "AI 導演的 idea 有沒有用" },
   { key: "daily", label: "能融入平常剪輯流程" },
   { key: "usability", label: "不用教也會用" },

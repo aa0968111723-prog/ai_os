@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  countApprovedScenes,
   countScenesWithMedia,
   deriveSuggestedPhase,
   formatCoCreateWorkSummary,
@@ -19,7 +18,6 @@ const empty: CoCreateProgressInput = {
   tones: [],
   sceneCount: 0,
   scenesWithMedia: 0,
-  approvedCount: 0,
 };
 
 describe("coCreateProgress (G1)", () => {
@@ -32,7 +30,7 @@ describe("coCreateProgress (G1)", () => {
   it("structure / visuals / wrap thresholds", () => {
     expect(isStructureComplete({ ...empty, sceneCount: 1 })).toBe(true);
     expect(isVisualsComplete({ ...empty, scenesWithMedia: 1 })).toBe(true);
-    expect(isWrapComplete({ ...empty, approvedCount: 1 })).toBe(true);
+    expect(isWrapComplete({ ...empty, sceneCount: 2, scenesWithMedia: 2 })).toBe(true);
   });
 
   it("derives first incomplete phase", () => {
@@ -53,8 +51,7 @@ describe("coCreateProgress (G1)", () => {
         ...empty,
         wvReady: true,
         sceneCount: 2,
-        scenesWithMedia: 2,
-        approvedCount: 0,
+        scenesWithMedia: 1,
       }),
     ).toBe("wrap");
     expect(
@@ -63,7 +60,6 @@ describe("coCreateProgress (G1)", () => {
         wvReady: true,
         sceneCount: 2,
         scenesWithMedia: 2,
-        approvedCount: 1,
       }),
     ).toBe("wrap");
   });
@@ -73,7 +69,6 @@ describe("coCreateProgress (G1)", () => {
       wvReady: true,
       sceneCount: 2,
       scenesWithMedia: 0,
-      approvedCount: 0,
     };
     // session on theme：theme 當 current；structure 已完成仍標 done
     expect(coCreateJourneyStatesWithProgress("theme", p)).toEqual([
@@ -100,7 +95,6 @@ describe("coCreateProgress (G1)", () => {
         tones: ["平靜", "溫暖"],
         sceneCount: 3,
         scenesWithMedia: 1,
-        approvedCount: 0,
       }),
     ).toMatch(/設定：「清晨禪堂」/);
     expect(
@@ -110,19 +104,17 @@ describe("coCreateProgress (G1)", () => {
         tones: ["平靜"],
         sceneCount: 3,
         scenesWithMedia: 1,
-        approvedCount: 0,
       }),
     ).toMatch(/缺 2/);
   });
 
-  it("counts media and approved from scene rows", () => {
+  it("counts media from scene rows", () => {
     const rows = [
-      { assetId: "a", status: "todo" },
-      { narrationAssetId: "n", status: "approved" },
-      { assetId: null, narrationAssetId: null, status: "pending" },
+      { assetId: "a" },
+      { narrationAssetId: "n" },
+      { assetId: null, narrationAssetId: null },
     ];
     expect(countScenesWithMedia(rows)).toBe(2);
-    expect(countApprovedScenes(rows)).toBe(1);
   });
 
   it("isPhaseComplete covers all ids", () => {

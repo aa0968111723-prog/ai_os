@@ -53,9 +53,9 @@ export const optionsRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId);
 
-      // 只有 platform 帶畫面比例；若有帶就必須是這三種之一（生成台才對得上）
+      // 只有 platform 帶畫面比例；若有帶就必須是模型支援的比例之一（生成台才對得上）
       if (input.format !== undefined && !(PLATFORM_FORMATS as string[]).includes(input.format)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "畫面比例只能是 16:9／9:16／1:1" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: `畫面比例只能是：${PLATFORM_FORMATS.join("／")}` });
       }
       const label = input.label.trim();
 
@@ -97,7 +97,7 @@ export const optionsRouter = router({
       let format: string | null = null;
       if (input.type === "platform") {
         if (!input.format) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "請選擇畫面比例（16:9／9:16／1:1）" });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "請選擇畫面比例（例如 16:9／9:16／1:1）" });
         }
         format = input.format;
       }

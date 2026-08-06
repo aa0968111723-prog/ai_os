@@ -1,17 +1,36 @@
 /**
- * 真實儲存層（持久磁碟 /data，由部署平台的 Volume 掛載）：
- * - 上傳素材與生成成品都落地到磁碟，網址永遠有效（fal 的 CDN 網址會過期，不能當永久儲存）。
- * - 服務一律走 /api/assets/:id/file：登入＋組隔離；要給 fal 當「來源輸入」時改用 HMAC 簽名短效網址。
- * - 沒掛 Volume 時退回 ./.data（本機開發可用；正式站務必掛 /data 或設 ASSET_DIR，否則重啟即遺失）。
+ * 真實儲存層——兩種後端，同一組 API：
+ *
+ * 1. **本機持久磁碟**（預設）：/data，由部署平台的 Volume 掛載；沒掛時退回 ./.data（僅供本機開發）。
+ * 2. **S3 相容物件儲存**（設了 S3_ENDPOINT／MINIO_ENDPOINT 即自動啟用）：MinIO／R2／AWS S3。
+ *
+ * 兩者的相對路徑（storage_path，形如 2026/08/uuid.png）刻意完全相同，所以：
+ * - 資料庫既有的素材紀錄切換後端不用改寫；
+ * - 可以先開物件儲存收新檔，再用 `npm run assets:migrate-object-store` 把舊檔搬過去。
+ *
+ * 不論哪種後端，服務一律走 /api/assets/:id/file：登入＋組隔離；
+ * 要給 fal 當「來源輸入」時改用 HMAC 簽名短效網址。
  */
 import { createHmac, randomUUID, createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile, rename, stat, unlink, readdir } from "node:fs/promises";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { eq } from "drizzle-orm";
 import { proxyFetch } from "./http";
 import { db, schema } from "../db";
 import { clearStorageDegraded, setStorageDegraded } from "./storageHealth";
+import {
+  ObjectNotFoundError,
+  activeObjectStoreConfig,
+  copyObject,
+  deleteObject,
+  getObject,
+  headObject,
+  isObjectStoreEnabled,
+  listObjects,
+  putObject,
+} from "./objectStore";
 
 /** 儲存根目錄：正式站掛 Volume 在 /data；本機退回 ./.data（已入 .gitignore） */
 export const STORAGE_ROOT = process.env.ASSET_DIR ?? (existsSync("/data") ? "/data" : path.join(process.cwd(), ".data"));
@@ -36,7 +55,28 @@ export function publicBaseUrl(): string {
 }
 
 export function ensureStorageDirs(): void {
+  // 物件儲存模式下 assets/ 不會有內容，但 tmp/ 仍要在：multer 一律先落地到本機暫存，
+  // 再由 adoptTmpFile 串流上傳——大檔不進記憶體這件事兩種後端都成立。
   for (const dir of [ASSETS_DIR, TMP_DIR]) mkdirSync(dir, { recursive: true });
+}
+
+/* ── 後端選擇 ───────────────────────────────────────────────────
+ * 設了物件儲存就用物件儲存，沒設就用本機磁碟。刻意不做「兩邊都寫」：
+ * 雙寫的失敗模式（一邊成功一邊失敗）比單寫更難收拾，而且會讓「檔到底在哪」失去單一答案。
+ * 要換後端請走搬移腳本，不要靠雙寫過渡。
+ * ─────────────────────────────────────────────────────────────── */
+
+export type StorageBackendKind = "local" | "object";
+
+export function storageBackend(): StorageBackendKind {
+  return isObjectStoreEnabled() ? "object" : "local";
+}
+
+/** 給自檢／就緒頁顯示的一行說明（不含金鑰） */
+export function storageBackendNote(): string {
+  const config = activeObjectStoreConfig();
+  if (config) return `物件儲存 ${config.endpoint}/${config.bucket}${config.prefix ? `/${config.prefix}` : ""}`;
+  return STORAGE_ROOT === "/data" ? `Volume ${STORAGE_ROOT}` : process.env.ASSET_DIR ? `ASSET_DIR ${STORAGE_ROOT}` : `本機 ${STORAGE_ROOT}`;
 }
 
 /* ── 持久性判定與 Volume 身分（素材保全） ─────────────────────────
@@ -45,8 +85,11 @@ export function ensureStorageDirs(): void {
  * 這裡改成看 /proc/mounts 的實際掛載點，而不是看目錄在不在。
  * ─────────────────────────────────────────────────────────────── */
 
-/** declared＝管理員自行宣告（ASSET_PERSISTENT=1）；mountpoint＝確認是獨立掛載點；container-layer＝寫在容器暫存層 */
-export type StoragePersistenceMode = "declared" | "mountpoint" | "container-layer" | "unknown";
+/**
+ * declared＝管理員自行宣告（ASSET_PERSISTENT=1）；mountpoint＝確認是獨立掛載點；
+ * container-layer＝寫在容器暫存層；object-store＝素材放在 S3 相容物件儲存（與本機磁碟無關）。
+ */
+export type StoragePersistenceMode = "declared" | "mountpoint" | "container-layer" | "object-store" | "unknown";
 
 export type StoragePersistenceAssessment = {
   root: string;
@@ -83,6 +126,17 @@ const EPHEMERAL_FS = /^(overlay|rootfs|tmpfs|devtmpfs|none)$/i;
  * 所以 note 要寫成「發生什麼事＋該怎麼辦」，不能只回代碼。
  */
 export function assessStoragePersistence(root: string = STORAGE_ROOT): StoragePersistenceAssessment {
+  // 物件儲存模式：素材根本不在這台機器的磁碟上，整套 Volume 判定（掛載點、卷指紋）都不適用。
+  // 這裡要早於所有本機判定回傳，否則會對著一個沒人在用的目錄發出永遠為真的假警報。
+  const objectConfig = activeObjectStoreConfig();
+  if (objectConfig) {
+    return {
+      root: `${objectConfig.endpoint}/${objectConfig.bucket}${objectConfig.prefix ? `/${objectConfig.prefix}` : ""}`,
+      mode: "object-store",
+      persistent: true,
+      note: "素材存放在物件儲存（S3／MinIO），與本機磁碟無關——重新部署不會遺失。",
+    };
+  }
   // 有些平台的持久磁碟不以獨立掛載點呈現（或跑在非 Linux 的環境）；
   // 管理員確認過就設 ASSET_PERSISTENT=1 明講，不必為了通過偵測去改架構。
   if (process.env.ASSET_PERSISTENT === "1") {
@@ -165,6 +219,12 @@ async function writeDbVolumeId(id: string): Promise<void> {
  * 這正是「素材無聲消失、資料庫卻還顯示一切正常」的那個缺口。
  */
 export async function verifyVolumeIdentity(): Promise<{ ok: boolean; diskId: string; dbId: string | null; changed: boolean }> {
+  // 物件儲存模式沒有「卷」可以被換掉：bucket 的身分由 endpoint＋bucket 名決定，
+  // 而本機那顆容器磁碟每次部署本來就是新的——在這裡比對只會每次部署都誤報一次卷被換掉。
+  if (storageBackend() === "object") {
+    const id = `object:${activeObjectStoreConfig()?.bucket ?? "unknown"}`;
+    return { ok: true, diskId: id, dbId: id, changed: false };
+  }
   const diskId = readOrCreateDiskVolumeId();
   const dbId = await readDbVolumeId();
   if (dbId == null) {
@@ -196,6 +256,10 @@ export async function resetVolumeIdentity(): Promise<string> {
 /** 對帳用：某個相對路徑的檔案還在不在、多大（不存在不算錯誤，回 exists:false） */
 export async function statStored(relPath: string): Promise<{ exists: boolean; size?: number }> {
   try {
+    if (storageBackend() === "object") {
+      const stat = await headObject(relPath);
+      return stat.exists ? { exists: true, size: stat.size } : { exists: false };
+    }
     // absPathOf 對跳脫路徑會丟例外——一併被 catch 成 exists:false（對帳時不該因為一列髒資料整批中斷）
     const st = await stat(absPathOf(relPath));
     return { exists: true, size: st.size };
@@ -412,6 +476,9 @@ export async function checkDiskSpace(incomingBytes: number, alreadyWritten = fal
   if (incomingBytes > MAX_FILE_BYTES) {
     return `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）`;
   }
+  // 物件儲存沒有「本機還剩多少」可言（容量由 bucket 那端管），只保留大小上限。
+  // 仍會用到本機 tmp，但那是單檔生命週期、由 MIN_FREE 之外的暫存清理負責。
+  if (storageBackend() === "object") return null;
   const free = await freeBytes();
   const projectedFree = alreadyWritten ? free : free !== null ? free - incomingBytes : null;
   if (projectedFree !== null && projectedFree < MIN_FREE_BYTES) {
@@ -438,8 +505,12 @@ export function absPathOf(relPath: string): string {
 }
 
 export async function saveBuffer(buf: Buffer, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
-  ensureStorageDirs();
   const rel = newRelPath(extFromMime(mime) ?? ".bin");
+  if (storageBackend() === "object") {
+    await putObject(rel, buf, mime);
+    return { storagePath: rel, sizeBytes: buf.length };
+  }
+  ensureStorageDirs();
   const abs = absPathOf(rel);
   mkdirSync(path.dirname(abs), { recursive: true });
   await writeFile(abs, buf);
@@ -452,10 +523,16 @@ export async function saveBuffer(buf: Buffer, mime: string): Promise<{ storagePa
  * fs.copyFile 走檔案系統層複製，大影片也不進 Node 記憶體。
  */
 export async function copyStoredFile(relPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
-  ensureStorageDirs();
-  const srcAbs = absPathOf(relPath);
   // path.extname 回空字串（不是 undefined），?? 接不到——用 || 落到 .bin
   const rel = newRelPath(extFromMime(mime) ?? (path.extname(relPath) || ".bin"));
+  if (storageBackend() === "object") {
+    // 伺服器端複製：大影片不經過本服務的記憶體與頻寬
+    await copyObject(relPath, rel);
+    const stat = await headObject(rel);
+    return { storagePath: rel, sizeBytes: stat.size ?? 0 };
+  }
+  ensureStorageDirs();
+  const srcAbs = absPathOf(relPath);
   const abs = absPathOf(rel);
   mkdirSync(path.dirname(abs), { recursive: true });
   const { copyFile } = await import("node:fs/promises");
@@ -466,12 +543,29 @@ export async function copyStoredFile(relPath: string, mime: string): Promise<{ s
 
 /** 把 multer 收到的暫存檔移進正式位置（避免大檔在記憶體複製） */
 export async function adoptTmpFile(tmpPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
-  ensureStorageDirs();
   const rel = newRelPath(extFromMime(mime) ?? ".bin");
+  if (storageBackend() === "object") return uploadTmpToObjectStore(tmpPath, rel, mime);
+  ensureStorageDirs();
   const abs = absPathOf(rel);
   mkdirSync(path.dirname(abs), { recursive: true });
   await rename(tmpPath, abs);
   const s = await stat(abs);
+  return { storagePath: rel, sizeBytes: s.size };
+}
+
+/**
+ * 暫存檔 → 物件儲存：串流上傳（大影片不進記憶體），成功後才刪暫存檔。
+ * 上傳失敗時**保留**暫存檔不刪——multer 的暫存清理會處理，
+ * 而保留下來的檔案讓「上傳到一半失敗」在磁碟上還有跡可循，比靜默消失好查。
+ */
+async function uploadTmpToObjectStore(
+  tmpPath: string,
+  rel: string,
+  mime: string,
+): Promise<{ storagePath: string; sizeBytes: number }> {
+  const s = await stat(tmpPath);
+  await putObject(rel, createReadStream(tmpPath), mime, s.size);
+  await unlink(tmpPath).catch(() => {});
   return { storagePath: rel, sizeBytes: s.size };
 }
 
@@ -481,9 +575,10 @@ export async function adoptTmpFile(tmpPath: string, mime: string): Promise<{ sto
  * 杜絕把任意 asset 相對路徑當 screenshotPath 提交、藉服務端跨組偷讀（IDOR）。
  */
 export async function adoptFeedbackShot(tmpPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
-  ensureStorageDirs();
   const ext = extFromMime(mime) ?? ".png";
   const rel = path.posix.join("feedback", `${randomUUID()}${ext}`);
+  if (storageBackend() === "object") return uploadTmpToObjectStore(tmpPath, rel, mime);
+  ensureStorageDirs();
   const abs = absPathOf(rel);
   mkdirSync(path.dirname(abs), { recursive: true });
   await rename(tmpPath, abs);
@@ -503,6 +598,35 @@ export function isFeedbackShotPath(p: string): boolean {
  * 此函式由 index.ts 定期呼叫；找不到目錄（尚未有任何回饋）安全略過。
  */
 export async function sweepFeedbackShots(): Promise<void> {
+  const cutoff = Date.now() - 6 * 3600 * 1000;
+
+  // 取 DB 目前所有被引用的截圖相對路徑（feedback/uuid.ext）
+  const referenced = new Set<string>();
+  const rows = await db
+    .select({ screenshotPath: schema.feedbackReports.screenshotPath })
+    .from(schema.feedbackReports);
+  for (const r of rows) if (r.screenshotPath) referenced.add(r.screenshotPath);
+
+  if (storageBackend() === "object") {
+    let objects: Awaited<ReturnType<typeof listObjects>>;
+    try {
+      objects = await listObjects("feedback/");
+    } catch (err) {
+      console.warn("[storage] 列出孤兒截圖失敗（略過本輪）：", err instanceof Error ? err.message : err);
+      return;
+    }
+    for (const obj of objects) {
+      if (referenced.has(obj.key)) continue;
+      const modified = obj.lastModified ? Date.parse(obj.lastModified) : NaN;
+      // 讀不到 lastModified 時保守跳過：寧可留下孤兒檔，也不要誤刪剛上傳待送出的截圖
+      if (!Number.isFinite(modified) || modified >= cutoff) continue;
+      await deleteObject(obj.key).catch((err) => {
+        console.warn("[storage] 清理孤兒截圖失敗（略過）：", err instanceof Error ? err.message : err);
+      });
+    }
+    return;
+  }
+
   const feedbackDir = path.join(ASSETS_DIR, "feedback");
   let names: string[];
   try {
@@ -512,14 +636,6 @@ export async function sweepFeedbackShots(): Promise<void> {
   }
   if (names.length === 0) return;
 
-  // 取 DB 目前所有被引用的截圖相對路徑（feedback/uuid.ext）
-  const rows = await db
-    .select({ screenshotPath: schema.feedbackReports.screenshotPath })
-    .from(schema.feedbackReports);
-  const referenced = new Set<string>();
-  for (const r of rows) if (r.screenshotPath) referenced.add(r.screenshotPath);
-
-  const cutoff = Date.now() - 6 * 3600 * 1000;
   for (const name of names) {
     const rel = path.posix.join("feedback", name);
     if (referenced.has(rel)) continue; // 仍被引用，保留
@@ -536,9 +652,117 @@ export async function sweepFeedbackShots(): Promise<void> {
 
 export async function removeStoredFile(relPath: string): Promise<void> {
   try {
+    if (storageBackend() === "object") {
+      await deleteObject(relPath);
+      return;
+    }
     await unlink(absPathOf(relPath));
   } catch (err) {
     console.warn("[storage] 刪檔失敗（略過）：", err instanceof Error ? err.message : err);
+  }
+}
+
+/* ── 讀取（服務端送檔） ─────────────────────────────────────────
+ * 本機後端維持 res.sendFile（Express 內建 Range／ETag／Last-Modified，效率最好）；
+ * 物件儲存後端則把 Range 標頭原樣轉給後端、再把回應串流直通給瀏覽器——
+ * 影音拖進度條因此不必在本服務切片，也不會把整支影片讀進記憶體。
+ * ─────────────────────────────────────────────────────────────── */
+
+export interface StoredObjectStream {
+  status: number;
+  stream: Readable;
+  size: number | null;
+  contentType: string | null;
+  contentRange: string | null;
+}
+
+/**
+ * 取一個落地檔的讀取串流（兩種後端通用）。
+ *
+ * 打包交付、產縮圖、算 checksum 這些「伺服器自己要讀檔」的路徑都走這裡——
+ * 直接用 createReadStream(absPathOf(...)) 的話，切到物件儲存後會整批 ENOENT。
+ * 檔案不存在時拋錯（含 ENOENT 的 code），沿用呼叫端既有的錯誤處理。
+ */
+export async function openStoredReadStream(relPath: string): Promise<Readable> {
+  if (storageBackend() === "object") {
+    const body = await getObject(relPath); // 不存在時拋 ObjectNotFoundError
+    return body.stream;
+  }
+  return createReadStream(absPathOf(relPath));
+}
+
+/**
+ * 整檔讀進記憶體（兩種後端通用）。
+ * 只給「本來就要整檔進記憶體才能處理」的用途（例如 sharp 產縮圖）；
+ * 打包／服務端送檔請一律用 openStoredReadStream，別把大影片讀進 RAM。
+ */
+export async function readStoredFile(relPath: string): Promise<Buffer> {
+  if (storageBackend() === "object") {
+    const body = await getObject(relPath);
+    const chunks: Buffer[] = [];
+    for await (const chunk of body.stream) chunks.push(Buffer.from(chunk as Buffer));
+    return Buffer.concat(chunks);
+  }
+  const { readFile } = await import("node:fs/promises");
+  return readFile(absPathOf(relPath));
+}
+
+/**
+ * 寫一個「路徑由呼叫端決定」的檔（縮圖等衍生檔）。
+ * 與 saveBuffer 的差別：saveBuffer 自己產 YYYY/MM/uuid 路徑，這支沿用呼叫端給的相對路徑。
+ */
+export async function putStoredBuffer(relPath: string, buf: Buffer, mime: string): Promise<void> {
+  if (storageBackend() === "object") {
+    await putObject(relPath, buf, mime);
+    return;
+  }
+  ensureStorageDirs();
+  const abs = absPathOf(relPath);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  await writeFile(abs, buf);
+}
+
+/** 讀落地檔的前 n 個位元組（型別嗅探用）；不足 n 就回實際長度 */
+export async function readStoredHead(relPath: string, bytes: number): Promise<Buffer> {
+  if (storageBackend() === "object") {
+    // Range 只抓需要的那幾個位元組，不必為了看檔頭把整支影片拉下來
+    const body = await getObject(relPath, `bytes=0-${Math.max(0, bytes - 1)}`);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of body.stream) {
+      const buf = Buffer.from(chunk as Buffer);
+      chunks.push(buf);
+      total += buf.length;
+      if (total >= bytes) break;
+    }
+    body.stream.destroy();
+    return Buffer.concat(chunks).subarray(0, bytes);
+  }
+  const { open } = await import("node:fs/promises");
+  const fh = await open(absPathOf(relPath), "r");
+  try {
+    const buf = Buffer.alloc(bytes);
+    const { bytesRead } = await fh.read(buf, 0, bytes, 0);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
+/** 從物件儲存取檔；物件不存在回 null（呼叫端轉 404，與本機 ENOENT 同語意） */
+export async function openStoredObject(relPath: string, rangeHeader?: string): Promise<StoredObjectStream | null> {
+  try {
+    const body = await getObject(relPath, rangeHeader);
+    return {
+      status: body.status,
+      stream: body.stream,
+      size: body.size,
+      contentType: body.contentType,
+      contentRange: body.contentRange,
+    };
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) return null;
+    throw err;
   }
 }
 

@@ -31,7 +31,6 @@ type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
   | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string; sceneNo?: number; sceneTitle?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
-  | { type: "submit_approval"; label: string; sceneId: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
@@ -80,21 +79,16 @@ type GenModel = {
 function toPayload(a: Action) {
   if (a.type === "generate") return { type: "generate" as const, prompt: a.prompt, modelId: a.modelId, sceneId: a.sceneId };
   if (a.type === "update_scene") return { type: "update_scene" as const, sceneId: a.sceneId, field: a.field, value: a.value };
+  if (a.type === "plan_agent") return { type: "plan_agent" as const, goal: a.goal, plannerMode: a.plannerMode };
   if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, prompt: a.prompt };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
-  if (a.type === "plan_agent") {
-    return { type: "plan_agent" as const, goal: a.goal, plannerMode: a.plannerMode };
-  }
-  if (a.type === "apply_worldview_chips") {
-    return {
-      type: "apply_worldview_chips" as const,
-      themes: a.themes,
-      tones: a.tones,
-      styles: a.styles,
-    };
-  }
-  return { type: "submit_approval" as const, sceneId: a.sceneId };
+  return {
+    type: "apply_worldview_chips" as const,
+    themes: a.themes,
+    tones: a.tones,
+    styles: a.styles,
+  };
 }
 
 /** 綁分鏡的生成只允許「能填進分鏡格」的模型：文字（LLM）成品不入分鏡、配樂（text-to-audio）沒有專屬槽會覆蓋旁白 */
@@ -112,7 +106,7 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
 }
 
 /**
- * AI 專案助手（進階版）：問專案進度/生成/分鏡/審批，並可「提議」動作。
+ * AI 專案助手（進階版）：問專案進度/生成/分鏡，並可「提議」動作。
  * 安全：任何花點數或改資料的動作都用 ConfirmButton，使用者按確認才真的執行。
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
@@ -696,7 +690,6 @@ export function ProjectAssistant({
                                 // 動作已在原專案執行；快取失效不依目前畫面，讓回到原專案時能取到新資料。
                                 utils.generation.invalidate();
                                 utils.scenes.invalidate();
-                                utils.approvals.invalidate();
                                 utils.quota.invalidate();
                                 if (result.kind === "run_workflow") utils.workflows.invalidate();
                                 if (result.kind === "plan_agent") utils.agents.invalidate();
@@ -729,13 +722,12 @@ export function ProjectAssistant({
                             <Icon
                               name={
                                 payloadAct.type === "generate" ? "Sparkles"
-                                  : payloadAct.type === "submit_approval" ? "Check"
-                                    : payloadAct.type === "create_scene" ? "Plus"
-                                      : payloadAct.type === "run_workflow" ? "Play"
-                                        : payloadAct.type === "split_script" ? "Clapperboard"
-                                          : payloadAct.type === "plan_agent" ? "Film"
-                                            : payloadAct.type === "apply_worldview_chips" ? "Palette"
-                                              : "Pencil"
+                                  : payloadAct.type === "create_scene" ? "Plus"
+                                    : payloadAct.type === "run_workflow" ? "Play"
+                                      : payloadAct.type === "split_script" ? "Clapperboard"
+                                        : payloadAct.type === "plan_agent" ? "Film"
+                                          : payloadAct.type === "apply_worldview_chips" ? "Palette"
+                                            : "Pencil"
                               }
                               size={13}
                               style={{ verticalAlign: "-2px", marginRight: 4 }}

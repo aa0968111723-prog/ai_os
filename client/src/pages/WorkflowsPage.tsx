@@ -38,9 +38,9 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
     { groupId: groupId || undefined },
     { enabled: !!groupId },
   );
-  // projects.list 沒帶 includeArchived 時，伺服器已經排除 status='archived'（見 projects.ts），
-  // 回傳的列也沒有 archivedAt 這個欄位——原本的 .filter(p => !p.archivedAt) 是永遠成立的空篩選
-  const projects = projectsQuery.data ?? [];
+  // 封存以 status 表示（專案表沒有 archivedAt 欄位）；原本比對的 p.archivedAt 永遠是 undefined，
+  // 等於這個篩選從來沒有生效過——封存專案照樣列在「選一個專案套用工作流」裡。
+  const projects = (projectsQuery.data ?? []).filter((p) => p.status !== "archived");
 
   // 取得短影音母版定義
   const seriesTemplates = useMemo(() => listSeriesTemplates(), []);
@@ -404,10 +404,10 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
               <Card>
                 <strong style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--fg)" }}>
                   <Icon name="CheckCircle2" size={16} style={{ color: "var(--primary-ink)" }} />
-                  4. 人工審批與剪輯交付
+                  4. 人工過片與剪輯交付
                 </strong>
                 <Meta as="p" style={{ marginTop: 6, lineHeight: 1.5 }}>
-                  自動化負責高效備料與初稿生成；開示合規、成片品質一律經組長審批（通過／退回）。核准後支援直接匯出並銜接剪映、Premiere 與 Final Cut Pro。
+                  自動化負責高效備料與初稿生成；開示合規、成片品質一律由人工過片確認。確認後支援直接匯出並銜接剪映、Premiere 與 Final Cut Pro。
                 </Meta>
               </Card>
             </div>

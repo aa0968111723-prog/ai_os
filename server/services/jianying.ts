@@ -21,7 +21,7 @@ import { Readable } from "node:stream";
 import type { Response } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
-import { absPathOf, extFromMime } from "./storage";
+import { extFromMime, openStoredReadStream } from "./storage";
 import { appendAndWait, capRemoteBytes, fetchRemoteAsset, REMOTE_FILE_MAX_BYTES, safeName, sceneDur, splitCue } from "./exporter";
 import { resolutionForFormat } from "../../shared/options";
 import { JY_CONTENT_TEMPLATE, JY_META_TEMPLATE } from "./jianyingTemplate";
@@ -351,9 +351,8 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
   const openSource = async (a: { storagePath: string | null; url: string | null }): Promise<Readable | null> => {
     try {
       if (a.storagePath) {
-        const abs = absPathOf(a.storagePath);
-        await stat(abs);
-        return createReadStream(abs);
+        // 兩種儲存後端通用；開檔／取物件失敗會拋，由外層 catch 走單檔容錯
+        return await openStoredReadStream(a.storagePath);
       }
       if (a.url && /^https?:\/\//.test(a.url)) {
         const fileRes = await fetchRemoteAsset(a.url, clientAbort.signal);

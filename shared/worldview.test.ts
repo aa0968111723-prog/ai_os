@@ -20,6 +20,8 @@ import {
   formatWorldviewStylesLabel,
   isWorldviewReady,
   hasActs,
+  formatActsLine,
+  formatActsOutline,
   removesDefaultTaboos,
   DEFAULT_TABOOS,
   LOGLINE_INJECT_MAX,
@@ -173,6 +175,33 @@ describe("isWorldviewReady / hasActs", () => {
   it("hasActs 任一幕非空", () => {
     expect(hasActs(full)).toBe(true);
     expect(hasActs(worldviewSchema.parse({}))).toBe(false);
+  });
+});
+
+describe("formatActsOutline（三幕當拆分鏡的腳本來源）", () => {
+  const acts = (a: Partial<{ hook: string; turn: string; cta: string }>) =>
+    worldviewSchema.parse({ acts: { hook: "", turn: "", cta: "", ...a } }).acts;
+
+  it("一幕一段、空行分隔——假模式的段落切幕才切得出三幕，不會整份塞成一幕", () => {
+    const out = formatActsOutline(acts({ hook: "深夜獨坐", turn: "一句開示", cta: "晨光釋懷" }));
+    expect(out).toBe("鉤子：深夜獨坐\n\n轉折：一句開示\n\n行動呼籲：晨光釋懷");
+    expect(out.split(/(?:\r?\n){2,}/).filter(Boolean)).toHaveLength(3);
+  });
+
+  it("空欄省略，不留空段", () => {
+    expect(formatActsOutline(acts({ hook: "只有鉤子" }))).toBe("鉤子：只有鉤子");
+    expect(formatActsOutline(acts({ hook: "鉤", cta: "行" }))).toBe("鉤子：鉤\n\n行動呼籲：行");
+  });
+
+  it("三幕全空回空字串——呼叫端據此擋掉「拿空大綱去拆分鏡」", () => {
+    expect(formatActsOutline(acts({}))).toBe("");
+    expect(formatActsOutline(acts({ hook: "   " }))).toBe("");
+  });
+
+  it("與 formatActsLine 用同一組標籤，只差在分隔（單行摘要 vs 可拆的來源）", () => {
+    const a = acts({ hook: "鉤", turn: "轉", cta: "行" });
+    expect(formatActsLine(a)).toBe("鉤子：鉤 → 轉折：轉 → 行動呼籲：行");
+    expect(formatActsOutline(a).replace(/\n\n/g, " → ")).toBe(formatActsLine(a));
   });
 });
 

@@ -250,7 +250,7 @@ export const quotaRouter = router({
    *  組長以上本就有派工權、不需也不受此欄影響——只對 role='member' 的成員有意義。
    *
    *  分級授權上線後這支**只是 setMemberCommandLevel 的粗糙版**（開＝至少 dispatch、關＝none），
-   *  保留是因為既有 UI（組長「選項」頁的派工權按鈕）與外部呼叫仍在用它，直接刪掉會讓那些入口壞掉。
+   *  保留是因為既有 UI（組長「監控與紀錄」頁點數分配卡的派工權按鈕）與外部呼叫仍在用它，直接刪掉會讓那些入口壞掉。
    *  但它不能只寫布林：resolveCommandLevel 以「明確設過的等級」優先，舊布林只是 null 時的退路，
    *  所以只寫布林的話，一位已被設成 supervise 的組員按下「關」之後，後端仍會讓他替別人核准並花點——
    *  開關變成謊言。故一律折算成等級一起寫（見 levelFromDispatchToggle 的兩條不對稱規則）。 */

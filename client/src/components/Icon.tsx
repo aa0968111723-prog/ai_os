@@ -84,11 +84,17 @@ export type IconName =
   | "Zap"
   | "MessageSquare"
   | "Workflow"
+  | "FlaskConical"
+  | "LayoutGrid"
+  | "Cpu"
+  | "Layers"
+  | "List"
+  | "Users"
+  | "FolderGit2"
   | "Brush"
   | "Droplet"
   | "Feather"
   | "Box"
-  | "Layers"
   | "Shapes"
   | "Scissors"
   | "Sun"
@@ -101,11 +107,7 @@ export type IconName =
   | "CircleDot"
   | "Stamp"
   | "Wind"
-  | "Flower2"
-  | "LayoutGrid"
-  | "List"
-  | "Users"
-  | "FolderGit2";
+  | "Flower2";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -538,6 +540,72 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect width="8" height="8" x="13" y="13" rx="2" />
     </>
   ),
+  FlaskConical: (
+    <>
+      <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
+      <path d="M6.453 15h11.094" />
+      <path d="M8.5 2h7" />
+    </>
+  ),
+  LayoutGrid: (
+    <>
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </>
+  ),
+  Cpu: (
+    <>
+      <path d="M12 20v2" />
+      <path d="M12 2v2" />
+      <path d="M17 20v2" />
+      <path d="M17 2v2" />
+      <path d="M2 12h2" />
+      <path d="M2 17h2" />
+      <path d="M2 7h2" />
+      <path d="M20 12h2" />
+      <path d="M20 17h2" />
+      <path d="M20 7h2" />
+      <path d="M7 20v2" />
+      <path d="M7 2v2" />
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <rect x="8" y="8" width="8" height="8" rx="1" />
+    </>
+  ),
+  Layers: (
+    <>
+      <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
+      <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
+      <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
+    </>
+  ),
+  List: (
+    <>
+      <path d="M3 5h.01" />
+      <path d="M3 12h.01" />
+      <path d="M3 19h.01" />
+      <path d="M8 5h13" />
+      <path d="M8 12h13" />
+      <path d="M8 19h13" />
+    </>
+  ),
+  Users: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <path d="M16 3.128a4 4 0 0 1 0 7.744" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <circle cx="9" cy="7" r="4" />
+    </>
+  ),
+  FolderGit2: (
+    <>
+      <path d="M18 19a5 5 0 0 1-5-5v8" />
+      <path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5" />
+      <circle cx="13" cy="12" r="2" />
+      <circle cx="20" cy="19" r="2" />
+    </>
+  ),
   Brush: (
     <>
       <path d="m11 10 3 3" />
@@ -558,13 +626,6 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
       <path d="m3.3 7 8.7 5 8.7-5" />
       <path d="M12 22V12" />
-    </>
-  ),
-  Layers: (
-    <>
-      <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
-      <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
-      <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
     </>
   ),
   Shapes: (
@@ -662,40 +723,6 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 10v12" />
       <path d="M12 22c4.2 0 7-1.667 7-5-4.2 0-7 1.667-7 5Z" />
       <path d="M12 22c-4.2 0-7-1.667-7-5 4.2 0 7 1.667 7 5Z" />
-    </>
-  ),
-  LayoutGrid: (
-    <>
-      <rect width="7" height="7" x="3" y="3" rx="1" />
-      <rect width="7" height="7" x="14" y="3" rx="1" />
-      <rect width="7" height="7" x="14" y="14" rx="1" />
-      <rect width="7" height="7" x="3" y="14" rx="1" />
-    </>
-  ),
-  List: (
-    <>
-      <path d="M3 5h.01" />
-      <path d="M3 12h.01" />
-      <path d="M3 19h.01" />
-      <path d="M8 5h13" />
-      <path d="M8 12h13" />
-      <path d="M8 19h13" />
-    </>
-  ),
-  Users: (
-    <>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <path d="M16 3.128a4 4 0 0 1 0 7.744" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <circle cx="9" cy="7" r="4" />
-    </>
-  ),
-  FolderGit2: (
-    <>
-      <path d="M18 19a5 5 0 0 1-5-5v8" />
-      <path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5" />
-      <circle cx="13" cy="12" r="2" />
-      <circle cx="20" cy="19" r="2" />
     </>
   ),
 };
