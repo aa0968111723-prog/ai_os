@@ -13,33 +13,39 @@ const ready = worldviewSchema.parse({
   taboos: [],
 });
 
+/** 當前步驟＝標了 is-current 的那張卡；下一步只由它表達，不再另外印一行文字 */
+function currentStepText() {
+  return document.querySelector(".visual-journey__item.is-current")?.textContent ?? "";
+}
+
 describe("WorldviewGuide：下一步指引", () => {
   it("全空時第一步是「這支片在講什麼」", () => {
     render(<WorldviewGuide wv={blank} onJump={() => {}} />);
-    expect(screen.getByText(/下一步：/).textContent).toContain("這支片在講什麼");
+    expect(currentStepText()).toContain("這支片在講什麼");
   });
 
   it("填了一句話後推進到「想要什麼感覺」", () => {
     render(<WorldviewGuide wv={partial} onJump={() => {}} />);
-    expect(screen.getByText(/下一步：/).textContent).toContain("想要什麼感覺");
+    expect(currentStepText()).toContain("想要什麼感覺");
   });
 
-  it("必填三步齊了就說可以出圖，下一步改建議那個可略過的第四步", () => {
+  it("必填三步齊了，當前步驟改成那個可略過的第四步", () => {
     render(<WorldviewGuide wv={ready} onJump={() => {}} />);
-    expect(screen.getByText(/已經可以出圖了/)).toBeTruthy();
-    expect(screen.getByText(/下一步：/).textContent).toContain("給誰看、怎麼講");
+    expect(currentStepText()).toContain("給誰看、怎麼講");
   });
 
-  it("四步全填完就不再顯示下一步", () => {
+  it("四步全填完就沒有當前步驟（全部打勾）", () => {
     const all = worldviewSchema.parse({ ...ready, audience: "初次接觸禪修的人" });
     render(<WorldviewGuide wv={all} onJump={() => {}} />);
-    expect(screen.queryByText(/下一步：/)).toBeNull();
-    expect(screen.getByText(/已經可以出圖了/)).toBeTruthy();
+    expect(document.querySelector(".visual-journey__item.is-current")).toBeNull();
+    expect(document.querySelectorAll(".visual-journey__item.is-done")).toHaveLength(4);
   });
 
-  it("未就緒時說明前三步填完就能出圖", () => {
+  it("不再自印「下一步：」與就緒里程碑——那兩句由上方的就緒條負責，避免同屏重複", () => {
     render(<WorldviewGuide wv={partial} onJump={() => {}} />);
-    expect(screen.getByText(/就能開始出圖/)).toBeTruthy();
+    expect(screen.queryByText(/下一步：/)).toBeNull();
+    expect(screen.queryByText(/已經可以出圖了/)).toBeNull();
+    expect(screen.queryByText(/就能開始出圖/)).toBeNull();
   });
 });
 

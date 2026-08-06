@@ -66,8 +66,6 @@ import {
   type ProjectContextReturnTo,
   type ProjectContextTarget,
 } from "../features/project-nav/projectContextNav";
-import { SimpleProjectMode } from "../features/project-simple/SimpleProjectMode";
-import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../features/project-simple/simpleMode";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
@@ -608,8 +606,6 @@ export function ProjectPage({ id }: { id: string }) {
   );
   /** 世界觀儲存回饋：成功後短暫顯示「已儲存 ✓」再淡出 */
   const [wvSaved, setWvSaved] = useState<"idle" | "shown" | "fading">("idle");
-  /** 使用者本次手動切換的模式（null＝沿用 localStorage／預設判定） */
-  const [projectModeOverride, setProjectModeOverride] = useState<ProjectMode | null>(null);
   /** 視覺風格：媒材家族分頁（未選時跟 styles 推斷） */
   const [styleFamilyTab, setStyleFamilyTab] = useState<StyleMediaFamily | null>(null);
   const wvTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -888,16 +884,6 @@ export function ProjectPage({ id }: { id: string }) {
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
-  // 簡易／完整版：偏好存 localStorage（每個專案各自記），沒存過時看專案有沒有開始做（見 simpleMode.ts）
-  const projectMode = projectModeOverride ?? resolveProjectMode(id, {
-    sceneCount: scenes.data?.length ?? 0,
-    generationCount: generations.data?.length ?? 0,
-  });
-  const setProjectModeAndPersist = (mode: ProjectMode) => {
-    saveProjectMode(id, mode);
-    setProjectModeOverride(mode);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
   // 2.3 前端唯讀可見性：後端守衛已全面擋 viewer，這裡讓寫入控制「事前」禁用＋常駐唯讀橫幅，
   // 不再讓檢視者「按了才失敗」（走完看價確認流程最後一步才被擋是最傷的版本）
   const canEdit = projectCanEdit(p.myProjectRole);
@@ -1389,49 +1375,6 @@ export function ProjectPage({ id }: { id: string }) {
       </header>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
-      {/*
-        簡易／完整版切換（QA 2026-08-01）：整頁 20+ 區塊對新手是路障，但對熟手是工具。
-        用切換而不是刪功能——簡易模式只是換一組畫面，底下呼叫的仍是同一批 procedure。
-        還沒開始做的專案預設簡易；已有分鏡或生成紀錄的專案維持完整版（不打擾進行中的工作）。
-      */}
-      {projectMode === "simple" ? (
-        <>
-          <SimpleProjectMode
-            projectId={id}
-            groupId={p.groupId}
-            canEdit={canEdit}
-            worldview={wv}
-            onSwitchToPro={() => setProjectModeAndPersist("pro")}
-          />
-          <div style={{ marginTop: 24 }}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-          </div>
-        </>
-      ) : (
-      <>
-      {/* 手機完整版：簡易入口要極明顯（M1-1）——不是藏在角落一顆 ghost 鈕 */}
-      <Card
-        as="div"
-        data-fb="切到簡易模式"
-        style={{
-          marginBottom: 12,
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-          borderColor: "var(--primary-border, var(--border))",
-          background: "var(--primary-tint)",
-        }}
-      >
-        <span style={{ flex: "1 1 160px", fontSize: 13, lineHeight: 1.45 }}>
-          <b>想快一點？</b>用簡易模式四步做完一支片（故事→分鏡→出圖→打包），完整工具隨時可切回來。
-        </span>
-        <Button size="sm" variant="primary" onClick={() => setProjectModeAndPersist("simple")}>
-          切成簡易模式
-        </Button>
-      </Card>
-
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
       {!canEdit && (
         <Card
@@ -1485,11 +1428,7 @@ export function ProjectPage({ id }: { id: string }) {
                 }
               }}
             />
-            {!allStepsDone && nextOnboardIndex >= 0 && (
-              <p className="project-guide__next">
-                下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
-              </p>
-            )}
+            {/* 展開時不再補「下一步：…」——上面的步驟卡已用「現在」標出同一步同一句話（去重複文案） */}
           </div>
         )}
         {/* 收合時仍留下一步一行，避免新手不知道下一步（手機預設收合尤為重要） */}
@@ -1522,7 +1461,7 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-context"
             num="①"
             title="定調"
-            desc="世界觀與定裝——基本設定、角色／場景／道具、知識與素材"
+            desc="AI 全程共用的設定，填一次就好"
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
@@ -1530,11 +1469,8 @@ export function ProjectPage({ id }: { id: string }) {
           <div className="ctx-overview" role="region" aria-label="專案上下文一覽">
             <div className="ctx-overview__head">
               <strong className="ctx-overview__title">專案大腦一覽</strong>
-              <Meta>
-                {wvReady
-                  ? "基本設定就緒——下方設定會自動注入每次生成"
-                  : "先補「這支片長什麼樣」的基本設定，後面生成才穩"}
-              </Meta>
+              {/* 就緒時不再重述「會自動注入每次生成」——下一行的帶入摘要已經把同一件事講完（去重複文案） */}
+              {!wvReady && <Meta>先補「這支片長什麼樣」的基本設定，後面生成才穩</Meta>}
               {/* C2.5：與生成台帶入列同源口徑（勾選數，非庫存總數） */}
               <Meta as="p" data-testid="ctx-bring-in-summary" style={{ margin: "6px 0 0", fontSize: 12 }}>
                 {formatBringInSummary({
@@ -2335,7 +2271,7 @@ export function ProjectPage({ id }: { id: string }) {
             </CtxGroup>
           </div>
 
-          <StageLink text="以上兩區會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
+          <StageLink text="設定好了就往下走 ② 創作，直接下指令出圖" />
 
           {/* ② 創作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
           <StageHead
@@ -2481,8 +2417,6 @@ export function ProjectPage({ id }: { id: string }) {
             document.body,
           )}
         </>
-      )}
-      </>
       )}
     </div>
   );

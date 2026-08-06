@@ -1,7 +1,7 @@
 /**
  * G1：共創完成條件與作品摘要（#404）。
  *
- * 與 SimpleProjectMode 對齊（勿兩套「做完」定義）：
+ * 「做完一支」的判定（全站只留這一套定義）：
  * - theme    ≈ 世界觀就緒 isWorldviewReady／logline 達標
  * - structure ≈ scenes.length >= 1（建議 >= 3，完成門檻用 1）
  * - visuals   ≈ 至少一格有畫面／旁白素材

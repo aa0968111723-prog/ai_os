@@ -1,11 +1,9 @@
 import {
   worldviewGuideSteps,
   nextWorldviewStep,
-  isWorldviewReady,
   type Worldview,
 } from "@shared/worldview";
 import { VisualJourney, type VisualJourneyStep } from "./VisualJourney";
-import { Meta } from "./ui";
 
 /**
  * 快速層引導鋪軌。
@@ -25,7 +23,6 @@ export function WorldviewGuide({
 }) {
   const steps = worldviewGuideSteps(wv);
   const next = nextWorldviewStep(wv);
-  const ready = isWorldviewReady(wv);
 
   const journeySteps: VisualJourneyStep[] = steps.map((s) => ({
     id: s.id,
@@ -45,19 +42,10 @@ export function WorldviewGuide({
           if (target) onJump(target.anchor, target.id);
         }}
       />
-      {next ? (
-        <p className="project-guide__next">
-          下一步：<b>{next.label}</b>・{next.hint}
-        </p>
-      ) : null}
-      {/* 里程碑讀的是 isWorldviewReady（＝最低門檻：一句話 ＋ 調性或畫風其一），
-          刻意比上面的步驟寬鬆：門檻一過就先告訴人「可以出圖了」，沒打勾的步驟
-          仍留著當建議。反過來（步驟打完卻說沒就緒）才是矛盾，由 shared 測試擋住。 */}
-      <Meta as="p" className="wv-guide__milestone">
-        {ready
-          ? "已經可以出圖了——AI 每次都會自動帶上這些設定。上面沒打勾的可以再補，畫面會更穩。"
-          : "填到「想要什麼感覺」或「畫面長什麼樣」其中一個，就能開始出圖。"}
-      </Meta>
+      {/* 就緒狀態與下一步 CTA 由上方 wv-ready-strip 單一出口負責（去重複文案）：
+          這裡只留「哪一步填了、現在該填哪一步」的進度軌，避免同一句話在一屏內講三次。
+          就緒門檻（isWorldviewReady＝一句話 ＋ 調性或畫風其一）刻意比步驟寬鬆，
+          沒打勾的步驟仍留著當建議；矛盾情況由 shared 測試擋住。 */}
     </div>
   );
 }

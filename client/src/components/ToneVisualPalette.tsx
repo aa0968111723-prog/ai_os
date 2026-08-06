@@ -102,32 +102,41 @@ export function ToneVisualPalette({
               onClick={() => onToggle(name)}
               title={
                 isSelected
-                  ? `${name}（已選・點擊取消）`
-                  : `選擇 ${name} 調性`
+                  ? `${name}（已選・點擊取消）${meta?.tagline ? `｜${meta.tagline}` : ""}`
+                  : `選擇 ${name} 調性${meta?.tagline ? `｜${meta.tagline}` : ""}`
               }
               aria-pressed={isSelected}
             >
               {/* 背景氛圍光效 */}
-              <div
+              <span
                 className="tone-card__glow"
-                style={{
-                  background: meta?.gradient ?? "var(--surface-3)",
-                }}
+                aria-hidden="true"
+                style={{ background: meta?.gradient ?? "var(--surface-3)" }}
               />
 
-              <div className="tone-card__header">
+              {/* 調性色票：整張卡最直觀的視覺線索，選中時放大成實心色塊 */}
+              <span
+                className="tone-card__swatch"
+                aria-hidden="true"
+                style={{ background: meta?.gradient ?? "var(--surface-3)" }}
+              >
                 <span className="tone-card__emoji">{meta?.emoji ?? "✨"}</span>
-                <span className="tone-card__name">{name}</span>
-                {isSelected && (
-                  <span className={`tone-card__rank ${isPrimary ? "is-rank-1" : "is-rank-2"}`}>
-                    {isPrimary ? "#1 主要" : isSecondary ? "#2 次要" : `#${idx + 1}`}
-                  </span>
-                )}
-              </div>
+              </span>
 
-              {meta?.tagline && <span className="tone-card__tagline">{meta.tagline}</span>}
+              <span className="tone-card__text">
+                <span className="tone-card__header">
+                  <span className="tone-card__name">{name}</span>
+                  {isSelected && (
+                    <span className={`tone-card__rank ${isPrimary ? "is-rank-1" : "is-rank-2"}`}>
+                      {isPrimary ? "#1 主要" : isSecondary ? "#2 次要" : `#${idx + 1}`}
+                    </span>
+                  )}
+                </span>
 
-              {en && <span className="tone-card__en">{en}</span>}
+                {meta?.tagline && <span className="tone-card__tagline">{meta.tagline}</span>}
+
+                {en && <span className="tone-card__en">{en}</span>}
+              </span>
             </button>
           );
         })}

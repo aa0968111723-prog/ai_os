@@ -43,6 +43,8 @@ vi.mock("../api", () => {
       // 專案本身是唯一會經歷 loading 的查詢
       get: { useQuery: () => (loading ? { data: undefined, isLoading: true, error: null } : q(project)) },
       assets: { useQuery: () => q([]) },
+      // 回收桶回傳的是物件（不是陣列），通用 stub 的 q([]) 會讓 RecycleBin 讀 data.assets.length 爆掉
+      listDeleted: { useQuery: () => q({ assets: [], scenes: [], knowledge: [] }) },
       setArchived: { useMutation: m },
       updateWorldview: { useMutation: m },
     },
@@ -50,9 +52,26 @@ vi.mock("../api", () => {
     messages: { unread: { useQuery: () => q(0) } },
     useUtils: () => new Proxy({}, { get: () => new Proxy({}, { get: () => vi.fn() }) }),
   };
+  /**
+   * 沒特別指定的查詢一律回這個「什麼都撐得住」的假資料：底層是空陣列（`.length`／`.map` 照常），
+   * 未知屬性再遞迴回一個同款代理（`data.assets.length` 之類的物件型回傳也不會炸）。
+   * 專案頁掛了數十個查詢，逐一造 fixture 只會讓這支 hook-order 迴歸測試變成 fixture 維護地獄。
+   */
+  const makeAnyData = (): unknown => {
+    const cache = new Map<string, unknown>();
+    return new Proxy([] as unknown as Record<string | symbol, unknown>, {
+      get(t, k) {
+        if (typeof k === "symbol" || k in t) return t[k];
+        // 快取很重要：每次存取都回新物件的話，依賴 query data 的 useEffect 會無限重跑
+        if (!cache.has(k)) cache.set(k, makeAnyData());
+        return cache.get(k);
+      },
+    });
+  };
+  const ANY_DATA = makeAnyData();
   const stub = (): unknown =>
     new Proxy(
-      { useQuery: () => q([]), useInfiniteQuery: () => q({ pages: [] }), useMutation: m },
+      { useQuery: () => q(ANY_DATA), useInfiniteQuery: () => q({ pages: [] }), useMutation: m },
       { get: (t: Record<string, unknown>, k: string) => (k in t ? t[k] : stub()) },
     );
   const wrap = (obj: Record<string, unknown>): unknown =>
@@ -75,6 +94,18 @@ let caught: Error | null = null;
 beforeEach(() => {
   loading = true;
   caught = null;
+  // 完整專案頁掛了章節導覽／捲動偵測，jsdom 沒有這兩個 API
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {}
+    },
+  );
+  vi.stubGlobal("scrollTo", vi.fn());
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.spyOn(console, "error").mockImplementation((...args) => {
     const first = args[0];
     if (first instanceof Error) caught = first;

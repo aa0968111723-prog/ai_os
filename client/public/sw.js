@@ -131,7 +131,10 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
+  // /styles/ 是畫風選擇卡的縮圖：第二次進「創作」分頁時直接讀快取，
+  // 圖跟版面同一幀就位，不會再閃一下空白漸層。
   const brand = url.pathname.startsWith("/icons/") || url.pathname.startsWith("/brand/") ||
+    url.pathname.startsWith("/styles/") || url.pathname.startsWith("/illustrations/") ||
     url.pathname.startsWith("/favicon") || url.pathname.startsWith("/apple-touch-icon") ||
     url.pathname === "/offline.html" || url.pathname === "/icon.svg";
   if (brand) {
