@@ -169,7 +169,7 @@ export function DownloadsPage() {
                       <Meta className="mono" style={{ flex: "none" }}>
                         {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
                       </Meta>
-                      <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
+                      <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download className="m-touch">
                         <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
                       </a>
                     </li>

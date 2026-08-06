@@ -105,7 +105,7 @@ export function AddOptionInline({
           取消
         </Button>
         {/* 改名／停用／排序這些少用的整理動作仍在整理頁；選單不再放它，改由這裡進入 */}
-        <Link href="/options" style={{ alignSelf: "center", fontSize: "var(--fs-12)" }}>整理全部選項</Link>
+        <Link href="/options" className="m-touch" style={{ alignSelf: "center", fontSize: "var(--fs-12)" }}>整理全部選項</Link>
       </div>
       {add.error && <p className="error" role="alert">新增失敗：{add.error.message}</p>}
     </div>
