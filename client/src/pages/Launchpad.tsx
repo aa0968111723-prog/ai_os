@@ -5,6 +5,7 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
+import { BentoStatusIcon } from "../components/BentoStatusIcons";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
@@ -356,28 +357,36 @@ export function Launchpad({ groupId }: { groupId: string }) {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          className="primary daily-new-project"
-          aria-expanded={createOpen}
-          aria-controls="new-project-panel"
-          onClick={() => {
-            // 體檢 P1-6：表單在下方，只 toggle 不捲 = 像壞掉。展開後捲到表單；收合不捲。
-            setCreateOpen((open) => {
-              const next = !open;
-              if (next) {
-                requestAnimationFrame(() => {
-                  document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  document.getElementById("np-title")?.focus({ preventScroll: true });
-                });
-              }
-              return next;
-            });
-          }}
-        >
-          <Icon name={createOpen ? "X" : "Plus"} size={16} />
-          {createOpen ? "收起建立表單" : "建立新專案"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <a
+            href="#ai-work"
+            className="btn btn-secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 46, textDecoration: "none" }}
+          >
+            <Icon name="Bot" size={16} />
+            <span>AI 總指揮</span>
+          </a>
+          <button
+            type="button"
+            className="primary daily-new-project"
+            aria-expanded={createOpen}
+            aria-controls="new-project-panel"
+            onClick={() => {
+              setCreateOpen((open) => {
+                const next = !open;
+                if (next) {
+                  requestAnimationFrame(() => {
+                    document.getElementById("np-title")?.focus({ preventScroll: true });
+                  });
+                }
+                return next;
+              });
+            }}
+          >
+            <Icon name={createOpen ? "X" : "Plus"} size={16} />
+            {createOpen ? "收起建立表單" : "建立新專案"}
+          </button>
+        </div>
       </section>
 
       <nav className="daily-quick-links" aria-label="常用工具">
@@ -394,157 +403,270 @@ export function Launchpad({ groupId }: { groupId: string }) {
           不要每集從空專案重想流程 */}
       {groupId && <SeriesTemplatePanel groupId={groupId} isLeader={isLeader} />}
 
-      {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
-      <Card as="section" id="new-project-panel" className="new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ flex: "3 1 220px" }}>
-            <label htmlFor="np-title" style={{ marginTop: 0 }}>新專案名稱</label>
-            <input id="np-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例：見證故事 · 走出低谷"
-              onKeyDown={(e) => { if (e.key === "Enter" && canCreate) create.mutate({ groupId, title: title.trim(), kind, platform }); }} />
-          </div>
-          <div style={{ flex: "1 1 130px" }}>
-            <label htmlFor="np-kind" style={{ marginTop: 0 }}>內容類型</label>
-            <select id="np-kind" value={kind} onChange={(e) => setKind(e.target.value)} disabled={!kindOptions.length}>
-              {kindOptions.map((k) => (
-                <option key={k.id} value={k.value}>{k.label}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ flex: "1 1 130px" }}>
-            <label htmlFor="np-platform" style={{ marginTop: 0 }}>發布平台</label>
-            <select id="np-platform" value={platform} onChange={(e) => setPlatform(e.target.value)} disabled={!platformOptions.length}>
-              {platformOptions.map((p) => (
-                <option key={p.id} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-          <Button variant="primary" disabled={!canCreate} onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}>
-            {create.isPending ? "建立中…" : "建立專案"}
-          </Button>
-        </div>
-        {/* 這一區的說明幾乎都是「為什麼還不能建」＋「怎麼解」，藏起來會讓人卡在原地，
-         * 故多為 layer="always"；只有解釋自動帶入行為的那句屬於引導層。 */}
-        {activeGroup && (
-          <Hint layer="always" style={{ marginTop: 8 }}>將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）</Hint>
-        )}
-        {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
-        {!options.isLoading && groupId && !kindOptions.length && <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>}
-        {!options.isLoading && groupId && !platformOptions.length && <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>}
-        {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
-        {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
-        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <Hint layer="always">先為專案命名，就能建立專案。</Hint>}
-        {create.error && <p className="error" role="alert">{create.error.message}</p>}
-      </Card>
-
-      <div className={`daily-overview${recentProjects.length ? "" : " daily-overview--solo"}`}>
-        <div className="daily-overview__main">
-          {focusState.kind === "start" ? (
+      {/* 建立新專案：現代磨砂玻璃 Modal 彈窗 */}
+      {createOpen ? (
+        <div
+          className="new-project-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCreateOpen(false);
+          }}
+        >
+          <Card
+            as="section"
+            id="new-project-panel"
+            className="new-project-modal-card"
+            data-fb="新專案卡"
+            aria-label="建立新專案"
+          >
             <button
               type="button"
-              className={`daily-focus-card ${focusState.kind}`}
-              onClick={() => {
-                setCreateOpen(true);
-                requestAnimationFrame(() => document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }));
-              }}
+              className="new-project-modal__close"
+              aria-label="關閉"
+              onClick={() => setCreateOpen(false)}
             >
-              <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
-              <span className="daily-focus-card__copy">
-                <small>{focusState.eyebrow}</small>
-                <strong>{focusState.title}</strong>
-                <span>{focusState.detail}</span>
-              </span>
-              <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+              <Icon name="X" size={18} />
             </button>
-          ) : (
-            <a href={focusState.href} className={`daily-focus-card ${focusState.kind}`}>
-              <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
-              <span className="daily-focus-card__copy">
-                <small>{focusState.eyebrow}</small>
-                <strong>{focusState.title}</strong>
-                <span>{focusState.detail}</span>
-              </span>
-              <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
-            </a>
-          )}
+            <div className="new-project-modal__header">
+              <p className="eyebrow" style={{ margin: 0 }}>NEW PROJECT</p>
+              <h2><Icon name="Sparkles" size={20} style={{ color: "var(--primary-ink)" }} />建立新創作專案</h2>
+              <p>為你的想法建立專案脈絡，AI 將在此協同創作</p>
+            </div>
+            <div className="new-project-modal__fields">
+              <div>
+                <label htmlFor="np-title" style={{ marginTop: 0, fontWeight: 600 }}>新專案名稱</label>
+                <input
+                  id="np-title"
+                  value={title}
+                  autoFocus
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="例：見證故事 · 走出低谷"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && canCreate) {
+                      create.mutate({ groupId, title: title.trim(), kind, platform });
+                    }
+                  }}
+                />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <div>
+                  <label htmlFor="np-kind" style={{ marginTop: 0, fontWeight: 600 }}>內容類型</label>
+                  <select
+                    id="np-kind"
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value)}
+                    disabled={!kindOptions.length}
+                  >
+                    {kindOptions.map((k) => (
+                      <option key={k.id} value={k.value}>{k.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="np-platform" style={{ marginTop: 0, fontWeight: 600 }}>發布平台</label>
+                  <select
+                    id="np-platform"
+                    value={platform}
+                    onChange={(e) => setPlatform(e.target.value)}
+                    disabled={!platformOptions.length}
+                  >
+                    {platformOptions.map((p) => (
+                      <option key={p.id} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            {/* 提示與錯誤訊息 */}
+            {activeGroup && (
+              <Hint layer="always" style={{ marginTop: 4 }}>
+                將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）
+              </Hint>
+            )}
+            {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
+            {!options.isLoading && groupId && !kindOptions.length && (
+              <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>
+            )}
+            {!options.isLoading && groupId && !platformOptions.length && (
+              <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>
+            )}
+            {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
+            {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
+            {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && (
+              <Hint layer="always">先為專案命名，就能建立專案。</Hint>
+            )}
+            {create.error && <p className="error" role="alert">{create.error.message}</p>}
 
-          <section className="daily-status-grid" aria-label="今日摘要">
-            {/* 直落「待我裁決」收件匣（#ai-work 區）——先前連 #projects 還要自己找案子 */}
+            <div className="new-project-modal__actions">
+              <Button type="button" onClick={() => setCreateOpen(false)}>
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!canCreate}
+                onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}
+              >
+                {create.isPending ? "建立中…" : "立即建立專案"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <Card
+          as="section"
+          id="new-project-panel"
+          className="new-project-panel"
+          data-fb="新專案卡"
+          hidden
+          aria-label="建立新專案"
+        >
+          <input id="np-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <select id="np-kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+            {kindOptions.map((k) => (
+              <option key={k.id} value={k.value}>{k.label}</option>
+            ))}
+          </select>
+          <select id="np-platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+            {platformOptions.map((p) => (
+              <option key={p.id} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </Card>
+      )}
+
+      {/* 雙欄 Bento 工作台：左側繼續創作、右側待裁決與 AI 動態 */}
+      <div className="daily-bento-grid">
+        {/* 左欄：繼續創作（最近專案） */}
+        <div className="bento-card bento-continue">
+          <div className="bento-card__head">
+            <h3><Icon name="Compass" size={17} style={{ color: "var(--primary-ink)" }} />繼續創作（最近專案）</h3>
+            <a href="#projects">全部專案 ({all.length}) →</a>
+          </div>
+          {recentProjects.length > 0 ? (
+            <section className="continue-work" aria-labelledby="continue-title" style={{ margin: 0, padding: 0 }}>
+              <h2 id="continue-title" style={{ display: "none" }}>最近專案</h2>
+              <div style={{ display: "grid", gap: 10 }}>
+                {recentProjects.map((project) => {
+                  const pending = pendingOf(project.id);
+                  return (
+                    <Link
+                      key={project.id}
+                      href={`/p/${project.id}`}
+                      className="continue-card"
+                      onClick={() => recordRecent(project.id)}
+                    >
+                      <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>
+                        {project.coverUrl ? (
+                          <AssetImg
+                            className="launch-mark__img"
+                            src={project.coverUrl}
+                            alt=""
+                            loading="lazy"
+                            fallbackLabel="封面圖遺失"
+                            fallbackClassName="launch-mark__fallback"
+                            fallbackHeight="100%"
+                            fallbackIconSize={16}
+                          />
+                        ) : (
+                          project.title.trim().charAt(0) || "○"
+                        )}
+                      </span>
+                      <span className="continue-card__body">
+                        <strong>{project.title}</strong>
+                        <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
+                      </span>
+                      {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
+                        <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                      )}
+                      <Icon name="ChevronRight" size={17} />
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <div style={{ padding: "8px 0" }}>
+              {focusState.kind === "start" ? (
+                <button
+                  type="button"
+                  className={`daily-focus-card ${focusState.kind}`}
+                  style={{ width: "100%", textAlign: "left" }}
+                  onClick={() => {
+                    setCreateOpen(true);
+                    requestAnimationFrame(() => document.getElementById("np-title")?.focus());
+                  }}
+                >
+                  <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+                  <span className="daily-focus-card__copy">
+                    <small>{focusState.eyebrow}</small>
+                    <strong>{focusState.title}</strong>
+                    <span>{focusState.detail}</span>
+                  </span>
+                  <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+                </button>
+              ) : (
+                <a href={focusState.href} className={`daily-focus-card ${focusState.kind}`} style={{ width: "100%", textAlign: "left" }}>
+                  <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+                  <span className="daily-focus-card__copy">
+                    <small>{focusState.eyebrow}</small>
+                    <strong>{focusState.title}</strong>
+                    <span>{focusState.detail}</span>
+                  </span>
+                  <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 右欄：待我裁決與 AI 動態 */}
+        <div className="bento-card bento-pulse">
+          <div className="bento-card__head">
+            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />待我裁決與 AI 動態</h3>
+            <a href="#ai-work">總指揮詳情 →</a>
+          </div>
+
+          <section className="daily-status-grid" aria-label="今日摘要" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+            {/* 直落「待我裁決」收件匣（#ai-work 區） */}
             <a href="#ai-work" className="daily-status-card attention">
-              <span className="daily-status-card__icon"><Icon name="Bell" size={18} /></span>
+              <span className="daily-status-card__icon"><BentoStatusIcon type="attention" size={26} /></span>
               <span><strong>{pendingTotal}</strong><small>待我處理</small></span>
               <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
             </a>
             <a href="#ai-work" className="daily-status-card working">
-              <span className="daily-status-card__icon"><Icon name="Sparkles" size={18} /></span>
+              <span className="daily-status-card__icon"><BentoStatusIcon type="working" size={26} /></span>
               <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
               <span className="daily-status-card__detail">
                 {agentSummary?.activeProjects
-                  ? `${agentSummary.activeProjects} 個專案有活動`
-                  : "目前沒有執行中的計畫"}
+                  ? `${agentSummary.activeProjects} 個專案活動`
+                  : "目前無執行中計畫"}
               </span>
             </a>
             <a href="#ai-work" className="daily-status-card waiting">
-              <span className="daily-status-card__icon"><Icon name="Clock" size={18} /></span>
+              <span className="daily-status-card__icon"><BentoStatusIcon type="waiting" size={26} /></span>
               <span><strong>{waitingRuns}</strong><small>等待／待核</small></span>
               <span className="daily-status-card__detail">
                 {(agentSummary?.awaitingApproval ?? 0) > 0
-                  ? `含 ${agentSummary!.awaitingApproval} 份待核准計畫`
-                  : "需要決定後才會繼續"}
+                  ? `${agentSummary!.awaitingApproval} 份待核准`
+                  : "需要決定後繼續"}
               </span>
             </a>
             <a href="#ai-work" className="daily-status-card completed">
-              <span className="daily-status-card__icon"><Icon name="Check" size={18} /></span>
+              <span className="daily-status-card__icon"><BentoStatusIcon type="completed" size={26} /></span>
               <span><strong>{completedRuns}</strong><small>近七日成果</small></span>
               <span className="daily-status-card__detail">
                 {(agentSummary?.failedRecent ?? 0) > 0
-                  ? `另有 ${agentSummary!.failedRecent} 筆近期失敗`
-                  : "已完成的 AI 計畫"}
+                  ? `${agentSummary!.failedRecent} 筆近期失敗`
+                  : "已完成 AI 計畫"}
               </span>
             </a>
           </section>
-        </div>
 
-        {recentProjects.length > 0 && (
-          <section className="continue-work" aria-labelledby="continue-title">
-            <div className="section-heading">
-              <div><p className="eyebrow">接續進度</p><h2 id="continue-title">最近專案</h2></div>
-              <a href="#projects">全部</a>
-            </div>
-            <div className="continue-work__grid">
-              {recentProjects.map((project) => {
-                const pending = pendingOf(project.id);
-                return (
-                  <Link key={project.id} href={`/p/${project.id}`} className="continue-card" onClick={() => recordRecent(project.id)}>
-                    <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>
-                      {project.coverUrl ? (
-                        <AssetImg
-                          className="launch-mark__img"
-                          src={project.coverUrl}
-                          alt=""
-                          loading="lazy"
-                          fallbackLabel="封面圖遺失"
-                          fallbackClassName="launch-mark__fallback"
-                          fallbackHeight="100%"
-                          fallbackIconSize={16}
-                        />
-                      ) : (
-                        project.title.trim().charAt(0) || "○"
-                      )}
-                    </span>
-                    <span className="continue-card__body">
-                      <strong>{project.title}</strong>
-                      <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
-                    </span>
-                    {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                      <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
-                    )}
-                    <Icon name="ChevronRight" size={17} />
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )}
+          <a href="#ai-work" className="bento-quick-ask" title="前往組代理總指揮提問或調度">
+            <Icon name="MessageSquare" size={15} style={{ color: "var(--primary-ink)" }} />
+            <span>向組總指揮提問、指派或調度...</span>
+            <Icon name="ArrowRight" size={14} />
+          </a>
+        </div>
       </div>
 
       {/* 組代理總指揮（需求 12）：裁決／現況／跨專案調度／派工／追問合為同一入口——沒選組就不渲染。
