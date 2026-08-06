@@ -19,6 +19,7 @@ import {
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
 import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
+import { setOrbState } from "../../../lib/orbState";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import {
   formatBringInSummary,
@@ -166,7 +167,12 @@ export function DirectGenerateMode({
 
   const submitRequestId = useRef<string>(crypto.randomUUID());
   const submit = trpc.generation.submit.useMutation({
+    // 手機 Orb 回饋（≤820 才有視覺；桌機這些屬性無感）：
+    // 送出中=thinking、成功=speaking（短暫後自動回 idle）、失敗=error
+    onMutate: () => setOrbState("thinking"),
+    onError: () => setOrbState("error"),
     onSuccess: (data, vars) => {
+      setOrbState("speaking");
       setTraceSessionId(data.traceSessionId);
       submitRequestId.current = crypto.randomUUID();
       if (data.status !== "awaiting_approval" && data.status !== "rejected") {

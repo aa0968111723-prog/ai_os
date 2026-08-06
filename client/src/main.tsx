@@ -7,6 +7,7 @@ import { DensityGate } from "./app/DensityGate";
 import { bootstrapPwa } from "./pwa";
 import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import { installKeyboardInset } from "./lib/keyboardInset";
+import { installOrbState } from "./lib/orbState";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
 // 手機 design token（MOB-T）：必須在 styles.css/styles.mobile-fab-01.css 之後載入
@@ -24,6 +25,8 @@ bootstrapTauriDesktop();
 bootstrapPwa();
 // 貼底面板要讓開虛擬鍵盤：整個 App 生命週期都要追蹤，故不綁在任何元件上
 installKeyboardInset();
+// 手機 Orb（底部導航中央 AI 球）預設 idle；視覺只在 ≤820 生效
+installOrbState();
 
 /**
  * 全站錯誤邊界：任何 render 錯誤都落在設計語言內的空狀態，而非空白白畫面。
