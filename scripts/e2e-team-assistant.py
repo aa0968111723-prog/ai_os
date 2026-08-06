@@ -96,7 +96,7 @@ pid = proj["id"]
 
 planned = call("POST", admin, "agents.plan", {
     "projectId": pid,
-    "goal": "建立一格主視覺分鏡並送審，供團隊分析儀表測試",
+    "goal": "建立一格主視覺分鏡並生成畫面，供團隊分析儀表測試",
 })
 ok("代理計畫待核准", planned.get("status") == "awaiting_approval")
 run_id = planned["id"]
