@@ -369,6 +369,122 @@ export const generationRouter = router({
     }),
 
   /**
+   * 同題並跑（模型競技場）：同一個提示詞、同一組設定，一次送進 2–4 顆模型各跑一輪。
+   *
+   * 為什麼要有這支：目錄上的「特性／擅長」是文字宣稱，看不出這顆模型畫你的題材長什麼樣。
+   * 唯一能回答「哪個適合我」的方法，就是拿自己的題目讓它們同場跑一次。
+   *
+   * 與消融實測互補：消融固定模型改提示詞（量測某段設定的影響力），
+   * 這裡固定提示詞改模型（量測模型之間的差別）。兩者共用同一條送出路徑，
+   * 所以點數、審核門檻、ACL、警告都與一般生成完全一致——不是繞過去的捷徑。
+   *
+   * 逐顆送出、逐顆記錄失敗：一顆模型缺來源素材或點數不足，不該讓其他幾顆也白跑。
+   */
+  bench: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      /** 要並跑的模型（2–4 顆；上限與指南頁的並排比較同口徑） */
+      modelIds: z.array(z.string().min(1).max(300)).min(2).max(4),
+      prompt: z.string().trim().min(1, "請填提示詞").max(MAX_PROMPT_CHARS),
+      sourceUrl: publicHttpsUrl.optional(),
+      sourceAssetId: z.string().uuid().optional(),
+      secondarySourceUrl: publicHttpsUrl.optional(),
+      secondarySourceAssetId: z.string().uuid().optional(),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      continuityMode: z.boolean().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const modelIds = [...new Set(input.modelIds)];
+      if (modelIds.length < 2) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "同題並跑至少要兩顆不同的模型" });
+      }
+      const runId = crypto.randomUUID();
+      const runs: Array<{ id: string; modelId: string; modelLabel: string; status: string; pointsEst: number }> = [];
+      const failed: Array<{ modelId: string; modelLabel: string; message: string }> = [];
+      for (const modelId of modelIds) {
+        const label = getModel(modelId)?.label ?? modelId;
+        try {
+          const generation = await executeGenerationCommand({
+            auth: ctx.auth,
+            source: "web",
+            projectId: input.projectId,
+            modelId,
+            prompt: input.prompt,
+            sourceUrl: input.sourceUrl,
+            sourceAssetId: input.sourceAssetId,
+            secondarySourceUrl: input.secondarySourceUrl,
+            secondarySourceAssetId: input.secondarySourceAssetId,
+            characterIds: input.characterIds,
+            scenePresetIds: input.scenePresetIds,
+            propIds: input.propIds,
+            continuityMode: input.continuityMode,
+            bench: { runId },
+          });
+          runs.push({
+            id: generation.id,
+            modelId,
+            modelLabel: label,
+            status: generation.status,
+            pointsEst: generation.pointsEst,
+          });
+        } catch (error) {
+          // 一顆失敗不擋其他顆：使用者要看的是「跑得起來的那幾顆長什麼樣」
+          failed.push({ modelId, modelLabel: label, message: error instanceof Error ? error.message : "送出失敗" });
+        }
+      }
+      if (!runs.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: failed[0]?.message ?? "同題並跑沒有送出任何一顆模型" });
+      }
+      return {
+        runId,
+        prompt: input.prompt,
+        runs,
+        failed,
+        pointsTotal: runs.reduce((sum, r) => sum + r.pointsEst, 0),
+      };
+    }),
+
+  /**
+   * 同題並跑的結果：把同一個 runId 的每顆模型撈回來並排。
+   * 帶上耗時（送出→最後更新）——「哪個比較快」是選模型時最常被問、卻最少被量的事。
+   */
+  benchResult: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), runId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId); // 多組隔離：只看得到自己組的實測
+      const rows = await db
+        .select()
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.projectId, input.projectId),
+          sql`${schema.generations.params}->'${sql.raw(GENERATION_SOURCE_META_KEY)}'->'bench'->>'runId' = ${input.runId}`,
+        ))
+        .orderBy(schema.generations.createdAt);
+      return rows.map((row) => {
+        const settled = row.status === "done" || row.status === "failed";
+        return {
+          id: row.id,
+          modelId: row.modelId,
+          modelLabel: getModel(row.modelId)?.label ?? row.modelId,
+          status: row.status,
+          kind: row.kind,
+          resultUrl: row.resultUrl,
+          resultText: row.resultText,
+          error: row.error,
+          points: row.pointsActual ?? row.pointsEst,
+          /** 送出到落地的秒數（還在跑的先不給數字，免得看起來像已完成） */
+          elapsedSeconds: settled
+            ? Math.max(0, Math.round((row.updatedAt.getTime() - row.createdAt.getTime()) / 1000))
+            : null,
+        };
+      });
+    }),
+
+  /**
    * 以相同設定重試（伺服器端完整版）：舊做法由前端拿 prompt/model/來源重組 submit，
    * 會默默丟失角色定裝/場景設定錨點與分鏡綁定——重試出的圖跨鏡就走樣、成品也不回填分鏡。
    * 這裡從失敗列原樣還原全部連結：characterIds/scenePresetIds/propIds/sceneId/sceneRole，
