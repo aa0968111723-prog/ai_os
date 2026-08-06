@@ -4119,7 +4119,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .secondary-page--narrow { max-width: 660px; }
 .admin-page { max-width: 1280px; }
 .models-page { max-width: 1180px; }
-.model-health-overview { border: 1px solid var(--border-soft); }
+.model-health-overview,
+.model-usage-overview { border: 1px solid var(--border-soft); }
+/* 使用量格子不是篩選鈕：不要 hover 邊框變化，也不要手指游標 */
+.model-usage-overview .model-health-stat { cursor: default; }
+.model-usage-overview .model-health-stat:hover { border-color: var(--border-soft); }
 .model-health-stats {
   display: flex;
   flex-wrap: wrap;
