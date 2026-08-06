@@ -2,7 +2,7 @@
  * 每組自訂選項（R23）——單一真相：型別、預設種子、回饋分類與頁面表。
  * 預設種子由現有寫死常數衍生，首次讀取某組某類型時 lazy-seed 進 group_options，之後由組長自行增修。
  */
-import { PROJECT_KINDS, PLATFORMS, type ProjectFormat } from "./models";
+import { PROJECT_KINDS, PLATFORMS, PROJECT_FORMAT_IDS, pixelsForFormat, type ProjectFormat } from "./models";
 import { TONE_OPTIONS, THEME_OPTIONS, STYLE_OPTIONS } from "./worldview";
 
 export type OptionType = "kind" | "platform" | "tone" | "theme" | "style";
@@ -21,23 +21,20 @@ export const OPTION_TYPE_META: Record<OptionType, { label: string; hint: string;
   },
 };
 
-/** 發布平台合法比例（自訂 platform 時限這三種，生成台才對得上） */
-export const PLATFORM_FORMATS: ProjectFormat[] = ["16:9", "9:16", "1:1"];
+/**
+ * 發布平台合法比例＝模型吃得下的全部比例（見 shared/models 的 PROJECT_FORMATS）。
+ * 原本只開 16:9／9:16／1:1，等於把 21:9、4:3、3:2、2:3… 這些模型本來就支援的尺寸鎖在門外。
+ */
+export const PLATFORM_FORMATS: ProjectFormat[] = PROJECT_FORMAT_IDS;
 
 /**
  * 專案畫面比例 → 交付時間軸／草稿的像素解析度（短邊 1080）。
  * FCPXML／Premiere XML／剪映草稿共用此單一來源，避免各處硬編橫向 1920×1080——
  * 否則 9:16 直式、1:1 方形專案匯入剪輯軟體會建成橫向序列、素材被裝進錯比例框（見審計 jianying/fcpxml 兩項）。
+ * 實際表格在 shared/models（比例選單與生成端共用同一份），這裡只轉呼叫、保留既有匯入路徑。
  */
 export function resolutionForFormat(format: string | null | undefined): { width: number; height: number } {
-  switch (format) {
-    case "9:16":
-      return { width: 1080, height: 1920 };
-    case "1:1":
-      return { width: 1080, height: 1080 };
-    default:
-      return { width: 1920, height: 1080 }; // 16:9 及未知一律橫向
-  }
+  return pixelsForFormat(format);
 }
 
 /** 一筆選項（前後端共用；來自 DB group_options 的投影） */

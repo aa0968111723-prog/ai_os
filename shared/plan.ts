@@ -16,7 +16,6 @@ export const planStepKindSchema = z.enum([
   "create_scene",
   "generate",
   "voiceover",
-  "submit_approval",
   "record_to_database",
   "create_note",
   "append_note",

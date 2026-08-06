@@ -287,7 +287,7 @@ function dbCheatsheet(dbs: WritableDb[]): string {
     .join("\n");
 }
 
-/** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填 → 送審，走完代理全生命週期。
+/** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填，走完代理全生命週期。
  *  若組內有「AI 可寫」的資料庫，末尾多一步 record_to_database——讓 AI 代理×資料庫的寫入路徑也能 e2e。 */
 function mockPlan(goal: string, existingSceneCount: number, writableDbs: WritableDb[]): {
   summary: string;
@@ -304,7 +304,6 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
   const steps: AgentStep[] = [
     { id: "scene", kind: "create_scene", title: goal.slice(0, 40) || "代理測試鏡", note: `新增分鏡「${goal.slice(0, 20)}」`, status: "pending", actorType: "ai", executionMode: "dag", scenePrompt: goal, points: 0 },
     { id: "visual", kind: "generate", title: "生成主視覺", note: `用 ${budget?.label ?? "SDXL Lightning"} 為第 ${newNo} 鏡生成畫面`, status: "pending", actorType: "ai", executionMode: "dag", dependsOn: ["scene"], modelId: budget?.id ?? "fal-ai/fast-lightning-sdxl", prompt: goal, sceneNo: newNo, points: budget?.points ?? 1 },
-    { id: "approval", kind: "submit_approval", title: "送交內容審核", note: `把第 ${newNo} 鏡送審`, status: "pending", actorType: "ai", executionMode: "dag", dependsOn: ["visual"], sceneNo: newNo, points: 0 },
   ];
   // 有可寫資料庫時，示範「把成果記進資料庫」：寫進第一個 text/其次任一欄位
   const targetDb = writableDbs[0];
@@ -319,7 +318,7 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
         status: "pending",
         actorType: "ai",
         executionMode: "dag",
-        dependsOn: ["approval"],
+        dependsOn: ["visual"],
         tableId: targetDb.id,
         rowData: { [field.key]: goal.slice(0, 100) },
         points: 0,
@@ -331,12 +330,12 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
     summary: `（測試模式計畫）${goal.slice(0, 80)}｜${steps.length} 個可執行步驟`,
     planSummary: {
       goal,
-      rationale: "測試模式使用固定短流程：建鏡、生成、送審即可驗證代理全生命週期。",
+      rationale: "測試模式使用固定短流程：建鏡、生成即可驗證代理全生命週期。",
       contextUsed: ["專案現況", "可寫資料庫"],
-      successCriteria: ["建立分鏡", "生成主視覺", "送交審核"],
+      successCriteria: ["建立分鏡", "生成主視覺"],
       assumptions: ["測試模式使用固定且可重現的計畫"],
       missingInformation: [],
-      expectedOutputs: ["可審核的分鏡與主視覺"],
+      expectedOutputs: ["分鏡與主視覺"],
       risks: [],
       milestones: [{ id: "content-ready", title: "內容準備完成" }],
       estimatedPoints: estPoints,
@@ -345,10 +344,6 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
     estPoints,
   };
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  todo: "草稿", review: "草稿", pending: "待審", approved: "已通過", needs_work: "需修改",
-};
 
 interface PlannerContext extends PlannerAliases {
   text: string;
@@ -655,7 +650,7 @@ export async function planAgentCore(input: {
   }
 
   const sceneLines = scenes.length
-    ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status}｜畫面${s.assetId ? "有" : "無"}｜配音詞${(s.voiceover ?? "").trim() ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
+    ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」｜畫面${s.assetId ? "有" : "無"}｜配音詞${(s.voiceover ?? "").trim() ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
     : "（尚無分鏡）";
   // D5/M4：明確指定 playbook（未知 id fail-fast，不靜默忽略使用者的選擇）
   const playbookDirective = input.playbookId ? plannerPlaybookDirective(input.playbookId) : null;
@@ -719,7 +714,6 @@ export async function planAgentCore(input: {
 - create_scene：sceneTitle、voiceover?、durationSec?、prompt?。
 - generate：prompt、sceneNo?、modelId?、characterRefs?、scenePresetRefs?、propRefs?、sourceAssetRef?、sourceUrl?；生成會花點數。needs 模型（圖生圖／i2v 等）必須指定 sourceAssetRef（素材庫代號）或 sourceUrl（https）。characterRefs／scenePresetRefs／propRefs 用上下文 charN／presetN／propN 代號。
 - voiceover：sceneNo；生成會花點數。
-- submit_approval：sceneNo。
 - record_to_database：dbRef、data；只能使用可寫資料庫代號與欄位 key。
 - create_note：content、notePurpose?、mentionRefs?；content 必須是根據現有資料可直接保存的實質內容，不能寫「之後補」。
 - append_note：noteRef、content、mentionRefs?；只能引用既有筆記代號。

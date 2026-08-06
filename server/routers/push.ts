@@ -19,7 +19,7 @@ async function assertSafeEndpoint(endpoint: string): Promise<void> {
 
 /**
  * 跨裝置通知（Web Push）設定：使用者在「通知設定」把手機/電腦連結進來後，
- * 審批、私訊、@提及、生成與代理完成等事件會推到所有已連結裝置（關頁也收得到）。
+ * 成本核准、私訊、@提及、生成與代理完成等事件會推到所有已連結裝置（關頁也收得到）。
  * 訂閱歸屬嚴格以本人為界——裝置清單/移除只操作自己的列，組長/管理員也看不到別人的裝置。
  */
 export const pushRouter = router({

@@ -2,7 +2,7 @@
  * 作業台「組代理總指揮」卡（S1：待我裁決收件匣＋健康度語意）。
  *
  * 這張卡原本的第一屏是五個計數加一句「目前不需要立即處理的代理阻塞」，
- * 於是新組打開只看得到五個 0——而同一頁其實已經查到分鏡送審／生成待核的筆數。
+ * 於是新組打開只看得到五個 0——而同一頁其實已經查到生成待核的筆數。
  * 這裡測的就是那個修法：三種「等人決定」的來源合流、卡最久的排前面、
  * 代理計畫可就地裁決、其餘導去專案頁，以及「沒東西可分析」不再講成「分析結果良好」。
  */
@@ -193,9 +193,8 @@ function seed(opts: {
     { id: "p2", title: "社課回顧", kind: "short", ownerId: "u1", status: "active", updatedAt: daysAgo(2) },
   ]);
   h.queryData.set("options.byGroup", []);
-  h.queryData.set("approvals.pendingSummary", {
+  h.queryData.set("generation.pendingSummary", {
     projects: opts.pending ?? [],
-    totalPendingApprovals: 0,
     totalAwaitingGenerations: 0,
   });
   h.queryData.set("teamAssistant.agentOverview", {
@@ -238,34 +237,33 @@ describe("buildDecisionInbox（三來源合流純函式）", () => {
     expect(items.map((i) => i.key)).toEqual(["agent-a"]);
   });
 
-  it("卡最久的排最前面（跨三種來源一起排）", () => {
+  it("卡最久的排最前面（跨兩種來源一起排）", () => {
     const items = buildDecisionInbox(
       [run({ id: "a", updatedAt: daysAgo(2) })] as never,
       [{
         projectId: "p2", projectTitle: "社課回顧",
-        pendingApprovals: 3, awaitingGenerations: 1,
-        oldestPendingApprovalAt: daysAgo(9),
-        oldestAwaitingGenerationAt: daysAgo(1),
+        awaitingGenerations: 1,
+        oldestAwaitingGenerationAt: daysAgo(9),
       }],
     );
-    expect(items.map((i) => i.key)).toEqual(["scene-p2", "agent-a", "generation-p2"]);
+    expect(items.map((i) => i.key)).toEqual(["generation-p2", "agent-a"]);
   });
 
   it("沒有時間戳的排最後，不會插隊到卡最久的前面", () => {
     const items = buildDecisionInbox(
       [] as never,
       [
-        { projectId: "p1", projectTitle: "A", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: null },
-        { projectId: "p2", projectTitle: "B", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: daysAgo(5) },
+        { projectId: "p1", projectTitle: "A", awaitingGenerations: 1, oldestAwaitingGenerationAt: null },
+        { projectId: "p2", projectTitle: "B", awaitingGenerations: 1, oldestAwaitingGenerationAt: daysAgo(5) },
       ],
     );
     expect(items.map((i) => i.projectId)).toEqual(["p2", "p1"]);
   });
 
-  it("計數為 0 的來源不產生列（避免「0 個分鏡等你裁決」這種鬼待辦）", () => {
+  it("計數為 0 的來源不產生列（避免「0 筆生成等你核准」這種鬼待辦）", () => {
     const items = buildDecisionInbox(
       [] as never,
-      [{ projectId: "p1", projectTitle: "A", pendingApprovals: 0, awaitingGenerations: 0 }],
+      [{ projectId: "p1", projectTitle: "A", awaitingGenerations: 0 }],
     );
     expect(items).toEqual([]);
   });
@@ -277,32 +275,30 @@ describe("組代理總指揮：待我裁決收件匣", () => {
     h.mutations.length = 0;
   });
 
-  it("代理計畫、分鏡送審、生成待核三種來源都出現在同一份收件匣", () => {
+  it("代理計畫與生成待核兩種來源都出現在同一份收件匣", () => {
     seed({
       runs: [run({ updatedAt: daysAgo(3) })],
       summary: { awaitingApproval: 1, active: 1, activeProjects: 1, health: "attention" },
       pending: [{
-        projectId: "p2", pendingApprovals: 2, awaitingGenerations: 1,
-        oldestPendingApprovalAt: daysAgo(8), oldestAwaitingGenerationAt: daysAgo(1),
+        projectId: "p2", awaitingGenerations: 2,
+        oldestAwaitingGenerationAt: daysAgo(8),
       }],
     });
     render(<Launchpad groupId={GROUP} />);
     const box = within(inbox());
     expect(box.getByText("計畫待核")).toBeInTheDocument();
-    expect(box.getByText("分鏡送審")).toBeInTheDocument();
     expect(box.getByText("生成待核")).toBeInTheDocument();
-    expect(box.getByText("2 個分鏡等你裁決")).toBeInTheDocument();
-    expect(box.getByText("1 筆生成等你核准")).toBeInTheDocument();
-    expect(box.getByText("3 件")).toBeInTheDocument();
-    // 卡最久（8 天）的分鏡排第一
+    expect(box.getByText("2 筆生成等你核准")).toBeInTheDocument();
+    expect(box.getByText("2 件")).toBeInTheDocument();
+    // 卡最久（8 天）的生成排第一
     expect(box.getByText("卡了 8 天")).toBeInTheDocument();
   });
 
-  it("只有代理計畫可就地核准／放棄；分鏡與生成導去專案頁（不看內容不能盲簽）", async () => {
+  it("只有代理計畫可就地核准／放棄；生成導去專案頁（不看內容不能盲簽）", async () => {
     seed({
       runs: [run()],
       summary: { awaitingApproval: 1, active: 1, health: "attention" },
-      pending: [{ projectId: "p2", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: daysAgo(2) }],
+      pending: [{ projectId: "p2", awaitingGenerations: 1, oldestAwaitingGenerationAt: daysAgo(2) }],
     });
     render(<Launchpad groupId={GROUP} />);
     const box = within(inbox());
@@ -330,20 +326,20 @@ describe("組代理總指揮：待我裁決收件匣", () => {
     seed({
       runs: [],
       pending: Array.from({ length: 8 }, (_, i) => ({
-        projectId: `px-${i}`, pendingApprovals: 1, awaitingGenerations: 0,
-        oldestPendingApprovalAt: daysAgo(i + 1),
+        projectId: `px-${i}`, awaitingGenerations: 1,
+        oldestAwaitingGenerationAt: daysAgo(i + 1),
       })),
     });
     render(<Launchpad groupId={GROUP} />);
     const box = within(inbox());
-    expect(box.getAllByText(/個分鏡等你裁決/)).toHaveLength(6);
+    expect(box.getAllByText(/筆生成等你核准/)).toHaveLength(6);
     expect(box.getByText(/還有 2 件/)).toBeInTheDocument();
   });
 
   it("查不到標題的專案仍會列出（不靜靜吃掉一件待辦）", () => {
     seed({
       runs: [],
-      pending: [{ projectId: "99999999-aaaa-bbbb-cccc-dddddddddddd", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: daysAgo(1) }],
+      pending: [{ projectId: "99999999-aaaa-bbbb-cccc-dddddddddddd", awaitingGenerations: 1, oldestAwaitingGenerationAt: daysAgo(1) }],
     });
     render(<Launchpad groupId={GROUP} />);
     expect(within(inbox()).getByText("專案 99999999")).toBeInTheDocument();
@@ -424,13 +420,13 @@ describe("S2：人類核准節點與「誰卡住了」", () => {
     expect(h.mutations[1]).toEqual({ path: "tasks.decideApproval", input: { id: "task-9", decision: "reject" } });
   });
 
-  it("四種來源一起依卡最久排序（人員核准不會固定黏在某一段）", () => {
+  it("三種來源一起依卡最久排序（人員核准不會固定黏在某一段）", () => {
     const items = buildDecisionInbox(
       [run({ id: "a", updatedAt: daysAgo(2) })] as never,
-      [{ projectId: "p2", projectTitle: "社課回顧", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: daysAgo(1) }],
+      [{ projectId: "p2", projectTitle: "社課回顧", awaitingGenerations: 1, oldestAwaitingGenerationAt: daysAgo(1) }],
       [{ taskId: "t9", projectId: "p2", projectTitle: "社課回顧", title: "確認旁白稿", dueAt: daysAgo(9) }],
     );
-    expect(items.map((i) => i.key)).toEqual(["task-t9", "agent-a", "scene-p2"]);
+    expect(items.map((i) => i.key)).toEqual(["task-t9", "agent-a", "generation-p2"]);
   });
 
   it("「誰卡住了」把未結任務歸到人與專案；未指派獨立顯示", () => {
@@ -814,7 +810,7 @@ describe("建議問句：問總指揮", () => {
       ...empty,
       runs: [mkRun({ status: "failed", error: "供應商逾時" })],
       people: [{ userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2 }],
-      pending: [{ projectTitle: "社課回顧", pendingApprovals: 3, awaitingGenerations: 1 }],
+      pending: [{ projectTitle: "社課回顧", awaitingGenerations: 1 }],
     }).map((s) => s.text).join("\n");
     // 這三句的答案就在「誰卡住了」與「待我裁決」裡，問了只是重述
     expect(all).not.toContain("哪個案子卡住了");
@@ -830,12 +826,12 @@ describe("建議問句：問總指揮", () => {
     expect(out[0].why).toContain("供應商逾時");
   });
 
-  it("依急迫性排序：失敗 → 逾期的人 → 待核成本 → 缺資訊 → 待審內容", () => {
+  it("依急迫性排序：失敗 → 逾期的人 → 待核成本 → 缺資訊", () => {
     const out = S({
       runs: [mkRun({ status: "failed", projectId: "pf", projectTitle: "失敗案" })],
       people: [{ userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2 }],
       planConcerns: [{ projectTitle: "缺資訊案", missingInformation: 2, risks: 0 }],
-      pending: [{ projectTitle: "待審案", pendingApprovals: 3, awaitingGenerations: 1 }],
+      pending: [{ projectTitle: "待審案", awaitingGenerations: 1 }],
     });
     expect(out.map((s) => s.id)).toEqual(["failed:pf", "person:u1", "gen:待審案", "concern:缺資訊案"]);
     expect(out).toHaveLength(4);
@@ -856,8 +852,8 @@ describe("建議問句：問總指揮", () => {
   });
 
   it("兜底句是補位時，tooltip 不會謊稱「沒有異常」（同排第一句明明就指出了異常）", () => {
-    const out = S({ ...empty, pending: [{ projectTitle: "招生短片", pendingApprovals: 3, awaitingGenerations: 0 }] });
-    expect(out[0].id).toBe("scene:招生短片");
+    const out = S({ ...empty, pending: [{ projectTitle: "招生短片", awaitingGenerations: 3 }] });
+    expect(out[0].id).toBe("gen:招生短片");
     const filler = out.find((s) => s.id.startsWith("fallback:"))!;
     expect(filler.why).toContain("上面幾句才是針對這個組現在的狀況");
     expect(filler.why).not.toContain("沒有");
@@ -871,7 +867,7 @@ describe("建議問句：問總指揮", () => {
         { userId: "u2", name: "小美", openTasks: 2, overdueTasks: 1 },
       ],
       planConcerns: [{ projectTitle: "A", missingInformation: 2, risks: 1 }],
-      pending: [{ projectTitle: "B", pendingApprovals: 3, awaitingGenerations: 2 }],
+      pending: [{ projectTitle: "B", awaitingGenerations: 2 }],
     });
     expect(out).toHaveLength(4);
     expect(new Set(out.map((s) => s.id)).size).toBe(4);

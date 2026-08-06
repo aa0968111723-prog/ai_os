@@ -2,8 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { ModelUsageCard } from "../components/ModelUsageCard";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
+import { ModelArena } from "../features/model-guide/ModelArena";
+import { ModelBaseChip, ModelBaseDetail } from "../features/model-guide/ModelBaseInfo";
+import { ModelHeatmap } from "../features/model-guide/ModelHeatmap";
+import { modelBaseSpecFor, WEIGHTS_LABEL } from "@shared/modelBase";
 import {
   CATEGORIES,
   MODELS,
@@ -18,7 +23,14 @@ import {
   type StyleShowdown,
 } from "@shared/models";
 
-/** 模型指南:全模型目錄總覽＋決策中心(看情境/比風格/三題篩選),挑選器的百科版 */
+/**
+ * 模型指南:全模型目錄總覽＋決策中心,挑選器的百科版。
+ *
+ * 決策中心五種方式:看情境／比風格／三題篩選(規格層),再加上實際動手的兩種——
+ * **實測競技場**(拿自己的題目讓 2–4 顆模型真的各跑一輪,看成品、點數與耗時)與
+ * **分析熱力圖**(整類攤成「模型 × 指標」,規格欄＋我自己的實測欄)。
+ * 每顆模型都標示**底層模型**(基座權重):同基座的兩個端點換過去風格不會變,換基座才會。
+ */
 
 const TIERS = [
   { id: "flagship", label: "旗艦", hint: "品質優先" },
@@ -109,7 +121,7 @@ function wizScore(
   return s;
 }
 
-/* ── 深度優化:決策中心(看情境/比風格/三題篩選)的共用定義 ── */
+/* ── 決策中心(看情境/比風格/三題篩選/實測競技場/分析熱力圖)的共用定義 ── */
 /** id → 模型(決策中心以字串 id 引用目錄,這裡一次建好查表;referential integrity 由 models.test 守) */
 const MODEL_BY_ID = new Map(MODELS.map((m) => [m.id, m] as const));
 /** 情境分組的圖示 */
@@ -121,14 +133,16 @@ const GROUP_ICON: Record<ScenarioGroup, IconName> = {
   audio: "Music",
   text: "FileText",
 };
-type DecisionMode = "scenario" | "style" | "quiz";
+type DecisionMode = "scenario" | "style" | "quiz" | "arena" | "heatmap";
 const DECISION_MODES: ReadonlyArray<{ id: DecisionMode; label: string; hint: string; icon: IconName }> = [
   { id: "scenario", label: "看情境", hint: "我要做什麼 → 該用哪個模型", icon: "Lightbulb" },
   { id: "style", label: "比風格", hint: "同類不同風格,哪個模型更強", icon: "Scale" },
   { id: "quiz", label: "三題篩選", hint: "類別＋預算＋素材,快速縮範圍", icon: "SlidersHorizontal" },
+  { id: "arena", label: "實測競技場", hint: "拿你的題目讓 2–4 顆模型真的跑一次", icon: "FlaskConical" },
+  { id: "heatmap", label: "分析熱力圖", hint: "整類攤開,一眼看出誰強在哪一格", icon: "LayoutGrid" },
 ];
 
-export function ModelsPage() {
+export function ModelsPage({ groupId = "" }: { groupId?: string }) {
   const categories = trpc.models.categories.useQuery();
   const moneyMeta = trpc.models.moneyMeta.useQuery();
   const contractSummary = trpc.models.contractSummary.useQuery(undefined, {
@@ -189,6 +203,12 @@ export function ModelsPage() {
       ),
     },
     { label: "級別", render: (m) => <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill> },
+    // 底層模型擺在最上面幾列：兩個端點若是同一顆基座，換過去風格不會變——
+    // 這是比較表最該先回答、卻最容易被「特性」那行文案蓋掉的一件事。
+    { label: "底層模型", render: (m) => <ModelBaseChip modelId={m.id} category={m.category} size="md" /> },
+    { label: "出品方", render: (m) => modelBaseSpecFor(m.id, m.category).developer },
+    { label: "骨幹架構", render: (m) => modelBaseSpecFor(m.id, m.category).arch },
+    { label: "權重", render: (m) => WEIGHTS_LABEL[modelBaseSpecFor(m.id, m.category).weights] },
     { label: "點數", render: (m) => <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span> },
     {
       label: "健康",
@@ -242,11 +262,15 @@ export function ModelsPage() {
     },
   ];
 
-  // ── 深度優化:決策中心狀態(看情境/比風格/三題篩選) ──
+  // ── 決策中心狀態(看情境/比風格/三題篩選/實測競技場/分析熱力圖) ──
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("scenario");
   const [scenarioGroup, setScenarioGroup] = useState<ScenarioGroup>("image");
+  // 熱力圖自己的類別：與下方完整目錄分開，看熱力圖時不會把目錄捲位置也一起換掉
+  const [heatmapCategory, setHeatmapCategory] = useState<string>("text-to-image");
   // 「在目錄看同類」:切到該類別、清掉搜尋/檔次,並捲到下方完整目錄
   const catalogRef = useRef<HTMLDivElement>(null);
+  // 從比較表跳到競技場時要把決策中心捲回視野內，不然按了像沒反應
+  const decisionRef = useRef<HTMLElement>(null);
   const jumpToCatalog = (cat: ModelCategory) => {
     setQ("");
     setTier("");
@@ -293,7 +317,8 @@ export function ModelsPage() {
         badge={`${MODEL_CATEGORY_COUNT} 類・${MODELS.length} 個模型`}
         description={
           <>
-            不用先懂所有模型。從情境、風格或三題開始挑選；目錄會標示<strong>實測健康</strong>、素材需求與文字塔能力，和創作台／MCP 同一份契約。
+            不用先懂所有模型。從情境、風格或三題開始挑；挑不定就<strong>拿自己的題目讓它們同題並跑</strong>，或用熱力圖把整類攤開比。
+            每顆都標示<strong>底層模型</strong>、實測健康、素材需求與文字塔能力，和創作台／MCP 同一份契約。
             {moneyMeta.data?.fxNote ? (
               <Meta as="span" style={{ display: "block", marginTop: 6 }}>{moneyMeta.data.fxNote}</Meta>
             ) : null}
@@ -301,54 +326,8 @@ export function ModelsPage() {
         }
       />
 
-      {/* ── 契約健康總覽 ── */}
-      {contractSummary.data && (
-        <Card as="section" className="model-health-overview" data-fb="模型契約健康" style={{ marginBottom: "var(--sp-16)", padding: "12px 16px" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-            <b style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="CheckCircle2" size={16} />站內契約健康
-            </b>
-            <Meta>
-              {contractSummary.data.modelCount} 模型 · 更新 {new Date(contractSummary.data.generatedAt).toLocaleString("zh-TW")}
-            </Meta>
-            <span className="spacer" />
-            <Hint as="span" style={{ margin: 0 }}>與 MCP／生成警告同源（不自動 verified）</Hint>
-          </div>
-          <div className="model-health-stats" role="list">
-            {(
-              [
-                "live_ok",
-                "needs_source",
-                "never_probed",
-                "live_timeout",
-                "live_fail",
-                "openapi_404",
-                "nim_no_key",
-              ] as HealthKey[]
-            ).map((key) => {
-              const n = contractSummary.data?.counts?.[key] ?? 0;
-              if (!n) return null;
-              const meta = HEALTH_META[key];
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="listitem"
-                  className={`model-health-stat tone-${meta.tone}${healthFilter === key ? " is-selected" : ""}`}
-                  title={meta.hint}
-                  onClick={() => {
-                    setHealthFilter((cur) => (cur === key ? "" : key));
-                    requestAnimationFrame(() => catalogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                  }}
-                >
-                  <strong>{n}</strong>
-                  <span>{meta.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-      )}
+      {/* ── 頂欄：我的使用量（取代站內契約健康——404／逾時／NIM 是站務指標，不是創作者要看的） ── */}
+      <ModelUsageCard />
 
       {/* ── 需求 #1:並排比較——勾 2–4 個模型,這張卡置頂(sticky)浮出 ── */}
       {compareList.length === 1 && (
@@ -364,6 +343,16 @@ export function ModelsPage() {
             <Icon name="Scale" size={16} />
             <b>並排比較({compareList.length}/{COMPARE_MAX})</b>
             <span className="spacer" />
+            {/* 規格比完之後真正的下一步：拿自己的題目讓這幾顆實際跑一次 */}
+            <Button
+              size="sm"
+              onClick={() => {
+                setDecisionMode("arena");
+                requestAnimationFrame(() => decisionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              }}
+            >
+              <Icon name="FlaskConical" size={12} />拿同一題實際跑跑看
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setCompareIds([])}>清空比較</Button>
           </div>
           {/* 小螢幕:表格保住最小寬,由外層橫向捲動 */}
@@ -403,8 +392,8 @@ export function ModelsPage() {
         </Card>
       )}
 
-      {/* ── 深度優化:決策中心——三種模式回答「怎麼選模型」 ── */}
-      <Card as="section" variant="primary" data-fb="模型決策中心" style={{ marginBottom: "var(--sp-16)" }}>
+      {/* ── 決策中心——五種方式回答「怎麼選模型」:看情境／比風格／三題篩選／實測競技場／分析熱力圖 ── */}
+      <Card as="section" ref={decisionRef} variant="primary" data-fb="模型決策中心" style={{ marginBottom: "var(--sp-16)", scrollMarginTop: "var(--sp-16)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           <h2 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Sparkles" size={18} />怎麼選模型?
@@ -412,7 +401,7 @@ export function ModelsPage() {
           <Hint as="span">先想「我要做什麼」,再看該用哪個——不必先懂 11 類分法。</Hint>
         </div>
 
-        {/* 三種決策模式(segmented) */}
+        {/* 決策模式(segmented) */}
         <div role="tablist" aria-label="決策模式" className="model-decision-tabs">
           {DECISION_MODES.map((mode) => {
             const on = decisionMode === mode.id;
@@ -481,6 +470,28 @@ export function ModelsPage() {
               />
             ))}
           </div>
+        )}
+
+        {/* 模式四:實測競技場——把上面勾的 2–4 顆模型拿同一題真的跑一次 */}
+        {decisionMode === "arena" && (
+          <ModelArena
+            groupId={groupId}
+            modelIds={compareIds}
+            onRemove={toggleCompare}
+            onClear={() => setCompareIds([])}
+          />
+        )}
+
+        {/* 模式五:分析熱力圖——整類攤開,規格欄＋我自己的實測欄 */}
+        {decisionMode === "heatmap" && (
+          <ModelHeatmap
+            category={heatmapCategory}
+            categories={(categories.data ?? CATEGORIES).filter((c) => c.id !== "workflow")}
+            onCategoryChange={setHeatmapCategory}
+            onCompare={toggleCompare}
+            comparedIds={compareIds}
+            compareFull={compareFull}
+          />
         )}
 
         {/* 模式三:三題篩選(原「幫我挑模型」精靈) */}
@@ -709,7 +720,7 @@ export function ModelsPage() {
                 {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
                 <label
                   className="hint"
-                  title={compareFull && !compareIds.includes(m.id) ? `一次最多比較 ${COMPARE_MAX} 個——先移掉一個再勾` : "勾 2 個以上,頁面頂部會浮出並排比較表"}
+                  title={compareFull && !compareIds.includes(m.id) ? `一次最多比較 ${COMPARE_MAX} 個——先移掉一個再勾` : "勾 2 個以上:頁面頂部浮出並排比較表,也可以直接送進實測競技場同題並跑"}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6, margin: "0 0 0 auto", whiteSpace: "nowrap",
                     cursor: compareFull && !compareIds.includes(m.id) ? "not-allowed" : "pointer",
@@ -726,6 +737,14 @@ export function ModelsPage() {
               </div>
               <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
               <Meta as="p" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
+              {/* 底層模型：同基座的兩個端點換過去風格不會變，這件事清單上就要看得到 */}
+              <details className="model-catalog-card__base">
+                <summary>
+                  <ModelBaseChip modelId={m.id} category={m.category} />
+                  <Meta style={{ fontSize: "var(--fs-11)" }}>看底層</Meta>
+                </summary>
+                <ModelBaseDetail modelId={m.id} category={m.category} />
+              </details>
               {(enc || neg != null) && (
                 <Meta as="p" style={{ margin: "4px 0 0", fontSize: 12 }}>
                   {enc ? `文字塔：${enc}${encLimit != null ? `（${encLimit} tok）` : ""}` : null}

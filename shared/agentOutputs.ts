@@ -2,7 +2,7 @@
  * 代理產出的型別標籤（agentRunner 的 outputRefs.type → 中文）。
  *
  * 放在 shared 而不是各自寫一份：這份對照表若和 agentRunner 實際發出的型別脫節，
- * 畫面就會出現 `approval`、`database_row` 這種沒翻譯的英文字串直接給使用者看——
+ * 畫面就會出現 `database_row` 這種沒翻譯的英文字串直接給使用者看——
  * 實機驗證時就抓到過。server/services/agentOutputs.test.ts 會掃 agentRunner 的
  * addOutputRef 呼叫點，確保每個型別都在這裡有對應。
  */
@@ -11,7 +11,6 @@ export const AGENT_OUTPUT_KIND_LABEL: Record<string, string> = {
   note: "筆記",
   task: "任務",
   schedule: "行程",
-  approval: "送審",
   generation: "生成",
   database_row: "資料列",
 };

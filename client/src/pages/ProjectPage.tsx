@@ -36,6 +36,7 @@ import {
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
+import { FormatTag } from "../components/FormatPicker";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
@@ -73,7 +74,7 @@ import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
 import { StyleVisualGallery } from "../components/StyleVisualGallery";
 import { ToneVisualPalette } from "../components/ToneVisualPalette";
-import { StoryFlowBlueprint, ThreeActStoryArc } from "../components/StoryFlowVisualizer";
+import { ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -381,7 +382,7 @@ function usePersistedIds(key: string): [string[], (updater: (prev: string[]) => 
 }
 
 /**
- * 選項就地新增（工作台一體化）：世界觀 chips 旁的「＋新增」——組長不必再繞去「選項」頁，
+ * 選項就地新增（工作台一體化）：世界觀 chips 旁的「＋新增」——組長不必再繞去選項整理頁，
  * 直接在工作台加一個調性／主軸／風格選項，加完全組立即可用、並自動幫本專案勾上。
  * 後端仍走同一個 options.upsert（組長以上限定、同名防撞）。
  */
@@ -541,7 +542,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 通知深連結（#225／#250）：
   // - ?focus=messages：開留言（手機 sheet／桌機捲動）
   // - ?focus=scene-<id>：捲到該分鏡格＋高亮（手機收合列要等可見）
-  // - ?focus=pending：捲到分鏡區（待審彙總）
+  // - ?focus=pending：捲到分鏡區（待處理彙總）
   // - ?focus=generation-<id>：開資源抽屜生成紀錄並高亮該筆
   // 列表非同步載入且手機列可能 display:none——輪詢到可見再捲，逾時放棄。
   useEffect(() => {
@@ -599,7 +600,7 @@ export function ProjectPage({ id }: { id: string }) {
   }, [mobileCompact]);
 
   const me = trpc.auth.me.useQuery();
-  // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
+  // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長就地新增，改名／排序才去整理頁）
   const options = trpc.options.byGroup.useQuery(
     { groupId: project.data?.groupId ?? "" },
     { enabled: !!project.data?.groupId },
@@ -981,10 +982,10 @@ export function ProjectPage({ id }: { id: string }) {
     },
     {
       label: "③ 交付",
-      // 有分鏡即算進入交付站；送審通過是加分，不當「必須才打勾」以免卡在空旅程
+      // 有分鏡即算進入交付站
       done: sceneCount > 0,
       target: "#stage-deliver",
-      hint: "把成品排進分鏡，再送審／打包",
+      hint: "把成品排進分鏡，再打包",
     },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
@@ -1021,7 +1022,6 @@ export function ProjectPage({ id }: { id: string }) {
     );
   };
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
-  const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
   const knowledgeCount = knowledge.data?.length;
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
@@ -1369,7 +1369,8 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </div>
       <p className="sub project-hero__meta">
-        {p.format}・{p.platform}
+        {/* 比例改用小方框＋數字：一眼看出這支是橫的還直的（純數字對非技術夥伴不直觀） */}
+        <FormatTag format={p.format} />・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
       {/* #25 常駐交付出口指引：桌機完整句；手機隱藏長句（③ 區內改一行短提示，見下方） */}
@@ -1682,11 +1683,9 @@ export function ProjectPage({ id }: { id: string }) {
                   scrollToSelector(anchor);
                 }}
               />
-              {/* 故事定盤星視覺藍圖 Strip */}
-              <StoryFlowBlueprint
-                wv={wv}
-                onFocusField={(fieldId) => scrollToSelector(`#${fieldId}`)}
-              />
+              {/* 這裡刻意不再放「故事定盤星視覺藍圖」摘要卡：它顯示的一句話／金句／畫風
+                  就是正下方欄位的原字，同一屏會上下重複一次。摘要留給收合後的區塊標題與
+                  下方「AI 會收到什麼」預覽即可。 */}
               {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
               <label htmlFor="wv-logline">
                 這支片在講什麼？
@@ -2331,14 +2330,14 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 交付：分鏡・排片・送審・打包（SceneList 一體卡） */}
+          {/* ③ 交付：分鏡・排片・打包（SceneList 一體卡） */}
           <StageHead
             id="stage-deliver"
             num="③"
             title="交付"
-            desc="分鏡・排片・送審・打包"
+            desc="分鏡・排片・打包"
             accent="group-3"
-            hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
+            hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
           />
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
@@ -2357,14 +2356,14 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} projectTitle={project.data?.title} />
+              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} />
             </div>
           </CollabZone>
         </div>
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
             id 供 ?focus=messages 通知深連結捲動定位——這個錨點已被平行 PR 弄丟兩次
-            （#246、#251），approvals.deeplink.test.ts 的守衛就是為此而存在，別再拿掉。 */}
+            （#246、#251），別再拿掉。 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
             <div id="project-messages">

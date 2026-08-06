@@ -3745,9 +3745,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: var(--border);
 }
 .scene-overview__rail span { min-width: 3px; height: 100%; }
+/* 有畫面＝綠、缺畫面＝灰（送審三態機移除後，色條只剩「備齊了沒」這一個維度） */
 .scene-overview__rail .draft { background: var(--border-strong); }
-.scene-overview__rail .review { background: var(--gold); }
-.scene-overview__rail .revision { background: var(--danger); }
 .scene-overview__rail .approved { background: var(--success); }
 .scene-overview__controls {
   display: flex;
@@ -4119,7 +4118,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .secondary-page--narrow { max-width: 660px; }
 .admin-page { max-width: 1280px; }
 .models-page { max-width: 1180px; }
-.model-health-overview { border: 1px solid var(--border-soft); }
+.model-health-overview,
+.model-usage-overview { border: 1px solid var(--border-soft); }
+/* 使用量格子不是篩選鈕：不要 hover 邊框變化，也不要手指游標 */
+.model-usage-overview .model-health-stat { cursor: default; }
+.model-usage-overview .model-health-stat:hover { border-color: var(--border-soft); }
 .model-health-stats {
   display: flex;
   flex-wrap: wrap;
@@ -4231,7 +4234,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-use-cta:hover { background: var(--primary-tint); }
 .model-decision-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 五種決策方式（看情境／比風格／三題／競技場／熱力圖）：固定三欄會把後兩個擠爆，
+     auto-fit 讓寬螢幕排五欄、中等寬度自動折行，手機仍走下方的橫向捲版本。 */
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -4311,6 +4316,178 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-quiz-progress > span.is-done { border-color: transparent; background: var(--success-ink); color: white; }
 .model-quiz-progress > span.is-current { border-color: var(--primary-border); background: var(--primary-tint); color: var(--primary-ink); box-shadow: inset 0 -2px 0 var(--primary); }
 .model-quiz-progress small { margin-left: 3px; color: var(--fg-secondary); font-size: var(--fs-11); }
+
+/* ── 底層模型（基座）標示：清單、比較表、競技場、熱力圖共用 ── */
+.model-base-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-base-chip .mono { font-size: 10px; opacity: 0.85; }
+.model-base-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--card2);
+}
+.model-base-detail dl { display: grid; gap: 3px; margin: 0; }
+.model-base-detail dl > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 8px;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+.model-base-detail dt { color: var(--fg-secondary); }
+.model-base-detail dd { margin: 0; }
+.model-catalog-card__base { margin-top: 6px; }
+.model-catalog-card__base > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.model-catalog-card__base > summary::-webkit-details-marker { display: none; }
+.model-catalog-card__base > summary .hint { margin: 0; }
+
+/* ── 實測競技場：同題並跑 ── */
+.model-arena__roster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.model-arena__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: var(--fs-12);
+}
+.model-arena__field { display: grid; gap: 4px; margin-top: 10px; }
+.model-arena__field > select,
+.model-arena__field > input,
+.model-arena__field > textarea { width: 100%; }
+.model-arena-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.model-arena-grid__media {
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--muted);
+}
+.model-arena-grid__text {
+  max-height: 100%;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ── 分析熱力圖 ── */
+.model-heatmap__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 10px 0;
+}
+.model-heatmap__scroll { overflow-x: auto; }
+.model-heatmap__table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: var(--fs-12);
+}
+.model-heatmap__table thead th {
+  padding: 4px 6px;
+  color: var(--fg-secondary);
+  font-weight: 600;
+  text-align: left;
+  vertical-align: bottom;
+}
+.model-heatmap__table thead th small { display: block; font-size: 10px; font-weight: 400; opacity: 0.8; }
+.model-heatmap__table tbody th {
+  min-width: 150px;
+  padding: 0;
+  font-weight: 400;
+  text-align: left;
+}
+.model-heatmap__name {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.model-heatmap__name:hover { border-color: var(--border-soft); background: var(--card2); }
+.model-heatmap__name b { display: block; font-size: var(--fs-12); }
+.model-heatmap__name small { display: block; color: var(--fg-secondary); font-size: 10px; }
+.model-heatmap__cell {
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+/* 沒有資料＝斜線空格。塗成最淺的顏色會被讀成「分數很低」，那是兩件不同的事。 */
+.model-heatmap__cell.is-empty {
+  color: var(--fg-secondary);
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--fg-secondary) 14%, transparent) 5px 6px
+  );
+}
+.model-heatmap__table tr.is-open th,
+.model-heatmap__table tr.is-open td { box-shadow: inset 0 -2px 0 var(--primary-border); }
+.model-heatmap__detail > td { padding: 2px 4px 8px; }
+.model-heatmap__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.model-heatmap__swatch {
+  width: 22px;
+  height: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
 .secondary-page-header {
   min-width: 0;
   display: flex;
@@ -5395,154 +5572,38 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 /* ── 世界觀快速層引導鋪軌 ── */
 .wv-guide { margin: 8px 0 12px; }
 
-/* ── 故事定盤星視覺藍圖 (Story Blueprint Strip) ── */
-.story-blueprint-strip {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  margin: 12px 0 16px;
-  padding: 10px;
-  border-radius: 12px;
-  background: var(--surface-2, rgba(0,0,0,0.03));
-  border: 1px solid var(--border-soft);
-}
-.story-blueprint-card {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--card, #ffffff);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: all var(--dur-fast);
-  text-align: left;
-}
-.story-blueprint-card:hover {
-  border-color: var(--primary);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-}
-.story-blueprint-card__badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--primary-ink);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.story-blueprint-card__body {
-  font-size: 13px;
-  line-height: 1.4;
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-}
-.story-blueprint-card__text {
-  margin: 0;
-  font-weight: 500;
-  color: var(--fg);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.story-blueprint-card__quote {
-  font-style: italic;
-  color: var(--primary-ink);
-  font-weight: 600;
-}
-.story-blueprint-card__placeholder {
-  font-size: 12px;
-  color: var(--fg-muted);
-  border: 1px dashed var(--border);
-  padding: 4px 8px;
-  border-radius: 6px;
-  width: 100%;
-}
-.story-blueprint-card__visual-body {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.story-blueprint-card__thumb {
-  width: 38px;
-  height: 38px;
-  border-radius: 6px;
-  object-fit: cover;
-  flex-shrink: 0;
-  border: 1px solid var(--border-soft);
-}
-.story-blueprint-card__thumb-placeholder {
-  width: 38px;
-  height: 38px;
-  border-radius: 6px;
-  background: var(--surface-3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-muted);
-  flex-shrink: 0;
-}
-.story-blueprint-card__visual-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.story-blueprint-card__style-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.story-blueprint-card__tone-pill {
-  display: inline-block;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  width: fit-content;
-}
-.story-blueprint-connector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-muted);
-  padding: 0 2px;
-}
-@media (max-width: 640px) {
-  .story-blueprint-strip { flex-direction: column; }
-  .story-blueprint-connector { transform: rotate(90deg); padding: 4px 0; }
-}
-
 /* ── 視覺畫風藝廊 (StyleVisualGallery) ── */
 .style-visual-gallery {
   margin-top: 6px;
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 .style-gallery-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding-bottom: 6px;
+  padding-bottom: 5px;
   border-bottom: 1px solid var(--border-soft);
 }
+/*
+ * 三個家族按鈕在手機上原本會折成兩行、把「卡片／標籤」切換再擠到第三行——
+ * 光是選擇器的框架就吃掉三列，圖還沒開始出現。改成單列橫向捲動（捲動條隱藏），
+ * 選擇器永遠只占一行。
+ */
 .style-family-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.style-family-bar::-webkit-scrollbar { display: none; }
+.style-family-bar > * { flex-shrink: 0; }
 .style-family-label {
   font-size: 12px;
   font-weight: 600;
@@ -5579,6 +5640,12 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 .style-family-tab.is-active .style-family-tab__hint {
   color: rgba(255,255,255,0.9);
+}
+/* 窄螢幕收掉補充說明，三個家族才塞得進同一行；說明仍留在 title 提示裡 */
+@media (max-width: 560px) {
+  .style-family-tab { padding: 5px 8px; }
+  .style-family-tab__hint { display: none; }
+  .style-family-label { display: none; }
 }
 
 .style-view-mode-toggle {
@@ -5633,10 +5700,26 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   color: var(--fg-secondary);
 }
 
+/*
+ * <picture> 包裝（StyleImage）：預設是 inline，會帶進一條基線空隙、也不吃 flex 佈局。
+ * 統一收成 inline-flex＋line-height:0，尺寸一律交給裡面那顆 <img> 的 class 決定。
+ */
+.style-image {
+  display: inline-flex;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+/*
+ * 軌道上限鎖在 168px：寫實／3D 家族各只有一個主風格，用 `1fr` 會讓那張唯一的卡
+ * 撐滿整列——在手機上就是一塊 300×225 的巨大縮圖，把下面的質感區與摘要全推出畫面外。
+ * 有上限之後不論幾張卡都維持同一個尺寸，靠左排列。
+ */
 .style-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 168px));
+  justify-content: start;
+  gap: 10px;
 }
 .style-visual-card {
   display: flex;
@@ -5667,11 +5750,26 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   overflow: hidden;
   background: var(--surface-3);
 }
+/* <picture> 是 inline 元素，要撐開才不會在 media 裡塌成一條線 */
+.style-visual-card__media .style-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
 .style-visual-card__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 圖抵達前先用 LQIP 底圖（inline style 帶入）撐色，載入完再淡入 */
+  animation: style-img-in var(--dur-normal, 220ms) ease-out both;
   transition: transform 0.3s ease;
+}
+@keyframes style-img-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .style-visual-card__img { animation: none; }
 }
 .style-visual-card:hover .style-visual-card__img {
   transform: scale(1.04);
@@ -5683,12 +5781,12 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 .style-visual-card__badge-selected {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 8px;
+  gap: 2px;
+  padding: 2px 6px;
   border-radius: 20px;
   background: var(--primary);
   color: #ffffff;
@@ -5709,53 +5807,62 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   font-weight: 600;
 }
 .style-visual-card__body {
-  padding: 8px 10px 10px;
+  padding: 6px 8px 8px;
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 .style-visual-card__name-row {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
 }
 .style-visual-card__title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--fg);
+  white-space: nowrap;
 }
 .style-visual-card__en {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--fg-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
+/* 說明文字最多兩行——七個字的差異不值得讓每張卡多長 15px */
 .style-visual-card__desc {
   margin: 0;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--fg-secondary);
-  line-height: 1.35;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .style-texture-section {
-  margin-top: 8px;
-  padding: 10px;
+  margin-top: 6px;
+  padding: 8px;
   background: var(--surface-2);
   border-radius: 10px;
   border: 1px solid var(--border-soft);
 }
 .style-texture-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 260px));
+  justify-content: start;
+  gap: 6px;
   margin-top: 6px;
 }
 .style-texture-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 5px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--card);
@@ -5771,9 +5878,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   background: color-mix(in srgb, var(--primary) 8%, var(--card));
   box-shadow: 0 0 0 1px var(--primary);
 }
+.style-texture-card .style-image {
+  display: block;
+  flex-shrink: 0;
+  line-height: 0;
+}
 .style-texture-card__thumb {
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   border-radius: 6px;
   object-fit: cover;
   flex-shrink: 0;
@@ -5825,6 +5937,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   border: 1px solid var(--border-soft);
   background: var(--surface-3);
 }
+.style-summary-banner__thumb .style-image,
 .style-summary-banner__thumb img {
   width: 100%;
   height: 100%;
@@ -5843,18 +5956,27 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   gap: 3px;
   min-width: 0;
 }
+/*
+ * 沒有 flex-wrap 時，「主風格:寫實攝影；質感:膠片質感」這種長標籤會把家族徽章擠成
+ * 一欄直排的窄柱（實測手機寬度就會發生）。允許換行、標籤本身可縮，版面才收得住。
+ */
 .style-summary-banner__title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 13px;
   color: var(--fg);
+  min-width: 0;
 }
 .style-summary-banner__label {
   color: var(--primary-ink);
   font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .style-summary-banner__fam-badge {
+  flex-shrink: 0;
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
@@ -5897,17 +6019,22 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   display: grid;
   gap: 8px;
 }
+/*
+ * 六個調性原本一張卡一列、每列近 80px，光選調性就吃掉半個手機畫面。
+ * 改成橫向排版（色票在左、文字在右）＋ `min(100%, 132px)` 下限，
+ * 窄螢幕保底兩欄、平板以上三～四欄，整區高度大約剩三分之一。
+ */
 .tone-visual-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
+  gap: 6px;
 }
 .tone-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
   border-radius: 10px;
   border: 1.5px solid var(--border);
   background: var(--card);
@@ -5937,24 +6064,55 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .tone-card.is-selected .tone-card__glow {
   opacity: 0.28;
 }
+/* 色票：調性沒有實拍圖，這個漸層圓就是它的「圖」——選中時加白框強化狀態 */
+.tone-card__swatch {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform var(--dur-fast), box-shadow var(--dur-fast);
+}
+.tone-card.is-selected .tone-card__swatch {
+  transform: scale(1.06);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.7), 0 2px 6px rgba(0, 0, 0, 0.22);
+}
+.tone-card__text {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
 .tone-card__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   position: relative;
+  min-width: 0;
 }
-.tone-card__emoji { font-size: 15px; }
+.tone-card__emoji {
+  font-size: 15px;
+  line-height: 1;
+  /* 疊在彩色色票上，加一點暗影才不會在淺色漸層上糊掉 */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
 .tone-card__name {
   font-size: 13px;
   font-weight: 700;
   color: var(--fg);
+  white-space: nowrap;
 }
 .tone-card__rank {
   margin-left: auto;
-  font-size: 10px;
-  padding: 1px 5px;
+  font-size: 9.5px;
+  padding: 1px 4px;
   border-radius: 4px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .tone-card__rank.is-rank-1 {
   background: var(--primary);
@@ -5965,15 +6123,25 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   color: var(--fg-secondary);
 }
 .tone-card__tagline {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--fg-secondary);
-  line-height: 1.3;
+  line-height: 1.25;
   position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* 英文提示字對選擇沒有幫助，只是給模型看的——窄螢幕先讓位給版面 */
 .tone-card__en {
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--fg-muted);
   position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .tone-card__en { display: none; }
 }
 .tone-order-row {
   margin-top: 4px;

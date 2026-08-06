@@ -145,7 +145,7 @@ export const googleEventLinks = pgTable("google_event_links", {
 /**
  * Web Push 訂閱（手機＋電腦跨裝置通知）：每位使用者每個「瀏覽器裝置」一筆——
  * 使用者在通知設定啟用後，瀏覽器發的 PushSubscription（endpoint＋加密金鑰）存這裡，
- * 伺服器事件（審批/私訊/@提及/生成與代理完成）經 services/webPush 推到所有已連結裝置，
+ * 伺服器事件（核准/私訊/@提及/生成與代理完成）經 services/webPush 推到所有已連結裝置，
  * 關頁、關瀏覽器也收得到（相對於既有的頁內桌面通知只在分頁開著時有效）。
  * endpoint 唯一＝同裝置重複啟用是 upsert 不長重複列；推送回 404/410 即自動清掉失效列。
  * 新表由正式 migration 建立。

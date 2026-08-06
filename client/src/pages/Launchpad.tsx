@@ -7,11 +7,14 @@ import { ProgressStepper, inferProjectCurrentStep } from "../components/Progress
 import { Icon } from "../components/Icon";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
+import { AddOptionInline } from "../components/AddOptionInline";
+import { FormatPicker } from "../components/FormatPicker";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { useCollab, CursorOverlay } from "../realtime";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
+import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
 import { DEFAULT_AGENT_PLANNER_MODE } from "../../../shared/agentPlanner";
 import { plannerCostLabel } from "../../../shared/llmPricing";
 import {
@@ -116,8 +119,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
     { groupId: groupId || undefined, includeArchived: includeArchived || undefined },
     { enabled: !!groupId },
   );
-  // 跨專案待辦（UX 高：首頁不顯示待審/待核→組長漏審、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
-  const pendingSummary = trpc.approvals.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
+  // 跨專案待辦（UX 高：首頁不顯示待核→組長漏核、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
+  const pendingSummary = trpc.generation.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
   const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
   const agentOverview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
@@ -159,6 +162,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
   const [platform, setPlatform] = useState<string>("");
+  /** 畫面尺寸：預設跟著平台走，使用者可在建立表單直接改（改了就以他挑的為準，直到換平台） */
+  const [format, setFormat] = useState<ProjectFormat>(DEFAULT_PROJECT_FORMAT);
   const [createOpen, setCreateOpen] = useState(false);
   const createAutoOpenedGroup = useRef<string | null>(null);
 
@@ -207,6 +212,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const myRole = activeGroup?.role;
   const isLeader = myRole === "leader" || myRole === "admin";
   const pickedPlatform = platformOptions.find((p) => p.value === platform);
+  // 換平台就把尺寸帶回該平台預設；使用者之後在尺寸圖上另選的值會保留（本效果只在平台預設變動時觸發）
+  const pickedPlatformFormat = pickedPlatform?.format ?? null;
+  useEffect(() => {
+    if (pickedPlatformFormat) setFormat(normalizeProjectFormat(pickedPlatformFormat));
+  }, [pickedPlatformFormat]);
 
   const all = projects.data ?? [];
   // 過濾（搜尋＋類型）→ 排序（最近開啟置頂／最近更新／名稱）→ 限量
@@ -239,15 +249,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const runningRuns = agentSummary?.running ?? 0;
   const waitingRuns = (agentSummary?.waiting ?? 0) + (agentSummary?.awaitingApproval ?? 0);
   const completedRuns = agentSummary?.doneRecent ?? 0;
-  const pendingApprovals = pendingSummary.data?.totalPendingApprovals ?? 0;
-  const pendingGenerations = pendingSummary.data?.totalAwaitingGenerations ?? 0;
-  const pendingTotal = pendingApprovals + pendingGenerations;
+  const pendingTotal = pendingSummary.data?.totalAwaitingGenerations ?? 0;
   const todayLabel = new Intl.DateTimeFormat("zh-TW", {
     month: "long",
     day: "numeric",
     weekday: "long",
   }).format(new Date());
-  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 計數配上專案標題。
+  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 待核生成計數配上專案標題。
   // 兩份資料都是這一頁本來就查過的（專案卡角標與頂欄計數共用），不多發任何查詢。
   const pendingDecisions = useMemo<PendingDecisionSource[]>(() => {
     const titleOf = new Map((projects.data ?? []).map((p) => [p.id, p.title] as const));
@@ -263,7 +271,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
         kind: "attention",
         eyebrow: "優先處理",
         title: `有 ${pendingTotal} 件需要你決定`,
-        detail: "先處理待審與成本核准，AI 與團隊才能繼續往下走。",
+        detail: "先處理成本核准，AI 與團隊才能繼續往下走。",
         href: "#projects",
         action: "開始處理",
         icon: "Bell" as const,
@@ -429,7 +437,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   placeholder="例：見證故事 · 走出低谷"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && canCreate) {
-                      create.mutate({ groupId, title: title.trim(), kind, platform });
+                      create.mutate({ groupId, title: title.trim(), kind, platform, format });
                     }
                   }}
                 />
@@ -447,6 +455,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <option key={k.id} value={k.value}>{k.label}</option>
                     ))}
                   </select>
+                  {/* 少了想要的類型就在這裡加，不必離開表單（原本得繞去選單的「選項」頁，回來還要重填） */}
+                  {isLeader && groupId && (
+                    <AddOptionInline
+                      groupId={groupId}
+                      type="kind"
+                      buttonLabel="自己加一個類型"
+                      onAdded={(opt) => setKind(opt.value)}
+                    />
+                  )}
                 </div>
                 <div>
                   <label htmlFor="np-platform" style={{ marginTop: 0, fontWeight: 600 }}>發布平台</label>
@@ -460,7 +477,28 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <option key={p.id} value={p.value}>{p.label}</option>
                     ))}
                   </select>
+                  {isLeader && groupId && (
+                    <AddOptionInline
+                      groupId={groupId}
+                      type="platform"
+                      buttonLabel="自己加一個平台"
+                      onAdded={(opt) => {
+                        setPlatform(opt.value);
+                        if (opt.format) setFormat(normalizeProjectFormat(opt.format));
+                      }}
+                    />
+                  )}
                 </div>
+              </div>
+              {/* 畫面尺寸：模型支援的全部比例都給選，並畫成等比例小方框（挑錯尺寸＝整支重生成＝真金白銀） */}
+              <div>
+                <label id="np-format-label" style={{ marginTop: 0, fontWeight: 600 }}>畫面尺寸</label>
+                <FormatPicker value={format} onChange={setFormat} labelledBy="np-format-label" />
+                {pickedPlatform?.format && normalizeProjectFormat(pickedPlatform.format) !== format && (
+                  <Hint layer="always">
+                    已改成 {format}（此平台預設 {pickedPlatform.format}）——以你挑的尺寸為準。
+                  </Hint>
+                )}
               </div>
             </div>
             {/* 提示與錯誤訊息 */}
@@ -471,12 +509,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
             )}
             {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
             {!options.isLoading && groupId && !kindOptions.length && (
-              <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>
+              <Hint layer="always">
+                這個組還沒有內容類型選項——{isLeader ? "用上面的「自己加一個類型」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
+              </Hint>
             )}
             {!options.isLoading && groupId && !platformOptions.length && (
-              <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>
+              <Hint layer="always">
+                這個組還沒有發布平台選項——{isLeader ? "用上面的「自己加一個平台」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
+              </Hint>
             )}
-            {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
             {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
             {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && (
               <Hint layer="always">先為專案命名，就能建立專案。</Hint>
@@ -490,7 +531,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
               <Button
                 variant="primary"
                 disabled={!canCreate}
-                onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}
+                onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform, format })}
               >
                 {create.isPending ? "建立中…" : "立即建立專案"}
               </Button>
@@ -561,9 +602,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
                         <strong>{project.title}</strong>
                         <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                       </span>
-                      {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
+                      {!!pending && pending.awaitingGenerations > 0 && (
                         <Link href={`/p/${project.id}?focus=pending`} style={{ textDecoration: "none" }}>
-                          <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                          <Chip>{pending.awaitingGenerations} 待處理</Chip>
                         </Link>
                       )}
                       <Icon name="ChevronRight" size={17} />
@@ -933,13 +974,13 @@ const MAX_QUESTION_SUGGESTIONS = 4;
  *
  * 每一句都必須是**卡片答不出來**的：卡片給的是數字與清單，這裡問的是那些數字背後的內容
  * 與原因——要鑽進分鏡全文、生成紀錄、人員任務或資料庫才答得出來。
- * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊 → 待審內容。
+ * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊。
  */
 export function buildTeamQuestionSuggestions(input: {
   runs: Array<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>;
   people: Array<{ userId: string | null; name: string | null; openTasks: number; overdueTasks: number }>;
   planConcerns: Array<{ projectTitle: string; missingInformation: number; risks: number }>;
-  pending: Array<{ projectTitle: string; pendingApprovals: number; awaitingGenerations: number }>;
+  pending: Array<{ projectTitle: string; awaitingGenerations: number }>;
 }): TeamQuestionSuggestion[] {
   const out: TeamQuestionSuggestion[] = [];
   const push = (id: string, text: string, why: string) => {
@@ -987,17 +1028,7 @@ export function buildTeamQuestionSuggestions(input: {
     );
   }
 
-  // ⑤ 待審分鏡：卡片顯示「3 個分鏡等你裁決」，答不出「那三鏡各寫了什麼、該注意什麼」
-  const toReview = input.pending.find((p) => p.pendingApprovals > 0);
-  if (toReview) {
-    push(
-      `scene:${toReview.projectTitle}`,
-      `「${toReview.projectTitle}」那 ${toReview.pendingApprovals} 鏡的畫面與配音詞各寫了什麼？裁決前我該注意什麼？`,
-      `因為「${toReview.projectTitle}」有 ${toReview.pendingApprovals} 鏡送審中`,
-    );
-  }
-
-  // ⑥ 有在跑的計畫：問它實際做了什麼，而不是看進度條
+  // ⑤ 有在跑的計畫：問它實際做了什麼，而不是看進度條
   const running = input.runs.find((r) => r.status === "running" || r.status === "waiting");
   if (running) {
     push(
@@ -1097,14 +1128,12 @@ export function mergeTeamHealth(
   return { health: run, fromPeople: false };
 }
 
-/** 一件「等人裁決」的事：四種來源合流成同一份收件匣 */
-type DecisionKind = "agent" | "task" | "scene" | "generation";
+/** 一件「等人裁決」的事：三種來源合流成同一份收件匣 */
+type DecisionKind = "agent" | "task" | "generation";
 type PendingDecisionSource = {
   projectId: string;
   projectTitle: string;
-  pendingApprovals: number;
   awaitingGenerations: number;
-  oldestPendingApprovalAt?: Date | string | null;
   oldestAwaitingGenerationAt?: Date | string | null;
 };
 /** 組級洞察裡的一項人類核准節點（來自 teamAssistant.groupInsights 的 workItems） */
@@ -1136,7 +1165,6 @@ type DecisionItem = {
 const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
   agent: { label: "計畫待核", hint: "核准後才開始執行、才開始花點" },
   task: { label: "人員核准", hint: "代理計畫卡在這個人類關卡，核准或退回都會喚醒後續步驟" },
-  scene: { label: "分鏡送審", hint: "要看過內容才能裁決，到專案頁決定" },
   generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
 };
 
@@ -1223,12 +1251,6 @@ export function buildDecisionInbox(
     });
   }
   for (const p of pending) {
-    if (p.pendingApprovals > 0) {
-      items.push({
-        key: `scene-${p.projectId}`, kind: "scene", projectId: p.projectId, projectTitle: p.projectTitle,
-        what: `${p.pendingApprovals} 個分鏡等你裁決`, since: toDate(p.oldestPendingApprovalAt),
-      });
-    }
     if (p.awaitingGenerations > 0) {
       items.push({
         key: `generation-${p.projectId}`, kind: "generation", projectId: p.projectId, projectTitle: p.projectTitle,
@@ -1236,7 +1258,7 @@ export function buildDecisionInbox(
       });
     }
   }
-  const ORDER: DecisionKind[] = ["agent", "task", "scene", "generation"];
+  const ORDER: DecisionKind[] = ["agent", "task", "generation"];
   return items.sort((a, b) => {
     const ta = a.since?.getTime() ?? Number.POSITIVE_INFINITY;
     const tb = b.since?.getTime() ?? Number.POSITIVE_INFINITY;
@@ -1684,7 +1706,7 @@ function TeamAssistantCard({
   myUserId,
 }: {
   groupId: string;
-  /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
+  /** 組內「生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
   pendingDecisions: PendingDecisionSource[];
   pendingLoading: boolean;
   pendingFailed: boolean;
@@ -1852,7 +1874,7 @@ function TeamAssistantCard({
   const afterDecide = () => {
     overview.refetch();
     insights.refetch();
-    utils.approvals.pendingSummary.invalidate();
+    utils.generation.pendingSummary.invalidate();
     utils.projects.invalidate();
   };
 

@@ -113,7 +113,7 @@ export function AppShell() {
   });
   const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
-  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
+  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/核准通知）。
   // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
   const logoutWithPushCleanup = async () => {
     try {
@@ -208,7 +208,7 @@ export function AppShell() {
   }, [activeGroupId]);
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
-  // 目前作用組的角色：組長或管理員才看得到「選項」入口（自訂內容類型／平台／世界觀選項）
+  // 目前作用組的角色：組長或管理員才做得了組級設定（就地新增選項、點數分配、審核門檻、/options 整理頁）
   const activeGroup = groups.find((g) => g.groupId === activeGroupId);
   const activeIsLeader = activeGroup?.role === "leader" || activeGroup?.role === "admin";
   // 通訊錄／操作紀錄：只要在「任一組」是組長或管理員就能看（跨組彙總）——比照後端 directory/audit 的可見界；

@@ -1864,10 +1864,22 @@ if (isProd && httpSurface.serveSpa) {
     }
     next();
   });
+  // 靜態資產快取分層：
+  //   /assets/*        Vite 產物、檔名帶 hash → 一年 immutable
+  //   /styles /brand /icons /illustrations
+  //                    圖片資產，換圖才改動 → 30 天，另給 stale-while-revalidate，
+  //                    換版當下使用者先拿到舊圖、背景更新，不必等網路來回
+  // 沒有這段的話這些圖每次進「創作」分頁都要重新問伺服器（至少一次 304 往返），
+  // 首屏就多等一個 RTT——圖已經壓到幾十 KB，剩下的成本幾乎都在連線本身。
+  const IMAGE_ASSET_DIRS = ["styles", "brand", "icons", "illustrations"];
   app.use(express.static(publicDir, {
     setHeaders(res, filePath) {
       if (filePath.includes(`${path.sep}assets${path.sep}`)) {
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return;
+      }
+      if (IMAGE_ASSET_DIRS.some((dir) => filePath.includes(`${path.sep}${dir}${path.sep}`))) {
+        res.setHeader("Cache-Control", "public, max-age=2592000, stale-while-revalidate=86400");
       }
     },
   }));

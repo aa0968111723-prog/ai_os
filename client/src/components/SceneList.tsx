@@ -8,7 +8,6 @@ import { formatPropDisplayName } from "@shared/propOwnership";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
-import { REWORK_TAGS, parseEpisodeTitle, reworkTagNeedsNote, type ReworkTag } from "@shared/seriesTemplate";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
@@ -18,17 +17,9 @@ import { AssetImg, AssetVideo } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealProjectContext } from "../features/project-nav/projectContextNav";
 
-import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
 const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
-
-const SCENE_STATUS: Record<string, { label: string; cls: PillStatus }> = {
-  todo: { label: "草稿", cls: "queued" },
-  review: { label: "草稿", cls: "queued" },
-  pending: { label: "待審", cls: "running" },
-  needs_work: { label: "需修改", cls: "failed" },
-  approved: { label: "已通過", cls: "done" },
-};
 
 // 逐格快速出圖的預設模型：便宜快、試構圖首選。要換模型／細修請開「單格工作室」——
 // 工作室選過的模型記在同一把 localStorage 鑰匙，這裡的「生成這一格」會跟著用。
@@ -198,7 +189,6 @@ function SceneRow({
   i,
   total,
   rowClassName,
-  isLeader,
   canEdit,
   meLoading,
   genModelId,
@@ -210,17 +200,11 @@ function SceneRow({
   invalidate,
   move,
   remove,
-  submitApproval,
-  decide,
-  pending,
-  rejectReason,
-  isSeriesEpisode = false,
 }: {
   s: Scene;
   i: number;
   total: number;
   rowClassName?: string;
-  isLeader: boolean;
   canEdit: boolean;
   meLoading: boolean;
   /** 快速出圖用的文生圖模型（跟著單格工作室上次選的；預設 SDXL Lightning） */
@@ -237,13 +221,6 @@ function SceneRow({
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
-  submitApproval: ReturnType<typeof trpc.approvals.submit.useMutation>;
-  decide: ReturnType<typeof trpc.approvals.decide.useMutation>;
-  pending: { id: string } | undefined;
-  /** 最新一筆已裁決的退回理由（needs_work）——提交人不必翻留言才知道改什麼 */
-  rejectReason?: string | null;
-  /** 這一格屬於母版系列的一集 → 退回改用固定標籤（#255） */
-  isSeriesEpisode?: boolean;
 }) {
   // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
@@ -278,10 +255,8 @@ function SceneRow({
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
-  const isDraft = s.status === "todo" || s.status === "review";
-
-  // 主要動作已經是「開單格工作室」時（沒提示詞／被退回要修），就不再重複列 tonal 版工作室鈕
-  const primaryOpensStudio = canEdit && ((!s.assetId && !hasPrompt && !isGenerating) || s.status === "needs_work");
+  // 主要動作已經是「開單格工作室」時（沒提示詞要先寫），就不再重複列 tonal 版工作室鈕
+  const primaryOpensStudio = canEdit && !s.assetId && !hasPrompt && !isGenerating;
 
   return (
     <div className={`gen-row scene-list__row${rowClassName ? ` ${rowClassName}` : ""}`} data-fb="分鏡格" id={`scene-${s.id}`}>
@@ -332,9 +307,6 @@ function SceneRow({
             秒
           </label>
           <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無畫面"}</span>
-          <Pill status={SCENE_STATUS[s.status]?.cls ?? "queued"}>
-            {SCENE_STATUS[s.status]?.label ?? s.status}
-          </Pill>
           {isGenerating && <Pill status="running">生成中…</Pill>}
           {isAwaitingApproval && <Pill status="queued">待核准…</Pill>}
           {/* 旁白狀態一眼可見（編輯入口在單格工作室・配音） */}
@@ -359,24 +331,6 @@ function SceneRow({
             </Meta>
           ) : null}
         </div>
-        {s.status === "needs_work" && rejectReason && (
-          <Meta
-            as="p"
-            role="status"
-            style={{
-              margin: "6px 0 0",
-              padding: "6px 10px",
-              borderRadius: "var(--r-8)",
-              background: "var(--danger-tint, rgba(180,60,60,0.08))",
-              border: "1px solid var(--danger)",
-              color: "var(--danger-ink)",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            <b>退回理由：</b>{rejectReason}
-          </Meta>
-        )}
-
         {/* 逐鏡卡片綁定：這一鏡用誰、在哪、拿什麼——沒指定就沿用生成台勾選 */}
         <SceneCardBinding projectId={projectId} scene={s} canEdit={canEdit} onSaved={invalidate} />
 
@@ -474,60 +428,7 @@ function SceneRow({
                   <Icon name="Sparkles" size={13} /> 寫提示詞出圖
                 </Button>
               )
-            ) : !meLoading && isDraft ? (
-              <Button size="sm" variant="primary" disabled={submitApproval.isPending} onClick={() => submitApproval.mutate({ sceneId: s.id })}>
-                送審
-              </Button>
-            ) : !meLoading && s.status === "needs_work" ? (
-              <>
-                <Button size="sm" variant="primary" title="照退回理由修這一格：開單格工作室改畫面或配音" onClick={onOpenStudio}>
-                  <Icon name="SlidersHorizontal" size={13} /> 去修這一格
-                </Button>
-                <Button size="sm" disabled={submitApproval.isPending} onClick={() => submitApproval.mutate({ sceneId: s.id })}>
-                  重送審
-                </Button>
-              </>
             ) : null
-          )}
-          {!meLoading && isLeader && s.status === "pending" && pending && (
-            <>
-              <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success-ink)", borderColor: "var(--success)" }}
-                disabled={decide.isPending}
-                onClick={() => decide.mutate({ approvalId: pending.id, decision: "approved" })}>
-                <Icon name="Check" /> 通過
-              </button>
-              <ConfirmButton
-                triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
-                disabled={decide.isPending}
-                title="退回這一鏡"
-                reason={
-                  isSeriesEpisode
-                    ? {
-                      // 母版系列：退回原因收斂成固定 5 種，退回後只重做被點名的步驟或鏡號，不整案重跑
-                      label: "退回原因（會通知提交人）",
-                      placeholder: "選「其他」時必填；其餘可補一句細節…",
-                      tags: REWORK_TAGS,
-                      tagRequired: true,
-                      tagsNeedingNote: REWORK_TAGS.filter((t) => reworkTagNeedsNote(t.value)).map((t) => t.value),
-                    }
-                    : {
-                      label: "退回理由（會通知提交人）",
-                      placeholder: "說明需要修改的地方…",
-                      required: true,
-                      presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
-                    }
-                }
-                confirmLabel="退回"
-                onConfirm={(reason, tag) => decide.mutate({
-                  approvalId: pending.id,
-                  decision: "needs_work",
-                  reason,
-                  reasonTag: (tag as ReworkTag | undefined),
-                })}
-              >
-                <Icon name="Undo2" /> 退回
-              </ConfirmButton>
-            </>
           )}
           {/* 單格工作室：Adobe 式「把單張拉出來改」——畫面、配音、版本的深改都在這裡。
               檢視者也開得起來（唯讀回看版本與成本），寫入控制由工作室內部依 canEdit 隱藏。 */}
@@ -561,13 +462,6 @@ function SceneRow({
               onClick={() => discussInMessages({ refType: "scene", refId: s.id, title: s.title })}
             >
               <Icon name="MessageCircle" size={13} /> 討論
-            </button>
-          )}
-          {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建 */}
-          {!meLoading && canEdit && s.status === "approved" && (
-            <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
-              onClick={() => submitApproval.mutate({ sceneId: s.id })}>
-              重送新版審核
             </button>
           )}
         </div>
@@ -610,46 +504,32 @@ function SceneRow({
 }
 
 /** 製作流程五階段：給「現在該做什麼」一個明確答案（C 流程引導）。 */
-type StageKey = "board" | "asset" | "voice" | "review" | "deliver";
+type StageKey = "board" | "asset" | "voice" | "deliver";
 const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
   { key: "board", label: "排分鏡" },
   { key: "asset", label: "補畫面" },
   { key: "voice", label: "配音" },
-  { key: "review", label: "送審" },
   { key: "deliver", label: "打包交付" },
 ];
 
 /** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
- *  深改（提示詞/配音/換模型/版本）集中在單格工作室；審批三態機與打包照舊。
+ *  深改（提示詞/配音/換模型/版本）集中在單格工作室；打包照舊。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
-export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneIds, propIds, projectTitle }: { projectId: string; isLeader: boolean; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[]; /** 專案標題——只用來判斷「這是不是母版系列的一集」（#255 退回標籤） */ projectTitle?: string }) {
+export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds }: { projectId: string; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[] }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
   const scenes = trpc.scenes.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
-  const approvals = trpc.approvals.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
   const invalidate = () => {
     utils.scenes.listByProject.invalidate({ projectId });
-    utils.approvals.listByProject.invalidate({ projectId });
     utils.messages.list.invalidate({ projectId });
     // 同類缺陷一併修：分鏡軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
     utils.projects.listDeleted.invalidate({ projectId });
   };
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
-  const submitApproval = trpc.approvals.submit.useMutation({ onSuccess: invalidate });
-  const decide = trpc.approvals.decide.useMutation({ onSuccess: invalidate });
-  // #255：這個專案是不是母版系列的一集？是的話退回改用固定標籤（結構跑掉／出處不符／…），
-  // 組員才知道要重做哪一步；不是的話維持原本的自由文字＋快捷句。
-  // 標題由呼叫端傳入而非在此重查專案：ProjectPage 早就載好了，多開一支 query 只會讓
-  // 每個掛 SceneList 的測試都得補 projects.get 樁（#256 剛因同類耦合修過一輪）。
-  const isSeriesEpisode = !!projectTitle && !!parseEpisodeTitle(projectTitle);
-  const pendingOf = (sceneId: string) => approvals.data?.find((a) => a.sceneId === sceneId && a.status === "pending");
-  // listByProject 已依 createdAt desc：同鏡最新一筆 needs_work 的 reason 即最近退回理由
-  const rejectReasonOf = (sceneId: string) =>
-    approvals.data?.find((a) => a.sceneId === sceneId && a.status === "needs_work" && a.reason)?.reason ?? null;
-  // 統一小紅字：這四個共用 mutation 失敗時（送審/裁決/排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
-  const actionError = submitApproval.error ?? decide.error ?? move.error ?? remove.error;
+  // 統一小紅字：這兩個共用 mutation 失敗時（排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
+  const actionError = move.error ?? remove.error;
 
   const list = (scenes.data ?? []) as Scene[];
   // 文字腳本的「設定卡」唯讀標注要顯示名字——與專案頁同快取鍵，不會多打 API
@@ -665,40 +545,33 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
     }),
   ].filter((n): n is string => !!n);
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
-  type SceneFilter = "all" | "draft" | "pending" | "needs_work" | "approved" | "missing";
+  type SceneFilter = "all" | "ready" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
   const [sceneListExpanded, setSceneListExpanded] = useState(false);
 
   // 通知深連結配套（與 ProjectPage 的 focus effect 分工）：
   // focus=scene-<id> 時手機收合的第 5 格以後是 display:none，先展開完整列表讓目標可見；
-  // focus=pending（組長彙總入口）直接切到「待審」篩選，一到頁就是要裁決的清單。
+  // focus=pending（頂欄待辦入口）直接切到「無畫面」篩選，一到頁就是還缺東西的清單。
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (!focus) return;
-    if (focus === "pending") setSceneFilter("pending");
+    if (focus === "pending") setSceneFilter("missing");
     else if (/^scene-[0-9a-f-]+$/i.test(focus)) setSceneListExpanded(true);
   }, []);
   const statusCounts = {
-    draft: list.filter((s) => s.status === "todo" || s.status === "review").length,
-    pending: list.filter((s) => s.status === "pending").length,
-    needs_work: list.filter((s) => s.status === "needs_work").length,
-    approved: list.filter((s) => s.status === "approved").length,
+    ready: list.filter((s) => !!s.assetId).length,
     missing: list.filter((s) => !s.assetId).length,
   };
   const sceneMatchesFilter = (scene: Scene, filter: SceneFilter) =>
     filter === "all"
-    || (filter === "draft" && (scene.status === "todo" || scene.status === "review"))
     || (filter === "missing" && !scene.assetId)
-    || scene.status === filter;
+    || (filter === "ready" && !!scene.assetId);
   const filteredSceneEntries = list
     .map((scene, index) => ({ scene, index }))
     .filter(({ scene }) => sceneMatchesFilter(scene, sceneFilter));
   const sceneFilters: Array<{ id: SceneFilter; label: string; count: number }> = [
     { id: "all", label: "全部", count: list.length },
-    { id: "draft", label: "草稿", count: statusCounts.draft },
-    { id: "pending", label: "待審", count: statusCounts.pending },
-    { id: "needs_work", label: "需修改", count: statusCounts.needs_work },
-    { id: "approved", label: "已通過", count: statusCounts.approved },
+    { id: "ready", label: "有畫面", count: statusCounts.ready },
     { id: "missing", label: "無畫面", count: statusCounts.missing },
   ];
 
@@ -707,19 +580,16 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   // scenes.listByProject 的投影只有 narrationUrl（narrationAssets join 已濾軟刪），沒有 narrationAssetId。
   // 型別上它是 optional 所以不會被 tsc 擋下，錯用只會安靜地永遠判為「沒有旁白」。
   const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationUrl).length;
-  const unapproved = statusCounts.draft + statusCounts.needs_work;
-  const allApproved = list.length > 0 && statusCounts.approved === list.length;
+  const allReady = list.length > 0 && statusCounts.missing === 0;
   const currentStage: StageKey =
     list.length === 0 ? "board"
     : statusCounts.missing > 0 ? "asset"
     : voicePending > 0 ? "voice"
-    : !allApproved ? "review"
     : "deliver";
   const stageDone: Record<StageKey, boolean> = {
     board: list.length > 0,
-    asset: list.length > 0 && statusCounts.missing === 0,
-    voice: list.length > 0 && statusCounts.missing === 0 && voicePending === 0,
-    review: allApproved,
+    asset: allReady,
+    voice: allReady && voicePending === 0,
     deliver: false, // 打包沒有「完成」狀態——隨時可以再打包
   };
   /** 依當前階段給一句「下一步」與（可選的）一鍵切到對應篩選 */
@@ -730,19 +600,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
       case "asset":
         return { text: `還有 ${statusCounts.missing} 鏡沒有畫面——按該格「生成這一格」快速出圖，或點縮圖開單格工作室細修。`, filter: "missing" };
       case "voice":
-        return { text: `有 ${voicePending} 鏡已填配音詞、還沒生成旁白——點該格縮圖開單格工作室的「配音」分頁。不配旁白也可以先送審。` };
-      case "review":
-        if (unapproved === 0 && statusCounts.pending > 0) {
-          return isLeader
-            ? { text: `有 ${statusCounts.pending} 鏡等你裁決——按「通過」或「退回」。`, filter: "pending" }
-            : { text: `已送審 ${statusCounts.pending} 鏡，等組長裁決；通過後就能打包交付。` };
-        }
-        return {
-          text: `畫面齊了——逐格按「送審」${statusCounts.needs_work > 0 ? `（${statusCounts.needs_work} 鏡被退回，先照理由修好再重送）` : ""}${statusCounts.pending > 0 ? `；另有 ${statusCounts.pending} 鏡審核中` : ""}，全部通過就能打包交付。`,
-          filter: statusCounts.needs_work > 0 ? "needs_work" : undefined,
-        };
+        return { text: `有 ${voicePending} 鏡已填配音詞、還沒生成旁白——點該格縮圖開單格工作室的「配音」分頁。不配旁白也可以直接打包交付。` };
       case "deliver":
-        return { text: `全部 ${list.length} 鏡已通過——到下方「交付」打包帶走。` };
+        return { text: `全部 ${list.length} 鏡都有畫面了——到下方「交付」打包帶走。` };
     }
   };
 
@@ -781,25 +641,17 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   return (
     <Card as="section" data-fb="分鏡與交付">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序：補畫面→配音→送審，全部通過後在下方「交付」打包。細修單格請點縮圖開單格工作室。" /></h2>
+        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序：補畫面→配音，齊了就在下方「交付」打包。細修單格請點縮圖開單格工作室。" /></h2>
         {list.length > 0 && (
           <span className="mono" style={{ fontSize: 13, color: "var(--primary-ink)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
         )}
       </div>
       {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
-      {/* 查詢失敗不能偽裝成空清單／裁決鈕消失——分開 scenes 與 approvals 錯誤並給重試 */}
+      {/* 查詢失敗不能偽裝成空清單——明確報錯並給重試 */}
       {scenes.isError && (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           分鏡清單暫時載入不了（不是資料不見了）——
           <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => scenes.refetch()}>
-            再試一次
-          </Button>
-        </p>
-      )}
-      {approvals.isError && (
-        <p className="error" role="alert" style={{ marginTop: 8 }}>
-          審批狀態暫時載入不了（通過／退回鈕可能暫時看不到）——
-          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => approvals.refetch()}>
             再試一次
           </Button>
         </p>
@@ -851,12 +703,10 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
           <div
             className="scene-overview__rail"
             role="img"
-            aria-label={`草稿 ${statusCounts.draft}、待審 ${statusCounts.pending}、需修改 ${statusCounts.needs_work}、已通過 ${statusCounts.approved}`}
+            aria-label={`有畫面 ${statusCounts.ready}、無畫面 ${statusCounts.missing}`}
           >
-            {statusCounts.draft > 0 && <span className="draft" style={{ width: `${(statusCounts.draft / list.length) * 100}%` }} />}
-            {statusCounts.pending > 0 && <span className="review" style={{ width: `${(statusCounts.pending / list.length) * 100}%` }} />}
-            {statusCounts.needs_work > 0 && <span className="revision" style={{ width: `${(statusCounts.needs_work / list.length) * 100}%` }} />}
-            {statusCounts.approved > 0 && <span className="approved" style={{ width: `${(statusCounts.approved / list.length) * 100}%` }} />}
+            {statusCounts.ready > 0 && <span className="approved" style={{ width: `${(statusCounts.ready / list.length) * 100}%` }} />}
+            {statusCounts.missing > 0 && <span className="draft" style={{ width: `${(statusCounts.missing / list.length) * 100}%` }} />}
           </div>
           <div className="scene-overview__controls" role="group" aria-label="篩選分鏡">
             {sceneFilters.map((filter) => (
@@ -905,7 +755,6 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
                   total={list.length}
                   onOpenStudio={() => setStudioScene({ id: s.id, number: i + 1 })}
                   rowClassName={sceneFilter === "all" && visibleIndex >= 4 ? "is-mobile-overflow" : undefined}
-                  isLeader={isLeader}
                   canEdit={canEdit}
                   meLoading={me.isLoading}
                   genModelId={genModelId}
@@ -916,11 +765,6 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
                   invalidate={invalidate}
                   move={move}
                   remove={remove}
-                  submitApproval={submitApproval}
-                  decide={decide}
-                  pending={pendingOf(s.id)}
-                  rejectReason={rejectReasonOf(s.id)}
-                  isSeriesEpisode={isSeriesEpisode}
                 />
               ))}
             </div>
@@ -942,22 +786,14 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
               <h3 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-15)" }}>
                 <Icon name="Package" size={16} /> 交付
               </h3>
-              {allApproved ? (
+              {allReady ? (
                 <Meta role="status" style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <Icon name="Check" size={13} /> 全部 {list.length} 鏡已通過審核，可以打包交付
+                  <Icon name="Check" size={13} /> 全部 {list.length} 鏡都有畫面了，可以打包交付
                 </Meta>
               ) : (
                 <Meta role="status">
-                  已通過 {statusCounts.approved}／{list.length} 鏡
-                  {(() => {
-                    const parts = [
-                      statusCounts.missing > 0 ? `${statusCounts.missing} 鏡無畫面` : null,
-                      statusCounts.draft > 0 ? `${statusCounts.draft} 鏡未送審` : null,
-                      statusCounts.pending > 0 ? `${statusCounts.pending} 鏡待審` : null,
-                      statusCounts.needs_work > 0 ? `${statusCounts.needs_work} 鏡需修改` : null,
-                    ].filter(Boolean);
-                    return parts.length > 0 ? `——${parts.join("、")}` : "";
-                  })()}
+                  有畫面 {statusCounts.ready}／{list.length} 鏡
+                  {statusCounts.missing > 0 ? `——${statusCounts.missing} 鏡無畫面` : ""}
                 </Meta>
               )}
             </div>
@@ -1055,19 +891,6 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
                 setGenModelId(readGenModel());
               }}
               onChanged={invalidate}
-              /* 就地裁決：查 list（不是 filtered——切到別的篩選不該讓開著的工作室失去狀態），
-                 且每次 render 重算，裁決後 invalidate 會讓這裡自然更新、按鈕自己收起來 */
-              isLeader={isLeader}
-              meLoading={me.isLoading}
-              sceneStatus={list.find((s) => s.id === studioScene.id)?.status}
-              pendingApprovalId={pendingOf(studioScene.id)?.id}
-              rejectReason={rejectReasonOf(studioScene.id)}
-              approvalsError={approvals.isError}
-              deciding={decide.isPending}
-              onDecide={(decision, reason) => {
-                const approvalId = pendingOf(studioScene.id)?.id;
-                if (approvalId) decide.mutate({ approvalId, decision, reason });
-              }}
             />
           )}
         </>

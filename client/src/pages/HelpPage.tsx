@@ -244,7 +244,7 @@ export function HelpPage() {
             <a href="#help-install">「把 Aios 裝到手機或電腦」</a>。
           </Spot>
           <Spot icon="Bell" name="通知設定" where="你的名字選單裡">
-            把手機和電腦連結進來，分鏡審批、私訊、@提及、生成完成會直接推到裝置——
+            把手機和電腦連結進來，成本核准、私訊、@提及、生成完成會直接推到裝置——
             <b>關掉網頁也收得到</b>。手機（iPhone 要先「加入主畫面」）和電腦各啟用一次。
           </Spot>
         </MapGroup>
@@ -301,14 +301,16 @@ export function HelpPage() {
         </MapGroup>
 
         <MapGroup title="給組長／管理員（一般組員不會看到）" icon="SlidersHorizontal">
-          <Spot icon="Ellipsis" name="選項" where="選單・管理（組長）">
-            自訂這一組能選的內容類型、平台、世界觀選項，讓下拉選單貼合你們的做法。
+          <Spot icon="Ellipsis" name="自訂選項" where="就在需要它的地方（組長）">
+            內容類型、發布平台在「建立新專案」表單裡直接加；調性／主軸／視覺風格在專案的世界觀 chips 旁邊加。
+            加完全組立即可用。要改名、停用或排序，從那些「＋新增」旁的「整理全部選項」進去。
           </Spot>
           <Spot icon="User" name="通訊錄" where="選單・管理">
             團隊 → 組別 → 成員一層層攤開，邀請新夥伴（連結用 LINE 傳）、看誰在哪一組。
           </Spot>
           <Spot icon="FileText" name="監控與紀錄" where="選單・管理">
             點數消耗監控＋操作紀錄，看點花在哪、誰做了什麼；範圍自動收斂到你帶的組。
+            組長的「成本審核門檻」與「點數分配」也在這一頁。
           </Spot>
           <Spot icon="SlidersHorizontal" name="團隊管理" where="選單・管理（管理員）">
             帳號、點數與額度（總預算／週上限／個人覆寫）、系統自檢、
@@ -485,7 +487,7 @@ export function HelpPage() {
         <Faq q="想讓 Claude 等外部 AI 直接操作我的專案？">
           <p style={{ marginTop: 0 }}>
             系統提供 <b>MCP</b>（Model Context Protocol）介面，讓外部 AI 客戶端連進來，替你查專案、挑模型、送生成、貼留言。關鍵是：
-            <b>連進來的身分就是「你」</b>——只碰得到你有份的組與專案，扣的是你的點數額度，一樣受審批門檻限制。
+            <b>連進來的身分就是「你」</b>——只碰得到你有份的組與專案，扣的是你的點數額度，一樣受成本門檻限制。
             每個人用<b>自己的金鑰</b>，不共用、可隨時撤銷。
           </p>
           <p style={{ margin: 0 }}>
@@ -591,7 +593,7 @@ export function HelpPage() {
         <Faq q="裝好後要怎麼開推播？">
           <p style={{ marginTop: 0 }}>
             帳號選單 → <b>通知設定</b> → 在這台裝置啟用。
-            手機與電腦要各啟用一次；分鏡審批、私訊、生成完成才會推到裝置（關掉分頁也收得到）。
+            手機與電腦要各啟用一次；成本核准、私訊、生成完成才會推到裝置（關掉分頁也收得到）。
           </p>
         </Faq>
       </div>
@@ -640,7 +642,7 @@ export function HelpPage() {
           此專案唯讀角色：能看與留言，不能改內容或生成。與「組員」身份可並存。
         </Term>
         <Term word="MCP">
-          讓外部 AI（如 Claude）用你的身分連進來操作專案。自己的金鑰、同樣組隔離與審批。
+          讓外部 AI（如 Claude）用你的身分連進來操作專案。自己的金鑰、同樣組隔離與成本門檻。
         </Term>
         <Term word="組員">組內成員，可建專案、生成、加入分鏡（除非某專案被設成檢視者）。</Term>
         <Term word="組長">

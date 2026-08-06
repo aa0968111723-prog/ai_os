@@ -1,7 +1,7 @@
 /**
  * 分鏡・交付（SceneList）深度優化後的三件事：
  * 1. 精簡分鏡格——每格一顆「依狀態決定的主要動作」，深改集中到單格工作室；
- * 2. 流程引導——五階段條與「下一步」提示要指對地方；
+ * 2. 流程引導——四階段條與「下一步」提示要指對地方；
  * 3. 交付中心——就緒度講清楚、單檔收進進階摺疊。
  * 隔離 trpc mock；SceneStudio／StoryboardPlayer 用 stub（各自有獨立測試）。
  */
@@ -11,15 +11,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SceneList } from "./SceneList";
 
 const scenesQuery = vi.fn();
-const approvalsQuery = vi.fn();
 const meQuery = vi.fn();
 const updateMutate = vi.fn();
 const generateMutate = vi.fn();
 const insertAfterMutate = vi.fn();
 const moveMutate = vi.fn();
 const removeMutate = vi.fn();
-const submitMutate = vi.fn();
-const decideMutate = vi.fn();
 const exportCreateMutate = vi.fn();
 const invalidate = vi.fn();
 
@@ -27,7 +24,6 @@ vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({
       scenes: { listByProject: { invalidate } },
-      approvals: { listByProject: { invalidate } },
       messages: { list: { invalidate } },
       projects: { listDeleted: { invalidate } },
     }),
@@ -44,11 +40,6 @@ vi.mock("../api", () => ({
     characters: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
     scenePresets: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
     props: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
-    approvals: {
-      listByProject: { useQuery: (...args: unknown[]) => approvalsQuery(...args) },
-      submit: { useMutation: () => ({ mutate: submitMutate, isPending: false, error: null }) },
-      decide: { useMutation: () => ({ mutate: decideMutate, isPending: false, error: null }) },
-    },
     exportJobs: {
       create: { useMutation: () => ({ mutate: exportCreateMutate, isPending: false, error: null }) },
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
@@ -101,15 +92,8 @@ function scene(over: SceneOver) {
   };
 }
 
-function mount(over: { isLeader?: boolean; canEdit?: boolean; projectTitle?: string } = {}) {
-  return render(
-    <SceneList
-      projectId="p-1"
-      isLeader={over.isLeader ?? false}
-      canEdit={over.canEdit ?? true}
-      projectTitle={over.projectTitle}
-    />,
-  );
+function mount(over: { canEdit?: boolean } = {}) {
+  return render(<SceneList projectId="p-1" canEdit={over.canEdit ?? true} />);
 }
 
 const rowOf = (id: string) => {
@@ -123,7 +107,6 @@ beforeEach(() => {
   window.localStorage.clear();
   meQuery.mockReturnValue({ isLoading: false, data: { id: "u-1" } });
   scenesQuery.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
-  approvalsQuery.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
 });
 
 describe("SceneList 流程引導（C）", () => {
@@ -159,7 +142,7 @@ describe("SceneList 流程引導（C）", () => {
     // scenes.narrationAssetId 在素材軟刪後刻意保留（供回收桶還原），若拿它判斷，
     // 這一格會假裝成「旁白 ✓」並放行到打包交付，但交付包（已濾軟刪）裡根本沒有那個音檔。
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved", voiceover: "大家好", narrationUrl: null })],
+      data: [scene({ id: "s1", voiceover: "大家好", narrationUrl: null })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
@@ -167,28 +150,28 @@ describe("SceneList 流程引導（C）", () => {
     expect(screen.getByText("配音").closest("li")).toHaveAttribute("aria-current", "step");
   });
 
-  it("全部通過：流程條到「打包交付」，交付中心亮綠", () => {
+  it("畫面都齊了：流程條到「打包交付」，交付中心亮綠", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved" }), scene({ id: "s2", status: "approved", voiceover: "好", narrationUrl: "https://example.test/n1.mp3" })],
+      data: [scene({ id: "s1" }), scene({ id: "s2", voiceover: "好", narrationUrl: "https://example.test/n1.mp3" })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
     expect(screen.getByText("打包交付").closest("li")).toHaveAttribute("aria-current", "step");
-    expect(screen.getByText(/全部 2 鏡已通過審核，可以打包交付/)).toBeInTheDocument();
+    expect(screen.getByText(/全部 2 鏡都有畫面了，可以打包交付/)).toBeInTheDocument();
     expect(rowOf("s2").getByText("旁白 ✓")).toBeInTheDocument();
   });
 });
 
 describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動作", () => {
-  it("無畫面有提示詞→生成這一格；有畫面草稿→送審", () => {
+  it("無畫面有提示詞→生成這一格；有畫面就只剩單格工作室（沒有送審這種東西了）", () => {
     scenesQuery.mockReturnValue({
       data: [scene({ id: "s1", hasAsset: false }), scene({ id: "s2" })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
     expect(rowOf("s1").getByRole("button", { name: /^生成這一格/ })).toBeInTheDocument();
-    expect(rowOf("s1").queryByRole("button", { name: "送審" })).not.toBeInTheDocument();
-    expect(rowOf("s2").getByRole("button", { name: "送審" })).toBeInTheDocument();
+    expect(rowOf("s2").queryByRole("button", { name: /送審/ })).not.toBeInTheDocument();
+    expect(rowOf("s2").getByRole("button", { name: "單格工作室" })).toBeInTheDocument();
   });
 
   it("無畫面也沒提示詞→主動作改成開單格工作室寫提示詞", async () => {
@@ -202,87 +185,14 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     expect(screen.getByRole("dialog", { name: /單格工作室 stub 第 1 鏡/ })).toBeInTheDocument();
   });
 
-  it("被退回：主動作是去修這一格＋重送審，退回理由就地顯示", async () => {
-    const user = userEvent.setup();
-    scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "needs_work" })],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    approvalsQuery.mockReturnValue({
-      data: [{ id: "ap1", sceneId: "s1", status: "needs_work", reason: "文字有錯字" }],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    mount();
-    expect(rowOf("s1").getByText(/文字有錯字/)).toBeInTheDocument();
-    expect(rowOf("s1").getByRole("button", { name: "重送審" })).toBeInTheDocument();
-    await user.click(rowOf("s1").getByRole("button", { name: /去修這一格/ }));
-    expect(screen.getByRole("dialog", { name: /單格工作室 stub/ })).toBeInTheDocument();
-  });
-
-  it("待審＋組長：通過／退回就在格上；非組長看不到裁決鈕", () => {
-    scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "pending" })],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    approvalsQuery.mockReturnValue({
-      data: [{ id: "ap1", sceneId: "s1", status: "pending" }],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    const first = mount({ isLeader: true });
-    expect(rowOf("s1").getByRole("button", { name: /通過/ })).toBeInTheDocument();
-    expect(rowOf("s1").getByRole("button", { name: /退回/ })).toBeInTheDocument();
-    first.unmount();
-    mount({ isLeader: false });
-    expect(rowOf("s1").queryByRole("button", { name: /通過/ })).not.toBeInTheDocument();
-  });
-
-  // #255：母版系列的一集，退回原因收斂成固定 5 種（其餘專案維持自由文字）。
-  // 判斷只看傳進來的專案標題——這條接線斷過一次（SceneList 曾自己重查 projects.get），故留守衛。
-  it("母版系列的一集：退回改出固定標籤，且標籤原樣送到後端", async () => {
-    scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "pending" })],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    approvalsQuery.mockReturnValue({
-      data: [{ id: "ap1", sceneId: "s1", status: "pending" }],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    mount({ isLeader: true, projectTitle: "週更開示60秒｜2026-08-05｜留一點空隙" });
-
-    await userEvent.click(rowOf("s1").getByRole("button", { name: /退回/ }));
-    await userEvent.click(screen.getByRole("button", { name: "結構跑掉" }));
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-
-    expect(decideMutate).toHaveBeenCalledWith({
-      approvalId: "ap1", decision: "needs_work", reason: "", reasonTag: "結構跑掉",
-    });
-  });
-
-  it("一般專案：退回維持自由文字＋快捷句，不出現母版標籤", async () => {
-    scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "pending" })],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    approvalsQuery.mockReturnValue({
-      data: [{ id: "ap1", sceneId: "s1", status: "pending" }],
-      isLoading: false, isError: false, refetch: vi.fn(),
-    });
-    mount({ isLeader: true, projectTitle: "隨便一個專案" });
-
-    await userEvent.click(rowOf("s1").getByRole("button", { name: /退回/ }));
-    expect(screen.queryByRole("button", { name: "結構跑掉" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "畫面與腳本不符" })).toBeInTheDocument();
-  });
-
   it("檢視者（2.3 唯讀）：沒有任何寫入鈕，仍可開單格工作室、下載與討論", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved" })],
+      data: [scene({ id: "s1" })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount({ canEdit: false });
     const row = rowOf("s1");
-    expect(row.queryByRole("button", { name: "送審" })).not.toBeInTheDocument();
-    expect(row.queryByRole("button", { name: "重送新版審核" })).not.toBeInTheDocument();
+    expect(row.queryByRole("button", { name: /^生成這一格/ })).not.toBeInTheDocument();
     expect(row.queryByRole("button", { name: "上移" })).not.toBeInTheDocument();
     expect(row.queryByRole("button", { name: "刪除" })).not.toBeInTheDocument();
     expect(row.getByRole("button", { name: "單格工作室" })).toBeInTheDocument();
@@ -335,22 +245,21 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
 });
 
 describe("SceneList 交付中心（B）", () => {
-  it("未全通過：就緒度列出卡在哪；主 CTA 仍可打包", () => {
+  it("畫面沒齊：就緒度列出卡在哪；主 CTA 仍可打包", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved" }), scene({ id: "s2", status: "pending" }), scene({ id: "s3", hasAsset: false })],
+      data: [scene({ id: "s1" }), scene({ id: "s2" }), scene({ id: "s3", hasAsset: false })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
     const deliver = within(screen.getByRole("region", { name: "交付" }));
-    expect(deliver.getByText(/已通過 1／3 鏡/)).toBeInTheDocument();
+    expect(deliver.getByText(/有畫面 2／3 鏡/)).toBeInTheDocument();
     expect(deliver.getByText(/1 鏡無畫面/)).toBeInTheDocument();
-    expect(deliver.getByText(/1 鏡待審/)).toBeInTheDocument();
     expect(deliver.getByRole("button", { name: /打包下載交付包/ })).toBeInTheDocument();
   });
 
   it("單檔下載收進「進階」摺疊區，預設收合", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved" })],
+      data: [scene({ id: "s1" })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();

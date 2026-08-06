@@ -67,7 +67,7 @@ project_id = project["id"]
 
 planned = call("POST", admin, "agents.plan", {
     "projectId": project_id,
-    "goal": "建立一格活動主視覺分鏡、生成畫面並送交審核",
+    "goal": "建立一格活動主視覺分鏡並生成畫面",
 })
 ok("完整計畫待核准", planned.get("status") == "awaiting_approval")
 ok(
@@ -106,7 +106,7 @@ ok("事件分頁明示 nextCursor", "nextCursor" in events_page)
 insights = call("GET", admin, "agents.insights", {"projectId": project_id})
 result_types = {result["type"] for result in insights.get("results", [])}
 ok("成果中心收錄分鏡", "scene" in result_types)
-ok("成果中心收錄生成與審核", "generation" in result_types and "approval" in result_types)
+ok("成果中心收錄生成", "generation" in result_types)
 ok("健康摘要含統一任務與截斷旗標", isinstance(insights.get("workItems"), list) and isinstance(insights.get("truncated"), dict))
 
 discarded_plan = call("POST", admin, "agents.plan", {
