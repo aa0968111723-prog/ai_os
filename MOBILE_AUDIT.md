@@ -44,19 +44,19 @@
 - [x] **P1-04** done(PR#463)｜`client/src/styles.css:2349`｜hidden-on-mobile｜/
   - 問題：≤560px 用 `.continue-card .chip { display:none }` 把「N 待處理」角標整顆藏掉，而首頁的待核提示卡（focusState attention）只在沒有最近專案時才渲染——手機上有專案的組長在首頁完全看不到任何待核計數，正是程式註解自己點名的「首頁不顯示待核→組長漏核、組員卡住」情境。
   - 修法：手機別整顆藏：改成縮小版（小圓點或純數字 badge，例如 .continue-card .chip { padding:2px 6px; font-size:10px }），或在手機版 bento 頭部補一行「N 件待核」總計連結。
-- [ ] **P1-05**｜`client/src/pages/ProjectPage.tsx:2172`｜fixed-element/底部遮擋｜/projects/:id（① 定調・角色與定裝分頁）
+- [x] **P1-05** done(PR#466)｜`client/src/pages/ProjectPage.tsx:2172`｜fixed-element/底部遮擋｜/projects/:id（① 定調・角色與定裝分頁）
   - 問題：「回到創作台／回到分鏡」的 context-return-bar 用 position:sticky; bottom:0，在 ≤820px 會整條黏進固定底部分頁列（.mobile-nav，fixed bottom:0 z-44）底下，捲動途中看不到也點不到，sticky 常駐 CTA 的目的在手機完全失效。
   - 修法：手機給 bottom: calc(64px + max(8px, var(--safe-bottom)))（或抽成 CSS class 讀 --chrome-bottom 相關變數），讓 sticky 落點浮在分頁列之上。
-- [ ] **P1-06**｜`client/src/pages/ProjectPage.tsx:211`｜sticky-header/錨點落點｜/projects/:id（TocNav ①②③ 階段列）
+- [x] **P1-06** done(PR#466)｜`client/src/pages/ProjectPage.tsx:211`｜sticky-header/錨點落點｜/projects/:id（TocNav ①②③ 階段列）
   - 問題：StageHead 的 inline scrollMarginTop 16px 蓋掉 styles.css 給 #stage-context/#stage-create/#stage-deliver 的 scroll-margin 契約（~64px+），而 ≤820 的 96px 加高清單也漏掉三個 stage id——手機點 TocNav 階段丸（block:"start"）後，階段標頭被 sticky 頂欄（52-56px）＋常駐 toc-rail（~46px）疊起來的 ~100px 蓋住，落點像跳錯位置。
   - 修法：拿掉 StageHead 的 inline scrollMarginTop，並把三個 stage id 加進 ≤820 的 96px scroll-margin 清單。
-- [ ] **P1-07**｜`client/src/pages/ProjectPage.tsx:324`｜橫向溢位｜/projects/:id（① 定調・進階「參考連結」）
+- [x] **P1-07** done(PR#466)｜`client/src/pages/ProjectPage.tsx:324`｜橫向溢位｜/projects/:id（① 定調・進階「參考連結」）
   - 問題：TokenListEditor 的 chip 沒有 max-width／overflow-wrap，參考連結是最長 100 字的無空白 URL，360px 下一顆 chip 可寬達 ~600px；html 的 overflow-x:clip 讓頁面不能橫捲，chip 尾端的移除 ✕ 被裁在畫面外，手機上該連結永遠刪不掉。
   - 修法：給 chip 補 max-width:100% 與 overflow-wrap:anywhere（或 URL 顯示截斷＋title 全文），確保 ✕ 留在可視範圍。
 - [x] **P1-08** done(PR#463)｜`client/src/styles.css:2096`｜chrome-bottom 契約破口｜/projects/:id（③ 交付底部；影響所有頁）
   - 問題：安裝為 PWA（html.is-standalone）時 `.app` 的 padding-bottom 被寫死 48px+safe，特異性 (0,2,1) 蓋過 --chrome-bottom 契約的 100px/140px——手機 standalone 下固定分頁列（~64-72px）會壓住頁面最底一截（專案頁＝③ 打包／SceneList 尾端），最後一列內容捲不上來。
   - 修法：standalone 規則改寫 padding-bottom: calc(var(--chrome-bottom) + env(safe-area-inset-bottom, 0px))，回歸變數契約。
-- [ ] **P1-09**｜`client/src/features/creation-workbench/modes/DirectGenerateMode.tsx:474`｜viewport-visibility｜/p/:id（專案頁 ② AI 創作工作台・直接出圖）
+- [x] **P1-09** done(PR#466)｜`client/src/features/creation-workbench/modes/DirectGenerateMode.tsx:474`｜viewport-visibility｜/p/:id（專案頁 ② AI 創作工作台・直接出圖）
   - 問題：按「生成」後確認面板只在按鈕下方 inline 展開，未捲動也未移焦，手機上按鈕常位於視窗底部，整個 confirm-panel 落在摺線以下，看起來像按了沒反應。
   - 修法：setConfirming(true) 後 requestAnimationFrame 用既有 scrollIntoViewForChrome 捲到 .confirm-panel（或把焦點移到「確認生成」鈕），沿用 --chrome-bottom 契約。
 - [ ] **P1-10**｜`client/src/pages/PlannerPage.tsx:695`｜觸控互動｜/planner
