@@ -1398,8 +1398,23 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   }
   #onboard-worldview, #ctx-group-world, #ctx-group-sources, #ctx-group-manage, #sec-knowledge, #sec-ai-hub, #sec-characters,
   #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
-  #sec-workflow, #onboard-delivery {
+  #sec-workflow, #onboard-delivery,
+  #stage-context, #stage-create, #stage-deliver {
     scroll-margin-top: calc(96px + var(--safe-top));
+  }
+  /* 「回到創作台／回到分鏡」sticky 列：行內 bottom:0 在手機會整條黏進固定
+     底部分頁列（.mobile-nav z-44）底下，捲動途中看不到也點不到；
+     抬到分頁列之上（nav 約 64px 高，safe-bottom 另計）。!important 是為了壓過行內樣式。 */
+  .context-return-bar {
+    bottom: calc(64px + max(8px, var(--safe-bottom))) !important;
+  }
+  /* 參考連結 chip：無空白長 URL 在 360px 可把一顆 chip 撐到 ~600px，
+     html overflow-x:clip 下尾端的移除 ✕ 被裁在畫面外、永遠刪不掉 */
+  .token-chips .chip {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    height: auto;
   }
 }
 
