@@ -201,3 +201,39 @@
     html[data-orb-state] .mobile-nav > a:nth-child(3)::before { animation: none; }
   }
 }
+
+/* ═══ MOB-T3：手機標題字族改走 sans 高字重（P2-42）═══
+ * Noto Serif TC 全站只用在 12 處標題／裝飾數字，但手機每個標題字都得在 sans 之外
+ * 再抓一份 serif 的 CJK 分包（單包 ~47KB）——同一個字下載兩次。
+ * ≤820 把這些選擇器改用 --m-font-display：Latin 走 board 的 Fraunces（已載，36K），
+ * CJK 回退 Noto Sans TC Variable（首屏本來就要載），serif CJK 因此完全不必下載。
+ * 桌機維持 var(--serif) 不變（本區塊在 media 內）。
+ * 注意：--m-font-display 的第二順位刻意是 Noto Serif TC——這裡要蓋掉它，
+ * 故手機標題明確改用 sans 堆疊。 */
+@media (max-width: 820px) {
+  :root {
+    /* 手機標題實際字族：Fraunces（Latin）→ Noto Sans TC（CJK，首屏已載） */
+    --m-font-heading: "Fraunces Variable", "Noto Sans TC Variable", var(--sans, sans-serif);
+  }
+  h1,
+  .empty-state h3,
+  .launch-mono,
+  .group-num,
+  .landing-capability__number,
+  .daily-status-card strong,
+  .continue-card__mark,
+  .model-head-stats strong,
+  .dm-avatar,
+  .model-usage__stats strong,
+  .bento-mini-stat strong {
+    font-family: var(--m-font-heading);
+  }
+  /* 第 12 個 serif 使用點 .launch-list-row__mark 刻意不納入：它屬於桌面列表檢視
+     （禁改清單；JS 以 isDesktop 守門，手機永遠不渲染），因此手機端本來就不會
+     因它觸發 serif 下載。 */
+  /* 原本靠 serif 的視覺重量，改由字重補回（可變字型 600–700 之間） */
+  h1, .empty-state h3, .daily-status-card strong, .model-head-stats strong,
+  .model-usage__stats strong, .bento-mini-stat strong {
+    font-weight: 650;
+  }
+}
