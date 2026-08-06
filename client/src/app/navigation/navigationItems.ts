@@ -95,16 +95,8 @@ export const accountMenuItems: NavigationItem[] = [
   { key: "integrations", label: "連接的資料來源", href: "/integrations", section: "work", icon: "Package" },
   { key: "downloads", label: "共用文件下載", href: "/downloads", section: "work", icon: "FileText" },
   // 管理（capability 對齊 PolicyEngine；UI-only 字串保留 require 回退）
-  {
-    key: "options",
-    label: "選項",
-    href: "/options",
-    section: "manage",
-    icon: "Ellipsis",
-    require: "activeLeader",
-    // 組長等同 generation.approve / group.manage_members；用後者當組級閘門
-    capability: "group.manage_members",
-  },
+  // 註：「選項」不再放進選單——選項改成「在需要的地方就地新增」（建立專案表單、世界觀 chips）。
+  // /options 仍是可用路由（改名／停用／排序的整理頁），由那些就地新增處的連結進入。
   {
     key: "members",
     label: "通訊錄",

@@ -7,6 +7,7 @@ import { db, schema } from "../db";
 import {
   getModel as getStaticModel,
   estimatePoints as estimateStaticPoints,
+  nearestFormat,
   type EstimateContext,
   type ModelCategory,
   type ModelEntry,
@@ -25,7 +26,8 @@ let cacheLoadedAt: number | null = null;
 /** 新發現模型的通用 fal 輸入（未知 schema 時的保守預設） */
 function genericInput(kind: OutputKind, category: string): ModelEntry["input"] {
   return (prompt, format, sourceUrl) => {
-    const aspect = format === "9:16" ? "9:16" : format === "1:1" ? "1:1" : "16:9";
+    // 未知 schema 的新模型只敢送最普遍支援的三種比例，其餘就近取一（避免 21:9 之類被 API 退件）
+    const aspect = nearestFormat(format, ["16:9", "9:16", "1:1"]);
     if (kind === "video") {
       const body: Record<string, unknown> = { prompt, aspect_ratio: aspect };
       if (sourceUrl) body[category === "video-to-video" ? "video_url" : "image_url"] = sourceUrl;

@@ -35,7 +35,84 @@ export type OutputKind = "image" | "video" | "audio" | "text";
 /** 需要的來源輸入(素材庫網址或外部 URL) */
 export type SourceKind = "image" | "audio" | "video" | "zip";
 
-export type ProjectFormat = "16:9" | "9:16" | "1:1";
+/**
+ * 專案畫面比例 —— 取「生成模型實際吃得下的全部比例」（fal aspect_ratio 通用列舉：
+ * 21:9／16:9／4:3／3:2／1:1／2:3／3:4／9:16／9:21）。
+ * 舊專案只會存 16:9／9:16／1:1，仍是本集合的子集，不必資料遷移。
+ */
+export type ProjectFormat = "21:9" | "16:9" | "3:2" | "4:3" | "1:1" | "3:4" | "2:3" | "9:16" | "9:21";
+
+export interface ProjectFormatMeta {
+  id: ProjectFormat;
+  /** 白話用途(選單與視覺化比例圖顯示;非技術夥伴看得懂的那一行) */
+  use: string;
+  /** 寬 ÷ 高。視覺化比例圖畫框、以及「就近對應」到模型支援集合時都用它 */
+  ratio: number;
+  /** 交付像素(短邊 1080;時間軸/剪映草稿/匯出共用) */
+  width: number;
+  height: number;
+  orientation: "landscape" | "square" | "portrait";
+}
+
+/**
+ * 全部可選比例（顯示順序：最寬 → 方形 → 最長）。
+ * 像素一律「短邊 1080」：橫式高 1080、直式寬 1080、方形 1080×1080——
+ * 與 resolutionForFormat 舊行為（1920×1080／1080×1920／1080×1080）完全相容。
+ */
+export const PROJECT_FORMATS: ProjectFormatMeta[] = [
+  { id: "21:9", use: "電影寬幅・橫向大螢幕", ratio: 21 / 9, width: 2520, height: 1080, orientation: "landscape" },
+  { id: "16:9", use: "YouTube 橫式・簡報播放", ratio: 16 / 9, width: 1920, height: 1080, orientation: "landscape" },
+  { id: "3:2", use: "相機橫幅・沖印照片", ratio: 3 / 2, width: 1620, height: 1080, orientation: "landscape" },
+  { id: "4:3", use: "傳統電視・投影片", ratio: 4 / 3, width: 1440, height: 1080, orientation: "landscape" },
+  { id: "1:1", use: "社群方形貼文", ratio: 1, width: 1080, height: 1080, orientation: "square" },
+  { id: "3:4", use: "IG 直式貼文", ratio: 3 / 4, width: 1080, height: 1440, orientation: "portrait" },
+  { id: "2:3", use: "直式海報・書封", ratio: 2 / 3, width: 1080, height: 1620, orientation: "portrait" },
+  { id: "9:16", use: "Shorts / Reels / 限動", ratio: 9 / 16, width: 1080, height: 1920, orientation: "portrait" },
+  { id: "9:21", use: "超長直式・電子看板", ratio: 9 / 21, width: 1080, height: 2520, orientation: "portrait" },
+];
+
+export const PROJECT_FORMAT_IDS: ProjectFormat[] = PROJECT_FORMATS.map((f) => f.id);
+
+const FORMAT_META = new Map<string, ProjectFormatMeta>(PROJECT_FORMATS.map((f) => [f.id, f]));
+
+/** 預設比例（未指定或無法辨識時一律退這個，維持既有橫式行為） */
+export const DEFAULT_PROJECT_FORMAT: ProjectFormat = "16:9";
+
+/** 任意字串 → 合法比例；認不得就退 16:9（DB 舊值與外部輸入都走這裡） */
+export function normalizeProjectFormat(format: string | null | undefined): ProjectFormat {
+  return FORMAT_META.has(format ?? "") ? (format as ProjectFormat) : DEFAULT_PROJECT_FORMAT;
+}
+
+export function formatMeta(format: string | null | undefined): ProjectFormatMeta {
+  return FORMAT_META.get(normalizeProjectFormat(format))!;
+}
+
+/** 交付像素(短邊 1080)；shared/options 的 resolutionForFormat 轉呼叫這支，全站單一真相 */
+export function pixelsForFormat(format: string | null | undefined): { width: number; height: number } {
+  const m = formatMeta(format);
+  return { width: m.width, height: m.height };
+}
+
+/**
+ * 就近對應：專案比例不在某模型支援的集合內時，取「寬高比最接近」的那個，而不是硬塞未知值被 API 退件。
+ * 用對數距離比較，讓 21:9→16:9 與 9:21→9:16 這種對稱情況得到對稱結果。
+ */
+export function nearestFormat(format: string | null | undefined, allowed: ProjectFormat[]): ProjectFormat {
+  const f = normalizeProjectFormat(format);
+  if (allowed.includes(f)) return f;
+  if (allowed.length === 0) return f;
+  const target = Math.log(formatMeta(f).ratio);
+  let best = allowed[0];
+  let bestDist = Infinity;
+  for (const cand of allowed) {
+    const dist = Math.abs(Math.log(formatMeta(cand).ratio) - target);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = cand;
+    }
+  }
+  return best;
+}
 
 export interface ModelEntry {
   /** 目錄唯一鍵(nvidia-nim/any-llm 系列用 # 區分子型號) */
@@ -228,9 +305,22 @@ export function tierLabel(tier: ModelTier): string {
 }
 
 /* ── 輸入組裝小工具 ── */
-const imageSize = (f: ProjectFormat) =>
-  f === "9:16" ? "portrait_16_9" : f === "1:1" ? "square_hd" : "landscape_16_9";
-const aspect = (f: ProjectFormat) => f;
+/**
+ * fal image_size 只有五種列舉(方形/4:3/16:9 各正反)，比可選比例少；
+ * 一律以「最接近的寬高比」對應，使用者選 3:2 不會被退件、也不會被硬轉成 16:9 之外的怪值。
+ */
+const IMAGE_SIZE_BUCKETS: ProjectFormat[] = ["16:9", "4:3", "1:1", "3:4", "9:16"];
+const IMAGE_SIZE_BY_BUCKET: Record<string, string> = {
+  "16:9": "landscape_16_9",
+  "4:3": "landscape_4_3",
+  "1:1": "square_hd",
+  "3:4": "portrait_4_3",
+  "9:16": "portrait_16_9",
+};
+const imageSize = (f: ProjectFormat) => IMAGE_SIZE_BY_BUCKET[nearestFormat(f, IMAGE_SIZE_BUCKETS)];
+const aspect = (f: ProjectFormat) => normalizeProjectFormat(f);
+/** 只吃橫式/直式兩種的影片模型(多數 image-to-video)：方形與其他比例就近取一 */
+const wideOrTall = (f: ProjectFormat) => nearestFormat(f, ["16:9", "9:16"]);
 /** LLM 系列共用(NVIDIA NIM 與舊 any-llm 皆為 {model, prompt} 形狀;NIM 端由 nimSubmit 轉 chat messages) */
 const llmInput = (model: string) => (prompt: string) => ({ model, prompt });
 const llmVisionInput = (model: string) => (prompt: string, _f: ProjectFormat, sourceUrl?: string) => ({
@@ -663,7 +753,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "往畫面外補內容轉比例;授權安全的 outpainting",
     bestFor: "直式照擴 16:9 上 YouTube、老照片補天補地",
     sourceHint: "要擴圖的圖",
-    input: (p, f, s) => ({ image_url: s, prompt: p, canvas_size: f === "9:16" ? [1080, 1920] : f === "1:1" ? [1440, 1440] : [1920, 1080] }),
+    input: (p, f, s) => ({ image_url: s, prompt: p, canvas_size: [pixelsForFormat(f).width, pixelsForFormat(f).height] }),
   },
   {
     id: "fal-ai/image-editing/object-removal", label: "物件移除 Object Removal", category: "image-to-image", tier: "economy", kind: "image",
@@ -1164,7 +1254,7 @@ export const MODELS: ModelEntry[] = [
     points: 9, cost: "720p $0.03/秒(無音)–$0.05(含音)、1080p $0.05–0.08/秒;按秒計費,點數為 6 秒含音基準", verified: true,
     strengths: "Veo 質感的超低價版;含音只要 $0.05/秒",
     bestFor: "量產日常 B-roll、空鏡、活動預告",
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "9:16" ? "9:16" : "16:9" }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f) }),
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/text-to-video", label: "Hailuo 02 Standard", category: "text-to-video", tier: "economy", kind: "video",
@@ -1190,7 +1280,7 @@ export const MODELS: ModelEntry[] = [
     points: 16, cost: "480p $0.05/秒、720p $0.10/秒、1080p $0.15/秒;站內鎖 720p;按秒計費,點數為 5 秒@720p 基準", verified: true,
     strengths: "Wan 新一代;畫質提升並加入原生音訊,仍親民價",
     bestFor: "開源價又要帶音效的療癒 B-roll",
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "1:1" ? "16:9" : f, resolution: "720p" }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f), resolution: "720p" }),
   },
   {
     // 審計 #116：目錄 fal-ai/wan/v2.6/text-to-video 與 wan-26 皆 404 → 實端點 **wan/v2.6**（無 fal-ai/ 前綴、無 /text-to-video）
@@ -1209,7 +1299,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "Hunyuan 升級版;畫質與時序穩定度提升",
     bestFor: "莊嚴療癒風的空景與慢運鏡",
     // 審計 #117：OpenAPI aspect_ratio 僅 16:9|9:16；1:1 改送 16:9
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "1:1" ? "16:9" : f }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f) }),
   },
   {
     id: "fal-ai/pika/v2.2/text-to-video", label: "Pika 2.2", category: "text-to-video", tier: "economy", kind: "video",
@@ -1224,7 +1314,7 @@ export const MODELS: ModelEntry[] = [
     points: 6, cost: "$0.2/支", verified: true,
     strengths: "Ray 2 的平價版;保留 Luma 柔順運鏡美感",
     bestFor: "意境空鏡的日常主力、快迭代",
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "1:1" ? "16:9" : f }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f) }),
   },
   {
     // 審計 #120：OpenAPI about 已 deprecated→轉 seedance 1.0 pro fast（Pricing will change）；aspect 含 1:1；本輪維持 id/points
@@ -1264,7 +1354,7 @@ export const MODELS: ModelEntry[] = [
     points: 6, cost: "$0.2/支(1.3B 480p);wan-pro 版 $0.8/5秒", verified: true,
     strengths: "前代開源輕量版極省;品質基本堪用",
     bestFor: "最省的開源試鏡頭、既有 2.1 LoRA",
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "1:1" ? "16:9" : f }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f) }),
   },
   {
     id: "fal-ai/hunyuan-video", label: "Hunyuan Video(騰訊開源)", category: "text-to-video", tier: "budget", kind: "video",
@@ -1272,7 +1362,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "騰訊開源大模型;動態自然、開源生態豐",
     bestFor: "日常空鏡、抽象動態;自訓 LoRA 底模",
     // 審計 #125：OpenAPI aspect_ratio 僅 16:9|9:16；1:1 改送 16:9 防 422（同 v1.5）
-    input: (p, f) => ({ prompt: p, aspect_ratio: f === "1:1" ? "16:9" : f }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: wideOrTall(f) }),
   },
   {
     // 審計 #126：OpenAPI MochiV1Input **無** aspect_ratio（僅 prompt/negative/seed/frames/expansion）
