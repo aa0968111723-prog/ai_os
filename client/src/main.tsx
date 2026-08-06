@@ -88,7 +88,22 @@ class ErrorBoundary extends React.Component<
 }
 
 function Root() {
-  const [queryClient] = useState(() => new QueryClient());
+  /**
+   * 全站 Query 預設：少重試、失敗快露臉。
+   * 預設 retry:3 在 bootstrap／慢查失敗時會讓 SessionGate 長時間「載入中…」，
+   * 症狀就是「除了首頁其他頁都只有載入中」。
+   */
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 1,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
   const [trpcClient] = useState(() => createTrpcClient());
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
