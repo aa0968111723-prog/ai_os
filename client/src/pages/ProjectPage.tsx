@@ -203,13 +203,14 @@ function StageHead({ id, num, title, desc, accent, hint }: {
   accent: "group-1" | "group-2" | "group-3";
   hint?: string;
 }) {
+  // scroll-margin 由 styles.css 契約管（桌機 #stage-* 清單、手機 ≤820 96px 清單）；
+  // 行內 scrollMarginTop 會蓋掉契約、讓錨點落在 sticky 頂欄底下——不可加回來
   return (
     <div
       id={id}
       role="heading"
       aria-level={2}
       className={`group-head project-stage-head ${accent}`}
-      style={{ scrollMarginTop: "var(--sp-16)" }}
     >
       <span className="group-num">{num}</span>
       <span className="group-title">{title}</span>
@@ -320,7 +321,8 @@ function TokenListEditor({
         {fieldKey && <FieldReaders field={fieldKey} />}
         {hint && <HelpTip text={hint} />}
       </label>
-      <div role="group" aria-labelledby={`${id}-label`}>
+      {/* token-chips：≤820 讓長 URL chip 斷行（否則 360px 上移除 ✕ 被 overflow clip 裁在畫面外） */}
+      <div role="group" aria-labelledby={`${id}-label`} className="token-chips">
         {values.map((v) => (
           <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {v}
@@ -893,8 +895,16 @@ export function ProjectPage({ id }: { id: string }) {
   const styleOpts = (options.data ?? []).filter((o) => o.type === "style").map((o) => o.label);
   // 已勾選但選項已被組長改名/刪除的「孤兒值」：仍在 worldview 裡且會注入生成，
   // 必須補一顆 chip 讓使用者點得掉（否則看不到、按不掉、卻持續注入）。options 尚未載入時不算孤兒。
+  //
+  // 內建畫風例外：畫風藝廊是直接讀 STYLE_OPTIONS 出卡，不看這組的 group_options
+  // （選項只在建組時 seed 一次，之後新增的內建畫風不會回填到既有的組）。
+  // 不排除掉的話，選了新畫風會同時出現在藝廊卡片與「此選項已移出清單」的孤兒提示裡，自相矛盾。
   const orphansOf = (field: "themes" | "tones" | "styles", opts: string[]) =>
-    options.data ? wv[field].filter((v) => !opts.includes(v)) : [];
+    options.data
+      ? wv[field].filter(
+          (v) => !opts.includes(v) && !(field === "styles" && STYLE_MEDIA_FAMILY[v]),
+        )
+      : [];
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;

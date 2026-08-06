@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
 import { PlannerSection, plannerInitialSections } from "../components/PlannerSection";
@@ -629,6 +630,10 @@ function CalendarView({
   const today = new Date();
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // ≤820：點「有行程的日子」只展開下方當日清單，不再直接 prefill 表單
+  //（原行為會展開表單＋smooth 捲走＋聚焦標題，Android 立刻彈鍵盤——
+  // 手機上想「看某天行程」被表單搶走視角）。桌機行為不變。
+  const compact = useMatchMedia("(max-width: 820px)");
 
   // 行程依「天」歸位（用開始時間的本地日）
   const byDay = useMemo(() => {
@@ -698,9 +703,15 @@ function CalendarView({
               className={`cal-cell${inMonth ? "" : " out"}${isToday ? " today" : ""}${isSel ? " sel" : ""}`}
               onClick={() => {
                 setSelectedKey(evs.length ? k : null);
+                if (compact && evs.length) {
+                  requestAnimationFrame(() => {
+                    scrollIntoViewForChrome(document.getElementById("cal-day-list"));
+                  });
+                  return;
+                }
                 onDayClick(dt);
               }}
-              aria-label={`${dt.getMonth() + 1}/${dt.getDate()}${evs.length ? `，${evs.length} 筆行程，點此新增` : "，點此新增行程"}`}
+              aria-label={`${dt.getMonth() + 1}/${dt.getDate()}${evs.length ? `，${evs.length} 筆行程，${compact ? "點此查看" : "點此新增"}` : "，點此新增行程"}`}
               title={evs.length ? undefined : "點此新增行程"}
             >
               <span className="cal-daynum">{dt.getDate()}</span>
@@ -720,10 +731,22 @@ function CalendarView({
 
       {/* 選定某天 → 展開當日全部行程（含刪除、回連） */}
       {selectedKey && selectedItems.length > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div id="cal-day-list" style={{ marginTop: 10 }}>
           <h3 style={{ fontSize: "var(--fs-13)", color: "var(--fg-secondary)", margin: "0 0 2px" }}>
             {new Date(selectedItems[0].startsAt).toLocaleDateString("zh-TW")}・{selectedItems.length} 筆
           </h3>
+          {/* compact 才渲染：手機點有行程的日子不再直達表單，新增入口改在這裡（桌機 DOM 不變） */}
+          {compact && (
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              style={{ margin: "2px 0 4px" }}
+              onClick={() => onDayClick(new Date(selectedItems[0].startsAt))}
+            >
+              <Icon name="Clock" size={13} style={{ marginRight: 4 }} />＋在這天新增行程
+            </Button>
+          )}
           {selectedItems.map((ev) => {
             const projTitle = projectTitleOf(ev.projectId);
             return (
@@ -1604,6 +1627,9 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
                 // note / schedule / knowledge / agent / db 葉節點
                 return (
                   <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...a11yProps(n.selection)} {...dragProps}>
+                    {/* 透明命中圈：r=6 的葉節點在手機等比縮小後只剩 ~4px 可點
+                       （text 是 pointer-events:none），永遠隱形、只擴大命中面積 */}
+                    <circle className="map-hit" cx={x} cy={y} r={20} />
                     <circle cx={x} cy={y} r={6} />
                     <text x={x} y={y - 12} textAnchor="middle">{n.label}</text>
                   </g>

@@ -1,0 +1,9 @@
+/* 中文字型 CSS（MOB-G）：由 main.tsx 動態 import（不擋首繪）。
+ * 兩份 fontsource variable index.css 共 ~300KB raw 的 @font-face 宣告，
+ * 先前 @import 在 styles.css 頂端＝跟主樣式合成單一 render-blocking CSS
+ *（gzip 121KB），是手機 4G 首屏 LCP 最大單一瓶頸。
+ * 全部宣告皆 font-display: swap：字型到位無縫換上，穩態渲染前後相同；
+ * 實際 woff2 仍照 unicode-range 按需下載。
+ * 不要把這兩行搬回 styles.css 的 @import。 */
+@import "@fontsource-variable/noto-sans-tc/index.css";
+@import "@fontsource-variable/noto-serif-tc/index.css";

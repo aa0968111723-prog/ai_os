@@ -12,12 +12,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const loginMutate = vi.fn();
 const verifyMutate = vi.fn();
 const meInvalidate = vi.fn();
+/** AppShell 的閘門吃 sessionBoot.bootstrap，LoginPage 成功後兩支都會清；樁少一支就會整段炸掉 */
+const bootstrapInvalidate = vi.fn();
 /** 由測試設定：login 成功時要回傳的內容 */
 let loginResult: unknown = { status: "ok", auth: null };
 
 vi.mock("../api", () => ({
   trpc: {
-    useUtils: () => ({ auth: { me: { invalidate: meInvalidate } } }),
+    useUtils: () => ({
+      auth: { me: { invalidate: meInvalidate } },
+      sessionBoot: { bootstrap: { invalidate: bootstrapInvalidate } },
+    }),
     auth: {
       login: {
         useMutation: (opts?: { onSuccess?: (r: unknown) => void }) => ({
@@ -178,6 +183,8 @@ describe("陌生裝置", () => {
     await signIn(user);
     await user.type(await screen.findByLabelText("驗證碼"), "483920");
     await waitFor(() => expect(meInvalidate).toHaveBeenCalled());
+    // AppShell 的閘門看的是 sessionBoot.bootstrap；只清 auth.me 會卡在登入畫面
+    expect(bootstrapInvalidate).toHaveBeenCalled();
   });
 
   it("可以取消回到登入頁重來", async () => {
