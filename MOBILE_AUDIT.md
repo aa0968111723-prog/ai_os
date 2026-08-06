@@ -128,10 +128,10 @@
 - [ ] **P2-12**｜`client/src/pages/ProjectPage.tsx:1634`｜鍵盤遮擋＋reduced-motion｜/projects/:id（去填一句話／用這個提示詞）
   - 問題：多處直接 el.focus()＋scrollIntoView({behavior:"smooth", block:"center"})（wv-logline、gen-prompt、sec-characters），繞過專案自建的 focusAndReveal/scrollToSelector：block:center 以 layout viewport 置中，iOS 鍵盤彈出時欄位可能落在鍵盤下；且顯式 smooth 無視 prefers-reduced-motion（CSS scroll-behavior:auto 蓋不掉 JS 顯式參數）。
   - 修法：輸入框聚焦一律改用 focusAndReveal，純捲動改 scrollToSelector（兩者已內建 reduce 與 --chrome-bottom/鍵盤補償）。
-- [ ] **P2-13**｜`client/src/styles.css:3558`｜巢狀捲動｜/projects/:id（留言 bottom sheet）
+- [x] **P2-13** done(PR#470)｜`client/src/styles.css:3558`｜巢狀捲動｜/projects/:id（留言 bottom sheet）
   - 問題：.project-messages-sheet__body 缺 overscroll-behavior:contain——留言清單捲到頂/底時捲動鏈到背後的長專案頁，關掉 sheet 後頁面位置已飄走（同站的 .mobile-more-sheet、.modal-scrim 都有 contain，唯獨這裡漏掉）。
   - 修法：在 .project-messages-sheet__body 加 overscroll-behavior: contain。
-- [ ] **P2-14**｜`client/src/styles.css:1537`｜橫向捲動可發現性｜/projects/:id（定調中心子分頁）
+- [x] **P2-14** done(PR#470)｜`client/src/styles.css:1537`｜橫向捲動可發現性｜/projects/:id（定調中心子分頁）
   - 問題：tone-studio-nav 四顆 nowrap 分頁在 360px 總寬約 480-520px，overflow-x:auto 但 scrollbar 隱藏、無漸層提示——「知識與素材」被切半、「回收桶」完全在畫面外，新手不易發現可橫滑（repo 自己在 .ctx-summary--wrap 注解就點名這種切邊看起來像壞掉）。
   - 修法：≤560px 改 2×2 grid（比照 .creation-mode-tabs 的 MOB-03 處理）或加右緣漸層淡出提示。
 - [x] **P2-15** done(PR#469)｜`client/src/pages/ProjectPage.tsx:2345`｜觸控目標｜/projects/:id（③ 交付一行導引）
@@ -155,7 +155,7 @@
 - [ ] **P2-21**｜`client/src/pages/PlannerPage.tsx:556`｜橫向空間/佈局｜/planner
   - 問題：排程與筆記列用 inline style 寫死 gridTemplateColumns，特異性蓋掉 styles.css 為 ≤560 準備的 `.gen-row { grid-template-columns: 1fr }` 堆疊規則——360px 時排程列仍是「時間｜內容｜刪除」三欄，標題欄只剩約 110px，長標題＋專案 Chip 擠成多行窄柱。
   - 修法：把欄位模板改成修飾 class（如 .gen-row--schedule）由 CSS 定義，讓 ≤560 媒體查詢能接手堆疊。
-- [ ] **P2-22**｜`client/src/pages/DatabasesPage.tsx:948`｜橫向溢位｜/databases
+- [x] **P2-22** done(PR#470)｜`client/src/pages/DatabasesPage.tsx:948`｜橫向溢位｜/databases
   - 問題：批次匯入的欄位對應列是無 flexWrap 的 flex row，來源表頭 select 寬 auto 且無 max-width/min-width:0——CSV 表頭很長時 select 的 min-content 撐破 360px 容器，被 html 的 overflow-x:clip 直接裁掉、選單右半不可見。
   - 修法：label 加 flexWrap:"wrap"，select 加 maxWidth:"100%"、minWidth:0（或 flex:"1 1 140px"）。
 - [ ] **P2-23**｜`client/src/pages/PlannerPage.tsx:373`｜動效/reduced-motion｜/planner
@@ -167,22 +167,22 @@
 - [x] **P2-25** done(PR#469)｜`client/src/feedback/FeedbackWidget.tsx:348`｜touch-target｜全站（回饋 widget）
   - 問題：表單裡的「重選」是 span role="button" 行內小字（約 26×18px），全域 button 觸控下限吃不到，手指難點中。
   - 修法：改用 <Button variant="ghost" size="sm">重選</Button> 或補 inline-flex + min-height/padding 撐到 ≥44px 高。
-- [ ] **P2-26**｜`client/src/feedback/picker.ts:226`｜safe-area｜全站（回饋 widget）
+- [x] **P2-26** done(PR#470)｜`client/src/feedback/picker.ts:226`｜safe-area｜全站（回饋 widget）
   - 問題：選取模式的提示列（手機上唯一的取消入口）fixed top:16px 未加 env(safe-area-inset-top)，PWA standalone／瀏海機上會被狀態列壓住而難以點取消。
   - 修法：top 改為 `calc(env(safe-area-inset-top, 0px) + 16px)`。
-- [ ] **P2-27**｜`client/src/styles.css:1845`｜nested-scroll｜/chat
+- [x] **P2-27** done(PR#470)｜`client/src/styles.css:1845`｜nested-scroll｜/chat
   - 問題：訊息列表 .dm-scroll 沒有 overscroll-behavior: contain，手機捲到頂/底會鏈到整頁捲動（standalone PWA 還可能誤觸下拉刷新）。
   - 修法：在 .dm-scroll 補 `overscroll-behavior: contain`（.dm-list 一併補）。
-- [ ] **P2-28**｜`client/src/pages/CommunityPage.tsx:273`｜horizontal-overflow/long-string｜/community
+- [x] **P2-28** done(PR#470)｜`client/src/pages/CommunityPage.tsx:273`｜horizontal-overflow/long-string｜/community
   - 問題：貼文標題與描述沒有 overflow-wrap，長無空白字串（URL、英文長 token）在 360px 會撐出卡片、被 html 的 overflow-x:clip 硬切掉。
   - 修法：在標題/描述容器補 overflow-wrap:anywhere（promptText 的 <pre> 已有 break-word，不必動）。
 - [x] **P2-29** done(PR#469)｜`client/src/pages/AdminPage.tsx:502`｜touch-target｜/admin, /logs
   - 問題：DetailBlock 的 <summary>（專案與負責人／組資料庫／團隊資料庫展開鈕）觸控高約 20px，全域 --touch-min 規則只涵蓋 button/.btn/.menu-item/input/select、不含 summary（消耗監控卡 summary 也只有 minHeight 32）。
   - 修法：summary 補 minHeight: "var(--touch-min)"（或在 styles.css 為互動 summary 增列 44px 下限）。
-- [ ] **P2-30**｜`client/src/pages/AdminPage.tsx:2286`｜overflow｜/admin
+- [x] **P2-30** done(PR#470)｜`client/src/pages/AdminPage.tsx:2286`｜overflow｜/admin
   - 問題：邀請連結列（唯讀 input＋複製＋分享鈕）flex row 沒有 flexWrap，input 最小內容寬（size=20 約 170px）＋兩顆 flex:none 按鈕在 360px（內容寬約 308px）會超出，分享鈕被 body overflow-x:clip 裁掉。
   - 修法：該列加 flexWrap: "wrap"（比照 McpPage.tsx:231 金鑰列的寫法）。
-- [ ] **P2-31**｜`client/src/pages/McpPage.tsx:174`｜overflow｜/mcp
+- [x] **P2-31** done(PR#470)｜`client/src/pages/McpPage.tsx:174`｜overflow｜/mcp
   - 問題：連線位置卡的端點 URL 是不可斷行的 <code> 長字串（origin+/api/mcp 常 >40 字元），360px 卡內寬約 308px 時尾端被裁掉且整卡無 overflowWrap／word-break（金鑰 token 有 break-all、這行沒有）。
   - 修法：code 加 style={{ overflowWrap: "anywhere" }}（或 wordBreak: "break-all"）。
 - [x] **P2-32** done(PR#463，a.btn-sm 規則涵蓋)｜`client/src/pages/IntegrationsPage.tsx:138`｜touch-target｜/integrations
@@ -194,16 +194,16 @@
 - [x] **P2-34** done(PR#469)｜`client/src/pages/ModelsPage.tsx:741`｜touch-target｜/models
   - 問題：目錄卡「看底層」<details> 的 summary（.model-catalog-card__base > summary）觸控高約 22px，styles.css 該選擇器無 min-height，summary 也不在全域 44px 下限名單。
   - 修法：.model-catalog-card__base > summary 補 min-height: var(--touch-min) 與 align-items: center。
-- [ ] **P2-35**｜`client/src/pages/ModelsPage.tsx:920`｜hover-only｜/models
+- [x] **P2-35** done(PR#470)｜`client/src/pages/ModelsPage.tsx:920`｜hover-only｜/models
   - 問題：HealthBadge 的完整健康說明（healthNote／meta.hint）只放在 title 屬性，手機無 hover 看不到；完整目錄卡另有行內 healthNote（755 行）補救，但並排比較表與三題精靈結果只剩 title 一途。
   - 修法：比較表健康列與精靈結果在徽章旁補一行 Meta 顯示 note，或改用站內點擊展開的 HelpTip。
-- [ ] **P2-36**｜`client/src/styles.css:5036`｜keyboard-overlap｜/chat 私訊（對話輸入列）
+- [x] **P2-36** done(PR#462，與 P1-13 同源重複發現)｜`client/src/styles.css:5036`｜keyboard-overlap｜/chat 私訊（對話輸入列）
   - 問題：dm-layout 高度用 100dvh 減固定常數但沒扣 --kb-inset；iOS 鍵盤不縮 dvh，貼底的 .dm-compose 輸入列與送出鈕會被鍵盤壓住（站內其他貼底面板都有顯式扣除）。
   - 修法：兩處高度式各再減 var(--kb-inset, 0px)。
 - [x] **P2-37** done(PR#463)｜`client/src/styles.css:2357`｜horizontal-overflow｜全站頂欄（≤560）
   - 問題：≤560 把 ≤820 的 topbar overflow-x:auto 改回 overflow:visible，但 flex-wrap 仍是 nowrap 且徽章皆 flex:none——當徽章齊備（mock 徽章＋點數＋在線＋說明/快速圖示＋帳號，各含 44px 下限）總寬可超過 360px，body 的 overflow-x:clip 會直接裁掉尾端動作且無法捲回。
   - 修法：≤560 保留 overflow-x:auto（選單已 portal 到 body，2364 行註解證實不需 visible），或在 360px 實測徽章全開時的總寬。
-- [ ] **P2-38**｜`client/src/styles.css:752`｜text-overflow｜專案頁留言區／生成結果文字
+- [x] **P2-38** done(PR#470)｜`client/src/styles.css:752`｜text-overflow｜專案頁留言區／生成結果文字
   - 問題：.msg 與 .result-text 沒有長字串斷行保護，留言或 AI 生成文字含長網址/長英數 token 時撐出容器，被 body overflow-x:clip 直接裁掉看不到。
   - 修法：比照 .dm-bubble：給 .msg 的文字子層加 min-width:0 與 overflow-wrap:anywhere，.result-text 加 overflow-wrap:anywhere。
 - [x] **P2-39** done(PR#469)｜`client/src/styles.css:3761`｜touch-target｜專案頁分鏡總覽／專案頁 presence／定調中心
@@ -212,7 +212,7 @@
 - [x] **P2-40** done(PR#469)｜`client/src/styles.css:4223`｜touch-target｜/models 模型型錄（「用這個模型」連結）
   - 問題：全域 44px 下限選擇器只涵蓋 button/.btn/.menu-item/input/textarea/select，<a> 不在內：.model-use-cta 實高約 22px（11px 字＋2px padding），同型還有 .bento-card__head a。
   - 修法：為這兩個連結補 min-height: var(--touch-min)（inline-flex 已置中），或比照 2238/2305 行的 `min-height:44px; display:inline-flex` 模式。
-- [ ] **P2-41**｜`client/src/styles.css:6666`｜nested-scroll｜今日工作台 AI 創作助理（AICreativeCopilot）
+- [x] **P2-41** done(PR#470)｜`client/src/styles.css:6666`｜nested-scroll｜今日工作台 AI 創作助理（AICreativeCopilot）
   - 問題：對話 feed 是固定 max-height:420px 的巢狀捲動區，沒有 overscroll-behavior:contain，手機捲到底/頂會連動整頁捲動；420px 在小手機也佔掉過多首屏。
   - 修法：加 overscroll-behavior: contain 與 -webkit-overflow-scrolling: touch，≤560 改 max-height: min(420px, 48dvh)。
 - [ ] **P2-42**｜`client/src/styles.css:26`｜字體子集化｜全站首屏標題（h1、empty-state、launch cover、landing 數字）
