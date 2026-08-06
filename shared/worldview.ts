@@ -41,8 +41,6 @@ export function DEFAULT_TABOOS(): string[] {
 
 export const TONE_OPTIONS = ["莊嚴", "溫暖", "真誠", "療癒", "活潑", "簡約"];
 export const THEME_OPTIONS = ["苦→修行→轉變→感恩", "禪修日常", "佛法入門", "活動紀實", "感恩分享"];
-/** 視覺風格內建清單：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
-export const STYLE_OPTIONS = ["日系水彩", "寫實攝影", "3D 動畫", "手繪插畫", "極簡線條", "膠片質感", "水墨禪意"];
 
 /**
  * UI／正規化上限：風格 look+質感 ≤2；調性／主軸 2（軟警告，助手套用時截斷）。
@@ -66,20 +64,6 @@ export const LLM_INJECT_MAX = {
   styles: 2,
 } as const;
 
-/**
- * 內建 chips 的英文錨點：FLUX/SDXL 等圖像影片模型以英文語彙訓練為主，純中文風格詞
- * 常被當雜訊忽略——視覺類別注入時附上英文對應，畫風才真正錨得住。
- * 只映射內建選項；組長自訂的 chips 沒有對應就維持原文注入（不猜翻譯）。
- */
-export const STYLE_EN: Record<string, string> = {
-  "日系水彩": "Japanese watercolor illustration",
-  "寫實攝影": "photorealistic photography",
-  "3D 動畫": "3D animated render",
-  "手繪插畫": "hand-drawn illustration",
-  "極簡線條": "minimalist line art",
-  "膠片質感": "analog film grain",
-  "水墨禪意": "Chinese ink wash painting, zen minimalism",
-};
 export const TONE_EN: Record<string, string> = {
   "莊嚴": "solemn, majestic",
   "溫暖": "warm, gentle",
@@ -90,45 +74,305 @@ export const TONE_EN: Record<string, string> = {
 };
 
 /** 媒材家族：互斥；跨家族並選畫面易沖 */
-export type StyleMediaFamily = "photo" | "illustrate" | "3d";
-
-export const STYLE_FAMILY_ORDER: StyleMediaFamily[] = ["photo", "illustrate", "3d"];
-
-export const STYLE_FAMILY_META: Record<
-  StyleMediaFamily,
-  { label: string; hint: string; defaultStyle: string }
-> = {
-  photo: { label: "寫實", hint: "攝影／紀實感", defaultStyle: "寫實攝影" },
-  illustrate: { label: "插畫", hint: "手繪／平面", defaultStyle: "手繪插畫" },
-  "3d": { label: "3D", hint: "立體渲染", defaultStyle: "3D 動畫" },
-};
-
-/**
- * 風格媒材家族：跨家族並選容易畫面互沖（寫實 vs 插畫 vs 3D）。
- * 同家族內 look + texture（如寫實+膠片）可並存注入。
- */
-export const STYLE_MEDIA_FAMILY: Record<string, StyleMediaFamily> = {
-  "寫實攝影": "photo",
-  "膠片質感": "photo",
-  "日系水彩": "illustrate",
-  "手繪插畫": "illustrate",
-  "極簡線條": "illustrate",
-  "水墨禪意": "illustrate",
-  "3D 動畫": "3d",
-};
+export type StyleMediaFamily = "photo" | "illustrate" | "anime" | "3d" | "graphic" | "craft";
 
 /** look＝主風格（家族內互斥）；texture＝同家族可選質感（0～1） */
 export type StyleLookRole = "look" | "texture";
 
-export const STYLE_LOOK_ROLE: Record<string, StyleLookRole> = {
-  "寫實攝影": "look",
-  "膠片質感": "texture",
-  "日系水彩": "look",
-  "手繪插畫": "look",
-  "極簡線條": "look",
-  "水墨禪意": "look",
-  "3D 動畫": "look",
+export const STYLE_FAMILY_ORDER: StyleMediaFamily[] = [
+  "photo",
+  "illustrate",
+  "anime",
+  "3d",
+  "graphic",
+  "craft",
+];
+
+export const STYLE_FAMILY_META: Record<
+  StyleMediaFamily,
+  { label: string; hint: string; emoji: string; defaultStyle: string }
+> = {
+  photo: { label: "寫實", hint: "攝影／紀實感", emoji: "📸", defaultStyle: "寫實攝影" },
+  illustrate: { label: "插畫", hint: "手繪／繪本", emoji: "🎨", defaultStyle: "手繪插畫" },
+  anime: { label: "動畫", hint: "賽璐璐／日系動漫", emoji: "🌸", defaultStyle: "日系動畫" },
+  "3d": { label: "3D", hint: "立體渲染", emoji: "🧊", defaultStyle: "3D 動畫" },
+  graphic: { label: "圖形", hint: "向量／平面設計", emoji: "🔷", defaultStyle: "扁平向量" },
+  craft: { label: "工藝", hint: "實體材質手作", emoji: "🧶", defaultStyle: "剪紙拼貼" },
 };
+
+/**
+ * 內建視覺風格的**單一真相表**：一列＝一個風格。
+ *
+ * 清單（STYLE_OPTIONS）、媒材家族對照、look/texture 角色、英文錨點全部由這張表衍生。
+ * 原本是四份各自維護的 Record，加一個畫風要記得同步改四個地方——漏掉家族對照就變成
+ * 「選得到但被當自訂值」，漏掉英文錨點就是「中文詞被模型當雜訊忽略、畫風錨不住」。
+ *
+ * en＝送進模型的英文錨點：FLUX/SDXL 等圖像影片模型以英文語彙訓練為主，純中文風格詞
+ * 常被當雜訊忽略——視覺類別注入時附上英文對應，畫風才真正錨得住。
+ * 只映射內建選項；組長自訂的 chips 沒有對應就維持原文注入（不猜翻譯）。
+ *
+ * 排序＝UI 出卡順序：家族分段，段內 look 在前、texture 在後；有實拍縮圖的排家族最前面。
+ * 跨家族並選容易畫面互沖（寫實 vs 插畫 vs 3D）；同家族內 look + texture 可並存注入。
+ */
+const STYLE_DEFS: readonly {
+  name: string;
+  family: StyleMediaFamily;
+  role: StyleLookRole;
+  en: string;
+}[] = [
+  // ── 寫實：攝影／紀實 ──
+  { name: "寫實攝影", family: "photo", role: "look", en: "photorealistic photography" },
+  {
+    name: "電影感光影",
+    family: "photo",
+    role: "look",
+    en: "cinematic film still, anamorphic lighting, shallow depth of field",
+  },
+  {
+    name: "紀實抓拍",
+    family: "photo",
+    role: "look",
+    en: "candid documentary photojournalism, available light",
+  },
+  {
+    name: "空氣感人像",
+    family: "photo",
+    role: "look",
+    en: "airy portrait photography, soft natural light, creamy bokeh",
+  },
+  {
+    name: "逆光剪影",
+    family: "photo",
+    role: "look",
+    en: "backlit silhouette photography, rim light, atmospheric haze",
+  },
+  { name: "膠片質感", family: "photo", role: "texture", en: "analog film grain" },
+  {
+    name: "柔光暈影",
+    family: "photo",
+    role: "texture",
+    en: "soft bloom, hazy glow, gentle vignette",
+  },
+  {
+    name: "黑白單色",
+    family: "photo",
+    role: "texture",
+    en: "black and white monochrome, rich tonal range",
+  },
+
+  // ── 插畫：手繪／繪本 ──
+  { name: "日系水彩", family: "illustrate", role: "look", en: "Japanese watercolor illustration" },
+  { name: "手繪插畫", family: "illustrate", role: "look", en: "hand-drawn illustration" },
+  { name: "極簡線條", family: "illustrate", role: "look", en: "minimalist line art" },
+  {
+    name: "水墨禪意",
+    family: "illustrate",
+    role: "look",
+    en: "Chinese ink wash painting, zen minimalism",
+  },
+  {
+    name: "厚塗油畫",
+    family: "illustrate",
+    role: "look",
+    en: "impasto oil painting, thick painterly brush strokes",
+  },
+  {
+    name: "粉彩蠟筆",
+    family: "illustrate",
+    role: "look",
+    en: "soft pastel and crayon illustration, chalky texture",
+  },
+  {
+    name: "淡彩速寫",
+    family: "illustrate",
+    role: "look",
+    en: "loose ink sketch with light watercolor wash, urban sketching",
+  },
+  {
+    name: "紙纖理",
+    family: "illustrate",
+    role: "texture",
+    en: "textured watercolor paper grain, visible fibers",
+  },
+  {
+    name: "暈染邊緣",
+    family: "illustrate",
+    role: "texture",
+    en: "wet-on-wet bleeding wash edges, pigment blooms",
+  },
+
+  // ── 動畫：賽璐璐／日系動漫 ──
+  {
+    name: "日系動畫",
+    family: "anime",
+    role: "look",
+    en: "anime cel shading, clean line art, vivid key light",
+  },
+  {
+    name: "劇場版動畫",
+    family: "anime",
+    role: "look",
+    en: "theatrical anime feature film, lush painted backgrounds",
+  },
+  {
+    name: "黑白漫畫",
+    family: "anime",
+    role: "look",
+    en: "black and white manga, screentone shading, ink hatching",
+  },
+  {
+    name: "Q 版角色",
+    family: "anime",
+    role: "look",
+    en: "chibi character art, super deformed proportions",
+  },
+  {
+    name: "復古卡通",
+    family: "anime",
+    role: "look",
+    en: "retro 1930s rubber hose cartoon, bouncy shapes",
+  },
+  {
+    name: "動態速度線",
+    family: "anime",
+    role: "texture",
+    en: "manga speed lines, motion streaks",
+  },
+  {
+    name: "賽璐璐高光",
+    family: "anime",
+    role: "texture",
+    en: "glossy cel highlights, rim light, specular sheen",
+  },
+
+  // ── 3D：立體渲染 ──
+  { name: "3D 動畫", family: "3d", role: "look", en: "3D animated render" },
+  {
+    name: "寫實 CG 渲染",
+    family: "3d",
+    role: "look",
+    en: "photorealistic CGI render, physically based shading, ray tracing",
+  },
+  {
+    name: "黏土定格",
+    family: "3d",
+    role: "look",
+    en: "claymation stop-motion, handmade plasticine",
+  },
+  {
+    name: "等距小場景",
+    family: "3d",
+    role: "look",
+    en: "isometric miniature diorama, tilt-shift",
+  },
+  { name: "低多邊形", family: "3d", role: "look", en: "low poly 3D, faceted geometry, flat shading" },
+  {
+    name: "公仔玩具",
+    family: "3d",
+    role: "look",
+    en: "vinyl designer toy figure render, glossy plastic",
+  },
+  {
+    name: "陶土霧面",
+    family: "3d",
+    role: "texture",
+    en: "matte clay material, soft subsurface scattering",
+  },
+  {
+    name: "玻璃通透",
+    family: "3d",
+    role: "texture",
+    en: "translucent glass and jelly material, refraction",
+  },
+
+  // ── 圖形：向量／平面設計 ──
+  {
+    name: "扁平向量",
+    family: "graphic",
+    role: "look",
+    en: "flat vector illustration, clean geometric shapes",
+  },
+  {
+    name: "幾何構成",
+    family: "graphic",
+    role: "look",
+    en: "geometric abstract composition, bauhaus shapes",
+  },
+  {
+    name: "極簡海報",
+    family: "graphic",
+    role: "look",
+    en: "minimal swiss poster design, generous negative space",
+  },
+  { name: "漸層光暈", family: "graphic", role: "look", en: "smooth gradient mesh, aurora glow" },
+  {
+    name: "復古印刷",
+    family: "graphic",
+    role: "look",
+    en: "retro mid-century print poster, limited palette",
+  },
+  {
+    name: "網點印刷",
+    family: "graphic",
+    role: "texture",
+    en: "risograph halftone dots, offset misregistration",
+  },
+  {
+    name: "顆粒噪點",
+    family: "graphic",
+    role: "texture",
+    en: "fine grain noise overlay, dithered speckle",
+  },
+
+  // ── 工藝：實體材質手作 ──
+  {
+    name: "剪紙拼貼",
+    family: "craft",
+    role: "look",
+    en: "layered paper cut collage, papercraft depth",
+  },
+  {
+    name: "木刻版畫",
+    family: "craft",
+    role: "look",
+    en: "woodblock print, carved linework, relief printmaking",
+  },
+  { name: "刺繡織品", family: "craft", role: "look", en: "embroidered textile art, stitched thread" },
+  { name: "沙畫流動", family: "craft", role: "look", en: "sand art on a lightbox, flowing grains" },
+  {
+    name: "皮影戲",
+    family: "craft",
+    role: "look",
+    en: "shadow puppet theatre, backlit cut-out silhouettes",
+  },
+  {
+    name: "布紋織理",
+    family: "craft",
+    role: "texture",
+    en: "woven fabric weave texture, canvas grain",
+  },
+  {
+    name: "手作毛邊",
+    family: "craft",
+    role: "texture",
+    en: "torn handmade paper, deckle edges",
+  },
+];
+
+/** 視覺風格內建清單：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
+export const STYLE_OPTIONS: string[] = STYLE_DEFS.map((d) => d.name);
+
+export const STYLE_EN: Record<string, string> = Object.fromEntries(
+  STYLE_DEFS.map((d) => [d.name, d.en]),
+);
+
+export const STYLE_MEDIA_FAMILY: Record<string, StyleMediaFamily> = Object.fromEntries(
+  STYLE_DEFS.map((d) => [d.name, d.family]),
+);
+
+export const STYLE_LOOK_ROLE: Record<string, StyleLookRole> = Object.fromEntries(
+  STYLE_DEFS.map((d) => [d.name, d.role]),
+);
 
 /** 把 chips 轉成「中文(英文)」雙語注入形；無對應者原樣保留 */
 export function bilingualChips(values: string[], map: Record<string, string>): string[] {
@@ -165,6 +409,26 @@ export function texturesForFamily(family: StyleMediaFamily): string[] {
   return STYLE_OPTIONS.filter(
     (s) => STYLE_MEDIA_FAMILY[s] === family && STYLE_LOOK_ROLE[s] === "texture",
   );
+}
+
+/** 這批 styles 落在哪些媒材家族（去重、依家族固定順序；自訂值不計） */
+export function styleFamiliesOf(styles: string[]): StyleMediaFamily[] {
+  const hit = new Set(styles.map((s) => STYLE_MEDIA_FAMILY[s]).filter(Boolean));
+  return STYLE_FAMILY_ORDER.filter((f) => hit.has(f));
+}
+
+/**
+ * 給 AI 提示詞用的風格速查：一行一個家族（主風格／質感）。
+ * 從同一張 STYLE_DEFS 衍生——提示詞裡手抄一份清單，加了新畫風就永遠有人忘了同步，
+ * 模型只會一直推薦那七個舊詞。
+ */
+export function styleFamilyCheatsheet(): string {
+  return STYLE_FAMILY_ORDER.map((fam) => {
+    const meta = STYLE_FAMILY_META[fam];
+    const looks = looksForFamily(fam).join("/");
+    const textures = texturesForFamily(fam);
+    return `${meta.label}(${meta.hint})：${looks}${textures.length ? `；質感：${textures.join("/")}` : ""}`;
+  }).join("\n");
 }
 
 /** 從 styles 陣列解析家族／主風格／質感／其餘（舊多選或自訂） */
@@ -368,7 +632,9 @@ export function chipSoftWarnings(wv: Pick<Worldview, WorldviewChipField>): strin
   }
   if (hasStyleFamilyConflict(wv.styles)) {
     const famLabel = slots.family ? STYLE_FAMILY_META[slots.family].label : "目前主風格所屬";
-    warnings.push(`風格橫跨不同媒材（寫實／插畫／3D）——建議只留「${famLabel}」一類`);
+    // 家族有六個，全部列出來反而看不到重點——只點名這次真的撞在一起的那幾個
+    const clashing = styleFamiliesOf(wv.styles).map((f) => STYLE_FAMILY_META[f].label);
+    warnings.push(`風格橫跨不同媒材（${clashing.join("／")}）——建議只留「${famLabel}」一類`);
   }
   return warnings;
 }
