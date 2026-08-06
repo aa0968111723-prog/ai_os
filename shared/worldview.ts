@@ -590,6 +590,21 @@ export function formatActsLine(acts: Worldview["acts"]): string {
 }
 
 /**
+ * 三幕大綱（拆分鏡用）：一幕一段、以空行分隔。
+ *
+ * 與 formatActsLine 的差別是**用途**，不是格式潔癖：那支是注入 prompt 的單行摘要，
+ * 這支是要當「腳本來源」送進拆分鏡的。空行分隔讓假模式的段落切幕能切出三幕
+ * （單行版會整份塞成一幕），真模式也讀得出這是三段而不是一句話。
+ */
+export function formatActsOutline(acts: Worldview["acts"]): string {
+  const parts: string[] = [];
+  if (acts.hook.trim()) parts.push(`鉤子：${acts.hook.trim()}`);
+  if (acts.turn.trim()) parts.push(`轉折：${acts.turn.trim()}`);
+  if (acts.cta.trim()) parts.push(`行動呼籲：${acts.cta.trim()}`);
+  return parts.join("\n\n");
+}
+
+/**
  * 世界觀 → AI／交付用文字（前後端共用）。
  * references 刻意不進模型（URL 對擴散／LLM 敘事弱、且易膨脹）；僅 export 可列備註。
  */
