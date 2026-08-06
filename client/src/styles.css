@@ -5660,3 +5660,32 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   }
 }
 
+/* 專案 5 階段進度燈號 (ProgressStepper) */
+.progress-stepper-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+}
+.progress-stepper-svg {
+  display: block;
+  overflow: visible;
+}
+.stepper-glow-pulse {
+  animation: stepper-pulse 2.2s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes stepper-pulse {
+  0% { transform: scale(0.85); opacity: 0.4; }
+  50% { transform: scale(1.35); opacity: 0.9; }
+  100% { transform: scale(0.85); opacity: 0.4; }
+}
+.launch-card__stepper {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-soft);
+  display: flex;
+  justify-content: center;
+}
+
+

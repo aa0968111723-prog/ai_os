@@ -6,6 +6,7 @@ import { InstallAppBanner } from "../components/InstallAppBanner";
 import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
 import { BentoStatusIcon } from "../components/BentoStatusIcons";
+import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
@@ -968,6 +969,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     </Button>
                   )}
                 </div>
+                {!isArchived && (
+                  <div className="launch-card__stepper">
+                    <ProgressStepper currentStep={inferProjectCurrentStep(p, pd)} size="sm" />
+                  </div>
+                )}
               </div>
             </Link>
           );
