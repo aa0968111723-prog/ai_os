@@ -3,9 +3,6 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
-import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
-import { Icon } from "../components/Icon";
-import { BentoStatusIcon } from "../components/BentoStatusIcons";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
 import { AICreativeCopilot } from "../components/AICreativeCopilot";
 import { AssetImg } from "../components/MediaFallback";
@@ -394,16 +391,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <nav className="daily-quick-links" aria-label="常用工具">
         <Link href="/planner"><Icon name="Clock" size={15} /><span>安排今天</span><small>排程與筆記</small></Link>
         <Link href="/databases"><Icon name="Database" size={15} /><span>整理資料</span><small>清單與批次匯入</small></Link>
+        <Link href="/workflows"><Icon name="Workflow" size={15} /><span>自動化工作流</span><small>母版系列與批次生成</small></Link>
         <Link href="/chat"><Icon name="MessageCircle" size={15} /><span>聯絡夥伴</span><small>私訊與標注</small></Link>
       </nav>
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
-
-      {/* 母版系列（#255 第 1 期）：相同結構的短影音走「複製母版→填 4 格」，
-          不要每集從空專案重想流程 */}
-      {groupId && <SeriesTemplatePanel groupId={groupId} isLeader={isLeader} />}
 
       {/* 建立新專案：現代磨砂玻璃 Modal 彈窗 */}
       {createOpen ? (
