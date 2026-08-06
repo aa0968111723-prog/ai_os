@@ -1870,8 +1870,9 @@ button.linkish {
 .dm-attach-img img { max-width: 220px; max-height: 220px; border-radius: 10px; object-fit: cover; display: block; }
 .dm-attach-media { display: block; margin-bottom: 4px; max-width: 260px; width: 100%; border-radius: 10px; }
 audio.dm-attach-media { height: 36px; }
-/* 標注 picker 的分頁列 */
-.dm-ref-pop { padding: 6px; gap: 4px; }
+/* 標注 picker 的分頁列；寬高原為 TSX 行內樣式，移進 CSS 讓 ≤560 蓋得掉（值不變，桌機渲染相同） */
+.dm-ref-pop { padding: 6px; gap: 4px; width: 280px; max-height: 300px; }
+.dm-ref-list { overflow-y: auto; max-height: 220px; }
 .dm-ref-tabs { display: flex; gap: 4px; padding: 2px 2px 6px; border-bottom: 1px solid var(--border-soft); margin-bottom: 2px; }
 .dm-ref-tabs button { flex: 1; padding: 5px 4px; font-size: 12px; border-radius: 8px; border: 1px solid transparent; }
 .dm-ref-tabs button.on { background: var(--primary-tint); border-color: var(--primary-border); color: var(--primary-ink); font-weight: 600; }
@@ -5029,12 +5030,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .chat-intro__summary strong { font-size: 18px; }
   .chat-intro__summary small { font-size: 9px; }
   .chat-page.has-peer .chat-intro { display: none; }
+  /* MOB-A2（P1）：iOS 鍵盤彈出時 dvh 不縮（interactive-widget 只有 Android 支援），
+     100dvh 定高會讓輸入列整條沉到鍵盤下——顯式扣 --kb-inset（Android 時≈0 不會重複扣）。
+     min-height 在鍵盤在場時也要讓步，否則 390px 下限會把扣掉的高度頂回來。 */
   .dm-layout {
-    height: calc(100dvh - 222px - var(--safe-top) - var(--safe-bottom));
-    min-height: 390px;
+    height: calc(100dvh - 222px - var(--safe-top) - var(--safe-bottom) - var(--kb-inset, 0px));
+    min-height: min(390px, calc(100dvh - 140px - var(--kb-inset, 0px)));
   }
   .chat-page.has-peer .dm-layout {
-    height: calc(100dvh - 132px - var(--safe-top) - var(--safe-bottom));
+    height: calc(100dvh - 132px - var(--safe-top) - var(--safe-bottom) - var(--kb-inset, 0px));
   }
   .dm-list { padding: 9px; border-radius: 15px; }
   .dm-item { min-height: 58px; padding: 8px 6px; }
@@ -5044,6 +5048,19 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .dm-tools { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .dm-tools::-webkit-scrollbar { display: none; }
   .dm-tools button { flex: none; }
+  /* MOB-A1（P0）：.dm-tools 在本斷點是 overflow-x:auto 捲動容器（overflow-y 隨規範計算成 auto），
+     absolute 的標注 picker 會被整個裁掉、手機上完全打不開。改成 fixed 小抽屜逃離裁切：
+     底距讓開鍵盤（--kb-inset）與底部殼層（--chrome-bottom），z 介於分頁列(44)/sheet(47) 與 modal-scrim(50) 之間。 */
+  .mention-pop.dm-ref-pop {
+    position: fixed;
+    left: max(10px, var(--safe-left));
+    right: max(10px, var(--safe-right));
+    bottom: calc(var(--kb-inset, 0px) + var(--chrome-bottom, 100px) + 10px);
+    width: auto;
+    max-height: min(52dvh, calc(100dvh - var(--kb-inset, 0px) - var(--chrome-bottom, 100px) - var(--safe-top) - 72px));
+    z-index: 48;
+  }
+  .dm-ref-pop .dm-ref-list { max-height: none; flex: 1; }
   .dm-compose { padding: 8px; }
 
   .project-breadcrumb { margin-top: 6px; }
