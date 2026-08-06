@@ -36,6 +36,12 @@ interface PendingDevice {
   deviceLabel: string;
 }
 
+/** AppShell 閘門吃 sessionBoot.bootstrap（不是 auth.me）。登入成功後兩邊都要清。 */
+function refreshSession(utils: ReturnType<typeof trpc.useUtils>) {
+  void utils.sessionBoot.bootstrap.invalidate();
+  void utils.auth.me.invalidate();
+}
+
 export function LoginPage() {
   const utils = trpc.useUtils();
   const pwRef = useRef<HTMLInputElement>(null);
@@ -51,7 +57,8 @@ export function LoginPage() {
         });
         return;
       }
-      utils.auth.me.invalidate();
+      // 必須清 sessionBoot：否則 bootstrap 快取 me:null（staleTime 60s）讓閘門以為還沒登入
+      refreshSession(utils);
     },
     // 失敗後選取整段密碼並聚焦：使用者直接重打即可，不用先手動清空
     onError: () => {
@@ -93,7 +100,7 @@ export function LoginPage() {
           setPassword("");
           login.reset();
         }}
-        onVerified={() => utils.auth.me.invalidate()}
+        onVerified={() => refreshSession(utils)}
       />
     );
   }
