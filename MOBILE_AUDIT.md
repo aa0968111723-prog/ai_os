@@ -221,19 +221,19 @@
 - [ ] **P2-43** DEFERRED（ProjectPage chunk 拆分見 D-011）｜`client/src/app/AppRoutes.tsx:28`｜route splitting／重依賴｜/project/:id（行動端主要作業頁）
   - 問題：ProjectPage 單一 lazy chunk 476KB（gzip 150KB）是全站最大 JS，手機弱網下載入慢且最容易 chunk 失敗——lazyWithRetry 的註解自己就點名它是最常中招的一支。
   - 修法：把 ProjectPage 內的重分頁（分鏡／生成／審稿等 tab 級區塊）再往下 dynamic import，讓進頁先載骨架與當前 tab。
-- [ ] **P2-44**｜`client/public/manifest.webmanifest:33`｜圖片格式與尺寸｜PWA 安裝流程（manifest icons）＋部署產物
+- [x] **P2-44** done(PR#472，部分：brand/source 移出部署；1024 precache 為 sw.test 明文契約保留，無損重壓 0% 收益)｜`client/public/manifest.webmanifest:33`｜圖片格式與尺寸｜PWA 安裝流程（manifest icons）＋部署產物
   - 問題：manifest 掛 1024px 圖示兩張（any 520K＋maskable 244K），PWA 安裝時多抓約 760KB；另 client/public/brand/source/ 的 208K 母版 PNG 跟著部署但無人引用。
   - 修法：1024 圖示以 oxipng/pngquant 重壓（同尺寸可壓到 <150K）或直接移除 1024 檔位只留 512；brand/source/ 移出 public 改放 repo 文件目錄。
-- [ ] **P2-45**｜`client/public/offline.html:6`｜pwa-brand-consistency｜/offline.html（離線 fallback 頁）
+- [x] **P2-45** done(PR#472)｜`client/public/offline.html:6`｜pwa-brand-consistency｜/offline.html（離線 fallback 頁）
   - 問題：offline.html 仍用 v2 舊品牌色（theme-color/底色 #e9e3d8、按鈕 #b0542f），與 v3「ribbon-light」tokens 及 index.html 的 theme-color #f3f0e8 不一致，離線瞬間狀態列與按鈕會跳回舊皮膚
   - 修法：把 offline.html 的 theme-color/底色/按鈕色換成 v3 值（#f3f0e8／#c23a0c），並依 sw.js 註解慣例評估是否同步升 CACHE_VERSION
-- [ ] **P2-46**｜`client/src/pwa.ts:175`｜pwa-update｜全站（SW 更新提示）
+- [x] **P2-46** done(PR#472)｜`client/src/pwa.ts:175`｜pwa-update｜全站（SW 更新提示）
   - 問題：SW 更新檢查只掛 window focus 事件；手機 PWA 從背景恢復時 focus 不一定觸發（iOS standalone 尤其），更新提示可能延到下次冷啟才出現——站內其他前景邏輯都是用 visibilitychange
   - 修法：加掛 document visibilitychange（visible 時呼叫 registration.update()），與 focus 並存
-- [ ] **P2-47**｜`client/public/sw.js:99`｜offline-shell｜全站（離線 shell 導航）
+- [x] **P2-47** done(PR#472)｜`client/public/sw.js:99`｜offline-shell｜全站（離線 shell 導航）
   - 問題：導航 network-first 沒有逾時：lie-fi（有訊號但極慢）時使用者會白屏等到瀏覽器層 fetch 自然逾時（可達數十秒）才 fallback 到 offline.html
   - 修法：用 Promise.race 加 3–5 秒逾時（或啟用 navigation preload），逾時即回 offline.html
-- [ ] **P2-48**｜`client/public/manifest.webmanifest:32`｜pwa-install-ui｜全站（安裝對話框）
+- [ ] **P2-48** DEFERRED（screenshots 應呈現重製後手機 UI，排元件重製後補拍）｜`client/public/manifest.webmanifest:32`｜pwa-install-ui｜全站（安裝對話框）
   - 問題：manifest 缺 screenshots 欄位，Android/桌面 Chrome 的安裝提示只會顯示簡易小卡，拿不到含預覽圖的富安裝 UI
   - 修法：補 screenshots 陣列（form_factor: narrow 與 wide 各至少一張）
 - [x] **P2-49** done(PR#469)｜`client/src/components/ui/Button.tsx:45`｜touch-target｜全站（UI 基元 Button）

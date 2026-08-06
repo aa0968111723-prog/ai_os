@@ -23,7 +23,7 @@
 - [done] 批次 H1（觸控目標掃蕩 15 項）：P2-08/09/10/11/15/20/24/25/29/32/33/34/39/40/49 → PR #469
 - [done] 批次 H2（捲動圍堵/長字串/佈局/hover-only 12 項）：P2-13/14/22/26/27/28/30/31/35/36/38/41 → PR #470
 - [done] 批次 H3（互動 8 項）：P2-04/12/16/17/19/21/23 → PR #471；P2-18 免改勾銷
-- [todo] PWA 驗收階段（P2-44~48 併入）；P2-42/43 DEFERRED（D-011/D-012）
+- [done] PWA 驗收階段程式面完成（PR #472）；P2-42/43/48 DEFERRED
 
 ## 階段三：Adobe 視覺落地
 - [done] 板資產存取驗證＋視覺語彙萃取（D-003/D-004；耗點 0/200）
@@ -31,8 +31,8 @@
 - [todo] 手機端元件重製（Button/Input/Card/BottomSheet/Toast/Tabs/底部導航/Orb…）
 
 ## 階段四：PWA 完備（既有：manifest 完整、sw.js、offline.html、share_target）
-- [todo] 稽核缺口（更新提示 UI、安裝引導、離線 fallback 驗證）→ 補齊
-- [todo] Lighthouse PWA 全過＋飛航模式驗證
+- [done] 程式面缺口補齊：P2-44/45/46/47 → PR #472（離線頁 v3、lie-fi 5s 逾時、visibilitychange 更新檢查、部署減重）；安裝引導/iOS 教學既有已達標
+- [todo] Lighthouse PWA 全過＋飛航模式驗證（本機 E2E_MOCK 驗證輪）；P2-48 screenshots 等元件重製後補拍
 
 ## 階段五：側載 APK（PWA 全數完成後）
 - [todo] Capacitor/TWA 包裝＋GitHub Actions 自動 build＋INSTALL.md
