@@ -1486,11 +1486,7 @@ export function ProjectPage({ id }: { id: string }) {
                 }
               }}
             />
-            {!allStepsDone && nextOnboardIndex >= 0 && (
-              <p className="project-guide__next">
-                下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
-              </p>
-            )}
+            {/* 展開時不再補「下一步：…」——上面的步驟卡已用「現在」標出同一步同一句話（去重複文案） */}
           </div>
         )}
         {/* 收合時仍留下一步一行，避免新手不知道下一步（手機預設收合尤為重要） */}
@@ -1523,7 +1519,7 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-context"
             num="①"
             title="定調"
-            desc="世界觀與定裝——基本設定、角色／場景／道具、知識與素材"
+            desc="AI 全程共用的設定，填一次就好"
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
@@ -1531,11 +1527,8 @@ export function ProjectPage({ id }: { id: string }) {
           <div className="ctx-overview" role="region" aria-label="專案上下文一覽">
             <div className="ctx-overview__head">
               <strong className="ctx-overview__title">專案大腦一覽</strong>
-              <Meta>
-                {wvReady
-                  ? "基本設定就緒——下方設定會自動注入每次生成"
-                  : "先補「這支片長什麼樣」的基本設定，後面生成才穩"}
-              </Meta>
+              {/* 就緒時不再重述「會自動注入每次生成」——下一行的帶入摘要已經把同一件事講完（去重複文案） */}
+              {!wvReady && <Meta>先補「這支片長什麼樣」的基本設定，後面生成才穩</Meta>}
               {/* C2.5：與生成台帶入列同源口徑（勾選數，非庫存總數） */}
               <Meta as="p" data-testid="ctx-bring-in-summary" style={{ margin: "6px 0 0", fontSize: 12 }}>
                 {formatBringInSummary({
@@ -2336,7 +2329,7 @@ export function ProjectPage({ id }: { id: string }) {
             </CtxGroup>
           </div>
 
-          <StageLink text="以上兩區會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
+          <StageLink text="設定好了就往下走 ② 創作，直接下指令出圖" />
 
           {/* ② 創作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
           <StageHead
