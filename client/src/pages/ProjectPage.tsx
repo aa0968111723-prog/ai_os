@@ -73,6 +73,9 @@ import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourn
 import { WorldviewPreview } from "../components/WorldviewPreview";
 import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
+import { StyleVisualGallery } from "../components/StyleVisualGallery";
+import { ToneVisualPalette } from "../components/ToneVisualPalette";
+import { StoryFlowBlueprint, ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -997,6 +1000,28 @@ export function ProjectPage({ id }: { id: string }) {
   }));
 
   // 三幕標頭與摘要條的進度數字：全讀頁面既有查詢，查詢還沒回來就不顯示
+  const stylePicker = (labelledBy: string) => {
+    return (
+      <StyleVisualGallery
+        styles={wv.styles}
+        styleOpts={styleOpts}
+        labelledBy={labelledBy}
+        canEdit={canEdit}
+        isLeader={isLeader}
+        styleFamilyTab={styleFamilyTab}
+        onPickFamily={pickStyleFamily}
+        onToggleStyle={(style) => toggle("styles", style)}
+        onKeepPrimary={keepPrimaryStyle}
+        renderAddOption={
+          isLeader && canEdit ? (
+            <AddOptionChip groupId={p.groupId} type="style" onAdded={(label) => toggle("styles", label)} />
+          ) : null
+        }
+        orphans={orphansOf("styles", styleOpts)}
+        isLoading={options.isLoading}
+      />
+    );
+  };
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
   const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
   const knowledgeCount = knowledge.data?.length;
@@ -1165,173 +1190,7 @@ export function ProjectPage({ id }: { id: string }) {
     );
   };
 
-  /**
-   * 視覺風格：媒材家族（互斥）→ 主風格（准單選）→ 同家族質感（可選 0～1）→ 自訂。
-   * 固定顯示出圖摘要；舊多選／跨家族可一鍵收斂。
-   */
-  const stylePicker = (labelledBy: string) => {
-    const slots = parseWorldviewStyleSlots(wv.styles);
-    const inject = stylesForVisualInject(wv.styles);
-    const activeFamily: StyleMediaFamily | null = styleFamilyTab ?? slots.family;
-    const lookOpts = activeFamily ? looksForFamily(activeFamily) : [];
-    const textureOpts = activeFamily ? texturesForFamily(activeFamily) : [];
-    const customOpts = styleOpts.filter((s) => !STYLE_MEDIA_FAMILY[s]);
-    const orphans = orphansOf("styles", styleOpts);
-    const canonical = keepPrimaryWorldviewStyle(wv.styles);
-    const dirty =
-      wv.styles.length !== canonical.length || wv.styles.some((v, i) => v !== canonical[i]);
 
-    return (
-      <div role="group" aria-labelledby={labelledBy}>
-        <Meta style={{ display: "block", marginBottom: 6, fontSize: 12 }}>媒材家族（互斥）</Meta>
-        <div role="radiogroup" aria-label="媒材家族">
-          {STYLE_FAMILY_ORDER.map((fam) => {
-            const meta = STYLE_FAMILY_META[fam];
-            const on = activeFamily === fam;
-            return (
-              <Chip
-                key={fam}
-                selected={on}
-                role="radio"
-                aria-checked={on}
-                title={`${meta.label}：${meta.hint}`}
-                onClick={() => pickStyleFamily(fam)}
-              >
-                {meta.label}
-              </Chip>
-            );
-          })}
-        </div>
-
-        {activeFamily && (
-          <>
-            <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
-              主風格（{STYLE_FAMILY_META[activeFamily].label}・擇一）
-            </Meta>
-            {lookOpts.map((t) => {
-              const on = slots.look === t;
-              return (
-                <Chip
-                  key={t}
-                  selected={on}
-                  onClick={() => toggle("styles", t)}
-                  title={on ? "目前主風格（再點取消全部風格）" : "設為主風格"}
-                >
-                  {on && (
-                    <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
-                      主
-                    </Meta>
-                  )}
-                  {t}
-                </Chip>
-              );
-            })}
-            {textureOpts.length > 0 && (
-              <>
-                <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
-                  質感（可選・與主風格同家族）
-                </Meta>
-                {textureOpts.map((t) => {
-                  const on = slots.texture === t;
-                  return (
-                    <Chip
-                      key={t}
-                      selected={on}
-                      onClick={() => toggle("styles", t)}
-                      title={on ? "取消質感" : "加上質感（可與主風格並存注入）"}
-                    >
-                      {on && (
-                        <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
-                          質感
-                        </Meta>
-                      )}
-                      {t}
-                    </Chip>
-                  );
-                })}
-              </>
-            )}
-          </>
-        )}
-
-        {(customOpts.length > 0 || isLeader) && (
-          <>
-            <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
-              自訂風格（准單選・無家族映射）
-            </Meta>
-            {customOpts.map((t) => {
-              const on = wv.styles.length === 1 && wv.styles[0] === t;
-              return (
-                <Chip
-                  key={t}
-                  selected={on}
-                  onClick={() => toggle("styles", t)}
-                  title={on ? "目前出圖風格（再點取消）" : "設為出圖風格（取代內建選擇）"}
-                >
-                  {on && (
-                    <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
-                      出圖
-                    </Meta>
-                  )}
-                  {t}
-                </Chip>
-              );
-            })}
-            {isLeader && canEdit && (
-              <AddOptionChip groupId={p.groupId} type="style" onAdded={(label) => toggle("styles", label)} />
-            )}
-          </>
-        )}
-
-        {orphans.map((t) => (
-          <Chip
-            key={`orphan-style-${t}`}
-            selected
-            style={{ borderStyle: "dashed", opacity: 0.75 }}
-            title="此選項已移出清單；點一下套用收斂規則或取消"
-            onClick={() => toggle("styles", t)}
-          >
-            {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
-          </Chip>
-        ))}
-
-        <Meta style={{ display: "block", marginTop: 8, fontSize: 12 }} aria-live="polite">
-          出圖風格：
-          {inject.length ? (
-            <strong>{formatWorldviewStylesLabel(inject)}</strong>
-          ) : (
-            "尚未設定"
-          )}
-          {slots.family ? ` · 媒材：${STYLE_FAMILY_META[slots.family].label}` : ""}
-        </Meta>
-
-        {canEdit && dirty && (
-          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }}>
-            資料需收斂——
-            <button
-              type="button"
-              className="linkish"
-              style={{
-                marginLeft: 4,
-                fontSize: 12,
-                border: 0,
-                background: "none",
-                cursor: "pointer",
-                color: "var(--primary-ink)",
-                textDecoration: "underline",
-                fontWeight: 600,
-              }}
-              onClick={keepPrimaryStyle}
-            >
-              一鍵只留「{formatWorldviewStylesLabel(canonical) || canonical[0] || "可注入項"}」
-            </button>
-          </Meta>
-        )}
-
-        {options.isLoading && !styleOpts.length && <Meta>載入中…</Meta>}
-      </div>
-    );
-  };
 
   const wvChipWarnings = chipSoftWarnings(wv);
 
@@ -1867,15 +1726,18 @@ export function ProjectPage({ id }: { id: string }) {
                   onDismiss={dismissWvExample}
                 />
               )}
-              {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
-                  key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
+              {/* 引導鋪軌：只讀 wv、不持有任何欄位值 */}
               <WorldviewGuide
                 wv={wv}
                 onJump={(anchor, stepId) => {
-                  // 第四步／故事走向在進階摺疊層裡，捲過去之前得先把它撐開
                   if (stepId === "narrative") setWvAdvancedOpen(true);
                   scrollToSelector(anchor);
                 }}
+              />
+              {/* 故事定盤星視覺藍圖 Strip */}
+              <StoryFlowBlueprint
+                wv={wv}
+                onFocusField={(fieldId) => scrollToSelector(`#${fieldId}`)}
               />
               {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
               <label htmlFor="wv-logline">
@@ -1883,9 +1745,6 @@ export function ProjectPage({ id }: { id: string }) {
                 <FieldReaders field="logline" />
                 <HelpTip text="一句話就好。會截成 80 字接在每次出圖的提示詞後面。" />
               </label>
-              {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
-                  非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
-                  maxLength 與後端 worldviewSchema .max(500) 對齊，貼超長不再靜默存失敗。 */}
               <input
                 key={`logline-${wv.logline}`}
                 id="wv-logline"
@@ -1910,13 +1769,27 @@ export function ProjectPage({ id }: { id: string }) {
                 onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
               />
               <label id="wv-tones">
-                氣氛
+                氣氛調性
                 <FieldReaders field="tones" />
                 <HelpTip text="畫面給人的感覺。挑 1～2 個合得來的（如溫暖＋真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
               </label>
-              {chipGroup("tones", toneOpts, "tone", "wv-tones")}
-              <label id="wv-styles">
-                畫風
+              <ToneVisualPalette
+                tones={wv.tones}
+                options={toneOpts}
+                labelledBy="wv-tones"
+                canEdit={canEdit}
+                onToggle={(tone) => toggle("tones", tone)}
+                onPromote={(tone) => promote("tones", tone)}
+                renderAddOption={
+                  isLeader && canEdit ? (
+                    <AddOptionChip groupId={p.groupId} type="tone" onAdded={(label) => toggle("tones", label)} />
+                  ) : null
+                }
+                orphans={orphansOf("tones", toneOpts)}
+                isLoading={options.isLoading}
+              />
+              <label id="wv-styles" style={{ marginTop: 12, display: "block" }}>
+                出圖畫風
                 <FieldReaders field="styles" />
                 <Meta as="span" style={{ marginLeft: 6, fontSize: 12, fontWeight: 400 }}>每張圖看起來像什麼——這一項最有效</Meta>
                 <HelpTip text="先選畫法（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨畫法不會混進同一張圖。" />
@@ -2111,30 +1984,13 @@ export function ProjectPage({ id }: { id: string }) {
                       onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                     />
 
-                    <label style={{ marginTop: 8, display: "block" }}>
-                      故事三段
-                      <FieldReaders field="acts" />
-                      <HelpTip text="敘事骨架。進助手／文字生成／導演；不進圖影。" />
-                    </label>
-                    {([
-                      ["hook", "開頭怎麼抓住人", "例：第一個抓住人的畫面或處境"],
-                      ["turn", "中間怎麼轉", "例：心或局面怎麼轉"],
-                      ["cta", "最後希望觀眾做什麼", "例：希望觀眾帶走什麼／做什麼"],
-                    ] as const).map(([field, label, ph]) => (
-                      <input
-                        key={`${field}-${wv.acts[field]}`}
-                        aria-label={`三幕結構：${label}`}
-                        defaultValue={wv.acts[field]}
-                        readOnly={!canEdit}
-                        maxLength={500}
-                        placeholder={`${label}——${ph}`}
-                        style={{ marginTop: 6 }}
-                        onBlur={(e) =>
-                          canEdit && e.target.value !== wv.acts[field] &&
-                          updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: e.target.value } } })
-                        }
-                      />
-                    ))}
+                    <ThreeActStoryArc
+                      acts={wv.acts}
+                      canEdit={canEdit}
+                      onChange={(field, value) => {
+                        updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: value } } });
+                      }}
+                    />
 
                     <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
                       故事裡有誰（純文字）

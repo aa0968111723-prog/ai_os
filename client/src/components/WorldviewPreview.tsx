@@ -56,7 +56,10 @@ export function WorldviewPreview({
   return (
     <Card as="details" variant="quiet" className="wv-preview" id={id} open={defaultOpen}>
       <summary className="wv-preview__summary">
-        <span className="wv-preview__title">AI 會收到什麼？</span>
+        <div className="wv-preview__title-group">
+          <span className="wv-preview__icon">✨</span>
+          <span className="wv-preview__title">AI 會收到什麼？（提示詞出圖配方）</span>
+        </div>
         <Meta as="span" className="wv-preview__hint">
           點開看實際送出去的字
         </Meta>
@@ -73,6 +76,8 @@ export function WorldviewPreview({
           <>
             <PreviewBlock
               label="出圖／出影片時"
+              icon="Image"
+              badge="畫面生成"
               text={formatWorldviewInjectedPrompt("〈你在生成台打的那句話〉", preview.visual.positive)}
               copied={copied === "visual"}
               failed={copied === "visual:fail"}
@@ -82,6 +87,8 @@ export function WorldviewPreview({
             {preview.visual.negative ? (
               <PreviewBlock
                 label="出圖時會避開（負向）"
+                icon="Shield"
+                badge="合規防護"
                 text={preview.visual.negative}
                 note="只有支援負向的模型吃得到，生成台會標。"
                 copied={copied === "negative"}
@@ -92,6 +99,8 @@ export function WorldviewPreview({
 
             <PreviewBlock
               label="寫字的 AI（旁白・腳本・文案）"
+              icon="FileText"
+              badge="敘事文字"
               text={formatWorldviewInjectedPrompt("〈你打的那句話〉", preview.llm.positive)}
               copied={copied === "llm"}
               failed={copied === "llm:fail"}
@@ -116,6 +125,8 @@ export function WorldviewPreview({
 
 function PreviewBlock({
   label,
+  icon,
+  badge,
   text,
   note,
   copied,
@@ -123,6 +134,8 @@ function PreviewBlock({
   onCopy,
 }: {
   label: string;
+  icon?: string;
+  badge?: string;
   text: string;
   note?: string;
   copied: boolean;
@@ -132,11 +145,27 @@ function PreviewBlock({
   return (
     <div className="wv-preview__block">
       <div className="wv-preview__block-head">
-        <Meta as="span" className="wv-preview__label">
-          {label}
-        </Meta>
+        <div className="wv-preview__block-title-row">
+          {icon && <Icon name={icon as any} size={14} className="wv-preview__block-icon" />}
+          <Meta as="span" className="wv-preview__label">
+            {label}
+          </Meta>
+          {badge && <span className="wv-preview__badge-pill">{badge}</span>}
+        </div>
         <button type="button" className="linkish wv-preview__copy" onClick={onCopy}>
-          {copied ? "已複製" : failed ? "複製失敗" : "複製"}
+          {copied ? (
+            <>
+              <Icon name="Check" size={12} style={{ verticalAlign: "-2px", marginRight: 2 }} />
+              已複製
+            </>
+          ) : failed ? (
+            "複製失敗"
+          ) : (
+            <>
+              <Icon name="Copy" size={12} style={{ verticalAlign: "-2px", marginRight: 2 }} />
+              複製
+            </>
+          )}
         </button>
       </div>
       <pre className="wv-preview__pre">{text}</pre>

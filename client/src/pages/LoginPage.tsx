@@ -38,10 +38,13 @@ interface PendingDevice {
 
 export function LoginPage() {
   const utils = trpc.useUtils();
+  const emailRef = useRef<HTMLInputElement>(null);
   const pwRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingDevice | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const login = trpc.auth.login.useMutation({
     onSuccess: (res) => {
+      setIsSubmitting(false);
       // 陌生裝置：後端刻意沒發 session，改導到驗證碼步驟
       if (res.status === "device_verification_required") {
         setPending({
@@ -55,6 +58,7 @@ export function LoginPage() {
     },
     // 失敗後選取整段密碼並聚焦：使用者直接重打即可，不用先手動清空
     onError: () => {
+      setIsSubmitting(false);
       pwRef.current?.select();
       pwRef.current?.focus();
     },
@@ -63,23 +67,41 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState("");
 
+  const isBusy = login.isPending || isSubmitting;
+
   // 一開始改字就收掉舊錯誤，避免「正在改了紅字還掛著」
   const clearStaleError = () => {
     if (login.error) login.reset();
     if (localError) setLocalError("");
   };
 
-  // 送出前先在本地擋明顯的 email 格式錯誤：不必等後端 zod 回整包 JSON 錯誤
+  // 送出驗證：缺漏欄位即時跳出提示並聚焦，避免按鈕按了毫無反應
   const doLogin = async () => {
-    if (login.isPending) return;
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+    if (isBusy) return;
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setLocalError("請輸入 Email");
+      emailRef.current?.focus();
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
       setLocalError("Email 格式不對，請檢查（例：you@example.com）");
+      emailRef.current?.focus();
+      return;
+    }
+    if (!password) {
+      setLocalError("請輸入密碼");
+      pwRef.current?.focus();
       return;
     }
     setLocalError("");
-    // collectDeviceHint 是非同步的（UA Client Hints 的 getHighEntropyValues 回 Promise）；
-    // 它內部已吞掉所有例外回 undefined，故失敗只是少了裝置細節，登入照走。
-    login.mutate({ email: email.trim(), password, device: await collectDeviceHint() });
+    setIsSubmitting(true);
+    try {
+      const device = await collectDeviceHint();
+      login.mutate({ email: cleanEmail, password, device });
+    } catch {
+      login.mutate({ email: cleanEmail, password, device: undefined });
+    }
   };
 
   if (pending) {
@@ -118,11 +140,12 @@ export function LoginPage() {
           {/* 可讀標題由 BrandLogo 的 aria-label 提供；表單前保留視覺層級用的隱藏 h1 */}
           <h1 className="sr-only">{BRAND_NAME}</h1>
         </BrandReveal>
-        {/* 用 <form>：瀏覽器/密碼管理器靠它辨識登入表單做自動填入；Enter 由 submit 統一處理 */}
-        <form style={{ textAlign: "left" }} onSubmit={(e) => { e.preventDefault(); void doLogin(); }}>
+        {/* 用 <form>：瀏覽器/密碼管理器靠它辨識登入表單做自動填入；noValidate 由 JavaScript 提供友善錯誤提示 */}
+        <form noValidate style={{ textAlign: "left" }} onSubmit={(e) => { e.preventDefault(); void doLogin(); }}>
           <label htmlFor="login-email">Email</label>
           <input
             id="login-email"
+            ref={emailRef}
             type="email"
             value={email}
             onChange={(e) => { setEmail(e.target.value); clearStaleError(); }}
@@ -143,9 +166,9 @@ export function LoginPage() {
               className="primary"
               type="submit"
               style={{ width: "100%" }}
-              disabled={!email.trim() || !password || login.isPending}
+              disabled={isBusy}
             >
-              {login.isPending ? (
+              {isBusy ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-8)" }}>
                   <Icon name="Loader" className="spin" />
                   登入中…

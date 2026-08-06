@@ -4,8 +4,6 @@ import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
-import { AICreativeCopilot } from "../components/AICreativeCopilot";
-import { BentoStatusIcon } from "../components/BentoStatusIcons";
 import { Icon } from "../components/Icon";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
@@ -276,8 +274,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
           eyebrow: "正在推進",
           title: `AI 正在處理 ${runningRuns} 份計畫`,
           detail: "你可以先做別的事；需要人員決定時，這裡會提醒你。",
-          href: "#ai-copilot",
-          action: "查看進度",
+          href: "#projects",
+          action: "查看專案",
           icon: "Sparkles" as const,
         }
       : focusProject
@@ -359,14 +357,6 @@ export function Launchpad({ groupId }: { groupId: string }) {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <a
-            href="#ai-copilot"
-            className="btn btn-secondary"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 46, textDecoration: "none" }}
-          >
-            <Icon name="Sparkles" size={16} />
-            <span>AI 創作助理</span>
-          </a>
           <button
             type="button"
             className="primary daily-new-project"
@@ -531,9 +521,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </Card>
       )}
 
-      {/* 雙欄 Bento 工作台：左側繼續創作、右側待裁決與 AI 動態 */}
+      {/* 工作台：繼續創作（最近專案） */}
       <div className="daily-bento-grid">
-        {/* 左欄：繼續創作（最近專案） */}
+        {/* 繼續創作（最近專案） */}
         <div className="bento-card bento-continue">
           <div className="bento-card__head">
             <h3><Icon name="Compass" size={17} style={{ color: "var(--primary-ink)" }} />繼續創作（最近專案）</h3>
@@ -617,76 +607,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
             </div>
           )}
         </div>
-
-        {/* 右欄：AI 創作動態與助理 */}
-        <div className="bento-card bento-pulse">
-          <div className="bento-card__head">
-            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />AI 創作動態與助理</h3>
-            <a href="#ai-copilot">創作助理 →</a>
-          </div>
-
-          <section className="daily-status-grid" aria-label="今日摘要" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {/* 直落 AI 創作助理區 */}
-            <a href="#ai-copilot" className="daily-status-card attention">
-              <span className="daily-status-card__icon"><BentoStatusIcon type="attention" size={26} /></span>
-              <span><strong>{pendingTotal}</strong><small>待推進專案</small></span>
-              <span className="daily-status-card__detail">{pendingTotal > 0 ? `${pendingTotal} 個專案進行中` : "全組推進中"}</span>
-            </a>
-            <a href="#ai-copilot" className="daily-status-card working">
-              <span className="daily-status-card__icon"><BentoStatusIcon type="working" size={26} /></span>
-              <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
-              <span className="daily-status-card__detail">
-                {agentSummary?.activeProjects
-                  ? `${agentSummary.activeProjects} 個專案活動`
-                  : "目前無執行中計畫"}
-              </span>
-            </a>
-            <a href="#ai-copilot" className="daily-status-card waiting">
-              <span className="daily-status-card__icon"><BentoStatusIcon type="waiting" size={26} /></span>
-              <span><strong>{waitingRuns}</strong><small>AI 待命就緒</small></span>
-              <span className="daily-status-card__detail">
-                {waitingRuns > 0
-                  ? `${waitingRuns} 份計畫準備就緒`
-                  : "隨時可快速發想"}
-              </span>
-            </a>
-            <a href="#ai-copilot" className="daily-status-card completed">
-              <span className="daily-status-card__icon"><BentoStatusIcon type="completed" size={26} /></span>
-              <span><strong>{completedRuns}</strong><small>近七日成果</small></span>
-              <span className="daily-status-card__detail">
-                {completedRuns > 0
-                  ? `${completedRuns} 筆已完成產出`
-                  : "已完成 AI 計畫"}
-              </span>
-            </a>
-          </section>
-
-          <a href="#ai-copilot" className="bento-quick-ask" title="前往 AI 創作助理發想靈感或提問">
-            <Icon name="Sparkles" size={15} style={{ color: "var(--primary-ink)" }} />
-            <span>向 AI 創作助理發想靈感、主題或規劃分鏡...</span>
-            <Icon name="ArrowRight" size={14} />
-          </a>
-        </div>
       </div>
-
-      {/* AI 創作助理（Copilot / 靈感發想與專案全知解答） */}
-      <section id="ai-copilot" className="dashboard-section" aria-labelledby="ai-copilot-title">
-        <div className="section-heading">
-          <div><p className="eyebrow">AI 助理</p><h2 id="ai-copilot-title">AI 創作助理</h2></div>
-          <p>隨時發想爆款短片靈感、企劃分鏡架構、解答專案進度與內容建議。</p>
-        </div>
-        <AICreativeCopilot
-          groupId={groupId}
-          onUseIdeaForNewProject={(ideaTitle) => {
-            setTitle(ideaTitle);
-            setCreateOpen(true);
-            requestAnimationFrame(() => {
-              document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
-              document.getElementById("np-title")?.focus();
-            });
-          }}
-        />
-      </section>
 
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
         <div className="section-heading">
