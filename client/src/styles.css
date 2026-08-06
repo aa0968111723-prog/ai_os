@@ -5990,7 +5990,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   padding: 0;
 }
 
-/* ── 三幕劇視覺結構 (ThreeActStoryArc) ── */
+/* ── 三幕大綱 (ThreeActStoryArc) ── */
 .three-act-story-arc {
   margin: 12px 0;
   padding: 12px;
@@ -6016,6 +6016,33 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .three-act-header__hint {
   font-size: 11px;
   color: var(--fg-secondary);
+}
+.three-act-header__toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--fg);
+}
+.three-act-collapsed-summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-secondary);
+}
+.three-act-header__link {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-ink);
+  text-decoration: underline;
 }
 .three-act-timeline {
   display: grid;
@@ -6065,7 +6092,6 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
-  resize: vertical;
   background: var(--surface-1);
 }
 .three-act-stage__input:focus {
