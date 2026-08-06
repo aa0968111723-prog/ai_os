@@ -18,7 +18,7 @@
 - [done] 批次 C（Launchpad）：P1-03/P1-17 Modal 貼底 sheet＋P2-06 巢狀 Link → PR #464
 - [done] 批次 D（導航）：P1-01 SPA 導航＋rAF 錨點捲動 → PR #465
 - [done] 批次 E（專案頁）：P1-05/06/07/09 → PR #466（4 檔 +82/−4，契約測試 4 條）
-- [todo] 批次 F（Planner/Databases/Members/Models）：月曆點擊行為、知識地圖手機斷點、其餘觸控目標
+- [done] 批次 F：P1-10/11/15（月曆點擊、知識地圖、比較卡 sticky）→ PR #467
 - [todo] 批次 G（效能）：brand logo 524KB PNG、CSS @import 字型拆出、ProjectPage chunk 瘦身、首屏 JS
 - [todo] 批次 H（P2 掃尾，逐頁）
 

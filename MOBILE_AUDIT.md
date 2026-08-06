@@ -59,10 +59,10 @@
 - [x] **P1-09** done(PR#466)｜`client/src/features/creation-workbench/modes/DirectGenerateMode.tsx:474`｜viewport-visibility｜/p/:id（專案頁 ② AI 創作工作台・直接出圖）
   - 問題：按「生成」後確認面板只在按鈕下方 inline 展開，未捲動也未移焦，手機上按鈕常位於視窗底部，整個 confirm-panel 落在摺線以下，看起來像按了沒反應。
   - 修法：setConfirming(true) 後 requestAnimationFrame 用既有 scrollIntoViewForChrome 捲到 .confirm-panel（或把焦點移到「確認生成」鈕），沿用 --chrome-bottom 契約。
-- [ ] **P1-10**｜`client/src/pages/PlannerPage.tsx:695`｜觸控互動｜/planner
+- [x] **P1-10** done(PR#467)｜`client/src/pages/PlannerPage.tsx:695`｜觸控互動｜/planner
   - 問題：月曆任一日期格點擊必觸發 prefillFromDay：展開新增表單、smooth 捲到表單並在 280ms 後聚焦標題——手機上想「看某天的行程」會被表單搶走視角（當日清單其實渲染在月曆下方，使用者卻被捲到上方表單），Android 還會彈出鍵盤。
   - 修法：compact（≤820）時，有行程的日子第一次點擊只 setSelectedKey 展開當日清單並捲到清單；新增改由空白日點擊或另一顆明確的「＋在這天新增」觸發。
-- [ ] **P1-11**｜`client/src/pages/PlannerPage.tsx:1232`｜觸控目標/可讀性｜/planner
+- [x] **P1-11** done(PR#467)｜`client/src/pages/PlannerPage.tsx:1232`｜觸控目標/可讀性｜/planner
   - 問題：知識地圖 SVG 固定 viewBox 920×560、CSS 只有 width:100% 等比縮放且無任何手機斷點：360px 時整圖縮到約 0.36 倍，葉節點命中區只剩 r=6 的圓（渲染後約 4–5px、文字 pointer-events:none 不算命中），節點文字 11–13px 縮成約 4px，觸控幾乎點不到也讀不到；內建縮放上限 2.5x 仍不足 44px。
   - 修法：≤820 給地圖獨立幾何：加一顆透明命中圓（r≈20）擴大觸控區，並讓 .map-wrap 改成固定較大像素寬＋overflow-x auto（或手機預設 view.s 放大）。
 - [x] **P1-12** done(PR#463)｜`client/src/pages/DatabasesPage.tsx:1433`｜觸控目標｜/databases
@@ -74,7 +74,7 @@
 - [x] **P1-14** done(PR#463)｜`client/src/pages/MembersPage.tsx:292`｜touch-target｜/members
   - 問題：成員卡的「私訊」連結實高約 29px（<44px）：它是 <a class="btn-tonal btn-sm">，不在全域觸控下限選擇器（button/.btn/.menu-item）的涵蓋範圍。
   - 修法：className 加上 btn 基底（"btn btn-tonal btn-sm"），或把 .btn-tonal 納入 styles.css:146 的觸控下限選擇器群。
-- [ ] **P1-15**｜`client/src/pages/ModelsPage.tsx:341`｜sticky-overlap｜/models
+- [x] **P1-15** done(PR#467)｜`client/src/pages/ModelsPage.tsx:341`｜sticky-overlap｜/models
   - 問題：並排比較卡 sticky top 8px 未讓出手機 sticky 頂欄（~52px+safe-top）且與其同 z-index 30，DOM 較後者蓋住頂欄；且整張含 16 列比較表的卡在手機上釘住後可佔掉近整個視口，目錄內容被壓在下面難以瀏覽。
   - 修法：≤820px 改 top: calc(52px + var(--safe-top)) 並給卡 max-height（如 40dvh 內部捲動）或手機改為可收合的置頂摘要列。
 - [x] **P1-16** done(PR#463)｜`client/src/styles.css:966`｜ios-zoom｜全站（頂欄組別切換器 .group-select）
