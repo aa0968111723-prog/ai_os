@@ -32,13 +32,13 @@
 
 ## P1 — 可用但明顯難用（19 項）
 
-- [ ] **P1-01**｜`client/src/app/components/MobileNavigation.tsx:104`｜navigation-full-reload｜所有已登入路由（≤820px 底部分頁列）
+- [x] **P1-01** done(PR#465)｜`client/src/app/components/MobileNavigation.tsx:104`｜navigation-full-reload｜所有已登入路由（≤820px 底部分頁列）
   - 問題：底部分頁列「專案」「AI 工作」兩顆用原生 <a> 帶 hash，從 /planner、/p/:id、/chat 等非 /dashboard 路由點擊會觸發整頁重載（重跑 bootstrap、重載所有 chunk），手機弱網下每次切分頁要等數秒。
   - 修法：改用 onClick 攔截：e.preventDefault() 後以 wouter navigate 到 /dashboard 再設 location.hash（或 navigate("/dashboard#projects") 由 wouter pushState），保留 <a> 語義但走 SPA 路由。
 - [x] **P1-02** done(PR#463)｜`client/src/styles.css:966`｜input-zoom｜所有已登入路由（≤560px 頂欄組別切換器）
   - 問題：≤560px 把 .group-select 字級降到 14px !important，特異性 (0,1,0) 蓋過同為 !important 的 select 16px 防縮放契約，iPhone Safari 點組別切換器會強制放大整頁且不回彈——違反本檔 936-937 行自己寫明的規則。
   - 修法：≤560 保持 font-size 16px，改用縮 padding-inline 與 max-width 換取頂欄空間。
-- [ ] **P1-03**｜`client/src/pages/Launchpad.tsx:435`｜keyboard/viewport｜/
+- [x] **P1-03** done(PR#464)｜`client/src/pages/Launchpad.tsx:435`｜keyboard/viewport｜/
   - 問題：「建立新專案」Modal 未走站內既有的 .modal-scrim/.modal-card 手機契約：置中卡片 max-height 90vh（vh 非 dvh）、backdrop 未被 --kb-inset 抬高、無 ≤560 貼底 sheet，而 #np-title 又 autoFocus 直接彈鍵盤——iOS 上表單下半（畫面尺寸、立即建立鈕）被鍵盤蓋住且捲不到，得先收鍵盤才按得到。
   - 修法：把 new-project-modal 改用（或比照）.modal-scrim/.modal-card 契約：backdrop 加 bottom: var(--kb-inset,0px) 與 overscroll-behavior:contain，卡片改 max-height:min(86dvh,100%)，≤560 轉貼底 sheet 並 padding-bottom:max(16px,var(--safe-bottom))。
 - [x] **P1-04** done(PR#463)｜`client/src/styles.css:2349`｜hidden-on-mobile｜/
@@ -80,7 +80,7 @@
 - [x] **P1-16** done(PR#463)｜`client/src/styles.css:966`｜ios-zoom｜全站（頂欄組別切換器 .group-select）
   - 問題：≤560px 對 .group-select 寫 font-size:14px !important，特異性(0,1,0)壓過 938 行 select 的 16px !important 防縮放契約，iPhone Safari 聚焦 <16px 的 select 會放大整頁且不回彈。
   - 修法：刪除 966 行的 font-size 宣告（或改 16px），視覺收斂改用 padding-inline 與 max-width。
-- [ ] **P1-17**｜`client/src/styles.css:6387`｜keyboard-overlap｜作業台 /launchpad 與 /workflows「建立專案」彈窗
+- [x] **P1-17** done(PR#464)｜`client/src/styles.css:6387`｜keyboard-overlap｜作業台 /launchpad 與 /workflows「建立專案」彈窗
   - 問題：新專案彈窗未走既有 .modal-scrim/.modal-card 契約：90vh（非 dvh）置中卡、backdrop padding 無 safe-area、完全沒接 --kb-inset，手機鍵盤彈出時表單欄位與送出鈕被蓋，且 90vh(=大視口) 在 iOS 工具列展開時超出可視高。
   - 修法：改掛 .modal-scrim/.modal-card（自動獲得 ≤560 貼底 sheet＋kb-inset＋safe-area），或把 max-height 改 min(90dvh, calc(100dvh - var(--kb-inset,0px) - 32px)) 並在 backdrop padding 套 max(20px, var(--safe-*))。
 - [ ] **P1-18**｜`client/src/brand.ts:30`｜圖片格式與尺寸／LCP｜全站（AppHeader 頂欄，priority 載入）＋ /login hero ＋ / landing
@@ -107,7 +107,7 @@
 - [x] **P2-05** done(PR#463)｜`client/src/styles.css:2141`｜safe-area｜/（Landing，standalone PWA＋瀏海機）
   - 問題：登入頂欄 .topbar 在 standalone 有 safe-top 墊高（2098 行），但公開站的 .public-header 同為 sticky top:0 卻沒有對應規則——已安裝 App 內 session 過期落回 Landing 時，捲動後 header 會滑進狀態列／瀏海底下。
   - 修法：補 `html.is-standalone .public-header { padding-top: max(12px, var(--safe-top)); }`。
-- [ ] **P2-06**｜`client/src/pages/Launchpad.tsx:606`｜touch/invalid-nesting｜/
+- [x] **P2-06** done(PR#464)｜`client/src/pages/Launchpad.tsx:606`｜touch/invalid-nesting｜/
   - 問題：「N 待處理」的 Link 巢在 continue-card 的 Link 裡（a 包 a，HTML 不合法）；點擊事件冒泡到外層 Link 後外層的 navigate 最後執行，`?focus=pending` 深連結被吃掉——在 561-820px 平板（chip 可見）點角標等於點整張卡。
   - 修法：內層改為 onClick={(e)=>e.stopPropagation()} 並移出巢狀（用 span+onClick navigate），或乾脆把角標做成純 Chip、讓整卡連結帶 ?focus=pending。
 - [x] **P2-07** done(PR#463)｜`client/src/pages/Launchpad.tsx:570`｜touch-target｜/

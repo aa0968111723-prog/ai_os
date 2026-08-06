@@ -15,8 +15,8 @@
 ## 階段二：P0 → P1 → P2 修復（分批小 PR）
 - [done] 批次 A（P0＋聊天）：P0-01 標注 picker 裁切＋P1-13 私訊輸入列 --kb-inset → PR #462（3 檔 +76/−8，契約測試 3 條）
 - [done] 批次 B（CSS-only 快修 12 項）：P1-02/04/08/12/14/16＋P2-01/02/03/05/07/37 → PR #463（4 檔 +86/−4，契約測試 7 條）
-- [todo] 批次 C（Launchpad）：新專案 Modal 走 .modal-scrim/.modal-card 契約＋巢狀 Link
-- [todo] 批次 D（導航）：MobileNavigation 原生 <a> 整頁重載 → SPA 導航
+- [done] 批次 C（Launchpad）：P1-03/P1-17 Modal 貼底 sheet＋P2-06 巢狀 Link → PR #464
+- [done] 批次 D（導航）：P1-01 SPA 導航＋rAF 錨點捲動 → PR #465
 - [todo] 批次 E（專案頁）：context-return-bar 遮擋、StageHead scrollMargin、TokenListEditor chip 溢位、DirectGenerateMode 確認面板可視
 - [todo] 批次 F（Planner/Databases/Members/Models）：月曆點擊行為、知識地圖手機斷點、其餘觸控目標
 - [todo] 批次 G（效能）：brand logo 524KB PNG、CSS @import 字型拆出、ProjectPage chunk 瘦身、首屏 JS
