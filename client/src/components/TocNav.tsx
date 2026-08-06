@@ -23,7 +23,7 @@ export const DEFAULT_ITEMS: TocItem[] = [
 
 /** 尊重使用者的減少動效偏好：開啟時退回瞬間捲動 */
 function reducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return typeof window !== "undefined" && (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false);
 }
 
 export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
