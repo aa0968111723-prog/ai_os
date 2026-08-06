@@ -3,6 +3,7 @@ import {
   BRAND_FULL_LOGO_READY,
   BRAND_LOGO_SRC,
   BRAND_LOGO_SRC_2X,
+  BRAND_LOGO_SRC_MOBILE,
   BRAND_MARK_SRC,
   BRAND_NAME,
   BRAND_SIZE_PX,
@@ -121,19 +122,25 @@ export function BrandLogo({
         {/* ≤560 的 responsive：full-img 被 CSS display:none 但仍會下載整張 524KB @2x PNG——
             直接不渲染（桌機與 >560 的 DOM 維持原狀；斷點放大時 useMatchMedia 會補渲染） */}
         {responsive && compactBrand ? null : (
-          <img
-            className="brand-logo__full-img"
-            src={logoSrc}
-            srcSet={srcSet}
-            alt=""
-            width={width}
-            height={height}
-            draggable={false}
-            aria-hidden
-            decoding="async"
-            loading={loading}
-            {...(fetchPriority ? { fetchPriority } : {})}
-          />
+          /* <picture>＝透明容器（display:contents 保證版面不變）：
+             ≤820 命中 WebP source（62KB，landing hero 在手機是 LCP 元素）；
+             桌機不命中 media → 走原本 img src/srcSet，選圖位元不變 */
+          <picture style={{ display: "contents" }}>
+            {logo2x && <source media="(max-width: 820px)" type="image/webp" srcSet={BRAND_LOGO_SRC_MOBILE} />}
+            <img
+              className="brand-logo__full-img"
+              src={logoSrc}
+              srcSet={srcSet}
+              alt=""
+              width={width}
+              height={height}
+              draggable={false}
+              aria-hidden
+              decoding="async"
+              loading={loading}
+              {...(fetchPriority ? { fetchPriority } : {})}
+            />
+          </picture>
         )}
         {showTagline ? (
           <span className="brand-logo__tagline" aria-hidden>
