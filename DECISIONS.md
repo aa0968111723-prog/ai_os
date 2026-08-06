@@ -56,6 +56,10 @@
 - 字族落地＝D-012 決策：手機標題 Fraunces（Latin variable 36K）＋內文 Manrope（16K×2），非阻塞載入、中文回退 Noto；P2-42 的 serif 重複下載問題因此不再擴大（手機標題 Latin 走 Fraunces）。
 - fonts.brand.css 獨立於 PR #468 的 fonts.css（兩 PR 互不依賴，可任意順序合併）。
 
+## D-014 APK 簽章金鑰策略（PR #475）
+- 本機無 keytool（僅 JRE8）無法產 keystore。CI 策略：Secrets 有金鑰就用（簽章固定、可覆蓋更新）；沒有就自動產生並隨 Release 附上、INSTALL.md 引導一次性設成 Secrets 後刪附件。
+- 取捨：首版金鑰經 Release 短暫可下載（私有 repo 風險有限），換得「不需要我持有 admin 權限設 Secrets」的全自動流程；使用者設好 Secrets 後即固定。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）

@@ -28,15 +28,16 @@
 ## 階段三：Adobe 視覺落地
 - [done] 板資產存取驗證＋視覺語彙萃取（D-003/D-004；耗點 0/200）
 - [done] 手機 design token（--m-* 變數）＋殼層重製第一批（底部導航/sheet/卡片/控件圓角＋Fraunces/Manrope Latin 子集）→ PR #473
-- [todo] 元件重製第二批：Input/Textarea/Select、Toast、Tabs、Badge/Progress/Skeleton、Empty/Error state、Orb（idle/thinking/speaking/error 手機版）
-- [todo] 圖示 SVG sprite 評估（既有 Icon 元件已是 SVG，確認缺口即可）
+- [done] 元件重製第二批＋Orb 四態（Input/Select/Chip/Badge/Skeleton/EmptyState/分頁＋中央 Orb FAB 含生成生命週期接線）→ PR #474（堆疊於 #473）
+- [done] 圖示：既有 Icon 元件即 SVG（lucide 系）無缺口；Android launcher/splash 由品牌 1024 生成（PR #475）
 
 ## 階段四：PWA 完備（既有：manifest 完整、sw.js、offline.html、share_target）
 - [done] 程式面缺口補齊：P2-44/45/46/47 → PR #472（離線頁 v3、lie-fi 5s 逾時、visibilitychange 更新檢查、部署減重）；安裝引導/iOS 教學既有已達標
 - [todo] Lighthouse PWA 全過＋飛航模式驗證（本機 E2E_MOCK 驗證輪）；P2-48 screenshots 等元件重製後補拍
 
-## 階段五：側載 APK（PWA 全數完成後）
-- [todo] Capacitor/TWA 包裝＋GitHub Actions 自動 build＋INSTALL.md
+## 階段五：側載 APK
+- [done] Capacitor 薄殼（server.url 直連線上站）＋品牌化（狀態列/圖示/splash/深層連結）＋apk.yml（tag apk-v* 自動簽章發佈）＋INSTALL.md → PR #475
+- [todo] 合併後打 apk-v0.1.0 tag 驗證 CI 產出
 
 ## CI 觀察
 - 2026-08-07 00:40：#462/#463 首輪 CI 因 GitHub Actions 基礎設施故障（Service Unavailable）失敗。
