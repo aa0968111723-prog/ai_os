@@ -10,6 +10,14 @@ name: apk
 on:
   push:
     tags: ["apk-v*"]
+  # 手動觸發：tag 事件偶有不派工（實測 apk-v0.1.0/0.1.1 均未產生 run），
+  # 保留一條可從 Actions 頁面／API 直接開跑的路徑；version 決定產出檔名。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本標籤（產出檔名用，例：v0.1.0）"
+        required: false
+        default: "manual"
 permissions:
   contents: write
 jobs:
@@ -53,12 +61,13 @@ jobs:
             echo "keypass=$PASS" >> "$GITHUB_OUTPUT"
           fi
       - name: Build release APK
-        run: cd android && ./gradlew assembleRelease --no-daemon
+        run: cd android && chmod +x ./gradlew && ./gradlew assembleRelease --no-daemon --stacktrace
       - name: Sign APK
-        env:
-          ANDROID_HOME_TOOLS: ${{ env.ANDROID_HOME }}
         run: |
-          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          # runner 已設 ANDROID_HOME／ANDROID_SDK_ROOT；取最新的 build-tools
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT=$(ls "$SDK/build-tools" | sort -V | tail -1)
+          export ANDROID_HOME="$SDK"
           "$ANDROID_HOME/build-tools/$BT/zipalign" -f 4 \
             android/app/build/outputs/apk/release/app-release-unsigned.apk aios-aligned.apk
           "$ANDROID_HOME/build-tools/$BT/apksigner" sign \
@@ -66,14 +75,15 @@ jobs:
             --ks-pass pass:${{ steps.keystore.outputs.pass }} \
             --ks-key-alias ${{ steps.keystore.outputs.alias }} \
             --key-pass pass:${{ steps.keystore.outputs.keypass }} \
-            --out aios-${{ github.ref_name }}.apk aios-aligned.apk
+            --out aios-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}.apk aios-aligned.apk
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Aios Android ${{ github.ref_name }}"
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('apk-{0}', inputs.version) || github.ref_name }}
+          name: "Aios Android ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
           body: |
             側載 APK（不經商店）。安裝步驟見 repo 的 INSTALL.md。
             ${{ steps.keystore.outputs.generated == 'true' && '⚠️ 本版使用「自動產生」的簽章金鑰（Secrets 未設定）：請下載附件 aios-release.keystore 並依 INSTALL.md 設成 repo Secrets，否則下一版簽章不同、更新前得先解除安裝。' || '✅ 使用 repo Secrets 的固定簽章金鑰，可直接覆蓋更新。' }}
           files: |
-            aios-${{ github.ref_name }}.apk
+            aios-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}.apk
             ${{ steps.keystore.outputs.generated == 'true' && 'aios-release.keystore' || '' }}

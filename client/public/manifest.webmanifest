@@ -37,6 +37,12 @@
     { "src": "/icons/icon-v2-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/icons/icon-v2-1024-maskable.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
   ],
+  "screenshots": [
+    { "src": "/screenshots/mobile-home.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "把想法變成團隊能完成的計畫" },
+    { "src": "/screenshots/mobile-planner.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "筆記排程與行事曆" },
+    { "src": "/screenshots/mobile-models.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "模型指南與並排比較" },
+    { "src": "/screenshots/desktop-dashboard.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "今日工作台" }
+  ],
   "shortcuts": [
     { "name": "作業台", "short_name": "作業台", "description": "回到專案作業台", "url": "/?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },
     { "name": "筆記排程", "short_name": "排程", "description": "開啟筆記排程", "url": "/planner?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },
