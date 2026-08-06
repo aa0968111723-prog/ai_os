@@ -571,7 +571,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
                         <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                       </span>
                       {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                        <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                        <Link href={`/p/${project.id}?focus=pending`} style={{ textDecoration: "none" }}>
+                          <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                        </Link>
                       )}
                       <Icon name="ChevronRight" size={17} />
                     </Link>
