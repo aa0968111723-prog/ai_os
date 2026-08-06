@@ -105,7 +105,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
       <Route path="/settings"><SettingsPage /></Route>
       <Route path="/my-reports"><MyReportsPage /></Route>
-      <Route path="/models"><ModelsPage /></Route>
+      <Route path="/models"><ModelsPage groupId={activeGroupId} /></Route>
       <Route path="/help"><HelpPage /></Route>
       <Route path="/mcp"><McpPage /></Route>
       <Route path="/integrations"><IntegrationsPage /></Route>

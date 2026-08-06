@@ -53,6 +53,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.retry": "重試失敗的生成",
   "generation.ablation": "送出影響力實測（基準＋各拿掉一段）",
   "generation.ablationResult": "查看影響力實測結果",
+  "generation.bench": "送出同題並跑（多顆模型比較）",
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",

@@ -4231,7 +4231,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-use-cta:hover { background: var(--primary-tint); }
 .model-decision-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 五種決策方式（看情境／比風格／三題／競技場／熱力圖）：固定三欄會把後兩個擠爆，
+     auto-fit 讓寬螢幕排五欄、中等寬度自動折行，手機仍走下方的橫向捲版本。 */
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -4311,6 +4313,178 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-quiz-progress > span.is-done { border-color: transparent; background: var(--success-ink); color: white; }
 .model-quiz-progress > span.is-current { border-color: var(--primary-border); background: var(--primary-tint); color: var(--primary-ink); box-shadow: inset 0 -2px 0 var(--primary); }
 .model-quiz-progress small { margin-left: 3px; color: var(--fg-secondary); font-size: var(--fs-11); }
+
+/* ── 底層模型（基座）標示：清單、比較表、競技場、熱力圖共用 ── */
+.model-base-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-base-chip .mono { font-size: 10px; opacity: 0.85; }
+.model-base-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--card2);
+}
+.model-base-detail dl { display: grid; gap: 3px; margin: 0; }
+.model-base-detail dl > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 8px;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+.model-base-detail dt { color: var(--fg-secondary); }
+.model-base-detail dd { margin: 0; }
+.model-catalog-card__base { margin-top: 6px; }
+.model-catalog-card__base > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.model-catalog-card__base > summary::-webkit-details-marker { display: none; }
+.model-catalog-card__base > summary .hint { margin: 0; }
+
+/* ── 實測競技場：同題並跑 ── */
+.model-arena__roster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.model-arena__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: var(--fs-12);
+}
+.model-arena__field { display: grid; gap: 4px; margin-top: 10px; }
+.model-arena__field > select,
+.model-arena__field > input,
+.model-arena__field > textarea { width: 100%; }
+.model-arena-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.model-arena-grid__media {
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--muted);
+}
+.model-arena-grid__text {
+  max-height: 100%;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ── 分析熱力圖 ── */
+.model-heatmap__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 10px 0;
+}
+.model-heatmap__scroll { overflow-x: auto; }
+.model-heatmap__table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: var(--fs-12);
+}
+.model-heatmap__table thead th {
+  padding: 4px 6px;
+  color: var(--fg-secondary);
+  font-weight: 600;
+  text-align: left;
+  vertical-align: bottom;
+}
+.model-heatmap__table thead th small { display: block; font-size: 10px; font-weight: 400; opacity: 0.8; }
+.model-heatmap__table tbody th {
+  min-width: 150px;
+  padding: 0;
+  font-weight: 400;
+  text-align: left;
+}
+.model-heatmap__name {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.model-heatmap__name:hover { border-color: var(--border-soft); background: var(--card2); }
+.model-heatmap__name b { display: block; font-size: var(--fs-12); }
+.model-heatmap__name small { display: block; color: var(--fg-secondary); font-size: 10px; }
+.model-heatmap__cell {
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+/* 沒有資料＝斜線空格。塗成最淺的顏色會被讀成「分數很低」，那是兩件不同的事。 */
+.model-heatmap__cell.is-empty {
+  color: var(--fg-secondary);
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--fg-secondary) 14%, transparent) 5px 6px
+  );
+}
+.model-heatmap__table tr.is-open th,
+.model-heatmap__table tr.is-open td { box-shadow: inset 0 -2px 0 var(--primary-border); }
+.model-heatmap__detail > td { padding: 2px 4px 8px; }
+.model-heatmap__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.model-heatmap__swatch {
+  width: 22px;
+  height: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
 .secondary-page-header {
   min-width: 0;
   display: flex;
