@@ -1630,6 +1630,62 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
   margin: 0;
 }
 
+/* ── 定調中心子導覽分頁 (Tone Studio Sub-Tabs) ── */
+.tone-studio-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 6px;
+  background: var(--card2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.08));
+  border-radius: var(--r-12, 12px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tone-studio-nav::-webkit-scrollbar {
+  display: none;
+}
+.tone-studio-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  min-height: 40px;
+  border-radius: var(--r-8, 8px);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-secondary, #666);
+  font-size: var(--fs-13, 13px);
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--dur-fast, 0.15s) ease;
+}
+.tone-studio-tab:hover {
+  color: var(--fg, #111);
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+}
+.tone-studio-tab.active {
+  color: var(--primary-ink, #e05638);
+  background: var(--card, #fff);
+  border-color: var(--border, #e5e7eb);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-weight: 650;
+}
+.tone-tab-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.08));
+  color: var(--fg, inherit);
+}
+.tone-tab-badge--success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+  font-weight: 700;
+}
+
 /* ── 專案上下文分組：世界與角色 / 依據與素材 / 管理 ── */
 .ctx-group {
   margin: 0 0 14px;
