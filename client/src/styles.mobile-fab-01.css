@@ -63,6 +63,16 @@
   }
 }
 
+/* 已安裝（standalone）修正：styles.css 的 `html.is-standalone .app` 把 padding-bottom
+ * 寫死 48px+safe（特異性 0,2,1），蓋過 --chrome-bottom 契約的 100/140px——
+ * 裝成 PWA 後底部分頁列反而壓住內容。本檔後載入、同選擇器即勝出；
+ * 桌機 standalone 不受影響（--chrome-bottom 預設就是 48px，算出來同值）。 */
+@media (max-width: 820px) {
+  html.is-standalone .app {
+    padding-bottom: calc(var(--chrome-bottom, 48px) + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
+  }
+}
+
 /* 平板窄寬（≤820px、>560px）：分頁列已常駐，表單展開時同樣加高 */
 @media (max-width: 820px) and (min-width: 561px) {
   .app:has(.series-form-open),

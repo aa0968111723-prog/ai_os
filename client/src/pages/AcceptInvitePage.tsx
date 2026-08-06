@@ -31,8 +31,9 @@ export function AcceptInvitePage({ token }: { token: string }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
 
+  // dvh：手機網址列在場時 vh 偏高會多出捲動；桌機兩者等值（全站已統一 dvh，見 LoginPage/.public-site）
   const wrap = (inner: React.ReactNode) => (
-    <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
+    <div style={{ minHeight: "70dvh", display: "grid", placeItems: "center" }}>
       <Card style={{ width: 420, maxWidth: "92vw" }}>{inner}</Card>
     </div>
   );
