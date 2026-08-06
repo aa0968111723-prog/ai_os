@@ -55,9 +55,11 @@ export function StyleVisualGallery({
 
   const slots = parseWorldviewStyleSlots(styles);
   const inject = stylesForVisualInject(styles);
-  const activeFamily: StyleMediaFamily | null = styleFamilyTab ?? slots.family;
-  const lookOpts = activeFamily ? looksForFamily(activeFamily) : [];
-  const textureOpts = activeFamily ? texturesForFamily(activeFamily) : [];
+  // 還沒選任何風格時退到第一個家族「先給看」——不預選、只決定現在瀏覽哪一櫃。
+  // 以前這裡是 null，新專案打開整個卡片區是空的，看起來像沒有畫風可挑。
+  const activeFamily: StyleMediaFamily = styleFamilyTab ?? slots.family ?? STYLE_FAMILY_ORDER[0]!;
+  const lookOpts = looksForFamily(activeFamily);
+  const textureOpts = texturesForFamily(activeFamily);
   const customOpts = styleOpts.filter((s) => !STYLE_MEDIA_FAMILY[s]);
   const canonical = keepPrimaryWorldviewStyle(styles);
   const dirty =
@@ -75,6 +77,7 @@ export function StyleVisualGallery({
           {STYLE_FAMILY_ORDER.map((fam) => {
             const meta = STYLE_FAMILY_META[fam];
             const on = activeFamily === fam;
+            const famLookCount = looksForFamily(fam).length;
             return (
               <button
                 key={fam}
@@ -82,12 +85,10 @@ export function StyleVisualGallery({
                 role="radio"
                 aria-checked={on}
                 className={`style-family-tab ${on ? "is-active" : ""}`}
-                title={`${meta.label}：${meta.hint}`}
+                title={`${meta.label}：${meta.hint}（${famLookCount} 款主風格）`}
                 onClick={() => onPickFamily(fam)}
               >
-                <span className="style-family-tab__icon">
-                  {fam === "photo" ? "📸" : fam === "illustrate" ? "🎨" : "🧊"}
-                </span>
+                <span className="style-family-tab__icon">{meta.emoji}</span>
                 <span className="style-family-tab__label">{meta.label}</span>
                 <span className="style-family-tab__hint">{meta.hint}</span>
               </button>
@@ -121,130 +122,162 @@ export function StyleVisualGallery({
       {/* 視覺卡片檢視 */}
       {viewMode === "visual" ? (
         <div className="style-card-grid-container">
-          {activeFamily && (
-            <div className="style-card-section">
-              <div className="style-section-title">
-                <span>主風格（{STYLE_FAMILY_META[activeFamily].label}・擇一）</span>
-                <span className="style-section-sub">點擊選為整支片的主要視覺基底</span>
-              </div>
+          <div className="style-card-section">
+            <div className="style-section-title">
+              <span>
+                主風格（{STYLE_FAMILY_META[activeFamily].label}・{lookOpts.length} 款擇一）
+              </span>
+              <span className="style-section-sub">點擊選為整支片的主要視覺基底</span>
+            </div>
 
-              <div className="style-card-grid">
-                {lookOpts.map((name, i) => {
-                  const on = slots.look === name;
-                  const asset = styleAssetOf(name);
-                  const en = STYLE_EN[name];
+            <div className="style-card-grid">
+              {lookOpts.map((name, i) => {
+                const on = slots.look === name;
+                const asset = styleAssetOf(name);
+                const en = STYLE_EN[name];
 
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      className={`style-visual-card ${on ? "is-selected" : ""}`}
-                      onClick={() => onToggleStyle(name)}
-                      title={on ? `${name}（目前主風格・點擊取消）` : `設為 ${name}`}
-                      aria-pressed={on}
-                    >
-                      <div className="style-visual-card__media">
-                        {/* 底層漸層：圖還沒到／載入失敗時都有底色，不會出現空白破框 */}
-                        <div
-                          className="style-visual-card__fallback-gradient"
-                          style={{
-                            background: asset?.color
-                              ? `linear-gradient(135deg, ${asset.color}55, ${asset.color}18)`
-                              : "var(--surface-3)",
-                          }}
-                        />
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`style-visual-card ${on ? "is-selected" : ""}`}
+                    onClick={() => onToggleStyle(name)}
+                    title={on ? `${name}（目前主風格・點擊取消）` : `設為 ${name}`}
+                    aria-pressed={on}
+                  >
+                    <div className="style-visual-card__media">
+                      {/* 底層漸層：圖還沒到／載入失敗時都有底色，不會出現空白破框 */}
+                      <div
+                        className="style-visual-card__fallback-gradient"
+                        style={{
+                          background: asset?.color
+                            ? `linear-gradient(135deg, ${asset.color}55, ${asset.color}18)`
+                            : "var(--surface-3)",
+                        }}
+                      />
+                      <StyleImage
+                        asset={asset}
+                        alt={name}
+                        variant="card"
+                        className="style-visual-card__img"
+                        // 前兩張是進頁就看得到的，不延後載入；其餘交給 lazy
+                        eager={i < 2}
+                      />
+
+                      {on && (
+                        <div className="style-visual-card__badge-selected">
+                          <Icon name="Check" size={12} />
+                          <span>主風格</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="style-visual-card__body">
+                      <div className="style-visual-card__name-row">
+                        <span className="style-visual-card__title">{name}</span>
+                        {en && <span className="style-visual-card__en">{en}</span>}
+                      </div>
+                      {asset?.tagline && (
+                        <p className="style-visual-card__desc">{asset.tagline}</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 同家族質感 (Texture / Grain) */}
+            {textureOpts.length > 0 && (
+              <div className="style-texture-section">
+                <div className="style-section-title">
+                  <span className="style-section-title__badge">質感疊加</span>
+                  <span>同家族質感（可選・與主風格並存）</span>
+                </div>
+                <div className="style-texture-grid">
+                  {textureOpts.map((t) => {
+                    const on = slots.texture === t;
+                    const asset = styleAssetOf(t);
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`style-texture-card ${on ? "is-selected" : ""}`}
+                        onClick={() => onToggleStyle(t)}
+                        aria-pressed={on}
+                        title={on ? `${t}（已疊加質感・點擊取消）` : `疊加 ${t}`}
+                      >
                         <StyleImage
                           asset={asset}
-                          alt={name}
-                          variant="card"
-                          className="style-visual-card__img"
-                          // 前兩張是進頁就看得到的，不延後載入；其餘交給 lazy
-                          eager={i < 2}
+                          alt={t}
+                          variant="thumb"
+                          className="style-texture-card__thumb"
                         />
-
-                        {on && (
-                          <div className="style-visual-card__badge-selected">
-                            <Icon name="Check" size={12} />
-                            <span>主風格</span>
+                        <div className="style-texture-card__info">
+                          <div className="style-texture-card__header">
+                            <span className="style-texture-card__name">{t}</span>
+                            {on && <span className="style-texture-card__active-pill">已套用</span>}
                           </div>
-                        )}
-                      </div>
-
-                      <div className="style-visual-card__body">
-                        <div className="style-visual-card__name-row">
-                          <span className="style-visual-card__title">{name}</span>
-                          {en && <span className="style-visual-card__en">{en}</span>}
+                          <span className="style-texture-card__desc">
+                            {asset?.tagline ?? "疊加顆粒與層次質感"}
+                          </span>
                         </div>
-                        {asset?.tagline && (
-                          <p className="style-visual-card__desc">{asset.tagline}</p>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* 同家族質感 (Texture / Grain) */}
-              {textureOpts.length > 0 && (
-                <div className="style-texture-section">
-                  <div className="style-section-title">
-                    <span className="style-section-title__badge">質感疊加</span>
-                    <span>同家族質感（可選・與主風格並存）</span>
-                  </div>
-                  <div className="style-texture-grid">
-                    {textureOpts.map((t) => {
-                      const on = slots.texture === t;
-                      const asset = styleAssetOf(t);
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          className={`style-texture-card ${on ? "is-selected" : ""}`}
-                          onClick={() => onToggleStyle(t)}
-                          aria-pressed={on}
-                          title={on ? `${t}（已疊加質感・點擊取消）` : `疊加 ${t}`}
-                        >
-                          <StyleImage
-                            asset={asset}
-                            alt={t}
-                            variant="thumb"
-                            className="style-texture-card__thumb"
-                          />
-                          <div className="style-texture-card__info">
-                            <div className="style-texture-card__header">
-                              <span className="style-texture-card__name">{t}</span>
-                              {on && <span className="style-texture-card__active-pill">已套用</span>}
-                            </div>
-                            <span className="style-texture-card__desc">
-                              {asset?.tagline ?? "疊加顆粒與層次質感"}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         /* 精簡標籤檢視 */
         <div className="style-compact-chips">
-          {activeFamily && (
+          <Meta style={{ display: "block", marginTop: 8, marginBottom: 6, fontSize: 12 }}>
+            主風格（{STYLE_FAMILY_META[activeFamily].label}・{lookOpts.length} 款擇一）
+          </Meta>
+          <div className="style-chip-row">
+            {lookOpts.map((t) => {
+              const on = slots.look === t;
+              return (
+                <Chip
+                  key={t}
+                  selected={on}
+                  onClick={() => onToggleStyle(t)}
+                  title={on ? "目前主風格（再點取消全部風格）" : "設為主風格"}
+                >
+                  {on && (
+                    <Meta
+                      as="span"
+                      style={{
+                        marginRight: 4,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--primary-ink)",
+                      }}
+                    >
+                      主
+                    </Meta>
+                  )}
+                  {t}
+                </Chip>
+              );
+            })}
+          </div>
+
+          {textureOpts.length > 0 && (
             <>
-              <Meta style={{ display: "block", marginTop: 8, marginBottom: 6, fontSize: 12 }}>
-                主風格（{STYLE_FAMILY_META[activeFamily].label}・擇一）
+              <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
+                質感（可選・與主風格同家族）
               </Meta>
               <div className="style-chip-row">
-                {lookOpts.map((t) => {
-                  const on = slots.look === t;
+                {textureOpts.map((t) => {
+                  const on = slots.texture === t;
                   return (
                     <Chip
                       key={t}
                       selected={on}
                       onClick={() => onToggleStyle(t)}
-                      title={on ? "目前主風格（再點取消全部風格）" : "設為主風格"}
+                      title={on ? "取消質感" : "加上質感（可與主風格並存注入）"}
                     >
                       {on && (
                         <Meta
@@ -256,7 +289,7 @@ export function StyleVisualGallery({
                             color: "var(--primary-ink)",
                           }}
                         >
-                          主
+                          質感
                         </Meta>
                       )}
                       {t}
@@ -264,42 +297,6 @@ export function StyleVisualGallery({
                   );
                 })}
               </div>
-
-              {textureOpts.length > 0 && (
-                <>
-                  <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
-                    質感（可選・與主風格同家族）
-                  </Meta>
-                  <div className="style-chip-row">
-                    {textureOpts.map((t) => {
-                      const on = slots.texture === t;
-                      return (
-                        <Chip
-                          key={t}
-                          selected={on}
-                          onClick={() => onToggleStyle(t)}
-                          title={on ? "取消質感" : "加上質感（可與主風格並存注入）"}
-                        >
-                          {on && (
-                            <Meta
-                              as="span"
-                              style={{
-                                marginRight: 4,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "var(--primary-ink)",
-                              }}
-                            >
-                              質感
-                            </Meta>
-                          )}
-                          {t}
-                        </Chip>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
             </>
           )}
         </div>

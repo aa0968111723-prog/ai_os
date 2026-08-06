@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  STYLE_FAMILY_ORDER,
+  STYLE_FAMILY_META,
+  STYLE_OPTIONS,
+  looksForFamily,
+} from "@shared/worldview";
 import { StyleVisualGallery, STYLE_VISUAL_ASSETS } from "./StyleVisualGallery";
 
 describe("StyleVisualGallery：視覺畫風藝廊", () => {
@@ -55,15 +61,26 @@ describe("StyleVisualGallery：視覺畫風藝廊", () => {
     await userEvent.click(tagBtn);
 
     // 精簡模式晶片
-    expect(screen.getByText("主風格（插畫・擇一）")).toBeTruthy();
+    expect(screen.getByText(/^主風格（插畫・\d+ 款擇一）$/)).toBeTruthy();
   });
 
-  it("風格卡片送出 webp 與 jpg fallback，並鎖定寬高避免版面位移", () => {
+  it("每張主風格卡都有視覺（實拍縮圖或程序化色票），沒有空白破框", () => {
     const { container } = render(<StyleVisualGallery {...defaultProps} />);
 
-    // 插畫家族四個主風格都要有圖，不能只有選中的那張
+    const cards = container.querySelectorAll(".style-card-grid .style-visual-card");
+    expect(cards.length).toBe(looksForFamily("illustrate").length);
+    for (const card of cards) {
+      const visual =
+        card.querySelector("picture.style-image") ?? card.querySelector(".style-swatch");
+      expect(visual, `${card.textContent} 這張卡沒有任何視覺`).toBeTruthy();
+    }
+  });
+
+  it("實拍縮圖送出 webp 與 jpg fallback，並鎖定寬高避免版面位移", () => {
+    const { container } = render(<StyleVisualGallery {...defaultProps} />);
+
     const pictures = container.querySelectorAll(".style-visual-card picture.style-image");
-    expect(pictures.length).toBe(4);
+    expect(pictures.length).toBeGreaterThan(0);
 
     const first = pictures[0];
     expect(first.querySelector("source")?.getAttribute("type")).toBe("image/webp");
@@ -77,6 +94,62 @@ describe("StyleVisualGallery：視覺畫風藝廊", () => {
     expect(img.getAttribute("decoding")).toBe("async");
     // LQIP 佔位圖內嵌成 background，載入中不會是一塊空白
     expect(img.getAttribute("style")).toContain("data:image/webp;base64,");
+  });
+
+  it("沒有實拍圖的畫風畫成 SVG 色票，不是一塊空白灰底", () => {
+    const { container } = render(<StyleVisualGallery {...defaultProps} />);
+
+    // 厚塗油畫沒有實拍縮圖（assets-src 只放了 7 張），走程序化色票
+    const swatch = container.querySelector('.style-swatch[aria-label="厚塗油畫"]')!;
+    expect(swatch).toBeTruthy();
+    expect(swatch.getAttribute("role")).toBe("img");
+    // 漸層 + 紋理兩層，且 id 不能與同頁其他色票相撞
+    const gradients = swatch.querySelectorAll("linearGradient");
+    expect(gradients.length).toBe(1);
+    expect(swatch.querySelectorAll("pattern").length).toBe(1);
+
+    const allSwatchIds = [...container.querySelectorAll(".style-swatch linearGradient")].map((g) =>
+      g.getAttribute("id"),
+    );
+    expect(new Set(allSwatchIds).size).toBe(allSwatchIds.length);
+  });
+
+  it("六個媒材家族都出得來，並帶主風格款數提示", () => {
+    render(<StyleVisualGallery {...defaultProps} />);
+
+    for (const fam of STYLE_FAMILY_ORDER) {
+      const meta = STYLE_FAMILY_META[fam];
+      const tab = screen.getByTitle(
+        `${meta.label}：${meta.hint}（${looksForFamily(fam).length} 款主風格）`,
+      );
+      expect(tab.getAttribute("role")).toBe("radio");
+    }
+    expect(screen.getAllByRole("radio").length).toBe(STYLE_FAMILY_ORDER.length);
+  });
+
+  it("還沒選風格時退到第一個家族「先給看」，卡片區不是空的", () => {
+    const { container } = render(
+      <StyleVisualGallery {...defaultProps} styles={[]} styleFamilyTab={null} />,
+    );
+
+    const firstFamily = STYLE_FAMILY_ORDER[0];
+    expect(container.querySelectorAll(".style-card-grid .style-visual-card").length).toBe(
+      looksForFamily(firstFamily).length,
+    );
+    // 只是「現在瀏覽哪一櫃」，不代表已經選了——摘要看板仍要說尚未選擇
+    expect(container.querySelector(".style-summary-banner__unset")?.textContent).toContain(
+      "尚未選擇",
+    );
+  });
+
+  it("每個內建畫風都有視覺資產（新增畫風時必須同步補 STYLE_VISUAL_ASSETS）", () => {
+    for (const name of STYLE_OPTIONS) {
+      const asset = STYLE_VISUAL_ASSETS[name];
+      expect(asset, `STYLE_VISUAL_ASSETS 缺 ${name}`).toBeTruthy();
+      expect(asset.tagline, `${name} 缺一句話說明`).toBeTruthy();
+      expect(asset.color, `${name} 缺主色`).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(asset.accent, `${name} 缺漸層第二色`).toMatch(/^#[0-9a-f]{6}$/i);
+    }
   });
 
   it("質感小卡與摘要看板用 128px 縮圖，不重用卡片大圖", () => {

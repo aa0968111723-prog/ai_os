@@ -60,7 +60,12 @@ export function ModelArenaResults({ projectId, runId }: { projectId: string; run
 
       <ul className="model-arena-grid">
         {rows.map((row) => (
-          <li key={row.id}>
+          /* 得獎那一格用外框標出來：整個功能最有價值的結論本來只是那行小字尾巴的「· 最快」，
+             掃過去看不見。文字保持原樣（測試逐字比對），這裡只加視覺。 */
+          <li
+            key={row.id}
+            className={[fastest?.id === row.id ? "is-fastest" : "", cheapest?.id === row.id ? "is-cheapest" : ""].filter(Boolean).join(" ") || undefined}
+          >
             <Card variant="quiet" style={{ padding: 8, borderRadius: 12, height: "100%" }}>
               <div className="model-arena-grid__media">
                 {row.resultUrl && row.kind === "video" ? (

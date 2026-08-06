@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Card, Chip, Hint, Skeleton } from "./ui";
+import { Card, Chip, Hint, Meta, Skeleton } from "./ui";
 import { FormatPicker, FormatSwatch } from "./FormatPicker";
 import {
   OPTION_TYPES,
@@ -32,6 +32,13 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
   const actionError = upsert.error ?? setActive.error ?? remove.error ?? reorder.error;
 
   const rowsOf = (type: OptionType) => (list.data ?? []).filter((o) => o.type === type);
+
+  /**
+   * 內建畫風有 40+ 個（六個媒材家族），整份攤開會把這一頁拉成一面看不完的長牆——
+   * 超過 COLLAPSE_AFTER 就先顯示前段，其餘由組長按「顯示全部」展開。
+   */
+  const COLLAPSE_AFTER = 12;
+  const [expandedTypes, setExpandedTypes] = useState<Partial<Record<OptionType, boolean>>>({});
 
   // 依「目前顯示序（active＋inactive 混排）」組 orderedIds，交換相鄰兩筆後送出。
   const move = (type: OptionType, index: number, dir: -1 | 1) => {
@@ -97,16 +104,23 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
       {OPTION_TYPES.map((type) => {
         const meta = OPTION_TYPE_META[type];
         const rows = rowsOf(type);
+        const showAll = expandedTypes[type] ?? rows.length <= COLLAPSE_AFTER;
+        const visible = showAll ? rows : rows.slice(0, COLLAPSE_AFTER);
         return (
           <div key={type} style={{ marginTop: 20, borderTop: "1px solid var(--border-soft)", paddingTop: 14 }}>
-            <div style={{ fontWeight: 600, fontSize: "var(--fs-15)" }}>{meta.label}</div>
+            <div style={{ fontWeight: 600, fontSize: "var(--fs-15)" }}>
+              {meta.label}
+              {rows.length > 0 && (
+                <Meta as="span" style={{ marginLeft: 6, fontWeight: 400 }}>{rows.length} 個</Meta>
+              )}
+            </div>
             <Hint style={{ marginTop: 2 }}>{meta.hint}</Hint>
 
             {rows.length === 0 ? (
               <Hint layer="always" style={{ marginTop: 8 }}>還沒有選項——用下面的欄位加一個。</Hint>
             ) : (
               <div style={{ marginTop: 8 }}>
-                {rows.map((o, i) => (
+                {visible.map((o, i) => (
                   <div
                     key={o.id}
                     style={{
@@ -134,7 +148,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                       <button
                         aria-label="下移"
                         title="下移"
-                        disabled={busy || i === rows.length - 1}
+                        disabled={busy || i === visible.length - 1}
                         onClick={() => move(type, i, 1)}
                         style={{ padding: "0 8px", fontSize: "var(--fs-12)", lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       >
@@ -186,6 +200,14 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                     </ConfirmButton>
                   </div>
                 ))}
+                {!showAll && (
+                  <button
+                    onClick={() => setExpandedTypes((prev) => ({ ...prev, [type]: true }))}
+                    style={{ marginTop: 8, padding: "3px 12px", fontSize: "var(--fs-12)" }}
+                  >
+                    顯示全部 {rows.length} 個（還有 {rows.length - visible.length} 個沒顯示）
+                  </button>
+                )}
               </div>
             )}
 

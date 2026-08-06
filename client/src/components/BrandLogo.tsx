@@ -11,6 +11,7 @@ import {
   type BrandTone,
   type BrandVariant,
 } from "../brand";
+import { useMatchMedia } from "../lib/useMatchMedia";
 
 export type BrandLogoProps = {
   variant?: BrandVariant;
@@ -50,6 +51,9 @@ export function BrandLogo({
   responsive = false,
   priority = false,
 }: BrandLogoProps) {
+  // 與 styles.css 463 行的斷點一致：≤560 時 responsive logo 只「顯示」mark。
+  // 但 display:none 的 <img> 照樣下載（524KB @2x 全幅 PNG）——手機乾脆不渲染那顆 img。
+  const compactBrand = useMatchMedia("(max-width: 560px)");
   const dims = BRAND_SIZE_PX[size];
   const markSrc = BRAND_MARK_SRC[tone];
   const logoSrc = BRAND_LOGO_SRC[tone];
@@ -114,19 +118,23 @@ export function BrandLogo({
             loading={loading}
           />
         ) : null}
-        <img
-          className="brand-logo__full-img"
-          src={logoSrc}
-          srcSet={srcSet}
-          alt=""
-          width={width}
-          height={height}
-          draggable={false}
-          aria-hidden
-          decoding="async"
-          loading={loading}
-          {...(fetchPriority ? { fetchPriority } : {})}
-        />
+        {/* ≤560 的 responsive：full-img 被 CSS display:none 但仍會下載整張 524KB @2x PNG——
+            直接不渲染（桌機與 >560 的 DOM 維持原狀；斷點放大時 useMatchMedia 會補渲染） */}
+        {responsive && compactBrand ? null : (
+          <img
+            className="brand-logo__full-img"
+            src={logoSrc}
+            srcSet={srcSet}
+            alt=""
+            width={width}
+            height={height}
+            draggable={false}
+            aria-hidden
+            decoding="async"
+            loading={loading}
+            {...(fetchPriority ? { fetchPriority } : {})}
+          />
+        )}
         {showTagline ? (
           <span className="brand-logo__tagline" aria-hidden>
             {BRAND_TAGLINE}
