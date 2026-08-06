@@ -50,6 +50,20 @@ describe("MobileNavigation", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
+  it("returns to 今日 from a hash tab on the same page", async () => {
+    // 停在 /dashboard#projects 時「今日」和其他分頁同 pathname：wouter 的 location
+    // 不含 hash，pushState 也不發 hashchange——分頁列因此不重繪，看起來就是「按了沒反應」。
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/dashboard#projects");
+    render(<MobileNavigation />);
+    await user.click(screen.getByRole("link", { name: "今日" }));
+
+    expect(window.location.pathname).toBe("/dashboard");
+    expect(window.location.hash).toBe("");
+    expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "專案" })).not.toHaveAttribute("aria-current");
+  });
+
   it("keeps 專案 tab active on project detail pages", () => {
     window.history.replaceState(null, "", "/p/some-project-id");
     render(<MobileNavigation />);
