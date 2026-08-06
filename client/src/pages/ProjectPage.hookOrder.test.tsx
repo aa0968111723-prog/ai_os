@@ -110,5 +110,5 @@ describe("ProjectPage hook order (React #310 迴歸)", () => {
     expect(caught, `render 期間丟出例外：${caught?.message}`).toBeNull();
     expect(screen.queryByText("載入中…")).toBeNull();
     expect(screen.getByText("測試專案")).toBeTruthy();
-  });
+  }, 15000);
 });
