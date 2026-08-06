@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,6 +64,27 @@ describe("MobileNavigation", () => {
     expect(window.location.hash).toBe("");
     expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "專案" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("points every dashboard hash tab at an anchor that exists", () => {
+    // 「AI 工作」曾指向全庫都沒有的 #ai-work：分頁會亮起，但 scrollToAnchorWhenReady
+    // 輪詢 3 秒後放棄，畫面完全不動＝另一種「按了沒反應」。錨點是跨檔案契約，
+    // 只看 MobileNavigation 看不出壞掉，這裡直接對 Launchpad 的原始碼驗。
+    window.history.replaceState(null, "", "/dashboard");
+    render(<MobileNavigation />);
+    // 註解裡提到的 id 不算數（否則一句說明就能讓斷言恆真）——先把註解剝掉再驗
+    const launchpad = readFileSync(resolve(process.cwd(), "client/src/pages/Launchpad.tsx"), "utf8")
+      .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+
+    const anchors = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href") ?? "")
+      .filter((href) => href.startsWith("/dashboard#"))
+      .map((href) => href.split("#")[1]);
+
+    expect(anchors).toEqual(expect.arrayContaining(["projects", "ai-work"]));
+    for (const anchor of anchors) expect(launchpad).toContain(`id="${anchor}"`);
   });
 
   it("keeps 專案 tab active on project detail pages", () => {
