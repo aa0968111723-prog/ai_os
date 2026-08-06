@@ -38,7 +38,7 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
     { groupId: groupId || undefined },
     { enabled: !!groupId },
   );
-  const projects = (projectsQuery.data ?? []).filter((p) => !p.archivedAt);
+  const projects = (projectsQuery.data ?? []).filter((p) => p.status !== "archived");
 
   // 取得短影音母版定義
   const seriesTemplates = useMemo(() => listSeriesTemplates(), []);
@@ -231,9 +231,10 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
             </div>
 
             {filteredWorkflows.length === 0 ? (
-              <EmptyState title="找不到符合條件的工作流">
-                請嘗試清除搜尋關鍵字或調整等級篩選條件。
-              </EmptyState>
+              <EmptyState
+                title="找不到符合條件的工作流"
+                description="請嘗試清除搜尋關鍵字或調整等級篩選條件。"
+              />
             ) : (
               <div
                 style={{
@@ -444,12 +445,15 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
             </Meta>
 
             {projects.length === 0 ? (
-              <EmptyState title="目前沒有進行中的專案">
-                <p style={{ margin: "0 0 12px" }}>請先前往今日工作台建立新專案，再套用自動化工作流。</p>
-                <Button variant="primary" onClick={() => navigate("/dashboard")}>
-                  前往今日工作台
-                </Button>
-              </EmptyState>
+              <EmptyState
+                title="目前沒有進行中的專案"
+                description="請先前往今日工作台建立新專案，再套用自動化工作流。"
+                action={
+                  <Button variant="primary" onClick={() => navigate("/dashboard")}>
+                    前往今日工作台
+                  </Button>
+                }
+              />
             ) : (
               <div style={{ display: "grid", gap: 8, maxHeight: 300, overflowY: "auto", marginBottom: 16 }}>
                 {projects.map((proj) => (

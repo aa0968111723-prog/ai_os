@@ -10,6 +10,31 @@ const direct = readFileSync(join(root, "client/src/features/creation-workbench/m
 const genList = readFileSync(join(root, "client/src/components/GenerationList.tsx"), "utf8");
 const styles = readFileSync(join(root, "client/src/styles.css"), "utf8");
 
+/**
+ * 取出「定義了某個選擇器」的那一段 S 斷點（max-width: 560px）區塊。
+ *
+ * 原本這裡用 `lastIndexOf("@media (max-width: 560px)")` ＋ 往後切 20000 字元：
+ * 只要有人在檔案更後面補一段 560px（例如畫風家族標籤那段），錨點就會跳到那裡，
+ * 契約永遠切不到而整組紅燈——紅的是切片位置，不是它要守的樣式。改成用大括號配對
+ * 找出每一段 560px 區塊，再挑出真的宣告了該選擇器的那一段，區塊怎麼搬都不影響。
+ */
+function sBreakpointBlockWith(selector: string): string {
+  const media = "@media (max-width: 560px)";
+  for (let at = styles.indexOf(media); at !== -1; at = styles.indexOf(media, at + 1)) {
+    const open = styles.indexOf("{", at);
+    if (open === -1) continue;
+    let depth = 0;
+    let end = open;
+    for (; end < styles.length; end++) {
+      if (styles[end] === "{") depth++;
+      else if (styles[end] === "}" && --depth === 0) break;
+    }
+    const block = styles.slice(open + 1, end);
+    if (new RegExp(`${selector.replace(".", "\\.")}\\s*\\{`).test(block)) return block;
+  }
+  throw new Error(`找不到宣告 ${selector} 的 @media (max-width: 560px) 區塊`);
+}
+
 describe("MOB-03 long-task leave copy", () => {
   it("confirm panel tells user they may leave; push on complete", () => {
     expect(direct).toContain("可關閉此頁，完成會推播到已連結裝置");
@@ -22,9 +47,7 @@ describe("MOB-03 long-task leave copy", () => {
   });
 
   it("S breakpoint forces 2×2 creation mode tabs with min-height 64", () => {
-    const last560 = styles.lastIndexOf("@media (max-width: 560px)");
-    expect(last560).toBeGreaterThan(0);
-    const chunk = styles.slice(last560, last560 + 20000);
+    const chunk = sBreakpointBlockWith(".creation-mode-tabs");
     expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*grid-template-columns:\s*1fr 1fr/);
     expect(chunk).toMatch(/\.creation-mode-tab\s*\{[\s\S]*min-height:\s*64px/);
   });
@@ -38,8 +61,7 @@ describe("MOB-04 overflow-related CSS contract", () => {
   });
 
   it("S creation-mode-tabs stay grid (no horizontal scroll snap strip)", () => {
-    const last560 = styles.lastIndexOf("@media (max-width: 560px)");
-    const chunk = styles.slice(last560, last560 + 20000);
+    const chunk = sBreakpointBlockWith(".creation-mode-tabs");
     expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*?overflow:\s*visible/);
     expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*?scroll-snap-type:\s*none/);
   });
