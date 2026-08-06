@@ -263,7 +263,55 @@ describe("legacy migration adoption bridge", () => {
     );
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
-    expect(result.alreadyPresent).toBe(8);
+    // 8 項來自 bridge 前綴；另外 2 項來自 bridge 之後的 0036／0037——這份合成 drift
+    // 只放了 bridge 的語句，那兩支的最終形狀自然不在裡面。兩者都寫了 IF NOT EXISTS，
+    // 重跑是 no-op，所以同樣計入 alreadyPresent 而不是判成缺漏。
+    expect(result.alreadyPresent).toBe(8 + 2);
+  });
+
+  it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {
+    // 實機踩過：0037 只是 ADD COLUMN IF NOT EXISTS，但因為它排在 bridge 前綴之後，
+    // 舊版把它造成的 drift 判成未經審查的分歧，legacy DB 從此永遠 adopt 不了。
+    const postBridge = manifest.entries.filter((entry) =>
+      ["0036_community_likes_surrogate_pk", "0037_project_cover"].includes(entry.tag),
+    );
+    expect(postBridge).toHaveLength(2);
+    const postBridgeDdl = postBridge
+      .flatMap((entry) => entry.sql.split("--> statement-breakpoint").map(canonicalMigrationStatement))
+      .filter((statement) => /^ALTER TABLE "projects" ADD COLUMN "cover_asset_id"/.test(statement));
+    expect(postBridgeDdl).toHaveLength(1);
+
+    const result = verifyLegacyAdoptionBridge(
+      manifest,
+      { hasDataLoss: false, warnings: [], statements: [...expectedStatements, ...postBridgeDdl] },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("CREATE TABLE 的表層具名主鍵與內嵌主鍵視為同一句", () => {
+    // 手寫 migration 慣用 CONSTRAINT "x_pkey" PRIMARY KEY ("id")，drizzle 產生的 drift
+    // 一律內嵌。逐字比對會讓同一張表同時被判成「非預期 drift」與「缺漏」（0035 踩過）。
+    const named = canonicalMigrationStatement(
+      'CREATE TABLE IF NOT EXISTS "community_likes" (\n'
+      + '  "id" uuid DEFAULT gen_random_uuid() NOT NULL,\n'
+      + '  "post_id" uuid NOT NULL,\n'
+      + '  CONSTRAINT "community_likes_pkey" PRIMARY KEY ("id")\n);',
+    );
+    const inline = canonicalMigrationStatement(
+      'CREATE TABLE "community_likes" (\n'
+      + '\t"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,\n'
+      + '\t"post_id" uuid NOT NULL\n);',
+    );
+    expect(named).toBe(inline);
+    expect(named).toContain('PRIMARY KEY("id")');
+    // 主鍵資訊不能在正規化時被丟掉：欄位相同但主鍵不同的兩張表仍要判成不同
+    expect(named).not.toBe(
+      canonicalMigrationStatement(
+        'CREATE TABLE "community_likes" ("id" uuid DEFAULT gen_random_uuid() NOT NULL,"post_id" uuid PRIMARY KEY NOT NULL);',
+      ),
+    );
   });
 
   it("rejects absent reviewed DDL that cannot be safely re-run", () => {
