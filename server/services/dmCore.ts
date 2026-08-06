@@ -12,6 +12,7 @@ import type { AuthState } from "./auth";
 import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
 import { listPresence } from "./presence";
 import { pushToUsers } from "./webPush";
+import { publicAvatarUrl } from "./userAvatar";
 
 /** 單則私訊長度上限（與專案留言一致） */
 export const DM_MAX_BODY = 2000;
@@ -55,6 +56,7 @@ export interface DmPeer {
   userId: string;
   name: string;
   email: string;
+  avatarUrl: string | null;
   isSuperAdmin: boolean;
   /** 與我共同的組（顯示用，如「北區工作組・剪輯組」）；開發者對象可能為空陣列 */
   sharedGroups: string[];
@@ -85,11 +87,17 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
     sharedByUser.set(m.userId, list);
   }
 
-  let candidates: Array<{ id: string; name: string; email: string; isSuperAdmin: boolean }>;
+  let candidates: Array<{ id: string; name: string; email: string; avatarUrl: string | null; isSuperAdmin: boolean }>;
   if (auth.user.isSuperAdmin) {
     // 開發者：全站啟用中帳號都可私訊
     candidates = await db
-      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin })
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        avatarUrl: schema.users.avatarUrl,
+        isSuperAdmin: schema.users.isSuperAdmin,
+      })
       .from(schema.users)
       .where(eq(schema.users.status, "active"));
   } else {
@@ -126,7 +134,13 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
     const conds = [eq(schema.users.isSuperAdmin, true)];
     if (allowedIds.length) conds.push(inArray(schema.users.id, allowedIds));
     candidates = await db
-      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin })
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        avatarUrl: schema.users.avatarUrl,
+        isSuperAdmin: schema.users.isSuperAdmin,
+      })
       .from(schema.users)
       .where(and(eq(schema.users.status, "active"), or(...conds)));
   }
@@ -137,6 +151,7 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
       userId: u.id,
       name: u.name,
       email: u.email,
+      avatarUrl: publicAvatarUrl(u.id, u.avatarUrl),
       isSuperAdmin: u.isSuperAdmin,
       sharedGroups: (sharedByUser.get(u.id) ?? []).sort((a, b) => a.localeCompare(b, "zh-Hant")),
     }))
@@ -433,6 +448,7 @@ export interface DmThread {
   peerId: string;
   peerName: string;
   peerEmail: string;
+  peerAvatarUrl: string | null;
   lastBody: string;
   lastFromMe: boolean;
   lastAt: Date;
@@ -486,7 +502,7 @@ export async function listDmThreads(auth: AuthState): Promise<DmThread[]> {
 
   const [users, unread] = await Promise.all([
     db
-      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, avatarUrl: schema.users.avatarUrl })
       .from(schema.users)
       .where(inArray(schema.users.id, rows.map((r) => r.peerId))),
     unreadBySender(me),
@@ -499,6 +515,7 @@ export async function listDmThreads(auth: AuthState): Promise<DmThread[]> {
         peerId: r.peerId,
         peerName: u?.name ?? "（已移除的帳號）",
         peerEmail: u?.email ?? "",
+        peerAvatarUrl: u ? publicAvatarUrl(u.id, u.avatarUrl) : null,
         lastBody: r.lastBody, // 已在 rows 映射時經 dmThreadPreview（含截斷／附件標注佔位）
         lastFromMe: r.lastFromMe,
         lastAt: new Date(r.lastAt),
@@ -535,7 +552,7 @@ export async function listDmHistory(
   auth: AuthState,
   peerId: string,
   opts: { before?: Date; limit?: number } = {},
-): Promise<{ peer: { userId: string; name: string; email: string }; items: DmHistoryItem[]; hasMore: boolean }> {
+): Promise<{ peer: { userId: string; name: string; email: string; avatarUrl: string | null }; items: DmHistoryItem[]; hasMore: boolean }> {
   const me = auth.user.id;
   const pairCond = or(
     and(eq(schema.dmMessages.senderId, me), eq(schema.dmMessages.recipientId, peerId)),
@@ -566,7 +583,7 @@ export async function listDmHistory(
     resolveDmAttachments(page.map((m) => m.attachmentId).filter((v): v is string => !!v)),
   ]);
   return {
-    peer: { userId: peer.id, name: peer.name, email: peer.email },
+    peer: { userId: peer.id, name: peer.name, email: peer.email, avatarUrl: publicAvatarUrl(peer.id, peer.avatarUrl) },
     items: page.map((m) => ({
       id: m.id,
       fromMe: m.senderId === me,

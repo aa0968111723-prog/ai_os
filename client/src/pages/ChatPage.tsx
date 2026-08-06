@@ -53,6 +53,20 @@ function avatarInitial(name: string): string {
   return name.trim().charAt(0).toLocaleUpperCase("zh-TW") || "人";
 }
 
+function DmAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string | null }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        className="dm-avatar"
+        style={{ objectFit: "cover", width: "100%", height: "100%", borderRadius: "50%" }}
+      />
+    );
+  }
+  return <span className="dm-avatar" aria-hidden>{avatarInitial(name)}</span>;
+}
+
 /**
  * 站內私訊（通訊錄 1:1 聊天）。人人可用——可訊對象＝同組夥伴＋開發者（後端 dmCore 守界）。
  * 左欄：對話串（未讀數）＋可發起新對話的夥伴名單；右欄：聊天視窗（輪詢 5 秒、聚焦即已讀）。
@@ -138,7 +152,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                   {newPeers.map((p) => (
                     <button key={p.userId} className="dm-item" onClick={() => navigate(`/chat/${p.userId}`)}>
                       <span className="dm-avatar-wrap">
-                        <span className="dm-avatar" aria-hidden>{avatarInitial(p.name)}</span>
+                        <DmAvatar name={p.name} avatarUrl={p.avatarUrl} />
                         <PresenceDot lastActiveAt={lastActiveByUser.get(p.userId) ?? null} />
                       </span>
                       <span className="dm-item-copy">
@@ -184,7 +198,7 @@ function ThreadItem({
   return (
     <button className={`dm-item ${active ? "active" : ""}`} onClick={onOpen} aria-current={active}>
       <span className="dm-avatar-wrap">
-        <span className="dm-avatar" aria-hidden>{avatarInitial(t.peerName)}</span>
+        <DmAvatar name={t.peerName} avatarUrl={t.peerAvatarUrl} />
         <PresenceDot lastActiveAt={lastActiveAt ?? null} />
       </span>
       <span className="dm-item-copy">
@@ -358,6 +372,13 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
     <Card as="section" className="dm-thread" aria-label={peer ? `與 ${peer.name} 的對話` : "對話"}>
       <header className="dm-head">
         <Button size="sm" className="dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></Button>
+        {peer?.avatarUrl ? (
+          <img
+            src={peer.avatarUrl}
+            alt=""
+            style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+          />
+        ) : null}
         <div style={{ minWidth: 0 }}>
           <b>{peer?.name ?? "…"}</b>
           {/* lastActiveAt 為 undefined＝這位已不在可訊界（例如已被移出組），只留既有對話可回看，

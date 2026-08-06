@@ -34,17 +34,25 @@ export function isAvatarRelPath(p: string): boolean {
 
 /** 解析 data URL → { mime, buffer }；失敗回 null */
 export function parseAvatarDataUrl(dataUrl: string): { mime: string; buffer: Buffer } | null {
-  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl.trim());
+  if (typeof dataUrl !== "string") return null;
+  const trimmed = dataUrl.trim();
+  // 快速長度上限檢查：150KB binary 約 200KB base64，加上 prefix 最長約 250KB，防止過長字串跑 regex
+  if (trimmed.length > 250 * 1024) return null;
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i.exec(trimmed);
   if (!m) return null;
   const mime = m[1].toLowerCase();
   if (!ALLOWED_MIME.has(mime)) return null;
   try {
     const buffer = Buffer.from(m[2].replace(/\s+/g, ""), "base64");
     if (buffer.length === 0 || buffer.length > MAX_AVATAR_BYTES) return null;
-    // 簡易 magic bytes 核對
+    // magic bytes 核對
     if (mime === "image/jpeg" && !(buffer[0] === 0xff && buffer[1] === 0xd8)) return null;
     if (mime === "image/png" && !(buffer[0] === 0x89 && buffer.subarray(1, 4).toString("latin1") === "PNG")) return null;
-    if (mime === "image/webp" && buffer.subarray(0, 4).toString("latin1") !== "RIFF") return null;
+    if (mime === "image/webp") {
+      if (buffer.length < 12) return null;
+      if (buffer.subarray(0, 4).toString("latin1") !== "RIFF") return null;
+      if (buffer.subarray(8, 12).toString("latin1") !== "WEBP") return null;
+    }
     return { mime, buffer };
   } catch {
     return null;

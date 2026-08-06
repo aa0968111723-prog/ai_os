@@ -189,6 +189,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
 
 export type AccountMenuProps = {
   userName: string;
+  avatarUrl?: string | null;
   /** auth.me — TD-05b capability 閘門 */
   me?: MeWithCapabilities;
   activeGroupId?: string | null;
@@ -206,7 +207,7 @@ export type AccountMenuProps = {
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 export function AccountMenu({
-  userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
+  userName, avatarUrl, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -223,14 +224,22 @@ export function AccountMenu({
   return (
     <div className="menu-wrap account-menu">
       <button ref={triggerRef} className="badge account-menu__trigger" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
-        <Icon name="User" size={14} />
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" style={{ width: 16, height: 16, borderRadius: "50%", objectFit: "cover" }} />
+        ) : (
+          <Icon name="User" size={14} />
+        )}
         <span className="account-menu__name">{userName}</span>
         <Icon name="ChevronDown" size={14} className="account-menu__chevron" />
       </button>
       <MenuSurface open={open} onClose={close} label="使用者選單" triggerRef={triggerRef} className="account-menu__menu">
           {/* 身分標頭：手機 sheet 打開先看到「這是誰的選單」；桌機同樣受益 */}
           <div className="account-menu__id" role="presentation">
-            <span className="account-menu__avatar" aria-hidden><Icon name="User" size={17} /></span>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" style={{ width: 22, height: 22, borderRadius: "50%", objectFit: "cover", marginRight: 6 }} />
+            ) : (
+              <span className="account-menu__avatar" aria-hidden><Icon name="User" size={17} /></span>
+            )}
             <strong>{userName}</strong>
           </div>
           {/* 個人點數摘要：今日／本週用量與剩餘（quota.my）；與頂欄徽章互補 */}
