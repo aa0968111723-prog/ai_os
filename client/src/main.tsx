@@ -9,7 +9,12 @@ import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import { installKeyboardInset } from "./lib/keyboardInset";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
+// 手機 design token（MOB-T）：必須在 styles.css/styles.mobile-fab-01.css 之後載入
+// （同特異性覆寫靠載入順序勝出）；全檔規則都包在 ≤820 media 內，桌機零改動
+import "./styles.mobile-tokens.css";
 import "./splash.css";
+// board 字族（Latin 子集）非阻塞載入：手機 token 引用，桌機無規則指向（MOB-T）
+void import("./fonts.brand.css");
 import { EmptyState } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { buildCrashReport, isChunkLoadError, type CrashReport } from "./lib/crashReport";

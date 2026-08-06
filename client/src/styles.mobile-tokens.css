@@ -1,0 +1,86 @@
+/* ═══ 手機 Design Token（MOB-T / Adobe Firefly Board 視覺語彙）═══
+ *
+ * 來源：Firefly Board（DECISIONS.md D-004）——暖米紙感底、紙雕 3D 層疊、
+ * 大圓角（app icon 圓角率 ~22%）、coral→amber→mint 高彩度點綴、navy 深度。
+ * 品牌四色：navy #16223B／coral #EF6A4E／amber #F2B24A／mint #8FE3CB。
+ *
+ * 紅線契約：
+ * 1. 變數一律帶 --m- 前綴，絕不覆寫桌機既有變數（--primary/--bg/--r-* 等）。
+ * 2. 所有賦值與元件覆寫都包在 @media (max-width: 820px) 內——桌機零改動。
+ * 3. 本檔在 main.tsx 於 styles.css／styles.mobile-fab-01.css 之後載入，
+ *    同特異性覆寫以後載入勝出；--chrome-bottom／--kb-inset 版面契約只讀不改。
+ * 4. 文字對比不自創：主要文字色沿用 v3 已過 AA 的 --primary-ink／--fg 系。
+ */
+
+@media (max-width: 820px) {
+  :root {
+    /* ── 色彩（board 四色＋衍生） ── */
+    --m-navy: #16223b;
+    --m-coral: #ef6a4e;
+    --m-amber: #f2b24a;
+    --m-mint: #8fe3cb;
+    --m-paper: #f3f0e8; /* 與既有 --bg 同值：暖米紙感，列出供元件顯式引用 */
+    /* ── 圓角節奏（icon 圓角率 ~22% 依控件尺寸換算） ── */
+    --m-r-control: 14px; /* 按鈕/chip/清單項 */
+    --m-r-card: 20px;    /* 卡片 */
+    --m-r-sheet: 24px;   /* 貼底 sheet 上緣 */
+    /* ── 紙雕層疊陰影（navy 低透明度雙層：近影銳、遠影散） ── */
+    --m-shadow-1: 0 1px 2px rgba(22, 34, 59, 0.05), 0 4px 14px -6px rgba(22, 34, 59, 0.1);
+    --m-shadow-2: 0 2px 4px rgba(22, 34, 59, 0.06), 0 12px 30px -12px rgba(22, 34, 59, 0.16);
+    /* ── 點綴漸層（低飽和 tint；文字對比另由 --primary-ink 保證） ── */
+    --m-tint-warm: linear-gradient(135deg, rgba(239, 106, 78, 0.16), rgba(242, 178, 74, 0.14));
+    --m-tint-mint: linear-gradient(160deg, rgba(143, 227, 203, 0.28), rgba(143, 227, 203, 0.08));
+    /* ── 字族（D-005/D-012）：Latin 用 board 指定字族，中文回退既有堆疊 ── */
+    --m-font-display: "Fraunces Variable", "Noto Serif TC Variable", var(--serif, serif);
+    --m-font-body: "Manrope", "Noto Sans TC Variable", var(--sans, sans-serif);
+    /* ── 動效 ── */
+    --m-dur: 200ms;
+    --m-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  /* ── 底部分頁列：紙雕懸浮感（上緣柔影取代硬線），active 換暖色雙色 tint ── */
+  .mobile-nav {
+    border-top: 0;
+    box-shadow: 0 -1px 0 var(--border-soft), 0 -10px 26px -20px rgba(22, 34, 59, 0.35);
+  }
+  .mobile-nav a,
+  .mobile-nav button {
+    border-radius: var(--m-r-control);
+    transition: transform var(--m-dur) var(--m-ease), background var(--m-dur) var(--m-ease);
+  }
+  .mobile-nav a.active,
+  .mobile-nav button.active {
+    background: var(--m-tint-warm);
+    /* 文字維持 var(--primary-ink)（styles.css 既有宣告）：AA 對比已由 v3 校準 */
+  }
+
+  /* ── 貼底 sheet（更多面板／MenuSurface）：board 圓角節奏＋紙雕陰影＋把手加寬 ── */
+  .menu-surface.is-sheet,
+  .mobile-more-sheet {
+    border-radius: var(--m-r-sheet) var(--m-r-sheet) 0 0;
+    box-shadow: var(--m-shadow-2);
+  }
+  .menu-surface.is-sheet::before,
+  .mobile-more-sheet__grip {
+    width: 44px;
+    background: color-mix(in srgb, var(--m-navy) 24%, transparent);
+  }
+  .mobile-more-sheet__head strong {
+    font-family: var(--m-font-display);
+    font-variation-settings: "SOFT" 40, "WONK" 0;
+  }
+  .mobile-more-sheet__grid a { border-radius: var(--m-r-control); }
+  .mobile-more-sheet__grid a.active { background: var(--m-tint-warm); }
+  .mobile-more-sheet__icon {
+    border-radius: var(--m-r-control);
+    background: var(--m-tint-mint);
+  }
+
+  /* ── 卡片與 Modal：紙雕層疊（僅手機；桌機 var(--e*) 不動） ── */
+  .card { box-shadow: var(--m-shadow-1); }
+  .card--primary, .modal-card { box-shadow: var(--m-shadow-2); }
+  .card, .new-project-modal-card { border-radius: var(--m-r-card); }
+
+  /* ── 控件圓角統一到 board 節奏（尺寸/觸控高不動） ── */
+  button.primary, .btn, .btn-tonal { border-radius: var(--m-r-control); }
+}
