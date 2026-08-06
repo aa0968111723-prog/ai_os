@@ -13,7 +13,7 @@
 - [done] MOBILE_AUDIT.md 彙整完成 → PR（分支 mobile/audit）
 
 ## 階段二：P0 → P1 → P2 修復（分批小 PR）
-- [todo] 批次 A（P0＋聊天）：P0-01 標注 picker 裁切＋P1 私訊輸入列 --kb-inset
+- [done] 批次 A（P0＋聊天）：P0-01 標注 picker 裁切＋P1-13 私訊輸入列 --kb-inset → PR #462（3 檔 +76/−8，契約測試 3 條）
 - [todo] 批次 B（CSS-only 快修）：group-select 16px、topbar 360px 溢位、continue-card chip、PWA standalone --chrome-bottom、public-header safe-area、AcceptInvite dvh、觸控目標補 min-height（bento head a／btn-sm a／public nav a）
 - [todo] 批次 C（Launchpad）：新專案 Modal 走 .modal-scrim/.modal-card 契約＋巢狀 Link
 - [todo] 批次 D（導航）：MobileNavigation 原生 <a> 整頁重載 → SPA 導航

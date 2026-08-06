@@ -25,7 +25,7 @@
 
 ## P0 — 破版/不可用（1 項）
 
-- [ ] **P0-01**｜`client/src/pages/ChatPage.tsx:513`｜overflow-clipping/popover｜/chat
+- [x] **P0-01** done(PR#462)｜`client/src/pages/ChatPage.tsx:513`｜overflow-clipping/popover｜/chat
   - 問題：≤560px 手機上「標注」picker 被 .dm-tools 的橫向捲動容器整個裁掉，功能完全打不開。
   - 修法：≤560px 把 dm-ref-pop 改成 portal 到 body 的貼底 sheet（沿用 .menu-surface.is-sheet 語彙）或 position:fixed 定位，別留在 overflow-x:auto 的 .dm-tools 內。
   - 驗證註記：逐項核實：(1) ChatPage.tsx:507-513 屬實——picker 以 inline 方式渲染在 .dm-tools 內的 position:relative span 中，全檔無 createPortal/is-sheet；(2) styles.css:1468 .mention-pop 為 absolute + bottom:calc(100%+6px) 向上展開，屬實；(3) styles.css:5044 確在 4758 行起的 @media (max-width:560px) 區塊內，.dm-tools 設 overflow-x:auto——依 CSS Overflow 規範 overflow-y 隨之計算為 auto，.dm-tools 成為雙軸裁切的捲動容器；panel 的 containing block（該 span）在 .dm-tools 內，故被裁切，且上方負溢位區不可捲達（.dm-tools padding-top 8px、panel 底緣在 span 頂上 6px，最多殘留約 2px 細條）。(4) 無任何緩解：styles.css 中 .dm-tools/.dm-ref-pop/.mention-pop 規則僅 1859-1874、5044-5046，styles.mobile-fab-01.css 零匹配，.mobile-nav/--chrome-bottom/--kb-inset 區塊皆未觸及；z-index:12 無法逃脫祖先 overflow 裁切。嚴重度未誇大：≤560px 按鈕可切換狀態但面板不可見不可點，標注功能在手機上完全不可用。
@@ -68,7 +68,7 @@
 - [ ] **P1-12**｜`client/src/pages/DatabasesPage.tsx:1433`｜觸控目標｜/databases
   - 問題：`<a className="btn-sm">`（檔案列的 icon-only「下載原檔」與工具列「匯出 CSV」）缺 `btn` 基底 class，吃不到全域 44px 觸控下限（該規則只涵蓋 button/.btn/.menu-item），實際命中區約 37×27px，且夾在一排 44px 按鈕之間極易誤觸鄰鈕。
   - 修法：改用 `<Button as="a" size="sm">`（會補上 `btn` 基底）或在 className 加上 `btn`。
-- [ ] **P1-13**｜`client/src/styles.css:5036`｜keyboard｜/chat
+- [x] **P1-13** done(PR#462)｜`client/src/styles.css:5036`｜keyboard｜/chat
   - 問題：私訊輸入列未接 --kb-inset 契約：iOS 鍵盤彈出時 .dm-layout 仍按 100dvh 定高（iOS 的 dvh 不隨鍵盤縮），輸入列與最新訊息被鍵盤蓋住、只靠 Safari 自動捲動勉強補救。
   - 修法：比照 .project-messages-sheet-root，讓 .chat-page.has-peer .dm-layout 高度再扣 var(--kb-inset, 0px)（Android 因 interactive-widget=resizes-content 會算出 0，不重複位移）。
 - [ ] **P1-14**｜`client/src/pages/MembersPage.tsx:292`｜touch-target｜/members

@@ -36,6 +36,10 @@
 - typecheck ✓；vitest 1751 passed / 1 failed / 37 skipped。
 - 唯一失敗：`server/services/userAvatar.test.ts`「resolves safe path inside avatars dir」——期望含 POSIX 分隔符 `avatars/…`，Windows 實得 `avatars\…`。base 乾淨 checkout 即失敗，**非本任務造成**（CI 在 Linux 會過）。依決策表：記錄後跳過，後續以「除此之外全綠」為基準。
 
+## D-008 client 測試本地紅測基線（2026-08-07）
+- `npm run test:client` 在本地 Windows 有 4 個檔既有紅測（mob03LongTaskCopy×2、Launchpad.teamCard×71、LoginPage.deviceTrust×2 等）——乾淨 base 以 git stash 對照同樣紅，屬本地環境因素（CI Linux 為準）。
+- 每批修復以「失敗集不增加」為判準，並優先跑受影響檔＋styles.contract.test.ts。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）
