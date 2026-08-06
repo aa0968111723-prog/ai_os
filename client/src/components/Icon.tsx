@@ -103,7 +103,9 @@ export type IconName =
   | "Wind"
   | "Flower2"
   | "LayoutGrid"
-  | "List";
+  | "List"
+  | "Users"
+  | "FolderGit2";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -678,6 +680,22 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M8 5h13" />
       <path d="M8 12h13" />
       <path d="M8 19h13" />
+    </>
+  ),
+  Users: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <path d="M16 3.128a4 4 0 0 1 0 7.744" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <circle cx="9" cy="7" r="4" />
+    </>
+  ),
+  FolderGit2: (
+    <>
+      <path d="M18 19a5 5 0 0 1-5-5v8" />
+      <path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5" />
+      <circle cx="13" cy="12" r="2" />
+      <circle cx="20" cy="19" r="2" />
     </>
   ),
 };

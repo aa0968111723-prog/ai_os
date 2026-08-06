@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "../api";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
 
 interface ChatMessage {
@@ -10,7 +10,9 @@ interface ChatMessage {
   contextUsed?: string[];
 }
 
-const QUICK_PROMPTS = [
+// 標上 IconName：不標的話 icon 會被推成 string，<Icon name={item.icon}> 型別對不上，
+// 而且打錯圖示名不會有人發現（PATHS 查不到就渲染成一顆空的 svg）
+const QUICK_PROMPTS: { icon: IconName; label: string; prompt: string }[] = [
   {
     icon: "Sparkles",
     label: "爆款短片主題",
