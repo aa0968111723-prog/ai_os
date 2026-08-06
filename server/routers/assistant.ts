@@ -10,6 +10,9 @@ import {
   normalizeWorldviewChipsPatch,
   summarizeWorldviewChipsPatch,
   CHIP_SOFT_MAX,
+  TONE_OPTIONS,
+  THEME_OPTIONS,
+  styleFamilyCheatsheet,
 } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
@@ -641,12 +644,15 @@ ${forceFinal
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
-- apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用內建詞（調性：莊嚴/溫暖/真誠/療癒/活潑/簡約；風格主風格：日系水彩/寫實攝影/3D 動畫/手繪插畫/極簡線條/水墨禪意；質感：膠片質感；主軸：苦→修行→轉變→感恩/禪修日常/佛法入門/活動紀實/感恩分享）或組內已有選項。
+- apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍須組長審核。
-世界觀 chips：風格先選媒材家族（寫實／插畫／3D）再選主風格，可選一個同家族質感；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
+世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
 一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
+<視覺風格速查>
+${styleFamilyCheatsheet()}
+</視覺風格速查>
 <可用模型速查>
 ${buildAiModelCheatsheet()}
 </可用模型速查>
