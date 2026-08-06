@@ -537,8 +537,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </Card>
       )}
 
-      {/* 工作台：繼續創作（最近專案） */}
-      <div className="daily-bento-grid">
+      {/* 工作台：繼續創作（最近專案）
+       *  這裡的 id 是手機底部中央「AI 工作」分頁的落點。它原本指向一個全庫都不存在的
+       *  錨點，點下去只亮起、捲不到任何地方（scrollToAnchorWhenReady 輪詢 3 秒後放棄）。
+       *  這塊是 dashboard 上唯一承載 AI 產出的區域（最近專案＋待處理生成），掛在這裡。 */}
+      <div className="daily-bento-grid" id="ai-work">
         {/* 繼續創作（最近專案） */}
         <div className="bento-card bento-continue">
           <div className="bento-card__head">
