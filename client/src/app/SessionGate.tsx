@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { AcceptInvitePage } from "../pages/AcceptInvitePage";
 import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
@@ -40,6 +41,54 @@ function RedirectFromLogin() {
   return <Redirect to={next ?? "/dashboard"} replace />;
 }
 
+/** bootstrap 超過此時間仍未回來 → 顯示可操作的重試，避免整站永遠「載入中…」 */
+const SESSION_LOADING_SOFT_MS = 6_000;
+const SESSION_LOADING_HARD_MS = 14_000;
+
+/** 會一直卡在「載入中」的 session 閘門：超過 soft 提示慢、超過 hard 給重試／去登入 */
+function SessionLoading({ onRetry }: { onRetry: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = window.setInterval(() => setElapsed(Date.now() - t0), 500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (elapsed < SESSION_LOADING_SOFT_MS) {
+    return <Meta as="p" role="status" aria-busy="true">載入中…</Meta>;
+  }
+
+  const stuck = elapsed >= SESSION_LOADING_HARD_MS;
+  return (
+    <div role="status" aria-busy={!stuck} style={{ maxWidth: 420, margin: "24px auto", padding: "0 16px" }}>
+      <Meta as="p" style={{ marginBottom: 12 }}>
+        {stuck
+          ? "連線偏慢或伺服器暫時沒回應——不是你被登出。可重試，或先去登入頁。"
+          : "連線比平常慢一點，還在等伺服器回應…"}
+      </Meta>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Button size="sm" variant="primary" onClick={onRetry}>重試</Button>
+        <Button size="sm" variant="ghost" onClick={() => { window.location.href = "/login"; }}>
+          去登入
+        </Button>
+        {stuck && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set("_r", String(Date.now()));
+              window.location.replace(url.toString());
+            }}
+          >
+            強制重新整理
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export type SessionGateProps = {
   me: SessionMe;
   meLoading: boolean;
@@ -80,7 +129,7 @@ export function SessionGate({
           // #281：auth.me 失敗時仍允許進登入表單（否則連不上後端時永遠看不到登入頁）
           <LoginPage />
         ) : meLoading ? (
-          <Meta as="p">載入中…</Meta>
+          <SessionLoading onRetry={onRetry} />
         ) : meError ? (
           <p className="error">
             系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
