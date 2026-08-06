@@ -6,6 +6,8 @@ import {
 } from "@shared/worldview";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import { PROJECT_KINDS } from "@shared/models";
+import { STYLE_VISUAL_ASSETS } from "./StyleVisualGallery";
+import { TONE_VISUAL_META } from "./ToneVisualPalette";
 import { Button, Card, Chip, EmptyState, Meta } from "./ui";
 import { WorldviewPreview } from "./WorldviewPreview";
 
@@ -41,6 +43,9 @@ export function WorldviewExampleCard({
   const patch = applyWorldviewFullExample(wv, kind, false);
   const hypothetical = parseWorldviewSafe({ ...wv, ...patch });
   const kindLabel = PROJECT_KINDS.find((k) => k.id === kind)?.label;
+
+  const examplePrimaryStyle = ex.styles[0];
+  const styleAsset = examplePrimaryStyle ? STYLE_VISUAL_ASSETS[examplePrimaryStyle] : null;
 
   return (
     <Card variant="quiet" className="wv-example" data-testid="wv-example-card">
@@ -82,19 +87,34 @@ export function WorldviewExampleCard({
 
       <dl className="wv-example__fields">
         <dt>這支片在講什麼</dt>
-        <dd>{ex.logline}</dd>
+        <dd className="wv-example__val-logline">{ex.logline}</dd>
         <dt>看完要記得哪一句</dt>
-        <dd>{ex.message}</dd>
+        <dd className="wv-example__val-message">{ex.message}</dd>
         <dt>氣氛</dt>
         <dd className="wv-example__chips">
-          {ex.tones.map((t) => (
-            <Chip key={t} as="span" selected>
-              {t}
-            </Chip>
-          ))}
+          {ex.tones.map((t) => {
+            const meta = TONE_VISUAL_META[t];
+            return (
+              <Chip key={t} as="span" selected className="wv-example__tone-chip">
+                {meta?.emoji ? <span style={{ marginRight: 4 }}>{meta.emoji}</span> : null}
+                {t}
+              </Chip>
+            );
+          })}
         </dd>
         <dt>畫風</dt>
-        <dd>{formatWorldviewStylesLabel(ex.styles) || ex.styles.join("、")}</dd>
+        <dd className="wv-example__style-preview">
+          {styleAsset?.image && (
+            <img
+              src={styleAsset.image}
+              alt={examplePrimaryStyle || "畫風範例"}
+              className="wv-example__style-thumb"
+            />
+          )}
+          <span className="wv-example__style-label">
+            {formatWorldviewStylesLabel(ex.styles) || ex.styles.join("、")}
+          </span>
+        </dd>
       </dl>
 
       <Meta as="p" className="wv-example__lead">

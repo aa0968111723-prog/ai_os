@@ -166,20 +166,28 @@ export async function collectDeviceHint(): Promise<DeviceHint | undefined> {
     // Safari／Firefox 沒有這個 API，取不到就維持上面的基本資訊。
     const uaData = (navigator as Navigator & { userAgentData?: NavigatorUAData }).userAgentData;
     if (uaData?.getHighEntropyValues) {
-      const high = await uaData.getHighEntropyValues([
-        "architecture",
-        "bitness",
-        "model",
-        "platformVersion",
-        "fullVersionList",
-      ]);
-      hint.model = high.model || undefined;
-      hint.arch = high.architecture || undefined;
-      hint.bitness = high.bitness || undefined;
-      hint.detailOsVersion = high.platformVersion || undefined;
-      // fullVersionList 含 "Not_A Brand" 之類的防呆假品牌，取最後一個真實品牌的版本
-      const real = high.fullVersionList?.filter((b) => !/not[\W_]*a[\W_]*brand/i.test(b.brand));
-      hint.detailBrowserVersion = real?.[real.length - 1]?.version;
+      try {
+        const highPromise = uaData.getHighEntropyValues([
+          "architecture",
+          "bitness",
+          "model",
+          "platformVersion",
+          "fullVersionList",
+        ]);
+        const timeoutPromise = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 200));
+        const high = await Promise.race([highPromise, timeoutPromise]);
+        if (high) {
+          hint.model = high.model || undefined;
+          hint.arch = high.architecture || undefined;
+          hint.bitness = high.bitness || undefined;
+          hint.detailOsVersion = high.platformVersion || undefined;
+          // fullVersionList 含 "Not_A Brand" 之類的防呆假品牌，取最後一個真實品牌的版本
+          const real = high.fullVersionList?.filter((b) => !/not[\W_]*a[\W_]*brand/i.test(b.brand));
+          hint.detailBrowserVersion = real?.[real.length - 1]?.version;
+        }
+      } catch {
+        /* ignore UA client hints errors */
+      }
     }
     return hint;
   } catch {
