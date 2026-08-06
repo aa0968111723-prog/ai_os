@@ -21,7 +21,7 @@ export function primaryActionTypesForPhase(
     case "visuals":
       return ["generate"];
     case "wrap":
-      return ["submit_approval"];
+      return [];
     default:
       return [];
   }
@@ -66,7 +66,7 @@ export function suggestedPhaseAfterAction(
   if (current === "visuals" && actionType === "generate") {
     return "wrap";
   }
-  // wrap：submit_approval 留在 wrap；導航打包不靠 phase 切換
+  // wrap 是最後一步：導航打包不靠 phase 切換
   return null;
 }
 
@@ -84,17 +84,13 @@ export function phaseAdvanceNotice(
 export function wrapNextStepHint(input: {
   sceneCount: number;
   scenesWithMedia: number;
-  approvedCount: number;
 }): string {
   if (input.sceneCount === 0) {
     return "還沒有分鏡。可回到「分鏡」拆鏡頭，或退出共創用完整版。";
   }
   const missing = Math.max(0, input.sceneCount - input.scenesWithMedia);
   if (missing > 0) {
-    return `還有 ${missing} 格缺畫面；可回「畫面」生成，或先送審已有的鏡頭。交付／打包請用工作台完整版匯出。`;
+    return `還有 ${missing} 格缺畫面；可回「畫面」生成。交付／打包請用工作台完整版匯出。`;
   }
-  if (input.approvedCount === 0) {
-    return "畫面已齊。可請助手提議「送審」，或退出共創到完整版打包匯出。";
-  }
-  return "已有過審鏡頭。可退出共創，到完整版打包／匯出交付。";
+  return "畫面已齊。可退出共創，到完整版打包／匯出交付。";
 }

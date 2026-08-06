@@ -126,7 +126,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
       const sub = await subscribeThisDevice(publicKey.data.publicKey);
       await subscribe.mutateAsync({ endpoint: sub.endpoint, keys: sub.keys, label: deviceLabel() });
       setThisEndpoint(sub.endpoint);
-      setNotice("本裝置已連結——審批、私訊、@提及、生成完成都會推到這裡（關頁也收得到）");
+      setNotice("本裝置已連結——成本核准、私訊、@提及、生成完成都會推到這裡（關頁也收得到）");
       await utils.push.devices.invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "啟用失敗，請再試一次");
@@ -219,7 +219,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             <Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 連結手機與電腦
           </h2>
           <Hint>
-            把通知送到你的手機和電腦——關掉網頁、關掉瀏覽器也收得到審批、私訊、@提及與生成完成。
+            把通知送到你的手機和電腦——關掉網頁、關掉瀏覽器也收得到成本核准、私訊、@提及與生成完成。
           </Hint>
         </header>
 

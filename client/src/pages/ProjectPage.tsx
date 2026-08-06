@@ -542,7 +542,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 通知深連結（#225／#250）：
   // - ?focus=messages：開留言（手機 sheet／桌機捲動）
   // - ?focus=scene-<id>：捲到該分鏡格＋高亮（手機收合列要等可見）
-  // - ?focus=pending：捲到分鏡區（待審彙總）
+  // - ?focus=pending：捲到分鏡區（待處理彙總）
   // - ?focus=generation-<id>：開資源抽屜生成紀錄並高亮該筆
   // 列表非同步載入且手機列可能 display:none——輪詢到可見再捲，逾時放棄。
   useEffect(() => {
@@ -970,10 +970,10 @@ export function ProjectPage({ id }: { id: string }) {
     },
     {
       label: "③ 交付",
-      // 有分鏡即算進入交付站；送審通過是加分，不當「必須才打勾」以免卡在空旅程
+      // 有分鏡即算進入交付站
       done: sceneCount > 0,
       target: "#stage-deliver",
-      hint: "把成品排進分鏡，再送審／打包",
+      hint: "把成品排進分鏡，再打包",
     },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
@@ -1010,7 +1010,6 @@ export function ProjectPage({ id }: { id: string }) {
     );
   };
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
-  const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
   const knowledgeCount = knowledge.data?.length;
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
@@ -2312,14 +2311,14 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 交付：分鏡・排片・送審・打包（SceneList 一體卡） */}
+          {/* ③ 交付：分鏡・排片・打包（SceneList 一體卡） */}
           <StageHead
             id="stage-deliver"
             num="③"
             title="交付"
-            desc="分鏡・排片・送審・打包"
+            desc="分鏡・排片・打包"
             accent="group-3"
-            hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
+            hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
           />
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
@@ -2338,14 +2337,14 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} projectTitle={project.data?.title} />
+              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} />
             </div>
           </CollabZone>
         </div>
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
             id 供 ?focus=messages 通知深連結捲動定位——這個錨點已被平行 PR 弄丟兩次
-            （#246、#251），approvals.deeplink.test.ts 的守衛就是為此而存在，別再拿掉。 */}
+            （#246、#251），別再拿掉。 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
             <div id="project-messages">

@@ -85,10 +85,6 @@ export const completePlanDraftSchema = z.object({
       sceneNo: z.number().int().positive(),
     }),
     stepBase.extend({
-      kind: z.literal("submit_approval"),
-      sceneNo: z.number().int().positive(),
-    }),
-    stepBase.extend({
       kind: z.literal("record_to_database"),
       dbRef: z.string().trim().max(40),
       data: z.record(z.unknown()),
@@ -466,8 +462,6 @@ export function resolveCompletePlanDraft(
         modelId: voiceModel.id,
         points: voiceModel.points,
       });
-    } else if (source.kind === "submit_approval") {
-      steps.push({ ...base, sceneNo: source.sceneNo, points: 0 });
     } else if (source.kind === "create_note") {
       steps.push({
         ...base,

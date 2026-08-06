@@ -3745,9 +3745,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: var(--border);
 }
 .scene-overview__rail span { min-width: 3px; height: 100%; }
+/* 有畫面＝綠、缺畫面＝灰（送審三態機移除後，色條只剩「備齊了沒」這一個維度） */
 .scene-overview__rail .draft { background: var(--border-strong); }
-.scene-overview__rail .review { background: var(--gold); }
-.scene-overview__rail .revision { background: var(--danger); }
 .scene-overview__rail .approved { background: var(--success); }
 .scene-overview__controls {
   display: flex;

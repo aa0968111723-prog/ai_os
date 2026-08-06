@@ -139,8 +139,6 @@ ok("🔒 檢視者不能跑助手動作", "檢視者" in deny.get("__error__", "
 pv = call("GET", mem, "projects.get", {"id": pid})
 ok("projects.get 回 myProjectRole=viewer", pv.get("myProjectRole") == "viewer")
 sid_v = scenes[0]["id"]
-deny = call("POST", mem, "approvals.submit", {"sceneId": sid_v})
-ok("🔒 檢視者不能送審", "檢視者" in deny.get("__error__", ""))
 deny = call("POST", mem, "director.splitScript", {"projectId": pid, "scriptText": "第一段內容。\n\n第二段內容。"})
 ok("🔒 檢視者不能拆分鏡(不扣點)", "檢視者" in deny.get("__error__", ""))
 deny = call("POST", mem, "scenes.remove", {"sceneId": sid_v})
@@ -156,16 +154,13 @@ deny = call("POST", mem, "prompts.remove", {"id": pr["id"]})
 ok("🔒 檢視者不能刪提示詞", "檢視者" in deny.get("__error__", ""))
 
 # ── P0 跨專案待辦彙總（Launchpad 角標＋頂欄計數的資料源）──
+# 分鏡送審已移除，彙總只剩「生成待核」，資料源改掛 generation.pendingSummary
 call("POST", admin, "projects.setProjectRole", {"projectId": pid, "userId": mem_id, "role": "editor"})
 pv2 = call("GET", mem, "projects.get", {"id": pid})
 ok("恢復編輯者後 myProjectRole=editor", pv2.get("myProjectRole") == "editor")
-ap = call("POST", mem, "approvals.submit", {"sceneId": sid_v})
-ok("編輯者可送審", isinstance(ap, dict) and "__error__" not in ap and ap.get("status") == "pending")
-summ = call("GET", mem, "approvals.pendingSummary", {"groupId": gid})
-row = next((x for x in summ.get("projects", []) if x["projectId"] == pid), None)
-ok("pendingSummary 回本案待審計數", row is not None and row["pendingApprovals"] >= 1)
-ok("pendingSummary 組層級總數", summ.get("totalPendingApprovals", 0) >= 1)
-deny = call("GET", mem, "approvals.pendingSummary", {"groupId": "00000000-0000-0000-0000-000000000000"})
+summ = call("GET", mem, "generation.pendingSummary", {"groupId": gid})
+ok("pendingSummary 回組層級待核生成總數", isinstance(summ, dict) and "totalAwaitingGenerations" in summ and isinstance(summ.get("projects"), list))
+deny = call("GET", mem, "generation.pendingSummary", {"groupId": "00000000-0000-0000-0000-000000000000"})
 ok("🔒 非本組不能看待辦彙總", "__error__" in deny)
 
 print("—— e2e-phase3 完成 ——")

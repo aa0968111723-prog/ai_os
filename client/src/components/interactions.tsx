@@ -90,7 +90,7 @@ export function ConfirmButton({
   triggerTitle,
   triggerAriaLabel,
 }: {
-  onConfirm: (reason?: string, tag?: string) => void;
+  onConfirm: (reason?: string) => void;
   children: ReactNode;
   title?: string;
   message?: string;
@@ -102,16 +102,6 @@ export function ConfirmButton({
     placeholder?: string;
     required?: boolean;
     presets?: string[];
-    /**
-     * 固定標籤（單選）。與 presets 的差別：presets 只是把句子貼進文字框（仍是自由文字），
-     * tags 選的是**契約裡的固定值**，會原樣交給 onConfirm 的第二個參數送到後端。
-     * 用於「退回原因只能是這幾種」的場合（#255 母版系列退回標籤）。
-     */
-    tags?: ReadonlyArray<{ value: string; meaning?: string }>;
-    /** 必須選一個標籤才能送出 */
-    tagRequired?: boolean;
-    /** 這些標籤本身講不清楚，一定要另外寫一句說明（例如「其他」） */
-    tagsNeedingNote?: readonly string[];
   };
   disabled?: boolean;
   triggerClassName?: string;
@@ -126,7 +116,6 @@ export function ConfirmButton({
   const [reasonError, setReasonError] = useState(false);
   /** 錯誤文案隨情境變（沒選標籤／標籤要補說明／理由必填），不要一律顯示「此欄必填」 */
   const [reasonErrorMsg, setReasonErrorMsg] = useState("請填寫理由後再送出（此欄必填）");
-  const [tag, setTag] = useState<string | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -138,7 +127,6 @@ export function ConfirmButton({
     setArmed(false);
     setReasonText("");
     setReasonError(false);
-    setTag(null);
     triggerRef.current?.focus();
   };
   const fail = (msg: string) => {
@@ -148,24 +136,14 @@ export function ConfirmButton({
   };
   const confirm = () => {
     const text = reasonText.trim();
-    if (reason?.tagRequired && !tag) {
-      fail("請先選一個原因標籤");
-      return;
-    }
-    if (tag && reason?.tagsNeedingNote?.includes(tag) && !text) {
-      fail(`選「${tag}」時必須另外寫一句說明`);
-      return;
-    }
-    // 有標籤時標籤本身已足夠成句——required 只在「完全沒有標籤」的舊用法下強制文字
-    if (reason?.required && !text && !tag) {
+    if (reason?.required && !text) {
       fail("請填寫理由後再送出（此欄必填）");
       return;
     }
-    onConfirm(reason ? text : undefined, tag ?? undefined);
+    onConfirm(reason ? text : undefined);
     setArmed(false);
     setReasonText("");
     setReasonError(false);
-    setTag(null);
   };
 
   useEffect(() => {
@@ -236,30 +214,6 @@ export function ConfirmButton({
           {reason && (
             <>
               {reason.label && <label htmlFor={reasonId}>{reason.label}</label>}
-              {/* 固定標籤（單選）：契約值，不是自由文字——選了才知道要重做哪一步 */}
-              {!!reason.tags?.length && (
-                <span role="group" aria-label="原因標籤" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                  {reason.tags.map((t) => {
-                    const on = tag === t.value;
-                    return (
-                      <button
-                        key={t.value}
-                        type="button"
-                        className="chip"
-                        aria-pressed={on}
-                        title={t.meaning}
-                        style={on ? { borderColor: "var(--danger)", color: "var(--danger-ink)", fontWeight: 600 } : undefined}
-                        onClick={() => {
-                          setTag(on ? null : t.value);
-                          setReasonError(false);
-                        }}
-                      >
-                        {t.value}
-                      </button>
-                    );
-                  })}
-                </span>
-              )}
               {/* 快捷理由 chips：手機打字成本高，點一下帶入可續編（退回理由等常用句） */}
               {!!reason.presets?.length && (
                 <span role="group" aria-label="常用理由" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>

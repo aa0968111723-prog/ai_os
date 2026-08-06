@@ -25,8 +25,8 @@
     },
     {
       "id": "e2e.phase2",
-      "title": "E2E：世界觀／分鏡／審批／點數",
-      "paths": ["server/routers/scenes.ts", "server/routers/approvals.ts", "scripts/e2e-phase2.py"],
+      "title": "E2E：世界觀／分鏡／點數",
+      "paths": ["server/routers/scenes.ts", "scripts/e2e-phase2.py"],
       "kind": "e2e-py",
       "suite": "phase2"
     },

@@ -78,9 +78,9 @@ export const AI_PROJECT_ROLES: readonly AiProjectRole[] = [
     title: "品管",
     summary: "過片與品質把關；VLM 評分預設關閉，以人類為主。",
     primary: "human",
-    kindHints: ["submit_approval", "request_approval", "wait_for_human", "create_task"],
+    kindHints: ["request_approval", "wait_for_human", "create_task"],
     humanKeeps: ["過片", "上架"],
-    defaultGoalHint: "把第 1 鏡送審，並列出仍需人工確認的風險",
+    defaultGoalHint: "列出第 1 鏡仍需人工確認的風險",
   },
 ] as const;
 

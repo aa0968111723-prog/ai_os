@@ -65,7 +65,7 @@ describe("創作代理短版 playbook（#133 PR-3）", () => {
     expect(short?.plannerHint).toContain("missingInformation");
     expect(short?.plannerHint).toContain("summary.rationale");
     expect(short?.suggestedKinds).toEqual([
-      "split_script", "create_scene", "generate", "voiceover", "submit_approval",
+      "split_script", "create_scene", "generate", "voiceover",
     ]);
   });
 

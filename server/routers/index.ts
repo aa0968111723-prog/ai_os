@@ -7,7 +7,6 @@ import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 import { scenesRouter } from "./scenes";
 import { quotaRouter } from "./quota";
-import { approvalsRouter } from "./approvals";
 import { directorRouter } from "./director";
 import { feedbackRouter } from "./feedback";
 import { modelsRouter } from "./models";
@@ -52,7 +51,6 @@ export const appRouter = router({
   messages: messagesRouter,
   scenes: scenesRouter,
   quota: quotaRouter,
-  approvals: approvalsRouter,
   director: directorRouter,
   feedback: feedbackRouter,
   knowledge: knowledgeRouter,

@@ -1,10 +1,9 @@
 /**
- * 母版系列面板（#255 第 1 期）與退回標籤（第 2 期）的行為測試。
+ * 母版系列面板（#255 第 1 期）的行為測試。
  *
  * 這裡守的是 SOP 的兩條硬規則：
  *   1. 沒有母版就不能開集——組員看到的是「請組長先建立」，不是一個會生出野生專案的按鈕。
  *   2. 4 格沒填齊不能送出；送出的專案名必須是 `系列｜日期｜主題`。
- * 以及退回標籤：只能選固定 5 種，「其他」一定要另寫一句說明。
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -63,8 +62,6 @@ vi.mock("wouter", () => ({
 vi.mock("./Icon", () => ({ Icon: () => null }));
 
 import { SeriesTemplatePanel } from "./SeriesTemplatePanel";
-import { ConfirmButton } from "./interactions";
-import { REWORK_TAGS } from "@shared/seriesTemplate";
 
 const GROUP = "11111111-1111-4111-8111-111111111111";
 
@@ -137,55 +134,5 @@ describe("母版系列面板", () => {
     render(<SeriesTemplatePanel groupId={GROUP} isLeader={false} />);
     expect(screen.getByText("已開 1 集")).toBeTruthy();
     expect(screen.getByRole("link", { name: /留一點空隙/ }).getAttribute("href")).toBe("/p/e1");
-  });
-});
-
-describe("退回標籤（固定 5 種）", () => {
-  const openReject = async (onConfirm: (reason?: string, tag?: string) => void) => {
-    render(
-      <ConfirmButton
-        title="退回這一鏡"
-        confirmLabel="退回"
-        reason={{
-          label: "退回原因",
-          tags: REWORK_TAGS,
-          tagRequired: true,
-          tagsNeedingNote: ["其他"],
-        }}
-        onConfirm={onConfirm}
-      >
-        退回
-      </ConfirmButton>,
-    );
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-  };
-
-  it("沒選標籤就按退回 → 擋下並提示", async () => {
-    const onConfirm = vi.fn();
-    await openReject(onConfirm);
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-    expect(onConfirm).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain("請先選一個原因標籤");
-  });
-
-  it("選了一般標籤就能直接退回，標籤原樣往上送", async () => {
-    const onConfirm = vi.fn();
-    await openReject(onConfirm);
-    await userEvent.click(screen.getByRole("button", { name: "結構跑掉" }));
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-    expect(onConfirm).toHaveBeenCalledWith("", "結構跑掉");
-  });
-
-  it("「其他」沒寫說明會被擋下，寫了才放行", async () => {
-    const onConfirm = vi.fn();
-    await openReject(onConfirm);
-    await userEvent.click(screen.getByRole("button", { name: "其他" }));
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-    expect(onConfirm).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain("必須另外寫一句說明");
-
-    await userEvent.type(screen.getByLabelText("退回原因"), "檔名要重編");
-    await userEvent.click(screen.getByRole("button", { name: "退回" }));
-    expect(onConfirm).toHaveBeenCalledWith("檔名要重編", "其他");
   });
 });

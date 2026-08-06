@@ -744,7 +744,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           summary: "等待成本核准，尚未送出 provider",
         }).catch(() => undefined);
       }
-      // 系統訊息通知組內（比照審批三態機）；失敗不擋主流程
+      // 系統訊息通知組內；失敗不擋主流程
       await db
         .insert(schema.messages)
         .values({

@@ -5,13 +5,13 @@ import { Icon } from "../../components/Icon";
 import { MenuSurface } from "./MenuSurface";
 
 /**
- * 頂欄待辦徽章（UX 高：頂欄完全不顯示待審/待核→多專案組長必然漏審）：
- * 作用組的「分鏡待審＋生成待核」總數。點鈴鐺展開通知清單，逐案列出是哪個專案、
+ * 頂欄待辦徽章（UX 高：頂欄完全不顯示待核→多專案組長必然漏核）：
+ * 作用組的「生成待核」總數。點鈴鐺展開通知清單，逐案列出是哪個專案、
  * 各差幾筆，點某一列直接跳到該專案；也保留「回作業台看全部」。0 筆不佔版面。
  * CSP 下自製下拉（無外部庫）：點外面或 Esc 關閉，比照 AccountMenu。
  */
 export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
-  const summary = trpc.approvals.pendingSummary.useQuery({ groupId }, { refetchInterval: 60_000, enabled: !!groupId });
+  const summary = trpc.generation.pendingSummary.useQuery({ groupId }, { refetchInterval: 60_000, enabled: !!groupId });
   // 專案名稱查詢（pendingSummary 只回 projectId）：與 Launchpad 同一條 query，react-query 會去重快取
   const projectList = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
   const [open, setOpen] = useState(false);
@@ -21,14 +21,14 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
   const close = useCallback(() => setOpen(false), []);
 
   const summ = summary.data;
-  const total = summ ? summ.totalPendingApprovals + summ.totalAwaitingGenerations : 0;
+  const total = summ ? summ.totalAwaitingGenerations : 0;
   // 0 筆（或還沒載到）不佔版面——所有 hook 已在上方無條件呼叫，這裡提早 return 安全
   if (!summ || total === 0) return null;
   const titleOf = (pid: string) => projectList.data?.find((p) => p.id === pid)?.title ?? "專案";
   // 逐案列（各專案至少一筆待辦）：待辦多的排前面，讓最該處理的浮到頂
   const rows = summ.projects
-    .filter((p) => p.pendingApprovals + p.awaitingGenerations > 0)
-    .sort((a, b) => (b.pendingApprovals + b.awaitingGenerations) - (a.pendingApprovals + a.awaitingGenerations));
+    .filter((p) => p.awaitingGenerations > 0)
+    .sort((a, b) => b.awaitingGenerations - a.awaitingGenerations);
   return (
     <div className="menu-wrap">
       <button
@@ -38,7 +38,7 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{ color: "var(--gold-ink)", cursor: "pointer" }}
-        title={`分鏡待審 ${summ.totalPendingApprovals}・生成待核准 ${summ.totalAwaitingGenerations}——點開看是哪些專案`}
+        title={`生成待核准 ${summ.totalAwaitingGenerations}——點開看是哪些專案`}
       >
         <Icon name="Bell" size={14} />
         <span className="mono">{total}</span>
@@ -57,12 +57,7 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
               <span style={{ fontWeight: 600, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {titleOf(p.projectId)}
               </span>
-              <span className="meta">
-                {[
-                  p.pendingApprovals > 0 ? `分鏡待審 ${p.pendingApprovals}` : null,
-                  p.awaitingGenerations > 0 ? `生成待核 ${p.awaitingGenerations}` : null,
-                ].filter(Boolean).join("・")}
-              </span>
+              <span className="meta">生成待核 {p.awaitingGenerations}</span>
             </Link>
           ))}
           <div className="menu-sep" />
