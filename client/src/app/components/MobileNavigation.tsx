@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
@@ -13,19 +13,21 @@ const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] 
 /** wouter 的 location 不含 hash——分頁列有三顆都指向 /dashboard（帶不同 hash），
  *  只比 pathname 會三顆同時亮；這裡自己追 hash 讓「今日／專案／AI 工作」互斥。
  *  渲染時直接讀 window.location.hash（pushState 導航靠 useLocation 重繪即拿到新值），
- *  hashchange/popstate 監聽只補「純 hash 變化」不經 wouter 的情況。 */
-function useHash(): string {
+ *  hashchange/popstate 監聽只補「純 hash 變化」不經 wouter 的情況。
+ *  回傳的 sync 給「只清掉 hash」的導航用：那種切換不發 hashchange，wouter 的
+ *  location 快照（pathname+search）也沒變，沒人叫得動重繪。 */
+function useHash(): [string, () => void] {
   const [, bump] = useState(0);
+  const sync = useCallback(() => bump((n) => n + 1), []);
   useEffect(() => {
-    const sync = () => bump((n) => n + 1);
     window.addEventListener("hashchange", sync);
     window.addEventListener("popstate", sync);
     return () => {
       window.removeEventListener("hashchange", sync);
       window.removeEventListener("popstate", sync);
     };
-  }, []);
-  return typeof window === "undefined" ? "" : window.location.hash;
+  }, [sync]);
+  return [typeof window === "undefined" ? "" : window.location.hash, sync];
 }
 
 const MORE_ITEMS: { href: string; label: string; description: string; icon: IconName; match: string[] }[] = [
@@ -52,7 +54,7 @@ function scrollToAnchorWhenReady(anchor: string) {
 
 export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
   const [location, navigate] = useLocation();
-  const hash = useHash();
+  const [hash, syncHash] = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
   // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」——補上最小手勢：
   // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉
@@ -151,7 +153,25 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
               {content}
             </a>
           ) : (
-            <Link key={item.label} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
+            <Link
+              key={item.label}
+              href={item.href}
+              className={active ? "active" : ""}
+              aria-current={active ? "page" : undefined}
+              onClick={(e) => {
+                // 「今日」＝同 pathname 但不帶 hash。從 /dashboard#projects 回來時 wouter
+                // 的 pushState 雖然清得掉 hash，卻不會發 hashchange，快照（pathname+search）
+                // 也一樣 → React 直接跳過重繪：分頁列還亮在「專案」、畫面停在原處，
+                // 使用者看到的就是「按了沒反應」。自己導航後補 syncHash()，再捲回頁首，
+                // 讓它跟其他分頁一樣真的換頁。
+                if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button !== 0) return;
+                if (location !== pathname || !window.location.hash) return;
+                e.preventDefault();
+                navigate(item.href);
+                syncHash();
+                window.scrollTo({ top: 0 });
+              }}
+            >
               {content}
             </Link>
           );
