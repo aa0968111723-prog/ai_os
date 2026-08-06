@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { trpc } from "../../api";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { Button, Hint, Meta } from "../../components/ui";
 
 export type GenerationSourceAsset = { id: string; title: string; kind: string };
@@ -158,6 +159,8 @@ export function GenerationSourcePicker({
           <input
             id={`${idPrefix}-url`}
             value={sourceUrl}
+            // 鍵盤契約：聚焦時捲進可視帶（讓開 --chrome-bottom/--kb-inset；已可見時 no-op）
+            onFocus={(e) => focusAndReveal(e.currentTarget)}
             onChange={(e) => {
               onSourceUrlChange(e.target.value);
               onSourceUrlError("");

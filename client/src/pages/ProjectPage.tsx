@@ -57,6 +57,7 @@ import {
 } from "../features/creation-workbench/modes/DirectGenerateMode";
 import { projectCanEdit } from "../features/creation-workbench/generationGates";
 import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-workbench/workbenchNav";
+import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import {
   PROJECT_CONTEXT_REVEAL_EVENT,
   formatBringInSummary,
@@ -705,7 +706,7 @@ export function ProjectPage({ id }: { id: string }) {
       });
       setCtxSectionOpen("characters", true);
       requestAnimationFrame(() => {
-        document.getElementById("sec-characters")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrollToSelector("#sec-characters");
       });
     },
   });
@@ -967,9 +968,9 @@ export function ProjectPage({ id }: { id: string }) {
     revealWorkbenchAnchor("#sec-studio", { projectId: id });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
-        el?.focus({ preventScroll: true });
-        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        // focusAndReveal：讓開鍵盤與 --chrome-bottom、尊重 reduced-motion
+        //（block:center 以 layout viewport 置中，iOS 鍵盤彈出時會把欄位藏在鍵盤下）
+        focusAndReveal(document.getElementById("gen-prompt"));
       });
     });
     return true;
@@ -1641,9 +1642,7 @@ export function ProjectPage({ id }: { id: string }) {
                     onClick={() => {
                       setCtxSectionOpen("worldview", true);
                       requestAnimationFrame(() => {
-                        const el = document.getElementById("wv-logline") as HTMLInputElement | null;
-                        el?.focus();
-                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        focusAndReveal(document.getElementById("wv-logline"));
                       });
                     }}
                   >
@@ -1677,9 +1676,7 @@ export function ProjectPage({ id }: { id: string }) {
                     revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     requestAnimationFrame(() => {
                       requestAnimationFrame(() => {
-                        const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
-                        el?.focus({ preventScroll: true });
-                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        focusAndReveal(document.getElementById("gen-prompt"));
                       });
                     });
                   }}
@@ -1995,7 +1992,7 @@ export function ProjectPage({ id }: { id: string }) {
                                       setCtxSectionOpen("characters", true);
                                       setToneTab("costume");
                                       requestAnimationFrame(() => {
-                                        document.getElementById("sec-characters")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                        scrollToSelector("#sec-characters");
                                       });
                                     }}
                                   >

@@ -371,7 +371,11 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
     setStartAt(toDatetimeLocal(start));
     setEndAt("");
     setCreateOpen(true);
-    formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // 尊重 prefers-reduced-motion（同檔 revealPlannerSection 的既有寫法；顯式 smooth 蓋不掉 CSS 開關）
+    formRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "center",
+    });
     // 表單在手機是收合的，展開要等一次 render；捲動動畫結束後才聚焦，才不會被捲走
     setTimeout(() => {
       document.querySelector<HTMLElement>('[aria-label="排程標題"]')?.focus?.();
@@ -554,7 +558,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
               {g.items.map((ev) => {
                 const projTitle = projectTitleOf(ev.projectId);
                 return (
-                  <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
+                  <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row gen-row--schedule" style={{ alignItems: "center" }}>
                     <span className="mono" style={{ fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
                       <Icon name="Clock" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
                       {fmtTime(ev.startsAt)}
@@ -746,7 +750,7 @@ function CalendarView({
           {selectedItems.map((ev) => {
             const projTitle = projectTitleOf(ev.projectId);
             return (
-              <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
+              <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row gen-row--schedule" style={{ alignItems: "center" }}>
                 <span className="mono" style={{ fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
                   <Icon name="Clock" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
                   {fmtTime(ev.startsAt)}{ev.endsAt ? `–${fmtTime(ev.endsAt)}` : ""}
@@ -904,7 +908,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
           {list.data.map((n) => {
             const projTitle = projectTitleOf(n.projectId);
             return (
-              <div key={n.id} id={`note-${n.id}`} className="gen-row" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
+              <div key={n.id} id={`note-${n.id}`} className="gen-row gen-row--note" style={{ alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                     {n.title}

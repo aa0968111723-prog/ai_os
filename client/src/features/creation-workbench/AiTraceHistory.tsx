@@ -26,7 +26,9 @@ export function AiTraceHistory({ projectId }: { projectId: string }) {
         實際運作紀錄
       </Button>
       {open ? (
-        <Card style={{ position: "absolute", right: 12, zIndex: 20, width: "min(720px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto", padding: 12, marginTop: 6 }}>
+        // ai-trace-pop：≤820 由 CSS 覆寫 max-height（dvh＋讓開 --chrome-bottom）與 z-index
+        // （70vh＋z20 在手機會被固定分頁列 z44 蓋住底緣，最後幾列看不見）
+        <Card className="ai-trace-pop" style={{ position: "absolute", right: 12, zIndex: 20, width: "min(720px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto", padding: 12, marginTop: 6 }}>
           <strong>專案 AI 實際運作紀錄</strong>
           <Meta as="p">永久隨專案保存，只有該次操作的發起者本人可讀；敏感金鑰與模型私密推理不會保存。</Meta>
           {list.isLoading ? <Meta as="p">載入中…</Meta> : null}
