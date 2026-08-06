@@ -37,8 +37,21 @@ const MORE_ITEMS: { href: string; label: string; description: string; icon: Icon
   { href: "/downloads", label: "共用下載", description: "取得團隊共用文件", icon: "Download", match: ["/downloads"] },
 ];
 
+/** SPA 導航後等目標區塊掛載完成再捲過去（lazy chunk／資料載入中時 getElementById 還拿不到）。
+ *  原生 <a> 整頁重載時是瀏覽器載入完自動捲錨點；這裡補上等價行為，捲動位置同樣吃
+ *  既有 scroll-margin CSS。3 秒還等不到就放棄（僅少捲動、不影響導航本身）。 */
+function scrollToAnchorWhenReady(anchor: string) {
+  const deadline = Date.now() + 3000;
+  const tick = () => {
+    const el = document.getElementById(anchor);
+    if (el) el.scrollIntoView();
+    else if (Date.now() < deadline) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const hash = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = MORE_ITEMS.some((item) => item.match.some((prefix) => location.startsWith(prefix)));
@@ -101,7 +114,23 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
             </>
           );
           return item.href.includes("#") ? (
-            <a key={item.label} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
+            <a
+              key={item.label}
+              href={item.href}
+              className={active ? "active" : ""}
+              aria-current={active ? "page" : undefined}
+              onClick={(e) => {
+                // 帶 hash 的分頁不能交給原生 <a>：wouter 只攔 Link，跨 pathname 點擊
+                // 會整頁重載（重跑 bootstrap、重抓所有 chunk），弱網下切個分頁要等數秒。
+                // 同 pathname 的純 hash 跳轉本來就不重載，保留原生錨點捲動；
+                // 修飾鍵／中鍵（開新分頁）也交還瀏覽器。
+                if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button !== 0) return;
+                if (location === pathname) return;
+                e.preventDefault();
+                navigate(item.href);
+                if (anchor) scrollToAnchorWhenReady(anchor);
+              }}
+            >
               {content}
             </a>
           ) : (

@@ -38,6 +38,18 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("link", { name: "AI 工作" })).not.toHaveAttribute("aria-current");
   });
 
+  it("switches dashboard tabs without a full page reload from other routes", async () => {
+    // 帶 hash 的分頁原本是原生 <a>：wouter 不攔，跨 pathname 點擊＝整頁重載
+    //（重跑 bootstrap、重抓 chunk）。修正後走 pushState——jsdom 裡若還是原生導航，
+    // location 不會變（jsdom 不實作跨頁導航），此斷言就會抓到回歸。
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/planner");
+    render(<MobileNavigation />);
+    await user.click(screen.getByRole("link", { name: "專案" }));
+    expect(window.location.pathname).toBe("/dashboard");
+    expect(window.location.hash).toBe("#projects");
+  });
+
   it("keeps 專案 tab active on project detail pages", () => {
     window.history.replaceState(null, "", "/p/some-project-id");
     render(<MobileNavigation />);
