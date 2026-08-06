@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Aios v3「ribbon-light」品牌色（與 client/src/styles.css 對齊） -->
+    <color name="colorPrimary">#F3F0E8</color>
+    <color name="colorPrimaryDark">#E7E0D3</color>
+    <color name="colorAccent">#C23A0C</color>
+    <color name="aiosPaper">#F3F0E8</color>
+</resources>

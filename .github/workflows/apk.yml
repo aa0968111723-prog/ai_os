@@ -1,0 +1,79 @@
+# 側載 APK 自動建置（任務第 7 節 B）：
+# 打 tag `apk-v*`（例：apk-v1.0.0）即建置 signed release APK 並發佈到 GitHub Releases。
+#
+# 簽章金鑰二選一：
+# 1.（建議，更新不換簽）repo Secrets 設 ANDROID_KEYSTORE_B64（keystore 檔 base64）、
+#    ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD。
+# 2. 未設 Secrets 時自動產生一把新 keystore，並隨 Release 附上（aios-release.keystore）
+#    ——請下載保存並照 INSTALL.md 設成 Secrets，否則下一版簽章不同、裝置得先解除安裝才能更新。
+name: apk
+on:
+  push:
+    tags: ["apk-v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: Install deps
+        run: npm ci
+      - name: Build web（webDir 形式需求；App 實際載入 server.url 線上站）
+        run: npm run build
+      - name: Capacitor sync
+        run: npx cap sync android
+      - name: Prepare keystore
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > aios-release.keystore
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+            echo "pass=$KS_PASS" >> "$GITHUB_OUTPUT"
+            echo "alias=${KEY_ALIAS:-aios}" >> "$GITHUB_OUTPUT"
+            echo "keypass=${KEY_PASS:-$KS_PASS}" >> "$GITHUB_OUTPUT"
+          else
+            PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -v -keystore aios-release.keystore -alias aios \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" \
+              -dname "CN=Aios, OU=AiosTeam, O=Aios, L=Taipei, C=TW"
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+            echo "pass=$PASS" >> "$GITHUB_OUTPUT"
+            echo "alias=aios" >> "$GITHUB_OUTPUT"
+            echo "keypass=$PASS" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon
+      - name: Sign APK
+        env:
+          ANDROID_HOME_TOOLS: ${{ env.ANDROID_HOME }}
+        run: |
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BT/zipalign" -f 4 \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk aios-aligned.apk
+          "$ANDROID_HOME/build-tools/$BT/apksigner" sign \
+            --ks aios-release.keystore \
+            --ks-pass pass:${{ steps.keystore.outputs.pass }} \
+            --ks-key-alias ${{ steps.keystore.outputs.alias }} \
+            --key-pass pass:${{ steps.keystore.outputs.keypass }} \
+            --out aios-${{ github.ref_name }}.apk aios-aligned.apk
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Aios Android ${{ github.ref_name }}"
+          body: |
+            側載 APK（不經商店）。安裝步驟見 repo 的 INSTALL.md。
+            ${{ steps.keystore.outputs.generated == 'true' && '⚠️ 本版使用「自動產生」的簽章金鑰（Secrets 未設定）：請下載附件 aios-release.keystore 並依 INSTALL.md 設成 repo Secrets，否則下一版簽章不同、更新前得先解除安裝。' || '✅ 使用 repo Secrets 的固定簽章金鑰，可直接覆蓋更新。' }}
+          files: |
+            aios-${{ github.ref_name }}.apk
+            ${{ steps.keystore.outputs.generated == 'true' && 'aios-release.keystore' || '' }}
