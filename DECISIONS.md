@@ -40,6 +40,12 @@
 - `npm run test:client` 在本地 Windows 有 4 個檔既有紅測（mob03LongTaskCopy×2、Launchpad.teamCard×71、LoginPage.deviceTrust×2 等）——乾淨 base 以 git stash 對照同樣紅，屬本地環境因素（CI Linux 為準）。
 - 每批修復以「失敗集不增加」為判準，並優先跑受影響檔＋styles.contract.test.ts。
 
+## D-010 字型 CSS 非阻塞化（紅線邊界說明）
+- P1-19 修法（PR #468）把兩份中文字型 index.css 移出 render-blocking CSS，桌機「穩態渲染」完全相同，但首載瞬間字型改為 swap-in（原本 CSS 同支早到）。判定：紅線精神是桌機像素級不變（截圖為穩態），此為過渡行為非版面變更；效益（阻塞 CSS gzip 121→33KB）同時惠及桌機。回滾：把 fonts.css 兩行 @import 搬回 styles.css 頂端即可。
+
+## D-011 ProjectPage chunk 瘦身 DEFERRED
+- ProjectPage chunk gzip 151KB 超 100KB 門檻，但瘦身需把 workbench/modes 拆成巢狀 lazy——動共用結構、迴歸面大（該頁有 hookOrder/workbenchContract 等契約測試防守）。標 DEFERRED，待 P2 掃尾與元件重製完成後獨立 PR 評估。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）

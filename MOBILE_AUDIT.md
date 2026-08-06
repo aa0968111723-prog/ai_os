@@ -83,10 +83,10 @@
 - [x] **P1-17** done(PR#464)｜`client/src/styles.css:6387`｜keyboard-overlap｜作業台 /launchpad 與 /workflows「建立專案」彈窗
   - 問題：新專案彈窗未走既有 .modal-scrim/.modal-card 契約：90vh（非 dvh）置中卡、backdrop padding 無 safe-area、完全沒接 --kb-inset，手機鍵盤彈出時表單欄位與送出鈕被蓋，且 90vh(=大視口) 在 iOS 工具列展開時超出可視高。
   - 修法：改掛 .modal-scrim/.modal-card（自動獲得 ≤560 貼底 sheet＋kb-inset＋safe-area），或把 max-height 改 min(90dvh, calc(100dvh - var(--kb-inset,0px) - 32px)) 並在 backdrop padding 套 max(20px, var(--safe-*))。
-- [ ] **P1-18**｜`client/src/brand.ts:30`｜圖片格式與尺寸／LCP｜全站（AppHeader 頂欄，priority 載入）＋ /login hero ＋ / landing
+- [x] **P1-18** done(PR#468)｜`client/src/brand.ts:30`｜圖片格式與尺寸／LCP｜全站（AppHeader 頂欄，priority 載入）＋ /login hero ＋ / landing
   - 問題：首屏品牌 logo 用 524KB 的 @2x PNG（1440×632）渲染頂欄 26px 高的位置，且 ≤560px 手機上該 img 被 CSS 藏起後仍照樣下載，再疊加 132KB 的 512px mark PNG——每個手機首屏白吃約 650KB 圖片頻寬，直接搶 LCP。
   - 修法：產出貼合顯示尺寸的 WebP/AVIF 變體（頂欄 ~264×116、hero ~330×145 的 1x/2x，各約 5–20KB），responsive 模式改用 <picture media> 或 matchMedia 條件渲染，讓手機根本不輸出隱藏的 full-img。
-- [ ] **P1-19**｜`client/src/styles.css:25`｜字體子集化／首屏 blocking CSS｜全站首屏（單一 render-blocking CSS bundle）
+- [x] **P1-19** done(PR#468)｜`client/src/styles.css:25`｜字體子集化／首屏 blocking CSS｜全站首屏（單一 render-blocking CSS bundle）
   - 問題：styles.css 頂端 @import 兩套 CJK 可變字型的 fontsource index.css，build 後全部併進唯一一支 render-blocking CSS——400KB（gzip 118KB）、內含 215 條 unicode-range @font-face 宣告，手機 4G 上 FCP/LCP 都要等它下載完。
   - 修法：把兩套 CJK @font-face 宣告抽成獨立非阻塞樣式表（media=print onload 或 build 後注入 preload+async），首屏先走既有 system-ui fallback 堆疊，font-display:swap 接手換字。
 
