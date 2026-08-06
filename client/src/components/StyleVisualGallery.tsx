@@ -16,60 +16,11 @@ import {
 } from "@shared/worldview";
 import { Icon } from "./Icon";
 import { Chip, Meta, Hint } from "./ui";
+import { STYLE_VISUAL_ASSETS, StyleImage, styleAssetOf } from "./StyleImage";
 
-/** 內建風格視覺資產與色彩對應 */
-export const STYLE_VISUAL_ASSETS: Record<
-  string,
-  {
-    image: string;
-    tagline: string;
-    color: string;
-    icon: string;
-  }
-> = {
-  "寫實攝影": {
-    image: "/styles/realistic_photo.jpg",
-    tagline: "85mm 鏡頭質感・自然光影與細節",
-    color: "#eab308",
-    icon: "Camera",
-  },
-  "日系水彩": {
-    image: "/styles/jp_watercolor.jpg",
-    tagline: "柔和透明水彩・粉彩清新日系",
-    color: "#06b6d4",
-    icon: "Palette",
-  },
-  "3D 動畫": {
-    image: "/styles/3d_animation.jpg",
-    tagline: "皮克斯迪士尼風・立體光澤與可愛渲染",
-    color: "#a855f7",
-    icon: "Box",
-  },
-  "手繪插畫": {
-    image: "/styles/hand_drawn.jpg",
-    tagline: "繪本手感線條・溫馨手作童話風",
-    color: "#f97316",
-    icon: "Edit3",
-  },
-  "極簡線條": {
-    image: "/styles/minimalist_line.jpg",
-    tagline: "單線連續輪廓・洗鍊現代禪風",
-    color: "#64748b",
-    icon: "Feather",
-  },
-  "膠片質感": {
-    image: "/styles/film_grain.jpg",
-    tagline: "35mm 復古顆粒・溫暖底片光暈",
-    color: "#d97706",
-    icon: "Film",
-  },
-  "水墨禪意": {
-    image: "/styles/zen_ink.jpg",
-    tagline: "傳統東方宣紙留白・空靈意境筆觸",
-    color: "#475569",
-    icon: "Moon",
-  },
-};
+// 資產表本體搬到 StyleImage.tsx（與 <picture>／LQIP 邏輯放在一起）；
+// 這裡再匯出一次，既有引用（StoryFlowVisualizer、WorldviewExampleCard、測試）不必改路徑。
+export { STYLE_VISUAL_ASSETS } from "./StyleImage";
 
 export interface StyleVisualGalleryProps {
   styles: string[];
@@ -113,7 +64,7 @@ export function StyleVisualGallery({
     styles.length !== canonical.length || styles.some((v, i) => v !== canonical[i]);
 
   // 當前選中的主風格 meta
-  const currentLookMeta = slots.look ? STYLE_VISUAL_ASSETS[slots.look] : null;
+  const currentLookMeta = styleAssetOf(slots.look);
 
   return (
     <div className="style-visual-gallery" role="group" aria-labelledby={labelledBy}>
@@ -178,9 +129,9 @@ export function StyleVisualGallery({
               </div>
 
               <div className="style-card-grid">
-                {lookOpts.map((name) => {
+                {lookOpts.map((name, i) => {
                   const on = slots.look === name;
-                  const asset = STYLE_VISUAL_ASSETS[name];
+                  const asset = styleAssetOf(name);
                   const en = STYLE_EN[name];
 
                   return (
@@ -193,37 +144,30 @@ export function StyleVisualGallery({
                       aria-pressed={on}
                     >
                       <div className="style-visual-card__media">
-                        {asset?.image ? (
-                          <img
-                            src={asset.image}
-                            alt={name}
-                            className="style-visual-card__img"
-                            loading="lazy"
-                            onError={(e) => {
-                              // 圖片載入失敗時降級為漸層
-                              (e.currentTarget as HTMLImageElement).style.display = "none";
-                            }}
-                          />
-                        ) : null}
+                        {/* 底層漸層：圖還沒到／載入失敗時都有底色，不會出現空白破框 */}
                         <div
                           className="style-visual-card__fallback-gradient"
                           style={{
                             background: asset?.color
-                              ? `linear-gradient(135deg, ${asset.color}40, ${asset.color}15)`
+                              ? `linear-gradient(135deg, ${asset.color}55, ${asset.color}18)`
                               : "var(--surface-3)",
                           }}
+                        />
+                        <StyleImage
+                          asset={asset}
+                          alt={name}
+                          variant="card"
+                          className="style-visual-card__img"
+                          // 前兩張是進頁就看得到的，不延後載入；其餘交給 lazy
+                          eager={i < 2}
                         />
 
                         {on && (
                           <div className="style-visual-card__badge-selected">
-                            <Icon name="Check" size={14} />
+                            <Icon name="Check" size={12} />
                             <span>主風格</span>
                           </div>
                         )}
-
-                        <div className="style-visual-card__family-tag">
-                          {STYLE_FAMILY_META[activeFamily].label}
-                        </div>
                       </div>
 
                       <div className="style-visual-card__body">
@@ -250,7 +194,7 @@ export function StyleVisualGallery({
                   <div className="style-texture-grid">
                     {textureOpts.map((t) => {
                       const on = slots.texture === t;
-                      const asset = STYLE_VISUAL_ASSETS[t];
+                      const asset = styleAssetOf(t);
                       return (
                         <button
                           key={t}
@@ -260,14 +204,12 @@ export function StyleVisualGallery({
                           aria-pressed={on}
                           title={on ? `${t}（已疊加質感・點擊取消）` : `疊加 ${t}`}
                         >
-                          {asset?.image && (
-                            <img
-                              src={asset.image}
-                              alt={t}
-                              className="style-texture-card__thumb"
-                              loading="lazy"
-                            />
-                          )}
+                          <StyleImage
+                            asset={asset}
+                            alt={t}
+                            variant="thumb"
+                            className="style-texture-card__thumb"
+                          />
                           <div className="style-texture-card__info">
                             <div className="style-texture-card__header">
                               <span className="style-texture-card__name">{t}</span>
@@ -417,8 +359,13 @@ export function StyleVisualGallery({
       {/* 視覺出圖風格摘要看板 (Active Style Showcase Banner) */}
       <div className="style-summary-banner" aria-live="polite">
         <div className="style-summary-banner__thumb">
-          {currentLookMeta?.image ? (
-            <img src={currentLookMeta.image} alt={slots.look || "風格縮圖"} />
+          {currentLookMeta ? (
+            <StyleImage
+              asset={currentLookMeta}
+              alt={slots.look || "風格縮圖"}
+              variant="thumb"
+              eager
+            />
           ) : (
             <div className="style-summary-banner__placeholder">
               <Icon name="Image" size={16} />

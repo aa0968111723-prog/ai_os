@@ -1,5 +1,5 @@
 import { type Worldview } from "@shared/worldview";
-import { STYLE_VISUAL_ASSETS } from "./StyleVisualGallery";
+import { StyleImage, styleAssetOf } from "./StyleImage";
 import { TONE_VISUAL_META } from "./ToneVisualPalette";
 import { Icon } from "./Icon";
 import { Meta } from "./ui";
@@ -16,7 +16,7 @@ export function StoryFlowBlueprint({
   onFocusField?: (fieldId: string) => void;
 }) {
   const primaryStyle = wv.styles[0];
-  const styleAsset = primaryStyle ? STYLE_VISUAL_ASSETS[primaryStyle] : null;
+  const styleAsset = styleAssetOf(primaryStyle);
   const primaryTone = wv.tones[0];
   const toneMeta = primaryTone ? TONE_VISUAL_META[primaryTone] : null;
 
@@ -91,10 +91,11 @@ export function StoryFlowBlueprint({
           <span>畫面定調</span>
         </div>
         <div className="story-blueprint-card__body story-blueprint-card__visual-body">
-          {styleAsset?.image ? (
-            <img
-              src={styleAsset.image}
+          {styleAsset ? (
+            <StyleImage
+              asset={styleAsset}
               alt={primaryStyle || "畫風"}
+              variant="thumb"
               className="story-blueprint-card__thumb"
             />
           ) : (
