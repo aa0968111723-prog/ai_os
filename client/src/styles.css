@@ -1735,6 +1735,9 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-node.clickable:hover text { fill: var(--fg); }
 .map-node.clickable:hover circle { r: 8; }
 .map-node.project.clickable:hover rect, .map-node.more.clickable:hover rect { stroke: var(--primary); stroke-width: 1.8; }
+/* 透明命中圈（手機觸控目標）：必須壓過上面的型別填色（.map-node.note circle 等）
+   與 hover 的 r 放大——它永遠隱形，只負責擴大命中面積 */
+.map-node circle.map-hit { fill: transparent !important; stroke: none !important; }
 /* 鍵盤聚焦（Tab 逐一走訪節點）：明確的聚焦環，SVG 內以描邊＋outline 雙保險 */
 .map-node[tabindex] { outline: none; }
 .map-node[tabindex]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -4981,6 +4984,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .planner-jump-grid::-webkit-scrollbar { display: none; }
   .planner-jump-grid button { min-width: 210px; flex: 0 0 210px; scroll-snap-align: start; }
   .planner-section { margin-top: 10px; scroll-margin-top: 112px; }
+  /* 知識地圖：360px 直接等比縮到 0.39x（文字 ~4px 不可讀、節點點不到）。
+     改成固定較大畫布＋橫向捲動；SVG 觸控本就不平移畫布（保留頁面捲動的刻意設計），
+     橫捲手勢直接落在 .map-wrap 上，不衝突。 */
+  .map-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .map-svg { min-width: 720px; }
   .planner-section > summary.planner-section-summary { min-height: 60px; }
   .planner-section-lede {
     display: -webkit-box;
@@ -6791,3 +6799,18 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 
 
+
+/* ═══ 手機修正（MOB-F）：模型頁並排比較卡 ═══
+ * 卡片用行內 sticky top:8px + z-index:30——手機上 (1) 與 sticky 頂欄同 z、
+ * DOM 較後 → 蓋住頂欄；(2) 16 列比較表釘住後吃掉近整個視口。
+ * ≤820 讓它落在頂欄下方、z 低於頂欄(30)高於 toc-rail(25)，並限高內部捲動。
+ * !important 是壓過行內樣式的唯一手段；桌機不在 media 內、不受影響。 */
+@media (max-width: 820px) {
+  section[data-fb="模型並排比較"] {
+    top: calc(52px + var(--safe-top)) !important;
+    z-index: 26 !important;
+    max-height: 42dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
