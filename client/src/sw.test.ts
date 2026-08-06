@@ -168,7 +168,7 @@ describe("service worker 品牌資產快取", () => {
   it("manifest.webmanifest 走 network-first：有網路時必須回新版", async () => {
     const h = loadServiceWorker(async () => makeResponse("new-manifest"));
     // 先把舊 manifest 塞進 shell 快取，模擬已安裝的 PWA
-    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v2-shell");
+    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v3-shell");
     await cache.put(new URL("/manifest.webmanifest", ORIGIN).href, makeResponse("old-manifest"));
 
     const { response } = await dispatchFetch(h, "/manifest.webmanifest");
@@ -181,7 +181,7 @@ describe("service worker 品牌資產快取", () => {
     const h = loadServiceWorker(async () => {
       throw new Error("offline");
     });
-    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v2-shell");
+    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v3-shell");
     await cache.put(new URL("/manifest.webmanifest", ORIGIN).href, makeResponse("cached-manifest"));
 
     const { response } = await dispatchFetch(h, "/manifest.webmanifest");
@@ -190,7 +190,7 @@ describe("service worker 品牌資產快取", () => {
 
   it("/icons/* 先回快取，但背景更新掛在 waitUntil 上（否則新圖永遠追不上）", async () => {
     const h = loadServiceWorker(async () => makeResponse("fresh-icon"));
-    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v2-shell");
+    const cache = await (h.scope.caches as { open(n: string): Promise<FakeCache> }).open("aios-app-v3-shell");
     const iconUrl = new URL("/icons/icon-v2-512.png", ORIGIN).href;
     await cache.put(iconUrl, makeResponse("stale-icon"));
 

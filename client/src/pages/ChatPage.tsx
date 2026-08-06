@@ -509,8 +509,9 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
             <Icon name="Tag" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />標注
           </button>
           {refPickerOpen && (
-            // 向上展開（mention-pop 預設 bottom），避免被 .dm-thread { overflow:hidden } 裁切底部
-            <div className="mention-pop dm-ref-pop" role="dialog" aria-label="標注項目" style={{ width: 280, maxHeight: 300 }}>
+            // 向上展開（mention-pop 預設 bottom），避免被 .dm-thread { overflow:hidden } 裁切底部；
+            // 尺寸在 CSS（.dm-ref-pop）——≤560 需改成 fixed 小抽屜逃離 .dm-tools 的捲動裁切，行內樣式蓋不掉
+            <div className="mention-pop dm-ref-pop" role="dialog" aria-label="標注項目">
               <div className="dm-ref-tabs" role="tablist">
                 {(["project", "database", "schedule", "note"] as DmRefType[]).map((t) => (
                   <button key={t} type="button" role="tab" aria-selected={refTab === t} className={refTab === t ? "on" : ""} onClick={() => setRefTab(t)}>
@@ -518,7 +519,7 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
                   </button>
                 ))}
               </div>
-              <div style={{ overflowY: "auto", maxHeight: 220 }}>
+              <div className="dm-ref-list">
                 {mentionables.isError ? (
                   <span className="error" style={{ padding: "8px 12px", display: "block" }}>
                     載入失敗：{mentionables.error.message}
