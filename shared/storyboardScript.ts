@@ -9,6 +9,7 @@
  *   ## 1. 開場・晨光 (5s)
  *   畫面：清晨禪堂，柔和光線灑落
  *   旁白：那一年，我第一次走進禪堂。
+ *   環境音：遠處鐘聲，細微鳥鳴
  *
  * 解析規則刻意寬鬆（序號、秒數、任一區塊都可省略；全形半形冒號都吃），
  * 但**套用規則刻意保守**：只更新與新增，永不刪除。文字裡少寫一鏡不該讓
@@ -20,6 +21,8 @@ export type StoryboardScriptScene = {
   durationSec?: number;
   prompt?: string;
   voiceover?: string;
+  /** 這一鏡聽得到什麼（環境音／音效）。與 voiceover 對稱，同樣是可寫回的文字。 */
+  ambience?: string;
   /**
    * 標題上的鏡次（`## 3.` 的 3）。這不是裝飾，是**身分證**：中間整段沒寫時，
    * 靠它才知道「## 3.」指的仍是第 3 鏡，而不是往前遞補成第 2 鏡。見 resolveScriptTargets。
@@ -33,6 +36,7 @@ export type StoryboardScriptRow = {
   durationSec: number;
   prompt?: string | null;
   voiceover?: string | null;
+  ambience?: string | null;
   /** 這一鏡綁定的卡片名字，僅供閱讀時標注 */
   cardNames?: string[];
 };
@@ -40,12 +44,15 @@ export type StoryboardScriptRow = {
 export const SCRIPT_SCENE_HEADING = "##";
 const VISUAL_LABEL = "畫面";
 const VOICE_LABEL = "旁白";
+const AMBIENCE_LABEL = "環境音";
 const CARDS_LABEL = "設定卡";
 
 /** 冒號：全形半形都收（中文輸入法預設打出全形） */
 const COLON = "[：:]";
 const HEADING_RE = /^##\s*(?:(\d+)\s*[.、．]\s*)?(.*?)\s*(?:[（(]\s*(\d+)\s*(?:s|秒)?\s*[）)])?\s*$/;
-const LABEL_RE = new RegExp(`^(${VISUAL_LABEL}|${VOICE_LABEL}|${CARDS_LABEL})${COLON}\\s*(.*)$`);
+const LABEL_RE = new RegExp(
+  `^(${VISUAL_LABEL}|${VOICE_LABEL}|${AMBIENCE_LABEL}|${CARDS_LABEL})${COLON}\\s*(.*)$`,
+);
 
 /** 跳脫字元：內容裡「長得像結構」的那一行前面加一個反斜線 */
 const ESCAPE = "\\";
@@ -81,6 +88,9 @@ export function formatStoryboardScript(rows: StoryboardScriptRow[]): string {
       const lines = [`${SCRIPT_SCENE_HEADING} ${i + 1}. ${row.title} (${row.durationSec}s)`];
       lines.push(`${VISUAL_LABEL}：${escapeBody((row.prompt ?? "").trim())}`);
       lines.push(`${VOICE_LABEL}：${escapeBody((row.voiceover ?? "").trim())}`);
+      // 環境音與畫面／旁白同層級一律輸出（即使是空的）：它剛從「沒有家」變成鏡規格的一員，
+      // 有空欄位在那裡，使用者才知道這一格可以寫；只在有值時才出現等於繼續藏著它。
+      lines.push(`${AMBIENCE_LABEL}：${escapeBody((row.ambience ?? "").trim())}`);
       // 卡片是唯讀標注：讓人讀腳本時知道這鏡會帶誰，但改文字不會動到綁定
       if (row.cardNames?.length) lines.push(`${CARDS_LABEL}：${row.cardNames.join("・")}（唯讀）`);
       return lines.join("\n");
@@ -95,6 +105,8 @@ export function formatStoryboardScript(rows: StoryboardScriptRow[]): string {
 export const SCRIPT_TITLE_MAX = 60;
 export const SCRIPT_PROMPT_MAX = 4000;
 export const SCRIPT_VOICEOVER_MAX = 2000;
+/** 環境音是給音效模型的提示詞，不是台詞——比旁白短得多就夠用 */
+export const SCRIPT_AMBIENCE_MAX = 500;
 /** 一份腳本最多幾鏡：寫回是逐鏡 insert/update，沒上限等於讓一份貼錯的文件在交易裡跑幾千趟 */
 export const MAX_SCRIPT_SCENES = 200;
 
@@ -122,6 +134,7 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
     scene.title = scene.title.trim();
     scene.prompt = scene.prompt?.trim();
     scene.voiceover = scene.voiceover?.trim();
+    scene.ambience = scene.ambience?.trim();
     if (!scene.title) scene.title = `第 ${scenes.length + 1} 鏡`;
     scenes.push(scene);
     current = null;
@@ -164,6 +177,9 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
       } else if (name === VOICE_LABEL) {
         current._label = VOICE_LABEL;
         current.voiceover = rest ?? "";
+      } else if (name === AMBIENCE_LABEL) {
+        current._label = AMBIENCE_LABEL;
+        current.ambience = rest ?? "";
       } else {
         // 設定卡是唯讀標注，讀回來就丟掉（改綁定請到分鏡表那一列）
         current._label = CARDS_LABEL;
@@ -175,6 +191,8 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
     const content = unescapeLine(line);
     if (current._label === VOICE_LABEL) {
       current.voiceover = `${current.voiceover ?? ""}\n${content}`.trim();
+    } else if (current._label === AMBIENCE_LABEL) {
+      current.ambience = `${current.ambience ?? ""}\n${content}`.trim();
     } else if (current._label === CARDS_LABEL) {
       // 唯讀區塊的續行一併忽略
     } else {
@@ -207,6 +225,9 @@ function limitErrors(scenes: StoryboardScriptScene[]): string[] {
     }
     if ((scene.voiceover?.length ?? 0) > SCRIPT_VOICEOVER_MAX) {
       errors.push(`${where}的旁白 ${scene.voiceover?.length} 字，超過 ${SCRIPT_VOICEOVER_MAX} 字`);
+    }
+    if ((scene.ambience?.length ?? 0) > SCRIPT_AMBIENCE_MAX) {
+      errors.push(`${where}的環境音 ${scene.ambience?.length} 字，超過 ${SCRIPT_AMBIENCE_MAX} 字`);
     }
   });
   return errors;
@@ -263,6 +284,7 @@ function changed(row: StoryboardScriptRow, scene: StoryboardScriptScene): boolea
   if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) return true;
   if (scene.prompt !== undefined && scene.prompt !== (row.prompt ?? "").trim()) return true;
   if (scene.voiceover !== undefined && scene.voiceover !== (row.voiceover ?? "").trim()) return true;
+  if (scene.ambience !== undefined && scene.ambience !== (row.ambience ?? "").trim()) return true;
   return false;
 }
 

@@ -10,6 +10,7 @@ import { resolveSceneCards } from "../../shared/sceneCards";
 import {
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
+  SCRIPT_AMBIENCE_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
 } from "../../shared/storyboardScript";
@@ -31,8 +32,16 @@ import { MAX_PROMPT_CHARS } from "./prompts";
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
 
-/** 素材 kind → 這一格的哪個現用指標欄；null＝不能當分鏡素材（例如 doc） */
-export function sceneSlotForAssetKind(kind: string): "assetId" | "narrationAssetId" | null {
+export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId";
+
+/**
+ * 素材 kind → 這一格的哪個現用指標欄；null＝不能當分鏡素材（例如 doc）。
+ *
+ * 音訊有兩個槽（旁白／環境音）之後，kind 本身已經不足以判斷要放哪一格——
+ * 但預設仍是旁白：那是既有行為，改預設會讓舊的「切回這一版」靜默切到別的軌。
+ * 要指到環境音的呼叫端必須明講（setVisualFromAsset 的 role 參數）。
+ */
+export function sceneSlotForAssetKind(kind: string): SceneAssetSlot | null {
   if (kind === "audio") return "narrationAssetId"; // 音訊＝旁白槽（與 advanceGeneration 回填同口徑）
   if (kind === "image" || kind === "video") return "assetId";
   return null;
@@ -115,6 +124,8 @@ export const scenesRouter = router({
     await getProjectChecked(ctx, input.projectId);
     // 旁白音檔另用一次別名 join（與主畫面 assetId 的 join 分開，避免同表兩次 join 撞名）
     const narrationAssets = aliasedTable(schema.assets, "narration_assets");
+    // 環境音同理再一次別名：三個素材指標各自 join，任一被軟刪只影響自己那一軌
+    const ambienceAssets = aliasedTable(schema.assets, "ambience_assets");
     const rows = await db
       .select({
         id: schema.scenes.id,
@@ -125,6 +136,7 @@ export const scenesRouter = router({
         assetId: schema.scenes.assetId,
         prompt: schema.scenes.prompt,
         voiceover: schema.scenes.voiceover,
+        ambience: schema.scenes.ambience,
         // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
@@ -154,12 +166,21 @@ export const scenesRouter = router({
           where g.scene_id = ${schema.scenes.id} and g.scene_role = 'narration' and g.status in ('queued', 'running', 'awaiting_approval')
           order by g.created_at desc, g.id desc limit 1
         )`,
+        // 逐鏡環境音音檔網址；與 narrationUrl 同理走各自的 join，判斷「這格有沒有環境音」一律看它
+        ambienceUrl: ambienceAssets.url,
+        // 進行中的「環境音」生成：與畫面／配音三軌各自獨立，生成中不互相鎖
+        pendingAmbienceStatus: sql<"queued" | "running" | "awaiting_approval" | null>`(
+          select g.status from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id} and g.scene_role = 'ambience' and g.status in ('queued', 'running', 'awaiting_approval')
+          order by g.created_at desc, g.id desc limit 1
+        )`,
       })
       .from(schema.scenes)
       // JOIN 也要排除軟刪素材：deleteAsset 刻意保留 scenes.assetId（供還原），若 join 不濾 deletedAt，
       // 該格會繼續顯示已刪素材的縮圖/音檔——與交付包（box 已濾）不一致。還原後 join 自動重連。
       .leftJoin(schema.assets, and(eq(schema.scenes.assetId, schema.assets.id), isNull(schema.assets.deletedAt)))
       .leftJoin(narrationAssets, and(eq(schema.scenes.narrationAssetId, narrationAssets.id), isNull(narrationAssets.deletedAt)))
+      .leftJoin(ambienceAssets, and(eq(schema.scenes.ambienceAssetId, ambienceAssets.id), isNull(ambienceAssets.deletedAt)))
       // 排除已軟刪除（回收桶）的分鏡——漏掉這個過濾會讓刪掉的分鏡繼續出現在列表
       .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)))
       .orderBy(asc(schema.scenes.orderIndex));
@@ -335,7 +356,7 @@ export const scenesRouter = router({
 
     // 現在被引用、但不是本格生成產出的素材（例：素材庫直接指派、或舊資料沒回綁的「＋加入分鏡」）。
     // 沒有這一段，該素材不會出現在版本清單裡，切走之後就再也切不回來。
-    const pointerIds = [scene.assetId, scene.narrationAssetId].filter((id): id is string => !!id);
+    const pointerIds = [scene.assetId, scene.narrationAssetId, scene.ambienceAssetId].filter((id): id is string => !!id);
     const pointerRows = pointerIds.length
       ? await db
           .select({
@@ -356,7 +377,11 @@ export const scenesRouter = router({
       createdAt: a.createdAt.toISOString(),
     }));
 
-    const versions = buildSceneVersions(rows, { assetId: scene.assetId, narrationAssetId: scene.narrationAssetId }, externals);
+    const versions = buildSceneVersions(
+      rows,
+      { assetId: scene.assetId, narrationAssetId: scene.narrationAssetId, ambienceAssetId: scene.ambienceAssetId },
+      externals,
+    );
     // 指標欄結構上保證同一 role 只有一個現用；投影出兩個＝查詢寫錯，當場擋下不要讓 UI 顯示兩個「現用」
     const duplicated = findDuplicateCurrent(versions);
     if (duplicated.length > 0) {
@@ -370,6 +395,8 @@ export const scenesRouter = router({
       voiceover: scene.voiceover,
       assetId: scene.assetId,
       narrationAssetId: scene.narrationAssetId,
+      ambience: scene.ambience,
+      ambienceAssetId: scene.ambienceAssetId,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -382,7 +409,12 @@ export const scenesRouter = router({
    * 與 setVisualFromGeneration 的差別是它以「素材」為鍵——外部帶入、沒有生成紀錄的版本也切得回去。
    */
   setVisualFromAsset: authedProcedure
-    .input(z.object({ sceneId: z.string().uuid(), assetId: z.string().uuid() }))
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      assetId: z.string().uuid(),
+      /** 音訊要進哪一軌；不給＝沿用 sceneSlotForAssetKind 的既有預設（旁白） */
+      role: z.enum(["narration", "ambience"]).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
         .select()
@@ -401,7 +433,12 @@ export const scenesRouter = router({
       // 音訊＝旁白槽；圖/影＝主畫面槽（與 advanceGeneration 回填、setVisualFromGeneration 同口徑）
       const slot = sceneSlotForAssetKind(asset.kind);
       if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "只有圖片／影片／音訊可以設為分鏡素材" });
-      const patch = { [slot]: asset.id };
+      // role 只對音訊有意義：拿它去改圖／影的落點會把畫面塞進音軌
+      if (input.role && asset.kind !== "audio") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "只有音訊素材可以指定要進旁白還是環境音" });
+      }
+      const target: SceneAssetSlot = input.role === "ambience" ? "ambienceAssetId" : slot;
+      const patch = { [target]: asset.id };
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
       return updated;
     }),
@@ -515,6 +552,8 @@ export const scenesRouter = router({
             status: "todo",
             prompt: dup ? cur.prompt : null,
             voiceover: dup ? cur.voiceover : null,
+            // 環境音的「文字」跟 prompt/voiceover 同類（是設定），音檔本身不複製——與 assetId 同規則
+            ambience: dup ? cur.ambience : null,
             // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
@@ -573,6 +612,7 @@ export const scenesRouter = router({
         title: z.string().min(1).max(SCRIPT_TITLE_MAX).optional(),
         durationSec: z.number().int().min(1).max(60).optional(),
         voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
+        ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       }),
@@ -588,6 +628,7 @@ export const scenesRouter = router({
       if (input.title !== undefined) patch.title = input.title;
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
+      if (input.ambience !== undefined) patch.ambience = input.ambience;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
@@ -645,6 +686,7 @@ export const scenesRouter = router({
               status: "todo",
               prompt: scene.prompt ?? null,
               voiceover: scene.voiceover ?? null,
+              ambience: scene.ambience ?? null,
             });
             created += 1;
             continue;
@@ -660,6 +702,9 @@ export const scenesRouter = router({
           }
           if (scene.voiceover !== undefined && scene.voiceover !== (row.voiceover ?? "").trim()) {
             patch.voiceover = scene.voiceover;
+          }
+          if (scene.ambience !== undefined && scene.ambience !== (row.ambience ?? "").trim()) {
+            patch.ambience = scene.ambience;
           }
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
@@ -885,6 +930,55 @@ export const scenesRouter = router({
         sceneId: scene.id,
         sceneRole: "narration",
         reasonPrefix: "配音生成",
+      });
+      return { generationId: gen.id };
+    }),
+
+  /**
+   * 逐鏡環境音：以該分鏡的 ambience 當提示詞送音效／配樂模型，綁 ambience 角色，
+   * 完成後回填 ambienceAssetId。整支與 generateVoiceover 對稱，差別只有三處，且每一處都是刻意的：
+   * 放行的模型類別是 text-to-audio（不是 TTS）、防抖看的是 ambience 角色、回填落在環境音槽。
+   */
+  generateAmbience: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string().optional(), clientRequestId: z.string().uuid().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project); // 封存專案不接受付費生成
+      const prompt = scene.ambience ?? "";
+      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有環境音描述，請先在分鏡或腳本裡填" });
+      // 與配音相反的把關：這裡只放行 text-to-audio（音效／配樂）。TTS 同為 kind=audio 但會把
+      // 描述「唸出來」——「遠處鐘聲，細微鳥鳴」變成一個人朗讀那八個字，扣了點卻拿到廢音檔。
+      const modelId = input.modelId ?? "fal-ai/elevenlabs/sound-effects/v2";
+      const model = getModel(modelId);
+      if (!model || model.category !== "text-to-audio") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "環境音需要用音效／配樂（text-to-audio）模型" });
+      }
+      // 伺服器端防抖：三軌各自獨立，環境音生成中不擋畫面與配音，反之亦然
+      const [pendingAmbience] = await db
+        .select({ id: schema.generations.id })
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.sceneId, scene.id),
+          eq(schema.generations.sceneRole, "ambience"),
+          inArray(schema.generations.status, ["queued", "running"]),
+        ))
+        .limit(1);
+      if (pendingAmbience) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成環境音，請稍候" });
+      const gen = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id: input.clientRequestId, // 冪等鍵：timeout 重送同鍵回原列，不重複扣點
+        projectId: scene.projectId,
+        modelId,
+        prompt,
+        sceneId: scene.id,
+        sceneRole: "ambience",
+        reasonPrefix: "環境音生成",
       });
       return { generationId: gen.id };
     }),

@@ -178,6 +178,10 @@ export const scenes = pgTable("scenes", {
   narrationAssetId: uuid("narration_asset_id"),
   prompt: text("prompt"),
   voiceover: text("voiceover"),
+  /** 這一鏡聽得到什麼（蟲鳴、鐘聲、腳步）——餵給音效／配樂模型的提示詞。與 voiceover 對稱。 */
+  ambience: text("ambience"),
+  /** 環境音成品音檔。與 narrationAssetId 對稱；null＝這一鏡還沒有環境音。 */
+  ambienceAssetId: uuid("ambience_asset_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   propIds: jsonb("prop_ids").$type<string[]>(),

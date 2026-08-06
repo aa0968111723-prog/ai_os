@@ -198,8 +198,11 @@ export interface SubmitCoreInput {
   reasonPrefix?: string;
   /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
   sceneId?: string;
-  /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
-  sceneRole?: "visual" | "narration";
+  /**
+   * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
+   * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
+   */
+  sceneRole?: "visual" | "narration" | "ambience";
   /** 來源工作流執行 id：runner 帶入，生成列落庫後可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId?: string;
   /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
@@ -997,9 +1000,14 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
         if (gen.sceneId) {
-          // 角色感知回填：narration→旁白音檔欄位；其餘（visual/null）→主畫面欄位。
+          // 角色感知回填：narration→旁白音檔、ambience→環境音；其餘（visual/null）→主畫面欄位。
           // 軟刪／回收桶分鏡不回填，避免還原後突然出現意外綁定
-          const patch = gen.sceneRole === "narration" ? { narrationAssetId: asset.id } : { assetId: asset.id };
+          const patch =
+            gen.sceneRole === "narration"
+              ? { narrationAssetId: asset.id }
+              : gen.sceneRole === "ambience"
+                ? { ambienceAssetId: asset.id }
+                : { assetId: asset.id };
           await tx
             .update(schema.scenes)
             .set(patch)
