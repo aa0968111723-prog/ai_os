@@ -6400,6 +6400,23 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .new-project-modal-card[hidden] {
   display: none !important;
 }
+/* ≤560：比照 .modal-scrim/.modal-card 契約（1898 行起）轉貼底 sheet——
+   置中 90vh 卡＋autoFocus 彈鍵盤時，表單下半（畫面尺寸、立即建立鈕）被鍵盤蓋住捲不到：
+   backdrop 讓開 --kb-inset、卡片貼底、dvh 取代 vh、補 safe-bottom 與 overscroll 圍堵。 */
+@media (max-width: 560px) {
+  .new-project-modal-backdrop {
+    bottom: var(--kb-inset, 0px);
+    align-items: flex-end;
+    padding: max(8px, var(--safe-top)) 0 0 0;
+    overscroll-behavior: contain;
+  }
+  .new-project-modal-card {
+    max-height: min(92dvh, 100%);
+    border-radius: var(--r-16) var(--r-16) 0 0;
+    padding-bottom: max(16px, var(--safe-bottom));
+    animation: modal-sheet-in 280ms var(--ease-out);
+  }
+}
 .new-project-modal__close {
   position: absolute;
   top: 18px;
