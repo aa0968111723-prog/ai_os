@@ -7,14 +7,20 @@ import { DensityGate } from "./app/DensityGate";
 import { bootstrapPwa } from "./pwa";
 import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import { installKeyboardInset } from "./lib/keyboardInset";
+import { installOrbState } from "./lib/orbState";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
+// 手機 design token（MOB-T）：必須在 styles.css/styles.mobile-fab-01.css 之後載入
+// （同特異性覆寫靠載入順序勝出）；全檔規則都包在 ≤820 media 內，桌機零改動
+import "./styles.mobile-tokens.css";
 import "./splash.css";
 // 中文字型 CSS（MOB-G）：兩份 fontsource variable index.css 共 ~300KB raw 的 @font-face
 // 宣告，先前 @import 在 styles.css 頂端＝跟主樣式合成單一 render-blocking CSS，
 // 是手機 4G 首屏 LCP 最大單一瓶頸。改動態 import：立即發起但不擋首繪；
 // 全部宣告皆 font-display: swap，字型到位無縫換上（實際 woff2 仍照 unicode-range 按需下載）。
 void import("./fonts.css");
+// board 字族（Latin 子集）非阻塞載入：手機 token 引用，桌機無規則指向（MOB-T）
+void import("./fonts.brand.css");
 import { EmptyState } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { buildCrashReport, isChunkLoadError, type CrashReport } from "./lib/crashReport";
@@ -24,6 +30,8 @@ bootstrapTauriDesktop();
 bootstrapPwa();
 // 貼底面板要讓開虛擬鍵盤：整個 App 生命週期都要追蹤，故不綁在任何元件上
 installKeyboardInset();
+// 手機 Orb（底部導航中央 AI 球）預設 idle；視覺只在 ≤820 生效
+installOrbState();
 
 /**
  * 全站錯誤邊界：任何 render 錯誤都落在設計語言內的空狀態，而非空白白畫面。
