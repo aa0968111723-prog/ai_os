@@ -21,9 +21,13 @@
  * 700×12、750×2 共六種字重。靜態字型每個字重都要自己一整份中文字符集——同樣的字
  * 下載六遍，實測單頁 1113KB。可變字型一份 105 個 unicode-range 分包涵蓋 100–900，
  * 連 650／750 都能精確渲染（靜態字型只能就近取 700）。
- * 瀏覽器仍只下載當頁真正出現的字，不是整包。 */
-@import "@fontsource-variable/noto-sans-tc/index.css";
-@import "@fontsource-variable/noto-serif-tc/index.css";
+ * 瀏覽器仍只下載當頁真正出現的字，不是整包。
+ *
+ * 載入方式（MOB-G）：這兩份 index.css 各 ~150KB raw（共 105/108 個 @font-face 分包宣告），
+ * 曾以 @import 綁進本檔＝跟主樣式合成單一 render-blocking CSS（gzip 121KB），
+ * 是手機 4G 首屏 LCP 的最大單一瓶頸。現改在 main.tsx 動態 import（不擋首繪；
+ * 全部宣告皆 font-display: swap，字型到位無縫換上，穩態渲染前後相同）。
+ * 不要把 @import 加回來。 */
 
 /* 等寬字（UIUX-03 補漏）：--mono 一直宣告著 "IBM Plex Mono" 卻從來沒載入過——
  * 與 --sans/--serif 是同一個問題，先前只修了那兩個。它退回系統等寬字時，

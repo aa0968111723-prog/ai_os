@@ -10,6 +10,11 @@ import { installKeyboardInset } from "./lib/keyboardInset";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
 import "./splash.css";
+// 中文字型 CSS（MOB-G）：兩份 fontsource variable index.css 共 ~300KB raw 的 @font-face
+// 宣告，先前 @import 在 styles.css 頂端＝跟主樣式合成單一 render-blocking CSS，
+// 是手機 4G 首屏 LCP 最大單一瓶頸。改動態 import：立即發起但不擋首繪；
+// 全部宣告皆 font-display: swap，字型到位無縫換上（實際 woff2 仍照 unicode-range 按需下載）。
+void import("./fonts.css");
 import { EmptyState } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { buildCrashReport, isChunkLoadError, type CrashReport } from "./lib/crashReport";
