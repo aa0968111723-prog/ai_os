@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { ModelUsageCard } from "../components/ModelUsageCard";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 import {
@@ -301,54 +302,8 @@ export function ModelsPage() {
         }
       />
 
-      {/* ── 契約健康總覽 ── */}
-      {contractSummary.data && (
-        <Card as="section" className="model-health-overview" data-fb="模型契約健康" style={{ marginBottom: "var(--sp-16)", padding: "12px 16px" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-            <b style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="CheckCircle2" size={16} />站內契約健康
-            </b>
-            <Meta>
-              {contractSummary.data.modelCount} 模型 · 更新 {new Date(contractSummary.data.generatedAt).toLocaleString("zh-TW")}
-            </Meta>
-            <span className="spacer" />
-            <Hint as="span" style={{ margin: 0 }}>與 MCP／生成警告同源（不自動 verified）</Hint>
-          </div>
-          <div className="model-health-stats" role="list">
-            {(
-              [
-                "live_ok",
-                "needs_source",
-                "never_probed",
-                "live_timeout",
-                "live_fail",
-                "openapi_404",
-                "nim_no_key",
-              ] as HealthKey[]
-            ).map((key) => {
-              const n = contractSummary.data?.counts?.[key] ?? 0;
-              if (!n) return null;
-              const meta = HEALTH_META[key];
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="listitem"
-                  className={`model-health-stat tone-${meta.tone}${healthFilter === key ? " is-selected" : ""}`}
-                  title={meta.hint}
-                  onClick={() => {
-                    setHealthFilter((cur) => (cur === key ? "" : key));
-                    requestAnimationFrame(() => catalogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                  }}
-                >
-                  <strong>{n}</strong>
-                  <span>{meta.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-      )}
+      {/* ── 頂欄：我的使用量（取代站內契約健康——404／逾時／NIM 是站務指標，不是創作者要看的） ── */}
+      <ModelUsageCard />
 
       {/* ── 需求 #1:並排比較——勾 2–4 個模型,這張卡置頂(sticky)浮出 ── */}
       {compareList.length === 1 && (
