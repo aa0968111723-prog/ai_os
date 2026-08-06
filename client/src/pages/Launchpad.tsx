@@ -5,6 +5,8 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
 import { AICreativeCopilot } from "../components/AICreativeCopilot";
+import { BentoStatusIcon } from "../components/BentoStatusIcons";
+import { Icon } from "../components/Icon";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
