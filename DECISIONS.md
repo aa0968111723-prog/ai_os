@@ -64,6 +64,11 @@
 - 實測節流：FCP 2.5s✓／SI 3.8s／CLS 0.015✓，但 LCP 5.3s、TTI 12.2s、TBT 1.63s——根因＝純 client-render SPA 的 JS 開機成本（入口鏈 gzip ~207KB），4x CPU 節流下 React boot 即吃掉預算。
 - 紅線內可拿的已拿完（阻塞 CSS 121→33KB、hero 535KB→62KB、字型非阻塞、logo 不下載）；過 90 需 SSR/預渲染或入口重構＝結構性工程，與「桌機零改動、小 PR」衝突。與 D-011 合併為後續獨立提案。
 
+## D-016 APK 驗收完成（2026-08-07）
+- Release **apk-v0.1.2**：`aios-v0.1.2.apk` 18.88MB，簽章 v1+v2+v3 三層（Android 11+ 要求 ≥v2），classes.dex/AndroidManifest 完整。
+- 過程修掉兩個真實 CI 缺陷：GitHub tag 事件實測不派工（補 workflow_dispatch，PR #479）、Windows 提交的 gradlew 是 100644（PR #483 改 100755）。
+- 首版金鑰為 CI 自動產生並附在 Release，**待使用者依 INSTALL.md 設成 Secrets 後刪除附件**，之後才能覆蓋更新。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）

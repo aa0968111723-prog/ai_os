@@ -50,11 +50,13 @@
 ## 驗收清單對照（第 8 節）
 - [x] 桌機 1280/1440 像素級無變化（同庫對照實驗＋pixel-diff 佐證；唯一結構差異歸因上游 #457）
 - [x] 樣式改動全在手機 breakpoint 內（token/契約測試強制；無條件新規則僅限隱形命中圈等零像素項）
-- [x] MOBILE_AUDIT.md 69 項全處置（46 修復＋P2-18 免改＋3 DEFERRED 有記錄）
+- [x] MOBILE_AUDIT.md 69 項全處置（48 修復＋P2-18 免改＋2 DEFERRED-ARCH；P2-42/48 後續補完）
 - [x] 360/375/390/430×全路由：巡檢 85/85 無橫向捲動、無破版（360/390 實測；375/430 介於兩者且無固定寬版面）
 - [x] 深淺色：站台鎖亮色（v3 設計決策），N/A；離線頁主題色已對齊
 - [x] 手機元件已套 Firefly Board token（殼層＋基元兩批；PR #473/#474）
-- [~] 效能：CLS/FCP/SI 達標；LCP/TTI/Lighthouse 90 DEFERRED-ARCH（D-015，需 SSR 級重構）
-- [x] PWA 可安裝（manifest+引導）可離線（實測）；APK 管線就緒（合併 #475 後打 tag 驗證）
+- [~] 效能：CLS 0.015／FCP 2.5s／SI 3.8s 達標、a11y 與 Best Practices 各 100；
+  資產面實測：阻塞 CSS gzip 121→33KB、hero 535→62KB、手機 serif CJK 6→0 包（省 ~250KB）、隱藏 logo 不再下載 524KB。
+  LCP/TTI/Lighthouse Performance 90 標為 DEFERRED-ARCH（D-015：純 client-render SPA 的 JS 開機成本，需 SSR/預渲染級重構，與桌機零改動紅線衝突）
+- [x] PWA 可安裝（manifest 含 screenshots 富安裝 UI＋引導）可離線（實測）；**APK 已實際產出並驗證**——Release apk-v0.1.2（18.88MB，簽章 v1+v2+v3）
 - [x] Console：巡檢全程無新增 error（axe+console 檢查在 audit script 內）
 - [x] PROGRESS.md、DECISIONS.md、INSTALL.md、VERIFICATION.md 齊備

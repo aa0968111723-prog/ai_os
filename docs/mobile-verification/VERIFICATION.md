@@ -61,7 +61,36 @@ LCP 5.3s、TTI 12.2s、TBT 1.63s **未達標**。
 站台鎖亮色（`color-scheme: light`，v3「白紙」設計決策）——深色模式驗收項不適用（N/A），
 offline.html 與 App 主題色已對齊一致。
 
-## 7. 證據檔
+## 7. APK 實測（第 7 節 B 驗收）
+
+`workflow_dispatch` 觸發實跑成功，Release **apk-v0.1.2** 產出 `aios-v0.1.2.apk`（18.88 MB）。
+下載回本機驗證：
+
+| 檢查 | 結果 |
+|---|---|
+| APK Signing Block | 存在 |
+| 簽章方案 | **v1（JAR）＋ v2 ＋ v3** 三層俱全（Android 11+ 安裝要求 ≥v2） |
+| 內容 | classes.dex ✓、AndroidManifest.xml ✓、767 個 entry |
+
+過程中修掉兩個真實 CI 缺陷：
+1. tag 事件不派工（兩次 tag 推送皆無 run）→ 補 `workflow_dispatch`
+2. `./gradlew: Permission denied`（Windows 產生的 commit 存成 100644）→ workflow 補 chmod ＋ repo 內模式改 100755
+
+## 8. Orb 四態實拍
+
+`orb-idle.png` / `orb-thinking.png` / `orb-error.png`（390 寬底部導航區）：
+中央「AI 工作」分頁已抬升為 coral→amber→mint 漸層懸浮球，四態動畫只用 transform/opacity。
+
+## 9. 手機字族策略實測（P2-42）
+
+`font-usage-check.mjs` 量測實際下載的字型檔：
+
+| 視寬 | serif CJK 分包 |
+|---|---|
+| 手機 390 | 6 → **0**（省約 250KB） |
+| 桌機 1280 | **6（不變）** |
+
+## 10. 證據檔
 
 - `before-after-{planner,models,chat}-360.png`：手機 360 寬前後對比
 - `before-after-desktop-dashboard-1280.png`：桌機無差異樣本
