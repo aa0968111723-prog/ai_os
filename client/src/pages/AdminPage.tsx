@@ -499,7 +499,7 @@ function ProjectOwnerRow({ groupId, project, members }: {
 function DetailBlock({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <details style={{ marginTop: 8 }}>
-      <summary style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
+      <summary className="m-touch" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
         <Icon name="ChevronRight" size={14} className="details-caret" />
         <b>{title}</b>
         <Meta style={{ fontSize: 12 }}>（{count}）</Meta>

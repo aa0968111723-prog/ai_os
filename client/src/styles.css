@@ -6989,6 +6989,23 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   }
 }
 
+/* ═══ 手機修正（MOB-H1）：觸控目標掃蕩 ═══
+ * .m-touch：只在 ≤820 生效的觸控下限工具類——桌機沒有任何規則、零影響；
+ * 掛在「獨立動作」的裸連結／span[role=button]／summary 上（句中行內連結不掛）。
+ * 其餘為個別控件的手機覆寫：這些 class 以自設 min-height（32/34/40px）蓋過
+ * 全站 44px 契約、桌機刻意緊湊——手機拉回下限，密度靠 padding 自理。 */
+@media (max-width: 820px) {
+  .m-touch { min-height: var(--touch-min); display: inline-flex; align-items: center; }
+  .tone-studio-tab, .scene-filter, .project-presence-chip { min-height: var(--touch-min); }
+  .model-use-cta { min-height: var(--touch-min); display: inline-flex; align-items: center; }
+  .model-catalog-card__base > summary { min-height: var(--touch-min); align-items: center; }
+  .project-delivery-link--stage { min-height: var(--touch-min); display: flex; align-items: center; }
+  /* Button as="a" ghost 輸出 a.btn-ghost，沒有 .btn 基底、不在全站 44px 名單；
+     行內情境（p/.hint/.error 中）沿用全站契約的行內豁免精神 */
+  a.btn-ghost { min-height: var(--touch-min); }
+  p a.btn-ghost, .hint a.btn-ghost, .error a.btn-ghost { min-height: 0; }
+}
+
 /* ═══ 手機修正（MOB-H2）：捲動圍堵、長字串斷行、分頁佈局 ═══ */
 @media (max-width: 820px) {
   /* 巢狀捲動圍堵：捲到頂/底不再鏈到背後整頁（.mobile-more-sheet/.modal-scrim 本就有

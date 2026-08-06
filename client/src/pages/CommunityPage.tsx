@@ -386,7 +386,7 @@ export function CommunityPage() {
                       </Button>
                     )}
                     {post.mediaUrl && (
-                      <a href={post.mediaUrl} target="_blank" rel="noreferrer" style={{ fontSize: "var(--fs-12)" }}>
+                      <a href={post.mediaUrl} target="_blank" rel="noreferrer" className="m-touch" style={{ fontSize: "var(--fs-12)" }}>
                         開媒體
                       </a>
                     )}
