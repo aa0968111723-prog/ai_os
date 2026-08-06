@@ -68,7 +68,6 @@ import {
 } from "../features/project-nav/projectContextNav";
 import { SimpleProjectMode } from "../features/project-simple/SimpleProjectMode";
 import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../features/project-simple/simpleMode";
-import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
@@ -91,6 +90,7 @@ const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
 type CtxSectionKey = "worldview" | "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
 type CtxGroupKey = "world" | "sources" | "manage";
+export type ToneSubTab = "story" | "costume" | "sources" | "recycle";
 
 /** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
 function CtxCollapse({
@@ -502,6 +502,8 @@ export function ProjectPage({ id }: { id: string }) {
   });
   /** C1：定裝三卡改 Tab；jump / 建定裝時同步切到對應 tab */
   const [costumeTab, setCostumeTab] = useState<CostumeTab>("characters");
+  /** 定調中心子分頁：故事與畫風／角色與定裝／知識與素材／回收桶 */
+  const [toneTab, setToneTab] = useState<ToneSubTab>("story");
   const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) => {
     setCtxOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
     if (open && (key === "characters" || key === "scenes" || key === "props")) {
@@ -785,17 +787,33 @@ export function ProjectPage({ id }: { id: string }) {
   /** 展開 ① 對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責） */
   const expandContextForSelector = (target: string) => {
     const costume = costumeTabFromTarget(target);
-    if (costume) setCostumeTab(costume);
-    if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
-      setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
-      return;
+    if (costume) {
+      setCostumeTab(costume);
+      setToneTab("costume");
     }
-    if (target === "#sec-members") {
-      setCtxGroupSectionOpen("manage", true);
-      return;
-    }
-    if (target === "#stage-context") {
+    if (target === "#onboard-worldview" || target === "#stage-context" || target === "#ctx-group-world") {
+      setToneTab("story");
       setCtxGroupSectionOpen("world", true);
+      setCtxSectionOpen("worldview", true);
+      return;
+    }
+    if (target === "#sec-costume" || target === "#sec-characters" || target === "#sec-scenes" || target === "#sec-props") {
+      setToneTab("costume");
+      setCtxGroupSectionOpen("world", true);
+      setCostumePackOpen(true);
+      return;
+    }
+    if (target === "#sec-knowledge" || target === "#sec-databases" || target === "#sec-assets" || target === "#ctx-group-sources") {
+      setToneTab("sources");
+      setCtxGroupSectionOpen("sources", true);
+      const k = targetToCtxKey(target);
+      if (k) setCtxSectionOpen(k, true);
+      return;
+    }
+    if (target === "#sec-recyclebin" || target === "#ctx-group-manage") {
+      setToneTab("recycle");
+      setCtxGroupSectionOpen("manage", true);
+      setCtxSectionOpen("recycle", true);
       return;
     }
     const key = targetToCtxKey(target);
@@ -803,9 +821,17 @@ export function ProjectPage({ id }: { id: string }) {
       setCtxGroupSectionOpen(sectionToGroup(key), true);
       setCtxSectionOpen(key, true);
       if (key === "characters" || key === "scenes" || key === "props") {
+        setToneTab("costume");
         setCostumePackOpen(true);
+      } else if (key === "knowledge" || key === "databases" || key === "assets") {
+        setToneTab("sources");
+      } else if (key === "recycle") {
+        setToneTab("recycle");
+      } else {
+        setToneTab("story");
       }
     } else if (costume) {
+      setToneTab("costume");
       setCostumePackOpen(true);
     }
   };
@@ -1642,13 +1668,13 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
-          {/* 總覽卡：狀態一句話 + chip 直達；底下只剩兩大分組，不再平鋪一長串 */}
+          {/* 總覽卡：狀態一句話 + 子分頁切換 */}
           <div className="ctx-overview" role="region" aria-label="專案上下文一覽">
             <div className="ctx-overview__head">
               <strong className="ctx-overview__title">專案大腦一覽</strong>
               <Meta>
                 {wvReady
-                  ? "基本設定就緒——下方兩區會自動注入每次生成"
+                  ? "基本設定就緒——下方設定會自動注入每次生成"
                   : "先補「這支片長什麼樣」的基本設定，後面生成才穩"}
               </Meta>
               {/* C2.5：與生成台帶入列同源口徑（勾選數，非庫存總數） */}
@@ -1673,737 +1699,786 @@ export function ProjectPage({ id }: { id: string }) {
             </div>
           </div>
 
-          {/* ── 分組 A：世界與角色（基調 + 定裝三卡） ── */}
-          <CtxGroup
-            groupId="ctx-group-world"
-            title="這支片長什麼樣"
-            lede="先講清楚這支片在說什麼、看起來像什麼，再把角色／場景／道具的樣子定下來——每次生成 AI 都會自動帶上，你不用重講。"
-            meta={[
-              wvReady ? "設定✓" : "設定待補",
-              ...(charCount != null ? [`角${charCount}`] : []),
-              ...(presetCount != null ? [`景${presetCount}`] : []),
-              ...(propCount != null ? [`道${propCount}`] : []),
-            ].join(" · ")}
-            compact={mobileCompact}
-            open={ctxGroupOpen.world}
-            onOpenChange={(o) => setCtxGroupSectionOpen("world", o)}
-          >
-          <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="onboard-worldview"
-            title="這支片的固定設定"
-            meta={wvReady ? "可以開始出圖" : "還差一點"}
-            open={ctxOpen.worldview}
-            onOpenChange={(o) => setCtxSectionOpen("worldview", o)}
-          >
-          <Card as="section" data-fb="世界觀卡" id="onboard-worldview-card">
-            <h2>
-              這支片的固定設定
-              <HelpTip text="填一次就好。下面「AI 會收到什麼」可以直接看到每次生成實際送出去的字。（這一區以前叫「世界觀」）" />
-              {updateWv.isPending ? (
-                <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
-              ) : wvSaved !== "idle" ? (
-                <Meta
-                  style={{
-                    marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary-ink)",
-                    opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity var(--dur-slow)",
-                  }}
-                >
-                  已儲存 <Icon name="Check" size={13} />
-                </Meta>
-              ) : null}
-            </h2>
-            {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
-            {/* C0 (#402)：就緒狀態一句話 + 未就緒 CTA——對齊 isWorldviewReady（一句話＋氣氛或畫風） */}
-            <div
-              className="wv-ready-strip"
-              role="status"
-              data-testid="wv-ready-strip"
-              style={{
-                marginTop: 8,
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: `1px solid ${wvReady ? "var(--border, #e5e7eb)" : "var(--warn, #b45309)"}`,
-                background: wvReady ? "var(--surface-2, transparent)" : "color-mix(in srgb, var(--warn, #b45309) 8%, transparent)",
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                gap: 8,
+          {/* 定調中心 Sub-Tabs 切換列 */}
+          <div className="tone-studio-nav" role="tablist" aria-label="定調分頁">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={toneTab === "story"}
+              className={`tone-studio-tab ${toneTab === "story" ? "active" : ""}`}
+              onClick={() => {
+                setToneTab("story");
+                setCtxGroupSectionOpen("world", true);
+                setCtxSectionOpen("worldview", true);
               }}
             >
-              <Meta as="span" style={{ fontSize: 13, fontWeight: 600 }}>
-                {wvReady ? "基本設定就緒 ✓——每次生成會自動帶上" : "基本設定還沒齊——補一句話，再選氣氛或畫風就能出圖"}
-              </Meta>
-              {!wvReady ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setCtxSectionOpen("worldview", true);
-                    requestAnimationFrame(() => {
-                      const el = document.getElementById("wv-logline") as HTMLInputElement | null;
-                      el?.focus();
-                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    });
-                  }}
-                >
-                  去填一句話
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    // 就緒後主 CTA：進創作台直接出圖
-                    revealWorkbenchAnchor("#sec-studio", { projectId: id });
-                  }}
-                >
-                  去創作台出圖
-                </Button>
+              <Icon name="Sparkles" size={15} />
+              <span>故事與畫風</span>
+              {wvReady && <span className="tone-tab-badge tone-tab-badge--success">✓</span>}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={toneTab === "costume"}
+              className={`tone-studio-tab ${toneTab === "costume" ? "active" : ""}`}
+              onClick={() => {
+                setToneTab("costume");
+                setCtxGroupSectionOpen("world", true);
+                setCostumePackOpen(true);
+              }}
+            >
+              <Icon name="Users" size={15} />
+              <span>角色與定裝</span>
+              {((charCount ?? 0) + (presetCount ?? 0) + (propCount ?? 0)) > 0 && (
+                <span className="tone-tab-badge">{(charCount ?? 0) + (presetCount ?? 0) + (propCount ?? 0)}</span>
               )}
-            </div>
-            {/* 全空的專案：先給一份可以照抄的範例（含「套下去 AI 會收到什麼」的預覽）。
-                唯讀成員也看得到範例本身，只是沒有套用按鈕。 */}
-            {wvBlank && !wvExampleDismissed && (
-              <WorldviewExampleCard
-                wv={wv}
-                kind={p.kind}
-                canEdit={canEdit}
-                onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
-                onApplyAndGoStudio={(patch) => {
-                  // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal）
-                  updateWv.mutate({ id, worldview: patch });
-                  revealWorkbenchAnchor("#sec-studio", { projectId: id });
-                  requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                      const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
-                      el?.focus({ preventScroll: true });
-                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    });
-                  });
-                }}
-                onDismiss={dismissWvExample}
-              />
-            )}
-            {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
-                key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
-            <WorldviewGuide
-              wv={wv}
-              onJump={(anchor, stepId) => {
-                // 第四步／故事走向在進階摺疊層裡，捲過去之前得先把它撐開
-                if (stepId === "narrative") setWvAdvancedOpen(true);
-                scrollToSelector(anchor);
-              }}
-            />
-            {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
-            <label htmlFor="wv-logline">
-              這支片在講什麼？
-              <FieldReaders field="logline" />
-              <HelpTip text="一句話就好。會截成 80 字接在每次出圖的提示詞後面。" />
-            </label>
-            {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
-                非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
-                maxLength 與後端 worldviewSchema .max(500) 對齊，貼超長不再靜默存失敗。 */}
-            <input
-              key={`logline-${wv.logline}`}
-              id="wv-logline"
-              defaultValue={wv.logline}
-              readOnly={!canEdit}
-              maxLength={500}
-              placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
-              onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
-            />
-            <label htmlFor="wv-message">
-              看完要記得哪一句？
-              <FieldReaders field="message" />
-              <HelpTip text="一支片只講一件事。這句會原封不動送進出圖和文字 AI。" />
-            </label>
-            <input
-              key={`message-${wv.message}`}
-              id="wv-message"
-              defaultValue={wv.message}
-              readOnly={!canEdit}
-              maxLength={500}
-              placeholder="例：把心交給佛，煩惱就交給了光"
-              onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
-            />
-            <label id="wv-tones">
-              氣氛
-              <FieldReaders field="tones" />
-              <HelpTip text="畫面給人的感覺。挑 1～2 個合得來的（如溫暖＋真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
-            </label>
-            {chipGroup("tones", toneOpts, "tone", "wv-tones")}
-            <label id="wv-styles">
-              畫風
-              <FieldReaders field="styles" />
-              <Meta as="span" style={{ marginLeft: 6, fontSize: 12, fontWeight: 400 }}>每張圖看起來像什麼——這一項最有效</Meta>
-              <HelpTip text="先選畫法（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨畫法不會混進同一張圖。" />
-            </label>
-            {stylePicker("wv-styles")}
-            {wvChipWarnings.length > 0 && (
-              <Hint layer="always" role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
-                {wvChipWarnings.map((w) => (
-                  <div key={w}>{w}</div>
-                ))}
-              </Hint>
-            )}
-            {isLeader && (
-              <Hint style={{ marginTop: 8, fontSize: 12 }}>
-                選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
-                實際會注入哪些，下方「AI 會收到什麼」直接看得到。
-              </Hint>
-            )}
-            {/* C0：禁忌會進生成負向／避免——留在主路徑；預設禁語仍可摺疊調整 */}
-            <div
-              style={{
-                marginTop: 12,
-                marginBottom: 4,
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border, #e5e7eb)",
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={toneTab === "sources"}
+              className={`tone-studio-tab ${toneTab === "sources" ? "active" : ""}`}
+              onClick={() => {
+                setToneTab("sources");
+                setCtxGroupSectionOpen("sources", true);
               }}
             >
-              <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                不能出現的東西
-                <FieldReaders field="taboos" />
-              </Meta>
-              {isDefaultTaboosOnly(wv.taboos) ? (
-                <details>
-                  <summary style={{ cursor: "pointer", fontSize: 13 }}>
-                    合規保護已開啟 ✓（預設禁語；點此展開調整）
-                  </summary>
-                  <div style={{ marginTop: 8 }}>
-                    <TokenListEditor
-                      id="wv-taboos"
-                      label="不能講、不能出現的"
-                      fieldKey="taboos"
-                      hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
-                      values={wv.taboos}
-                      placeholder="例：不得出現可讀文字（Enter 加入）"
-                      readOnly={!canEdit}
-                      onChange={(next) => {
-                        if (removesDefaultTaboos(wv.taboos, next)) {
-                          const ok = window.confirm(
-                            "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
-                          );
-                          if (!ok) return;
-                        }
-                        updateWv.mutate({ id, worldview: { taboos: next } });
-                      }}
-                    />
-                  </div>
-                </details>
-              ) : (
-                <TokenListEditor
-                  id="wv-taboos"
-                  label="不能講、不能出現的"
-                  fieldKey="taboos"
-                  hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
-                  values={wv.taboos}
-                  placeholder="例：不得出現可讀文字（Enter 加入）"
-                  readOnly={!canEdit}
-                  onChange={(next) => {
-                    if (removesDefaultTaboos(wv.taboos, next)) {
-                      const ok = window.confirm(
-                        "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
-                      );
-                      if (!ok) return;
-                    }
-                    updateWv.mutate({ id, worldview: { taboos: next } });
+              <Icon name="FolderGit2" size={15} />
+              <span>知識與素材</span>
+              {((knowledgeCount ?? 0) + (assetCount ?? 0)) > 0 && (
+                <span className="tone-tab-badge">{(knowledgeCount ?? 0) + (assetCount ?? 0)}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={toneTab === "recycle"}
+              className={`tone-studio-tab ${toneTab === "recycle" ? "active" : ""}`}
+              onClick={() => {
+                setToneTab("recycle");
+                setCtxGroupSectionOpen("manage", true);
+                setCtxSectionOpen("recycle", true);
+              }}
+            >
+              <Icon name="Trash2" size={15} />
+              <span>回收桶</span>
+            </button>
+          </div>
+
+          {/* ── 定調 1：故事與畫風 ── */}
+          <div style={{ display: toneTab === "story" ? "block" : "none" }}>
+            <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
+            <CtxCollapse
+              compact={mobileCompact}
+              sectionId="onboard-worldview"
+              title="這支片的固定設定"
+              meta={wvReady ? "可以開始出圖" : "還差一點"}
+              open={ctxOpen.worldview}
+              onOpenChange={(o) => setCtxSectionOpen("worldview", o)}
+            >
+            <Card as="section" data-fb="世界觀卡" id="onboard-worldview-card">
+              <h2>
+                這支片的固定設定
+                <HelpTip text="填一次就好。下面「AI 會收到什麼」可以直接看到每次生成實際送出去的字。（這一區以前叫「世界觀」）" />
+                {updateWv.isPending ? (
+                  <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
+                ) : wvSaved !== "idle" ? (
+                  <Meta
+                    style={{
+                      marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary-ink)",
+                      opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity var(--dur-slow)",
+                    }}
+                  >
+                    已儲存 <Icon name="Check" size={13} />
+                  </Meta>
+                ) : null}
+              </h2>
+              {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
+              {/* C0 (#402)：就緒狀態一句話 + 未就緒 CTA——對齊 isWorldviewReady（一句話＋氣氛或畫風） */}
+              <div
+                className="wv-ready-strip"
+                role="status"
+                data-testid="wv-ready-strip"
+                style={{
+                  marginTop: 8,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: `1px solid ${wvReady ? "var(--border, #e5e7eb)" : "var(--warn, #b45309)"}`,
+                  background: wvReady ? "var(--surface-2, transparent)" : "color-mix(in srgb, var(--warn, #b45309) 8%, transparent)",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Meta as="span" style={{ fontSize: 13, fontWeight: 600 }}>
+                  {wvReady ? "基本設定就緒 ✓——每次生成會自動帶上" : "基本設定還沒齊——補一句話，再選氣氛或畫風就能出圖"}
+                </Meta>
+                {!wvReady ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setCtxSectionOpen("worldview", true);
+                      requestAnimationFrame(() => {
+                        const el = document.getElementById("wv-logline") as HTMLInputElement | null;
+                        el?.focus();
+                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      });
+                    }}
+                  >
+                    去填一句話
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      // 就緒後主 CTA：進創作台直接出圖
+                      revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                    }}
+                  >
+                    去創作台出圖
+                  </Button>
+                )}
+              </div>
+              {/* 全空的專案：先給一份可以照抄的範例（含「套下去 AI 會收到什麼」的預覽）。
+                  唯讀成員也看得到範例本身，只是沒有套用按鈕。 */}
+              {wvBlank && !wvExampleDismissed && (
+                <WorldviewExampleCard
+                  wv={wv}
+                  kind={p.kind}
+                  canEdit={canEdit}
+                  onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
+                  onApplyAndGoStudio={(patch) => {
+                    // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal）
+                    updateWv.mutate({ id, worldview: patch });
+                    revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => {
+                        const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+                        el?.focus({ preventScroll: true });
+                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      });
+                    });
                   }}
+                  onDismiss={dismissWvExample}
                 />
               )}
-            </div>
-            {/* 注入預覽：必須在進階摺疊層「之上」。C0：預設收合，縮短首屏高度。 */}
-            <WorldviewPreview
-              wv={wv}
-              cardCounts={{ characters: charIds.length, scenes: sceneIds.length, props: propIds.length }}
-              defaultOpen={false}
-            />
-            {/* 進階層：故事走向 + 敘事 AI + 交接備註（出圖不吃）；禁忌已提升至主路徑 */}
-            <details
-              style={{ marginTop: 10 }}
-              open={
-                wvAdvancedOpen ||
-                hasActs(wv) ||
-                !!wv.audience.trim() ||
-                wv.people.length > 0 ||
-                wv.themes.length > 0
-              }
-              onToggle={(e) => setWvAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary style={{ cursor: "pointer", fontSize: 13 }}>
-                進階：故事走向、給寫字的 AI、交接備註（可以晚點再填）
-              </summary>
-              <div style={{ marginTop: 8 }}>
-                <Hint layer="always" style={{ marginBottom: 12, fontSize: 12 }}>
-                  <strong>上面填完就能出圖。</strong>
-                  這裡填了，寫腳本／拆分鏡／問助手會更準；
-                  <strong>直接出圖不吃</strong>故事走向／觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
+              {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
+                  key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
+              <WorldviewGuide
+                wv={wv}
+                onJump={(anchor, stepId) => {
+                  // 第四步／故事走向在進階摺疊層裡，捲過去之前得先把它撐開
+                  if (stepId === "narrative") setWvAdvancedOpen(true);
+                  scrollToSelector(anchor);
+                }}
+              />
+              {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
+              <label htmlFor="wv-logline">
+                這支片在講什麼？
+                <FieldReaders field="logline" />
+                <HelpTip text="一句話就好。會截成 80 字接在每次出圖的提示詞後面。" />
+              </label>
+              {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
+                  非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
+                  maxLength 與後端 worldviewSchema .max(500) 對齊，貼超長不再靜默存失敗。 */}
+              <input
+                key={`logline-${wv.logline}`}
+                id="wv-logline"
+                defaultValue={wv.logline}
+                readOnly={!canEdit}
+                maxLength={500}
+                placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
+                onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
+              />
+              <label htmlFor="wv-message">
+                看完要記得哪一句？
+                <FieldReaders field="message" />
+                <HelpTip text="一支片只講一件事。這句會原封不動送進出圖和文字 AI。" />
+              </label>
+              <input
+                key={`message-${wv.message}`}
+                id="wv-message"
+                defaultValue={wv.message}
+                readOnly={!canEdit}
+                maxLength={500}
+                placeholder="例：把心交給佛，煩惱就交給了光"
+                onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
+              />
+              <label id="wv-tones">
+                氣氛
+                <FieldReaders field="tones" />
+                <HelpTip text="畫面給人的感覺。挑 1～2 個合得來的（如溫暖＋真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
+              </label>
+              {chipGroup("tones", toneOpts, "tone", "wv-tones")}
+              <label id="wv-styles">
+                畫風
+                <FieldReaders field="styles" />
+                <Meta as="span" style={{ marginLeft: 6, fontSize: 12, fontWeight: 400 }}>每張圖看起來像什麼——這一項最有效</Meta>
+                <HelpTip text="先選畫法（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨畫法不會混進同一張圖。" />
+              </label>
+              {stylePicker("wv-styles")}
+              {wvChipWarnings.length > 0 && (
+                <Hint layer="always" role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                  {wvChipWarnings.map((w) => (
+                    <div key={w}>{w}</div>
+                  ))}
                 </Hint>
-
-                <label id="wv-themes">
-                  故事走向
-                  <FieldReaders field="themes" />
-                  <HelpTip text="可略過。只給寫腳本／拆分鏡的 AI 看，出圖不吃。建議 1～2 個，第一個為主。" />
-                </label>
-                {chipGroup("themes", themeOpts, "theme", "wv-themes")}
-
-                {/* ① 給敘事 AI */}
-                <div
-                  style={{
-                    marginTop: 12,
-                    marginBottom: 14,
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border, #e5e7eb)",
-                    background: "var(--surface-2, transparent)",
-                  }}
-                >
-                  <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ① 寫腳本、拆分鏡時會用到
-                    <Meta as="span" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11, opacity: 0.85 }}>
-                      出圖不吃這一段
-                    </Meta>
-                  </Meta>
-                  {canEdit && (
-                    <Meta style={{ display: "block", marginBottom: 10, fontSize: 12 }}>
-                      <button
-                        type="button"
-                        className="linkish"
-                        style={{
-                          border: 0,
-                          background: "none",
-                          cursor: "pointer",
-                          color: "var(--primary-ink)",
-                          textDecoration: "underline",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: 0,
+              )}
+              {isLeader && (
+                <Hint style={{ marginTop: 8, fontSize: 12 }}>
+                  選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
+                  實際會注入哪些，下方「AI 會收到什麼」直接看得到。
+                </Hint>
+              )}
+              {/* C0：禁忌會進生成負向／避免——留在主路徑；預設禁語仍可摺疊調整 */}
+              <div
+                style={{
+                  marginTop: 12,
+                  marginBottom: 4,
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border, #e5e7eb)",
+                }}
+              >
+                <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  不能出現的東西
+                  <FieldReaders field="taboos" />
+                </Meta>
+                {isDefaultTaboosOnly(wv.taboos) ? (
+                  <details>
+                    <summary style={{ cursor: "pointer", fontSize: 13 }}>
+                      合規保護已開啟 ✓（預設禁語；點此展開調整）
+                    </summary>
+                    <div style={{ marginTop: 8 }}>
+                      <TokenListEditor
+                        id="wv-taboos"
+                        label="不能講、不能出現的"
+                        fieldKey="taboos"
+                        hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
+                        values={wv.taboos}
+                        placeholder="例：不得出現可讀文字（Enter 加入）"
+                        readOnly={!canEdit}
+                        onChange={(next) => {
+                          if (removesDefaultTaboos(wv.taboos, next)) {
+                            const ok = window.confirm(
+                              "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                            );
+                            if (!ok) return;
+                          }
+                          updateWv.mutate({ id, worldview: { taboos: next } });
                         }}
-                        onClick={() => {
-                          const patch = applyWorldviewAdvancedExample(wv, p.kind, true);
-                          if (!Object.keys(patch).length) return;
-                          updateWv.mutate({ id, worldview: patch });
-                        }}
-                      >
-                        空白欄帶入範例
-                      </button>
-                      <span style={{ opacity: 0.5 }}> · </span>
-                      <button
-                        type="button"
-                        className="linkish"
-                        style={{
-                          border: 0,
-                          background: "none",
-                          cursor: "pointer",
-                          color: "var(--primary-ink)",
-                          textDecoration: "underline",
-                          fontSize: 12,
-                          padding: 0,
-                        }}
-                        onClick={() => {
-                          if (!window.confirm("要用範例覆寫目前的觀眾、三幕與敘事人物嗎？（禁忌與參考連結不動）")) return;
-                          const patch = applyWorldviewAdvancedExample(wv, p.kind, false);
-                          updateWv.mutate({ id, worldview: patch });
-                        }}
-                      >
-                        整段換成範例
-                      </button>
-                      <span style={{ marginLeft: 6, opacity: 0.75 }}>（依本專案類型微調，可再改）</span>
-                    </Meta>
-                  )}
-
-                  <label htmlFor="wv-audience">
-                    這支片給誰看？
-                    <FieldReaders field="audience" />
-                    <HelpTip text="給誰看。會進助手／代理、文字生成、導演；不會塞進圖影正向 prompt。" />
-                  </label>
-                  <input
-                    key={`audience-${wv.audience}`}
-                    id="wv-audience"
-                    defaultValue={wv.audience}
+                      />
+                    </div>
+                  </details>
+                ) : (
+                  <TokenListEditor
+                    id="wv-taboos"
+                    label="不能講、不能出現的"
+                    fieldKey="taboos"
+                    hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
+                    values={wv.taboos}
+                    placeholder="例：不得出現可讀文字（Enter 加入）"
                     readOnly={!canEdit}
-                    maxLength={500}
-                    placeholder="例：想在忙碌生活裡找片刻安定的年輕人與家庭"
-                    onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
+                    onChange={(next) => {
+                      if (removesDefaultTaboos(wv.taboos, next)) {
+                        const ok = window.confirm(
+                          "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                        );
+                        if (!ok) return;
+                      }
+                      updateWv.mutate({ id, worldview: { taboos: next } });
+                    }}
                   />
+                )}
+              </div>
+              {/* 注入預覽：必須在進階摺疊層「之上」。C0：預設收合，縮短首屏高度。 */}
+              <WorldviewPreview
+                wv={wv}
+                cardCounts={{ characters: charIds.length, scenes: sceneIds.length, props: propIds.length }}
+                defaultOpen={false}
+              />
+              {/* 進階層：故事走向 + 敘事 AI + 交接備註（出圖不吃）；禁忌已提升至主路徑 */}
+              <details
+                style={{ marginTop: 10 }}
+                open={
+                  wvAdvancedOpen ||
+                  hasActs(wv) ||
+                  !!wv.audience.trim() ||
+                  wv.people.length > 0 ||
+                  wv.themes.length > 0
+                }
+                onToggle={(e) => setWvAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+              >
+                <summary style={{ cursor: "pointer", fontSize: 13 }}>
+                  進階：故事走向、給寫字的 AI、交接備註（可以晚點再填）
+                </summary>
+                <div style={{ marginTop: 8 }}>
+                  <Hint layer="always" style={{ marginBottom: 12, fontSize: 12 }}>
+                    <strong>上面填完就能出圖。</strong>
+                    這裡填了，寫腳本／拆分鏡／問助手會更準；
+                    <strong>直接出圖不吃</strong>故事走向／觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
+                  </Hint>
 
-                  <label style={{ marginTop: 8, display: "block" }}>
-                    故事三段
-                    <FieldReaders field="acts" />
-                    <HelpTip text="敘事骨架。進助手／文字生成／導演；不進圖影。" />
+                  <label id="wv-themes">
+                    故事走向
+                    <FieldReaders field="themes" />
+                    <HelpTip text="可略過。只給寫腳本／拆分鏡的 AI 看，出圖不吃。建議 1～2 個，第一個為主。" />
                   </label>
-                  {([
-                    ["hook", "開頭怎麼抓住人", "例：第一個抓住人的畫面或處境"],
-                    ["turn", "中間怎麼轉", "例：心或局面怎麼轉"],
-                    ["cta", "最後希望觀眾做什麼", "例：希望觀眾帶走什麼／做什麼"],
-                  ] as const).map(([field, label, ph]) => (
+                  {chipGroup("themes", themeOpts, "theme", "wv-themes")}
+
+                  {/* ① 給敘事 AI */}
+                  <div
+                    style={{
+                      marginTop: 12,
+                      marginBottom: 14,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border, #e5e7eb)",
+                      background: "var(--surface-2, transparent)",
+                    }}
+                  >
+                    <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                      ① 寫腳本、拆分鏡時會用到
+                      <Meta as="span" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11, opacity: 0.85 }}>
+                        出圖不吃這一段
+                      </Meta>
+                    </Meta>
+                    {canEdit && (
+                      <Meta style={{ display: "block", marginBottom: 10, fontSize: 12 }}>
+                        <button
+                          type="button"
+                          className="linkish"
+                          style={{
+                            border: 0,
+                            background: "none",
+                            cursor: "pointer",
+                            color: "var(--primary-ink)",
+                            textDecoration: "underline",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            padding: 0,
+                          }}
+                          onClick={() => {
+                            const patch = applyWorldviewAdvancedExample(wv, p.kind, true);
+                            if (!Object.keys(patch).length) return;
+                            updateWv.mutate({ id, worldview: patch });
+                          }}
+                        >
+                          空白欄帶入範例
+                        </button>
+                        <span style={{ opacity: 0.5 }}> · </span>
+                        <button
+                          type="button"
+                          className="linkish"
+                          style={{
+                            border: 0,
+                            background: "none",
+                            cursor: "pointer",
+                            color: "var(--primary-ink)",
+                            textDecoration: "underline",
+                            fontSize: 12,
+                            padding: 0,
+                          }}
+                          onClick={() => {
+                            if (!window.confirm("要用範例覆寫目前的觀眾、三幕與敘事人物嗎？（禁忌與參考連結不動）")) return;
+                            const patch = applyWorldviewAdvancedExample(wv, p.kind, false);
+                            updateWv.mutate({ id, worldview: patch });
+                          }}
+                        >
+                          整段換成範例
+                        </button>
+                        <span style={{ marginLeft: 6, opacity: 0.75 }}>（依本專案類型微調，可再改）</span>
+                      </Meta>
+                    )}
+
+                    <label htmlFor="wv-audience">
+                      這支片給誰看？
+                      <FieldReaders field="audience" />
+                      <HelpTip text="給誰看。會進助手／代理、文字生成、導演；不會塞進圖影正向 prompt。" />
+                    </label>
                     <input
-                      key={`${field}-${wv.acts[field]}`}
-                      aria-label={`三幕結構：${label}`}
-                      defaultValue={wv.acts[field]}
+                      key={`audience-${wv.audience}`}
+                      id="wv-audience"
+                      defaultValue={wv.audience}
                       readOnly={!canEdit}
                       maxLength={500}
-                      placeholder={`${label}——${ph}`}
-                      style={{ marginTop: 6 }}
-                      onBlur={(e) =>
-                        canEdit && e.target.value !== wv.acts[field] &&
-                        updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: e.target.value } } })
-                      }
+                      placeholder="例：想在忙碌生活裡找片刻安定的年輕人與家庭"
+                      onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                     />
-                  ))}
 
-                  <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
-                    故事裡有誰（純文字）
-                    <FieldReaders field="people" />
-                    <HelpTip text="故事裡有誰（文字）。要畫得像請按「建定裝」→ 角色定裝卡，生成時勾選。" />
-                  </label>
-                  <div role="group" aria-labelledby="wv-people-label">
-                    {wv.people.map((token) => {
-                      const parsed = parsePersonTokenForCharacter(token);
-                      const existing = characters.data?.find((c) => c.name === parsed.name);
-                      return (
-                        <Chip key={token} style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "4px 6px 4px 0" }}>
-                          <span>{token}</span>
-                          {canEdit && (
-                            <>
-                              {existing ? (
-                                <button
-                                  type="button"
-                                  className="linkish"
-                                  style={{
-                                    border: 0,
-                                    background: "none",
-                                    cursor: "pointer",
-                                    color: "var(--primary-ink)",
-                                    textDecoration: "underline",
-                                    fontSize: 11,
-                                    padding: 0,
-                                  }}
-                                  title="已有同名定裝，捲到角色定裝並勾選"
-                                  onClick={() => {
-                                    setCharIds((prev) => {
-                                      if (prev.includes(existing.id) || prev.length >= 6) return prev;
-                                      return [...prev, existing.id];
-                                    });
-                                    setCtxSectionOpen("characters", true);
-                                    requestAnimationFrame(() => {
-                                      document.getElementById("sec-characters")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                                    });
-                                  }}
-                                >
-                                  已有定裝
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="linkish"
-                                  style={{
-                                    border: 0,
-                                    background: "none",
-                                    cursor: "pointer",
-                                    color: "var(--primary-ink)",
-                                    textDecoration: "underline",
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    padding: 0,
-                                  }}
-                                  disabled={addCharFromPerson.isPending}
-                                  title="建立角色定裝卡（外觀可再改）"
-                                  onClick={() => {
-                                    addCharFromPerson.mutate({
-                                      projectId: id,
-                                      name: parsed.name,
-                                      appearance: parsed.appearance,
-                                      notes: parsed.notes,
-                                      clientRequestId: crypto.randomUUID(),
-                                    });
-                                  }}
-                                >
-                                  建定裝
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="tag-remove"
-                                aria-label={`移除「${token}」`}
-                                title="移除"
-                                onClick={() => updateWv.mutate({ id, worldview: { people: wv.people.filter((x) => x !== token) } })}
-                              >
-                                <Icon name="X" size={12} />
-                              </button>
-                            </>
-                          )}
-                        </Chip>
-                      );
-                    })}
-                    {wv.people.length === 0 && !canEdit && <Meta>未設定</Meta>}
-                    {canEdit && (
-                      <NarrativePersonAdd
-                        onAdd={(token) => {
-                          if (wv.people.includes(token) || wv.people.length >= 30) return;
-                          updateWv.mutate({ id, worldview: { people: [...wv.people, token] } });
-                        }}
-                        disabled={wv.people.length >= 30}
+                    <label style={{ marginTop: 8, display: "block" }}>
+                      故事三段
+                      <FieldReaders field="acts" />
+                      <HelpTip text="敘事骨架。進助手／文字生成／導演；不進圖影。" />
+                    </label>
+                    {([
+                      ["hook", "開頭怎麼抓住人", "例：第一個抓住人的畫面或處境"],
+                      ["turn", "中間怎麼轉", "例：心或局面怎麼轉"],
+                      ["cta", "最後希望觀眾做什麼", "例：希望觀眾帶走什麼／做什麼"],
+                    ] as const).map(([field, label, ph]) => (
+                      <input
+                        key={`${field}-${wv.acts[field]}`}
+                        aria-label={`三幕結構：${label}`}
+                        defaultValue={wv.acts[field]}
+                        readOnly={!canEdit}
+                        maxLength={500}
+                        placeholder={`${label}——${ph}`}
+                        style={{ marginTop: 6 }}
+                        onBlur={(e) =>
+                          canEdit && e.target.value !== wv.acts[field] &&
+                          updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: e.target.value } } })
+                        }
                       />
-                    )}
-                  </div>
-                  {canEdit && wv.people.length > 0 && (charCount === 0 || charCount == null) && (
-                    <Hint layer="always" style={{ marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
-                      已有敘事人物、尚無角色定裝——出圖外觀可能不穩。點人物旁「建定裝」或到下方角色定裝建卡。
-                    </Hint>
-                  )}
-                  {addCharFromPerson.error && (
-                    <p className="error" style={{ marginTop: 6 }}>{addCharFromPerson.error.message}</p>
-                  )}
-                  <Hint style={{ margin: "6px 0 0", fontSize: 12 }}>
-                    寫法可用「名字＝外觀」（例：安倢＝紅傘、米白外套），建定裝會拆成名與外觀。
-                  </Hint>
-                </div>
+                    ))}
 
-                {/* ② 交接備註（禁忌已提升至主路徑） */}
-                <div
-                  style={{
-                    marginBottom: 8,
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px dashed var(--border, #e5e7eb)",
+                    <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
+                      故事裡有誰（純文字）
+                      <FieldReaders field="people" />
+                      <HelpTip text="故事裡有誰（文字）。要畫得像請按「建定裝」→ 角色定裝卡，生成時勾選。" />
+                    </label>
+                    <div role="group" aria-labelledby="wv-people-label">
+                      {wv.people.map((token) => {
+                        const parsed = parsePersonTokenForCharacter(token);
+                        const existing = characters.data?.find((c) => c.name === parsed.name);
+                        return (
+                          <Chip key={token} style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "4px 6px 4px 0" }}>
+                            <span>{token}</span>
+                            {canEdit && (
+                              <>
+                                {existing ? (
+                                  <button
+                                    type="button"
+                                    className="linkish"
+                                    style={{
+                                      border: 0,
+                                      background: "none",
+                                      cursor: "pointer",
+                                      color: "var(--primary-ink)",
+                                      textDecoration: "underline",
+                                      fontSize: 11,
+                                      padding: 0,
+                                    }}
+                                    title="已有同名定裝，捲到角色定裝並勾選"
+                                    onClick={() => {
+                                      setCharIds((prev) => {
+                                        if (prev.includes(existing.id) || prev.length >= 6) return prev;
+                                        return [...prev, existing.id];
+                                      });
+                                      setCtxSectionOpen("characters", true);
+                                      setToneTab("costume");
+                                      requestAnimationFrame(() => {
+                                        document.getElementById("sec-characters")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                      });
+                                    }}
+                                  >
+                                    已有定裝
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="linkish"
+                                    style={{
+                                      border: 0,
+                                      background: "none",
+                                      cursor: "pointer",
+                                      color: "var(--primary-ink)",
+                                      textDecoration: "underline",
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      padding: 0,
+                                    }}
+                                    disabled={addCharFromPerson.isPending}
+                                    title="建立角色定裝卡（外觀可再改）"
+                                    onClick={() => {
+                                      addCharFromPerson.mutate({
+                                        projectId: id,
+                                        name: parsed.name,
+                                        appearance: parsed.appearance,
+                                        notes: parsed.notes,
+                                        clientRequestId: crypto.randomUUID(),
+                                      });
+                                    }}
+                                  >
+                                    建定裝
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="tag-remove"
+                                  aria-label={`移除「${token}」`}
+                                  title="移除"
+                                  onClick={() => updateWv.mutate({ id, worldview: { people: wv.people.filter((x) => x !== token) } })}
+                                >
+                                  <Icon name="X" size={12} />
+                                </button>
+                              </>
+                            )}
+                          </Chip>
+                        );
+                      })}
+                      {wv.people.length === 0 && !canEdit && <Meta>未設定</Meta>}
+                      {canEdit && (
+                        <NarrativePersonAdd
+                          onAdd={(token) => {
+                            if (wv.people.includes(token) || wv.people.length >= 30) return;
+                            updateWv.mutate({ id, worldview: { people: [...wv.people, token] } });
+                          }}
+                          disabled={wv.people.length >= 30}
+                        />
+                      )}
+                    </div>
+                    {canEdit && wv.people.length > 0 && (charCount === 0 || charCount == null) && (
+                      <Hint layer="always" style={{ marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                        已有敘事人物、尚無角色定裝——出圖外觀可能不穩。點人物旁「建定裝」或到下方角色定裝建卡。
+                      </Hint>
+                    )}
+                    {addCharFromPerson.error && (
+                      <p className="error" style={{ marginTop: 6 }}>{addCharFromPerson.error.message}</p>
+                    )}
+                    <Hint style={{ margin: "6px 0 0", fontSize: 12 }}>
+                      寫法可用「名字＝外觀」（例：安倢＝紅傘、米白外套），建定裝會拆成名與外觀。
+                    </Hint>
+                  </div>
+
+                  {/* ② 交接備註（禁忌已提升至主路徑） */}
+                  <div
+                    style={{
+                      marginBottom: 8,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px dashed var(--border, #e5e7eb)",
+                    }}
+                  >
+                    <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                      ② 給人看的備註（AI 不會讀）
+                      <FieldReaders field="references" />
+                    </Meta>
+                    <Hint style={{ marginBottom: 8, fontSize: 12 }}>
+                      只寫進交付鏡頭表給人看；不會影響生成或導演。
+                    </Hint>
+                    <TokenListEditor
+                      id="wv-references"
+                      label="參考連結"
+                      fieldKey="references"
+                      hint="剪輯／企劃交接用網址。"
+                      values={wv.references}
+                      placeholder="貼上參考影片/文章網址（Enter 加入）"
+                      readOnly={!canEdit}
+                      onChange={(next) => updateWv.mutate({ id, worldview: { references: next } })}
+                    />
+                  </div>
+                </div>
+              </details>
+
+              {updateWv.error && <p className="error">設定儲存失敗：{updateWv.error.message}</p>}
+            </Card>
+            </CtxCollapse>
+            </CollabZone>
+          </div>
+
+          {/* ── 定調 2：角色與場景定裝 ── */}
+          <div style={{ display: toneTab === "costume" ? "block" : "none" }}>
+            <CtxCollapse
+              compact={mobileCompact}
+              sectionId="sec-costume"
+              title="定裝"
+              meta={[
+                charCount != null ? `角${charCount}` : null,
+                presetCount != null ? `景${presetCount}` : null,
+                propCount != null ? `道${propCount}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined}
+              open={costumePackOpen}
+              onOpenChange={setCostumePackOpen}
+            >
+              <CostumePackSection
+                tab={costumeTab}
+                onTabChange={(t) => {
+                  setCostumeTab(t);
+                  setCtxSectionOpen(t, true);
+                }}
+                counts={{
+                  characters: charCount,
+                  scenes: presetCount,
+                  props: propCount,
+                }}
+                carriedHint={
+                  <>
+                    勾選角色／場景後，歸屬在它們名下的道具會在生成時
+                    <strong>自動帶入</strong>
+                    （與創作台數字同源；手動勾選優先）。目前預覽會多帶{" "}
+                    {carriedPropIds.filter((pid) => !propIds.includes(pid)).length} 件。
+                  </>
+                }
+                panels={{
+                  characters: (
+                    <CharacterCards
+                      projectId={id}
+                      selectedIds={charIds}
+                      onToggle={toggleChar}
+                      onCreated={onCharCreated}
+                      readOnly={!canEdit}
+                    />
+                  ),
+                  scenes: (
+                    <ScenePresetCards
+                      projectId={id}
+                      selectedIds={sceneIds}
+                      onToggle={toggleScene}
+                      onCreated={onSceneCreated}
+                      readOnly={!canEdit}
+                    />
+                  ),
+                  props: (
+                    <PropCards
+                      projectId={id}
+                      selectedIds={propIds}
+                      onToggle={toggleProp}
+                      onCreated={onPropCreated}
+                      readOnly={!canEdit}
+                    />
+                  ),
+                }}
+              />
+              {/* C2.3：回到原處——主 CTA 依 returnTo；無記憶時兩鈕並列次要 */}
+              <div
+                className="context-return-bar"
+                data-testid="context-return-bar"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginTop: 12,
+                  paddingTop: 10,
+                  borderTop: "1px solid var(--border-soft)",
+                  position: "sticky",
+                  bottom: 0,
+                  background: "var(--card, var(--bg))",
+                  zIndex: 1,
+                }}
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  // C2.3：僅在從該站來時 primary；null（直開頁）時兩鈕皆 ghost
+                  variant={contextReturnTo === "studio" ? "primary" : "ghost"}
+                  onClick={() => {
+                    returnFromContext("studio", { projectId: id });
+                    setContextReturnTo(null);
                   }}
                 >
-                  <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ② 給人看的備註（AI 不會讀）
-                    <FieldReaders field="references" />
+                  回到創作台
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={contextReturnTo === "scenes" ? "primary" : "ghost"}
+                  onClick={() => {
+                    returnFromContext("scenes", { projectId: id });
+                    setContextReturnTo(null);
+                  }}
+                >
+                  回到分鏡
+                </Button>
+                {contextReturnTo ? (
+                  <Meta as="span" style={{ fontSize: 12, alignSelf: "center" }}>
+                    {contextReturnTo === "studio" ? "從創作台來——改完可回生成" : "從分鏡來——改完可回交付"}
                   </Meta>
-                  <Hint style={{ marginBottom: 8, fontSize: 12 }}>
-                    只寫進交付鏡頭表給人看；不會影響生成或導演。
-                  </Hint>
-                  <TokenListEditor
-                    id="wv-references"
-                    label="參考連結"
-                    fieldKey="references"
-                    hint="剪輯／企劃交接用網址。"
-                    values={wv.references}
-                    placeholder="貼上參考影片/文章網址（Enter 加入）"
-                    readOnly={!canEdit}
-                    onChange={(next) => updateWv.mutate({ id, worldview: { references: next } })}
-                  />
-                </div>
+                ) : null}
               </div>
-            </details>
+            </CtxCollapse>
+          </div>
 
-            {updateWv.error && <p className="error">設定儲存失敗：{updateWv.error.message}</p>}
-          </Card>
-          </CtxCollapse>
-          </CollabZone>
-
-          {/* C1：角色／場景／道具合一「定裝」Tab。錨點 #sec-characters|scenes|props 掛 tabpanel。
-              手機：整包 CtxCollapse 預設收合；桌機直接展開。 */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-costume"
-            title="定裝"
-            meta={[
-              charCount != null ? `角${charCount}` : null,
-              presetCount != null ? `景${presetCount}` : null,
-              propCount != null ? `道${propCount}` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || undefined}
-            open={costumePackOpen}
-            onOpenChange={setCostumePackOpen}
-          >
-            <CostumePackSection
-              tab={costumeTab}
-              onTabChange={(t) => {
-                setCostumeTab(t);
-                setCtxSectionOpen(t, true);
-              }}
-              counts={{
-                characters: charCount,
-                scenes: presetCount,
-                props: propCount,
-              }}
-              carriedHint={
-                <>
-                  勾選角色／場景後，歸屬在它們名下的道具會在生成時
-                  <strong>自動帶入</strong>
-                  （與創作台數字同源；手動勾選優先）。目前預覽會多帶{" "}
-                  {carriedPropIds.filter((pid) => !propIds.includes(pid)).length} 件。
-                </>
-              }
-              panels={{
-                characters: (
-                  <CharacterCards
-                    projectId={id}
-                    selectedIds={charIds}
-                    onToggle={toggleChar}
-                    onCreated={onCharCreated}
-                    readOnly={!canEdit}
-                  />
-                ),
-                scenes: (
-                  <ScenePresetCards
-                    projectId={id}
-                    selectedIds={sceneIds}
-                    onToggle={toggleScene}
-                    onCreated={onSceneCreated}
-                    readOnly={!canEdit}
-                  />
-                ),
-                props: (
-                  <PropCards
-                    projectId={id}
-                    selectedIds={propIds}
-                    onToggle={toggleProp}
-                    onCreated={onPropCreated}
-                    readOnly={!canEdit}
-                  />
-                ),
-              }}
-            />
-            {/* C2.3：回到原處——主 CTA 依 returnTo；無記憶時兩鈕並列次要 */}
-            <div
-              className="context-return-bar"
-              data-testid="context-return-bar"
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginTop: 12,
-                paddingTop: 10,
-                borderTop: "1px solid var(--border-soft)",
-                position: "sticky",
-                bottom: 0,
-                background: "var(--card, var(--bg))",
-                zIndex: 1,
-              }}
+          {/* ── 定調 3：依據與素材（知識庫／資料表／素材庫） ── */}
+          <div style={{ display: toneTab === "sources" ? "block" : "none" }}>
+            <CtxGroup
+              groupId="ctx-group-sources"
+              title="依據與素材"
+              lede="知識庫、專案資料表、上傳素材——給 AI 可引用的事實與來源"
+              meta={[
+                ...(knowledgeCount != null ? [`知${knowledgeCount}`] : []),
+                ...(assetCount != null ? [`材${assetCount}`] : []),
+              ].join(" · ") || undefined}
+              compact={mobileCompact}
+              open={ctxGroupOpen.sources}
+              onOpenChange={(o) => setCtxGroupSectionOpen("sources", o)}
             >
-              <Button
-                type="button"
-                size="sm"
-                // C2.3：僅在從該站來時 primary；null（直開頁）時兩鈕皆 ghost
-                variant={contextReturnTo === "studio" ? "primary" : "ghost"}
-                onClick={() => {
-                  returnFromContext("studio", { projectId: id });
-                  setContextReturnTo(null);
-                }}
-              >
-                回到創作台
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={contextReturnTo === "scenes" ? "primary" : "ghost"}
-                onClick={() => {
-                  returnFromContext("scenes", { projectId: id });
-                  setContextReturnTo(null);
-                }}
-              >
-                回到分鏡
-              </Button>
-              {contextReturnTo ? (
-                <Meta as="span" style={{ fontSize: 12, alignSelf: "center" }}>
-                  {contextReturnTo === "studio" ? "從創作台來——改完可回生成" : "從分鏡來——改完可回交付"}
-                </Meta>
-              ) : null}
-            </div>
-          </CtxCollapse>
-          </CtxGroup>
+            {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
+            <CtxCollapse
+              compact={mobileCompact}
+              sectionId="sec-knowledge"
+              title="知識庫"
+              meta={knowledgeCount != null ? `${knowledgeCount} 份` : undefined}
+              open={ctxOpen.knowledge}
+              onOpenChange={(o) => setCtxSectionOpen("knowledge", o)}
+            >
+              <KnowledgeBase projectId={id} readOnly={!canEdit} />
+            </CtxCollapse>
 
-          {/* ── 分組 B：依據與素材（知識庫／資料表／素材庫） ── */}
-          <CtxGroup
-            groupId="ctx-group-sources"
-            title="依據與素材"
-            lede="知識庫、專案資料表、上傳素材——給 AI 可引用的事實與來源"
-            meta={[
-              ...(knowledgeCount != null ? [`知${knowledgeCount}`] : []),
-              ...(assetCount != null ? [`材${assetCount}`] : []),
-            ].join(" · ") || undefined}
-            compact={mobileCompact}
-            open={ctxGroupOpen.sources}
-            onOpenChange={(o) => setCtxGroupSectionOpen("sources", o)}
-          >
-          {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-knowledge"
-            title="知識庫"
-            meta={knowledgeCount != null ? `${knowledgeCount} 份` : undefined}
-            open={ctxOpen.knowledge}
-            onOpenChange={(o) => setCtxSectionOpen("knowledge", o)}
-          >
-            <KnowledgeBase projectId={id} readOnly={!canEdit} />
-          </CtxCollapse>
+            {/* 專案資料：AI 可引用狀態 + 一鍵建表；手機受控預設收合，桌機維持展開 */}
+            <ProjectDatabasesCard
+              projectId={id}
+              canEdit={canEdit}
+              open={mobileCompact ? ctxOpen.databases : undefined}
+              onOpenChange={mobileCompact ? (o) => setCtxSectionOpen("databases", o) : undefined}
+            />
 
-          {/* 專案資料：AI 可引用狀態 + 一鍵建表；手機受控預設收合，桌機維持展開 */}
-          <ProjectDatabasesCard
-            projectId={id}
-            canEdit={canEdit}
-            open={mobileCompact ? ctxOpen.databases : undefined}
-            onOpenChange={mobileCompact ? (o) => setCtxSectionOpen("databases", o) : undefined}
-          />
+            {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
+            <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
+              <div data-fb="上傳素材">
+                <CtxCollapse
+                  compact={mobileCompact}
+                  sectionId="sec-assets"
+                  title="素材庫"
+                  meta={assetCount != null ? `${assetCount}` : undefined}
+                  open={ctxOpen.assets}
+                  onOpenChange={(o) => setCtxSectionOpen("assets", o)}
+                >
+                  <AssetLibrary
+                    projectId={id}
+                    selectedSourceId={sourceHighlightId}
+                    onPickSource={(a) => {
+                      setSourceHighlightId(a.id);
+                      setGenerateApply((prev) => ({
+                        nonce: (prev?.nonce ?? 0) + 1,
+                        sourceAsset: a,
+                      }));
+                      revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                    }}
+                  />
+                </CtxCollapse>
+              </div>
+            </CollabZone>
+            </CtxGroup>
+          </div>
 
-          {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
-          <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
-            <div data-fb="上傳素材">
+          {/* ── 分組 C：管理（回收桶）——預設收合 ── */}
+          <div style={{ display: toneTab === "recycle" ? "block" : "none" }}>
+            <CtxGroup
+              groupId="ctx-group-manage"
+              title="回收桶"
+              lede="已刪除的分鏡與素材——需要時可在此還原"
+              compact={mobileCompact}
+              open={ctxGroupOpen.manage}
+              onOpenChange={(o) => setCtxGroupSectionOpen("manage", o)}
+            >
               <CtxCollapse
                 compact={mobileCompact}
-                sectionId="sec-assets"
-                title="素材庫"
-                meta={assetCount != null ? `${assetCount}` : undefined}
-                open={ctxOpen.assets}
-                onOpenChange={(o) => setCtxSectionOpen("assets", o)}
+                sectionId="sec-recyclebin"
+                title="回收桶"
+                open={ctxOpen.recycle}
+                onOpenChange={(o) => setCtxSectionOpen("recycle", o)}
               >
-                <AssetLibrary
-                  projectId={id}
-                  selectedSourceId={sourceHighlightId}
-                  onPickSource={(a) => {
-                    setSourceHighlightId(a.id);
-                    setGenerateApply((prev) => ({
-                      nonce: (prev?.nonce ?? 0) + 1,
-                      sourceAsset: a,
-                    }));
-                    revealWorkbenchAnchor("#sec-studio", { projectId: id });
-                  }}
-                />
+                <RecycleBin projectId={id} />
               </CtxCollapse>
-            </div>
-          </CollabZone>
-          </CtxGroup>
-
-          {/* ── 分組 C：管理（回收桶／權限）——降級到最底，預設收合 ── */}
-          <CtxGroup
-            groupId="ctx-group-manage"
-            title="管理"
-            lede="回收桶與成員權限——非日常創作流程，需要時再開"
-            compact={mobileCompact}
-            open={ctxGroupOpen.manage}
-            onOpenChange={(o) => setCtxGroupSectionOpen("manage", o)}
-          >
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-recyclebin"
-            title="回收桶"
-            open={ctxOpen.recycle}
-            onOpenChange={(o) => setCtxSectionOpen("recycle", o)}
-          >
-            <RecycleBin projectId={id} />
-          </CtxCollapse>
-
-          <Card as="details" variant="quiet" className="ctx-manage" data-fb="專案權限收合卡" id="sec-members">
-            <summary>
-              <Icon name="Lock" size={14} />成員權限（預設全員可編輯；可設個別成員唯讀）
-              <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
-            </summary>
-            <div style={{ marginTop: 10 }}>
-              <ProjectMembersCard projectId={id} bare />
-            </div>
-          </Card>
-          </CtxGroup>
+            </CtxGroup>
+          </div>
 
           <StageLink text="以上兩區會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 

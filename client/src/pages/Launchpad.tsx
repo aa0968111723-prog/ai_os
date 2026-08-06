@@ -3,9 +3,8 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
-import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
-import { Icon } from "../components/Icon";
-import { BentoStatusIcon } from "../components/BentoStatusIcons";
+import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
+import { AICreativeCopilot } from "../components/AICreativeCopilot";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
@@ -275,7 +274,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           eyebrow: "正在推進",
           title: `AI 正在處理 ${runningRuns} 份計畫`,
           detail: "你可以先做別的事；需要人員決定時，這裡會提醒你。",
-          href: "#ai-work",
+          href: "#ai-copilot",
           action: "查看進度",
           icon: "Sparkles" as const,
         }
@@ -359,12 +358,12 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <a
-            href="#ai-work"
+            href="#ai-copilot"
             className="btn btn-secondary"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 46, textDecoration: "none" }}
           >
-            <Icon name="Bot" size={16} />
-            <span>AI 總指揮</span>
+            <Icon name="Sparkles" size={16} />
+            <span>AI 創作助理</span>
           </a>
           <button
             type="button"
@@ -392,16 +391,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <nav className="daily-quick-links" aria-label="常用工具">
         <Link href="/planner"><Icon name="Clock" size={15} /><span>安排今天</span><small>排程與筆記</small></Link>
         <Link href="/databases"><Icon name="Database" size={15} /><span>整理資料</span><small>清單與批次匯入</small></Link>
+        <Link href="/workflows"><Icon name="Workflow" size={15} /><span>自動化工作流</span><small>母版系列與批次生成</small></Link>
         <Link href="/chat"><Icon name="MessageCircle" size={15} /><span>聯絡夥伴</span><small>私訊與標注</small></Link>
       </nav>
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
-
-      {/* 母版系列（#255 第 1 期）：相同結構的短影音走「複製母版→填 4 格」，
-          不要每集從空專案重想流程 */}
-      {groupId && <SeriesTemplatePanel groupId={groupId} isLeader={isLeader} />}
 
       {/* 建立新專案：現代磨砂玻璃 Modal 彈窗 */}
       {createOpen ? (
@@ -575,7 +571,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
                         <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                       </span>
                       {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                        <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                        <Link href={`/p/${project.id}?focus=pending`} style={{ textDecoration: "none" }}>
+                          <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                        </Link>
                       )}
                       <Icon name="ChevronRight" size={17} />
                     </Link>
@@ -618,21 +616,21 @@ export function Launchpad({ groupId }: { groupId: string }) {
           )}
         </div>
 
-        {/* 右欄：待我裁決與 AI 動態 */}
+        {/* 右欄：AI 創作動態與助理 */}
         <div className="bento-card bento-pulse">
           <div className="bento-card__head">
-            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />待我裁決與 AI 動態</h3>
-            <a href="#ai-work">總指揮詳情 →</a>
+            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />AI 創作動態與助理</h3>
+            <a href="#ai-copilot">創作助理 →</a>
           </div>
 
           <section className="daily-status-grid" aria-label="今日摘要" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {/* 直落「待我裁決」收件匣（#ai-work 區） */}
-            <a href="#ai-work" className="daily-status-card attention">
+            {/* 直落 AI 創作助理區 */}
+            <a href="#ai-copilot" className="daily-status-card attention">
               <span className="daily-status-card__icon"><BentoStatusIcon type="attention" size={26} /></span>
-              <span><strong>{pendingTotal}</strong><small>待我處理</small></span>
-              <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
+              <span><strong>{pendingTotal}</strong><small>待推進專案</small></span>
+              <span className="daily-status-card__detail">{pendingTotal > 0 ? `${pendingTotal} 個專案進行中` : "全組推進中"}</span>
             </a>
-            <a href="#ai-work" className="daily-status-card working">
+            <a href="#ai-copilot" className="daily-status-card working">
               <span className="daily-status-card__icon"><BentoStatusIcon type="working" size={26} /></span>
               <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
               <span className="daily-status-card__detail">
@@ -641,54 +639,51 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   : "目前無執行中計畫"}
               </span>
             </a>
-            <a href="#ai-work" className="daily-status-card waiting">
+            <a href="#ai-copilot" className="daily-status-card waiting">
               <span className="daily-status-card__icon"><BentoStatusIcon type="waiting" size={26} /></span>
-              <span><strong>{waitingRuns}</strong><small>等待／待核</small></span>
+              <span><strong>{waitingRuns}</strong><small>AI 待命就緒</small></span>
               <span className="daily-status-card__detail">
-                {(agentSummary?.awaitingApproval ?? 0) > 0
-                  ? `${agentSummary!.awaitingApproval} 份待核准`
-                  : "需要決定後繼續"}
+                {waitingRuns > 0
+                  ? `${waitingRuns} 份計畫準備就緒`
+                  : "隨時可快速發想"}
               </span>
             </a>
-            <a href="#ai-work" className="daily-status-card completed">
+            <a href="#ai-copilot" className="daily-status-card completed">
               <span className="daily-status-card__icon"><BentoStatusIcon type="completed" size={26} /></span>
               <span><strong>{completedRuns}</strong><small>近七日成果</small></span>
               <span className="daily-status-card__detail">
-                {(agentSummary?.failedRecent ?? 0) > 0
-                  ? `${agentSummary!.failedRecent} 筆近期失敗`
+                {completedRuns > 0
+                  ? `${completedRuns} 筆已完成產出`
                   : "已完成 AI 計畫"}
               </span>
             </a>
           </section>
 
-          <a href="#ai-work" className="bento-quick-ask" title="前往組代理總指揮提問或調度">
-            <Icon name="MessageSquare" size={15} style={{ color: "var(--primary-ink)" }} />
-            <span>向組總指揮提問、指派或調度...</span>
+          <a href="#ai-copilot" className="bento-quick-ask" title="前往 AI 創作助理發想靈感或提問">
+            <Icon name="Sparkles" size={15} style={{ color: "var(--primary-ink)" }} />
+            <span>向 AI 創作助理發想靈感、主題或規劃分鏡...</span>
             <Icon name="ArrowRight" size={14} />
           </a>
         </div>
       </div>
 
-      {/* 組代理總指揮（需求 12）：裁決／現況／跨專案調度／派工／追問合為同一入口——沒選組就不渲染。
-          key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、
-          「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
-      <section id="ai-work" className="dashboard-section" aria-labelledby="ai-work-title">
+      {/* AI 創作助理（Copilot / 靈感發想與專案全知解答） */}
+      <section id="ai-copilot" className="dashboard-section" aria-labelledby="ai-copilot-title">
         <div className="section-heading">
-          <div><p className="eyebrow">AI 工作</p><h2 id="ai-work-title">組代理總指揮</h2></div>
-          <p>裁決待辦、看誰卡住、跨專案調度、派工與追問——全組代理同一個入口。</p>
+          <div><p className="eyebrow">AI 助理</p><h2 id="ai-copilot-title">AI 創作助理</h2></div>
+          <p>隨時發想爆款短片靈感、企劃分鏡架構、解答專案進度與內容建議。</p>
         </div>
-        {groupId && (
-          <TeamAssistantCard
-            key={groupId}
-            groupId={groupId}
-            pendingDecisions={pendingDecisions}
-            pendingLoading={pendingSummary.isLoading}
-            pendingFailed={!!pendingSummary.error}
-            starterProjects={all}
-            isLeader={isLeader}
-            myUserId={myUserId}
-          />
-        )}
+        <AICreativeCopilot
+          groupId={groupId}
+          onUseIdeaForNewProject={(ideaTitle) => {
+            setTitle(ideaTitle);
+            setCreateOpen(true);
+            requestAnimationFrame(() => {
+              document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+              document.getElementById("np-title")?.focus();
+            });
+          }}
+        />
       </section>
 
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
@@ -861,16 +856,6 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   <span className="launch-list-row__time">更新 {relTime(p.updatedAt)}</span>
                   <span className="launch-list-row__badges">
                     {isArchived && <Chip style={{ margin: 0 }}>已封存</Chip>}
-                    {pd && pd.pendingApprovals > 0 && (
-                      <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="分鏡待審">
-                        待審 {pd.pendingApprovals}
-                      </Chip>
-                    )}
-                    {pd && pd.awaitingGenerations > 0 && (
-                      <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="生成待核">
-                        待核 {pd.awaitingGenerations}
-                      </Chip>
-                    )}
                   </span>
                 </Link>
                 {canRestore && (
@@ -939,17 +924,6 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       已封存
                     </Chip>
                   )}
-                  {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
-                  {pd && pd.pendingApprovals > 0 && (
-                    <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
-                      待審 {pd.pendingApprovals}
-                    </Chip>
-                  )}
-                  {pd && pd.awaitingGenerations > 0 && (
-                    <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
-                      待核 {pd.awaitingGenerations}
-                    </Chip>
-                  )}
                 </div>
                 <div className="launch-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>更新於 {relTime(p.updatedAt)}</span>
@@ -968,6 +942,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     </Button>
                   )}
                 </div>
+                {!isArchived && (
+                  <div className="launch-card__stepper">
+                    <ProgressStepper currentStep={inferProjectCurrentStep(p, pd)} size="sm" />
+                  </div>
+                )}
               </div>
             </Link>
           );
@@ -1990,151 +1969,7 @@ function TeamAssistantCard({
         </p>
       )}
 
-      {/* ── ② 待我裁決：這張卡的第一動作。
-          三種「等人決定」的來源合流成一份收件匣，卡最久的排前面；計數與清單在「全組現況」。 ── */}
-      {!overview.isLoading && (
-        <div className="team-inbox" aria-label="待我裁決">
-            <div className="team-inbox__head">
-              <strong>待我裁決</strong>
-              <Meta>
-                {pendingLoading && inbox.length === 0 ? "統計中…" : `${inbox.length} 件`}
-                {pendingFailed ? "・跨專案待辦載入失敗，可能少列" : ""}
-              </Meta>
-            </div>
-            {inbox.length === 0 ? (
-              <Hint layer="always" style={{ margin: 0 }}>
-                {pendingFailed
-                  ? "跨專案待辦載入失敗，暫時無法確認有沒有待裁決事項。"
-                  : summary?.hasRuns
-                    ? "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"
-                    : "這個組還沒開始用 AI 代理。下面挑一個起手式就能發起第一份計畫（建立計畫免費，核准後才花點）。"}
-              </Hint>
-            ) : (
-              <div className="team-inbox__list">
-                {inbox.slice(0, DECISION_INBOX_MAX).map((d) => {
-                  const meta = DECISION_META[d.kind];
-                  const stuck = daysStuck(d.since, nowMs);
-                  const busy = decidingKey === d.key;
-                  return (
-                    <div key={d.key} className={`team-inbox__row is-${d.kind}`}>
-                      <Chip style={{ margin: 0 }} title={meta.hint}>{meta.label}</Chip>
-                      <span className="team-inbox__copy">
-                        <Link href={`/p/${d.projectId}`} title="開啟這個專案">{d.projectTitle}</Link>
-                        <span title={d.what}>{d.what}</span>
-                      </span>
-                      <Meta className="team-inbox__age">
-                        {stuck === null ? "—" : stuck === 0 ? "今天" : `卡了 ${stuck} 天`}
-                        {d.kind === "agent" && d.estPoints != null ? `・估 ${d.estPoints} 點` : ""}
-                      </Meta>
-                      <span className="team-inbox__act">
-                        {d.kind === "agent" && d.runId && canDecideRun(d, isLeader, myUserId) ? (
-                          <>
-                            {/* 就地核准／放棄：走專案頁同一支 mutation。核准這一刻起才開始花點，
-                                所以一定要二次確認並把估點寫在確認訊息裡。 */}
-                            <ConfirmButton
-                              triggerClassName="btn-tonal btn-sm"
-                              disabled={busy}
-                              title="核准後代理才開始執行、才開始花點"
-                              message={`核准「${d.projectTitle}」的執行計畫？\n${d.what}\n核准後背景執行器會接手，估 ${d.estPoints ?? 0} 點。`}
-                              confirmLabel="核准並開始"
-                              onConfirm={async () => {
-                                setDecidingKey(d.key);
-                                try {
-                                  await approveRun.mutateAsync({ runId: d.runId! });
-                                  afterDecide();
-                                } catch {
-                                  /* approveRun.error 已顯示 */
-                                } finally {
-                                  setDecidingKey((k) => (k === d.key ? null : k));
-                                }
-                              }}
-                            >
-                              核准
-                            </ConfirmButton>
-                            <ConfirmButton
-                              triggerClassName="btn-ghost btn-sm"
-                              disabled={busy}
-                              title="放棄這份還沒核准的計畫（不花點）"
-                              message={`放棄「${d.projectTitle}」的執行計畫？\n${d.what}\n計畫會被丟棄，不會花點；要再做得重新規劃。`}
-                              confirmLabel="放棄計畫"
-                              onConfirm={async () => {
-                                setDecidingKey(d.key);
-                                try {
-                                  await discardRun.mutateAsync({ runId: d.runId! });
-                                  afterDecide();
-                                } catch {
-                                  /* discardRun.error 已顯示 */
-                                } finally {
-                                  setDecidingKey((k) => (k === d.key ? null : k));
-                                }
-                              }}
-                            >
-                              放棄
-                            </ConfirmButton>
-                          </>
-                        ) : d.kind === "task" && d.taskId ? (
-                          <>
-                            {/* 人類核准節點：要決定的內容就是任務標題本身（不像分鏡要看圖），
-                                所以可以就地裁決；走 tasks.decideApproval，喚醒邏輯留在 core 裡 */}
-                            <ConfirmButton
-                              triggerClassName="btn-tonal btn-sm"
-                              disabled={busy}
-                              title="核准這個人類關卡，讓計畫的後續步驟繼續"
-                              message={`核准「${d.projectTitle}」的人員關卡？\n${d.what}\n核准後計畫的後續步驟會被喚醒繼續執行。`}
-                              confirmLabel="核准並繼續"
-                              onConfirm={async () => {
-                                setDecidingKey(d.key);
-                                try {
-                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "approve" });
-                                  afterDecide();
-                                } catch {
-                                  /* decideTask.error 已顯示 */
-                                } finally {
-                                  setDecidingKey((k) => (k === d.key ? null : k));
-                                }
-                              }}
-                            >
-                              核准
-                            </ConfirmButton>
-                            <ConfirmButton
-                              triggerClassName="btn-ghost btn-sm"
-                              disabled={busy}
-                              title="退回這個關卡（計畫不會繼續往下走）"
-                              message={`退回「${d.projectTitle}」的人員關卡？\n${d.what}\n計畫不會繼續往下走，需要重新處理後再送一次。`}
-                              confirmLabel="退回"
-                              onConfirm={async () => {
-                                setDecidingKey(d.key);
-                                try {
-                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "reject" });
-                                  afterDecide();
-                                } catch {
-                                  /* decideTask.error 已顯示 */
-                                } finally {
-                                  setDecidingKey((k) => (k === d.key ? null : k));
-                                }
-                              }}
-                            >
-                              退回
-                            </ConfirmButton>
-                          </>
-                        ) : (
-                          /* 分鏡／生成刻意不就地裁決：不看內容就按核准等於盲簽 */
-                          <Link href={`/p/${d.projectId}?focus=pending`} title={meta.hint}>前往處理 →</Link>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-                {inbox.length > DECISION_INBOX_MAX && (
-                  <Meta as="p" style={{ margin: 0 }}>
-                    還有 {inbox.length - DECISION_INBOX_MAX} 件——先處理上面卡最久的幾件。
-                  </Meta>
-                )}
-              </div>
-            )}
-            {decideError && <p className="error" role="alert" style={{ margin: 0 }}>{decideError.message}</p>}
-          </div>
-        )}
+      {/* ── ② 快速調度起手式 ── */}
 
         {/* ── 起手式：空組的第一屏不能只有一句「沒有東西」。
             用既有的 playbook 目標模板當三個起點，選一個專案就能發起——
