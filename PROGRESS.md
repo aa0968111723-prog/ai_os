@@ -28,19 +28,33 @@
 ## 階段三：Adobe 視覺落地
 - [done] 板資產存取驗證＋視覺語彙萃取（D-003/D-004；耗點 0/200）
 - [done] 手機 design token（--m-* 變數）＋殼層重製第一批（底部導航/sheet/卡片/控件圓角＋Fraunces/Manrope Latin 子集）→ PR #473
-- [todo] 元件重製第二批：Input/Textarea/Select、Toast、Tabs、Badge/Progress/Skeleton、Empty/Error state、Orb（idle/thinking/speaking/error 手機版）
-- [todo] 圖示 SVG sprite 評估（既有 Icon 元件已是 SVG，確認缺口即可）
+- [done] 元件重製第二批＋Orb 四態（Input/Select/Chip/Badge/Skeleton/EmptyState/分頁＋中央 Orb FAB 含生成生命週期接線）→ PR #474（堆疊於 #473）
+- [done] 圖示：既有 Icon 元件即 SVG（lucide 系）無缺口；Android launcher/splash 由品牌 1024 生成（PR #475）
 
 ## 階段四：PWA 完備（既有：manifest 完整、sw.js、offline.html、share_target）
 - [done] 程式面缺口補齊：P2-44/45/46/47 → PR #472（離線頁 v3、lie-fi 5s 逾時、visibilitychange 更新檢查、部署減重）；安裝引導/iOS 教學既有已達標
-- [todo] Lighthouse PWA 全過＋飛航模式驗證（本機 E2E_MOCK 驗證輪）；P2-48 screenshots 等元件重製後補拍
+- [done] 驗證輪完成（docs/mobile-verification/VERIFICATION.md）：離線✓、a11y 100、BP 100、桌機像素紅線✓、觸控失敗歸零；效能 90 分 DEFERRED-ARCH（D-015）；P2-48 截圖素材已有（shots_integ 360/390 全套）
 
-## 階段五：側載 APK（PWA 全數完成後）
-- [todo] Capacitor/TWA 包裝＋GitHub Actions 自動 build＋INSTALL.md
+## 階段五：側載 APK
+- [done] Capacitor 薄殼（server.url 直連線上站）＋品牌化（狀態列/圖示/splash/深層連結）＋apk.yml（tag apk-v* 自動簽章發佈）＋INSTALL.md → PR #475
+- [todo] 合併後打 apk-v0.1.0 tag 驗證 CI 產出
+
+## 協作分工（2026-08-07 05:35）
+- 使用者已合併 #461-#468、#472；另一代理 session 正在解 #469/#470/#471/#473 的 base 衝突——**這四個分支我不再推 push**，待其完成後我接手 rebase 堆疊的 #474（reskin-2）與 #475（APK，package.json 撞 #473 字體依賴）。
+- 我專責：驗證輪（本機整合建置 E2E_MOCK＋全視寬截圖＋桌機像素對比＋離線/Lighthouse）→ 最終驗收報告。
 
 ## CI 觀察
 - 2026-08-07 00:40：#462/#463 首輪 CI 因 GitHub Actions 基礎設施故障（Service Unavailable）失敗。
 - 2026-08-07 02:10：確認 base 分支自身 CI 亦紅——(a) 同一波平台故障 (b) Launchpad.teamCard 71 測試為時間相依破損（另一並行分支 fix/launchpad-teamcard-frozen-clock 正在修），本任務所有分支繼承此紅測；已對 fix-a/b/c 觸發 rerun。判準維持「失敗集不比 base 多」。
 
 ## 驗收清單對照（第 8 節）
-- [todo] 全部（詳見各階段）
+- [x] 桌機 1280/1440 像素級無變化（同庫對照實驗＋pixel-diff 佐證；唯一結構差異歸因上游 #457）
+- [x] 樣式改動全在手機 breakpoint 內（token/契約測試強制；無條件新規則僅限隱形命中圈等零像素項）
+- [x] MOBILE_AUDIT.md 69 項全處置（46 修復＋P2-18 免改＋3 DEFERRED 有記錄）
+- [x] 360/375/390/430×全路由：巡檢 85/85 無橫向捲動、無破版（360/390 實測；375/430 介於兩者且無固定寬版面）
+- [x] 深淺色：站台鎖亮色（v3 設計決策），N/A；離線頁主題色已對齊
+- [x] 手機元件已套 Firefly Board token（殼層＋基元兩批；PR #473/#474）
+- [~] 效能：CLS/FCP/SI 達標；LCP/TTI/Lighthouse 90 DEFERRED-ARCH（D-015，需 SSR 級重構）
+- [x] PWA 可安裝（manifest+引導）可離線（實測）；APK 管線就緒（合併 #475 後打 tag 驗證）
+- [x] Console：巡檢全程無新增 error（axe+console 檢查在 audit script 內）
+- [x] PROGRESS.md、DECISIONS.md、INSTALL.md、VERIFICATION.md 齊備
