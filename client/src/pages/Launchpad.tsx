@@ -709,6 +709,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
             </>
           )}
           <label
+            className="m-touch"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, cursor: "pointer", flex: "0 0 auto" }}
             title="預設隱藏已封存專案；勾選後可列出並還原"
           >
@@ -756,7 +757,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   <Icon name="Sparkles" size={15} />
                   {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
                 </Button>
-                <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+                <Link href="/help" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
                   <Icon name="HelpCircle" size={14} />看怎麼用
                 </Link>
               </div>

@@ -1278,6 +1278,7 @@ export function ProjectPage({ id }: { id: string }) {
                 return (
                   <span
                     key={peer.userId}
+                    className={!isMe ? "m-touch" : undefined}
                     role={!isMe ? "button" : undefined}
                     tabIndex={!isMe ? 0 : undefined}
                     title={

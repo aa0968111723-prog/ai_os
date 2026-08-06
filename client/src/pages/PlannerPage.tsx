@@ -250,7 +250,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
   }, []);
 
   const icsFallback = (
-    <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+    <a href={`/api/schedule/${groupId}/calendar.ics`} download className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       <Icon name="Download" size={14} />匯出 .ics
     </a>
   );
@@ -270,7 +270,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
   if (!st.connected) {
     return (
       <>
-        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <a href="/api/google/oauth/start" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="CalendarPlus" size={14} />連結 Google 日曆（自動同步）
         </a>
         <Meta style={{ margin: 0 }}>{flash ?? "連結後排程增刪改自動出現在你的 Google 日曆，免匯出匯入"}</Meta>
@@ -284,7 +284,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
         <Meta style={{ margin: 0, color: "var(--danger, #b3261e)" }} title={st.lastError ?? undefined}>
           Google 日曆授權已失效
         </Meta>
-        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <a href="/api/google/oauth/start" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="CalendarPlus" size={14} />重新連結
         </a>
       </>
