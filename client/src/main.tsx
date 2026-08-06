@@ -88,7 +88,18 @@ class ErrorBoundary extends React.Component<
 }
 
 function Root() {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            // 掛住的請求不要默默重試三次把 isLoading 拖很久；失敗較快 → SessionGate 可進重試 UI
+            retry: 1,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
   const [trpcClient] = useState(() => createTrpcClient());
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

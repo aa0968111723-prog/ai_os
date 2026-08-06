@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { AcceptInvitePage } from "../pages/AcceptInvitePage";
 import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
@@ -40,6 +41,55 @@ function RedirectFromLogin() {
   return <Redirect to={next ?? "/dashboard"} replace />;
 }
 
+/**
+ * 避免永久卡在「載入中…」：超過 threshold 顯示可操作恢復 UI。
+ * 常見原因：sessionBoot 掛住、網路極慢、部署後 chunk 卡住未 reject。
+ */
+function LoadingWithTimeout({
+  onRetry,
+  thresholdMs = 12_000,
+}: {
+  onRetry: () => void;
+  thresholdMs?: number;
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), thresholdMs);
+    return () => window.clearTimeout(t);
+  }, [thresholdMs]);
+
+  if (!slow) {
+    return <Meta as="p">載入中…</Meta>;
+  }
+
+  return (
+    <div style={{ padding: "var(--sp-24)", maxWidth: 420 }}>
+      <p className="error" style={{ marginBottom: 12 }}>
+        連線較慢或卡住了——不是你被登出。可重試，或強制重新整理換新版本。
+      </p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Button size="sm" variant="primary" onClick={onRetry}>
+          重試
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("_r", String(Date.now()));
+            window.location.replace(url.toString());
+          }}
+        >
+          強制重新整理
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => { window.location.href = "/login"; }}>
+          去登入
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export type SessionGateProps = {
   me: SessionMe;
   meLoading: boolean;
@@ -80,7 +130,7 @@ export function SessionGate({
           // #281：auth.me 失敗時仍允許進登入表單（否則連不上後端時永遠看不到登入頁）
           <LoginPage />
         ) : meLoading ? (
-          <Meta as="p">載入中…</Meta>
+          <LoadingWithTimeout onRetry={onRetry} />
         ) : meError ? (
           <p className="error">
             系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
