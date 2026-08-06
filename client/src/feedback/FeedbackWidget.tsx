@@ -345,7 +345,7 @@ function ReportForm({
       {target && (
         <Meta as="p" style={{ margin: "8px 0 0" }}>
           標定：<strong style={{ color: "var(--primary-ink)" }}>{target.targetLabel}</strong>{" "}
-          <span role="button" tabIndex={0} onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary-ink)", cursor: "pointer", textDecoration: "underline" }}>
+          <span role="button" tabIndex={0} className="m-touch" onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary-ink)", cursor: "pointer", textDecoration: "underline" }}>
             重選
           </span>
         </Meta>

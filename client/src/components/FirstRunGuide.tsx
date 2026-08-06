@@ -84,7 +84,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
           {createSample.isPending ? "建立範例中…" : "建立範例專案看看"}
         </button>
         <button onClick={onDismiss}>略過</button>
-        <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+        <Link href="/help" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}>
           <Icon name="HelpCircle" size={14} />看怎麼用
         </Link>
         {!groupId && <Hint as="span" layer="always">（要先屬於一個組才能建立範例）</Hint>}
