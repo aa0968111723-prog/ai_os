@@ -13,6 +13,7 @@ const ConsumptionMonitorCard = lazyWithRetry(() => import("../pages/AdminPage").
 const InsightsCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
 const MembersPage = lazyWithRetry(() => import("../pages/MembersPage").then((m) => ({ default: m.MembersPage })));
 const FeedbackPage = lazyWithRetry(() => import("../pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
+const SettingsPage = lazyWithRetry(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const MyReportsPage = lazyWithRetry(() => import("../pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
 const ModelsPage = lazyWithRetry(() => import("../pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
 const HelpPage = lazyWithRetry(() => import("../pages/HelpPage").then((m) => ({ default: m.HelpPage })));
@@ -102,6 +103,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
         )}
       </Route>
       <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
+      <Route path="/settings"><SettingsPage /></Route>
       <Route path="/my-reports"><MyReportsPage /></Route>
       <Route path="/models"><ModelsPage /></Route>
       <Route path="/help"><HelpPage /></Route>
@@ -131,6 +133,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
 export function UngroupedRoutes() {
   return (
     <Switch>
+      <Route path="/settings"><SettingsPage /></Route>
       <Route path="/help"><HelpPage /></Route>
       {/* MCP 金鑰屬帳號層級；未分組時仍可先建立，實際連入後仍由服務端權限隔離。 */}
       <Route path="/mcp"><McpPage /></Route>

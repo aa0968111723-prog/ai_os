@@ -254,8 +254,34 @@ function MemberCard({ m, isSelf, focusGroupId }: { m: Member; isSelf: boolean; /
   const isLeaderSomewhere = m.memberships.some((x) => x.role === "leader");
   return (
     <Card as="section" style={{ marginBottom: 12, opacity: m.disabled ? 0.6 : 1 }}>
-      {/* 標頭：姓名＋角色徽章；右端「私訊」直達站內聊天（停用帳號收不到訊息，不給入口） */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      {/* 標頭：頭像＋姓名＋角色徽章；右端「私訊」直達站內聊天（停用帳號收不到訊息，不給入口） */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        {m.avatarUrl ? (
+          <img
+            src={m.avatarUrl}
+            alt=""
+            style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+          />
+        ) : (
+          <span
+            aria-hidden
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: "50%",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "var(--border-soft)",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--ink-muted)",
+              flexShrink: 0,
+            }}
+          >
+            {(m.name[0] || "?").toUpperCase()}
+          </span>
+        )}
         <b style={{ fontSize: "var(--fs-16)" }}>{m.name}</b>
         {m.isSuperAdmin && <span style={ROLE_BADGE.super}>超管</span>}
         {isLeaderSomewhere && <span style={ROLE_BADGE.leader}>組長</span>}

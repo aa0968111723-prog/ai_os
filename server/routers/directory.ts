@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { groupUsageMany } from "../services/points";
 import { humanizeAuditAction } from "../../shared/auditWording";
 import type { AuthState } from "../services/auth";
+import { publicAvatarUrl } from "../services/userAvatar";
 
 /**
  * 成員通訊錄（需求：團隊/組別/人員的細節）。
@@ -67,7 +68,14 @@ export const directoryRouter = router({
 
       const [users, usageRows, activity, logins] = await Promise.all([
         db
-          .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin, status: schema.users.status })
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            email: schema.users.email,
+            isSuperAdmin: schema.users.isSuperAdmin,
+            status: schema.users.status,
+            avatarUrl: schema.users.avatarUrl,
+          })
           .from(schema.users)
           .where(inArray(schema.users.id, userIds)),
         // 各組逐人本週/累計淨消耗——一次查（groupUsageMany）避免逐組 N+1；只回有帳本者，無用量者稍後補 0
@@ -117,6 +125,7 @@ export const directoryRouter = router({
             userId: m.userId,
             name: u.name,
             email: u.email,
+            avatarUrl: publicAvatarUrl(u.id, u.avatarUrl),
             isSuperAdmin: u.isSuperAdmin,
             disabled: u.status === "disabled",
             memberships: [],
@@ -154,6 +163,7 @@ type MemberEntry = {
   userId: string;
   name: string;
   email: string;
+  avatarUrl: string | null;
   isSuperAdmin: boolean;
   disabled: boolean;
   memberships: Array<{

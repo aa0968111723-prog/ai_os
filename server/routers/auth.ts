@@ -26,6 +26,7 @@ import {
   parseCookies,
 } from "../services/auth";
 import { authMeCapabilities } from "../services/policyEngine";
+import { saveUserAvatar, clearUserAvatar } from "../services/userAvatar";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { assertProjectEditable } from "../services/projectAcl";
 import {
@@ -319,6 +320,28 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       await db.update(schema.users).set({ uiDensity: input.density }).where(eq(schema.users.id, ctx.auth.user.id));
       return { ok: true as const };
+    }),
+
+  /** 上傳/設定個人頭像 */
+  setAvatar: authedProcedure
+    .input(z.object({ dataUrl: z.string().min(1, "請提供頭像圖片") }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await saveUserAvatar(ctx.auth.user.id, input.dataUrl);
+      return result;
+    }),
+
+  /** 清除/移除個人頭像 */
+  clearAvatar: authedProcedure.mutation(async ({ ctx }) => {
+    await clearUserAvatar(ctx.auth.user.id);
+    return { ok: true as const };
+  }),
+
+  /** 修改個人顯示名稱 */
+  updateProfile: authedProcedure
+    .input(z.object({ name: z.string().trim().min(1, "請輸入顯示名稱").max(64, "顯示名稱最多 64 字") }))
+    .mutation(async ({ ctx, input }) => {
+      await db.update(schema.users).set({ name: input.name }).where(eq(schema.users.id, ctx.auth.user.id));
+      return { name: input.name };
     }),
 
   logout: authedProcedure.mutation(async ({ ctx }) => {

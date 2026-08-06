@@ -65,6 +65,7 @@ export type AppHeaderGroup = {
 export type AppHeaderProps = {
   /** When null/undefined, only brand is shown (pre-auth / loading). */
   userName?: string;
+  avatarUrl?: string | null;
   /** auth.me for TD-05b capability-gated account menu */
   me?: MeWithCapabilities;
   groups: AppHeaderGroup[];
@@ -87,6 +88,7 @@ export type AppHeaderProps = {
  */
 export function AppHeader({
   userName,
+  avatarUrl,
   me,
   groups,
   activeGroupId,
@@ -143,6 +145,7 @@ export function AppHeader({
       {signedIn && (
         <AccountMenu
           userName={userName}
+          avatarUrl={avatarUrl}
           me={me}
           activeGroupId={activeGroupId}
           isAdmin={isAdmin}

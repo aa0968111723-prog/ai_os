@@ -224,6 +224,7 @@ export function AppShell() {
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         {me.data && <AppHeader
           userName={me.data?.user.name}
+          avatarUrl={me.data?.user.avatarUrl}
           me={me.data}
           groups={groups}
           activeGroupId={activeGroupId}

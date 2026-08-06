@@ -135,6 +135,13 @@ export const accountMenuItems: NavigationItem[] = [
   },
   // 帳號（Link-based only; actions like change-password stay in UserMenu)
   {
+    key: "settings",
+    label: "個人設定",
+    href: "/settings",
+    section: "account",
+    icon: "User",
+  },
+  {
     key: "my-reports",
     label: "我的回報",
     href: "/my-reports",

@@ -17,6 +17,7 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession, type AuthState } from "./services/auth";
+import { resolveAvatarFile } from "./services/userAvatar";
 import { deviceTrustMisconfigured, resolveDeviceTrustMode } from "./services/deviceTrust";
 import {
   buildUploadLineageMeta,
@@ -1119,6 +1120,22 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
     recordError("schedule:ics", err);
     if (!res.headersSent) res.status(500).json({ error: "匯出失敗，請稍後再試" });
   }
+});
+
+// ── 個人頭像公開讀取 ──
+// 登入者皆可看見其他成員頭像；設合理快取與 Content-Type。
+app.get("/api/avatars/:userId", async (req, res) => {
+  const userId = req.params.userId;
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    return res.status(400).send("invalid user id");
+  }
+  const file = await resolveAvatarFile(userId);
+  if (!file) {
+    return res.status(404).send("not found");
+  }
+  res.setHeader("Content-Type", file.mime);
+  res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400");
+  return res.sendFile(file.abs);
 });
 
 // ── 個資自助匯出 v1（個資法「查詢／請求複本」權）：登入者一鍵下載「自己的」資料。
