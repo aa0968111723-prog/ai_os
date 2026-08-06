@@ -39,6 +39,10 @@
 - [done] Capacitor 薄殼（server.url 直連線上站）＋品牌化（狀態列/圖示/splash/深層連結）＋apk.yml（tag apk-v* 自動簽章發佈）＋INSTALL.md → PR #475
 - [todo] 合併後打 apk-v0.1.0 tag 驗證 CI 產出
 
+## 協作分工（2026-08-07 05:35）
+- 使用者已合併 #461-#468、#472；另一代理 session 正在解 #469/#470/#471/#473 的 base 衝突——**這四個分支我不再推 push**，待其完成後我接手 rebase 堆疊的 #474（reskin-2）與 #475（APK，package.json 撞 #473 字體依賴）。
+- 我專責：驗證輪（本機整合建置 E2E_MOCK＋全視寬截圖＋桌機像素對比＋離線/Lighthouse）→ 最終驗收報告。
+
 ## CI 觀察
 - 2026-08-07 00:40：#462/#463 首輪 CI 因 GitHub Actions 基礎設施故障（Service Unavailable）失敗。
 - 2026-08-07 02:10：確認 base 分支自身 CI 亦紅——(a) 同一波平台故障 (b) Launchpad.teamCard 71 測試為時間相依破損（另一並行分支 fix/launchpad-teamcard-frozen-clock 正在修），本任務所有分支繼承此紅測；已對 fix-a/b/c 觸發 rerun。判準維持「失敗集不比 base 多」。
