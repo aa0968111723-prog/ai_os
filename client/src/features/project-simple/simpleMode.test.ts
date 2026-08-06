@@ -8,7 +8,6 @@ import {
   runningVisualCount,
   saveProjectMode,
   scenesNeedingVisual,
-  scenesReadyToSubmit,
   splitScriptReadiness,
   type SimpleScene,
 } from "./simpleMode";
@@ -70,16 +69,6 @@ describe("批次動作的挑選規則", () => {
     const list = [scene(), scene({ pendingGenStatus: "running" }), scene({ assetUrl: "x.png" })];
     expect(scenesNeedingVisual(list)).toHaveLength(1);
     expect(runningVisualCount(list)).toBe(1);
-  });
-
-  it("送審只挑有畫面且尚未送審／通過的格子", () => {
-    const list = [
-      scene({ assetUrl: "a.png" }),
-      scene({ assetUrl: "b.png", status: "pending" }),
-      scene({ assetUrl: "c.png", status: "approved" }),
-      scene(),
-    ];
-    expect(scenesReadyToSubmit(list)).toHaveLength(1);
   });
 });
 

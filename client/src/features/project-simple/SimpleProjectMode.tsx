@@ -12,7 +12,6 @@ import {
   currentSimpleStepIndex,
   runningVisualCount,
   scenesNeedingVisual,
-  scenesReadyToSubmit,
   splitScriptReadiness,
   type SimpleScene,
 } from "./simpleMode";
@@ -160,29 +159,9 @@ export function SimpleProjectMode({
     }
   };
 
-  // ---------- 第 4 步：送審／打包 ----------
-  const submitApproval = trpc.approvals.submit.useMutation();
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const readyToSubmit = scenesReadyToSubmit(scenes);
-
-  const submitAll = async () => {
-    if (!canEdit) return;
-    setSubmitError(null);
-    setSubmitBusy(true);
-    try {
-      for (const s of readyToSubmit) await submitApproval.mutateAsync({ sceneId: s.id });
-      await utils.scenes.listByProject.invalidate({ projectId });
-      await utils.approvals.listByProject.invalidate({ projectId });
-    } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : "送審失敗");
-    } finally {
-      setSubmitBusy(false);
-    }
-  };
-
-  const approvedCount = scenes.filter((s) => s.status === "approved").length;
-  const allApproved = scenes.length > 0 && approvedCount === scenes.length;
+  // ---------- 第 4 步：打包 ----------
+  const withVisualCount = scenes.filter((s) => !!s.assetUrl).length;
+  const allReady = scenes.length > 0 && withVisualCount === scenes.length;
 
   return (
     <div className="simple-project" data-fb="簡易模式">
@@ -318,25 +297,18 @@ export function SimpleProjectMode({
 
       {/* 第 4 步 */}
       <Card as="section" className="simple-step simple-step--deliver" data-fb="簡易-交付">
-        <h3 style={{ marginTop: 0 }}>4・送審與打包</h3>
+        <h3 style={{ marginTop: 0 }}>4・打包交付</h3>
         {scenes.length === 0 ? (
           <Meta>還沒有分鏡。</Meta>
         ) : (
           <>
             <Meta style={{ display: "block", marginBottom: 8 }}>
-              已通過 {approvedCount}／{scenes.length} 格
+              已完成 {withVisualCount}／{scenes.length} 格
             </Meta>
             <div className="simple-step__actions">
-              <Button
-                disabled={!canEdit || submitBusy || readyToSubmit.length === 0}
-                onClick={() => void submitAll()}
-              >
-                {submitBusy ? "送審中…" : readyToSubmit.length === 0 ? "沒有可送審的格子" : `送審 ${readyToSubmit.length} 格`}
-              </Button>
               <ExportJobButton projectId={projectId} idleLabel="打包下載交付包（.zip）" />
             </div>
-            {!allApproved && <Hint layer="guide">全部通過後打包最完整；也可以先打包目前進度。</Hint>}
-            {submitError && <p className="error">{submitError}</p>}
+            {!allReady && <Hint layer="guide">畫面齊了打包最完整；也可以先打包目前進度。</Hint>}
           </>
         )}
       </Card>

@@ -64,10 +64,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "quota.setGroupQuota": "調整組別額度",
   "quota.setGroupBudget": "分配組別點數預算",
   "quota.setMemberBudget": "分配組員點數預算",
-  "quota.setApprovalThreshold": "調整審批門檻",
+  "quota.setApprovalThreshold": "調整成本核准門檻",
   "quota.setMemberOverride": "調整個人額度",
   "quota.setMemberDispatch": "調整組員派工權",
-  // 分鏡與審批
+  // 分鏡
   "scenes.addDraft": "新增分鏡草稿",
   "scenes.addFromGeneration": "把成品加入分鏡",
   "scenes.setVisualFromGeneration": "設定分鏡畫面",
@@ -84,8 +84,6 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.purge": "永久刪除分鏡",
   "scenes.generateInto": "在分鏡格生成",
   "scenes.generateVoiceover": "生成分鏡配音",
-  "approvals.submit": "送審",
-  "approvals.decide": "審批（通過／退回）",
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
   "director.splitScript": "AI 拆分鏡",
@@ -103,7 +101,6 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.step.voiceover": "AI 代理：生成旁白配音",
   "agents.step.create_scene": "AI 代理：新增分鏡",
   "agents.step.split_script": "AI 代理：拆分鏡",
-  "agents.step.submit_approval": "AI 代理：送審分鏡",
   "agents.step.record_to_database": "AI 代理：寫入資料庫",
   "agents.step.create_note": "AI 代理：建立筆記",
   "agents.step.append_note": "AI 代理：追加筆記",
@@ -312,7 +309,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
   { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
-  { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
+  { key: "storyboard", label: "分鏡", prefixes: ["scenes"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "community"] },
@@ -347,12 +344,11 @@ const VALUE_MAX = 48;
  * 值先原樣比對，命中才換；沒命中就照原字串顯示（不硬翻，免得誤導）。
  */
 const VALUE_LABELS: Record<string, string> = {
-  // 審批決定
+  // 核准決定
   approve: "通過",
   approved: "通過",
   reject: "退回",
   rejected: "退回",
-  needs_work: "需修改",
   // 角色與權限
   admin: "管理員",
   leader: "組長",
@@ -499,7 +495,7 @@ const INPUT_FIELD_LABELS: Array<[key: string, label: string]> = [
   ["fileQuotaGb", "檔案空間上限（GB）"],
   ["expiresInDays", "效期（天）"],
   ["cost", "點數"],
-  ["threshold", "審批門檻"],
+  ["threshold", "成本核准門檻"],
   ["agentAccess", "代理權限"],
   ["memberWritable", "組員可編輯"],
   ["readOnly", "唯讀"],

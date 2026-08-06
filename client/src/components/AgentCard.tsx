@@ -39,7 +39,6 @@ interface AgentStep {
     | "create_scene"
     | "generate"
     | "voiceover"
-    | "submit_approval"
     | "record_to_database"
     | "create_note"
     | "append_note"
@@ -75,7 +74,6 @@ const KIND_ICON: Record<AgentStep["kind"], IconName> = {
   create_scene: "Plus",
   generate: "Sparkles",
   voiceover: "Mic",
-  submit_approval: "Check",
   record_to_database: "Database",
   create_note: "FileText",
   append_note: "FileText",
@@ -182,11 +180,11 @@ function OutputRefChips({ refs }: { refs: Array<{ type: string; id: string; labe
 const GOAL_EXAMPLES = [
   "請分鏡助理：把知識庫腳本拆成分鏡，並為每一鏡生成畫面（帶定裝）",
   "請生成員：做三格開場分鏡——禪堂晨光、點香、遠景，各配一張圖",
-  "請配音統籌：為已有配音詞的分鏡生成旁白；品管再把第 1 鏡送審",
+  "請配音統籌：為已有配音詞的分鏡生成旁白，並列出仍需人工確認的風險",
 ];
 
 const AI_ROLE_ROSTER = listAiProjectRoles();
-/** #133 PR-3：創作短版入口——固定短骨架（拆分鏡→生成→可選配音／送審），與完整多步計畫區隔 */
+/** #133 PR-3：創作短版入口——固定短骨架（拆分鏡→生成→可選配音），與完整多步計畫區隔 */
 const SHORT_CREATION_PLAYBOOK = getPlaybook("playbook.creation.short.v1");
 
 export function AgentCard({

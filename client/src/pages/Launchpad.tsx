@@ -116,8 +116,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
     { groupId: groupId || undefined, includeArchived: includeArchived || undefined },
     { enabled: !!groupId },
   );
-  // 跨專案待辦（UX 高：首頁不顯示待審/待核→組長漏審、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
-  const pendingSummary = trpc.approvals.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
+  // 跨專案待辦（UX 高：首頁不顯示待核→組長漏核、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
+  const pendingSummary = trpc.generation.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
   const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
   const agentOverview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
@@ -239,15 +239,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const runningRuns = agentSummary?.running ?? 0;
   const waitingRuns = (agentSummary?.waiting ?? 0) + (agentSummary?.awaitingApproval ?? 0);
   const completedRuns = agentSummary?.doneRecent ?? 0;
-  const pendingApprovals = pendingSummary.data?.totalPendingApprovals ?? 0;
-  const pendingGenerations = pendingSummary.data?.totalAwaitingGenerations ?? 0;
-  const pendingTotal = pendingApprovals + pendingGenerations;
+  const pendingTotal = pendingSummary.data?.totalAwaitingGenerations ?? 0;
   const todayLabel = new Intl.DateTimeFormat("zh-TW", {
     month: "long",
     day: "numeric",
     weekday: "long",
   }).format(new Date());
-  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 計數配上專案標題。
+  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 待核生成計數配上專案標題。
   // 兩份資料都是這一頁本來就查過的（專案卡角標與頂欄計數共用），不多發任何查詢。
   const pendingDecisions = useMemo<PendingDecisionSource[]>(() => {
     const titleOf = new Map((projects.data ?? []).map((p) => [p.id, p.title] as const));
@@ -263,7 +261,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
         kind: "attention",
         eyebrow: "優先處理",
         title: `有 ${pendingTotal} 件需要你決定`,
-        detail: "先處理待審與成本核准，AI 與團隊才能繼續往下走。",
+        detail: "先處理成本核准，AI 與團隊才能繼續往下走。",
         href: "#projects",
         action: "開始處理",
         icon: "Bell" as const,
@@ -562,9 +560,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
                         <strong>{project.title}</strong>
                         <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                       </span>
-                      {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
+                      {!!pending && pending.awaitingGenerations > 0 && (
                         <Link href={`/p/${project.id}?focus=pending`} style={{ textDecoration: "none" }}>
-                          <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
+                          <Chip>{pending.awaitingGenerations} 待處理</Chip>
                         </Link>
                       )}
                       <Icon name="ChevronRight" size={17} />
@@ -934,13 +932,13 @@ const MAX_QUESTION_SUGGESTIONS = 4;
  *
  * 每一句都必須是**卡片答不出來**的：卡片給的是數字與清單，這裡問的是那些數字背後的內容
  * 與原因——要鑽進分鏡全文、生成紀錄、人員任務或資料庫才答得出來。
- * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊 → 待審內容。
+ * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊。
  */
 export function buildTeamQuestionSuggestions(input: {
   runs: Array<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>;
   people: Array<{ userId: string | null; name: string | null; openTasks: number; overdueTasks: number }>;
   planConcerns: Array<{ projectTitle: string; missingInformation: number; risks: number }>;
-  pending: Array<{ projectTitle: string; pendingApprovals: number; awaitingGenerations: number }>;
+  pending: Array<{ projectTitle: string; awaitingGenerations: number }>;
 }): TeamQuestionSuggestion[] {
   const out: TeamQuestionSuggestion[] = [];
   const push = (id: string, text: string, why: string) => {
@@ -988,17 +986,7 @@ export function buildTeamQuestionSuggestions(input: {
     );
   }
 
-  // ⑤ 待審分鏡：卡片顯示「3 個分鏡等你裁決」，答不出「那三鏡各寫了什麼、該注意什麼」
-  const toReview = input.pending.find((p) => p.pendingApprovals > 0);
-  if (toReview) {
-    push(
-      `scene:${toReview.projectTitle}`,
-      `「${toReview.projectTitle}」那 ${toReview.pendingApprovals} 鏡的畫面與配音詞各寫了什麼？裁決前我該注意什麼？`,
-      `因為「${toReview.projectTitle}」有 ${toReview.pendingApprovals} 鏡送審中`,
-    );
-  }
-
-  // ⑥ 有在跑的計畫：問它實際做了什麼，而不是看進度條
+  // ⑤ 有在跑的計畫：問它實際做了什麼，而不是看進度條
   const running = input.runs.find((r) => r.status === "running" || r.status === "waiting");
   if (running) {
     push(
@@ -1098,14 +1086,12 @@ export function mergeTeamHealth(
   return { health: run, fromPeople: false };
 }
 
-/** 一件「等人裁決」的事：四種來源合流成同一份收件匣 */
-type DecisionKind = "agent" | "task" | "scene" | "generation";
+/** 一件「等人裁決」的事：三種來源合流成同一份收件匣 */
+type DecisionKind = "agent" | "task" | "generation";
 type PendingDecisionSource = {
   projectId: string;
   projectTitle: string;
-  pendingApprovals: number;
   awaitingGenerations: number;
-  oldestPendingApprovalAt?: Date | string | null;
   oldestAwaitingGenerationAt?: Date | string | null;
 };
 /** 組級洞察裡的一項人類核准節點（來自 teamAssistant.groupInsights 的 workItems） */
@@ -1137,7 +1123,6 @@ type DecisionItem = {
 const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
   agent: { label: "計畫待核", hint: "核准後才開始執行、才開始花點" },
   task: { label: "人員核准", hint: "代理計畫卡在這個人類關卡，核准或退回都會喚醒後續步驟" },
-  scene: { label: "分鏡送審", hint: "要看過內容才能裁決，到專案頁決定" },
   generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
 };
 
@@ -1224,12 +1209,6 @@ export function buildDecisionInbox(
     });
   }
   for (const p of pending) {
-    if (p.pendingApprovals > 0) {
-      items.push({
-        key: `scene-${p.projectId}`, kind: "scene", projectId: p.projectId, projectTitle: p.projectTitle,
-        what: `${p.pendingApprovals} 個分鏡等你裁決`, since: toDate(p.oldestPendingApprovalAt),
-      });
-    }
     if (p.awaitingGenerations > 0) {
       items.push({
         key: `generation-${p.projectId}`, kind: "generation", projectId: p.projectId, projectTitle: p.projectTitle,
@@ -1237,7 +1216,7 @@ export function buildDecisionInbox(
       });
     }
   }
-  const ORDER: DecisionKind[] = ["agent", "task", "scene", "generation"];
+  const ORDER: DecisionKind[] = ["agent", "task", "generation"];
   return items.sort((a, b) => {
     const ta = a.since?.getTime() ?? Number.POSITIVE_INFINITY;
     const tb = b.since?.getTime() ?? Number.POSITIVE_INFINITY;
@@ -1685,7 +1664,7 @@ function TeamAssistantCard({
   myUserId,
 }: {
   groupId: string;
-  /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
+  /** 組內「生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
   pendingDecisions: PendingDecisionSource[];
   pendingLoading: boolean;
   pendingFailed: boolean;
@@ -1853,7 +1832,7 @@ function TeamAssistantCard({
   const afterDecide = () => {
     overview.refetch();
     insights.refetch();
-    utils.approvals.pendingSummary.invalidate();
+    utils.generation.pendingSummary.invalidate();
     utils.projects.invalidate();
   };
 

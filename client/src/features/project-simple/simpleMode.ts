@@ -70,7 +70,7 @@ export type SimpleStepState = {
 };
 
 /**
- * 四步進度。**全部由伺服器資料推導**（世界觀、分鏡列、審核狀態），不存前端 state——
+ * 四步進度。**全部由伺服器資料推導**（世界觀、分鏡列、畫面狀態），不存前端 state——
  * 這正是「重新整理後仍看得到進度」的關鍵：重整後查詢一回來，進度就回到原位。
  */
 export function computeSimpleSteps(input: {
@@ -79,7 +79,6 @@ export function computeSimpleSteps(input: {
 }): SimpleStepState[] {
   const { worldviewReady, scenes } = input;
   const withVisual = scenes.filter((s) => !!s.assetUrl).length;
-  const approved = scenes.filter((s) => s.status === "approved").length;
   return [
     {
       id: "story",
@@ -101,9 +100,9 @@ export function computeSimpleSteps(input: {
     },
     {
       id: "deliver",
-      label: "送審・打包",
-      done: scenes.length > 0 && approved === scenes.length,
-      hint: scenes.length > 0 ? `已通過 ${approved}／${scenes.length} 格` : "畫面齊了就能送審打包",
+      label: "打包交付",
+      done: scenes.length > 0 && withVisual === scenes.length,
+      hint: scenes.length > 0 ? `已完成 ${withVisual}／${scenes.length} 格` : "畫面齊了就能打包",
     },
   ];
 }
@@ -121,11 +120,6 @@ export function currentSimpleStepIndex(steps: SimpleStepState[]): number {
  */
 export function scenesNeedingVisual(scenes: SimpleScene[]): SimpleScene[] {
   return scenes.filter((s) => !s.assetUrl && !s.pendingGenStatus);
-}
-
-/** 送審對象：有畫面、還在草稿（todo/draft）的格子。已送審／已通過的不重送。 */
-export function scenesReadyToSubmit(scenes: SimpleScene[]): SimpleScene[] {
-  return scenes.filter((s) => !!s.assetUrl && s.status !== "pending" && s.status !== "approved");
 }
 
 /** 進行中任務數（生成中的格子）——頂部常駐條用，重整後照樣算得出來。 */

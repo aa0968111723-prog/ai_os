@@ -44,7 +44,6 @@ const ALLOWLIST = new Set([
   // generationCore anchors → services/cardAnchors (scene+character)
   "server/services/agentCore.ts::../routers/knowledge",
   "server/services/agentRunner.ts::../routers/director",
-  "server/services/agentRunner.ts::../routers/approvals",
   "server/services/agentRunner.ts::../routers/assistant",
   "server/services/agentSplitRecovery.pg.test.ts::../routers/director",
   "server/services/messageAssistant.ts::../routers/knowledge",

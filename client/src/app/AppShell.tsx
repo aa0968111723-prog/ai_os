@@ -113,7 +113,7 @@ export function AppShell() {
   });
   const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
-  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
+  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/核准通知）。
   // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
   const logoutWithPushCleanup = async () => {
     try {

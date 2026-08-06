@@ -187,20 +187,8 @@ export const scenes = pgTable("scenes", {
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
 }));
 
-export const approvals = pgTable("approvals", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull(),
-  sceneId: uuid("scene_id"),
-  version: integer("version").notNull().default(1),
-  status: text("status", { enum: ["pending", "needs_work", "approved"] }).notNull().default("pending"),
-  submittedBy: uuid("submitted_by").notNull(),
-  decidedBy: uuid("decided_by"),
-  reason: text("reason"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  decidedAt: timestamp("decided_at"),
-}, (t) => ({
-  projectStatusIdx: index("approvals_project_status_idx").on(t.projectId, t.status),
-}));
+// 分鏡送審／裁決機制已移除：approvals 資料表刻意不再有 Drizzle 定義（DB 內的舊表與舊資料保留不動，
+// 只是應用程式不再讀寫）。要復原請一併還原 routers/approvals.ts 與前端送審 UI。
 
 export const groupOptions = pgTable("group_options", {
   id: uuid("id").primaryKey().defaultRandom(),
