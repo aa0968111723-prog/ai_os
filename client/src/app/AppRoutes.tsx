@@ -1,5 +1,6 @@
 import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
+import { GroupQuotaSettings } from "../components/GroupQuotaSettings";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { EmptyState, Hint } from "../components/ui";
 import { Icon } from "../components/Icon";
@@ -57,10 +58,10 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
           <div className="page-shell secondary-page admin-tool-page">
             <SecondaryPageHeader
               eyebrow="組別設定"
-              title="工作規則與選項"
+              title="整理這一組的選項"
               icon="SlidersHorizontal"
               badge="只影響目前組別"
-              description={<>調整可用的內容類型、風格、標籤與 AI 規則；日常成員只會看到啟用中的選項。</>}
+              description={<>改名、停用、排序既有選項。新增選項不必來這裡——在建立專案表單與世界觀 chips 旁就能直接加。</>}
             />
             <GroupOptionsEditor groupId={activeGroupId} />
           </div>
@@ -82,6 +83,10 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
               description={<>查看點數消耗、模型使用、近期操作與異常線索，快速找到需要調整或追蹤的地方。</>}
             />
             <div className="stack">
+              {/* 審核門檻與點數分配原本在「選項」頁；選項頁退出選單後，這兩張「錢」的設定
+                  搬來與點數消耗放在一起（都是組長每天在看的同一件事）。限作用組組長，
+                  後端 quota.usage/setMemberBudget 亦為組長以上。 */}
+              {activeIsLeader && activeGroupId && <GroupQuotaSettings groupId={activeGroupId} />}
               <ConsumptionMonitorCard />
               <InsightsCard />
               <AuditLogCard />

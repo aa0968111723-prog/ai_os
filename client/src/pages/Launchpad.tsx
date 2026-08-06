@@ -7,11 +7,14 @@ import { ProgressStepper, inferProjectCurrentStep } from "../components/Progress
 import { Icon } from "../components/Icon";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
+import { AddOptionInline } from "../components/AddOptionInline";
+import { FormatPicker } from "../components/FormatPicker";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { useCollab, CursorOverlay } from "../realtime";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
+import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
 import { DEFAULT_AGENT_PLANNER_MODE } from "../../../shared/agentPlanner";
 import { plannerCostLabel } from "../../../shared/llmPricing";
 import {
@@ -159,6 +162,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
   const [platform, setPlatform] = useState<string>("");
+  /** 畫面尺寸：預設跟著平台走，使用者可在建立表單直接改（改了就以他挑的為準，直到換平台） */
+  const [format, setFormat] = useState<ProjectFormat>(DEFAULT_PROJECT_FORMAT);
   const [createOpen, setCreateOpen] = useState(false);
   const createAutoOpenedGroup = useRef<string | null>(null);
 
@@ -207,6 +212,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const myRole = activeGroup?.role;
   const isLeader = myRole === "leader" || myRole === "admin";
   const pickedPlatform = platformOptions.find((p) => p.value === platform);
+  // 換平台就把尺寸帶回該平台預設；使用者之後在尺寸圖上另選的值會保留（本效果只在平台預設變動時觸發）
+  const pickedPlatformFormat = pickedPlatform?.format ?? null;
+  useEffect(() => {
+    if (pickedPlatformFormat) setFormat(normalizeProjectFormat(pickedPlatformFormat));
+  }, [pickedPlatformFormat]);
 
   const all = projects.data ?? [];
   // 過濾（搜尋＋類型）→ 排序（最近開啟置頂／最近更新／名稱）→ 限量
@@ -429,7 +439,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   placeholder="例：見證故事 · 走出低谷"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && canCreate) {
-                      create.mutate({ groupId, title: title.trim(), kind, platform });
+                      create.mutate({ groupId, title: title.trim(), kind, platform, format });
                     }
                   }}
                 />
@@ -447,6 +457,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <option key={k.id} value={k.value}>{k.label}</option>
                     ))}
                   </select>
+                  {/* 少了想要的類型就在這裡加，不必離開表單（原本得繞去選單的「選項」頁，回來還要重填） */}
+                  {isLeader && groupId && (
+                    <AddOptionInline
+                      groupId={groupId}
+                      type="kind"
+                      buttonLabel="自己加一個類型"
+                      onAdded={(opt) => setKind(opt.value)}
+                    />
+                  )}
                 </div>
                 <div>
                   <label htmlFor="np-platform" style={{ marginTop: 0, fontWeight: 600 }}>發布平台</label>
@@ -460,7 +479,28 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <option key={p.id} value={p.value}>{p.label}</option>
                     ))}
                   </select>
+                  {isLeader && groupId && (
+                    <AddOptionInline
+                      groupId={groupId}
+                      type="platform"
+                      buttonLabel="自己加一個平台"
+                      onAdded={(opt) => {
+                        setPlatform(opt.value);
+                        if (opt.format) setFormat(normalizeProjectFormat(opt.format));
+                      }}
+                    />
+                  )}
                 </div>
+              </div>
+              {/* 畫面尺寸：模型支援的全部比例都給選，並畫成等比例小方框（挑錯尺寸＝整支重生成＝真金白銀） */}
+              <div>
+                <label id="np-format-label" style={{ marginTop: 0, fontWeight: 600 }}>畫面尺寸</label>
+                <FormatPicker value={format} onChange={setFormat} labelledBy="np-format-label" />
+                {pickedPlatform?.format && normalizeProjectFormat(pickedPlatform.format) !== format && (
+                  <Hint layer="always">
+                    已改成 {format}（此平台預設 {pickedPlatform.format}）——以你挑的尺寸為準。
+                  </Hint>
+                )}
               </div>
             </div>
             {/* 提示與錯誤訊息 */}
@@ -471,12 +511,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
             )}
             {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
             {!options.isLoading && groupId && !kindOptions.length && (
-              <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>
+              <Hint layer="always">
+                這個組還沒有內容類型選項——{isLeader ? "用上面的「自己加一個類型」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
+              </Hint>
             )}
             {!options.isLoading && groupId && !platformOptions.length && (
-              <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>
+              <Hint layer="always">
+                這個組還沒有發布平台選項——{isLeader ? "用上面的「自己加一個平台」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
+              </Hint>
             )}
-            {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
             {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
             {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && (
               <Hint layer="always">先為專案命名，就能建立專案。</Hint>
@@ -490,7 +533,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
               <Button
                 variant="primary"
                 disabled={!canCreate}
-                onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}
+                onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform, format })}
               >
                 {create.isPending ? "建立中…" : "立即建立專案"}
               </Button>

@@ -36,6 +36,7 @@ import {
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
+import { FormatTag } from "../components/FormatPicker";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
@@ -381,7 +382,7 @@ function usePersistedIds(key: string): [string[], (updater: (prev: string[]) => 
 }
 
 /**
- * 選項就地新增（工作台一體化）：世界觀 chips 旁的「＋新增」——組長不必再繞去「選項」頁，
+ * 選項就地新增（工作台一體化）：世界觀 chips 旁的「＋新增」——組長不必再繞去選項整理頁，
  * 直接在工作台加一個調性／主軸／風格選項，加完全組立即可用、並自動幫本專案勾上。
  * 後端仍走同一個 options.upsert（組長以上限定、同名防撞）。
  */
@@ -599,7 +600,7 @@ export function ProjectPage({ id }: { id: string }) {
   }, [mobileCompact]);
 
   const me = trpc.auth.me.useQuery();
-  // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
+  // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長就地新增，改名／排序才去整理頁）
   const options = trpc.options.byGroup.useQuery(
     { groupId: project.data?.groupId ?? "" },
     { enabled: !!project.data?.groupId },
@@ -1357,7 +1358,8 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </div>
       <p className="sub project-hero__meta">
-        {p.format}・{p.platform}
+        {/* 比例改用小方框＋數字：一眼看出這支是橫的還直的（純數字對非技術夥伴不直觀） */}
+        <FormatTag format={p.format} />・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
       {/* #25 常駐交付出口指引：桌機完整句；手機隱藏長句（③ 區內改一行短提示，見下方） */}

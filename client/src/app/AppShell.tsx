@@ -208,7 +208,7 @@ export function AppShell() {
   }, [activeGroupId]);
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
-  // 目前作用組的角色：組長或管理員才看得到「選項」入口（自訂內容類型／平台／世界觀選項）
+  // 目前作用組的角色：組長或管理員才做得了組級設定（就地新增選項、點數分配、審核門檻、/options 整理頁）
   const activeGroup = groups.find((g) => g.groupId === activeGroupId);
   const activeIsLeader = activeGroup?.role === "leader" || activeGroup?.role === "admin";
   // 通訊錄／操作紀錄：只要在「任一組」是組長或管理員就能看（跨組彙總）——比照後端 directory/audit 的可見界；

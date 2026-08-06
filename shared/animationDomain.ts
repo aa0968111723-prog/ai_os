@@ -19,10 +19,12 @@ import {
   type SoftDeletable,
 } from "./animationContracts";
 import type { ShotCharacterRef } from "./animationContinuity";
+import { PROJECT_FORMAT_IDS, type ProjectFormat } from "./models";
 
 // ─── 正式領域型別（對齊 remediation plan §3／§4；adapter 投影用） ─────────
 
-export type ProductionFormat = "16:9" | "9:16" | "1:1" | "custom";
+/** 專案可選的全部比例（PROJECT_FORMATS）＋認不得的舊值 custom */
+export type ProductionFormat = ProjectFormat | "custom";
 
 export type ProductionState =
   | "development"
@@ -161,7 +163,7 @@ export function defaultSequenceId(productionId: string): string {
 export function normalizeProductionFormat(
   format: string | null | undefined,
 ): ProductionFormat {
-  if (format === "16:9" || format === "9:16" || format === "1:1") return format;
+  if ((PROJECT_FORMAT_IDS as string[]).includes(format ?? "")) return format as ProjectFormat;
   if (format == null || format === "") return DEFAULT_PRODUCTION_FORMAT;
   return "custom";
 }

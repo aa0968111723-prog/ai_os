@@ -301,14 +301,16 @@ export function HelpPage() {
         </MapGroup>
 
         <MapGroup title="給組長／管理員（一般組員不會看到）" icon="SlidersHorizontal">
-          <Spot icon="Ellipsis" name="選項" where="選單・管理（組長）">
-            自訂這一組能選的內容類型、平台、世界觀選項，讓下拉選單貼合你們的做法。
+          <Spot icon="Ellipsis" name="自訂選項" where="就在需要它的地方（組長）">
+            內容類型、發布平台在「建立新專案」表單裡直接加；調性／主軸／視覺風格在專案的世界觀 chips 旁邊加。
+            加完全組立即可用。要改名、停用或排序，從那些「＋新增」旁的「整理全部選項」進去。
           </Spot>
           <Spot icon="User" name="通訊錄" where="選單・管理">
             團隊 → 組別 → 成員一層層攤開，邀請新夥伴（連結用 LINE 傳）、看誰在哪一組。
           </Spot>
           <Spot icon="FileText" name="監控與紀錄" where="選單・管理">
             點數消耗監控＋操作紀錄，看點花在哪、誰做了什麼；範圍自動收斂到你帶的組。
+            組長的「成本審核門檻」與「點數分配」也在這一頁。
           </Spot>
           <Spot icon="SlidersHorizontal" name="團隊管理" where="選單・管理（管理員）">
             帳號、點數與額度（總預算／週上限／個人覆寫）、系統自檢、
