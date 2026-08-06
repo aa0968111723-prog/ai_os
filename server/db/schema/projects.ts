@@ -187,8 +187,29 @@ export const scenes = pgTable("scenes", {
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
 }));
 
-// 分鏡送審／裁決機制已移除：approvals 資料表刻意不再有 Drizzle 定義（DB 內的舊表與舊資料保留不動，
-// 只是應用程式不再讀寫）。要復原請一併還原 routers/approvals.ts 與前端送審 UI。
+/**
+ * 分鏡送審／裁決機制已移除——這張表現在是**遺留宣告**：沒有任何應用程式碼讀寫它，
+ * 保留定義純粹是為了讓 schema 與實際 DB 對齊。
+ *
+ * 為什麼不直接刪掉宣告：db:check／db:adopt 的漂移檢查走 drizzle-kit pushSchema，
+ * 它一看到「DB 有、schema 沒有」的表就會跳互動式提問（rename 還是 drop？），CI 無 TTY 直接炸，
+ * migration 與 e2e 兩個 job 全紅。舊表與舊資料要保留，宣告就得留著。
+ * 真的要清掉這張表，請另開一支 drop 的 migration，再一併移除這段宣告。
+ */
+export const approvals = pgTable("approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  sceneId: uuid("scene_id"),
+  version: integer("version").notNull().default(1),
+  status: text("status", { enum: ["pending", "needs_work", "approved"] }).notNull().default("pending"),
+  submittedBy: uuid("submitted_by").notNull(),
+  decidedBy: uuid("decided_by"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  decidedAt: timestamp("decided_at"),
+}, (t) => ({
+  projectStatusIdx: index("approvals_project_status_idx").on(t.projectId, t.status),
+}));
 
 export const groupOptions = pgTable("group_options", {
   id: uuid("id").primaryKey().defaultRandom(),
