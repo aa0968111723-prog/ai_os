@@ -6,6 +6,14 @@ import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
 import { PlannerSection, plannerInitialSections } from "../components/PlannerSection";
+import {
+  buildKnowledgeBranches,
+  LEAF_TOGGLES,
+  type LeafKind,
+  type MapGraphData,
+  type MapLens,
+  type MapNav,
+} from "../components/knowledgeMapModel";
 import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
@@ -1107,53 +1115,37 @@ function KnowledgeImport({
 
 /* ─────────────────────── (3) 知識地圖・心智圖（知識族譜） ─────────────────────── */
 
-type MapLens = Lens;
-
-/** 葉節點的五種型別：筆記／行程（本頁上方兩卡）＋知識庫／AI 助手（掛專案）＋資料庫（組相關） */
-type LeafKind = "note" | "schedule" | "knowledge" | "agent" | "db";
-
-/** 點節點後詳情面板的導航動作：anchor＝跳到本頁上方那筆；project＝進專案頁；db＝資料庫頁（可帶 ?open= 深連結） */
-type MapNav =
-  | { type: "anchor"; anchorId: string }
-  | { type: "project"; projectId: string }
-  | { type: "db"; tableId?: string }
-  | null;
-
-type MapLeaf = { id: string; kind: LeafKind; label: string; sub: string; nav: MapNav };
 type MapSelection = { label: string; sub: string; nav: MapNav };
 
-/** knowledgeMap.graph 的回傳形狀（superjson 下日期是 Date，顯示前仍防禦性包 new Date） */
-type MapGraphData = {
-  projects: Array<{ id: string; title: string; status: string; updatedAt: string | Date }>;
-  notes: Array<{ id: string; projectId: string | null; title: string; createdBy: string; mentions: string[] | null; updatedAt: string | Date }>;
-  schedule: Array<{ id: string; projectId: string | null; title: string; startsAt: string | Date; createdBy: string; mentions: string[] | null }>;
-  knowledge: Array<{ id: string; projectId: string; kind: string; title: string; chars: number; createdBy: string; createdAt: string | Date }>;
-  agents: Array<{ id: string; projectId: string; goal: string; status: string; estPoints: number; userId: string; updatedAt: string | Date }>;
-  databases: Array<{ id: string; scope: string; name: string; rowCount: number; agentAccess: string; createdBy: string; updatedAt: string | Date }>;
-};
+/** 兩種檢視：清單（大綱，手機預設）與心智圖（放射圖，桌機預設） */
+type MapView = "list" | "map";
 
-const KNOWLEDGE_KIND_LABEL: Record<string, string> = { transcript: "師父開示稿", testimony: "見證故事", script: "腳本", note: "其他筆記" };
-const AGENT_STATUS_LABEL: Record<string, string> = { awaiting_approval: "待核准", running: "執行中", done: "已完成", failed: "失敗", stopped: "已停止" };
-const DB_SCOPE_LABEL: Record<string, string> = { personal: "個人", group: "組", team: "團隊", global: "全站" };
-const DB_AGENT_ACCESS_LABEL: Record<string, string> = { none: "不開放 AI", read: "AI 唯讀", write: "AI 可查可寫" };
-const LEAF_TOGGLES: Array<{ kind: LeafKind; label: string }> = [
-  { kind: "note", label: "筆記" },
-  { kind: "schedule", label: "行程" },
-  { kind: "knowledge", label: "知識" },
-  { kind: "agent", label: "AI 執行計畫" },
-  { kind: "db", label: "資料庫" },
-];
+/** 清單每支分支先展開幾列，其餘按「顯示其餘 N 個」續載——一次倒 200 列出來沒人捲得完 */
+const LIST_PAGE = 8;
+/** 心智圖畫得下的分支數／每支葉數；超過的分別由「另有 N 支」與「+N」節點交棒給清單 */
+const MAP_MAX_BRANCHES = 10;
+const MAP_MAX_LEAVES = 6;
+
+const isMapView = (v: string | null): v is MapView => v === "list" || v === "map";
 
 /**
  * 知識地圖（知識族譜）：中心＝這個組，往外一圈是「專案／組層級／資料庫」分支，
  * 再往外是掛在其下的筆記（藍）、行程（琥珀）、知識（綠）、AI 助手（紫）與資料庫（青）。
- * 資料改吃後端聚合端點 knowledgeMap.graph（一次撈齊六類、全帶組隔離與資料庫 ACL），
- * 前端只負責過濾（鏡頭／專案聚焦／型別開關）、佈局與導航——點節點開詳情面板，
- * 面板可跳到本頁那筆、進專案頁或深連結開某個資料庫（/databases?open=id）。
+ * 資料吃後端聚合端點 knowledgeMap.graph（一次撈齊六類、全帶組隔離與資料庫 ACL），
+ * 過濾與分支組裝在 knowledgeMapModel（純函式、可測），本元件只做檢視、佈局與導航。
+ *
+ * 兩種檢視吃同一棵樹：
+ * - **清單**：分支收合式大綱，一列一個節點、點一下直接到那筆——手機預設。
+ *   920×560 的放射圖在 360px 螢幕上等比縮到 0.39x，文字剩 4px、節點剩 2px；
+ *   放大成 720px 再橫捲又會開在整片空白的左緣（中心節點在畫布正中央）。
+ *   要在手機上「找到某一筆」，清單才是能用的形狀。
+ * - **心智圖**：看關聯用的鳥瞰圖，桌機預設；可拖拉排版、縮放、平移。
+ * 搜尋、鏡頭、專案聚焦與型別開關對兩種檢視同時生效。
  */
-function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
+export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
   const [, setLocation] = useLocation();
   const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
+  const compact = useMatchMedia("(max-width: 820px)");
   const me = trpc.auth.me.useQuery();
   const meId = me.data?.user.id ?? "";
   const graphQ = trpc.knowledgeMap.graph.useQuery({ groupId });
@@ -1161,99 +1153,57 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
   const [lens, setLensRaw] = useState<MapLens>("all");
   const [focusProject, setFocusProjectRaw] = useState(""); // ""＝全部專案
   const [types, setTypes] = useState<Record<LeafKind, boolean>>({ note: true, schedule: true, knowledge: true, agent: true, db: true });
+  const [query, setQueryRaw] = useState("");
   const [selected, setSelected] = useState<MapSelection | null>(null);
+  // 檢視偏好記在這台裝置：手機預設清單、桌機預設心智圖（改過就以使用者選的為準）
+  const viewStoreKey = `map-view-${groupId}`;
+  const [viewMode, setViewModeRaw] = useState<MapView>(() => {
+    try {
+      const saved = localStorage.getItem(viewStoreKey);
+      if (isMapView(saved)) return saved;
+    } catch {
+      /* 無痕模式讀不到就用預設 */
+    }
+    return compact ? "list" : "map";
+  });
+  // 清單檢視：哪些分支展開（未指定者用預設規則）、每支已顯示幾列
+  const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({});
+  const [listLimits, setListLimits] = useState<Record<string, number>>({});
+
   // 換鏡頭／聚焦／開關型別時把選取清掉——面板殘留上一個視角的節點會誤導
   const setLens = (v: MapLens) => { setLensRaw(v); setSelected(null); };
   const setFocusProject = (v: string) => { setFocusProjectRaw(v); setSelected(null); };
   const toggleType = (k: LeafKind) => { setTypes((t) => ({ ...t, [k]: !t[k] })); setSelected(null); };
+  // 換關鍵字時連「哪支展開／展開幾列」一起歸零：留著上一輪的收合狀態會把搜到的結果藏起來
+  const setQuery = (v: string) => { setQueryRaw(v); setSelected(null); setOpenBranches({}); setListLimits({}); };
+  const setViewMode = (v: MapView) => {
+    setViewModeRaw(v);
+    setSelected(null);
+    try {
+      localStorage.setItem(viewStoreKey, v);
+    } catch {
+      /* 存不了就只在本次會話生效 */
+    }
+  };
 
   const data = graphQ.data as MapGraphData | undefined;
 
-  const graph = useMemo(() => {
-    if (!data) return null;
-    // 鏡頭：全組看全部；「我的」＝我建立的（各型別皆適用）；「提及我」只有筆記／行程有 @提及語意
-    const inLens = (createdBy: string, mentions?: string[] | null) => {
-      if (lens === "all") return true;
-      if (lens === "mine") return createdBy === meId;
-      return Array.isArray(mentions) && mentions.includes(meId);
-    };
-    const projTitle = (pid: string | null) => (pid ? data.projects.find((p) => p.id === pid)?.title ?? "（已移除專案）" : null);
+  const graph = useMemo(
+    () => (data ? buildKnowledgeBranches(data, { meId, lens, focusProject, types, query, fmtDateTime }) : null),
+    [data, lens, focusProject, types, query, meId],
+  );
 
-    const noteRows = data.notes.filter((n) => types.note && inLens(n.createdBy, n.mentions) && (!focusProject || n.projectId === focusProject));
-    const schedRows = data.schedule.filter((e) => types.schedule && inLens(e.createdBy, e.mentions) && (!focusProject || e.projectId === focusProject));
-    const knowRows = data.knowledge.filter((k) => types.knowledge && inLens(k.createdBy) && (!focusProject || k.projectId === focusProject));
-    const agentRows = data.agents.filter((a) => types.agent && inLens(a.userId) && (!focusProject || a.projectId === focusProject));
-    // 資料庫不掛專案：聚焦某專案時不畫（避免誤導成「這庫屬於這個專案」）
-    const dbRows = focusProject ? [] : data.databases.filter((d) => types.db && inLens(d.createdBy));
-
-    // 分支：key＝專案 id 或 "__group"（組層級／未掛專案）；資料庫獨立一支
-    const branches = new Map<string, { key: string; label: string; kind: "project" | "bucket"; projectId: string | null; leaves: MapLeaf[] }>();
-    const branchOf = (pid: string | null) => {
-      const key = pid ?? "__group";
-      let b = branches.get(key);
-      if (!b) {
-        b = { key, label: pid ? projTitle(pid) ?? "專案" : "組層級", kind: pid ? "project" : "bucket", projectId: pid, leaves: [] };
-        branches.set(key, b);
-      }
-      return b;
-    };
-    // 葉順序：知識（沉澱）→ 筆記 → 行程 → 代理（動態）——同分支內按「知識脈絡」由靜到動排
-    for (const k of knowRows)
-      branchOf(k.projectId).leaves.push({
-        id: `k-${k.id}`,
-        kind: "knowledge",
-        label: k.title,
-        sub: `知識庫・${KNOWLEDGE_KIND_LABEL[k.kind] ?? k.kind}・${k.chars.toLocaleString()} 字`,
-        nav: { type: "project", projectId: k.projectId },
-      });
-    for (const n of noteRows)
-      branchOf(n.projectId).leaves.push({
-        id: `n-${n.id}`,
-        kind: "note",
-        label: n.title,
-        sub: `筆記・${fmtDateTime(n.updatedAt)} 更新`,
-        nav: { type: "anchor", anchorId: `note-${n.id}` },
-      });
-    for (const e of schedRows)
-      branchOf(e.projectId).leaves.push({
-        id: `s-${e.id}`,
-        kind: "schedule",
-        label: e.title,
-        sub: `行程・${fmtDateTime(e.startsAt)}`,
-        nav: { type: "anchor", anchorId: `schedule-${e.id}` },
-      });
-    for (const a of agentRows)
-      branchOf(a.projectId).leaves.push({
-        id: `a-${a.id}`,
-        kind: "agent",
-        label: a.goal,
-        sub: `AI 執行計畫・${AGENT_STATUS_LABEL[a.status] ?? a.status}・估 ${a.estPoints} 點`,
-        nav: { type: "project", projectId: a.projectId },
-      });
-
-    const dbLeaves: MapLeaf[] = dbRows.map((d) => ({
-      id: `d-${d.id}`,
-      kind: "db",
-      label: d.name,
-      sub: `資料庫・${DB_SCOPE_LABEL[d.scope] ?? d.scope}・${d.rowCount.toLocaleString()} 列・${DB_AGENT_ACCESS_LABEL[d.agentAccess] ?? d.agentAccess}`,
-      nav: { type: "db", tableId: d.id },
-    }));
-
-    const contentBranches = [...branches.values()].filter((b) => b.leaves.length > 0);
-    // 分支多時先排「內容多」的；資料庫分支固定保留一席，其餘不畫（避免過度擁擠）
-    contentBranches.sort((a, b) => b.leaves.length - a.leaves.length);
-    const maxContent = dbLeaves.length > 0 ? 9 : 10;
-    const shownBranches: Array<{ key: string; label: string; kind: "project" | "bucket" | "dbhub"; projectId: string | null; leaves: MapLeaf[] }> =
-      contentBranches.slice(0, maxContent);
-    const hiddenBranchCount = contentBranches.length - Math.min(contentBranches.length, maxContent);
-    if (dbLeaves.length > 0) shownBranches.push({ key: "__db", label: "資料庫", kind: "dbhub", projectId: null, leaves: dbLeaves });
-
+  /** 心智圖畫得下的部分：分支取前 10 支（資料庫分支固定保留一席），其餘交給清單 */
+  const mapBranches = useMemo(() => {
+    if (!graph) return null;
+    const dbBranch = graph.branches.find((b) => b.kind === "dbhub");
+    const content = graph.branches.filter((b) => b.kind !== "dbhub");
+    const cap = dbBranch ? MAP_MAX_BRANCHES - 1 : MAP_MAX_BRANCHES;
     return {
-      shownBranches,
-      hiddenBranchCount,
-      counts: { note: noteRows.length, schedule: schedRows.length, knowledge: knowRows.length, agent: agentRows.length, db: dbRows.length },
+      shownBranches: [...content.slice(0, cap), ...(dbBranch ? [dbBranch] : [])],
+      hiddenBranchCount: Math.max(0, content.length - cap),
     };
-  }, [data, lens, focusProject, types, meId]);
+  }, [graph]);
 
   // 佈局幾何（固定 viewBox，SVG 依容器寬縮放）
   const W = 920;
@@ -1263,8 +1213,8 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 
   const layout = useMemo(() => {
-    if (!graph) return null;
-    const { shownBranches } = graph;
+    if (!mapBranches) return null;
+    const { shownBranches } = mapBranches;
     const B = shownBranches.length;
     const RB = 165; // 分支節點半徑
     const RL = 258; // 葉節點半徑
@@ -1297,14 +1247,18 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         selection: { label: b.label, sub: `${b.kind === "dbhub" ? "資料庫" : b.kind === "project" ? "專案" : "組層級"}・${b.leaves.length} 個節點`, nav: branchNav },
       });
       // 葉節點：在分支角度附近扇形展開；最多 6 片，其餘收成一顆「+N」
-      const shownLeaves = b.leaves.slice(0, 6);
+      const shownLeaves = b.leaves.slice(0, MAP_MAX_LEAVES);
       const extra = b.leaves.length - shownLeaves.length;
       const total = shownLeaves.length + (extra > 0 ? 1 : 0);
       const fan = Math.min(Math.PI * 0.7, 0.36 * Math.max(1, total)); // 扇形總開角
+      // 相鄰葉一近一遠交錯（差 RING）：同半徑排排站時，標籤（最長 11 字 ≈ 80px）
+      // 會蓋掉隔壁那顆的字——扇形只隔開了節點，沒隔開節點上方的文字。
+      const RING = 34;
       const leafPos = (j: number) => {
         const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
         const la = a + off;
-        return { lx: cx + RL * Math.cos(la), ly: cy + RL * Math.sin(la) };
+        const r = RL + (j % 2 === 1 ? RING : 0);
+        return { lx: cx + r * Math.cos(la), ly: cy + r * Math.sin(la) };
       };
       shownLeaves.forEach((leaf, j) => {
         const { lx, ly } = leafPos(j);
@@ -1320,12 +1274,17 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
           label: `+${extra}`,
           x: lx,
           y: ly,
-          selection: { label: `${b.label}：還有 ${extra} 個節點`, sub: "地圖每支最多畫 6 片葉子，其餘請進來源頁看全部", nav: branchNav },
+          // 以前這裡只是一句「請進來源頁看全部」的死路；現在按下去會切到清單並展開這一支
+          selection: {
+            label: `${b.label}：還有 ${extra} 個節點`,
+            sub: `心智圖每支最多畫 ${MAP_MAX_LEAVES} 片葉子，切到清單可看完整 ${b.leaves.length} 筆`,
+            nav: { type: "branch", key: b.key },
+          },
         });
       }
     });
     return { nodes, edges };
-  }, [graph]);
+  }, [mapBranches]);
 
   /* ── 自由拖拉（創作者可自行排版）──
    * - 節點拖拉：存「相對自動佈局的偏移量」（不是絕對座標）——資料增減、換鏡頭後
@@ -1342,6 +1301,8 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
     }
   });
   const [view, setView] = useState({ tx: 0, ty: 0, s: 1 });
+  // 使用者自己縮放／平移過就別再自動套「剛好裝滿」的檢視——那會把他調好的視角搶回去
+  const [viewTouched, setViewTouched] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<
     | { mode: "node"; id: string; startX: number; startY: number; baseDx: number; baseDy: number; moved: boolean }
@@ -1409,6 +1370,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
     const d = dragRef.current;
     if (!d || d.mode !== "pan") return;
     const k = pxToSvg();
+    setViewTouched(true);
     setView((v) => ({ ...v, tx: d.baseTx + (e.clientX - d.startX) * k, ty: d.baseTy + (e.clientY - d.startY) * k }));
   };
   const onSvgPointerUp = () => {
@@ -1416,7 +1378,8 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
   };
 
   /** 縮放（限 0.5–2.5 倍）：以指定的 viewBox 錨點為中心，錨點在畫面上不動 */
-  const zoomAt = (px: number, py: number, factor: number) =>
+  const zoomAt = (px: number, py: number, factor: number) => {
+    setViewTouched(true);
     setView((v) => {
       const s2 = Math.min(2.5, Math.max(0.5, v.s * factor));
       if (s2 === v.s) return v;
@@ -1424,11 +1387,36 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       const wy = (py - v.ty) / v.s;
       return { s: s2, tx: px - wx * s2, ty: py - wy * s2 };
     });
-  const hasMap = !!graph && graph.shownBranches.length > 0;
+  };
+
+  /* 「剛好裝滿」的初始檢視：固定 viewBox 是 920×560，但少少幾個節點只佔中間一小圈，
+     四周全是空白——手機縮到 0.39x 後那圈更小得看不清。算出節點的外接框（留標籤的邊距）
+     再等比放到畫布上，圖就填滿可視區。使用者一動手（縮放／平移）就不再覆蓋他的視角。 */
+  const fitView = useMemo(() => {
+    const nodes = layout?.nodes ?? [];
+    if (nodes.length === 0) return { tx: 0, ty: 0, s: 1 };
+    const PAD = 64; // 標籤畫在節點上方／兩側，外接框要留出來
+    const pts = nodes.map((n) => {
+      const o = overrides[n.id];
+      return o ? { x: n.x + o.dx, y: n.y + o.dy } : { x: n.x, y: n.y };
+    });
+    const minX = Math.min(...pts.map((p) => p.x)) - PAD;
+    const maxX = Math.max(...pts.map((p) => p.x)) + PAD;
+    const minY = Math.min(...pts.map((p) => p.y)) - PAD;
+    const maxY = Math.max(...pts.map((p) => p.y)) + PAD;
+    const s = Math.min(2.5, Math.max(0.5, Math.min(W / (maxX - minX), H / (maxY - minY))));
+    return { s, tx: W / 2 - ((minX + maxX) / 2) * s, ty: H / 2 - ((minY + maxY) / 2) * s };
+  }, [layout, overrides]);
+  useEffect(() => {
+    if (!viewTouched) setView(fitView);
+  }, [fitView, viewTouched]);
+
+  const hasContent = !!graph && graph.branches.length > 0;
+  const mapVisible = hasContent && viewMode === "map";
   // 滾輪縮放要 preventDefault 擋頁面捲動；React 的 onWheel 在根節點是 passive，改掛原生非 passive 監聽
   useEffect(() => {
     const el = svgRef.current;
-    if (!el || !hasMap) return;
+    if (!el || !mapVisible) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
@@ -1440,7 +1428,18 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
     return () => el.removeEventListener("wheel", onWheel);
     // zoomAt 是穩定閉包（只用 setView 函式式更新），不入依賴
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasMap]);
+  }, [mapVisible]);
+
+  /* 手機把畫布放大成 720px 橫捲（等比縮到螢幕寬會讓字剩 4px），但捲軸起點在最左邊——
+     中心節點在畫布正中央，使用者一打開只看到整片空白，以為地圖壞了。開圖時先捲到中央。 */
+  const mapWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!mapVisible) return;
+    const el = mapWrapRef.current;
+    if (!el) return;
+    const overflow = el.scrollWidth - el.clientWidth;
+    if (overflow > 0) el.scrollLeft = overflow / 2;
+  }, [mapVisible]);
 
   /** 節點的有效位置＝自動佈局＋使用者拖出的偏移 */
   const posOf = (n: { id: string; x: number; y: number }) => {
@@ -1457,9 +1456,13 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       /* 同 persistOverrides：存取失敗不影響本次會話 */
     }
   };
-  const resetView = () => setView({ tx: 0, ty: 0, s: 1 });
+  /** 重設檢視＝回到「剛好裝滿」，不是回到原點——原點下的圖只佔畫布中間一小塊 */
+  const resetView = () => {
+    setViewTouched(false);
+    setView(fitView);
+  };
 
-  /** 詳情面板的「前往」：按 nav 型別跳頁或跳到上方那筆 */
+  /** 節點的「前往」：按 nav 型別跳頁、跳到上方那筆，或切到清單展開整支 */
   const go = (nav: MapNav) => {
     if (!nav) return;
     if (nav.type === "anchor") {
@@ -1469,29 +1472,36 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       window.requestAnimationFrame(() => flashAnchor(nav.anchorId));
     }
     else if (nav.type === "project") setLocation(`/p/${nav.projectId}`);
+    else if (nav.type === "branch") {
+      setViewMode("list");
+      setOpenBranches({ [nav.key]: true });
+      setListLimits((l) => ({ ...l, [nav.key]: Math.max(l[nav.key] ?? 0, LIST_PAGE * 4) }));
+    }
     else setLocation(nav.tableId ? `/databases?open=${nav.tableId}` : "/databases");
   };
   const navLabel = (nav: MapNav) =>
-    !nav ? null : nav.type === "anchor" ? "跳到上方那筆" : nav.type === "project" ? "開啟專案" : nav.tableId ? "開啟資料庫" : "開啟資料庫頁";
+    !nav
+      ? null
+      : nav.type === "anchor"
+        ? "跳到上方那筆"
+        : nav.type === "project"
+          ? "開啟專案"
+          : nav.type === "branch"
+            ? "在清單看全部"
+            : nav.tableId
+              ? "開啟資料庫"
+              : "開啟資料庫頁";
 
   const counts = graph?.counts;
+  const lensLabel = lens === "all" ? "全組" : lens === "mine" ? "我的" : "提及我";
+  const focusLabel = focusProject ? data?.projects.find((p) => p.id === focusProject)?.title ?? "某專案" : "全部專案";
+  const onTypeCount = LEAF_TOGGLES.filter((t) => types[t.kind]).length;
 
-  return (
-    <PlannerSection
-      open={sectionOpen}
-      onOpenChange={setSectionOpen}
-      analyticsLabel="知識地圖卡"
-      contentId="planner-knowledge-map-content"
-      title="知識地圖・心智圖"
-      lede="依專案與資料型別探索組內知識關聯"
-    >
-        <Hint>
-        本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 執行計畫（紫）與資料庫（青）。
-        點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。節點可以自由拖拉排版（位置記在這台裝置）；空白處拖曳平移、滾輪或右上角按鈕縮放。
-        </Hint>
-
-      {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+  /* 鏡頭／專案聚焦／型別開關：桌機直接攤開，手機收進「篩選」摺疊——
+     四排控制項在 360px 螢幕上會佔掉整個第一屏，地圖本體被推到看不見的地方。 */
+  const filterControls = (
+    <>
+      <div className="map-filter-row">
         <div className="seg" role="tablist" aria-label="鏡頭">
           {(["all", "mine", "mentioned"] as const).map((item) => (
             <button
@@ -1523,16 +1533,10 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
             ))}
           </select>
         </div>
-        {counts && (
-          <Meta style={{ margin: 0 }}>
-            筆記 {counts.note}・行程 {counts.schedule}・知識 {counts.knowledge}・代理 {counts.agent}・資料庫 {counts.db}
-            {graph && graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
-          </Meta>
-        )}
       </div>
 
-      {/* 圖例＝型別開關：點一下顯示／隱藏該型別的葉節點 */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      {/* 圖例＝型別開關：點一下顯示／隱藏該型別的節點 */}
+      <div className="map-filter-row">
         {LEAF_TOGGLES.map((t) => (
           <button key={t.kind} type="button" className={`map-toggle${types[t.kind] ? " on" : ""}`} aria-pressed={types[t.kind]} onClick={() => toggleType(t.kind)}>
             <span className={`map-dot ${t.kind}`} /> {t.label}
@@ -1544,27 +1548,172 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       {lens === "mentioned" && (
         <Hint style={{ marginTop: 6 }}>「提及我」只適用有 @提及 的筆記與行程；知識、代理與資料庫在此鏡頭下不顯示。</Hint>
       )}
+    </>
+  );
+
+  return (
+    <PlannerSection
+      open={sectionOpen}
+      onOpenChange={setSectionOpen}
+      analyticsLabel="知識地圖卡"
+      contentId="planner-knowledge-map-content"
+      title="知識地圖・心智圖"
+      lede="依專案與資料型別探索組內知識關聯"
+    >
+      <Hint>
+        本組知識族譜：先用搜尋或篩選收斂，再挑檢視——「清單」一列一個節點、點一下直接開那一筆（手機建議）；
+        「心智圖」把專案／組層級／資料庫織成放射圖看關聯，節點可拖拉排版（位置記在這台裝置）、可縮放平移。
+        顏色：筆記（藍）、行程（琥珀）、知識庫（綠）、AI 執行計畫（紫）、資料庫（青）。
+      </Hint>
+
+      {/* 搜尋＋檢視切換：兩者對清單與心智圖同時生效 */}
+      <div className="map-bar">
+        <span className="map-search">
+          <Icon name="Search" size={14} />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜尋節點名稱…"
+            aria-label="搜尋知識族譜節點"
+          />
+          {query && (
+            <Button variant="ghost" size="sm" onClick={() => setQuery("")} aria-label="清除搜尋">清除</Button>
+          )}
+        </span>
+        <div className="seg" role="tablist" aria-label="檢視">
+          {(["list", "map"] as const).map((item) => (
+            <button
+              key={item}
+              role="tab"
+              aria-selected={viewMode === item}
+              tabIndex={viewMode === item ? 0 : -1}
+              data-map-view={item}
+              className={viewMode === item ? "on" : ""}
+              onClick={() => setViewMode(item)}
+              onKeyDown={(event) => {
+                const next = nextTabValue(["list", "map"] as const, item, event.key);
+                if (!next) return;
+                event.preventDefault();
+                setViewMode(next);
+                event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-map-view="${next}"]`)?.focus();
+              }}
+            >
+              <Icon name={item === "list" ? "List" : "Waypoints"} size={13} /> {item === "list" ? "清單" : "心智圖"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {compact ? (
+        <details className="map-filters">
+          <summary>篩選：{lensLabel}・{focusLabel}・{onTypeCount}/{LEAF_TOGGLES.length} 型別</summary>
+          {filterControls}
+        </details>
+      ) : (
+        filterControls
+      )}
+
+      {counts && graph && (
+        <Meta style={{ marginTop: 8 }}>
+          共 {graph.total} 個節點・筆記 {counts.note}・行程 {counts.schedule}・知識 {counts.knowledge}・AI 計畫 {counts.agent}・資料庫 {counts.db}
+          {viewMode === "map" && mapBranches && mapBranches.hiddenBranchCount > 0
+            ? `・另有 ${mapBranches.hiddenBranchCount} 支太密沒畫（切「清單」看全部）`
+            : ""}
+        </Meta>
+      )}
 
       {graphQ.isLoading ? (
         <Skeleton style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
       ) : graphQ.error ? (
         <p className="error">{graphQ.error.message}</p>
-      ) : !graph || graph.shownBranches.length === 0 ? (
-        <EmptyState icon={<Icon name="Waypoints" />} title={<>這張地圖還是空的</>} description={<>先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
-            {lens !== "all" && "或把鏡頭切回「全組」。"}</>} style={{ marginTop: 12 }} />
+      ) : !graph || graph.branches.length === 0 ? (
+        query.trim() ? (
+          <EmptyState
+            icon={<Icon name="Search" />}
+            title={<>找不到「{query.trim()}」</>}
+            description={<>換個關鍵字，或把鏡頭切回「全組」、型別開關全開再找一次。</>}
+            style={{ marginTop: 12 }}
+          />
+        ) : (
+          <EmptyState icon={<Icon name="Waypoints" />} title={<>這張族譜還是空的</>} description={<>先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
+              {lens !== "all" && "或把鏡頭切回「全組」。"}</>} style={{ marginTop: 12 }} />
+        )
+      ) : viewMode === "list" ? (
+        /* 清單檢視：分支收合式大綱。一列一個節點、48px 高的整列命中區，點一下直接到那一筆——
+           手機上找東西靠的是這個，不是在 0.39x 的放射圖上戳 2px 的圓點。 */
+        <div className="map-list" data-testid="map-list">
+          {graph.branches.map((b, i) => {
+            const isOpen = openBranches[b.key] ?? (!!query.trim() || i === 0);
+            const limit = listLimits[b.key] ?? LIST_PAGE;
+            const shown = b.leaves.slice(0, limit);
+            const rest = b.leaves.length - shown.length;
+            const branchNav: MapNav =
+              b.kind === "project" && b.projectId ? { type: "project", projectId: b.projectId } : b.kind === "dbhub" ? { type: "db" } : null;
+            return (
+              <div className={`map-branch${isOpen ? " open" : ""}`} key={b.key}>
+                <div className="map-branch__head">
+                  <button
+                    type="button"
+                    className="map-branch__toggle"
+                    aria-expanded={isOpen}
+                    aria-controls={`map-branch-${b.key}`}
+                    onClick={() => setOpenBranches((o) => ({ ...o, [b.key]: !isOpen }))}
+                  >
+                    <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={14} />
+                    <span className={`map-dot ${b.kind === "dbhub" ? "db" : b.kind === "project" ? "proj" : "bucket"}`} />
+                    <span className="map-branch__label">{b.label}</span>
+                    <Meta style={{ margin: 0 }}>{b.leaves.length}</Meta>
+                  </button>
+                  {branchNav && (
+                    <Button variant="ghost" size="sm" onClick={() => go(branchNav)}>{navLabel(branchNav)}</Button>
+                  )}
+                </div>
+                {isOpen && (
+                  <ul className="map-rows" id={`map-branch-${b.key}`}>
+                    {shown.map((leaf) => (
+                      <li key={leaf.id}>
+                        <button type="button" className="map-row" onClick={() => go(leaf.nav)}>
+                          <span className={`map-dot ${leaf.kind}`} />
+                          <span className="map-row__text">
+                            <strong>{leaf.label}</strong>
+                            <small>{leaf.sub}</small>
+                          </span>
+                          <span className="map-row__go">{navLabel(leaf.nav)}<Icon name="ChevronRight" size={14} /></span>
+                        </button>
+                      </li>
+                    ))}
+                    {rest > 0 && (
+                      <li>
+                        <button
+                          type="button"
+                          className="map-row map-row--more"
+                          onClick={() => setListLimits((l) => ({ ...l, [b.key]: (l[b.key] ?? LIST_PAGE) + LIST_PAGE * 2 }))}
+                        >
+                          顯示其餘 {rest} 個節點
+                        </button>
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
-        <div className="map-wrap" style={{ marginTop: 12 }}>
+        <div className="map-stage" style={{ marginTop: 12 }}>
           {/* 畫布工具：縮放與重設（浮在右上角）；佈局被拖過才出現「重設佈局」 */}
           <div className="map-tools">
             <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1.2)} aria-label="放大" title="放大">＋</Button>
             <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</Button>
-            {(view.s !== 1 || view.tx !== 0 || view.ty !== 0) && (
-              <Button size="sm" onClick={resetView} title="回到原始平移與縮放">重設檢視</Button>
+            {viewTouched && (
+              <Button size="sm" onClick={resetView} title="回到「剛好裝滿畫布」的檢視">重設檢視</Button>
             )}
             {hasCustomLayout && (
               <Button size="sm" onClick={resetLayout} title="清除拖拉過的節點位置，回到自動佈局">重設佈局</Button>
             )}
           </div>
+          <div className="map-wrap" ref={mapWrapRef}>
           {/* role=group（非 img）：img 會讓報讀器把整張圖當單一圖片，內部所有可點節點對 AT 隱形 */}
           <svg
             ref={svgRef}
@@ -1637,22 +1786,23 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
               })}
             </g>
           </svg>
-        </div>
-      )}
-
-      {/* 節點詳情面板：點節點顯示；「前往」按 nav 型別跳頁 */}
-      {selected && (
-        <div className="map-detail" role="status">
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <strong style={{ fontSize: "var(--fs-14)", display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{selected.label}</strong>
-            <Meta style={{ margin: 0 }}>{selected.sub}</Meta>
           </div>
-          {selected.nav && (
-            <Button size="sm" variant="primary" onClick={() => go(selected.nav)}>
-              {navLabel(selected.nav)}
-            </Button>
+          {/* 節點詳情面板：貼在畫布下緣（不是卡片最底下）——手機上畫布有 438px 高，
+              面板放在圖後面會落在螢幕外，點了節點像沒反應 */}
+          {selected && (
+            <div className="map-detail" role="status">
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <strong style={{ fontSize: "var(--fs-14)", display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{selected.label}</strong>
+                <Meta style={{ margin: 0 }}>{selected.sub}</Meta>
+              </div>
+              {selected.nav && (
+                <Button size="sm" variant="primary" onClick={() => go(selected.nav)}>
+                  {navLabel(selected.nav)}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</Button>
+            </div>
           )}
-          <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</Button>
         </div>
       )}
     </PlannerSection>

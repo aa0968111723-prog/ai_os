@@ -1741,6 +1741,9 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 }
 
 /* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
+/* .map-stage 是定位脈絡：畫布工具與詳情面板浮在它上面，畫布本身（.map-wrap）在手機可橫捲，
+   面板若放在捲動容器內會跟著捲走 */
+.map-stage { position: relative; }
 .map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; position: relative; }
 .map-svg { display: block; width: 100%; height: auto; }
 /* 畫布工具（縮放/重設）：浮在地圖右上角 */
@@ -1794,8 +1797,56 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--fg-secondary); background: none; border: 1px solid var(--border-soft); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
 .map-toggle:not(.on) { opacity: 0.4; }
 .map-toggle:not(.on) .map-dot { filter: grayscale(1); }
-/* 節點詳情面板：點節點後顯示在圖下方，含前往／關閉 */
-.map-detail { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); padding: var(--sp-12); }
+/* 節點詳情面板：貼在畫布下緣（.map-stage 的定位脈絡內），含前往／關閉 */
+.map-detail {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 1;
+  border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card); padding: var(--sp-12);
+  box-shadow: var(--e2, 0 4px 12px rgb(0 0 0 / 12%));
+}
+
+/* ── 知識族譜的搜尋列＋檢視切換 ── */
+.map-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.map-search {
+  display: inline-flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 0;
+  border: 1px solid var(--border-soft); border-radius: 999px; background: var(--card2); padding: 2px 6px 2px 12px; color: var(--fg-secondary);
+}
+.map-search input { flex: 1; min-width: 0; border: 0; background: none; padding: 6px 0; font: inherit; font-size: var(--fs-13); color: var(--fg); }
+.map-search input:focus { outline: none; }
+.map-search:focus-within { border-color: var(--primary-border); }
+/* 搜尋框內建的清除叉叉在各家瀏覽器長相不一，站內用自己的「清除」鈕 */
+.map-search input::-webkit-search-cancel-button { display: none; }
+.map-bar .seg button { display: inline-flex; align-items: center; gap: 4px; }
+
+/* 手機把四排篩選收成一顆摘要鈕：攤開時會吃掉整個第一屏，地圖本體被推出畫面 */
+.map-filters { margin-top: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); padding: 8px 12px; }
+.map-filters > summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-secondary); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.map-filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+
+/* ── 清單檢視（大綱）：分支收合、一列一節點，整列都是命中區 ── */
+.map-list { margin-top: 12px; display: grid; gap: 8px; }
+.map-branch { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; }
+.map-branch__head { display: flex; align-items: center; gap: 6px; padding-right: 8px; }
+.map-branch__toggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left;
+  background: none; border: 0; padding: 10px 12px; min-height: 44px; cursor: pointer; color: var(--fg);
+}
+.map-branch__label { font-weight: 600; font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-rows { list-style: none; margin: 0; padding: 0; }
+.map-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: 0; border-top: 1px solid var(--border-soft); padding: 9px 12px; min-height: 48px; cursor: pointer; color: var(--fg);
+}
+.map-row:hover, .map-row:focus-visible { background: var(--card); }
+.map-row__text { min-width: 0; flex: 1; }
+.map-row__text strong { display: block; font-size: var(--fs-13); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-row__text small { display: block; font-size: var(--fs-12); color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-row__go { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); color: var(--fg-secondary); flex: 0 0 auto; }
+.map-row--more { justify-content: center; font-size: var(--fs-12); color: var(--fg-secondary); font-weight: 600; }
+@media (max-width: 620px) {
+  /* 手機一列放不下「跳到上方那筆」這種說明字，留 chevron 就夠——整列本來就可點 */
+  .map-row__go { font-size: 0; }
+}
 
 /* ── 站內私訊（/chat）：左欄對話串＋右欄聊天視窗；手機以 has-peer 切換單欄 ── */
 .dm-layout {
@@ -5107,9 +5158,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .planner-section { margin-top: 10px; scroll-margin-top: 112px; }
   /* 知識地圖：360px 直接等比縮到 0.39x（文字 ~4px 不可讀、節點點不到）。
      改成固定較大畫布＋橫向捲動；SVG 觸控本就不平移畫布（保留頁面捲動的刻意設計），
-     橫捲手勢直接落在 .map-wrap 上，不衝突。 */
+     橫捲手勢直接落在 .map-wrap 上，不衝突。
+     捲軸起點由 JS 移到中央（KnowledgeMapCard）——中心節點在畫布正中，
+     停在最左緣只會看到一片空白。工具列與詳情面板掛在 .map-stage 上而非這個捲動容器，
+     橫捲時才不會跟著跑出畫面。 */
   .map-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .map-svg { min-width: 720px; }
+  /* 手機：搜尋框獨佔一行，檢視切換換到下一行才按得到（並排會擠成兩個窄按鈕） */
+  .map-search { flex-basis: 100%; }
   .planner-section > summary.planner-section-summary { min-height: 60px; }
   .planner-section-lede {
     display: -webkit-box;
