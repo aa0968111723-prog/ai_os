@@ -74,7 +74,7 @@ import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
 import { StyleVisualGallery } from "../components/StyleVisualGallery";
 import { ToneVisualPalette } from "../components/ToneVisualPalette";
-import { StoryFlowBlueprint, ThreeActStoryArc } from "../components/StoryFlowVisualizer";
+import { ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -1671,11 +1671,9 @@ export function ProjectPage({ id }: { id: string }) {
                   scrollToSelector(anchor);
                 }}
               />
-              {/* 故事定盤星視覺藍圖 Strip */}
-              <StoryFlowBlueprint
-                wv={wv}
-                onFocusField={(fieldId) => scrollToSelector(`#${fieldId}`)}
-              />
+              {/* 這裡刻意不再放「故事定盤星視覺藍圖」摘要卡：它顯示的一句話／金句／畫風
+                  就是正下方欄位的原字，同一屏會上下重複一次。摘要留給收合後的區塊標題與
+                  下方「AI 會收到什麼」預覽即可。 */}
               {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
               <label htmlFor="wv-logline">
                 這支片在講什麼？
