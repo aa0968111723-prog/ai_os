@@ -829,6 +829,8 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-label { font-size: 11px; font-weight: 600; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.06em; user-select: none; }
 /* 分組標題與前一組留一點呼吸：分隔線之後緊接標題時，標題自帶上緣間距讓群組更成塊 */
 .menu-sep + .menu-label { margin-top: 2px; }
+/* 選單內的一句指路（手機帳號選單指向底部「更多」）：不是可點項目，縮排對齊 .menu-item 的文字 */
+.menu-note { padding: 6px 10px 2px; line-height: 1.45; }
 
 /* 素材庫（真實儲存層） */
 .upload-zone { border: 2px dashed var(--border); border-radius: var(--r-12); padding: 16px; text-align: center;
@@ -5606,6 +5608,12 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .mobile-more-sheet__head strong { font-size: var(--fs-15); }
   .mobile-more-sheet__head small { color: var(--fg-secondary); font-size: var(--fs-11); }
   .mobile-more-sheet__grid { display: grid; gap: 5px; margin-top: 10px; }
+  /* 分組標題：面板收全站頁面後清單變長，分組讓它仍然一眼可掃（與 .menu-label 同語彙） */
+  .mobile-more-sheet__label {
+    padding: 8px 8px 0; font-size: var(--fs-11); font-weight: 650;
+    color: var(--fg-secondary); letter-spacing: .06em; user-select: none;
+  }
+  .mobile-more-sheet__label:first-child { padding-top: 2px; }
   .mobile-more-sheet__grid a {
     min-width: 0; min-height: 54px;
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;

@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { MobileNavigation } from "./MobileNavigation";
+import { DESTINATIONS } from "../navigation/navigationItems";
 
 describe("MobileNavigation", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
@@ -15,12 +16,27 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("href", "/dashboard#projects");
     expect(screen.getByRole("link", { name: "AI 工作" })).toHaveAttribute("href", "/dashboard#ai-work");
-    expect(screen.getByRole("link", { name: "排程" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "筆記排程" })).toHaveAttribute("aria-current", "page");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /資料庫/ })).toHaveAttribute("href", "/databases");
     expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
-    expect(screen.getByRole("link", { name: /使用說明/ })).toHaveAttribute("href", "/help");
+    expect(screen.getByRole("link", { name: /怎麼用/ })).toHaveAttribute("href", "/help");
+  });
+
+  it("names every destination exactly as the shared catalog does（同一頁不再有第二個名字）", async () => {
+    const user = userEvent.setup();
+    render(<MobileNavigation />);
+    await user.click(screen.getByRole("button", { name: "更多" }));
+
+    // 面板收全站頁面：使用者選單在手機上不再重複列一次，因此這裡必須齊全
+    for (const key of ["community", "databases", "chat", "help", "models", "mcp", "integrations", "downloads"] as const) {
+      const d = DESTINATIONS[key];
+      expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
+    }
+    // 舊的第二套名字不得復活
+    expect(screen.queryByText("使用說明")).not.toBeInTheDocument();
+    expect(screen.queryByText("外部資料")).not.toBeInTheDocument();
   });
 
   it("highlights exactly one dashboard tab per hash（今日／專案／AI 工作互斥）", () => {

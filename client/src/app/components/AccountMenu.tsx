@@ -7,7 +7,8 @@ import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribe
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
 import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
-import { MenuSurface } from "./MenuSurface";
+import { MenuSurface, MENU_SHEET_MQ } from "./MenuSurface";
+import { useMatchMedia } from "../../lib/useMatchMedia";
 import { writeUiDensity } from "../../lib/densityPreference";
 import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 
@@ -205,7 +206,11 @@ export type AccountMenuProps = {
 };
 
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
- * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
+ * CSP 下自製（無外部庫）：點外面或 Esc 關閉。
+ *
+ * 手機（≤820px）少列「說明／工作」兩組——那裡底部分頁列的「更多」面板就是全站頁面總表，
+ * 兩邊各列一次同一批頁面（而且曾經各叫各的名字）正是使用者說的「選單有點亂」。
+ * 手機上的分工：**下面的「更多」＝去哪裡，右上角頭像＝我與團隊**（點數、管理、帳號設定）。 */
 export function AccountMenu({
   userName, avatarUrl, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
 }: AccountMenuProps) {
@@ -220,6 +225,8 @@ export function AccountMenu({
   const manageItems = filterNavItems(accountMenuItems.filter((i) => i.section === "manage"), filterCtx);
   const accountLinkItems = filterNavItems(accountMenuItems.filter((i) => i.section === "account"), filterCtx);
   const desktop = hasDesktopBridge();
+  // 與 MenuSurface 同一條斷點：手機時選單本身變 sheet，底部分頁列的「更多」也同時存在
+  const compact = useMatchMedia(MENU_SHEET_MQ);
 
   return (
     <div className="menu-wrap account-menu">
@@ -247,28 +254,37 @@ export function AccountMenu({
           {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
            * 筆記排程／資料庫是高頻入口，已升到頂欄常駐，故不再列進「工作」；
            * 權限限定的選項／通訊錄／監控／團隊管理獨立成「管理」組，一般組員整段不顯示。 */}
-          <div className="menu-label" role="presentation">說明</div>
-          {helpItems.map((item) => (
-            <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
-              {item.icon && <Icon name={item.icon} size={15} />}{item.label}
-            </Link>
-          ))}
-          <div className="menu-sep" />
-          <div className="menu-label" role="presentation">工作</div>
-          {desktop ? (
-            <Link href="/desktop" className="menu-item" role="menuitem" onClick={close}>
-              <Icon name="Monitor" size={15} />桌面剪輯連接
-            </Link>
+          {compact ? (
+            /* 手機：頁面入口全歸「更多」面板，這裡只留一句指路，免得有人在頭像下面翻找靈感頻道 */
+            <div className="menu-note" role="presentation">
+              <Hint as="span" layer="always">要去其他頁面（靈感頻道、資料庫、怎麼用…）請按最底下的「更多」</Hint>
+            </div>
           ) : (
-            <Link href="/downloads#desktop-app" className="menu-item" role="menuitem" onClick={close}>
-              <Icon name="Download" size={15} />下載電腦版應用程式
-            </Link>
+            <>
+              <div className="menu-label" role="presentation">說明</div>
+              {helpItems.map((item) => (
+                <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
+                  {item.icon && <Icon name={item.icon} size={15} />}{item.label}
+                </Link>
+              ))}
+              <div className="menu-sep" />
+              <div className="menu-label" role="presentation">工作</div>
+              {desktop ? (
+                <Link href="/desktop" className="menu-item" role="menuitem" onClick={close}>
+                  <Icon name="Monitor" size={15} />桌面剪輯連接
+                </Link>
+              ) : (
+                <Link href="/downloads#desktop-app" className="menu-item" role="menuitem" onClick={close}>
+                  <Icon name="Download" size={15} />下載電腦版應用程式
+                </Link>
+              )}
+              {workItems.map((item) => (
+                <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
+                  {item.icon && <Icon name={item.icon} size={15} />}{item.label}
+                </Link>
+              ))}
+            </>
           )}
-          {workItems.map((item) => (
-            <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
-              {item.icon && <Icon name={item.icon} size={15} />}{item.label}
-            </Link>
-          ))}
           {/* 管理組：只要在任一組是組長或管理員（canSeeOrg）就顯示整段；段內各項再依細權限收放，
            * 團隊管理限管理員（isAdmin）、選項限作用組組長（activeIsLeader）。canSeeOrg 為兩者的聯集，
            * 故整段用它當閘門時，段內至少會有通訊錄／監控兩項，不會出現只有標題的空組。 */}
