@@ -11,10 +11,26 @@ import path from "node:path";
 import type { Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { STORAGE_ROOT } from "./storage";
+import { STORAGE_ROOT, storageBackend } from "./storage";
 import { resolveSession } from "./auth";
 
 const ASSETS_DIR = path.join(STORAGE_ROOT, "assets");
+
+/**
+ * 這個端點打包的是**本機 assets 目錄**。切到物件儲存之後那個目錄是空的，
+ * 照跑會產出一包空的 tar.gz 並在 backup_runs 記一筆「成功」——
+ * 管理頁於是顯示「最近備份：剛剛」，實際上什麼都沒備到。
+ * 這種假綠燈比沒有備份更危險，所以明確擋下並告訴管理員該怎麼備份。
+ * 回 null＝可以正常備份。
+ */
+export function assetBackupUnsupportedReason(): string | null {
+  if (storageBackend() !== "object") return null;
+  return (
+    "目前素材存放在物件儲存（S3／MinIO），不在本機磁碟上，這個備份端點打包不到任何東西。" +
+    "請改用物件儲存本身的備份機制（bucket 版本控管、跨區複寫，或 mc mirror／aws s3 sync 到另一個 bucket）。" +
+    "資料庫仍需另外備份——素材檔與資料庫紀錄要成對備份、成對還原。"
+  );
+}
 
 /** timing-safe-ish 比對（權杖長度固定時可用；長度不同直接 false） */
 function tokenMatches(provided: string, expected: string): boolean {

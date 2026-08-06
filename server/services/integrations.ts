@@ -20,7 +20,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { proxyFetch } from "./http";
-import { STORAGE_ROOT } from "./storage";
+import { STORAGE_ROOT, storageBackend } from "./storage";
 import { assertPublicHostOrError, MAX_IMPORT_BYTES, readBodyCapped, ssrfGuardError } from "./databaseFiles";
 import {
   consumeRateLimit,
@@ -52,6 +52,16 @@ let cachedSeed: string | null = null;
 function keySeed(): string {
   if (process.env.INTEGRATION_TOKEN_SECRET) return process.env.INTEGRATION_TOKEN_SECRET;
   if (cachedSeed) return cachedSeed;
+  // 物件儲存模式的人通常已經把 Volume 退掉，STORAGE_ROOT 落在容器暫存層——
+  // 那裡「寫得進去但活不過下次部署」，於是每次部署都產生一把新種子，
+  // 所有已存的 Google／Notion token 在無聲無息中變成解不開的亂碼（使用者只會看到整合突然全斷）。
+  // 磁碟可寫所以下面的 catch 接不到，只能在這裡明確擋下。
+  if (storageBackend() === "object") {
+    throw new Error(
+      "使用物件儲存時必須設定環境變數 INTEGRATION_TOKEN_SECRET（至少 32 字元，可用 openssl rand -hex 32）——" +
+        "整合金鑰不能存在容器暫存層，否則每次重新部署都會換一把，已連結的 Google／Notion 帳號會全部失效且無法復原。",
+    );
+  }
   const file = path.join(STORAGE_ROOT, ".integration-key");
   try {
     if (existsSync(file)) {

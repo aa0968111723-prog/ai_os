@@ -3,7 +3,9 @@
  * GET https://api.fal.ai/v1/account/billing?expand=credits
  * 需 Admin scope key；優先 FAL_ADMIN_KEY，其次 FAL_KEY。
  * Key 永不回傳前端；錯誤訊息使用者可讀、不含 secret。
+ * 快取有 Redis 時跨實例共用（見 services/cache），沒有就退回本行程記憶體。
  */
+import { cacheDelete, cacheGet, cacheSet } from "./cache";
 import { proxyFetch } from "./http";
 
 const BILLING_URL = "https://api.fal.ai/v1/account/billing?expand=credits";
@@ -28,16 +30,12 @@ export type FalAccountBalanceErr = {
 
 export type FalAccountBalanceResult = FalAccountBalanceOk | FalAccountBalanceErr;
 
-type CacheEntry = {
-  result: FalAccountBalanceOk;
-  expiresAt: number;
-};
-
-let cache: CacheEntry | null = null;
+/** 快取鍵（services/cache 會自動加上 Redis 前綴） */
+const CACHE_KEY = "fal:account-balance";
 
 /** 單元測試用：清快取與狀態 */
 export function resetFalBillingCacheForTests(): void {
-  cache = null;
+  void cacheDelete(CACHE_KEY);
 }
 
 function resolveBillingKey(): string | null {
@@ -70,9 +68,9 @@ function parseBillingPayload(data: unknown): { username: string; balance: number
  * 不拋例外：一律回傳結構化 ok / 錯誤碼，方便 tRPC 直接透傳。
  */
 export async function getFalAccountBalance(opts?: { force?: boolean }): Promise<FalAccountBalanceResult> {
-  const now = Date.now();
-  if (!opts?.force && cache && cache.expiresAt > now) {
-    return { ...cache.result, cached: true };
+  if (!opts?.force) {
+    const hit = await cacheGet<FalAccountBalanceOk>(CACHE_KEY);
+    if (hit) return { ...hit, cached: true };
   }
 
   const key = resolveBillingKey();
@@ -144,7 +142,7 @@ export async function getFalAccountBalance(opts?: { force?: boolean }): Promise<
       fetchedAt,
       cached: false,
     };
-    cache = { result: okResult, expiresAt: now + FAL_BILLING_CACHE_TTL_MS };
+    await cacheSet(CACHE_KEY, okResult, FAL_BILLING_CACHE_TTL_MS);
     return okResult;
   } catch (err) {
     // 不洩漏錯誤細節（可能含 URL／proxy 資訊）；僅使用者可讀訊息
