@@ -222,7 +222,8 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
   // 手機沒有 Esc 也沒有右鍵——提示列本身就是取消鈕（pointer-events:auto＋自己的 click）
   hint.textContent = "點一下要標記的地方（手機可拖曳瞄準）· Esc / 右鍵 / 點此取消";
   hint.style.cssText =
-    "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483002;" +
+    // safe-area：提示列是手機上唯一的取消入口，standalone／瀏海機不讓開狀態列就點不到
+    "position:fixed;left:50%;top:calc(env(safe-area-inset-top, 0px) + 16px);transform:translateX(-50%);z-index:2147483002;" +
     "background:rgba(43,38,32,0.86);color:#fbf7f0;font:600 13px/1.4 var(--sans);" +
     "padding:7px 16px;border-radius:999px;pointer-events:auto;cursor:pointer;max-width:92vw;text-align:center;";
 

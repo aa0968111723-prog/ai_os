@@ -6,6 +6,7 @@ import { ModelUsageCard } from "../components/ModelUsageCard";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 import { ModelArena } from "../features/model-guide/ModelArena";
+import { useMatchMedia } from "../lib/useMatchMedia";
 import { ModelBaseChip, ModelBaseDetail } from "../features/model-guide/ModelBaseInfo";
 import { ModelHeatmap } from "../features/model-guide/ModelHeatmap";
 import { modelBaseSpecFor, WEIGHTS_LABEL } from "@shared/modelBase";
@@ -206,7 +207,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
     { label: "點數", render: (m) => <span className="mono model-workflow-card__points">{m.points} 點/次</span> },
     {
       label: "健康",
-      render: (m) => <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} />,
+      render: (m) => <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} showNoteOnCompact />,
     },
     { label: "官方約略價", render: (m) => <span className="mono" style={{ fontSize: 11 }}>{m.cost}</span> },
     { label: "特性", render: (m) => m.strengths },
@@ -968,8 +969,12 @@ function ModelThumb({
   );
 }
 
-/** 契約健康徽章 */
-function HealthBadge({ health, note }: { health?: string | null; note?: string | null }) {
+/** 契約健康徽章。
+ *  showNoteOnCompact：完整說明原本只放 title 屬性，手機沒有 hover 看不到——
+ *  並排比較表與精靈結果開這個開關，≤820 時在徽章下補一行說明（桌機維持 title 不變；
+ *  完整目錄卡已有行內 healthNote 補救，不開以免重複顯示）。 */
+function HealthBadge({ health, note, showNoteOnCompact = false }: { health?: string | null; note?: string | null; showNoteOnCompact?: boolean }) {
+  const compact = useMatchMedia("(max-width: 820px)");
   const key = normalizeHealth(health);
   const meta = HEALTH_META[key];
   const icon: IconName =
@@ -982,14 +987,20 @@ function HealthBadge({ health, note }: { health?: string | null; note?: string |
           : key === "needs_source"
             ? "Package"
             : "Info";
+  const fullNote = note || meta.hint;
   return (
-    <span
-      className={`model-health-badge tone-${meta.tone}`}
-      title={note || meta.hint}
-    >
-      <Icon name={icon} size={12} />
-      {meta.short}
-    </span>
+    <>
+      <span
+        className={`model-health-badge tone-${meta.tone}`}
+        title={fullNote}
+      >
+        <Icon name={icon} size={12} />
+        {meta.short}
+      </span>
+      {showNoteOnCompact && compact && fullNote && (
+        <Meta as="span" style={{ display: "block", fontSize: 11, marginTop: 2 }}>{fullNote}</Meta>
+      )}
+    </>
   );
 }
 
@@ -1019,7 +1030,7 @@ function ModelInline({
       {lead && <span className="eyebrow cjk" style={{ fontWeight: 700, color: "var(--primary-ink)" }}>{lead}</span>}
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
       <Pill className={TIER_CLASS[m.tier]}>{tierLabel(m.tier)}</Pill>
-      {health != null && <HealthBadge health={health} note={healthNote} />}
+      {health != null && <HealthBadge health={health} note={healthNote} showNoteOnCompact />}
       <span className="mono" style={{ fontSize: 11 }}>{m.points} 點</span>
       <Button variant="ghost" size="sm"
         title={`複製模型 ID:${m.id}`}
