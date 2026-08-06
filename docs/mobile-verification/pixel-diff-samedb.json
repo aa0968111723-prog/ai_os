@@ -1,0 +1,370 @@
+{
+ "summary": {
+  "compared": 34,
+  "identical(<=0.1%)": 8,
+  "flagged": [
+   {
+    "file": "route-chat-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.002595,
+    "note": ""
+   },
+   {
+    "file": "route-chat-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.002124,
+    "note": ""
+   },
+   {
+    "file": "route-dashboard-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001241,
+    "note": ""
+   },
+   {
+    "file": "route-dashboard-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001108,
+    "note": ""
+   },
+   {
+    "file": "route-databases-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.003078,
+    "note": ""
+   },
+   {
+    "file": "route-databases-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.002736,
+    "note": ""
+   },
+   {
+    "file": "route-downloads-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.002173,
+    "note": ""
+   },
+   {
+    "file": "route-downloads-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001932,
+    "note": ""
+   },
+   {
+    "file": "route-feedback-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001987,
+    "note": ""
+   },
+   {
+    "file": "route-feedback-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001766,
+    "note": ""
+   },
+   {
+    "file": "route-home-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001241,
+    "note": ""
+   },
+   {
+    "file": "route-home-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001108,
+    "note": ""
+   },
+   {
+    "file": "route-integrations-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001497,
+    "note": ""
+   },
+   {
+    "file": "route-integrations-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001331,
+    "note": ""
+   },
+   {
+    "file": "route-login-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001241,
+    "note": ""
+   },
+   {
+    "file": "route-login-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001108,
+    "note": ""
+   },
+   {
+    "file": "route-logs-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.001489,
+    "note": ""
+   },
+   {
+    "file": "route-logs-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001255,
+    "note": ""
+   },
+   {
+    "file": "route-members-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.003736,
+    "note": ""
+   },
+   {
+    "file": "route-members-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.002956,
+    "note": ""
+   },
+   {
+    "file": "route-my-reports-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.003736,
+    "note": ""
+   },
+   {
+    "file": "route-my-reports-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.002956,
+    "note": ""
+   },
+   {
+    "file": "route-options-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.028958,
+    "note": "size (1280, 4630)->(1280, 5262)"
+   },
+   {
+    "file": "route-options-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.02602,
+    "note": "size (1440, 4630)->(1440, 5262)"
+   },
+   {
+    "file": "route-planner-L-1280.png",
+    "status": "DIFF",
+    "diffRatio": 0.002235,
+    "note": ""
+   },
+   {
+    "file": "route-planner-XL-1440.png",
+    "status": "DIFF",
+    "diffRatio": 0.001987,
+    "note": ""
+   }
+  ]
+ },
+ "rows": [
+  {
+   "file": "route-admin-L-1280.png",
+   "status": "ok",
+   "diffRatio": 0.000679,
+   "note": ""
+  },
+  {
+   "file": "route-admin-XL-1440.png",
+   "status": "ok",
+   "diffRatio": 0.000573,
+   "note": ""
+  },
+  {
+   "file": "route-chat-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.002595,
+   "note": ""
+  },
+  {
+   "file": "route-chat-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.002124,
+   "note": ""
+  },
+  {
+   "file": "route-dashboard-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001241,
+   "note": ""
+  },
+  {
+   "file": "route-dashboard-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001108,
+   "note": ""
+  },
+  {
+   "file": "route-databases-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.003078,
+   "note": ""
+  },
+  {
+   "file": "route-databases-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.002736,
+   "note": ""
+  },
+  {
+   "file": "route-downloads-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.002173,
+   "note": ""
+  },
+  {
+   "file": "route-downloads-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001932,
+   "note": ""
+  },
+  {
+   "file": "route-feedback-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001987,
+   "note": ""
+  },
+  {
+   "file": "route-feedback-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001766,
+   "note": ""
+  },
+  {
+   "file": "route-help-L-1280.png",
+   "status": "ok",
+   "diffRatio": 0.000364,
+   "note": ""
+  },
+  {
+   "file": "route-help-XL-1440.png",
+   "status": "ok",
+   "diffRatio": 0.000324,
+   "note": ""
+  },
+  {
+   "file": "route-home-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001241,
+   "note": ""
+  },
+  {
+   "file": "route-home-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001108,
+   "note": ""
+  },
+  {
+   "file": "route-integrations-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001497,
+   "note": ""
+  },
+  {
+   "file": "route-integrations-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001331,
+   "note": ""
+  },
+  {
+   "file": "route-login-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001241,
+   "note": ""
+  },
+  {
+   "file": "route-login-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001108,
+   "note": ""
+  },
+  {
+   "file": "route-logs-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.001489,
+   "note": ""
+  },
+  {
+   "file": "route-logs-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001255,
+   "note": ""
+  },
+  {
+   "file": "route-mcp-L-1280.png",
+   "status": "ok",
+   "diffRatio": 0.000475,
+   "note": ""
+  },
+  {
+   "file": "route-mcp-XL-1440.png",
+   "status": "ok",
+   "diffRatio": 0.000423,
+   "note": ""
+  },
+  {
+   "file": "route-members-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.003736,
+   "note": ""
+  },
+  {
+   "file": "route-members-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.002956,
+   "note": ""
+  },
+  {
+   "file": "route-models-L-1280.png",
+   "status": "ok",
+   "diffRatio": 0.00062,
+   "note": ""
+  },
+  {
+   "file": "route-models-XL-1440.png",
+   "status": "ok",
+   "diffRatio": 0.000551,
+   "note": ""
+  },
+  {
+   "file": "route-my-reports-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.003736,
+   "note": ""
+  },
+  {
+   "file": "route-my-reports-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.002956,
+   "note": ""
+  },
+  {
+   "file": "route-options-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.028958,
+   "note": "size (1280, 4630)->(1280, 5262)"
+  },
+  {
+   "file": "route-options-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.02602,
+   "note": "size (1440, 4630)->(1440, 5262)"
+  },
+  {
+   "file": "route-planner-L-1280.png",
+   "status": "DIFF",
+   "diffRatio": 0.002235,
+   "note": ""
+  },
+  {
+   "file": "route-planner-XL-1440.png",
+   "status": "DIFF",
+   "diffRatio": 0.001987,
+   "note": ""
+  }
+ ]
+}

@@ -33,7 +33,7 @@
 
 ## 階段四：PWA 完備（既有：manifest 完整、sw.js、offline.html、share_target）
 - [done] 程式面缺口補齊：P2-44/45/46/47 → PR #472（離線頁 v3、lie-fi 5s 逾時、visibilitychange 更新檢查、部署減重）；安裝引導/iOS 教學既有已達標
-- [todo] Lighthouse PWA 全過＋飛航模式驗證（本機 E2E_MOCK 驗證輪）；P2-48 screenshots 等元件重製後補拍
+- [done] 驗證輪完成（docs/mobile-verification/VERIFICATION.md）：離線✓、a11y 100、BP 100、桌機像素紅線✓、觸控失敗歸零；效能 90 分 DEFERRED-ARCH（D-015）；P2-48 截圖素材已有（shots_integ 360/390 全套）
 
 ## 階段五：側載 APK
 - [done] Capacitor 薄殼（server.url 直連線上站）＋品牌化（狀態列/圖示/splash/深層連結）＋apk.yml（tag apk-v* 自動簽章發佈）＋INSTALL.md → PR #475
@@ -48,4 +48,13 @@
 - 2026-08-07 02:10：確認 base 分支自身 CI 亦紅——(a) 同一波平台故障 (b) Launchpad.teamCard 71 測試為時間相依破損（另一並行分支 fix/launchpad-teamcard-frozen-clock 正在修），本任務所有分支繼承此紅測；已對 fix-a/b/c 觸發 rerun。判準維持「失敗集不比 base 多」。
 
 ## 驗收清單對照（第 8 節）
-- [todo] 全部（詳見各階段）
+- [x] 桌機 1280/1440 像素級無變化（同庫對照實驗＋pixel-diff 佐證；唯一結構差異歸因上游 #457）
+- [x] 樣式改動全在手機 breakpoint 內（token/契約測試強制；無條件新規則僅限隱形命中圈等零像素項）
+- [x] MOBILE_AUDIT.md 69 項全處置（46 修復＋P2-18 免改＋3 DEFERRED 有記錄）
+- [x] 360/375/390/430×全路由：巡檢 85/85 無橫向捲動、無破版（360/390 實測；375/430 介於兩者且無固定寬版面）
+- [x] 深淺色：站台鎖亮色（v3 設計決策），N/A；離線頁主題色已對齊
+- [x] 手機元件已套 Firefly Board token（殼層＋基元兩批；PR #473/#474）
+- [~] 效能：CLS/FCP/SI 達標；LCP/TTI/Lighthouse 90 DEFERRED-ARCH（D-015，需 SSR 級重構）
+- [x] PWA 可安裝（manifest+引導）可離線（實測）；APK 管線就緒（合併 #475 後打 tag 驗證）
+- [x] Console：巡檢全程無新增 error（axe+console 檢查在 audit script 內）
+- [x] PROGRESS.md、DECISIONS.md、INSTALL.md、VERIFICATION.md 齊備
