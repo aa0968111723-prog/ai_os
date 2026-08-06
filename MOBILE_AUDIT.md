@@ -113,16 +113,16 @@
 - [x] **P2-07** done(PR#463)｜`client/src/pages/Launchpad.tsx:570`｜touch-target｜/
   - 問題：「繼續創作」bento 頭部的「全部專案 (N) →」是 12px 純文字 <a>，實際點擊高度約 17px，遠低於全站 --touch-min 44px（<a> 不吃全域 button 下限）。
   - 修法：比照 styles.css:2305，給 .bento-card__head a 補 min-height: var(--touch-min); display:inline-flex; align-items:center。
-- [ ] **P2-08**｜`client/src/pages/Launchpad.tsx:711`｜touch-target｜/
+- [x] **P2-08** done(PR#469)｜`client/src/pages/Launchpad.tsx:711`｜touch-target｜/
   - 問題：「顯示已封存」是 16px checkbox＋文字的 inline-flex label，實際點擊高度約 24px；checkbox 型輸入被全域 44px 下限刻意豁免，label 本身也沒補下限。
   - 修法：label 補 minHeight: "var(--touch-min)"（維持 inline-flex 置中即可，不動 checkbox 本體）。
-- [ ] **P2-09**｜`client/src/pages/Launchpad.tsx:759`｜touch-target｜/
+- [x] **P2-09** done(PR#469)｜`client/src/pages/Launchpad.tsx:759`｜touch-target｜/
   - 問題：空狀態的「看怎麼用」（14px 文字 Link）是獨立操作目標而非句中行內連結，點擊高度約 21px；同樣寫法出現在 FirstRunGuide.tsx:87（「看怎麼用」）與 AddOptionInline.tsx:108（「整理全部選項」，12px）。
   - 修法：獨立動作連結統一補 minHeight: "var(--touch-min)"（inline-flex 置中），或改用 Button as="a" variant="ghost"。
-- [ ] **P2-10**｜`client/src/styles.css:1548`｜觸控目標｜/projects/:id（定調中心子分頁）
+- [x] **P2-10** done(PR#469)｜`client/src/styles.css:1548`｜觸控目標｜/projects/:id（定調中心子分頁）
   - 問題：.tone-studio-tab 自設 min-height:40px，class 特異性蓋過全站 button ≥44px 契約，手機主要分頁切換鈕矮於 44px 觸控下限。
   - 修法：改 min-height: var(--touch-min)（44px），padding 可維持不變。
-- [ ] **P2-11**｜`client/src/pages/ProjectPage.tsx:1309`｜觸控目標｜/projects/:id（hero 協作在場區）
+- [x] **P2-11** done(PR#469)｜`client/src/pages/ProjectPage.tsx:1309`｜觸控目標｜/projects/:id（hero 協作在場區）
   - 問題：展開後的成員 chip 是 span role="button"（點擊切換鏡像跟隨），inline style 12px 字＋2px 直向 padding 實高僅 ~24px；「N 人在線」chip 也被 .project-presence-chip 壓到 32px——皆為手機專屬控件卻低於 44px 下限。
   - 修法：兩者補 min-height: var(--touch-min) 並用 inline-flex 置中（比照 .chip.pick 的做法）。
 - [ ] **P2-12**｜`client/src/pages/ProjectPage.tsx:1634`｜鍵盤遮擋＋reduced-motion｜/projects/:id（去填一句話／用這個提示詞）
@@ -134,7 +134,7 @@
 - [ ] **P2-14**｜`client/src/styles.css:1537`｜橫向捲動可發現性｜/projects/:id（定調中心子分頁）
   - 問題：tone-studio-nav 四顆 nowrap 分頁在 360px 總寬約 480-520px，overflow-x:auto 但 scrollbar 隱藏、無漸層提示——「知識與素材」被切半、「回收桶」完全在畫面外，新手不易發現可橫滑（repo 自己在 .ctx-summary--wrap 注解就點名這種切邊看起來像壞掉）。
   - 修法：≤560px 改 2×2 grid（比照 .creation-mode-tabs 的 MOB-03 處理）或加右緣漸層淡出提示。
-- [ ] **P2-15**｜`client/src/pages/ProjectPage.tsx:2345`｜觸控目標｜/projects/:id（③ 交付一行導引）
+- [x] **P2-15** done(PR#469)｜`client/src/pages/ProjectPage.tsx:2345`｜觸控目標｜/projects/:id（③ 交付一行導引）
   - 問題：手機專屬的「做好可打包 zip 交付」是 <p role="button">，fs-12＋padding 5px 0 實高約 28px，不吃全域 button 44px 規則，低於觸控下限。
   - 修法：補 min-height: var(--touch-min) 與 display:flex 對齊（或改用 Button variant=ghost）。
 - [ ] **P2-16**｜`client/src/features/creation-workbench/AiTraceHistory.tsx:29`｜vh-dvh-overlay｜/p/:id（工作台標題列「實際運作紀錄」浮層）
@@ -149,7 +149,7 @@
 - [ ] **P2-19**｜`client/src/features/creation-workbench/MechanicsDiagram.tsx:119`｜svg-legibility｜/p/:id（這顆模型怎麼運作・結構圖）
   - 問題：SVG 以 viewBox 等比縮放，360px 容器下 5 關以上的階段標籤（fontSize 9.5 SVG 單位）縮到約 8px 難以辨識，6 關時可點格子也縮到約 40px（<44）；幸有下方同功能的階段清單按鈕備援，屬打磨項。
   - 修法：≤560 隱藏 SVG 內文字改由下方清單承擔標籤，或改用 clamp 過的 HTML 標籤列＋僅保留圖形符號。
-- [ ] **P2-20**｜`client/src/pages/PlannerPage.tsx:253`｜觸控目標｜/planner
+- [x] **P2-20** done(PR#469)｜`client/src/pages/PlannerPage.tsx:253`｜觸控目標｜/planner
   - 問題：GoogleCalendarBar 的純文字 `<a>` 動作（「匯出 .ics」「連結 Google 日曆（自動同步）」「重新連結」）是 inline-flex 裸連結，高度約 22px，未達 44px 觸控下限，且它們是同步工具列的主要動作而非句中行內連結。
   - 修法：改成 `<Button as="a">`（拿到 .btn 基底與 44px 下限）或補 `btn` class。
 - [ ] **P2-21**｜`client/src/pages/PlannerPage.tsx:556`｜橫向空間/佈局｜/planner
@@ -161,10 +161,10 @@
 - [ ] **P2-23**｜`client/src/pages/PlannerPage.tsx:373`｜動效/reduced-motion｜/planner
   - 問題：prefillFromDay 的 scrollIntoView 無條件 behavior:"smooth"，不尊重 prefers-reduced-motion；同檔 revealPlannerSection 已示範正確寫法，兩處不一致。
   - 修法：沿用 revealPlannerSection 的 reduced-motion 三元判斷。
-- [ ] **P2-24**｜`client/src/pages/CommunityPage.tsx:389`｜touch-target｜/community
+- [x] **P2-24** done(PR#469)｜`client/src/pages/CommunityPage.tsx:389`｜touch-target｜/community
   - 問題：「開媒體」是 fs-12 裸 <a>（約 40×18px），夾在一排 44px 按鈕之間，手機難以精準點按。
   - 修法：改 <Button as="a" size="sm" variant="ghost">（as="a" 非 ghost 會補 .btn 基底）或直接給 .btn class。
-- [ ] **P2-25**｜`client/src/feedback/FeedbackWidget.tsx:348`｜touch-target｜全站（回饋 widget）
+- [x] **P2-25** done(PR#469)｜`client/src/feedback/FeedbackWidget.tsx:348`｜touch-target｜全站（回饋 widget）
   - 問題：表單裡的「重選」是 span role="button" 行內小字（約 26×18px），全域 button 觸控下限吃不到，手指難點中。
   - 修法：改用 <Button variant="ghost" size="sm">重選</Button> 或補 inline-flex + min-height/padding 撐到 ≥44px 高。
 - [ ] **P2-26**｜`client/src/feedback/picker.ts:226`｜safe-area｜全站（回饋 widget）
@@ -176,7 +176,7 @@
 - [ ] **P2-28**｜`client/src/pages/CommunityPage.tsx:273`｜horizontal-overflow/long-string｜/community
   - 問題：貼文標題與描述沒有 overflow-wrap，長無空白字串（URL、英文長 token）在 360px 會撐出卡片、被 html 的 overflow-x:clip 硬切掉。
   - 修法：在標題/描述容器補 overflow-wrap:anywhere（promptText 的 <pre> 已有 break-word，不必動）。
-- [ ] **P2-29**｜`client/src/pages/AdminPage.tsx:502`｜touch-target｜/admin, /logs
+- [x] **P2-29** done(PR#469)｜`client/src/pages/AdminPage.tsx:502`｜touch-target｜/admin, /logs
   - 問題：DetailBlock 的 <summary>（專案與負責人／組資料庫／團隊資料庫展開鈕）觸控高約 20px，全域 --touch-min 規則只涵蓋 button/.btn/.menu-item/input/select、不含 summary（消耗監控卡 summary 也只有 minHeight 32）。
   - 修法：summary 補 minHeight: "var(--touch-min)"（或在 styles.css 為互動 summary 增列 44px 下限）。
 - [ ] **P2-30**｜`client/src/pages/AdminPage.tsx:2286`｜overflow｜/admin
@@ -185,13 +185,13 @@
 - [ ] **P2-31**｜`client/src/pages/McpPage.tsx:174`｜overflow｜/mcp
   - 問題：連線位置卡的端點 URL 是不可斷行的 <code> 長字串（origin+/api/mcp 常 >40 字元），360px 卡內寬約 308px 時尾端被裁掉且整卡無 overflowWrap／word-break（金鑰 token 有 break-all、這行沒有）。
   - 修法：code 加 style={{ overflowWrap: "anywhere" }}（或 wordBreak: "break-all"）。
-- [ ] **P2-32**｜`client/src/pages/IntegrationsPage.tsx:138`｜touch-target｜/integrations
+- [x] **P2-32** done(PR#463，a.btn-sm 規則涵蓋)｜`client/src/pages/IntegrationsPage.tsx:138`｜touch-target｜/integrations
   - 問題：「連結 Google 雲端」與 148 行「重新連結」是裸 <a className="btn-sm …">，沒有 .btn 基底 class，吃不到全域 button/.btn 的 44px 觸控下限，實高約 27px。
   - 修法：改用 <Button as="a" size="sm">（自動帶 .btn）或 className 補上 btn。
-- [ ] **P2-33**｜`client/src/pages/DownloadsPage.tsx:172`｜touch-target｜/downloads
+- [x] **P2-33** done(PR#469)｜`client/src/pages/DownloadsPage.tsx:172`｜touch-target｜/downloads
   - 問題：文件清單每列唯一動作「下載」是無 class 純文字 <a>，觸控高約 20px、不受 44px 下限保護，手機上是每列的主操作卻最難點。
   - 修法：改 <Button as="a" size="sm" variant="tonal" download> 或加 btn btn-sm class 取得 44px 下限。
-- [ ] **P2-34**｜`client/src/pages/ModelsPage.tsx:741`｜touch-target｜/models
+- [x] **P2-34** done(PR#469)｜`client/src/pages/ModelsPage.tsx:741`｜touch-target｜/models
   - 問題：目錄卡「看底層」<details> 的 summary（.model-catalog-card__base > summary）觸控高約 22px，styles.css 該選擇器無 min-height，summary 也不在全域 44px 下限名單。
   - 修法：.model-catalog-card__base > summary 補 min-height: var(--touch-min) 與 align-items: center。
 - [ ] **P2-35**｜`client/src/pages/ModelsPage.tsx:920`｜hover-only｜/models
@@ -206,10 +206,10 @@
 - [ ] **P2-38**｜`client/src/styles.css:752`｜text-overflow｜專案頁留言區／生成結果文字
   - 問題：.msg 與 .result-text 沒有長字串斷行保護，留言或 AI 生成文字含長網址/長英數 token 時撐出容器，被 body overflow-x:clip 直接裁掉看不到。
   - 修法：比照 .dm-bubble：給 .msg 的文字子層加 min-width:0 與 overflow-wrap:anywhere，.result-text 加 overflow-wrap:anywhere。
-- [ ] **P2-39**｜`client/src/styles.css:3761`｜touch-target｜專案頁分鏡總覽／專案頁 presence／定調中心
+- [x] **P2-39** done(PR#469)｜`client/src/styles.css:3761`｜touch-target｜專案頁分鏡總覽／專案頁 presence／定調中心
   - 問題：三處以顯式 min-height 覆寫全域 44px 觸控下限且無文件化豁免理由：.scene-filter 34px、.project-presence-chip 32px、.tone-studio-tab 40px，均為手機可見的可點控件。
   - 修法：改為 min-height: var(--touch-min)，視覺密度用 padding 縮、或用透明 hit-area 擴大。
-- [ ] **P2-40**｜`client/src/styles.css:4223`｜touch-target｜/models 模型型錄（「用這個模型」連結）
+- [x] **P2-40** done(PR#469)｜`client/src/styles.css:4223`｜touch-target｜/models 模型型錄（「用這個模型」連結）
   - 問題：全域 44px 下限選擇器只涵蓋 button/.btn/.menu-item/input/textarea/select，<a> 不在內：.model-use-cta 實高約 22px（11px 字＋2px padding），同型還有 .bento-card__head a。
   - 修法：為這兩個連結補 min-height: var(--touch-min)（inline-flex 已置中），或比照 2238/2305 行的 `min-height:44px; display:inline-flex` 模式。
 - [ ] **P2-41**｜`client/src/styles.css:6666`｜nested-scroll｜今日工作台 AI 創作助理（AICreativeCopilot）
@@ -236,7 +236,7 @@
 - [ ] **P2-48**｜`client/public/manifest.webmanifest:32`｜pwa-install-ui｜全站（安裝對話框）
   - 問題：manifest 缺 screenshots 欄位，Android/桌面 Chrome 的安裝提示只會顯示簡易小卡，拿不到含預覽圖的富安裝 UI
   - 修法：補 screenshots 陣列（form_factor: narrow 與 wide 各至少一張）
-- [ ] **P2-49**｜`client/src/components/ui/Button.tsx:45`｜touch-target｜全站（UI 基元 Button）
+- [x] **P2-49** done(PR#469)｜`client/src/components/ui/Button.tsx:45`｜touch-target｜全站（UI 基元 Button）
   - 問題：Button as="a" variant="ghost" 輸出 `<a class="btn-ghost">`，不在全域 44px 觸控下限選擇器名單內（只涵蓋 button/.btn/.menu-item），實高僅約 26-28px——目前僅測試檔用到此組合，屬潛在缺口
   - 修法：在 styles.css 給 `a.btn-ghost` 補 min-height: var(--touch-min)（保留 p/.hint/.error 內的行內豁免），或在 Button 禁止 ghost+anchor 組合
 
