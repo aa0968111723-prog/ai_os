@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
+import { hasDesktopBridge } from "../../platform/desktopBridge";
+import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
 
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
-  { href: "/dashboard", label: "今日", icon: "CheckCircle2", match: [] },
+  { href: "/dashboard", label: DESTINATIONS.dashboard.label, icon: DESTINATIONS.dashboard.icon, match: [] },
   { href: "/dashboard#projects", label: "專案", icon: "Package", match: ["/p/"] },
   { href: "/dashboard#ai-work", label: "AI 工作", icon: "Sparkles", match: [] },
-  { href: "/planner", label: "排程", icon: "Clock", match: ["/planner"] },
+  { href: "/planner", label: DESTINATIONS.planner.label, icon: DESTINATIONS.planner.icon, match: ["/planner"] },
 ];
 
 /** wouter 的 location 不含 hash——分頁列有三顆都指向 /dashboard（帶不同 hash），
@@ -30,14 +32,26 @@ function useHash(): [string, () => void] {
   return [typeof window === "undefined" ? "" : window.location.hash, sync];
 }
 
-const MORE_ITEMS: { href: string; label: string; description: string; icon: IconName; match: string[] }[] = [
-  { href: "/community", label: "靈感頻道", description: "全站共用提示詞與素材", icon: "Sparkles", match: ["/community"] },
-  { href: "/databases", label: "資料庫", description: "清單、文件與批次匯入", icon: "Database", match: ["/databases"] },
-  { href: "/chat", label: "私訊", description: "與夥伴和 AI 協作", icon: "MessageCircle", match: ["/chat"] },
-  { href: "/help", label: "使用說明", description: "快速找到下一步", icon: "HelpCircle", match: ["/help"] },
-  { href: "/integrations", label: "外部資料", description: "Google、Notion 與 API", icon: "ArrowRight", match: ["/integrations"] },
-  { href: "/downloads", label: "共用下載", description: "取得團隊共用文件", icon: "Download", match: ["/downloads"] },
-];
+/** 面板列出的一項：DESTINATIONS 的條目，或下面那條只有桌面 App 才有的入口 */
+type SheetItem = Omit<Destination, "key">;
+
+/** 桌面版 App 內才有的入口——與使用者選單同一條（窄視窗下選單的「工作」組已收起） */
+const DESKTOP_BRIDGE: SheetItem = {
+  label: "桌面剪輯連接",
+  description: "把生成素材送進本機剪輯軟體",
+  href: "/desktop",
+  icon: "Monitor",
+};
+
+/** 更多面板的分組內容：名稱與說明全部取自 DESTINATIONS，不在這裡另外寫字 */
+function moreGroups(): { label: string; items: SheetItem[] }[] {
+  const groups: { label: string; items: SheetItem[] }[] = mobileMoreGroups.map((group) => ({
+    label: group.label,
+    items: group.keys.map((key) => DESTINATIONS[key]),
+  }));
+  if (hasDesktopBridge()) groups[groups.length - 1]?.items.push(DESKTOP_BRIDGE);
+  return groups;
+}
 
 /** SPA 導航後等目標區塊掛載完成再捲過去（lazy chunk／資料載入中時 getElementById 還拿不到）。
  *  原生 <a> 整頁重載時是瀏覽器載入完自動捲錨點；這裡補上等價行為，捲動位置同樣吃
@@ -73,7 +87,9 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
     onPointerUp: () => { sheetDragY.current = null; },
     onPointerCancel: () => { sheetDragY.current = null; },
   };
-  const moreActive = MORE_ITEMS.some((item) => item.match.some((prefix) => location.startsWith(prefix)));
+  const groups = moreGroups();
+  const isHere = (item: SheetItem) => destinationMatch(item).some((prefix) => location.startsWith(prefix));
+  const moreActive = groups.some((group) => group.items.some(isHere));
 
   useEffect(() => setMoreOpen(false), [location]);
   useEffect(() => {
@@ -99,22 +115,27 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
             <div className="mobile-more-sheet__grip" aria-hidden="true" {...sheetDragProps} />
             <div className="mobile-more-sheet__head" {...sheetDragProps}>
               <span>
-                <strong>更多日常工具</strong>
-                <small>資料、溝通與外部連接都保留在這裡</small>
+                <strong>全部功能</strong>
+                <small>底下分頁列放不下的頁面都在這裡</small>
               </span>
               <Button variant="ghost" size="sm" type="button" onClick={() => setMoreOpen(false)} aria-label="關閉更多功能">
                 <Icon name="X" size={16} />
               </Button>
             </div>
             <div className="mobile-more-sheet__grid">
-              {MORE_ITEMS.map((item) => (
-                <Link key={item.href} href={item.href} className={item.match.some((prefix) => location.startsWith(prefix)) ? "active" : ""}>
-                  <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
-                  <span><strong>{item.label}{item.href === "/chat" && dmUnread > 0 && (
-                    <span className="dm-nav-unread" aria-label={`${dmUnread} 則未讀私訊`}>{dmUnread > 99 ? "99+" : dmUnread}</span>
-                  )}</strong><small>{item.description}</small></span>
-                  <Icon name="ChevronRight" size={16} />
-                </Link>
+              {groups.map((group) => (
+                <Fragment key={group.label}>
+                  <div className="mobile-more-sheet__label" role="presentation">{group.label}</div>
+                  {group.items.map((item) => (
+                    <Link key={item.href} href={item.href} className={isHere(item) ? "active" : ""}>
+                      <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
+                      <span><strong>{item.label}{item.href === "/chat" && dmUnread > 0 && (
+                        <span className="dm-nav-unread" aria-label={`${dmUnread} 則未讀私訊`}>{dmUnread > 99 ? "99+" : dmUnread}</span>
+                      )}</strong><small>{item.description}</small></span>
+                      <Icon name="ChevronRight" size={16} />
+                    </Link>
+                  ))}
+                </Fragment>
               ))}
             </div>
           </aside>
