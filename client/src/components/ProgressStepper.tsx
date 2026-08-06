@@ -285,9 +285,10 @@ export function inferProjectCurrentStep(
   pending?: { pendingApprovals?: number; awaitingGenerations?: number } | null
 ): number {
   if (project.status === "archived") return 5;
-  if (pending && (pending.pendingApprovals > 0 || pending.awaitingGenerations > 0)) {
+  if (pending && ((pending.pendingApprovals ?? 0) > 0 || (pending.awaitingGenerations ?? 0) > 0)) {
     return 3; // 分鏡/生成待審批中
   }
   // 依據時間戳與專案活動狀態推導預設階段
   return 2; // 預設腳本推進中
 }
+
