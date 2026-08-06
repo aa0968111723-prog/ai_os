@@ -3104,6 +3104,13 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 「下一步：…」那行已移除（去重複文案）：當前步驟卡是那句提示的唯一出口，
+   所以只有 is-current 放行換行——其餘步驟維持單行省略，網格才不會被長句撐歪。 */
+.visual-journey__item.is-current .visual-journey__copy small {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
 .visual-journey__now {
   padding: 3px 7px;
   border-radius: 999px;
@@ -5493,7 +5500,6 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 /* ── 世界觀快速層引導鋪軌 ── */
 .wv-guide { margin: 8px 0 12px; }
-.wv-guide__milestone { font-size: 12px; margin: 4px 0 0; }
 
 /* ── 故事定盤星視覺藍圖 (Story Blueprint Strip) ── */
 .story-blueprint-strip {

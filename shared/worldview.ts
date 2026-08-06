@@ -519,7 +519,7 @@ export function worldviewGuideSteps(
     {
       id: "story",
       label: "這支片在講什麼",
-      hint: "一句話就好，之後每次生成都會帶上",
+      hint: "一句話就好，例如：一位訪客在晨光禪堂點香",
       done: !!(wv.logline.trim() || wv.message.trim()),
       optional: false,
       anchor: "#wv-logline",
