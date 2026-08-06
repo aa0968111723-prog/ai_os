@@ -8,7 +8,7 @@
  */
 // 版號變更會丟棄舊 shell 快取。品牌資產換版時務必一併加版號，
 // 否則已安裝的 PWA 會一直沿用舊圖示（開屏圖會停在舊版）。
-const CACHE_VERSION = "aios-app-v2";
+const CACHE_VERSION = "aios-app-v3";
 const PRECACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 // Web Share Target 暫存區：分享進來的檔案先落地在 Cache，等 /share-target 頁認領。
@@ -96,8 +96,15 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || isApi(url)) return;
   if (req.mode === "navigate") {
     event.respondWith((async () => {
-      try { return await fetch(req); }
-      catch {
+      // lie-fi 保護（P2-47）：有訊號但極慢時，瀏覽器層 fetch 可能吊幾十秒才失敗，
+      // 使用者只看到白屏。5 秒等不到就先給離線頁（上面有「重新連線」可重試）；
+      // 門檻取 5s 而非 3s——4G Slow 正常載入約 2-4s，別把慢當斷線。
+      try {
+        return await Promise.race([
+          fetch(req),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("nav-timeout")), 5000)),
+        ]);
+      } catch {
         return (await caches.match("/offline.html")) || new Response("離線", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
       }
     })());

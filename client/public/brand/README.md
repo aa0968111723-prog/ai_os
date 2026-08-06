@@ -18,8 +18,8 @@ Vite 靜態根目錄為 `client/public/`，網址路徑為 `/brand/*`。
 | `icon-aios-*.png` | 前方彩色 **A** 標記（App Icon） |
 | `mark-aios-mono.png` | 單色 A 標記 |
 | `apple-touch-icon.png` | Apple touch |
-| `source/aios-logo-original.webp` | 使用者提供裁切母版（WebP） |
-| `source/aios-logo-color-cropped.png` | 去背後裁切 PNG |
+| `docs/brand-source/aios-logo-original.webp` | 使用者提供裁切母版（WebP；MOB-PWA：母版無人引用卻隨站部署 ~208KB，移出 public） |
+| `docs/brand-source/aios-logo-color-cropped.png` | 去背後裁切 PNG（同上，移至 repo 文件目錄） |
 
 PWA／favicon 另見（**現行為 v2；v1 已停用，僅為舊快取相容保留檔案**）：
 
