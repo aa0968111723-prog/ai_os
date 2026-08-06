@@ -6,7 +6,7 @@ import {
 } from "@shared/worldview";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import { PROJECT_KINDS } from "@shared/models";
-import { STYLE_VISUAL_ASSETS } from "./StyleVisualGallery";
+import { StyleImage, styleAssetOf } from "./StyleImage";
 import { TONE_VISUAL_META } from "./ToneVisualPalette";
 import { Button, Card, Chip, EmptyState, Meta } from "./ui";
 import { WorldviewPreview } from "./WorldviewPreview";
@@ -45,7 +45,7 @@ export function WorldviewExampleCard({
   const kindLabel = PROJECT_KINDS.find((k) => k.id === kind)?.label;
 
   const examplePrimaryStyle = ex.styles[0];
-  const styleAsset = examplePrimaryStyle ? STYLE_VISUAL_ASSETS[examplePrimaryStyle] : null;
+  const styleAsset = styleAssetOf(examplePrimaryStyle);
 
   return (
     <Card variant="quiet" className="wv-example" data-testid="wv-example-card">
@@ -104,13 +104,12 @@ export function WorldviewExampleCard({
         </dd>
         <dt>畫風</dt>
         <dd className="wv-example__style-preview">
-          {styleAsset?.image && (
-            <img
-              src={styleAsset.image}
-              alt={examplePrimaryStyle || "畫風範例"}
-              className="wv-example__style-thumb"
-            />
-          )}
+          <StyleImage
+            asset={styleAsset}
+            alt={examplePrimaryStyle || "畫風範例"}
+            variant="thumb"
+            className="wv-example__style-thumb"
+          />
           <span className="wv-example__style-label">
             {formatWorldviewStylesLabel(ex.styles) || ex.styles.join("、")}
           </span>
