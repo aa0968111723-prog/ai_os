@@ -5346,9 +5346,41 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 
 /*
- * 軌道上限鎖在 168px：寫實／3D 家族各只有一個主風格，用 `1fr` 會讓那張唯一的卡
- * 撐滿整列——在手機上就是一塊 300×225 的巨大縮圖，把下面的質感區與摘要全推出畫面外。
- * 有上限之後不論幾張卡都維持同一個尺寸，靠左排列。
+ * 程序化畫風色票（StyleSwatch）：沒有實拍縮圖的畫風就地畫一張 SVG。
+ * 外層 span 同時掛 .style-image 與呼叫端傳進來的尺寸 class（.style-visual-card__img、
+ * .style-texture-card__thumb…），所以尺寸規則沿用實拍圖那一套，兩者可以混排在同一格網裡。
+ * 裡面的 <svg> 一律填滿外框（用子選擇器提高特異性，才不會被外層的固定寬高蓋掉）。
+ */
+.style-swatch {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.style-swatch > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* 用絕對置中而不是 flex：外層 .style-image 在卡片裡會被改成 display:block，flex 置中會失效 */
+.style-swatch__icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.92);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+/* 淺色票（紙纖理、手作毛邊…）白圖示會整個消失，改深墨＋亮影 */
+.style-swatch__icon.is-dark-ink {
+  color: rgba(23, 23, 23, 0.78);
+  filter: drop-shadow(0 1px 2px rgba(255, 255, 255, 0.6));
+}
+
+/*
+ * 軌道上限鎖在 168px：家族之間主風格數量差很多（少的 5 張、多的 7 張），用 `1fr` 會讓
+ * 張數少的家族把卡撐滿整列——在手機上就是一塊 300×225 的巨大縮圖，把下面的質感區與
+ * 摘要全推出畫面外。有上限之後不論幾張卡都維持同一個尺寸，靠左排列。
  */
 .style-card-grid {
   display: grid;
