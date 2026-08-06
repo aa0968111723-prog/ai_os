@@ -7,6 +7,7 @@ import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
 import { BentoStatusIcon } from "../components/BentoStatusIcons";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
+import { AICreativeCopilot } from "../components/AICreativeCopilot";
 import { AssetImg } from "../components/MediaFallback";
 import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
@@ -276,7 +277,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           eyebrow: "正在推進",
           title: `AI 正在處理 ${runningRuns} 份計畫`,
           detail: "你可以先做別的事；需要人員決定時，這裡會提醒你。",
-          href: "#ai-work",
+          href: "#ai-copilot",
           action: "查看進度",
           icon: "Sparkles" as const,
         }
@@ -360,12 +361,12 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <a
-            href="#ai-work"
+            href="#ai-copilot"
             className="btn btn-secondary"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 46, textDecoration: "none" }}
           >
-            <Icon name="Bot" size={16} />
-            <span>AI 總指揮</span>
+            <Icon name="Sparkles" size={16} />
+            <span>AI 創作助理</span>
           </a>
           <button
             type="button"
@@ -619,21 +620,21 @@ export function Launchpad({ groupId }: { groupId: string }) {
           )}
         </div>
 
-        {/* 右欄：組代理總指揮與 AI 動態 */}
+        {/* 右欄：AI 創作動態與助理 */}
         <div className="bento-card bento-pulse">
           <div className="bento-card__head">
-            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />組代理總指揮與 AI 動態</h3>
-            <a href="#ai-work">總指揮面板 →</a>
+            <h3><Icon name="Zap" size={17} style={{ color: "var(--primary-ink)" }} />AI 創作動態與助理</h3>
+            <a href="#ai-copilot">創作助理 →</a>
           </div>
 
           <section className="daily-status-grid" aria-label="今日摘要" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {/* 直落 AI 總指揮區 */}
-            <a href="#ai-work" className="daily-status-card attention">
+            {/* 直落 AI 創作助理區 */}
+            <a href="#ai-copilot" className="daily-status-card attention">
               <span className="daily-status-card__icon"><BentoStatusIcon type="attention" size={26} /></span>
               <span><strong>{pendingTotal}</strong><small>待推進專案</small></span>
               <span className="daily-status-card__detail">{pendingTotal > 0 ? `${pendingTotal} 個專案進行中` : "全組推進中"}</span>
             </a>
-            <a href="#ai-work" className="daily-status-card working">
+            <a href="#ai-copilot" className="daily-status-card working">
               <span className="daily-status-card__icon"><BentoStatusIcon type="working" size={26} /></span>
               <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
               <span className="daily-status-card__detail">
@@ -642,16 +643,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   : "目前無執行中計畫"}
               </span>
             </a>
-            <a href="#ai-work" className="daily-status-card waiting">
+            <a href="#ai-copilot" className="daily-status-card waiting">
               <span className="daily-status-card__icon"><BentoStatusIcon type="waiting" size={26} /></span>
               <span><strong>{waitingRuns}</strong><small>AI 待命就緒</small></span>
               <span className="daily-status-card__detail">
                 {waitingRuns > 0
                   ? `${waitingRuns} 份計畫準備就緒`
-                  : "隨時可快速調度"}
+                  : "隨時可快速發想"}
               </span>
             </a>
-            <a href="#ai-work" className="daily-status-card completed">
+            <a href="#ai-copilot" className="daily-status-card completed">
               <span className="daily-status-card__icon"><BentoStatusIcon type="completed" size={26} /></span>
               <span><strong>{completedRuns}</strong><small>近七日成果</small></span>
               <span className="daily-status-card__detail">
@@ -662,34 +663,31 @@ export function Launchpad({ groupId }: { groupId: string }) {
             </a>
           </section>
 
-          <a href="#ai-work" className="bento-quick-ask" title="前往組代理總指揮提問或調度">
-            <Icon name="MessageSquare" size={15} style={{ color: "var(--primary-ink)" }} />
-            <span>向組總指揮提問、指派或調度...</span>
+          <a href="#ai-copilot" className="bento-quick-ask" title="前往 AI 創作助理發想靈感或提問">
+            <Icon name="Sparkles" size={15} style={{ color: "var(--primary-ink)" }} />
+            <span>向 AI 創作助理發想靈感、主題或規劃分鏡...</span>
             <Icon name="ArrowRight" size={14} />
           </a>
         </div>
       </div>
 
-      {/* 組代理總指揮（需求 12）：裁決／現況／跨專案調度／派工／追問合為同一入口——沒選組就不渲染。
-          key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、
-          「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
-      <section id="ai-work" className="dashboard-section" aria-labelledby="ai-work-title">
+      {/* AI 創作助理（Copilot / 靈感發想與專案全知解答） */}
+      <section id="ai-copilot" className="dashboard-section" aria-labelledby="ai-copilot-title">
         <div className="section-heading">
-          <div><p className="eyebrow">AI 工作</p><h2 id="ai-work-title">組代理總指揮</h2></div>
-          <p>裁決待辦、看誰卡住、跨專案調度、派工與追問——全組代理同一個入口。</p>
+          <div><p className="eyebrow">AI 助理</p><h2 id="ai-copilot-title">AI 創作助理</h2></div>
+          <p>隨時發想爆款短片靈感、企劃分鏡架構、解答專案進度與內容建議。</p>
         </div>
-        {groupId && (
-          <TeamAssistantCard
-            key={groupId}
-            groupId={groupId}
-            pendingDecisions={pendingDecisions}
-            pendingLoading={pendingSummary.isLoading}
-            pendingFailed={!!pendingSummary.error}
-            starterProjects={all}
-            isLeader={isLeader}
-            myUserId={myUserId}
-          />
-        )}
+        <AICreativeCopilot
+          groupId={groupId}
+          onUseIdeaForNewProject={(ideaTitle) => {
+            setTitle(ideaTitle);
+            setCreateOpen(true);
+            requestAnimationFrame(() => {
+              document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+              document.getElementById("np-title")?.focus();
+            });
+          }}
+        />
       </section>
 
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
