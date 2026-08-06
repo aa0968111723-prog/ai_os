@@ -172,8 +172,15 @@ export function bootstrapPwa(): void {
     });
 
     // 使用者回到 App 時檢查新版；失敗不影響主流程。
+    // focus 之外也掛 visibilitychange（P2-46）：手機 PWA 從背景恢復時 focus
+    // 不一定觸發（iOS standalone 尤其），少了這條更新提示會延到下次冷啟才出現。
     window.addEventListener("focus", () => {
       void registration.update().catch(() => {});
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        void registration.update().catch(() => {});
+      }
     });
   };
 

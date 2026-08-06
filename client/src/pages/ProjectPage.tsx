@@ -202,13 +202,14 @@ function StageHead({ id, num, title, desc, accent, hint }: {
   accent: "group-1" | "group-2" | "group-3";
   hint?: string;
 }) {
+  // scroll-margin 由 styles.css 契約管（桌機 #stage-* 清單、手機 ≤820 96px 清單）；
+  // 行內 scrollMarginTop 會蓋掉契約、讓錨點落在 sticky 頂欄底下——不可加回來
   return (
     <div
       id={id}
       role="heading"
       aria-level={2}
       className={`group-head project-stage-head ${accent}`}
-      style={{ scrollMarginTop: "var(--sp-16)" }}
     >
       <span className="group-num">{num}</span>
       <span className="group-title">{title}</span>
@@ -319,7 +320,8 @@ function TokenListEditor({
         {fieldKey && <FieldReaders field={fieldKey} />}
         {hint && <HelpTip text={hint} />}
       </label>
-      <div role="group" aria-labelledby={`${id}-label`}>
+      {/* token-chips：≤820 讓長 URL chip 斷行（否則 360px 上移除 ✕ 被 overflow clip 裁在畫面外） */}
+      <div role="group" aria-labelledby={`${id}-label`} className="token-chips">
         {values.map((v) => (
           <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {v}

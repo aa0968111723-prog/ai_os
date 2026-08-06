@@ -247,7 +247,35 @@ export function canonicalMigrationStatement(statement: string): string {
     // 手寫的 migration 幾乎一定會為了可讀性加上（`("a", "b")`）——只收斂空白「run」的話，
     // 兩者永遠對不上，於是一句完全等價的 CREATE INDEX 會同時被判成「非預期 drift」與「缺漏」。
     // 這在識別字之間不是語意差異，正規化掉才不會逼每一份手寫 migration 去猜產生器的排版。
-    .replace(/,\s+/g, ",");
+    .replace(/,\s+/g, ",")
+    .replace(/^CREATE TABLE .*/i, canonicalCreateTablePrimaryKey);
+}
+
+/**
+ * 主鍵寫法正規化：`CREATE TABLE` 的單一主鍵在 SQL 有兩種等價寫法——
+ * drizzle-kit 產生 drift 時一律內嵌（`"id" uuid PRIMARY KEY DEFAULT …`），
+ * 手寫 migration 則常用表層具名約束（`CONSTRAINT "x_pkey" PRIMARY KEY ("id")`）。
+ * 兩者建出來的表一模一樣，但逐字比對會同時判成「非預期 drift」與「缺漏」，
+ * 於是一份正確的 migration 反而擋下 adopt（0035 community_likes 實際踩過）。
+ * 這裡把兩種寫法都收斂成尾端的 `PRIMARY KEY(...)`，主鍵資訊保留、寫法差異消失。
+ */
+function canonicalCreateTablePrimaryKey(statement: string): string {
+  let primaryKey: string | null = null;
+  let out = statement.replace(
+    /,CONSTRAINT "[^"]+" PRIMARY KEY ?\(([^)]+)\)/i,
+    (_match, columns: string) => {
+      primaryKey = columns.replace(/\s+/g, "");
+      return "";
+    },
+  );
+  out = out.replace(
+    /((?:^|[(,])\s*"([^"]+)"[^,]*?) PRIMARY KEY(?=[ ,)])/i,
+    (_match, head: string, column: string) => {
+      primaryKey = primaryKey ?? `"${column}"`;
+      return head;
+    },
+  );
+  return primaryKey ? out.replace(/\s*\)$/, `,PRIMARY KEY(${primaryKey}) )`) : out;
 }
 
 function migrationStatements(entry: MigrationFile): string[] {
@@ -399,12 +427,22 @@ export function verifyLegacyAdoptionBridge(
   // migration. Those show up as expected DDL that is absent from drift, which
   // is safe precisely when re-running the statement is a no-op — the migration
   // then records as applied without touching the existing object, and the
-  // post-migration drift gate still proves the end state. Drift the bridge did
-  // not predict stays fatal: that is unreviewed divergence.
+  // post-migration drift gate still proves the end state. Drift no pending
+  // migration predicts stays fatal: that is unreviewed divergence.
+  //
+  // 「有沒有人為它負責」要對**全部** pending migration 比對，不能只比 bridge 前綴：
+  // drift 是「這顆 DB」對「現在的 schema.ts」的差，自然含 bridge 之後那幾支
+  // （0036 PK 改寫、0037 專案封面）造成的最終形狀。只拿前綴當預期集的話，
+  // 每多一支 post-bridge migration 就多一項「非 bridge 預期 drift」，adopt 從此永遠失敗。
+  // 純新增的安全性審查仍只作用在受審核的 bridge 前綴（上面的 unsafe 檢查），沒有放寬。
+  const accountedPairs = pending.flatMap(migrationStatementPairs);
   const reRunnable = new Set(
-    pairs.filter((pair) => isReRunnableCreateStatement(pair.raw)).map((pair) => pair.canonical),
+    accountedPairs.filter((pair) => isReRunnableCreateStatement(pair.raw)).map((pair) => pair.canonical),
   );
-  const expectedCanonical = expected.filter(isAdditiveSchemaStatement).sort();
+  const expectedCanonical = accountedPairs
+    .map((pair) => pair.canonical)
+    .filter(isAdditiveSchemaStatement)
+    .sort();
   const actualCanonical = drift.statements.map(canonicalMigrationStatement).filter(Boolean).sort();
   if (
     expectedCanonical.length !== actualCanonical.length
@@ -418,7 +456,7 @@ export function verifyLegacyAdoptionBridge(
     if (unexpected.length > 0) errors.push(`legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift`);
     if (missingUnsafe.length > 0) {
       errors.push(
-        `legacy schema 少了 ${missingUnsafe.length} 項 bridge 預期 drift，且該 migration 無法安全重跑`,
+        `legacy schema 少了 ${missingUnsafe.length} 項待套用 migration 的預期 drift，且該 migration 無法安全重跑`,
       );
     }
     if (missing.length > missingUnsafe.length) {

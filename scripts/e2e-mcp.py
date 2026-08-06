@@ -151,7 +151,7 @@ st, d = mcp_raw("initialize", None, FULL)
 ok("initialize", st == 200 and d["result"]["serverInfo"]["name"] == "ai-director-os")
 st, d = mcp_raw("tools/list", None, FULL)
 names = {t["name"] for t in d["result"]["tools"]}
-EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
+EXPECTED = {"whoami","list_projects","get_project_context","find_model","get_model_contract","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows","update_database_row",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_agent_events","get_agent_insights",
