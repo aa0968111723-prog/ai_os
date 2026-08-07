@@ -6874,63 +6874,171 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * AI 創作助理 (AICreativeCopilot)
+ *
+ * 光暈語彙（UIUX：助手不該長得像表單）
+ * ─────────────────────────────────────
+ * 這張卡先前是「白底方框 ＋ 頂緣一條 3px 彩虹線」——四邊等寬硬邊、色彩被壓成
+ * 一條裝飾線，看起來像設定面板而不是會回話的東西。改成 Google 助手那種
+ * 環境光（ambient glow）：**顏色從卡片外緣長出來，而不是畫在卡片裡面**。
+ *
+ * 助手**沒有卡片**：`.ai-copilot-card` 的白底、邊框、陰影全部拿掉，光暈本身就是
+ * 背景，內容直接浮在光上——這是 Google 助手與這張卡最大的差別，也是「石板感」
+ * 的真正來源。方框一旦存在，顏色就只能繞著框邊打轉，永遠是「一張有裝飾的表單」。
+ *
+ * 於是層次只剩兩個：
+ *   1. `.ai-copilot-halo`   **只長在四周**的彩色光暈，中央淨空
+ *   2. 內容元素（快捷膠囊、氣泡、輸入列）＝浮在光上的毛玻璃，只有它們有底色
+ *
+ * 光為什麼只在四周、中央不能染：面板本身是半透明的（見 .global-assistant），
+ * 中央要透出底下的網站；而且直接壓在光上的 --fg-secondary（hint／meta，沒有玻璃
+ * 墊底）在滿版染色下實測只有 2.94:1，遠低於 AA 的 4.5。Google 助手也是這個做法——
+ * 光沿著畫面邊緣走，中間留給內容。「像 Google 助手」與「字讀得到」是同一件事。
+ *
+ * 邊緣光是用八顆貼著邊放的 radial-gradient 疊出來的，不是 mask 挖空：
+ * mask 不支援時會整片染回去，那不是少個效果，是文字直接讀不到。
+ *
+ * 毛玻璃而不是實色：內容底下必須看得見光在動，但文字又要站得住。
+ * 半透明白 + backdrop-filter 兩者兼顧，且 backdrop-filter 不支援時退回同一個
+ * 半透明白（只是少了模糊），文字對比不變。
+ *
+ * 色彩一律取 --brand-* 六色（logo 實測值），不自帶調色盤：先前那條彩虹線用的
+ * #FF6B35 / #00B4D8 是站內任何 token 都沒有的顏色，等於在 logo 之外多開一套色。
+ *
+ * 動畫成本：全部只動 transform / opacity / 已註冊的角度自訂屬性，不觸發版面重算；
+ * 模糊層固定尺寸不隨內容變動，手機上是一次合成。prefers-reduced-motion 全數停用
+ * （見本區塊末尾），靜止後仍是完整的漸層，不會退化成白卡。
  * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 漸層環的角度要能被 keyframes 補間，必須先註冊型別——沒有 @property 的瀏覽器
+ * 會把 --ai-ring-angle 當成無效字串，conic-gradient 退回 from 0deg 的靜態彩環：
+ * 不轉，但顏色與粗細完全一樣，是可接受的降級。 */
+@property --ai-ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.ai-copilot-shell {
+  position: relative;
+  /* 建立堆疊脈絡：暈斑的 z-index 只在這顆殼裡有意義，
+     不會跟 sheet 內其他浮層（送出鍵、chip）比大小。 */
+  isolation: isolate;
+
+  /* 毛玻璃兩檔，集中在這裡改。底色用 --card 的通道值（暖白 #fffefa）而不是純白——
+     純白壓在暖象牙底上會浮出一層冷調，整片光暈跟著偏灰。
+
+     0.72 / 0.85 這兩個數字是量出來的：面板底色拿掉之後，這層玻璃是文字與
+     背後網站之間**唯一**的東西。實測 0.58 / 0.74 那組在淺色頁面就有字掉到
+     3.4:1，背後全黑時只剩 2.5:1。現在這組即使背後整片純黑也全部 ≥7:1。
+     再透就是拿可讀性換透明度，而透明度已經由「面板沒有底」交代完了。 */
+  --ai-glass:        rgba(255, 254, 250, 0.72);
+  --ai-glass-strong: rgba(255, 254, 250, 0.85);
+  --ai-glass-edge:   rgba(255, 255, 255, 0.7);
+}
+
+/* 感知光鋪滿整個視窗，而不是只圍著面板：光是「助手醒著」的訊號，訊號的範圍
+   就是整個螢幕。position: fixed 能逃出 sheet、對齊視窗，前提是祖先沒有任何
+   transform / filter / backdrop-filter——那三個會把 fixed 的基準改成祖先方框。
+   .global-assistant 因此不能有 backdrop-filter，入場動畫也換成只動 opacity 的
+   版本（見下方 .global-assistant），兩件事都是為了這一行成立。 */
+.ai-copilot-halo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  border-radius: 0;
+  pointer-events: none;
+  /* 鋪滿視窗後模糊半徑要跟著放大，否則邊緣那圈會看得出是幾顆圓 */
+  filter: blur(46px) saturate(1.25);
+  opacity: 0.8;
+  transition: opacity 420ms var(--ease-out);
+}
+.ai-copilot-halo::before,
+.ai-copilot-halo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* 上緣＋兩側上半：紅→橘→琥珀（logo 前段）。
+   每顆的圓心都貼在邊上（y 幾乎是 0、或 x 是 0/100%），半徑刻意小——
+   中央因此沒有任何一顆蓋到，天然就是空的，不需要再拿白紗壓回去。 */
+.ai-copilot-halo::before {
+  background:
+    radial-gradient(44% 30% at 4% 0%,    rgba(197, 22, 27, 0.9), transparent 76%),
+    radial-gradient(46% 26% at 42% -6%,  rgba(246, 119, 30, 0.92), transparent 76%),
+    radial-gradient(44% 30% at 94% 0%,   rgba(235, 162, 7, 0.88), transparent 76%),
+    radial-gradient(22% 38% at 104% 32%, rgba(141, 177, 42, 0.72), transparent 78%);
+  animation: ai-halo-drift-a 15s ease-in-out infinite;
+}
+/* 下緣＋兩側下半：黃綠→綠→藍綠（logo 後段）；兩層週期互質，合起來不會出現明顯循環 */
+.ai-copilot-halo::after {
+  background:
+    radial-gradient(44% 30% at 96% 100%, rgba(11, 157, 149, 0.85), transparent 76%),
+    radial-gradient(46% 26% at 50% 106%, rgba(7, 143, 83, 0.82), transparent 76%),
+    radial-gradient(44% 30% at 4% 100%,  rgba(246, 119, 30, 0.8), transparent 76%),
+    radial-gradient(22% 38% at -4% 64%,  rgba(197, 22, 27, 0.7), transparent 78%);
+  animation: ai-halo-drift-b 19s ease-in-out infinite;
+}
+@keyframes ai-halo-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  34%      { transform: translate3d(3.5%, -3%, 0) scale(1.08); }
+  67%      { transform: translate3d(-3%, 2%, 0) scale(1.03); }
+}
+@keyframes ai-halo-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.02); }
+  40%      { transform: translate3d(-4%, 2.5%, 0) scale(1.09); }
+  72%      { transform: translate3d(2.5%, -2%, 0) scale(1); }
+}
+
+/* 思考中：暈斑亮起來並加速——狀態不是靠一行「載入中」講，是靠整張卡的呼吸講 */
+.ai-copilot-shell[data-ai-state="thinking"] .ai-copilot-halo { opacity: 0.95; }
+.ai-copilot-shell[data-ai-state="thinking"] .ai-copilot-halo::before { animation-duration: 5s; }
+.ai-copilot-shell[data-ai-state="thinking"] .ai-copilot-halo::after  { animation-duration: 6.5s; }
+
+/* 這裡是整個改版的重點：把 .card 的三件套（白底 / 邊框 / 陰影）全部歸零。
+   選擇器只有一個 class，與 .card 同特異性——靠「寫在後面」贏，所以這段不能
+   被移到 .card 定義之前。padding 保留：內容仍需要與光暈邊緣的呼吸距離。 */
 .ai-copilot-card {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--card);
-  padding: 20px;
-  box-shadow: var(--e2);
+  border: 0;
+  border-radius: 20px;
+  background: none;
+  box-shadow: none;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   position: relative;
-  overflow: hidden;
+  z-index: 1; /* 光暈 0 → 內容 1 */
+  /* overflow 從 hidden 改回 visible：已經沒有底色要裁切，留著只會把毛玻璃元素
+     自己的柔光陰影切掉一半。 */
+  overflow: visible;
 }
-.ai-copilot-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #FF6B35, #FFAB40, #00B4D8, #8BC34A);
-  border-radius: 18px 18px 0 0;
+@keyframes ai-ring-spin {
+  to { --ai-ring-angle: 360deg; }
 }
-.ai-copilot-header {
+
+/* 清空對話：收成一顆圖示鍵靠右，是這張面板上唯一剩下的次要動作 */
+.ai-copilot-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.ai-copilot-header__left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.ai-copilot-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 11px;
-  border-radius: 999px;
-  background: rgba(255, 107, 53, 0.12);
-  border: 1px solid rgba(255, 107, 53, 0.3);
-  color: #FF6B35;
-  font-weight: 700;
-  font-size: 14px;
-}
-.ai-copilot-badge__icon {
-  color: #FFAB40;
-}
-.ai-copilot-status-dot {
-  width: 8px;
-  height: 8px;
+.ai-copilot-clear {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: #66BB6A;
-  box-shadow: 0 0 8px rgba(102, 187, 106, 0.8);
+  display: grid;
+  place-items: center;
+  background: var(--ai-glass);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid var(--ai-glass-edge);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast), background-color var(--dur-fast);
+}
+.ai-copilot-clear:hover {
+  background: var(--ai-glass-strong);
+  color: var(--danger-ink);
 }
 
 .ai-copilot-prompts {
@@ -6939,40 +7047,54 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   gap: 8px;
   flex-wrap: wrap;
 }
+/* 快捷提示：直角方框 → 全圓角膠囊，hover 不再只是換邊色，而是亮起一圈柔光。
+   transition 從 `all` 收斂成具名屬性——`all` 會把上面那些漸層與陰影一起補間。 */
 .ai-copilot-prompt-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  background: var(--card2);
-  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--ai-glass);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid var(--ai-glass-edge);
   color: var(--fg);
   font-size: 13px;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .ai-copilot-prompt-pill:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: #FF6B35;
-  color: #FF6B35;
+  background: var(--ai-glass-strong);
+  border-color: transparent;
+  color: var(--primary-ink);
   transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(246, 119, 30, 0.45),
+    0 8px 18px -10px rgba(246, 119, 30, 0.65);
 }
 .ai-copilot-prompt-pill:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* feed 也不再是一個框：它先前的 card2 底＋邊框，是「卡中卡」——去掉白底之後
+   若留著，畫面上就會出現一塊唯一還是實色的方塊，比原本更突兀。
+   padding 只留橫向 2px 讓氣泡陰影不貼邊；捲動與限高照舊。 */
 .ai-copilot-chat-feed {
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-height: 420px;
   overflow-y: auto;
-  padding: 12px;
-  border-radius: 12px;
-  background: var(--card2);
-  border: 1px solid var(--border-soft);
+  padding: 2px 2px 4px;
+  background: none;
+  border: 0;
 }
 .ai-copilot-bubble {
   display: flex;
@@ -6993,12 +7115,32 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   font-weight: 700;
 }
 .ai-copilot-bubble--user .ai-copilot-bubble__avatar {
-  background: var(--primary);
-  color: #fff;
+  background: var(--primary-solid);
+  color: var(--primary-fg);
 }
+/* 助手頭像＝一顆會發光的球（與底部導覽那顆 orb 同一個身分），
+   不是方形 app icon：斜向 45° 線性漸層改成順時針彩環＋左上高光，
+   下方再壓一圈彩色外光讓它「浮」在氣泡列上。 */
 .ai-copilot-bubble--assistant .ai-copilot-bubble__avatar {
-  background: linear-gradient(135deg, #FF6B35, #FFAB40);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.72), transparent 46%),
+    conic-gradient(from 200deg,
+      var(--brand-orange), var(--brand-amber), var(--brand-lime),
+      var(--brand-teal), var(--brand-red), var(--brand-orange));
   color: #fff;
+  box-shadow:
+    0 2px 8px -2px rgba(246, 119, 30, 0.55),
+    0 0 16px -4px rgba(11, 157, 149, 0.45);
+  animation: ai-orb-breathe 3.4s var(--ease-out) infinite;
+}
+/* 等回覆時球心亮度起伏加快，等於把「思考」畫在說話的那一方身上 */
+.ai-copilot-bubble.is-thinking .ai-copilot-bubble__avatar {
+  animation-duration: 1.15s;
+}
+@keyframes ai-orb-breathe {
+  0%, 100% { transform: scale(1);    filter: brightness(1); }
+  50%      { transform: scale(1.07); filter: brightness(1.12); }
 }
 .ai-copilot-bubble__content {
   max-width: 82%;
@@ -7025,39 +7167,137 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   word-break: break-word;
 }
 .ai-copilot-bubble--user .ai-copilot-bubble__text {
-  background: var(--primary);
-  color: #ffffff;
+  /* --primary 是「品牌相」，只保證非文字對比；白字要壓在 --primary-solid 上才過 AA
+     （原本的 --primary + #fff 是 3.3:1，正文不該踩在這裡） */
+  background: var(--primary-solid);
+  color: var(--primary-fg);
   border-bottom-right-radius: 4px;
 }
+/* 助手氣泡是毛玻璃：光暈在它底下繼續流動，字仍然壓在 --fg 上（10:1 以上）。
+   使用者氣泡維持實心 primary-solid——兩邊都半透明就分不出誰在說話了。 */
 .ai-copilot-bubble--assistant .ai-copilot-bubble__text {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: var(--ai-glass-strong);
+  -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(12px);
+  border: 1px solid var(--ai-glass-edge);
   color: var(--fg);
   border-bottom-left-radius: 4px;
+  box-shadow: 0 4px 16px -10px rgba(28, 25, 23, 0.4);
+}
+/* 等待中的氣泡：玻璃濃度不動（動它就是拿可讀性換效果），改在玻璃上疊一層
+   極淡的暖光，讓「還在想」看得出來又不影響字。 */
+.ai-copilot-bubble.is-thinking .ai-copilot-bubble__text {
+  background:
+    linear-gradient(100deg, rgba(246, 119, 30, 0.1), rgba(11, 157, 149, 0.1)),
+    var(--ai-glass-strong);
 }
 .ai-copilot-loading {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   color: var(--fg-secondary);
+}
+/* 三顆錯開起落的光點：轉圈是「卡住」的語彙，點點才是「正在想」 */
+.ai-copilot-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.ai-copilot-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-orange);
+  box-shadow: 0 0 8px -1px currentColor;
+  animation: ai-dot-bounce 1.15s var(--ease-out) infinite;
+}
+.ai-copilot-dots i:nth-child(2) { background: var(--brand-amber); animation-delay: 0.16s; }
+.ai-copilot-dots i:nth-child(3) { background: var(--brand-teal);  animation-delay: 0.32s; }
+@keyframes ai-dot-bounce {
+  0%, 100% { transform: translateY(0) scale(0.8); opacity: 0.45; }
+  40%      { transform: translateY(-3px) scale(1); opacity: 1; }
+}
+/* 文字上跑一道光掃過去。background-clip: text 需要 color: transparent，
+   但這行字是暫態狀態而非內容——同樣的字串仍完整留在 DOM 供讀屏朗讀。
+   掃過去的兩個顏色刻意用 ink 檔而不是 --brand-* 原色：光掃到哪一段，
+   那幾個字就是那個顏色，原色（#f6771e / #0b9d95）在白卡上只有 2~3:1，
+   等於每 2.6 秒讓整行字讀不清一次。ink 檔全段都過 AA。 */
+.ai-copilot-loading__label {
+  background: linear-gradient(100deg,
+    var(--fg-secondary) 26%, var(--primary-ink) 44%,
+    var(--collab-ink) 56%, var(--fg-secondary) 74%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  animation: ai-text-shimmer 2.6s linear infinite;
+}
+@keyframes ai-text-shimmer {
+  from { background-position: 130% 0; }
+  to   { background-position: -130% 0; }
 }
 .ai-copilot-bubble__actions {
   margin-top: 4px;
 }
 
 .ai-copilot-input-box {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 6px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--card2);
+  padding: 6px 8px 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--ai-glass-edge);
+  /* 三檔玻璃裡最濃的一檔：這是唯一要打字的地方，游標與輸入中的字必須絕對清楚 */
+  background: var(--ai-glass-strong);
+  -webkit-backdrop-filter: blur(14px);
+          backdrop-filter: blur(14px);
+  box-shadow: 0 6px 20px -12px rgba(28, 25, 23, 0.45);
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
+/* 聚焦時整條輸入列被光圈托起來：外圈柔光負責「被聽見了」，
+   ::after 那圈漸層環負責把它跟卡片外緣的彩帶連成同一套語彙。 */
 .ai-copilot-input-box:focus-within {
-  border-color: #FF6B35;
-  box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.15);
+  border-color: var(--primary-border);
+  box-shadow:
+    0 0 0 4px rgba(246, 119, 30, 0.13),
+    0 8px 24px -14px rgba(246, 119, 30, 0.6),
+    0 8px 26px -16px rgba(11, 157, 149, 0.5);
+}
+/* 同上：鏤空不成立時整條輸入列會被彩色矩形蓋掉，所以整組放進 @supports。
+   沒命中的瀏覽器只是少了那圈環，上面的柔光陰影仍然完整表達 focus。 */
+@supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+  .ai-copilot-input-box:focus-within { border-color: transparent; }
+  .ai-copilot-input-box::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.5px;
+    pointer-events: none;
+    opacity: 0;
+    background: conic-gradient(
+      from var(--ai-ring-angle),
+      var(--brand-orange), var(--brand-amber), var(--brand-lime),
+      var(--brand-teal), var(--brand-red), var(--brand-orange)
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .ai-copilot-input-box:focus-within::after {
+    opacity: 1;
+    animation: ai-ring-spin 6s linear infinite;
+  }
+}
+/* placeholder 明寫顏色：不寫的話瀏覽器會拿 color（--fg）自己打折，各家折的比例
+   不同（Chromium 約 54%），在半透明面板上折完就掉到 2.3:1。 */
+.ai-copilot-input-box textarea::placeholder {
+  color: var(--fg-secondary);
+  opacity: 1; /* Firefox 預設給 placeholder 額外 opacity，會再打一次折 */
 }
 .ai-copilot-input-box textarea {
   flex: 1;
@@ -7073,23 +7313,54 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   font-family: inherit;
 }
 .ai-copilot-send-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #FF6B35, #FFAB40);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.5), transparent 48%),
+    linear-gradient(135deg, var(--brand-red), var(--brand-orange) 55%, var(--brand-amber));
   border: none;
   color: #fff;
   cursor: pointer;
-  transition: transform var(--dur-fast), opacity var(--dur-fast);
+  box-shadow: 0 4px 14px -6px rgba(246, 119, 30, 0.75);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast);
 }
 .ai-copilot-send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
+  transform: scale(1.06);
+  box-shadow: 0 6px 20px -6px rgba(246, 119, 30, 0.9);
 }
 .ai-copilot-send-btn:disabled {
+  /* 停用時把光一起收掉——只降透明度會留下一顆「發著光卻按不動」的球 */
   opacity: 0.4;
+  box-shadow: none;
   cursor: not-allowed;
+}
+
+/* ── 減少動態偏好：全部靜止，但顏色一個都不拿掉 ──
+ * 這裡的動畫都是氛圍性的（飄移、旋轉、呼吸、掃光），對前庭敏感的使用者是負擔；
+ * 停掉之後畫面仍然是完整的漸層彩環＋暈斑，不會退回原本那張白卡。
+ * 掃光文字必須把 color 收回實色：background-position 不再移動時，
+ * `color: transparent` 會讓那行字停在漸層的隨機一段上。 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-copilot-halo,
+  .ai-copilot-halo::before,
+  .ai-copilot-halo::after,
+  .ai-copilot-input-box:focus-within::after,
+  .ai-copilot-bubble--assistant .ai-copilot-bubble__avatar,
+  .ai-copilot-dots i,
+  .ai-copilot-loading__label {
+    animation: none;
+  }
+  .ai-copilot-dots i { opacity: 1; transform: none; }
+  .ai-copilot-loading__label {
+    background: none;
+    color: var(--fg-secondary);
+  }
 }
 
 
@@ -7263,13 +7534,61 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 
 /* ── 全站 AI 助手（底部導覽中央球開啟） ── */
-.global-assistant__head {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 2px 2px 8px;
-}
 /* 桌機：球不存在（.mobile-nav 在 >820 隱藏），但 MenuSurface 的 stretch 幾何仍需要
    一個合理下限，免得對話框窄到每行兩個字 */
-.global-assistant { min-width: min(420px, calc(100vw - 32px)); }
+/* overflow-x: 助手卡的光暈往外溢出 10px。sheet 本身是 overflow-y: auto，而 CSS 規定
+   另一軸的 visible 會被計算成 auto——於是暈斑會在手機上生出一條橫向捲軸（捲過去
+   只有一片模糊色塊）。clip 只切掉溢出的那圈光，直向捲動不受影響。
+
+   背景改成透明毛玻璃：助手是「浮在你正在看的東西上」，底下的網站要看得見，
+   光暈沿著面板四周走。面板自己不透明的話，光等於被關在一個白盒子裡。
+
+   面板本身完全不畫：沒有底色、沒有邊、沒有陰影。底下的網站原樣透出來，
+   畫面上只剩浮著的輸入框與整片視窗邊緣的感知光。
+
+   **不可以加 backdrop-filter**（也不要加 transform / filter / contain）：
+   .ai-copilot-halo 靠 position: fixed 鋪滿視窗，這三類屬性任何一個出現在祖先上，
+   都會把 fixed 的定位基準改成這個面板的方框，光暈立刻縮回面板裡。
+   入場動畫同理換成只動 opacity 的 ai-assistant-in（原本的 mobile-sheet-up 動 transform，
+   那 260ms 內光暈會被關進面板，收尾時再跳回全螢幕）。
+
+   --fg-secondary 換掉：站內那個 #67615b 是對著白卡校的（白卡 6.1:1），這裡沒有白卡，
+   文字只靠自己那層毛玻璃。逐像素實測最差 5% 分位——淺色頁面 ≥5.8:1、背後整片純黑
+   ≥4.6:1，都過 AA。這是表面換了 token 就得跟著換，不是逐條規則補 color——
+   補規則會漏掉 Meta 那種用行內 style 吃 token 的元件。 */
+.global-assistant {
+  min-width: min(420px, calc(100vw - 32px));
+  overflow-x: clip;
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  --fg-secondary: #423d38;
+}
+@media (max-width: 820px) {
+  .menu-surface.is-sheet.global-assistant {
+    border: 0;
+    box-shadow: none;
+    animation: ai-assistant-in 260ms var(--ease-out);
+  }
+  /* 拖曳把手是唯一保留的裝飾：它是關閉這張 sheet 的手勢提示，不是文案。
+     底色沒了之後把手要自己看得見，換成半透明白＋一點暗邊。 */
+  .menu-surface.is-sheet.global-assistant::before {
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.12);
+  }
+}
+@keyframes ai-assistant-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+/* 助手的遮罩比其他 sheet 淡：其他選單壓暗底下是為了「別看那裡」，助手相反——
+   底下的網站要看得見，助手只是浮在上面。0.38 會把整頁壓成灰的，感知光也跟著髒。
+   「這層在最上面」的訊號改由鋪滿視窗的光暈承擔。
+   :has 不支援時退回 0.38，只是暗一點，功能與可讀性都不變。
+   （逐像素實測：淺色頁面全部 ≥8:1、背後整片純黑也全部 ≥5:1。） */
+.menu-surface__scrim:has(+ .global-assistant) {
+  background: rgba(28, 25, 23, 0.16);
+}
 
 /* ── 圖上定點標注 ───────────────────────────────────────────────
    舞台的媒體是 object-fit: contain，所以圓點的定位基準是「內容框」而不是元素框；
@@ -7320,6 +7639,30 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .scene-annot__dot.is-selected::before {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
 }
+
+/* ── AI 調度（組代理 campaign）：只有「可總指揮」的人看得到，渲染在助手 sheet 最上方 ── */
+.campaign-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 2px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 12px;
+}
+.campaign-panel__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.campaign-panel__field { display: flex; flex-direction: column; gap: 4px; }
+.campaign-panel__label { font-size: var(--fs-12); color: var(--ink-2); }
+.campaign-panel__budget { display: flex; flex-direction: column; gap: 6px; }
+/* 選項換行而不是橫向捲：html/body 是 overflow-x: clip，捲不出去的東西會被硬裁掉 */
+.campaign-panel__choices { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.campaign-card { display: flex; flex-direction: column; gap: 6px; }
+.campaign-card__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* 目標可能很長：min-width 0 讓它在 flex 容器裡真的換行，而不是把卡片撐爆 390px */
+.campaign-card__goal { min-width: 0; overflow-wrap: anywhere; }
+.campaign-card__steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.campaign-card__step { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.campaign-card__step-title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.campaign-card__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.campaign-card__addbudget { display: flex; flex-direction: column; gap: 4px; flex: 1 0 100%; }
 
 /* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
 .agent-hud {
