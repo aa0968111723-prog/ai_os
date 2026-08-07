@@ -5,16 +5,25 @@ import { AICreativeCopilot } from "./AICreativeCopilot";
 
 // Mock TRPC api
 vi.mock("../api", () => {
+  const mutation = () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isSuccess: false,
+    reset: vi.fn(),
+    error: null,
+    data: undefined,
+  });
   return {
     trpc: {
+      // 問答已改走全站助手（globalAssistant.ask）；確認卡另用 runSiteAction 與
+      // teamAssistant 的 dispatch/command——元件頂層只掛 ask，其餘在卡片元件內
+      globalAssistant: {
+        ask: { useMutation: mutation },
+        runSiteAction: { useMutation: mutation },
+      },
       teamAssistant: {
-        ask: {
-          useMutation: () => ({
-            mutate: vi.fn(),
-            isPending: false,
-            reset: vi.fn(),
-          }),
-        },
+        dispatch: { useMutation: mutation },
+        command: { useMutation: mutation },
       },
     },
   };

@@ -27,6 +27,9 @@ export const RATE_LIMIT_POLICIES = {
   mcpFailures: { limit: 10, windowMs: 60_000, blockMs: 5 * 60_000 },
   projectAssistant: { limit: 6, windowMs: 60_000 },
   teamAssistant: { limit: 6, windowMs: 60_000 },
+  /** 全站助手問答：與組助手同價（6/分/人）。自成一桶——它與 teamAssistant 是不同入口，
+   *  共用桶會讓一邊把另一邊餓死（同 groupCampaignPlan 不與 agentPlan 共桶的理由）。 */
+  globalAssistant: { limit: 6, windowMs: 60_000 },
   agentPlan: { limit: 4, windowMs: 60_000 },
   /**
    * 組代理調度計畫的規劃：自成一桶，不與 agentPlan 共用。
@@ -67,6 +70,7 @@ export const RATE_LIMIT_SCOPES = {
   mcpIp: "mcp:ip",
   projectAssistant: "assistant:project",
   teamAssistant: "assistant:team",
+  globalAssistant: "assistant:global",
   agentPlan: "assistant:agent-plan",
   groupCampaignPlan: "assistant:group-campaign-plan",
   messageAssistant: "assistant:message",

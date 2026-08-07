@@ -5,6 +5,9 @@ import type { AppRouter } from "../../server/routers";
 
 export const trpc = createTRPCReact<AppRouter>();
 
+/** 供元件做 inferRouterOutputs 型別推導（type-only）——元件不得自己 import server（ADR-009 邊界） */
+export type { AppRouter };
+
 /**
  * 會同步外呼或必須獨立的 procedure 走非批次 `httpLink`；其餘仍用 `httpBatchLink`。
  *
