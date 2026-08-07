@@ -290,6 +290,13 @@ export function SettingsPage() {
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: "var(--fs-14)", fontWeight: 600, marginBottom: 12 }}>進階與相關功能</h2>
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          {/* 團隊資料表：日常用不到（在專案頁需要時就地出現），這裡是想直接管理時的入口。
+              與 integrations／mcp 同組——三者都已移出手機「更多」面板。 */}
+          <li>
+            <Link href="/databases" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }}>
+              <Icon name="Database" size={15} />團隊資料表（清單、文件與批次匯入）
+            </Link>
+          </li>
           <li>
             <Link href="/integrations" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }}>
               <Icon name="SlidersHorizontal" size={15} />整合與個人 AI 金鑰

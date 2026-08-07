@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../../api";
 import { Button, Card, Chip, Meta } from "../../components/ui";
+import { TraceEventList } from "../agent-trace/TraceEventList";
 
 const MODE_LABEL: Record<string, string> = {
   ask: "一起想",
@@ -50,14 +51,10 @@ export function AiTraceHistory({ projectId }: { projectId: string }) {
           {selectedId ? (
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-soft)" }}>
               <strong>{detail.data?.session.title ?? "讀取紀錄…"}</strong>
-              {detail.data?.events.map((event) => (
-                <details key={event.id} style={{ marginTop: 6 }}>
-                  <summary style={{ cursor: "pointer" }}>#{event.sequence} {event.summary}</summary>
-                  <pre style={{ maxHeight: 280, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--card2)", padding: 8, borderRadius: 8, fontSize: 12 }}>
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
-                </details>
-              ))}
+              {/* 這裡以前是 <pre>{JSON.stringify(event.payload)}</pre>——資料一直在手上，
+                  只是以「請你自己讀 JSON」的形式呈現。改成時間軸後，工具查到的素材、
+                  分鏡畫面、生成成品會直接畫出來，技術事件仍可展開看原始 payload。 */}
+              {detail.data ? <TraceEventList events={detail.data.events} /> : null}
             </div>
           ) : null}
         </Card>

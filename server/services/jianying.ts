@@ -22,7 +22,8 @@ import type { Response } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { extFromMime, openStoredReadStream } from "./storage";
-import { appendAndWait, capRemoteBytes, fetchRemoteAsset, REMOTE_FILE_MAX_BYTES, safeName, sceneDur, splitCue } from "./exporter";
+import { appendAndWait, capRemoteBytes, fetchRemoteAsset, REMOTE_FILE_MAX_BYTES, safeName, splitCue } from "./exporter";
+import { framesToSec, layoutTimeline } from "../../shared/timeline";
 import { resolutionForFormat } from "../../shared/options";
 import { JY_CONTENT_TEMPLATE, JY_META_TEMPLATE } from "./jianyingTemplate";
 
@@ -44,6 +45,10 @@ export type JyScene = {
   voiceover: string | null;
   media: { kind: "video" | "photo"; fileName: string } | null;
   narrationFileName: string | null;
+  /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
+  trimStartMs?: number | null;
+  /** 畫面素材來源出點（毫秒）；null＝未修剪 */
+  trimEndMs?: number | null;
 };
 
 /** 佔位符路徑：##_draftpath_..._##/Resources/local/<檔名>（剪映載入時解析為草稿實際位置） */
@@ -116,14 +121,16 @@ export function buildJianyingDraftContent(
     return id;
   };
 
-  let cumSec = 0;
-  let tUs = 0;
-  for (const sc of scenes) {
-    const startSec = cumSec;
-    cumSec += sceneDur(sc);
-    const startUs = tUs;
-    const durUs = Math.round(cumSec * US) - startUs; // 邊界取累計值再回差，避免逐鏡四捨五入漂移
-    tUs = startUs + durUs;
+  // 時間軸排版與 fcpxml/xmeml/srt/edl 同源（見 shared/timeline.ts）——先前這裡是第五個
+  // 獨立累加器，durationSec 一旦不是整數就會與其他四種格式的切點漂開。
+  const layout = layoutTimeline(scenes);
+  for (const [i, sc] of scenes.entries()) {
+    const timing = layout.shots[i];
+    const startSec = timing.startSec;
+    const startUs = Math.round(timing.startSec * US);
+    const durUs = Math.round(timing.endSec * US) - startUs; // 邊界取累計值再回差，避免逐鏡四捨五入漂移
+    // 素材上的取用範圍（修剪）；未修剪＝從 0 起算，與修剪上線前的輸出相同
+    const srcInUs = Math.round(framesToSec(timing.sourceInFrames) * US);
 
     if (sc.media) {
       const mid = hex32();
@@ -138,8 +145,9 @@ export function buildJianyingDraftContent(
         },
         crop_ratio: "free",
         crop_scale: 1.0,
-        // 影片素材長度未經探測，以該鏡規劃秒數計（截取前 N 秒）；圖片固定 3 小時
-        duration: sc.media.kind === "photo" ? PHOTO_DURATION_US : durUs,
+        // 影片素材長度未經探測，以「入點＋鏡長」計（修剪過的鏡要涵蓋到取用範圍的尾端，
+        // 只宣告鏡長會讓剪映看到 segment 超出素材）；圖片固定 3 小時
+        duration: sc.media.kind === "photo" ? PHOTO_DURATION_US : srcInUs + durUs,
         height: 1080, // 未探測實際尺寸的慣例值；剪映載入時依實檔重算畫面
         id: mid,
         local_material_id: "",
@@ -152,7 +160,7 @@ export function buildJianyingDraftContent(
       });
       videoSegs.push({
         ...baseSegment(mid, startUs, durUs),
-        source_timerange: { start: 0, duration: durUs },
+        source_timerange: { start: srcInUs, duration: durUs },
         extra_material_refs: [addSpeed()],
         clip: defaultClip(),
         uniform_scale: { on: true, value: 1.0 },
@@ -190,7 +198,7 @@ export function buildJianyingDraftContent(
     }
 
     // 字幕：與 04_字幕/SRT 同一套可讀性切塊（每塊 ≤18 全形字、最短 0.8 秒），一塊一素材一片段
-    for (const cue of splitCue(sc.voiceover ?? "", startSec, cumSec)) {
+    for (const cue of splitCue(sc.voiceover ?? "", startSec, timing.endSec)) {
       // 邊界各自取整再相減（與 media segment 同一套「累計值取整」規則）：獨立四捨五入起點與長度
       // 會讓相鄰字幕可能重疊 1µs——剪映同軌 segment 不可重疊（pyJianYingDraft 遇重疊即拋錯）
       const cueStartUs = Math.round(cue.start * US);
@@ -254,10 +262,11 @@ export function buildJianyingDraftContent(
   content.materials.texts = texts;
   content.materials.speeds = speeds;
   content.tracks = tracks;
-  content.duration = tUs;
+  const totalUs = Math.round(layout.totalSec * US);
+  content.duration = totalUs;
   content.fps = 30.0;
 
-  return { content: JSON.stringify(content, null, 4), durationUs: tUs };
+  return { content: JSON.stringify(content, null, 4), durationUs: totalUs };
 }
 
 /** draft_meta_info.json：模板空殼＋草稿名/id/總時長（其餘欄位剪映開啟後自行補全） */
@@ -425,7 +434,15 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
       }
     }
 
-    jyScenes.push({ title: scene.title, durationSec: scene.durationSec, voiceover: scene.voiceover, media, narrationFileName });
+    jyScenes.push({
+      title: scene.title,
+      durationSec: scene.durationSec,
+      voiceover: scene.voiceover,
+      media,
+      narrationFileName,
+      trimStartMs: scene.trimStartMs,
+      trimEndMs: scene.trimEndMs,
+    });
   }
 
   if (clientAbort.signal.aborted) return;

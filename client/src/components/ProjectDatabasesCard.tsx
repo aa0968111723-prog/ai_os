@@ -165,12 +165,30 @@ export function ProjectDatabasesCard({
         else setUncontrolledOpen(next);
       }}>
       <summary>
-        <Icon name="Database" size={14} /> 專案資料
+        <Icon name="Database" size={14} /> 專案依據
         <span className="meta" style={{ marginLeft: 8 }}>
           {linkedRows > 0
             ? `${groups.length} 張表 · ${linkedRows} 列已關聯`
-            : "給 AI 與團隊共用的依據"}
+            : "AI 生成時會參考的資料"}
         </span>
+        {/* 還沒有任何 AI 可讀依據時，收合狀態就給一顆能按的「加資料」——
+            否則使用者要先展開一張叫「專案依據」的卡，才會發現裡面能貼文字／上傳檔案。
+            實測回報「不知道該如何使用在專案上」，缺的正是這一步。
+            stopPropagation：在 summary 內按鈕不該同時觸發 details 展開。 */}
+        {showStatus && aiHint.tone === "empty" && canEdit && (
+          <Button
+            size="sm"
+            variant="primary"
+            style={{ marginLeft: 8 }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              scrollTo("sec-knowledge");
+            }}
+          >
+            <Icon name="Plus" size={13} /> 加資料
+          </Button>
+        )}
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
       </summary>
 

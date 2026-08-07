@@ -173,6 +173,16 @@ export const scenes = pgTable("scenes", {
   orderIndex: integer("order_index").notNull().default(0),
   title: text("title").notNull(),
   durationSec: integer("duration_sec").notNull().default(5),
+  /**
+   * 畫面素材的來源入點（毫秒）——「剪初稿」要切的就是這個。
+   * 0＝從素材開頭播。與 trimEndMs 一組，語義見 shared/timeline.ts 的 ShotSource。
+   */
+  trimStartMs: integer("trim_start_ms").notNull().default(0),
+  /**
+   * 畫面素材的來源出點（毫秒）；null＝這一鏡沒修剪過，鏡長仍由 durationSec 決定。
+   * 存絕對出點而非「尾巴切掉多少」：素材重生成、長度變了時，絕對位置仍指向同一個時間點。
+   */
+  trimEndMs: integer("trim_end_ms"),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
   narrationAssetId: uuid("narration_asset_id"),
@@ -291,7 +301,7 @@ export const notes = pgTable("notes", {
 }));
 
 /**
- * 筆記／知識庫的檔案附件（0040_content_attachments）：
+ * 筆記／知識庫的檔案附件（0041_content_attachments）：
  * 會議紀錄要能夾照片、簽到表掃描檔、講義 PDF；知識庫的開示稿本來就常是一份 PDF/Word。
  * 原檔落在同一套素材儲存（storage_path，與素材庫／私訊附件共用 Volume 與備份），
  * text_content 存抽出的純文字——知識庫附件的文字會跟著注入 AI 導演，PDF 不再是「只能下載的死檔」。
