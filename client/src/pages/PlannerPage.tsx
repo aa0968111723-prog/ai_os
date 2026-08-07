@@ -79,6 +79,23 @@ function fmtDateTime(d: string | Date): string {
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
+/**
+ * 行程分組標頭用的日期標籤。原本印 `toLocaleDateString("zh-TW")`＝「2026/8/7」，
+ * 使用者得先自己算今天幾號才知道第一組是不是今天——這一頁的承諾是「今天要做什麼一眼就知道」，
+ * 絕對日期做不到。今天／明天／昨天直接講人話，其餘給「8/12（週二）」，跨年才補上年份。
+ */
+export function dayLabel(d: Date, now: Date = new Date()): string {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((target.getTime() - base.getTime()) / 86400000);
+  const md = `${target.getMonth() + 1}/${target.getDate()}`;
+  const wd = `週${"日一二三四五六"[target.getDay()]}`;
+  if (diff === 0) return `今天・${md}（${wd}）`;
+  if (diff === 1) return `明天・${md}（${wd}）`;
+  if (diff === -1) return `昨天・${md}（${wd}）`;
+  const year = target.getFullYear() === base.getFullYear() ? "" : `${target.getFullYear()}/`;
+  return `${year}${md}（${wd}）`;
+}
 /** Date → datetime-local 的值（本地時區；toISOString 會偏移成 UTC） */
 function toDatetimeLocal(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -142,7 +159,6 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   const upcomingItems = (schedulePreview.data?.items ?? []) as ScheduleItem[];
   const today = new Date();
   const todayScheduleCount = upcomingItems.filter((item) => dayKey(new Date(item.startsAt)) === dayKey(today)).length;
-  const nextSchedule = upcomingItems[0];
   const noteCount = notesPreview.data?.length ?? 0;
   const linkedKnowledgeCount = upcomingItems.filter((item) => item.projectId).length
     + (notesPreview.data ?? []).filter((note) => note.projectId).length;
@@ -192,24 +208,22 @@ export function PlannerPage({ groupId }: { groupId: string }) {
         </div>
       )}
 
-      <nav className="planner-jump-grid" aria-label="筆記排程功能">
+      {/* 跳轉列。原本是三張大卡（各約 150px 高，手機還要橫捲），但它們只做一件事：
+          捲到下面那一段——而那三段就在同一個畫面裡。等於用掉整個第一屏換三顆捲動鈕，
+          真正的行程與筆記反而被推到看不見的地方；卡片上的文案還被寬度截成
+          「下一筆 2026/…」這種讀不出資訊的字。改成一列膠囊：跳轉照舊，只吃一行。 */}
+      <nav className="planner-jump" aria-label="筆記排程功能">
         <button type="button" onClick={() => revealPlannerSection("planner-schedule")}>
-          <span className="planner-jump-grid__icon schedule"><Icon name="CalendarPlus" size={18} /></span>
-          <span>
-            <strong>組排程</strong>
-            <small>{nextSchedule ? `下一筆 ${fmtDateTime(nextSchedule.startsAt)}` : "接下來沒有行程"}</small>
-          </span>
-          <span className="planner-jump-grid__metric"><em>{todayScheduleCount}</em><Icon name="ChevronRight" size={16} /></span>
+          <Icon name="CalendarPlus" size={14} />組排程
+          {todayScheduleCount > 0 && <em title="今天的行程數">今天 {todayScheduleCount}</em>}
         </button>
         <button type="button" onClick={() => revealPlannerSection("planner-notes")}>
-          <span className="planner-jump-grid__icon notes"><Icon name="FileText" size={18} /></span>
-          <span><strong>筆記與決議</strong><small>{noteCount ? `${noteCount} 份可追溯共用筆記` : "還沒有共用筆記"}</small></span>
-          <span className="planner-jump-grid__metric"><em>{noteCount}</em><Icon name="ChevronRight" size={16} /></span>
+          <Icon name="FileText" size={14} />筆記與決議
+          {noteCount > 0 && <em title="共用筆記份數">{noteCount}</em>}
         </button>
         <button type="button" onClick={() => revealPlannerSection("planner-knowledge-map")}>
-          <span className="planner-jump-grid__icon map"><Icon name="Sparkles" size={18} /></span>
-          <span><strong>知識地圖</strong><small>{linkedKnowledgeCount ? `${linkedKnowledgeCount} 筆已連回專案` : "把筆記排程連回專案"}</small></span>
-          <span className="planner-jump-grid__metric"><em>{linkedKnowledgeCount}</em><Icon name="ChevronRight" size={16} /></span>
+          <Icon name="Sparkles" size={14} />知識地圖
+          {linkedKnowledgeCount > 0 && <em title="已連回專案的筆記與行程數">{linkedKnowledgeCount}</em>}
         </button>
       </nav>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
@@ -332,6 +346,25 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
   // 手機減負：六欄新增表單先收成一顆「＋ 新增行程」，清單優先（桌機維持常駐表單）
   const compact = useMatchMedia("(max-width: 820px)");
   const [createOpen, setCreateOpen] = useState(false);
+  // 手機再減一層：展開後仍有六欄堆成六列，但「排一筆會議」只需要標題＋開始時間。
+  // 結束／專案／備註收進「其他欄位」，要用的人再展開。
+  const [moreFields, setMoreFields] = useState(false);
+  // 同步設定的摘要（與 GoogleCalendarBar 同一個 query key，react-query 只會打一次）
+  const syncStatus = trpc.googleCalendar.status.useQuery();
+  const [syncOpen, setSyncOpen] = useState(false);
+  // 授權失效＝同步已經默默停掉，這種要處理的狀態不能藏在摺疊裡
+  useEffect(() => {
+    if (syncStatus.data?.status === "error") setSyncOpen(true);
+  }, [syncStatus.data?.status]);
+  const syncSummary = !syncStatus.data
+    ? "檢查中…"
+    : syncStatus.data.status === "error"
+      ? "Google 授權已失效，需重新連結"
+      : syncStatus.data.connected
+        ? "已連結 Google 日曆・自動同步中"
+        : syncStatus.data.configured
+          ? "尚未連結 Google 日曆"
+          : "可匯出 .ics 匯入個人日曆";
   // 清單檢視吃 includePast 開關；月曆檢視固定拉全部（含過去），才畫得出任意月份
   const list = trpc.schedule.list.useQuery({ groupId, includePast: view === "calendar" ? true : includePast });
   // 專案下拉＋列表上的專案名對照；與筆記卡同 key，react-query 只會打一次
@@ -390,6 +423,8 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
     }, 280);
   };
 
+  // 桌機照舊全欄常駐；手機只在使用者主動展開、或那些欄位已經有值時才攤開
+  const showAllFields = !compact || moreFields || !!endAt || !!projectId || !!note;
   const endInvalid = !!startAt && !!endAt && new Date(endAt) < new Date(startAt);
   const canAdd = !!title.trim() && !!startAt && !endInvalid && !add.isPending;
   // 沉默 disable 會讓人不知道卡在哪個欄位——比照生成鈕的 disableReason，在按鈕旁講人話
@@ -418,13 +453,15 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
   // QA-017：截斷不再靜默——超過單頁上限時明確告知，避免使用者以為行程只有這些
   const scheduleTruncated = list.data?.truncated ?? false;
 
-  // 依日期分組（list 已按 startsAt 升冪，同一天必相鄰，掃一遍即可）
-  const groups: Array<{ label: string; items: ScheduleItem[] }> = [];
+  // 依日期分組（list 已按 startsAt 升冪，同一天必相鄰，掃一遍即可）。
+  // 分組身分用 dayKey（跨年同月同日不會撞在一起），顯示才換成「今天／明天」的人話標籤。
+  const groups: Array<{ key: string; label: string; items: ScheduleItem[] }> = [];
   for (const ev of items) {
-    const label = new Date(ev.startsAt).toLocaleDateString("zh-TW");
+    const at = new Date(ev.startsAt);
+    const key = dayKey(at);
     const last = groups[groups.length - 1];
-    if (last && last.label === label) last.items.push(ev);
-    else groups.push({ label, items: [ev] });
+    if (last && last.key === key) last.items.push(ev);
+    else groups.push({ key, label: dayLabel(at), items: [ev] });
   }
 
   return (
@@ -437,9 +474,10 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       lede="安排全組行程、切換清單／月曆與管理日曆同步"
       primary
     >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        {/* 清單／月曆切換（真實日曆）：段落式切換鈕 */}
-          <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
+        {/* 工具列一行搞定：檢視切換＋清單過濾（＋精簡模式下的「說明」小鈕）。
+            過去這裡只有靠右的切換鈕獨佔一行，說明鈕、過去行程開關、日曆設定各自再吃一行。 */}
+        <div className="planner-toolbar">
+          <div className="seg" role="tablist" aria-label="排程檢視">
           <button
             role="tab"
             aria-selected={view === "list"}
@@ -475,20 +513,14 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
             <Icon name="CalendarPlus" size={13} /> 月曆
           </button>
           </div>
+          {view === "list" && (
+            <label className="planner-toolbar__filter" title="預設只顯示未來與最近 24 小時內的行程">
+              <input type="checkbox" checked={includePast} onChange={(e) => setIncludePast(e.target.checked)} />
+              顯示過去行程
+            </label>
+          )}
+          <Hint>拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</Hint>
         </div>
-        <Hint>拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</Hint>
-
-      {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
-      <div className="planner-sync-bar" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        <GoogleCalendarBar groupId={groupId} />
-        <span className="spacer" />
-        {view === "list" && (
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }} title="預設只顯示未來與最近 24 小時內的行程">
-            <input type="checkbox" checked={includePast} onChange={(e) => setIncludePast(e.target.checked)} />
-            顯示過去行程
-          </label>
-        )}
-      </div>
 
       {/* 新增列：手機預設收合（清單優先，展開才吃半屏高度）；桌機常駐 */}
       {compact && !createOpen && (
@@ -513,10 +545,13 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
           <label htmlFor="sch-start">開始（必填）</label>
           <input id="sch-start" type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
         </div>
+        {showAllFields && (
         <div className="schedule-create-form__end" style={{ flex: "1 1 185px" }}>
           <label htmlFor="sch-end">結束（選填）</label>
           <input id="sch-end" type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
         </div>
+        )}
+        {showAllFields && (
         <div className="schedule-create-form__project" style={{ flex: "1 1 150px" }}>
           <label htmlFor="sch-project">掛在專案（選填）</label>
           <select id="sch-project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -526,10 +561,25 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
             ))}
           </select>
         </div>
+        )}
+        {showAllFields && (
         <div className="schedule-create-form__note" style={{ flex: "2 1 180px" }}>
           <label htmlFor="sch-note">備註（選填）</label>
           <input id="sch-note" value={note} maxLength={500} placeholder="例：地點、要先準備什麼" onChange={(e) => setNote(e.target.value)} />
         </div>
+        )}
+        {/* 排一筆會議真正必要的只有標題＋開始時間。手機上六欄堆成六列＝整個視窗都是表單，
+            其餘三欄收在這顆按鈕後面（有填過內容就不收，免得使用者以為自己打的字不見了）。 */}
+        {compact && !showAllFields && (
+          <button
+            type="button"
+            className="schedule-create-form__more"
+            aria-expanded={false}
+            onClick={() => setMoreFields(true)}
+          >
+            <Icon name="ChevronDown" size={13} />結束時間・專案・備註
+          </button>
+        )}
         <button className="primary schedule-create-form__submit" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
           {add.isPending ? "加入中…" : "加入"}
         </button>
@@ -561,8 +611,8 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       ) : (
         <div style={{ marginTop: 8 }}>
           {groups.map((g) => (
-            <div key={g.label} style={{ marginTop: 10 }}>
-              <h3 style={{ fontSize: "var(--fs-13)", color: "var(--fg-secondary)", margin: "0 0 2px" }}>{g.label}</h3>
+            <div key={g.key} style={{ marginTop: 10 }}>
+              <h3 className="planner-day-head">{g.label}</h3>
               {g.items.map((ev) => {
                 const projTitle = projectTitleOf(ev.projectId);
                 return (
@@ -616,6 +666,20 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         </Meta>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
+
+      {/* 行事曆同步與匯出：這是「設定一次」的東西，卻擺在行程清單上方——每次進來都要先
+          捲過一整段帳號設定（連結 Google／說明文案／匯出 .ics）才看得到今天要做什麼。
+          收成摺疊、移到清單下方，狀態直接寫在摘要行；只有授權失效（同步已默默停掉）才自動展開。 */}
+      <details className="planner-sync" open={syncOpen} onToggle={(e) => setSyncOpen(e.currentTarget.open)}>
+        <summary>
+          <Icon name="CalendarPlus" size={14} />
+          <span>行事曆同步與匯出</span>
+          <Meta as="span" style={{ margin: 0 }}>{syncSummary}</Meta>
+        </summary>
+        <div className="planner-sync-bar" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <GoogleCalendarBar groupId={groupId} />
+        </div>
+      </details>
     </PlannerSection>
   );
 }
@@ -740,8 +804,8 @@ function CalendarView({
       {/* 選定某天 → 展開當日全部行程（含刪除、回連） */}
       {selectedKey && selectedItems.length > 0 && (
         <div id="cal-day-list" style={{ marginTop: 10 }}>
-          <h3 style={{ fontSize: "var(--fs-13)", color: "var(--fg-secondary)", margin: "0 0 2px" }}>
-            {new Date(selectedItems[0].startsAt).toLocaleDateString("zh-TW")}・{selectedItems.length} 筆
+          <h3 className="planner-day-head">
+            {dayLabel(new Date(selectedItems[0].startsAt))}・{selectedItems.length} 筆
           </h3>
           {/* compact 才渲染：手機點有行程的日子不再直達表單，新增入口改在這裡（桌機 DOM 不變） */}
           {compact && (
@@ -842,11 +906,17 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
     setProjectId("");
     setFormOpen(true);
   };
+  // 表單移到清單上方之後，從下面某一列按「編輯」得把視角帶回表單，否則看起來像沒反應
+  const formRef = useRef<HTMLDivElement | null>(null);
+  const revealForm = () => {
+    requestAnimationFrame(() => scrollIntoViewForChrome(formRef.current));
+  };
   const openEdit = (n: { id: string; title: string; projectId: string | null }) => {
     seededRef.current = false;
     setEditingId(n.id);
     setProjectId(n.projectId ?? "");
     setFormOpen(true);
+    revealForm();
   };
 
   const add = trpc.notes.add.useMutation({
@@ -890,6 +960,15 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
 
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
 
+  // 筆記清單原本沒有任何搜尋——三個月的會議紀錄堆起來只能一列一列往下看。
+  // 標題與摘要都比對（摘要就是內文開頭，找「那次講到分鏡的會」靠的是它）。
+  const notes = list.data ?? [];
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? notes.filter((n) => `${n.title} ${n.excerpt}`.toLowerCase().includes(needle))
+    : notes;
+
   return (
     <PlannerSection
       open={sectionOpen}
@@ -899,66 +978,32 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
       title="筆記・會議紀錄"
       lede="集中會議決議、待辦與可追溯版本的共用筆記"
     >
+      {/* 新增與搜尋擺在清單上方。原本「新增筆記」在整份清單的最底下——筆記一多就得先捲過
+          所有紀錄才加得了一則；而清單本身沒有搜尋，要找「上次講到分鏡的那場會」只能一列一列看。 */}
+      <div className="planner-toolbar">
+        {!formOpen && (
+          <Button variant="primary" size="sm" onClick={openNew}>
+            <Icon name="Plus" size={14} />新增筆記
+          </Button>
+        )}
+        {notes.length > 4 && (
+          <span className="map-search">
+            <Icon name="Search" size={14} />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜尋標題或內容…"
+              aria-label="搜尋筆記"
+            />
+            {query && <Button variant="ghost" size="sm" onClick={() => setQuery("")} aria-label="清除搜尋">清除</Button>}
+          </span>
+        )}
         <Hint>會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</Hint>
+      </div>
 
-      {list.isLoading ? (
-        <div style={{ marginTop: 8 }} aria-hidden="true">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="gen-row">
-              <Skeleton style={{ height: 14 }} />
-            </div>
-          ))}
-        </div>
-      ) : list.error ? (
-        <p className="error">{list.error.message}</p>
-      ) : list.data && list.data.length > 0 ? (
-        <div style={{ marginTop: 8 }}>
-          {list.data.map((n) => {
-            const projTitle = projectTitleOf(n.projectId);
-            return (
-              <div key={n.id} id={`note-${n.id}`} className="gen-row gen-row--note" style={{ alignItems: "center" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
-                    {n.title}
-                    {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
-                    {n.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</Chip> : null}
-                  </div>
-                  <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
-                  <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
-                  {n.sourceMessageId && n.projectId && (
-                    <Link href={`/p/${n.projectId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                      <Icon name="MessageCircle" size={11} />來自留言
-                    </Link>
-                  )}
-                  {n.planRunId && n.projectId && (
-                    <Link href={`/p/${n.projectId}?focus=agent-run-${n.planRunId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: "2px 0 0 8px" }}>
-                      <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
-                    </Link>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <Button size="sm" onClick={() => openEdit(n)}>編輯</Button>
-                  <ConfirmButton
-                    onConfirm={() => remove.mutate({ id: n.id })}
-                    message={`刪除筆記「${n.title}」？`}
-                    triggerClassName="btn-sm"
-                    triggerStyle={{ color: "var(--danger-ink)" }}
-                    disabled={remove.isPending}
-                  >
-                    刪除
-                  </ConfirmButton>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState icon={<Icon name="FileText" />} title={<>還沒有筆記</>} description={<>開完會記一份，決議和待辦全組都看得到。</>} style={{ marginTop: 8 }} />
-      )}
-      {remove.error && <p className="error">{remove.error.message}</p>}
-
-      {formOpen ? (
-        <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
+      {formOpen && (
+        <div ref={formRef} style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
           <label htmlFor="note-title">標題{!editingId && "（可 @ 提及夥伴）"}</label>
           {editingId ? (
             <input id="note-title" value={title} maxLength={120} placeholder="例：0716 週會紀錄" onChange={(e) => setTitle(e.target.value)} />
@@ -1023,11 +1068,71 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
             <p className="error">{add.error?.message ?? update.error?.message ?? full.error?.message}</p>
           )}
         </div>
-      ) : (
-        <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={openNew}>
-          <Icon name="Plus" size={14} />新增筆記
-        </button>
       )}
+
+      {list.isLoading ? (
+        <div style={{ marginTop: 8 }} aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="gen-row">
+              <Skeleton style={{ height: 14 }} />
+            </div>
+          ))}
+        </div>
+      ) : list.error ? (
+        <p className="error">{list.error.message}</p>
+      ) : filtered.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          {filtered.map((n) => {
+            const projTitle = projectTitleOf(n.projectId);
+            return (
+              <div key={n.id} id={`note-${n.id}`} className="gen-row gen-row--note" style={{ alignItems: "center" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
+                    {n.title}
+                    {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
+                    {n.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</Chip> : null}
+                  </div>
+                  <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
+                  <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
+                  {n.sourceMessageId && n.projectId && (
+                    <Link href={`/p/${n.projectId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <Icon name="MessageCircle" size={11} />來自留言
+                    </Link>
+                  )}
+                  {n.planRunId && n.projectId && (
+                    <Link href={`/p/${n.projectId}?focus=agent-run-${n.planRunId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: "2px 0 0 8px" }}>
+                      <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
+                    </Link>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <Button size="sm" onClick={() => openEdit(n)}>編輯</Button>
+                  <ConfirmButton
+                    onConfirm={() => remove.mutate({ id: n.id })}
+                    message={`刪除筆記「${n.title}」？`}
+                    triggerClassName="btn-sm"
+                    triggerStyle={{ color: "var(--danger-ink)" }}
+                    disabled={remove.isPending}
+                  >
+                    刪除
+                  </ConfirmButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : needle ? (
+        <EmptyState
+          icon={<Icon name="Search" />}
+          title={<>找不到「{query.trim()}」</>}
+          description={<>這個組有 {notes.length} 份筆記，換個關鍵字或清除搜尋再看一次。</>}
+          style={{ marginTop: 8 }}
+        />
+      ) : (
+        <EmptyState icon={<Icon name="FileText" />} title={<>還沒有筆記</>} description={<>開完會記一份，決議和待辦全組都看得到。</>} style={{ marginTop: 8 }} />
+      )}
+      {remove.error && <p className="error">{remove.error.message}</p>}
+
     </PlannerSection>
   );
 }
