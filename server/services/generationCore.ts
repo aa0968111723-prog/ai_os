@@ -43,6 +43,7 @@ import {
   type ContinuityCoverage,
 } from "./continuity";
 import { groupLeaderIds, pushToUsers } from "./webPush";
+import { publishToProject } from "./realtime";
 import {
   findAiTraceSessionBySource,
   recordAiTraceEventSafely,
@@ -1019,6 +1020,12 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     if (!advanced.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen; // 別人已推進，直接回現況（列必存在,回退舊快照僅是型別防禦）
+    }
+    // 成品落地：全房即時看到那一格換了畫面。
+    // 沒有這一段的話，「組長按下生成、把畫面留給組員看」時組員端毫無訊號——
+    // 這條路徑不經 tRPC，客戶端的 mutation 快取訂閱看不到它，只能等 10/20/45 秒的輪詢追上。
+    if (gen.projectId && gen.sceneId) {
+      publishToProject(gen.projectId, { kind: "scene", id: gen.sceneId }, "生成完成，畫面已更新");
     }
     if (
       gen.modelId.startsWith("fal-ai/")

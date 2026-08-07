@@ -70,6 +70,14 @@ interface Client {
   lastCursorAt: number;
   lastFocusAt: number;
   lastInvalidateAt: number;
+  /**
+   * 被節流擋下的最後一則 invalidate，等節流窗過了補送。
+   *
+   * 舊版兩層檢查都是直接 `return` 丟棄，沒有補送——而 invalidate 不是游標那種
+   * 「下一幀會再來一次」的連續訊號，它是離散事件。只要某一次改動剛好落在被吃掉的
+   * 那 400ms 裡，對方的世界觀／素材庫可以**整場都停在半小時前**，而畫面上毫無異狀。
+   */
+  pendingInvalidate: { payload: Record<string, unknown>; timer: NodeJS.Timeout } | null;
 }
 
 /** 房間：roomKey（p:projectId 或 g:groupId）→ 連線集合（同一 user 開兩個分頁＝兩個 Client，presence 去重顯示一人） */
@@ -182,6 +190,22 @@ function broadcast(roomKey: string, room: Set<Client>, msg: unknown, except?: Cl
   publishRoomEvent(roomKey, msg);
 }
 
+/**
+ * invalidate 的 scope 驗證：只收白名單 kind ＋ uuid 形狀的 id。
+ *
+ * 沒有這道守衛的話，scope 會變成一個「任何登入者都能塞任意字串進別人瀏覽器」的洞——
+ * 接收端拿它去查表、拼 query key、甚至當 DOM 選擇器用，都是實打實的注入面。
+ * 與 cursor 的 anchor 同一條原則：不信任 client，逐欄夾制後才轉發。
+ */
+const INVALIDATE_SCOPE_KINDS = new Set(["scene", "worldview", "asset", "card", "annotation", "knowledge"]);
+function readInvalidateScope(raw: unknown): { kind: string; id: string | null } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = (raw as { kind?: unknown }).kind;
+  if (typeof kind !== "string" || !INVALIDATE_SCOPE_KINDS.has(kind)) return null;
+  const id = (raw as { id?: unknown }).id;
+  return { kind, id: typeof id === "string" && UUID_RE.test(id) ? id : null };
+}
+
 /** 伺服器發起的推播節流（每專案）：代理一次 tick 會連寫多筆事件，不節流會對同房重複轟炸 */
 const serverPushThrottle = new Map<string, number>();
 const SERVER_PUSH_MIN_MS = 800;
@@ -211,6 +235,31 @@ export function notifyAgentProgress(
   const room = rooms.get(roomKey) ?? new Set<Client>();
   broadcast(roomKey, room, { type: "agent-step", runId: step.runId, stepId: step.stepId ?? null, eventKey: step.eventKey });
   broadcast(roomKey, room, { type: "invalidate" });
+}
+
+/**
+ * 伺服器端對某專案房間廣播一則帶 scope 的 invalidate。
+ *
+ * 為什麼需要它：在此之前 invalidate **只有客戶端會發**——背景 runner 改完 DB 從不發訊號。
+ * 於是「組長按下生成、把畫面留給組員看」時，成品落地那一刻組員端沒有任何即時訊息，
+ * 只能等分鏡列 10s／單格工作室 20s／生成紀錄 45s 的輪詢慢慢追上。
+ *
+ * 部署前提（已確認）：現行部署是單一行程（railway.toml 的 startCommand 是單一 start.sh，
+ * 環境變數清單沒有 PROCESS_ROLE，未設即 `all`），所以本機房間廣播就涵蓋所有連線者。
+ * `broadcast` 同時發跨實例匯流排，將來開到多 replica 或拆 web/worker 時只要設了
+ * REDIS_URL 就自動涵蓋；沒設 Redis 的多實例部署則會退化成「只有同實例的人收得到」，
+ * 而不是壞掉——各查詢仍有輪詢兜底。
+ */
+export function publishToProject(
+  projectId: string,
+  scope: { kind: string; id?: string | null },
+  label?: string,
+): void {
+  const roomKey = `p:${projectId}`;
+  const room = rooms.get(roomKey) ?? new Set<Client>();
+  const payload: Record<string, unknown> = { type: "invalidate", scope: { kind: scope.kind, id: scope.id ?? null } };
+  if (label) payload.label = label;
+  broadcast(roomKey, room, payload);
 }
 
 /** 在場名單有變：本機重播一次（presence 是完整名單，不能只送差異） */
@@ -334,6 +383,7 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
     lastCursorAt: 0,
     lastFocusAt: 0,
     lastInvalidateAt: 0,
+    pendingInvalidate: null,
   };
   room.add(client);
   totalConnections += 1;
@@ -350,7 +400,7 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   });
 
   ws.on("message", (raw) => {
-    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown; anchor?: unknown; ax?: unknown; ay?: unknown; vy?: unknown; vx?: unknown; ci?: unknown };
+    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown; anchor?: unknown; ax?: unknown; ay?: unknown; vy?: unknown; vx?: unknown; ci?: unknown; scope?: unknown; label?: unknown };
     try {
       const text = String(raw);
       if (text.length > 2048) return; // 協定內全是小訊息，超長一律視為異常丟棄
@@ -390,16 +440,51 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
       // zone 也是名冊的一部分（新加入者的 hello 要帶得出既有聚焦），變更時同步給其他實例
       announceRoster(roomKey, theRoom);
     } else if (msg.type === "invalidate") {
-      if (now - client.lastInvalidateAt < MIN_INVALIDATE_MS) return;
+      // scope／label 是 optional：沒帶就是舊行為（全域失效）。新舊客戶端可混跑。
+      // 一律逐欄驗證後才轉發——不信任 client，與 cursor 同一條原則。
+      const scope = readInvalidateScope(msg.scope);
+      const label = typeof msg.label === "string" && msg.label.length <= 40 ? msg.label : null;
+      const payload: Record<string, unknown> = { type: "invalidate", userId: client.userId, name: client.name };
+      if (scope) payload.scope = scope;
+      if (label) payload.label = label;
+
+      const throttled =
+        now - client.lastInvalidateAt < MIN_INVALIDATE_MS ||
+        userThrottled(client.userId, "invalidate", now, MIN_INVALIDATE_MS);
+      if (throttled) {
+        // **補送而不是丟棄。** invalidate 是離散事件，不像游標下一幀會再來一次——
+        // 丟掉的那一則就是永遠不會發生的一次刷新。只留最後一則（同一波連續改動裡，
+        // 最後那則的 scope 才是使用者最終看到的狀態）。
+        if (client.pendingInvalidate) clearTimeout(client.pendingInvalidate.timer);
+        const timer = setTimeout(() => {
+          const c = client;
+          c.pendingInvalidate = null;
+          if (c.ws.readyState !== WebSocket.OPEN) return;
+          const stillThere = rooms.get(roomKey);
+          if (!stillThere) return;
+          c.lastInvalidateAt = Date.now();
+          broadcast(roomKey, stillThere, payload, c);
+        }, MIN_INVALIDATE_MS);
+        // 定時器不該讓行程活著等一則刷新
+        timer.unref?.();
+        client.pendingInvalidate = { payload, timer };
+        return;
+      }
       client.lastInvalidateAt = now;
-      if (userThrottled(client.userId, "invalidate", now, MIN_INVALIDATE_MS)) return;
-      broadcast(roomKey, theRoom, { type: "invalidate", userId: client.userId }, client);
+      broadcast(roomKey, theRoom, payload, client);
     }
   });
 
   ws.on("close", () => {
     theRoom.delete(client);
     totalConnections -= 1;
+    // 尚未補送的 invalidate：連線都沒了，那則刷新沒有意義。
+    // 定時器內雖已擋 readyState !== OPEN，但那是最後一道防線——留著它會讓已斷線的 Client
+    // 物件被 timer 多活 400ms，而斷線風暴時這種殘留會一路累積。
+    if (client.pendingInvalidate) {
+      clearTimeout(client.pendingInvalidate.timer);
+      client.pendingInvalidate = null;
+    }
     // 遞減該 user 連線數；歸零即清掉其廣播節流狀態，避免 userThrottle 無限膨脹
     const remaining = (userConnCount.get(client.userId) ?? 1) - 1;
     if (remaining <= 0) {
