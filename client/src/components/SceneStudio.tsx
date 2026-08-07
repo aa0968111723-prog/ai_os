@@ -4,6 +4,7 @@ import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
+import { parseMusicMarker } from "@shared/sceneMusic";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
 import { AssetAudio, AssetImg, AssetVideo } from "./MediaFallback";
@@ -18,6 +19,9 @@ const MAX_VOICEOVER_CHARS = 2000;
 const DEFAULT_REGEN_MODEL = "fal-ai/fast-lightning-sdxl";
 /** 對白上限：與後端 scenes.update 的 dialogue z.string().max(2000) 同口徑 */
 const MAX_DIALOGUE_CHARS = 2000;
+
+/** 配樂標記上限：與後端 scenes.update 的 music z.string().max(300) 同口徑 */
+const MAX_MUSIC_CHARS = 300;
 
 /** 動作走位上限：與後端 scenes.update 的 action z.string().max(500) 同口徑 */
 const MAX_ACTION_CHARS = 500;
@@ -114,6 +118,7 @@ export function SceneStudio({
   const [ambienceDraft, setAmbienceDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [actionDraft, setActionDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [dialogueDraft, setDialogueDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [musicDraft, setMusicDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [instruction, setInstruction] = useState("");
   /** 修正用的底圖；null＝這一格目前的畫面 */
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
@@ -175,13 +180,14 @@ export function SceneStudio({
   // 走位另開一支 update，理由同配音詞與環境音：各自的「儲存中／已儲存」不能互相污染
   const saveAction = trpc.scenes.update.useMutation({ onSuccess: () => { setActionDraft(null); refresh(); } });
   const saveDialogue = trpc.scenes.update.useMutation({ onSuccess: () => { setDialogueDraft(null); refresh(); } });
+  const saveMusic = trpc.scenes.update.useMutation({ onSuccess: () => { setMusicDraft(null); refresh(); } });
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
   });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
@@ -194,6 +200,9 @@ export function SceneStudio({
   const savedDialogue = data?.dialogue ?? "";
   // 即時回饋「系統讀懂了幾句、誰是誰」——@ 打錯就會看到句數不對，不必等生成完才發現
   const speechPreview = useMemo(() => parseSpeechLines(dialogue), [dialogue]);
+  const music = musicDraft ?? data?.music ?? "";
+  const musicDirty = musicDraft !== null && musicDraft !== (data?.music ?? "");
+  const musicMarker = useMemo(() => parseMusicMarker(music), [music]);
   const action = actionDraft ?? data?.action ?? "";
   const actionDirty = actionDraft !== null && actionDraft !== (data?.action ?? "");
   const ambience = ambienceDraft ?? data?.ambience ?? "";
@@ -724,6 +733,34 @@ export function SceneStudio({
                             </span>
                           )}
                         </ConfirmButton>
+                      )}
+                    </div>
+                  </>
+                )}
+                {canEdit && (
+                  <>
+                    <label htmlFor={`studio-music-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: "12px 0 0" }}>
+                      配樂（跨鏡）
+                      <HelpTip text="配樂通常橫跨好幾鏡：在開始的那一鏡寫「起｜描述」，在結束的下一鏡寫「止」。中間的鏡不必寫。鏡被搬動時區間會自動跟著走。" />
+                    </label>
+                    <input
+                      id={`studio-music-${sceneId}`}
+                      value={music}
+                      disabled={saveMusic.isPending}
+                      maxLength={MAX_MUSIC_CHARS}
+                      placeholder="起｜單音鋼琴，極簡，很慢　或　止"
+                      onChange={(e) => setMusicDraft(e.target.value)}
+                      style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Button size="sm" disabled={!musicDirty || saveMusic.isPending} onClick={() => saveMusic.mutate({ sceneId, music })}>
+                        {saveMusic.isPending ? "儲存中…" : "儲存配樂標記"}
+                      </Button>
+                      {musicDirty ? <Meta>尚未儲存</Meta> : saveMusic.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                      {musicMarker && (
+                        <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                          {musicMarker.kind === "stop" ? "這一鏡起停止配樂" : "從這一鏡開始播"}
+                        </Meta>
                       )}
                     </div>
                   </>

@@ -30,6 +30,8 @@ export type StoryboardScriptScene = {
   action?: string;
   /** 說話序列（@說話者：台詞）。旁白用 @旁白，可與對白交錯。結構見 shared/sceneSpeech.ts。 */
   dialogue?: string;
+  /** 配樂端點標記（「起｜描述」或「止」）；區間由 shared/sceneMusic.ts 推導 */
+  music?: string;
   /**
    * 標題上的鏡次（`## 3.` 的 3）。這不是裝飾，是**身分證**：中間整段沒寫時，
    * 靠它才知道「## 3.」指的仍是第 3 鏡，而不是往前遞補成第 2 鏡。見 resolveScriptTargets。
@@ -46,6 +48,7 @@ export type StoryboardScriptRow = {
   ambience?: string | null;
   action?: string | null;
   dialogue?: string | null;
+  music?: string | null;
   /** 這一鏡綁定的卡片名字，僅供閱讀時標注 */
   cardNames?: string[];
 };
@@ -56,6 +59,7 @@ const ACTION_LABEL = "動作";
 const VOICE_LABEL = "旁白";
 const DIALOGUE_LABEL = "對白";
 const AMBIENCE_LABEL = "環境音";
+const MUSIC_LABEL = "配樂";
 const CARDS_LABEL = "設定卡";
 
 /**
@@ -68,7 +72,7 @@ const CARDS_LABEL = "設定卡";
  * multiline=false 的欄位**不吃續行**：它們的值是一行寫完的短指示，後面若接自由文字
  * （例如在鏡末尾補一句筆記），那句話不該被吞進這個欄位。
  */
-export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "dialogue" | "ambience";
+export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "dialogue" | "ambience" | "music";
 
 type ScriptFieldSpec = {
   key: ScriptFieldKey;
@@ -95,6 +99,8 @@ export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
   // 對白：多行序列，每行「@說話者：台詞」。旁白可用 @旁白 混在裡面達成交錯。
   { key: "dialogue", label: DIALOGUE_LABEL, multiline: true, alwaysEmit: true, max: 2000, human: "對白", blockValue: true },
   { key: "ambience", label: AMBIENCE_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "環境音" },
+  // 配樂是區間端點，不是每鏡都有的屬性——只在有標記時輸出，且不吃續行（值是一行寫完的標記）
+  { key: "music", label: MUSIC_LABEL, multiline: false, alwaysEmit: false, max: 300, human: "配樂" },
 ] as const;
 
 /**
@@ -202,6 +208,8 @@ export const SCRIPT_AMBIENCE_MAX = 500;
 export const SCRIPT_ACTION_MAX = 500;
 /** 對白與旁白同量級——它們是同一件事的兩種標記 */
 export const SCRIPT_DIALOGUE_MAX = 2000;
+/** 配樂標記是一行（起｜描述），不是描述段落 */
+export const SCRIPT_MUSIC_MAX = 300;
 /** 一份腳本最多幾鏡：寫回是逐鏡 insert/update，沒上限等於讓一份貼錯的文件在交易裡跑幾千趟 */
 export const MAX_SCRIPT_SCENES = 200;
 

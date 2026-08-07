@@ -80,6 +80,8 @@ type Scene = {
   action?: string | null;
   /** 說話序列（@說話者：台詞，旁白用 @旁白）；空＝這鏡沒有台詞。 */
   dialogue?: string | null;
+  /** 配樂端點標記（起｜描述／止）；空＝這鏡沒有配樂變化。 */
+  music?: string | null;
   /** 已生成且未軟刪的環境音網址——判斷「這格有沒有環境音」的唯一依據（理由同 narrationUrl）。 */
   ambienceUrl?: string | null;
   /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
@@ -826,6 +828,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             ambience: s.ambience,
             action: s.action,
             dialogue: s.dialogue,
+            music: s.music,
             cardNames: sceneCardNames(s),
           }))}
           canEdit={canEdit}

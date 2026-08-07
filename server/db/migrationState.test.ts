@@ -273,11 +273,12 @@ describe("legacy migration adoption bridge", () => {
     //   0042 是 community_posts 的三個分類欄位＋兩個索引，五句皆 IF NOT EXISTS；
     //   0043 是 content_attachments 的建表與兩個索引，三句；
     //   0044 是 scenes 的動作走位欄位，單句 ADD COLUMN IF NOT EXISTS；
-    //   0045 是 scenes 的對白欄位，單句 ADD COLUMN IF NOT EXISTS。）
+    //   0045 是 scenes 的對白欄位，單句 ADD COLUMN IF NOT EXISTS；
+    //   0046 是 scenes 的配樂標記與配樂音檔，兩句 ADD COLUMN IF NOT EXISTS。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 19);
+    expect(result.alreadyPresent).toBe(8 + 21);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

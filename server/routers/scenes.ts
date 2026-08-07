@@ -14,6 +14,7 @@ import {
   SCRIPT_AMBIENCE_MAX,
   SCRIPT_ACTION_MAX,
   SCRIPT_DIALOGUE_MAX,
+  SCRIPT_MUSIC_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
 } from "../../shared/storyboardScript";
@@ -42,7 +43,7 @@ const SCENE_VERSION_LIMIT = 120;
  */
 const TRIM_MAX_MS = 60 * 60 * 1000;
 
-export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId";
+export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId" | "musicAssetId";
 
 /**
  * 素材 kind → 這一格的哪個現用指標欄；null＝不能當分鏡素材（例如 doc）。
@@ -152,6 +153,7 @@ export const scenesRouter = router({
         ambience: schema.scenes.ambience,
         action: schema.scenes.action,
         dialogue: schema.scenes.dialogue,
+        music: schema.scenes.music,
         // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
@@ -371,7 +373,7 @@ export const scenesRouter = router({
 
     // 現在被引用、但不是本格生成產出的素材（例：素材庫直接指派、或舊資料沒回綁的「＋加入分鏡」）。
     // 沒有這一段，該素材不會出現在版本清單裡，切走之後就再也切不回來。
-    const pointerIds = [scene.assetId, scene.narrationAssetId, scene.ambienceAssetId].filter((id): id is string => !!id);
+    const pointerIds = [scene.assetId, scene.narrationAssetId, scene.ambienceAssetId, scene.musicAssetId].filter((id): id is string => !!id);
     const pointerRows = pointerIds.length
       ? await db
           .select({
@@ -414,6 +416,7 @@ export const scenesRouter = router({
       ambienceAssetId: scene.ambienceAssetId,
       action: scene.action,
       dialogue: scene.dialogue,
+      music: scene.music,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -430,7 +433,7 @@ export const scenesRouter = router({
       sceneId: z.string().uuid(),
       assetId: z.string().uuid(),
       /** 音訊要進哪一軌；不給＝沿用 sceneSlotForAssetKind 的既有預設（旁白） */
-      role: z.enum(["narration", "ambience"]).optional(),
+      role: z.enum(["narration", "ambience", "music"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -452,9 +455,14 @@ export const scenesRouter = router({
       if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "只有圖片／影片／音訊可以設為分鏡素材" });
       // role 只對音訊有意義：拿它去改圖／影的落點會把畫面塞進音軌
       if (input.role && asset.kind !== "audio") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "只有音訊素材可以指定要進旁白還是環境音" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "只有音訊素材可以指定要進旁白、環境音還是配樂" });
       }
-      const target: SceneAssetSlot = input.role === "ambience" ? "ambienceAssetId" : slot;
+      const ROLE_SLOT: Record<string, SceneAssetSlot> = {
+        ambience: "ambienceAssetId",
+        music: "musicAssetId",
+        narration: "narrationAssetId",
+      };
+      const target: SceneAssetSlot = input.role ? ROLE_SLOT[input.role]! : slot;
       const patch = { [target]: asset.id };
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
       return updated;
@@ -574,6 +582,7 @@ export const scenesRouter = router({
             // 走位是設定不是產物，跟著複製（同 prompt/voiceover/ambience）
             action: dup ? cur.action : null,
             dialogue: dup ? cur.dialogue : null,
+            music: dup ? cur.music : null,
             // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
@@ -635,6 +644,7 @@ export const scenesRouter = router({
         ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
         action: z.string().max(SCRIPT_ACTION_MAX).optional(),
         dialogue: z.string().max(SCRIPT_DIALOGUE_MAX).optional(),
+        music: z.string().max(SCRIPT_MUSIC_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
         // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
@@ -656,6 +666,7 @@ export const scenesRouter = router({
       if (input.ambience !== undefined) patch.ambience = input.ambience;
       if (input.action !== undefined) patch.action = input.action;
       if (input.dialogue !== undefined) patch.dialogue = input.dialogue;
+      if (input.music !== undefined) patch.music = input.music;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
@@ -725,6 +736,7 @@ export const scenesRouter = router({
               ambience: scene.ambience ?? null,
               action: scene.action ?? null,
               dialogue: scene.dialogue ?? null,
+              music: scene.music ?? null,
             });
             created += 1;
             continue;
@@ -749,6 +761,9 @@ export const scenesRouter = router({
           }
           if (scene.dialogue !== undefined && scene.dialogue !== (row.dialogue ?? "").trim()) {
             patch.dialogue = scene.dialogue;
+          }
+          if (scene.music !== undefined && scene.music !== (row.music ?? "").trim()) {
+            patch.music = scene.music;
           }
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));

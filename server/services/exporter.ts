@@ -213,6 +213,8 @@ export type TimelineScene = {
   ambiencePath?: string | null;
   /** 動作走位——只進備註欄給人看，不產生任何媒體檔 */
   action?: string | null;
+  /** 該鏡配樂的 zip 內相對路徑（07_配樂/…）；只有「起鏡」會有 */
+  musicPath?: string | null;
   /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
   trimStartMs?: number | null;
   /** 畫面素材來源出點（毫秒）；null＝未修剪 */
@@ -346,6 +348,11 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
       const sid = audioAsset(sc.mediaPath);
       connectedXml += `\n              <asset-clip ref="${sid}" lane="-2" offset="0s" duration="${dur}" name="${clipName}" audioRole="effects"/>`;
     }
+    // 配樂自己一軌（lane -4）：與環境音（-3）分開，剪輯師要能各自調音量、各自靜音
+    if (sc.musicPath) {
+      const mid = audioAsset(sc.musicPath);
+      connectedXml += `\n              <asset-clip ref="${mid}" lane="-4" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_配樂`)}" audioRole="music"/>`;
+    }
     // 環境音自己一軌（lane -3）：不與 lane -2 共用，否則「主素材就是音檔」的鏡會兩個 clip 疊在同一軌，
     // 剪輯師匯進去看到的是互相蓋掉的兩段音訊，而不是可以各自調音量的兩軌。
     if (sc.ambiencePath) {
@@ -429,6 +436,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
   const audioItems: string[] = []; // A1：旁白
   const audioItems2: string[] = []; // A2：音訊類場景素材
   const audioItems3: string[] = []; // A3：逐鏡環境音（與 A2 分軌，理由同 fcpxml 的 lane -3）
+  const audioItems4: string[] = []; // A4：配樂（與環境音分軌，要能各自調音量）
   let fileSeq = 0;
   // 影格邊界與 fcpxml/srt/edl 同源（見 shared/timeline.ts）
   const layout = layoutTimeline(scenes);
@@ -516,6 +524,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     if (sc.narrationPath) audioItems.push(audioClip("clipitem-a", i, `${i + 1}_旁白`, sc.narrationPath, startF, endF));
     if (sc.mediaPath && sc.mediaKind === "audio") audioItems2.push(audioClip("clipitem-sa", i, label, sc.mediaPath, startF, endF));
     if (sc.ambiencePath) audioItems3.push(audioClip("clipitem-amb", i, `${i + 1}_環境音`, sc.ambiencePath, startF, endF));
+    if (sc.musicPath) audioItems4.push(audioClip("clipitem-mus", i, `${i + 1}_配樂`, sc.musicPath, startF, endF));
   }
   const totalF = layout.totalFrames;
   return [
@@ -544,6 +553,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     // A2：音訊類場景素材（有才輸出第二條音軌）
     ...(audioItems2.length ? [[`        <track>`, audioItems2.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     ...(audioItems3.length ? [[`        <track>`, audioItems3.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
+    ...(audioItems4.length ? [[`        <track>`, audioItems4.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     `      </audio>`,
     `    </media>`,
     `  </sequence>`,
@@ -770,6 +780,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
   // 逐鏡旁白音檔的實際相對檔名（成功入包後回填），供鏡頭表標明該鏡有無旁白配音。
   const narrationNames: (string | null)[] = new Array(scenes.length).fill(null);
   const ambienceNames: (string | null)[] = new Array(scenes.length).fill(null);
+  const musicNames: (string | null)[] = new Array(scenes.length).fill(null);
   // 鏡頭表時間碼與交付的時間軸檔同源（見 shared/timeline.ts）——先前是第七個獨立累加器，
   // 修剪過的鏡在這裡會報出未修剪的長度，剪輯師照著鏡頭表對位就會整片錯開。
   const times = layoutTimeline(scenes).shots.map((t) => ({ in: t.startSec, out: t.endSec }));
@@ -930,6 +941,15 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     into: ambienceNames,
   }) === "aborted") return;
 
+  // 07_配樂：配樂只落在「起鏡」上，區間由 shared/sceneMusic 推導——這裡照樣逐鏡掃，
+  // 沒有 musicAssetId 的鏡自然跳過，所以一段配樂只會入包一次。
+  if (await packSceneAudioTrack({
+    assetIdOf: (s) => s.musicAssetId,
+    folder: "07_配樂",
+    label: "配樂",
+    into: musicNames,
+  }) === "aborted") return;
+
   if (abortSignal.aborted) return;
 
   // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）、旁白音檔檔名與累計進出點時間碼。
@@ -1026,6 +1046,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
       narrationPath: narrationNames[i],
       ambiencePath: ambienceNames[i],
       action: sc.action,
+      musicPath: musicNames[i],
       trimStartMs: sc.trimStartMs,
       trimEndMs: sc.trimEndMs,
     }));
@@ -1048,8 +1069,9 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
 
   const hasNarration = narrationNames.some((n) => n !== null);
   const hasAmbience = ambienceNames.some((n) => n !== null);
+  const hasMusic = musicNames.some((n) => n !== null);
   archive.append(
-    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasAmbience ? "06_環境音（逐鏡環境音／音效）／" : ""}${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasAmbience ? "06_環境音（逐鏡環境音／音效）／" : ""}${hasMusic ? "07_配樂（跨鏡配樂，落在起鏡）／" : ""}${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
       "\n" +
       "【最快組片方式：匯入一個檔，粗剪自動排好】\n" +
       "本包內的時間軸檔已「連結媒體」：先把整個 zip 解壓（保持資料夾結構不動），再依你的剪輯軟體匯入對應檔案，\n" +
