@@ -302,6 +302,8 @@ export function StudioAiPanel({
                 sketchMutation.mutate({
                   projectId,
                   prompt: sketchPrompt.trim(),
+                  // 選了分鏡就帶上：伺服器抓前後鏡做連戲（主體、場景、銀幕方向接上一鏡）
+                  sceneId: shot?.id,
                   boardW: sketch.boardW,
                   boardH: sketch.boardH,
                   maxStrokes: sketch.maxStrokes,
@@ -352,7 +354,9 @@ export function StudioAiPanel({
           </Meta>
         )}
         <Hint>
-          AI 畫的是分鏡構圖草稿（框、簡筆人物、運鏡箭頭），不是精緻插畫。畫在現有筆畫上面——想從白紙開始，先按白板的清空。
+          AI 畫的是分鏡構圖草稿（框、簡筆人物、運鏡箭頭），不是精緻插畫。
+          {shot ? "會參考上一鏡／下一鏡的畫面與走位自動連戲。" : "選一鏡再畫，AI 會參考前後鏡自動連戲。"}
+          畫在現有筆畫上面——想從白紙開始，先按白板的清空。
         </Hint>
       </Card>
 
