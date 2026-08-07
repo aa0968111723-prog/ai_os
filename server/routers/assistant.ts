@@ -44,6 +44,7 @@ import {
   searchAiModels,
   selectAiGenerationModel,
 } from "../services/aiModelPolicy";
+import { callTool } from "../services/mcp";
 import { resolveModel } from "../services/modelResolve";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
 import {
@@ -239,7 +240,14 @@ const FIELD_LABEL: Record<string, string> = { title: "標題", voiceover: "旁�
 
 /** LLM 的工具呼叫格式：{"tool":"...","args":{...}}（與最終回答的 {"answer":...} 互斥,以 tool 鍵區分） */
 const toolCallSchema = z.object({
-  tool: z.enum(["list_assets", "read_scene", "list_generations", "find_model", "query_database"]),
+  tool: z.enum([
+    "list_assets", "read_scene", "list_generations", "find_model", "query_database",
+    // 「人的事」三支（WP2）：分鏡／生成／知識庫本來就注入在 <專案現況> 裡，
+    // 助手真正看不到的是**人**——誰卡住、什麼時候到期、討論記在哪。
+    // teamAssistant 早就有 list_tasks／group_blockers，專案助手卻沒有，
+    // 所以它答得出「有幾個生成在跑」，答不出「這個專案卡在誰身上」。
+    "list_tasks", "list_schedule", "list_notes",
+  ]),
   args: z
     .object({
       kind: z.string().max(20).optional(),
@@ -248,9 +256,31 @@ const toolCallSchema = z.object({
       category: z.string().max(40).optional(),
       // query_database 用：資料庫代號（抄 <可讀資料庫> 的 db1/db2…；不收 uuid，防幻覺）
       dbRef: z.string().max(16).optional(),
+      // list_schedule 用：預設只看未來與近 24 小時，要回顧才給 true
+      includePast: z.boolean().optional(),
     })
     .optional(),
 });
+
+/**
+ * 經 MCP 的 callTool 執行一支跨域唯讀工具。
+ *
+ * 為什麼繞道 MCP 而不在這裡各寫一份查詢：那 71 支工具每一支都自帶組隔離、
+ * per-table ACL 與審計（recordMcpAudit）。在助手裡重寫等於複製一份會分岔的
+ * 權限判斷——遲早有一邊漏掉。callTool 是 mcp.ts 刻意 export 的入口（見該處
+ * 註解），readOnly:true 讓唯讀守衛再擋一次寫入類工具，縱深防禦。
+ *
+ * 身分一律是**登入者本人**（ctx.auth）：助手沒有自己的權限，看得到什麼
+ * 完全等於這個人自己看得到什麼。
+ */
+async function runMcpReadTool(
+  auth: AuthState,
+  projectId: string,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  return callTool(auth, { readOnly: true }, name, { projectId, ...args });
+}
 
 /* ── 資料庫接線（連結全專案×資料庫）：AI 可讀的自訂資料庫 ── */
 
@@ -299,6 +329,34 @@ export function rowLine(fields: DataField[], data: Record<string, unknown>): str
     })
     .filter(Boolean)
     .join("｜") || "（空列）";
+}
+
+/**
+ * MCP 工具回傳的一列 → 給 LLM 的一行。
+ *
+ * 這些工具（list_tasks／list_schedule／list_notes）的欄位各不相同，而且未來還會變。
+ * 與其為每支各寫一套格式（三份會分岔的樣板），不如通用壓平：跳過 null／空字串與
+ * 內部 id，長值截斷防灌爆提示詞。欄位名保持英文原樣——它們是模型讀的鍵，
+ * 翻成中文反而讓模型難以在後續動作裡引用。
+ */
+export function compactRowLine(row: unknown): string {
+  if (row === null || row === undefined) return "（空）";
+  if (typeof row !== "object") return String(row).slice(0, 120);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
+    if (value === null || value === undefined || value === "") continue;
+    // id 對模型無用（它不能拿 uuid 做任何事，只會拿去幻覺引用），但 title/name 這種要留
+    if (key === "id" || key.endsWith("Id")) continue;
+    const text = value instanceof Date
+      ? value.toISOString().slice(0, 16).replace("T", " ")
+      : typeof value === "boolean" ? (value ? "是" : "否")
+      : typeof value === "object" ? JSON.stringify(value).slice(0, 60)
+      : String(value);
+    if (!text.trim()) continue;
+    parts.push(`${key}:${text.slice(0, 60)}`);
+    if (parts.length >= 8) break;
+  }
+  return parts.join("｜") || "（空列）";
 }
 
 /** 挑模型（純函式,單元可測）：關鍵字掃 id/名稱/特性/擅長,可再鎖類別;回傳給 LLM 的速查文字 */
@@ -352,6 +410,7 @@ const GENERATION_PREVIEW_LIMIT = 15;
  * 畫面卻顯示縮圖」這種自相矛盾——而系統提示明訂 AI 只能引用工具結果裡實際列出的項目。
  */
 async function runLookupTool(
+  auth: AuthState,
   project: typeof schema.projects.$inferSelect,
   scenes: Array<typeof schema.scenes.$inferSelect>,
   readableDbs: ReadableDb[],
@@ -519,6 +578,35 @@ async function runLookupTool(
       text: lines.join("\n"),
       preview: { kind: "generations", items, truncated: rows.length === GENERATION_PREVIEW_LIMIT },
     };
+  }
+
+  if (call.tool === "list_tasks" || call.tool === "list_schedule" || call.tool === "list_notes") {
+    // 經 MCP 的 callTool：組隔離、per-table ACL 與審計都在那裡，不在助手裡重寫一份
+    const label = call.tool === "list_tasks" ? "人員任務" : call.tool === "list_schedule" ? "行程與死線" : "筆記";
+    try {
+      const extra =
+        call.tool === "list_schedule" ? { includePast: call.args?.includePast ?? false }
+        : call.tool === "list_notes" ? { keyword: call.args?.keyword?.trim() || undefined, limit: 20 }
+        : {};
+      const result = await runMcpReadTool(auth, project.id, call.tool, extra);
+      const rows = Array.isArray(result) ? result : (result as { items?: unknown[] })?.items ?? [];
+      if (!rows.length) {
+        const text = `（沒有${label}）`;
+        return { step: `查了${label}(0 筆)`, text, preview: { kind: "text", text } };
+      }
+      // 給 LLM 讀的一行一列；預覽同一次迭代（見本函式檔頭的鐵則）
+      const lines = rows.map((r, i) => `${i + 1}. ${compactRowLine(r)}`);
+      const text = lines.join("\n");
+      return {
+        step: `查了${label}(${rows.length} 筆)`,
+        text,
+        preview: { kind: "text", text },
+      };
+    } catch (err) {
+      // 工具內部的守衛（組隔離／ACL）拋出時，把人話回給模型讓它換方向，而不是整個問答失敗
+      const text = err instanceof TRPCError ? err.message : `查${label}時出了問題`;
+      return { step: `查${label}失敗`, text, preview: { kind: "text", text } };
+    }
   }
 
   // find_model
@@ -805,7 +893,11 @@ ${forceFinal
 - {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
 - {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
+- {"tool":"list_tasks","args":{}}：這個專案的人員任務與待核准（標題／狀態／負責人／期限）——被問到「誰卡住」「還有什麼要做」「等誰」時查這個
+- {"tool":"list_schedule","args":{}}：這個專案相關的行程與交付死線（含組層級；args 可加 {"includePast":true} 回顧過去）——被問到「什麼時候要交」「這週有什麼」時查這個
+- {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆）——被問到「上次討論的結論」「有沒有記錄」時查這個
 能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
+分鏡、生成統計與知識庫已經在 <專案現況> 裡，不要用工具重查；工具是用來看「人的事」（任務／行程／筆記）與明細（單一分鏡全文、素材清單、資料庫列）。
 例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script","script":"…"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
@@ -898,7 +990,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             if (toolCall.success) {
               await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${toolCall.data.tool}`, payload: toolCall.data });
               emit("lookup", `正在查${LOOKUP_LABEL[toolCall.data.tool] ?? "資料"}…`, { tool: toolCall.data.tool });
-              const r = await runLookupTool(project, scenes, readableDbs, toolCall.data);
+              const r = await runLookupTool(input.auth, project, scenes, readableDbs, toolCall.data);
               // preview 一併落庫：trace 是「實際運作紀錄」，只存一段給 LLM 讀的文字摘要，
               // 使用者事後回看仍然看不到工具究竟查到了什麼。
               await recordAiTraceEventSafely({

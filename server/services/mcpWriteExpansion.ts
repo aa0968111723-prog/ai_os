@@ -3,11 +3,12 @@
  * 與 mcpUploadGrant 同模式——工具定義 + handler 獨立，由 mcp.ts 掛上 TOOLS 與 runTool。
  * 一律重用既有 ACL（requireGroup / assertProjectEditable）、點數與審計，不另開後門。
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import { assertProjectEditable } from "./projectAcl";
+import { lockSceneOrder } from "./locks";
 import { worldviewSchema } from "../../shared/worldview";
 import { executeGenerationCommand } from "./generationCommand";
 import type { AuthState } from "./auth";
@@ -75,7 +76,7 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
   },
   {
     name: "update_scene",
-    description: "更新分鏡標題、提示詞、旁白或秒數。",
+    description: "更新分鏡標題、提示詞、旁白、環境音或剪輯（秒數與素材入出點）。durationSec 是整數 1-60 秒；秒以下的節奏微調用 trimStartMs／trimEndMs（毫秒，出點必須大於入點）。",
     inputSchema: {
       type: "object",
       properties: {
@@ -83,9 +84,24 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
         title: { type: "string" },
         prompt: { type: "string" },
         voiceover: { type: "string" },
+        ambience: { type: "string" },
         durationSec: { type: "number" },
+        trimStartMs: { type: "number" },
+        trimEndMs: { type: "number" },
       },
       required: ["sceneId"],
+    },
+  },
+  {
+    name: "reorder_scenes",
+    description: "重排專案分鏡順序。orderedSceneIds 依想要的新順序完整列出分鏡 id（可先用 list_scenes 取得）；清單漏掉的分鏡會依原相對順序補到尾端。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        orderedSceneIds: { type: "array", items: { type: "string" } },
+      },
+      required: ["projectId", "orderedSceneIds"],
     },
   },
   {
@@ -480,9 +496,74 @@ export async function runMcpWriteExpansion(
     if (typeof args.prompt === "string") patch.prompt = args.prompt.slice(0, MAX_PROMPT);
     if (typeof args.voiceover === "string") patch.voiceover = args.voiceover.slice(0, 500);
     if (typeof args.durationSec === "number") patch.durationSec = Math.min(60, Math.max(1, Math.trunc(args.durationSec)));
+    if (typeof args.ambience === "string") patch.ambience = args.ambience.slice(0, 500);
+    if (typeof args.trimStartMs === "number" || typeof args.trimEndMs === "number") {
+      // 出點必須大於入點——與 scenes.update 及代理的 update_scene step 同一條物理，
+      // 外部 MCP 客戶端不得享有更鬆的守門（否則時間軸會算出負長度的鏡）
+      const nextStart = typeof args.trimStartMs === "number" ? Math.max(0, Math.trunc(args.trimStartMs)) : scene.trimStartMs;
+      const nextEnd = typeof args.trimEndMs === "number" ? Math.max(1, Math.trunc(args.trimEndMs)) : scene.trimEndMs;
+      if (nextEnd != null && nextEnd <= nextStart) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `修剪出點（${nextEnd}ms）必須大於入點（${nextStart}ms）` });
+      }
+      if (typeof args.trimStartMs === "number") patch.trimStartMs = nextStart;
+      if (typeof args.trimEndMs === "number") patch.trimEndMs = nextEnd;
+    }
     if (Object.keys(patch).length === 0) return { sceneId: scene.id, title: scene.title };
     const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, sceneId)).returning();
     return { sceneId: updated.id, title: updated.title };
+  }
+
+  if (name === "reorder_scenes") {
+    const projectId = String(args.projectId ?? "");
+    const orderedSceneIds = Array.isArray(args.orderedSceneIds)
+      ? args.orderedSceneIds.filter((v): v is string => typeof v === "string")
+      : [];
+    if (orderedSceneIds.length < 2) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "orderedSceneIds 至少要有兩個分鏡 id" });
+    }
+    // 重複 id 直接拒絕——與 scenes.reorder 同一條：重複代表呼叫端狀態已壞，
+    // 寫入會產生跳號／覆蓋，不能默默吞掉
+    if (new Set(orderedSceneIds).size !== orderedSceneIds.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "orderedSceneIds 有重複的分鏡 id" });
+    }
+    const [reorderProject] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    if (!reorderProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+    requireGroup(auth, reorderProject.groupId);
+    await assertProjectEditable(auth, reorderProject);
+    // 交易＋序號鎖：與 scenes.reorder 同一套物理，否則重排中另一人拆分鏡，
+    // 新格會拿到與重排結果重疊的序號
+    const applied = await db.transaction(async (tx) => {
+      await lockSceneOrder(tx, projectId);
+      const rows = await tx
+        .select({ id: schema.scenes.id })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const own = new Set(rows.map((r) => r.id));
+      const listed = new Set(orderedSceneIds);
+      let idx = 0;
+      let matched = 0;
+      for (const id of orderedSceneIds) {
+        if (!own.has(id)) continue; // 別專案的 id 或已刪除的鏡：跳過，不越權也不失敗
+        await tx.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, id));
+        idx += 1;
+        matched += 1;
+      }
+      // 清單漏掉的既有分鏡依原相對順序補到尾端重新編號，不留與新序號重疊的舊值
+      for (const row of rows) {
+        if (listed.has(row.id)) continue;
+        await tx.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, row.id));
+        idx += 1;
+      }
+      return { matched, total: rows.length };
+    });
+    return {
+      projectId,
+      reordered: applied.matched,
+      total: applied.total,
+      // 呼叫端給了不屬於本專案的 id 時要說出來，不能讓它以為全部生效
+      ignored: orderedSceneIds.length - applied.matched,
+    };
   }
 
   if (name === "set_scene_visual") {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole } from "./assistant";
+import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, compactRowLine } from "./assistant";
 import { getModel } from "../../shared/models";
 
 /** 該類別已驗證的推薦日常主力（pickGenerateModel 找不到時的退回目標） */
@@ -114,5 +114,44 @@ describe("sceneFillRole（生成成品能填進分鏡的哪個格）", () => {
     const sfx = sceneFillRole(repByCategory("text-to-audio"));
     expect(tts).not.toBe(sfx);
     expect([tts, sfx]).toEqual(["narration", "ambience"]);
+  });
+});
+
+/**
+ * WP2：專案助手接上「人的事」。
+ *
+ * 分鏡／生成統計／知識庫早就注入在 <專案現況> 裡，助手真正看不到的是**人**——
+ * 誰卡住、什麼時候到期、討論記在哪。teamAssistant 早就有 list_tasks／group_blockers，
+ * 專案助手卻沒有，所以它答得出「有幾個生成在跑」，答不出「這個專案卡在誰身上」。
+ */
+describe("compactRowLine（MCP 工具列 → 給 LLM 的一行）", () => {
+  it("跳過 id 類欄位——模型拿 uuid 做不了任何事，只會拿去幻覺引用", () => {
+    const line = compactRowLine({ id: "11111111-1111-4111-8111-111111111111", planRunId: "x", title: "確認六個議題" });
+    expect(line).toBe("title:確認六個議題");
+    expect(line).not.toContain("1111");
+  });
+
+  it("跳過空值，不留下一排「key:」的雜訊", () => {
+    expect(compactRowLine({ title: "對稿", note: "", owner: null, endsAt: undefined })).toBe("title:對稿");
+  });
+
+  it("布林轉人話、日期截到分鐘——模型讀 ISO 全長只是浪費 token", () => {
+    const line = compactRowLine({ title: "交片", projectScoped: true, startsAt: new Date("2026-08-09T10:30:00Z") });
+    expect(line).toContain("projectScoped:是");
+    expect(line).toContain("startsAt:2026-08-09 10:30");
+  });
+
+  it("長值截斷、欄位數有上限——工具結果不得灌爆提示詞", () => {
+    const wide: Record<string, string> = {};
+    for (let i = 0; i < 20; i += 1) wide[`f${i}`] = "x".repeat(200);
+    const line = compactRowLine(wide);
+    expect(line.split("｜")).toHaveLength(8);
+    expect(line.length).toBeLessThan(600);
+  });
+
+  it("空物件與非物件都有安全輸出，不回 undefined 讓提示詞出現空洞", () => {
+    expect(compactRowLine({})).toBe("（空列）");
+    expect(compactRowLine(null)).toBe("（空）");
+    expect(compactRowLine("已完成")).toBe("已完成");
   });
 });

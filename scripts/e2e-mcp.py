@@ -164,7 +164,7 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","get_mod
     "request_upload_grant","get_upload_grant_status",
     # 寫入擴充（services/mcpWriteExpansion，由 mcp.ts 掛進 TOOLS）：知識庫／分鏡／世界觀／素材卡／Adobe
     "add_knowledge","update_knowledge",
-    "add_scene","update_scene","set_scene_visual","generate_into_scene","update_worldview",
+    "add_scene","update_scene","reorder_scenes","set_scene_visual","generate_into_scene","update_worldview",
     "rename_asset","set_asset_lock",
     "add_character","update_character",
     "add_scene_preset","update_scene_preset",
