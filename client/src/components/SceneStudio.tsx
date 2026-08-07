@@ -15,6 +15,12 @@ const MAX_PROMPT_CHARS = 4000;
 const MAX_VOICEOVER_CHARS = 2000;
 /** 逐格生成的預設模型（與 SceneList 同一支，換頁不會突然變別的模型） */
 const DEFAULT_REGEN_MODEL = "fal-ai/fast-lightning-sdxl";
+/** 環境音描述上限：與後端 scenes.update 的 ambience z.string().max(500) 同口徑 */
+const MAX_AMBIENCE_CHARS = 500;
+
+/** 逐格環境音的後端預設音效模型（scenes.generateAmbience 未帶 modelId 時用它）——前端只拿來顯示預估點數 */
+const DEFAULT_AMBIENCE_MODEL = "fal-ai/elevenlabs/sound-effects/v2";
+
 /** 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數 */
 const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
@@ -33,12 +39,13 @@ const VERSION_STATE: Record<SceneVersion["state"], { label: string; cls: PillSta
   failed: { label: "失敗", cls: "failed" },
 };
 
-type StudioTab = "regen" | "refine" | "voice" | "versions";
+type StudioTab = "regen" | "refine" | "voice" | "ambience" | "versions";
 
 const TABS: Array<{ id: StudioTab; label: string; icon: Parameters<typeof Icon>[0]["name"] }> = [
   { id: "refine", label: "修正這張", icon: "Palette" },
   { id: "regen", label: "重畫這格", icon: "Sparkles" },
   { id: "voice", label: "配音", icon: "Mic" },
+  { id: "ambience", label: "環境音", icon: "Music" },
   { id: "versions", label: "版本", icon: "Clock" },
 ];
 
@@ -55,13 +62,14 @@ function readStored(key: string, fallback: string, valid: (v: string) => boolean
 /**
  * 單格工作室：把「一格」單獨拉到全螢幕反覆修，不牽動其他分鏡。
  *
- * 四件事在同一個畫面裡（這是與分鏡列最大的差別——分鏡列一次看全片，這裡只看一格）：
+ * 五件事在同一個畫面裡（這是與分鏡列最大的差別——分鏡列一次看全片，這裡只看一格）：
  * 1. **修正這張**：以現用畫面（或任何一版）當底圖送圖生圖／圖生影片——保留構圖只改指定的地方。
  * 2. **重畫這格**：換模型從頭重畫，適合構圖本身要換掉。
  * 3. **配音**：編這一格的配音詞、生成中文旁白、就地試聽——單格的深改只有這一個入口。
- * 4. **版本**：這一格歷來每一次生成都在，含模型／指示／花了幾點；一鍵切回任何一版，可逆。
+ * 4. **環境音**：這一鏡聽得到什麼（鐘聲、蟲鳴）。與配音同流程但送音效模型，各自成軌。
+ * 5. **版本**：這一格歷來每一次生成都在，含模型／指示／花了幾點；一鍵切回任何一版，可逆。
  *
- * 現用是哪一版的單一真相是 scenes.assetId／narrationAssetId（伺服器端），
+ * 現用是哪一版的單一真相是 scenes.assetId／narrationAssetId／ambienceAssetId（伺服器端），
  * 本元件只呈現與觸發，不自己保存版本狀態。
  */
 export function SceneStudio({
@@ -96,6 +104,7 @@ export function SceneStudio({
   const [tab, setTab] = useState<StudioTab>("refine");
   const [promptDraft, setPromptDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [voiceDraft, setVoiceDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [ambienceDraft, setAmbienceDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [instruction, setInstruction] = useState("");
   /** 修正用的底圖；null＝這一格目前的畫面 */
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
@@ -122,6 +131,7 @@ export function SceneStudio({
   const list = useMemo(() => data?.versions ?? [], [data]);
   const visualVersions = useMemo(() => list.filter((v) => v.role === "visual"), [list]);
   const narrationVersions = useMemo(() => list.filter((v) => v.role === "narration"), [list]);
+  const ambienceVersions = useMemo(() => list.filter((v) => v.role === "ambience"), [list]);
   const currentVisual = visualVersions.find((v) => v.isCurrent);
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
@@ -140,6 +150,7 @@ export function SceneStudio({
   const regenRequestId = useRef(crypto.randomUUID());
   const refineRequestId = useRef(crypto.randomUUID());
   const voiceRequestId = useRef(crypto.randomUUID());
+  const ambienceRequestId = useRef(crypto.randomUUID());
   const regen = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { regenRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
   });
@@ -150,10 +161,15 @@ export function SceneStudio({
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
     onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); refresh(); },
   });
+  // 環境音描述另開一支 update，理由同配音詞：三種「儲存中／已儲存」回饋不能互相污染
+  const saveAmbience = trpc.scenes.update.useMutation({ onSuccess: () => { setAmbienceDraft(null); refresh(); } });
+  const generateAmbience = trpc.scenes.generateAmbience.useMutation({
+    onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
+  });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? saveVoice.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
@@ -161,6 +177,9 @@ export function SceneStudio({
   const voiceDirty = voiceDraft !== null && voiceDraft !== (data?.voiceover ?? "");
   /** 後端生成旁白吃的是「已儲存」的配音詞——估點與可否生成都以它為準 */
   const savedVoiceover = data?.voiceover ?? "";
+  const ambience = ambienceDraft ?? data?.ambience ?? "";
+  const ambienceDirty = ambienceDraft !== null && ambienceDraft !== (data?.ambience ?? "");
+  const savedAmbience = data?.ambience ?? "";
 
   const regenModel = getModel(regenModelId) ?? getModel(DEFAULT_REGEN_MODEL);
   const refineModel = getModel(refineModelId);
@@ -170,6 +189,11 @@ export function SceneStudio({
   const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: savedVoiceover.length }) : undefined;
   const currentNarration = narrationVersions.find((v) => v.isCurrent);
   const isVoicing = narrationVersions.some((v) => v.state === "generating") || generateVoiceover.isPending;
+  // 環境音走 text-to-audio（音效），估點口徑與配音同一支 estimatePoints
+  const ambienceModel = getModel(DEFAULT_AMBIENCE_MODEL);
+  const ambiencePoints = ambienceModel ? estimatePoints(ambienceModel, { promptChars: savedAmbience.length }) : undefined;
+  const currentAmbience = ambienceVersions.find((v) => v.isCurrent);
+  const isAmbiencing = ambienceVersions.some((v) => v.state === "generating") || generateAmbience.isPending;
 
   /** 修正的底圖：指定的那一版，或這一格現用畫面 */
   const baseVersion = baseAssetId ? list.find((v) => v.assetId === baseAssetId) : currentVisual;
@@ -571,6 +595,86 @@ export function SceneStudio({
                 {canEdit && (
                   <Hint style={{ marginTop: 6 }}>
                     重生不會覆蓋舊旁白：完成後成為新的一版，舊版仍留在「版本」裡。
+                  </Hint>
+                )}
+              </div>
+            )}
+
+            {/* 環境音：這一鏡聽得到什麼。與配音同一套流程，差別只有送去的是音效模型而非 TTS */}
+            {tab === "ambience" && (
+              <div role="tabpanel" id={`studio-panel-ambience-${sceneId}`} aria-labelledby={`studio-tab-ambience-${sceneId}`}>
+                {!canEdit ? (
+                  <Hint layer="always">你是檢視者，只能試聽環境音，不能修改描述。</Hint>
+                ) : (
+                  <>
+                    <label htmlFor={`studio-ambience-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
+                      這一鏡聽得到什麼
+                      <HelpTip text="描述聲音本身，不是台詞：例「遠處鐘聲，細微鳥鳴，風吹過樹葉」。存好後按「生成環境音」會用音效模型做出來。" />
+                    </label>
+                    <textarea
+                      id={`studio-ambience-${sceneId}`}
+                      value={ambience}
+                      disabled={saveAmbience.isPending}
+                      maxLength={MAX_AMBIENCE_CHARS}
+                      rows={3}
+                      placeholder="例：遠處鐘聲，細微鳥鳴，風吹過樹葉（可留白＝這鏡沒有環境音）"
+                      onChange={(e) => setAmbienceDraft(e.target.value)}
+                      style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Button size="sm" disabled={!ambienceDirty || saveAmbience.isPending} onClick={() => saveAmbience.mutate({ sceneId, ambience })}>
+                        {saveAmbience.isPending ? "儲存中…" : "儲存描述"}
+                      </Button>
+                      {ambienceDirty ? <Meta>尚未儲存</Meta> : saveAmbience.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                    </div>
+                    {savedAmbience.trim() === "" && <Hint layer="always">先填環境音描述並儲存，才能生成。</Hint>}
+                    {ambienceDirty && savedAmbience.trim() !== "" && (
+                      <Hint layer="always">描述還沒儲存——先按「儲存描述」，生成才會用新的。</Hint>
+                    )}
+                    <div style={{ marginTop: 8 }}>
+                      {isAmbiencing ? (
+                        <Button variant="primary" disabled>環境音生成中…</Button>
+                      ) : (
+                        <ConfirmButton
+                          triggerClassName="primary"
+                          disabled={savedAmbience.trim() === "" || ambienceDirty}
+                          triggerTitle="用已儲存的描述生成環境音，完成後就在下方試聽"
+                          message={`即將生成環境音（${ambienceModel?.label ?? "音效模型"}${ambiencePoints != null ? `，約 −${ambiencePoints} 點` : ""}）；失敗自動退點`}
+                          confirmLabel="確認生成"
+                          onConfirm={() => generateAmbience.mutate({ sceneId, clientRequestId: ambienceRequestId.current })}
+                        >
+                          {currentAmbience ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="RotateCw" size={14} /> 重生環境音{ambiencePoints != null ? `（約 −${ambiencePoints} 點）` : ""}
+                            </span>
+                          ) : (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="Music" size={14} /> 生成環境音{ambiencePoints != null ? `（約 −${ambiencePoints} 點）` : ""}
+                            </span>
+                          )}
+                        </ConfirmButton>
+                      )}
+                    </div>
+                  </>
+                )}
+                {currentAmbience?.assetUrl && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <AssetAudio
+                      controls
+                      preload="none"
+                      src={currentAmbience.assetUrl}
+                      aria-label={`第 ${sceneNumber} 鏡環境音試聽`}
+                      style={{ height: 32, flex: 1, minWidth: 180 }}
+                      fallbackLabel="環境音檔遺失——可用「重生環境音」補回"
+                    />
+                    <Button as="a" size="sm" variant="tonal" href={`/api/assets/${currentAmbience.assetId}/file`} download>
+                      <Icon name="Download" size={13} /> 下載環境音
+                    </Button>
+                  </div>
+                )}
+                {canEdit && (
+                  <Hint style={{ marginTop: 6 }}>
+                    環境音與旁白是各自獨立的兩軌，交付包裡也分開放（06_環境音），剪輯時可以各自調音量。
                   </Hint>
                 )}
               </div>

@@ -14,6 +14,7 @@ const updateMutate = vi.fn();
 const regenMutate = vi.fn();
 const refineMutate = vi.fn();
 const voiceMutate = vi.fn();
+const ambienceMutate = vi.fn();
 const setCurrentMutate = vi.fn();
 const invalidate = vi.fn();
 
@@ -26,6 +27,7 @@ vi.mock("../api", () => ({
       generateInto: { useMutation: () => ({ mutate: regenMutate, isPending: false, error: null }) },
       refine: { useMutation: () => ({ mutate: refineMutate, isPending: false, error: null }) },
       generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
+      generateAmbience: { useMutation: () => ({ mutate: ambienceMutate, isPending: false, error: null }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
     },
   },
@@ -50,18 +52,20 @@ function genRow(over: Partial<SceneVersionGenerationRow> & { generationId: strin
 }
 
 /** 伺服器回傳的形狀（scenes.versions）——用真的 buildSceneVersions 產生，避免 mock 與正式投影分岔 */
-function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null } = {}) {
+function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null; ambience?: string | null } = {}) {
   const rows = opts.rows ?? [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" })];
   const currentAssetId = opts.currentAssetId === undefined ? "asset-g1" : opts.currentAssetId;
-  const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null });
+  const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null, ambienceAssetId: null });
   return {
     sceneId: "s-1",
     projectId: "p-1",
     title: "海邊遠景",
     prompt: opts.prompt === undefined ? "黃昏的海邊" : opts.prompt,
     voiceover: opts.voiceover ?? null,
+    ambience: opts.ambience ?? null,
     assetId: currentAssetId,
     narrationAssetId: null,
+    ambienceAssetId: null,
     versions,
     summary: {
       visual: versions.filter((v) => v.role === "visual").length,
@@ -333,6 +337,47 @@ describe("SceneStudio", () => {
     const arg = voiceMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.sceneId).toBe("s-1");
     expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("環境音頁：還沒填描述→生成鈕鎖住並指路；填了要先儲存", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /環境音/ }));
+    expect(screen.getByText(/先填環境音描述並儲存/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^生成環境音/ })).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: /這一鏡聽得到什麼/ }), "遠處鐘聲");
+    expect(screen.getByRole("button", { name: /^生成環境音/ })).toBeDisabled(); // 未儲存＝後端讀不到
+    await user.click(screen.getByRole("button", { name: /儲存描述/ }));
+    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", ambience: "遠處鐘聲" });
+  });
+
+  it("描述已儲存：生成環境音帶冪等鍵，且送的是環境音而非配音", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ ambience: "遠處鐘聲，細微蟲鳴" }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /環境音/ }));
+    await user.click(screen.getByRole("button", { name: /^生成環境音/ }));
+    await user.click(screen.getByRole("button", { name: "確認生成" }));
+    expect(ambienceMutate).toHaveBeenCalledTimes(1);
+    // 兩條路各走各的：按環境音不該送出配音生成（會扣到錯的模型的點）
+    expect(voiceMutate).not.toHaveBeenCalled();
+    const arg = ambienceMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.sceneId).toBe("s-1");
+    expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("檢視者的環境音頁：唯讀，沒有編輯與生成鈕", async () => {
+    const user = userEvent.setup();
+    mountStudio({ canEdit: false });
+    await user.click(screen.getByRole("tab", { name: /環境音/ }));
+    expect(screen.getByText(/只能試聽環境音/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /這一鏡聽得到什麼/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^生成環境音/ })).not.toBeInTheDocument();
   });
 
   it("檢視者的配音頁：唯讀，沒有編輯與生成鈕", async () => {

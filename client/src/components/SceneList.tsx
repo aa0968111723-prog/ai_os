@@ -74,6 +74,12 @@ type Scene = {
   narrationUrl?: string | null;
   /** 該格若有進行中的「配音」生成，回 queued/running；無則 null。 */
   pendingVoiceStatus?: string | null;
+  /** 這一鏡聽得到什麼（環境音描述）；空＝還沒寫。 */
+  ambience?: string | null;
+  /** 已生成且未軟刪的環境音網址——判斷「這格有沒有環境音」的唯一依據（理由同 narrationUrl）。 */
+  ambienceUrl?: string | null;
+  /** 該格若有進行中的「環境音」生成，回 queued/running；無則 null。 */
+  pendingAmbienceStatus?: string | null;
   /** 逐鏡卡片綁定：這一鏡指定要用的設定卡（皆空＝沿用生成台勾選） */
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
@@ -247,6 +253,9 @@ function SceneRow({
   const isAwaitingApproval = s.pendingGenStatus === "awaiting_approval";
   // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
+  // 三軌各自獨立：環境音生成中不影響畫面與配音的按鈕狀態
+  const isAmbiencing = s.pendingAmbienceStatus === "queued" || s.pendingAmbienceStatus === "running";
+  const hasAmbienceText = (s.ambience ?? "").trim() !== "";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const hasPrompt = (s.prompt ?? "").trim() !== "";
   // 這一鏡實際會用的卡片（有綁用它、沒綁沿用生成台勾選）——預覽與出圖看的是同一份
@@ -321,6 +330,20 @@ function SceneRow({
           ) : hasVoiceover ? (
             <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="Mic" size={11} /> 旁白未生成
+            </Meta>
+          ) : null}
+          {/* 環境音狀態：與旁白同一套三態（生成中／已好／已寫描述但還沒生），空著就不佔位 */}
+          {isAmbiencing ? (
+            <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Music" size={11} /> 環境音生成中…
+            </Meta>
+          ) : s.ambienceUrl ? (
+            <Meta style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Music" size={11} /> 環境音 ✓
+            </Meta>
+          ) : hasAmbienceText ? (
+            <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Music" size={11} /> 環境音未生成
             </Meta>
           ) : null}
           {update.isPending ? (
