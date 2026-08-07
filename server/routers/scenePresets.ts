@@ -11,6 +11,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
+import { applyWithRevision } from "../services/revisionGuard";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildSceneAnchor } from "../services/cardAnchors";
@@ -110,6 +111,10 @@ export const scenePresetsRouter = router({
         palette: z.string().trim().min(1, "請填色板").max(SCENE_PALETTE_MAX).optional(),
         lighting: z.string().trim().max(SCENE_LIGHTING_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
+        /** 樂觀併發（shared/revision.ts）：載入時的 rev；不給＝維持舊行為 */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 載入時這些欄位的原值——rev 撞了但欄位沒撞時據此自動合併 */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -133,12 +138,21 @@ export const scenePresetsRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const [updated] = await db
-        .update(schema.scenePresets)
-        .set(patch)
-        .where(eq(schema.scenePresets.id, input.id))
-        .returning();
-      return updated;
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "scenePreset",
+        table: schema.scenePresets,
+        idColumn: schema.scenePresets.id,
+        revColumn: schema.scenePresets.rev,
+        row,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.id, input.id));
+          return fresh;
+        },
+      });
+      return { ...updated, merged };
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

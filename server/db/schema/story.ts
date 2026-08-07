@@ -26,6 +26,12 @@ export const stories = pgTable("stories", {
   lastParsedAt: timestamp("last_parsed_at"),
   /** 最近一次解析時內容的 sha256——內容沒變就跳過重解（Idempotency + Cost Control） */
   parsedContentHash: text("parsed_content_hash"),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   updatedBy: uuid("updated_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -44,6 +50,12 @@ export const storyScenes = pgTable("story_scenes", {
   /** 這場戲的地點 → scene_presets.id（邏輯關聯）；null＝未指定 */
   locationId: uuid("location_id"),
   /** 環境狀態（EnvironmentState）：天氣/時間/氛圍/備註——Shot 生成時繼承注入 */
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   environment: jsonb("environment").$type<EnvironmentState>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -64,6 +76,12 @@ export const characterLooks = pgTable("character_looks", {
   referenceAssetId: uuid("reference_asset_id"),
   /** 來源：manual＝手動建立、parse＝自動解析建立（供追溯與 Undo） */
   source: text("source").notNull().default("manual"),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({

@@ -12,6 +12,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
+import { applyWithRevision } from "../services/revisionGuard";
 
 export { MAX_PROJECT_PROPS };
 
@@ -173,6 +174,10 @@ export const propsRouter = router({
         notes: z.string().trim().max(PROP_NOTES_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
         ...ownerInput,
+        /** 樂觀併發（shared/revision.ts）：載入時的 rev；不給＝維持舊行為 */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 載入時這些欄位的原值——rev 撞了但欄位沒撞時據此自動合併 */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -203,8 +208,21 @@ export const propsRouter = router({
       }
       if (Object.keys(patch).length === 0) return row;
 
-      const [updated] = await db.update(schema.props).set(patch).where(eq(schema.props.id, input.id)).returning();
-      return updated;
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "prop",
+        table: schema.props,
+        idColumn: schema.props.id,
+        revColumn: schema.props.rev,
+        row,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.props).where(eq(schema.props.id, input.id));
+          return fresh;
+        },
+      });
+      return { ...updated, merged };
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

@@ -8,6 +8,8 @@ import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton, HelpTip } from "../../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui";
+import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
+import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import {
@@ -23,6 +25,8 @@ const SAVE_LABEL: Record<StorySaveState, string> = {
   saving: "儲存中…",
   saved: "已儲存 ✓",
   error: "儲存失敗，稍後會再試",
+  // 衝突不是失敗——你的字還在，只是需要你決定要哪一版。詳細說明在下面的衝突卡。
+  conflict: "夥伴也改了這份故事",
 };
 
 /** 確認卡（PE 計畫 §06）：只讓使用者處理 AI 真正不確定的 1–2 件事，不是 20 個核取方塊 */
@@ -132,12 +136,37 @@ export function StoryStage({
   const contentRef = useRef<string | null>(null);
   contentRef.current = content;
 
+  /**
+   * 樂觀併發（shared/revision.ts）。故事是**整份全文覆寫**、autosave 每 800ms 送一次，
+   * 是全站最容易吃掉別人整段內容的地方——沒有這兩個欄位，兩個人同時打字時
+   * 其中一人的整段文字每 800ms 就被覆蓋一次，而畫面上什麼都不會發生。
+   *
+   * baseline 記的是「我這份草稿是從哪一份內容長出來的」（最後一次收養／存成功的遠端內容），
+   * 伺服器據此判斷夥伴到底有沒有真的動過內文。
+   */
+  const revRef = useRef<number | undefined>(undefined);
+  const baselineRef = useRef<string | undefined>(undefined);
+  const [conflict, setConflict] = useState<RevisionConflict | null>(null);
+
   const save = trpc.story.save.useMutation({
-    onSuccess: () => {
+    onSuccess: (r) => {
       setSaveState("saved");
+      setConflict(null);
+      // 存成功＝我這份就是新的基準；下一次編輯以它為 baseline，rev 也往前
+      if (typeof r?.rev === "number") revRef.current = r.rev;
+      baselineRef.current = contentRef.current ?? baselineRef.current;
       utils.story.get.invalidate({ projectId });
     },
-    onError: () => setSaveState("error"),
+    onError: (err) => {
+      const c = conflictFromError(err);
+      if (c) {
+        // 夥伴也改了。**不覆蓋、不自動選邊**——把兩份都留著交給人決定。
+        setConflict(c);
+        setSaveState("conflict");
+        return;
+      }
+      setSaveState("error");
+    },
   });
   const saveRef = useRef(save.mutate);
   saveRef.current = save.mutate;
@@ -149,10 +178,20 @@ export function StoryStage({
   // typeof 守衛：測試環境以泛用 stub 餵 query，content 可能不是字串
   const rawRemote = storyQ.data?.story?.content;
   const remote = typeof rawRemote === "string" ? rawRemote : storyQ.data ? "" : null;
+  // rev 一律跟著查詢走（連衝突期間也是）：使用者按「重新套用我的修改」時，
+  // 要送的是**對方那一版**的 rev，否則必然再撞一次，而且是撞在同一個地方。
+  const rawRev = storyQ.data?.story?.rev;
+  useEffect(() => {
+    if (typeof rawRev === "number") revRef.current = rawRev;
+  }, [rawRev]);
   useEffect(() => {
     if (remote === null) return;
     setContent((local) => {
-      if (shouldAdoptRemote(saveStateRef.current, local, remote)) return remote;
+      if (shouldAdoptRemote(saveStateRef.current, local, remote)) {
+        // 收養＝我的草稿從此以這份內容為基準
+        baselineRef.current = remote;
+        return remote;
+      }
       return local;
     });
     // saveState 透過 ref 讀，避免它變動時重收養
@@ -162,11 +201,19 @@ export function StoryStage({
   // autosave：去抖 800ms；卸載時 flush（未存的內容不可默默丟掉）
   useEffect(() => {
     if (content === null || remote === null || content === remote) return;
+    // 已經撞上衝突就停掉 autosave：再自動重送只會每 800 毫秒撞一次同一面牆，
+    // 而使用者需要的是先看到「發生什麼事」並做決定。
+    if (saveStateRef.current === "conflict") return;
     setSaveState("dirty");
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setSaveState("saving");
-      saveRef.current({ projectId, content });
+      saveRef.current({
+        projectId,
+        content,
+        expectedRev: revRef.current,
+        baseline: baselineRef.current,
+      });
     }, STORY_AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -257,6 +304,34 @@ export function StoryStage({
           </Button>
         </div>
         {!canEdit && <Hint style={{ margin: "4px 0 8px" }}>檢視者唯讀——故事可以看，不能改。</Hint>}
+        {/* 併發衝突：兩份內容都還在，由使用者決定要哪一版。
+            autosave 已在 conflict 狀態下停住，不會一邊問一邊繼續覆蓋。 */}
+        {conflict && (
+          <ConflictNotice
+            conflict={conflict}
+            reapplying={save.isPending}
+            onViewLatest={() => {
+              // 採用夥伴那一版：草稿換成他的內容，基準也跟著換，autosave 隨即恢復正常
+              const theirs = String((conflict.currentData as { content?: unknown }).content ?? "");
+              setContent(theirs);
+              baselineRef.current = theirs;
+              revRef.current = conflict.currentRev;
+              setConflict(null);
+              setSaveState("saved");
+            }}
+            onReapply={() => {
+              // 我這一版勝出：以**對方那一版的 rev** 重送，仍然過一次併發檢查——
+              // 若這期間又有第三個人改了，會再撞一次，而那是對的。
+              const mine = contentRef.current;
+              if (mine === null) return;
+              revRef.current = conflict.currentRev;
+              baselineRef.current = String((conflict.currentData as { content?: unknown }).content ?? "");
+              setConflict(null);
+              setSaveState("saving");
+              save.mutate({ projectId, content: mine, expectedRev: conflict.currentRev, baseline: baselineRef.current });
+            }}
+          />
+        )}
         {showVersions && (
           <Card variant="quiet" style={{ margin: "8px 0" }}>
             <Meta as="p" style={{ margin: "0 0 6px" }}>故事版本（自動快照；還原前會先保存現況）</Meta>
