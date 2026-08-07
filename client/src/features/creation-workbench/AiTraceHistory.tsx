@@ -8,6 +8,7 @@ const MODE_LABEL: Record<string, string> = {
   generate: "直接生成",
   workflow: "製作範本",
   agent_plan: "多步計畫",
+  story_parse: "故事解析",
   quality_review: "品質檢查",
 };
 

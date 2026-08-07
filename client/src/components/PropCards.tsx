@@ -17,6 +17,7 @@ import { CharCount, ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
 import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { EntityImpactHint } from "./EntityImpactHint";
 
 export { MAX_GENERATE_PROPS };
 
@@ -216,6 +217,7 @@ export function PropCards({
                     appearance={p.appearance}
                     notes={p.notes ?? ""}
                     projectId={projectId}
+                    entityId={p.id}
                     reference={
                       p.referenceAssetId && p.referenceUrl
                         ? { id: p.referenceAssetId, url: p.referenceUrl, title: "素材參考圖" }
@@ -515,6 +517,7 @@ function PropTextEditor({
   appearance,
   notes,
   projectId,
+  entityId,
   reference,
   owner,
   pending,
@@ -527,6 +530,8 @@ function PropTextEditor({
   notes: string;
   /** 參考圖挑選器要用（上傳／從本專案素材庫挑） */
   projectId: string;
+  /** 這張卡的 id：查「改了會影響哪幾鏡」；新增中的卡還沒有 id，就不顯示影響 */
+  entityId?: string;
   /** 目前綁定的參考圖；null＝還沒綁 */
   reference: ReferenceImage | null;
   /** 目前歸屬；null＝獨立物件 */
@@ -567,6 +572,7 @@ function PropTextEditor({
       <OwnerPicker projectId={projectId} value={own} onChange={setOwn} disabled={pending} labelStyle={editLabel} />
       <label style={editLabel}>素材參考圖（選填：上傳或從素材庫選）</label>
       <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
+      {entityId && <EntityImpactHint projectId={projectId} kind="prop" entityId={entityId} />}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button
           type="button"

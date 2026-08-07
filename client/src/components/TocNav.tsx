@@ -11,15 +11,22 @@ import { Icon } from "./Icon";
 export type TocItem = { id: string; label: string; badge?: string };
 
 /**
- * 預設三幕（WB-06 + C3 #402）：與 ProjectPage StageHead 對齊。
- * 用語固定「定調 → 創作 → 交付」，避免 ① 叫上下文、② 叫創作中心、步驟列又另一套。
+ * 預設四段（Story-first PE 計畫 §03）：與 ProjectPage StageHead 對齊。
+ * 用語固定「故事 → 分鏡 → 製作 → 成片」——故事是來源、分鏡是中心、製作是生成、成片是交付。
+ * 「定調」不再是必經頁面：其能力拆成自動解析＋專案設定（二層）＋分鏡繼承。
  * 特殊頁面可用 items props 覆蓋；勿把 #sec-studio / #sec-workflow 等模式錨點列進目錄。
  */
 export const DEFAULT_ITEMS: TocItem[] = [
-  { id: "stage-context", label: "① 定調" },
-  { id: "stage-create", label: "② 創作" },
-  { id: "stage-deliver", label: "③ 交付" },
+  { id: "stage-story", label: "① 故事" },
+  { id: "stage-board", label: "② 分鏡" },
+  { id: "stage-create", label: "③ 製作" },
+  { id: "stage-deliver", label: "④ 成片" },
 ];
+
+/** 舊深連結相容：重構前的「① 定調」錨點導到「① 故事」（外部書籤／推播裡的舊 URL 不能斷） */
+export const LEGACY_STAGE_ALIAS: Record<string, string> = {
+  "stage-context": "stage-story",
+};
 
 /** 尊重使用者的減少動效偏好：開啟時退回瞬間捲動 */
 function reducedMotion() {
@@ -74,7 +81,8 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
 
   // 深連結：帶 #stage-xxx 開頁時自動捲到該階段（內容掛載晚於瀏覽器原生錨點時機，這裡補跳一次）
   useEffect(() => {
-    const id = window.location.hash.slice(1);
+    const raw = window.location.hash.slice(1);
+    const id = LEGACY_STAGE_ALIAS[raw] ?? raw;
     if (!id || !items.some((it) => it.id === id)) return;
     const t = window.setTimeout(() => {
       document.getElementById(id)?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });

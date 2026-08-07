@@ -38,6 +38,29 @@ describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
     });
   });
 
+  it("把 direct_shot 畸形工具呼叫救回（逐鏡鏡頭語言）", () => {
+    const r = coerceActionToolCall({
+      tool: "direct_shot",
+      args: { sceneNo: 3, camera: { shotSize: "特寫", movement: "緩推" }, performance: { emotion: "若有所思" } },
+    });
+    expect(r?.actions?.[0]).toMatchObject({
+      type: "direct_shot",
+      sceneNo: 3,
+      camera: { shotSize: "特寫", movement: "緩推" },
+      performance: { emotion: "若有所思" },
+    });
+  });
+
+  it("direct_shot 只帶一個欄位也合法（單點指令是常態）", () => {
+    const r = coerceActionToolCall({ tool: "direct_shot", sceneNo: 1, camera: { shotSize: "大特寫" } });
+    expect(r?.actions?.[0]).toMatchObject({ type: "direct_shot", sceneNo: 1, camera: { shotSize: "大特寫" } });
+  });
+
+  it("direct_shot 的 sceneNo 不合法（0／負數）→ 回 null", () => {
+    expect(coerceActionToolCall({ tool: "direct_shot", sceneNo: 0, camera: { shotSize: "特寫" } })).toBeNull();
+    expect(coerceActionToolCall({ tool: "direct_shot", sceneNo: -2, camera: { shotSize: "特寫" } })).toBeNull();
+  });
+
   it("真正的唯讀工具（list_assets）不當動作救回 → 回 null", () => {
     expect(coerceActionToolCall({ tool: "list_assets", args: { kind: "image" } })).toBeNull();
   });

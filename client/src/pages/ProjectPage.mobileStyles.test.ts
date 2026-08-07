@@ -23,7 +23,7 @@ describe("mobile project-page contract (batch E)", () => {
     const listRule = declarations.slice(
       declarations.indexOf("#onboard-worldview", declarations.indexOf("(max-width: 820px)")),
     );
-    for (const id of ["#stage-context", "#stage-create", "#stage-deliver"]) {
+    for (const id of ["#stage-story", "#stage-board", "#stage-create", "#stage-deliver"]) {
       expect(listRule.slice(0, 600)).toContain(id);
     }
   });

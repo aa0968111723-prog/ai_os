@@ -109,19 +109,41 @@ describe("ProjectPage workbench contract (WB-06)", () => {
   });
 
   /**
-   * C3 (#402)：空專案三步＝定調→創作→交付；範例一鍵去創作台；Stage 用語對齊 TocNav。
+   * C3（Story-first PE 計畫）：空專案四步＝故事→分鏡→製作→成片；範例一鍵去創作台；
+   * Stage 用語對齊 TocNav 四段。「定調」不再是階段——其資料面收進專案設定二層。
    */
-  it("C3 empty journey: three onboard stages, apply-and-studio, stage titles 定調/創作/交付", () => {
-    expect(src).toMatch(/label: "① 定調"/);
-    expect(src).toMatch(/label: "② 創作"/);
-    expect(src).toMatch(/label: "③ 交付"/);
+  it("C3 empty journey: four onboard stages, apply-and-studio, stage titles 故事/分鏡/製作/成片", () => {
+    expect(src).toMatch(/label: "① 故事"/);
+    expect(src).toMatch(/label: "② 分鏡"/);
+    expect(src).toMatch(/label: "③ 製作"/);
+    expect(src).toMatch(/label: "④ 成片"/);
     // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）
     expect(src).toMatch(/onApplyAndGoStudio/);
     expect(src).toMatch(/revealWorkbenchAnchor\("#sec-studio"/);
-    // StageHead titles（與 TocNav 定調→創作→交付 同口徑）
-    expect(src).toMatch(/title="定調"/);
-    expect(src).toMatch(/title="創作"/);
-    expect(src).toMatch(/title="交付"/);
+    // StageHead titles（與 TocNav 故事→分鏡→製作→成片 同口徑）
+    expect(src).toMatch(/title="故事"/);
+    expect(src).toMatch(/title="分鏡"/);
+    expect(src).toMatch(/title="製作"/);
+    expect(src).toMatch(/title="成片"/);
+    // 舊「定調」不得再以階段身分出現
+    expect(src).not.toMatch(/label: "① 定調"/);
+    expect(src).not.toMatch(/id="stage-context"/);
+  });
+
+  /**
+   * Story-first 骨架：① 故事＝StoryStage、② 分鏡＝StoryboardStage；
+   * 舊定調資料面（世界觀／定裝／知識素材／回收桶）整包住進專案設定二層 sheet。
+   */
+  it("mounts StoryStage / StoryboardStage and houses the old tone panels in the settings sheet", () => {
+    expect(src).toMatch(/from ["'].*story-workspace\/StoryStage["']/);
+    expect(src).toMatch(/<StoryStage\b/);
+    expect(src).toMatch(/from ["'].*storyboard-center\/StoryboardStage["']/);
+    expect(src).toMatch(/<StoryboardStage\b/);
+    expect(src).toMatch(/className="psettings-sheet"/);
+    expect(src).toMatch(/aria-label="專案設定"/);
+    // 舊書籤 #stage-context 正規化到 #stage-story（深連結不能斷）
+    expect(src).toMatch(/#stage-context/);
+    expect(src).toMatch(/#stage-story/);
   });
 
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {

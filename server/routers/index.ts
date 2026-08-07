@@ -6,6 +6,8 @@ import { projectsRouter } from "./projects";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 import { scenesRouter } from "./scenes";
+import { storyRouter } from "./story";
+import { characterLooksRouter } from "./characterLooks";
 import { quotaRouter } from "./quota";
 import { directorRouter } from "./director";
 import { feedbackRouter } from "./feedback";
@@ -54,6 +56,8 @@ export const appRouter = router({
   generation: generationRouter,
   messages: messagesRouter,
   scenes: scenesRouter,
+  story: storyRouter,
+  characterLooks: characterLooksRouter,
   quota: quotaRouter,
   director: directorRouter,
   feedback: feedbackRouter,

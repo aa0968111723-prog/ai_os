@@ -52,7 +52,7 @@ buildTeamAskContext（組級視野）、runTeamTool（9 唯讀工具）、resolv
 
 ## FILES CHANGED（27 檔，+2348/−351）
 
-新增：`server/services/assistantCore.ts`（＋test）、`server/routers/globalAssistant.ts`（＋test）、`server/services/aiSiteTrace.ts`、`server/db/schema/aiSiteTrace.ts`、`drizzle/0049_ai_site_trace.sql`、`scripts/e2e-global-assistant.py`、`client/src/app/components/GlobalAssistantSheet.test.tsx`、docs×3。
+新增：`server/services/assistantCore.ts`（＋test）、`server/routers/globalAssistant.ts`（＋test）、`server/services/aiSiteTrace.ts`、`server/db/schema/aiSiteTrace.ts`、`drizzle/0050_ai_site_trace.sql`、`scripts/e2e-global-assistant.py`、`client/src/app/components/GlobalAssistantSheet.test.tsx`、docs×3。
 修改：`teamAssistant.ts`（buildTeamAskContext 抽取＋export，行為不變）、`server/index.ts`（SSE 端點）、`routers/index.ts`（註冊）、`rateLimit.ts`（scope）、`auditWording.ts`、`migrationRevisions.ts`、`migrationState.test.ts`（bridge 計數＋註記）、`GlobalAssistantSheet.tsx`、`AICreativeCopilot.tsx`、`api.ts`（AppRouter type re-export）、`styles.css`、測試 mock×3、`drizzle/meta/_journal.json`。
 
 ## DATABASE CHANGES
