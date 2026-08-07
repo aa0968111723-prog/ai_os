@@ -49,7 +49,7 @@ import {
   selectAgentDagStep,
   stopPendingDagSteps,
   usesDagExecution,
-} from "./agentDag";
+} from "../../shared/agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { resolveModel } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";

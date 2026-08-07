@@ -11,7 +11,7 @@ import {
   evaluateAgentDag,
   stopPendingDagSteps,
   type AgentDagStep,
-} from "./agentDag";
+} from "../../shared/agentDag";
 
 export type ProjectTaskRow = typeof schema.projectTasks.$inferSelect;
 export type ProjectTaskStatus = ProjectTaskRow["status"];

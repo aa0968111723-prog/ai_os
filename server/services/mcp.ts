@@ -654,7 +654,16 @@ function externalAssetUrl(url: string | null): string | null {
   return url;
 }
 
-async function callTool(auth: AuthState, scope: McpScope, name: string, args: Record<string, unknown>): Promise<unknown> {
+/**
+ * 工具呼叫的唯一入口（含唯讀金鑰守衛與審計）。
+ *
+ * export 的用意：站內助手目前只有自己那 5 個唯讀工具（server/routers/assistant.ts），
+ * 拿不到這裡的 71 個——同一套系統裡，外接客戶端反而比站內助手看得到更多專案資料。
+ * 要讓助手共用這批工具，就得從這個已經帶守衛與審計的入口進來，而不是另開一條繞過
+ * scopeDeniedReason／recordMcpAudit 的旁路。故對外可見的是 callTool 而非 runTool：
+ * runTool 沒有審計，任何呼叫端都不該直接碰。
+ */
+export async function callTool(auth: AuthState, scope: McpScope, name: string, args: Record<string, unknown>): Promise<unknown> {
   // 每次工具呼叫（含失敗）都落審計——與 tRPC mutation 同一口徑；讀寫工具一律記（MCP 量小、
   // 每筆都是跨介面操作，可追溯性優先於「query 不記」的省量取捨）。actorId＝金鑰擁有者本人。
   try {
