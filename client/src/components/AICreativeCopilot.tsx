@@ -52,7 +52,7 @@ const QUICK_PROMPTS: ReadonlyArray<{ icon: IconName; label: string; prompt: stri
 ];
 
 /** 已解析動作 → runSiteAction 輸入（逐型別挑欄位；label 等顯示欄位不上送） */
-function toSiteActionInput(a: SiteAction) {
+export function toSiteActionInput(a: SiteAction) {
   switch (a.type) {
     case "create_project":
       return { type: a.type, groupId: a.groupId, title: a.title, kind: a.kind, platform: a.platform } as const;
@@ -68,7 +68,7 @@ function toSiteActionInput(a: SiteAction) {
 }
 
 /** 完成後「前往看結果」的落點（沒有合適落點就不給連結） */
-function siteActionDoneLink(a: SiteAction, result: { type: string; projectId?: string }): { href: string; label: string } | null {
+export function siteActionDoneLink(a: SiteAction, result: { type: string; projectId?: string }): { href: string; label: string } | null {
   if (a.type === "create_project" && result.projectId) return { href: `/p/${result.projectId}`, label: "前往專案" };
   if (a.type === "add_schedule_item" || a.type === "add_note") return { href: "/planner", label: "查看筆記排程" };
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
