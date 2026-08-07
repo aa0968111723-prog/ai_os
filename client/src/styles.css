@@ -5654,7 +5654,9 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     background: rgba(28, 25, 23, .38);
   }
   .menu-surface.is-sheet {
-    position: fixed; z-index: 47; inset-inline: 0; top: auto; bottom: 0;
+    /* bottom 吃 --kb-inset：sheet 裡有輸入框時（全站 AI 助手）鍵盤彈出會直接蓋住
+       輸入列，與 .modal-scrim／專案留言 sheet 同一條契約，不可只有它漏掉 */
+    position: fixed; z-index: 47; inset-inline: 0; top: auto; bottom: var(--kb-inset, 0px);
     left: 0; right: 0; max-width: none;
     border: 1px solid var(--border-soft); border-bottom: 0;
     border-radius: 22px 22px 0 0;
@@ -5670,6 +5672,8 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     border-radius: 999px; background: var(--border-strong);
   }
   .menu-surface.is-sheet .menu-item { min-height: 48px; }
+  /* 全站 AI 助手：對話內容要吃滿 sheet 高度，輸入列才不會被推出視窗 */
+  .menu-surface.is-sheet.global-assistant { max-height: calc(100dvh - 48px - var(--safe-top)); }
   /* sheet 內的多行項目（例如待辦通知逐案列）撐開後仍要留住 48px 的觸控高度 */
   .menu-surface.is-sheet .menu-item { padding-block: 10px; }
 
@@ -7247,3 +7251,12 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   color: var(--gold-ink);
   border-color: var(--gold);
 }
+
+/* ── 全站 AI 助手（底部導覽中央球開啟） ── */
+.global-assistant__head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 2px 2px 8px;
+}
+/* 桌機：球不存在（.mobile-nav 在 >820 隱藏），但 MenuSurface 的 stretch 幾何仍需要
+   一個合理下限，免得對話框窄到每行兩個字 */
+.global-assistant { min-width: min(420px, calc(100vw - 32px)); }

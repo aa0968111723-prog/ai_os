@@ -260,7 +260,7 @@ export function AppShell() {
                 />
               </Suspense>
             </main>
-            <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} />
+            <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} groupId={activeGroupId} />
           </>
         ) : (
           <Suspense fallback={<RouteFallback />}>

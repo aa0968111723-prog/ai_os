@@ -129,14 +129,14 @@
    * 決策表指定「底部 tab bar＋中央 Orb FAB」。中央分頁本來就是「AI 工作」，
    * 以 CSS 把它抬升成 board 漸層圓球（不動 DOM/導航行為，與 PR #465/#471 零衝突）。
    * 四態由 html[data-orb-state] 驅動（lib/orbState.ts），動畫只用 transform/opacity。 */
-  .mobile-nav > a:nth-child(3) {
+  .mobile-nav__orb {
     position: relative;
   }
-  .mobile-nav > a:nth-child(3) .mobile-nav__icon-wrap,
-  .mobile-nav > a:nth-child(3) > svg {
+  .mobile-nav__orb .mobile-nav__icon-wrap,
+  .mobile-nav__orb > svg {
     /* 圖示落在球心：把原 icon 包進球 */
   }
-  .mobile-nav > a:nth-child(3)::before {
+  .mobile-nav__orb::before {
     content: "";
     position: absolute;
     top: -18px;
@@ -154,26 +154,26 @@
       inset 0 -2px 5px rgba(22, 34, 59, 0.12);
     z-index: 0;
   }
-  .mobile-nav > a:nth-child(3) > * { position: relative; z-index: 1; }
-  .mobile-nav > a:nth-child(3) svg {
+  .mobile-nav__orb > * { position: relative; z-index: 1; }
+  .mobile-nav__orb svg {
     color: #fff;
     margin-top: -14px;
     filter: drop-shadow(0 1px 1.5px rgba(22, 34, 59, 0.35));
   }
-  .mobile-nav > a:nth-child(3) span:last-child { margin-top: 8px; }
-  .mobile-nav > a:nth-child(3).active { background: transparent; }
+  .mobile-nav__orb span:last-child { margin-top: 8px; }
+  .mobile-nav__orb.active { background: transparent; }
 
   /* 四態（html[data-orb-state]）：idle=呼吸、thinking=脈動、speaking=雙波、error=搖頭轉紅 */
-  html[data-orb-state="idle"] .mobile-nav > a:nth-child(3)::before {
+  html[data-orb-state="idle"] .mobile-nav__orb::before {
     animation: m-orb-breathe 3.2s var(--m-ease) infinite;
   }
-  html[data-orb-state="thinking"] .mobile-nav > a:nth-child(3)::before {
+  html[data-orb-state="thinking"] .mobile-nav__orb::before {
     animation: m-orb-pulse 0.9s var(--m-ease) infinite;
   }
-  html[data-orb-state="speaking"] .mobile-nav > a:nth-child(3)::before {
+  html[data-orb-state="speaking"] .mobile-nav__orb::before {
     animation: m-orb-speak 0.55s var(--m-ease) infinite alternate;
   }
-  html[data-orb-state="error"] .mobile-nav > a:nth-child(3)::before {
+  html[data-orb-state="error"] .mobile-nav__orb::before {
     background:
       radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.5), transparent 42%),
       linear-gradient(140deg, #d24545, var(--m-coral));
@@ -198,7 +198,7 @@
   }
   /* 尊重減少動效：全部停格（styles.css 的全域 kill-switch 亦會涵蓋，這裡雙保險） */
   @media (prefers-reduced-motion: reduce) {
-    html[data-orb-state] .mobile-nav > a:nth-child(3)::before { animation: none; }
+    html[data-orb-state] .mobile-nav__orb::before { animation: none; }
   }
 }
 
