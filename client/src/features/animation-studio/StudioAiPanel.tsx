@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+// 欄位上限的單一真相在 shared——在元件裡再寫一次數字，遲早有一邊被調大變成後門
+import { SCRIPT_AMBIENCE_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "@shared/storyboardScript";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Card, Hint, Meta } from "../../components/ui";
@@ -40,22 +42,31 @@ export function StudioAiPanel({
   const utils = trpc.useUtils();
   const [prompt, setPrompt] = useState(shot?.prompt ?? "");
   const [voiceover, setVoiceover] = useState(shot?.voiceover ?? "");
+  const [ambience, setAmbience] = useState(shot?.ambience ?? "");
   const [title, setTitle] = useState(shot?.title ?? "");
   const [durationSec, setDurationSec] = useState(shot?.durationSec ?? 5);
   const [saveState, setSaveState] = useState<"idle" | "uploading" | "done">("idle");
   const [saveError, setSaveError] = useState("");
   const [rawScript, setRawScript] = useState<string | null>(null);
 
-  // 切換分鏡時把欄位換成那一鏡的內容（本地編輯中的草稿刻意丟棄——
-  // 保留它會讓人在第 3 鏡看到第 2 鏡沒存的字，比丟掉更難解釋）
+  /**
+   * 切換分鏡時把欄位換成那一鏡的內容（本地編輯中的草稿刻意丟棄——
+   * 保留它會讓人在第 3 鏡看到第 2 鏡沒存的字，比丟掉更難解釋）。
+   *
+   * 依賴只跟 `shot?.id`，不跟各欄位的伺服器值：同一列的環境音／旁白在別處
+   * （分鏡表的單格工作室）也改得動，跟著伺服器值重設等於「別人存檔時，
+   * 你在這裡打到一半的提示詞會被清掉」。切鏡才重設，就是這段註解原本的意圖。
+   */
   useEffect(() => {
     setPrompt(shot?.prompt ?? "");
     setVoiceover(shot?.voiceover ?? "");
+    setAmbience(shot?.ambience ?? "");
     setTitle(shot?.title ?? "");
     setDurationSec(shot?.durationSec ?? 5);
     setSaveState("idle");
     setSaveError("");
-  }, [shot?.id, shot?.prompt, shot?.voiceover, shot?.title, shot?.durationSec]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shot?.id]);
 
   const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
 
@@ -97,7 +108,11 @@ export function StudioAiPanel({
 
   const dirty =
     !!shot &&
-    (title !== shot.title || prompt !== (shot.prompt ?? "") || voiceover !== (shot.voiceover ?? "") || durationSec !== shot.durationSec);
+    (title !== shot.title ||
+      prompt !== (shot.prompt ?? "") ||
+      voiceover !== (shot.voiceover ?? "") ||
+      ambience !== (shot.ambience ?? "") ||
+      durationSec !== shot.durationSec);
 
   return (
     <div className="studio-ai" data-mode={layout.mode}>
@@ -113,7 +128,7 @@ export function StudioAiPanel({
         ) : (
           <>
             <label htmlFor="studio-shot-title">標題</label>
-            <input id="studio-shot-title" value={title} maxLength={60} disabled={!canEdit} onChange={(e) => setTitle(e.target.value)} />
+            <input id="studio-shot-title" value={title} maxLength={SCRIPT_TITLE_MAX} disabled={!canEdit} onChange={(e) => setTitle(e.target.value)} />
 
             <label htmlFor="studio-shot-duration">秒數</label>
             <input
@@ -141,16 +156,34 @@ export function StudioAiPanel({
               id="studio-shot-voiceover"
               rows={2}
               value={voiceover}
+              maxLength={SCRIPT_VOICEOVER_MAX}
               disabled={!canEdit}
               onChange={(e) => setVoiceover(e.target.value)}
             />
+
+            {/* 環境音：分鏡的第三軌（畫面／旁白／環境音）。這裡只編描述——
+                真的要生成音效請到分鏡表的單格工作室「環境音」分頁，
+                那裡有模型選擇、預估點數與試聽，不在創作室重做一套。 */}
+            <label htmlFor="studio-shot-ambience">環境音（這一鏡聽得到什麼）</label>
+            <textarea
+              id="studio-shot-ambience"
+              rows={2}
+              value={ambience}
+              maxLength={SCRIPT_AMBIENCE_MAX}
+              disabled={!canEdit}
+              placeholder="例：遠處鐘聲，細微鳥鳴，風吹過樹葉（可留白＝這鏡沒有環境音）"
+              onChange={(e) => setAmbience(e.target.value)}
+            />
+            <Hint>寫的是聲音本身、不是台詞。存好之後到單格工作室的「環境音」分頁就能生成。</Hint>
 
             <div className="studio-ai__actions">
               <Button
                 size="sm"
                 variant="primary"
                 disabled={!canEdit || !dirty || update.isPending}
-                onClick={() => update.mutate({ sceneId: shot.id, title: title.trim() || shot.title, durationSec, prompt, voiceover })}
+                onClick={() =>
+                  update.mutate({ sceneId: shot.id, title: title.trim() || shot.title, durationSec, prompt, voiceover, ambience })
+                }
               >
                 {update.isPending ? "儲存中…" : dirty ? "儲存這一鏡" : "已儲存 ✓"}
               </Button>

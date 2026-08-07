@@ -14,6 +14,8 @@ export interface StudioShot {
   assetKind?: string | null;
   prompt?: string | null;
   voiceover?: string | null;
+  /** 環境音描述（這一鏡聽得到什麼）；listByProject 已回這一欄 */
+  ambience?: string | null;
 }
 
 export interface ShotStripProps {

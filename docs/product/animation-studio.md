@@ -114,6 +114,7 @@
 | --- | --- |
 | 讀分鏡 | `scenes.listByProject` |
 | 加一鏡／重排／改欄位 | `scenes.addDraft`／`scenes.move`／`scenes.reorder`／`scenes.update` |
+| 編這一鏡的欄位 | 標題／秒數／畫面提示詞／旁白／環境音（上限一律引用 `@shared/storyboardScript`） |
 | 白板存成這一鏡的畫面 | `/api/upload`（進素材庫）→ `scenes.setVisualFromAsset` |
 | AI 給畫面建議 | `director.suggest`（可填進這一鏡或另存成新鏡） |
 | 貼腳本拆整份分鏡 | `director.splitScript` |
@@ -146,6 +147,7 @@
 | `studioLayout.test.ts` | 輕量版真的降成本，斷點與全站一致 |
 | `useBoardSession.test.ts` | 切鏡不覆蓋、離開補存、上限生效 |
 | `ShotStrip.test.tsx` / `BrushShelf.test.tsx` | 順序操作與收錄流程 |
+| `StudioAiPanel.test.tsx` | 欄位帶入、dirty 判斷、送出的 payload 不漏欄位 |
 | `studio.styles.contract.test.ts` | 底部留白契約、觸控 44px、遮罩、不進主 CSS |
 
 ## 已知界線
@@ -157,3 +159,5 @@
 - 存檔用 localStorage（同步、全網域共用約 5MB）。若之後要支援更大的畫，正解是換 IndexedDB
   （非同步、配額大得多），存取層已收斂在 `studioStorage.ts`，換掉不影響呼叫端。
 - 匯出 PNG 只含紙面與筆畫，**不含**描圖底稿——那張是拿來描的，烘進去會分不清哪張是手稿。
+- 環境音在這裡**只編描述、不生成**。生成要挑音效模型、預估點數、試聽，那是分鏡表
+  單格工作室「環境音」分頁的職責，不在創作室重做一套。

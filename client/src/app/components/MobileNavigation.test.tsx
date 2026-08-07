@@ -32,7 +32,7 @@ describe("MobileNavigation", () => {
     await user.click(screen.getByRole("button", { name: "更多" }));
 
     // 面板收全站頁面：使用者選單在手機上不再重複列一次，因此這裡必須齊全
-    for (const key of ["community", "databases", "chat", "help", "models", "mcp", "integrations", "downloads"] as const) {
+    for (const key of ["studio", "community", "databases", "chat", "help", "models", "mcp", "integrations", "downloads"] as const) {
       const d = DESTINATIONS[key];
       expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
     }
