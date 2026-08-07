@@ -53,6 +53,35 @@ export type AddDataDestination =
   | { kind: "project"; projectId: string; projectTitle?: string | null }
   | { kind: "hub" };
 
+/** 網址參數：正在進行中的加入方式。外部授權往返時，靠它把使用者送回原本那一步。 */
+const ADD_PARAM = "add";
+
+const VALID_METHODS = new Set<string>(["upload", "paste", "google-drive", "notion", "url", "tabular", "api"]);
+
+/**
+ * 目前網址上「正在進行中的加入方式」（`?add=google-drive`）。
+ *
+ * 為什麼需要它：Google 授權是整頁重導，回來時 React state 早就沒了。
+ * 只把使用者導回同一個網址還不夠——他會看到一個關著的面板，等於還是得自己重來。
+ * 把「進行到哪一步」寫進網址，往返之後就能接回原本那一步（Golden Path 1／4／5）。
+ *
+ * 呼叫端用它決定初始要不要打開面板。
+ */
+export function pendingAddDataMethod(search?: string): AddDataMethodId | null {
+  const qs = search ?? (typeof window === "undefined" ? "" : window.location.search);
+  const raw = new URLSearchParams(qs).get(ADD_PARAM);
+  return raw && VALID_METHODS.has(raw) ? (raw as AddDataMethodId) : null;
+}
+
+/** 把「進行到哪一步」寫進網址（不留歷史紀錄——上一頁不該是同一個面板的上一步） */
+function syncMethodToUrl(method: AddDataMethodId | null): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (method) url.searchParams.set(ADD_PARAM, method);
+  else url.searchParams.delete(ADD_PARAM);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableFlow }: {
   open: boolean;
   /** 從專案進來就已經知道要加到哪；從資料中心進來則先讓使用者挑一個專案 */
@@ -66,10 +95,15 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
    */
   onOpenTableFlow?: () => void;
 }) {
-  const [method, setMethod] = useState<AddDataMethodId | null>(null);
+  // 初始值取自網址：外部授權往返回來時直接接回原本那一步，而不是給一個空面板
+  const [method, setMethod] = useState<AddDataMethodId | null>(() => pendingAddDataMethod());
   const [pickedProjectId, setPickedProjectId] = useState<string>("");
   const cardRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
+  // 剛從 Google 授權回來的一次性回饋：使用者離開過整個網站，回來要看得出「那一步成功了」
+  const [justConnected, setJustConnected] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("gdrive") === "connected",
+  );
 
   const sources = trpc.dataHub.sources.useQuery(undefined, { enabled: open, staleTime: 30_000 });
   // 資料中心入口才需要選目的地；專案內已經知道要加到哪
@@ -134,10 +168,18 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
     };
   }, [open, onClose]);
 
-  // 每次重新開啟都回到「你想從哪裡加入？」——不要接著上次的半路狀態
+  // 關閉即歸零：下次開啟從「你想從哪裡加入？」開始，網址也不留半路狀態
   useEffect(() => {
-    if (!open) setMethod(null);
+    if (!open) {
+      setMethod(null);
+      syncMethodToUrl(null);
+    }
   }, [open]);
+
+  // 進行到哪一步寫進網址——外部授權整頁重導回來時才接得回原本那一步
+  useEffect(() => {
+    if (open) syncMethodToUrl(method);
+  }, [open, method]);
 
   if (!open) return null;
 
@@ -172,6 +214,14 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
             <Icon name="X" size={18} />
           </Button>
         </div>
+
+        {justConnected && (
+          <Meta as="p" role="status" style={{ margin: 0, color: "var(--success-ink)" }}>
+            <Icon name="Check" size={13} /> 已連接 Google 雲端——接著挑你要加入的檔案就好。
+            {/* 只提示一次：重新整理不該再播一次已經發生過的事 */}
+            <Button size="sm" variant="ghost" onClick={() => setJustConnected(false)}>知道了</Button>
+          </Meta>
+        )}
 
         {needsDestination && (
           <div className="add-data-destination">

@@ -85,6 +85,7 @@ vi.mock("../components/DataHubOverview", () => ({
 }));
 vi.mock("../components/AddDataSheet", () => ({
   AddDataSheet: () => null,
+  pendingAddDataMethod: () => null,
 }));
 
 // 全組 presence／游標走真的 WebSocket＋react-query client，這支測的是深鏈與建庫表單，

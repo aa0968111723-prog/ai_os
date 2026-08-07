@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
-import { AddDataSheet } from "./AddDataSheet";
+import { AddDataSheet, pendingAddDataMethod } from "./AddDataSheet";
 import type { DataField, DataRowData, DataRowValue } from "@shared/databaseFields";
 import {
   PROJECT_DATA_TEMPLATES,
@@ -89,8 +89,9 @@ export function ProjectDatabasesCard({
   const [quickDraft, setQuickDraft] = useState<Record<string, string>>({});
   const [quickError, setQuickError] = useState<Record<string, string>>({});
   const [quickOk, setQuickOk] = useState<Record<string, string>>({});
-  // 全站唯一的「＋加入資料」：就地開，不跳頁、不先問使用者這份資料屬於哪個系統
-  const [addOpen, setAddOpen] = useState(false);
+  // 全站唯一的「＋加入資料」：就地開，不跳頁、不先問使用者這份資料屬於哪個系統。
+  // 外部授權是整頁重導，回來時網址還帶著「進行到哪一步」——直接接回去（Golden Path 1／5）。
+  const [addOpen, setAddOpen] = useState(() => pendingAddDataMethod() !== null);
   const project = trpc.projects.get.useQuery({ id: projectId });
 
   const createBound = trpc.databases.createBoundToProject.useMutation({
@@ -164,6 +165,21 @@ export function ProjectDatabasesCard({
   const open = controlled ? openProp : uncontrolledOpen;
 
   return (
+    <>
+      {/*
+        面板刻意放在 <details> 外面：手機的專案資料卡預設收合，收合的 details
+        內容不會被算繪。授權往返回來時面板若在裡面，使用者會回到一張「什麼都沒發生」
+        的收合卡——等於還是得自己重來一次。
+      */}
+      <AddDataSheet
+        open={addOpen}
+        destination={{ kind: "project", projectId, projectTitle: project.data?.title ?? null }}
+        onClose={() => setAddOpen(false)}
+        onAdded={() => {
+          void utils.knowledge.list.invalidate({ projectId });
+          void utils.projects.assets.invalidate({ projectId });
+        }}
+      />
     <Card as="details" variant="quiet"
       data-fb="專案資料"
       id="sec-databases"
@@ -255,16 +271,6 @@ export function ProjectDatabasesCard({
             <Icon name="Sparkles" size={13} /> 問 AI 助手
           </Button>
         </div>
-
-        <AddDataSheet
-          open={addOpen}
-          destination={{ kind: "project", projectId, projectTitle: project.data?.title ?? null }}
-          onClose={() => setAddOpen(false)}
-          onAdded={() => {
-            void utils.knowledge.list.invalidate({ projectId });
-            void utils.projects.assets.invalidate({ projectId });
-          }}
-        />
 
         {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (
@@ -454,5 +460,6 @@ export function ProjectDatabasesCard({
         </details>
       </div>
     </Card>
+    </>
   );
 }

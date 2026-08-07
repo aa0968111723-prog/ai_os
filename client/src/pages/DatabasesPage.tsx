@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
-import { AddDataSheet } from "../components/AddDataSheet";
+import { AddDataSheet, pendingAddDataMethod } from "../components/AddDataSheet";
 import { DataHubOverview } from "../components/DataHubOverview";
 import { GoogleDrivePicker } from "../components/GoogleDrivePicker";
 import { NotionPagePicker } from "../components/NotionPagePicker";
@@ -131,7 +131,8 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [databaseQuery, setDatabaseQuery] = useState("");
-  const [addOpen, setAddOpen] = useState(false);
+  // 外部授權是整頁重導：回來時網址上還帶著「進行到哪一步」，直接把面板接回去（Golden Path 1／5）
+  const [addOpen, setAddOpen] = useState(() => pendingAddDataMethod() !== null);
   // 從專案頁深鏈：?projectId=&from=project —— 麵包屑回專案、建表可預綁關聯專案
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
   const [fromProject, setFromProject] = useState(false);

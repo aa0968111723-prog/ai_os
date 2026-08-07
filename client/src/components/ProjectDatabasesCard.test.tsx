@@ -66,6 +66,7 @@ vi.mock("../api", () => ({
 // 「＋加入資料」自己有一整組查詢與 picker（另有專屬測試）；這支測的是專案資料卡本身
 vi.mock("./AddDataSheet", () => ({
   AddDataSheet: ({ open }: { open: boolean }) => (open ? <div data-testid="add-data-sheet" /> : null),
+  pendingAddDataMethod: () => null,
 }));
 
 vi.mock("wouter", () => ({

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AddDataSheet } from "./AddDataSheet";
+import { AddDataSheet, pendingAddDataMethod } from "./AddDataSheet";
 
 /**
  * ＋加入資料的產品契約：
@@ -65,6 +65,7 @@ describe("AddDataSheet", () => {
   beforeEach(() => {
     state.addKnowledge.mockReset();
     state.projects = [];
+    window.history.replaceState(null, "", "/p/p1");
   });
 
   it("關閉時什麼都不算繪（不佔畫面、不搶焦點）", () => {
@@ -209,5 +210,41 @@ describe("AddDataSheet", () => {
     );
     expect(screen.queryByRole("button", { name: /CSV/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /外部 API/ })).toBeNull();
+  });
+
+  /* ── 外部授權往返（Golden Path 1／4／5）────────────────────────────
+     Google 授權是整頁重導：回來時 React state 早就沒了。「進行到哪一步」寫在網址上，
+     所以回來能接回原本那一步，而不是給使用者一個空面板要他重來。 */
+  describe("授權往返後接回原本那一步", () => {
+    it("開啟某個加入方式時，網址記下進行到哪一步", async () => {
+      const user = userEvent.setup();
+      render(<AddDataSheet open destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />);
+      await user.click(screen.getByRole("button", { name: /Google 雲端/ }));
+      expect(pendingAddDataMethod()).toBe("google-drive");
+    });
+
+    it("★ 帶著進行中的步驟回到頁面時，直接接回那一步", () => {
+      window.history.replaceState(null, "", "/p/p1?add=google-drive&gdrive=connected");
+      render(<AddDataSheet open destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />);
+      expect(screen.getByTestId("drive-picker")).toBeInTheDocument();
+      expect(screen.getByText(/已連接 Google 雲端/)).toBeInTheDocument();
+    });
+
+    it("關閉後網址不留半路狀態（重新整理不會又跳回那一步）", () => {
+      window.history.replaceState(null, "", "/p/p1?add=notion");
+      const { rerender } = render(
+        <AddDataSheet open destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />,
+      );
+      expect(pendingAddDataMethod()).toBe("notion");
+      rerender(<AddDataSheet open={false} destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />);
+      expect(pendingAddDataMethod()).toBeNull();
+    });
+
+    it("★ 網址上的加入方式不被信任：未知值一律忽略", () => {
+      expect(pendingAddDataMethod("?add=%3Cscript%3E")).toBeNull();
+      expect(pendingAddDataMethod("?add=")).toBeNull();
+      expect(pendingAddDataMethod("")).toBeNull();
+      expect(pendingAddDataMethod("?add=notion")).toBe("notion");
+    });
   });
 });
