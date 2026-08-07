@@ -319,7 +319,7 @@ export async function memberCanDispatch(auth: AuthState, groupId: string, role: 
 /* ── 多步唯讀查詢工具：LLM 回答前可鑽進特定專案、資料庫、代理動態或查模型目錄（範圍鎖死本組） ── */
 
 /** LLM 的工具呼叫格式（與最終回答的 {"answer":...} 互斥，以 tool 鍵區分）；ref＝專案代號 p1…pN、dbRef＝資料庫代號 db1…dbN */
-const teamToolSchema = z.object({
+export const teamToolSchema = z.object({
   tool: z.enum([
     "project_detail", "read_scene", "list_generations", "find_model", "query_database", "list_agent_runs",
     // S5：ask 原本看不到人的事——阻塞、人類任務、專案營運快照全在畫面上有、在提示詞裡沒有。
@@ -429,12 +429,12 @@ export function sanitizeRationale(raw: unknown): string | undefined {
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
-type ProjRow = typeof schema.projects.$inferSelect;
+export type ProjRow = typeof schema.projects.$inferSelect;
 /** 工具可鑽查的資料庫（代號 db1…dbN → 真實表）＝ask 注入上下文的那批可見庫（已過 agentAccess≠none 的濾網） */
-interface TeamDb { ref: string; id: string; name: string; fields: DataField[]; rowCount: number }
+export interface TeamDb { ref: string; id: string; name: string; fields: DataField[]; rowCount: number }
 
 /** 執行一個唯讀查詢工具（範圍鎖死在 projByRef／dbByRef 列出的本組資源＋本組 groupId）；回給 LLM 的結果文字＋給使用者看的步驟摘要 */
-async function runTeamTool(
+export async function runTeamTool(
   projByRef: Map<string, ProjRow>,
   dbByRef: Map<string, TeamDb>,
   groupId: string,
@@ -769,6 +769,319 @@ export function formatCommandRefs(refs: CommandRefs, level: GroupCommandLevel): 
   return `\n可下令的對象（代號 rN／tN／uN；下令一律用代號，不要吐 uuid）：\n${lines.join("\n")}`;
 }
 
+/** teamAssistant.ask 組級上下文組裝的回傳（globalAssistant.ask 重用同一份視野） */
+export interface TeamAskContext {
+  commandLevel: GroupCommandLevel;
+  canDispatch: boolean;
+  canSupervise: boolean;
+  totalProjects: number;
+  /** 每案一行（前綴代號 pN）——mock 模式回覆與提示詞共用 */
+  projectLines: string[];
+  projByRef: Map<string, ProjRow>;
+  dbByRef: Map<string, TeamDb>;
+  commandRefs: CommandRefs;
+  /** 組級阻塞讀取失敗（降級模式：提示詞裡誠實說這段沒讀到） */
+  degraded: boolean;
+  /** 組現況完整區塊（專案現況＋阻塞＋資料庫快照＋可下令對象） */
+  context: string;
+}
+
+/**
+ * 組級問答的上下文組裝（teamAssistant.ask 與 globalAssistant.ask 共用）。
+ * requireGroup 在最前面——不屬於該組的人拿不到任何組資料。
+ * 抽出來的動機：全站助手是組助手的演進（GLOBAL_ASSISTANT_PLAN §4.1），
+ * 視野必須同源；複製一份的話，之後每補一段上下文都要改兩處、遲早分岔。
+ */
+export async function buildTeamAskContext(auth: AuthState, groupId: string): Promise<TeamAskContext> {
+  // 組員即可問自己組（唯讀彙總不需組長權限）；不屬於該組的直接擋
+  requireGroup(auth, groupId);
+  const commandLevel = await getGroupCommandLevel(auth, groupId);
+  const canDispatch = canRunCommand(commandLevel, "dispatch");
+  const canSupervise = levelAtLeast(commandLevel, "supervise");
+
+  // ── 組彙總上下文：active 優先、最近更新在前，最多列 PROJECT_LIMIT 案 ──
+  const [projRows, countRows, weekRows] = await Promise.all([
+    db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.groupId, groupId))
+      .orderBy(sql`case when ${schema.projects.status} = 'active' then 0 else 1 end`, desc(schema.projects.updatedAt))
+      .limit(PROJECT_LIMIT),
+    db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(eq(schema.projects.groupId, groupId)),
+    // 本週組花費：粗略取「近 7 天」帳本淨額（deduct 為負、refund 為正，取負和＝實花）
+    db
+      .select({ spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+      .from(schema.costLedger)
+      .where(and(eq(schema.costLedger.groupId, groupId), gte(schema.costLedger.createdAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)))),
+  ]);
+  const totalProjects = Number(countRows[0]?.n ?? 0);
+  const weekSpent = Number(weekRows[0]?.spent ?? 0);
+  const projectIds = projRows.map((p) => p.id);
+  // 專案代號 p1…pN：LLM 一律用代號指涉專案（查工具的 ref、派工的 projectRef），避免吐 uuid（會幻覺）
+  const projByRef = new Map<string, ProjRow>(projRows.map((p, i) => [`p${i + 1}`, p]));
+
+  // 每案聚合：各一條 groupBy 查詢一次撈齊（避免 15 案 × 4 查詢的 N+1）；
+  // 沒有專案就全空——空陣列丟給 inArray 會產生無效 SQL（比照 feedbackReports 的守則）
+  let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
+  let genAgg: Array<{ projectId: string; status: string; n: number; last: Date | string | null }> = [];
+  let costAgg: Array<{ projectId: string; spent: number }> = [];
+  if (projectIds.length) {
+    [sceneAgg, genAgg, costAgg] = await Promise.all([
+      // 分鏡按狀態計數（軟刪不算）
+      db
+        .select({ projectId: schema.scenes.projectId, status: schema.scenes.status, n: sql<number>`count(*)` })
+        .from(schema.scenes)
+        .where(and(inArray(schema.scenes.projectId, projectIds), isNull(schema.scenes.deletedAt)))
+        .groupBy(schema.scenes.projectId, schema.scenes.status),
+      // 生成按狀態計數；順便取每狀態的 max(updatedAt)，JS 端再合成「最後活動」
+      db
+        .select({
+          projectId: schema.generations.projectId,
+          status: schema.generations.status,
+          n: sql<number>`count(*)`,
+          last: sql<Date | string | null>`max(${schema.generations.updatedAt})`,
+        })
+        .from(schema.generations)
+        .where(inArray(schema.generations.projectId, projectIds))
+        .groupBy(schema.generations.projectId, schema.generations.status),
+      // 每案已花點數：帳本沒有 projectId，join 生成取回專案歸屬（無 generationId 的帳列不歸案，可接受）
+      db
+        .select({ projectId: schema.generations.projectId, spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+        .from(schema.costLedger)
+        .innerJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+        .where(and(eq(schema.costLedger.groupId, groupId), inArray(schema.generations.projectId, projectIds)))
+        .groupBy(schema.generations.projectId),
+    ]);
+  }
+
+  // 聚合列 → 每案查表 Map（count 經 node-postgres 回來是字串，一律 Number()）
+  const scenesBy = new Map<string, { total: number }>();
+  for (const r of sceneAgg) {
+    const cur = scenesBy.get(r.projectId) ?? { total: 0 };
+    cur.total += Number(r.n);
+    scenesBy.set(r.projectId, cur);
+  }
+  const gensBy = new Map<string, { done: number; running: number; failed: number; awaiting: number; last: Date | null }>();
+  for (const r of genAgg) {
+    const cur = gensBy.get(r.projectId) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null };
+    const n = Number(r.n);
+    if (r.status === "done") cur.done += n;
+    else if (r.status === "queued" || r.status === "running") cur.running += n;
+    else if (r.status === "failed") cur.failed += n;
+    else if (r.status === "awaiting_approval") cur.awaiting += n;
+    const t = r.last ? new Date(r.last) : null;
+    if (t && (!cur.last || t.getTime() > cur.last.getTime())) cur.last = t;
+    gensBy.set(r.projectId, cur);
+  }
+  const spentBy = new Map<string, number>(costAgg.map((r) => [r.projectId, Number(r.spent)]));
+
+  // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜最後活動
+  const lines = projRows.map((p, i) => {
+    const sc = scenesBy.get(p.id) ?? { total: 0 };
+    const g = gensBy.get(p.id) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null as Date | null };
+    const lastActive = g.last && g.last.getTime() > new Date(p.updatedAt).getTime() ? g.last : new Date(p.updatedAt);
+    return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
+  });
+  const hidden = totalProjects - projRows.length;
+
+  // ── 自訂資料庫注入（AI 代理系統 × 資料庫系統的內部接點）──
+  // 這個組看得到的組/團隊/全站資料庫（個人庫不進共享上下文），每庫附欄位與前幾列，
+  // 讓助手能回答「名單裡有誰」「器材借用狀況」這類結構化資料問題。上限收緊防提示詞灌爆。
+  const teamId = auth.groups.find((g) => g.groupId === groupId)?.teamId;
+  const DB_LIMIT = 5;
+  const DB_ROW_LIMIT = 12;
+  const dbConds = [
+    and(eq(schema.dataTables.scope, "group"), eq(schema.dataTables.groupId, groupId))!,
+    eq(schema.dataTables.scope, "global"),
+  ];
+  if (teamId) dbConds.push(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, teamId))!);
+  const visibleTables = await db
+    .select()
+    .from(schema.dataTables)
+    // agentAccess='none'＝管理者不讓 AI 看這個庫——助手上下文也不注入（read/write 都可讀）
+    .where(and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds)))
+    .orderBy(desc(schema.dataTables.updatedAt))
+    .limit(DB_LIMIT);
+  // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
+  // 助手能直接回答「素材庫裡有多少張圖」「哪個庫最大」這類資訊量問題。
+  const tableIds = visibleTables.map((t) => t.id);
+  const KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
+  const rowCountBy = new Map<string, number>();
+  const fileAggBy = new Map<string, Array<{ kind: string; n: number; bytes: number }>>();
+  if (tableIds.length) {
+    const kindExpr = sql<string>`case
+      when ${schema.dataFiles.mime} like 'image/%' then 'image'
+      when ${schema.dataFiles.mime} like 'video/%' then 'video'
+      when ${schema.dataFiles.mime} like 'audio/%' then 'audio'
+      else 'doc' end`;
+    const [rowAgg, fileAgg] = await Promise.all([
+      db
+        .select({ tableId: schema.dataRows.tableId, n: sql<number>`count(*)` })
+        .from(schema.dataRows)
+        .where(inArray(schema.dataRows.tableId, tableIds))
+        .groupBy(schema.dataRows.tableId),
+      db
+        .select({ tableId: schema.dataFiles.tableId, kind: kindExpr, n: sql<number>`count(*)`, bytes: sql<number>`coalesce(sum(${schema.dataFiles.sizeBytes}), 0)` })
+        .from(schema.dataFiles)
+        .where(inArray(schema.dataFiles.tableId, tableIds))
+        .groupBy(schema.dataFiles.tableId, kindExpr),
+    ]);
+    for (const r of rowAgg) rowCountBy.set(r.tableId, Number(r.n));
+    for (const f of fileAgg) {
+      const arr = fileAggBy.get(f.tableId) ?? [];
+      arr.push({ kind: f.kind, n: Number(f.n), bytes: Number(f.bytes) });
+      fileAggBy.set(f.tableId, arr);
+    }
+  }
+  const fmtMb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
+
+  // 資料庫代號 db1…dbN：query_database 工具用代號鑽查（比照專案代號 pN，避免 uuid 幻覺）
+  const dbByRef = new Map<string, TeamDb>(
+    visibleTables.map((t, i) => [
+      `db${i + 1}`,
+      { ref: `db${i + 1}`, id: t.id, name: t.name, fields: ((t.fields as DataField[]) ?? []), rowCount: rowCountBy.get(t.id) ?? 0 },
+    ]),
+  );
+
+  const dbSections: string[] = [];
+  for (const [di, t] of visibleTables.entries()) {
+    const [rows, files] = await Promise.all([
+      db
+        .select({ data: schema.dataRows.data })
+        .from(schema.dataRows)
+        .where(eq(schema.dataRows.tableId, t.id))
+        .orderBy(desc(schema.dataRows.createdAt))
+        .limit(DB_ROW_LIMIT),
+      // 文件層：檔名全列（AI 知道有什麼；圖影帶類型與分類），最近兩份可讀文件各附 600 字摘錄，
+      // 圖影另附 AI 看圖描述——助手答得出「那張海報畫了什麼」。
+      db
+        .select({
+          name: schema.dataFiles.name,
+          mime: schema.dataFiles.mime,
+          category: schema.dataFiles.category,
+          aiDescription: schema.dataFiles.aiDescription,
+          textContent: schema.dataFiles.textContent,
+        })
+        .from(schema.dataFiles)
+        .where(eq(schema.dataFiles.tableId, t.id))
+        .orderBy(desc(schema.dataFiles.createdAt))
+        .limit(10),
+    ]);
+    const fields = (t.fields as Array<{ key: string; label: string }>) ?? [];
+    const labelOf = new Map(fields.map((f) => [f.key, f.label]));
+    const rowLines = rows.map((r) => {
+      const entries = Object.entries((r.data ?? {}) as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== "")
+        .map(([k, v]) => `${labelOf.get(k) ?? k}:${String(v).slice(0, 40)}`);
+      return "  - " + (entries.join("｜") || "（空列）");
+    });
+    const kindOf = (mime: string) => (mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "doc");
+    const fileNames = files
+      .map((f) => {
+        const tags = [kindOf(f.mime) !== "doc" ? KIND_LABEL[kindOf(f.mime)] : null, f.category].filter(Boolean).join("・");
+        return tags ? `${f.name}（${tags}）` : f.name;
+      })
+      .join("、");
+    const excerpts = files
+      .filter((f) => f.textContent)
+      .slice(0, 2)
+      .map((f) => `  《${f.name}》摘錄：${f.textContent!.slice(0, 600).replace(/\s+/g, " ")}`);
+    const mediaNotes = files
+      .filter((f) => !f.textContent && f.aiDescription)
+      .slice(0, 3)
+      .map((f) => `  《${f.name}》AI 看圖描述：${f.aiDescription!.slice(0, 300).replace(/\s+/g, " ")}`);
+    // 資訊量一行：總列數（非只注入的 12 列）＋文件分佈與容量
+    const agg = fileAggBy.get(t.id) ?? [];
+    const totalFiles = agg.reduce((s, a) => s + a.n, 0);
+    const totalBytes = agg.reduce((s, a) => s + a.bytes, 0);
+    const kindParts = agg.filter((a) => a.n > 0).map((a) => `${KIND_LABEL[a.kind] ?? a.kind} ${a.n}`).join("、");
+    const statsLine = `  資訊量：資料 ${(rowCountBy.get(t.id) ?? 0).toLocaleString()} 列${totalFiles > 0 ? `｜文件 ${totalFiles} 份（${kindParts}）共 ${fmtMb(totalBytes)}` : "｜無附掛文件"}`;
+    dbSections.push([
+      `[db${di + 1}] 資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：`,
+      rowLines.join("\n") || "  （沒有資料）",
+      statsLine,
+      ...(files.length ? [`  附掛文件：${fileNames}`] : []),
+      ...excerpts,
+      ...mediaNotes,
+    ].join("\n"));
+  }
+
+  // ── S5：阻塞與人員負荷。畫面上「誰卡住了」看得到、提示詞裡卻沒有，
+  // 於是被問「哪個案子卡住了」時它只能從 run 狀態猜——真正的答案在人類任務裡。
+  // 讀失敗不讓整次提問掛掉，改標記 degraded 並在提示詞裡誠實說「這段沒讀到」。
+  let blockerBlock = "";
+  let degraded = false;
+  try {
+    const insight = await getGroupAgentInsights(auth, groupId);
+    blockerBlock = formatGroupBlockerDigest(insight);
+  } catch (err) {
+    degraded = true;
+    console.warn("[teamAssistant] 組級阻塞讀取失敗（改以降級模式回答）：", err instanceof Error ? err.message : err);
+  }
+
+  // ── L1/L2：可下令的對象。有監督權的人問「怎麼辦」時，答案不該停在「你可以去核准那三份」——
+  // 它應該直接把那三顆按鈕遞過來。沒有監督權就整段不撈也不注入（省一趟查詢，也不揭露做不到的動作）。
+  const commandRefs: CommandRefs = { runs: [], tasks: [], members: [] };
+  if (canSupervise) {
+    const nowMs = Date.now();
+    const [runRows, taskRows, memberRows] = await Promise.all([
+      db
+        .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
+        .from(schema.agentRuns)
+        .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+        .where(and(
+          eq(schema.agentRuns.groupId, groupId),
+          inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting", "failed", "stopped"]),
+        ))
+        .orderBy(desc(schema.agentRuns.updatedAt))
+        .limit(COMMAND_REF_LIMIT),
+      listGroupTasks(auth, groupId, { openOnly: true, limit: COMMAND_REF_LIMIT }),
+      db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.groupMembers)
+        .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+        .where(eq(schema.groupMembers.groupId, groupId))
+        // 沒有 ORDER BY 的 LIMIT，PostgreSQL 不保證回傳順序：uN 代號會在兩輪之間指到不同的人，
+        // 使用者上一輪讀到的理由對不上這一輪的按鈕；超過上限時連「哪幾個人進得了提示詞」都會飄。
+        .orderBy(asc(schema.users.name), asc(schema.users.id))
+        .limit(COMMAND_REF_LIMIT),
+    ]);
+    commandRefs.runs = runRows.map((r, i) => ({
+      ref: `r${i + 1}`,
+      id: r.run.id,
+      projectTitle: r.projectTitle,
+      status: r.run.status,
+      goal: r.run.goal,
+      estPoints: r.run.estPoints,
+    }));
+    commandRefs.tasks = taskRows.slice(0, COMMAND_REF_LIMIT).map((t, i) => ({
+      ref: `t${i + 1}`,
+      id: t.id,
+      title: t.title,
+      projectTitle: t.projectTitle,
+      assigneeName: t.assigneeName,
+      overdueDays: t.dueAt && t.dueAt.getTime() < nowMs ? Math.floor((nowMs - t.dueAt.getTime()) / 86_400_000) : null,
+    }));
+    commandRefs.members = memberRows.map((m, i) => ({ ref: `u${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
+  }
+
+  const context = [
+    `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
+    lines.length ? lines.join("\n") : "（本組目前沒有專案）",
+    `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
+    "",
+    "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
+    degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
+    ...(dbSections.length ? ["", "組可見的自訂資料庫（前綴代號 dbN；工作台「資料庫」頁維護；快照僅最近幾列，全量搜尋用 query_database 工具）：", ...dbSections] : []),
+    formatCommandRefs(commandRefs, commandLevel),
+  ].join("\n");
+
+  return {
+    commandLevel, canDispatch, canSupervise, totalProjects,
+    projectLines: lines, projByRef, dbByRef, commandRefs, degraded, context,
+  };
+}
+
 export const teamAssistantRouter = router({
   /**
    * 組彙總問答：撈整組專案現況（聚合查詢、無 N+1）＋可見資料庫餵給 LLM；LLM 可先用唯讀工具鑽進
@@ -792,288 +1105,10 @@ export const teamAssistantRouter = router({
         }
         throw error;
       }
-      // 組員即可問自己組（唯讀彙總不需組長權限）；不屬於該組的直接擋
-      requireGroup(ctx.auth, input.groupId);
-      const commandLevel = await getGroupCommandLevel(ctx.auth, input.groupId);
-      const canDispatch = canRunCommand(commandLevel, "dispatch");
-      const canSupervise = levelAtLeast(commandLevel, "supervise");
-
-      // ── 組彙總上下文：active 優先、最近更新在前，最多列 PROJECT_LIMIT 案 ──
-      const [projRows, countRows, weekRows] = await Promise.all([
-        db
-          .select()
-          .from(schema.projects)
-          .where(eq(schema.projects.groupId, input.groupId))
-          .orderBy(sql`case when ${schema.projects.status} = 'active' then 0 else 1 end`, desc(schema.projects.updatedAt))
-          .limit(PROJECT_LIMIT),
-        db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(eq(schema.projects.groupId, input.groupId)),
-        // 本週組花費：粗略取「近 7 天」帳本淨額（deduct 為負、refund 為正，取負和＝實花）
-        db
-          .select({ spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
-          .from(schema.costLedger)
-          .where(and(eq(schema.costLedger.groupId, input.groupId), gte(schema.costLedger.createdAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)))),
-      ]);
-      const totalProjects = Number(countRows[0]?.n ?? 0);
-      const weekSpent = Number(weekRows[0]?.spent ?? 0);
-      const projectIds = projRows.map((p) => p.id);
-      // 專案代號 p1…pN：LLM 一律用代號指涉專案（查工具的 ref、派工的 projectRef），避免吐 uuid（會幻覺）
-      const projByRef = new Map<string, ProjRow>(projRows.map((p, i) => [`p${i + 1}`, p]));
-
-      // 每案聚合：各一條 groupBy 查詢一次撈齊（避免 15 案 × 4 查詢的 N+1）；
-      // 沒有專案就全空——空陣列丟給 inArray 會產生無效 SQL（比照 feedbackReports 的守則）
-      let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
-      let genAgg: Array<{ projectId: string; status: string; n: number; last: Date | string | null }> = [];
-      let costAgg: Array<{ projectId: string; spent: number }> = [];
-      if (projectIds.length) {
-        [sceneAgg, genAgg, costAgg] = await Promise.all([
-          // 分鏡按狀態計數（軟刪不算）
-          db
-            .select({ projectId: schema.scenes.projectId, status: schema.scenes.status, n: sql<number>`count(*)` })
-            .from(schema.scenes)
-            .where(and(inArray(schema.scenes.projectId, projectIds), isNull(schema.scenes.deletedAt)))
-            .groupBy(schema.scenes.projectId, schema.scenes.status),
-          // 生成按狀態計數；順便取每狀態的 max(updatedAt)，JS 端再合成「最後活動」
-          db
-            .select({
-              projectId: schema.generations.projectId,
-              status: schema.generations.status,
-              n: sql<number>`count(*)`,
-              last: sql<Date | string | null>`max(${schema.generations.updatedAt})`,
-            })
-            .from(schema.generations)
-            .where(inArray(schema.generations.projectId, projectIds))
-            .groupBy(schema.generations.projectId, schema.generations.status),
-          // 每案已花點數：帳本沒有 projectId，join 生成取回專案歸屬（無 generationId 的帳列不歸案，可接受）
-          db
-            .select({ projectId: schema.generations.projectId, spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
-            .from(schema.costLedger)
-            .innerJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
-            .where(and(eq(schema.costLedger.groupId, input.groupId), inArray(schema.generations.projectId, projectIds)))
-            .groupBy(schema.generations.projectId),
-        ]);
-      }
-
-      // 聚合列 → 每案查表 Map（count 經 node-postgres 回來是字串，一律 Number()）
-      const scenesBy = new Map<string, { total: number }>();
-      for (const r of sceneAgg) {
-        const cur = scenesBy.get(r.projectId) ?? { total: 0 };
-        cur.total += Number(r.n);
-        scenesBy.set(r.projectId, cur);
-      }
-      const gensBy = new Map<string, { done: number; running: number; failed: number; awaiting: number; last: Date | null }>();
-      for (const r of genAgg) {
-        const cur = gensBy.get(r.projectId) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null };
-        const n = Number(r.n);
-        if (r.status === "done") cur.done += n;
-        else if (r.status === "queued" || r.status === "running") cur.running += n;
-        else if (r.status === "failed") cur.failed += n;
-        else if (r.status === "awaiting_approval") cur.awaiting += n;
-        const t = r.last ? new Date(r.last) : null;
-        if (t && (!cur.last || t.getTime() > cur.last.getTime())) cur.last = t;
-        gensBy.set(r.projectId, cur);
-      }
-      const spentBy = new Map<string, number>(costAgg.map((r) => [r.projectId, Number(r.spent)]));
-
-      // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜最後活動
-      const lines = projRows.map((p, i) => {
-        const sc = scenesBy.get(p.id) ?? { total: 0 };
-        const g = gensBy.get(p.id) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null as Date | null };
-        const lastActive = g.last && g.last.getTime() > new Date(p.updatedAt).getTime() ? g.last : new Date(p.updatedAt);
-        return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
-      });
-      const hidden = totalProjects - projRows.length;
-
-      // ── 自訂資料庫注入（AI 代理系統 × 資料庫系統的內部接點）──
-      // 這個組看得到的組/團隊/全站資料庫（個人庫不進共享上下文），每庫附欄位與前幾列，
-      // 讓助手能回答「名單裡有誰」「器材借用狀況」這類結構化資料問題。上限收緊防提示詞灌爆。
-      const teamId = ctx.auth.groups.find((g) => g.groupId === input.groupId)?.teamId;
-      const DB_LIMIT = 5;
-      const DB_ROW_LIMIT = 12;
-      const dbConds = [
-        and(eq(schema.dataTables.scope, "group"), eq(schema.dataTables.groupId, input.groupId))!,
-        eq(schema.dataTables.scope, "global"),
-      ];
-      if (teamId) dbConds.push(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, teamId))!);
-      const visibleTables = await db
-        .select()
-        .from(schema.dataTables)
-        // agentAccess='none'＝管理者不讓 AI 看這個庫——助手上下文也不注入（read/write 都可讀）
-        .where(and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds)))
-        .orderBy(desc(schema.dataTables.updatedAt))
-        .limit(DB_LIMIT);
-      // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
-      // 助手能直接回答「素材庫裡有多少張圖」「哪個庫最大」這類資訊量問題。
-      const tableIds = visibleTables.map((t) => t.id);
-      const KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
-      const rowCountBy = new Map<string, number>();
-      const fileAggBy = new Map<string, Array<{ kind: string; n: number; bytes: number }>>();
-      if (tableIds.length) {
-        const kindExpr = sql<string>`case
-          when ${schema.dataFiles.mime} like 'image/%' then 'image'
-          when ${schema.dataFiles.mime} like 'video/%' then 'video'
-          when ${schema.dataFiles.mime} like 'audio/%' then 'audio'
-          else 'doc' end`;
-        const [rowAgg, fileAgg] = await Promise.all([
-          db
-            .select({ tableId: schema.dataRows.tableId, n: sql<number>`count(*)` })
-            .from(schema.dataRows)
-            .where(inArray(schema.dataRows.tableId, tableIds))
-            .groupBy(schema.dataRows.tableId),
-          db
-            .select({ tableId: schema.dataFiles.tableId, kind: kindExpr, n: sql<number>`count(*)`, bytes: sql<number>`coalesce(sum(${schema.dataFiles.sizeBytes}), 0)` })
-            .from(schema.dataFiles)
-            .where(inArray(schema.dataFiles.tableId, tableIds))
-            .groupBy(schema.dataFiles.tableId, kindExpr),
-        ]);
-        for (const r of rowAgg) rowCountBy.set(r.tableId, Number(r.n));
-        for (const f of fileAgg) {
-          const arr = fileAggBy.get(f.tableId) ?? [];
-          arr.push({ kind: f.kind, n: Number(f.n), bytes: Number(f.bytes) });
-          fileAggBy.set(f.tableId, arr);
-        }
-      }
-      const fmtMb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
-
-      // 資料庫代號 db1…dbN：query_database 工具用代號鑽查（比照專案代號 pN，避免 uuid 幻覺）
-      const dbByRef = new Map<string, TeamDb>(
-        visibleTables.map((t, i) => [
-          `db${i + 1}`,
-          { ref: `db${i + 1}`, id: t.id, name: t.name, fields: ((t.fields as DataField[]) ?? []), rowCount: rowCountBy.get(t.id) ?? 0 },
-        ]),
-      );
-
-      const dbSections: string[] = [];
-      for (const [di, t] of visibleTables.entries()) {
-        const [rows, files] = await Promise.all([
-          db
-            .select({ data: schema.dataRows.data })
-            .from(schema.dataRows)
-            .where(eq(schema.dataRows.tableId, t.id))
-            .orderBy(desc(schema.dataRows.createdAt))
-            .limit(DB_ROW_LIMIT),
-          // 文件層：檔名全列（AI 知道有什麼；圖影帶類型與分類），最近兩份可讀文件各附 600 字摘錄，
-          // 圖影另附 AI 看圖描述——助手答得出「那張海報畫了什麼」。
-          db
-            .select({
-              name: schema.dataFiles.name,
-              mime: schema.dataFiles.mime,
-              category: schema.dataFiles.category,
-              aiDescription: schema.dataFiles.aiDescription,
-              textContent: schema.dataFiles.textContent,
-            })
-            .from(schema.dataFiles)
-            .where(eq(schema.dataFiles.tableId, t.id))
-            .orderBy(desc(schema.dataFiles.createdAt))
-            .limit(10),
-        ]);
-        const fields = (t.fields as Array<{ key: string; label: string }>) ?? [];
-        const labelOf = new Map(fields.map((f) => [f.key, f.label]));
-        const rowLines = rows.map((r) => {
-          const entries = Object.entries((r.data ?? {}) as Record<string, unknown>)
-            .filter(([, v]) => v !== null && v !== "")
-            .map(([k, v]) => `${labelOf.get(k) ?? k}:${String(v).slice(0, 40)}`);
-          return "  - " + (entries.join("｜") || "（空列）");
-        });
-        const kindOf = (mime: string) => (mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "doc");
-        const fileNames = files
-          .map((f) => {
-            const tags = [kindOf(f.mime) !== "doc" ? KIND_LABEL[kindOf(f.mime)] : null, f.category].filter(Boolean).join("・");
-            return tags ? `${f.name}（${tags}）` : f.name;
-          })
-          .join("、");
-        const excerpts = files
-          .filter((f) => f.textContent)
-          .slice(0, 2)
-          .map((f) => `  《${f.name}》摘錄：${f.textContent!.slice(0, 600).replace(/\s+/g, " ")}`);
-        const mediaNotes = files
-          .filter((f) => !f.textContent && f.aiDescription)
-          .slice(0, 3)
-          .map((f) => `  《${f.name}》AI 看圖描述：${f.aiDescription!.slice(0, 300).replace(/\s+/g, " ")}`);
-        // 資訊量一行：總列數（非只注入的 12 列）＋文件分佈與容量
-        const agg = fileAggBy.get(t.id) ?? [];
-        const totalFiles = agg.reduce((s, a) => s + a.n, 0);
-        const totalBytes = agg.reduce((s, a) => s + a.bytes, 0);
-        const kindParts = agg.filter((a) => a.n > 0).map((a) => `${KIND_LABEL[a.kind] ?? a.kind} ${a.n}`).join("、");
-        const statsLine = `  資訊量：資料 ${(rowCountBy.get(t.id) ?? 0).toLocaleString()} 列${totalFiles > 0 ? `｜文件 ${totalFiles} 份（${kindParts}）共 ${fmtMb(totalBytes)}` : "｜無附掛文件"}`;
-        dbSections.push([
-          `[db${di + 1}] 資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：`,
-          rowLines.join("\n") || "  （沒有資料）",
-          statsLine,
-          ...(files.length ? [`  附掛文件：${fileNames}`] : []),
-          ...excerpts,
-          ...mediaNotes,
-        ].join("\n"));
-      }
-
-      // ── S5：阻塞與人員負荷。畫面上「誰卡住了」看得到、提示詞裡卻沒有，
-      // 於是被問「哪個案子卡住了」時它只能從 run 狀態猜——真正的答案在人類任務裡。
-      // 讀失敗不讓整次提問掛掉，改標記 degraded 並在提示詞裡誠實說「這段沒讀到」。
-      let blockerBlock = "";
-      let degraded = false;
-      try {
-        const insight = await getGroupAgentInsights(ctx.auth, input.groupId);
-        blockerBlock = formatGroupBlockerDigest(insight);
-      } catch (err) {
-        degraded = true;
-        console.warn("[teamAssistant] 組級阻塞讀取失敗（改以降級模式回答）：", err instanceof Error ? err.message : err);
-      }
-
-      // ── L1/L2：可下令的對象。有監督權的人問「怎麼辦」時，答案不該停在「你可以去核准那三份」——
-      // 它應該直接把那三顆按鈕遞過來。沒有監督權就整段不撈也不注入（省一趟查詢，也不揭露做不到的動作）。
-      const commandRefs: CommandRefs = { runs: [], tasks: [], members: [] };
-      if (canSupervise) {
-        const nowMs = Date.now();
-        const [runRows, taskRows, memberRows] = await Promise.all([
-          db
-            .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
-            .from(schema.agentRuns)
-            .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
-            .where(and(
-              eq(schema.agentRuns.groupId, input.groupId),
-              inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting", "failed", "stopped"]),
-            ))
-            .orderBy(desc(schema.agentRuns.updatedAt))
-            .limit(COMMAND_REF_LIMIT),
-          listGroupTasks(ctx.auth, input.groupId, { openOnly: true, limit: COMMAND_REF_LIMIT }),
-          db
-            .select({ id: schema.users.id, name: schema.users.name })
-            .from(schema.groupMembers)
-            .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
-            .where(eq(schema.groupMembers.groupId, input.groupId))
-            // 沒有 ORDER BY 的 LIMIT，PostgreSQL 不保證回傳順序：uN 代號會在兩輪之間指到不同的人，
-            // 使用者上一輪讀到的理由對不上這一輪的按鈕；超過上限時連「哪幾個人進得了提示詞」都會飄。
-            .orderBy(asc(schema.users.name), asc(schema.users.id))
-            .limit(COMMAND_REF_LIMIT),
-        ]);
-        commandRefs.runs = runRows.map((r, i) => ({
-          ref: `r${i + 1}`,
-          id: r.run.id,
-          projectTitle: r.projectTitle,
-          status: r.run.status,
-          goal: r.run.goal,
-          estPoints: r.run.estPoints,
-        }));
-        commandRefs.tasks = taskRows.slice(0, COMMAND_REF_LIMIT).map((t, i) => ({
-          ref: `t${i + 1}`,
-          id: t.id,
-          title: t.title,
-          projectTitle: t.projectTitle,
-          assigneeName: t.assigneeName,
-          overdueDays: t.dueAt && t.dueAt.getTime() < nowMs ? Math.floor((nowMs - t.dueAt.getTime()) / 86_400_000) : null,
-        }));
-        commandRefs.members = memberRows.map((m, i) => ({ ref: `u${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
-      }
-
-      const context = [
-        `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
-        lines.length ? lines.join("\n") : "（本組目前沒有專案）",
-        `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
-        "",
-        "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
-        degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
-        ...(dbSections.length ? ["", "組可見的自訂資料庫（前綴代號 dbN；工作台「資料庫」頁維護；快照僅最近幾列，全量搜尋用 query_database 工具）：", ...dbSections] : []),
-        formatCommandRefs(commandRefs, commandLevel),
-      ].join("\n");
+      // 組級上下文（requireGroup 在內）：與 globalAssistant.ask 共用同一份組裝
+      const teamCtx = await buildTeamAskContext(ctx.auth, input.groupId);
+      const { commandLevel, canDispatch, canSupervise, totalProjects, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
+      const lines = teamCtx.projectLines;
 
       // 假模式：不扣點，回確定性摘要（可測、不花錢），不提議派工
       if (isMockMode()) {
