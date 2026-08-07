@@ -81,12 +81,18 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   const [assistantOpen, setAssistantOpen] = useState(false);
   const orbRef = useRef<HTMLButtonElement | null>(null);
   // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」——補上最小手勢：
-  // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉
+  // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉。
+  //
+  // setPointerCapture ＋ 把手的 touch-action: none（見 .mobile-more-sheet__grip）
+  // 缺一不可：sheet 是 overflow-y: auto，少了它們瀏覽器會把這條直向拖曳判成捲動，
+  // 滑到約 16px 就送出 pointercancel，永遠走不到下方 48px 的門檻。
+  // 真機實測序列 `down → move → move → CANCEL`——手勢從落地起就沒有生效過。
   const sheetDragY = useRef<number | null>(null);
   const sheetDragProps = {
     onPointerDown: (e: ReactPointerEvent) => {
       if (e.pointerType === "mouse") return;
       sheetDragY.current = e.clientY;
+      e.currentTarget.setPointerCapture(e.pointerId);
     },
     onPointerMove: (e: ReactPointerEvent) => {
       if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
