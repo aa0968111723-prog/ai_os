@@ -72,6 +72,8 @@ export interface AgentStep {
   kind:
     | "split_script"
     | "create_scene"
+    | "update_scene"
+    | "reorder_scenes"
     | "generate"
     | "voiceover"
     | "record_to_database"
@@ -140,6 +142,15 @@ export interface AgentStep {
   scenePrompt?: string;
   /** split_script 用：腳本全文；空＝用知識庫的腳本／開示稿 */
   script?: string;
+  /** update_scene 用：環境音描述（分鏡第三軌） */
+  ambience?: string;
+  /** update_scene 用：素材入／出點（毫秒）。節奏微調靠修剪——durationSec 是整數秒 */
+  trimStartMs?: number;
+  trimEndMs?: number;
+  /** reorder_scenes 用：規劃時的分鏡編號新順序（1 起算，對「核准當下」的順序） */
+  orderedSceneNos?: number[];
+  /** 執行期：編號首次解析成 id 後保存；replay 只認這份，不再對「新順序」重解編號 */
+  orderedSceneIds?: string[];
   /** 估點（核准畫面顯示；實際扣點由各步驟守門） */
   points?: number;
   /** 執行期：生成步驟的冪等佔位 id */
@@ -1348,6 +1359,102 @@ async function advanceRun(run: RunRow): Promise<void> {
     step.status = "done";
     addOutputRef(step, "scene", effectId, title);
     step.detail = `已新增「${title.slice(0, 30)}」`;
+    auditAgentStep(run, step, idx, true);
+    await saveDagProgress(run, steps);
+    return;
+  }
+
+  if (step.kind === "update_scene") {
+    // 目標鏡只解析一次（resolvePersistedSceneTarget 保存 targetSceneId）：
+    // 核准後使用者重排分鏡，replay 仍然只改第一次指到的那一格
+    const scene = await resolvePersistedSceneTarget(run, steps, step);
+    if (!scene) return failRun(run, steps, idx, `第 ${step.sceneNo ?? "?"} 鏡不存在（可能已被刪除）`);
+    const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+    const changed: string[] = [];
+    if (step.sceneTitle?.trim()) {
+      patch.title = step.sceneTitle.trim().slice(0, 60);
+      if (patch.title !== scene.title) changed.push(`標題「${scene.title}」→「${patch.title}」`);
+    }
+    if (step.durationSec != null) {
+      patch.durationSec = Math.max(1, Math.min(60, Math.round(step.durationSec)));
+      if (patch.durationSec !== scene.durationSec) changed.push(`秒數 ${scene.durationSec}→${patch.durationSec}`);
+    }
+    if (step.scenePrompt != null) { patch.prompt = step.scenePrompt.trim().slice(0, 2000); changed.push("提示詞"); }
+    if (step.voiceover != null) { patch.voiceover = step.voiceover.trim().slice(0, 500); changed.push("旁白"); }
+    if (step.ambience != null) { patch.ambience = step.ambience.trim().slice(0, 500); changed.push("環境音"); }
+    if (step.trimStartMs != null || step.trimEndMs != null) {
+      // 出點必須大於入點——與 scenes.update 的守門同一條規則，代理不得享有更鬆的物理
+      const nextStart = step.trimStartMs != null ? Math.max(0, Math.round(step.trimStartMs)) : scene.trimStartMs;
+      const nextEnd = step.trimEndMs != null ? Math.max(1, Math.round(step.trimEndMs)) : scene.trimEndMs;
+      if (nextEnd != null && nextEnd <= nextStart) {
+        return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡的修剪出點（${nextEnd}ms）必須大於入點（${nextStart}ms）`);
+      }
+      if (step.trimStartMs != null) { patch.trimStartMs = nextStart; changed.push(`入點 ${nextStart}ms`); }
+      if (step.trimEndMs != null) { patch.trimEndMs = nextEnd; changed.push(`出點 ${nextEnd}ms`); }
+    }
+    if (changed.length === 0) {
+      step.status = "done";
+      step.detail = "沒有要改的欄位（可能重播時已套用過）";
+    } else {
+      // 天然冪等：同一份 patch 重播寫入同樣的值
+      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
+      step.status = "done";
+      step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}`;
+    }
+    addOutputRef(step, "scene", scene.id, (patch.title as string | undefined) ?? scene.title);
+    auditAgentStep(run, step, idx, true);
+    await saveDagProgress(run, steps);
+    return;
+  }
+
+  if (step.kind === "reorder_scenes") {
+    // 編號→id 只解析一次並保存：重排改變了編號的意義，replay 若拿「新順序」重解
+    // 同一串編號，會得到另一種順序——冪等靠 orderedSceneIds，不靠編號
+    if (!step.orderedSceneIds) {
+      const nos = step.orderedSceneNos ?? [];
+      if (nos.length < 2 || new Set(nos).size !== nos.length) {
+        return failRun(run, steps, idx, "重排清單無效（至少兩鏡、編號不可重複）");
+      }
+      const rows = await db
+        .select({ id: schema.scenes.id })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const ids: string[] = [];
+      for (const no of nos) {
+        const row = rows[no - 1];
+        if (!row) return failRun(run, steps, idx, `重排清單裡的第 ${no} 鏡不存在（目前共 ${rows.length} 鏡）`);
+        ids.push(row.id);
+      }
+      step.orderedSceneIds = ids;
+      await saveRun(run.id, { steps });
+    }
+    const ordered = step.orderedSceneIds;
+    // 交易＋序號鎖，與 scenes.reorder 同一套物理：清單漏掉的分鏡依原相對順序補到尾端，
+    // 不留與新序號重疊的舊 orderIndex
+    await db.transaction(async (tx) => {
+      await lockSceneOrder(tx, run.projectId);
+      const rows = await tx
+        .select({ id: schema.scenes.id })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const own = new Set(rows.map((r) => r.id));
+      const listed = new Set(ordered);
+      let next = 0;
+      for (const id of ordered) {
+        if (!own.has(id)) continue; // 已被刪除的鏡：跳過即可，不失敗（刪除不是代理的錯）
+        await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, id));
+        next += 1;
+      }
+      for (const row of rows) {
+        if (listed.has(row.id)) continue;
+        await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, row.id));
+        next += 1;
+      }
+    });
+    step.status = "done";
+    step.detail = `已重排 ${ordered.length} 鏡的順序`;
     auditAgentStep(run, step, idx, true);
     await saveDagProgress(run, steps);
     return;

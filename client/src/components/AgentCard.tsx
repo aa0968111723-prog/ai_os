@@ -37,6 +37,8 @@ interface AgentStep {
   kind:
     | "split_script"
     | "create_scene"
+    | "update_scene"
+    | "reorder_scenes"
     | "generate"
     | "voiceover"
     | "record_to_database"
@@ -72,6 +74,8 @@ const STEP_ICON: Record<AgentStep["status"], IconName> = {
 const KIND_ICON: Record<AgentStep["kind"], IconName> = {
   split_script: "Clapperboard",
   create_scene: "Plus",
+  update_scene: "Clapperboard",
+  reorder_scenes: "Layers",
   generate: "Sparkles",
   voiceover: "Mic",
   record_to_database: "Database",
