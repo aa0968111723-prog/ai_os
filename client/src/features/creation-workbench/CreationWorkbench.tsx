@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
-import { flashAnchor } from "../../discuss";
+import { flashAnchorWhenVisible } from "../../discuss";
+import { useRevealFocus } from "../../lib/goTo";
 import { ProjectAssistant } from "../../components/ProjectAssistant";
 import {
   coCreateQuickPrompts,
@@ -256,10 +257,17 @@ export function CreationWorkbench({
     return () => window.clearTimeout(t);
   }, [sideNotice]);
 
-  const [focusedRunAnchor] = useState(() => {
-    if (typeof window === "undefined") return null;
-    const focus = new URLSearchParams(window.location.search).get("focus");
-    return focus?.startsWith("agent-run-") ? focus : null;
+  /**
+   * `?focus=agent-run-<id>`：把計畫分頁打開並閃那張卡。
+   *
+   * 用 seq 而不是只存錨點字串：代理動態列在同一份計畫上連按兩次時，錨點沒變，
+   * 光靠字串比對的 effect 不會重跑，第二次按就沒有反應。seq 每次揭示都遞增，
+   * 「再指一次同一個東西」才成立。
+   */
+  const [focusedRun, setFocusedRun] = useState<{ anchor: string; seq: number } | null>(null);
+  useRevealFocus((focus) => {
+    if (!focus.startsWith("agent-run-")) return;
+    setFocusedRun((prev) => ({ anchor: focus, seq: (prev?.seq ?? 0) + 1 }));
   });
 
   const { awaiting, running, waiting } = useAgentRunBadges(projectId);
@@ -360,17 +368,15 @@ export function CreationWorkbench({
   );
 
   useEffect(() => {
-    if (!focusedRunAnchor) return;
+    if (!focusedRun) return;
     setCollapsed(false);
     setDraft({ mode: "plan" });
     setPlanForceOpen(true);
-    let tries = 0;
-    const timer = window.setInterval(() => {
-      tries += 1;
-      if (flashAnchor(focusedRunAnchor) || tries > 20) window.clearInterval(timer);
-    }, 100);
-    return () => window.clearInterval(timer);
-  }, [focusedRunAnchor, setDraft]);
+    // flashAnchorWhenVisible 而不是輪詢 flashAnchor 的回傳值：計畫分頁是
+    // role="tabpanel" hidden={!active}，hidden 的元素 getElementById 照樣找得到，
+    // 於是舊寫法會在「找到但看不見」的那一輪就停住，畫面什麼都沒發生。
+    return flashAnchorWhenVisible(focusedRun.anchor, { intervalMs: 100, maxTries: 20 });
+  }, [focusedRun, setDraft]);
 
   // External reveal: GenerationList chips, requestWorkbenchMode, etc.
   useEffect(() => {

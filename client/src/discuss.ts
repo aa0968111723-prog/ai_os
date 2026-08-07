@@ -43,13 +43,48 @@ export function jumpToRef(refType: string, refId: string): boolean {
 export function flashAnchor(anchorId: string): boolean {
   const el = document.getElementById(anchorId);
   if (!el) return false;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  // 尊重「減少動態」：前庭功能敏感的人被一段強制平滑捲動打到就是眩暈，
+  // 而這條路徑是深連結／通知點擊，使用者沒有預期畫面會自己動。
+  const reduced = typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
   el.classList.remove("flash-target");
   // 強制 reflow 讓動畫可重播(連點兩次也會再閃一次)
   void el.offsetWidth;
   el.classList.add("flash-target");
   window.setTimeout(() => el.classList.remove("flash-target"), 2400);
   return true;
+}
+
+/**
+ * 輪詢到錨點「真的看得見」再捲＋高亮；回傳取消函式。
+ *
+ * 為什麼不能直接拿 `flashAnchor` 的回傳值當終止條件：它只在**元素不存在**時回 false。
+ * 站內有兩種「找得到但看不見」的常態——手機收合的分鏡列（第 5 格以後 display:none）
+ * 與 `hidden` 的 tabpanel（PlanMode 的 role="tabpanel" hidden={!active}）——
+ * `getElementById` 照樣找得到它們，於是輪詢會提早停在一個捲不到的目標上，
+ * 畫面什麼都沒發生。用 `getClientRects().length` 判斷才是「真的在版面裡」。
+ *
+ * 這個修正原本只寫在 ProjectPage 的 scene 分支；抽出來讓三處共用同一個正確版本。
+ */
+export function flashAnchorWhenVisible(
+  anchorId: string,
+  opts?: { intervalMs?: number; maxTries?: number },
+): () => void {
+  const intervalMs = opts?.intervalMs ?? 200;
+  const maxTries = opts?.maxTries ?? 25;
+  let tries = 0;
+  const timer = window.setInterval(() => {
+    tries += 1;
+    const el = document.getElementById(anchorId);
+    if (el && el.getClientRects().length > 0) {
+      window.clearInterval(timer);
+      flashAnchor(anchorId);
+    } else if (tries >= maxTries) {
+      window.clearInterval(timer);
+    }
+  }, intervalMs);
+  return () => window.clearInterval(timer);
 }
 
 /**

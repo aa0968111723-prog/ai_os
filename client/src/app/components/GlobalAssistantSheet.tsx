@@ -1,6 +1,7 @@
 import { lazy, Suspense, type RefObject } from "react";
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
+import { proposeNewProjectIdea } from "../../lib/newProjectIdea";
 import { Meta } from "../../components/ui";
 
 /**
@@ -87,11 +88,11 @@ export function GlobalAssistantSheet({
           onUseIdeaForNewProject={(ideaTitle) => {
             // 建專案是寫入動作——這裡只把想法帶到建立流程，不代按確認。
             // 真正的建立仍在 Launchpad 的建立專案表單，由使用者自己送出。
+            // 走 sessionStorage 交棒而不是裸 dispatchEvent：Launchpad 是 lazy route，
+            // setTimeout(0) 派的事件會在它掛載前發進真空（見 lib/newProjectIdea.ts）。
             onClose();
+            proposeNewProjectIdea(ideaTitle);
             navigate(`/dashboard#projects`);
-            window.setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("aios:new-project-idea", { detail: { ideaTitle } }));
-            }, 0);
           }}
         />
         </Suspense>

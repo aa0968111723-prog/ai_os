@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
+import { NEW_PROJECT_IDEA_EVENT, takePendingNewProjectIdea } from "../lib/newProjectIdea";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
@@ -290,6 +291,31 @@ export function Launchpad({ groupId }: { groupId: string }) {
       setCreateOpen(true);
     }
   }, [groupId, projects.data]);
+
+  // AI 助手的「以此靈感開新專案」：把靈感標題帶進建立表單並打開它。
+  // 雙軌收（見 lib/newProjectIdea.ts）：掛載時補收暫存（人從別頁跳來，Launchpad
+  // 是 lazy route，事件早就發完了）；已掛載時走事件路徑（人就在 dashboard 按的）。
+  // 只填表不送出——建立仍由使用者按「立即建立專案」。
+  useEffect(() => {
+    const applyIdea = (ideaTitle: string) => {
+      const t = ideaTitle.trim();
+      if (!t) return;
+      setTitle(t.slice(0, 80));
+      setCreateOpen(true);
+      requestAnimationFrame(() => {
+        document.getElementById("np-title")?.focus({ preventScroll: true });
+      });
+    };
+    const pending = takePendingNewProjectIdea();
+    if (pending) applyIdea(pending);
+    const onIdea = (e: Event) => {
+      // 事件路徑也要燒掉暫存，不然下次掛載會重放同一個靈感
+      takePendingNewProjectIdea();
+      applyIdea((e as CustomEvent<{ ideaTitle: string }>).detail?.ideaTitle ?? "");
+    };
+    window.addEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
+    return () => window.removeEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
+  }, []);
 
   return (
     <div

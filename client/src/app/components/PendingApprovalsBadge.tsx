@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
+import { revealOnSamePageClick } from "../../lib/goTo";
 import { MenuSurface } from "./MenuSurface";
 
 /**
@@ -51,7 +52,14 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
               href={`/p/${p.projectId}?focus=pending`}
               className="menu-item"
               role="menuitem"
-              onClick={close}
+              onClick={() => {
+                // 徽章在頂欄，所以「點的就是我正在看的那個專案」是常態。
+                // wouter 只認 pathname，那一點不會 re-render，?focus=pending 的消費者
+                // （SceneList 切「無畫面」篩選、ProjectPage 捲到交付區）一個都不會重跑。
+                // 連結本體照留（中鍵開新分頁、右鍵複製網址不該犧牲），只補軌二的事件。
+                revealOnSamePageClick(`/p/${p.projectId}?focus=pending`);
+                close();
+              }}
               style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}
             >
               <span style={{ fontWeight: 600, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

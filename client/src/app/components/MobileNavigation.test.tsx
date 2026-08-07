@@ -11,8 +11,19 @@ vi.mock("../../api", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
   return {
     trpc: {
-      useUtils: () => ({}),
-      teamAssistant: { ask: { useMutation: mutation } },
+      useUtils: () => ({ teamAssistant: { campaigns: { invalidate: vi.fn() } } }),
+      teamAssistant: {
+        ask: { useMutation: mutation },
+        // 調度面板（GroupCampaignPanel）也掛在 sheet 裡：權限給 "none" 讓它整塊不渲染，
+        // 這支測試守的是入口與 aria 契約，不是調度面板（它有自己的測試檔）
+        commandLevel: { useQuery: () => ({ data: "none", isSuccess: true, isLoading: false, error: null }) },
+        campaigns: { useQuery: () => ({ data: [], isLoading: false, error: null }) },
+        planCampaign: { useMutation: mutation },
+        approveCampaign: { useMutation: mutation },
+        discardCampaign: { useMutation: mutation },
+        stopCampaign: { useMutation: mutation },
+        resumeCampaign: { useMutation: mutation },
+      },
     },
   };
 });

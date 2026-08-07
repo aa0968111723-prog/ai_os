@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { goTo } from "../../lib/goTo";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Meta, Pill } from "../../components/ui";
@@ -25,7 +25,6 @@ import { Button, Meta, Pill } from "../../components/ui";
  * 停止走既有的 agents.stop（stopAgentCore 內含權限復驗），前端不自己判斷誰能停。
  */
 export function AgentActivityHud({ groupId }: { groupId: string }) {
-  const [, navigate] = useLocation();
   const [stopping, setStopping] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
@@ -64,7 +63,10 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
       <button
         type="button"
         className="agent-hud__body"
-        onClick={() => navigate(`/p/${lead.projectId}?focus=agent-run-${lead.id}`)}
+        // 走 goTo 而不是裸 navigate：HUD 是**跨頁常駐**的，最常按到它的時機正是
+        // 「人已經在那個專案頁上」——而 wouter 只認 pathname，那一按不會 re-render，
+        // ?focus= 的消費者一個都不會重跑，這顆鈕就是靜默死鍵（見 lib/goTo.ts）。
+        onClick={() => goTo(`/p/${lead.projectId}`, { focus: `agent-run-${lead.id}` })}
       >
         <span className="agent-hud__note">
           {lead.currentStepNote || lead.goal}

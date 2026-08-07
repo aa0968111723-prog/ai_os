@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
+import { useRevealFocus } from "../lib/goTo";
 import { SceneCardBinding } from "./SceneCardBinding";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
@@ -766,12 +767,12 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   // 通知深連結配套（與 ProjectPage 的 focus effect 分工）：
   // focus=scene-<id> 時手機收合的第 5 格以後是 display:none，先展開完整列表讓目標可見；
   // focus=pending（頂欄待辦入口）直接切到「無畫面」篩選，一到頁就是還缺東西的清單。
-  useEffect(() => {
-    const focus = new URLSearchParams(window.location.search).get("focus");
-    if (!focus) return;
+  // useRevealFocus 同時吃「掛載時的網址」與「同頁再次揭示的事件」——後者是必要的：
+  // 頂欄待辦徽章點的常常就是目前這一頁，那時候不會有任何重新掛載（見 lib/goTo.ts）。
+  useRevealFocus((focus) => {
     if (focus === "pending") setSceneFilter("missing");
     else if (/^scene-[0-9a-f-]+$/i.test(focus)) setSceneListExpanded(true);
-  }, []);
+  });
   const statusCounts = {
     ready: list.filter((s) => !!s.assetId).length,
     missing: list.filter((s) => !s.assetId).length,

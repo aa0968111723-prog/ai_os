@@ -71,6 +71,13 @@ vi.mock("../../../api", () => ({
 
 vi.mock("../../../discuss", () => ({
   flashAnchor: (...args: unknown[]) => flashAnchor(...args),
+  // 元件改用「等到看得見再閃」的版本（tabpanel hidden 時 getElementById 照樣找得到，
+  // 直接輪詢 flashAnchor 會提早停）。測試裡沒有真的版面，立即委派給同一顆 spy，
+  // 既有的「最後有沒有閃到那個錨點」斷言全部照舊成立。
+  flashAnchorWhenVisible: (anchorId: string) => {
+    flashAnchor(anchorId);
+    return () => {};
+  },
 }));
 
 /** Captures onCreationAction from AskAiMode → ProjectAssistant for bring-in tests. */

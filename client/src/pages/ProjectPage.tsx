@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
-import { DISCUSS_EVENT, flashAnchor } from "../discuss";
+import { DISCUSS_EVENT, flashAnchorWhenVisible } from "../discuss";
+import { useRevealFocus } from "../lib/goTo";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
@@ -561,9 +562,12 @@ export function ProjectPage({ id }: { id: string }) {
   // - ?focus=pending：捲到分鏡區（待處理彙總）
   // - ?focus=generation-<id>：開資源抽屜生成紀錄並高亮該筆
   // 列表非同步載入且手機列可能 display:none——輪詢到可見再捲，逾時放棄。
-  useEffect(() => {
-    const focus = new URLSearchParams(window.location.search).get("focus");
-    if (!focus) return;
+  //
+  // useRevealFocus 而不是「掛載時讀一次網址」：頂欄待辦徽章與代理動態列點的
+  // 常常就是**目前這一頁**，那一點在 wouter 底下不會有任何重新掛載（pathname 沒變
+  // → useSyncExternalStore 的 snapshot 沒變 → 零 re-render，見 lib/goTo.ts）。
+  // 事件軌補上後，「人在專案頁點該專案的待辦」才真的會捲過去。
+  useRevealFocus((focus) => {
     if (focus === "messages") {
       // mid=<messageId>：@提及推播要捲到「那一則」，不只是打開面板。
       // 白名單比照下方 scene 分支；MessagePanel 收到 prop 後自行定位（含往回翻頁）
@@ -579,32 +583,16 @@ export function ProjectPage({ id }: { id: string }) {
     }
     if (/^generation-[0-9a-f-]+$/i.test(focus)) {
       revealWorkbenchAnchor("#sec-generations", { projectId: id });
-      let tries = 0;
-      const timer = window.setInterval(() => {
-        tries += 1;
-        if (flashAnchor(focus) || tries >= 50) window.clearInterval(timer);
-      }, 300);
-      return () => window.clearInterval(timer);
+      // 抽屜展開前元素 hidden——等「真的看得見」再捲（flashAnchor 只在不存在時回 false，
+      // hidden 的元素它照樣找得到，拿回傳值當終止條件會提早停在捲不到的目標上）
+      return flashAnchorWhenVisible(focus, { intervalMs: 300, maxTries: 50 });
     }
     if (/^scene-[0-9a-f-]+$/i.test(focus)) {
-      let tries = 0;
-      const timer = window.setInterval(() => {
-        tries += 1;
-        const el = document.getElementById(focus);
-        // 手機收合中的列 getClientRects 為空——等 SceneList focus effect 展開後才捲
-        if (el && el.getClientRects().length > 0) {
-          window.clearInterval(timer);
-          flashAnchor(focus);
-        } else if (tries >= 50) {
-          window.clearInterval(timer);
-        }
-      }, 300);
-      return () => window.clearInterval(timer);
+      // 手機收合中的列 getClientRects 為空——等 SceneList focus effect 展開後才捲
+      return flashAnchorWhenVisible(focus, { intervalMs: 300, maxTries: 50 });
     }
     // focus=agent-run-* 由 CreationWorkbench／AiHub 自行處理（既有契約）
-    // 掛載時讀一次網址即可；mobileCompact 變化不該重觸發深連結
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  });
 
   // 手機「討論這個」：MessagePanel 只在 sheet 開著時 mount，事件會發進真空——
   // 這裡代收事件開 sheet，MessagePanel 掛載時再從交棒暫存補收引用卡（見 discuss.ts）

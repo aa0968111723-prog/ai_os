@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentActivityHud } from "./AgentActivityHud";
 
 const stopMutate = vi.fn();
+const goToSpy = vi.fn();
 let overviewRuns: unknown[] = [];
+
+vi.mock("../../lib/goTo", () => ({
+  goTo: (...args: unknown[]) => goToSpy(...args),
+}));
 
 vi.mock("../../api", () => ({
   trpc: {
@@ -68,6 +73,17 @@ describe("AgentActivityHud", () => {
     overviewRuns = [run({ status: "waiting" })];
     render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText("等你回覆")).toBeVisible();
+  });
+
+  it("點本體用 goTo 帶 focus 導航——裸 navigate 在「人已在該專案頁」時是靜默死鍵", async () => {
+    // wouter 只認 pathname：/p/X → /p/X?focus=… 不會 re-render，掛載時讀一次的
+    // ?focus= 消費者全都不會重跑。goTo 的同頁事件軌是唯一能補到這個洞的路徑，
+    // 所以這裡鎖的是「走 goTo 且把 focus 分離傳遞」，不是只鎖網址字串。
+    const user = userEvent.setup();
+    overviewRuns = [run()];
+    render(<AgentActivityHud groupId="g1" />);
+    await user.click(screen.getByText("為第 3 鏡生成畫面"));
+    expect(goToSpy).toHaveBeenCalledWith("/p/proj-1", { focus: "agent-run-run-1" });
   });
 
   it("「停」直接放在列上——代理會花點數會改資料，任何頁面都要能立刻按停", async () => {
