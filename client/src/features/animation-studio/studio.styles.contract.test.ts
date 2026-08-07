@@ -88,6 +88,27 @@ describe("底部留白契約（M2／#294）", () => {
   it("貼底 sheet 高度扣掉鍵盤高度（iOS 鍵盤不會縮 dvh）", () => {
     expect(declarations).toMatch(/\.studio-sheet \{[\s\S]*?max-height: min\(76dvh, calc\(100dvh - var\(--kb-inset, 0px\) - 96px\)\)/);
   });
+
+  /**
+   * 回歸守衛：sheet 蓋在分頁列上面（z 47 > nav 44），不該再讓開 `--chrome-bottom`。
+   * 讓開的後果是面板底部多出 140px+safe 的死白，76dvh 的 sheet 有四分之一不能用，
+   * 「AI 畫草圖」的輸入框與按鈕被擠進剩下那截裡——真機上看起來就是「沒辦法用」。
+   */
+  it("貼底 sheet 不讓開分頁列高度——它自己就蓋在分頁列上面", () => {
+    const sheet = ruleFor(".studio-sheet");
+    expect(sheet).not.toContain("--chrome-bottom");
+    expect(sheet).toContain("padding: 8px 12px max(12px, var(--safe-bottom))");
+  });
+
+  it("貼底 sheet 的底邊吃 --kb-inset：只扣高度的話 iOS 鍵盤仍會蓋住輸入列", () => {
+    expect(ruleFor(".studio-sheet")).toContain("bottom: var(--kb-inset, 0px)");
+  });
+
+  it("sheet 內容區可收縮才捲得動（flex 子項的自動最小高度會擋住收縮）", () => {
+    const body = ruleFor(".studio-sheet__body");
+    expect(body).toContain("min-height: 0");
+    expect(body).toContain("overflow-y: auto");
+  });
 });
 
 describe("觸控與遮罩", () => {

@@ -540,16 +540,22 @@
 }
 /* 觸控裝置的 button:hover 重置特異性較高，遮罩要併列同分才不會被塗成實色 */
 button.studio-sheet__scrim:hover { background: rgba(22, 34, 59, 0.32); }
+/* sheet **蓋住**分頁列（z 47 > nav 的 44，scrim 46 也擋著），所以不必再讓開它的高度。
+ * `--chrome-bottom` 是給「捲動內容不被貼底殼層蓋住」用的，寫在這裡等於在面板底部
+ * 挖出一塊 140px+safe 的死白：手機上 76dvh 的 sheet 有四分之一不能用，內容還被截在半句。
+ * 只留 safe-bottom（Home 指示條）＋呼吸空間，與全站另一個貼底面板 `.menu-surface.is-sheet` 同一條契約。
+ * bottom 吃 `--kb-inset`：iOS 鍵盤不縮版面視窗，只扣 max-height 的話 sheet 仍貼在鍵盤底下
+ *（Android 有 interactive-widget=resizes-content，inset 算出來是 0，不會重複位移）。 */
 .studio-sheet {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--kb-inset, 0px);
   z-index: 47;
   max-height: min(76dvh, calc(100dvh - var(--kb-inset, 0px) - 96px));
   display: flex;
   flex-direction: column;
-  padding: 8px 12px calc(var(--chrome-bottom) + var(--safe-bottom));
+  padding: 8px 12px max(12px, var(--safe-bottom));
   border-radius: var(--m-r-sheet, 24px) var(--m-r-sheet, 24px) 0 0;
   background: var(--card);
   box-shadow: var(--m-shadow-2, 0 -8px 30px -12px rgba(22, 34, 59, 0.4));
@@ -558,6 +564,7 @@ button.studio-sheet__scrim:hover { background: rgba(22, 34, 59, 0.32); }
 .studio[data-mode="desktop"] .studio-sheet {
   left: auto;
   top: 0;
+  bottom: 0;
   width: min(380px, 92vw);
   max-height: 100dvh;
   padding-bottom: 16px;
@@ -571,7 +578,9 @@ button.studio-sheet__scrim:hover { background: rgba(22, 34, 59, 0.32); }
   border-radius: 999px;
   background: color-mix(in srgb, var(--m-navy, #16223b) 24%, transparent);
 }
-.studio-sheet__body { overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
+/* min-height: 0 才收得住：flex 子項的自動最小高度會擋住收縮，
+   sheet 撐到 max-height 之後多出來的內容就溢出去而不是進到這裡捲。 */
+.studio-sheet__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
 
 /* ═══ 全螢幕專注模式 ════════════════════════════════════
  * 兩層：原生 Fullscreen API（吃掉瀏覽器介面）＋這裡的 CSS 沉浸。
