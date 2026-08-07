@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // 欄位上限的單一真相在 shared——在元件裡再寫一次數字，遲早有一邊被調大變成後門
 import { SCRIPT_AMBIENCE_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "@shared/storyboardScript";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Card, Hint, Meta } from "../../components/ui";
+import type { Stroke } from "./boardDoc";
 import { boardFileName, type ExportResult } from "./boardExport";
+import { boardDocFromSketch, clampSketchToCapacity } from "./sketchImport";
+import { replaySketch, type ReplayHandle } from "./sketchReplay";
 import type { StudioShot } from "./ShotStrip";
 import type { StudioLayout } from "./studioLayout";
 
@@ -19,6 +22,15 @@ export interface StudioAiPanelProps {
   exportBoard: () => Promise<ExportResult | null>;
   /** 白板已存成畫面：父層據此清掉「未存手稿」標記 */
   onBoardSaved: (shotId: string) => void;
+  /** AI 畫草圖：逐筆重播進白板（與手繪共用 pushStroke，尺寸與筆畫上限同一套） */
+  sketch: {
+    pushStroke: (stroke: Stroke) => void;
+    boardW: number;
+    boardH: number;
+    maxStrokes: number;
+    /** 白板目前已有幾筆——AI 的畫只准填進剩餘空間，絕不擠掉使用者已畫的（addStroke 超限丟最舊） */
+    strokeCount: number;
+  };
 }
 
 /**
@@ -38,6 +50,7 @@ export function StudioAiPanel({
   boardEmpty,
   exportBoard,
   onBoardSaved,
+  sketch,
 }: StudioAiPanelProps) {
   const utils = trpc.useUtils();
   const [prompt, setPrompt] = useState(shot?.prompt ?? "");
@@ -74,6 +87,38 @@ export function StudioAiPanel({
   const addDraft = trpc.scenes.addDraft.useMutation({ onSuccess: invalidateScenes });
   const setVisual = trpc.scenes.setVisualFromAsset.useMutation({ onSuccess: invalidateScenes });
   const suggest = trpc.director.suggest.useMutation();
+
+  // ── AI 畫草圖 ────────────────────────────────────────────
+  const [sketchPrompt, setSketchPrompt] = useState("");
+  const [replaying, setReplaying] = useState(false);
+  /** 因白板空間不足被裁掉的筆數（>0 必須告知，不准默默少畫） */
+  const [clippedByBoard, setClippedByBoard] = useState(0);
+  const replayRef = useRef<ReplayHandle | null>(null);
+  const sketchMutation = trpc.director.sketchBoard.useMutation({
+    onSuccess: (data) => {
+      // 伺服器輸出照樣過 parseBoard 防禦閘（boardDocFromSketch 內），與 localStorage 讀回同一道門
+      const board = boardDocFromSketch(data.doc);
+      if (!board || board.strokes.length === 0) return;
+      // 只填進剩餘空間：addStroke 超限丟「最舊」，不裁的話 AI 會把使用者已畫的擠掉
+      const { doc, clipped } = clampSketchToCapacity(board, sketch.strokeCount, sketch.maxStrokes);
+      setClippedByBoard(clipped);
+      if (doc.strokes.length === 0) return;
+      const reducedMotion =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      setReplaying(true);
+      replayRef.current = replaySketch(doc, sketch.pushStroke, {
+        reducedMotion,
+        onDone: () => setReplaying(false),
+      });
+    },
+  });
+  // 離開創作室時停掉還在畫的重播；已落的筆畫留著（本機草稿，可 undo 可清空）
+  useEffect(() => () => replayRef.current?.cancel(), []);
+  const stopReplay = () => {
+    replayRef.current?.cancel();
+    setReplaying(false);
+  };
   const split = trpc.director.splitScript.useMutation({
     onSuccess: (data) => {
       // 有截斷就把原文留著：尾段沒拆進來這件事收掉面板等於沒講
@@ -203,6 +248,67 @@ export function StudioAiPanel({
             {update.error && <p className="error" role="alert">儲存失敗：{update.error.message}</p>}
           </>
         )}
+      </Card>
+
+      <Card as="section" variant="quiet" data-fb="創作室・AI 畫草圖">
+        <h3 className="studio-ai__title">
+          <Icon name="Sparkles" size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          AI 畫草圖
+        </h3>
+        <label htmlFor="studio-sketch-prompt">跟 AI 說這一鏡要看到什麼，它畫在白板上</label>
+        <textarea
+          id="studio-sketch-prompt"
+          rows={2}
+          value={sketchPrompt}
+          maxLength={500}
+          disabled={!canEdit || sketchMutation.isPending || replaying}
+          placeholder="例：一個人在山路上往右走，遠處有夕陽"
+          onChange={(e) => setSketchPrompt(e.target.value)}
+        />
+        <div className="studio-ai__actions">
+          {replaying ? (
+            <Button size="sm" variant="tonal" onClick={stopReplay}>
+              <Icon name="X" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+              停（已畫的留著）
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!canEdit || sketchMutation.isPending || sketchPrompt.trim().length < 4}
+              onClick={() => {
+                sketchMutation.mutate({
+                  projectId,
+                  prompt: sketchPrompt.trim(),
+                  boardW: sketch.boardW,
+                  boardH: sketch.boardH,
+                  maxStrokes: sketch.maxStrokes,
+                });
+              }}
+            >
+              {sketchMutation.isPending ? "AI 構圖中…" : "AI 畫草圖（0 點）"}
+            </Button>
+          )}
+          {shot?.prompt && !replaying && !sketchMutation.isPending && (
+            <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setSketchPrompt(shot.prompt ?? "")}>
+              帶入這一鏡的提示詞
+            </Button>
+          )}
+        </div>
+        {sketchMutation.error && <p className="error" role="alert">AI 畫圖失敗：{sketchMutation.error.message}</p>}
+        {sketchMutation.data?.limitNotice && <Hint role="status">{sketchMutation.data.limitNotice}</Hint>}
+        {sketchMutation.data && !replaying && !sketchMutation.isPending && (
+          <Meta role="status" as="p" style={{ margin: "4px 0 0" }}>
+            畫好了：{sketchMutation.data.doc.strokes.length} 筆
+            {sketchMutation.data.droppedStrokes > 0 ? `（超過白板上限，省略了 ${sketchMutation.data.droppedStrokes} 筆）` : ""}
+            {clippedByBoard > 0 ? `（白板剩餘空間不足，另有 ${clippedByBoard} 筆沒畫上——清空白板可畫完整版）` : ""}
+            {sketchMutation.data.mock ? (sketchMutation.data.fallback ? "・AI 暫時沒回應，先畫示範構圖（不是依你的描述畫的）" : "・示範模式（不是依你的描述畫的）") : ""}
+            。看完沒問題，就用上面「把白板存成這一鏡的畫面」收進分鏡。
+          </Meta>
+        )}
+        <Hint>
+          AI 畫的是分鏡構圖草稿（框、簡筆人物、運鏡箭頭），不是精緻插畫。畫在現有筆畫上面——想從白紙開始，先按白板的清空。
+        </Hint>
       </Card>
 
       <Card as="section" variant="quiet" data-fb="創作室・AI 導演建議">

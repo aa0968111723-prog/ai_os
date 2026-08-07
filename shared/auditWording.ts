@@ -90,6 +90,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.generateAmbience": "生成分鏡環境音",
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
+  "director.sketchBoard": "AI 畫白板草圖",
   "director.splitScript": "AI 拆分鏡",
   "assistant.ask": "詢問專案 AI 助手",
   "assistant.preview": "預覽專案 AI 助手上下文",
