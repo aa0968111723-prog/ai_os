@@ -11,6 +11,7 @@
 import { router, publicProcedure } from "../trpc";
 import { authMeCapabilities } from "../services/policyEngine";
 import { dmUnreadTotal } from "../services/dmCore";
+import { notificationUnreadCount } from "../services/notify";
 import { isMockMode } from "../services/fal";
 
 /** 未讀查詢硬上限（ms）——超過就回 0，不擋登入後路由 */
@@ -49,14 +50,16 @@ export const sessionBootRouter = router({
    */
   bootstrap: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.auth) {
-      return { me: null as null, unreadTotal: 0, mockMode: isMockMode() };
+      return { me: null as null, unreadTotal: 0, notifyUnread: 0, mockMode: isMockMode() };
     }
     const me = { ...ctx.auth, ...authMeCapabilities(ctx.auth) };
-    const unreadTotal = await withTimeout(
-      dmUnreadTotal(ctx.auth).catch(() => 0),
-      UNREAD_BUDGET_MS,
-      0,
-    );
-    return { me, unreadTotal, mockMode: isMockMode() };
+    // 兩個數字並列而不是合成一個：私訊未讀是「有人在跟我說話」，收件匣未讀是「有事情等我處理」。
+    // 併成一個數字之後，看到紅點的人不知道該去哪裡，而這正是收件匣要解掉的問題。
+    // 共用同一個 withTimeout 保底：首屏不該因為其中一支慢而整個卡住。
+    const [unreadTotal, notifyUnread] = await Promise.all([
+      withTimeout(dmUnreadTotal(ctx.auth).catch(() => 0), UNREAD_BUDGET_MS, 0),
+      withTimeout(notificationUnreadCount(ctx.auth.user.id).catch(() => 0), UNREAD_BUDGET_MS, 0),
+    ]);
+    return { me, unreadTotal, notifyUnread, mockMode: isMockMode() };
   }),
 });

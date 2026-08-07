@@ -7589,3 +7589,78 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .menu-surface__scrim:has(+ .global-assistant) {
   background: rgba(28, 25, 23, 0.16);
 }
+
+/* ── 圖上定點標注 ───────────────────────────────────────────────
+   舞台的媒體是 object-fit: contain，所以圓點的定位基準是「內容框」而不是元素框；
+   換算在 SceneAnnotationLayer 用 shared/mediaPoint 算好，這裡只負責外觀。 */
+.scene-annot {
+  position: relative;
+  min-width: 0;
+}
+.scene-annot.is-annotating,
+.scene-annot.is-annotating img,
+.scene-annot.is-annotating video {
+  cursor: crosshair;
+  /* 標注模式下舞台不吃捲動手勢——否則手機上想標注就會一直捲走 */
+  touch-action: none;
+}
+.scene-annot__dot {
+  position: absolute;
+  /* 視覺 22px，但外圍透明命中區補到 44px（比照全站觸控尺寸的既定結論）：
+     圓點畫小才不會遮住它要指的東西，手指卻按得到。 */
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  padding: 0;
+  border: none;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font: 600 var(--fs-11) / 1 var(--font-ui);
+  color: var(--on-accent);
+}
+.scene-annot__dot::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--danger-ink);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.scene-annot__dot > * ,
+.scene-annot__dot { z-index: 1; }
+.scene-annot__dot.is-resolved::before {
+  background: transparent;
+  border: 2px solid var(--muted-ink);
+}
+.scene-annot__dot.is-resolved { color: var(--muted-ink); }
+.scene-annot__dot.is-selected::before {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+/* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
+.agent-hud {
+  position: fixed; left: 0; right: 0; z-index: 43;
+  /* 疊在分頁列之上、之下：分頁列 z44 蓋住它才對——HUD 是資訊列，不該遮住主導覽。
+     bottom 吃 --chrome-bottom（分頁列高度的單一契約）＋鍵盤 inset。 */
+  bottom: calc(var(--chrome-bottom, 48px) + var(--kb-inset, 0px));
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin: 0 8px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-12);
+  background: var(--card); box-shadow: var(--e3);
+}
+.agent-hud__body {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  text-align: start; background: transparent; border: 0; padding: 0;
+}
+/* 步驟說明可能很長：單行截斷，完整內容在專案頁的代理卡 */
+.agent-hud__note {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-13);
+}
+@media (min-width: 821px) {
+  /* 桌機沒有底部分頁列：貼右下角，不橫跨整個視窗 */
+  .agent-hud { left: auto; right: 16px; bottom: 16px; max-width: 420px; margin: 0; }
+}

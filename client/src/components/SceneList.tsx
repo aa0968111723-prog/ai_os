@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { SceneCardBinding } from "./SceneCardBinding";
 import { ScenePromptPreview } from "./ScenePromptPreview";
@@ -344,6 +344,7 @@ function SceneRow({
   sceneIds,
   propIds,
   watchers,
+  openAnnotations,
   invalidate,
   move,
   remove,
@@ -367,6 +368,8 @@ function SceneRow({
   propIds?: string[];
   /** 現在把游標停在這一格的人（不含自己）；沒連上協作或沒人在這格時是空陣列 */
   watchers: CollabAnchorPeer[];
+  /** 這一格還沒改好的標注數（0＝不顯示角標） */
+  openAnnotations: number;
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
@@ -649,6 +652,17 @@ function SceneRow({
               <Icon name="MessageCircle" size={13} /> 討論
             </button>
           )}
+          {/* 未改好的標注數。這一顆就是「組長標了 5 格，捲過分鏡列一眼看得出是哪 5 格」——
+              沒有它的話，每一格長得一模一樣，要改哪幾格只能自己數。 */}
+          {openAnnotations > 0 && (
+            <button
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)" }}
+              title={`這一格有 ${openAnnotations} 則還沒改好的標注——點開單格工作室看是哪裡`}
+              onClick={onOpenStudio}
+            >
+              <Icon name="Highlighter" size={13} /> {openAnnotations}
+            </button>
+          )}
         </div>
       </div>
       {canEdit && (
@@ -715,6 +729,13 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
   const scenes = trpc.scenes.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
+  // 整個專案每一格的未改好標注數，一支查完（不逐格 N+1——十幾格就是十幾支查詢，
+  // 而這個數字是每次開專案頁都要的）
+  const openAnnotations = trpc.messages.openCountsByScene.useQuery({ projectId }, { refetchInterval: 30_000 });
+  const openAnnotationBySceneId = useMemo(
+    () => new Map((openAnnotations.data ?? []).map((r) => [r.refId, r.n])),
+    [openAnnotations.data],
+  );
   const invalidate = () => {
     utils.scenes.listByProject.invalidate({ projectId });
     utils.messages.list.invalidate({ projectId });
@@ -971,6 +992,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   propIds={propIds}
                   // 錨點格式與 realtime.tsx 的 collabAnchorFromElement 對齊：這一格的 id 就是 `scene-<id>`
                   watchers={anchorPeers?.get(`#scene-${s.id}`) ?? EMPTY_WATCHERS}
+                  openAnnotations={openAnnotationBySceneId.get(s.id) ?? 0}
                   invalidate={invalidate}
                   move={move}
                   remove={remove}

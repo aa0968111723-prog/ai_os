@@ -70,8 +70,15 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
 /**
  * 推播給多位使用者的「所有已連結裝置」。永不拋例外；回傳嘗試/成功數供測試通知顯示。
  * 404/410（訂閱已失效）→ 刪列自清；其他錯誤（推送服務抖動）→ 留列下次再試，僅記 log。
+ *
+ * ⚠ `attempted` 是**跨所有收件人的訂閱列數，不是人數**。要判斷「某個人有沒有送到」
+ * 一定要一次只傳一個 userId（見 services/notify.ts 為什麼逐人推）。
+ *
+ * `error: true` 只在「系統故障」時出現（DB 讀不到、VAPID 取不到）。沒有它的話，
+ * 故障與「這個人沒有任何裝置」都是 {0,0}，完全無法區分——收件匣會把整批系統故障
+ * 記成 no_device，而那正好是最需要看得出來的一種失敗。
  */
-export async function pushToUsers(userIds: string[], payload: PushPayload): Promise<{ attempted: number; delivered: number }> {
+export async function pushToUsers(userIds: string[], payload: PushPayload): Promise<{ attempted: number; delivered: number; error?: true }> {
   const targets = [...new Set(userIds)].filter(Boolean);
   if (targets.length === 0) return { attempted: 0, delivered: 0 };
   try {
@@ -110,9 +117,10 @@ export async function pushToUsers(userIds: string[], payload: PushPayload): Prom
     );
     return { attempted: subs.length, delivered };
   } catch (err) {
-    // DB 讀不到／金鑰取不到等：推播是附加訊號，靜默降級
+    // DB 讀不到／金鑰取不到等：推播是附加訊號，靜默降級。
+    // 但要回 error 旗標——呼叫端才分得出這是系統故障，而不是「這個人沒有任何裝置」。
     console.warn("[push] 推播略過：", err instanceof Error ? err.message : err);
-    return { attempted: 0, delivered: 0 };
+    return { attempted: 0, delivered: 0, error: true };
   }
 }
 
