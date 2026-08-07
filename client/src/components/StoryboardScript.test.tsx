@@ -10,6 +10,8 @@ import { StoryboardScript } from "./StoryboardScript";
 const applyMutate = vi.fn();
 const splitMutate = vi.fn();
 let applyState: { isPending: boolean; error: { message: string } | null } = { isPending: false, error: null };
+/** 寫回成功時伺服器回什麼（warnings＝看得懂但沒照做的行） */
+let applyResult: { warnings: string[] } = { warnings: [] };
 /** 拆分鏡成功時伺服器回什麼（truncation 非 null＝尾段沒拆進來） */
 let splitResult: { truncation: { sentChars: number; totalChars: number } | null } = { truncation: null };
 /** scenes.listByProject 的最小投影：這支元件只用它取 id 當寫回前的分鏡指紋 */
@@ -41,12 +43,22 @@ vi.mock("../api", async () => {
       },
       scenes: {
         applyScript: {
-          useMutation: () => ({
-            mutate: applyMutate,
-            isPending: applyState.isPending,
-            error: applyState.error,
-            reset: vi.fn(),
-          }),
+          // 同樣用真的 useState 存 data：伺服器才知道的 warnings（卡片名字對不上時整行不套用）
+          // 是在寫回成功「之後」才渲染的，沒有真實重新渲染就測不到它看不看得見
+          useMutation: (opts?: { onSuccess?: () => void }) => {
+            const [data, setData] = useState<typeof applyResult | undefined>(undefined);
+            return {
+              mutate: (vars: unknown) => {
+                applyMutate(vars);
+                setData(applyResult);
+                opts?.onSuccess?.();
+              },
+              isPending: applyState.isPending,
+              error: applyState.error,
+              data,
+              reset: () => setData(undefined),
+            };
+          },
         },
         // 寫回要帶上「算差異時看到的那份分鏡」的 id 指紋（夥伴刪一格會讓鏡次整批錯位）；
         // 與 SceneList 同一把 query key，吃的是同一份快取
@@ -59,7 +71,7 @@ vi.mock("../api", async () => {
 // 六個內容欄位一律寫滿：StoryboardScriptRow 刻意把它們設成必填，漏傳一欄＝寫回時被判成
 // 「使用者刻意清空」（環境音就這樣被清過一次），所以連測試 fixture 也不給省。
 const ROWS = [
-  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", action: null, voiceover: "那一年", dialogue: null, ambience: "遠處鐘聲", music: null, cardNames: ["安倢的紅傘"] },
+  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", action: null, voiceover: "那一年", dialogue: null, ambience: "遠處鐘聲", music: null, propNames: ["安倢的紅傘"] },
   { title: "收尾", durationSec: 3, prompt: "關門", action: null, voiceover: null, dialogue: null, ambience: null, music: null },
 ];
 
@@ -70,16 +82,17 @@ describe("StoryboardScript", () => {
     applyState = { isPending: false, error: null };
     splitResult = { truncation: null };
     sceneRows = [{ id: "s1" }, { id: "s2" }];
+    applyResult = { warnings: [] };
   });
 
-  it("展開後可讀到整份腳本（含唯讀的設定卡標注）", async () => {
+  it("展開後可讀到整份腳本（含可寫回的卡片行）", async () => {
     const user = userEvent.setup();
     render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: /文字腳本/ }));
     const pre = screen.getByText(/## 1\. 開場・晨光 \(5s\)/);
     expect(pre).toBeVisible();
-    expect(pre.textContent).toContain("設定卡：安倢的紅傘（唯讀）");
+    expect(pre.textContent).toContain("素材卡：安倢的紅傘");
   });
 
   it("編輯時先預告會動到什麼——少寫的鏡標明保留不動", async () => {
@@ -162,6 +175,26 @@ describe("StoryboardScript", () => {
 
     expect(screen.queryByRole("button", { name: "確認寫回" })).toBeNull();
     expect(applyMutate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 卡片名字對不上時伺服器整行不套用，而寫回一成功編輯框就收掉了。
+   * 不把這一則講出來，使用者看到的只有「寫回成功」，他寫的角色卻一個都沒進去。
+   */
+  it("寫回成功後仍顯示伺服器回報的「沒照做」的行", async () => {
+    applyResult = { warnings: ["第 1 鏡的「角色卡」裡找不到「小明」，整行不套用（其餘名字也沒動）"] };
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    // 寫回是兩段式（覆蓋掉的字沒有回收桶可還原）——第一次點只是把確認鈕叫出來
+    await user.click(screen.getByRole("button", { name: "寫回分鏡" }));
+    await user.click(screen.getByRole("button", { name: "確認寫回" }));
+
+    // 編輯框已經收掉（onSuccess 清 draft），提示仍在
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/找不到「小明」/));
+    expect(screen.queryByRole("textbox", { name: "分鏡腳本全文" })).toBeNull();
   });
 
   it("格式錯（整段沒有 ##）會擋下寫回並說明原因", async () => {

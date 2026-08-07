@@ -4,9 +4,11 @@
  * 為什麼不讓 LLM 直接吐 UUID：模型會捏造看起來像 UUID 的字串，寫進去就是壞引用。
  * 代號＋白名單解析＝解析不到就丟掉，永遠不會寫入不存在的卡片（與 agentPlanning 同一套思路）。
  */
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { formatPropDisplayName } from "../../shared/propOwnership";
+import type { CardLookupEntry, SceneCardKind } from "../../shared/sceneCards";
 import { clipCardField } from "./cardAnchors";
 
 /** 每種卡片最多列給模型幾張（提示詞不能被卡片清單灌爆） */
@@ -93,6 +95,63 @@ export function resolveSceneCardRefs(
     characterIds: resolveRefs(refs.characterRefs, aliases.characters, MAX_GENERATE_CHARACTERS),
     scenePresetIds: resolveRefs(refs.scenePresetRefs, aliases.scenePresets, MAX_GENERATE_SCENE_PRESETS),
     propIds: resolveRefs(refs.propRefs, aliases.props, MAX_GENERATE_PROPS),
+  };
+}
+
+/**
+ * 文字腳本的卡片行要靠**名字**回推卡片，所以要一份「名字 → id」的完整名冊。
+ *
+ * 與 loadProjectCardAliases 的差別在用途，不是重複：那份是給 LLM 讀的代號清單，
+ * 會截到 SCENE_CARD_ALIAS_MAX（提示詞不能被卡片清單灌爆）。這份不能截——
+ * 截掉的那張卡在文字裡就變成「找不到這個名字」，使用者明明在畫面上看得到它。
+ *
+ * 素材卡收兩種寫法：顯示名（「安倢的紅傘」）與原名（「紅傘」）。原名撞名時
+ * resolveCardLine 會判成有歧義並整行不套用，不會擲骰子挑一張。
+ */
+export async function loadSceneCardLookup(
+  projectId: string,
+): Promise<Record<SceneCardKind, CardLookupEntry[]>> {
+  const [characterRows, sceneRows, propRows] = await Promise.all([
+    db
+      .select({ id: schema.characters.id, name: schema.characters.name })
+      .from(schema.characters)
+      .where(eq(schema.characters.projectId, projectId))
+      .orderBy(asc(schema.characters.createdAt)),
+    db
+      .select({ id: schema.scenePresets.id, name: schema.scenePresets.name })
+      .from(schema.scenePresets)
+      .where(eq(schema.scenePresets.projectId, projectId))
+      .orderBy(asc(schema.scenePresets.createdAt)),
+    db
+      .select({
+        id: schema.props.id,
+        name: schema.props.name,
+        ownerKind: schema.props.ownerKind,
+        ownerCharacterName: schema.characters.name,
+        ownerSceneName: schema.scenePresets.name,
+      })
+      .from(schema.props)
+      .leftJoin(
+        schema.characters,
+        and(eq(schema.characters.id, schema.props.ownerId), eq(schema.props.ownerKind, "character")),
+      )
+      .leftJoin(
+        schema.scenePresets,
+        and(eq(schema.scenePresets.id, schema.props.ownerId), eq(schema.props.ownerKind, "scene")),
+      )
+      .where(eq(schema.props.projectId, projectId))
+      .orderBy(asc(schema.props.createdAt)),
+  ]);
+
+  return {
+    characters: characterRows.map((row) => ({ id: row.id, names: [row.name] })),
+    scenePresets: sceneRows.map((row) => ({ id: row.id, names: [row.name] })),
+    props: propRows.map((row) => {
+      const ownerName =
+        row.ownerKind === "character" ? row.ownerCharacterName : row.ownerKind === "scene" ? row.ownerSceneName : null;
+      const display = formatPropDisplayName(row.name, ownerName);
+      return { id: row.id, names: display === row.name ? [row.name] : [display, row.name] };
+    }),
   };
 }
 

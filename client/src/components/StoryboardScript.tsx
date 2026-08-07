@@ -123,7 +123,7 @@ export function StoryboardScript({
                   取消編輯
                 </Button>
               ) : (
-                <Button variant="ghost" size="sm" onClick={() => setDraft(current)}>
+                <Button variant="ghost" size="sm" onClick={() => { apply.reset(); setDraft(current); }}>
                   <Icon name="Pencil" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                   編輯全文
                 </Button>
@@ -190,7 +190,11 @@ export function StoryboardScript({
               <Hint>
                 每一鏡以「## 」開頭，例如「## 1. 開場 (5s)」；底下用「畫面：」「旁白：」「環境音：」。
                 序號、秒數、任一區塊都可省略——**省略＝維持原值**，不會被清空。
-                文字裡沒寫到的鏡會**保留不動**（要刪請用分鏡表的刪除鈕）。設定卡是唯讀標注，改文字不會動到綁定。
+                文字裡沒寫到的鏡會**保留不動**（要刪請用分鏡表的刪除鈕）。
+                <br />
+                卡片用名字寫：「角色卡：安倢・師父」「場景卡：禪堂」「素材卡：安倢的紅傘」。
+                名字有一個對不上就<b>整行不套用</b>並告訴你是哪一個；留白＝維持原本綁定，
+                要解除請寫「角色卡：無」。
               </Hint>
               {parsed?.errors.length ? (
                 <p className="error" role="alert">{parsed.errors.join("；")}</p>
@@ -283,6 +287,15 @@ export function StoryboardScript({
               {current}
             </pre>
           )}
+          {/*
+            伺服器才知道的事要講出來：卡片名字對不上時整行不套用，而寫回一成功編輯框就收掉了。
+            不顯示這一則的話，使用者看到的只有「寫回成功」，他寫的角色卻一個都沒進去。
+          */}
+          {apply.data?.warnings?.length ? (
+            <Hint role="status" style={{ color: "var(--gold-ink)" }}>
+              寫回完成，但有幾行沒有照做：{apply.data.warnings.join("；")}
+            </Hint>
+          ) : null}
         </div>
       )}
     </Card>

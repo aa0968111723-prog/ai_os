@@ -375,3 +375,69 @@ describe("complete AI planning safety resolver", () => {
     expect(plan.steps.every((s) => s.modelId !== "this-model-does-not-exist-anywhere")).toBe(true);
   });
 });
+
+/**
+ * A1 剪輯步驟（update_scene／reorder_scenes）：真代理路線圖「一個提示詞操作剪輯」的
+ * 資料層入口。時間軸唯一真相是 scenes 表，這兩種 kind 就是代理的剪刀。
+ */
+describe("editing step kinds (update_scene / reorder_scenes)", () => {
+  it("update_scene 的欄位完整映射進 AgentStep（prompt→scenePrompt，與 create_scene 同慣例）", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "tighten",
+        kind: "update_scene",
+        title: "縮短第 3 鏡",
+        note: "把第 3 鏡收到 3 秒並修出點",
+        sceneNo: 3,
+        durationSec: 3,
+        prompt: "夕陽下的教室，逆光剪影",
+        ambience: "遠處蟬鳴",
+        trimStartMs: 500,
+        trimEndMs: 3500,
+      }],
+    });
+    const plan = resolveCompletePlanDraft(draft, aliases);
+    const step = plan.steps.find((s) => s.id === "tighten")!;
+    expect(step.kind).toBe("update_scene");
+    expect(step.sceneNo).toBe(3);
+    expect(step.durationSec).toBe(3);
+    expect(step.scenePrompt).toBe("夕陽下的教室，逆光剪影");
+    expect(step.ambience).toBe("遠處蟬鳴");
+    expect(step.trimStartMs).toBe(500);
+    expect(step.trimEndMs).toBe(3500);
+    // 免費步驟：估點 0，核准畫面不該出現幽靈點數
+    expect(step.points).toBe(0);
+    expect(step.actorType).toBe("ai");
+  });
+
+  it("reorder_scenes 帶完整的新順序編號；少於 2 個被 schema 擋下", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "resort",
+        kind: "reorder_scenes",
+        title: "把結尾提前",
+        note: "第 3 鏡移到開頭",
+        orderedSceneNos: [3, 1, 2],
+      }],
+    });
+    const plan = resolveCompletePlanDraft(draft, aliases);
+    expect(plan.steps.find((s) => s.id === "resort")?.orderedSceneNos).toEqual([3, 1, 2]);
+
+    expect(() =>
+      completePlanDraftSchema.parse({
+        summary: summary(),
+        steps: [{ id: "bad", kind: "reorder_scenes", title: "壞", note: "壞", orderedSceneNos: [1] }],
+      }),
+    ).toThrow();
+  });
+
+  it("update_scene 沒有任何刪除能力——schema 不存在 remove 類欄位（applyScript 站規：永不刪除）", () => {
+    const parsed = completePlanDraftSchema.safeParse({
+      summary: summary(),
+      steps: [{ id: "x", kind: "remove_scene", title: "刪", note: "刪", sceneNo: 1 }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+});

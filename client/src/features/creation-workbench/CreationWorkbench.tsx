@@ -509,39 +509,25 @@ export function CreationWorkbench({
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
-        <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
-          {coCreateOpen
-            ? "共創引導中：先選方向，再一步步定調、分鏡、畫面、收斂。"
-            : mode === "generate"
-              ? "預設直接出圖：選模型、寫提示詞、看點數，再按生成。上方想法可選，不會扣點。"
-              : "寫你想完成的畫面或片子，再按 ＋ 請誰來幫忙——像請劇組，不必先背四個分頁。"}
-        </Hint>
-
+        {/*
+          版面順序＝決策順序（UIUX 修：使用者回報「介面很複雜、不夠直覺」）。
+          原本目標輸入框排在模式分頁**上面**，但它的送出鈕文案由 GOAL_SUBMIT[mode] 決定
+          ——「帶入提示詞／問 AI／帶入範本／帶去排步驟」四種意思，取決於使用者還沒看到的
+          下方分頁。於是那顆鈕在讀到分頁之前無法理解，只能靠旁邊補一行 hint 解釋。
+          先選模式、再寫目標，按鈕的字自然就對得上，補充說明也不必存在。
+        */}
         {!coCreateOpen ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              marginTop: 8,
-            }}
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={enterCoCreate}
-              data-testid="co-create-entry"
-              disabled={!canEdit}
-            >
-              沒靈感？陪你做完
-            </Button>
-            <Meta as="span" style={{ margin: 0 }}>
-              沒靈感時從這裡走引導，不必先選四個分頁
-            </Meta>
-          </div>
-        ) : null}
+          <>
+            <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
+            {/* 緊貼模式分頁下方：切換模式時這行跟著變，是使用者唯一看得見
+                「這次 AI 到底讀不讀得到我放的東西」的地方（見 aiContextSummary.ts） */}
+            <AiContextLine mode={mode} draft={draft} />
+          </>
+        ) : (
+          <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
+            共創引導中：先選方向，再一步步定調、分鏡、畫面、收斂。
+          </Hint>
+        )}
 
         <CreationGoalInput
           inputId={goalInputId}
@@ -555,6 +541,22 @@ export function CreationWorkbench({
           submitHint={GOAL_SUBMIT[mode].hint}
           compact={mode === "generate" || coCreateOpen}
         />
+
+        {/* 沒靈感的出口放在目標框**之後**：讀完「要填什麼」才知道自己填不出來。
+            按鈕本身已寫明用途，旁邊不再補一行同義的說明字。 */}
+        {!coCreateOpen ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={enterCoCreate}
+            data-testid="co-create-entry"
+            disabled={!canEdit}
+            style={{ marginTop: 6 }}
+          >
+            沒靈感？陪你做完
+          </Button>
+        ) : null}
 
         {coCreateOpen ? (
           <CoCreateShell
@@ -596,12 +598,6 @@ export function CreationWorkbench({
           </CoCreateShell>
         ) : (
           <>
-            <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
-
-            {/* 緊貼模式分頁下方：切換模式時這行跟著變，是使用者唯一看得見
-                「這次 AI 到底讀不讀得到我放的東西」的地方（見 aiContextSummary.ts） */}
-            <AiContextLine mode={mode} draft={draft} />
-
             <CreationContextBar onNavigate={goTo} />
 
             {(mode === "ask" || mode === "plan") && (

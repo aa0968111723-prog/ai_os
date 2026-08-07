@@ -30,12 +30,14 @@ describe("buildReplaySchedule", () => {
     expect(longGap).toBeGreaterThan(shortGap);
   });
 
-  it("整場重播的收尾不超過上限——300 筆的畫也不該讓人等太久", () => {
-    const many = Array.from({ length: 300 }, () => strokeWithPoints(120));
-    const schedule = buildReplaySchedule(many);
-    // 最後一筆的落點 ≤ 總長上限 6.5s（間隔各自有下限，但總量受 totalMs 分配約束）
-    expect(schedule.at(-1)!.atMs).toBeLessThanOrEqual(300 * 550);
-    expect(schedule.at(-1)!.atMs).toBeGreaterThan(0);
+  it("整場重播的收尾不超過 6.5 秒——單筆下限不得凌駕總長承諾", () => {
+    // 審查抓到的：45ms 下限 × 300 筆＝13.5 秒，「不超過 6.5 秒」曾是謊言
+    for (const count of [300, 1200]) {
+      const many = Array.from({ length: count }, () => strokeWithPoints(120));
+      const schedule = buildReplaySchedule(many);
+      expect(schedule.at(-1)!.atMs).toBeLessThanOrEqual(6_500);
+      expect(schedule.at(-1)!.atMs).toBeGreaterThan(0);
+    }
   });
 
   it("空文件回空排程", () => {

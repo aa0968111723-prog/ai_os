@@ -14,6 +14,8 @@ import {
 export const planStepKindSchema = z.enum([
   "split_script",
   "create_scene",
+  "update_scene",
+  "reorder_scenes",
   "generate",
   "voiceover",
   "record_to_database",

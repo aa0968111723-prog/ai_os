@@ -74,3 +74,129 @@ export function formatSceneCardNames(names: {
     .filter(Boolean)
     .join("・");
 }
+
+/* ------------------------------------------------------------------ *
+ * 文字腳本裡的卡片行：「角色卡：安倢・師父」
+ *
+ * 為什麼名字可以寫回、而 id 從來不出現在文字裡：
+ * 使用者寫的是劇本，不是資料庫。要他在「畫面：」旁邊貼一串 UUID，這條路就白開了。
+ * 代價是名字要回推卡片——所以規則刻意嚴格：**整行要嘛全中，要嘛一張都不動**。
+ * 半套用才是真正的災難：寫了三個名字、只認得兩個，靜默存兩張，等於系統替他刪了一個角色。
+ * ------------------------------------------------------------------ */
+
+/** 輸出一律用「・」；讀回時多收幾種手打常見的分隔符 */
+const NAME_JOIN = "・";
+const NAME_SPLIT_RE = /[・、，,／/]+/;
+
+/**
+ * 明確解除綁定的字。
+ *
+ * 留白**不是**解除：文字腳本的整套契約是「省略＝維持原值」，而卡片綁定被誤清的代價
+ * 遠高於旁白被誤清——旁白重打一次就有，綁定要回到分鏡表逐格重勾。所以要解除得說出口。
+ */
+export const CARD_CLEAR_TOKEN = "無";
+
+export type SceneCardKind = "characters" | "scenePresets" | "props";
+
+/** 三種卡片的固定順序（文字腳本的行序、逐一處理的迴圈都用這個，不各自寫一份） */
+export const SCENE_CARD_KINDS: readonly SceneCardKind[] = ["characters", "scenePresets", "props"];
+
+/** 卡片種類 → 分鏡表上的欄名 */
+export const SCENE_CARD_COLUMN = {
+  characters: "characterIds",
+  scenePresets: "scenePresetIds",
+  props: "propIds",
+} as const satisfies Record<SceneCardKind, keyof SceneCardBinding>;
+
+/** 一張卡在文字裡可以被寫成哪些名字（素材卡有「安倢的紅傘」與「紅傘」兩種寫法） */
+export type CardLookupEntry = { id: string; names: readonly string[] };
+
+/** 名字陣列 → 一行文字 */
+export function formatCardNames(names: readonly string[]): string {
+  return names.map((n) => n.trim()).filter(Boolean).join(NAME_JOIN);
+}
+
+export type CardLineIntent =
+  /** 這一鏡沒有這一行——維持原值 */
+  | { kind: "absent" }
+  /** 有這一行但留白——同樣維持原值（見 CARD_CLEAR_TOKEN 的理由） */
+  | { kind: "blank" }
+  /** 寫了「無」——這才是解除 */
+  | { kind: "clear" }
+  /** 這一行就是整份名單（不是附加） */
+  | { kind: "set"; names: string[] };
+
+export function parseCardLine(value: string | null | undefined): CardLineIntent {
+  if (value === undefined || value === null) return { kind: "absent" };
+  const raw = value.trim();
+  if (!raw) return { kind: "blank" };
+  if (raw === CARD_CLEAR_TOKEN) return { kind: "clear" };
+  const names = raw.split(NAME_SPLIT_RE).map((n) => n.trim()).filter(Boolean);
+  return names.length ? { kind: "set", names } : { kind: "blank" };
+}
+
+export type CardLineOutcome =
+  /** 不動這一鏡的這一種卡；warning 有值代表「看得懂但不照做」，要講給使用者聽 */
+  | { kind: "keep"; warning?: string }
+  /** 整行解析成功——ids 就是這一鏡這一種卡的完整名單（空陣列＝解除） */
+  | { kind: "set"; ids: string[] };
+
+/**
+ * 一行卡片文字 → 卡片 id。
+ *
+ * 任一個名字查不到、或對到不只一張同名卡，**整行都不套用**並回報原因。
+ * 這是刻意的：部分套用會把「我打錯一個字」變成「系統刪掉我兩個角色」，
+ * 而使用者看到的畫面只會寫「更新 1 鏡」。
+ */
+export function resolveCardLine(
+  value: string | null | undefined,
+  entries: readonly CardLookupEntry[],
+  opts: { max: number; human: string; currentCount: number },
+): CardLineOutcome {
+  const intent = parseCardLine(value);
+  if (intent.kind === "absent") return { kind: "keep" };
+  if (intent.kind === "blank") {
+    // 只在真的有東西會被誤清時才出聲——沒綁卡的鏡留白是常態，警告會洗版
+    return opts.currentCount > 0
+      ? {
+          kind: "keep",
+          warning: `「${opts.human}」留白＝維持原本綁定；要解除請寫「${opts.human}：${CARD_CLEAR_TOKEN}」`,
+        }
+      : { kind: "keep" };
+  }
+  if (intent.kind === "clear") return { kind: "set", ids: [] };
+
+  const byName = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    for (const name of entry.names) {
+      const key = name.trim();
+      if (!key) continue;
+      const bucket = byName.get(key) ?? new Set<string>();
+      bucket.add(entry.id);
+      byName.set(key, bucket);
+    }
+  }
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const name of intent.names) {
+    const hit = byName.get(name);
+    if (!hit?.size) {
+      return { kind: "keep", warning: `「${opts.human}」裡找不到「${name}」，整行不套用（其餘名字也沒動）` };
+    }
+    if (hit.size > 1) {
+      return {
+        kind: "keep",
+        warning: `「${opts.human}」的「${name}」對到不只一張同名卡，整行不套用——請寫完整名稱，或到分鏡表那一列改`,
+      };
+    }
+    const id = [...hit][0]!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  if (ids.length > opts.max) {
+    return { kind: "keep", warning: `「${opts.human}」列了 ${ids.length} 張，單鏡最多 ${opts.max} 張，整行不套用` };
+  }
+  return { kind: "set", ids };
+}

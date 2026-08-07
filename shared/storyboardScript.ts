@@ -13,11 +13,20 @@
  *   @師父：坐吧。心急的人，茶會燙。
  *   @安倢（小聲）：謝謝師父。
  *   環境音：遠處鐘聲，細微鳥鳴
+ *   角色卡：安倢・師父
+ *   場景卡：禪堂
  *
  * 解析規則刻意寬鬆（序號、秒數、任一區塊都可省略；全形半形冒號都吃），
  * 但**套用規則刻意保守**：只更新與新增，永不刪除。文字裡少寫一鏡不該讓
  * 已經出好圖的那一格消失——要刪請到分鏡表按刪除，那裡有確認框。
+ *
+ * 卡片三行（角色卡／場景卡／素材卡）比其他欄位再保守一級：留白也維持原值，
+ * 要解除綁定得寫「無」。理由與整份格式一致——被誤清的旁白重打一次就有，
+ * 被誤清的綁定要回分鏡表逐格重勾。名字回推卡片的規則見 shared/sceneCards.ts。
  */
+
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "./cardLimits";
+import { formatCardNames, parseCardLine, type SceneCardKind } from "./sceneCards";
 
 export type StoryboardScriptScene = {
   title: string;
@@ -32,6 +41,12 @@ export type StoryboardScriptScene = {
   dialogue?: string;
   /** 配樂端點標記（「起｜描述」或「止」）；區間由 shared/sceneMusic.ts 推導 */
   music?: string;
+  /** 角色卡名單原文（「安倢・師父」／「無」）。名字→id 的回推在伺服器做，見 shared/sceneCards.ts。 */
+  characters?: string;
+  /** 場景卡名單原文 */
+  scenePresets?: string;
+  /** 素材卡名單原文（可寫「安倢的紅傘」或「紅傘」） */
+  props?: string;
   /**
    * 標題上的鏡次（`## 3.` 的 3）。這不是裝飾，是**身分證**：中間整段沒寫時，
    * 靠它才知道「## 3.」指的仍是第 3 鏡，而不是往前遞補成第 2 鏡。見 resolveScriptTargets。
@@ -39,24 +54,35 @@ export type StoryboardScriptScene = {
   ordinal?: number;
 };
 
-/** 分鏡表現況（格式化時用；卡片名稱只讀，不從文字寫回——靠名字回推卡片太脆弱） */
+/**
+ * 分鏡表現況（格式化時用）。
+ *
+ * 卡片以**名字**進出這份文字：使用者寫的是劇本，不是資料庫，要他在「畫面：」旁邊
+ * 貼一串 UUID 這條路就白開了。名字回推卡片的嚴格規則（整行全中才套用）在 shared/sceneCards.ts。
+ */
 export type StoryboardScriptRow = {
   title: string;
   durationSec: number;
-  /** 這一鏡綁定的卡片名字，僅供閱讀時標注 */
-  cardNames?: string[];
+  /** 這一鏡綁定的角色卡名字（依綁定順序——順序會影響提示詞組裝，比對時不可忽略） */
+  characterNames?: string[];
+  scenePresetNames?: string[];
+  /** 素材卡顯示名（「安倢的紅傘」；formatPropDisplayName 的結果） */
+  propNames?: string[];
 } & {
   /**
-   * 六個內容欄位**一律必填**（值可以是 null／undefined，但欄位不能不寫），
-   * 而且直接由 SCRIPT_FIELDS 導出——新增欄位只改那張表，這裡自動跟上。
+   * 描述型欄位**一律必填**（值可以是 null／undefined，但欄位不能不寫），
+   * 而且直接由 ScriptTextKey 導出——欄位表長出新的一欄，這裡自動跟上。
    *
    * 為什麼要逼呼叫端寫出每一個 key：alwaysEmit 的欄位在格式化時一律輸出標籤（即使是空的），
    * 所以漏傳一欄＝使用者看到的全文裡那一欄是空的；原封不動按下「寫回分鏡」，解析回來是空字串，
    * 寫回端判定「"" ≠ 原本的值」成立，**那一欄在使用者一個字都沒改的情況下被清光**。
    * 環境音就這樣被清過一次。format→parse 的來回測試結構上抓不到這種「呼叫端漏傳」
    * ——兩邊都缺同一欄時 diff 反而顯示「沒有任何變更」——真正擋得住的是這裡的編譯錯誤。
+   *
+   * 卡片三欄（characters／scenePresets／props）刻意不在這裡：它們在列上是 `*Names` 陣列，
+   * 由 scriptRowCardNames 讀，而且 alwaysEmit=false——留白＝維持原值，漏傳不會清空任何東西。
    */
-  [K in ScriptFieldKey]: string | null | undefined;
+  [K in ScriptTextKey]: string | null | undefined;
 };
 
 export const SCRIPT_SCENE_HEADING = "##";
@@ -66,7 +92,11 @@ const VOICE_LABEL = "旁白";
 const DIALOGUE_LABEL = "對白";
 const AMBIENCE_LABEL = "環境音";
 const MUSIC_LABEL = "配樂";
-const CARDS_LABEL = "設定卡";
+const CHARACTERS_LABEL = "角色卡";
+const SCENE_PRESETS_LABEL = "場景卡";
+const PROPS_LABEL = "素材卡";
+/** 舊格式的唯讀標注行；已不再輸出，但貼回來時要被安全忽略（不能被當成自由文字寫進畫面） */
+const LEGACY_CARDS_LABEL = "設定卡";
 
 /**
  * 欄位表：新增一個欄位只改這裡，parse／format／上限檢查全部由它導出。
@@ -78,10 +108,10 @@ const CARDS_LABEL = "設定卡";
  * multiline=false 的欄位**不吃續行**：它們的值是一行寫完的短指示，後面若接自由文字
  * （例如在鏡末尾補一句筆記），那句話不該被吞進這個欄位。
  */
-export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "dialogue" | "ambience" | "music";
+export type ScriptTextKey = "prompt" | "action" | "voiceover" | "dialogue" | "ambience" | "music";
+export type ScriptFieldKey = ScriptTextKey | SceneCardKind;
 
-type ScriptFieldSpec = {
-  key: ScriptFieldKey;
+type ScriptFieldBase = {
   label: string;
   /** 吃續行？false＝只收標籤同一行的內容，後續行落回上一個 multiline 欄位 */
   multiline: boolean;
@@ -97,6 +127,18 @@ type ScriptFieldSpec = {
   blockValue?: boolean;
 };
 
+/**
+ * `card: true` 的欄位值是**卡片名單**不是自由文字：比對與寫回都走 shared/sceneCards.ts
+ * 的規則（留白＝維持原值、「無」＝解除、整行全中才套用）。用型別聯集而不是一個布林旗標，
+ * 是為了讓 `field.card` 為真時 `field.key` 自動收窄成 SceneCardKind——不必在讀 row 時硬轉型。
+ */
+type ScriptFieldSpec =
+  | (ScriptFieldBase & { key: ScriptTextKey; card?: false })
+  | (ScriptFieldBase & { key: SceneCardKind; card: true });
+
+/** 單鏡卡片行的上限：素材卡顯示名最長（「主人名的物件名」＝40＋1＋40），四張就 328 字 */
+const SCRIPT_CARD_LINE_MAX = 400;
+
 export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
   { key: "prompt", label: VISUAL_LABEL, multiline: true, alwaysEmit: true, max: 4000, human: "畫面" },
   // 動作走位：與畫面同為描述，吃續行。上限比畫面小一個量級——它是指示不是全景描述。
@@ -107,17 +149,45 @@ export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
   { key: "ambience", label: AMBIENCE_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "環境音" },
   // 配樂是區間端點，不是每鏡都有的屬性——只在有標記時輸出，且不吃續行（值是一行寫完的標記）
   { key: "music", label: MUSIC_LABEL, multiline: false, alwaysEmit: false, max: 300, human: "配樂" },
-] as const;
+  // 卡片三行排在一鏡的最後，像分場表的場末註記：這一鏡帶誰、在哪、拿什麼。
+  // alwaysEmit=false 是刻意的——空的卡片行是**沒有作用**的（留白＝維持原值），
+  // 印一行「角色卡：」在編輯模板裡會誤導人以為清空它就能解除綁定。
+  { key: "characters", label: CHARACTERS_LABEL, card: true, multiline: false, alwaysEmit: false, max: SCRIPT_CARD_LINE_MAX, human: CHARACTERS_LABEL },
+  { key: "scenePresets", label: SCENE_PRESETS_LABEL, card: true, multiline: false, alwaysEmit: false, max: SCRIPT_CARD_LINE_MAX, human: SCENE_PRESETS_LABEL },
+  { key: "props", label: PROPS_LABEL, card: true, multiline: false, alwaysEmit: false, max: SCRIPT_CARD_LINE_MAX, human: PROPS_LABEL },
+];
 
 /**
- * multiline=false 保留給「名單型」欄位（角色／場景／道具／配樂）——它們排在一鏡的最後，
- * 使用者在鏡末尾補一句筆記時，那句話會被吞進名單再拿去查卡片，命中 0 張就把整鏡綁定解掉。
+ * multiline=false 保留給「名單型」欄位（配樂／角色卡／場景卡／素材卡）——它們排在一鏡的最後，
+ * 使用者在鏡末尾補一句筆記時，那句話會被吞進名單再拿去查卡片，而查不到就整行不套用，
+ * 等於他補的筆記讓整鏡的綁定「看起來壞了」。
  *
  * 描述型欄位（畫面／動作／旁白／環境音）一律 multiline：把它們設成單行會讓續行落回
  * 前一個 multiline 欄位，而那個欄位可能在後面被自己的標籤覆寫——使用者的字就這樣無聲消失。
  * 這是實測出來的：環境音一度被設成單行，「環境音：蟲鳴 / 遠處狗吠 / 旁白：說話」會讓
  * 「遠處狗吠」完全不見。
  */
+
+/** 每一種卡片各自的名單上限（與逐鏡綁定、單次生成同一組常數） */
+export const SCRIPT_CARD_MAX: Record<SceneCardKind, number> = {
+  characters: MAX_GENERATE_CHARACTERS,
+  scenePresets: MAX_GENERATE_SCENE_PRESETS,
+  props: MAX_GENERATE_PROPS,
+};
+
+/** 卡片行的標籤（伺服器回報「哪一行不套用」時要講同一個字） */
+export const SCRIPT_CARD_LABELS: Record<SceneCardKind, string> = {
+  characters: CHARACTERS_LABEL,
+  scenePresets: SCENE_PRESETS_LABEL,
+  props: PROPS_LABEL,
+};
+
+/** 這一列現況綁了哪些卡片名字（比對與格式化共用同一個讀法） */
+export function scriptRowCardNames(row: StoryboardScriptRow, kind: SceneCardKind): string[] {
+  if (kind === "characters") return row.characterNames ?? [];
+  if (kind === "scenePresets") return row.scenePresetNames ?? [];
+  return row.propNames ?? [];
+}
 
 const FIELD_BY_LABEL = new Map(SCRIPT_FIELDS.map((f) => [f.label, f]));
 /** 最後一個 multiline 欄位——單行欄位後面的續行落回這裡，而不是被單行欄位吞掉 */
@@ -133,8 +203,8 @@ const LAST_MULTILINE_BEFORE = new Map<string, ScriptFieldKey>();
 /** 冒號：全形半形都收（中文輸入法預設打出全形） */
 const COLON = "[：:]";
 const HEADING_RE = /^##\s*(?:(\d+)\s*[.、．]\s*)?(.*?)\s*(?:[（(]\s*(\d+)\s*(?:s|秒)?\s*[）)])?\s*$/;
-// CARDS_LABEL 仍留在集合裡：舊文字貼回來時那一行要被安全忽略，不能被當成自由文字寫進畫面
-const ALL_LABELS = [...SCRIPT_FIELDS.map((f) => f.label), CARDS_LABEL];
+// 舊的「設定卡」仍留在集合裡：舊文字貼回來時那一行要被安全忽略，不能被當成自由文字寫進畫面
+const ALL_LABELS = [...SCRIPT_FIELDS.map((f) => f.label), LEGACY_CARDS_LABEL];
 const LABEL_RE = new RegExp(`^(${ALL_LABELS.join("|")})${COLON}\\s*(.*)$`);
 
 /** 跳脫字元：內容裡「長得像結構」的那一行前面加一個反斜線 */
@@ -196,7 +266,9 @@ export function formatStoryboardScript(
     .map((row, i) => {
       const lines = [`${SCRIPT_SCENE_HEADING} ${i + 1}. ${flattenTitle(row.title)} (${row.durationSec}s)`];
       for (const field of SCRIPT_FIELDS) {
-        const value = (row[field.key] ?? "").trim();
+        const value = field.card
+          ? formatCardNames(scriptRowCardNames(row, field.key))
+          : (row[field.key] ?? "").trim();
         if (!value && (mode === "read" || !field.alwaysEmit)) continue;
         // blockValue：標籤自己一行，值從下一行開始（逐句序列才對得齊）
         lines.push(
@@ -205,8 +277,6 @@ export function formatStoryboardScript(
             : `${field.label}：${escapeBody(value)}`,
         );
       }
-      // 卡片是唯讀標注：讓人讀腳本時知道這鏡會帶誰，但改文字不會動到綁定
-      if (row.cardNames?.length) lines.push(`${CARDS_LABEL}：${row.cardNames.join("・")}（唯讀）`);
       return lines.join("\n");
     })
     .join("\n\n");
@@ -410,7 +480,19 @@ function changed(row: StoryboardScriptRow, scene: StoryboardScriptScene): boolea
   // 同上：逐欄比對表驅動。漏一欄的症狀是「畫面說沒變更，DB 卻被改了」——最難查的那種。
   for (const field of SCRIPT_FIELDS) {
     const next = scene[field.key];
-    if (next !== undefined && next !== (row[field.key] ?? "").trim()) return true;
+    if (next === undefined) continue;
+    if (field.card) {
+      // 卡片行的「空」不等於「清空」，所以不能拿字串直接比：留白的那一行什麼都不會發生，
+      // 照字串比會算成「更新 N 鏡」，按下去卻毫無動靜——預覽說謊比不預覽更糟。
+      const intent = parseCardLine(next);
+      if (intent.kind === "absent" || intent.kind === "blank") continue;
+      const now = scriptRowCardNames(row, field.key);
+      if (intent.kind === "clear" ? now.length > 0 : formatCardNames(intent.names) !== formatCardNames(now)) {
+        return true;
+      }
+      continue;
+    }
+    if (next !== (row[field.key] ?? "").trim()) return true;
   }
   return false;
 }

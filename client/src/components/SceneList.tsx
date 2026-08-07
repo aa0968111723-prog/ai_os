@@ -734,14 +734,9 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const characterCards = trpc.characters.list.useQuery({ projectId });
   const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
   const propCards = trpc.props.list.useQuery({ projectId });
-  const sceneCardNames = (s: Scene): string[] => [
-    ...(s.characterIds ?? []).map((id) => characterCards.data?.find((c) => c.id === id)?.name),
-    ...(s.scenePresetIds ?? []).map((id) => sceneCards.data?.find((x) => x.id === id)?.name),
-    ...(s.propIds ?? []).map((id) => {
-      const row = propCards.data?.find((p) => p.id === id);
-      return row ? formatPropDisplayName(row.name, row.ownerName) : undefined;
-    }),
-  ].filter((n): n is string => !!n);
+  /** id → 卡片名（查不到的丟掉：卡片被刪掉時，文字裡不該出現一個回不去的名字） */
+  const cardNamesOf = (ids: string[] | null | undefined, cards: Array<{ id: string; name: string }> | undefined) =>
+    (ids ?? []).map((id) => cards?.find((c) => c.id === id)?.name).filter((n): n is string => !!n);
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
   type SceneFilter = "all" | "ready" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
@@ -897,7 +892,14 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             action: s.action,
             dialogue: s.dialogue,
             music: s.music,
-            cardNames: sceneCardNames(s),
+            // 卡片三行是可寫回的：名字要與伺服器名冊對得上，順序也要與綁定順序一致
+            // （順序決定提示詞裡卡片的組裝順序，比對時不能當成無序集合）
+            characterNames: cardNamesOf(s.characterIds, characterCards.data),
+            scenePresetNames: cardNamesOf(s.scenePresetIds, sceneCards.data),
+            propNames: (s.propIds ?? [])
+              .map((id) => propCards.data?.find((p) => p.id === id))
+              .filter((p): p is NonNullable<typeof p> => !!p)
+              .map((p) => formatPropDisplayName(p.name, p.ownerName)),
           }))}
           canEdit={canEdit}
           onApplied={invalidate}
