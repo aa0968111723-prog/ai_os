@@ -102,14 +102,23 @@ buildTeamAskContext（組級視野）、runTeamTool（9 唯讀工具）、resolv
 
 tsc ✓；build ✓；boundaries（0 違規）/ui-primitives/hooks ✓；server vitest 2032 passed（僅 D-007 既有本地紅＋一次偶發 hook timeout 單跑即綠）；client 受影響 5 檔全綠；migrationState＋auditWording 守門 48/48；e2e-global-assistant 22/22；瀏覽器實測（桌機＋390px）全流程走通。check:agent-planner canary 需真 FAL_KEY（本機無金鑰，既有限制）。
 
-## KNOWN LIMITATIONS
+## PHASE 3 續作（2026-08-08 第二輪，同分支）
 
-1. 全站模式前端仍是一次性 mutation（steps 事後摘要）；SSE 端點已就緒、前端接 AssistantSseDecoder 列下一輪。
-2. teamAssistant.ask／assistant.ts 迴圈本體尚未遷入 assistantCore（已共用上下文與 schema；遷移屬機械工程，Phase 3）。
-3. mock 模式不產 siteActions 提議（LLM 不在場）；提議→確認的 UI 全鏈路要靠真模型環境驗。
-4. 站級動作第一批五種；資料庫寫入、request_upload_grant 等第二批未開。
-5. WATCH 僅止於既有 event-driven 基礎（pendingSummary／group_blockers 進 ask 工具面）；主動通知/推薦引擎未做。
+原 KNOWN LIMITATIONS 1／2／3／5 已完成：
+
+1. ✅ **全站模式前端 SSE**：`requestSiteAssistantStream`（site done 形狀專屬 guard——與專案助手的 done 差 fallback/siteActions 欄位，共用 guard 會永不派發）＋LiveAssistantTrace 即時軌跡＋取消鍵；串流沒開始才退一次性 tRPC，吐過事件絕不重跑（防重複扣額度）。
+2. ✅ **雙迴圈遷入 assistantCore**：teamAssistant.ask 與 assistant.ts（專案助手）的內嵌迴圈全數改走 runToolLoop——JSON 工具迴圈自此**單一實作、三個消費者**；C2 self-healing 與三種回覆來源的 trace 摘要語義保留（assistant 114＋coerce 8＋team 66 測試綠）。
+3. ✅ **mock 確定性提議**：訊息含「專案」→create_project、含「筆記」→add_note，走同一條 resolveSiteActions 驗證——「ASK→提議→確認卡→runSiteAction→真寫入」在 E2E_MOCK 全鏈路可驗（e2e 25/25；瀏覽器實測確認卡按下後 DB 真的建案）。
+4. ✅ **WATCH foundation**：sheet 零狀態「需要你注意」（重用 groupInsights＋agentOverview，零新後端；待核准／近期失敗／人類關卡／逾期／critical 阻塞；全健康時整塊不渲染）。
+
+期間主幹併入 story-first 大改（PR #546/#547）：另一 session 已把主幹 merge 進本分支並把 0049_ai_site_trace 重編號為 0050（story-first 佔 0049）；合併後全新 DB migrate 至 0050 ✓、173 相關測試 ✓、e2e 25/25 ✓、story-first 新版專案頁上 sheet／chip／ProjectAssistant 嵌入實測正常。
+
+## KNOWN LIMITATIONS（更新後）
+
+1. 正式模型環境的 LLM 提議品質（非 mock）尚待實戰調校（提示詞已含平台白名單與代號制防幻覺）。
+2. 站級動作第一批五種；資料庫寫入、request_upload_grant 等第二批未開。
+3. WATCH 是拉式（開 sheet 時算）；推播式主動通知列後續。
 
 ## REMAINING WORK（依優先序）
 
-Phase 3：全站模式前端 SSE 軌跡；兩個舊迴圈遷入 assistantCore；桌機浮窗形態檢討；單專案視角工具 context 感知加掛；第二批寫入動作；agent runner 缺口（failed-run resume、非 generation 步驟 retry）；WATCH 主動化；NIM 原生 tool calling spike。
+桌機浮窗形態檢討；單專案視角工具 context 感知加掛；第二批寫入動作；agent runner 缺口（failed-run resume、非 generation 步驟 retry）；WATCH 推播化；NIM 原生 tool calling spike（屆時只換 assistantCore 呼叫端注入的 llm/prompt 策略）。

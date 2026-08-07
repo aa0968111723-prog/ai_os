@@ -66,6 +66,13 @@ ASK（全站問答）／ACT（確認卡寫入）／scope 自動聚焦專案，�
 - 全站模式 SSE 端點已就緒，但 AICreativeCopilot 仍走 tRPC mutation（一次性回覆＋steps 摘要）；接 AssistantSseDecoder 列 Phase 3（前端即時軌跡）。
 - teamAssistant.ask 迴圈本體尚未遷入 assistantCore（僅上下文共用）；assistant.ts 同。列 Phase 3 收斂。
 
+## PHASE 3 續作（2026-08-08 第二輪）
+
+- 自審 17 條 confirmed 全修（dd90733＋3c11de6）；PR #548 開出、CI 綠。
+- 全站模式前端 SSE（requestSiteAssistantStream＋LiveAssistantTrace＋取消）；雙迴圈遷入 assistantCore（runToolLoop 泛型化讓 preview 穿透）；mock 確定性提議（ACT 全鏈路 e2e 25/25＋瀏覽器實測 DB 真建案）；WATCH 零狀態（groupInsights＋agentOverview 重用）。
+- 主幹 story-first（PR #546/#547）被另一 session merge 進本分支：0049_ai_site_trace → 0050 重編號（對方已做）；合併後 migrate/測試/e2e/瀏覽器全綠。
+- 教訓：**遠端分支會被並行 session 推進**（push 被拒＝先 fetch 看對方做了什麼再 pull merge，絕不 force）。
+
 ## NEXT STEP
 
-修自審 confirmed → docs/GLOBAL_AGENT_FINAL_REPORT.md → push → PR（繁中描述）。
+（無——見 GLOBAL_AGENT_FINAL_REPORT REMAINING WORK 的後續提案。）
