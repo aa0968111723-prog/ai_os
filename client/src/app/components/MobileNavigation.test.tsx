@@ -7,6 +7,20 @@ import { MobileNavigation } from "./MobileNavigation";
 import { DESTINATIONS } from "../navigation/navigationItems";
 
 /** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例） */
+/**
+ * 全站助手面板會 lazy-load 組代理總指揮面板，而那個元件自帶六支 teamAssistant 查詢
+ *（commandLevel／campaigns／planCampaign／approve／discard／stop／resume）。
+ *
+ * 本檔測的是導航的 aria 契約，campaign 另有專屬測試（GroupCampaignPanel.test.tsx）。
+ * 不 stub 的話它會在 Suspense 解析**之後**才炸——而那時本檔的測試早已跑完，
+ * 於是 vitest 把這個 unhandled error 記到「當下正在跑的下一個測試檔」頭上：
+ * 訊息指向 MobileNavigation、堆疊卻在 GroupCampaignPanel，兩邊單獨跑又都是綠的。
+ * 這正是它先前在完整套件下紅、單獨跑卻過的原因。
+ */
+vi.mock("../../features/group-campaign/GroupCampaignPanel", () => ({
+  GroupCampaignPanel: () => <div aria-label="組代理總指揮 stub" />,
+}));
+
 vi.mock("../../api", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
   return {
