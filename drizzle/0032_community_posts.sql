@@ -4,9 +4,9 @@
 --
 -- auto_tags／category／taxonomy_version（自動細化分類）也寫在這張 CREATE TABLE 裡：
 -- community_posts 本身還在 legacy bridge 的 pending 批次內，bridge 比對的是整表 DDL，
--- 欄位不能只靠後面的 0041 用 ALTER 補——見 0022 的註記與 0025／0029 的前例。
--- 已經套用過舊版本檔的資料庫由 0041 的 ADD COLUMN IF NOT EXISTS 補齊；
--- 新資料庫跑到 0041 是 no-op。兩條路徑最終 schema 完全相同。
+-- 欄位不能只靠後面的 0042 用 ALTER 補——見 0022 的註記與 0025／0029 的前例。
+-- 已經套用過舊版本檔的資料庫由 0042 的 ADD COLUMN IF NOT EXISTS 補齊；
+-- 新資料庫跑到 0042 是 no-op。兩條路徑最終 schema 完全相同。
 CREATE TABLE IF NOT EXISTS "community_posts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"author_id" uuid NOT NULL,
