@@ -616,7 +616,7 @@ describe("CreationWorkbench", () => {
 
   it.each([
     // C2：① 錨點走 project-context-reveal → flashAnchor；分鏡仍純捲動
-    { label: "知識", anchorId: "sec-knowledge", via: "reveal" as const },
+    { label: "專案依據", anchorId: "sec-knowledge", via: "reveal" as const },
     { label: "素材", anchorId: "sec-assets", via: "reveal" as const },
     { label: "分鏡與交付", anchorId: "stage-deliver", via: "scroll" as const },
   ] as const)("context chip $label navigates to #$anchorId", async ({ label, anchorId, via }) => {

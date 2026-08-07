@@ -69,7 +69,7 @@ export const DESTINATIONS: Record<DestinationKey, Destination> = {
   },
   databases: {
     key: "databases",
-    label: "資料庫",
+    label: "團隊資料表",
     description: "清單、文件與批次匯入",
     href: "/databases",
     icon: "Database",

@@ -2234,7 +2234,7 @@ export function ProjectPage({ id }: { id: string }) {
             <CtxCollapse
               compact={mobileCompact}
               sectionId="sec-knowledge"
-              title="知識庫"
+              title="專案依據"
               meta={knowledgeCount != null ? `${knowledgeCount} 份` : undefined}
               open={ctxOpen.knowledge}
               onOpenChange={(o) => setCtxSectionOpen("knowledge", o)}
