@@ -463,6 +463,21 @@ export function SceneStudio({
                       onChange={(e) => setInstruction(e.target.value)}
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
+                    {/*
+                      動作走位唯一接得上的生成路徑。
+                      「重畫這格」選影片模型時，走位由 sceneVisualPrompt 自動接在畫面後面；但「讓這張動起來」
+                      走的是修正這條路，提示詞是使用者當場打的指示，伺服器不該擅自接上去（那會跟他打的字打架）。
+                      於是這一鏡明明寫好了「安倢從門口走到窗邊」，要讓它動起來時還得再打一次。
+                      一顆按鈕把它填進去就好——只在指示還空著時出現，永遠不會蓋掉使用者打的字。
+                    */}
+                    {refineModel && refineGroupOf(refineModel) === "video" && action.trim() !== "" && instruction.trim() === "" && (
+                      <Hint>
+                        這一鏡的動作走位是「{action.trim()}」。
+                        <Button size="sm" variant="ghost" onClick={() => setInstruction(action.trim())}>
+                          用它當修正指示
+                        </Button>
+                      </Hint>
+                    )}
                     <label htmlFor={`studio-refine-model-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
                       用哪個模型修
                     </label>
