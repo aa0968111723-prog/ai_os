@@ -16,6 +16,7 @@ export function CreationCostSummary({
   approvalLabel,
   outputSpec,
   usageBasedNote,
+  personalKey,
 }: {
   modeLabel?: string;
   /** e.g. "約 5 點" or "依範本步驟加總" */
@@ -29,6 +30,12 @@ export function CreationCostSummary({
   outputSpec?: string;
   /** Extra line for usage-based models */
   usageBasedNote?: string;
+  /**
+   * BYOK：這次預計走個人金鑰（不扣平台點數）。
+   * 用「預計」而非「一定」——送出到執行之間金鑰可能被停用或解密失敗，
+   * 實際結果以生成紀錄回寫的 usedUserKey 為準（GenerationList 已這樣顯示）。
+   */
+  personalKey?: boolean;
 }) {
   return (
     <Meta
@@ -52,11 +59,16 @@ export function CreationCostSummary({
         {freeNote ? ` · ${freeNote}` : ""}
       </span>
       <span className="creation-cost-summary__item">
-        預估消耗：<b className="creation-cost-summary__points">{estimateLabel}</b>
-        {usageBasedNote ? (
+        預估消耗：<b className="creation-cost-summary__points">{personalKey ? "0 點" : estimateLabel}</b>
+        {usageBasedNote && !personalKey ? (
           <span style={{ marginLeft: 4 }}>{usageBasedNote}</span>
         ) : null}
       </span>
+      {personalKey ? (
+        <span className="creation-cost-summary__item">
+          這次預計走<b>你的個人金鑰</b>，不扣團隊點數
+        </span>
+      ) : null}
       {outputSpec ? <span className="creation-cost-summary__item">輸出規格：{outputSpec}</span> : null}
       {remainingLabel ? <span className="creation-cost-summary__item">{remainingLabel}</span> : null}
       {approvalLabel ? <span className="creation-cost-summary__item">是否需要核准：{approvalLabel}</span> : null}

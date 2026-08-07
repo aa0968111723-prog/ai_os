@@ -20,6 +20,7 @@ import {
 } from "../generationGates";
 import { focusAndReveal, scrollIntoViewForChrome } from "../../../lib/scrollIntoViewForChrome";
 import { setOrbState } from "../../../lib/orbState";
+import { willUsePersonalKey } from "@shared/byokPredict";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import {
   formatBringInSummary,
@@ -155,6 +156,9 @@ export function DirectGenerateMode({
 
   const assets = trpc.projects.assets.useQuery({ projectId });
   const quota = trpc.quota.my.useQuery({ groupId }, { enabled: confirming && !!groupId });
+  // BYOK：生成前就要知道會不會扣點——事後才在生成紀錄看到就太遲了。
+  // 清單只回末四碼與狀態（不含密文），且每人最多幾筆，常駐查詢成本可忽略。
+  const aiKeys = trpc.userAiKeys.list.useQuery(undefined, { staleTime: 60_000 });
   const savePrompt = trpc.prompts.save.useMutation({
     onSuccess: () => utils.prompts.list.invalidate({ projectId }),
   });
@@ -304,6 +308,9 @@ export function DirectGenerateMode({
   const needs = model?.needs;
   const secondaryNeeds = model?.secondaryNeeds;
   const fullModel = model ? getModel(model.id) : undefined;
+  // 放在 fullModel 之後：判斷需要完整的 ModelEntry（PickedModel 沒有 category/tier，
+  // 而 isNimModel 要看那些欄位）。model 尚未載入時預測為 false，不會誤報「不扣點」。
+  const personalKey = willUsePersonalKey(fullModel, aiKeys.data);
   const estPoints = estimateGenerationPoints(model, prompt.length, getModel, model?.usdToTwdRate);
   const disableReason = getGenerationDisableReason({
     canEdit,
@@ -469,6 +476,7 @@ export function DirectGenerateMode({
             : undefined
         }
         remainingLabel={remainingLabel}
+        personalKey={personalKey}
       />
 
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
