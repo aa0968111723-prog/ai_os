@@ -4,11 +4,19 @@ import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
+import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 
+/**
+ * 分頁列的四個導航格。
+ *
+ * 正中央的「AI 工作」**不在這個陣列裡**——它從導航連結變成了「開啟全站 AI 助手」
+ * 的按鈕（見下方 orb）。原本它只是 `/dashboard#ai-work` 的捲動錨點：按下去跳回
+ * 今日工作台捲到「繼續創作」那一格，而那一格本來就在 dashboard 上、捲一下就到。
+ * 換成助手入口幾乎不犧牲任何既有功能，卻讓那顆球真的有事做。
+ */
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
   { href: "/dashboard", label: DESTINATIONS.dashboard.label, icon: DESTINATIONS.dashboard.icon, match: [] },
   { href: "/dashboard#projects", label: "專案", icon: "Package", match: ["/p/"] },
-  { href: "/dashboard#ai-work", label: "AI 工作", icon: "Sparkles", match: [] },
   { href: "/planner", label: DESTINATIONS.planner.label, icon: DESTINATIONS.planner.icon, match: ["/planner"] },
 ];
 
@@ -66,10 +74,12 @@ function scrollToAnchorWhenReady(anchor: string) {
   requestAnimationFrame(tick);
 }
 
-export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
+export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: number; groupId?: string }) {
   const [location, navigate] = useLocation();
   const [hash, syncHash] = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const orbRef = useRef<HTMLButtonElement | null>(null);
   // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」——補上最小手勢：
   // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉
   const sheetDragY = useRef<number | null>(null);
@@ -141,8 +151,30 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
           </aside>
         </>
       )}
+      <GlobalAssistantSheet
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        groupId={groupId}
+        triggerRef={orbRef}
+      />
       <nav className="mobile-nav" aria-label="主要功能">
-        {ITEMS.map((item) => {
+        {ITEMS.map((item, index) => {
+          // 正中央插入 AI 球（第 2 顆之後）：它不是導航連結，是開啟助手的按鈕
+          const orb = index === 2 ? (
+            <button
+              key="ai-orb"
+              type="button"
+              ref={orbRef}
+              className={`mobile-nav__orb${assistantOpen ? " active" : ""}`}
+              aria-haspopup="dialog"
+              aria-expanded={assistantOpen}
+              aria-controls="global-assistant-sheet"
+              onClick={() => setAssistantOpen((v) => !v)}
+            >
+              <Icon name="Sparkles" size={20} />
+              <span>AI 助手</span>
+            </button>
+          ) : null;
           const [pathname, anchor] = item.href.split("#");
           // 同 pathname 的分頁以 hash 互斥：/dashboard 無 hash＝今日、#projects＝專案、#ai-work＝AI 工作
           const hashMatched = anchor ? hash === `#${anchor}` : !ITEMS.some((i) => i.href === `${pathname}${hash}` && i.href !== item.href);
@@ -153,9 +185,8 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
               <span>{item.label}</span>
             </>
           );
-          return item.href.includes("#") ? (
+          const link = item.href.includes("#") ? (
             <a
-              key={item.label}
               href={item.href}
               className={active ? "active" : ""}
               aria-current={active ? "page" : undefined}
@@ -175,7 +206,6 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
             </a>
           ) : (
             <Link
-              key={item.label}
               href={item.href}
               className={active ? "active" : ""}
               aria-current={active ? "page" : undefined}
@@ -195,6 +225,13 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
             >
               {content}
             </Link>
+          );
+          // orb 在中央：先渲染前兩顆導航格，插入球，再接後面的
+          return (
+            <Fragment key={item.label}>
+              {orb}
+              {link}
+            </Fragment>
           );
         })}
         <button

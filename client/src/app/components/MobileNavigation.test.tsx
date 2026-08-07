@@ -2,9 +2,20 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileNavigation } from "./MobileNavigation";
 import { DESTINATIONS } from "../navigation/navigationItems";
+
+/** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例） */
+vi.mock("../../api", () => {
+  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
+  return {
+    trpc: {
+      useUtils: () => ({}),
+      teamAssistant: { ask: { useMutation: mutation } },
+    },
+  };
+});
 
 describe("MobileNavigation", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
@@ -17,7 +28,8 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("navigation", { name: "主要功能" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("href", "/dashboard#projects");
-    expect(screen.getByRole("link", { name: "AI 工作" })).toHaveAttribute("href", "/dashboard#ai-work");
+    // 正中央的球不再是導航連結——它開啟全站 AI 助手（見下方專屬案例）
+    expect(screen.queryByRole("link", { name: /AI/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "筆記排程" })).toHaveAttribute("aria-current", "page");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
@@ -46,19 +58,17 @@ describe("MobileNavigation", () => {
     expect(screen.queryByText("外部資料")).not.toBeInTheDocument();
   });
 
-  it("highlights exactly one dashboard tab per hash（今日／專案／AI 工作互斥）", () => {
+  it("highlights exactly one dashboard tab per hash（今日／專案互斥）", () => {
     window.history.replaceState(null, "", "/dashboard");
     const { unmount } = render(<MobileNavigation />);
     expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "專案" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("link", { name: "AI 工作" })).not.toHaveAttribute("aria-current");
     unmount();
 
     window.history.replaceState(null, "", "/dashboard#projects");
     render(<MobileNavigation />);
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("link", { name: "AI 工作" })).not.toHaveAttribute("aria-current");
   });
 
   it("switches dashboard tabs without a full page reload from other routes", async () => {
@@ -104,8 +114,35 @@ describe("MobileNavigation", () => {
       .filter((href) => href.startsWith("/dashboard#"))
       .map((href) => href.split("#")[1]);
 
-    expect(anchors).toEqual(expect.arrayContaining(["projects", "ai-work"]));
+    expect(anchors).toEqual(expect.arrayContaining(["projects"]));
     for (const anchor of anchors) expect(launchpad).toContain(`id="${anchor}"`);
+  });
+
+  it("正中央的球開啟全站 AI 助手，不是導航連結", async () => {
+    // 這顆球原本只是 /dashboard#ai-work 的捲動錨點——按下去跳回今日工作台捲到
+    // 「繼續創作」那一格（那一格本來就在 dashboard 上，捲一下就到）。
+    // 現在它是助手入口：aria 契約要正確，否則讀屏使用者不知道按下去會開東西。
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/planner");
+    render(<MobileNavigation groupId="11111111-1111-4111-8111-111111111111" />);
+
+    const orb = screen.getByRole("button", { name: "AI 助手" });
+    expect(orb).toHaveAttribute("aria-haspopup", "dialog");
+    expect(orb).toHaveAttribute("aria-expanded", "false");
+    expect(orb).toHaveAttribute("aria-controls", "global-assistant-sheet");
+
+    await user.click(orb);
+    expect(orb).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
+    // 範圍要誠實寫出來：在專案頁按球看到的仍是組級視角
+    expect(screen.getByText("範圍：整個組")).toBeVisible();
+  });
+
+  it("沒有選定的組時，助手講清楚為什麼不能用（而不是給一個沒反應的輸入框）", async () => {
+    const user = userEvent.setup();
+    render(<MobileNavigation groupId="" />);
+    await user.click(screen.getByRole("button", { name: "AI 助手" }));
+    expect(await screen.findByText(/還沒有選定的組/)).toBeVisible();
   });
 
   it("keeps 專案 tab active on project detail pages", () => {
