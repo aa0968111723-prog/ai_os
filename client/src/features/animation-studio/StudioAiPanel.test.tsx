@@ -132,3 +132,47 @@ describe("StudioAiPanel・這一鏡", () => {
     expect(screen.getByText(/還沒選分鏡/)).toBeInTheDocument();
   });
 });
+
+/**
+ * 停用的按鈕在手機上按下去毫無回饋，畫面又不講原因——使用者的結論只會是「沒辦法用」。
+ * 按鈕可以停用，但停用的理由一定要看得到。
+ */
+describe("StudioAiPanel・AI 畫草圖按不下去時要說原因", () => {
+  it("還沒寫描述：按鈕停用，並告訴使用者要先寫字", () => {
+    setup();
+    expect(screen.getByRole("button", { name: /AI 畫草圖/ })).toBeDisabled();
+    expect(screen.getByText(/先在上面寫這一鏡要看到什麼/)).toBeInTheDocument();
+  });
+
+  it("字數還不夠：換成「再多寫幾個字」，不是原封不動的空白提示", async () => {
+    setup();
+    await userEvent.type(screen.getByLabelText(/跟 AI 說/), "夕陽");
+    expect(screen.getByRole("button", { name: /AI 畫草圖/ })).toBeDisabled();
+    expect(screen.getByText(/再多寫幾個字/)).toBeInTheDocument();
+  });
+
+  it("寫夠字就亮起來，提示同時收掉", async () => {
+    setup();
+    await userEvent.type(screen.getByLabelText(/跟 AI 說/), "一個人走在山路上");
+    expect(screen.getByRole("button", { name: /AI 畫草圖/ })).toBeEnabled();
+    expect(screen.queryByText(/再多寫幾個字/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/先在上面寫這一鏡要看到什麼/)).not.toBeInTheDocument();
+  });
+
+  it("檢視者看到的是「你沒有編輯權」，不是叫他多打幾個字", () => {
+    render(
+      <StudioAiPanel
+        layout={DESKTOP}
+        projectId="proj-1"
+        shot={SHOT}
+        canEdit={false}
+        boardEmpty
+        exportBoard={vi.fn()}
+        onBoardSaved={vi.fn()}
+        sketch={SKETCH}
+      />,
+    );
+    expect(screen.getByText(/你在這個專案是檢視者/)).toBeInTheDocument();
+    expect(screen.queryByText(/先在上面寫這一鏡要看到什麼/)).not.toBeInTheDocument();
+  });
+});

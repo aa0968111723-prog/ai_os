@@ -90,6 +90,8 @@ export function StudioAiPanel({
 
   // ── AI 畫草圖 ────────────────────────────────────────────
   const [sketchPrompt, setSketchPrompt] = useState("");
+  /** 至少四個字才送：一兩個字畫出來的構圖跟亂數沒兩樣，白花一次等待 */
+  const SKETCH_PROMPT_MIN = 4;
   const [replaying, setReplaying] = useState(false);
   /** 因白板空間不足被裁掉的筆數（>0 必須告知，不准默默少畫） */
   const [clippedByBoard, setClippedByBoard] = useState(0);
@@ -291,7 +293,7 @@ export function StudioAiPanel({
             <Button
               size="sm"
               variant="primary"
-              disabled={!canEdit || sketchMutation.isPending || sketchPrompt.trim().length < 4}
+              disabled={!canEdit || sketchMutation.isPending || sketchPrompt.trim().length < SKETCH_PROMPT_MIN}
               onClick={() => {
                 sketchMutation.mutate({
                   projectId,
@@ -311,6 +313,16 @@ export function StudioAiPanel({
             </Button>
           )}
         </div>
+        {/* 停用的按鈕在手機上按下去毫無反應，畫面又沒說原因——看起來就是「這功能壞了」。
+            按鈕本身停用（避免送出注定畫不好的一兩個字），但一定要講清楚差在哪。 */}
+        {!replaying && !sketchMutation.isPending && canEdit && sketchPrompt.trim().length < SKETCH_PROMPT_MIN && (
+          <Hint role="status">
+            {sketchPrompt.trim().length === 0
+              ? `先在上面寫這一鏡要看到什麼（至少 ${SKETCH_PROMPT_MIN} 個字），按鈕就會亮起來。`
+              : `再多寫幾個字（至少 ${SKETCH_PROMPT_MIN} 個字）就能按了。`}
+          </Hint>
+        )}
+        {!canEdit && <Hint role="status">你在這個專案是檢視者，不能請 AI 畫草圖。</Hint>}
         {sketchMutation.error && <p className="error" role="alert">AI 畫圖失敗：{sketchMutation.error.message}</p>}
         {replaying && (
           <Meta role="status" as="p" style={{ margin: "4px 0 0" }}>
