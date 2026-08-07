@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { framesToSec, shotFrames } from "@shared/timeline";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
 
@@ -14,8 +15,15 @@ export type StoryboardPlayerScene = {
   narrationUrl?: string | null;
 };
 
-/** 每鏡至少停留 1 秒，避免 durationSec 為 0/空時瞬間跳過看不到 */
-const clampDur = (s: number) => Math.max(1, Number.isFinite(s) ? s : 0);
+/**
+ * 這一鏡停留幾秒——與交付包（fcpxml/xmeml/srt/edl）共用同一條規則。
+ *
+ * 先前這裡是 `Math.max(1, ...)`，而 exporter 的 `sceneDur` 對無效鏡長是退回 3 秒：
+ * 同一個 durationSec=0 的鏡，預覽播 1 秒、交付包排 3 秒。durationSec 走 API 有 min(1) 擋著，
+ * 所以這是舊資料才踩得到的潛在落差；但「預覽看到的不是交付出去的」正是剪輯台最不能有的病，
+ * 規則收斂進 shared/timeline.ts 之後不會再各自演化。
+ */
+const clampDur = (s: number) => framesToSec(shotFrames(s));
 
 /** 秒數 → m:ss（時間軸經過/總長顯示用） */
 const fmtTime = (s: number) => {
