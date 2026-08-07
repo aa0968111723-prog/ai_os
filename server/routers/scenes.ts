@@ -44,6 +44,12 @@ import {
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { MAX_PROMPT_CHARS } from "./prompts";
+import {
+  formatEnvironmentState,
+  formatShotDirection,
+  shotCameraSchema,
+  shotPerformanceSchema,
+} from "../../shared/story";
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
@@ -175,6 +181,49 @@ export function cardPatchFromScript(
     patch[column] = outcome.ids.length ? outcome.ids : null;
   }
   return patch;
+}
+
+/**
+ * Shot Context Builder（PE 計畫 §11）：把「這一鏡獨有」的上下文疊到畫面描述上。
+ * 組裝順序＝繼承順序：Scene State（所屬場的天氣/時間/氛圍）→ 鏡頭語言 → 表演 → 造型鎖定。
+ * Project 風格（worldview）與角色/場景/道具錨點不在這裡——generationCore 既有機制會注入，
+ * 這裡重複加只會把提示詞灌爆（Cost Control guardrail）。
+ */
+async function buildShotContextPrompt(
+  scene: typeof schema.scenes.$inferSelect,
+  model: Parameters<typeof sceneVisualPrompt>[1],
+): Promise<string> {
+  const base = sceneVisualPrompt(scene, model);
+  if (!base.trim()) return base;
+  const parts: string[] = [base];
+
+  if (scene.storySceneId) {
+    const [storyScene] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, scene.storySceneId));
+    const envText = storyScene ? formatEnvironmentState(storyScene.environment) : "";
+    if (envText) parts.push(`[場景狀態] ${envText}`);
+  }
+
+  const direction = formatShotDirection(scene.camera, scene.performance);
+  if (direction) parts.push(`[鏡頭語言] ${direction}`);
+
+  if (scene.lookIds?.length) {
+    const looks = await db
+      .select({
+        name: schema.characterLooks.name,
+        costume: schema.characterLooks.costume,
+        characterName: schema.characters.name,
+      })
+      .from(schema.characterLooks)
+      .leftJoin(schema.characters, eq(schema.characters.id, schema.characterLooks.characterId))
+      .where(inArray(schema.characterLooks.id, scene.lookIds));
+    const lookText = looks
+      .map((l) => `${l.characterName ?? ""}：${(l.costume || l.name).slice(0, 120)}`)
+      .filter((s) => s.length > 1)
+      .join("；");
+    if (lookText) parts.push(`[造型鎖定] ${lookText}`);
+  }
+
+  return parts.join("\n\n");
 }
 
 /** 分鏡：簡易排序（↑↓）＋從生成成品加入（定案：不做拖曳時間軸） */
@@ -708,6 +757,14 @@ export const scenesRouter = router({
         // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
         trimStartMs: z.number().int().min(0).max(TRIM_MAX_MS).optional(),
         trimEndMs: z.number().int().min(0).max(TRIM_MAX_MS).nullable().optional(),
+        /** Story-first：這一鏡屬於哪一場（story_scenes.id）；null＝解除歸屬（未分場） */
+        storySceneId: z.string().uuid().nullable().optional(),
+        /** 鏡頭語言（簡單模式只填 shotSize；專業模式全開）；null＝清空 */
+        camera: shotCameraSchema.nullable().optional(),
+        /** 表演（表情/視線）；null＝清空 */
+        performance: shotPerformanceSchema.nullable().optional(),
+        /** 這一鏡採用的造型（character_looks.id）；空陣列＝清空 */
+        lookIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -717,6 +774,20 @@ export const scenesRouter = router({
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），你剛才的修改沒有存進去" });
       await getProjectChecked(ctx, scene.projectId, true);
+      // fail-closed：跨專案引用一律拒絕（與卡片綁定同一關）——否則能把別專案的場/造型 UUID 寫進本鏡
+      if (input.storySceneId) {
+        const [ss] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, input.storySceneId));
+        if (!ss || ss.projectId !== scene.projectId) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一場" });
+      }
+      if (input.lookIds?.length) {
+        const rows = await db
+          .select({ id: schema.characterLooks.id, projectId: schema.characterLooks.projectId })
+          .from(schema.characterLooks)
+          .where(inArray(schema.characterLooks.id, input.lookIds));
+        if (rows.length !== new Set(input.lookIds).size || rows.some((r) => r.projectId !== scene.projectId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
+        }
+      }
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
       if (input.title !== undefined) patch.title = input.title;
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
@@ -728,6 +799,15 @@ export const scenesRouter = router({
       if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
+      if (input.storySceneId !== undefined) patch.storySceneId = input.storySceneId;
+      // camera/performance：全空物件視同清空（存 null，不存 {}——與卡片欄「空即 null」同口徑）
+      if (input.camera !== undefined) {
+        patch.camera = input.camera && Object.values(input.camera).some((v) => v?.trim()) ? input.camera : null;
+      }
+      if (input.performance !== undefined) {
+        patch.performance = input.performance && Object.values(input.performance).some((v) => v?.trim()) ? input.performance : null;
+      }
+      if (input.lookIds !== undefined) patch.lookIds = input.lookIds.length ? [...new Set(input.lookIds)] : null;
       // 出點必須大於入點，否則是零長度或負長度剪輯——交付出去的時間軸會打不開。
       // 兩欄可以分開送，所以要拿「合併後」的值判斷，不能只看這次送了什麼。
       const nextStart = patch.trimStartMs ?? scene.trimStartMs;
@@ -949,8 +1029,11 @@ export const scenesRouter = router({
       const model = getModel(input.modelId);
       const modelRejection = regenRejection(model);
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
-      // 呼叫端指定的提示詞優先；否則用這一鏡的畫面描述，影片類模型再接上走位
-      const prompt = input.prompt ?? sceneVisualPrompt(scene, model);
+      // Shot Context Builder（PE 計畫 §11）：呼叫端指定的提示詞優先；否則以這一鏡的畫面描述為底，
+      // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
+      // 表演（表情/視線）→ 造型鎖定（本鏡指定的 Look）。Project 風格與角色/場景/道具錨點
+      // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的上下文。
+      const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選

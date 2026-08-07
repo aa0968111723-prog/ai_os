@@ -39,6 +39,8 @@ export const RATE_LIMIT_POLICIES = {
   messageAssistant: { limit: 6, windowMs: 60_000 },
   dmAssistant: { limit: 6, windowMs: 60_000 },
   director: { limit: 6, windowMs: 60_000 },
+  /** 故事自動解析：與拆分鏡同級距的 LLM 呼叫，自成一桶（不與 director 互相餓死） */
+  storyParse: { limit: 6, windowMs: 60_000 },
   imageDescription: { limit: 6, windowMs: 60_000 },
   apiFetch: { limit: 20, windowMs: 60_000 },
   driveList: { limit: 30, windowMs: 60_000 },
@@ -70,6 +72,7 @@ export const RATE_LIMIT_SCOPES = {
   messageAssistant: "assistant:message",
   dmAssistant: "assistant:dm",
   director: "assistant:director",
+  storyParse: "story:parse",
   imageDescription: "knowledge:image-description",
   apiFetch: "integrations:api-fetch",
   driveList: "integrations:drive-list",

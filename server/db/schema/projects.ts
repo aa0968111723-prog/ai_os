@@ -214,10 +214,22 @@ export const scenes = pgTable("scenes", {
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   propIds: jsonb("prop_ids").$type<string[]>(),
+  /**
+   * Story-first（PE 計畫）：這一鏡屬於哪一場戲 → story_scenes.id（邏輯關聯）。
+   * null＝尚未歸入任何場（手動加的鏡、或重構前的舊資料）——分鏡中心會排在「未分場」群。
+   */
+  storySceneId: uuid("story_scene_id"),
+  /** 鏡頭語言（shared/story.ts shotCameraSchema）：鏡別/角度/運鏡/焦段/光線/構圖；null＝未設定 */
+  camera: jsonb("camera").$type<import("../../../shared/story").ShotCamera>(),
+  /** 表演（shotPerformanceSchema）：表情/視線；動作走位仍在 action 欄（時間性，語義不同） */
+  performance: jsonb("performance").$type<import("../../../shared/story").ShotPerformance>(),
+  /** 這一鏡採用的造型 → character_looks.id[]；null＝未指定（沿用角色 Identity） */
+  lookIds: jsonb("look_ids").$type<string[]>(),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
+  storySceneIdx: index("scenes_story_scene_idx").on(t.storySceneId),
 }));
 
 /**
