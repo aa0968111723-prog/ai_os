@@ -815,7 +815,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     }
 
     let sceneId: string | undefined;
-    let sceneRole: "visual" | "narration" | undefined;
+    let sceneRole: "visual" | "narration" | "ambience" | undefined;
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) {
@@ -828,7 +828,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
           run,
           steps,
           idx,
-          `第 ${step.sceneNo} 鏡：${model.label} 是配樂/音效或文字模型，無法填入分鏡——請改用旁白語音模型，或這步不要綁分鏡`,
+          `第 ${step.sceneNo} 鏡：${model.label} 是文字模型，成品無法填入分鏡——請改用圖像／影片／旁白語音／音效模型，或這步不要綁分鏡`,
         );
         return;
       }
@@ -1491,7 +1491,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let modelId: string;
   let prompt: string;
   let sceneId: string | undefined;
-  let sceneRole: "visual" | "narration" | undefined;
+  let sceneRole: "visual" | "narration" | "ambience" | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
@@ -1520,12 +1520,12 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
-      // 修 GEN-201：用與助手同源的能力判斷，別再用 kind==="audio" 粗判——text-to-audio（配樂/音效）
-      // 會被誤當旁白寫進 narrationAssetId、靜默覆蓋分鏡旁白。role===null（配樂/音效/文字）時直接收攏成
-      // failed 並指路，不得綁分鏡。
+      // 修 GEN-201：用與助手同源的能力判斷，別再用 kind==="audio" 粗判——text-to-audio（音效/配樂）
+      // 曾被誤當旁白寫進 narrationAssetId、靜默覆蓋分鏡旁白；0038 之後它有自己的環境音槽，
+      // sceneFillRole 會回 "ambience"。role===null（純文字）時仍收攏成 failed 並指路，不得綁分鏡。
       const role = sceneFillRole(model);
       if (role === null) {
-        return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡：${model.label} 是配樂/音效或文字模型，無法填入分鏡——請改用旁白語音模型，或這步不要綁分鏡`);
+        return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡：${model.label} 是文字模型，成品無法填入分鏡——請改用圖像／影片／旁白語音／音效模型，或這步不要綁分鏡`);
       }
       sceneId = scene.id;
       sceneRole = role;

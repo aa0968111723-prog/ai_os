@@ -95,12 +95,24 @@ describe("pickGenerateModel／assistantModel 白名單守門（防幻覺 id、�
 });
 
 describe("sceneFillRole（生成成品能填進分鏡的哪個格）", () => {
-  it("視覺類（圖／影）回 visual、旁白語音回 narration、配樂與文字回 null（不准綁分鏡）", () => {
+  it("視覺類（圖／影）回 visual、旁白語音回 narration、音效／配樂回 ambience", () => {
     expect(sceneFillRole(repByCategory("text-to-image"))).toBe("visual");
     expect(sceneFillRole(repByCategory("text-to-video"))).toBe("visual");
     expect(sceneFillRole(repByCategory("text-to-speech"))).toBe("narration");
-    // 配樂/音效沒有專屬分鏡格（綁鏡會覆蓋旁白）→ null；LLM 文字不入分鏡 → null
-    expect(sceneFillRole(repByCategory("text-to-audio"))).toBeNull();
+    // 0038 之前音效／配樂沒有專屬槽，綁鏡會覆蓋旁白，所以回 null 擋下；
+    // 現在有 ambienceAssetId 了，助手與代理理應做得到使用者在單格工作室做得到的事。
+    expect(sceneFillRole(repByCategory("text-to-audio"))).toBe("ambience");
+  });
+
+  it("純文字仍回 null——文字成品沒有任何分鏡格可填，綁了只會靜默落空", () => {
     expect(sceneFillRole(repByCategory("llm"))).toBeNull();
+  });
+
+  it("三種音訊去向互斥：TTS 進旁白、音效進環境音，不會互相搶槽", () => {
+    // 這兩者的 model.kind 都是 audio——粗判 kind 會讓音效寫進旁白槽（GEN-201 的原始缺陷）
+    const tts = sceneFillRole(repByCategory("text-to-speech"));
+    const sfx = sceneFillRole(repByCategory("text-to-audio"));
+    expect(tts).not.toBe(sfx);
+    expect([tts, sfx]).toEqual(["narration", "ambience"]);
   });
 });

@@ -14,8 +14,11 @@
  */
 import type { ModelEntry } from "./models";
 
-/** 版本歸屬的槽位：畫面（scenes.assetId）／旁白（scenes.narrationAssetId） */
-export type SceneVersionRole = "visual" | "narration";
+/**
+ * 版本歸屬的槽位：畫面（scenes.assetId）／旁白（scenes.narrationAssetId）／
+ * 環境音（scenes.ambienceAssetId）。三軌各自編版次，互不干擾。
+ */
+export type SceneVersionRole = "visual" | "narration" | "ambience";
 
 /**
  * 版本在使用者眼中的狀態。與 `AssetVersionStatus`（candidate/selected/superseded/rejected）
@@ -52,6 +55,7 @@ export interface SceneVersionGenerationRow {
 export interface SceneCurrentPointers {
   assetId: string | null;
   narrationAssetId: string | null;
+  ambienceAssetId?: string | null;
 }
 
 /** 沒有對應生成紀錄、但目前正被引用的素材（例如「＋加入分鏡」帶進來的成品） */
@@ -117,6 +121,13 @@ function ascending(a: { createdAt: string; key: string }, b: { createdAt: string
  * - 外部帶入的素材（externals）只有在沒有任何生成紀錄指到同一個 assetId 時才另立一版，
  *   否則會與該筆生成重複顯示成兩版。
  */
+/** 該 role 的現用指標。ambienceAssetId 為 optional（舊呼叫端沒帶＝這格沒有環境音）。 */
+function pointerFor(role: SceneVersionRole, current: SceneCurrentPointers): string | null {
+  if (role === "narration") return current.narrationAssetId;
+  if (role === "ambience") return current.ambienceAssetId ?? null;
+  return current.assetId;
+}
+
 export function buildSceneVersions(
   rows: readonly SceneVersionGenerationRow[],
   current: SceneCurrentPointers,
@@ -129,8 +140,9 @@ export function buildSceneVersions(
 
   for (const row of rows) {
     // sceneRole 為 null 的舊資料視為 visual（與 listByProject／advanceGeneration 同口徑）
-    const role: SceneVersionRole = row.sceneRole === "narration" ? "narration" : "visual";
-    const pointer = role === "narration" ? current.narrationAssetId : current.assetId;
+    const role: SceneVersionRole =
+      row.sceneRole === "narration" || row.sceneRole === "ambience" ? row.sceneRole : "visual";
+    const pointer = pointerFor(role, current);
     const isCurrent = !!row.assetId && row.assetId === pointer;
     const state = isCurrent ? "current" : stateOf(row.status);
     drafts.push({
@@ -156,8 +168,15 @@ export function buildSceneVersions(
 
   for (const ext of externals) {
     if (seenAssetIds.has(ext.assetId)) continue;
-    const role: SceneVersionRole = ext.assetKind === "audio" ? "narration" : "visual";
-    const pointer = role === "narration" ? current.narrationAssetId : current.assetId;
+    // 外部帶入的音檔有兩個可能的家：先看它是不是某一軌的現用指標，指到誰就歸誰。
+    // 都沒指到就沿用既有預設（旁白）——那是加環境音之前的行為，不該因為多一軌而改判。
+    const role: SceneVersionRole =
+      ext.assetKind !== "audio"
+        ? "visual"
+        : ext.assetId === (current.ambienceAssetId ?? null)
+          ? "ambience"
+          : "narration";
+    const pointer = pointerFor(role, current);
     const isCurrent = ext.assetId === pointer;
     drafts.push({
       key: ext.assetId,
@@ -181,7 +200,7 @@ export function buildSceneVersions(
   }
 
   // 版次：同 role 內由舊到新編號
-  const counters: Record<SceneVersionRole, number> = { visual: 0, narration: 0 };
+  const counters: Record<SceneVersionRole, number> = { visual: 0, narration: 0, ambience: 0 };
   const ascendingAll = [...drafts].sort(ascending);
   const indexByKey = new Map<string, number>();
   for (const d of ascendingAll) {

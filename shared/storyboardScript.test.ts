@@ -15,33 +15,65 @@ import {
 } from "./storyboardScript";
 
 const ROWS = [
-  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂，柔和光線", voiceover: "那一年，我第一次走進禪堂。" },
+  {
+    title: "開場・晨光",
+    durationSec: 5,
+    prompt: "清晨禪堂，柔和光線",
+    voiceover: "那一年，我第一次走進禪堂。",
+    ambience: "遠處鐘聲，細微鳥鳴",
+  },
   { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, cardNames: ["安倢的紅傘"] },
 ];
 
 describe("formatStoryboardScript", () => {
-  it("每鏡一段：標題帶序號與秒數，畫面與旁白各一行", () => {
+  it("每鏡一段：標題帶序號與秒數，畫面／旁白／環境音各一行", () => {
     expect(formatStoryboardScript(ROWS)).toBe(
       [
         "## 1. 開場・晨光 (5s)",
         "畫面：清晨禪堂，柔和光線",
         "旁白：那一年，我第一次走進禪堂。",
+        "環境音：遠處鐘聲，細微鳥鳴",
         "",
         "## 2. 紅傘特寫 (4s)",
         "畫面：正紅長柄傘立在門邊",
         "旁白：",
+        "環境音：",
         "設定卡：安倢的紅傘（唯讀）",
       ].join("\n"),
     );
+  });
+
+  /**
+   * 空的環境音也要輸出。它剛從「沒有欄位可放」變成鏡規格的一員——只在有值時才出現，
+   * 等於繼續藏著它，使用者永遠不知道這一格可以寫。
+   */
+  it("環境音是空的也照樣輸出一行（讓人知道這一格可以寫）", () => {
+    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫", voiceover: null }]);
+    expect(out).toContain("\n環境音：");
   });
 
   it("格式化出來的文字，解析回去必須等值（來回不失真）", () => {
     const parsed = parseStoryboardScript(formatStoryboardScript(ROWS));
     expect(parsed.errors).toEqual([]);
     expect(parsed.scenes).toEqual([
-      { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂，柔和光線", voiceover: "那一年，我第一次走進禪堂。", ordinal: 1 },
-      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: "", ordinal: 2 },
+      {
+        title: "開場・晨光",
+        durationSec: 5,
+        prompt: "清晨禪堂，柔和光線",
+        voiceover: "那一年，我第一次走進禪堂。",
+        ambience: "遠處鐘聲，細微鳥鳴",
+        ordinal: 1,
+      },
+      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: "", ambience: "", ordinal: 2 },
     ]);
+  });
+
+  it("環境音吃續行，也吃半形冒號（與畫面／旁白同規則）", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "環境音: 蟲鳴", "遠處狗吠", "旁白：說話"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.ambience).toBe("蟲鳴\n遠處狗吠");
+    expect(parsed.scenes[0]?.voiceover).toBe("說話");
   });
 
   it("內容裡長得像結構的行會跳脫，原封不動寫回不會吃掉字", () => {

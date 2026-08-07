@@ -722,17 +722,50 @@ function SelfTestCard() {
   );
 }
 
-/** 分類 chip 配色循環：借用設計系統既有 accent tokens，安靜不搶戲、深淺主題都過 AA */
-const AUDIT_CAT_PALETTE = [
-  { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
-  { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" },
-  { background: "var(--success-soft)", color: "var(--success-ink)", border: "1px solid var(--success)" },
-  { background: "var(--accent-soft, var(--primary-tint))", color: "var(--accent-ink, var(--primary-ink))", border: "1px solid var(--border-soft)" },
-];
-/** 分類 key → 穩定配色（照 AUDIT_CATEGORIES 順序取色，同類永遠同色，好認） */
-const AUDIT_CAT_STYLE: Record<string, { background: string; color: string; border: string }> = Object.fromEntries(
-  AUDIT_CATEGORIES.map((c, i) => [c.key, AUDIT_CAT_PALETTE[i % AUDIT_CAT_PALETTE.length]]),
-);
+/**
+ * 分類標籤的樣式：安靜的中性底，全站只有這一種。
+ *
+ * 先前是四色循環套在 12 個分類上——顏色不夠分，第 1、5、9 類長得一模一樣。
+ * 讀者會以為顏色在編碼分類，實際上編碼不了，只換來一牆彩色方塊
+ * （回饋：「操作明細有時會看到眼花撩亂」）。分類名稱本身就是最準的標示，
+ * 顏色留給真正有語意的地方：成功／失敗、失敗數、成功率。
+ */
+const AUDIT_CAT_CHIP: CSSProperties = {
+  background: "var(--card2)",
+  color: "var(--fg-secondary)",
+  border: "1px solid var(--border-soft)",
+  fontSize: 11,
+  padding: "1px 8px",
+  borderRadius: 999,
+};
+
+/** 「最多的那一類」才上主色淡底：這裡的顏色編碼的是「主要在忙哪一塊」，不是分類身分 */
+const AUDIT_CAT_CHIP_TOP: CSSProperties = {
+  ...AUDIT_CAT_CHIP,
+  background: "var(--primary-tint)",
+  color: "var(--primary-ink)",
+  border: "1px solid var(--primary-border)",
+};
+
+/** 過濾 chip 樣式（操作紀錄的分類、操作洞察的分頁與期間共用一套視覺） */
+const filterChip = (active: boolean): CSSProperties => ({
+  padding: "3px 10px",
+  fontSize: 12,
+  borderRadius: 999,
+  cursor: "pointer",
+  border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
+  background: active ? "var(--primary-tint)" : "transparent",
+  color: active ? "var(--primary-ink)" : "var(--fg)",
+  fontWeight: active ? 600 : 400,
+});
+
+/** 展開／收合這類「不是過濾條件、只是控制多寡」的鈕：更輕，不跟真正的過濾 chip 搶 */
+const moreChip: CSSProperties = {
+  ...filterChip(false),
+  border: "1px dashed var(--border-soft)",
+  color: "var(--fg-secondary)",
+  background: "none",
+};
 
 type AuditRowData = inferRouterOutputs<AppRouter>["audit"]["list"]["items"][number];
 
@@ -783,7 +816,6 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
   const summary = summarizeAuditInput(r.input);
   const details = describeAuditInput(r.input);
   const expandable = details.length > 0 || (repeats?.length ?? 0) > 1;
-  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
   return (
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -795,8 +827,8 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
             ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
             : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
         </span>
-        {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
-        <Pill style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</Pill>
+        {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…）——安靜中性底，讓成敗與失敗訊息才是紅的 */}
+        <Pill style={AUDIT_CAT_CHIP}>{cat.label}</Pill>
         {/* 操作者：點名字＝只看這位夥伴做的事（分組員） */}
         <button
           type="button"
@@ -914,6 +946,46 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
   );
 }
 
+/** 收合時先露出的分類數：12 類全攤開在手機上要滑過六行 chip 才看得到第一筆紀錄 */
+const AUDIT_CAT_PREVIEW = 4;
+
+/**
+ * 分類過濾 chip：預設只露前幾類，其餘收進「更多分類（N）」。
+ *
+ * 全部攤開共 13 顆（全部＋12 類），在手機上排成六行、佔掉近半個畫面——
+ * 過濾器比它要過濾的資料還顯眼。收起來之後，一行看完、要挑細項再展開。
+ * 目前選中的那一類就算落在收合區也一定會被拉出來顯示，
+ * 否則畫面會出現「明明有在過濾、卻看不到過濾條件」的鬼打牆。
+ */
+export function AuditCategoryFilter({ value, onChange }: { value: string | null; onChange: (key: string | null) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const overflow = AUDIT_CATEGORIES.slice(AUDIT_CAT_PREVIEW);
+  const pinned = overflow.filter((c) => c.key === value);
+  const shown = expanded ? AUDIT_CATEGORIES : [...AUDIT_CATEGORIES.slice(0, AUDIT_CAT_PREVIEW), ...pinned];
+  const hiddenCount = overflow.length - pinned.length;
+  return (
+    <div role="group" aria-label="依分類過濾" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+      <button type="button" style={filterChip(value === null)} aria-pressed={value === null} onClick={() => onChange(null)}>全部</button>
+      {shown.map((c) => (
+        <button key={c.key} type="button" style={filterChip(value === c.key)} aria-pressed={value === c.key} onClick={() => onChange(c.key)}>
+          {c.label}
+        </button>
+      ))}
+      {(expanded || hiddenCount > 0) && (
+        <button
+          type="button"
+          style={moreChip}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? "只留常用的幾類" : "列出全部分類"}
+        >
+          {expanded ? "收合分類" : `更多分類（${hiddenCount}）`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * 操作紀錄（審計）卡：誰在什麼時候做了哪些敏感操作、成功與否。
  * 組長以上都看得到——後端已按呼叫者權限過濾範圍（組長只看自己組），這裡不需要 isSuperAdmin gate。
@@ -981,29 +1053,12 @@ export function AuditLogCard() {
     project: (id, title) => setProject({ id, title }),
     group: (id) => setGroupId(id),
   };
-  const chip = (active: boolean): CSSProperties => ({
-    padding: "3px 10px",
-    fontSize: 12,
-    borderRadius: 999,
-    cursor: "pointer",
-    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
-    background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--fg)",
-    fontWeight: active ? 600 : 400,
-  });
   return (
     <Card data-fb="操作紀錄卡">
       <h2>操作紀錄</h2>
       <Hint>誰在什麼時候做了什麼——用白話寫給每位夥伴看。能看到的範圍已按你的權限過濾（組長看自己組）。</Hint>
       {/* 分類 chip：白話分類，點一下只看那一類；不必先懂 admin.invite 這種代碼 */}
-      <div role="group" aria-label="依分類過濾" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-        <button type="button" style={chip(category === null)} aria-pressed={category === null} onClick={() => setCategory(null)}>全部</button>
-        {AUDIT_CATEGORIES.map((c) => (
-          <button key={c.key} type="button" style={chip(category === c.key)} aria-pressed={category === c.key} onClick={() => setCategory(c.key)}>
-            {c.label}
-          </button>
-        ))}
-      </div>
+      <AuditCategoryFilter value={category} onChange={setCategory} />
       {/* 分團隊／分組別：跨多團隊時先選團隊（下拉自動收斂到該團隊的組），再選組看那組的流水 */}
       {((scope.data?.groups.length ?? 0) > 1 || teams.length > 1) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
@@ -1174,6 +1229,44 @@ function PromptRow({ p }: { p: RecentPromptData }) {
 
 type RecentPromptData = inferRouterOutputs<AppRouter>["insights"]["recentPrompts"]["items"][number];
 type UserModelStatRow = inferRouterOutputs<AppRouter>["insights"]["userModelStats"]["rows"][number];
+type ActorCategory = inferRouterOutputs<AppRouter>["insights"]["actorBreakdown"]["members"][number]["categories"][number];
+
+/** 一位夥伴預設露出的分類數：問「他在忙哪一塊」，前三名就答完了 */
+const MEMBER_CAT_PREVIEW = 3;
+
+/**
+ * 一位夥伴的分類分佈：預設只列最多的前三類（後端已由多到少排好），其餘收進「＋N 類」。
+ *
+ * 攤開全部的話，一位夥伴就是十幾顆標籤排四五行，兩位夥伴吃掉整個手機畫面，
+ * 而且每顆都同樣醒目——等於沒有重點。前三名回答了「主要在忙哪一塊」，
+ * 要看長尾再展開；最多的那一類上淡主色，一眼就抓得到重心。
+ */
+export function MemberCategoryBreakdown({ categories }: { categories: readonly ActorCategory[] }) {
+  const [open, setOpen] = useState(false);
+  const hiddenCount = categories.length - MEMBER_CAT_PREVIEW;
+  const shown = open ? categories : categories.slice(0, MEMBER_CAT_PREVIEW);
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
+      {shown.map((c, i) => (
+        <Pill key={c.key} style={i === 0 ? AUDIT_CAT_CHIP_TOP : AUDIT_CAT_CHIP}>
+          {c.label} <b>{c.count.toLocaleString("zh-TW")}</b>
+        </Pill>
+      ))}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          className="hint"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          style={{ ...moreChip, fontSize: 11, padding: "1px 8px" }}
+          title={open ? "只看最多的前三類" : "列出其餘分類"}
+        >
+          {open ? "收合" : `＋${hiddenCount} 類`}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** 瀏覽器端下載 CSV（UTF-8 BOM 已由 toCsv 處理，Excel 可開中文） */
 function downloadCsv(filename: string, csv: string) {
@@ -1217,16 +1310,6 @@ export function InsightsCard() {
     { ...common, modelId: modelFilter?.id, actorId: actorFilter?.id, limit: 30 },
     { enabled: tab === "prompts" },
   );
-  const chip = (active: boolean): CSSProperties => ({
-    padding: "3px 10px",
-    fontSize: 12,
-    borderRadius: 999,
-    cursor: "pointer",
-    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
-    background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--fg)",
-    fontWeight: active ? 600 : 400,
-  });
   const groupOptions = scope.data?.groups ?? [];
 
   function exportUsageCsv(rows: UserModelStatRow[], fxNote: string) {
@@ -1267,15 +1350,24 @@ export function InsightsCard() {
       <Hint>把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、人×模型用量與估價、大家的提示詞怎麼寫。</Hint>
       {/* 分頁 chips */}
       <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-        <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
-        <button type="button" style={chip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
-        <button type="button" style={chip(tab === "usage")} aria-pressed={tab === "usage"} onClick={() => setTab("usage")}>用量明細</button>
-        <button type="button" style={chip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
+        <button type="button" style={filterChip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
+        <button type="button" style={filterChip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
+        <button type="button" style={filterChip(tab === "usage")} aria-pressed={tab === "usage"} onClick={() => setTab("usage")}>用量明細</button>
+        <button type="button" style={filterChip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
       </div>
-      {/* 期間＋組別過濾（三個分頁共用） */}
+      {/* 期間＋組別過濾（三個分頁共用）。
+          冠上「期間」二字並縮一號：上一排是「看什麼」、這排是「看多久」，
+          兩排長得一模一樣時讀者會以為近 30 天也是一個分頁。 */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+        <Meta style={{ fontSize: 11 }}>期間</Meta>
         {INSIGHT_DAYS.map((d) => (
-          <button key={d.value} type="button" style={chip(days === d.value)} aria-pressed={days === d.value} onClick={() => setDays(d.value)}>
+          <button
+            key={d.value}
+            type="button"
+            style={{ ...filterChip(days === d.value), fontSize: 11, padding: "2px 8px" }}
+            aria-pressed={days === d.value}
+            onClick={() => setDays(d.value)}
+          >
             {d.label}
           </button>
         ))}
@@ -1313,17 +1405,8 @@ export function InsightsCard() {
                 {m.fails > 0 && <span style={{ color: "var(--danger-ink)", fontSize: 12 }}>{m.fails} 筆失敗</span>}
                 <Meta style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</Meta>
               </div>
-              {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                {m.categories.map((c) => {
-                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
-                  return (
-                    <Pill key={c.key} style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
-                      {c.label} {c.count}
-                    </Pill>
-                  );
-                })}
-              </div>
+              {/* 分類細節：這位夥伴各類操作的次數，多到少；預設只露前三名，其餘收起來 */}
+              <MemberCategoryBreakdown categories={m.categories} />
             </div>
           ))
         )
