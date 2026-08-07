@@ -110,6 +110,66 @@ export function formatShotDirection(
   return parts.join("；");
 }
 
+/* ── 逐鏡上下文指導（PE 計畫 §12）：AI／使用者「只改這一鏡的鏡頭語言」 ─────────────
+ * 為什麼要 merge 而不是整份覆寫：助手收到的是「鏡頭再靠近一點」這種單點指令，
+ * 整份覆寫會把使用者先前調好的光線／構圖默默清掉——那是靜默資料遺失，不是「沒改到」。 */
+
+/** 欄位中文名（確認卡與活動紀錄都用這份，單一真相） */
+export const SHOT_DIRECTION_FIELD_LABEL: Record<string, string> = {
+  shotSize: "鏡別",
+  angle: "機位",
+  movement: "運鏡",
+  focalLength: "焦段",
+  lighting: "光線",
+  composition: "構圖",
+  emotion: "情緒",
+  gaze: "視線",
+};
+
+/**
+ * 局部套用鏡頭語言／表演：patch 只帶「要改的欄位」。
+ *  - `undefined`／缺鍵＝不動這個欄位
+ *  - 空字串＝清掉這個欄位（使用者說「不要運鏡」要有辦法表達）
+ * 全部欄位都空 → 回 `null`（與 storyScenes.environment 一致：空狀態存 null，不留空物件）。
+ */
+export function mergeShotDirection<T extends Record<string, string | undefined>>(
+  base: T | null | undefined,
+  patch: Partial<T> | null | undefined,
+): T | null {
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base ?? {})) {
+    if (typeof v === "string" && v.trim()) merged[k] = v.trim();
+  }
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    if (v === undefined) continue;
+    const t = typeof v === "string" ? v.trim() : "";
+    if (t) merged[k] = t;
+    else delete merged[k];
+  }
+  return Object.keys(merged).length ? (merged as T) : null;
+}
+
+/**
+ * 變更預覽（PE 計畫 §14）：把 before→after 講成人看得懂的一句話，
+ * 讓「確認」這一步真的看得到會被改掉什麼（沒填過的欄位顯示「－」）。
+ * 回空陣列＝這個 patch 其實什麼都沒改（呼叫端據此不給使用者一顆假按鈕）。
+ */
+export function describeDirectionChange(
+  before: Record<string, string | undefined> | null | undefined,
+  after: Record<string, string | undefined> | null | undefined,
+): string[] {
+  const keys = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
+  const out: string[] = [];
+  for (const k of keys) {
+    const b = before?.[k]?.trim() || "";
+    const a = after?.[k]?.trim() || "";
+    if (b === a) continue;
+    const label = SHOT_DIRECTION_FIELD_LABEL[k] ?? k;
+    out.push(`${label} ${b || "－"}→${a || "－"}`);
+  }
+  return out;
+}
+
 /** UI 快選選項（不是白名單——欄位仍收自由文字，模型/使用者可寫其他值） */
 export const SHOT_SIZE_OPTIONS = ["大遠景", "遠景", "全景", "中景", "中特寫", "特寫", "大特寫"] as const;
 export const SHOT_ANGLE_OPTIONS = ["平視", "低角度", "高角度", "俯視", "過肩", "主觀視角"] as const;

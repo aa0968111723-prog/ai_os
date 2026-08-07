@@ -9,10 +9,13 @@ import {
   sameEntityName,
   formatEnvironmentState,
   formatShotDirection,
+  mergeShotDirection,
+  describeDirectionChange,
   storyParseModelSchema,
   environmentStateSchema,
   CONFIDENCE_AUTO,
   CONFIDENCE_FLAG,
+  type ShotCamera,
 } from "./story";
 
 describe("nameKey / sameEntityName", () => {
@@ -73,6 +76,60 @@ describe("formatShotDirection", () => {
     expect(formatShotDirection(null, { emotion: "平靜" })).toBe("表演：平靜");
     expect(formatShotDirection(null, null)).toBe("");
     expect(formatShotDirection({}, {})).toBe("");
+  });
+});
+
+describe("mergeShotDirection（§12 逐鏡指導：只動被指名的欄位）", () => {
+  it("只覆寫 patch 帶到的欄位，其餘原封不動", () => {
+    const before = { shotSize: "全景", lighting: "逆光", composition: "留白" };
+    expect(mergeShotDirection(before, { shotSize: "特寫" })).toEqual({
+      shotSize: "特寫",
+      lighting: "逆光",
+      composition: "留白",
+    });
+  });
+  it("缺鍵與 undefined 都不算「要清掉」——這是防靜默資料遺失的核心", () => {
+    const before = { shotSize: "全景", lighting: "逆光" };
+    expect(mergeShotDirection(before, {})).toEqual(before);
+    expect(mergeShotDirection(before, { lighting: undefined })).toEqual(before);
+  });
+  it("空字串＝明確清掉這個欄位", () => {
+    expect(mergeShotDirection({ shotSize: "全景", movement: "緩推" }, { movement: "" })).toEqual({ shotSize: "全景" });
+    expect(mergeShotDirection({ shotSize: "全景", movement: "  " }, { movement: "" })).toEqual({ shotSize: "全景" });
+  });
+  it("清空最後一個欄位回 null（不留空物件，與 environment 存法一致）", () => {
+    expect(mergeShotDirection({ shotSize: "全景" }, { shotSize: "" })).toBeNull();
+    expect(mergeShotDirection(null, {})).toBeNull();
+    expect(mergeShotDirection(null, { shotSize: "  " })).toBeNull();
+  });
+  it("入庫前 trim；base 裡的空白欄位不會被當成有值帶進來", () => {
+    expect(mergeShotDirection<ShotCamera>({ shotSize: "  ", angle: " 平視 " }, { movement: " 緩推 " })).toEqual({
+      angle: "平視",
+      movement: "緩推",
+    });
+  });
+});
+
+describe("describeDirectionChange（§14 變更預覽：確認前看得到改什麼）", () => {
+  it("沒填過的欄位顯示「－」，新舊並陳", () => {
+    expect(describeDirectionChange({ shotSize: "全景" }, { shotSize: "特寫", movement: "緩推" })).toEqual([
+      "鏡別 全景→特寫",
+      "運鏡 －→緩推",
+    ]);
+  });
+  it("清掉欄位也要看得到（→－）", () => {
+    expect(describeDirectionChange({ movement: "緩推" }, null)).toEqual(["運鏡 緩推→－"]);
+  });
+  it("沒有實際差異回空陣列——呼叫端據此不給一顆假按鈕", () => {
+    expect(describeDirectionChange({ shotSize: "全景" }, { shotSize: "全景" })).toEqual([]);
+    expect(describeDirectionChange(null, null)).toEqual([]);
+    expect(describeDirectionChange({ shotSize: "全景" }, { shotSize: " 全景 " })).toEqual([]);
+  });
+  it("表演欄位也走同一份中文欄名", () => {
+    expect(describeDirectionChange({ emotion: "平靜" }, { emotion: "若有所思", gaze: "看向遠方" })).toEqual([
+      "情緒 平靜→若有所思",
+      "視線 －→看向遠方",
+    ]);
   });
 });
 
