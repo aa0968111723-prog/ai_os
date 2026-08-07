@@ -45,7 +45,7 @@ import {
   generateAgentPlanDraft,
 } from "./agentPlannerProvider";
 import { buildProjectIntelligence } from "./projectIntelligence";
-import { stopPendingDagSteps } from "./agentDag";
+import { stopPendingDagSteps } from "../../shared/agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {

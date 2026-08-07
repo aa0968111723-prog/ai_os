@@ -1,3 +1,15 @@
+/**
+ * 代理步驟 DAG 的求解規則（純函式、零相依）。
+ *
+ * 位置為何在 `shared/` 而不是 `server/services/`：ADR-009 規定 `client/**` 不得
+ * import `server/**`，而前端要把步驟依賴畫成時間軸（哪幾步平行、哪幾步被前一步
+ * 連坐擋住）就必須跑同一套求解規則。規則複製到前端會分岔——同一份 dependsOn 在
+ * 後端算出「被擋住」、前端畫成「等待中」是遲早的事。故改放 shared 讓兩端共用同
+ * 一份實作，`shared/agentDag.test.ts` 是它唯一的行為契約。
+ *
+ * 這裡只做「依賴關係 → 誰可以跑」的推導，不碰資料庫、不碰執行；實際推進由
+ * `server/services/agentRunner.ts` 負責。
+ */
 export interface AgentDagStep {
   id?: string;
   note: string;

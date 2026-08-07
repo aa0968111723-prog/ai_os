@@ -67,6 +67,20 @@ client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/se
 | `server/services/messageAssistant.ts` | `../routers/knowledge` | 同上 knowledge helper |
 | `server/services/restApi.ts` | `../routers/schedule`（`buildIcs`） | ICS 建置仍在 schedule router |
 
+## 下沉先例：`agentDag` → `shared/`（2026-08-07）
+
+規則 1 列出的「允許的替代」——**純函式下沉到 `shared/`**——的第一個實作案例，記錄於此作為後續同類需求的範本：**不要為了讓前端讀後端邏輯而擴大 allowlist，要把邏輯搬到 `shared/`。**
+
+| 項目 | 內容 |
+|---|---|
+| 移動 | `server/services/agentDag.ts` → `shared/agentDag.ts`（測試一併移至 `shared/agentDag.test.ts`） |
+| 動機 | 前端要把代理步驟依賴畫成時間軸（哪幾步平行、哪幾步被前一步連坐擋住），必須跑與後端同一套 DAG 求解規則 |
+| 為何可以搬 | 該模組 **零 import**、純函式、不碰 DB 與執行——完全符合「跨端共用契約」的定義 |
+| 更新的引用 | `server/services/agentRunner.ts`、`server/services/taskCore.ts`、`server/services/agentCore.ts` 改為 `../../shared/agentDag` |
+| allowlist 變化 | **無**。這正是重點：規則 1 的正解是下沉，不是加例外 |
+
+若日後前端需要其他後端邏輯，先問「這段是不是純函式」；是就搬 `shared/`，不是就先抽純函式再搬，兩者皆非才討論其他方案。
+
 ## 強制機制
 
 - 腳本：`scripts/check-import-boundaries.mjs`
