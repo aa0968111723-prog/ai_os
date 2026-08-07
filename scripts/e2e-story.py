@@ -181,6 +181,37 @@ if shot_umbrella:
     after_notes = call("GET", admin, "story.continuityCheck", {"projectId": pid})
     ok("只改備註不新增過時項", after_notes["total"] == stale["total"])
 
+# ── 8.8 Shot 相關素材（§13）：名稱／標籤對得上才推薦，且要說得出理由 ──
+def upload_asset(opener, project_id, filename):
+    """multipart 上傳一張小圖（與 e2e-messages 同一套手組 boundary 寫法）"""
+    boundary = "----e2estoryboundary"
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082")
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"projectId\"\r\n\r\n{project_id}\r\n".encode(),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode(),
+        png,
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    req = urllib.request.Request(f"{HOST}/api/upload", data=b"".join(parts), method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    if opener.cookie: req.add_header("Cookie", opener.cookie)
+    try:
+        with opener.open(req) as r: return json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"__error__": e.read().decode()[:200]}
+
+if shot_umbrella:
+    empty = call("GET", admin, "story.shotAssetSuggestions", {"sceneId": shot_umbrella["id"]})
+    ok("素材庫沒對得上的東西時不硬推", empty["items"] == [] and len(empty["terms"]) >= 1)
+    up1 = upload_asset(admin, pid, "克難坡實景參考.png")
+    up2 = upload_asset(admin, pid, "完全無關的東西.png")
+    ok("素材上傳成功（推薦的前提）", "__error__" not in up1 and "__error__" not in up2)
+    sug = call("GET", admin, "story.shotAssetSuggestions", {"sceneId": shot_umbrella["id"]})
+    titles = [i["title"] for i in sug["items"]]
+    ok("名稱對得上的素材被推薦", any("克難坡" in t for t in titles))
+    ok("對不上的不推薦（不要讓人自己過濾雜訊）", not any("完全無關" in t for t in titles))
+    ok("推薦說得出理由（命中哪些詞）", all(i["matched"] for i in sug["items"]))
+
 # ── 9. 修改故事 → 差異訊號（不整部重算） ──
 saved = call("POST", admin, "story.save", {"projectId": pid, "content": STORY + "\n\n三年後，她剪了短髮回到克難坡。"})
 st = call("GET", admin, "story.get", {"projectId": pid})

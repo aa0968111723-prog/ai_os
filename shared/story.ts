@@ -364,6 +364,79 @@ export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
   };
 }
 
+/* ── Shot 素材推薦（PE 計畫 §13／§26） ────────────────────────
+ *
+ * 刻意**不做**語意向量檢索，也刻意不寫「AI 已分析」這種文案——現在沒有那個能力，
+ * 假裝有就是騙使用者（§60）。這一版誠實地做「名稱或標籤對得上」：
+ * 用這一鏡已經綁定的角色／場景／道具名字去比對素材的標題與標籤，
+ * 並把**命中的詞**一起回給 UI，讓推薦理由看得見（「符合：安倢、紅傘」）。
+ *
+ * 之後要接向量檢索時，換掉的是 buildShotSearchTerms 的來源與這支的分數來源，
+ * 回傳形狀（matched/score）不用動——介面先長對，能力再長進來。
+ */
+
+export interface AssetLike {
+  id: string;
+  title: string;
+  tags: unknown;
+}
+
+export interface AssetSuggestion {
+  assetId: string;
+  /** 命中的詞（給使用者看推薦理由，不是黑盒分數） */
+  matched: string[];
+}
+
+/** tags 是 jsonb，實務上可能是字串陣列、也可能被寫成別的東西——只取字串 */
+function toTagList(tags: unknown): string[] {
+  return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === "string") : [];
+}
+
+/**
+ * 這一鏡拿哪些詞去找素材：綁定的實體名字（精準、有意義），不是把整段畫面描述斷詞。
+ * 中文斷詞在沒有詞庫的情況下只會製造雜訊命中，寧可少而準。
+ */
+export function buildShotSearchTerms(input: {
+  characterNames?: string[];
+  locationNames?: string[];
+  propNames?: string[];
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of [...(input.characterNames ?? []), ...(input.locationNames ?? []), ...(input.propNames ?? [])]) {
+    const t = name.trim();
+    const key = nameKey(t);
+    // 一個字的名字（「傘」）會命中太多不相干素材，門檻設兩個字
+    if (!key || key.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * 依「標題或標籤含有這些詞」挑素材，命中越多詞越前面。
+ * 完全沒命中的素材不回——寧可一個都不推薦，也不要推一堆不相干的讓使用者自己過濾。
+ */
+export function suggestAssetsForShot(terms: string[], assets: AssetLike[], limit = 6): AssetSuggestion[] {
+  if (!terms.length) return [];
+  const termKeys = terms.map((t) => ({ raw: t, key: nameKey(t) })).filter((t) => t.key);
+  const scored: Array<{ s: AssetSuggestion; score: number }> = [];
+  for (const asset of assets) {
+    const haystack = nameKey([asset.title, ...toTagList(asset.tags)].join(" "));
+    if (!haystack) continue;
+    const matched = termKeys.filter((t) => haystack.includes(t.key)).map((t) => t.raw);
+    if (!matched.length) continue;
+    scored.push({ s: { assetId: asset.id, matched }, score: matched.length });
+  }
+  // 命中詞數多的優先；同分維持原順序（呼叫端已依時間排序，較新的在前）
+  return scored
+    .map((x, i) => ({ ...x, i }))
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, limit)
+    .map((x) => x.s);
+}
+
 /* ── 解析摘要（story.get 回給 UI 的 counts 形狀） ─────────────── */
 
 export interface StoryParseSummary {

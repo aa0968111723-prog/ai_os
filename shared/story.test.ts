@@ -14,6 +14,8 @@ import {
   storyParseModelSchema,
   diffStoryboardPlan,
   summarizeStoryboardDiff,
+  buildShotSearchTerms,
+  suggestAssetsForShot,
   environmentStateSchema,
   CONFIDENCE_AUTO,
   CONFIDENCE_FLAG,
@@ -193,6 +195,46 @@ describe("diffStoryboardPlan（§22 逐場套用：不重複建、也不蓋掉�
       reuseScenes: 1,
       newShots: 2,
     });
+  });
+});
+
+describe("Shot 素材推薦（§13：誠實的名稱／標籤比對，不假裝有語意檢索）", () => {
+  const assets = [
+    { id: "a1", title: "安倢_開學日_定裝", tags: ["角色"] },
+    { id: "a2", title: "克難坡實景", tags: ["場景", "紅傘"] },
+    { id: "a3", title: "無關的配樂", tags: ["音樂"] },
+    { id: "a4", title: "雜物", tags: [] },
+  ];
+
+  it("命中詞數多的排前面，並回報命中了什麼（推薦理由看得見）", () => {
+    const terms = buildShotSearchTerms({ characterNames: ["安倢"], locationNames: ["克難坡"], propNames: ["紅傘"] });
+    const out = suggestAssetsForShot(terms, assets);
+    expect(out[0]).toEqual({ assetId: "a2", matched: ["克難坡", "紅傘"] });
+    expect(out[1]).toEqual({ assetId: "a1", matched: ["安倢"] });
+    expect(out.map((o) => o.assetId)).not.toContain("a3");
+  });
+
+  it("沒有命中就一個都不推——寧可空手也不要讓人自己過濾雜訊", () => {
+    expect(suggestAssetsForShot(["完全不存在的詞"], assets)).toEqual([]);
+    expect(suggestAssetsForShot([], assets)).toEqual([]);
+  });
+
+  it("單字詞被濾掉（「傘」會命中太多不相干素材）", () => {
+    expect(buildShotSearchTerms({ propNames: ["傘", "紅傘"] })).toEqual(["紅傘"]);
+  });
+
+  it("同一個名字重複綁定只算一次", () => {
+    expect(buildShotSearchTerms({ characterNames: ["安倢", " 安倢 "], propNames: ["「安倢」"] })).toEqual(["安倢"]);
+  });
+
+  it("tags 不是字串陣列時不炸（jsonb 可能被寫進奇怪的東西）", () => {
+    const weird = [{ id: "x", title: "克難坡", tags: { nope: 1 } }, { id: "y", title: "克難坡2", tags: null }];
+    expect(suggestAssetsForShot(["克難坡"], weird).map((o) => o.assetId)).toEqual(["x", "y"]);
+  });
+
+  it("limit 收斂數量（提示區不是第二個素材庫）", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, title: "克難坡", tags: [] }));
+    expect(suggestAssetsForShot(["克難坡"], many, 3)).toHaveLength(3);
   });
 });
 

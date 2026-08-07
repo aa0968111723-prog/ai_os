@@ -24,6 +24,8 @@ import { checkProjectContinuity } from "../services/continuityCheck";
 import {
   diffStoryboardPlan,
   summarizeStoryboardDiff,
+  buildShotSearchTerms,
+  suggestAssetsForShot,
   environmentStateSchema,
   STORY_MAX_CHARS,
   STORY_SCENE_TITLE_MAX,
@@ -496,6 +498,71 @@ export const storyRouter = router({
         sampleTitles: shots.slice(0, 5).map((s) => s.title),
         /** 其中畫面已經與卡片對不上的鏡數（＝這次修改真正「已經造成落差」的部分） */
         outdatedShots: outdated.length,
+      };
+    }),
+
+  /**
+   * 這一鏡的相關素材（PE 計畫 §13／§26）：用這一鏡綁定的角色／場景／道具名字，
+   * 去比對素材的標題與標籤。**不是語意檢索**，回傳也帶著命中的詞，
+   * 讓 UI 能誠實地說「名稱或標籤對得上」而不是假裝「AI 已分析」（§60）。
+   */
+  shotAssetSuggestions: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [shot] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!shot) throw new TRPCError({ code: "NOT_FOUND" });
+      const project = await getProjectChecked(ctx, shot.projectId, false);
+
+      const [chars, locs, props] = await Promise.all([
+        shot.characterIds?.length
+          ? db.select({ name: schema.characters.name }).from(schema.characters).where(inArray(schema.characters.id, shot.characterIds))
+          : Promise.resolve([]),
+        shot.scenePresetIds?.length
+          ? db.select({ name: schema.scenePresets.name }).from(schema.scenePresets).where(inArray(schema.scenePresets.id, shot.scenePresetIds))
+          : Promise.resolve([]),
+        shot.propIds?.length
+          ? db.select({ name: schema.props.name }).from(schema.props).where(inArray(schema.props.id, shot.propIds))
+          : Promise.resolve([]),
+      ]);
+      const terms = buildShotSearchTerms({
+        characterNames: chars.map((c) => c.name),
+        locationNames: locs.map((l) => l.name),
+        propNames: props.map((p) => p.name),
+      });
+      if (!terms.length) return { terms: [], items: [] };
+
+      // 只找「使用者自己上傳的」素材：AI 生成物本來就綁在某一鏡上，
+      // 拿它回頭推薦給另一鏡只會讓畫面互相污染（參考素材要的是原始資料）。
+      const assets = await db
+        .select({
+          id: schema.assets.id,
+          title: schema.assets.title,
+          tags: schema.assets.tags,
+          kind: schema.assets.kind,
+          url: schema.assets.url,
+        })
+        .from(schema.assets)
+        .where(
+          and(
+            eq(schema.assets.projectId, project.id),
+            isNull(schema.assets.deletedAt),
+            eq(schema.assets.isAiGenerated, false),
+          ),
+        )
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(300);
+
+      const suggestions = suggestAssetsForShot(terms, assets);
+      const byId = new Map(assets.map((a) => [a.id, a]));
+      return {
+        terms,
+        items: suggestions.flatMap((s) => {
+          const a = byId.get(s.assetId);
+          return a ? [{ id: a.id, title: a.title, kind: a.kind, url: a.url, matched: s.matched }] : [];
+        }),
       };
     }),
 

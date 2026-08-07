@@ -7986,6 +7986,8 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 }
 .shot-card__prompt, .shot-card__action { width: 100%; font-size: var(--fs-13); line-height: 1.6; resize: vertical; }
 .shot-card__refs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* §13 相關素材：一列 chips，與 refs 同一套視覺（它是參考不是主內容） */
+.shot-card__assets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: var(--sp-4); }
 .shot-card__looks { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .shot-card__direction { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
 .shot-card__direction label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-12); }
