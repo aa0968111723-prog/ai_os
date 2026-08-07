@@ -94,8 +94,14 @@ export function StudioAiPanel({
   /** 因白板空間不足被裁掉的筆數（>0 必須告知，不准默默少畫） */
   const [clippedByBoard, setClippedByBoard] = useState(0);
   const replayRef = useRef<ReplayHandle | null>(null);
+  /** 卸載後才回來的 onSuccess 不准開新重播（react-query 的 mutation 不隨卸載中止） */
+  const mountedRef = useRef(true);
   const sketchMutation = trpc.director.sketchBoard.useMutation({
     onSuccess: (data) => {
+      if (!mountedRef.current) return;
+      // LLM 失敗的 fallback **不畫**：未經同意把 13 筆無關的示範圖蓋在使用者的草稿上，
+      // 比畫不出來更糟——錯誤用 alert 區塊講清楚（見下方渲染）。示範模式（mock 非 fallback）照畫。
+      if (data.fallback) return;
       // 伺服器輸出照樣過 parseBoard 防禦閘（boardDocFromSketch 內），與 localStorage 讀回同一道門
       const board = boardDocFromSketch(data.doc);
       if (!board || board.strokes.length === 0) return;
@@ -114,7 +120,17 @@ export function StudioAiPanel({
     },
   });
   // 離開創作室時停掉還在畫的重播；已落的筆畫留著（本機草稿，可 undo 可清空）
-  useEffect(() => () => replayRef.current?.cancel(), []);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    replayRef.current?.cancel();
+  }, []);
+  // 切換分鏡也要停：switchTo 換掉白板文件但不 unmount 面板，殘餘的 timer 會把
+  // AI 筆畫灌進「新載入那一鏡」的白板，再被自動存檔寫進錯誤分鏡的本機草稿
+  useEffect(() => {
+    replayRef.current?.cancel();
+    setReplaying(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shot?.id]);
   const stopReplay = () => {
     replayRef.current?.cancel();
     setReplaying(false);
@@ -296,14 +312,27 @@ export function StudioAiPanel({
           )}
         </div>
         {sketchMutation.error && <p className="error" role="alert">AI 畫圖失敗：{sketchMutation.error.message}</p>}
-        {sketchMutation.data?.limitNotice && <Hint role="status">{sketchMutation.data.limitNotice}</Hint>}
-        {sketchMutation.data && !replaying && !sketchMutation.isPending && (
+        {replaying && (
+          <Meta role="status" as="p" style={{ margin: "4px 0 0" }}>
+            AI 正在白板上作畫…可隨時按停，已畫的會留著。
+          </Meta>
+        )}
+        {sketchMutation.data?.fallback && !sketchMutation.isPending && (
+          // LLM 失敗：沒有畫任何東西——這是錯誤不是成果，不准講成「畫好了」
+          <p className="error" role="alert">
+            AI 暫時沒回應，這次沒有畫任何東西。
+            {sketchMutation.data.limitNotice ? `（${sketchMutation.data.limitNotice}）` : "稍等一下再試一次。"}
+          </p>
+        )}
+        {sketchMutation.data && !sketchMutation.data.fallback && !replaying && !sketchMutation.isPending && (
           <Meta role="status" as="p" style={{ margin: "4px 0 0" }}>
             畫好了：{sketchMutation.data.doc.strokes.length} 筆
             {sketchMutation.data.droppedStrokes > 0 ? `（超過白板上限，省略了 ${sketchMutation.data.droppedStrokes} 筆）` : ""}
             {clippedByBoard > 0 ? `（白板剩餘空間不足，另有 ${clippedByBoard} 筆沒畫上——清空白板可畫完整版）` : ""}
-            {sketchMutation.data.mock ? (sketchMutation.data.fallback ? "・AI 暫時沒回應，先畫示範構圖（不是依你的描述畫的）" : "・示範模式（不是依你的描述畫的）") : ""}
-            。看完沒問題，就用上面「把白板存成這一鏡的畫面」收進分鏡。
+            {sketchMutation.data.mock ? "・示範模式（不是依你的描述畫的）" : ""}
+            {shot
+              ? "。看完沒問題，就用上面「把白板存成這一鏡的畫面」收進分鏡。"
+              : "。目前沒選分鏡，這張會存成自由塗鴉——到分鏡表選一鏡後，才能把它存成那一鏡的畫面。"}
           </Meta>
         )}
         <Hint>

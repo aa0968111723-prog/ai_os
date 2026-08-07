@@ -182,6 +182,37 @@ function broadcast(roomKey: string, room: Set<Client>, msg: unknown, except?: Cl
   publishRoomEvent(roomKey, msg);
 }
 
+/** 伺服器發起的推播節流（每專案）：代理一次 tick 會連寫多筆事件，不節流會對同房重複轟炸 */
+const serverPushThrottle = new Map<string, number>();
+const SERVER_PUSH_MIN_MS = 800;
+
+/**
+ * 伺服器端事件推播（C1 操演推播的最小形）：代理每步推進時喚醒專案房間裡的所有客戶端。
+ *
+ * 訊息帶兩層：
+ * - `invalidate`：客戶端**既有**的處理路徑（realtime.tsx 收到就重取 react-query 快取）——
+ *   代理進度從 4-8 秒輪詢變成即時，前端零改動。
+ * - `agent-step`：帶 runId/stepId/eventKey 的具名事件。現在沒有客戶端消費它（未知
+ *   type 會被 else-if 鏈安靜忽略），是留給操演 HUD（C3）的接點——屆時前端能知道
+ *   「哪一步剛發生什麼」而不只是「有東西變了」，伺服器不必再改。
+ *
+ * 房間不存在也照樣發跨實例匯流排：使用者可能連在另一個 replica 上。
+ * 節流是每專案 800ms 領先緣——漏掉的尾巴由 AgentCard 保留的輪詢兜底。
+ */
+export function notifyAgentProgress(
+  projectId: string,
+  step: { runId: string; stepId?: string | null; eventKey: string },
+): void {
+  const now = Date.now();
+  const last = serverPushThrottle.get(projectId) ?? 0;
+  if (now - last < SERVER_PUSH_MIN_MS) return;
+  serverPushThrottle.set(projectId, now);
+  const roomKey = `p:${projectId}`;
+  const room = rooms.get(roomKey) ?? new Set<Client>();
+  broadcast(roomKey, room, { type: "agent-step", runId: step.runId, stepId: step.stepId ?? null, eventKey: step.eventKey });
+  broadcast(roomKey, room, { type: "invalidate" });
+}
+
 /** 在場名單有變：本機重播一次（presence 是完整名單，不能只送差異） */
 function broadcastPresence(roomKey: string, room: Set<Client>, except?: Client): void {
   sendLocal(room, { type: "presence", users: dedupeUsers(roomKey, room) }, except);

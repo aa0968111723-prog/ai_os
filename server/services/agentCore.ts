@@ -712,6 +712,8 @@ export async function planAgentCore(input: {
 可用步驟與專屬欄位（不得發明其他 kind）：
 - split_script：script 可省略，從知識庫腳本拆分鏡。
 - create_scene：sceneTitle、voiceover?、durationSec?、prompt?。
+- update_scene：sceneNo、sceneTitle?、durationSec?（整數 1-60 秒）、prompt?、voiceover?、ambience?、trimStartMs?/trimEndMs?（毫秒；秒以下的節奏微調用修剪，不要發明小數秒）。免費，用於改欄位與剪輯節奏。
+- reorder_scenes：orderedSceneNos（把全部分鏡的「目前編號」按新順序完整列出，例如 [3,1,2,4]；不可重複、不可漏）。免費，用於調整敘事順序。
 - generate：prompt、sceneNo?、modelId?、characterRefs?、scenePresetRefs?、propRefs?、sourceAssetRef?、sourceUrl?；生成會花點數。needs 模型（圖生圖／i2v 等）必須指定 sourceAssetRef（素材庫代號）或 sourceUrl（https）。characterRefs／scenePresetRefs／propRefs 用上下文 charN／presetN／propN 代號。
 - voiceover：sceneNo；生成會花點數。
 - record_to_database：dbRef、data；只能使用可寫資料庫代號與欄位 key。

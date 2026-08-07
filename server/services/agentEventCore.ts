@@ -6,6 +6,7 @@ import type { AuthState } from "./auth";
 import type { AgentStep } from "./agentRunner";
 import { listGroupTasks } from "./taskCore";
 import type { CompletePlanSummary } from "../../shared/plan";
+import { notifyAgentProgress } from "./realtime";
 
 export type AgentEventType = typeof schema.agentEvents.$inferInsert["eventType"];
 
@@ -53,6 +54,14 @@ export async function recordAgentEventSafely(input: RecordAgentEventInput): Prom
       `[agent-event] 事件寫入失敗（不影響代理主流程）：run=${input.runId} key=${input.eventKey}`,
       error instanceof Error ? error.message : error,
     );
+  }
+  // C1 操演推播：這裡是所有代理事件（step_started/completed/failed/run_completed…）的
+  // 單一漏斗，掛一次就涵蓋全部轉換——代理進度從輪詢變即時，前端看得見 AI 正在動。
+  // 事件寫入失敗也照樣推：推播喚醒的是「重新查詢」，查到的是資料庫的真相，不是這筆事件。
+  try {
+    notifyAgentProgress(input.projectId, { runId: input.runId, stepId: input.stepId, eventKey: input.eventKey });
+  } catch {
+    // 推播失敗不影響代理主流程；輪詢兜底
   }
 }
 

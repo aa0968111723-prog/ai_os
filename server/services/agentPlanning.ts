@@ -69,6 +69,21 @@ export const completePlanDraftSchema = z.object({
       prompt: z.string().max(2_000).optional(),
     }),
     stepBase.extend({
+      kind: z.literal("update_scene"),
+      sceneNo: z.number().int().positive(),
+      sceneTitle: z.string().trim().min(1).max(60).optional(),
+      durationSec: z.number().min(1).max(60).optional(),
+      prompt: z.string().max(2_000).optional(),
+      voiceover: z.string().max(500).optional(),
+      ambience: z.string().max(500).optional(),
+      trimStartMs: z.number().int().min(0).max(3_600_000).optional(),
+      trimEndMs: z.number().int().min(1).max(3_600_000).optional(),
+    }),
+    stepBase.extend({
+      kind: z.literal("reorder_scenes"),
+      orderedSceneNos: z.array(z.number().int().positive()).min(2).max(60),
+    }),
+    stepBase.extend({
       kind: z.literal("generate"),
       prompt: z.string().trim().min(1).max(8_000),
       sceneNo: z.number().int().positive().optional(),
@@ -375,6 +390,21 @@ export function resolveCompletePlanDraft(
         scenePrompt: source.prompt,
         points: 0,
       });
+    } else if (source.kind === "update_scene") {
+      steps.push({
+        ...base,
+        sceneNo: source.sceneNo,
+        sceneTitle: source.sceneTitle,
+        durationSec: source.durationSec,
+        scenePrompt: source.prompt,
+        voiceover: source.voiceover,
+        ambience: source.ambience,
+        trimStartMs: source.trimStartMs,
+        trimEndMs: source.trimEndMs,
+        points: 0,
+      });
+    } else if (source.kind === "reorder_scenes") {
+      steps.push({ ...base, orderedSceneNos: source.orderedSceneNos, points: 0 });
     } else if (source.kind === "generate") {
       const characterIds = resolveAliasIdList(
         source.characterRefs,

@@ -101,10 +101,26 @@ describe("expandSketch", () => {
   });
 
   it("壞色碼換成預設深灰，不整包退件（草圖容錯優先）", () => {
-    // schema 層擋掉壞色碼，但展開器自己也要防（兩層防禦各自可測）
-    const p = plan([{ kind: "line", x1: 0, y1: 0, x2: 100, y2: 100, color: "#aabbcc" }]);
-    const { doc } = expandSketch(p, BOARD);
-    expect(doc.strokes[0]!.brush.color).toBe("#aabbcc");
+    // schema 層會擋掉壞色碼，但展開器是獨立入口（呼叫端可能繞過 schema）——
+    // 第二層防禦要真的餵壞值才算有測到
+    const bad = plan([{ kind: "line", x1: 0, y1: 0, x2: 100, y2: 100, color: "red" as never }]);
+    expect(expandSketch(bad, BOARD).doc.strokes[0]!.brush.color).toBe("#2b2b30");
+    const good = plan([{ kind: "line", x1: 0, y1: 0, x2: 100, y2: 100, color: "#AABBCC" }]);
+    expect(expandSketch(good, BOARD).doc.strokes[0]!.brush.color).toBe("#aabbcc");
+  });
+
+  it("巨大尺寸被 schema 退件；展開器對繞過 schema 的大橢圓也有取樣上限（同步迴圈不可卡死）", () => {
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "ellipse", cx: 500, cy: 500, rx: 999999, ry: 999999 }],
+    }).success).toBe(false);
+    // 直接呼叫展開器（繞過 schema）：取樣數封頂，毫秒級完成而不是百萬點迴圈
+    const started = Date.now();
+    const { doc } = expandSketch(
+      { primitives: [{ kind: "ellipse", cx: 500, cy: 500, rx: 4000, ry: 4000 }] },
+      BOARD,
+    );
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(doc.strokes[0]!.points.length).toBeLessThanOrEqual(2000);
   });
 
   it("直式白板（9:16）：同一份計畫按比例縮放，不變形出界", () => {

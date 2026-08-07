@@ -26,8 +26,10 @@ import { z } from "zod";
 
 /* ── 原語 schema（LLM 的輸出契約） ── */
 
-/** 正規化座標：0–1000。超界不丟棄——clamp 進界內（LLM 溢出一點很常見）。 */
-const coord = z.number().finite();
+/** 正規化座標：0–1000。小幅超界不丟棄——clamp 進界內（LLM 溢出一點很常見）；
+ *  超過 ±4000 就是失控輸出，schema 直接退件——尺寸決定取樣點數，
+ *  無上限的半徑會讓伺服器在同步展開迴圈裡卡死。 */
+const coord = z.number().finite().min(-4000).max(4000);
 
 const penSchema = z.enum(["pencil", "pen", "marker"]);
 /** #rrggbb；壞值不整包退件，由展開器換成預設深灰（草圖容錯優先） */
@@ -58,7 +60,7 @@ export const sketchPrimitiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("stick_figure"),
     cx: coord,
     cy: coord,
-    h: z.number().finite(),
+    h: z.number().finite().min(1).max(4000),
     pose: z.enum(["stand", "walk", "run", "sit", "arms_up", "point"]).optional(),
     ...baseFields,
   }),
@@ -256,7 +258,9 @@ function stickFigureVertices(
 
 /** 橢圓取樣（含微幅起筆／收筆重疊，畫圓不留缺口的手繪慣性） */
 function ellipseVertices(cx: number, cy: number, rx: number, ry: number): Array<{ x: number; y: number }> {
-  const per = Math.max(12, Math.round((Math.PI * (rx + ry)) / 14));
+  // 取樣數雙界：下限 12 畫得圓，上限 720 擋住巨大半徑——展開是同步迴圈，
+  // 這裡失控就是整個 event loop 卡死，不能只靠 schema 層擋
+  const per = Math.min(720, Math.max(12, Math.round((Math.PI * (rx + ry)) / 14)));
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i <= per + 2; i += 1) {
     const t = (i / per) * Math.PI * 2 - Math.PI / 2;
@@ -338,7 +342,11 @@ export function expandSketch(
         break;
       }
       case "ellipse":
-        pushVertexStroke(ellipseVertices(X(prim.cx), Y(prim.cy), Math.abs(X(prim.rx)), Math.abs(Y(prim.ry))), pen, color);
+        // 半徑 clamp 到白板尺度：schema 已擋失控值，這裡把「大一點」收斂成「貼著板邊」
+        pushVertexStroke(
+          ellipseVertices(X(prim.cx), Y(prim.cy), Math.min(Math.abs(X(prim.rx)), w), Math.min(Math.abs(Y(prim.ry)), h)),
+          pen, color,
+        );
         break;
       case "arrow": {
         const x1 = X(prim.x1); const y1 = Y(prim.y1);
@@ -358,7 +366,7 @@ export function expandSketch(
       }
       case "stick_figure": {
         const cx = X(prim.cx); const cy = Y(prim.cy);
-        const fh = Math.abs(Y(prim.h));
+        const fh = Math.min(Math.abs(Y(prim.h)), h * 1.5);
         // 頭
         pushVertexStroke(ellipseVertices(cx, cy, fh * 0.11, fh * 0.11), pen, color);
         for (const limb of stickFigureVertices(cx, cy, fh, prim.pose ?? "stand")) {
