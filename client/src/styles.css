@@ -7117,3 +7117,30 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     overscroll-behavior: contain;
   }
 }
+
+/* 「本次 AI 會讀到什麼」狀態列（創作台模式分頁下方）：
+   四個模式的上下文語意差異，是使用者唯一看得見「這次讀不讀得到我放的東西」的地方。
+   排除項用 gold 而非灰——「不含專案依據」正是最需要被看見的那句。 */
+.ai-context-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0 2px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+}
+.ai-context-line__label { flex: none; font-weight: 600; }
+.ai-context-line__items { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.ai-context-line__chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary-tint);
+  color: var(--primary-ink);
+  border: 1px solid var(--primary-border);
+}
+.ai-context-line__chip.is-excluded {
+  background: var(--gold-soft);
+  color: var(--gold-ink);
+  border-color: var(--gold);
+}
