@@ -20,6 +20,17 @@ export interface CollabPeer {
   color: string;
 }
 
+/** 在場者 ＋「這一格的訊號有多新」。stale＝超過 ANCHOR_FADE_MS 沒更新，畫成半透明。 */
+export interface CollabAnchorPeer extends CollabPeer {
+  stale: boolean;
+}
+
+/** 某人最後一則「有落在錨點上」的 cursor。ts 不吃 CURSOR_TTL_MS，只受 ANCHOR_* 兩段門檻管。 */
+export interface CollabAnchorSighting {
+  anchor: string;
+  ts: number;
+}
+
 export interface CollabCursor {
   x: number;
   y: number;
@@ -36,7 +47,9 @@ export interface CollabCursor {
 
 export const COLLAB_ZONES = {
   worldview: "世界觀",
+  cards: "定裝",
   studio: "生成台",
+  knowledge: "知識庫",
   assets: "素材庫",
   scenes: "分鏡",
   messages: "留言",
@@ -44,15 +57,37 @@ export const COLLAB_ZONES = {
 
 const CURSOR_THROTTLE_MS = 32;
 const CURSOR_TTL_MS = 4000;
+/**
+ * 「誰在改這一格」的兩段淡出。刻意比 CURSOR_TTL_MS（4 秒）寬得多：
+ * 游標圖示消失只是少了一個裝飾，但格級指示消失會讓看到的人以為對方已經走了，
+ * 於是動手改同一格——而對方只是停下來想事情。10 秒沒更新先轉半透明（可能只是離開椅子），
+ * 60 秒才真的移除。人離房則不等 60 秒，presence 名單一少人就立刻消失（見 groupPeersByAnchor）。
+ */
+const ANCHOR_FADE_MS = 10_000;
+const ANCHOR_DROP_MS = 60_000;
 const RETRY_BASE_MS = 2000;
 const RETRY_MAX_MS = 10_000;
 const RETRY_MAX_ATTEMPTS = 30;
 const MIRROR_SCROLL_MIN_MS = 16;
-const MIRROR_LOCK_EPSILON_PX = 2;
-const SCROLL_RESEND_MIN_MS = 48;
+/** 鏡像鎖定的死區半徑。2px 在有 subpixel 佈局的頁面上永遠收斂不了——
+ *  每個封包都量到一點點殘差、修完又跑掉，畫面就一直在抖。 */
+const MIRROR_LOCK_EPSILON_PX = 6;
+/** 超過這個落差就直接追，不等死區的第二次同號確認：
+ *  對方跳到另一個錨點時等一整個封包（>30ms）才動，跟隨會明顯遲鈍。 */
+const MIRROR_LOCK_SNAP_PX = 24;
+/** 發送端節流。真正決定鏡像更新率的是這個數字（接收端的 MIRROR_SCROLL_MIN_MS=16 永遠命不中），
+ *  48ms≈21Hz 在跟隨端看起來就是一格一格跳。 */
+const SCROLL_RESEND_MIN_MS = 32;
 const CURSOR_LERP_MS = 50;
-const MIRROR_PREDICT_LEAD_MS = 40;
+/** 預測前導時間的初值；穩定後改用實測封包間隔的 EMA（見 updatePacketIntervalEma）。
+ *  以前寫死 40ms 而發送端節流 ≥48ms，`k = lead/dt` 恆小於 1 → 預測系統性欠量。 */
+const MIRROR_PREDICT_LEAD_INIT_MS = SCROLL_RESEND_MIN_MS;
+const MIRROR_PREDICT_EMA_ALPHA = 0.2;
 const MIRROR_PREDICT_MAX_K = 1.25;
+
+/** 鏡像期間掛在 <html> 上的 class：關掉 scroll-behavior:smooth 與 .gen-row 的 content-visibility
+ *  （見 styles.css）。兩者都會讓「寫入捲動 → 立刻重量 rect」量到假值。 */
+export const COLLAB_MIRRORING_CLASS = "collab-mirroring";
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 
@@ -157,7 +192,7 @@ export type CursorMotionSample = {
 export function extrapolateCursorPose(
   prev: CursorMotionSample | null | undefined,
   curr: CursorMotionSample,
-  leadMs: number = MIRROR_PREDICT_LEAD_MS,
+  leadMs: number = MIRROR_PREDICT_LEAD_INIT_MS,
 ): { ax: number; ay: number; vy: number; vx: number } {
   if (!prev || !(leadMs > 0) || curr.t <= prev.t) {
     return { ax: curr.ax, ay: curr.ay, vy: curr.vy, vx: curr.vx };
@@ -174,6 +209,18 @@ export function extrapolateCursorPose(
     vy: step(prev.vy, curr.vy),
     vx: step(prev.vx, curr.vx),
   };
+}
+
+/**
+ * 封包間隔的指數移動平均，拿來當預測前導時間。
+ * 前導時間必須貼著「下一個封包多久會到」——`extrapolateCursorPose` 的 k = lead/dt，
+ * lead 若小於實際間隔就永遠補不足這一段空窗，跟隨畫面會恆定落後對方一小截。
+ * 對端網路抖動或分頁被凍結會送出離譜的 dt，這種樣本不能污染平均值，直接忽略
+ * （範圍與 extrapolateCursorPose 判定「這一段不可信」的門檻一致）。
+ */
+export function updatePacketIntervalEma(ema: number, dt: number): number {
+  if (!Number.isFinite(dt) || dt < 12 || dt > 400) return ema;
+  return ema * (1 - MIRROR_PREDICT_EMA_ALPHA) + dt * MIRROR_PREDICT_EMA_ALPHA;
 }
 
 export function cursorViewportPoint(
@@ -215,6 +262,101 @@ export function listScrollParents(from: Element | null): Element[] {
   return out;
 }
 
+/**
+ * 「我們自己剛剛把這個元素捲到哪裡」的帳本。
+ *
+ * 程式化捲動一樣會觸發 window/document 上的 capture scroll handler（見 useCollab），
+ * 那條路的終點是 sendCursorAt → focus，於是「只是在旁邊看的人」會在全房畫面上
+ * 變成「正在編輯」，兩個人互跟還會形成不收斂的牽引迴圈。
+ *
+ * 不能用時間窗旗標擋：sendCursorAt 是所有游標與 focus 的**唯一**出口（含真正的 onPointerMove），
+ * 鏡像期間抑制窗幾乎一直開著，跟隨者會對全房完全隱形。
+ * 改用預期位置比對——只有「捲到我們寫進去的那個值」才跳過，確定性、無時序競態，
+ * 而且只擋捲動這一條路，滑鼠移動與真正的聚焦照送。
+ *
+ * WeakMap：元素卸載後條目自動消失，不需要任何清理路徑。
+ */
+const expectedScrollTop = new WeakMap<Element, number>();
+const expectedScrollLeft = new WeakMap<Element, number>();
+/** 捲動位置在瀏覽器端可能被四捨五入到 device pixel，比對要留 1px。 */
+const PROGRAMMATIC_SCROLL_TOLERANCE_PX = 1;
+
+/**
+ * 以 scrollTo({ behavior:"instant" }) 寫入捲動，並記下預期落點。
+ *
+ * 必須是 "instant" 不能是 "auto"：CSSOM-View 規定 "auto" 的語意就是「照該元素 computed 的
+ * scroll-behavior 走」，在 `html{scroll-behavior:smooth}`（styles.css）之下它與直接寫
+ * `el.scrollTop` 完全同義——捲動變成一段動畫，同一個同步 tick 內的殘差校正就全部量到
+ * 動畫中途值，等於對著移動中的目標開槍（這就是「有人覺得很準、有人覺得在飄」的來源）。
+ * `html.collab-mirroring{scroll-behavior:auto}` 那條 CSS 是同一件事的第二道保險（給不認得
+ * "instant" 的舊瀏覽器），兩層都要留著——只靠其中一層，另一層被誰刪掉就會靜默退回平滑動畫。
+ *
+ * 呼叫端必須先確認「真的會位移」：記一筆「預期落點＝現在位置」的帳永遠等不到對應的
+ * scroll 事件來消耗，會留到使用者下一次真實捲動時被誤判（見 consumeProgrammaticScroll）。
+ * jsdom 沒有實作 Element.prototype.scrollTo，退回直接指派。
+ */
+function scrollElementTo(el: HTMLElement, axis: "top" | "left", next: number): void {
+  if (axis === "top") expectedScrollTop.set(el, next);
+  else expectedScrollLeft.set(el, next);
+  if (typeof el.scrollTo === "function") {
+    el.scrollTo(axis === "top" ? { top: next, behavior: "instant" } : { left: next, behavior: "instant" });
+    return;
+  }
+  if (axis === "top") el.scrollTop = next;
+  else el.scrollLeft = next;
+}
+
+/**
+ * 判斷這次 scroll 事件是不是我們自己捲的。
+ * 不論比對成不成功都把記錄消掉：一筆記錄只負責它對應的那一次事件，
+ * 留著它反而可能在稍後某次使用者的手動捲動剛好落在同一位置時誤擋。
+ *
+ * 記了幾軸就要幾軸都吻合，不能「任一軸命中就算」：同一個元素上若同時留著兩軸的帳，
+ * 只有一軸對得上代表這次位移不是我們寫的那一筆，把它當成程式化捲動就等於吞掉
+ * 使用者真正的操作——跟隨者對全房完全隱形，正好是這條防線最不該造成的副作用。
+ */
+export function consumeProgrammaticScroll(el: Element | null | undefined): boolean {
+  if (!el) return false;
+  let recorded = 0;
+  let matched = 0;
+  const top = expectedScrollTop.get(el);
+  if (top !== undefined) {
+    expectedScrollTop.delete(el);
+    recorded += 1;
+    if (Math.abs(el.scrollTop - top) <= PROGRAMMATIC_SCROLL_TOLERANCE_PX) matched += 1;
+  }
+  const left = expectedScrollLeft.get(el);
+  if (left !== undefined) {
+    expectedScrollLeft.delete(el);
+    recorded += 1;
+    if (Math.abs(el.scrollLeft - left) <= PROGRAMMATIC_SCROLL_TOLERANCE_PX) matched += 1;
+  }
+  return recorded > 0 && recorded === matched;
+}
+
+/**
+ * 同一個 scroll 事件會被判斷兩次：useCollab 在 window 與 document 上各掛了一個 capture handler，
+ * 而 scroll 事件雖然不冒泡，捕獲階段兩個都會收到同一個 Event 物件。
+ * 帳本是「用完即銷」的，第二次查一定落空——不記住判斷結果的話，擋掉的那一次會從另一個
+ * handler 原封不動送出去，這條防線等於沒有。
+ */
+const judgedProgrammaticEvents = new WeakSet<Event>();
+
+/** 視窗捲動的事件 target 是 document 而不是元素，要換算回 scrollingElement 才查得到帳本。 */
+export function shouldSkipCollabScrollBroadcast(ev: Event): boolean {
+  if (judgedProgrammaticEvents.has(ev)) return true;
+  const target = ev.target;
+  const el =
+    target instanceof Element
+      ? target
+      : target instanceof Document
+        ? target.scrollingElement
+        : document.scrollingElement;
+  if (!consumeProgrammaticScroll(el)) return false;
+  judgedProgrammaticEvents.add(ev);
+  return true;
+}
+
 export function applyScrollDeltaY(fromEl: Element | null, deltaY: number): number {
   if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
   let remaining = deltaY;
@@ -228,13 +370,23 @@ export function applyScrollDeltaY(fromEl: Element | null, deltaY: number): numbe
     const next = Math.min(max, Math.max(0, before + remaining));
     const moved = next - before;
     if (moved !== 0) {
-      el.scrollTop = next;
+      scrollElementTo(el, "top", next);
       remaining -= moved;
       applied += moved;
     }
   }
   if (Math.abs(remaining) >= 0.5) {
-    window.scrollBy({ top: remaining, left: 0, behavior: "auto" });
+    // 實務上走不到：listScrollParents 一律把 scrollingElement 加進清單、它幾乎一定吃得下 delta。
+    // 留著當退路，但一樣要記帳，否則這條路捲出來的事件會被當成使用者操作廣播出去。
+    const root = document.scrollingElement;
+    if (root) {
+      const max = Math.max(0, root.scrollHeight - root.clientHeight);
+      const next = Math.min(max, Math.max(0, root.scrollTop + remaining));
+      // 捲不動就不要記帳（已經頂在底部／頂部時 next 就等於現值）：那一筆帳等不到 scroll 事件來
+      // 消耗，會留到使用者下一次真實捲動被當成程式化捲動而不廣播，房裡其他人看到他的游標卡一拍。
+      if (next !== root.scrollTop) expectedScrollTop.set(root, next);
+    }
+    window.scrollBy({ top: remaining, left: 0, behavior: "instant" });
     applied += remaining;
     remaining = 0;
   }
@@ -275,9 +427,41 @@ export function ensureAnchorExpanded(el: Element | null): boolean {
   return changed;
 }
 
+/** 鏡像鎖定的跨封包記憶：只放死區需要的「上一次殘差方向」。 */
+export interface MirrorLockState {
+  /** 上一次量到的殘差方向：+1 / -1 / 0（0＝在死區內）。 */
+  lastSign: number;
+}
+
+export const createMirrorLockState = (): MirrorLockState => ({ lastSign: 0 });
+
+/**
+ * 死區判定：這一次的殘差該不該真的動手修。
+ * 不帶 state（例如單元測試逐次呼叫）時退化成單純的 epsilon 門檻。
+ */
+function shouldCorrect(delta: number, state: MirrorLockState | undefined): boolean {
+  const abs = Math.abs(delta);
+  if (abs < MIRROR_LOCK_EPSILON_PX) {
+    if (state) state.lastSign = 0;
+    return false;
+  }
+  const sign = delta > 0 ? 1 : -1;
+  if (!state) return true;
+  if (abs >= MIRROR_LOCK_SNAP_PX) {
+    state.lastSign = sign;
+    return true;
+  }
+  // 小幅殘差在 subpixel 佈局上會每個封包正負來回；追它只是把抖動忠實重現在跟隨端。
+  // 要求連續兩次同號：抖動自然被濾掉，真正的緩慢漂移則會在下一個封包補上。
+  const ok = state.lastSign === sign;
+  state.lastSign = sign;
+  return ok;
+}
+
 export function applyMirrorViewportLock(
   c: Pick<CollabCursor, "x" | "y" | "anchor" | "ax" | "ay" | "vy" | "ci"> & { vx?: number },
   container: Element | null | undefined,
+  state?: MirrorLockState,
 ): boolean {
   const el = findCollabAnchorElement(c.anchor ?? null);
   const expanded = ensureAnchorExpanded(el);
@@ -291,12 +475,19 @@ export function applyMirrorViewportLock(
   const targetVy = Math.min(0.95, Math.max(0.05, rawVy));
   const targetClientY = targetVy * vh;
 
-  let deltaY = point.y - targetClientY;
+  const deltaY = point.y - targetClientY;
   let movedAny = false;
+  // 垂直有沒有動過要與水平分開記。下面的殘差回合只修垂直，若它被「水平捲了一下」點亮，
+  // 上面因為死區刻意不修的垂直殘差就會在殘差回合被純 epsilon 修掉——只要對方的游標停在
+  // 任何一個橫向可捲的容器裡，死區等於沒加，subpixel 抖動照樣忠實重現在跟隨端。
+  let movedVertical = false;
 
-  if (Math.abs(deltaY) >= MIRROR_LOCK_EPSILON_PX) {
+  if (shouldCorrect(deltaY, state)) {
     const applied = applyScrollDeltaY(el, deltaY);
-    if (Math.abs(applied) >= 0.5) movedAny = true;
+    if (Math.abs(applied) >= 0.5) {
+      movedAny = true;
+      movedVertical = true;
+    }
   }
 
   if (typeof c.vx === "number" && Number.isFinite(c.vx) && vw > 0 && el) {
@@ -315,38 +506,54 @@ export function applyMirrorViewportLock(
               const before = node.scrollLeft;
               const max = node.scrollWidth - node.clientWidth;
               const next = Math.min(max, Math.max(0, before + rem));
-              node.scrollLeft = next;
-              rem -= next - before;
-              if (next !== before) movedAny = true;
+              // 捲得動才寫（與 applyScrollDeltaY 的 `if (moved !== 0)` 同一條規則）：
+              // 已經頂在兩端時 scrollElementTo 會留下一筆等不到 scroll 事件的死帳。
+              if (next !== before) {
+                scrollElementTo(node, "left", next);
+                rem -= next - before;
+                movedAny = true;
+              }
             }
           }
           node = node.parentElement;
         }
         if (Math.abs(rem) >= 0.5) {
-          window.scrollBy({ left: rem, top: 0, behavior: "auto" });
-          movedAny = true;
+          const root = document.scrollingElement;
+          // 本站 html 是 overflow-x:clip（styles.css:216），根元素橫向根本捲不動，這條退路
+          // 幾乎每個封包都會走到卻什麼都沒捲。無條件記帳等於每個封包在 <html> 上留一筆死帳，
+          // 之後（包含退出鏡像後）使用者的第一次捲動就被誤判成程式化捲動而不廣播。
+          if (root) {
+            const max = Math.max(0, root.scrollWidth - root.clientWidth);
+            const next = Math.min(max, Math.max(0, root.scrollLeft + rem));
+            if (next !== root.scrollLeft) {
+              expectedScrollLeft.set(root, next);
+              movedAny = true;
+            }
+          }
+          window.scrollBy({ left: rem, top: 0, behavior: "instant" });
         }
       }
     }
   }
 
-  const point2 = cursorViewportPoint(c, container);
-  if (point2) {
-    const residual = point2.y - targetClientY;
-    if (Math.abs(residual) >= MIRROR_LOCK_EPSILON_PX) {
-      const applied = applyScrollDeltaY(el, residual);
-      if (Math.abs(applied) >= 0.5) movedAny = true;
-    }
-  }
-  if (expanded) {
-    const point3 = cursorViewportPoint(c, container);
-    if (point3) {
-      const residual = point3.y - targetClientY;
-      if (Math.abs(residual) >= MIRROR_LOCK_EPSILON_PX) {
-        const applied = applyScrollDeltaY(el, residual);
-        if (Math.abs(applied) >= 0.5) movedAny = true;
-      }
-    }
+  // 殘差校正：捲動已改成 scrollTo({behavior:"instant"})、且鏡像期間 html.collab-mirroring
+  // 也把 scroll-behavior:smooth 關掉了，這裡重量 rect 才量得到「捲完之後」的真值。
+  //
+  // 只有**垂直**真的捲過（或展開過 details 而改變了版面）才重量：
+  // 若上面因為死區刻意不修，這裡再修一次等於把死區整個繞過去，抖動照舊。
+  // （展開 details 是例外——版面整個跳掉，死區當時是拿過期的量測做的判斷，重量才對。）
+  const residualPasses = expanded ? 2 : movedVertical ? 1 : 0;
+  for (let i = 0; i < residualPasses; i += 1) {
+    const p = cursorViewportPoint(c, container);
+    if (!p) break;
+    const residual = p.y - targetClientY;
+    if (Math.abs(residual) < MIRROR_LOCK_EPSILON_PX) break;
+    const applied = applyScrollDeltaY(el, residual);
+    if (Math.abs(applied) < 0.5) break;
+    movedAny = true;
+    // 殘差回合也是一次「往這個方向修」：不記下來的話，下一個封包的同號判定會拿修正前的
+    // 舊方向去比，死區的兩次確認就建立在過期資訊上。
+    if (state) state.lastSign = residual > 0 ? 1 : -1;
   }
   return movedAny;
 }
@@ -363,6 +570,8 @@ export function useCollab(
   cursors: Map<string, CollabCursor>;
   cursorsLiveRef: RefObject<Map<string, CollabCursor>>;
   focusZones: Record<string, CollabPeer[]>;
+  /** 錨點（`#scene-<id>` 等）→ 最後停在那裡的人。給「誰在改這一格」用，純 client 端聚合。 */
+  anchorPeers: Map<string, CollabAnchorPeer[]>;
   self: CollabPeer | null;
   sendFocus: (zone: string | null) => void;
   containerRef: RefObject<HTMLDivElement | null>;
@@ -377,6 +586,20 @@ export function useCollab(
   const [cursors, setCursors] = useState<Map<string, CollabCursor>>(() => new Map());
   const cursorsLiveRef = useRef<Map<string, CollabCursor>>(new Map());
   const [zoneByUser, setZoneByUser] = useState<Record<string, string>>({});
+  /**
+   * 每人最後一則帶錨點的 cursor。放 ref 不放 state：cursor 封包最高約 30Hz，
+   * 每一則都 setState 會讓整份分鏡列跟著封包率重繪。真正需要重畫的時機由 anchorEpoch 決定。
+   */
+  const anchorSeenRef = useRef<Map<string, CollabAnchorSighting>>(new Map());
+  const anchorSigRef = useRef("");
+  const [anchorEpoch, setAnchorEpoch] = useState(0);
+  /** 只有「分組結果會變」才重畫：換格、轉半透明、逾時消失都算，在同一格裡動滑鼠不算。 */
+  const syncAnchorEpoch = useCallback(() => {
+    const sig = anchorSignature(anchorSeenRef.current, Date.now());
+    if (sig === anchorSigRef.current) return;
+    anchorSigRef.current = sig;
+    setAnchorEpoch((n) => n + 1);
+  }, []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -439,6 +662,12 @@ export function useCollab(
           live.set(msg.userId, entry);
           cursorsLiveRef.current = live;
           setCursors(live);
+          // 「誰在改這一格」走的是這條、不是上面的 cursors：cursors 4 秒就過期，
+          // 而人停手想事情本來就會超過 4 秒。anchor 為空＝他的游標已經不在任何可辨識的
+          // 元素上，這時要收掉指示——留著一個過時的格子比沒有指示更會誤導人。
+          if (entry.anchor) anchorSeenRef.current.set(msg.userId, { anchor: entry.anchor, ts: entry.ts });
+          else anchorSeenRef.current.delete(msg.userId);
+          syncAnchorEpoch();
         } else if (msg.type === "focus") {
           setZoneByUser((prev) => {
             const next = { ...prev };
@@ -461,6 +690,8 @@ export function useCollab(
         setZoneByUser({});
         cursorsLiveRef.current = new Map();
         setCursors(new Map());
+        anchorSeenRef.current = new Map();
+        syncAnchorEpoch();
         if (ev.code === 4403) return;
         retryCount += 1;
         if (retryCount >= RETRY_MAX_ATTEMPTS) {
@@ -480,7 +711,7 @@ export function useCollab(
       wsRef.current = null;
       ws?.close();
     };
-  }, [id, enabled, kind]);
+  }, [id, enabled, kind, syncAnchorEpoch]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -500,6 +731,19 @@ export function useCollab(
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // 格級指示的兩段淡出得自己走時鐘：最後一則 cursor 之後可能再也沒有封包進來，
+  // 少了這個掃描，「10 秒轉半透明、60 秒移除」就永遠不會發生（指示會一直亮著）。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      for (const [userId, sighting] of anchorSeenRef.current) {
+        if (anchorSightingState(now - sighting.ts) === "gone") anchorSeenRef.current.delete(userId);
+      }
+      syncAnchorEpoch();
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [syncAnchorEpoch]);
 
   useEffect(() => {
     return queryClient.getMutationCache().subscribe((event) => {
@@ -602,7 +846,10 @@ export function useCollab(
 
   useEffect(() => {
     if (!enabled) return;
-    const onScroll = () => {
+    const onScroll = (ev: Event) => {
+      // 鏡像跟隨自己捲出來的事件不能再廣播出去（見 consumeProgrammaticScroll）：
+      // 否則被動看的人會在全房畫面上出現「正在編輯」指示框，兩人互跟更會互相牽引到不收斂。
+      if (shouldSkipCollabScrollBroadcast(ev)) return;
       const now = Date.now();
       if (now - lastScrollSendRef.current < SCROLL_RESEND_MIN_MS) return;
       const ws = wsRef.current;
@@ -689,7 +936,14 @@ export function useCollab(
     return out;
   }, [zoneByUser, peers]);
 
-  return { peers, cursors, cursorsLiveRef, focusZones, self, sendFocus, containerRef, onPointerMove, connected };
+  // anchorSeenRef 是 ref，改動不會觸發重算——anchorEpoch 就是它的「內容變了」訊號，
+  // 故意列進依賴（拿掉它畫面會停在第一次算出來的分組上）。
+  const anchorPeers = useMemo(
+    () => groupPeersByAnchor(anchorSeenRef.current, peers, Date.now()),
+    [peers, anchorEpoch],
+  );
+
+  return { peers, cursors, cursorsLiveRef, focusZones, anchorPeers, self, sendFocus, containerRef, onPointerMove, connected };
 }
 
 export type CollabViewMode = "live" | "mirror";
@@ -706,6 +960,48 @@ export function followablePeers(peers: CollabPeer[], selfId: string | null | und
   return peers.filter((p) => p.userId !== selfId);
 }
 
+export function anchorSightingState(ageMs: number): "live" | "stale" | "gone" {
+  if (ageMs > ANCHOR_DROP_MS) return "gone";
+  return ageMs > ANCHOR_FADE_MS ? "stale" : "live";
+}
+
+/**
+ * 把「每人最後一則 cursor 的錨點」依錨點分組——「誰在改這一格」的資料來源。
+ *
+ * 與 peers 做 join 而不是自己記誰離線：離房唯一的真相是 presence 名單，
+ * 兩邊各記一份，遲早會出現「人早就走了、格子上還掛著他的名字」。
+ */
+export function groupPeersByAnchor(
+  seen: Map<string, CollabAnchorSighting>,
+  peers: CollabPeer[],
+  now: number,
+): Map<string, CollabAnchorPeer[]> {
+  const out = new Map<string, CollabAnchorPeer[]>();
+  for (const [userId, sighting] of seen) {
+    const state = anchorSightingState(now - sighting.ts);
+    if (state === "gone") continue;
+    const peer = peers.find((p) => p.userId === userId);
+    if (!peer) continue;
+    const entry: CollabAnchorPeer = { ...peer, stale: state === "stale" };
+    const list = out.get(sighting.anchor);
+    if (list) list.push(entry);
+    else out.set(sighting.anchor, [entry]);
+  }
+  return out;
+}
+
+/**
+ * 分組結果的指紋：只有它變了才值得重畫。
+ * cursor 封包最高約 30Hz，若每一則都 setState，整份分鏡列會跟著封包率重繪——
+ * 而使用者在同一格裡移動滑鼠時，畫面上該顯示的東西一個字都沒變。
+ */
+export function anchorSignature(seen: Map<string, CollabAnchorSighting>, now: number): string {
+  return [...seen.entries()]
+    .map(([userId, s]) => `${userId}|${s.anchor}|${anchorSightingState(now - s.ts)}`)
+    .sort()
+    .join(",");
+}
+
 export function useCollabMirrorFollow(
   mode: CollabViewMode,
   followUserId: string | null,
@@ -718,12 +1014,28 @@ export function useCollabMirrorFollow(
   const containerRefStable = containerRef;
   const lastZoneRef = useRef<string | null>(null);
   const prevSampleRef = useRef<CursorMotionSample | null>(null);
+  const lockStateRef = useRef<MirrorLockState>(createMirrorLockState());
+  const leadEmaRef = useRef(MIRROR_PREDICT_LEAD_INIT_MS);
   const mapCursors = (src: typeof cursors): Map<string, CollabCursor> => {
     if (src && typeof src === "object" && "current" in src) {
       return src.current ?? new Map();
     }
     return src as Map<string, CollabCursor>;
   };
+
+  // 鏡像期間才關掉平滑捲動與 .gen-row 的 content-visibility（見 styles.css 的 html.collab-mirroring）。
+  // 這個 class 殘留的代價很高——會**永久**停用全站的平滑捲動與離屏繪製最佳化，
+  // 所以卸除交給 useEffect 的 cleanup：切換模式、跟隨對象離線／離房（followUserId 變 null）、
+  // 元件卸載全都會走到它。
+  // 「跟隨對象不在 peers 裡就把 followUserId 歸零」這條規則必須跟這支 hook 掛在同一層（ProjectPage），
+  // 不能只放在 CollabModeBar：那顆 bar 在手機收合在場面板時會整個卸載，對象離線時沒人歸零，
+  // class 就留在 <html> 上到離開頁面為止，而且使用者連取消鏡像的入口都被收起來了。
+  useEffect(() => {
+    if (mode !== "mirror" || !followUserId) return;
+    const root = document.documentElement;
+    root.classList.add(COLLAB_MIRRORING_CLASS);
+    return () => root.classList.remove(COLLAB_MIRRORING_CLASS);
+  }, [mode, followUserId]);
 
   useEffect(() => {
     if (mode !== "mirror" || !followUserId) {
@@ -742,10 +1054,19 @@ export function useCollabMirrorFollow(
     } catch {
       el = null;
     }
-    if (el) {
-      ensureAnchorExpanded(el);
-      el.scrollIntoView({ behavior: "auto", block: "nearest" });
-    }
+    if (!el) return;
+    ensureAnchorExpanded(el);
+    const r = el.getBoundingClientRect();
+    // 隱藏中的 zone（定裝／知識庫都包在 display:none 的定調子分頁裡）rect 全 0，
+    // 照它算捲動量會把跟隨端捲到莫名其妙的位置。
+    if (r.width <= 0 && r.height <= 0) return;
+    // 不用 el.scrollIntoView()：那是這支 hook 裡唯一不會記進「預期位置」帳本的程式化捲動，
+    // 它捲出來的 scroll 事件會被 useCollab 當成使用者操作廣播出去——只是在旁邊看的人
+    // 於是在全房畫面上變成「正在這裡」，兩人互跟還會開始互相牽引。走 applyScrollDeltaY 才有記帳。
+    const vh = window.innerHeight || 1;
+    // block:"nearest" 的語意是「已經看得到就不動」，這裡照樣保留
+    if (r.bottom > 0 && r.top < vh) return;
+    applyScrollDeltaY(el, r.top + r.height / 2 - vh * 0.42);
   }, [mode, followUserId, focusZones, cursors]);
 
   useEffect(() => {
@@ -754,6 +1075,9 @@ export function useCollabMirrorFollow(
     let lastCursorTs = 0;
     let lastScrollAt = 0;
     prevSampleRef.current = null;
+    // 換人跟／重新進入鏡像＝換一組節奏與版面，上一位留下的間隔與殘差方向都不能沿用。
+    lockStateRef.current = createMirrorLockState();
+    leadEmaRef.current = MIRROR_PREDICT_LEAD_INIT_MS;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const cur = mapCursors(cursors).get(followUserId);
@@ -769,7 +1093,11 @@ export function useCollabMirrorFollow(
         vy: typeof cur.vy === "number" ? cur.vy : 0.42,
         vx: typeof cur.vx === "number" ? cur.vx : 0.5,
       };
-      const pred = extrapolateCursorPose(prevSampleRef.current, sample, MIRROR_PREDICT_LEAD_MS);
+      // 前導時間取實測封包間隔：發送端節流、對端網路狀況都會讓真實間隔跟常數對不上，
+      // 而預測要補的正是「下一個封包到達前的這段空窗」。先吃進這一筆再用，才是最新的估計。
+      const prevSample = prevSampleRef.current;
+      if (prevSample) leadEmaRef.current = updatePacketIntervalEma(leadEmaRef.current, sample.t - prevSample.t);
+      const pred = extrapolateCursorPose(prevSample, sample, leadEmaRef.current);
       prevSampleRef.current = sample;
       const predicted: CollabCursor = {
         ...cur,
@@ -779,7 +1107,7 @@ export function useCollabMirrorFollow(
         vx: pred.vx,
       };
 
-      const ok = applyMirrorViewportLock(predicted, containerRefStable?.current ?? null);
+      const ok = applyMirrorViewportLock(predicted, containerRefStable?.current ?? null, lockStateRef.current);
       if (ok) {
         lastCursorTs = cur.ts;
         lastScrollAt = now;
@@ -798,6 +1126,9 @@ export function useCollabMirrorFollow(
         if (!el) return;
         ensureAnchorExpanded(el);
         const r = el.getBoundingClientRect();
+        // 隱藏中的 zone rect 全 0（定調的子分頁用 display:none 切換），據此算出來的
+        // delta 是 -0.42*vh，會把跟隨端往上捲一段莫名其妙的距離。
+        if (r.width <= 0 && r.height <= 0) return;
         const mid = r.top + r.height / 2;
         const vh = window.innerHeight || 1;
         const delta = mid - vh * 0.42;
@@ -1049,27 +1380,47 @@ export function CollabZone({
           : {}),
       }}
     >
-      {first && (
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            top: 4,
-            right: 8,
-            zIndex: 30,
-            pointerEvents: "none",
-            background: first.color,
-            color: "#fff",
-            textShadow: "0 1px 2px var(--scrim)",
-            fontSize: "var(--fs-11)",
-            padding: "1px 8px",
-            borderRadius: 999,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {first.name} 正在這裡{watchers.length > 1 ? ` +${watchers.length - 1}` : ""}
-        </span>
-      )}
+      {/* sticky 而非 absolute：分鏡 zone 從 SceneList 一路包到交付中心，標籤釘在 zone 最上緣時
+          捲到第 7 格就已經出視窗，畫面上只剩兩側 2px 內陰影——等於沒有訊號。
+          三個刻意的細節：
+          1. 高度 0 ＋ alignItems:flex-start——標籤浮在內容上、不佔版面高度
+             （0 高的 flex 容器用預設 stretch 會把標籤壓成 0 高看不見）。
+          2. 沒人在這裡時也照樣渲染這個空容器：它是 in-flow 的第一個子元素，會擋掉
+             首個子元素 margin 的向上合併；只在有人時才插進來的話，別人進出這個區塊
+             整塊內容就會上下跳一下。
+          3. top 用與站內其他 sticky 元素同一個 --topbar-sticky-offset，否則會滑到常駐頂欄底下。 */}
+      <div
+        aria-hidden
+        style={{
+          position: "sticky",
+          top: "calc(var(--topbar-sticky-offset) + var(--sp-8))",
+          zIndex: 30,
+          height: 0,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "flex-end",
+          pointerEvents: "none",
+        }}
+      >
+        {first && (
+          <span
+            style={{
+              position: "relative",
+              top: 4,
+              right: 8,
+              background: first.color,
+              color: "#fff",
+              textShadow: "0 1px 2px var(--scrim)",
+              fontSize: "var(--fs-11)",
+              padding: "1px 8px",
+              borderRadius: 999,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {first.name} 正在這裡{watchers.length > 1 ? ` +${watchers.length - 1}` : ""}
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );

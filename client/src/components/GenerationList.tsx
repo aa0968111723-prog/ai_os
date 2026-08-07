@@ -666,12 +666,20 @@ export function GenerationList({
                 </button>
               )
             )}
-            {/* 綁定分鏡的成品可一鍵回填為該格現用畫面（音訊＝旁白）——重生多次後挑最好的一版用 */}
+            {/* 綁定分鏡的成品可一鍵回填為該格現用（重生多次後挑最好的一版用）。
+                音訊有旁白／環境音兩軌，伺服器依這筆生成的 sceneRole 決定寫進哪一軌，
+                問句要跟著講對——一律說「旁白」會讓人在確認環境音時以為自己按錯了 */}
             {canEdit && g.status === "done" && g.sceneId && (
               <ConfirmButton
                 triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
                 disabled={setVisual.isPending}
-                message={g.kind === "audio" ? "把這筆音訊設為該分鏡的旁白？" : "把這筆成品設為該分鏡的現用畫面？"}
+                message={
+                  g.sceneRole === "ambience"
+                    ? "把這筆音訊設為該分鏡的環境音？"
+                    : g.kind === "audio"
+                      ? "把這筆音訊設為該分鏡的旁白？"
+                      : "把這筆成品設為該分鏡的現用畫面？"
+                }
                 confirmLabel="設定"
                 onConfirm={() => setVisual.mutate({ sceneId: g.sceneId!, generationId: g.id })}
               >

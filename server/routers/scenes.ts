@@ -8,6 +8,7 @@ import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import {
+  MAX_SCRIPT_SCENES,
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
   SCRIPT_AMBIENCE_MAX,
@@ -468,8 +469,18 @@ export const scenesRouter = router({
         .orderBy(desc(schema.assets.createdAt))
         .limit(1);
       if (!asset) throw new TRPCError({ code: "BAD_REQUEST", message: "此生成沒有可用素材（文字輸出、或素材已在回收桶）" });
-      // 音訊成品＝旁白；圖/影＝主畫面（與 advanceGeneration 回填的角色判斷一致）
-      const patch = asset.kind === "audio" ? { narrationAssetId: asset.id } : { assetId: asset.id };
+      // 落點看生成當時記下的 sceneRole，不是素材的 kind——與 advanceGeneration 的回填同一條規則
+      // （generationCore.ts 的角色感知回填）。只看 kind==='audio' 會把環境音寫進 narrationAssetId：
+      // 環境音那一軌沒動、旁白指標反而被音效蓋掉，交付包的「02_旁白音檔」裝進環境音，全程沒有錯誤。
+      const patch =
+        gen.sceneRole === "narration"
+          ? { narrationAssetId: asset.id }
+          : gen.sceneRole === "ambience"
+            ? { ambienceAssetId: asset.id }
+            : asset.kind === "audio"
+              // 舊資料沒有 sceneRole（那時只有旁白一條音訊路徑），維持原本的落點
+              ? { narrationAssetId: asset.id }
+              : { assetId: asset.id };
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
       return updated;
     }),
@@ -482,7 +493,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒辦法調整順序" });
       await getProjectChecked(ctx, scene.projectId, true);
       // 交易＋序號鎖：兩個併發 move（雙擊↑↓／兩人同時排）各自「讀清單→互換」會用過期的
       // orderIndex 交換出重複值；上鎖後讀與寫成對序列化,兩筆 update 也不再有半套(只換到一邊)
@@ -520,7 +531,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "要插在哪一格後面的那一格剛被夥伴刪除了（可到回收桶還原）" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project);
       return db.transaction(async (tx) => {
@@ -570,7 +581,7 @@ export const scenesRouter = router({
       .select()
       .from(schema.scenes)
       .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-    if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格已經不在分鏡列上了——夥伴剛刪過（可到回收桶還原）" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能刪分鏡
     await db.update(schema.scenes).set({ deletedAt: new Date() }).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
@@ -579,7 +590,7 @@ export const scenesRouter = router({
   /** 還原分鏡（回收桶 → 分鏡列）：清掉 deletedAt，接回原本引用的素材 */
   restore: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
-    if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "回收桶裡找不到這一格了（可能已被夥伴永久刪除）" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能還原分鏡
     // 修 R3-BINV-01：還原時把 orderIndex 重排到尾端，別沿用被刪當下的舊序號——否則與現有分鏡撞出
     // 重複 orderIndex，破壞排序唯一性（move/reorder 交換失準）。交易＋lockSceneOrder 序列化同專案建格。
@@ -597,7 +608,7 @@ export const scenesRouter = router({
   /** 永久刪除分鏡（回收桶內「永久刪除」）：真的 db.delete，不可復原 */
   purge: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
-    if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "回收桶裡找不到這一格了（夥伴可能已經永久刪除或還原它）" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能永久刪除分鏡（不可回復）
     await db.delete(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
@@ -622,7 +633,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），你剛才的修改沒有存進去" });
       await getProjectChecked(ctx, scene.projectId, true);
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
       if (input.title !== undefined) patch.title = input.title;
@@ -648,6 +659,15 @@ export const scenesRouter = router({
       projectId: z.string().uuid(),
       // 12 鏡 × 每鏡提示詞上限仍有餘裕；再長多半是整份文件貼錯地方
       text: z.string().max(60_000),
+      /**
+       * 使用者算差異時看到的那份分鏡（依 orderIndex 排序的 id）。
+       *
+       * 寫回是拿「鏡次／位置」對格的，而畫面上那份清單最舊可能是 10 秒前的（listByProject 的
+       * refetchInterval）。夥伴在這段空窗刪掉第 2 鏡，第 3 鏡的文字就會整批落到原本的第 4 鏡上——
+       * 被覆蓋的畫面／旁白沒有回收桶可還原，而確認框還指名道姓說要蓋第 3 鏡。
+       * 對不上就整批拒絕，讓人重開一次全文；沒帶（舊前端、MCP）則維持原行為不做檢查。
+       */
+      expectedSceneIds: z.array(z.string().uuid()).max(MAX_SCRIPT_SCENES).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const project = await getProjectChecked(ctx, input.projectId, true);
@@ -669,6 +689,17 @@ export const scenesRouter = router({
           .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
           .orderBy(asc(schema.scenes.orderIndex));
 
+        // 指紋比對放在鎖之後：鎖外讀到的清單一樣可能在鎖等待期間被改掉。
+        // 「鏡次→位置」的對應只在分鏡列沒動過時才成立，一動就整批拒絕，不做局部猜測——
+        // 猜錯的代價是把別人的畫面／旁白蓋掉，而且沒有回收桶。
+        const expected = input.expectedSceneIds;
+        if (expected && (expected.length !== rows.length || expected.some((id, i) => id !== rows[i].id))) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "分鏡在你編輯期間被夥伴改過（新增、刪除或重新排序），這次沒有寫回。請取消編輯、重新打開全文再改一次",
+          });
+        }
+
         let updated = 0;
         let created = 0;
         let order = rows.length ? Math.max(...rows.map((r) => r.orderIndex)) : 0;
@@ -681,7 +712,9 @@ export const scenesRouter = router({
             await tx.insert(schema.scenes).values({
               projectId: project.id,
               orderIndex: ++order,
-              title: scene.title.slice(0, SCRIPT_TITLE_MAX),
+              // 標題留空在既有鏡是「維持原值」，但新增的鏡沒有原值可維持——
+              // 就地補一個看得懂的佔位，否則分鏡列會多出一格無名空白。
+              title: (scene.title || `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
               durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
               status: "todo",
               prompt: scene.prompt ?? null,
@@ -727,16 +760,24 @@ export const scenesRouter = router({
   setCards: authedProcedure
     .input(z.object({
       sceneId: z.string().uuid(),
-      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS),
-      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS),
-      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS),
+      /**
+       * 三排各自 optional，undefined＝這一排不動（與 scenes.update 同口徑）。
+       *
+       * 一定要能「只送動到的那一排」：面板是每勾一下就存，若照舊要求整組送出，
+       * 呼叫端只能拿自己手上的 scene 快照補齊另外兩排——而那份快照最舊是 10 秒前的
+       * （listByProject 的 refetchInterval）。夥伴剛在同一格綁上的場景卡就會被這次
+       * 整組覆寫靜默清掉，兩邊都沒有提示，之後逐鏡出圖少注入那張場景錨點，畫風分岔而沒人知道為什麼。
+       */
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），卡片綁定沒有存進去" });
       await getProjectChecked(ctx, scene.projectId, true);
       // fail-closed：卡片必須屬於本專案，否則不寫入外鍵 UUID（與 generation 同一關）
       await assertGenerationEntityIds(scene.projectId, {
@@ -744,9 +785,20 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      // 只覆寫真的送上來的那幾排（空陣列→null 的正規化仍由 sceneCardColumns 統一做）
+      const columns = sceneCardColumns({
+        characterIds: input.characterIds ?? [],
+        scenePresetIds: input.scenePresetIds ?? [],
+        propIds: input.propIds ?? [],
+      });
+      const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+      if (input.characterIds !== undefined) patch.characterIds = columns.characterIds;
+      if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
+      if (input.propIds !== undefined) patch.propIds = columns.propIds;
+      if (Object.keys(patch).length === 0) return scene; // 三排都沒送＝沒事可做
       const [updated] = await db
         .update(schema.scenes)
-        .set(sceneCardColumns(input))
+        .set(patch)
         .where(eq(schema.scenes.id, input.sceneId))
         .returning();
       return updated;
@@ -774,7 +826,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒有送出生成，也沒有扣點" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
       // kind 守衛（與 generateVoiceover 對稱）：就地生成回填主畫面 assetId，只接受圖像/影片模型。
@@ -895,7 +947,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒有送出配音生成，也沒有扣點" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
       const prompt = scene.voiceover ?? "";
@@ -915,10 +967,13 @@ export const scenesRouter = router({
         .where(and(
           eq(schema.generations.sceneId, scene.id),
           eq(schema.generations.sceneRole, "narration"),
-          inArray(schema.generations.status, ["queued", "running"]),
+          // awaiting_approval 也算在途（與 assertNoPendingVisual 同口徑）：待核准的生成雖然還沒扣點、
+          // 也還沒送供應商，但它已經佔住旁白這一軌。漏掉它就能在待核那筆之上再開一筆，
+          // 同格同軌兩筆在途，兩筆先後核准會各自回填 narrationAssetId——先落地的那一版無聲被覆蓋。
+          inArray(schema.generations.status, ["queued", "running", "awaiting_approval"]),
         ))
         .limit(1);
-      if (pendingVoice) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成配音，請稍候" });
+      if (pendingVoice) throw new TRPCError({ code: "CONFLICT", message: "這一格的配音正在生成或待核准中，請稍候" });
       // TD-02：配音生成走 Command
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -946,7 +1001,7 @@ export const scenesRouter = router({
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
-      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒有送出環境音生成，也沒有扣點" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
       const prompt = scene.ambience ?? "";
@@ -965,10 +1020,12 @@ export const scenesRouter = router({
         .where(and(
           eq(schema.generations.sceneId, scene.id),
           eq(schema.generations.sceneRole, "ambience"),
-          inArray(schema.generations.status, ["queued", "running"]),
+          // 同 generateVoiceover：待核准的生成沒扣點也沒送供應商，但它已經佔住環境音這一軌，
+          // 再開一筆就是同格同軌兩筆在途，核准後兩筆都回填 ambienceAssetId 而互相覆蓋。
+          inArray(schema.generations.status, ["queued", "running", "awaiting_approval"]),
         ))
         .limit(1);
-      if (pendingAmbience) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成環境音，請稍候" });
+      if (pendingAmbience) throw new TRPCError({ code: "CONFLICT", message: "這一格的環境音正在生成或待核准中，請稍候" });
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
         source: "web",

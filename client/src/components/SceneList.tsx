@@ -15,6 +15,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+import type { CollabAnchorPeer } from "../realtime";
 import { revealProjectContext } from "../features/project-nav/projectContextNav";
 
 import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton } from "./ui";
@@ -26,6 +27,9 @@ const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影�
 const DEFAULT_MODEL = "fal-ai/fast-lightning-sdxl";
 // 可當快速出圖的文生圖模型（不需來源素材；與單格工作室「重畫這格」同一份清單口徑）
 const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && !m.needs);
+// 沒人在這一格時共用同一個空陣列：每列各寫一次 [] 會讓每次 render 都換一個新身分，
+// 白白讓所有分鏡格的 props 每秒都「看起來變了」
+const EMPTY_WATCHERS: CollabAnchorPeer[] = [];
 
 // 目標剪輯軟體 → 可直接匯入的檔案（需求 #8＋直連強化）：每套軟體列出「最能直接組好時間軸」的
 // 格式優先（Premiere 吃 xmeml 時間軸、FCP/Resolve/剪映專業版吃 fcpxml），字幕 SRT 當通用備援；
@@ -188,6 +192,46 @@ function InlineEdit({
   );
 }
 
+/** 這一格上有誰：對方色的名字縮寫小圓。
+ *
+ *  訊號來源是「最後一則 cursor」（realtime.tsx 的 anchorPeers），不是 4 秒過期的游標圖示——
+ *  對方停下來想事情四秒指示就消失，看到的人會以為他走了而動手改同一格，那正是這條要防的事。
+ *  逾 10 秒沒更新畫成半透明：人還掛在這一格，但不保證還坐在椅子上。
+ *  最多列三顆＋「+N」：分鏡列的標題行只有這麼寬，第四顆進來會把標題輸入框擠掉。 */
+function SceneWatchers({ watchers }: { watchers: CollabAnchorPeer[] }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+      {watchers.slice(0, 3).map((p) => (
+        <span
+          key={p.userId}
+          role="img"
+          aria-label={`${p.name} 正在這一格`}
+          title={p.stale ? `${p.name} 正在這一格（暫時沒動作）` : `${p.name} 正在這一格`}
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: p.color,
+            color: "#fff",
+            textShadow: "0 1px 2px var(--scrim)",
+            fontSize: 11,
+            lineHeight: 1,
+            // 半透明不是裝飾：它是「這個訊號有點舊了」的唯一表達方式
+            opacity: p.stale ? 0.45 : 1,
+          }}
+        >
+          {/* 用展開取首字元而非 name[0]：emoji／罕用字是代理對，用索引會切出半個字 */}
+          {[...p.name][0] ?? "?"}
+        </span>
+      ))}
+      {watchers.length > 3 && <Meta style={{ fontSize: 11 }}>+{watchers.length - 3}</Meta>}
+    </span>
+  );
+}
+
 /** 單格分鏡（精簡版）：縮圖、標題/秒數、狀態，加「一顆依狀態決定的主要動作」。
  *  深改（提示詞、配音、換模型、版本）都收進單格工作室——列表回歸排順序與總覽。 */
 function SceneRow({
@@ -203,6 +247,7 @@ function SceneRow({
   charIds,
   sceneIds,
   propIds,
+  watchers,
   invalidate,
   move,
   remove,
@@ -224,6 +269,8 @@ function SceneRow({
   charIds?: string[];
   sceneIds?: string[];
   propIds?: string[];
+  /** 現在把游標停在這一格的人（不含自己）；沒連上協作或沒人在這格時是空陣列 */
+  watchers: CollabAnchorPeer[];
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
@@ -266,9 +313,18 @@ function SceneRow({
   const genPoints = genModel?.points;
   // 主要動作已經是「開單格工作室」時（沒提示詞要先寫），就不再重複列 tonal 版工作室鈕
   const primaryOpensStudio = canEdit && !s.assetId && !hasPrompt && !isGenerating;
+  // 誰在改這一格：邊框只畫第一位（多人時由縮寫小圓補齊），顏色與對方的游標／在場 chip 同一把色
+  const leadWatcher = watchers[0];
 
   return (
-    <div className={`gen-row scene-list__row${rowClassName ? ` ${rowClassName}` : ""}`} data-fb="分鏡格" id={`scene-${s.id}`}>
+    <div
+      className={`gen-row scene-list__row${rowClassName ? ` ${rowClassName}` : ""}`}
+      data-fb="分鏡格"
+      id={`scene-${s.id}`}
+      // 左邊框加粗 1→3px 的同時把左內距 12→10：只換顏色與粗細、不讓這一格的內容左右跳動
+      // （.gen-row 的 border 1px / padding 12px 見 styles.css）
+      style={leadWatcher ? { borderLeftColor: leadWatcher.color, borderLeftWidth: 3, paddingLeft: 10 } : undefined}
+    >
       {/* 縮圖即入口：點縮圖＝開單格工作室（Adobe 式「點素材放大修」的直覺） */}
       <button
         type="button"
@@ -292,6 +348,7 @@ function SceneRow({
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="mono" style={{ color: "var(--primary-ink)", flexShrink: 0 }}>{i + 1}</span>
+          {watchers.length > 0 && <SceneWatchers watchers={watchers} />}
           <InlineEdit
             value={s.title}
             kind="text"
@@ -538,7 +595,16 @@ const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
 /** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
  *  深改（提示詞/配音/換模型/版本）集中在單格工作室；打包照舊。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
-export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds }: { projectId: string; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[] }) {
+export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds, anchorPeers }: {
+  projectId: string;
+  canEdit?: boolean;
+  charIds?: string[];
+  sceneIds?: string[];
+  propIds?: string[];
+  /** 錨點 → 在場者（useCollab 的衍生值）。optional：沒連上協作、或在沒有協作的地方
+   *  單獨渲染這張卡時就是沒有訊號，不該逼呼叫端生一個假的空 Map。 */
+  anchorPeers?: Map<string, CollabAnchorPeer[]>;
+}) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -715,6 +781,9 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             durationSec: s.durationSec,
             prompt: s.prompt,
             voiceover: s.voiceover,
+            // 環境音一定要傳：全文一律輸出「環境音：」那一行，這裡漏掉就等於讓使用者
+            // 讀到一份「環境音全空」的腳本，原封不動寫回會把整個專案的環境音清光
+            ambience: s.ambience,
             cardNames: sceneCardNames(s),
           }))}
           canEdit={canEdit}
@@ -785,6 +854,8 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   charIds={charIds}
                   sceneIds={sceneIds}
                   propIds={propIds}
+                  // 錨點格式與 realtime.tsx 的 collabAnchorFromElement 對齊：這一格的 id 就是 `scene-<id>`
+                  watchers={anchorPeers?.get(`#scene-${s.id}`) ?? EMPTY_WATCHERS}
                   invalidate={invalidate}
                   move={move}
                   remove={remove}

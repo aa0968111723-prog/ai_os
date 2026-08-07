@@ -22,7 +22,7 @@ const ROWS = [
     voiceover: "那一年，我第一次走進禪堂。",
     ambience: "遠處鐘聲，細微鳥鳴",
   },
-  { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, cardNames: ["安倢的紅傘"] },
+  { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, ambience: null, cardNames: ["安倢的紅傘"] },
 ];
 
 describe("formatStoryboardScript", () => {
@@ -48,8 +48,23 @@ describe("formatStoryboardScript", () => {
    * 等於繼續藏著它，使用者永遠不知道這一格可以寫。
    */
   it("環境音是空的也照樣輸出一行（讓人知道這一格可以寫）", () => {
-    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫", voiceover: null }]);
+    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫", voiceover: null, ambience: null }]);
     expect(out).toContain("\n環境音：");
+  });
+
+  /**
+   * scenes.title 在 DB 是 text，沒有任何禁換行的守衛（MCP 與 AI 拆分鏡都只 trim+slice），
+   * 所以帶換行的標題是存得進去的。照原樣寫進「## 」那一行，換行後那半截會被 parse 當成
+   * 續行吃進畫面描述——打開全文再原封不動寫回，那半截就永久消失。
+   */
+  it("標題裡的換行壓成空白，來回一趟不會吃掉換行後的字", () => {
+    const rows = [{ title: "開場\n（分鏡師版）", durationSec: 5, prompt: "晨光", voiceover: null, ambience: null }];
+    const text = formatStoryboardScript(rows);
+    expect(text.split("\n")[0]).toBe("## 1. 開場 （分鏡師版） (5s)");
+    const back = parseStoryboardScript(text).scenes[0];
+    expect(back?.title).toBe("開場 （分鏡師版）");
+    expect(back?.durationSec).toBe(5);
+    expect(back?.prompt).toBe("晨光");
   });
 
   it("格式化出來的文字，解析回去必須等值（來回不失真）", () => {
@@ -80,7 +95,7 @@ describe("formatStoryboardScript", () => {
     // 沒有跳脫的話：畫面的第二行「旁白：…」會被當成旁白標籤，接著真正的「旁白：」再把它覆蓋成空——
     // 使用者什麼都沒改，那行字卻消失了
     const rows = [
-      { title: "T", durationSec: 5, prompt: "第一行\n旁白：這其實是畫面的第二行\n## 這行也是", voiceover: "旁白第一行\n設定卡：這是旁白" },
+      { title: "T", durationSec: 5, prompt: "第一行\n旁白：這其實是畫面的第二行\n## 這行也是", voiceover: "旁白第一行\n設定卡：這是旁白", ambience: null },
     ];
     const back = parseStoryboardScript(formatStoryboardScript(rows)).scenes[0];
     expect(back?.prompt).toBe("第一行\n旁白：這其實是畫面的第二行\n## 這行也是");
@@ -88,7 +103,7 @@ describe("formatStoryboardScript", () => {
   });
 
   it("本來就以反斜線開頭的字不會被誤拆（只還原真的長得像結構的那種）", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "第一行\n\\不是結構\n\\旁白：是結構", voiceover: null }];
+    const rows = [{ title: "T", durationSec: 5, prompt: "第一行\n\\不是結構\n\\旁白：是結構", voiceover: null, ambience: null }];
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.prompt).toBe(
       "第一行\n\\不是結構\n\\旁白：是結構",
     );
@@ -129,8 +144,17 @@ describe("parseStoryboardScript", () => {
     expect(parsed.warnings.join()).toMatch(/超出 1–60/);
   });
 
-  it("沒有標題時給預設鏡名，不會產生無名分鏡", () => {
-    expect(parseStoryboardScript("## \n畫面：晨光").scenes[0]?.title).toBe("第 1 鏡");
+  // 標題留空與畫面／旁白省略是同一套語意（UI 明寫「省略＝維持原值」）。
+  // 以前這裡補「第 N 鏡」佔位，等於把使用者沒寫的欄位當成有寫，寫回時原標題就被蓋掉——
+  // 而且 N 取的是文字裡的出現順序，只留「## 1. A」與「## 5.」時第 5 鏡會被改名成「第 2 鏡」。
+  it("標題留空＝維持原值，不補佔位（新增鏡的佔位由 applyScript 就地補）", () => {
+    expect(parseStoryboardScript("## \n畫面：晨光").scenes[0]?.title).toBe("");
+  });
+
+  it("標題留空時 diff 不把它算成改動", () => {
+    const rows = [{ title: "晨光", durationSec: 5, prompt: "清晨", voiceover: null, ambience: null }];
+    const parsed = parseStoryboardScript("## 1.  (5s)\n畫面：清晨\n旁白：\n環境音：");
+    expect(diffStoryboardScript(rows, parsed.scenes).updated).toEqual([]);
   });
 
   it("第一個 ## 之前的抬頭文字會被忽略，但要說出來", () => {
@@ -239,11 +263,28 @@ describe("diffStoryboardScript（保守套用）", () => {
     expect(diffStoryboardScript(ROWS, parsed.scenes).updated).toEqual([]);
   });
 
+  /**
+   * 這條盯的是「編輯全文 → 原封不動寫回 → 全專案環境音被清光」那條資料遺失路徑。
+   * 環境音那一行一律輸出（即使是空的），所以呼叫端只要少傳這一欄，使用者讀到的就是
+   * 一份環境音全空的腳本；寫回時空字串 ≠ 原值成立，一個字都沒改卻整批被清掉。
+   * 型別上 ambience 已改必填擋住漏傳，這裡再從行為面把兩側都釘住。
+   */
+  it("環境音有值時來回一趟＝沒有任何變更（漏傳才會被判成清空）", () => {
+    const rows = [{ title: "晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", ambience: "遠處鐘聲" }];
+    const parsed = parseStoryboardScript(formatStoryboardScript(rows));
+    expect(parsed.scenes[0]?.ambience).toBe("遠處鐘聲");
+    expect(diffStoryboardScript(rows, parsed.scenes)).toEqual({ updated: [], created: [], keptUntouched: 0 });
+
+    // 對照組：格式化時漏掉環境音（就是被修掉的那個 bug）——使用者什麼都沒動，這一鏡卻算「有變更」
+    const dropped = parseStoryboardScript(formatStoryboardScript(rows.map((r) => ({ ...r, ambience: null }))));
+    expect(diffStoryboardScript(rows, dropped.scenes).updated).toEqual([{ index: 0, title: "晨光" }]);
+  });
+
   it("刪掉中間整段：預告與實際一致，動的是第 2 鏡而不是第 1 鏡", () => {
     const rows = [
-      { title: "A", durationSec: 5, prompt: "a", voiceover: null },
-      { title: "B", durationSec: 5, prompt: "b", voiceover: null },
-      { title: "C", durationSec: 5, prompt: "c", voiceover: null },
+      { title: "A", durationSec: 5, prompt: "a", voiceover: null, ambience: null },
+      { title: "B", durationSec: 5, prompt: "b", voiceover: null, ambience: null },
+      { title: "C", durationSec: 5, prompt: "c", voiceover: null, ambience: null },
     ];
     const parsed = parseStoryboardScript("## 1. A (5s)\n畫面：a\n\n## 3. C (5s)\n畫面：改過的 c");
     const diff = diffStoryboardScript(rows, parsed.scenes);
