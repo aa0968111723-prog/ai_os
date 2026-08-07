@@ -202,6 +202,13 @@ export const scenes = pgTable("scenes", {
    * 正規化改寫使用者自己打的字。
    */
   dialogue: text("dialogue"),
+  /**
+   * 配樂端點標記（「起｜描述」或「止」）。區間由 shared/sceneMusic.ts 掃相鄰鏡推導——
+   * 存區間本身會在鏡被重排／刪除／改秒數之後錯位，存端點則自動跟著鏡走。
+   */
+  music: text("music"),
+  /** 配樂音檔，落在起鏡上；與畫面／旁白／環境音三個指標欄同構。 */
+  musicAssetId: uuid("music_asset_id"),
   /** 環境音成品音檔。與 narrationAssetId 對稱；null＝這一鏡還沒有環境音。 */
   ambienceAssetId: uuid("ambience_asset_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),

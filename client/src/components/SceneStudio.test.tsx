@@ -52,7 +52,7 @@ function genRow(over: Partial<SceneVersionGenerationRow> & { generationId: strin
 }
 
 /** 伺服器回傳的形狀（scenes.versions）——用真的 buildSceneVersions 產生，避免 mock 與正式投影分岔 */
-function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null; ambience?: string | null; action?: string | null; dialogue?: string | null } = {}) {
+function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null; ambience?: string | null; action?: string | null; dialogue?: string | null; music?: string | null } = {}) {
   const rows = opts.rows ?? [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" })];
   const currentAssetId = opts.currentAssetId === undefined ? "asset-g1" : opts.currentAssetId;
   const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null, ambienceAssetId: null });
@@ -65,6 +65,7 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
     ambience: opts.ambience ?? null,
     action: opts.action ?? null,
     dialogue: opts.dialogue ?? null,
+    music: opts.music ?? null,
     assetId: currentAssetId,
     narrationAssetId: null,
     ambienceAssetId: null,
@@ -409,6 +410,32 @@ describe("SceneStudio", () => {
     const arg = ambienceMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.sceneId).toBe("s-1");
     expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("配樂標記可寫，並即時說明這一鏡是起還是止", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ music: "起｜單音鋼琴" }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /環境音/ }));
+    expect(screen.getByText(/從這一鏡開始播/)).toBeInTheDocument();
+  });
+
+  it("配樂寫「止」時說明改成停止——使用者不必記語法也看得懂", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ music: "止" }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /環境音/ }));
+    expect(screen.getByText(/這一鏡起停止配樂/)).toBeInTheDocument();
   });
 
   it("檢視者的環境音頁：唯讀，沒有編輯與生成鈕", async () => {

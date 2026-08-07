@@ -184,7 +184,27 @@ describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", (
     );
     expect(parsed.scenes[0]?.ambience).toBe("蟲鳴\n遠處狗吠");
     expect(parsed.scenes[0]?.voiceover).toBe("說話");
-    expect(SCRIPT_FIELDS.every((f) => f.multiline)).toBe(true); // 目前四欄都是描述型
+    // 規則不是「全部多行」，而是「描述型多行、名單型單行」。名單型（配樂與之後的
+    // 角色／場景／道具）排在一鏡最後，續行落回前一個描述欄不會被覆寫，所以安全。
+    const DESCRIPTIVE = new Set(["prompt", "action", "voiceover", "dialogue", "ambience"]);
+    for (const f of SCRIPT_FIELDS) {
+      expect(f.multiline, `${f.human} 的 multiline 設錯`).toBe(DESCRIPTIVE.has(f.key));
+    }
+  });
+
+  it("單行的名單型欄位排在最後，續行落回前一個描述欄而不是消失", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "環境音：蟲鳴", "配樂：起｜鋼琴", "這是鏡末尾的筆記"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.music).toBe("起｜鋼琴");
+    expect(parsed.scenes[0]?.ambience).toBe("蟲鳴\n這是鏡末尾的筆記"); // 沒有消失
+  });
+
+  it("配樂空的時候不輸出那一行——它是區間端點，不是每鏡都有的屬性", () => {
+    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫" }]);
+    expect(out).not.toContain("配樂：");
+    expect(out).toContain("環境音："); // 描述欄仍是全欄模板
+    expect(formatStoryboardScript([{ title: "T", durationSec: 5, music: "起｜鋼琴" }])).toContain("配樂：起｜鋼琴");
   });
 
   it("動作走位是獨立欄位，不會混進畫面（畫面是要送圖像模型的）", () => {
