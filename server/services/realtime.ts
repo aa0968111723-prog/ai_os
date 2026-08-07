@@ -262,6 +262,46 @@ export function publishToProject(
   broadcast(roomKey, room, payload);
 }
 
+/**
+ * 讀出「這個組現在有誰在線、各自在哪個專案／區塊」——協作首頁與協作中心的資料來源。
+ *
+ * 為什麼從記憶體讀而不是查表：presence 本來就是 ephemeral 的，把每一次 cursor／focus
+ * 都寫進 DB 只會製造一張永遠在寫、永遠沒人查歷史的表（而且多實例下還要處理清理）。
+ * 這裡直接投影現有的房間結構，跨實例的部分沿用 realtimeBus 的名冊——與畫面上看到的
+ * 在場名單是同一個真相，不會出現「首頁說 3 人在線、專案頁只看得到 2 個」。
+ *
+ * 回傳只含 userId／name／色票／所在專案／zone：**不含游標座標、不落任何歷史**。
+ * Presence 是「現在誰在哪」，不是行蹤紀錄。
+ */
+export interface CollaborationPresence {
+  userId: string;
+  name: string;
+  color: string;
+  /** 目前在哪些專案房（同一人多分頁可能同時在兩個專案） */
+  projectIds: string[];
+  /** 目前聚焦的編輯區塊（多分頁時取任一個非空者） */
+  zone: string | null;
+}
+
+export function groupPresence(groupId: string, projectIds: string[]): CollaborationPresence[] {
+  const byUser = new Map<string, CollaborationPresence>();
+  const consider = (roomKey: string, projectId: string | null) => {
+    const room = rooms.get(roomKey);
+    if (!room) return;
+    for (const c of room) {
+      // 房間本身已由 authorize 保證同組，這裡再擋一次跨組滲漏（防未來改動時失守）
+      if (c.groupId !== groupId) continue;
+      const entry = byUser.get(c.userId) ?? { userId: c.userId, name: c.name, color: c.color, projectIds: [], zone: null };
+      if (projectId && !entry.projectIds.includes(projectId)) entry.projectIds.push(projectId);
+      if (c.zone && !entry.zone) entry.zone = c.zone;
+      byUser.set(c.userId, entry);
+    }
+  };
+  consider(`g:${groupId}`, null);
+  for (const projectId of projectIds) consider(`p:${projectId}`, projectId);
+  return [...byUser.values()];
+}
+
 /** 在場名單有變：本機重播一次（presence 是完整名單，不能只送差異） */
 function broadcastPresence(roomKey: string, room: Set<Client>, except?: Client): void {
   sendLocal(room, { type: "presence", users: dedupeUsers(roomKey, room) }, except);
