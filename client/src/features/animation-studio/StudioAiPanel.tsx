@@ -7,6 +7,7 @@ import { Button, Card, Hint, Meta } from "../../components/ui";
 import type { Stroke } from "./boardDoc";
 import { boardFileName, type ExportResult } from "./boardExport";
 import { boardDocFromSketch, clampSketchToCapacity } from "./sketchImport";
+import type { BoardSummary } from "./boardSummary";
 import { replaySketch, type ReplayHandle, type SketchPreview } from "./sketchReplay";
 import type { StudioShot } from "./ShotStrip";
 import type { StudioLayout } from "./studioLayout";
@@ -27,6 +28,8 @@ export interface StudioAiPanelProps {
     pushStroke: (stroke: Stroke) => void;
     /** 正在畫的那一筆的逐點預覽（白板 live 層）；null＝畫完或停止，要把預覽清掉 */
     preview: (preview: SketchPreview | null) => void;
+    /** 白板現況摘要（畫布感知）：送出當下才算，AI 據此避開已有內容、不重畫外框 */
+    summarize: () => BoardSummary;
     boardW: number;
     boardH: number;
     maxStrokes: number;
@@ -299,11 +302,15 @@ export function StudioAiPanel({
               variant="primary"
               disabled={!canEdit || sketchMutation.isPending || sketchPrompt.trim().length < SKETCH_PROMPT_MIN}
               onClick={() => {
+                // 白板現況在按下的瞬間算（不是 render 時）：AI 拿到的是送出當下的畫面
+                const board = sketch.summarize();
                 sketchMutation.mutate({
                   projectId,
                   prompt: sketchPrompt.trim(),
                   // 選了分鏡就帶上：伺服器抓前後鏡做連戲（主體、場景、銀幕方向接上一鏡）
                   sceneId: shot?.id,
+                  // 空白板不帶摘要：省 token，AI 的空白板提示與從前完全一致
+                  board: board.strokeCount > 0 ? board : undefined,
                   boardW: sketch.boardW,
                   boardH: sketch.boardH,
                   maxStrokes: sketch.maxStrokes,
@@ -356,7 +363,7 @@ export function StudioAiPanel({
         <Hint>
           AI 畫的是分鏡構圖草稿（框、簡筆人物、運鏡箭頭），不是精緻插畫。
           {shot ? "會參考上一鏡／下一鏡的畫面與走位自動連戲。" : "選一鏡再畫，AI 會參考前後鏡自動連戲。"}
-          畫在現有筆畫上面——想從白紙開始，先按白板的清空。
+          白板已有筆畫時，AI 看得到哪裡有東西——會把新內容補進空白處、不重畫外框；想從白紙開始，先按白板的清空。
         </Hint>
       </Card>
 

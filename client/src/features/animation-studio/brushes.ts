@@ -292,3 +292,38 @@ export function speedBetween(a: { x: number; y: number; t: number }, b: { x: num
   if (!Number.isFinite(dt) || dt <= 0) return 0;
   return Math.hypot(b.x - a.x, b.y - a.y) / dt;
 }
+
+/**
+ * 線條穩定器（專業繪圖軟體的 stabilizer）：新取樣點只朝目標走一部分，
+ * 手的抖動被指數平均吸收，畫長弧線與髮絲線才穩得住。
+ *
+ * strength 0＝關閉（原點照收），1＝最強（每次只走 12% 距離——再低就會
+ * 「筆跟不上手」到讓人以為當機）。代價是筆跡略微落後指尖，這是所有
+ * 穩定器的固有取捨，畫的人自己選強度。
+ *
+ * 壓力也一起平滑：位置穩了但線寬還在跳，看起來仍是抖的。
+ */
+export function stabilizeNext(prev: StrokePoint | null, raw: StrokePoint, strength: number): StrokePoint {
+  const s = Math.min(1, Math.max(0, strength));
+  if (!prev || s <= 0) return { ...raw };
+  const follow = 1 - 0.88 * s;
+  return {
+    x: prev.x + (raw.x - prev.x) * follow,
+    y: prev.y + (raw.y - prev.y) * follow,
+    p: prev.p + (raw.p - prev.p) * follow,
+  };
+}
+
+/**
+ * 手寫板傾斜 → 側鋒加壓。筆桿放倒（tilt 大）等於用筆腹畫——線要變寬。
+ * 折進筆壓而不是另存欄位：StrokePoint 的格式（x,y,p）是儲存契約，
+ * 為傾斜加欄位會讓所有舊草稿變舊版格式，而「側鋒＝加壓」的近似在草圖尺度看不出差別。
+ * 傾斜最多補 0.25 的壓——側鋒是輔助，不能蓋過真正的筆壓。
+ */
+export function tiltBoost(pressure: number, tiltX: number | undefined, tiltY: number | undefined): number {
+  const tx = Number.isFinite(tiltX) ? Math.abs(tiltX!) : 0;
+  const ty = Number.isFinite(tiltY) ? Math.abs(tiltY!) : 0;
+  // tilt 各軸 ±90°；45° 以上就算完全放倒
+  const lean = Math.min(1, Math.max(tx, ty) / 45);
+  return Math.min(1, pressure + lean * 0.25);
+}

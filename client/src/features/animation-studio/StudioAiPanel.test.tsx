@@ -43,7 +43,15 @@ const SHOT: StudioShot = {
   ambience: "遠處鐘聲",
 };
 
-const SKETCH = { pushStroke: vi.fn(), preview: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
+const SKETCH = {
+  pushStroke: vi.fn(),
+  preview: vi.fn(),
+  summarize: vi.fn(() => ({ strokeCount: 3, cells: [100, 0, 0, 0, 0, 0, 0, 0, 0], hasFrame: false })),
+  boardW: 1600,
+  boardH: 900,
+  maxStrokes: 1200,
+  strokeCount: 0,
+};
 
 function setup(shot: StudioShot | null = SHOT) {
   render(
@@ -166,6 +174,15 @@ describe("StudioAiPanel・AI 畫草圖按不下去時要說原因", () => {
     await userEvent.type(screen.getByLabelText(/跟 AI 說/), "僧人沿石徑往右行禪");
     await userEvent.click(screen.getByRole("button", { name: /AI 畫草圖/ }));
     expect(sketchMutate).toHaveBeenCalledWith(expect.objectContaining({ projectId: "proj-1", sceneId: "shot-1" }));
+  });
+
+  it("白板有內容時送出現況摘要（畫布感知）——AI 靠它避開已有的東西", async () => {
+    setup();
+    await userEvent.type(screen.getByLabelText(/跟 AI 說/), "在空白處補一棵樹");
+    await userEvent.click(screen.getByRole("button", { name: /AI 畫草圖/ }));
+    expect(sketchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ board: expect.objectContaining({ strokeCount: 3, hasFrame: false }) }),
+    );
   });
 
   it("沒選分鏡（自由塗鴉）不帶 sceneId", async () => {

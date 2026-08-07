@@ -10,7 +10,8 @@ import { collectBrush, updateSavedBrush, workingCopy } from "./brushCollection";
 import { BRUSH_LIMITS, DEFAULT_BRUSH_ID, findBrush, type BrushSpec } from "./brushes";
 import { boardSizeForFormat, isBoardEmpty } from "./boardDoc";
 import { exportBoardPng } from "./boardExport";
-import { allBrushes, readSavedBrushes, writeSavedBrushes } from "./studioStorage";
+import { allBrushes, readSavedBrushes, readStudioPrefs, writeSavedBrushes, writeStudioPrefs } from "./studioStorage";
+import { summarizeBoard } from "./boardSummary";
 import { clampZoom, fitBoardToBox } from "./studioLayout";
 import { resolveShortcut, SHORTCUT_HINTS } from "./studioShortcuts";
 import type { SketchPreview } from "./sketchReplay";
@@ -63,6 +64,13 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setActiveBrushId(id);
     setBrush(workingCopy(findBrush(brushes, id)));
     setBrushNotice("");
+  };
+
+  /** 線條穩定器：跨筆刷的工作習慣（這台裝置＋這雙手），存進裝置偏好 */
+  const [stabilizer, setStabilizer] = useState(() => readStudioPrefs().stabilizer);
+  const changeStabilizer = (value: number) => {
+    setStabilizer(value);
+    writeStudioPrefs({ stabilizer: value });
   };
 
   const changeBrush = (next: BrushSpec) => {
@@ -220,8 +228,17 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       // 存進素材庫之後這份手稿不再是「未存的草稿」；本機那份留著可繼續改
       onBoardSaved={markSaved}
       // AI 畫草圖：筆一筆重播進白板（走同一個 pushStroke，上限與尺寸都跟手繪同一套）；
-      // preview 讓「正在畫的那一筆」逐點出現在白板上（live 層，不進文件）
-      sketch={{ pushStroke, preview: setAiPreview, boardW: boardSize.w, boardH: boardSize.h, maxStrokes: layout.maxStrokes, strokeCount: board.doc.strokes.length }}
+      // preview 讓「正在畫的那一筆」逐點出現在白板上（live 層，不進文件）；
+      // summarize 給 AI 白板現況（純數字摘要）——它才知道哪裡已有東西、該畫進哪裡
+      sketch={{
+        pushStroke,
+        preview: setAiPreview,
+        summarize: () => summarizeBoard(boardRef.current.doc),
+        boardW: boardSize.w,
+        boardH: boardSize.h,
+        maxStrokes: layout.maxStrokes,
+        strokeCount: board.doc.strokes.length,
+      }}
     />
   );
 
@@ -236,6 +253,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       onCollect={collect}
       onRemove={removeBrush}
       notice={brushNotice}
+      stabilizer={stabilizer}
+      onStabilizerChange={changeStabilizer}
     />
   );
 
@@ -326,6 +345,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             referenceUrl={referenceUrl}
             readOnly={!canEdit}
             aiPreview={aiPreview}
+            stabilizer={stabilizer}
           />
           {/* 狀態晶片：浮在畫布角落而不是佔一整列——這是給人「瞄一眼」的資訊，
               不該跟工具搶版面（先前那行「0／400 筆・9%・輕量版」看起來像除錯輸出） */}

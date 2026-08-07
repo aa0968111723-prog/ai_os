@@ -66,6 +66,43 @@ export function allBrushes(saved: readonly BrushSpec[]): BrushSpec[] {
   return [...BUILTIN_BRUSHES, ...saved];
 }
 
+/* ── 工作習慣偏好（穩定器等，跟裝置走） ── */
+
+export const STUDIO_PREFS_KEY = "aios.studio.prefs";
+
+export interface StudioPrefs {
+  /** 線條穩定器強度 0-1（0＝關）。是「這台裝置＋這雙手」的習慣，不跟專案走 */
+  stabilizer: number;
+}
+
+const DEFAULT_PREFS: StudioPrefs = { stabilizer: 0 };
+
+export function readStudioPrefs(): StudioPrefs {
+  const store = storage();
+  if (!store) return { ...DEFAULT_PREFS };
+  try {
+    const raw = store.getItem(STUDIO_PREFS_KEY);
+    if (!raw) return { ...DEFAULT_PREFS };
+    const data = JSON.parse(raw) as Partial<StudioPrefs>;
+    const stabilizer = typeof data.stabilizer === "number" && Number.isFinite(data.stabilizer)
+      ? Math.min(1, Math.max(0, data.stabilizer))
+      : DEFAULT_PREFS.stabilizer;
+    return { stabilizer };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+export function writeStudioPrefs(prefs: StudioPrefs): void {
+  const store = storage();
+  if (!store) return;
+  try {
+    store.setItem(STUDIO_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // 配額滿或隱私模式：這次的偏好只活在記憶體，不打斷創作
+  }
+}
+
 /**
  * 每一鏡一份白板草稿。key 帶專案與分鏡 id——沒有選分鏡時的自由塗鴉存在 `_free`，
  * 這樣「還沒決定要畫哪一鏡」的靈感不會在選了分鏡之後消失。

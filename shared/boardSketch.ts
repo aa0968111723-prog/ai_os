@@ -40,6 +40,8 @@ const baseFields = {
   pen: penSchema.optional(),
   /** 線色，預設深灰；強調處（箭頭、重點）LLM 可換色 */
   color: colorSchema.optional(),
+  /** 線寬層次：遠景／輔助線 light、主體輪廓 bold——素描的層次感靠輕重分明 */
+  weight: z.enum(["light", "normal", "bold"]).optional(),
 };
 
 export const sketchPrimitiveSchema = z.discriminatedUnion("kind", [
@@ -102,7 +104,7 @@ export function sketchDslPromptBlock(): string {
 - {"kind":"arrow","x1":…,"y1":…,"x2":…,"y2":…}：箭頭（運鏡方向、人物動線）
 - {"kind":"hatch","x":…,"y":…,"w":…,"h":…}：45° 排線陰影（人物腳下的影子、暗部、夜空），會自動排線
 - {"kind":"stick_figure","cx":…,"cy":…,"h":…,"pose":"stand|walk|run|sit|arms_up|point","dir":"left|right"}：火柴人，cx,cy 是頭的中心、h 是全身高（腳底大約在 cy+0.8h）、dir 是面向（預設 right）
-每個原語可加 "pen":"pencil|pen|marker"（預設 pencil）與 "color":"#rrggbb"（預設深灰；強調處才換色，整張最多兩色）。
+每個原語可加 "pen":"pencil|pen|marker"（預設 pencil）、"color":"#rrggbb"（預設深灰；強調處才換色，整張最多兩色）、"weight":"light|normal|bold"（線寬層次，預設 normal）。
 構圖與精準度要求（每一條都要做到）：
 1. 順序＝圖層：先 frame，再「背景→中景→主體→細節→運鏡箭頭」，後畫的疊在先畫的上面。
 2. 主體要夠大：主要人物或物件高度佔 300-500，放在三分線交點附近，不要縮在角落。
@@ -110,7 +112,8 @@ export function sketchDslPromptBlock(): string {
 4. 物件用多個原語組合，不要偷懶：例如「稻草人」＝直立桿 line＋水平橫桿 line＋stick_figure(pose:"arms_up")＋頭上的草帽 ellipse；「房子」＝rect 牆＋polyline 屋頂＋rect 門窗。
 5. 圓滑的自然物用 curve、稜角的人造物用 line/polyline/rect——山用 curve 畫才像山。
 6. 質感：主體腳下加一塊扁的 hatch 當影子（畫面才有重量）；人物的 dir 要與他的動線 arrow 同方向。
-7. 原語總數 14-50 個：要讓人一眼看懂「誰、在哪、往哪動」，細節足夠但不雜亂。`;
+7. 輕重分明：遠景與輔助線用 "weight":"light"、主體輪廓用 "weight":"bold"、其他 normal——素描的層次感靠線寬，不是靠畫得多。
+8. 原語總數 14-50 個：要讓人一眼看懂「誰、在哪、往哪動」，細節足夠但不雜亂。`;
 }
 
 /* ── 連戲（前後分鏡 → 提示詞區塊） ── */
@@ -152,6 +155,48 @@ export function sketchContinuityBlock(ctx: {
 /** 連戲的畫法指令（放在 <素材> 之外）：素材區宣告過「非指令」，指令混進去等於自己失效 */
 export const SKETCH_CONTINUITY_RULES =
   "連戲要求：主體與場景要與前後鏡一致（同一個人、同一個地方）；人物移動與運鏡箭頭的銀幕方向沿用上一鏡（dir 與 arrow 不要無故換邊跳軸）；這一鏡是上一段動作的延續，構圖要接得上，不是全新的畫面。";
+
+/* ── 白板現況（畫布感知 → 提示詞區塊） ── */
+
+/**
+ * 白板現況摘要：由前端從白板文件算出的**純數字**（筆數、3×3 區域筆墨量、是否已有外框），
+ * 不含任何自由文字——伺服器只把數字排成句子，使用者沒有藉由摘要夾帶指令的通道。
+ */
+export interface SketchBoardState {
+  strokeCount: number;
+  /** 3×3 區域的相對筆墨量 0-100（左上、上、右上、左、中央、右、左下、下、右下） */
+  cells: number[];
+  /** 已有一筆貼著白板邊緣繞一圈的大框（AI 不該再畫第二個 frame） */
+  hasFrame: boolean;
+}
+
+const CELL_LABELS = ["左上", "上方", "右上", "左側", "中央", "右側", "左下", "下方", "右下"] as const;
+
+/**
+ * 白板現況 → 素材區塊（純函式）。空白板回空字串——沒有內容就不注水，
+ * AI 拿到的空白板提示與從前完全一致。
+ * 只列「有筆墨的區域」：九格全列會把「哪裡是空的」淹沒在數字裡。
+ */
+export function sketchBoardStateBlock(state: SketchBoardState): string {
+  if (state.strokeCount <= 0) return "";
+  const cells = state.cells.slice(0, 9);
+  const inked: string[] = [];
+  const empty: string[] = [];
+  for (let i = 0; i < 9; i += 1) {
+    const v = Math.max(0, Math.min(100, Math.round(cells[i] ?? 0)));
+    if (v >= 10) inked.push(`${CELL_LABELS[i]}（筆墨量 ${v}）`);
+    else empty.push(CELL_LABELS[i]!);
+  }
+  return [
+    `白板現況：已有 ${state.strokeCount} 筆${state.hasFrame ? "，且已畫了構圖外框" : ""}。`,
+    inked.length ? `有內容的區域：${inked.join("、")}。` : "",
+    empty.length ? `大致空白的區域：${empty.join("、")}。` : "",
+  ].filter(Boolean).join("");
+}
+
+/** 畫布感知的畫法指令（放在 <素材> 之外，理由同連戲） */
+export const SKETCH_BOARD_STATE_RULES =
+  "白板現況要求：把已有的筆畫當成同一張畫的既有部分——已畫了構圖外框就不要再輸出 frame；新內容優先畫進空白區域，或在既有內容上補細節、陰影與運鏡箭頭；不要畫一整張蓋過去的新構圖。";
 
 /* ── 展開器（原語 → 筆畫） ── */
 
@@ -198,20 +243,29 @@ function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
 
-/** 筆刷樣板：尺寸按白板寬縮放（1600 寬時鉛筆 3px），换比例線不會忽粗忽細 */
-function brushFor(pen: "pencil" | "pen" | "marker", color: string, boardW: number, index: number): SketchStroke["brush"] {
+/** 筆刷樣板：尺寸按白板寬縮放（1600 寬時鉛筆 3px），换比例線不會忽粗忽細。
+ *  weight 是素描的輕重層次：light 細而淡（遠景、輔助線）、bold 粗而實（主體輪廓）。 */
+function brushFor(
+  pen: "pencil" | "pen" | "marker",
+  color: string,
+  boardW: number,
+  index: number,
+  weight: "light" | "normal" | "bold" = "normal",
+): SketchStroke["brush"] {
   const scale = boardW / 1600;
   const base = pen === "marker"
     ? { size: 10, opacity: 0.85, grain: 0.1, taper: 0.15 }
     : pen === "pen"
       ? { size: 4, opacity: 0.9, grain: 0.15, taper: 0.35 }
       : { size: 3, opacity: 0.72, grain: 0.55, taper: 0.3 };
+  const sizeMul = weight === "light" ? 0.6 : weight === "bold" ? 1.6 : 1;
+  const opacityMul = weight === "light" ? 0.8 : weight === "bold" ? 1.15 : 1;
   return {
     id: `ai.${pen}.${index}`,
     name: pen === "marker" ? "麥克筆" : pen === "pen" ? "原子筆" : "鉛筆",
     engine: pen,
-    size: Math.max(1, Math.round(base.size * scale)),
-    opacity: base.opacity,
+    size: Math.max(1, Math.round(base.size * scale * sizeMul)),
+    opacity: Math.min(1, base.opacity * opacityMul),
     pressure: 0.6,
     speed: 0.2,
     grain: base.grain,
@@ -390,6 +444,7 @@ export function expandSketch(
   let dropped = 0;
   let strokeIndex = 0;
 
+  let currentWeight: "light" | "normal" | "bold" = "normal";
   const pushVertexStroke = (
     vertices: Array<{ x: number; y: number }>,
     pen: "pencil" | "pen" | "marker",
@@ -401,7 +456,7 @@ export function expandSketch(
     if (points.length < 2) return;
     strokes.push({
       id: `ai-s${strokeIndex}`,
-      brush: brushFor(pen, color, w, strokeIndex),
+      brush: brushFor(pen, color, w, strokeIndex, currentWeight),
       points,
     });
     strokeIndex += 1;
@@ -410,6 +465,7 @@ export function expandSketch(
   for (const prim of plan.primitives) {
     const pen = prim.pen ?? "pencil";
     const color = prim.color && /^#[0-9a-fA-F]{6}$/.test(prim.color) ? prim.color.toLowerCase() : DEFAULT_COLOR;
+    currentWeight = prim.weight ?? "normal";
     const X = (v: number) => v * sx;
     const Y = (v: number) => v * sy;
 

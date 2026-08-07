@@ -12,8 +12,10 @@ import {
   simplifyStroke,
   smoothPoints,
   speedBetween,
+  stabilizeNext,
   strokeWidthAt,
   taperFactor,
+  tiltBoost,
   type BrushSpec,
 } from "./brushes";
 
@@ -252,5 +254,42 @@ describe("nextBrushId", () => {
     const id = nextBrushId(existing);
     expect(existing.some((b) => b.id === id)).toBe(false);
     expect(nextBrushId([...existing, sanitizeBrush({ id })])).not.toBe(id);
+  });
+});
+
+describe("stabilizeNext（線條穩定器）", () => {
+  it("strength 0 或沒有前一點：原樣通過", () => {
+    const raw = { x: 100, y: 50, p: 0.8 };
+    expect(stabilizeNext(null, raw, 1)).toEqual(raw);
+    expect(stabilizeNext({ x: 0, y: 0, p: 0.5 }, raw, 0)).toEqual(raw);
+  });
+
+  it("強度越高，新點越貼近前一點（抖動被吸收）", () => {
+    const prev = { x: 0, y: 0, p: 0.5 };
+    const raw = { x: 100, y: 0, p: 0.5 };
+    const soft = stabilizeNext(prev, raw, 0.3);
+    const hard = stabilizeNext(prev, raw, 1);
+    expect(hard.x).toBeLessThan(soft.x);
+    expect(hard.x).toBeGreaterThan(0); // 最強也還在走，不會「筆停住」
+  });
+
+  it("壓力一起平滑——位置穩了、線寬還在跳，看起來仍是抖的", () => {
+    const out = stabilizeNext({ x: 0, y: 0, p: 0.2 }, { x: 10, y: 0, p: 1 }, 1);
+    expect(out.p).toBeGreaterThan(0.2);
+    expect(out.p).toBeLessThan(0.5);
+  });
+});
+
+describe("tiltBoost（手寫板側鋒）", () => {
+  it("沒傾斜不加壓；筆桿放倒最多補 0.25，且封頂在 1", () => {
+    expect(tiltBoost(0.5, 0, 0)).toBe(0.5);
+    expect(tiltBoost(0.5, undefined, undefined)).toBe(0.5);
+    expect(tiltBoost(0.5, 60, 0)).toBeCloseTo(0.75, 5);
+    expect(tiltBoost(0.9, 90, 90)).toBe(1);
+  });
+
+  it("45° 以上就算完全放倒（側鋒是輔助，曲線平緩）", () => {
+    expect(tiltBoost(0.4, 45, 0)).toBeCloseTo(0.65, 5);
+    expect(tiltBoost(0.4, 80, 0)).toBeCloseTo(0.65, 5);
   });
 });

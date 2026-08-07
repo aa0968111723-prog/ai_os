@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  BUILTIN_BRUSHES,
   normalizePressure,
   simplifyStroke,
   speedBetween,
+  stabilizeNext,
+  tiltBoost,
   type BrushSpec,
   type StrokePoint,
 } from "./brushes";
@@ -33,6 +36,8 @@ export interface WhiteboardCanvasProps {
   readOnly?: boolean;
   /** AI 正在畫的那一筆（逐點前綴＋筆尖）：畫在 live 層，不進文件。null＝沒有在畫 */
   aiPreview?: SketchPreview | null;
+  /** 線條穩定器強度 0-1（0＝關）：抖動修正，見 brushes.stabilizeNext */
+  stabilizer?: number;
 }
 
 /**
@@ -61,14 +66,16 @@ export function WhiteboardCanvas({
   referenceOpacity = 0.35,
   readOnly,
   aiPreview,
+  stabilizer = 0,
 }: WhiteboardCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const liveRef = useRef<HTMLCanvasElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
 
-  /** 進行中的一筆：放 ref 不放 state——每個 move 都 setState 會讓 React 成為筆跡的瓶頸 */
-  const drawing = useRef<{ pointerId: number; points: StrokePoint[]; last: { x: number; y: number; t: number } } | null>(null);
+  /** 進行中的一筆：放 ref 不放 state——每個 move 都 setState 會讓 React 成為筆跡的瓶頸。
+   *  brush 凍結在落筆當下（筆尾橡皮擦時是橡皮擦）——畫到一半換筆不影響這一筆。 */
+  const drawing = useRef<{ pointerId: number; points: StrokePoint[]; last: { x: number; y: number; t: number }; brush: BrushSpec } | null>(null);
   /** 手勢中的指標（兩指＝縮放平移）；同時用來做基本的手掌排除 */
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ dist: number; cx: number; cy: number } | null>(null);
@@ -229,23 +236,24 @@ export function WhiteboardCanvas({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, []);
 
-  /** 正在畫的一筆：整筆重畫在 live 層（只有一筆，成本固定） */
-  const paintLive = useCallback((points: StrokePoint[]) => {
+  /** 正在畫的一筆：整筆重畫在 live 層（只有一筆，成本固定）。
+   *  筆刷吃這一筆凍結的那支（筆尾橡皮擦），不吃當下選中的。 */
+  const paintLive = useCallback((points: StrokePoint[], strokeBrush: BrushSpec) => {
     const canvas = liveRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-    renderStroke(ctx, { id: "live", brush, points }, viewRef.current);
-  }, [brush, dpr]);
+    renderStroke(ctx, { id: "live", brush: strokeBrush, points }, viewRef.current);
+  }, [dpr]);
 
   /** 橡皮擦要挖的是已提交的那一層，所以直接畫在 base 上（live 層挖自己等於沒挖） */
-  const eraseOnBase = useCallback((points: StrokePoint[]) => {
+  const eraseOnBase = useCallback((points: StrokePoint[], strokeBrush: BrushSpec) => {
     const ctx = baseRef.current?.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    renderStroke(ctx, { id: "live-eraser", brush, points: points.slice(-2) }, viewRef.current);
-  }, [brush, dpr]);
+    renderStroke(ctx, { id: "live-eraser", brush: strokeBrush, points: points.slice(-2) }, viewRef.current);
+  }, [dpr]);
 
   const cancelStroke = useCallback(() => {
     drawing.current = null;
@@ -287,10 +295,19 @@ export function WhiteboardCanvas({
       return;
     }
     const pt = toBoard(e.clientX, e.clientY);
-    const point: StrokePoint = { ...pt, p: normalizePressure(e.pressure, e.pointerType === "pen") };
-    drawing.current = { pointerId: e.pointerId, points: [point], last: { x: pt.x, y: pt.y, t: e.timeStamp } };
-    if (brush.engine === "eraser") eraseOnBase([point, point]);
-    else paintLive([point]);
+    const isPen = e.pointerType === "pen";
+    // 手寫板筆尾橡皮擦（PointerEvent buttons 的 bit 32）：翻筆就擦，不必去筆刷櫃換
+    const eraserTail = isPen && (e.buttons & 32) !== 0;
+    const strokeBrush = eraserTail
+      ? (BUILTIN_BRUSHES.find((b) => b.engine === "eraser") ?? brush)
+      : brush;
+    const pressure = isPen
+      ? tiltBoost(normalizePressure(e.pressure, true), e.tiltX, e.tiltY)
+      : normalizePressure(e.pressure, false);
+    const point: StrokePoint = { ...pt, p: pressure };
+    drawing.current = { pointerId: e.pointerId, points: [point], last: { x: pt.x, y: pt.y, t: e.timeStamp }, brush: strokeBrush };
+    if (strokeBrush.engine === "eraser") eraseOnBase([point, point], strokeBrush);
+    else paintLive([point], strokeBrush);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -339,16 +356,21 @@ export function WhiteboardCanvas({
     const raw = typeof e.nativeEvent.getCoalescedEvents === "function" ? e.nativeEvent.getCoalescedEvents() : [e.nativeEvent];
     for (const sample of raw.length ? raw : [e.nativeEvent]) {
       const pt = toBoard(sample.clientX, sample.clientY);
-      const pressure = normalizePressure(sample.pressure, e.pointerType === "pen");
+      const isPen = e.pointerType === "pen";
+      // 手寫板：傾斜折進筆壓（側鋒變寬，見 brushes.tiltBoost）
+      const pressure = isPen
+        ? tiltBoost(normalizePressure(sample.pressure, true), sample.tiltX, sample.tiltY)
+        : normalizePressure(sample.pressure, false);
       // 速度用來讓毛筆飛白；時間戳缺漏時 speedBetween 會回 0（不會變成無限大）
       const speed = speedBetween(active.last, { x: pt.x, y: pt.y, t: sample.timeStamp });
       active.last = { x: pt.x, y: pt.y, t: sample.timeStamp };
       // 速度也壓一點壓力：沒有壓感的滑鼠也畫得出快細慢粗
-      const p = e.pointerType === "pen" ? pressure : Math.max(0.2, Math.min(1, pressure - Math.min(0.3, speed * 0.15)));
-      active.points.push({ x: pt.x, y: pt.y, p });
+      const p = isPen ? pressure : Math.max(0.2, Math.min(1, pressure - Math.min(0.3, speed * 0.15)));
+      // 線條穩定器：新點只朝目標走一部分，抖動被吸收（strength=0 時原樣通過）
+      active.points.push(stabilizeNext(active.points[active.points.length - 1] ?? null, { x: pt.x, y: pt.y, p }, stabilizer));
     }
-    if (brush.engine === "eraser") eraseOnBase(active.points);
-    else paintLive(active.points);
+    if (active.brush.engine === "eraser") eraseOnBase(active.points, active.brush);
+    else paintLive(active.points, active.brush);
   };
 
   const finishStroke = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -362,7 +384,7 @@ export function WhiteboardCanvas({
     if (active.points.length === 0) return;
     // 抽稀只在放手時做一次：畫的當下每個取樣點都要用（手感），存進文件的不必——
     // 共線的冗餘點佔了一半以上的體積與重畫成本（見 brushes.simplifyStroke）
-    onStrokeEnd({ id: nextStrokeId(), brush, points: simplifyStroke(active.points) });
+    onStrokeEnd({ id: nextStrokeId(), brush: active.brush, points: simplifyStroke(active.points) });
   };
 
   /** 滾輪：ctrl/⌘＝以游標為錨縮放；一般滾動＝平移（與繪圖軟體慣例一致） */

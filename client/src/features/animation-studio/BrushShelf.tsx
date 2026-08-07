@@ -36,6 +36,9 @@ export interface BrushShelfProps {
   onRemove: (id: string) => void;
   /** 收藏失敗（已滿）等訊息 */
   notice?: string;
+  /** 線條穩定器 0-1（跨筆刷的工作習慣，存在裝置偏好，見 studioStorage） */
+  stabilizer?: number;
+  onStabilizerChange?: (value: number) => void;
 }
 
 /**
@@ -55,6 +58,8 @@ export function BrushShelf({
   onCollect,
   onRemove,
   notice,
+  stabilizer = 0,
+  onStabilizerChange,
 }: BrushShelfProps) {
   const [collectName, setCollectName] = useState("");
   const [collecting, setCollecting] = useState(false);
@@ -185,7 +190,22 @@ export function BrushShelf({
               <span>收筆 <b>{Math.round(brush.taper * 100)}%</b></span>
               <input type="range" min={0} max={100} value={Math.round(brush.taper * 100)} onChange={(e) => set({ taper: Number(e.target.value) / 100 })} />
             </label>
-            <Hint>壓感只有觸控筆吃得到；滑鼠與手指改用「畫快一點就細一點」近似（飛白）。</Hint>
+            {onStabilizerChange && (
+              <label className="studio-slider">
+                <span>穩定器（抖動修正） <b>{Math.round(stabilizer * 100)}%</b></span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(stabilizer * 100)}
+                  onChange={(e) => onStabilizerChange(Number(e.target.value) / 100)}
+                />
+              </label>
+            )}
+            <Hint>
+              支援手寫板：壓感與傾斜側鋒（筆桿放倒線變寬）只有觸控筆吃得到，筆尾橡皮擦翻筆就能擦；
+              滑鼠與手指改用「畫快一點就細一點」近似（飛白）。穩定器吸收手抖、線更順——代價是筆跡稍微落後筆尖。
+            </Hint>
           </details>
         )}
 
