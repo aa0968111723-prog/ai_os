@@ -12,6 +12,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { resolutionForFormat } from "../../shared/options";
+import { TIMELINE_FPS, fcpTimeFromFrames, framesToSec, layoutTimeline, shotFrames } from "../../shared/timeline";
 import { extFromMime, openStoredReadStream } from "./storage";
 
 export function safeName(value: string): string {
@@ -201,24 +202,28 @@ export type TimelineScene = {
   ambiencePath?: string | null;
 };
 
-/** 這一鏡在時間軸上佔的秒數（與鏡頭表/字幕同規則：最少 3 秒） */
+/**
+ * 這一鏡在時間軸上佔的秒數。
+ * 規則本體在 `shared/timeline.ts`（前後端單一真相），這裡只是薄轉接——秒值一律由影格推回，
+ * 確保與 fcpxml/xmeml 的影格邊界同源。
+ */
 export function sceneDur(sc: { durationSec: number }): number {
-  return sc.durationSec > 0 ? sc.durationSec : 3;
+  return framesToSec(shotFrames(sc.durationSec));
 }
 
 /**
- * SRT 字幕（剪映/CapCut/Premiere 皆可直接匯入）：每鏡一塊字幕、依 durationSec 累加時間碼，
+ * SRT 字幕（剪映/CapCut/Premiere 皆可直接匯入）：每鏡一塊字幕、時間碼取自共用時間軸排版，
  * 文字用配音詞、沒填則用分鏡標題——確保每一鏡都有可對位的字幕塊（剪輯對位用途）。
+ *
+ * 時間碼走 `layoutTimeline` 而非自行累加浮點秒：字幕的切點必須與 fcpxml/xmeml 的影格邊界
+ * 是同一個切點，否則加上修剪之後字幕會隨片長逐漸與畫面錯開。
  */
 export function buildSrt(scenes: TimelineScene[]): string {
   const blocks: string[] = [];
-  let t = 0;
+  const { shots } = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
   for (const [i, sc] of scenes.entries()) {
-    const start = t;
-    const end = t + sceneDur(sc);
-    t = end;
     const text = (sc.voiceover ?? "").trim() || sc.title;
-    blocks.push(`${i + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}`);
+    blocks.push(`${i + 1}\n${srtTime(shots[i].startSec)} --> ${srtTime(shots[i].endSec)}\n${text}`);
   }
   return blocks.length ? blocks.join("\n\n") + "\n" : "";
 }
@@ -257,14 +262,7 @@ export type TimelineFileOpts = {
   height?: number;
 };
 
-// 時間軸統一 30fps：FCPXML 時間值必須對齊影格，秒數換成影格數再輸出
-const TIMELINE_FPS = 30;
-
-/** 秒 → FCPXML 時間值：整秒輸出「Ns」（可讀），非整秒輸出影格有理數「F/30s」（保證影格對齊） */
-function fcpTime(sec: number): string {
-  const frames = Math.round(sec * TIMELINE_FPS);
-  return frames % TIMELINE_FPS === 0 ? `${frames / TIMELINE_FPS}s` : `${frames}/${TIMELINE_FPS}s`;
-}
+// TIMELINE_FPS／fcpTimeFromFrames 已移至 shared/timeline.ts（前後端共用同一份時間規則）
 
 /** zip 相對路徑取檔名（asset 顯示名用） */
 function baseName(zipRelPath: string): string {
@@ -290,15 +288,11 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
   const resources: string[] = [];
   const spineItems: string[] = [];
   let assetSeq = 0;
-  // 累計影格：每鏡邊界先換成影格再回秒差，相鄰鏡頭必然無縫、無重疊
-  let cumSec = 0;
-  let cumFrames = 0;
+  // 累計影格由共用排版給（相鄰鏡頭必然無縫、無重疊）；srt/edl 吃的是同一份結果
+  const layout = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
   for (const [i, sc] of scenes.entries()) {
-    cumSec += sceneDur(sc);
-    const endFrames = Math.round(cumSec * TIMELINE_FPS);
-    const offset = fcpTime(cumFrames / TIMELINE_FPS);
-    const dur = fcpTime((endFrames - cumFrames) / TIMELINE_FPS);
-    cumFrames = endFrames;
+    const offset = fcpTimeFromFrames(layout.shots[i].startFrames);
+    const dur = fcpTimeFromFrames(layout.shots[i].durationFrames);
 
     const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
     const clipName = escXml(`${i + 1}_${sc.title}`);
@@ -378,7 +372,7 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     `  <library>`,
     `    <event name="${escXml(projectTitle)}">`,
     `      <project name="${escXml(projectTitle)}">`,
-    `        <sequence format="r1" duration="${fcpTime(cumFrames / TIMELINE_FPS)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">`,
+    `        <sequence format="r1" duration="${fcpTimeFromFrames(layout.totalFrames)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">`,
     `          <spine>`,
     ...(spineItems.length ? [spineItems.join("\n")] : []),
     `          </spine>`,
@@ -411,8 +405,8 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
   const audioItems2: string[] = []; // A2：音訊類場景素材
   const audioItems3: string[] = []; // A3：逐鏡環境音（與 A2 分軌，理由同 fcpxml 的 lane -3）
   let fileSeq = 0;
-  let cumSec = 0;
-  let startF = 0;
+  // 影格邊界與 fcpxml/srt/edl 同源（見 shared/timeline.ts）
+  const layout = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
   // 音訊 clipitem 模板（A1 旁白/A2 場景音訊共用）：file 帶 pathurl、不帶 duration
   const audioClip = (idPrefix: string, i: number, name: string, path: string, startF: number, endF: number) => {
     fileSeq += 1;
@@ -436,9 +430,9 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     ].join("\n");
   };
   for (const [i, sc] of scenes.entries()) {
-    cumSec += sceneDur(sc);
-    const endF = Math.round(cumSec * TIMELINE_FPS);
-    const durF = endF - startF;
+    const startF = layout.shots[i].startFrames;
+    const endF = layout.shots[i].endFrames;
+    const durF = layout.shots[i].durationFrames;
     const label = `${i + 1}_${sc.title}`;
 
     fileSeq += 1;
@@ -492,9 +486,8 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     if (sc.narrationPath) audioItems.push(audioClip("clipitem-a", i, `${i + 1}_旁白`, sc.narrationPath, startF, endF));
     if (sc.mediaPath && sc.mediaKind === "audio") audioItems2.push(audioClip("clipitem-sa", i, label, sc.mediaPath, startF, endF));
     if (sc.ambiencePath) audioItems3.push(audioClip("clipitem-amb", i, `${i + 1}_環境音`, sc.ambiencePath, startF, endF));
-    startF = endF;
   }
-  const totalF = startF;
+  const totalF = layout.totalFrames;
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!DOCTYPE xmeml>`,
@@ -549,18 +542,18 @@ function edlTime(totalSec: number): string {
  */
 export function buildEdl(scenes: TimelineScene[], projectTitle: string): string {
   const lines: string[] = [`TITLE: ${projectTitle.replace(/\s+/g, " ").trim() || "未命名"}`, "FCM: NON-DROP FRAME", ""];
-  let t = 0;
+  // 時間碼與 fcpxml/xmeml/srt 同源（見 shared/timeline.ts）——EDL 先前自行累加浮點秒
+  const { shots } = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
   for (const [i, sc] of scenes.entries()) {
-    const dur = sceneDur(sc);
+    const { startSec, endSec, durationSec: dur } = shots[i];
     const num = String(i + 1).padStart(3, "0");
     const clipName = sc.mediaPath ? baseName(sc.mediaPath) : sc.title.replace(/\s+/g, " ").trim();
     lines.push(
-      `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(t)} ${edlTime(t + dur)}`,
+      `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(startSec)} ${edlTime(endSec)}`,
       `* FROM CLIP NAME: ${clipName}`,
       ...(sc.mediaPath ? [`* SOURCE FILE: ${sc.mediaPath}`] : []),
       "",
     );
-    t += dur;
   }
   return lines.join("\n");
 }

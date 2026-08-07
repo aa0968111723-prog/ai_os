@@ -41,8 +41,41 @@ describe("buildSrt", () => {
   });
 
   it("時間碼跨小時進位正確(HH:MM:SS,mmm)", () => {
-    const srt = buildSrt([{ title: "長片", durationSec: 3661.25, voiceover: null }]);
-    expect(srt).toContain("00:00:00,000 --> 01:01:01,250");
+    // 3661.2s＝109836 影格（整數影格），避開量化以純測進位；量化本身另有下一條測試
+    const srt = buildSrt([{ title: "長片", durationSec: 3661.2, voiceover: null }]);
+    expect(srt).toContain("00:00:00,000 --> 01:01:01,200");
+  });
+
+  it("鏡長落在影格之間時，字幕切點吸到最近影格——與 fcpxml/xmeml 同一個切點", () => {
+    // 3661.25s＝109837.5 影格 → 吸到 109838 → 3661.2666…s。差不到半格（<17ms），
+    // 換來的是「字幕與畫面永遠切在同一格」，以及不會隨鏡數累積的浮點漂移。
+    const srt = buildSrt([{ title: "半格", durationSec: 3661.25, voiceover: null }]);
+    expect(srt).toContain("00:00:00,000 --> 01:01:01,267");
+  });
+});
+
+describe("四種格式的切點一致（shared/timeline 單一真相）", () => {
+  // 先前 srt/edl 各自累加浮點秒、fcpxml/xmeml 各自換算影格——四個獨立累加器。
+  // durationSec 是整數時四者巧合一致，一加上修剪（sub-second）就會漂開，
+  // 交付包裡字幕與畫面對不上且隨片長放大。這條測試把「同源」釘住。
+  const mixed: TimelineScene[] = [
+    { title: "A", durationSec: 2.5, voiceover: null },
+    { title: "B", durationSec: 0.1, voiceover: null },
+    { title: "C", durationSec: 3.4, voiceover: null },
+  ];
+
+  it("總長在 fcpxml / xmeml / srt / edl 四者相同", () => {
+    // 2.5+0.1+3.4 = 75+3+102 = 180 影格 = 6 秒整
+    expect(buildFcpxml(mixed, "P")).toContain(`duration="6s"`);
+    expect(buildXmeml(mixed, "P")).toContain("<duration>180</duration>");
+    expect(buildSrt(mixed)).toContain("--> 00:00:06,000");
+    expect(buildEdl(mixed, "P")).toContain("00:00:06:00");
+  });
+
+  it("中間鏡的切點也對齊：第二鏡起點在 2.5s＝75 影格", () => {
+    expect(buildFcpxml(mixed, "P")).toContain(`offset="75/30s"`);
+    expect(buildXmeml(mixed, "P")).toContain("<start>75</start>");
+    expect(buildSrt(mixed)).toContain("00:00:02,500 --> 00:00:02,600");
   });
 });
 
