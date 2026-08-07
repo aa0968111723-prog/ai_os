@@ -12,6 +12,7 @@ import { CharCount, ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
 import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { EntityImpactHint } from "./EntityImpactHint";
 
 export { MAX_GENERATE_SCENE_PRESETS };
 
@@ -187,6 +188,7 @@ export function ScenePresetCards({
                     palette={s.palette}
                     lighting={s.lighting ?? ""}
                     projectId={projectId}
+                    entityId={s.id}
                     reference={
                       s.referenceAssetId && s.referenceUrl
                         ? { id: s.referenceAssetId, url: s.referenceUrl, title: "場景參考圖" }
@@ -460,6 +462,7 @@ function SceneTextEditor({
   palette,
   lighting,
   projectId,
+  entityId,
   reference,
   pending,
   error,
@@ -471,6 +474,8 @@ function SceneTextEditor({
   lighting: string;
   /** 參考圖挑選器要用（上傳／從本專案素材庫挑） */
   projectId: string;
+  /** 這張卡的 id：查「改了會影響哪幾鏡」；新增中的卡還沒有 id，就不顯示影響 */
+  entityId?: string;
   /** 目前綁定的參考圖；null＝還沒綁 */
   reference: ReferenceImage | null;
   pending: boolean;
@@ -502,6 +507,7 @@ function SceneTextEditor({
       <textarea value={l} maxLength={SCENE_LIGHTING_MAX} disabled={pending} rows={2} onChange={(e) => setL(e.target.value)} />
       <label style={editLabel}>場景參考圖（選填：上傳或從素材庫選）</label>
       <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
+      {entityId && <EntityImpactHint projectId={projectId} kind="location" entityId={entityId} />}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button
           type="button"

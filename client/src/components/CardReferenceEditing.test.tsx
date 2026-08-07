@@ -79,6 +79,13 @@ vi.mock("../api", () => ({
         useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
+    // 編輯表單裡的「這張卡有幾鏡在用」提示（§23）；同理缺替身會讓表單渲染失敗。
+    // 這裡回 0 鏡＝提示不顯示，本檔專注在參考圖欄，不被影響提示干擾。
+    story: {
+      entityImpact: {
+        useQuery: () => ({ data: { shots: 0, shotsWithVisual: 0, generations: 0, sampleTitles: [] } }),
+      },
+    },
   },
 }));
 

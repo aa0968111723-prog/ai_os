@@ -152,7 +152,7 @@ jobs:
       - name: 依序跑各套 e2e(每套全新 DB + 重啟伺服器)
         run: |
           set -eu
-          for suite in auth models phase2 phase3 phase4 messages databases agent mcp push export; do
+          for suite in auth models phase2 phase3 phase4 story messages databases agent mcp push export; do
             echo "::group::e2e-$suite"
             # 全新資料庫：public 與 migration ledger 必須一起重置，避免 ledger 假稱已套用。
             PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \

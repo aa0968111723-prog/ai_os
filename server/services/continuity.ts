@@ -9,6 +9,8 @@ export type ContinuitySelection = {
   characterIds?: string[];
   scenePresetIds?: string[];
   propIds?: string[];
+  /** 這一鏡選用的造型（Story-first）：解析成各角色的服裝，併進角色錨點；不影響挑卡順序 */
+  lookIds?: string[];
 };
 
 export type ContinuityEntityKind = "character" | "scene" | "prop";
@@ -118,6 +120,28 @@ export async function buildContinuitySnapshot(
       : Promise.resolve([]),
   ]);
 
+  // 造型 → 角色：一個角色這一鏡只鎖一套（多選同角色時取第一套，避免錨點自相矛盾「穿米白外套且穿雨衣」）
+  const lookIds = [...new Set(selected.lookIds ?? [])];
+  const lookRows = lookIds.length
+    ? await db
+        .select({
+          characterId: schema.characterLooks.characterId,
+          name: schema.characterLooks.name,
+          costume: schema.characterLooks.costume,
+        })
+        .from(schema.characterLooks)
+        .where(and(eq(schema.characterLooks.projectId, projectId), inArray(schema.characterLooks.id, lookIds)))
+    : [];
+  // costume 可為空（只給造型名沒寫描述）——錨點會退回用造型名，不是漏掉這一鏡的造型
+  const lookByCharacter = new Map<string, { name: string; costume: string | null }>();
+  for (const row of lookRows) {
+    if (!lookByCharacter.has(row.characterId)) lookByCharacter.set(row.characterId, { name: row.name, costume: row.costume });
+  }
+  const charactersWithLook = characterRows.map((row) => {
+    const look = lookByCharacter.get(row.id);
+    return look ? { ...row, lookName: look.name, lookCostume: look.costume } : row;
+  });
+
   const requestedReferenceAssetIds = uniquePresent([
     ...characterRows.map((row) => row.referenceAssetId),
     ...sceneRows.map((row) => row.referenceAssetId),
@@ -134,7 +158,7 @@ export async function buildContinuitySnapshot(
   const usableReferenceAssetIds = new Set(usableReferenceRows.map((row) => row.id));
 
   return assembleContinuitySnapshot({
-    characterRows: sanitizeContinuityReferences(characterRows, usableReferenceAssetIds),
+    characterRows: sanitizeContinuityReferences(charactersWithLook, usableReferenceAssetIds),
     sceneRows: sanitizeContinuityReferences(sceneRows, usableReferenceAssetIds),
     propRows: sanitizeContinuityReferences(propRows, usableReferenceAssetIds),
     selected,

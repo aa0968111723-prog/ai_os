@@ -5,7 +5,7 @@ import { trpc } from "../api";
 import { DISCUSS_EVENT, flashAnchor } from "../discuss";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
-import { ConfirmButton, HelpTip } from "../components/interactions";
+import { ConfirmButton, HelpTip, useFocusTrap } from "../components/interactions";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import {
   isWorldviewReady,
@@ -51,6 +51,8 @@ import {
   type CostumeTab,
 } from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
+import { StoryStage } from "../features/story-workspace/StoryStage";
+import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
@@ -557,6 +559,14 @@ export function ProjectPage({ id }: { id: string }) {
     setCtxGroupOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
   /** C2：從創作台／分鏡來的 returnTo——定裝區顯示「回到原處」主 CTA */
   const [contextReturnTo, setContextReturnTo] = useState<ProjectContextReturnTo | null>(null);
+  /** 專案設定（二層；PE 計畫 §03）：定調拆散後的資料面收納處——非必經，需要微調才打開 */
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(settingsPanelRef, settingsOpen, () => setSettingsOpen(false));
+  // 舊書籤／推播裡的 #stage-context（重構前的「① 定調」）→ 新「① 故事」；TocNav 的別名表負責捲動
+  useEffect(() => {
+    if (window.location.hash === "#stage-context") history.replaceState(null, "", "#stage-story");
+  }, []);
   // Escape 關閉留言 sheet
   useEffect(() => {
     if (!messagesSheetOpen) return;
@@ -701,9 +711,11 @@ export function ProjectPage({ id }: { id: string }) {
   const assets = trpc.projects.assets.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   // 留言未讀數（餵 TocNav ③分鏡・交付 徽章）：15 秒輪詢已夠即時，同房夥伴留言另有 WS invalidate 立即刷新
   const unread = trpc.messages.unread.useQuery({ projectId: id }, { refetchInterval: 15000 });
-  // 「從這裡開始」步驟列與三幕進度 hint 用：讀既有查詢判定（與子元件共用快取，不額外增負擔）
+  // 「從這裡開始」步驟列與四段進度 hint 用：讀既有查詢判定（與子元件共用快取，不額外增負擔）
   const generations = trpc.generation.listByProject.useQuery({ projectId: id });
   const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
+  // 故事狀態（與 StoryStage 共用同一快取 key，零額外請求）：判定 ① 是否完成
+  const storyMeta = trpc.story.get.useQuery({ projectId: id });
   // 上下文摘要條的計數查詢：key 與各子元件內部完全相同 → 共用快取，零額外請求
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   const characters = trpc.characters.list.useQuery({ projectId: id });
@@ -824,8 +836,10 @@ export function ProjectPage({ id }: { id: string }) {
     if (key === "recycle") return "manage";
     return "world";
   };
-  /** 展開 ① 對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責） */
+  /** 展開專案設定對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責）。
+   *  重構後這些區塊都住在「專案設定」二層 sheet 裡——揭示前先把 sheet 打開。 */
   const expandContextForSelector = (target: string) => {
+    setSettingsOpen(true);
     const costume = costumeTabFromTarget(target);
     if (costume) {
       setCostumeTab(costume);
@@ -1001,27 +1015,35 @@ export function ProjectPage({ id }: { id: string }) {
     return true;
   };
 
-  // C3.1：「從這裡開始」三步＝①②③ 同口徑（定調 → 創作 → 交付）
+  // Story-first：「從這裡開始」四步＝①②③④ 同口徑（故事 → 分鏡 → 製作 → 成片）
   const sceneCount = scenes.data?.length ?? 0;
+  // typeof 守衛：hookOrder 測試以泛用 stub 餵 query 資料，content 可能不是字串——防禦性判定
+  const storyContent = storyMeta.data?.story?.content;
+  const storyReady = typeof storyContent === "string" && storyContent.trim().length > 0;
   const onboardSteps = [
     {
-      label: "① 定調",
-      done: isWorldviewReady(wv),
-      target: "#onboard-worldview",
-      hint: "填一句「這支片在講什麼」＋挑氣氛或畫風（可抄範例）",
+      label: "① 故事",
+      done: storyReady,
+      target: "#stage-story",
+      hint: "貼上或寫下故事，按「AI 解析」讓角色場景自動就位",
     },
     {
-      label: "② 創作",
+      label: "② 分鏡",
+      done: sceneCount > 0,
+      target: "#stage-board",
+      hint: "按「產生分鏡」把故事變成分鏡卡",
+    },
+    {
+      label: "③ 製作",
       done: !!generations.data?.some((g) => g.status === "done"),
       target: "#gen-prompt",
-      hint: "到創作台「直接生成」做出第一張成品",
+      hint: "從分鏡卡逐鏡生成，或到製作台自由出圖",
     },
     {
-      label: "③ 交付",
-      // 有分鏡即算進入交付站
-      done: sceneCount > 0,
+      label: "④ 成片",
+      done: !!scenes.data?.some((s) => s.assetId),
       target: "#stage-deliver",
-      hint: "把成品排進分鏡，再打包",
+      hint: "粗剪預覽、配音，打包交付",
     },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
@@ -1395,6 +1417,14 @@ export function ProjectPage({ id }: { id: string }) {
             可點「退出鏡像」或再點對方名字取消。
           </Hint>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setSettingsOpen(true)}
+          title="整體風格、角色、場景、道具、知識、素材、回收桶——需要微調時才進來"
+        >
+          <Icon name="SlidersHorizontal" size={14} /> 專案設定
+        </Button>
         {canArchive && (
           p.status === "archived" ? (
             <Button size="sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
@@ -1442,7 +1472,7 @@ export function ProjectPage({ id }: { id: string }) {
           style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Icon name="Lock" size={15} style={{ flexShrink: 0, color: "var(--primary-ink)" }} />
           <span style={{ fontSize: 13 }}>
-            你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「① 定調」底部的成員權限把你改成編輯者。
+            你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長把你的專案權限改成編輯者。
           </span>
         </Card>
       )}
@@ -1451,7 +1481,7 @@ export function ProjectPage({ id }: { id: string }) {
       <Card as="section" className="project-guide" data-fb="從這裡開始">
         <div className="project-guide__head">
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
-          <HelpTip text="三步對齊頁面三幕：定調 → 創作 → 交付。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
+          <HelpTip text="四步對齊頁面四段：故事 → 分鏡 → 製作 → 成片。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
           <span style={{ flex: "1 1 auto" }} />
           <span className="project-guide__progress" aria-label={`已完成 ${completedStepCount}／${onboardSteps.length} 步`}>
             <span className="project-guide__progress-track" aria-hidden>
@@ -1480,7 +1510,7 @@ export function ProjectPage({ id }: { id: string }) {
                 if (step.target === "#gen-prompt" || step.target === "#sec-studio" || step.target === "#sec-agent" || step.target === "#sec-assistant") {
                   revealWorkbenchAnchor(step.target, { projectId: id });
                 } else if (step.target === "#onboard-worldview" || step.target === "#stage-context") {
-                  // C3：展開 ① 再捲，避免只 scroll 到收合區塊
+                  // 舊目標相容：世界觀已移入專案設定二層——開 sheet 再捲
                   revealProjectContext("worldview", { projectId: id });
                 } else {
                   scrollToSelector(step.target);
@@ -1515,15 +1545,70 @@ export function ProjectPage({ id }: { id: string }) {
       />
       <div className="cols">
         <div className="stack">
-          {/* ① 定調：世界觀・定裝・知識庫・素材——AI 的共同大腦 */}
+          {/* ① 故事（Story Workspace；PE 計畫）：故事是來源——AI 在背景整理成世界資料與分鏡 */}
           <StageHead
-            id="stage-context"
+            id="stage-story"
             num="①"
-            title="定調"
-            desc="AI 全程共用的設定，填一次就好"
+            title="故事"
+            desc="先說故事——角色、場景、道具交給 AI 整理"
             accent="group-1"
-            hint={wvReady ? "已設定" : "待設定"}
+            hint={storyReady ? "已有故事" : "從這裡開始"}
           />
+          <StoryStage
+            projectId={id}
+            canEdit={canEdit}
+            mobileCompact={mobileCompact}
+            onOpenSettings={() => {
+              setSettingsOpen(true);
+              setToneTab("story");
+            }}
+          />
+          <StageLink text="AI 解析後角色、場景、道具自動就位；「產生分鏡」把故事變成分鏡卡" />
+
+          {/* ② 分鏡（Storyboard Center）：分鏡卡＝製作中心——所有生成從 Shot 出發、可追溯 */}
+          <StageHead
+            id="stage-board"
+            num="②"
+            title="分鏡"
+            desc="場與鏡的創作中心——畫面、引用、鏡頭語言、生成"
+            accent="group-2"
+            hint={sceneCount > 0 ? `${sceneCount} 鏡` : "待產生"}
+          />
+          <StoryboardStage
+            projectId={id}
+            canEdit={canEdit}
+            charIds={charIds}
+            sceneIds={sceneIds}
+            propIds={propIds}
+          />
+          <StageLink text="逐鏡出圖在卡上完成；要自由發想、跑範本、多步開拍就到 ③ 製作" />
+
+          {/* 專案設定（二層；PE 計畫 §03）：舊「定調」的資料面全數收納於此——
+              整體風格／角色與定裝／知識與素材／回收桶。非必經：主流程 0 個資料庫管理頁。 */}
+          {settingsOpen && createPortal(
+            <div className="psettings-root">
+              <button
+                type="button"
+                className="psettings-backdrop"
+                aria-label="關閉專案設定"
+                onClick={() => setSettingsOpen(false)}
+              />
+              <div
+                className="psettings-sheet"
+                role="dialog"
+                aria-modal="true"
+                aria-label="專案設定"
+                ref={settingsPanelRef}
+              >
+                <div className="psettings-sheet__head">
+                  <Icon name="SlidersHorizontal" size={16} />
+                  <strong>專案設定</strong>
+                  <Meta as="span" className="psettings-sheet__lede">全片預設——不擋創作，需要微調才進來</Meta>
+                  <Button size="sm" type="button" aria-label="關閉專案設定" onClick={() => setSettingsOpen(false)}>
+                    <Icon name="X" size={16} />
+                  </Button>
+                </div>
+                <div className="psettings-sheet__body">
           {/* 總覽卡：狀態一句話 + 子分頁切換 */}
           <div className="ctx-overview" role="region" aria-label="專案上下文一覽">
             <div className="ctx-overview__head">
@@ -1566,7 +1651,7 @@ export function ProjectPage({ id }: { id: string }) {
               }}
             >
               <Icon name="Sparkles" size={15} />
-              <span>故事與畫風</span>
+              <span>整體風格</span>
               {wvReady && <span className="tone-tab-badge tone-tab-badge--success">✓</span>}
             </button>
             <button
@@ -1687,7 +1772,8 @@ export function ProjectPage({ id }: { id: string }) {
                     size="sm"
                     variant="ghost"
                     onClick={() => {
-                      // 就緒後主 CTA：進創作台直接出圖
+                      // 就緒後主 CTA：關掉設定、進創作台直接出圖
+                      setSettingsOpen(false);
                       revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     }}
                   >
@@ -1704,8 +1790,9 @@ export function ProjectPage({ id }: { id: string }) {
                   canEdit={canEdit}
                   onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
                   onApplyAndGoStudio={(patch) => {
-                    // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal）
+                    // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal；設定 sheet 先關）
                     updateWv.mutate({ id, worldview: patch });
+                    setSettingsOpen(false);
                     revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     requestAnimationFrame(() => {
                       requestAnimationFrame(() => {
@@ -1986,7 +2073,10 @@ export function ProjectPage({ id }: { id: string }) {
                       }
                       splitting={splitFromOutline.isPending}
                       splitError={splitFromOutline.error?.message ?? null}
-                      onSeeScenes={() => scrollToSelector("#stage-deliver")}
+                      onSeeScenes={() => {
+                        setSettingsOpen(false);
+                        scrollToSelector("#stage-deliver");
+                      }}
                     />
 
                     <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
@@ -2230,6 +2320,7 @@ export function ProjectPage({ id }: { id: string }) {
                   // C2.3：僅在從該站來時 primary；null（直開頁）時兩鈕皆 ghost
                   variant={contextReturnTo === "studio" ? "primary" : "ghost"}
                   onClick={() => {
+                    setSettingsOpen(false);
                     returnFromContext("studio", { projectId: id });
                     setContextReturnTo(null);
                   }}
@@ -2241,6 +2332,7 @@ export function ProjectPage({ id }: { id: string }) {
                   size="sm"
                   variant={contextReturnTo === "scenes" ? "primary" : "ghost"}
                   onClick={() => {
+                    setSettingsOpen(false);
                     returnFromContext("scenes", { projectId: id });
                     setContextReturnTo(null);
                   }}
@@ -2315,6 +2407,7 @@ export function ProjectPage({ id }: { id: string }) {
                         nonce: (prev?.nonce ?? 0) + 1,
                         sourceAsset: a,
                       }));
+                      setSettingsOpen(false);
                       revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     }}
                   />
@@ -2345,14 +2438,17 @@ export function ProjectPage({ id }: { id: string }) {
               </CtxCollapse>
             </CtxGroup>
           </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
 
-          <StageLink text="設定好了就往下走 ② 創作，直接下指令出圖" />
-
-          {/* ② 創作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
+          {/* ③ 製作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
           <StageHead
             id="stage-create"
-            num="②"
-            title="創作"
+            num="③"
+            title="製作"
             desc="問 AI・生成・範本・計畫 — 同一入口"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
@@ -2384,12 +2480,12 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 交付：分鏡・排片・打包（SceneList 一體卡） */}
+          {/* ④ 成片：粗剪・配音管線・打包交付（SceneList 一體卡） */}
           <StageHead
             id="stage-deliver"
-            num="③"
-            title="交付"
-            desc="分鏡・排片・打包"
+            num="④"
+            title="成片"
+            desc="粗剪・配音・打包交付"
             accent="group-3"
             hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
           />

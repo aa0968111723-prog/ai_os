@@ -16,6 +16,17 @@ import {
 } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
+import {
+  shotCameraSchema,
+  shotPerformanceSchema,
+  mergeShotDirection,
+  describeDirectionChange,
+  SHOT_SIZE_OPTIONS,
+  SHOT_ANGLE_OPTIONS,
+  SHOT_MOVEMENT_OPTIONS,
+  type ShotCamera,
+  type ShotPerformance,
+} from "../../shared/story";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
@@ -148,6 +159,14 @@ const proposalSchema = z.discriminatedUnion("type", [
   // prompt＝建議畫面提示詞（發想落地：導演式 idea 直接存成可就地生成的草稿分鏡）
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().trim().min(1).max(2000) }),
+  // direct_shot（PE 計畫 §12）：只改「這一鏡」的鏡頭語言／表演。camera/performance 是 patch——
+  // 只帶要改的欄位，空字串＝清掉；沒帶的欄位一律不動（見 shared/story.ts mergeShotDirection）。
+  z.object({
+    type: z.literal("direct_shot"),
+    sceneNo: z.number().int().positive(),
+    camera: shotCameraSchema.optional(),
+    performance: shotPerformanceSchema.optional(),
+  }),
   // split_script 的 script＝腳本全文（要求 LLM 從使用者訊息原樣抄錄）；下限 20 擋「拆一句話」的誤提議，上限 8000 收斂成本
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
@@ -172,6 +191,7 @@ const ACTION_TYPE_NAMES = new Set([
   "update_scene",
   "create_scene",
   "run_workflow",
+  "direct_shot",
   "split_script",
   "plan_agent",
   "apply_worldview_chips",
@@ -183,6 +203,7 @@ const COERCED_ACTION_ANSWER: Record<string, string> = {
   create_scene: "我幫你準備了新增分鏡，確認下方就加入。",
   run_workflow: "我幫你準備了一條工作流，確認下方就執行。",
   update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
+  direct_shot: "我幫你調了這一鏡的鏡頭語言，確認下方就套用（其他欄位不動）。",
   apply_worldview_chips: "我幫你準備了世界觀基調建議（主軸／調性／風格）——確認下方就寫入專案（可再手動微調）。",
 };
 export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
@@ -205,6 +226,8 @@ type ResolvedAction =
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
+  // direct_shot：changes＝已算好的 before→after 差異行（§14 變更預覽，前端直接顯示不必重算）
+  | { type: "direct_shot"; label: string; sceneId: string; camera?: ShotCamera; performance?: ShotPerformance; changes: string[] }
   | { type: "split_script"; label: string; script: string }
   | { type: "plan_agent"; label: string; goal: string }
   | {
@@ -221,6 +244,13 @@ const actionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update_scene"), sceneId: z.string().uuid(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().trim().min(1).max(2000) }),
+  // 前端把 resolve 過的 sceneId 與 patch 原樣送回；label/changes 只給人看，不進這裡（伺服器自己重算並重新驗證歸屬）
+  z.object({
+    type: z.literal("direct_shot"),
+    sceneId: z.string().uuid(),
+    camera: shotCameraSchema.optional(),
+    performance: shotPerformanceSchema.optional(),
+  }),
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
   z.object({
     type: z.literal("plan_agent"),
@@ -851,6 +881,25 @@ ${sceneLines}
               styles: patch.styles,
               label: `套用基調：${summary.slice(0, 48)}${summary.length > 48 ? "…" : ""}`,
             });
+          } else if (a.type === "direct_shot") {
+            const scene = scenes[a.sceneNo - 1];
+            if (!scene) continue; // 幻覺的鏡次：不給使用者一顆註定失敗的按鈕
+            // 先在伺服器算出合併結果與差異——確認卡要顯示的是「真的會變成什麼」，不是模型的說法
+            const nextCamera = mergeShotDirection(scene.camera, a.camera);
+            const nextPerformance = mergeShotDirection(scene.performance, a.performance);
+            const changes = [
+              ...describeDirectionChange(scene.camera, nextCamera),
+              ...describeDirectionChange(scene.performance, nextPerformance),
+            ];
+            if (!changes.length) continue; // patch 其實沒改到東西：略過空提議
+            out.push({
+              type: "direct_shot",
+              sceneId: scene.id,
+              camera: a.camera,
+              performance: a.performance,
+              changes,
+              label: `調整第 ${a.sceneNo} 鏡「${scene.title}」：${changes.join("、")}`,
+            });
           } else if (a.type === "run_workflow") {
             const preset = getWorkflow(a.presetId);
             if (!preset) continue; // 幻覺的 presetId：不給使用者一顆註定失敗的按鈕
@@ -903,6 +952,7 @@ ${forceFinal
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script","script":"…"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
+- direct_shot：只調某一鏡的**鏡頭語言與表演**（sceneNo＋camera／performance，兩者皆可選但至少給一個）。camera 可填 shotSize（${SHOT_SIZE_OPTIONS.join("/")}）、angle（${SHOT_ANGLE_OPTIONS.join("/")}）、movement（${SHOT_MOVEMENT_OPTIONS.join("/")}）、focalLength、lighting、composition；performance 可填 emotion、gaze。**只填你要改的欄位**——沒填的欄位會原樣保留，填空字串 "" 才是清掉。使用者說「這一鏡再靠近一點／換低角度／眼神看遠一點／光再柔一點」時用這個，不要用 update_scene（那支只改標題／旁白／秒數）。
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60、prompt 建議畫面提示詞 2000 字內）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
@@ -1192,6 +1242,28 @@ export const assistantRouter = router({
           await db.update(schema.scenes).set({ [a.field]: v }).where(eq(schema.scenes.id, scene.id));
         }
         return { ok: true, kind: "update_scene" as const, message: "已更新分鏡" };
+      }
+
+      if (a.type === "direct_shot") {
+        // 歸屬重驗：sceneId 由前端送回，必須是同專案且未軟刪（比照 update_scene）
+        const [scene] = await db
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+        // 以「現值」重新合併，不是用 resolve 當下的快照——中間別人改過的欄位不能被這一顆按鈕吃掉
+        const camera = mergeShotDirection(scene.camera, a.camera);
+        const performance = mergeShotDirection(scene.performance, a.performance);
+        const changes = [
+          ...describeDirectionChange(scene.camera, camera),
+          ...describeDirectionChange(scene.performance, performance),
+        ];
+        if (!changes.length) {
+          return { ok: true, kind: "direct_shot" as const, message: "這一鏡已經是這個設定了，沒有變更" };
+        }
+        await db.update(schema.scenes).set({ camera, performance }).where(eq(schema.scenes.id, scene.id));
+        // 用標題不用 orderIndex＋1：orderIndex 不保證是連續的顯示鏡次（軟刪與插入會留洞），報錯鏡次比不報還糟
+        return { ok: true, kind: "direct_shot" as const, message: `已調整「${scene.title}」：${changes.join("、")}` };
       }
 
       if (a.type === "create_scene") {
