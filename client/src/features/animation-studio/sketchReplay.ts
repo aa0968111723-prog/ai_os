@@ -36,12 +36,15 @@ export function buildReplaySchedule(strokes: ReadonlyArray<Pick<Stroke, "points"
   const totalWeight = weights.reduce((sum, w) => sum + w, 0);
   const totalMs = Math.min(MAX_TOTAL_MS, Math.max(MIN_TOTAL_MS, totalWeight * 2));
 
+  // 單筆下限不得凌駕總長上限：300 筆 × 45ms 下限＝13.5 秒，「不超過 6.5 秒」就成了謊言。
+  // 筆數多到塞不下時，下限跟著縮——快歸快，總長承諾優先。
+  const effectiveMin = Math.min(MIN_STROKE_MS, totalMs / strokes.length);
   const entries: ReplayScheduleEntry[] = [];
   let clock = 0;
   for (let i = 0; i < strokes.length; i += 1) {
     entries.push({ strokeIndex: i, atMs: Math.round(clock) });
     const slice = (weights[i]! / totalWeight) * totalMs;
-    clock += Math.min(MAX_STROKE_MS, Math.max(MIN_STROKE_MS, slice));
+    clock += Math.min(MAX_STROKE_MS, Math.max(effectiveMin, slice));
   }
   return entries;
 }
