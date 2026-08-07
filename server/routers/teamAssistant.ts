@@ -602,13 +602,13 @@ export async function runTeamTool(
 }
 
 /** LLM 提議的派工：projectRef＝現況清單的專案代號（p1…），goal＝要交給該專案代理達成的目標 */
-const dispatchProposalSchema = z.object({ projectRef: z.string().max(8), goal: z.string().min(5).max(1000) });
+export const dispatchProposalSchema = z.object({ projectRef: z.string().max(8), goal: z.string().min(5).max(1000) });
 
 /**
  * LLM 提議的一道指令（L1 監督／L2 調度）。一律用代號（r1／t1／u1）——與派工同樣的理由：
  * uuid 會被幻覺，代號對不到就整筆丟掉，使用者不會拿到一顆註定失敗的按鈕。
  */
-const commandProposalSchema = z.object({
+export const commandProposalSchema = z.object({
   kind: z.enum(["approve_run", "stop_run", "discard_run", "retry_run", "assign_task"]),
   ref: z.string().max(8),
   assigneeRef: z.string().max(8).optional(),
@@ -616,7 +616,7 @@ const commandProposalSchema = z.object({
   priority: taskPrioritySchema.optional(),
   reason: z.string().max(200).optional(),
 });
-const teamReplySchema = z.object({
+export const teamReplySchema = z.object({
   answer: z.string().min(1).max(4000),
   // S5 決策軌跡：結構化結論＋依據的上下文標籤。刻意不收「思考過程」——
   // 兩者都會再過 sanitize（rationale 截長、contextUsed 走白名單），模型講什麼不等於前端顯示什麼。

@@ -25,6 +25,7 @@ import { insightsRouter } from "./insights";
 import { notesRouter } from "./notes";
 import { scheduleRouter } from "./schedule";
 import { teamAssistantRouter } from "./teamAssistant";
+import { globalAssistantRouter } from "./globalAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
@@ -71,6 +72,7 @@ export const appRouter = router({
   notes: notesRouter,
   schedule: scheduleRouter,
   teamAssistant: teamAssistantRouter,
+  globalAssistant: globalAssistantRouter,
   mcpTokens: mcpTokensRouter,
   databases: databasesRouter,
   directory: directoryRouter,
