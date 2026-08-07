@@ -7271,6 +7271,30 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
    一個合理下限，免得對話框窄到每行兩個字 */
 .global-assistant { min-width: min(420px, calc(100vw - 32px)); }
 
+/* ── AI 調度（組代理 campaign）：只有「可總指揮」的人看得到，渲染在助手 sheet 最上方 ── */
+.campaign-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 2px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 12px;
+}
+.campaign-panel__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.campaign-panel__field { display: flex; flex-direction: column; gap: 4px; }
+.campaign-panel__label { font-size: var(--fs-12); color: var(--ink-2); }
+.campaign-panel__budget { display: flex; flex-direction: column; gap: 6px; }
+/* 選項換行而不是橫向捲：html/body 是 overflow-x: clip，捲不出去的東西會被硬裁掉 */
+.campaign-panel__choices { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.campaign-card { display: flex; flex-direction: column; gap: 6px; }
+.campaign-card__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* 目標可能很長：min-width 0 讓它在 flex 容器裡真的換行，而不是把卡片撐爆 390px */
+.campaign-card__goal { min-width: 0; overflow-wrap: anywhere; }
+.campaign-card__steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.campaign-card__step { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.campaign-card__step-title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.campaign-card__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.campaign-card__addbudget { display: flex; flex-direction: column; gap: 4px; flex: 1 0 100%; }
+
 /* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
 .agent-hud {
   position: fixed; left: 0; right: 0; z-index: 43;
