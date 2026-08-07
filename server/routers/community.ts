@@ -3,7 +3,7 @@
  *
  * PR1：publishFromSource / unpublish / listPublic / get / recordUse / myPosts
  * Phase D：toggleLike（community_likes + likeCount）
- * 之後 PR：remixToProject、channel 篩選、完整設定卡 snapshot
+ * Phase E：自動細化分類（auto_tags facet 篩選 + facetCounts）、上傳直發、重新上架
  */
 import { z } from "zod";
 import { and, desc, eq, lt, sql, inArray } from "drizzle-orm";
@@ -15,9 +15,25 @@ import {
   COMMUNITY_SOURCE_TYPES,
   COMMUNITY_MEDIA_KINDS,
 } from "../db/schema/community";
+import {
+  fileNameFromAssetMeta,
+  healInspirationTaxonomy,
+  taxonomyFieldsFor,
+} from "../services/communityTaxonomy";
+import { isKnownInspirationTag } from "../../shared/inspirationTaxonomy";
 
 const sourceTypeSchema = z.enum(COMMUNITY_SOURCE_TYPES);
 const mediaKindSchema = z.enum(COMMUNITY_MEDIA_KINDS);
+
+/**
+ * 細化分類標籤只能是字典裡的值。
+ * 不是為了防注入（下面一律走 bind 參數），而是為了讓「打錯字＝空結果」變成明確的 400，
+ * 而不是使用者盯著一個永遠空白的頻道猜自己哪裡做錯。
+ */
+const facetTagSchema = z
+  .string()
+  .max(60)
+  .refine(isKnownInspirationTag, { message: "不認得的分類標籤" });
 
 /** 從來源列推 mediaKind */
 function inferMediaKind(sourceType: string, kindOrMime?: string | null): (typeof COMMUNITY_MEDIA_KINDS)[number] {
@@ -47,6 +63,12 @@ export const communityRouter = router({
         mediaKind: mediaKindSchema.optional(),
         sourceType: sourceTypeSchema.optional(),
         tag: z.string().max(50).optional(),
+        /**
+         * 細化分類篩選（`facet:value`）。多個標籤是 AND：
+         * 選了「城市」再選「夜景」要收斂到兩者皆是的貼文，而不是聯集——
+         * 聯集會讓每多選一個條件結果就變多，跟使用者按下去的意圖完全相反。
+         */
+        facets: z.array(facetTagSchema).max(8).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -59,6 +81,9 @@ export const communityRouter = router({
       // 簡單 tags 包含（jsonb @> 語意用 sql）
       if (input.tag) {
         conditions.push(sql`${schema.communityPosts.tags} @> ${JSON.stringify([input.tag])}::jsonb`);
+      }
+      for (const facet of input.facets ?? []) {
+        conditions.push(sql`${schema.communityPosts.autoTags} @> ${JSON.stringify([facet])}::jsonb`);
       }
 
       const orderBy =
@@ -79,6 +104,10 @@ export const communityRouter = router({
         nextCursor = next.publishedAt.toISOString();
       }
 
+      // 字典版本落後的列就地補算（見 services/communityTaxonomy.ts）：
+      // 舊貼文不必等 backfill 就有細化分類，畫面上不會出現「沒有分類」的破口
+      const healed = await healInspirationTaxonomy(rows);
+
       // Phase D：標出目前使用者已按讚的貼（feed 愛心可點亮）
       const likedIds = new Set<string>();
       if (rows.length > 0) {
@@ -98,8 +127,47 @@ export const communityRouter = router({
       }
 
       return {
-        items: rows.map((r) => ({ ...r, likedByMe: likedIds.has(r.id) })),
+        items: healed.map((r) => ({ ...r, likedByMe: likedIds.has(r.id) })),
         nextCursor,
+      };
+    }),
+
+  /**
+   * 細化分類的可選項與數量。
+   *
+   * 為什麼要回數量：篩選 chip 沒有數字時，使用者只能一個一個點開才知道哪些是空的——
+   * 點到空結果的挫折會直接讓人放棄整排篩選。有數字就變成「哪一格有東西」一眼可見。
+   *
+   * 計數與目前的篩選條件同步（drill-down）：已經選了「城市」時，其他 chip 的數字
+   * 是「城市之中還有幾則」，不是全站總數，否則點下去又是空的。
+   */
+  facetCounts: authedProcedure
+    .input(
+      z.object({
+        mediaKind: mediaKindSchema.optional(),
+        sourceType: sourceTypeSchema.optional(),
+        facets: z.array(facetTagSchema).max(8).optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const filters = [eq(schema.communityPosts.status, "published")];
+      if (input.mediaKind) filters.push(eq(schema.communityPosts.mediaKind, input.mediaKind));
+      if (input.sourceType) filters.push(eq(schema.communityPosts.sourceType, input.sourceType));
+      for (const facet of input.facets ?? []) {
+        filters.push(sql`${schema.communityPosts.autoTags} @> ${JSON.stringify([facet])}::jsonb`);
+      }
+
+      // jsonb 陣列展開後分組計數；auto_tags 的值域封閉（字典），不會長出無界的分組數
+      const result = await db.execute<{ tag: string; count: number }>(sql`
+        select tag, count(*)::int as count
+        from ${schema.communityPosts},
+             lateral jsonb_array_elements_text(${schema.communityPosts.autoTags}) as tag
+        where ${and(...filters)}
+        group by tag
+        order by count desc, tag asc
+      `);
+      return {
+        counts: result.rows.map((r) => ({ tag: r.tag, count: Number(r.count) })),
       };
     }),
 
@@ -118,7 +186,10 @@ export const communityRouter = router({
           and(eq(schema.communityLikes.postId, input.id), eq(schema.communityLikes.userId, ctx.auth.user.id)),
         )
         .limit(1);
-      return { ...row, likedByMe: !!liked };
+      // 分享連結的落點就是這裡：那一則不一定在任何人的 feed 頁裡出現過，
+      // 沒有這行的話點連結進來的人會看到一則沒有分類的貼文
+      const [healed] = await healInspirationTaxonomy([row]);
+      return { ...healed, likedByMe: !!liked };
     }),
 
   /** 作者自己的發布列表（含 hidden） */
@@ -148,7 +219,7 @@ export const communityRouter = router({
         const next = rows.pop()!;
         nextCursor = next.publishedAt.toISOString();
       }
-      return { items: rows, nextCursor };
+      return { items: await healInspirationTaxonomy(rows), nextCursor };
     }),
 
   /**
@@ -163,6 +234,15 @@ export const communityRouter = router({
         title: z.string().min(1).max(200).optional(),
         description: z.string().max(2000).optional(),
         tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+        /**
+         * 上傳素材直發用：素材本身沒有 prompt 欄位，但作者手上有
+         * （在別的工具生的圖、外站帶進來的成品）。有 prompt 才有「一鍵再用」，
+         * 沒有的話上傳的素材在頻道裡只能看不能用。
+         * 只對 sourceType=asset 生效——提示詞／生成紀錄的 prompt 是系統快照的事實，
+         * 不開放用貼文覆寫，否則「Show Prompt」會與實際生成用的內容不符。
+         */
+        promptText: z.string().max(20_000).optional(),
+        modelId: z.string().max(120).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -178,6 +258,8 @@ export const communityRouter = router({
       let propIds: string[] | null = null;
       let sourceProjectId: string | null = null;
       let sourceGroupId: string | null = null;
+      /** 上傳素材的原始檔名——只餵給自動分類，不外顯 */
+      let fileName: string | null = null;
 
       if (input.sourceType === "prompt") {
         const [row] = await db.select().from(schema.prompts).where(eq(schema.prompts.id, input.sourceId));
@@ -218,6 +300,10 @@ export const communityRouter = router({
         mediaKind = inferMediaKind("asset", row.kind);
         sourceProjectId = row.projectId;
         sourceGroupId = row.groupId;
+        fileName = fileNameFromAssetMeta(row.meta);
+        // 素材沒有自己的 prompt／模型欄位，作者填了就收下（見 input.promptText 註解）
+        promptText = input.promptText?.trim() || null;
+        modelId = input.modelId?.trim() || null;
       } else if (input.sourceType === "character") {
         const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.sourceId));
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "角色卡不存在" });
@@ -258,6 +344,16 @@ export const communityRouter = router({
       if (!title) title = "未命名";
 
       const now = new Date();
+      // 自動細化分類：發布當下算一次，之後字典升級由讀取端自我修復
+      const taxonomy = taxonomyFieldsFor({
+        mediaKind,
+        sourceType: input.sourceType,
+        title,
+        description: input.description,
+        promptText,
+        tags: input.tags,
+        fileName,
+      });
       const values = {
         authorId: userId,
         sourceType: input.sourceType,
@@ -275,6 +371,7 @@ export const communityRouter = router({
         scenePresetIds,
         propIds,
         tags: input.tags ?? [],
+        ...taxonomy,
         status: "published" as const,
         publishedAt: now,
         updatedAt: now,
@@ -328,6 +425,58 @@ export const communityRouter = router({
         .where(eq(schema.communityPosts.id, input.postId))
         .returning();
       return updated;
+    }),
+
+  /**
+   * 作者重新上架（hidden → published）。
+   *
+   * 沒有這支的話「下架」是單向門：作者要把貼文放回頻道只能回原專案重發一次，
+   * 而重發會換一個 id——所有分享出去的連結、讚數與再用次數全部歸零。
+   * 重新上架時順手用現行字典重算分類（下架期間字典可能已經升級）。
+   */
+  republish: authedProcedure
+    .input(z.object({ postId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [post] = await db
+        .select()
+        .from(schema.communityPosts)
+        .where(eq(schema.communityPosts.id, input.postId));
+      if (!post) throw new TRPCError({ code: "NOT_FOUND" });
+      if (post.authorId !== ctx.auth.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只能上架自己的貼文" });
+      }
+      if (post.status === "published") return post;
+      if (post.status !== "hidden") {
+        // removed＝管理員下架，作者不能自行復原
+        throw new TRPCError({ code: "FORBIDDEN", message: "這則貼文已被管理員下架，無法自行重新上架" });
+      }
+
+      const taxonomy = taxonomyFieldsFor({
+        mediaKind: post.mediaKind,
+        sourceType: post.sourceType,
+        title: post.title,
+        description: post.description,
+        promptText: post.promptText,
+        tags: post.tags,
+      });
+
+      try {
+        const [updated] = await db
+          .update(schema.communityPosts)
+          .set({ status: "published", ...taxonomy, updatedAt: new Date() })
+          .where(eq(schema.communityPosts.id, input.postId))
+          .returning();
+        return updated;
+      } catch (err) {
+        // community_posts_source_active_uq：同來源已另有一則上架中（下架後又重發過）
+        if (String(err).includes("community_posts_source_active_uq")) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "同一個來源已經有另一則貼文在頻道上——請先下架那一則，或直接使用它",
+          });
+        }
+        throw err;
+      }
     }),
 
   /** 一鍵再用時呼叫，增加 useCount */

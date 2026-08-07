@@ -1,0 +1,406 @@
+/**
+ * 靈感頻道視覺牆（Flow 風格）。
+ *
+ * 為什麼另開一支 CSS：這是全站唯一一塊**深色劇場**。站內主色是暖象牙紙
+ * （--bg #f3f0e8），素材縮圖貼在紙上時，每張圖的白邊都會跟背景打架，
+ * 眼睛先看到的是卡片而不是作品。把牆放進一塊深色舞台後，圖自己會發光——
+ * 這正是 Flow／Flow TV 的做法，也是所有以作品為主角的介面的做法。
+ *
+ * 深色只在 .flow-stage 裡面生效（局部變數），不動全站主題，
+ * 也不需要任何 dark mode 基礎建設。
+ *
+ * 命名一律 flow-* 前綴：與 styles.css 既有 class 零碰撞，刪除時整支拿掉即可。
+ */
+
+.flow-stage {
+  /* 舞台自己的色票。與站內 token 同語系（暖調），只是把亮度翻過來 */
+  --flow-bg: #14120f;
+  --flow-bg-2: #1d1a16;
+  --flow-surface: #211d19;
+  --flow-ink: #f6f2ea;
+  --flow-ink-dim: rgba(246, 242, 234, 0.66);
+  --flow-ink-faint: rgba(246, 242, 234, 0.42);
+  --flow-line: rgba(246, 242, 234, 0.12);
+  --flow-line-strong: rgba(246, 242, 234, 0.26);
+  --flow-accent: #f2b24c;
+  --flow-radius: 18px;
+
+  position: relative;
+  margin-top: 16px;
+  padding: 16px 14px 22px;
+  border-radius: 24px;
+  color: var(--flow-ink);
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(242, 178, 76, 0.16) 0%, transparent 55%),
+    radial-gradient(90% 70% at 88% 8%, rgba(120, 150, 255, 0.13) 0%, transparent 60%),
+    linear-gradient(180deg, var(--flow-bg-2) 0%, var(--flow-bg) 42%);
+  box-shadow: 0 18px 48px rgba(20, 18, 15, 0.28);
+  overflow: hidden;
+}
+
+/* 舞台裡的所有連結沿用舞台文字色，不要掉回站內深色連結（在黑底上看不見） */
+.flow-stage a { color: var(--flow-accent); }
+
+.flow-stage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.flow-stage__title {
+  font-size: var(--fs-13);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--flow-ink-faint);
+}
+
+.flow-stage__count { font-size: var(--fs-12); color: var(--flow-ink-dim); }
+
+/* ── 篩選列 ───────────────────────────────────────────── */
+
+.flow-facets { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+.flow-facets__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 分類多的時候橫向捲，不要換行把整片牆往下推 */
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+  /* 捲動圍堵：手機上橫捲 chip 不該連帶把整頁往回彈 */
+  overscroll-behavior-x: contain;
+}
+
+.flow-facets__label {
+  flex: 0 0 auto;
+  font-size: var(--fs-11);
+  color: var(--flow-ink-faint);
+  min-width: 3.4em;
+}
+
+.flow-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--flow-line);
+  background: rgba(246, 242, 234, 0.05);
+  color: var(--flow-ink-dim);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.flow-chip:hover:not(:disabled) { background: rgba(246, 242, 234, 0.1); color: var(--flow-ink); }
+
+.flow-chip[aria-pressed="true"] {
+  background: var(--flow-accent);
+  border-color: var(--flow-accent);
+  color: #241c0d;
+  font-weight: 600;
+}
+
+.flow-chip__count {
+  font-size: var(--fs-11);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 牆（masonry） ────────────────────────────────────── */
+
+.flow-wall {
+  columns: 3;
+  column-gap: 12px;
+}
+
+.flow-tile {
+  display: block;
+  width: 100%;
+  break-inside: avoid;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 1px solid var(--flow-line);
+  border-radius: var(--flow-radius);
+  background: var(--flow-surface);
+  color: inherit;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.flow-tile:hover,
+.flow-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--flow-line-strong);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+}
+
+.flow-tile__media {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* 圖還沒載入時先撐出一塊深色，避免整面牆在載入期間跳動重排 */
+  min-height: 96px;
+  background: linear-gradient(160deg, rgba(246, 242, 234, 0.07), rgba(246, 242, 234, 0.02));
+  object-fit: cover;
+}
+
+/**
+ * 純文字貼文（提示詞／設定卡）也要是一塊「作品」。
+ * 用貼文 id 推出的色相（--flow-hue，由 JSX 寫入）生成專屬底色——
+ * 沒有縮圖的貼文不會變成一排一模一樣的灰盒子，掃視時仍能辨識。
+ */
+.flow-tile__poster {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 168px;
+  padding: 16px 15px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, hsl(var(--flow-hue, 38) 62% 38% / 0.85) 0%, transparent 62%),
+    linear-gradient(150deg, hsl(var(--flow-hue, 38) 44% 22%) 0%, #191612 78%);
+}
+
+.flow-tile__poster-quote {
+  font-size: var(--fs-14);
+  line-height: 1.55;
+  color: var(--flow-ink);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.flow-tile__badges {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  right: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.flow-tile__badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  color: var(--flow-ink);
+  background: rgba(20, 18, 15, 0.62);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--flow-line);
+}
+
+.flow-tile__badge--primary {
+  background: rgba(242, 178, 76, 0.9);
+  border-color: transparent;
+  color: #241c0d;
+  font-weight: 600;
+}
+
+/* 底部字幕層：Flow 的核心——prompt 直接壓在畫面上，不必點進去就能偷看 */
+.flow-tile__scrim {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 26px 12px 11px;
+  background: linear-gradient(180deg, transparent 0%, rgba(12, 10, 8, 0.82) 58%, rgba(12, 10, 8, 0.94) 100%);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.flow-tile:hover .flow-tile__scrim,
+.flow-tile:focus-visible .flow-tile__scrim { opacity: 1; transform: none; }
+
+/**
+ * 純文字貼文的字幕**不能**用 .flow-tile__scrim。
+ * scrim 是絕對定位、疊在圖上；文字卡沒有圖，卡面內容自己就流到底部，
+ * 兩者會直接壓在一起（實測：標題與引文疊字）。這裡改成正常流的一列。
+ */
+.flow-tile__caption {
+  padding: 10px 12px 12px;
+  background: rgba(12, 10, 8, 0.42);
+  border-top: 1px solid var(--flow-line);
+}
+
+.flow-tile__prompt {
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--flow-ink);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.flow-tile__meta {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--fs-11);
+  color: var(--flow-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-tile__play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 18, 15, 0.6);
+  border: 1px solid var(--flow-line-strong);
+  color: var(--flow-ink);
+  pointer-events: none;
+}
+
+/* ── 細節浮層（lightbox） ─────────────────────────────── */
+
+.flow-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(10, 9, 7, 0.82);
+  backdrop-filter: blur(10px);
+}
+
+.flow-lightbox__panel {
+  position: relative;
+  width: min(980px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 22px;
+  border: 1px solid var(--flow-line, rgba(246, 242, 234, 0.12));
+  background: linear-gradient(180deg, #211d19 0%, #16130f 100%);
+  color: #f6f2ea;
+  padding: 18px;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.5);
+}
+
+.flow-lightbox__media {
+  display: block;
+  width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+  border-radius: 14px;
+  background: #0e0c0a;
+}
+
+.flow-lightbox__prompt {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(246, 242, 234, 0.12);
+  background: rgba(246, 242, 234, 0.05);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.flow-lightbox__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* 舞台內的按鈕：站內 primitives 的亮色底在黑底上會炸眼，改成描邊玻璃 */
+.flow-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(246, 242, 234, 0.2);
+  background: rgba(246, 242, 234, 0.07);
+  color: #f6f2ea;
+  font-size: var(--fs-13);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.flow-action:hover:not(:disabled) { background: rgba(246, 242, 234, 0.14); }
+.flow-action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.flow-action--primary {
+  background: var(--flow-accent, #f2b24c);
+  border-color: transparent;
+  color: #241c0d;
+  font-weight: 600;
+}
+
+.flow-action--primary:hover:not(:disabled) { background: #ffc164; }
+
+.flow-empty {
+  padding: 44px 16px;
+  text-align: center;
+  color: var(--flow-ink-dim);
+  font-size: var(--fs-13);
+  line-height: 1.7;
+}
+
+/* ── 響應式 ───────────────────────────────────────────── */
+
+@media (max-width: 1080px) { .flow-wall { columns: 2; } }
+
+@media (max-width: 560px) {
+  .flow-stage { padding: 12px 10px 18px; border-radius: 20px; }
+  .flow-wall { columns: 1; }
+  /* 觸控目標下限 44px。同樣的規則在 (hover: none) 也寫了一次，兩條都要：
+     手機瀏覽器對 hover 的回報不一致（桌面模式、外接滑鼠、部分 WebView 會回 hover: hover），
+     只靠指標特徵會讓一部分真手機掉回 31px 的桌機尺寸。 */
+  .flow-chip { min-height: 44px; padding: 10px 14px; }
+  .flow-action { min-height: 44px; }
+  .flow-lightbox { padding: 0; align-items: flex-end; }
+  .flow-lightbox__panel {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(18px + var(--safe-bottom, 0px));
+  }
+}
+
+/**
+ * 觸控裝置沒有 hover：字幕層若只在 hover 出現，手機使用者永遠看不到 prompt，
+ * 而 prompt 正是這個頻道的全部價值。一律常駐。
+ */
+@media (hover: none) {
+  .flow-tile__scrim { opacity: 1; transform: none; }
+  .flow-tile:hover { transform: none; box-shadow: none; }
+  /* 觸控目標下限：站內規範 44px */
+  .flow-chip { min-height: 44px; padding: 10px 14px; }
+  .flow-action { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-tile,
+  .flow-tile__scrim { transition: none; }
+  .flow-tile:hover,
+  .flow-tile:focus-visible { transform: none; }
+}

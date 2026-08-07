@@ -164,6 +164,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 靈感頻道（Flow-TV）：把成品／筆記等來源發布成站內公開貼文
   "community.publishFromSource": "發布到靈感頻道",
   "community.unpublish": "從靈感頻道下架",
+  "community.republish": "重新上架靈感貼文",
   "community.recordUse": "記錄靈感被引用一次",
   "community.toggleLike": "按讚／取消按讚靈感貼文",
   // 個人 AI 金鑰（BYOK）：只記動作與供應商，金鑰本身不落審計
