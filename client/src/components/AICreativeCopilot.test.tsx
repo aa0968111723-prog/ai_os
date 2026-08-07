@@ -21,10 +21,12 @@ vi.mock("../api", () => {
 });
 
 describe("AICreativeCopilot", () => {
-  it("renders copilot header and quick prompt pills", () => {
+  it("renders quick prompt pills（面板上只剩能按的東西：說明文字已全部移除）", () => {
     render(<AICreativeCopilot groupId="grp-123" />);
 
-    expect(screen.getByText("AI 創作助理")).toBeInTheDocument();
+    // 名牌「AI 創作助理」與那行說明是文案不是功能，已移除；身分改由 aria-label 承擔
+    expect(screen.queryByText("AI 創作助理")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("向 AI 助手提問")).toBeInTheDocument();
     expect(screen.getByText("爆款短片主題")).toBeInTheDocument();
     expect(screen.getByText("分鏡腳本規劃")).toBeInTheDocument();
     expect(screen.getByText("全組專案進度")).toBeInTheDocument();
@@ -35,7 +37,7 @@ describe("AICreativeCopilot", () => {
     const user = userEvent.setup();
     render(<AICreativeCopilot groupId="grp-123" />);
 
-    const textarea = screen.getByPlaceholderText(/輸入任何想發想的主題/);
+    const textarea = screen.getByLabelText("向 AI 助手提問");
     await user.type(textarea, "企劃一個夏日飲品短片");
     expect(textarea).toHaveValue("企劃一個夏日飲品短片");
   });

@@ -1,7 +1,7 @@
-import { lazy, Suspense, useRef, type RefObject } from "react";
+import { lazy, Suspense, type RefObject } from "react";
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
-import { Chip, Meta } from "../../components/ui";
+import { Meta } from "../../components/ui";
 
 /**
  * 助手本體延後載入。
@@ -51,7 +51,6 @@ export function GlobalAssistantSheet({
   triggerRef: RefObject<HTMLElement | null>;
 }) {
   const [, navigate] = useLocation();
-  const headingRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <MenuSurface
@@ -66,11 +65,9 @@ export function GlobalAssistantSheet({
       className="global-assistant"
       triggerRef={triggerRef}
     >
-      <div className="global-assistant__head" ref={headingRef}>
-        <strong>AI 助手</strong>
-        {/* 範圍要寫出來：使用者在專案頁按球時，看到的是組級視角而不是這個專案 */}
-        <Chip>範圍：整個組</Chip>
-      </div>
+      {/* 可見標題與「範圍：整個組」的 chip 拿掉了：畫面上只留輸入框與四周的感知光。
+          範圍資訊沒有消失——MenuSurface 的 label="AI 助手" 仍是這張對話框的
+          aria-label，助手的視野本來就一律是組級，沒有第二種可選。 */}
       {groupId ? (
         <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
         <AICreativeCopilot
