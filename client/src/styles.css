@@ -2773,59 +2773,75 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .visual-journey--compact .visual-journey__item > button,
 .visual-journey--compact .visual-journey__item > div { min-height: 58px; padding: 8px; box-shadow: none; }
 
-/* ── 筆記排程：功能入口先可掃讀，展開後再處理詳細表單。 ── */
-.planner-jump-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 6px;
+/* ── 筆記排程：內容先出現，設定與說明退到旁邊。 ──
+   跳轉列曾是三張大卡（手機還橫捲），但它們唯一的功能是捲到同一畫面裡的下一段——
+   代價是整個第一屏都看不到任何行程或筆記。改成一列膠囊。 */
+.planner-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 8px;
 }
-.planner-jump-grid button {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+.planner-jump button {
+  min-height: 38px;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 14px;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--card) 88%, transparent);
-  text-align: left;
+  font-size: var(--fs-13);
 }
-.planner-jump-grid button > span:nth-child(2) { min-width: 0; display: grid; }
-.planner-jump-grid button strong { font-size: var(--fs-14); }
-.planner-jump-grid__metric { display: inline-flex; align-items: center; gap: 3px; }
-.planner-jump-grid button em {
-  min-width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  padding: 0 7px;
-  border-radius: 10px;
+.planner-jump button em {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
   background: var(--card2);
   color: var(--primary-ink);
-  font: 700 var(--fs-13)/1 var(--mono);
+  font: 700 var(--fs-11)/1.5 var(--mono);
   font-style: normal;
 }
-.planner-jump-grid button small {
-  overflow: hidden;
+/* 卡片內的一行工具列：檢視切換／過濾／新增鈕並排，說明（精簡模式是小鈕）跟著擠在同一行；
+   引導模式下說明是整段文字，才換自己一行。 */
+.planner-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.planner-toolbar__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
   color: var(--fg-secondary);
-  font-size: var(--fs-11);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--fs-13);
 }
-.planner-jump-grid__icon {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--primary-tint);
-  color: var(--primary-ink);
+.planner-toolbar > p.hint { flex-basis: 100%; margin-top: 2px; }
+.planner-day-head {
+  margin: 0 0 2px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
 }
-.planner-jump-grid__icon.notes { background: var(--collab-soft); color: var(--collab-ink); }
-.planner-jump-grid__icon.map { background: var(--healing-soft); color: var(--healing-ink); }
 .planner-section { scroll-margin-top: 80px; }
 .planner-section[open] { box-shadow: var(--e2), var(--hl-top); }
+/* 行事曆同步／匯出：設定一次的東西，收在清單下方的摺疊裡 */
+.planner-sync { margin-top: 14px; }
+.planner-sync > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+.planner-sync > summary:hover { background: var(--card2); }
+.planner-sync[open] > summary { margin-bottom: 6px; }
+.planner-sync > summary > span:first-of-type { color: var(--fg); font-weight: 600; }
 .planner-sync-bar {
   min-height: 42px;
   padding: 8px 10px;
@@ -2848,6 +2864,16 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .schedule-create-form__project { grid-column: span 2; }
 .schedule-create-form__note { grid-column: span 10; }
 .schedule-create-form__submit { grid-column: span 2; width: 100%; align-self: end; }
+/* 「其他欄位」只在手機出現（桌機六欄本來就排得下） */
+.schedule-create-form__more {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+}
 
 /* ── 資料庫：桌機固定主從工作區；手機進詳情後只留正在編輯的資料。 ── */
 .database-intro__stats,
@@ -5144,17 +5170,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .launch-cover__swap { inset: auto 4px 4px; justify-content: center; padding: 2px 4px; font-size: 11px; }
   .launch-body { padding: 12px; }
 
-  .planner-jump-grid {
-    display: flex;
-    gap: 7px;
-    margin-inline: calc(-1 * var(--app-pad-x));
-    padding: 0 var(--app-pad-x) 3px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-  }
-  .planner-jump-grid::-webkit-scrollbar { display: none; }
-  .planner-jump-grid button { min-width: 210px; flex: 0 0 210px; scroll-snap-align: start; }
+  /* 膠囊列不橫捲：三顆一次看得完，橫捲反而藏東西 */
+  .planner-jump button { min-height: 40px; padding: 8px 12px; }
   .planner-section { margin-top: 10px; scroll-margin-top: 112px; }
   /* 知識地圖：360px 直接等比縮到 0.39x（文字 ~4px 不可讀、節點點不到）。
      改成固定較大畫布＋橫向捲動；SVG 觸控本就不平移畫布（保留頁面捲動的刻意設計），
@@ -5175,6 +5192,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   }
   .planner-sync-bar { align-items: flex-start !important; }
   .planner-sync-bar .spacer { display: none; }
+  /* 摘要行在窄螢幕換行擺，狀態字才不會被擠成一個字寬 */
+  .planner-sync > summary { flex-wrap: wrap; padding: 9px 11px; }
+  .planner-sync > summary > span:last-child { flex-basis: 100%; }
   .schedule-create-form {
     grid-template-columns: 1fr !important;
     padding: 10px !important;
