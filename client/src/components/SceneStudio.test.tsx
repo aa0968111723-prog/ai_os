@@ -477,3 +477,65 @@ describe("SceneStudio", () => {
     expect(refetch).toHaveBeenCalled();
   });
 });
+
+/**
+ * 動作走位唯一接得上生成的路徑。
+ *
+ * 「重畫這格」選影片模型時，走位由 sceneVisualPrompt 自動接在畫面描述後面。但「讓這張動起來」
+ * 走的是修正這條路，提示詞是使用者當場打的指示——伺服器不該擅自接上去（那會跟他打的字打架）。
+ * 於是這一鏡明明寫好了走位，要讓它動起來時還得再打一次；這一顆按鈕就是把那一次省掉。
+ */
+describe("影片修正：把這一鏡的動作走位填成修正指示", () => {
+  /** 「讓這張動起來（產出影片）」那一組的第一支——刻意不做退路，選錯組會讓整組測試變成假綠 */
+  const videoModel = () => {
+    const select = screen.getByRole("combobox", { name: /用哪個模型修/ });
+    const group = within(select).getByRole("group", { name: /讓這張動起來/ }) as HTMLOptGroupElement;
+    const option = group.querySelector("option");
+    if (!option) throw new Error("模型目錄裡沒有任何圖生影片模型——測試前提失效");
+    return option.value;
+  };
+
+  it("選了影片模型且這一鏡有走位 → 出現一鍵填入", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ action: "安倢從門口走到窗邊，停下" }),
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.selectOptions(screen.getByRole("combobox", { name: /用哪個模型修/ }), videoModel());
+
+    const fill = screen.getByRole("button", { name: /用它當修正指示/ });
+    await user.click(fill);
+    expect(screen.getByRole("textbox", { name: /要改哪裡/ })).toHaveValue("安倢從門口走到窗邊，停下");
+    // 填完就收起來——它是空白時的捷徑，不是常駐控制項
+    expect(screen.queryByRole("button", { name: /用它當修正指示/ })).not.toBeInTheDocument();
+  });
+
+  it("使用者已經打了指示就不出現——永遠不蓋掉他打的字", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ action: "安倢從門口走到窗邊" }),
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.selectOptions(screen.getByRole("combobox", { name: /用哪個模型修/ }), videoModel());
+    await user.type(screen.getByRole("textbox", { name: /要改哪裡/ }), "讓她慢慢轉頭");
+    expect(screen.queryByRole("button", { name: /用它當修正指示/ })).not.toBeInTheDocument();
+  });
+
+  it("圖片模型不出現：走位是時間性的，單張圖畫不出來（與 sceneActionAppliesTo 同一條規則）", () => {
+    versionsQuery.mockReturnValue({
+      data: serverData({ action: "安倢從門口走到窗邊" }),
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mountStudio(); // 預設模型是推薦的圖片模型
+    expect(screen.queryByRole("button", { name: /用它當修正指示/ })).not.toBeInTheDocument();
+  });
+
+  it("這一鏡沒寫走位就不出現（不推銷一個空值）", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.selectOptions(screen.getByRole("combobox", { name: /用哪個模型修/ }), videoModel());
+    expect(screen.queryByRole("button", { name: /用它當修正指示/ })).not.toBeInTheDocument();
+  });
+});
