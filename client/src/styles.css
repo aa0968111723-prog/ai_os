@@ -7270,3 +7270,53 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 /* 桌機：球不存在（.mobile-nav 在 >820 隱藏），但 MenuSurface 的 stretch 幾何仍需要
    一個合理下限，免得對話框窄到每行兩個字 */
 .global-assistant { min-width: min(420px, calc(100vw - 32px)); }
+
+/* ── 圖上定點標注 ───────────────────────────────────────────────
+   舞台的媒體是 object-fit: contain，所以圓點的定位基準是「內容框」而不是元素框；
+   換算在 SceneAnnotationLayer 用 shared/mediaPoint 算好，這裡只負責外觀。 */
+.scene-annot {
+  position: relative;
+  min-width: 0;
+}
+.scene-annot.is-annotating,
+.scene-annot.is-annotating img,
+.scene-annot.is-annotating video {
+  cursor: crosshair;
+  /* 標注模式下舞台不吃捲動手勢——否則手機上想標注就會一直捲走 */
+  touch-action: none;
+}
+.scene-annot__dot {
+  position: absolute;
+  /* 視覺 22px，但外圍透明命中區補到 44px（比照全站觸控尺寸的既定結論）：
+     圓點畫小才不會遮住它要指的東西，手指卻按得到。 */
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  padding: 0;
+  border: none;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font: 600 var(--fs-11) / 1 var(--font-ui);
+  color: var(--on-accent);
+}
+.scene-annot__dot::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--danger-ink);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.scene-annot__dot > * ,
+.scene-annot__dot { z-index: 1; }
+.scene-annot__dot.is-resolved::before {
+  background: transparent;
+  border: 2px solid var(--muted-ink);
+}
+.scene-annot__dot.is-resolved { color: var(--muted-ink); }
+.scene-annot__dot.is-selected::before {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}

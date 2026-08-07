@@ -30,7 +30,7 @@ vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({
       scenes: { listByProject: { invalidate } },
-      messages: { list: { invalidate } },
+      messages: { list: { invalidate }, openCountsByScene: { invalidate } },
       projects: { listDeleted: { invalidate } },
     }),
     auth: { me: { useQuery: (...args: unknown[]) => meQuery(...args) } },
@@ -42,6 +42,8 @@ vi.mock("../api", () => ({
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
     },
+    // 未改好的標注數（分鏡格的「⚑ N」角標）——本檔不測角標，另有專屬情境；這裡回空清單
+    messages: { openCountsByScene: { useQuery: () => ({ data: [], isLoading: false }) } },
     // 文字腳本的卡片三行要讀這三份清單才翻得出名字（SceneList 自己查，不能靠 stub 子元件躲掉）
     characters: { list: { useQuery: () => ({ data: cardLists.characters, isLoading: false }) } },
     scenePresets: { list: { useQuery: () => ({ data: cardLists.scenePresets, isLoading: false }) } },

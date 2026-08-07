@@ -6,6 +6,7 @@ import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
 import { Icon } from "./Icon";
+import { SceneAnnotationLayer } from "./SceneAnnotationLayer";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
 import { AssetAudio, AssetImg, AssetVideo } from "./MediaFallback";
 import { relSeen } from "../push";
@@ -63,7 +64,7 @@ const VERSION_SECTIONS: Array<{ role: SceneVersionRole; label: string; icon: Par
   { role: "ambience", label: "環境音", icon: "Music" },
 ];
 
-type StudioTab = "regen" | "refine" | "voice" | "ambience" | "versions";
+type StudioTab = "regen" | "refine" | "voice" | "ambience" | "versions" | "annotations";
 
 const TABS: Array<{ id: StudioTab; label: string; icon: Parameters<typeof Icon>[0]["name"] }> = [
   { id: "refine", label: "修正這張", icon: "Palette" },
@@ -71,6 +72,7 @@ const TABS: Array<{ id: StudioTab; label: string; icon: Parameters<typeof Icon>[
   { id: "voice", label: "配音", icon: "Mic" },
   { id: "ambience", label: "環境音", icon: "Music" },
   { id: "versions", label: "版本", icon: "Clock" },
+  { id: "annotations", label: "標注", icon: "Highlighter" },
 ];
 
 /** localStorage 讀取包一層：無痕模式／被封鎖時只是少了記憶，不該讓工作室開不起來 */
@@ -137,6 +139,15 @@ export function SceneStudio({
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
   /** 舞台上看的是哪一版；null＝現用 */
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  /**
+   * 標注模式（顯式開關，不是「按著某個鍵」）：開啟時舞台不吃捲動手勢、游標變十字。
+   * 手機上沒有 hover 也沒有修飾鍵，隱式模式在觸控裝置上根本用不了。
+   */
+  const [annotating, setAnnotating] = useState(false);
+  /** 剛點下、還沒送出的座標；null＝沒有待輸入的標注 */
+  const [pendingPoint, setPendingPoint] = useState<{ ax: number; ay: number } | null>(null);
+  const [annotationDraft, setAnnotationDraft] = useState("");
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [regenModelId, setRegenModelId] = useState(() =>
     readStored(`aios.scenegen.${projectId}`, DEFAULT_REGEN_MODEL, (v) => REGEN_MODELS.some((m) => m.id === v)),
   );
@@ -176,10 +187,39 @@ export function SceneStudio({
   // 也與分鏡列不一致（listByProject 的 pendingGenStatus 已排除 narration）。
   const isGenerating = visualVersions.some((v) => v.state === "generating");
 
+  /**
+   * 這一格的標注。includeResolved：已改好的仍要看得到（空心圓點），
+   * 否則「處理完了」在畫面上等同「從來沒發生過」，沒人知道那裡曾經被指出過問題。
+   */
+  const annotationsQ = trpc.messages.listByRef.useQuery(
+    { projectId, refType: "scene", refId: sceneId, includeResolved: true },
+    { refetchInterval: 30_000 },
+  );
+  const annotations = useMemo(() => annotationsQ.data ?? [], [annotationsQ.data]);
+  /**
+   * 舞台上這一版的圓點。
+   *
+   * **標注釘死在它被畫下的那一版，不自動浮動**——換版往往換構圖，自動浮到新版上一定會
+   * 標錯地方，比不指還糟。所以這裡嚴格比對 anchorAssetId；其他版的標注收成上方橫幅。
+   * 編號用「這一版之內的序號」，使用者看到的 1/2/3 與圓點一致。
+   */
+
   const refresh = () => {
     utils.scenes.versions.invalidate({ sceneId });
     onChanged();
   };
+  const refreshAnnotations = () => {
+    utils.messages.listByRef.invalidate({ projectId, refType: "scene", refId: sceneId });
+    utils.messages.openCountsByScene.invalidate({ projectId });
+  };
+  const postAnnotation = trpc.messages.postAnnotation.useMutation({
+    onSuccess: () => {
+      setPendingPoint(null);
+      setAnnotationDraft("");
+      refreshAnnotations();
+    },
+  });
+  const resolveAnnotation = trpc.messages.resolveAnnotation.useMutation({ onSuccess: refreshAnnotations });
   const update = trpc.scenes.update.useMutation({ onSuccess: () => { setPromptDraft(null); refresh(); } });
   // 配音詞另開一支 update：存提示詞與存配音詞的 pending／已儲存回饋各自獨立，不互相污染
   const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
@@ -264,6 +304,20 @@ export function SceneStudio({
   /** 舞台上顯示的那一版（預覽某一版時用它，否則現用） */
   const stageVersion = previewAssetId ? list.find((v) => v.assetId === previewAssetId) ?? currentVisual : currentVisual;
 
+  const stageAssetId = stageVersion?.assetId ?? null;
+  const stageDots = useMemo(
+    () =>
+      annotations
+        .filter((a) => a.anchorAssetId && a.anchorAssetId === stageAssetId && a.ax != null && a.ay != null)
+        .map((a, i) => ({ id: a.id, ax: a.ax!, ay: a.ay!, resolvedAt: a.resolvedAt, index: i + 1 })),
+    [annotations, stageAssetId],
+  );
+  /** 不在這一版、且還沒改好的標注數——換版之後「還有東西沒處理」不能就這樣消失在畫面外 */
+  const otherOpenCount = useMemo(
+    () => annotations.filter((a) => !a.resolvedAt && a.anchorAssetId && a.anchorAssetId !== stageAssetId).length,
+    [annotations, stageAssetId],
+  );
+
   const refineBlocked = !refineModel || !baseUsable || instruction.trim() === "" || isGenerating || refine.isPending;
   const regenBlocked = !regenModel || prompt.trim() === "" || isGenerating || regen.isPending;
 
@@ -318,7 +372,14 @@ export function SceneStudio({
             {versions.isLoading ? (
               <Skeleton style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: "var(--r-12)" }} />
             ) : stageVersion?.assetUrl ? (
-              stageVersion.assetKind === "video" ? (
+              <SceneAnnotationLayer
+                annotations={stageDots}
+                annotating={annotating}
+                onPick={(p) => { setPendingPoint(p); setTab("annotations"); }}
+                onSelect={(id) => { setSelectedAnnotationId(id); setTab("annotations"); }}
+                selectedId={selectedAnnotationId}
+              >
+              {stageVersion.assetKind === "video" ? (
                 <AssetVideo
                   className="scene-studio__media"
                   src={stageVersion.assetUrl}
@@ -333,7 +394,8 @@ export function SceneStudio({
                   alt={`第 ${sceneNumber} 鏡${stageVersion.isCurrent ? "現用畫面" : `第 ${stageVersion.index} 版`}`}
                   fallbackLabel="素材遺失——可用右側重畫或修正補回"
                 />
-              )
+              )}
+              </SceneAnnotationLayer>
             ) : (
               <EmptyState
                 icon={<Icon name="Image" />}
@@ -355,6 +417,17 @@ export function SceneStudio({
                 <Meta role="status" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <Icon name="Loader" className="spin" size={13} /> 這一格正在生成…
                 </Meta>
+              )}
+              {canEdit && stageVersion?.assetId && (
+                <Button
+                  size="sm"
+                  variant={annotating ? "primary" : "tonal"}
+                  aria-pressed={annotating}
+                  onClick={() => { setAnnotating((v) => !v); setPendingPoint(null); }}
+                  title="開啟後在畫面上點一下，就能指出這裡要改"
+                >
+                  <Icon name="Highlighter" size={13} /> {annotating ? "標注中（點畫面）" : "標注"}
+                </Button>
               )}
               {previewAssetId && (
                 <Button size="sm" variant="ghost" onClick={() => setPreviewAssetId(null)}>
@@ -941,6 +1014,111 @@ export function SceneStudio({
                   </div>
                 )}
                 {data?.truncated && <Hint style={{ marginTop: 6 }}>版本很多，這裡只顯示最近 120 版。</Hint>}
+              </div>
+            )}
+
+            {tab === "annotations" && (
+              <div>
+                <Meta as="div" style={{ marginBottom: 6 }}>
+                  在畫面上點一下就能指出「這裡要改」。標注**釘在它被畫下的那一版**——
+                  換版通常也換了構圖，讓標注自動浮到新版一定會標錯地方，比不指還糟。
+                </Meta>
+                {otherOpenCount > 0 && (
+                  <Hint style={{ marginBottom: 8 }}>
+                    另有 {otherOpenCount} 則未改好的標注在別的版本上（切到那一版才看得到圓點）。
+                  </Hint>
+                )}
+                {pendingPoint && (
+                  <div style={{ marginBottom: 8 }}>
+                    <label className="field">
+                      <span>這裡要改什麼？（可 @夥伴，他才收得到通知）</span>
+                      <textarea
+                        rows={3}
+                        maxLength={2000}
+                        autoFocus
+                        value={annotationDraft}
+                        onChange={(e) => setAnnotationDraft(e.target.value)}
+                        placeholder="例：這盞路燈太亮，壓過主角的臉"
+                      />
+                    </label>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!annotationDraft.trim() || postAnnotation.isPending || !stageVersion?.assetId}
+                        onClick={() =>
+                          postAnnotation.mutate({
+                            projectId,
+                            sceneId,
+                            anchorAssetId: stageVersion!.assetId!,
+                            ax: pendingPoint.ax,
+                            ay: pendingPoint.ay,
+                            body: annotationDraft.trim(),
+                          })
+                        }
+                      >
+                        <Icon name="Check" size={13} /> 送出標注
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setPendingPoint(null); setAnnotationDraft(""); }}>
+                        取消
+                      </Button>
+                    </div>
+                    {postAnnotation.error && <p className="error" role="alert">{postAnnotation.error.message}</p>}
+                  </div>
+                )}
+                {annotationsQ.isLoading && <Skeleton style={{ height: 80, borderRadius: 8 }} role="status" aria-label="載入中" />}
+                {!annotationsQ.isLoading && annotations.length === 0 && !pendingPoint && (
+                  <EmptyState
+                    icon={<Icon name="Highlighter" />}
+                    title={<>這一格還沒有標注</>}
+                    description={<>按舞台上的「標注」，然後在畫面上點你想改的地方。</>}
+                  />
+                )}
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {annotations.map((a) => {
+                    const onStage = a.anchorAssetId === stageAssetId;
+                    const dotIndex = stageDots.find((d) => d.id === a.id)?.index;
+                    return (
+                      <li
+                        key={a.id}
+                        className={`scene-studio__version${selectedAnnotationId === a.id ? " is-current" : ""}`}
+                        style={{ opacity: a.resolvedAt ? 0.6 : 1 }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <b style={{ fontSize: "var(--fs-13)" }}>
+                              {dotIndex ? `第 ${dotIndex} 則・` : ""}{a.userName}
+                            </b>
+                            {a.resolvedAt && <Pill status="done">已改好</Pill>}
+                            {!onStage && <Meta>在別的版本上</Meta>}
+                          </div>
+                          <Meta as="div" style={{ whiteSpace: "pre-wrap" }}>{a.body}</Meta>
+                          <Meta as="div">{relSeen(a.createdAt)}</Meta>
+                          {canEdit && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                              {/* 任何組員都能收掉——「這件事我處理完了」不該是組長專屬 */}
+                              <Button
+                                size="sm"
+                                variant={a.resolvedAt ? "ghost" : "tonal"}
+                                disabled={resolveAnnotation.isPending}
+                                onClick={() => resolveAnnotation.mutate({ messageId: a.id, resolved: !a.resolvedAt })}
+                              >
+                                <Icon name={a.resolvedAt ? "Undo2" : "Check"} size={13} />
+                                {a.resolvedAt ? " 還是要改" : " 這版已改好"}
+                              </Button>
+                              {!onStage && a.anchorAssetId && (
+                                <Button size="sm" variant="ghost" onClick={() => setPreviewAssetId(a.anchorAssetId)}>
+                                  <Icon name="Image" size={13} /> 看那一版
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {resolveAnnotation.error && <p className="error" role="alert">{resolveAnnotation.error.message}</p>}
               </div>
             )}
           </div>

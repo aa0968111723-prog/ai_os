@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -337,6 +337,181 @@ export const messagesRouter = router({
           .onConflictDoNothing();
       }
       return { on: removed.length === 0 };
+    }),
+
+  /**
+   * 在某一版成品的某個位置上留一則標注。
+   *
+   * anchorAssetId 一定要驗「真的屬於這一格」：不驗的話，任何組員都能把標注釘到別格
+   * （甚至別專案）的素材上，而分鏡列的未解決數會開始出現指不到任何東西的幽靈。
+   */
+  postAnnotation: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        sceneId: z.string().uuid(),
+        anchorAssetId: z.string().uuid(),
+        ax: z.number().min(0).max(1),
+        ay: z.number().min(0).max(1),
+        tMs: z.number().int().min(0).optional(),
+        body: z.string().min(1).max(2000),
+        mentions: z.array(z.string().uuid()).max(20).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const project = await loadProject(input.projectId);
+      requireGroup(ctx.auth, project.groupId);
+      if (!(await refBelongs("scene", input.sceneId, input.projectId, project.groupId))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這一格不在本專案" });
+      }
+      // 標注釘在某一版成品上，而那一版必須真的是這一格的素材——否則標注會指向
+      // 一張與這格無關的圖，換版橫幅也算不出「來自第幾版」
+      const [anchor] = await db
+        .select({ id: schema.assets.id })
+        .from(schema.assets)
+        .where(and(
+          eq(schema.assets.id, input.anchorAssetId),
+          eq(schema.assets.projectId, input.projectId),
+          isNull(schema.assets.deletedAt),
+        ));
+      if (!anchor) throw new TRPCError({ code: "BAD_REQUEST", message: "找不到這一版成品（可能已在回收桶）" });
+      const mentions = await resolveMentions(project.groupId, input.mentions, input.body);
+      const [msg] = await db
+        .insert(schema.messages)
+        .values({
+          groupId: project.groupId,
+          projectId: input.projectId,
+          userId: ctx.auth.user.id,
+          kind: "annotation",
+          body: input.body,
+          refType: "scene",
+          refId: input.sceneId,
+          anchorAssetId: input.anchorAssetId,
+          ax: input.ax,
+          ay: input.ay,
+          tMs: input.tMs ?? null,
+          mentions: mentions ?? null,
+        })
+        .returning();
+      // 標注的收件人＝被 @ 的人；沒 @ 任何人時通知組內其他成員以外的人是洗版，
+      // 所以刻意只通知明確被指名的對象——「這裡要改」預設是講給某個人聽的
+      const targets = (mentions ?? []).filter((id) => id !== ctx.auth.user.id);
+      if (targets.length) {
+        void notify({
+          userIds: targets,
+          groupId: project.groupId,
+          projectId: project.id,
+          sceneId: input.sceneId,
+          kind: "annotation",
+          actorId: ctx.auth.user.id,
+          messageId: msg.id,
+          refType: "scene",
+          refId: input.sceneId,
+          title: `${ctx.auth.user.name} 在「${project.title}」標注了要改的地方`,
+          body: dmSnippet(input.body),
+          // 深連結要把舞台切回「標注所在的那一版」，不是現用版——否則點進來看到的是別的圖
+          url: `/p/${project.id}?focus=annotation&mid=${msg.id}`,
+          eventKey: `annotation:${msg.id}:posted`,
+        });
+      }
+      return msg;
+    }),
+
+  /** 某一格（或某個引用目標）的標注／討論串。走 messages_ref_idx。 */
+  listByRef: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      refType: z.enum(REF_TYPES),
+      refId: z.string().uuid(),
+      includeResolved: z.boolean().default(false),
+    }))
+    .query(async ({ ctx, input }) => {
+      const project = await loadProject(input.projectId);
+      requireGroup(ctx.auth, project.groupId);
+      const conds = [
+        eq(schema.messages.projectId, input.projectId),
+        eq(schema.messages.refType, input.refType),
+        eq(schema.messages.refId, input.refId),
+      ];
+      if (!input.includeResolved) conds.push(isNull(schema.messages.resolvedAt));
+      return db
+        .select({
+          id: schema.messages.id,
+          userId: schema.messages.userId,
+          userName: schema.users.name,
+          kind: schema.messages.kind,
+          body: schema.messages.body,
+          anchorAssetId: schema.messages.anchorAssetId,
+          ax: schema.messages.ax,
+          ay: schema.messages.ay,
+          tMs: schema.messages.tMs,
+          resolvedAt: schema.messages.resolvedAt,
+          resolvedBy: schema.messages.resolvedBy,
+          mentions: schema.messages.mentions,
+          createdAt: schema.messages.createdAt,
+        })
+        .from(schema.messages)
+        .innerJoin(schema.users, eq(schema.users.id, schema.messages.userId))
+        .where(and(...conds))
+        .orderBy(schema.messages.createdAt);
+    }),
+
+  /**
+   * 整個專案每一格的未解決標注數，一支查完（分鏡列的「⚑ N」）。
+   * 刻意不做成「每格各打一支」——十幾格就是十幾支查詢，而這個數字是每次開頁都要的。
+   */
+  openCountsByScene: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const project = await loadProject(input.projectId);
+      requireGroup(ctx.auth, project.groupId);
+      const rows = await db
+        .select({ refId: schema.messages.refId, n: count() })
+        .from(schema.messages)
+        .where(and(
+          eq(schema.messages.projectId, input.projectId),
+          eq(schema.messages.kind, "annotation"),
+          isNull(schema.messages.resolvedAt),
+        ))
+        .groupBy(schema.messages.refId);
+      return rows.filter((r): r is { refId: string; n: number } => !!r.refId);
+    }),
+
+  /**
+   * 「這版已改好」／收回。
+   *
+   * **requireGroup 而不是 requireLeader**：組員連自己開的討論串都不能收掉，是現況最沒道理
+   * 的一條。setPinned 用 requireLeader 對「釘公告」合理，但「這件事我處理完了」不該是組長專屬。
+   */
+  resolveAnnotation: authedProcedure
+    .input(z.object({ messageId: z.string().uuid(), resolved: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const msg = await loadMessage(input.messageId);
+      requireGroup(ctx.auth, msg.groupId);
+      if (msg.kind !== "annotation") throw new TRPCError({ code: "BAD_REQUEST", message: "只有標注可以標記為已改好" });
+      await db
+        .update(schema.messages)
+        .set(input.resolved
+          ? { resolvedAt: new Date(), resolvedBy: ctx.auth.user.id }
+          : { resolvedAt: null, resolvedBy: null })
+        .where(eq(schema.messages.id, input.messageId));
+      // 提出的人要知道「他指出的事被處理掉了」，否則得自己回去看
+      if (input.resolved && msg.userId !== ctx.auth.user.id && msg.projectId) {
+        void notify({
+          userIds: [msg.userId],
+          groupId: msg.groupId,
+          projectId: msg.projectId,
+          sceneId: msg.refId,
+          kind: "annotation_resolved",
+          actorId: ctx.auth.user.id,
+          messageId: msg.id,
+          title: `${ctx.auth.user.name} 標記「已改好」`,
+          body: dmSnippet(msg.body),
+          url: `/p/${msg.projectId}?focus=annotation&mid=${msg.id}`,
+          eventKey: `annotation_resolved:${msg.id}`,
+        });
+      }
+      return { ok: true as const };
     }),
 
   setPinned: authedProcedure

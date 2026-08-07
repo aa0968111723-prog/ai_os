@@ -1,7 +1,8 @@
 /**
  * Messaging domain schema（專案留言、私訊、反應、已讀）
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, uuid, text, integer, real, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const messages = pgTable("messages", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -22,10 +23,45 @@ export const messages = pgTable("messages", {
   // 下一輪掃描只撈 pending 故不會重撿重扣（見 services/voiceTranscribe 的 CAS 認領）。純 text 欄、無 DB
   // CHECK 約束，新增列舉值不需遷移。
   voiceStatus: text("voice_status", { enum: ["pending", "running", "done", "failed"] }),
+  /**
+   * 圖上定點標注（kind='annotation'）：釘在**哪一版成品**的哪個位置。
+   *
+   * 存 assetId 而不是「v2」這種版次字串——版次是 shared/sceneVersions.ts 每次查詢即時算的、
+   * 不落庫，而外部素材依 createdAt 插進排序，任何人指派一張舊素材就會讓既有版次整批位移。
+   *
+   * 標注**釘死在它被畫下的那一版，不自動浮動**：換版往往換構圖，自動浮動一定會標錯地方，
+   * 比不指還糟。舞台顯示的不是那一版時，收成「來自第 N 版的 M 則未解決（點看）」橫幅。
+   */
+  anchorAssetId: uuid("anchor_asset_id"),
+  /**
+   * 相對「媒體內容框」的比例座標，0..1。**不是相對元素框**——舞台是 object-fit: contain，
+   * 元素框裡有 letterbox 留白，兩者只在長寬比剛好相同時才一致。換算一律走 shared/mediaPoint.ts。
+   */
+  ax: real("ax"),
+  ay: real("ay"),
+  /** 影片／音訊的時間碼（毫秒）；null＝靜態圖。圓點只在播放頭接近它時顯示。 */
+  tMs: integer("t_ms"),
+  /**
+   * 已解決＝全組共用的單一狀態（3-8 人單組不需要 per-user ack）。
+   *
+   * 與 notifications.read_at 是**兩個欄位、兩個生命週期**：一則純 @ 留言永遠不會被 resolve，
+   * 若收件匣拿 resolved_at is null 當篩選條件，鈴鐺就永遠不會歸零；反之「我看過了」
+   * 也不等於「這件事處理完了」。
+   */
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: uuid("resolved_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectIdx: index("messages_project_idx").on(t.projectId, t.createdAt),
   voicePendingIdx: index("messages_voice_pending_idx").on(t.voiceStatus),
+  // 反向查詢（一格分鏡 → 它的標注）。在此之前 messages.list 只收 projectId，這個方向走不通。
+  refIdx: index("messages_ref_idx")
+    .on(t.refType, t.refId, t.createdAt)
+    .where(sql`${t.refId} is not null`),
+  // 分鏡列每格的「⚑ N」：一支查詢算完整個專案，不逐格 N+1
+  openAnnotationIdx: index("messages_open_annotation_idx")
+    .on(t.projectId, t.refId)
+    .where(sql`${t.kind} = 'annotation' and ${t.resolvedAt} is null`),
 }));
 
 /**

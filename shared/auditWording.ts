@@ -234,6 +234,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "adobe.renderTimeline": "在 Adobe 帳號內算圖剪輯",
   "adobe.exportTimelineFormats": "匯出 Adobe 時間軸（FCP／Premiere／EDL）",
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
+  "messages.postAnnotation": "在畫面上標注要改的地方",
+  "messages.resolveAnnotation": "標記標注已改好",
   "notifications.markRead": "標記通知已讀",
   "notifications.markAllRead": "全部通知標為已讀",
   "push.subscribe": "連結通知裝置",

@@ -20,7 +20,10 @@ const invalidate = vi.fn();
 
 vi.mock("../api", () => ({
   trpc: {
-    useUtils: () => ({ scenes: { versions: { invalidate } } }),
+    useUtils: () => ({
+      scenes: { versions: { invalidate } },
+      messages: { listByRef: { invalidate }, openCountsByScene: { invalidate } },
+    }),
     scenes: {
       versions: { useQuery: (...args: unknown[]) => versionsQuery(...args) },
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
@@ -29,6 +32,12 @@ vi.mock("../api", () => ({
       generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
       generateAmbience: { useMutation: () => ({ mutate: ambienceMutate, isPending: false, error: null }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
+    },
+    // 圖上標注：本檔專注在版本與生成的狀態機，標注另有專屬情境；這裡回空清單
+    messages: {
+      listByRef: { useQuery: () => ({ data: [], isLoading: false }) },
+      postAnnotation: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+      resolveAnnotation: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
   },
 }));
