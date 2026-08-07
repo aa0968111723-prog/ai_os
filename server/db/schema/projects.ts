@@ -301,7 +301,7 @@ export const notes = pgTable("notes", {
 }));
 
 /**
- * 筆記／知識庫的檔案附件（0042_content_attachments）：
+ * 筆記／知識庫的檔案附件（0043_content_attachments）：
  * 會議紀錄要能夾照片、簽到表掃描檔、講義 PDF；知識庫的開示稿本來就常是一份 PDF/Word。
  * 原檔落在同一套素材儲存（storage_path，與素材庫／私訊附件共用 Volume 與備份），
  * text_content 存抽出的純文字——知識庫附件的文字會跟著注入 AI 導演，PDF 不再是「只能下載的死檔」。
