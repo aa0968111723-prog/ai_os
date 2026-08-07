@@ -108,8 +108,10 @@ export async function runToolLoop<TToolCall, TReply>(
     }
     const reply = json !== null ? opts.tryReply(json) : null;
     if (reply !== null) return { reply, steps, aborted: false, usedFallback: false };
-    // 解析失敗：純文字 fallback（不提議任何動作——動作必須來自結構化回覆）
-    return { reply: opts.fallback(stripJsonObject(raw) || raw.trim()), steps, aborted: false, usedFallback: true };
+    // 解析失敗：純文字 fallback（不提議任何動作——動作必須來自結構化回覆）。
+    // 只給剝掉 JSON 後的人話：模型在強制收尾輪仍吐純工具 JSON 時，剝完是空字串，
+    // 讓呼叫端的預設訊息接手——把 {"tool":…} 原文亮給使用者比「請換個問法」更糟。
+    return { reply: opts.fallback(stripJsonObject(raw)), steps, aborted: false, usedFallback: true };
   }
 }
 

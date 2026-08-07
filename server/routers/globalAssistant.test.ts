@@ -86,6 +86,26 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0]).toMatchObject({ type: "send_dm", peerId: "user-2", peerName: "阿明" });
   });
 
+  it("空白標題（trim 後為空）整筆丟：不給按下去必吃 BAD_REQUEST 的確認卡", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "add_note", projectRef: "p1", title: "   ", content: "內容" },
+      { type: "add_schedule_item", title: "  ", startsAt: "2026-08-09T10:00:00+08:00" },
+      { type: "create_task", projectRef: "p1", title: " " },
+      { type: "create_project", title: "有名字", kind: "  ", platform: "youtube" },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("確認卡時間一律台北時間（UTC+8）：明早十點就顯示 10:00，不是 02:00", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "add_schedule_item", title: "對稿", startsAt: "2026-08-09T10:00:00+08:00" },
+      { type: "create_task", projectRef: "p1", title: "剪片", dueAt: "2026-08-12T23:30:00+08:00" },
+    ]);
+    expect(out[0].label).toContain("2026-08-09 10:00");
+    // dueAt 台北時間仍是 8/12（UTC 是 8/12 15:30）；顯示日期不得因時區換算跳日
+    expect(out[1].label).toContain("2026-08-12");
+  });
+
   it("上限 4 筆＋重複提議去重（同一件事講兩次只算一次）", () => {
     const dup = { type: "add_note" as const, projectRef: "p1", title: "同一則", content: "同一段" };
     const many = [

@@ -2029,6 +2029,9 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
   sse("open", { ok: true });
+  // 與 tRPC 雙生路徑同一份審計口徑：走 SSE 問的也要在操作紀錄裡看得到（成功與失敗都記）。
+  // tRPC 端由 authedProcedure 中介層記；這裡是 Express 路由，得自己補一筆同名 action。
+  const { recordAudit } = await import("./services/audit");
   try {
     const { runGlobalAsk } = await import("./routers/globalAssistant");
     const result = await runGlobalAsk(
@@ -2042,8 +2045,13 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       },
       (e) => sse("step", e),
     );
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, { ok: true });
     sse("done", result);
   } catch (err) {
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
     if (!closed) {
       recordError("globalAssistant:stream", err);
       sse("error", { message: err instanceof Error ? err.message : "全站 AI 助手暫時沒回應，請稍後再試" });

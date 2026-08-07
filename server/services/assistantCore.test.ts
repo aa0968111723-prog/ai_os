@@ -97,6 +97,20 @@ describe("runToolLoop", () => {
     expect((out.reply as { answer: string }).answer).toContain("fallback:");
   });
 
+  it("強制收尾輪吐純工具 JSON：fallback 收到空字串，不把 JSON 原文亮給使用者", async () => {
+    const seen: string[] = [];
+    await runToolLoop({
+      ...baseOpts,
+      maxToolRounds: 0, // 第一輪就是強制收尾
+      llm: async () => '{"tool":"project_detail","args":{"ref":"p2"}}',
+      fallback: (raw) => {
+        seen.push(raw);
+        return { answer: raw || "預設訊息" };
+      },
+    });
+    expect(seen).toEqual([""]);
+  });
+
   it("signal 已中止：不發起 LLM 呼叫、回 aborted", async () => {
     const ac = new AbortController();
     ac.abort();

@@ -95,9 +95,13 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
       </div>
     );
   }
+  // 以本人名義送出的內容必須全文可見再確認：label 只有摘要，私訊本文與筆記內容整段亮出來
+  const fullText =
+    action.type === "send_dm" ? action.body : action.type === "add_note" ? action.content : null;
   return (
     <div className="ai-copilot-action-card" data-fb="站級動作卡">
       <span className="ai-copilot-action-card__label">{action.label}</span>
+      {fullText && <span className="ai-copilot-action-card__detail">{fullText}</span>}
       {run.error && <span className="ai-copilot-action-card__error">{run.error.message}</span>}
       <div className="ai-copilot-action-card__buttons">
         <Button

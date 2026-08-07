@@ -160,7 +160,15 @@ export function resolveSiteActions(
   const out: ResolvedSiteAction[] = [];
   const seen = new Set<string>();
   const memberByRef = new Map(refs.members.map((m) => [m.ref, m]));
-  const fmtDay = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+  // 確認卡上的時間一律台北時間（UTC+8）：伺服器跑 UTC，直接 toISOString 會讓
+  // 「明早十點」顯示成 02:00——使用者按下去確認的必須是他看得懂的那個時刻。
+  // payload 仍存 ISO 瞬時值，落庫不受顯示格式影響（與 teamAssistant fmtTaipei 同一慣例）。
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmtTaipeiMinute = (iso: string) => {
+    const t = new Date(Date.parse(iso) + 8 * 60 * 60 * 1000);
+    return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
+  };
+  const fmtDay = (iso: string) => fmtTaipeiMinute(iso).slice(0, 10);
 
   for (const p of proposals) {
     if (out.length >= SITE_ACTION_LIMIT) break;
@@ -172,14 +180,15 @@ export function resolveSiteActions(
       const platform = refs.platforms.find((x) => x.value === p.platform.trim());
       if (!platform) continue;
       const title = p.title.trim();
-      if (!title) continue;
+      const kind = p.kind.trim();
+      if (!title || !kind) continue;
       out.push({
         type: "create_project",
         groupId: refs.groupId,
         title,
-        kind: p.kind.trim(),
+        kind,
         platform: platform.value,
-        label: `建立專案「${title}」（${platform.value}・${p.kind.trim()}）`,
+        label: `建立專案「${title}」（${platform.value}・${kind}）`,
       });
       continue;
     }
@@ -202,6 +211,7 @@ export function resolveSiteActions(
     if (p.type === "create_task") {
       const project = refs.projects.get(p.projectRef.trim());
       if (!project) continue;
+      if (!p.title.trim()) continue; // 空白標題：確認卡按下去必吃 BAD_REQUEST，不給註定失敗的按鈕
       const assignee = p.assigneeRef ? memberByRef.get(p.assigneeRef.trim()) : undefined;
       const dueAt = p.dueAt && !Number.isNaN(Date.parse(p.dueAt)) ? new Date(p.dueAt).toISOString() : undefined;
       out.push({
@@ -224,6 +234,9 @@ export function resolveSiteActions(
     const projectRef = p.projectRef?.trim();
     const project = projectRef ? refs.projects.get(projectRef) : undefined;
     if (projectRef && !project) continue;
+    // 空白標題同 create_task：不給註定失敗的按鈕。optional chaining 是防禦——
+    // zod 已保證聯集形狀，但這裡是最後一道，未知形狀寧可丟棄也不崩潰。
+    if (!p.title?.trim()) continue;
 
     if (p.type === "add_note") {
       out.push({
@@ -254,7 +267,7 @@ export function resolveSiteActions(
       startsAt,
       endsAt,
       note: p.note?.trim() || undefined,
-      label: `新增行程「${p.title.trim().slice(0, 24)}」（${startsAt.slice(0, 16).replace("T", " ")}${project ? `，「${project.title}」` : ""}）`,
+      label: `新增行程「${p.title.trim().slice(0, 24)}」（${fmtTaipeiMinute(startsAt)}${project ? `，「${project.title}」` : ""}）`,
     });
   }
   return out;
@@ -348,13 +361,17 @@ export async function runGlobalAsk(
     kinds: creationOptions.kinds,
   };
 
-  // 全站問答落 trace（分表）：mock 也落——測試模式的軌跡同樣是「實際發生過的事」
+  // 全站問答落 trace（分表）：mock 也落——測試模式的軌跡同樣是「實際發生過的事」。
+  // 透明化失敗不應讓合法問答失敗（aiTrace 同一原則）：session 建不起來就不落 trace，答案照給。
   const trace = await createSiteTraceSession({
     groupId,
     projectId: input.projectId ?? null,
     userId: auth.user.id,
     title: input.message.slice(0, 160),
     summary: "全站助手問答",
+  }).catch((err) => {
+    console.warn("[globalAssistant] trace session 建立失敗（不影響問答）：", err instanceof Error ? err.message : err);
+    return null;
   });
   const traceSessionId = trace?.id;
   if (traceSessionId) {
@@ -376,7 +393,7 @@ export async function runGlobalAsk(
     const preview = lines.slice(0, 3).join("\n");
     const answer = `（測試模式）本組共 ${teamCtx.totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析，並可提議建專案／筆記／行程／任務／私訊等動作（一律經你確認才執行）。`;
     if (traceSessionId) {
-      await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成", payload: { answer } });
+      await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成", payload: { answer } }).catch(() => undefined);
     }
     return {
       answer, dispatches: [], actions: [], siteActions: [], steps: [],
@@ -386,7 +403,13 @@ export async function runGlobalAsk(
 
   // 0 點問答：reserveQuota(0) 目前是 no-op（濫用防護在上面的限流）；佈線保留供未來調價
   const quotaError = await reserveQuota(auth.user.id, groupId, ASK_COST_POINTS, "全站助手");
-  if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+  if (quotaError) {
+    // 額度擋下也要收尾 trace——否則調價後每次超額都留一筆永遠 prepared 的懸掛 session
+    if (traceSessionId) {
+      await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "failed", summary: `額度不足：${quotaError.slice(0, 400)}` }).catch(() => undefined);
+    }
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+  }
 
   const dispatchBlock = canDispatch
     ? `你也可以「提議派工」：把某個專案的目標交給該專案的 AI 代理去規劃並（經核准後）執行。僅在使用者明確想「動手推進某個專案」時才提議，純詢問時不要提議。
@@ -436,6 +459,8 @@ ${historyBlock}使用者的問題：${input.message}`;
 
   let usedProvider: LlmProvider | undefined;
   let usedModel: string | undefined;
+  // 迴圈外收集 steps：迴圈中途拋錯（第二輪 LLM 429 等）時，已執行的查證不該從回覆裡消失
+  const collectedSteps: string[] = [];
 
   try {
     const outcome = await runToolLoop({
@@ -482,6 +507,7 @@ ${historyBlock}使用者的問題：${input.message}`;
       // 唯讀不變式：迴圈只執行 teamTool（全部唯讀、組隔離在各 core 內部）；寫入只能出現在 siteActions 提議
       execTool: (call) => runTeamTool(projByRef, dbByRef, groupId, call, auth),
       onToolResult: async (call, r) => {
+        collectedSteps.push(r.step);
         emit("step", r.step, call.tool);
         if (traceSessionId) {
           await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_result", summary: r.step, payload: { tool: call.tool, result: r.text } });
@@ -498,7 +524,7 @@ ${historyBlock}使用者的問題：${input.message}`;
 
     if (outcome.aborted || !outcome.reply) {
       if (traceSessionId) {
-        await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "stopped", summary: "用戶端中斷連線，提早收工" });
+        await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "stopped", summary: "用戶端中斷連線，提早收工" }).catch(() => undefined);
       }
       return { answer: "", dispatches: [], actions: [], siteActions: [], steps: outcome.steps, mock: false, rationale: undefined, contextUsed: [], ...base };
     }
@@ -516,7 +542,8 @@ ${historyBlock}使用者的問題：${input.message}`;
       ...base,
     };
     if (traceSessionId) {
-      await updateSiteTraceSession(traceSessionId, { provider: usedProvider ?? null, model: usedModel ?? null });
+      // 答案已經算好——trace 收尾失敗只記警告，不把成功的回答變成 500（透明化失敗不拖垮創作）
+      await updateSiteTraceSession(traceSessionId, { provider: usedProvider ?? null, model: usedModel ?? null }).catch(() => undefined);
       await finalizeSiteTraceSession({
         sessionId: traceSessionId,
         status: "completed",
@@ -528,21 +555,30 @@ ${historyBlock}使用者的問題：${input.message}`;
           actions: result.actions.map((a) => a.label),
           siteActions: result.siteActions.map((a) => a.label),
         },
+      }).catch((err) => {
+        console.warn("[globalAssistant] trace 收尾失敗（不影響回答）：", err instanceof Error ? err.message : err);
       });
     }
     return result;
   } catch (err) {
     await refund(auth.user.id, groupId, ASK_COST_POINTS, "全站助手失敗退回");
+    // 用戶端斷線時 completeText 以「已取消」拋出——那是使用者走了，不是助手壞了：
+    // trace 記 stopped 而非 failed，也不用把「已取消」當回答塞回死連線
+    const aborted = input.signal?.aborted === true;
     if (traceSessionId) {
       await finalizeSiteTraceSession({
         sessionId: traceSessionId,
-        status: "failed",
-        summary: err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
-      });
+        status: aborted ? "stopped" : "failed",
+        summary: aborted ? "用戶端中斷連線，提早收工" : err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
+      }).catch(() => undefined);
     }
-    // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功
+    if (aborted) {
+      return { answer: "", dispatches: [], actions: [], siteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base };
+    }
+    // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功。
+    // steps 用迴圈外收集的那份：中途炸掉不該讓「查過什麼」從回覆裡消失。
     const answer = err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
-    return { answer, dispatches: [], actions: [], siteActions: [], steps: [], mock: false, rationale: undefined, contextUsed: [], ...base };
+    return { answer, dispatches: [], actions: [], siteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base };
   }
 }
 

@@ -69,8 +69,10 @@ const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"]
 const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead", "push.subscribe", "push.sync"]);
 
 /** 審計內文脫敏清單：私訊承諾「只有收發雙方看得到」，但操作紀錄對組長/管理員可見——
- *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文 */
-const AUDIT_REDACT_BODY = new Set(["dm.send"]);
+ *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文。
+ *  globalAssistant.runSiteAction 是第二條發私訊的路（type=send_dm 分支帶 body）——
+ *  只有它有 body 欄位，其他分支不受影響。 */
+const AUDIT_REDACT_BODY = new Set(["dm.send", "globalAssistant.runSiteAction"]);
 
 /** 外部抓取的 path 可能被使用者塞查詢字串金鑰（?api_key=…）——動作照記，唯 path 以佔位符取代 */
 const AUDIT_REDACT_PATH = new Set(["integrations.fetchApi"]);
