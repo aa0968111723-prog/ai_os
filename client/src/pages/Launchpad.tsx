@@ -320,7 +320,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 alignItems: "center",
               }}
             >
-              <Hint as="span" layer="always" style={{ margin: 0, fontSize: 12 }}>
+              <Hint as="span" style={{ margin: 0, fontSize: 12 }}>
                 組內在線
               </Hint>
               {collab.peers.map((p) => (
@@ -471,7 +471,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 <label id="np-format-label" style={{ marginTop: 0, fontWeight: 600 }}>畫面尺寸</label>
                 <FormatPicker value={format} onChange={setFormat} labelledBy="np-format-label" />
                 {pickedPlatform?.format && normalizeProjectFormat(pickedPlatform.format) !== format && (
-                  <Hint layer="always">
+                  <Hint>
                     已改成 {format}（此平台預設 {pickedPlatform.format}）——以你挑的尺寸為準。
                   </Hint>
                 )}
@@ -479,24 +479,24 @@ export function Launchpad({ groupId }: { groupId: string }) {
             </div>
             {/* 提示與錯誤訊息 */}
             {activeGroup && (
-              <Hint layer="always" style={{ marginTop: 4 }}>
+              <Hint style={{ marginTop: 4 }}>
                 將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）
               </Hint>
             )}
-            {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
+            {options.isLoading && <Hint>選項載入中…</Hint>}
             {!options.isLoading && groupId && !kindOptions.length && (
-              <Hint layer="always">
+              <Hint>
                 這個組還沒有內容類型選項——{isLeader ? "用上面的「自己加一個類型」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
               </Hint>
             )}
             {!options.isLoading && groupId && !platformOptions.length && (
-              <Hint layer="always">
+              <Hint>
                 這個組還沒有發布平台選項——{isLeader ? "用上面的「自己加一個平台」加一個。" : "請組長加一個（組長在這張表單就能加）。"}
               </Hint>
             )}
-            {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
+            {!groupId && <Hint>（要先屬於一個組才能建專案）</Hint>}
             {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && (
-              <Hint layer="always">先為專案命名，就能建立專案。</Hint>
+              <Hint>先為專案命名，就能建立專案。</Hint>
             )}
             {create.error && <p className="error" role="alert">{create.error.message}</p>}
 
@@ -719,7 +719,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           </label>
           {all.length > 0 && (
             /* 篩選後的結果數是狀態不是說明——收成「？」只會讓人不知道篩掉了多少 */
-            <Hint as="span" layer="always" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</Hint>
+            <Hint as="span" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</Hint>
           )}
         </div>
       )}
@@ -763,7 +763,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           }
         />
       )}
-      {all.length > 0 && shownList.length === 0 && <Hint layer="always">沒有符合「{q}」的專案。</Hint>}
+      {all.length > 0 && shownList.length === 0 && <Hint>沒有符合「{q}」的專案。</Hint>}
 
       <div
         className={isDesktop && layout === "list" ? "launch-list" : "launch-grid"}

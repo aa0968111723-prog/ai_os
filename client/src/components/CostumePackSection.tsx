@@ -89,7 +89,7 @@ export function CostumePackSection({
         </Meta>
       </div>
       {carriedHint != null ? (
-        <Hint layer="always" className="costume-pack__carried" style={{ margin: "6px 0 8px", fontSize: 12 }}>
+        <Hint className="costume-pack__carried" style={{ margin: "6px 0 8px", fontSize: 12 }}>
           {carriedHint}
         </Hint>
       ) : null}

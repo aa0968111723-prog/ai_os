@@ -74,7 +74,7 @@ export function PromptTokenMap({ budget }: { budget: PromptBudgetReport }) {
         逐詞佔用：模型讀到哪些字
       </summary>
 
-      <Hint layer="always" style={{ marginTop: 6 }}>
+      <Hint style={{ marginTop: 6 }}>
         這是「版面」不是注意力權重：供應商不回傳模型內部的注意力，站內不會畫那種圖。
         下面每個詞後面的小數字，是它用 {budget.encoder.label} 的詞表實際佔掉的格數。
       </Hint>

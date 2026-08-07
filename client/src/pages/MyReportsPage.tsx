@@ -43,7 +43,7 @@ export function MyReportsPage() {
       ) : !mine.data?.length ? (
         <Card style={{ textAlign: "center", padding: 32 }}>
           <h3>你還沒有送過回報</h3>
-          <Hint layer="always">
+          <Hint>
             在任何頁面用右下角「回饋」浮標標定某個元件、或只針對這一頁說幾句就會出現在這裡。
           </Hint>
           <Link href="/dashboard">回今日工作台</Link>

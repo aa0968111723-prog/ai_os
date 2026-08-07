@@ -101,7 +101,7 @@ export function ModelHeatmap({
 
   return (
     <div className="model-heatmap" data-testid="model-heatmap">
-      <Hint layer="always" style={{ marginTop: 0 }}>
+      <Hint style={{ marginTop: 0 }}>
         一格＝一個「模型 × 指標」，<b>顏色越深分數越高</b>；斜線格代表這項沒有資料（不是 0 分）。
         點任何一列可以展開它的底層模型，或直接把它加進比較／競技場。
       </Hint>

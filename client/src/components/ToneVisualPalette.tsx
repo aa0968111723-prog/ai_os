@@ -182,7 +182,7 @@ export function ToneVisualPalette({
 
       {overSoft && (
         <Hint
-          layer="always"
+         
           style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}
         >
           已選 {tones.length} 個——畫面調性建議 1～2 個，出圖只會取前 2 個。

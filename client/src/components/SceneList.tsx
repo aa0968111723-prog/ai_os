@@ -697,7 +697,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             ))}
           </ol>
           <div className="scene-pipeline__hint">
-            <Hint as="span" layer="always">{hint.text}</Hint>
+            <Hint as="span">{hint.text}</Hint>
             {hint.filter && list.length > 0 && (
               <Button size="sm" variant="ghost" onClick={() => { setSceneFilter(hint.filter!); setSceneListExpanded(true); }}>
                 只看這些
@@ -763,7 +763,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
           ))}
         </div>
       ) : scenes.isError ? null : list.length === 0 ? (
-        <Hint layer="always">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</Hint>
+        <Hint>還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</Hint>
       ) : (
         <>
           {filteredSceneEntries.length === 0 ? (

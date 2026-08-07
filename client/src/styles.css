@@ -770,28 +770,6 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 .error { color: var(--danger-ink); font-size: 13px; margin-top: 8px; }
 .hint { color: var(--fg-secondary); font-size: 12px; line-height: 1.55; }
 .meta, .hint { color: var(--fg-secondary); }
-/* 精簡模式下 Hint 收合成的「說明」小鈕。
- * 前一版是 btn-ghost（透明底＋透明框）裡放一個全形「？」——畫面上看起來不是按鈕，
- * 是段落裡多打了一個問號，實機回報就是「為什麼這邊都打問號」。
- * 這裡給它看得見的框線與底色，並保留可見文字「說明」；44px 觸控下限由上面的
- * 全域 button 規則負責，這裡再寫死一次是為了不被行內情境的豁免規則削掉。 */
-.hint-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: var(--sp-4) var(--sp-12);
-  font-size: var(--fs-12);
-  font-weight: 500;
-  color: var(--fg-secondary);
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  box-shadow: none;
-}
-.hint-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
-.hint-toggle.is-open { color: var(--primary-ink); background: var(--primary-tint); border-color: var(--primary-border); }
 a { color: var(--primary-ink); text-underline-offset: 2px; }
 a:hover { color: var(--primary-solid-hover); }
 
@@ -3630,10 +3608,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 
 /* ── 模型事實區：選完模型後的能力／適用／點數換算 ──
- * 手機實測這一區會連吃六到八行（換算式自己就佔三行），是「AI 創作中心」
- * 最大的密度來源。這裡不刪任何一句話，只做兩件事：
+ * 手機實測這一區會連吃六到八行（換算式自己就佔三行）。這裡不刪任何一句話，只做兩件事：
  *   1. 徽章抽成獨立一列，讓句子佔滿整寬、不再被膠囊擠出孤字行
- *   2. 換算式收進具名 <details>，精簡模式預設收起（收起時金額仍在 summary 上）
+ *   2. 換算式收進具名 <details>，想收起的人自己收（收起時金額仍在 summary 上）
  */
 .model-facts { margin-top: 6px; display: grid; gap: 3px; }
 .model-facts__badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }

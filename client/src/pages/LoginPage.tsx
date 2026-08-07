@@ -192,7 +192,7 @@ export function LoginPage() {
           <p className="error" role="alert">{friendlyAuthError(login.error.message)}</p>
         ) : null}
         {/* 登入頁沒有註冊／忘記密碼入口，這句就是唯一的出路——收起來會讓進不去的人卡死，故 always */}
-        <Hint layer="always" style={{ marginTop: "var(--sp-12)" }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</Hint>
+        <Hint style={{ marginTop: "var(--sp-12)" }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</Hint>
         <div style={{ marginTop: "var(--sp-16)", textAlign: "left" }}>
           <InstallAppBanner />
         </div>
@@ -265,7 +265,7 @@ function DeviceVerifyStep({
             為了確認是你本人，我們寄了一組 6 位數驗證碼到 <strong>{pending.emailMasked}</strong>。
             請收信後填在下面。
           </p>
-          <Hint layer="always" style={{ marginBottom: "var(--sp-16)" }}>
+          <Hint style={{ marginBottom: "var(--sp-16)" }}>
             這次登入的裝置：{pending.deviceLabel}
           </Hint>
           <form onSubmit={(e) => { e.preventDefault(); void submit(code); }}>
@@ -308,7 +308,7 @@ function DeviceVerifyStep({
           {verify.error ? (
             <p className="error" role="alert">{friendlyAuthError(verify.error.message)}</p>
           ) : null}
-          <Hint layer="always" style={{ marginTop: "var(--sp-12)" }}>
+          <Hint style={{ marginTop: "var(--sp-12)" }}>
             驗證碼 10 分鐘內有效。收不到信請先看垃圾郵件匣；還是沒有就找管理員。
             如果這次登入不是你本人，代表有人知道了你的密碼——請立刻改密碼並通知管理員。
           </Hint>

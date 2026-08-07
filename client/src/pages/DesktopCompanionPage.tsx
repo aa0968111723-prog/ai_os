@@ -218,7 +218,7 @@ export function DesktopCompanionPage() {
     <section className="stack desktop-companion" style={{ maxWidth: 900, margin: "0 auto" }}>
       <Card>
         <h2>桌面剪輯連接</h2>
-        <Hint layer="always">
+        <Hint>
           選擇專案素材與電腦中已安裝的軟體。Aios 只會把素材下載到自己的本機快取；儲存修改後會上傳成新素材，不覆寫原檔。
         </Hint>
       </Card>
@@ -345,7 +345,7 @@ export function DesktopCompanionPage() {
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontWeight: 600, marginBottom: 8 }}>開啟軟體</legend>
           {matchingEditors.length === 0 ? (
-            <Hint layer="always">沒有偵測到符合這類素材的軟體。</Hint>
+            <Hint>沒有偵測到符合這類素材的軟體。</Hint>
           ) : (
             <div className="desktop-editor-picker" role="radiogroup" aria-label="選擇剪輯軟體">
               {matchingEditors.map((editor) => (
@@ -394,7 +394,7 @@ export function DesktopCompanionPage() {
       <Card>
         <h3>目前偵測到的桌面程式</h3>
         {editors.length === 0 ? (
-          <Hint layer="always">尚未偵測到已安裝的剪輯／影像軟體。</Hint>
+          <Hint>尚未偵測到已安裝的剪輯／影像軟體。</Hint>
         ) : (
           <ul className="desktop-editor-list">
             {editors.map((editor) => (

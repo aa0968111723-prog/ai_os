@@ -17,7 +17,7 @@ export function ModelMechanicsView({ modelId, category }: { modelId?: string; ca
   return (
     <details data-testid="model-mechanics" style={{ marginTop: 10 }}>
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>這顆模型怎麼運作</summary>
-      <Hint layer="always" style={{ marginTop: 6 }}>
+      <Hint style={{ marginTop: 6 }}>
         下圖是這類模型的架構示意（整理自公開資料），不是本次生成的中間結果——
         模型不回傳中間潛變數。要知道某一段設定這次有沒有真的起作用，請用下方的影響力實測。
       </Hint>

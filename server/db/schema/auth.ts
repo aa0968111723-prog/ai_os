@@ -16,8 +16,9 @@ export const users = pgTable("users", {
   status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
   /** 管理員重設密碼後為 true：首次登入強制改密碼（changePassword 成功即清除） */
   mustChangePassword: boolean("must_change_password").notNull().default(false),
-  /** 介面密度偏好（P1c 跨裝置同步）。null＝未設定過，前端用預設 guide；
-   *  值域與 shared/uiDensity.ts 的 uiDensitySchema 一致，寫入端一律先過 zod。 */
+  /** 介面密度偏好（0015）。「引導／精簡」兩種模式已於全站統一後撤除，欄位不再讀寫。
+   *  留著是因為 DROP COLUMN 得再發一次破壞性 migration，而多一個永遠是 null 的
+   *  文字欄位不影響任何查詢；schema 保留宣告則讓 drift 檢查對得上實際資料庫。 */
   uiDensity: text("ui_density", { enum: ["guide", "concise"] }),
   /** 個人頭像相對路徑（如 avatars/{userId}.jpg）；null＝尚未設定。0033_user_avatar */
   avatarUrl: text("avatar_url"),

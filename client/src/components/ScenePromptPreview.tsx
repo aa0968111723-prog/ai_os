@@ -122,7 +122,7 @@ function PreviewBody({ data }: { data: PreviewData }) {
         </pre>
       )}
       {data.warnings.length > 0 && (
-        <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
+        <Hint role="status" style={{ color: "var(--gold-ink)" }}>
           {data.warnings.map((w) => w.title).join("；")}
         </Hint>
       )}

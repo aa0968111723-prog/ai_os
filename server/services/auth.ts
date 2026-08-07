@@ -338,7 +338,6 @@ export interface AuthState {
     email: string;
     isSuperAdmin: boolean;
     mustChangePassword: boolean;
-    uiDensity: "guide" | "concise" | null;
     avatarUrl?: string | null;
   };
   /** 可用組（含角色）：直接組員＋團隊管理展開＋開發者展開全部 */
@@ -381,7 +380,6 @@ export async function loadAuthState(userId: string): Promise<AuthState | null> {
       email: user.email,
       isSuperAdmin: user.isSuperAdmin,
       mustChangePassword: user.mustChangePassword,
-      uiDensity: user.uiDensity,
       avatarUrl: publicAvatarUrl(user.id, user.avatarUrl),
     },
     groups: [...map.values()],

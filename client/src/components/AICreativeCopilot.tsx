@@ -236,7 +236,7 @@ export function AICreativeCopilot({ groupId, onUseIdeaForNewProject }: AICreativ
         </button>
       </div>
 
-      <Hint layer="always" style={{ margin: "8px 0 0", fontSize: 12, color: "var(--fg-secondary)" }}>
+      <Hint style={{ margin: "8px 0 0", fontSize: 12, color: "var(--fg-secondary)" }}>
         💡 免費・無限制發想。AI 隨時待命為您提供腳本點子、分鏡架構與專案全知建議。
       </Hint>
     </Card>

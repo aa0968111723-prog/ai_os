@@ -279,7 +279,7 @@ export function McpPage() {
             <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
               <Icon name="Lock" size={15} />「{fresh.label}」已建立{fresh.readOnly ? "（唯讀）" : ""}
             </div>
-            <Hint layer="always" style={{ margin: "6px 0 8px", color: "var(--gold-ink)" }}>
+            <Hint style={{ margin: "6px 0 8px", color: "var(--gold-ink)" }}>
               ⚠️ 金鑰只顯示這一次，請立刻複製收好；關掉後就再也拿不回（只能撤銷後重建）。
             </Hint>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -287,7 +287,7 @@ export function McpPage() {
               <CopyButton text={fresh.token} label="複製金鑰" />
             </div>
 
-            <Hint layer="always" style={{ margin: "10px 0 0" }}>
+            <Hint style={{ margin: "10px 0 0" }}>
               下一步：到下方「<a href="#mcp-clients">貼進你的 AI 客戶端</a>」照步驟貼上設定——趁這一頁還開著，範例已自動帶入這把金鑰。
             </Hint>
 
@@ -307,7 +307,7 @@ export function McpPage() {
 
       {/* 各客戶端接法：常駐顯示（先前只在剛建立金鑰時出現設定範例，關掉頁面就找不回教學了） */}
       <h2 id="mcp-clients" style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Monitor" size={18} />貼進你的 AI 客戶端</h2>
-      <Hint layer="always" style={{ marginTop: 0 }}>
+      <Hint style={{ marginTop: 0 }}>
         {fresh
           ? "範例已自動帶入剛建立的金鑰，直接複製即可。"
           : <>範例裡的「<code>你的金鑰</code>」請換成你建立時收好的那一串；忘了存就撤銷舊的再建一把。</>}
@@ -336,14 +336,14 @@ export function McpPage() {
           傳輸方式選「<b>HTTP</b>（Streamable HTTP）」，端點填上方「連線位置」的網址，再加一個 HTTP 標頭 <code>x-api-key: 你的金鑰</code>。各工具的設定介面不同，但要填的就這兩樣。
         </ClientGuide>
       </div>
-      <Hint layer="always" style={{ marginTop: 8 }}>
+      <Hint style={{ marginTop: 8 }}>
         <Icon name="Smartphone" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
         手機的 Claude App 目前接不了這種帶金鑰的 MCP 伺服器——第 ② 步請在電腦上完成，接上後在電腦端對話使用。
       </Hint>
 
       {/* 範例句：接上之後「要說什麼」——工具名對新手沒意義，給可照抄的白話需求 */}
       <h2 id="mcp-examples" style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="MessageSquare" size={18} />接上後可以這樣說</h2>
-      <Hint layer="always" style={{ marginTop: 0 }}>對 Claude 照抄或改編下面的話就能開始。不用背工具名——AI 會自己挑對的工具。</Hint>
+      <Hint style={{ marginTop: 0 }}>對 Claude 照抄或改編下面的話就能開始。不用背工具名——AI 會自己挑對的工具。</Hint>
       <Card>
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {EXAMPLE_PROMPTS.map((p) => (
@@ -366,7 +366,7 @@ export function McpPage() {
         ) : tokens.error ? (
           <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)" }}>載入金鑰失敗：{tokens.error.message}</Meta>
         ) : list.length === 0 ? (
-          <Hint layer="always" style={{ margin: 0 }}>還沒有金鑰。在上面建立一把即可開始連線。</Hint>
+          <Hint style={{ margin: 0 }}>還沒有金鑰。在上面建立一把即可開始連線。</Hint>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {list.map((t) => {
@@ -408,7 +408,7 @@ export function McpPage() {
 
       {/* 工具手冊 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Info" size={18} />可用工具</h2>
-      <Hint layer="always" style={{ marginTop: 0 }}>
+      <Hint style={{ marginTop: 0 }}>
         連進來的 AI 可呼叫以下工具。<b>讀取</b>類唯讀金鑰也能用；<b>寫入</b>類會扣點／留痕，唯讀金鑰一律擋下。
       </Hint>
       <Hint as="ul" style={{ marginTop: 0, paddingLeft: 20, lineHeight: 1.9 }}>
@@ -436,7 +436,7 @@ export function McpPage() {
 
       {/* 近期活動 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Clock" size={18} />近期 MCP 活動</h2>
-      <Hint layer="always" style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</Hint>
+      <Hint style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</Hint>
       <Card>
         {activity.isLoading ? (
           <Skeleton style={{ height: 36 }} />

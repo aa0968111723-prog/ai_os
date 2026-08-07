@@ -103,7 +103,7 @@ export function CreationSkillPicker({
       >
           <header className="creation-skill-menu__head">
             <strong>請誰來幫忙</strong>
-            {/* 怎麼操作這張選單的說明；熟手不需要 → guide 層，精簡模式收成「？」 */}
+            {/* 怎麼操作這張選單的說明 */}
             <Hint as="span">點卡面掛上；多步開拍前仍會請你過目</Hint>
           </header>
 

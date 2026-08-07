@@ -869,7 +869,7 @@ export function ProjectAssistant({
               ))}
             </select>
           </label>
-          <Hint as="span" layer="always">
+          <Hint as="span">
             {answerMode === "nim"
               ? "NVIDIA NIM 免費額度，站內 0 點、平台 0 成本。"
               : answerMode === "auto"

@@ -97,7 +97,7 @@ export function KnowledgeSourceStrip({
           ) : list.isError ? (
             <p className="error">{list.error.message}</p>
           ) : !list.data?.length ? (
-            <Hint layer="always">沒有符合的知識（可到專案知識庫新增或釘選）</Hint>
+            <Hint>沒有符合的知識（可到專案知識庫新增或釘選）</Hint>
           ) : (
             <div style={{ maxHeight: 180, overflow: "auto", display: "grid", gap: 4 }}>
               {list.data.map((k) => {

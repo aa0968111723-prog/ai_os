@@ -62,7 +62,7 @@ export function ProjectShareCard({ projectId, canEdit }: { projectId: string; ca
   return (
     <Card data-fb="分享連結卡" id="project-share">
       <h2>分享給夥伴檢視</h2>
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         產生一條唯讀連結：拿到的人不必登入就能看這個專案的設定、依據、分鏡與素材，但不能修改任何東西。
         連結本身就是憑證——傳給誰就等於開放給誰，不要貼在公開場合。
       </Hint>

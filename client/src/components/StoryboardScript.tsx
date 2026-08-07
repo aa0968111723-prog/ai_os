@@ -144,7 +144,7 @@ export function StoryboardScript({
           </div>
           {split.error && <p className="error" role="alert">拆分鏡失敗：{split.error.message}</p>}
           {split.data?.truncation && (
-            <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
+            <Hint role="status" style={{ color: "var(--gold-ink)" }}>
               腳本過長，這次只送了前 {split.data.truncation.sentChars.toLocaleString()} 字
               （共 {split.data.truncation.totalChars.toLocaleString()} 字）——尾段沒有拆進來。
               原文留在上面沒清掉：刪掉已經拆好的前段，再按一次就能接著拆。
@@ -156,7 +156,7 @@ export function StoryboardScript({
       {open && (
         <div style={{ marginTop: 8 }}>
           {rows.length === 0 && !editing ? (
-            <Hint layer="always">
+            <Hint>
               還沒有分鏡——上面「貼腳本拆分鏡」把腳本交給 AI 切幕，或到下方分鏡表新增一鏡，
               這裡就會出現整份可讀的文字腳本。
             </Hint>
@@ -179,7 +179,7 @@ export function StoryboardScript({
                 <p className="error" role="alert">{parsed.errors.join("；")}</p>
               ) : null}
               {parsed?.warnings.length ? (
-                <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
+                <Hint role="status" style={{ color: "var(--gold-ink)" }}>
                   {parsed.warnings.join("；")}
                 </Hint>
               ) : null}

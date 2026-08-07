@@ -54,7 +54,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
         <Badge style={{ marginLeft: "auto" }}>新手導覽</Badge>
       </div>
 
-      <Hint layer="always" style={{ marginTop: 8, fontSize: 13 }}>
+      <Hint style={{ marginTop: 8, fontSize: 13 }}>
         這是一套把「腳本 → 分鏡 → 生成 → 送審 → 交付」串起來的工具。第一次來，建議先開一個<strong>範例專案</strong>看看完整長相——
         裡面已經填好世界觀、附了四格草稿分鏡（含提示詞與配音詞）與一張示範縮圖，<strong>不會花到任何點數</strong>。
       </Hint>
@@ -87,7 +87,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
         <Link href="/help" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}>
           <Icon name="HelpCircle" size={14} />看怎麼用
         </Link>
-        {!groupId && <Hint as="span" layer="always">（要先屬於一個組才能建立範例）</Hint>}
+        {!groupId && <Hint as="span">（要先屬於一個組才能建立範例）</Hint>}
       </div>
 
       {createSample.error && <p className="error">{createSample.error.message}</p>}

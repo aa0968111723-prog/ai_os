@@ -797,7 +797,7 @@ export function MessagePanel({
           <Button size="sm" style={{ marginLeft: 8 }} onClick={() => list.refetch()}>重試</Button>
         </p>
       )}
-      {!list.isLoading && allMessages.length === 0 && <Hint layer="always">還沒有留言——留一句給同組夥伴吧。</Hint>}
+      {!list.isLoading && allMessages.length === 0 && <Hint>還沒有留言——留一句給同組夥伴吧。</Hint>}
 
       <div
         ref={listRef}
@@ -961,7 +961,7 @@ export function MessagePanel({
                 </button>
               ))}
               {!scheduleQ.data?.items.length && !notesQ.data?.length && (
-                <Hint as="span" layer="always" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</Hint>
+                <Hint as="span" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</Hint>
               )}
             </div>
           )}

@@ -274,7 +274,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               <div>
                 {isIOS() && !isStandalone() ? (
                   <>
-                    <Hint layer="always" style={{ margin: 0 }}>
+                    <Hint style={{ margin: 0 }}>
                       iPhone／iPad 必須先<strong>加入主畫面</strong>才能收通知（需 iOS 16.4+）：
                     </Hint>
                     <ol className="device-link-ios">
@@ -285,7 +285,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     </ol>
                   </>
                 ) : (
-                  <Hint layer="always" style={{ margin: 0 }}>
+                  <Hint style={{ margin: 0 }}>
                     這個瀏覽器不支援推播——請改用較新的 Chrome、Edge、Firefox 或 Safari。
                   </Hint>
                 )}
@@ -317,7 +317,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                 <Meta>通知金鑰暫時讀不到——稍後重開此視窗再試</Meta>
               )}
               {perm === "denied" && (
-                <Hint as="span" layer="always" role="status">
+                <Hint as="span" role="status">
                   通知權限被封鎖——請到瀏覽器網站設定把「通知」改為允許
                 </Hint>
               )}
@@ -331,7 +331,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           {devices.isLoading ? (
             <Meta as="p">載入中…</Meta>
           ) : deviceRows.length === 0 ? (
-            <Hint layer="always">
+            <Hint>
               還沒有任何裝置——先啟用本裝置，再到手機或另一台電腦用同一帳號重複一次。
             </Hint>
           ) : (

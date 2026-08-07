@@ -158,7 +158,7 @@ export function UngroupedRoutes() {
       {/* 分享收件：未分組只能「傳給夥伴」（頁內已依 groupId 空值收斂選項） */}
       <Route path="/share-target"><ShareTargetPage groupId="" /></Route>
       <Route>
-        <EmptyState icon={<Icon name="Clock" />} title={<>你已成功加入 ✓ 還差一步</>} description={<>帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。</>} action={<><Hint layer="always">等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</Hint></>} style={{ marginTop: "var(--sp-32)" }} />
+        <EmptyState icon={<Icon name="Clock" />} title={<>你已成功加入 ✓ 還差一步</>} description={<>帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。</>} action={<><Hint>等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</Hint></>} style={{ marginTop: "var(--sp-32)" }} />
       </Route>
     </Switch>
   );

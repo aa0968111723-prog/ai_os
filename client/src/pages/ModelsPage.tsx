@@ -588,7 +588,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
                   </div>
                 ))}
                 {wizardResults.length === 0 && (
-                  <Hint layer="always" style={{ margin: "12px 0 0" }}>這個組合目前沒有模型——換個預算檔試試。</Hint>
+                  <Hint style={{ margin: "12px 0 0" }}>這個組合目前沒有模型——換個預算檔試試。</Hint>
                 )}
               </div>
             )}
@@ -810,7 +810,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
             </div>
           </div>
           {/* 「每步各自扣點」是實際代價：不知道範本逐步計費就可能誤啟動 → 不可收 */}
-        <Hint layer="always">在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
+        <Hint>在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (

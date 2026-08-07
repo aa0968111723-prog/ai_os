@@ -74,7 +74,7 @@ export function AddOptionInline({
         background: "var(--card2)",
       }}
     >
-      <Hint layer="always" style={{ marginTop: 0 }}>新增的{meta.label}全組共用，之後每次建立都選得到。</Hint>
+      <Hint style={{ marginTop: 0 }}>新增的{meta.label}全組共用，之後每次建立都選得到。</Hint>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
         <input
           autoFocus
@@ -93,7 +93,7 @@ export function AddOptionInline({
       </div>
       {meta.hasFormat && (
         <div style={{ marginTop: 8 }}>
-          <Hint layer="always" style={{ marginTop: 0, fontWeight: 600 }}>這個平台的畫面尺寸</Hint>
+          <Hint style={{ marginTop: 0, fontWeight: 600 }}>這個平台的畫面尺寸</Hint>
           <FormatPicker value={format} onChange={setFormat} disabled={add.isPending} />
         </div>
       )}

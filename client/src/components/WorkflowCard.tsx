@@ -241,7 +241,7 @@ export function WorkflowCard({
               </li>
             ))}
           </Meta>
-          <Hint layer="always" style={{ margin: "6px 0 0" }}>
+          <Hint style={{ margin: "6px 0 0" }}>
             本次模式：製作範本・預估消耗：約 {wf.points} 點（{wf.steps.length} 步）・產物寫入生成紀錄
           </Hint>
           <Hint style={{ margin: "2px 0 0" }}>
@@ -321,7 +321,7 @@ export function WorkflowCard({
         >
           {start.isPending ? "送出中…" : `執行製作範本（約 −${wf?.points ?? 0} 點）`}
         </button>
-        {hasMyActive && <Hint as="span" layer="always">已有一個製作範本在執行</Hint>}
+        {hasMyActive && <Hint as="span">已有一個製作範本在執行</Hint>}
       </div>
       {start.error && <Meta as="p" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</Meta>}
       {stop.error && <Meta as="p" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</Meta>}

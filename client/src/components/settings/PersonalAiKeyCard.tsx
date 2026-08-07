@@ -59,7 +59,7 @@ export function PersonalAiKeyCard() {
         ，生成時可優先使用你的額度——<strong>不扣平台點數</strong>。
         關閉「優先使用」或移除金鑰後，自動回到平台 FAL_KEY + 正常扣點。
       </Hint>
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         金鑰加密存放、永不回顯；探活只用免費 models 列表，不會觸發付費生成。
       </Hint>
 
@@ -167,7 +167,7 @@ export function PersonalAiKeyCard() {
       {setMut.error && <p className="error" role="alert">{setMut.error.message}</p>}
       {removeMut.error && <p className="error" role="alert">{removeMut.error.message}</p>}
       {preferMut.error && <p className="error" role="alert">{preferMut.error.message}</p>}
-      <Hint layer="always" style={{ marginTop: 6 }}>
+      <Hint style={{ marginTop: 6 }}>
         <Icon name="Lock" size={12} /> 金鑰送出後即加密存放，不會再顯示——之後只看得到末四碼。
       </Hint>
     </Card>

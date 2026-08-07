@@ -125,15 +125,14 @@ export function IntegrationsPage() {
         <Hint style={{ marginTop: 4 }}>
           連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
         </Hint>
-        {/* 權限範圍是「按下連結鍵之前必須看到」的資訊——這句被精簡模式收進「？」，
-            等於讓人在不知道我們拿到什麼權限的情況下把雲端帳號交出去，故 always。 */}
-        <Hint layer="always" style={{ marginTop: 4 }}>
+        {/* 權限範圍是「按下連結鍵之前必須看到」的資訊：不知道我們拿到什麼權限就交出雲端帳號，不行。 */}
+        <Hint style={{ marginTop: 4 }}>
           AI 與代理只會讀「你選中並匯入」的檔案，不是整顆雲端；授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
         </Hint>
         {!d ? (
           <Meta as="p">載入中…</Meta>
         ) : !d.googleDrive.configured ? (
-          <Hint layer="always">站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</Hint>
+          <Hint>站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</Hint>
         ) : !d.googleDrive.connected ? (
           <a className="btn-sm primary" href="/api/integrations/google-drive/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Plus" size={14} /> 連結 Google 雲端
@@ -202,7 +201,7 @@ function AdobeCard() {
         連結你自己的 Adobe 帳號後，可以請 AI 直接在該帳號內完成去背、調色等修圖，並把剪輯素材備好，
         不必再一路下載上傳。素材與成品都留在你的 Adobe 帳號裡。
       </Hint>
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         AI 只會處理「你指定的素材」；授權可隨時中斷，中斷後本系統保存的憑證即刪除。
       </Hint>
       {flash && <Meta as="p" style={{ color: "var(--success-ink)" }}>{flash}</Meta>}
@@ -282,7 +281,7 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
       )}
       {setNotion.error && <p className="error" role="alert">{setNotion.error.message}</p>}
       {removeNotion.error && <p className="error" role="alert">{removeNotion.error.message}</p>}
-      <Hint layer="always" style={{ marginTop: 6 }}><Icon name="Lock" size={12} /> token 送出後即加密存放，不會再顯示——之後只看得到末四碼。</Hint>
+      <Hint style={{ marginTop: 6 }}><Icon name="Lock" size={12} /> token 送出後即加密存放，不會再顯示——之後只看得到末四碼。</Hint>
     </Card>
   );
 }
@@ -323,12 +322,12 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
   return (
     <Card as="section" id="integration-api" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
         真正要使用哪些內容，仍到「知識與資料」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
       </Hint>
 
-      {apis.length === 0 && !adding && <Hint layer="always">還沒有外部資料來源——按下面「新增連接」開始。</Hint>}
+      {apis.length === 0 && !adding && <Hint>還沒有外部資料來源——按下面「新增連接」開始。</Hint>}
       {apis.map((c) => (
         <div key={c.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -381,7 +380,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
               onChange={(e) => setSecret(e.target.value)}
             />
           </div>
-          <Hint layer="always" style={{ margin: 0 }}>標頭值原樣送出——需要 Bearer 前綴就一起貼（如「Bearer pat123」）。</Hint>
+          <Hint style={{ margin: 0 }}>標頭值原樣送出——需要 Bearer 前綴就一起貼（如「Bearer pat123」）。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
             <Button size="sm" variant="primary"
               disabled={!name.trim() || !baseUrl.trim() || !secret || addApi.isPending}

@@ -84,7 +84,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
       </div>
 
       {data && !data.ok && data.reason === "not-connected" && (
-        <Hint as="p" layer="always" style={{ marginTop: 8 }}>
+        <Hint as="p" style={{ marginTop: 8 }}>
           還沒設定 Notion。設定後只有「分享給整合」的頁面／資料庫會出現在這裡，AI 只讀你選中匯入的內容。
           <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往設定 Notion <Icon name="ArrowRight" size={13} /></Link>
         </Hint>
@@ -116,7 +116,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
           </div>
 
           {data?.ok && pages.length === 0 && !list.isFetching && (
-            <Hint as="p" layer="always" style={{ marginTop: 8 }}>
+            <Hint as="p" style={{ marginTop: 8 }}>
               找不到頁面或資料庫——確認它已「分享給整合」（右上 ⋯ → 連接 → 選你的 integration；
               資料庫要在資料庫本身那一頁操作，不是在單一列的頁面），或換個關鍵字。
             </Hint>

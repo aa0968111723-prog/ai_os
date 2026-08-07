@@ -1,15 +1,13 @@
 /**
- * 模型事實區的密度分層：匯率換算式在精簡模式預設收起、引導模式預設展開，
- * 且無論收合與否，金額（幾點）都看得到。
+ * 模型事實區：匯率換算式預設展開、可自行收起，且無論收合與否金額（幾點）都看得到。
  *
- * 這一段之所以要測：它是「AI 創作中心」在手機上最大的密度來源，
- * 但同時是點數透明度的依據——只要有人把它改成永遠常駐或永遠隱藏，都會退回原本的問題。
+ * 這一段之所以要測：它是點數透明度的依據——只要有人把它改成預設隱藏或不可收合，
+ * 都會退回原本的問題（看不到代價，或手機上被三行換算式塞滿）。
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ModelPicker } from "./ModelPicker";
-import { DensityProvider } from "./ui";
 
 const CATEGORY = { id: "text-to-image", label: "文生圖", hint: "從文字直接生圖" };
 const MODEL = {
@@ -41,12 +39,8 @@ vi.mock("../api", () => ({
   },
 }));
 
-function renderAt(density: "guide" | "concise") {
-  return render(
-    <DensityProvider value={density}>
-      <ModelPicker onChange={() => {}} />
-    </DensityProvider>,
-  );
+function renderPicker() {
+  return render(<ModelPicker onChange={() => {}} />);
 }
 
 /** jsdom 裡 <details> 收合仍留在 DOM，所以「看不看得到」只能靠 open 屬性判定。 */
@@ -58,26 +52,21 @@ function costDetails(): HTMLDetailsElement {
 }
 
 describe("ModelPicker 模型事實區", () => {
-  it("精簡模式收起匯率換算式，但金額仍留在收合列上", () => {
-    renderAt("concise");
-    expect(costDetails().open).toBe(false);
-    expect(screen.getByText("約 1 點")).toBeInTheDocument();
-  });
-
-  it("引導模式預設展開換算式", () => {
-    renderAt("guide");
+  it("預設展開換算式", () => {
+    renderPicker();
     expect(costDetails().open).toBe(true);
     expect(screen.getByText(/US\$1＝NT\$32.308/)).toBeInTheDocument();
   });
 
-  it("精簡模式下仍可自行展開換算式", async () => {
-    renderAt("concise");
+  it("可自行收起換算式，但金額仍留在收合列上", async () => {
+    renderPicker();
     await userEvent.click(screen.getByText(/點數怎麼算/));
-    expect(costDetails().open).toBe(true);
+    expect(costDetails().open).toBe(false);
+    expect(screen.getByText("約 1 點")).toBeInTheDocument();
   });
 
-  it("能力／適用情境不因密度收起——那是選型依據，不是介面說明", () => {
-    renderAt("concise");
+  it("能力／適用情境常駐——那是選型依據", () => {
+    renderPicker();
     expect(screen.getByText(/開源 14B/)).toBeInTheDocument();
     expect(screen.getByText(/日常分鏡影片/)).toBeInTheDocument();
   });

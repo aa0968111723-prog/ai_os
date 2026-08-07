@@ -880,7 +880,7 @@ export function CollabModeBar({
       {mode === "mirror" && (
         <>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: 0 }}>
-            <Hint as="span" layer="always" style={{ fontSize: 11 }}>跟著</Hint>
+            <Hint as="span" style={{ fontSize: 11 }}>跟著</Hint>
             <select
               aria-label="選擇要跟隨的夥伴"
               value={followUserId ?? ""}

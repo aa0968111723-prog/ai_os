@@ -464,7 +464,7 @@ function ReportForm({
         <button className="primary" disabled={!canSubmit} onClick={doSubmit}>
           {submitting ? "送出中…" : "送出"}
         </button>
-        <Hint as="span" layer="always">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</Hint>
+        <Hint as="span">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</Hint>
       </div>
       {submit.error && (
         <p className="error" role="alert">

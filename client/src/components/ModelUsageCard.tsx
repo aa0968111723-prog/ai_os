@@ -113,7 +113,7 @@ export function UsageOverview({ data }: { data: UsageData }) {
     return (
       <Card as="section" className="model-usage-overview" data-fb="模型使用量">
         <UsageHead days={data.days} />
-        <Hint layer="always" style={{ margin: "8px 0 0" }}>
+        <Hint style={{ margin: "8px 0 0" }}>
           還沒有生成紀錄——用下方「怎麼選模型」挑一個，到工作台跑一輪就會出現在這裡。
         </Hint>
       </Card>

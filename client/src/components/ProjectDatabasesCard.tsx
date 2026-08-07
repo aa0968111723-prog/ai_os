@@ -347,7 +347,7 @@ export function ProjectDatabasesCard({
             <Icon name="Database" size={13} /> 進階：資料表與外部連結（Notion／Google）——用不到可略過
           </summary>
           <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
-            <Hint layer="always" style={{ margin: 0 }}>
+            <Hint style={{ margin: 0 }}>
               想用表格管理人員、素材清單或發布排程，或把 Notion／Google 雲端的資料接進來，才需要這區。
               外部帳號連上後還要匯入或關聯專案，AI 才會使用。
             </Hint>
@@ -355,7 +355,7 @@ export function ProjectDatabasesCard({
             {canEdit && (
               <div data-testid="project-data-templates">
                 <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
-                <Hint layer="always" style={{ margin: "0 0 8px" }}>
+                <Hint style={{ margin: "0 0 8px" }}>
                   範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
                 </Hint>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

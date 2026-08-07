@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Badge, Button, Card, Chip, DensityProvider, EmptyState, Hint, Meta, Pill, Skeleton, cx } from ".";
+import { Badge, Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton, cx } from ".";
 import { useRovingRadio } from "../interactions";
 
 /**
@@ -304,8 +304,8 @@ describe("Skeleton", () => {
   });
 });
 
-describe("Hint — 新手／專家分層", () => {
-  it("預設密度是 guide，輸出與遷移前相同的 <p class=\"hint\">", () => {
+describe("Hint — 說明小字", () => {
+  it("輸出 <p class=\"hint\">", () => {
     const { container } = render(<Hint>說明文字</Hint>);
     const el = container.firstElementChild!;
     expect(el.tagName).toBe("P");
@@ -313,110 +313,30 @@ describe("Hint — 新手／專家分層", () => {
     expect(el).toHaveTextContent("說明文字");
   });
 
-  it("引導模式下常駐顯示", () => {
-    render(
-      <DensityProvider value="guide">
-        <Hint>說明文字</Hint>
-      </DensityProvider>,
-    );
+  // 曾有過「引導／精簡」兩種密度，精簡模式把說明收成一顆「說明」小鈕。
+  // 全站統一之後說明一律常駐——不該再有任何收合鈕冒出來。
+  it("一律常駐，不再收成可展開的小鈕", () => {
+    render(<Hint>說明文字</Hint>);
     expect(screen.getByText("說明文字")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("精簡模式收成可展開的「說明」小鈕", async () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint>說明文字</Hint>
-      </DensityProvider>,
+  it("as 可換標籤，className 疊加在 hint 之後", () => {
+    const { container } = render(
+      <Hint as="div" className="extra">
+        說明文字
+      </Hint>,
     );
-    expect(screen.queryByText("說明文字")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: /^顯示說明：說明文字/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-    await userEvent.click(toggle);
-    expect(screen.getByText("說明文字")).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-
-    await userEvent.click(toggle);
-    expect(screen.queryByText("說明文字")).not.toBeInTheDocument();
+    const el = container.firstElementChild!;
+    expect(el.tagName).toBe("DIV");
+    expect(el.getAttribute("class")).toBe("hint extra");
   });
 
-  it("layer=always 在精簡模式仍常駐（扣點、錯誤修法這類不能藏）", () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint layer="always">本次將扣 12 點</Hint>
-      </DensityProvider>,
-    );
-    expect(screen.getByText("本次將扣 12 點")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  });
-
-  // 舊版是 btn-ghost（透明底＋透明框）包一個裸的全形「？」，畫面上讀起來像段落裡
-  // 多打了一個問號而不是可按的控制項。收合鈕必須有可見文字，且文字要含在無障礙
-  // 名稱裡（WCAG 2.5.3 label in name），語音控制「點 說明」才點得到。
-  it("收合鈕帶可見文字「說明」，不是裸問號", () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint>說明文字</Hint>
-      </DensityProvider>,
-    );
-    const toggle = screen.getByRole("button", { name: /^顯示說明/ });
-    expect(toggle).toHaveTextContent("說明");
-    expect(toggle.textContent).not.toBe("？");
-    expect(toggle.className).toContain("hint-toggle");
-    expect(toggle.getAttribute("aria-label")).toContain("說明");
-  });
-
-  it("展開的說明由收合鈕以 aria-controls 指向", async () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint>說明文字</Hint>
-      </DensityProvider>,
-    );
-    const toggle = screen.getByRole("button", { name: /^顯示說明：說明文字/ });
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute("aria-controls")).toBe(screen.getByText("說明文字").id);
-  });
-
-  it("同頁多顆收合按鈕的名稱互異（讀屏 rotor 才分得出誰是誰）", () => {
-    // AdminPage 一頁就有 9 顆收合 Hint。若全叫「顯示說明」，元件清單聽到的是
-    // 一整排同名按鈕，語音控制「點 顯示說明」也無從指定——名稱必須帶內容片段。
-    render(
-      <DensityProvider value="concise">
-        <Hint>選好風格後會自動帶入語氣</Hint>
-        <Hint>分鏡助理會先讀知識庫</Hint>
-      </DensityProvider>,
-    );
-    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"));
-    expect(names).toHaveLength(2);
-    expect(new Set(names).size).toBe(2);
-    expect(names[0]).toContain("選好風格");
-    expect(names[1]).toContain("分鏡助理");
-  });
-
-  it("巢狀元素裡的文字也取得到；取不出文字才退回通稱", () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint>
-          <strong>重點</strong>之後是內文
-        </Hint>
-        <Hint>
-          <svg aria-hidden="true" />
-        </Hint>
-      </DensityProvider>,
-    );
-    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"));
-    expect(names[0]).toContain("重點之後是內文");
-    expect(names[1]).toBe("顯示說明");
-  });
-
-  it("toggleLabel 仍可覆蓋自動推導", () => {
-    render(
-      <DensityProvider value="concise">
-        <Hint toggleLabel="顯示排程說明">用上面的欄位加第一筆</Hint>
-      </DensityProvider>,
-    );
-    expect(screen.getByRole("button", { name: "顯示排程說明" })).toBeInTheDocument();
+  it("其餘屬性透傳到標籤上", () => {
+    const { container } = render(<Hint id="h1" style={{ marginTop: 4 }}>說明文字</Hint>);
+    const el = container.firstElementChild as HTMLElement;
+    expect(el.id).toBe("h1");
+    expect(el.style.marginTop).toBe("4px");
   });
 });
 
@@ -461,17 +381,15 @@ describe("Meta — 內容 vs 說明的分界", () => {
     expect(el.getAttribute("class")).toBe("hint");
   });
 
-  it("精簡模式下**不會**被收起 —— 藏內容會讓人以為資料不見了", () => {
+  it("內容與說明都常駐 —— 藏內容會讓人以為資料不見了", () => {
     render(
-      <DensityProvider value="concise">
+      <>
         <Meta>約 12 分</Meta>
         <Hint>這裡解釋怎麼用</Hint>
-      </DensityProvider>,
+      </>,
     );
     expect(screen.getByText("約 12 分")).toBeInTheDocument();
-    // 對照組：同一個密度下，說明被收成問號
-    expect(screen.queryByText("這裡解釋怎麼用")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^顯示說明：這裡解釋怎麼用/ })).toBeInTheDocument();
+    expect(screen.getByText("這裡解釋怎麼用")).toBeInTheDocument();
   });
 
   it("支援清單與段落等內容常見的標籤", () => {
@@ -490,15 +408,13 @@ describe("Meta — 內容 vs 說明的分界", () => {
 });
 
 describe("EmptyState", () => {
-  it("標題與說明都在，精簡模式也不會消失（空狀態的說明是唯一內容）", () => {
+  it("標題與說明都在（空狀態的說明是唯一內容）", () => {
     render(
-      <DensityProvider value="concise">
-        <EmptyState
-          title="還沒有專案"
-          description="建立第一個專案，開始你的創作。"
-          action={<Button variant="primary">建立專案</Button>}
-        />
-      </DensityProvider>,
+      <EmptyState
+        title="還沒有專案"
+        description="建立第一個專案，開始你的創作。"
+        action={<Button variant="primary">建立專案</Button>}
+      />,
     );
     expect(screen.getByRole("heading", { name: "還沒有專案" })).toBeInTheDocument();
     expect(screen.getByText("建立第一個專案，開始你的創作。")).toBeInTheDocument();

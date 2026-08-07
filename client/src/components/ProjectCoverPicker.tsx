@@ -86,7 +86,7 @@ export function ProjectCoverPicker({
               fallbackHeight={140}
             />
           ) : (
-            <Hint as="p" layer="always" style={{ margin: 0 }}>
+            <Hint as="p" style={{ margin: 0 }}>
               目前用的是自動配色封面（專案名稱首字）——選一張圖就會換掉它。
             </Hint>
           )}
