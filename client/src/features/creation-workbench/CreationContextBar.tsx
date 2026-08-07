@@ -9,8 +9,8 @@ import { revealProjectContextFromSelector } from "../project-nav/projectContextN
 
 export const CREATION_CONTEXT_LINKS: ReadonlyArray<{ label: string; target: string }> = [
   { label: "專案設定", target: "#stage-context" },
-  { label: "知識", target: "#sec-knowledge" },
-  { label: "資料來源", target: "#sec-databases" },
+  { label: "專案依據", target: "#sec-knowledge" },
+  { label: "AI 讀得到什麼", target: "#sec-databases" },
   { label: "素材", target: "#sec-assets" },
   { label: "分鏡與交付", target: "#stage-deliver" },
 ];

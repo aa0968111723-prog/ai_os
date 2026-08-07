@@ -193,7 +193,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       <CursorOverlay cursors={collab.cursors} />
       <header className="page-intro database-intro">
         <div>
-          <p className="eyebrow">團隊資料中心</p>
+          <p className="eyebrow">團隊共用</p>
           <h1>資料庫</h1>
           <p className="page-lede">把名單、素材、任務與文件變成團隊和 AI 都能安全使用的共同資料。</p>
         </div>

@@ -28,7 +28,7 @@ export function IntegrationsPage() {
     const q = new URLSearchParams(window.location.search).get("gdrive");
     if (!q) return;
     setFlash(
-      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「知識與資料」匯入你的私人文件"
+      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「團隊資料表」匯入你的私人文件"
       : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
       : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 雲端」"
       : "連結失敗，請稍後再試",
@@ -114,7 +114,7 @@ export function IntegrationsPage() {
       <Card as="section" className="integration-flow-card" data-fb="資料來源使用方式">
         <div className="integration-flow-card__head">
           <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
-          <Link href="/databases" className="btn-tonal btn-sm">前往知識與資料 <Icon name="ArrowRight" size={13} /></Link>
+          <Link href="/databases" className="btn-tonal btn-sm">前往團隊資料表 <Icon name="ArrowRight" size={13} /></Link>
         </div>
         <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
       </Card>
@@ -123,7 +123,7 @@ export function IntegrationsPage() {
       <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
-          連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
+          連結後，到「團隊資料表」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
         </Hint>
         {/* 權限範圍是「按下連結鍵之前必須看到」的資訊：不知道我們拿到什麼權限就交出雲端帳號，不行。 */}
         <Hint style={{ marginTop: 4 }}>

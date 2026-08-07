@@ -172,7 +172,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
 
   return (
     <Card as="section" data-fb="專案知識庫">
-      <h2>專案知識庫（AI 讀得懂你的素材）</h2>
+      <h2>專案依據（AI 生成時會參考）</h2>
       <Hint>
         貼上開示稿、見證、腳本——AI 導演／助手會自動讀取。
         <strong> 釘選</strong>的篇目注入優先（不會被新筆記擠掉）。

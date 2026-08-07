@@ -81,7 +81,9 @@ describe("ProjectDatabasesCard", () => {
   it("shows project data entry and empty AI status", () => {
     render(<ProjectDatabasesCard projectId="project-1" />);
 
-    expect(screen.getByText("專案依據")).toBeInTheDocument();
+    // 這張卡是「本專案有哪些東西 AI 讀得到」的總覽，與 KnowledgeBase（專案依據＝
+    // 專案內的全文素材）是不同東西，名稱刻意不同——同名會讓兩個功能看起來是一個。
+    expect(screen.getByText("AI 讀得到什麼")).toBeInTheDocument();
     expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "empty");
     // 收合狀態就要有得按：沒有依據時 summary 內常駐「加資料」，
     // 否則使用者得先展開一張卡才會發現裡面能貼文字／上傳（實測痛點）
