@@ -47,6 +47,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.deleteAsset": "刪除素材（進回收桶）",
   "projects.restoreAsset": "還原素材",
   "projects.purgeAsset": "永久刪除素材",
+  // 分享連結：唯一能讓專案內容被未登入者看到的動作，措辭必須明講「對外公開」
+  "share.create": "建立對外唯讀分享連結",
+  "share.revoke": "收回對外唯讀分享連結",
   // 生成與點數
   "generation.submit": "送出生成",
   "generation.preview": "預覽 AI 如何理解生成請求",
@@ -309,7 +312,9 @@ export function humanizeAuditAction(action: string): string {
  */
 export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
-  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs"] },
+  // share 歸在專案：對外分享是「把這個專案交出去」的一種交付方式，組長要查時
+  // 會跟封存、打包下載一起看，不該散在另一個分類裡
+  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs", "share"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
   { key: "storyboard", label: "分鏡", prefixes: ["scenes"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },

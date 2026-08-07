@@ -61,6 +61,9 @@ function pageTitle(pathname: string): string {
   if (pathname === "/login") return "登入｜Aios";
   if (pathname === "/dashboard") return "今日工作台｜Aios";
   if (pathname.startsWith("/p/")) return "專案｜Aios";
+  // 分享連結的唯讀檢視：頁面自己會在拿到資料後改成專案名，這裡先給中性標題，
+  // 不要讓外部訪客的分頁標題直接掛上產品名以外的內部字樣
+  if (pathname.startsWith("/s/")) return "專案檢視｜Aios";
   if (pathname.startsWith("/planner")) return "筆記排程｜Aios";
   if (pathname.startsWith("/databases")) return "知識資料｜Aios";
   if (pathname.startsWith("/chat")) return "訊息｜Aios";

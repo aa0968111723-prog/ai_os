@@ -213,4 +213,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0038_scene_ambience": [
     "9993a304399be42eaa9f52787af3d6d942f5a5302dffdbc0a679e4542a23c4b6",
   ],
+  "0039_project_share_links": [
+    "ad2681feabb586f070788e1987bae7f9df082a90b34622539d74a8e0981071bc",
+  ],
 };

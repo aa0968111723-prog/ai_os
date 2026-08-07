@@ -857,6 +857,19 @@ export function signAssetUrl(assetId: string, ttlSeconds = 3600): string {
   return `${publicBaseUrl()}/api/assets/${assetId}/file?exp=${exp}&sig=${sig}`;
 }
 
+/**
+ * 同一把簽章、但回「相對路徑」——給要在瀏覽器裡開的頁面用（分享連結的唯讀檢視）。
+ *
+ * 不用 signAssetUrl 是因為它吃 publicBaseUrl()：正式站若沒設 APP_URL/PUBLIC_DOMAIN
+ * 會落回 http://localhost:3000，外部訪客拿到的圖片網址全部指向他自己的電腦。
+ * 相對路徑由瀏覽器對「當下的來源」解析，永遠指得對。
+ */
+export function signAssetPath(assetId: string, ttlSeconds = 3600): string {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = createHmac("sha256", signSecret()).update(`${assetId}.${exp}`).digest("hex");
+  return `/api/assets/${assetId}/file?exp=${exp}&sig=${sig}`;
+}
+
 export function verifyAssetSig(assetId: string, exp: string | undefined, sig: string | undefined): boolean {
   if (!exp || !sig) return false;
   const expNum = Number(exp);
