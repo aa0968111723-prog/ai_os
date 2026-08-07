@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
+import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
@@ -80,29 +81,12 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   const [moreOpen, setMoreOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const orbRef = useRef<HTMLButtonElement | null>(null);
-  // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」——補上最小手勢：
-  // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉。
-  //
-  // setPointerCapture ＋ 把手的 touch-action: none（見 .mobile-more-sheet__grip）
-  // 缺一不可：sheet 是 overflow-y: auto，少了它們瀏覽器會把這條直向拖曳判成捲動，
-  // 滑到約 16px 就送出 pointercancel，永遠走不到下方 48px 的門檻。
-  // 真機實測序列 `down → move → move → CANCEL`——手勢從落地起就沒有生效過。
-  const sheetDragY = useRef<number | null>(null);
-  const sheetDragProps = {
-    onPointerDown: (e: ReactPointerEvent) => {
-      if (e.pointerType === "mouse") return;
-      sheetDragY.current = e.clientY;
-      e.currentTarget.setPointerCapture(e.pointerId);
-    },
-    onPointerMove: (e: ReactPointerEvent) => {
-      if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
-        sheetDragY.current = null;
-        setMoreOpen(false);
-      }
-    },
-    onPointerUp: () => { sheetDragY.current = null; },
-    onPointerCancel: () => { sheetDragY.current = null; },
-  };
+  // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」。手勢掛在整張 sheet
+  // （不只把手），內容捲動中自動讓路——為什麼必須這樣做（修壞過兩輪的
+  // 完整記載）在 useSheetSwipeDismiss 檔頭。
+  const moreSheetRef = useRef<HTMLElement | null>(null);
+  const closeMore = useCallback(() => setMoreOpen(false), []);
+  useSheetSwipeDismiss(moreSheetRef, closeMore, moreOpen);
   const groups = moreGroups();
   const isHere = (item: SheetItem) => destinationMatch(item).some((prefix) => location.startsWith(prefix));
   const moreActive = groups.some((group) => group.items.some(isHere));
@@ -127,9 +111,9 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
             aria-label="關閉更多功能"
             onClick={() => setMoreOpen(false)}
           />
-          <aside id="mobile-more-tools" className="mobile-more-sheet" aria-label="更多功能">
-            <div className="mobile-more-sheet__grip" aria-hidden="true" {...sheetDragProps} />
-            <div className="mobile-more-sheet__head" {...sheetDragProps}>
+          <aside id="mobile-more-tools" className="mobile-more-sheet" aria-label="更多功能" ref={moreSheetRef}>
+            <div className="mobile-more-sheet__grip" aria-hidden="true" />
+            <div className="mobile-more-sheet__head">
               <span>
                 <strong>全部功能</strong>
                 <small>底下分頁列放不下的頁面都在這裡</small>

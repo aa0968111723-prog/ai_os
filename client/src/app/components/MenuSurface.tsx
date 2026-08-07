@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useMatchMedia } from "../../lib/useMatchMedia";
+import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
 
 /** 選單改為貼底 sheet 的斷點：與 styles.css 的手機殼層 v2（≤820px）同界線 */
 export const MENU_SHEET_MQ = "(max-width: 820px)";
@@ -91,9 +92,10 @@ export function MenuSurface({
 }) {
   // hook 一律呼叫（不可放進條件式），只有結果被 forceSheet 蓋過
   const compact = useMatchMedia(MENU_SHEET_MQ) || forceSheet;
-  // sheet 下滑關閉手勢的起手 Y（僅 compact 使用；見 surface 的 onPointerDown）
-  const sheetDragY = useRef<number | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  // 整張 sheet 任何地方下滑即關（內容捲動中會自動讓路）。為什麼不是把手上的
+  // pointer 事件——修壞過兩輪的完整記載在 useSheetSwipeDismiss 檔頭。
+  useSheetSwipeDismiss(surfaceRef, onClose, open && compact);
   // 開啟當下就要能聚焦首項：DOM 在 layout effect 執行時已存在，
   // 用 rAF 會讓焦點落點取決於畫格時機，CI 與慢裝置上會間歇性留在觸發器上
   useLayoutEffect(() => {
@@ -173,39 +175,13 @@ export function MenuSurface({
         className={`menu menu-surface${placement === "stretch" ? " menu-surface--stretch" : ""}${compact ? " is-sheet" : ""}${className ? ` ${className}` : ""}`}
         style={!compact && minWidth ? { minWidth } : undefined}
       >
-        {/* sheet 把手：畫出「可下滑關閉」這個承諾，也真的收下那個手勢。
-         *
-         * 為什麼是真的元素而不是 .is-sheet::before：把手必須帶 `touch-action: none`。
-         * sheet 是 overflow-y: auto，把手先前畫在偽元素上、手勢掛在整個 surface 的
-         * 頂端 32px 帶——瀏覽器會把那條直向拖曳判成捲動，滑到約 16px 就送出
-         * pointercancel 收走 pointer 串流。真機實測序列是
-         * `down → move → move → CANCEL`：永遠走不到 48px 的關閉門檻，
-         * 也就是說這個手勢從落地起就沒有生效過（所有 sheet 皆然，不只 AI 助手）。
-         * 偽元素接不到事件、也吃不到 touch-action，只能換成真的節點。
-         *
-         * setPointerCapture：把串流釘在把手上，中途滑出把手範圍也不會被祖先接走。
-         *
-         * aria-hidden：它是冗餘控制項——關閉手段鍵盤有 Esc、指標有遮罩，
-         * 讀屏不需要再多一個沒有鍵盤等價操作的拖曳目標。 */}
-        {compact && (
-          <div
-            className="menu-surface__grip"
-            aria-hidden
-            onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
-              if (e.pointerType === "mouse") return;
-              sheetDragY.current = e.clientY;
-              e.currentTarget.setPointerCapture(e.pointerId);
-            }}
-            onPointerMove={(e: ReactPointerEvent<HTMLDivElement>) => {
-              if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
-                sheetDragY.current = null;
-                onClose();
-              }
-            }}
-            onPointerUp={() => { sheetDragY.current = null; }}
-            onPointerCancel={() => { sheetDragY.current = null; }}
-          />
-        )}
+        {/* sheet 把手：純視覺的手勢提示。手勢本身不在這裡——整張 sheet 任何地方
+         * 下滑都會關（useSheetSwipeDismiss 掛在 surface 上），把手只是把這個承諾
+         * 畫出來。仍是真元素而非 ::before：它要吃 touch-action: none，
+         * 讓「從把手起手」這條最明確的路徑連捲動仲裁都不用參與。
+         * aria-hidden：關閉手段鍵盤有 Esc、指標有遮罩，讀屏不需要再多一個
+         * 沒有鍵盤等價操作的拖曳目標。 */}
+        {compact && <div className="menu-surface__grip" aria-hidden />}
         {children}
       </div>
     </>
