@@ -92,8 +92,10 @@ export function GlobalAssistantSheet({
       {groupId ? (
         <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
         {/* 調度面板放在問答上面：「叫 AI 去做一整件事」比「問 AI 一個問題」是更重的意圖，
-            而它在自己不可用時（權限不足）完全不渲染，不會白佔一般組員的畫面。 */}
-        <GroupCampaignPanel groupId={groupId} />
+            而它在自己不可用時（權限不足）完全不渲染，不會白佔一般組員的畫面。
+            collapsible：攤開是一整版說明＋表單，會把問答輸入框推到看不見——
+            sheet 裡收成一列，有計畫等人時徽章會提醒展開。 */}
+        <GroupCampaignPanel groupId={groupId} collapsible />
         <AICreativeCopilot
           groupId={groupId}
           onUseIdeaForNewProject={(ideaTitle) => {
