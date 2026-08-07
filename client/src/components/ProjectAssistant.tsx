@@ -24,6 +24,7 @@ import {
   writeAssistantAnswerMode,
 } from "../lib/agentPlannerPreference";
 import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
+import { batchSummaryText } from "./assistantBatch";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 import { ProactiveModelConverter } from "../features/creation-workbench/ProactiveModelConverter";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
@@ -554,6 +555,13 @@ export function ProjectAssistant({
                 >
                   {t.text}
                 </div>
+                {/* §33 批次總帳：一次提議多個動作時，先讓人看懂全貌與費用，再逐顆確認 */}
+                {t.actions && batchSummaryText(t.actions) && (
+                  <Hint as="p" role="status" style={{ margin: "8px 0 0" }}>
+                    <Icon name="List" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                    {batchSummaryText(t.actions)}
+                  </Hint>
+                )}
                 {t.actions && t.actions.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {t.actions.map((act, j) => {
