@@ -80,6 +80,7 @@ type SceneOver = {
   narrationUrl?: string | null;
   ambience?: string | null;
   action?: string | null;
+  dialogue?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -101,6 +102,7 @@ function scene(over: SceneOver) {
     pendingVoiceStatus: null,
     ambience: over.ambience ?? null,
     action: over.action ?? null,
+    dialogue: over.dialogue ?? null,
     ambienceUrl: null,
     pendingAmbienceStatus: null,
   };
@@ -307,7 +309,7 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
 
   it("畫面／旁白／標題／秒數一併帶到——任何一欄漏掉都是同一條清空連鎖", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", prompt: "夜裡的禪堂", voiceover: "那一年…", ambience: "蟲鳴", action: "從門口走到窗邊" })],
+      data: [scene({ id: "s1", prompt: "夜裡的禪堂", voiceover: "那一年…", ambience: "蟲鳴", action: "從門口走到窗邊", dialogue: "@師父：坐吧。" })],
       isLoading: false,
       isError: false,
     });
@@ -320,6 +322,7 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
       voiceover: "那一年…",
       ambience: "蟲鳴",
       action: "從門口走到窗邊",
+      dialogue: "@師父：坐吧。",
     });
   });
 });

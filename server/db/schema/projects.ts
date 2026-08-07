@@ -196,6 +196,12 @@ export const scenes = pgTable("scenes", {
    * 單張圖畫不出「從門口走到窗邊」，混進去只會生出多重人影。
    */
   action: text("action"),
+  /**
+   * 對白序列（原文）：「@師父：坐吧。」這樣的一段，旁白以 @旁白 標記，可與對白交錯。
+   * 結構由 shared/sceneSpeech.ts 讀取時導出、永不落庫——結構化儲存會讓來回之後的
+   * 正規化改寫使用者自己打的字。
+   */
+  dialogue: text("dialogue"),
   /** 環境音成品音檔。與 narrationAssetId 對稱；null＝這一鏡還沒有環境音。 */
   ambienceAssetId: uuid("ambience_asset_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),

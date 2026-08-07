@@ -16,6 +16,7 @@ import { lockSceneOrder } from "./locks";
 import { pushToUsers } from "./webPush";
 import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { sceneFillRole } from "../routers/assistant";
+import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
@@ -1495,8 +1496,10 @@ async function advanceRun(run: RunRow): Promise<void> {
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
-    const text = (scene.voiceover ?? "").trim();
-    if (!text) return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡還沒有配音詞——先填配音詞或把這步移除重新規劃`);
+    // 與 scenes.generateVoiceover 同口徑：旁白與對白是同一條說話序列，
+    // 只寫了對白的鏡也要能配音，不能整條 run 判失敗說「還沒有配音詞」。
+    const text = speechForTts(sceneSpeechLines(scene)).map((l) => l.text).join("\n").trim();
+    if (!text) return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡還沒有旁白或對白——先填內容或把這步移除重新規劃`);
     const voiceModel = resolveModel(step.modelId ?? AGENT_TTS_MODEL);
     if (!voiceModel || voiceModel.category !== "text-to-speech" || voiceModel.needs || !modelIsOperationallyReady(voiceModel)) {
       return failRun(run, steps, idx, "計畫裡的旁白模型無效或尚未通過正式生成驗證，請重新規劃");

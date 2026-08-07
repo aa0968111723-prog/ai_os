@@ -27,19 +27,21 @@ const ROWS = [
 ];
 
 describe("formatStoryboardScript", () => {
-  it("每鏡一段：標題帶序號與秒數，四個描述欄各一行（編輯模式）", () => {
+  it("每鏡一段：標題帶序號與秒數，五個描述欄各一行（編輯模式）", () => {
     expect(formatStoryboardScript(ROWS)).toBe(
       [
         "## 1. 開場・晨光 (5s)",
         "畫面：清晨禪堂，柔和光線",
         "動作：",
         "旁白：那一年，我第一次走進禪堂。",
+        "對白：",
         "環境音：遠處鐘聲，細微鳥鳴",
         "",
         "## 2. 紅傘特寫 (4s)",
         "畫面：正紅長柄傘立在門邊",
         "動作：",
         "旁白：",
+        "對白：",
         "環境音：",
         "設定卡：安倢的紅傘（唯讀）",
       ].join("\n"),
@@ -89,10 +91,11 @@ describe("formatStoryboardScript", () => {
         prompt: "清晨禪堂，柔和光線",
         action: "",
         voiceover: "那一年，我第一次走進禪堂。",
+        dialogue: "",
         ambience: "遠處鐘聲，細微鳥鳴",
         ordinal: 1,
       },
-      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", action: "", voiceover: "", ambience: "", ordinal: 2 },
+      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", action: "", voiceover: "", dialogue: "", ambience: "", ordinal: 2 },
     ]);
   });
 
@@ -148,6 +151,28 @@ describe("formatStoryboardScript", () => {
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.prompt).toBe(
       "第一行\n\\不是結構\n\\旁白：是結構",
     );
+  });
+});
+
+describe("對白：逐句序列，旁白可混在裡面交錯", () => {
+  const BLOCK = ["@旁白：那一年。", "@師父：坐吧。", "@安倢（小聲）：謝謝師父。"].join("\n");
+
+  it("標籤自己一行、台詞列在下面——第一句不會被擠在冒號後面對不齊", () => {
+    const out = formatStoryboardScript([{ title: "T", durationSec: 5, dialogue: BLOCK }]);
+    expect(out).toContain("對白：\n@旁白：那一年。");
+  });
+
+  it("整段對白來回不失真（@ 行不匹配標籤規則，所以不需要跳脫）", () => {
+    const rows = [{ title: "T", durationSec: 8, prompt: "畫", dialogue: BLOCK }];
+    expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.dialogue).toBe(BLOCK);
+  });
+
+  it("對白裡的「旁白：」不會被誤讀成旁白欄位（有 @ 前綴保護）", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "對白：", "@旁白：這是對白區塊裡的旁白", "旁白：這才是旁白欄位"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.dialogue).toBe("@旁白：這是對白區塊裡的旁白");
+    expect(parsed.scenes[0]?.voiceover).toBe("這才是旁白欄位");
   });
 });
 
