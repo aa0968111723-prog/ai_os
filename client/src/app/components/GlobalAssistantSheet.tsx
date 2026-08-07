@@ -132,8 +132,14 @@ export function GlobalAssistantSheet({
           )}
           <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
             {scope === "project" && projectId ? (
-              /* key=projectId：換專案時整棵重掛，對話與軌跡不殘留上一個專案的內容 */
-              <ProjectAssistant key={projectId} projectId={projectId} embedded />
+              <>
+                {/* 調度面板在專案模式也要在：它收合成一列、無權限者完全不渲染，
+                    但「有計畫等你核准」的徽章不能因為人在專案頁就看不見——
+                    組長常駐專案頁工作，把核准提示藏在「整個組」chip 後面等於沒提醒。 */}
+                <GroupCampaignPanel groupId={groupId} collapsible />
+                {/* key=projectId：換專案時整棵重掛，對話與軌跡不殘留上一個專案的內容 */}
+                <ProjectAssistant key={projectId} projectId={projectId} embedded />
+              </>
             ) : (
               <>
                 {/* 調度面板放在問答上面：「叫 AI 去做一整件事」比「問 AI 一個問題」是更重的意圖，

@@ -7100,7 +7100,10 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   cursor: not-allowed;
 }
 
-/* ── 全站助手視野 chip（sheet 頂部；只在專案頁出現）── */
+/* ── 全站助手視野 chip（sheet 頂部；只在專案頁出現）──
+   注意：chip 在 .ai-copilot-shell **外面**（sheet 直屬子層），拿不到 shell 上宣告的
+   --ai-glass 系列變數——var() 一律帶字面 fallback（值同 .ai-copilot-shell:6951-6953），
+   否則背景直接失效變透明。 */
 .ga-scope {
   display: flex;
   gap: 8px;
@@ -7111,10 +7114,10 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   align-items: center;
   padding: 6px 14px;
   border-radius: 999px;
-  background: var(--ai-glass);
+  background: var(--ai-glass, rgba(255, 254, 250, 0.8));
   -webkit-backdrop-filter: blur(10px);
           backdrop-filter: blur(10px);
-  border: 1px solid var(--ai-glass-edge);
+  border: 1px solid var(--ai-glass-edge, rgba(255, 255, 255, 0.75));
   color: var(--fg-secondary);
   font-size: 13px;
   cursor: pointer;
@@ -7124,7 +7127,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     color var(--dur-fast) var(--ease-out);
 }
 .ga-scope__chip.is-active {
-  background: var(--ai-glass-strong);
+  background: var(--ai-glass-strong, rgba(255, 254, 250, 0.92));
   color: var(--primary-ink);
   border-color: rgba(246, 119, 30, 0.45);
 }
