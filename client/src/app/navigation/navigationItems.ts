@@ -31,6 +31,7 @@ export type DestinationKey =
   | "dashboard"
   | "planner"
   | "databases"
+  | "studio"
   | "community"
   | "chat"
   | "help"
@@ -72,6 +73,13 @@ export const DESTINATIONS: Record<DestinationKey, Destination> = {
     description: "清單、文件與批次匯入",
     href: "/databases",
     icon: "Database",
+  },
+  studio: {
+    key: "studio",
+    label: "動畫創作室",
+    description: "手繪白板與順序分鏡表",
+    href: "/studio",
+    icon: "Brush",
   },
   community: {
     key: "community",
@@ -172,6 +180,7 @@ export const topbarNavItems: NavigationItem[] = [
   fromDestination("dashboard", "topbar"),
   fromDestination("planner", "topbar"),
   fromDestination("databases", "topbar"),
+  fromDestination("studio", "topbar"),
   fromDestination("community", "topbar"),
   fromDestination("help", "topbar"),
 ];
@@ -185,7 +194,7 @@ export const topbarNavItems: NavigationItem[] = [
 export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
 
 export const mobileMoreGroups: MobileMoreGroup[] = [
-  { label: "工作", keys: ["community", "databases", "chat"] },
+  { label: "工作", keys: ["studio", "community", "databases", "chat"] },
   { label: "說明", keys: ["help", "models"] },
   { label: "連接與下載", keys: ["mcp", "integrations", "downloads"] },
 ];
@@ -195,6 +204,7 @@ export const accountMenuItems: NavigationItem[] = [
   // 說明／工作＝去處，名稱一律取自 DESTINATIONS（手機由「更多」面板承接，見 AccountMenu）
   fromDestination("help", "help"),
   fromDestination("models", "help"),
+  fromDestination("studio", "work"),
   fromDestination("community", "work"),
   fromDestination("mcp", "work"),
   fromDestination("integrations", "work"),

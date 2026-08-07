@@ -108,7 +108,17 @@ export type IconName =
   | "CircleDot"
   | "Stamp"
   | "Wind"
-  | "Flower2";
+  | "Flower2"
+  | "Eraser"
+  | "Hand"
+  | "Highlighter"
+  | "SprayCan"
+  | "Pipette"
+  | "GripVertical"
+  | "ArrowLeft"
+  | "ZoomIn"
+  | "ZoomOut"
+  | "Maximize";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -733,6 +743,86 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 10v12" />
       <path d="M12 22c4.2 0 7-1.667 7-5-4.2 0-7 1.667-7 5Z" />
       <path d="M12 22c-4.2 0-7-1.667-7-5 4.2 0 7 1.667 7 5Z" />
+    </>
+  ),
+  Eraser: (
+    <>
+      <path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21" />
+      <path d="m5.082 11.09 8.828 8.828" />
+    </>
+  ),
+  Hand: (
+    <>
+      <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+      <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+      <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+    </>
+  ),
+  Highlighter: (
+    <>
+      <path d="m9 11-6 6v3h9l3-3" />
+      <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+    </>
+  ),
+  SprayCan: (
+    <>
+      <path d="M3 3h.01" />
+      <path d="M7 5h.01" />
+      <path d="M11 7h.01" />
+      <path d="M3 7h.01" />
+      <path d="M7 9h.01" />
+      <path d="M3 11h.01" />
+      <rect width="4" height="4" x="15" y="5" />
+      <path d="m19 9 2 2v10c0 .6-.4 1-1 1h-6c-.6 0-1-.4-1-1V11l2-2" />
+      <path d="m13 14 8-2" />
+      <path d="m13 19 8-2" />
+    </>
+  ),
+  Pipette: (
+    <>
+      <path d="m12 9-8.414 8.414A2 2 0 0 0 3 18.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 3.828 21h1.344a2 2 0 0 0 1.414-.586L15 12" />
+      <path d="m18 9 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3z" />
+      <path d="m2 22 .414-.414" />
+    </>
+  ),
+  GripVertical: (
+    <>
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="9" cy="5" r="1" />
+      <circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="15" cy="5" r="1" />
+      <circle cx="15" cy="19" r="1" />
+    </>
+  ),
+  ArrowLeft: (
+    <>
+      <path d="m12 19-7-7 7-7" />
+      <path d="M19 12H5" />
+    </>
+  ),
+  ZoomIn: (
+    <>
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" x2="16.65" y1="21" y2="16.65" />
+      <line x1="11" x2="11" y1="8" y2="14" />
+      <line x1="8" x2="14" y1="11" y2="11" />
+    </>
+  ),
+  ZoomOut: (
+    <>
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" x2="16.65" y1="21" y2="16.65" />
+      <line x1="8" x2="14" y1="11" y2="11" />
+    </>
+  ),
+  Maximize: (
+    <>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
     </>
   ),
 };

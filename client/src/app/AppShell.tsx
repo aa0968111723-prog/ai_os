@@ -66,6 +66,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/s/")) return "專案檢視｜Aios";
   if (pathname.startsWith("/planner")) return "筆記排程｜Aios";
   if (pathname.startsWith("/databases")) return "知識資料｜Aios";
+  if (pathname.startsWith("/studio")) return "動畫創作室｜Aios";
   if (pathname.startsWith("/chat")) return "訊息｜Aios";
   return "Aios";
 }

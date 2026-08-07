@@ -20,6 +20,9 @@ const AUTHENTICATED_ROUTES = [
   "/planner",
   "/databases",
   "/chat",
+  // 動畫創作室的落點（挑專案）。創作室本體要帶 projectId，與 /p/:id 同理不列進
+  // 固定清單；這一條已足以覆蓋「新路由在五種視寬下不破版、無 a11y 退步」。
+  "/studio",
 ];
 
 const VIEWPORTS = [
