@@ -132,26 +132,62 @@ function stateSig(payload: string): string {
   return createHmac("sha256", stateKey()).update(payload).digest("hex");
 }
 
+/**
+ * 授權完成後要回到哪一頁（資料中心 P2）。
+ *
+ * 為什麼要有這個：使用者是從「專案 → ＋加入資料 → Google」出發的，
+ * 授權完卻被丟到 /integrations 這個跟他意圖無關的設定頁，得自己走回去——
+ * 這正是 Golden Path 1 斷掉的地方。
+ *
+ * ★ 安全：returnTo 只允許**同站相對路徑**，而且它是被 **HMAC 簽進 state 一起簽的**，
+ *   不是 callback 上的自由參數——外人無法偽造一個把使用者導去別處的授權連結
+ *   （open redirect）。任何不合格的值一律丟掉，退回預設頁，絕不「盡量照做」。
+ */
+export function sanitizeIntegrationReturnTo(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (raw.length > 512) return null;
+  // 必須是單一斜線開頭的站內路徑：擋掉 //evil.com、https://evil.com、\\evil.com、
+  // 以及任何含反斜線或控制字元的變形（瀏覽器對這些的正規化各家不同）。
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  if (raw.includes("\\")) return null;
+  if (/[\u0000-\u0020\u007f]/.test(raw)) return null;
+  return raw;
+}
+
 /** 以明確到期時刻簽發 state（可測接縫：讓測試造出「簽章正確但已過期」的樣本驗 TTL） */
-export function signIntegrationStateAt(userId: string, expiresAtMs: number): string {
-  const payload = Buffer.from(`${userId}|${expiresAtMs}`).toString("base64url");
+export function signIntegrationStateAt(userId: string, expiresAtMs: number, returnTo?: string | null): string {
+  // payload 第三段為可選的回跳路徑。舊 state（只有兩段）仍能驗過——升版不會讓
+  // 正在授權中的使用者的 state 突然失效。
+  const safe = sanitizeIntegrationReturnTo(returnTo);
+  const base = `${userId}|${expiresAtMs}`;
+  const payload = Buffer.from(safe ? `${base}|${encodeURIComponent(safe)}` : base).toString("base64url");
   return `${payload}.${stateSig(payload)}`;
 }
 
-export function signIntegrationState(userId: string): string {
-  return signIntegrationStateAt(userId, Date.now() + 10 * 60_000);
+export function signIntegrationState(userId: string, returnTo?: string | null): string {
+  return signIntegrationStateAt(userId, Date.now() + 10 * 60_000, returnTo);
 }
 
-export function verifyIntegrationState(state: string): { userId: string } | null {
+export function verifyIntegrationState(state: string): { userId: string; returnTo: string | null } | null {
   const [payload, sig] = state.split(".");
   if (!payload || !sig) return null;
   const expect = stateSig(payload);
   const a = Buffer.from(sig, "utf8");
   const b = Buffer.from(expect, "utf8");
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  const [userId, expStr] = Buffer.from(payload, "base64url").toString("utf8").split("|");
+  const [userId, expStr, returnRaw] = Buffer.from(payload, "base64url").toString("utf8").split("|");
   if (!userId || !expStr || Number(expStr) < Date.now()) return null;
-  return { userId };
+  let returnTo: string | null = null;
+  if (returnRaw) {
+    try {
+      // 簽章已保證這段沒被竄改，但仍再過一次白名單——沒有「因為簽過就放行」的路徑
+      returnTo = sanitizeIntegrationReturnTo(decodeURIComponent(returnRaw));
+    } catch {
+      returnTo = null;
+    }
+  }
+  return { userId, returnTo };
 }
 
 /* ────────────────────────── Google 雲端硬碟（OAuth drive.readonly） ────────────────────────── */
@@ -167,7 +203,7 @@ export function driveRedirectUri(): string {
   return `${base}/api/integrations/google-drive/callback`;
 }
 
-export function buildDriveAuthUrl(userId: string): string {
+export function buildDriveAuthUrl(userId: string, returnTo?: string | null): string {
   const q = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: driveRedirectUri(),
@@ -175,7 +211,8 @@ export function buildDriveAuthUrl(userId: string): string {
     scope: DRIVE_SCOPES,
     access_type: "offline",
     prompt: "consent", // 重複授權時 Google 預設不再發 refresh token——強制 consent 確保拿得到
-    state: signIntegrationState(userId),
+    // returnTo 簽進 state：授權完成後回到使用者原本的流程，而不是一律掉到 /integrations
+    state: signIntegrationState(userId, returnTo),
   });
   return `${OAUTH_AUTH_URL}?${q}`;
 }
