@@ -1731,11 +1731,48 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 /* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
 /* .map-stage 是定位脈絡：畫布工具與詳情面板浮在它上面，畫布本身（.map-wrap）在手機可橫捲，
    面板若放在捲動容器內會跟著捲走 */
-.map-stage { position: relative; }
+.map-stage { position: relative; margin-top: 12px; }
 .map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; position: relative; }
 .map-svg { display: block; width: 100%; height: auto; }
 /* 畫布工具（縮放/重設）：浮在地圖右上角 */
 .map-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 1; }
+
+/* ── 知識族譜的全螢幕（沉浸）──
+ * 卡片裡的畫布在手機上只有一小塊，35 個節點糊成一團；全螢幕把整張族譜攤到整個視窗。
+ * 兩層：原生 Fullscreen API（吃掉瀏覽器介面）＋這裡的 CSS 沉浸——iOS Safari 不支援
+ * 對元素 requestFullscreen，只有這一層時仍然是全版畫布（見 lib/useImmersive）。
+ * 沉浸的是 .map-host（含搜尋列與篩選）而不是只有畫布：進去以後還要能換關鍵字與檢視。 */
+.map-host.is-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 12px calc(10px + var(--safe-bottom));
+  background: var(--bg);
+  overflow: hidden;
+}
+.map-host.is-immersive .map-bar { margin-top: 0; }
+/* 畫布吃掉搜尋列與篩選以外的所有剩餘高度（min-height:0 才收得住 flex 子項） */
+.map-host.is-immersive .map-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 8px; }
+.map-host.is-immersive .map-wrap { flex: 1; min-height: 0; overflow: hidden; }
+/* 全螢幕的 viewBox 改吃容器實際像素（KnowledgeMapCard 量的），SVG 直接撐滿、不再橫捲；
+   touch-action:none 把單指平移與雙指縮放留給畫布（此時沒有頁面要捲） */
+.map-host.is-immersive .map-svg { width: 100%; height: 100%; min-width: 0; touch-action: none; }
+/* 清單檢視在全螢幕裡自己捲，不讓整個 .map-host 捲（工具列與搜尋列要留在原位） */
+.map-host.is-immersive .map-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin-top: 8px; }
+.map-host.is-immersive .map-filters,
+.map-host.is-immersive .map-filter-row { flex: none; }
+
+/* 全站浮動殼層讓開：沉浸時畫面上只該有這張族譜 */
+body.map-immersive .topbar,
+body.map-immersive .mobile-nav,
+body.map-immersive .dm-bubble-root,
+body.map-immersive .fb-fab-root,
+body.map-immersive .app-update-banner,
+body.map-immersive .share-rescue-banner { display: none !important; }
+body.map-immersive { overflow: hidden; }
 /* 自由拖拉：節點用抓取游標；touch-action:none 讓手機也能拖節點（空白處仍可捲頁） */
 .map-node { cursor: grab; touch-action: none; }
 .map-node:active { cursor: grabbing; }

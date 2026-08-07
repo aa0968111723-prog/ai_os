@@ -111,3 +111,52 @@ describe("知識族譜卡・檢視切換", () => {
     expect(localStorage.getItem(`map-view-${GROUP}`)).toBe("list");
   });
 });
+
+/**
+ * 全螢幕：卡片裡的族譜在手機上只有一小塊（0.39x 後字剩 4px），要看得懂得攤開整個視窗。
+ * jsdom 沒有 Fullscreen API，所以這裡守的是「沒有原生全螢幕時 CSS 沉浸那一層仍然成立」——
+ * 只做 requestFullscreen 的話，iOS Safari 使用者按下按鈕會完全沒反應。
+ */
+describe("知識族譜卡・全螢幕", () => {
+  const fullscreenButton = () => screen.getByRole("button", { name: /全螢幕/ });
+  const host = () => document.querySelector(".map-host")!;
+
+  it("按鈕在清單與心智圖都在，按下去就進沉浸（不依賴原生 Fullscreen API）", async () => {
+    renderCard("map");
+    expect(host()).not.toHaveClass("is-immersive");
+
+    await userEvent.click(fullscreenButton());
+    expect(host()).toHaveClass("is-immersive");
+    // 全站浮動殼層（頂欄、分頁列、私訊球、回饋浮標）靠這個 body 類別讓開
+    expect(document.body).toHaveClass("map-immersive");
+    expect(fullscreenButton()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("搜尋與檢視切換一起進全螢幕——不必退出來才能改條件", async () => {
+    renderCard("map");
+    await userEvent.click(fullscreenButton());
+    const wrapper = host();
+    expect(wrapper.querySelector('[aria-label="搜尋知識族譜節點"]')).toBeInTheDocument();
+    expect(wrapper.querySelector('[role="tablist"][aria-label="檢視"]')).toBeInTheDocument();
+    expect(wrapper.querySelector('[role="group"][aria-label^="知識地圖"]')).toBeInTheDocument();
+  });
+
+  it("Esc 退得出去（iOS Safari 只有 CSS 沉浸那一層，瀏覽器不會幫忙）", async () => {
+    renderCard("map");
+    await userEvent.click(fullscreenButton());
+    expect(host()).toHaveClass("is-immersive");
+
+    await userEvent.keyboard("{Escape}");
+    expect(host()).not.toHaveClass("is-immersive");
+    expect(document.body).not.toHaveClass("map-immersive");
+  });
+
+  it("離開卡片時把 body 類別拆掉——殘留的話全站頂欄與分頁列會永久消失", async () => {
+    const { unmount } = renderCard("map");
+    await userEvent.click(fullscreenButton());
+    expect(document.body).toHaveClass("map-immersive");
+
+    unmount();
+    expect(document.body).not.toHaveClass("map-immersive");
+  });
+});
