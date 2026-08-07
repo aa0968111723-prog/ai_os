@@ -7,11 +7,13 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import {
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
   SCRIPT_AMBIENCE_MAX,
   SCRIPT_ACTION_MAX,
+  SCRIPT_DIALOGUE_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
 } from "../../shared/storyboardScript";
@@ -149,6 +151,7 @@ export const scenesRouter = router({
         voiceover: schema.scenes.voiceover,
         ambience: schema.scenes.ambience,
         action: schema.scenes.action,
+        dialogue: schema.scenes.dialogue,
         // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
@@ -410,6 +413,7 @@ export const scenesRouter = router({
       ambience: scene.ambience,
       ambienceAssetId: scene.ambienceAssetId,
       action: scene.action,
+      dialogue: scene.dialogue,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -569,6 +573,7 @@ export const scenesRouter = router({
             ambience: dup ? cur.ambience : null,
             // 走位是設定不是產物，跟著複製（同 prompt/voiceover/ambience）
             action: dup ? cur.action : null,
+            dialogue: dup ? cur.dialogue : null,
             // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
@@ -629,6 +634,7 @@ export const scenesRouter = router({
         voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
         ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
         action: z.string().max(SCRIPT_ACTION_MAX).optional(),
+        dialogue: z.string().max(SCRIPT_DIALOGUE_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
         // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
@@ -649,6 +655,7 @@ export const scenesRouter = router({
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
       if (input.ambience !== undefined) patch.ambience = input.ambience;
       if (input.action !== undefined) patch.action = input.action;
+      if (input.dialogue !== undefined) patch.dialogue = input.dialogue;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
@@ -717,6 +724,7 @@ export const scenesRouter = router({
               voiceover: scene.voiceover ?? null,
               ambience: scene.ambience ?? null,
               action: scene.action ?? null,
+              dialogue: scene.dialogue ?? null,
             });
             created += 1;
             continue;
@@ -738,6 +746,9 @@ export const scenesRouter = router({
           }
           if (scene.action !== undefined && scene.action !== (row.action ?? "").trim()) {
             patch.action = scene.action;
+          }
+          if (scene.dialogue !== undefined && scene.dialogue !== (row.dialogue ?? "").trim()) {
+            patch.dialogue = scene.dialogue;
           }
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
@@ -932,8 +943,13 @@ export const scenesRouter = router({
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
-      const prompt = scene.voiceover ?? "";
-      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
+      // 旁白與對白是同一條說話序列：只寫了對白的鏡也要能配音，否則使用者明明滿滿台詞
+      // 卻被擋在「還沒有配音詞」。括號指示（小聲、畫外）不進唸詞——唸出來是廢音檔。
+      const speech = sceneSpeechLines(scene);
+      const prompt = speechForTts(speech).map((l) => l.text).join("\n");
+      if (!prompt.trim()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有旁白或對白，請先在分鏡或文字腳本裡填" });
+      }
       // 只放行「文字轉語音(TTS)」類：text-to-audio（配樂/音效）雖同為 kind=audio，但會生出音樂而非旁白，
       // 混入 narration 槽＝扣點又拿到錯內容，故以 category 精確把關（不能只看 kind）。
       const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";

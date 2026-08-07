@@ -9,6 +9,9 @@
  *   ## 1. 開場・晨光 (5s)
  *   畫面：清晨禪堂，柔和光線灑落
  *   旁白：那一年，我第一次走進禪堂。
+ *   對白：
+ *   @師父：坐吧。心急的人，茶會燙。
+ *   @安倢（小聲）：謝謝師父。
  *   環境音：遠處鐘聲，細微鳥鳴
  *
  * 解析規則刻意寬鬆（序號、秒數、任一區塊都可省略；全形半形冒號都吃），
@@ -25,6 +28,8 @@ export type StoryboardScriptScene = {
   ambience?: string;
   /** 誰做了什麼、從哪走到哪。刻意與 prompt 分開：走位是時間性的，單張圖畫不出來。 */
   action?: string;
+  /** 說話序列（@說話者：台詞）。旁白用 @旁白，可與對白交錯。結構見 shared/sceneSpeech.ts。 */
+  dialogue?: string;
   /**
    * 標題上的鏡次（`## 3.` 的 3）。這不是裝飾，是**身分證**：中間整段沒寫時，
    * 靠它才知道「## 3.」指的仍是第 3 鏡，而不是往前遞補成第 2 鏡。見 resolveScriptTargets。
@@ -40,6 +45,7 @@ export type StoryboardScriptRow = {
   voiceover?: string | null;
   ambience?: string | null;
   action?: string | null;
+  dialogue?: string | null;
   /** 這一鏡綁定的卡片名字，僅供閱讀時標注 */
   cardNames?: string[];
 };
@@ -48,6 +54,7 @@ export const SCRIPT_SCENE_HEADING = "##";
 const VISUAL_LABEL = "畫面";
 const ACTION_LABEL = "動作";
 const VOICE_LABEL = "旁白";
+const DIALOGUE_LABEL = "對白";
 const AMBIENCE_LABEL = "環境音";
 const CARDS_LABEL = "設定卡";
 
@@ -61,7 +68,7 @@ const CARDS_LABEL = "設定卡";
  * multiline=false 的欄位**不吃續行**：它們的值是一行寫完的短指示，後面若接自由文字
  * （例如在鏡末尾補一句筆記），那句話不該被吞進這個欄位。
  */
-export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "ambience";
+export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "dialogue" | "ambience";
 
 type ScriptFieldSpec = {
   key: ScriptFieldKey;
@@ -73,6 +80,11 @@ type ScriptFieldSpec = {
   max: number;
   /** 錯誤訊息裡的人話欄位名 */
   human: string;
+  /**
+   * 值從標籤的**下一行**開始（標籤自己一行）。
+   * 對白是逐句序列，把第一句擠在「對白：」後面會讓它跟其餘幾句對不齊，讀起來像漏了一行。
+   */
+  blockValue?: boolean;
 };
 
 export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
@@ -80,6 +92,8 @@ export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
   // 動作走位：與畫面同為描述，吃續行。上限比畫面小一個量級——它是指示不是全景描述。
   { key: "action", label: ACTION_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "動作" },
   { key: "voiceover", label: VOICE_LABEL, multiline: true, alwaysEmit: true, max: 2000, human: "旁白" },
+  // 對白：多行序列，每行「@說話者：台詞」。旁白可用 @旁白 混在裡面達成交錯。
+  { key: "dialogue", label: DIALOGUE_LABEL, multiline: true, alwaysEmit: true, max: 2000, human: "對白", blockValue: true },
   { key: "ambience", label: AMBIENCE_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "環境音" },
 ] as const;
 
@@ -161,7 +175,12 @@ export function formatStoryboardScript(
       for (const field of SCRIPT_FIELDS) {
         const value = (row[field.key] ?? "").trim();
         if (!value && (mode === "read" || !field.alwaysEmit)) continue;
-        lines.push(`${field.label}：${escapeBody(value)}`);
+        // blockValue：標籤自己一行，值從下一行開始（逐句序列才對得齊）
+        lines.push(
+          field.blockValue && value
+            ? `${field.label}：\n${escapeBody(value)}`
+            : `${field.label}：${escapeBody(value)}`,
+        );
       }
       // 卡片是唯讀標注：讓人讀腳本時知道這鏡會帶誰，但改文字不會動到綁定
       if (row.cardNames?.length) lines.push(`${CARDS_LABEL}：${row.cardNames.join("・")}（唯讀）`);
@@ -181,6 +200,8 @@ export const SCRIPT_VOICEOVER_MAX = 2000;
 export const SCRIPT_AMBIENCE_MAX = 500;
 /** 動作走位是指示不是全景描述，與環境音同量級 */
 export const SCRIPT_ACTION_MAX = 500;
+/** 對白與旁白同量級——它們是同一件事的兩種標記 */
+export const SCRIPT_DIALOGUE_MAX = 2000;
 /** 一份腳本最多幾鏡：寫回是逐鏡 insert/update，沒上限等於讓一份貼錯的文件在交易裡跑幾千趟 */
 export const MAX_SCRIPT_SCENES = 200;
 

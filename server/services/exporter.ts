@@ -22,6 +22,7 @@ import {
   type ShotSource,
 } from "../../shared/timeline";
 import { extFromMime, openStoredReadStream } from "./storage";
+import { sceneSpeechLines, speechForSubtitle } from "../../shared/sceneSpeech";
 
 export function safeName(value: string): string {
   // 控制字元一併置換：進 zip entry 名會讓部分解壓工具出錯，經 escXml 進 XML 則是 1.0 非法字元
@@ -168,14 +169,18 @@ export function splitCue(voiceover: string, startSec: number, endSec: number): A
  * 回空字串代表整片都沒有配音詞（不放空字幕檔）。
  * ※ 與下方匯出用的 buildSrt（每鏡一塊、空詞用標題）是兩套用途：這套給觀眾看，那套給剪輯對位。
  */
-function buildVoiceoverSrt(scenes: Array<ShotSource & { voiceover: string | null }>): string {
+function buildVoiceoverSrt(
+  scenes: Array<ShotSource & { voiceover: string | null; dialogue?: string | null }>,
+): string {
   const blocks: string[] = [];
   let idx = 0;
   // 切點與匯出用 srt/fcpxml/xmeml/edl 同源（見 shared/timeline.ts）——這裡先前是另一個獨立累加器
   const { shots } = layoutTimeline(scenes);
   for (const [i, sc] of scenes.entries()) {
     const { startSec: start, endSec: end } = shots[i];
-    for (const cue of splitCue(sc.voiceover ?? "", start, end)) {
+    // 字幕吃整條說話序列：角色台詞冠上名字、旁白不冠（speechForSubtitle 的規則）。
+    // 只讀 voiceover 會讓純對白的鏡整鏡沒有字幕。
+    for (const cue of splitCue(speechForSubtitle(sceneSpeechLines(sc)), start, end)) {
       idx += 1;
       blocks.push(`${idx}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${cue.text}`);
     }
@@ -1015,7 +1020,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const timelineScenes: TimelineScene[] = scenes.map((sc, i) => ({
       title: sc.title,
       durationSec: sc.durationSec,
-      voiceover: sc.voiceover,
+      voiceover: speechForSubtitle(sceneSpeechLines(sc)) || sc.voiceover,
       mediaPath: writtenNames[i],
       mediaKind: writtenKinds[i],
       narrationPath: narrationNames[i],
