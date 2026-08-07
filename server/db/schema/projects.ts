@@ -238,6 +238,36 @@ export const projectMembers = pgTable("project_members", {
   projectUserUq: uniqueIndex("project_members_project_user_uq").on(t.projectId, t.userId),
 }));
 
+/**
+ * 專案分享連結（唯讀公開檢視）：把整個專案頁以唯讀形式分享給「還沒有帳號的夥伴」。
+ *
+ * 安全形狀比照 sessions／invites／upload_grants：DB 只存 token 的 SHA-256，原文只在建立
+ * 當下回一次；可設有效期、可隨時撤銷。刻意不做「用過即失效」——分享連結本來就要能重複開。
+ *
+ * ★ 這是全庫唯一不需登入就能讀到專案內容的路徑。任何新增的公開欄位都等同對外公開，
+ *   請一律經由 services/projectShare.ts 的 buildSharedProjectView 決定，不要另開讀取點。
+ */
+export const projectShareLinks = pgTable("project_share_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  /** 冗餘存一份：撤銷／稽核時不必再回查專案，專案被刪也還看得出原本屬於哪一組 */
+  groupId: uuid("group_id").notNull(),
+  /** SHA-256（非原文）；.unique() → CONSTRAINT project_share_links_token_hash_unique（對齊 0038） */
+  tokenHash: text("token_hash").notNull().unique(),
+  /** 建立者自填的備註（給誰看的），純內部顯示，不出現在公開檢視頁 */
+  label: text("label"),
+  createdBy: uuid("created_by").notNull(),
+  /** null＝不設期限（建立者要自己記得撤銷） */
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  /** 最近一次被開啟的時間與累計次數：讓建立者看得出這條連結還活著、有沒有被亂傳 */
+  lastViewedAt: timestamp("last_viewed_at"),
+  viewCount: integer("view_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  projectCreatedIdx: index("project_share_links_project_created_idx").on(t.projectId, t.createdAt),
+}));
+
 export const notes = pgTable("notes", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),

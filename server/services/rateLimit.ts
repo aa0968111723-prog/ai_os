@@ -51,6 +51,12 @@ export const RATE_LIMIT_POLICIES = {
    * ——郵件轟炸本身就是攻擊，而且會讓受害者對驗證信麻痺。
    */
   deviceChallenge: { limit: 5, windowMs: 60 * 60_000 },
+  /**
+   * 專案分享連結的公開檢視：全庫唯一免登入就讀得到專案內容的入口，限流是它唯一的節流閥。
+   * 額度給得比登入寬（一份連結會被同一批人反覆開、頁面本身也會定期重抓換簽名網址），
+   * 但足以讓「拿 64 字 hex 猜 token」在實務上毫無意義。
+   */
+  shareView: { limit: 60, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitPolicy | FailureRateLimitPolicy>;
 
 export const RATE_LIMIT_SCOPES = {
@@ -71,6 +77,7 @@ export const RATE_LIMIT_SCOPES = {
   adobeJob: "integrations:adobe-job",
   deviceVerify: "auth:device-verify",
   deviceChallenge: "auth:device-challenge",
+  shareViewIp: "share:view-ip",
 } as const;
 
 export interface RateLimitPolicy {

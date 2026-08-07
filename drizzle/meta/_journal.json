@@ -267,6 +267,13 @@
       "when": 1786300000000,
       "tag": "0037_project_cover",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786400000000,
+      "tag": "0038_project_share_links",
+      "breakpoints": true
     }
   ]
 }

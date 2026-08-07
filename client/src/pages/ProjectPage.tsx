@@ -36,6 +36,7 @@ import {
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
+import { ProjectShareCard } from "../components/ProjectShareCard";
 import { FormatTag } from "../components/FormatPicker";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -2367,6 +2368,9 @@ export function ProjectPage({ id }: { id: string }) {
               <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} />
             </div>
           </CollabZone>
+          {/* 分享連結緊接在打包下載之後：兩者都是「把成果交出去」，只是一個給檔案、一個給連結。
+              刻意放在 CollabZone 外——它不是分鏡的協作區塊，不該把在場游標標到這裡。 */}
+          <ProjectShareCard projectId={id} canEdit={canEdit} />
         </div>
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。

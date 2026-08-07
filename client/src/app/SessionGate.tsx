@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { AcceptInvitePage } from "../pages/AcceptInvitePage";
+import { SharedProjectPage } from "../pages/SharedProjectPage";
 import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
@@ -122,6 +123,10 @@ export function SessionGate({
   return (
     <Switch>
       <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
+      {/* 專案分享連結：與 /invite 同層、刻意排在所有登入分支之前——
+          它的存取憑證就是網址裡的 token，未登入的訪客不該被推去 /login。
+          已登入的人打開同一條連結也走這裡（看到的一樣是唯讀畫面，不是專案頁）。 */}
+      <Route path="/s/:token">{(params) => <SharedProjectPage token={params.token} />}</Route>
       <Route>
         {meError && location === "/" ? (
           <LandingPage />
