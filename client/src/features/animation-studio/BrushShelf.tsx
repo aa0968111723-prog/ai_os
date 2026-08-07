@@ -58,9 +58,17 @@ export function BrushShelf({
 }: BrushShelfProps) {
   const [collectName, setCollectName] = useState("");
   const [collecting, setCollecting] = useState(false);
+  /**
+   * 手機 dock 的參數區預設收起來。
+   * 攤開是三列（筆／粗細濃度／色票），在 844px 高的手機上等於白板只剩三分之一——
+   * 而換筆是每分鐘都在做的事，調參數不是。桌機空間夠，一律攤開。
+   */
+  const dock = layout.brushShelf === "dock";
+  const [tuneOpen, setTuneOpen] = useState(!dock);
   const base = brushes.find((b) => b.id === activeId);
   const tuned = base ? isTuned(base, brush) : false;
   const set = (patch: Partial<BrushSpec>) => onBrushChange({ ...brush, ...patch });
+  const showTune = !dock || tuneOpen;
 
   return (
     <section className="studio-brushes" data-mode={layout.mode} aria-label="筆刷櫃">
@@ -96,9 +104,27 @@ export function BrushShelf({
             </div>
           );
         })}
+        {dock && (
+          <button
+            type="button"
+            className={`studio-brushes__toggle${tuneOpen ? " is-on" : ""}`}
+            aria-expanded={tuneOpen}
+            aria-controls="studio-brush-tune"
+            aria-label={tuneOpen ? "收起筆刷設定" : "展開筆刷設定"}
+            onClick={() => setTuneOpen((v) => !v)}
+          >
+            <span
+              className="studio-brushes__toggle-dot"
+              style={{ background: brush.engine === "eraser" ? "var(--border)" : brush.color }}
+              aria-hidden="true"
+            />
+            <b>{brush.size}</b>
+            <Icon name={tuneOpen ? "ChevronDown" : "ChevronUp"} size={13} />
+          </button>
+        )}
       </div>
 
-      <div className="studio-brushes__tune">
+      <div className="studio-brushes__tune" id="studio-brush-tune" hidden={!showTune}>
         <label className="studio-slider">
           <span>粗細 <b>{brush.size}</b></span>
           <input
@@ -163,8 +189,9 @@ export function BrushShelf({
           </details>
         )}
 
-        {/* 收錄：內建筆刷調過才出現（沒調就收＝存一支一模一樣的） */}
-        {collecting ? (
+        {/* 收錄：手機上調過才出現。永遠佔一整列的話，dock 會把白板的高度吃掉，
+            而「還沒調參數就想收藏」本來就沒有意義（收到的是一模一樣的一支）。 */}
+        {!layout.showBrushTuning && !tuned && !collecting ? null : collecting ? (
           <div className="studio-brushes__collect">
             <label htmlFor="studio-brush-name" className="sr-only">筆刷名稱</label>
             <input

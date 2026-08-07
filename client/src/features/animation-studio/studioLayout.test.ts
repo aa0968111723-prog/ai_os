@@ -3,13 +3,14 @@ import {
   clampZoom,
   fitBoardToBox,
   resolveStudioLayout,
-  STUDIO_LITE_QUERY,
+  STUDIO_COARSE_LITE_MAX,
   STUDIO_MOBILE_BREAKPOINT,
+  STUDIO_THREE_COLUMN_MIN,
   STUDIO_ZOOM,
 } from "./studioLayout";
 
 describe("resolveStudioLayout", () => {
-  it("桌機視窗給完整版面：常駐右欄、常駐分鏡軌、進階筆刷參數", () => {
+  it("寬桌機給完整版面：常駐右欄、常駐分鏡軌、進階筆刷參數", () => {
     const layout = resolveStudioLayout({ viewportWidth: 1440, devicePixelRatio: 2 });
     expect(layout.mode).toBe("desktop");
     expect(layout.aiPanel).toBe("column");
@@ -35,10 +36,23 @@ describe("resolveStudioLayout", () => {
     expect(lite.exportMaxEdge).toBeLessThan(desktop.exportMaxEdge);
   });
 
-  it("斷點與全站手機斷點一致（CSS 與 JS 不得各寫一個數字）", () => {
+  it("斷點與全站手機斷點一致", () => {
     expect(resolveStudioLayout({ viewportWidth: STUDIO_MOBILE_BREAKPOINT }).mode).toBe("lite");
     expect(resolveStudioLayout({ viewportWidth: STUDIO_MOBILE_BREAKPOINT + 1 }).mode).toBe("desktop");
-    expect(STUDIO_LITE_QUERY).toBe(`(max-width: ${STUDIO_MOBILE_BREAKPOINT}px)`);
+  });
+
+  it("窄桌機把 AI 欄收成抽屜，而不是藏起來——先前 821–1180px 連入口都沒有", () => {
+    const narrow = resolveStudioLayout({ viewportWidth: STUDIO_THREE_COLUMN_MIN - 1 });
+    expect(narrow.mode).toBe("desktop");
+    expect(narrow.aiPanel).toBe("sheet");
+    // 分鏡軌道不受影響：那是橫向的，窄一點照樣放得下
+    expect(narrow.shotStrip).toBe("rail");
+    expect(resolveStudioLayout({ viewportWidth: STUDIO_THREE_COLUMN_MIN }).aiPanel).toBe("column");
+  });
+
+  it("觸控輕量版的上限就是 STUDIO_COARSE_LITE_MAX（版面條件只有這一份）", () => {
+    expect(resolveStudioLayout({ viewportWidth: STUDIO_COARSE_LITE_MAX, coarsePointer: true }).mode).toBe("lite");
+    expect(resolveStudioLayout({ viewportWidth: STUDIO_COARSE_LITE_MAX + 1, coarsePointer: true }).mode).toBe("desktop");
   });
 
   it("觸控平板即使視窗較寬也走輕量版（手指的操作預算跟手機一樣）", () => {

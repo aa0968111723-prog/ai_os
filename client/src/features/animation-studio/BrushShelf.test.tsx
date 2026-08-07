@@ -83,13 +83,57 @@ describe("BrushShelf", () => {
       />,
     );
     expect(screen.queryByText("手感微調")).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/粗細/)).toBeInTheDocument();
   });
 
   it("橡皮擦不顯示顏色（擦掉就是擦掉，沒有顏色可選）", () => {
     const eraser = BUILTIN_BRUSHES.find((b) => b.engine === "eraser")!;
     setup({ activeId: eraser.id, brush: { ...eraser } });
     expect(screen.queryByRole("group", { name: "顏色" })).not.toBeInTheDocument();
+  });
+
+  it("手機 dock 預設收起參數區，白板才拿得到高度；展開鈕顯示目前的顏色與粗細", async () => {
+    render(
+      <BrushShelf
+        layout={LITE}
+        brushes={BUILTIN_BRUSHES}
+        activeId={pencil.id}
+        brush={{ ...pencil, size: 12 }}
+        onSelect={vi.fn()}
+        onBrushChange={vi.fn()}
+        onCollect={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    // 用 role 查詢：hidden 的內容不在無障礙樹裡，讀屏也讀不到（不是只有視覺藏起來）
+    expect(screen.queryByRole("slider", { name: /粗細/ })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "展開筆刷設定" });
+    expect(toggle).toHaveTextContent("12");
+    await userEvent.click(toggle);
+    expect(screen.getByRole("slider", { name: /粗細/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起筆刷設定" })).toBeInTheDocument();
+  });
+
+  it("桌機沒有收合鈕（空間夠，一律攤開）", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: /筆刷設定/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: /粗細/ })).toBeInTheDocument();
+  });
+
+  it("手機上還沒調參數就不顯示「收錄」——它會整列吃掉白板的高度", () => {
+    const { view } = setup();
+    view.rerender(
+      <BrushShelf
+        layout={LITE}
+        brushes={BUILTIN_BRUSHES}
+        activeId={pencil.id}
+        brush={{ ...pencil }}
+        onSelect={vi.fn()}
+        onBrushChange={vi.fn()}
+        onCollect={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /收錄成我的筆刷/ })).not.toBeInTheDocument();
   });
 
   it("收錄失敗的原因直接顯示出來", () => {

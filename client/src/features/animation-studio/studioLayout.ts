@@ -15,8 +15,24 @@
 
 /** 全站手機斷點：與 styles.mobile-tokens.css／styles.mobile-fab-01.css 一致 */
 export const STUDIO_MOBILE_BREAKPOINT = 820;
-/** 輕量版的媒體查詢字串（元件用 useMatchMedia 訂閱，與 CSS 同一條件） */
-export const STUDIO_LITE_QUERY = `(max-width: ${STUDIO_MOBILE_BREAKPOINT}px)`;
+
+/**
+ * 桌機要同時容納「筆刷櫃＋白板＋AI 欄」的最小寬度。
+ * 比這窄時 AI 欄改成可切換的抽屜——直接 display:none 會讓 821–1180px 的
+ * 使用者連入口都沒有（那正是先前的行為，實測就是「AI 欄不見了」）。
+ */
+export const STUDIO_THREE_COLUMN_MIN = 1180;
+
+/**
+ * 觸控裝置走輕量版的寬度上限。
+ *
+ * **這個條件必須只有一份**。先前 CSS 另外寫了 `@media (max-width: 820px)`，
+ * 於是 821–1100px 的觸控裝置（例如桌面模式的手機瀏覽器、平板）出現
+ * 「JS 說輕量版、CSS 還套桌機三欄」的錯位：白板被擠進 200px 的側欄格，
+ * 筆刷櫃因為沒套到 dock 規則而直向鋪滿整頁。
+ * 現在版面一律由 `resolveStudioLayout` 決定，再以 `data-mode` 交給 CSS。
+ */
+export const STUDIO_COARSE_LITE_MAX = 1100;
 
 export type StudioMode = "desktop" | "lite";
 
@@ -54,7 +70,7 @@ export interface StudioEnv {
 export function resolveStudioLayout(env: StudioEnv): StudioLayout {
   const narrow = env.viewportWidth <= STUDIO_MOBILE_BREAKPOINT;
   // 觸控裝置即使視窗寬一點（平板橫向 1024）也走輕量版：手指的操作預算和手機一樣
-  const lite = narrow || (!!env.coarsePointer && env.viewportWidth <= 1100);
+  const lite = narrow || (!!env.coarsePointer && env.viewportWidth <= STUDIO_COARSE_LITE_MAX);
   const dpr = Number.isFinite(env.devicePixelRatio) && (env.devicePixelRatio as number) > 0 ? (env.devicePixelRatio as number) : 1;
   if (lite) {
     return {
@@ -79,7 +95,8 @@ export function resolveStudioLayout(env: StudioEnv): StudioLayout {
     exportMaxEdge: 2048,
     shotStrip: "rail",
     brushShelf: "column",
-    aiPanel: "column",
+    // 窄桌機把 AI 欄收成抽屜（仍叫得出來），不是藏起來
+    aiPanel: env.viewportWidth >= STUDIO_THREE_COLUMN_MIN ? "column" : "sheet",
     showBrushTuning: true,
   };
 }
