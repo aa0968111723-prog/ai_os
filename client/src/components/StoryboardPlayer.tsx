@@ -8,6 +8,8 @@ import {
   type Frames,
 } from "@shared/timeline";
 import { resolutionForFormat } from "@shared/options";
+import { detectRenderSupport } from "../features/preview-render/capability";
+import { buildRenderPlan, renderPlanBlocker } from "../features/preview-render/renderPlan";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
 
@@ -21,6 +23,8 @@ export type StoryboardPlayerScene = {
   assetKind: string | null;
   /** 逐鏡配音音檔（同步播放；沒有就靜靜跳過） */
   narrationUrl?: string | null;
+  /** 逐鏡環境音；預覽時不播（會蓋掉旁白），但輸出 MP4 時混進去 */
+  ambienceUrl?: string | null;
   /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
   trimStartMs?: number | null;
   /** 畫面素材來源出點（毫秒）；null＝未修剪 */
@@ -230,6 +234,66 @@ export function StoryboardPlayer({
     if (sourceAtPlayhead <= shot.sourceInFrames) return;
     onTrim!(scene.id, { trimEndMs: framesToMs(sourceAtPlayhead) });
   }, [canTrim, scene, shot, sourceAtPlayhead, onTrim]);
+
+  // ── 輸出 MP4（給夥伴看用的預覽畫質；精修仍走交付包） ──────────────
+  // mediabunny 只在真的按下輸出時才載入：它是整包裡最大的相依之一，
+  // 而大多數人開預覽台只是想看節奏，不該為此多背一份 bundle。
+  const [render, setRender] = useState<
+    { state: "idle" } | { state: "running"; label: string; pct: number } | { state: "error"; message: string }
+  >({ state: "idle" });
+  const renderAbort = useRef<AbortController | null>(null);
+
+  const exportMp4 = useCallback(async () => {
+    const plan = buildRenderPlan(scenes, format);
+    const blocked = renderPlanBlocker(plan);
+    if (blocked) {
+      setRender({ state: "error", message: blocked });
+      return;
+    }
+    setPlaying(false);
+    setRender({ state: "running", label: "檢查瀏覽器支援", pct: 0 });
+    try {
+      const support = await detectRenderSupport(plan.width, plan.height);
+      if (!support.ok) {
+        setRender({ state: "error", message: support.reason });
+        return;
+      }
+      const { renderTimelineToMp4 } = await import("../features/preview-render/renderTimeline");
+      const ac = new AbortController();
+      renderAbort.current = ac;
+      const blob = await renderTimelineToMp4(plan, {
+        codecs: support.codecs,
+        signal: ac.signal,
+        onProgress: (p) => {
+          const label = p.phase === "audio" ? "混音" : p.phase === "video" ? "算圖" : "收檔";
+          setRender({ state: "running", label, pct: p.total > 0 ? p.done / p.total : 0 });
+        },
+      });
+      // 直接觸發下載：這支片是要傳給夥伴的，留在頁面上沒有意義
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "粗剪預覽.mp4";
+      a.click();
+      URL.revokeObjectURL(url);
+      setRender(
+        support.codecs.audio
+          ? { state: "idle" }
+          : { state: "error", message: "已輸出，但這個瀏覽器編不動任何音訊格式，成品沒有聲音。要有聲請改用 Chrome／Edge，或走交付包。" },
+      );
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") {
+        setRender({ state: "idle" });
+        return;
+      }
+      setRender({ state: "error", message: err instanceof Error ? err.message : "輸出失敗。" });
+    } finally {
+      renderAbort.current = null;
+    }
+  }, [scenes, format]);
+
+  // 關閉預覽台時中止還在跑的輸出——不然編碼器會在背景繼續吃 CPU 直到分頁關掉
+  useEffect(() => () => renderAbort.current?.abort(), []);
 
   // 開啟時把焦點鎖進播放器（Tab 不外漏）＋鎖背景捲動；關閉後焦點自動還給開啟者
   useFocusTrap(stageRef, true);
@@ -588,6 +652,34 @@ export function StoryboardPlayer({
           </span>
         </div>
       )}
+
+      {/* 輸出 MP4：給夥伴看用的預覽畫質。精修仍走交付包（見研究報告定案） */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: "min(1000px, 94vw)" }}>
+        {render.state === "running" ? (
+          <>
+            <span className="mono" style={{ color: "#faf9f7", fontSize: 13 }}>
+              {render.label} {Math.round(render.pct * 100)}%
+            </span>
+            <button style={{ ...btn, padding: "6px 12px", fontSize: 13 }} onClick={() => renderAbort.current?.abort()}>
+              取消輸出
+            </button>
+          </>
+        ) : (
+          <button
+            style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px" }}
+            onClick={exportMp4}
+            aria-label="輸出 MP4"
+            title="在本機算成一支 MP4（預覽畫質，方便傳給夥伴看）"
+          >
+            <Icon name="Download" size={16} /> 輸出 MP4
+          </button>
+        )}
+        {render.state === "error" && (
+          <span role="status" style={{ color: "#ffab6b", fontSize: 13, maxWidth: 620, lineHeight: 1.5 }}>
+            {render.message}
+          </span>
+        )}
+      </div>
 
       {/* 開關列 */}
       <div style={{ display: "flex", gap: 18, margin: "12px 0 0", flexWrap: "wrap", justifyContent: "center" }}>
