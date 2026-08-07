@@ -12,6 +12,7 @@ const SAMPLE = [
   "場景：克難坡（石階、老樹）",
   "道具：紅傘（紅色油紙傘）",
   "疑似道具：帆布包",
+  "造型：安倢＝米白外套",
   "",
   "清晨的克難坡下著雨。安倢撐著紅傘走下石階。",
   "",
@@ -29,6 +30,12 @@ describe("mockStoryExtract", () => {
       ["紅傘", 0.95],
       ["帆布包", 0.6],
     ]);
+  });
+
+  it("「造型：角色＝描述」掛到角色 costume（Identity/Look 分層）", () => {
+    const plan = mockStoryExtract(SAMPLE);
+    expect(plan.characters.find((c) => c.name === "安倢")?.costume).toBe("米白外套");
+    expect(plan.characters.find((c) => c.name === "師父")?.costume).toBeUndefined();
   });
 
   it("段落 → 場；句子 → 鏡；環境（雨/清晨）寫進 environment；出場角色掛 characterRefs", () => {

@@ -68,7 +68,8 @@ async function overParseLimit(userId: string): Promise<boolean> {
 }
 
 /* ── EXTRACT（假模式）：標記行驅動的確定性抽取 ─────────────────────────
- * 支援的標記（行首）：「角色：」「場景：」「道具：」「疑似道具：」——名（描述）、頓號分隔。
+ * 支援的標記（行首）：「角色：」「場景：」「道具：」「疑似道具：」——名（描述）、頓號分隔；
+ * 「造型：角色名＝描述」——掛到該角色的 costume（Identity/Look 分層可測）。
  * 其餘文字依空行分段成一場戲，句子拆鏡（最多 3 鏡）；段落含「雨」「清晨/黃昏/夜」寫進環境。
  * 疑似道具給 0.6 信心——e2e 與示範靠它走「確認卡」流程。 */
 export function mockStoryExtract(content: string): StoryParsePlan {
@@ -76,6 +77,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
   const characters: StoryParsePlan["characters"] = [];
   const locations: StoryParsePlan["locations"] = [];
   const props: StoryParsePlan["props"] = [];
+  const lookMarks: Array<{ owner: string; costume: string }> = [];
   const bodyLines: string[] = [];
 
   // 括號感知切分：「安倢（黑髮、柔和五官）、師父」的頓號不能切進括號內描述
@@ -97,7 +99,10 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     const mLoc = t.match(/^場景[:：]\s*(.+)$/);
     const mProp = t.match(/^道具[:：]\s*(.+)$/);
     const mMaybe = t.match(/^疑似道具[:：]\s*(.+)$/);
-    if (mChar) {
+    const mLook = t.match(/^造型[:：]\s*(.+?)[＝=](.+)$/);
+    if (mLook) {
+      lookMarks.push({ owner: mLook[1].trim(), costume: mLook[2].trim() });
+    } else if (mChar) {
       for (const it of parseItems(mChar[1])) characters.push({ name: it.name, appearance: it.desc, confidence: 0.95 });
     } else if (mLoc) {
       for (const it of parseItems(mLoc[1])) locations.push({ name: it.name, features: it.desc, confidence: 0.95 });
@@ -108,6 +113,12 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     } else {
       bodyLines.push(line);
     }
+  }
+
+  // 造型標記回填到角色候選（角色行可能在造型行之後，收完再掛）
+  for (const mark of lookMarks) {
+    const target = characters.find((c) => nameKey(c.name) === nameKey(mark.owner));
+    if (target && !target.costume) target.costume = mark.costume;
   }
 
   const paras = bodyLines
