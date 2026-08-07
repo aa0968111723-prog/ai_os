@@ -6,6 +6,7 @@ import {
   continuityReferenceAssetIds,
   sanitizeContinuityReferences,
 } from "./continuity";
+import { continuitySnapshotSchema } from "../../shared/continuity";
 
 const c1 = "00000000-0000-4000-8000-000000000001";
 const c2 = "00000000-0000-4000-8000-000000000002";
@@ -75,5 +76,56 @@ describe("applyContinuityReferences", () => {
     const result = applyContinuityReferences(input, undefined, ["character"]);
     expect(input).toEqual({ prompt: "x" });
     expect(result).toEqual({ supported: false, available: 1, attached: 0, truncated: 0 });
+  });
+});
+
+describe("造型欄位的舊快照相容（Story-first 加欄位不能弄壞既有生成的重試）", () => {
+  /** 這一段就是「線上已經存著的快照」的形狀：沒有 lookName／lookCostume。 */
+  const legacySnapshot = {
+    version: 1,
+    locked: true,
+    capturedAt: "2026-07-01T00:00:00.000Z",
+    fingerprint: "a".repeat(64),
+    characters: [{ id: c1, name: "安倢", appearance: "黑色長髮", notes: null, referenceAssetId: null }],
+    scenes: [],
+    props: [],
+    referenceAssetIds: [],
+  };
+
+  it("舊快照（無造型欄位）仍可解析——重試不會因為新增欄位而整批失敗", () => {
+    const parsed = continuitySnapshotSchema.safeParse(legacySnapshot);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.characters[0].lookCostume).toBeUndefined();
+  });
+
+  it("新快照帶造型欄位也合法，且 null 代表「這一鏡沒鎖造型」", () => {
+    const parsed = continuitySnapshotSchema.safeParse({
+      ...legacySnapshot,
+      characters: [{ ...legacySnapshot.characters[0], lookName: "開學日", lookCostume: "米白外套" }],
+      props: [{ id: c2, name: "紅傘", appearance: "紅色油紙傘", notes: null, referenceAssetId: null }],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.characters[0].lookCostume).toBe("米白外套");
+    expect(continuitySnapshotSchema.safeParse({
+      ...legacySnapshot,
+      characters: [{ ...legacySnapshot.characters[0], lookName: null, lookCostume: null }],
+    }).success).toBe(true);
+  });
+
+  it("造型欄位進 fingerprint：換造型＝換一份快照（不會沿用上一套衣服重試）", () => {
+    const base = {
+      characterRows: [{ id: c1, name: "安倢", appearance: "黑色長髮", notes: null, referenceAssetId: null }],
+      sceneRows: [],
+      propRows: [],
+      selected: { characterIds: [c1] },
+      locked: true,
+      capturedAt: "2026-07-01T00:00:00.000Z",
+    };
+    const noLook = assembleContinuitySnapshot(base);
+    const withLook = assembleContinuitySnapshot({
+      ...base,
+      characterRows: [{ ...base.characterRows[0], lookName: "開學日", lookCostume: "米白外套" }],
+    });
+    expect(withLook.fingerprint).not.toBe(noLook.fingerprint);
   });
 });

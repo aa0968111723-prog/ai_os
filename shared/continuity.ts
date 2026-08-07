@@ -8,6 +8,13 @@ export const continuityCharacterSchema = z.object({
   appearance: z.string(),
   notes: nullableText,
   referenceAssetId: z.string().uuid().nullable(),
+  /**
+   * 這一鏡選用的造型（Story-first §14 Identity/Look 分層；舊快照沒有這兩欄，維持可解析）。
+   * 為什麼凍進快照：造型是「本鏡限定」的外觀，重試時 Look 卡被改名或刪掉，
+   * 這一批鏡頭的錨點仍要是當初那句——與 prop 的 ownerName 同一個理由。
+   */
+  lookName: z.string().nullable().optional(),
+  lookCostume: z.string().nullable().optional(),
 });
 
 export const continuitySceneSchema = z.object({

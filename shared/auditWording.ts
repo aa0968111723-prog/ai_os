@@ -144,6 +144,18 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "characters.add": "新增角色卡",
   "characters.update": "更新角色卡",
   "characters.remove": "刪除角色卡",
+  // Story-first：故事工作台、自動解析與造型
+  "story.save": "儲存故事",
+  "story.restoreVersion": "還原故事版本",
+  "story.parse": "AI 解析故事",
+  "story.confirmCandidate": "處理解析確認卡",
+  "story.generateStoryboard": "從故事產生分鏡",
+  "story.undoRun": "撤銷一次故事解析",
+  "story.sceneUpdate": "更新場設定",
+  "story.sceneRemove": "刪除場（鏡改為未分場）",
+  "characterLooks.add": "新增造型",
+  "characterLooks.update": "更新造型",
+  "characterLooks.remove": "刪除造型",
   // 留言、筆記與其他
   "messages.post": "發佈留言",
   "messages.postVoice": "發佈語音留言",
@@ -324,9 +336,11 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // 會跟封存、打包下載一起看，不該散在另一個分類裡
   { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs", "share"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
-  { key: "storyboard", label: "分鏡", prefixes: ["scenes"] },
+  // story 歸在分鏡：故事、自動解析與轉分鏡是同一條創作鏈（Story-first），組長查「分鏡怎麼來的」
+  // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。
+  { key: "storyboard", label: "故事與分鏡", prefixes: ["scenes", "story"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },
-  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },

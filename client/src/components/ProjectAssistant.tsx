@@ -33,6 +33,15 @@ type Action =
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
+  // direct_shot：只調這一鏡的鏡頭語言／表演；changes＝伺服器算好的 before→after 差異行（確認前看得到改什麼）
+  | {
+      type: "direct_shot";
+      label: string;
+      sceneId: string;
+      camera?: Record<string, string | undefined>;
+      performance?: Record<string, string | undefined>;
+      changes?: string[];
+    }
   | { type: "split_script"; label: string; script: string }
   // plan_agent：把目標交給 AI 創作助手排計畫；plannerMode 由使用者在確認前選擇
   | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
@@ -83,6 +92,8 @@ function toPayload(a: Action) {
   if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, prompt: a.prompt };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
+  // changes/label 是給人看的預覽，不回送——伺服器會用「現值」重新合併並重算差異
+  if (a.type === "direct_shot") return { type: "direct_shot" as const, sceneId: a.sceneId, camera: a.camera, performance: a.performance };
   return {
     type: "apply_worldview_chips" as const,
     themes: a.themes,
@@ -578,7 +589,9 @@ export function ProjectAssistant({
                                 ? `把這個目標交給 AI 創作助手，並使用「${plannerOption.shortLabel}」？規劃本身${plannerCostLabel(chosenPlannerMode)}。這一步只排計畫，你在「AI 執行計畫」核准後才會開始花執行點數。`
                                 : payloadAct.type === "apply_worldview_chips"
                                   ? `套用世界觀基調「${payloadAct.label.replace(/^套用基調：/, "")}」？會覆寫你有選到的主軸／調性／風格欄位（未列的欄位不動）。可之後在專案基調區再改。`
-                                  : `執行「${payloadAct.label}」？`;
+                                  : payloadAct.type === "direct_shot"
+                                    ? `套用這一鏡的調整？${payloadAct.changes?.length ? `會改：${payloadAct.changes.join("、")}。` : ""}沒列到的欄位不動，免費。`
+                                    : `執行「${payloadAct.label}」？`;
                       return (
                         <div
                           key={j}
@@ -727,7 +740,8 @@ export function ProjectAssistant({
                                       : payloadAct.type === "split_script" ? "Clapperboard"
                                         : payloadAct.type === "plan_agent" ? "Film"
                                           : payloadAct.type === "apply_worldview_chips" ? "Palette"
-                                            : "Pencil"
+                                            : payloadAct.type === "direct_shot" ? "Camera"
+                                              : "Pencil"
                               }
                               size={13}
                               style={{ verticalAlign: "-2px", marginRight: 4 }}
