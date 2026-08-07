@@ -173,6 +173,16 @@ export const scenes = pgTable("scenes", {
   orderIndex: integer("order_index").notNull().default(0),
   title: text("title").notNull(),
   durationSec: integer("duration_sec").notNull().default(5),
+  /**
+   * 畫面素材的來源入點（毫秒）——「剪初稿」要切的就是這個。
+   * 0＝從素材開頭播。與 trimEndMs 一組，語義見 shared/timeline.ts 的 ShotSource。
+   */
+  trimStartMs: integer("trim_start_ms").notNull().default(0),
+  /**
+   * 畫面素材的來源出點（毫秒）；null＝這一鏡沒修剪過，鏡長仍由 durationSec 決定。
+   * 存絕對出點而非「尾巴切掉多少」：素材重生成、長度變了時，絕對位置仍指向同一個時間點。
+   */
+  trimEndMs: integer("trim_end_ms"),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
   narrationAssetId: uuid("narration_asset_id"),

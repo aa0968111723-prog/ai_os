@@ -9,8 +9,8 @@ const migration0036 = readFileSync(
   new URL("../../drizzle/0036_community_likes_surrogate_pk.sql", import.meta.url),
   "utf8",
 );
-const migration0040 = readFileSync(
-  new URL("../../drizzle/0040_community_taxonomy.sql", import.meta.url),
+const migration0041 = readFileSync(
+  new URL("../../drizzle/0041_community_taxonomy.sql", import.meta.url),
   "utf8",
 );
 
@@ -56,11 +56,11 @@ describe("community Phase E 自動細化分類", () => {
     expect(schemaSource).toContain('taxonomyVersion: integer("taxonomy_version")');
     expect(schemaSource).toContain('tags: jsonb("tags")');
 
-    expect(migration0040).toContain('ADD COLUMN IF NOT EXISTS "auto_tags" jsonb');
-    expect(migration0040).toContain('ADD COLUMN IF NOT EXISTS "category" text');
-    expect(migration0040).toContain('ADD COLUMN IF NOT EXISTS "taxonomy_version" integer');
+    expect(migration0041).toContain('ADD COLUMN IF NOT EXISTS "auto_tags" jsonb');
+    expect(migration0041).toContain('ADD COLUMN IF NOT EXISTS "category" text');
+    expect(migration0041).toContain('ADD COLUMN IF NOT EXISTS "taxonomy_version" integer');
     // 分類欄位一律 IF NOT EXISTS：重跑無害才進得了 legacy adoption bridge 的計數
-    for (const line of migration0040.split("\n")) {
+    for (const line of migration0041.split("\n")) {
       if (line.startsWith("ALTER TABLE")) expect(line).toContain("IF NOT EXISTS");
       if (line.startsWith("CREATE INDEX")) expect(line).toContain("IF NOT EXISTS");
     }
@@ -68,8 +68,8 @@ describe("community Phase E 自動細化分類", () => {
 
   it("indexes auto_tags with GIN so jsonb containment filters can use an index", () => {
     expect(schemaSource).toContain('index("community_posts_auto_tags_idx").using("gin"');
-    expect(migration0040).toContain('USING gin ("auto_tags")');
-    expect(migration0040).toContain('"community_posts_category_idx"');
+    expect(migration0041).toContain('USING gin ("auto_tags")');
+    expect(migration0041).toContain('"community_posts_category_idx"');
   });
 
   it("classifies on publish and re-classifies on republish", () => {

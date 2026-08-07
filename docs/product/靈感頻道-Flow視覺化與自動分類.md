@@ -2,7 +2,7 @@
 
 > 對應程式：`shared/inspirationTaxonomy.ts`、`server/services/communityTaxonomy.ts`、
 > `server/routers/community.ts`、`client/src/features/inspiration/*`、
-> `client/src/styles.inspiration.css`、`drizzle/0040_community_taxonomy.sql`
+> `client/src/styles.inspiration.css`、`drizzle/0041_community_taxonomy.sql`
 
 ## 這一版要解決的三件事
 
@@ -136,7 +136,7 @@ npm run community:reclassify -- --dry-run # 只印會改什麼
 
 ## 資料庫
 
-`drizzle/0040_community_taxonomy.sql`，三欄兩索引，全部 `IF NOT EXISTS`（重跑無害）：
+`drizzle/0041_community_taxonomy.sql`，三欄兩索引，全部 `IF NOT EXISTS`（重跑無害）：
 
 | 欄位 | 型別 | 用途 |
 | --- | --- | --- |

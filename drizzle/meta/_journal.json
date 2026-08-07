@@ -286,7 +286,14 @@
       "idx": 40,
       "version": "7",
       "when": 1786600000000,
-      "tag": "0040_community_taxonomy",
+      "tag": "0040_scene_trim",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0041_community_taxonomy",
       "breakpoints": true
     }
   ]

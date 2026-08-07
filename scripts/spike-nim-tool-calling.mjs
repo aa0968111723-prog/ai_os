@@ -117,6 +117,9 @@ async function post(body, timeoutMs = 60_000) {
 async function probe(model) {
   const result = {
     model,
+    reachable: false,
+    inconclusive: false,
+    inconclusiveReason: null,
     acceptsToolsParam: false,
     returnsToolCalls: false,
     argumentsParseable: false,
@@ -126,6 +129,40 @@ async function probe(model) {
     httpStatus: null,
     error: null,
   };
+
+  // 探測 0（baseline）：**不帶 tools** 的最小請求。
+  //
+  // 這一步是 2026-08-07 實測踩出來的：在有出站白名單的環境裡，帶 tools 的請求收到 403
+  // 「Host not in allowlist」，腳本卻把它判成「這個部署不支援 tools」——完全的假陰性，
+  // 而且會直接害 WP1 走錯路線。任何在公司代理後面跑這支腳本的人都會踩到同一個坑。
+  //
+  // 所以：先確認「不帶 tools 都通不通」。baseline 就失敗＝連線／金鑰／政策問題，結論一律
+  // 未知（exit 2）；只有 baseline 成功、帶 tools 才失敗，才能斷定是這個部署不吃 tools。
+  const baseline = await post({
+    model,
+    messages: [{ role: "user", content: "回一個字：好" }],
+    temperature: 0,
+    max_tokens: 16,
+  });
+  if (!baseline.ok) {
+    result.httpStatus = baseline.status;
+    const body = baseline.json?.detail ?? baseline.json?.message ?? baseline.text?.slice(0, 400) ?? "";
+    result.inconclusive = true;
+    result.error = body;
+    // 代理／出站政策擋下（403「not in allowlist」、407）與 NVIDIA 自己的 401 金鑰問題要分開講，
+    // 因為兩者的下一步完全不同：前者找管理員開白名單，後者換金鑰。
+    if (/allowlist|egress|not allowed|proxy/i.test(String(body)) || baseline.status === 407) {
+      result.inconclusiveReason = `出站政策擋住 ${new URL(ENDPOINT).host}——不是 NIM 的答案。請把這個主機加進網路白名單，或改在能直連的機器上跑。`;
+    } else if (baseline.status === 401 || baseline.status === 402) {
+      result.inconclusiveReason = "金鑰無效或額度用完——換一把金鑰再跑。";
+    } else if (baseline.status === 429) {
+      result.inconclusiveReason = "被限流（NIM 免費層約每分鐘 40 次）——等一分鐘再跑。";
+    } else {
+      result.inconclusiveReason = `連 baseline（不帶 tools）都失敗，HTTP ${baseline.status}——先確認端點與金鑰能通，再談 tool calling。`;
+    }
+    return result;
+  }
+  result.reachable = true;
 
   // 探測 1：送 tools + 一個明顯該呼叫 list_assets 的問題。
   const single = await post({
@@ -142,6 +179,7 @@ async function probe(model) {
   result.httpStatus = single.status;
 
   if (!single.ok) {
+    // baseline 已經通過，所以這裡的失敗才真的歸因於 tools 參數本身。
     // 400 通常就是「這個部署不吃 tools」——與 nvidia-nim.ts 對 logprobs 的 400 降級同一種訊號。
     result.error = single.json?.detail ?? single.json?.message ?? single.text?.slice(0, 400);
     return result;
@@ -213,6 +251,13 @@ function report(r) {
   const mark = (ok) => (ok ? "✅" : "❌");
   log(`\n── ${r.model} ──`);
   log(`  HTTP 狀態                 ${r.httpStatus ?? "—"}`);
+  // 結論未知時**不要**印那五格勾叉：全叉會被讀成「測過了，不支援」，
+  // 但實際上連 baseline 都沒通過，什麼都還沒測到。
+  if (r.inconclusive) {
+    log(`  ⚠ 結論未知——${r.inconclusiveReason}`);
+    if (r.error) log(`  原始錯誤                   ${r.error}`);
+    return;
+  }
   log(`  ${mark(r.acceptsToolsParam)} 端點接受 tools 參數`);
   log(`  ${mark(r.returnsToolCalls)} 回傳 message.tool_calls${r.calledTool ? `（呼叫了 ${r.calledTool}）` : ""}`);
   log(`  ${mark(r.argumentsParseable)} arguments 是合法 JSON${r.calledArgs ? `：${JSON.stringify(r.calledArgs)}` : ""}`);
@@ -255,6 +300,12 @@ async function main() {
   log("\n── 對 WP1 的結論 ──");
   if (primary?.transportFailure) {
     log("  網路或設定問題，結論未知——不要據此決定 WP1 路線。");
+    process.exit(2);
+  }
+  if (primary?.inconclusive) {
+    log("  ⚠ 結論未知，**不要**據此決定 WP1 路線。");
+    log(`     ${primary.inconclusiveReason}`);
+    log("     baseline（不帶 tools 的最小請求）都沒通過，代表這次根本還沒測到 tool calling。");
     process.exit(2);
   }
   if (primary?.returnsToolCalls && primary?.argumentsParseable) {

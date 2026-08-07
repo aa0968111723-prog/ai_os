@@ -3,6 +3,15 @@ import { trpc } from "../../api";
 import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
 
+/**
+ * 可指定的知識來源上限，與伺服器契約對齊：
+ * agents.plan／agents.dispatch 的 extraSourceIds 是 `.max(10)`（server/routers/agents.ts:35、:104），
+ * 而這裡原本讓人勾到 20 篇——第 11 篇之後會被 AgentCard 的 slice(0,10) 無聲截掉，
+ * 使用者只會體驗到「我明明勾了它卻沒用」。前端降到 10 而不是放寬後端：
+ * 指定來源會先吃掉知識預算，放寬只會把一般知識庫內容擠出上下文。
+ */
+export const MAX_KNOWLEDGE_SOURCES = 10;
+
 const KIND_LABEL: Record<string, string> = {
   transcript: "開示",
   testimony: "見證",
@@ -12,7 +21,7 @@ const KIND_LABEL: Record<string, string> = {
 
 /**
  * 工作台：勾選本次問 AI／多步開拍要優先注入的知識篇（寫入 creationDraft.knowledgeIds）。
- * 與代理卡 extraSourceIds 同語意；最多 20 篇。
+ * 與代理卡 extraSourceIds 同語意；最多 MAX_KNOWLEDGE_SOURCES 篇。
  */
 export function KnowledgeSourceStrip({
   projectId,
@@ -42,7 +51,7 @@ export function KnowledgeSourceStrip({
   const toggle = (id: string) => {
     if (disabled) return;
     if (selectedSet.has(id)) onChange(selectedIds.filter((x) => x !== id));
-    else if (selectedIds.length < 20) onChange([...selectedIds, id]);
+    else if (selectedIds.length < MAX_KNOWLEDGE_SOURCES) onChange([...selectedIds, id]);
   };
 
   return (
@@ -102,7 +111,7 @@ export function KnowledgeSourceStrip({
             <div style={{ maxHeight: 180, overflow: "auto", display: "grid", gap: 4 }}>
               {list.data.map((k) => {
                 const on = selectedSet.has(k.id);
-                const atMax = !on && selectedIds.length >= 20;
+                const atMax = !on && selectedIds.length >= MAX_KNOWLEDGE_SOURCES;
                 return (
                   <label
                     key={k.id}
@@ -134,7 +143,7 @@ export function KnowledgeSourceStrip({
             </div>
           )}
           <Hint style={{ marginTop: 6 }}>
-            勾選後問 AI／排計畫會<strong>優先注入</strong>這些篇（最多 20）。可與知識庫「釘選」併用。
+            勾選後問 AI／排計畫會<strong>優先注入</strong>這些篇（最多 {MAX_KNOWLEDGE_SOURCES} 篇）。可與知識庫「釘選」併用。
           </Hint>
         </div>
       )}

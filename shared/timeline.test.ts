@@ -5,9 +5,13 @@ import {
   TIMELINE_FPS,
   fcpTimeFromFrames,
   framesToSec,
+  isTrimmed,
   layoutTimeline,
+  msToFrames,
   secToFrames,
+  shotDurationFrames,
   shotFrames,
+  sourceInFrames,
 } from "./timeline";
 
 describe("shotFrames — 鏡長的唯一規則", () => {
@@ -87,5 +91,58 @@ describe("LAYER_LANE", () => {
     expect(LAYER_LANE).toEqual({ visual: 0, narration: -1, sfx: -2, ambience: -3 });
     const lanes = Object.values(LAYER_LANE);
     expect(new Set(lanes).size).toBe(lanes.length);
+  });
+});
+
+describe("修剪（ShotSource）", () => {
+  it("未修剪的鏡行為與修剪功能上線前完全相同", () => {
+    expect(shotDurationFrames({ durationSec: 5 })).toBe(150);
+    expect(shotDurationFrames({ durationSec: 5, trimStartMs: 0, trimEndMs: null })).toBe(150);
+    expect(sourceInFrames({ durationSec: 5 })).toBe(0);
+    expect(isTrimmed({ durationSec: 5, trimStartMs: 0, trimEndMs: null })).toBe(false);
+  });
+
+  it("修剪過就用修剪區間，durationSec 不再決定鏡長", () => {
+    // 8 秒素材取 2.0s–5.0s＝3 秒，即使 durationSec 還寫著 8
+    const shot = { durationSec: 8, trimStartMs: 2000, trimEndMs: 5000 };
+    expect(sourceInFrames(shot)).toBe(60);
+    expect(shotDurationFrames(shot)).toBe(90);
+    expect(isTrimmed(shot)).toBe(true);
+  });
+
+  it("只給入點、沒給出點時鏡長仍走 durationSec", () => {
+    const shot = { durationSec: 4, trimStartMs: 1500, trimEndMs: null };
+    expect(sourceInFrames(shot)).toBe(45);
+    expect(shotDurationFrames(shot)).toBe(120);
+    expect(isTrimmed(shot)).toBe(true);
+  });
+
+  it("出點不大於入點時給 1 影格——零長度剪輯會讓 NLE 匯入整條軌報錯", () => {
+    expect(shotDurationFrames({ durationSec: 5, trimStartMs: 3000, trimEndMs: 3000 })).toBe(1);
+    // 出點早於入點是壞資料（router 會擋），這裡退回 durationSec 而不是產生負長度
+    expect(shotDurationFrames({ durationSec: 5, trimStartMs: 3000, trimEndMs: 1000 })).toBe(150);
+  });
+
+  it("修剪點吸到影格，且不吃非有限值", () => {
+    // 100ms = 3 影格；2050ms = 61.5 → 62 影格
+    expect(msToFrames(100)).toBe(3);
+    expect(msToFrames(2050)).toBe(62);
+    expect(msToFrames(Number.NaN)).toBe(0);
+    expect(sourceInFrames({ durationSec: 5, trimStartMs: Number.NaN })).toBe(0);
+    expect(shotDurationFrames({ durationSec: 5, trimEndMs: Number.NaN })).toBe(150);
+  });
+
+  it("排版把修剪後的鏡長接起來：來源入點不影響時間軸位置", () => {
+    const { shots, totalFrames } = layoutTimeline([
+      { durationSec: 8, trimStartMs: 2000, trimEndMs: 5000 }, // 3 秒
+      { durationSec: 2 }, // 2 秒
+    ]);
+    expect(shots[0].startFrames).toBe(0);
+    expect(shots[0].durationFrames).toBe(90);
+    expect(shots[0].sourceInFrames).toBe(60);
+    expect(shots[0].sourceOutFrames).toBe(150);
+    // 第二鏡緊接第一鏡的「時間軸」結束點，與素材上的出點無關
+    expect(shots[1].startFrames).toBe(90);
+    expect(totalFrames).toBe(150);
   });
 });

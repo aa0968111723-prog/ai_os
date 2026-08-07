@@ -24,6 +24,7 @@ import {
   saveCoCreateOpen,
   saveCoCreatePhase,
 } from "../co-create/coCreateSession";
+import { AiContextLine } from "./AiContextLine";
 import { CreationContextBar } from "./CreationContextBar";
 import { CreationGoalInput } from "./CreationGoalInput";
 import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
@@ -596,6 +597,10 @@ export function CreationWorkbench({
         ) : (
           <>
             <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
+
+            {/* 緊貼模式分頁下方：切換模式時這行跟著變，是使用者唯一看得見
+                「這次 AI 到底讀不讀得到我放的東西」的地方（見 aiContextSummary.ts） */}
+            <AiContextLine mode={mode} draft={draft} />
 
             <CreationContextBar onNavigate={goTo} />
 
