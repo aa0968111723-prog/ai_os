@@ -57,6 +57,111 @@ function segmentWidth(brush: BrushSpec, points: readonly StrokePoint[], i: numbe
   return strokeWidthAt(brush, cur.p, approxSpeed) * taperFactor(brush, i, points.length);
 }
 
+/** 逐段畫線（壓力線寬＋決定性顆粒抖動）。colorStyle 由呼叫端決定：
+ *  直接畫時帶透明度，離屏合成時畫不透明、透明度整筆一次套。 */
+function paintSegments(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  pts: readonly StrokePoint[],
+  view: BoardView,
+  colorStyle: string,
+): void {
+  const { brush } = stroke;
+  const toX = (x: number) => x * view.scale + view.offsetX;
+  const toY = (y: number) => y * view.scale + view.offsetY;
+  ctx.strokeStyle = colorStyle;
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1]!;
+    const b = pts[i]!;
+    let width = segmentWidth(brush, pts, i) * view.scale;
+    let jitterX = 0;
+    let jitterY = 0;
+    if (brush.grain > 0) {
+      // 鉛筆／粉筆：線寬與位置各抖一點點，抖幅隨顆粒度成長但不超過半個線寬
+      const j1 = hashUnit(stroke.id, i);
+      const j2 = hashUnit(stroke.id, i + 9973);
+      width *= 1 - brush.grain * 0.45 * j1;
+      const amp = brush.grain * width * 0.35;
+      jitterX = (j2 - 0.5) * amp;
+      jitterY = (hashUnit(stroke.id, i + 31337) - 0.5) * amp;
+    }
+    ctx.lineWidth = Math.max(0.35, width);
+    ctx.beginPath();
+    ctx.moveTo(toX(a.x) + jitterX, toY(a.y) + jitterY);
+    ctx.lineTo(toX(b.x) + jitterX, toY(b.y) + jitterY);
+    ctx.stroke();
+  }
+}
+
+/** 離屏畫布（模組層共用一張，逐筆重用；只在真瀏覽器環境存在） */
+let scratch: HTMLCanvasElement | null = null;
+
+/**
+ * 半透明筆刷的**均勻墨色**離屏合成。
+ *
+ * 逐段 round-cap 畫線時，每個關節的圓頭會與下一段重疊——透明度 <1 時
+ * 疊兩層就變深，整條線佈滿深色小節點，這是「畫出來像麥克筆沒水」的元兇。
+ * 修法：先把整筆以**不透明**畫到離屏畫布（重疊處疊了也看不出來），
+ * 再以筆刷透明度一次貼回主畫布——整筆墨色均勻，麥克筆的 multiply
+ * 也只在「筆與筆之間」發生（這才是麥克筆的物理）。
+ *
+ * 回傳 false＝環境不支援（測試的假 ctx、jsdom）——退回逐段直畫，
+ * 視覺合約（multiply／線寬／位置）不變，只是關節略深。
+ */
+function paintUniformInk(ctx: CanvasRenderingContext2D, stroke: Stroke, pts: readonly StrokePoint[], view: BoardView): boolean {
+  if (typeof document === "undefined") return false;
+  const target = (ctx as Partial<CanvasRenderingContext2D>).canvas;
+  if (!target || typeof ctx.getTransform !== "function" || typeof ctx.drawImage !== "function") return false;
+  let sctx: CanvasRenderingContext2D | null = null;
+  let t: DOMMatrix;
+  try {
+    if (!scratch) scratch = document.createElement("canvas");
+    if (scratch.width !== target.width || scratch.height !== target.height) {
+      scratch.width = target.width;
+      scratch.height = target.height;
+    }
+    sctx = scratch.getContext("2d");
+    t = ctx.getTransform();
+  } catch {
+    return false;
+  }
+  if (!sctx || !t) return false;
+
+  const { brush } = stroke;
+  // 這一筆在裝置像素座標的包圍盒（含線寬與顆粒抖動的餘裕），離屏只清、只貼這一塊
+  const pad = (brush.size * (1 + brush.grain) + 4) * view.scale;
+  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+  for (const pt of pts) {
+    const x = pt.x * view.scale + view.offsetX;
+    const y = pt.y * view.scale + view.offsetY;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const bx = Math.max(0, Math.floor((minX - pad) * t.a + t.e));
+  const by = Math.max(0, Math.floor((minY - pad) * t.d + t.f));
+  const bw = Math.min(target.width - bx, Math.ceil((maxX - minX + pad * 2) * t.a));
+  const bh = Math.min(target.height - by, Math.ceil((maxY - minY + pad * 2) * t.d));
+  if (bw <= 0 || bh <= 0) return true; // 完全在畫布外：不畫也是畫完了
+
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(bx, by, bw, bh);
+  sctx.setTransform(t);
+  sctx.lineCap = "round";
+  sctx.lineJoin = "round";
+  sctx.globalCompositeOperation = "source-over";
+  paintSegments(sctx, stroke, pts, view, withAlpha(brush.color, 1));
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = brush.opacity;
+  ctx.globalCompositeOperation = brush.engine === "marker" ? "multiply" : "source-over";
+  ctx.drawImage(scratch!, bx, by, bw, bh, bx, by, bw, bh);
+  ctx.restore();
+  return true;
+}
+
 /**
  * 畫一筆。`view` 是白板座標→畫布座標的變換；線寬也跟著縮放，
  * 否則放大後線條會維持螢幕粗細（看起來像貼上去的貼紙，不像放大的畫）。
@@ -67,6 +172,15 @@ export function renderStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, view
   if (pts.length === 0) return;
   const toX = (x: number) => x * view.scale + view.offsetX;
   const toY = (y: number) => y * view.scale + view.offsetY;
+
+  // 半透明線刷（鉛筆／麥克筆／毛筆）走均勻墨色合成；不支援的環境退回逐段直畫
+  if (
+    brush.engine !== "eraser" && brush.engine !== "spray" &&
+    brush.opacity < 0.999 && pts.length > 1 &&
+    paintUniformInk(ctx, stroke, pts, view)
+  ) {
+    return;
+  }
 
   ctx.save();
   ctx.lineCap = "round";
@@ -103,27 +217,8 @@ export function renderStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, view
     return;
   }
 
-  for (let i = 1; i < pts.length; i += 1) {
-    const a = pts[i - 1]!;
-    const b = pts[i]!;
-    let width = segmentWidth(brush, pts, i) * view.scale;
-    let jitterX = 0;
-    let jitterY = 0;
-    if (brush.grain > 0) {
-      // 鉛筆／粉筆：線寬與位置各抖一點點，抖幅隨顆粒度成長但不超過半個線寬
-      const j1 = hashUnit(stroke.id, i);
-      const j2 = hashUnit(stroke.id, i + 9973);
-      width *= 1 - brush.grain * 0.45 * j1;
-      const amp = brush.grain * width * 0.35;
-      jitterX = (j2 - 0.5) * amp;
-      jitterY = (hashUnit(stroke.id, i + 31337) - 0.5) * amp;
-    }
-    ctx.lineWidth = Math.max(0.35, width);
-    ctx.beginPath();
-    ctx.moveTo(toX(a.x) + jitterX, toY(a.y) + jitterY);
-    ctx.lineTo(toX(b.x) + jitterX, toY(b.y) + jitterY);
-    ctx.stroke();
-  }
+  // 橡皮擦固定全不透明（濃度值對它無意義，見 BrushSpec 註解）
+  paintSegments(ctx, stroke, pts, view, brush.engine === "eraser" ? "rgba(0, 0, 0, 1)" : withAlpha(brush.color, brush.opacity));
   ctx.restore();
 }
 

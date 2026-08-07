@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   expandSketch,
+  sketchBoardStateBlock,
   sketchContinuityBlock,
   sketchDslPromptBlock,
   sketchPlanSchema,
+  SKETCH_BOARD_STATE_RULES,
   SKETCH_CONTINUITY_RULES,
   type SketchPlan,
 } from "./boardSketch";
@@ -194,6 +196,19 @@ describe("expandSketch", () => {
     }
   });
 
+  it("weight 線寬層次：light 細而淡、bold 粗而實（素描的層次感）", () => {
+    const at = (weight?: "light" | "normal" | "bold") =>
+      expandSketch(plan([{ kind: "line", x1: 0, y1: 0, x2: 500, y2: 0, ...(weight ? { weight } : {}) }]), BOARD)
+        .doc.strokes[0]!.brush;
+    const light = at("light");
+    const normal = at();
+    const bold = at("bold");
+    expect(light.size).toBeLessThan(normal.size);
+    expect(bold.size).toBeGreaterThan(normal.size);
+    expect(light.opacity).toBeLessThan(normal.opacity);
+    expect(bold.opacity).toBeLessThanOrEqual(1);
+  });
+
   it("站姿火柴人有腳掌短撇（站在地上，不是懸空）", () => {
     const withFeet = expandSketch(plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "stand" }]), BOARD);
     // 頭1＋軀幹1＋手2＋腳2＋腳掌2
@@ -265,5 +280,32 @@ describe("sketchContinuityBlock", () => {
       prev: { title: "長鏡", prompt: "很長".repeat(500) },
     });
     expect(block.length).toBeLessThan(400);
+  });
+});
+
+describe("sketchBoardStateBlock（畫布感知）", () => {
+  it("列出有內容與空白的區域、標記已有外框；指令住在 RULES（素材區外）", () => {
+    const block = sketchBoardStateBlock({
+      strokeCount: 24,
+      cells: [100, 40, 0, 0, 0, 0, 0, 0, 0],
+      hasFrame: true,
+    });
+    expect(block).toContain("已有 24 筆");
+    expect(block).toContain("已畫了構圖外框");
+    expect(block).toContain("左上（筆墨量 100）");
+    expect(block).toContain("大致空白的區域");
+    expect(block).toContain("右下");
+    expect(block).not.toContain("要求"); // 指令不混進素材
+    expect(SKETCH_BOARD_STATE_RULES).toContain("不要再輸出 frame");
+  });
+
+  it("空白板回空字串——AI 拿到的空白板提示與從前完全一致", () => {
+    expect(sketchBoardStateBlock({ strokeCount: 0, cells: new Array(9).fill(0), hasFrame: false })).toBe("");
+  });
+
+  it("壞數字被夾回 0-100，不會把亂值排進提示詞", () => {
+    const block = sketchBoardStateBlock({ strokeCount: 3, cells: [999, -5, 0, 0, 0, 0, 0, 0, 0], hasFrame: false });
+    expect(block).toContain("左上（筆墨量 100）");
+    expect(block).not.toContain("999");
   });
 });
