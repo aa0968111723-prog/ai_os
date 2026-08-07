@@ -91,6 +91,13 @@ buildTeamAskContext（組級視野）、runTeamTool（9 唯讀工具）、resolv
 - e2e 負例：跨組 projectId 借道、非組員 ask、他人軌跡、壞時間格式、限流——全部實測被擋。
 - trace 落庫全程經 sanitizeAiTracePayload（秘密／簽名 query／私密推理遮蔽）。
 
+## SELF-REVIEW（多代理對抗式，2026-08-08）
+
+4 維度審查（安全授權／正確性／回歸／成本誠實）×17 條發現，每條經獨立對抗驗證代理逐一 REFUTE 測試——17 條全數 confirmed、全數修復（commit dd90733＋3c11de6）：
+
+- **major×4**：send_dm 本文明文落 audit_log（補 AUDIT_REDACT_BODY，對齊 dm.send 隱私承諾）；確認卡只顯示 24 字摘要就讓使用者確認 2000 字私訊（改全文可見＋卡內自捲——這是紅線一「使用者看過才算確認」的實質漏洞）；trace 落庫失敗會吃掉算好的答案（全程 fail-safe）；確認卡時間顯示 UTC 差 8 小時（改台北時間）。
+- **minor×13**：SSE 路徑補審計、abort 記 stopped、catch 保留 steps、quota 懸掛 session 收尾、空白 title/kind 丟棄、fallback 不吐工具 JSON、chip CSS 變數 out-of-scope fallback、專案模式保留調度面板核准徽章等。
+
 ## TEST / BUILD RESULTS
 
 tsc ✓；build ✓；boundaries（0 違規）/ui-primitives/hooks ✓；server vitest 2032 passed（僅 D-007 既有本地紅＋一次偶發 hook timeout 單跑即綠）；client 受影響 5 檔全綠；migrationState＋auditWording 守門 48/48；e2e-global-assistant 22/22；瀏覽器實測（桌機＋390px）全流程走通。check:agent-planner canary 需真 FAL_KEY（本機無金鑰，既有限制）。
