@@ -7,7 +7,8 @@ import {
   type StrokePoint,
 } from "./brushes";
 import { nextStrokeId, type BoardDoc, type Stroke } from "./boardDoc";
-import { renderBoard, renderStroke } from "./boardRender";
+import { renderBoard, renderStroke, withAlpha } from "./boardRender";
+import type { SketchPreview } from "./sketchReplay";
 import { clampZoom, fitBoardToBox, type StudioLayout } from "./studioLayout";
 
 export interface BoardView {
@@ -30,6 +31,8 @@ export interface WhiteboardCanvasProps {
   referenceOpacity?: number;
   /** 唯讀（專案檢視者）：仍可縮放平移，但不能落筆 */
   readOnly?: boolean;
+  /** AI 正在畫的那一筆（逐點前綴＋筆尖）：畫在 live 層，不進文件。null＝沒有在畫 */
+  aiPreview?: SketchPreview | null;
 }
 
 /**
@@ -57,6 +60,7 @@ export function WhiteboardCanvas({
   referenceUrl,
   referenceOpacity = 0.35,
   readOnly,
+  aiPreview,
 }: WhiteboardCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
@@ -171,6 +175,40 @@ export function WhiteboardCanvas({
     canvas.width = Math.round(box.w * dpr);
     canvas.height = Math.round(box.h * dpr);
   }, [box, dpr]);
+
+  /**
+   * AI 逐點作畫的預覽：正在長出來的那一筆＋筆尖游標，畫在 live 層。
+   * 跟手繪共用同一張 live canvas 沒有衝突——重播中輸入被面板鎖住，
+   * 但仍防禦性讓路：使用者真的在落筆時不動 live 層（他的筆跡優先）。
+   * 筆尖用螢幕尺寸（不隨縮放變大變小）：它是游標不是筆畫。
+   */
+  useEffect(() => {
+    if (drawing.current) return;
+    const canvas = liveRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || box.w === 0 || box.h === 0) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, box.w, box.h);
+    if (!aiPreview) return;
+    const pts = aiPreview.stroke.points.slice(0, Math.max(1, aiPreview.visible));
+    if (pts.length === 0) return;
+    renderStroke(ctx, { ...aiPreview.stroke, points: pts }, view);
+    const tip = pts[pts.length - 1]!;
+    const tx = tip.x * view.scale + view.offsetX;
+    const ty = tip.y * view.scale + view.offsetY;
+    const color = aiPreview.stroke.brush.color;
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.beginPath();
+    ctx.arc(tx, ty, 9, 0, Math.PI * 2);
+    ctx.fillStyle = withAlpha(color, 0.16);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(tx, ty, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = withAlpha(color, 0.95);
+    ctx.fill();
+    ctx.restore();
+  }, [aiPreview, view, box, dpr]);
 
   const toBoard = useCallback((clientX: number, clientY: number) => {
     const host = hostRef.current;

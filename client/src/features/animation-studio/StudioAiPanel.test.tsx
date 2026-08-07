@@ -6,6 +6,7 @@ import type { StudioShot } from "./ShotStrip";
 import { resolveStudioLayout } from "./studioLayout";
 
 const updateMutate = vi.fn();
+const sketchMutate = vi.fn();
 
 /** 站內既有做法（見 AICreativeCopilot.test.tsx）：整支 api 換成假的，只留這支面板用到的路徑 */
 vi.mock("../../api", () => {
@@ -24,7 +25,7 @@ vi.mock("../../api", () => {
       director: {
         suggest: { useMutation: mutation },
         splitScript: { useMutation: mutation },
-        sketchBoard: { useMutation: mutation },
+        sketchBoard: { useMutation: () => ({ ...mutation(), mutate: sketchMutate }) },
       },
     },
   };
@@ -42,7 +43,7 @@ const SHOT: StudioShot = {
   ambience: "遠處鐘聲",
 };
 
-const SKETCH = { pushStroke: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
+const SKETCH = { pushStroke: vi.fn(), preview: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
 
 function setup(shot: StudioShot | null = SHOT) {
   render(
@@ -61,6 +62,7 @@ function setup(shot: StudioShot | null = SHOT) {
 
 beforeEach(() => {
   updateMutate.mockClear();
+  sketchMutate.mockClear();
 });
 
 describe("StudioAiPanel・這一鏡", () => {
@@ -157,6 +159,20 @@ describe("StudioAiPanel・AI 畫草圖按不下去時要說原因", () => {
     expect(screen.getByRole("button", { name: /AI 畫草圖/ })).toBeEnabled();
     expect(screen.queryByText(/再多寫幾個字/)).not.toBeInTheDocument();
     expect(screen.queryByText(/先在上面寫這一鏡要看到什麼/)).not.toBeInTheDocument();
+  });
+
+  it("選了分鏡時送出 sceneId——連戲（參考前後鏡）靠這條線，斷了伺服器只能憑空畫", async () => {
+    setup();
+    await userEvent.type(screen.getByLabelText(/跟 AI 說/), "僧人沿石徑往右行禪");
+    await userEvent.click(screen.getByRole("button", { name: /AI 畫草圖/ }));
+    expect(sketchMutate).toHaveBeenCalledWith(expect.objectContaining({ projectId: "proj-1", sceneId: "shot-1" }));
+  });
+
+  it("沒選分鏡（自由塗鴉）不帶 sceneId", async () => {
+    setup(null);
+    await userEvent.type(screen.getByLabelText(/跟 AI 說/), "遠山與夕陽");
+    await userEvent.click(screen.getByRole("button", { name: /AI 畫草圖/ }));
+    expect(sketchMutate).toHaveBeenCalledWith(expect.objectContaining({ sceneId: undefined }));
   });
 
   it("檢視者看到的是「你沒有編輯權」，不是叫他多打幾個字", () => {

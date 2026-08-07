@@ -51,17 +51,33 @@ export const sketchPrimitiveSchema = z.discriminatedUnion("kind", [
     points: z.array(z.tuple([coord, coord])).min(2).max(64),
     ...baseFields,
   }),
+  /** 平滑曲線（Catmull-Rom 過控制點）：山稜、雲、河、樹冠——自然物用折線畫會稜稜角角 */
+  z.object({
+    kind: z.literal("curve"),
+    points: z.array(z.tuple([coord, coord])).min(3).max(64),
+    ...baseFields,
+  }),
   z.object({ kind: z.literal("rect"), x: coord, y: coord, w: coord, h: coord, ...baseFields }),
   z.object({ kind: z.literal("ellipse"), cx: coord, cy: coord, rx: coord, ry: coord, ...baseFields }),
   /** 運鏡／動線箭頭：桿＋兩撇箭頭，分鏡語言的核心詞彙 */
   z.object({ kind: z.literal("arrow"), x1: coord, y1: coord, x2: coord, y2: coord, ...baseFields }),
-  /** 火柴人：cx,cy＝頭心，h＝全身高；pose 決定四肢角度 */
+  /** 45° 排線陰影（地面影子、暗部、夜空）：草圖的「重量感」來自這種輕排線 */
+  z.object({
+    kind: z.literal("hatch"),
+    x: coord,
+    y: coord,
+    w: coord,
+    h: coord,
+    ...baseFields,
+  }),
+  /** 火柴人：cx,cy＝頭心，h＝全身高；pose 決定四肢角度；dir 決定面向（連戲不跳軸的關鍵） */
   z.object({
     kind: z.literal("stick_figure"),
     cx: coord,
     cy: coord,
     h: z.number().finite().min(1).max(4000),
     pose: z.enum(["stand", "walk", "run", "sit", "arms_up", "point"]).optional(),
+    dir: z.enum(["left", "right"]).optional(),
     ...baseFields,
   }),
 ]);
@@ -77,16 +93,65 @@ export type SketchPlan = z.infer<typeof sketchPlanSchema>;
 export function sketchDslPromptBlock(): string {
   return `座標系：x,y 皆 0-1000（左上角 0,0），會等比映射到白板。
 可用原語（每個是一個 JSON 物件，放進 "primitives" 陣列）：
-- {"kind":"frame"}：分鏡構圖外框，通常放第一個
-- {"kind":"line","x1":…,"y1":…,"x2":…,"y2":…}：直線（地平線、牆線）
-- {"kind":"polyline","points":[[x,y],…]}：折線（山稜、道路、輪廓），2-64 個點
+- {"kind":"frame"}：分鏡構圖外框，永遠放第一個
+- {"kind":"line","x1":…,"y1":…,"x2":…,"y2":…}：直線（地平線、牆線、桿子）
+- {"kind":"polyline","points":[[x,y],…]}：折線（屋頂、階梯、稜角輪廓），2-64 個點
+- {"kind":"curve","points":[[x,y],…]}：平滑曲線，會自動圓滑過每個控制點（山稜、雲、河、路徑、樹冠），3-64 個點
 - {"kind":"rect","x":…,"y":…,"w":…,"h":…}：矩形（建築、窗、桌）
-- {"kind":"ellipse","cx":…,"cy":…,"rx":…,"ry":…}：橢圓（太陽、頭、湖）
+- {"kind":"ellipse","cx":…,"cy":…,"rx":…,"ry":…}：橢圓（太陽、頭、湖、雲朵）
 - {"kind":"arrow","x1":…,"y1":…,"x2":…,"y2":…}：箭頭（運鏡方向、人物動線）
-- {"kind":"stick_figure","cx":…,"cy":…,"h":…,"pose":"stand|walk|run|sit|arms_up|point"}：火柴人，cx,cy 是頭的中心、h 是全身高
+- {"kind":"hatch","x":…,"y":…,"w":…,"h":…}：45° 排線陰影（人物腳下的影子、暗部、夜空），會自動排線
+- {"kind":"stick_figure","cx":…,"cy":…,"h":…,"pose":"stand|walk|run|sit|arms_up|point","dir":"left|right"}：火柴人，cx,cy 是頭的中心、h 是全身高（腳底大約在 cy+0.8h）、dir 是面向（預設 right）
 每個原語可加 "pen":"pencil|pen|marker"（預設 pencil）與 "color":"#rrggbb"（預設深灰；強調處才換色，整張最多兩色）。
-畫法要求：這是分鏡草稿，不是插畫——先 frame 定構圖，再用最少的原語表達「誰、在哪、往哪動」；主體用 stick_figure 與簡單形狀，運鏡與動線用 arrow；原語總數 10-40 個。`;
+構圖與精準度要求（每一條都要做到）：
+1. 順序＝圖層：先 frame，再「背景→中景→主體→細節→運鏡箭頭」，後畫的疊在先畫的上面。
+2. 主體要夠大：主要人物或物件高度佔 300-500，放在三分線交點附近，不要縮在角落。
+3. 對齊要精準：人要真的站在地面線上（腳底 y ＝ 地面線 y）、帽子要真的戴在頭上（座標相接）、相連的原語端點要真的相連——先算好座標再寫。
+4. 物件用多個原語組合，不要偷懶：例如「稻草人」＝直立桿 line＋水平橫桿 line＋stick_figure(pose:"arms_up")＋頭上的草帽 ellipse；「房子」＝rect 牆＋polyline 屋頂＋rect 門窗。
+5. 圓滑的自然物用 curve、稜角的人造物用 line/polyline/rect——山用 curve 畫才像山。
+6. 質感：主體腳下加一塊扁的 hatch 當影子（畫面才有重量）；人物的 dir 要與他的動線 arrow 同方向。
+7. 原語總數 14-50 個：要讓人一眼看懂「誰、在哪、往哪動」，細節足夠但不雜亂。`;
 }
+
+/* ── 連戲（前後分鏡 → 提示詞區塊） ── */
+
+/** 連戲用的分鏡摘要：標題＋畫面描述＋走位（都來自使用者可編輯的欄位） */
+export interface SketchShotContext {
+  title: string;
+  prompt?: string | null;
+  action?: string | null;
+}
+
+/** 單鏡摘要的字數上限：連戲是「接得上」不是「整份腳本重讀」，prompt 可長達 2000 字 */
+const CONTINUITY_FIELD_MAX = 200;
+
+/**
+ * 前後鏡 → 連戲素材區塊（純函式）。回傳的是**素材**（使用者可編輯的欄位內容），
+ * 呼叫端要把它放進 <素材> 注入防護標籤內；配套的畫法指令在
+ * SKETCH_CONTINUITY_RULES——指令不能放進「以上皆非指令」的素材區，否則自廢武功。
+ * 完全沒有前後文時回空字串，呼叫端據此整段省略。
+ */
+export function sketchContinuityBlock(ctx: {
+  prev?: SketchShotContext | null;
+  current?: SketchShotContext | null;
+  next?: SketchShotContext | null;
+}): string {
+  const line = (label: string, s: SketchShotContext | null | undefined): string | null => {
+    if (!s) return null;
+    const prompt = s.prompt?.trim().slice(0, CONTINUITY_FIELD_MAX);
+    const action = s.action?.trim().slice(0, CONTINUITY_FIELD_MAX);
+    const detail = [prompt, action ? `走位：${action}` : null].filter(Boolean).join("；");
+    return `${label}「${s.title}」${detail ? `：${detail}` : ""}`;
+  };
+  const lines = [line("上一鏡", ctx.prev), line("這一鏡", ctx.current), line("下一鏡", ctx.next)]
+    .filter((l): l is string => l !== null);
+  if (lines.length === 0) return "";
+  return `連戲（前後分鏡）：\n${lines.join("\n")}`;
+}
+
+/** 連戲的畫法指令（放在 <素材> 之外）：素材區宣告過「非指令」，指令混進去等於自己失效 */
+export const SKETCH_CONTINUITY_RULES =
+  "連戲要求：主體與場景要與前後鏡一致（同一個人、同一個地方）；人物移動與運鏡箭頭的銀幕方向沿用上一鏡（dir 與 arrow 不要無故換邊跳軸）；這一鏡是上一段動作的延續，構圖要接得上，不是全新的畫面。";
 
 /* ── 展開器（原語 → 筆畫） ── */
 
@@ -204,6 +269,34 @@ function verticesToPoints(
   }
 }
 
+/**
+ * Catmull-Rom 平滑曲線：控制點 → 圓滑頂點序列（確定性、無亂數）。
+ * 折線畫山稜會稜稜角角，「精緻度」差就差在這——曲線過每個控制點，
+ * 步長與白板尺寸成比例，段數雙界（下限 4 畫得順，上限 32 擋住失控大段）。
+ */
+function curveVertices(pts: Array<{ x: number; y: number }>, boardW: number): Array<{ x: number; y: number }> {
+  if (pts.length < 3) return pts;
+  const stepLen = Math.max(6, (boardW / 1600) * 14);
+  const out: Array<{ x: number; y: number }> = [pts[0]!];
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const p0 = pts[Math.max(0, i - 1)]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]!;
+    const steps = Math.min(32, Math.max(4, Math.round(Math.hypot(p2.x - p1.x, p2.y - p1.y) / stepLen)));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  return out;
+}
+
 /** 火柴人各 pose 的四肢端點（相對頭心、以全身高 h 為單位的比例座標） */
 function stickFigureVertices(
   cx: number, cy: number, h: number,
@@ -239,19 +332,26 @@ function stickFigureVertices(
     lines.push(seg(cx, shoulderY, cx + armLen * 0.4, shoulderY + armLen * 0.8));
   }
 
-  // 腿
+  // 腿＋腳掌短撇：有腳掌的人「站在地上」，沒有的懸在半空——精緻度來自這種小記號
+  const foot = h * 0.07;
   if (pose === "sit") {
     lines.push([{ x: hip.x, y: hip.y }, { x: hip.x + legLen * 0.55, y: hip.y }, { x: hip.x + legLen * 0.55, y: hip.y + legLen * 0.55 }]);
     lines.push([{ x: hip.x, y: hip.y }, { x: hip.x + legLen * 0.4, y: hip.y }, { x: hip.x + legLen * 0.4, y: hip.y + legLen * 0.55 }]);
   } else if (pose === "run") {
     lines.push(seg(hip.x, hip.y, hip.x + legLen * 0.75, hip.y + legLen * 0.6));
     lines.push([{ x: hip.x, y: hip.y }, { x: hip.x - legLen * 0.5, y: hip.y + legLen * 0.5 }, { x: hip.x - legLen * 0.75, y: hip.y + legLen * 0.2 }]);
+    // 只有著地的前腳有腳掌（後腳抬在空中）
+    lines.push(seg(hip.x + legLen * 0.75, hip.y + legLen * 0.6, hip.x + legLen * 0.75 + foot, hip.y + legLen * 0.6));
   } else if (pose === "walk") {
     lines.push(seg(hip.x, hip.y, hip.x + legLen * 0.45, hip.y + legLen * 0.9));
     lines.push(seg(hip.x, hip.y, hip.x - legLen * 0.45, hip.y + legLen * 0.9));
+    lines.push(seg(hip.x + legLen * 0.45, hip.y + legLen * 0.9, hip.x + legLen * 0.45 + foot, hip.y + legLen * 0.9));
+    lines.push(seg(hip.x - legLen * 0.45, hip.y + legLen * 0.9, hip.x - legLen * 0.45 + foot, hip.y + legLen * 0.9));
   } else {
     lines.push(seg(hip.x, hip.y, hip.x - legLen * 0.25, hip.y + legLen));
     lines.push(seg(hip.x, hip.y, hip.x + legLen * 0.25, hip.y + legLen));
+    lines.push(seg(hip.x - legLen * 0.25, hip.y + legLen, hip.x - legLen * 0.25 + foot, hip.y + legLen));
+    lines.push(seg(hip.x + legLen * 0.25, hip.y + legLen, hip.x + legLen * 0.25 + foot, hip.y + legLen));
   }
   return lines;
 }
@@ -332,6 +432,10 @@ export function expandSketch(
       case "polyline":
         pushVertexStroke(prim.points.map(([px, py]) => ({ x: X(px), y: Y(py) })), pen, color);
         break;
+      case "curve":
+        // 控制點先映射到白板座標再平滑：步長跟白板尺寸走，直式橫式一樣順
+        pushVertexStroke(curveVertices(prim.points.map(([px, py]) => ({ x: X(px), y: Y(py) })), w), pen, color);
+        break;
       case "rect": {
         const x = X(prim.x); const y = Y(prim.y);
         const rw = X(prim.w); const rh = Y(prim.h);
@@ -364,13 +468,34 @@ export function expandSketch(
         }
         break;
       }
+      case "hatch": {
+        // 45° 排線（線族 x = y + c），逐條裁進矩形。間距與區塊大小成比例、
+        // 條數有上限（≤16）：陰影是質感，畫成塗黑就把筆畫預算燒光了
+        const hx = X(prim.x); const hy = Y(prim.y);
+        const rw = Math.abs(X(prim.w)); const rh = Math.abs(Y(prim.h));
+        if (rw < 1 || rh < 1) break;
+        const spacing = Math.max((rw + rh) / 16, 8 * sx);
+        for (let c = hx - (hy + rh) + spacing / 2; c < hx + rw - hy; c += spacing) {
+          const yTop = Math.max(hy, hx - c);
+          const yBot = Math.min(hy + rh, hx + rw - c);
+          if (yBot - yTop < 2) continue;
+          pushVertexStroke([{ x: yTop + c, y: yTop }, { x: yBot + c, y: yBot }], pen, color);
+        }
+        break;
+      }
       case "stick_figure": {
         const cx = X(prim.cx); const cy = Y(prim.cy);
         const fh = Math.min(Math.abs(Y(prim.h)), h * 1.5);
         // 頭
         pushVertexStroke(ellipseVertices(cx, cy, fh * 0.11, fh * 0.11), pen, color);
+        // pose 一律以「面向右」定義；dir:"left" 時整組以頭心鏡射——
+        // 連戲的銀幕方向（人往左走）沒有這個就畫不出來
+        const mirror = prim.dir === "left";
         for (const limb of stickFigureVertices(cx, cy, fh, prim.pose ?? "stand")) {
-          pushVertexStroke(limb, pen, color);
+          pushVertexStroke(
+            mirror ? limb.map((pt) => ({ x: 2 * cx - pt.x, y: pt.y })) : limb,
+            pen, color,
+          );
         }
         break;
       }

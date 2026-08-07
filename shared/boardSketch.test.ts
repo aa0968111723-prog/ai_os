@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   expandSketch,
+  sketchContinuityBlock,
   sketchDslPromptBlock,
   sketchPlanSchema,
+  SKETCH_CONTINUITY_RULES,
   type SketchPlan,
 } from "./boardSketch";
 
@@ -35,6 +37,27 @@ describe("sketchPlanSchema", () => {
     const tooMany = Array.from({ length: 65 }, (_, i) => [i, i] as [number, number]);
     expect(sketchPlanSchema.safeParse({ primitives: [{ kind: "polyline", points: tooMany }] }).success).toBe(false);
   });
+
+  it("hatch 與 stick_figure 的 dir 是合法輸入（連戲與陰影的新詞彙）", () => {
+    expect(sketchPlanSchema.safeParse({
+      primitives: [
+        { kind: "hatch", x: 300, y: 640, w: 130, h: 18 },
+        { kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "walk", dir: "left" },
+      ],
+    }).success).toBe(true);
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "stick_figure", cx: 500, cy: 300, h: 400, dir: "up" }],
+    }).success).toBe(false);
+  });
+
+  it("curve 至少 3 個控制點（2 點沒有東西可平滑，該用 line）", () => {
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "curve", points: [[0, 500], [300, 300], [700, 520]] }],
+    }).success).toBe(true);
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "curve", points: [[0, 500], [300, 300]] }],
+    }).success).toBe(false);
+  });
 });
 
 describe("expandSketch", () => {
@@ -54,14 +77,15 @@ describe("expandSketch", () => {
       { kind: "frame" },
       { kind: "line", x1: -50, y1: 0, x2: 1200, y2: 1050 }, // 刻意超界
       { kind: "polyline", points: [[0, 900], [300, 700], [600, 860], [1000, 640]] },
+      { kind: "curve", points: [[0, 520], [250, 380], [520, 500], [1000, 420]] },
       { kind: "rect", x: 100, y: 100, w: 300, h: 200 },
       { kind: "ellipse", cx: 500, cy: 500, rx: 120, ry: 80 },
       { kind: "arrow", x1: 200, y1: 200, x2: 600, y2: 400 },
       { kind: "stick_figure", cx: 700, cy: 300, h: 380 },
     ]);
     const { doc } = expandSketch(p, BOARD);
-    // frame1 + line1 + polyline1 + rect1 + ellipse1 + arrow3 + stick(頭1+軀幹1+手2+腳2)
-    expect(doc.strokes.length).toBeGreaterThanOrEqual(13);
+    // frame1 + line1 + polyline1 + curve1 + rect1 + ellipse1 + arrow3 + stick(頭1+軀幹1+手2+腳2+腳掌2)
+    expect(doc.strokes.length).toBeGreaterThanOrEqual(14);
     for (const stroke of doc.strokes) {
       expect(stroke.points.length).toBeGreaterThanOrEqual(2);
       for (const pt of stroke.points) {
@@ -123,6 +147,59 @@ describe("expandSketch", () => {
     expect(doc.strokes[0]!.points.length).toBeLessThanOrEqual(2000);
   });
 
+  it("curve 真的有平滑：展開出的頂點比控制點密，而且全部在白板內", () => {
+    const control: Array<[number, number]> = [[0, 500], [300, 250], [600, 550], [1000, 400]];
+    const { doc } = expandSketch(plan([{ kind: "curve", points: control }]), BOARD);
+    const stroke = doc.strokes[0]!;
+    // 3 段 × 至少 4 步取樣 ≫ 4 個控制點——不是把控制點直接連起來
+    expect(stroke.points.length).toBeGreaterThan(control.length * 4);
+    for (const pt of stroke.points) {
+      expect(pt.x).toBeGreaterThanOrEqual(0);
+      expect(pt.x).toBeLessThanOrEqual(BOARD.w);
+      expect(pt.y).toBeGreaterThanOrEqual(0);
+      expect(pt.y).toBeLessThanOrEqual(BOARD.h);
+    }
+  });
+
+  it("hatch 排成多條 45° 線、全部落在陰影矩形附近，條數有上限", () => {
+    const { doc } = expandSketch(plan([{ kind: "hatch", x: 200, y: 600, w: 300, h: 60 }]), BOARD);
+    expect(doc.strokes.length).toBeGreaterThanOrEqual(3);
+    expect(doc.strokes.length).toBeLessThanOrEqual(24);
+    // 正規化 200..500 × 600..660 → 白板 320..800 × 540..594；抖動留 6px 餘裕
+    for (const stroke of doc.strokes) {
+      for (const pt of stroke.points) {
+        expect(pt.x).toBeGreaterThanOrEqual(320 - 6);
+        expect(pt.x).toBeLessThanOrEqual(800 + 6);
+        expect(pt.y).toBeGreaterThanOrEqual(540 - 6);
+        expect(pt.y).toBeLessThanOrEqual(594 + 6);
+      }
+    }
+  });
+
+  it("stick_figure 的 dir:'left' 是以頭心水平鏡射（銀幕方向連戲的基礎）", () => {
+    const right = expandSketch(plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "point" }]), BOARD);
+    const left = expandSketch(plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "point", dir: "left" }]), BOARD);
+    expect(left.doc.strokes.length).toBe(right.doc.strokes.length);
+    const cxPx = 500 * (BOARD.w / 1000);
+    // 從 1 開始：第 0 筆是頭——圓本來就左右對稱，展開器不鏡射它，逐點比對自然對不上
+    for (let s = 1; s < right.doc.strokes.length; s += 1) {
+      const rPts = right.doc.strokes[s]!.points;
+      const lPts = left.doc.strokes[s]!.points;
+      expect(lPts.length).toBe(rPts.length);
+      for (let i = 0; i < rPts.length; i += 1) {
+        // 鏡射後再加同一串抖動：誤差上限是兩倍抖幅
+        expect(Math.abs(lPts[i]!.x - (2 * cxPx - rPts[i]!.x))).toBeLessThanOrEqual(6);
+        expect(Math.abs(lPts[i]!.y - rPts[i]!.y)).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it("站姿火柴人有腳掌短撇（站在地上，不是懸空）", () => {
+    const withFeet = expandSketch(plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "stand" }]), BOARD);
+    // 頭1＋軀幹1＋手2＋腳2＋腳掌2
+    expect(withFeet.doc.strokes.length).toBe(8);
+  });
+
   it("直式白板（9:16）：同一份計畫按比例縮放，不變形出界", () => {
     const p = plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400 }]);
     const { doc } = expandSketch(p, { w: 900, h: 1600, maxStrokes: 400 });
@@ -148,8 +225,45 @@ describe("expandSketch", () => {
 describe("sketchDslPromptBlock", () => {
   it("提示詞涵蓋 schema 的每一種原語——兩邊漂移時這裡會先紅", () => {
     const block = sketchDslPromptBlock();
-    for (const kind of ["frame", "line", "polyline", "rect", "ellipse", "arrow", "stick_figure"]) {
+    for (const kind of ["frame", "line", "polyline", "curve", "rect", "ellipse", "arrow", "hatch", "stick_figure"]) {
       expect(block).toContain(`"${kind}"`);
     }
+  });
+
+  it("提示詞帶著構圖與對齊要求——精準度的關鍵指令不能在改版時默默消失", () => {
+    const block = sketchDslPromptBlock();
+    expect(block).toContain("對齊");
+    expect(block).toContain("主體要夠大");
+    expect(block).toContain("多個原語組合");
+    expect(block).toContain("dir");
+  });
+});
+
+describe("sketchContinuityBlock", () => {
+  it("有前後鏡時列出標題、畫面與走位；素材與指令分離（指令不在區塊裡）", () => {
+    const block = sketchContinuityBlock({
+      prev: { title: "開場", prompt: "僧人走進山門", action: "從左往右走" },
+      current: { title: "行禪", prompt: "僧人沿石徑行禪" },
+      next: { title: "駐足", prompt: "僧人在樹下停步" },
+    });
+    expect(block).toContain("上一鏡「開場」");
+    expect(block).toContain("走位：從左往右走");
+    expect(block).toContain("這一鏡「行禪」");
+    expect(block).toContain("下一鏡「駐足」");
+    // 畫法指令住在 SKETCH_CONTINUITY_RULES（素材區外），素材區塊不得混入指令
+    expect(block).not.toContain("連戲要求");
+    expect(SKETCH_CONTINUITY_RULES).toContain("銀幕方向");
+  });
+
+  it("完全沒有前後文時回空字串——呼叫端據此整段省略，不注水", () => {
+    expect(sketchContinuityBlock({})).toBe("");
+    expect(sketchContinuityBlock({ prev: null, current: null, next: null })).toBe("");
+  });
+
+  it("超長的畫面描述會截斷——連戲是接得上，不是把整份腳本塞進提示詞", () => {
+    const block = sketchContinuityBlock({
+      prev: { title: "長鏡", prompt: "很長".repeat(500) },
+    });
+    expect(block.length).toBeLessThan(400);
   });
 });
