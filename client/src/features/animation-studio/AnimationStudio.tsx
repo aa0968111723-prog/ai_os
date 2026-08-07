@@ -66,11 +66,14 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setBrushNotice("");
   };
 
-  /** 線條穩定器：跨筆刷的工作習慣（這台裝置＋這雙手），存進裝置偏好 */
-  const [stabilizer, setStabilizer] = useState(() => readStudioPrefs().stabilizer);
-  const changeStabilizer = (value: number) => {
-    setStabilizer(value);
-    writeStudioPrefs({ stabilizer: value });
+  /** 穩定器與筆壓曲線：跨筆刷的工作習慣（這台裝置＋這雙手），存進裝置偏好 */
+  const [prefs, setPrefs] = useState(readStudioPrefs);
+  const updatePrefs = (patch: Partial<typeof prefs>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      writeStudioPrefs(next);
+      return next;
+    });
   };
 
   const changeBrush = (next: BrushSpec) => {
@@ -253,8 +256,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       onCollect={collect}
       onRemove={removeBrush}
       notice={brushNotice}
-      stabilizer={stabilizer}
-      onStabilizerChange={changeStabilizer}
+      stabilizer={prefs.stabilizer}
+      onStabilizerChange={(value) => updatePrefs({ stabilizer: value })}
+      pressureCurve={prefs.pressureCurve}
+      onPressureCurveChange={(curve) => updatePrefs({ pressureCurve: curve })}
     />
   );
 
@@ -345,7 +350,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             referenceUrl={referenceUrl}
             readOnly={!canEdit}
             aiPreview={aiPreview}
-            stabilizer={stabilizer}
+            stabilizer={prefs.stabilizer}
+            pressureCurve={prefs.pressureCurve}
           />
           {/* 狀態晶片：浮在畫布角落而不是佔一整列——這是給人「瞄一眼」的資訊，
               不該跟工具搶版面（先前那行「0／400 筆・9%・輕量版」看起來像除錯輸出） */}

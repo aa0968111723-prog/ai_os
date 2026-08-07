@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyPressureCurve,
   BRUSH_ENGINE_LABEL,
   BUILTIN_BRUSHES,
   DEFAULT_BRUSH_ID,
@@ -291,5 +292,26 @@ describe("tiltBoost（手寫板側鋒）", () => {
   it("45° 以上就算完全放倒（側鋒是輔助，曲線平緩）", () => {
     expect(tiltBoost(0.4, 45, 0)).toBeCloseTo(0.65, 5);
     expect(tiltBoost(0.4, 80, 0)).toBeCloseTo(0.65, 5);
+  });
+});
+
+describe("applyPressureCurve（筆壓曲線校正）", () => {
+  it("端點不動：0 還是 0、1 還是 1（校正只改中段反應）", () => {
+    for (const curve of ["soft", "normal", "firm"] as const) {
+      expect(applyPressureCurve(0, curve)).toBe(0);
+      expect(applyPressureCurve(1, curve)).toBe(1);
+    }
+  });
+
+  it("軟＝輕觸就出粗線（中段變高）、硬＝用力才變粗（中段變低）", () => {
+    const mid = 0.5;
+    expect(applyPressureCurve(mid, "soft")).toBeGreaterThan(mid);
+    expect(applyPressureCurve(mid, "normal")).toBe(mid);
+    expect(applyPressureCurve(mid, "firm")).toBeLessThan(mid);
+  });
+
+  it("超界輸入夾回 0-1，不會算出負線寬", () => {
+    expect(applyPressureCurve(-1, "soft")).toBe(0);
+    expect(applyPressureCurve(2, "firm")).toBe(1);
   });
 });

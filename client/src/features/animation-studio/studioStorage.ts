@@ -15,6 +15,7 @@ import {
   BUILTIN_BRUSHES,
   sanitizeBrush,
   type BrushSpec,
+  type PressureCurve,
 } from "./brushes";
 import { estimateBoardBytes, parseBoard, serializeBoard, type BoardDoc } from "./boardDoc";
 
@@ -73,9 +74,11 @@ export const STUDIO_PREFS_KEY = "aios.studio.prefs";
 export interface StudioPrefs {
   /** 線條穩定器強度 0-1（0＝關）。是「這台裝置＋這雙手」的習慣，不跟專案走 */
   stabilizer: number;
+  /** 筆壓曲線校正（軟／標準／硬）：跟著手與筆走，同樣屬於裝置偏好 */
+  pressureCurve: PressureCurve;
 }
 
-const DEFAULT_PREFS: StudioPrefs = { stabilizer: 0 };
+const DEFAULT_PREFS: StudioPrefs = { stabilizer: 0, pressureCurve: "normal" };
 
 export function readStudioPrefs(): StudioPrefs {
   const store = storage();
@@ -87,7 +90,10 @@ export function readStudioPrefs(): StudioPrefs {
     const stabilizer = typeof data.stabilizer === "number" && Number.isFinite(data.stabilizer)
       ? Math.min(1, Math.max(0, data.stabilizer))
       : DEFAULT_PREFS.stabilizer;
-    return { stabilizer };
+    const pressureCurve = data.pressureCurve === "soft" || data.pressureCurve === "firm" || data.pressureCurve === "normal"
+      ? data.pressureCurve
+      : DEFAULT_PREFS.pressureCurve;
+    return { stabilizer, pressureCurve };
   } catch {
     return { ...DEFAULT_PREFS };
   }

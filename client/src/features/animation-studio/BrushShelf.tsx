@@ -4,8 +4,10 @@ import { Button, Hint, Meta } from "../../components/ui";
 import {
   BRUSH_ENGINE_LABEL,
   BRUSH_LIMITS,
+  PRESSURE_CURVE_LABEL,
   type BrushEngine,
   type BrushSpec,
+  type PressureCurve,
 } from "./brushes";
 import { isTuned } from "./brushCollection";
 import type { StudioLayout } from "./studioLayout";
@@ -39,6 +41,9 @@ export interface BrushShelfProps {
   /** 線條穩定器 0-1（跨筆刷的工作習慣，存在裝置偏好，見 studioStorage） */
   stabilizer?: number;
   onStabilizerChange?: (value: number) => void;
+  /** 筆壓曲線校正（軟／標準／硬）——同屬裝置偏好 */
+  pressureCurve?: PressureCurve;
+  onPressureCurveChange?: (curve: PressureCurve) => void;
 }
 
 /**
@@ -60,6 +65,8 @@ export function BrushShelf({
   notice,
   stabilizer = 0,
   onStabilizerChange,
+  pressureCurve = "normal",
+  onPressureCurveChange,
 }: BrushShelfProps) {
   const [collectName, setCollectName] = useState("");
   const [collecting, setCollecting] = useState(false);
@@ -202,9 +209,26 @@ export function BrushShelf({
                 />
               </label>
             )}
+            {onPressureCurveChange && (
+              <div role="group" aria-label="筆壓曲線" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <Meta as="span">筆壓曲線</Meta>
+                {(Object.keys(PRESSURE_CURVE_LABEL) as PressureCurve[]).map((c) => (
+                  <Button
+                    key={c}
+                    size="sm"
+                    variant={pressureCurve === c ? "tonal" : "ghost"}
+                    aria-pressed={pressureCurve === c}
+                    onClick={() => onPressureCurveChange(c)}
+                  >
+                    {PRESSURE_CURVE_LABEL[c]}
+                  </Button>
+                ))}
+              </div>
+            )}
             <Hint>
-              支援手寫板：壓感與傾斜側鋒（筆桿放倒線變寬）只有觸控筆吃得到，筆尾橡皮擦翻筆就能擦；
-              滑鼠與手指改用「畫快一點就細一點」近似（飛白）。穩定器吸收手抖、線更順——代價是筆跡稍微落後筆尖。
+              支援手寫板：壓感、傾斜側鋒（筆桿放倒線變寬）、懸浮筆刷游標只有觸控筆吃得到；
+              筆尾或側鍵按著落筆就是橡皮擦。筆壓曲線「軟」＝輕觸就出粗線、「硬」＝用力才變粗。
+              穩定器吸收手抖、線更順——代價是筆跡稍微落後筆尖。滑鼠與手指用「畫快就細」近似（飛白）。
             </Hint>
           </details>
         )}

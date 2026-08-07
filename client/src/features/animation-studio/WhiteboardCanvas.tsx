@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  applyPressureCurve,
   BUILTIN_BRUSHES,
   normalizePressure,
   simplifyStroke,
@@ -7,6 +8,7 @@ import {
   stabilizeNext,
   tiltBoost,
   type BrushSpec,
+  type PressureCurve,
   type StrokePoint,
 } from "./brushes";
 import { nextStrokeId, type BoardDoc, type Stroke } from "./boardDoc";
@@ -38,6 +40,8 @@ export interface WhiteboardCanvasProps {
   aiPreview?: SketchPreview | null;
   /** 線條穩定器強度 0-1（0＝關）：抖動修正，見 brushes.stabilizeNext */
   stabilizer?: number;
+  /** 筆壓曲線校正（只影響觸控筆），見 brushes.applyPressureCurve */
+  pressureCurve?: PressureCurve;
 }
 
 /**
@@ -67,6 +71,7 @@ export function WhiteboardCanvas({
   readOnly,
   aiPreview,
   stabilizer = 0,
+  pressureCurve = "normal",
 }: WhiteboardCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
@@ -260,6 +265,41 @@ export function WhiteboardCanvas({
     clearLive();
   }, [clearLive]);
 
+  /** 觸控筆的完整壓力管線：正規化 → 使用者的筆壓曲線 → 傾斜側鋒 */
+  const penPressure = useCallback(
+    (raw: number | undefined, tiltX: number | undefined, tiltY: number | undefined) =>
+      tiltBoost(applyPressureCurve(normalizePressure(raw, true), pressureCurve), tiltX, tiltY),
+    [pressureCurve],
+  );
+
+  /** 觸控筆懸浮游標：落筆前就看得到筆刷會多粗、落在哪（Apple Pencil／Wacom 的懸浮） */
+  const hovering = useRef(false);
+  const paintHoverCursor = useCallback((clientX: number, clientY: number) => {
+    if (aiPreview) return; // live 層正在演 AI 的筆，游標讓路
+    const canvas = liveRef.current;
+    const ctx = canvas?.getContext("2d");
+    const host = hostRef.current;
+    if (!canvas || !ctx || !host) return;
+    const rect = host.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const r = Math.max(1.5, (brush.size * viewRef.current.scale) / 2);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = brush.engine === "eraser" ? "rgba(120, 120, 128, 0.65)" : withAlpha(brush.color, 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    hovering.current = true;
+  }, [aiPreview, brush, dpr]);
+
+  const clearHoverCursor = useCallback(() => {
+    if (!hovering.current) return;
+    hovering.current = false;
+    if (!drawing.current && !aiPreview) clearLive();
+  }, [aiPreview, clearLive]);
+
   const startGesture = useCallback(() => {
     const pts = [...pointers.current.values()];
     if (pts.length < 2) return;
@@ -296,13 +336,14 @@ export function WhiteboardCanvas({
     }
     const pt = toBoard(e.clientX, e.clientY);
     const isPen = e.pointerType === "pen";
-    // 手寫板筆尾橡皮擦（PointerEvent buttons 的 bit 32）：翻筆就擦，不必去筆刷櫃換
-    const eraserTail = isPen && (e.buttons & 32) !== 0;
+    // 手寫板的橡皮擦手勢：筆尾（bit 32）翻筆就擦；側鍵（bit 2，S-Pen／Wacom 按著落筆）也算——
+    // 兩者都不必去筆刷櫃換工具
+    const eraserTail = isPen && (e.buttons & (32 | 2)) !== 0;
     const strokeBrush = eraserTail
       ? (BUILTIN_BRUSHES.find((b) => b.engine === "eraser") ?? brush)
       : brush;
     const pressure = isPen
-      ? tiltBoost(normalizePressure(e.pressure, true), e.tiltX, e.tiltY)
+      ? penPressure(e.pressure, e.tiltX, e.tiltY)
       : normalizePressure(e.pressure, false);
     const point: StrokePoint = { ...pt, p: pressure };
     drawing.current = { pointerId: e.pointerId, points: [point], last: { x: pt.x, y: pt.y, t: e.timeStamp }, brush: strokeBrush };
@@ -313,6 +354,12 @@ export function WhiteboardCanvas({
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (penActive.current && e.pointerType === "touch") return;
+
+    // 觸控筆懸浮（還沒落筆）：畫筆刷游標，滑鼠／手指沒有懸浮這回事
+    if (e.pointerType === "pen" && !drawing.current && pointers.current.size === 0 && !panMode && !readOnly) {
+      paintHoverCursor(e.clientX, e.clientY);
+      return;
+    }
 
     // 兩指：縮放＋平移
     if (pointers.current.size >= 2 && gesture.current) {
@@ -357,9 +404,9 @@ export function WhiteboardCanvas({
     for (const sample of raw.length ? raw : [e.nativeEvent]) {
       const pt = toBoard(sample.clientX, sample.clientY);
       const isPen = e.pointerType === "pen";
-      // 手寫板：傾斜折進筆壓（側鋒變寬，見 brushes.tiltBoost）
+      // 手寫板的壓力管線：筆壓曲線校正＋傾斜側鋒（見 penPressure）
       const pressure = isPen
-        ? tiltBoost(normalizePressure(sample.pressure, true), sample.tiltX, sample.tiltY)
+        ? penPressure(sample.pressure, sample.tiltX, sample.tiltY)
         : normalizePressure(sample.pressure, false);
       // 速度用來讓毛筆飛白；時間戳缺漏時 speedBetween 會回 0（不會變成無限大）
       const speed = speedBetween(active.last, { x: pt.x, y: pt.y, t: sample.timeStamp });
@@ -369,8 +416,25 @@ export function WhiteboardCanvas({
       // 線條穩定器：新點只朝目標走一部分，抖動被吸收（strength=0 時原樣通過）
       active.points.push(stabilizeNext(active.points[active.points.length - 1] ?? null, { x: pt.x, y: pt.y, p }, stabilizer));
     }
-    if (active.brush.engine === "eraser") eraseOnBase(active.points, active.brush);
-    else paintLive(active.points, active.brush);
+    if (active.brush.engine === "eraser") {
+      // 橡皮擦不吃預測點：擦掉的像素收不回來，預測錯了就是真的擦錯
+      eraseOnBase(active.points, active.brush);
+      return;
+    }
+    // 預測筆跡（瀏覽器的手寫延遲補償）：只畫在 live 層墊在筆尖前面，
+    // 絕不進文件——預測錯的尾巴會在下一個 move 被真實筆跡蓋掉
+    let preview = active.points;
+    if (typeof e.nativeEvent.getPredictedEvents === "function") {
+      const predicted = e.nativeEvent.getPredictedEvents();
+      if (predicted.length > 0) {
+        const lastP = active.points[active.points.length - 1]!.p;
+        preview = active.points.concat(predicted.map((s) => {
+          const pt = toBoard(s.clientX, s.clientY);
+          return { x: pt.x, y: pt.y, p: lastP };
+        }));
+      }
+    }
+    paintLive(preview, active.brush);
   };
 
   const finishStroke = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -434,7 +498,10 @@ export function WhiteboardCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={finishStroke}
       onPointerCancel={finishStroke}
-      onPointerLeave={(e) => { if (drawing.current?.pointerId === e.pointerId) finishStroke(e); }}
+      onPointerLeave={(e) => {
+        if (drawing.current?.pointerId === e.pointerId) finishStroke(e);
+        else clearHoverCursor(); // 筆離開白板：懸浮游標不能留在原地
+      }}
       onWheel={onWheel}
     >
       {/* 紙面：白板的邊界要看得見，否則畫出去的部分不會被匯出這件事沒人知道 */}

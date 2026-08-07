@@ -315,6 +315,25 @@ export function stabilizeNext(prev: StrokePoint | null, raw: StrokePoint, streng
 }
 
 /**
+ * 筆壓曲線校正（專業手寫筆的基本功）：每個人的手勁與每支筆的感壓都不同，
+ * 「軟」讓輕觸就出粗線（手勁小、或筆偏硬），「硬」要用力壓才變粗（手勁大、線常糊掉）。
+ * 用 gamma 曲線：端點不動（0 還是 0、1 還是 1），只改中段的反應。
+ */
+export type PressureCurve = "soft" | "normal" | "firm";
+
+export const PRESSURE_CURVE_LABEL: Record<PressureCurve, string> = {
+  soft: "軟",
+  normal: "標準",
+  firm: "硬",
+};
+
+export function applyPressureCurve(pressure: number, curve: PressureCurve): number {
+  const p = Math.min(1, Math.max(0, pressure));
+  if (curve === "normal") return p;
+  return Math.pow(p, curve === "soft" ? 0.6 : 1.6);
+}
+
+/**
  * 手寫板傾斜 → 側鋒加壓。筆桿放倒（tilt 大）等於用筆腹畫——線要變寬。
  * 折進筆壓而不是另存欄位：StrokePoint 的格式（x,y,p）是儲存契約，
  * 為傾斜加欄位會讓所有舊草稿變舊版格式，而「側鋒＝加壓」的近似在草圖尺度看不出差別。
