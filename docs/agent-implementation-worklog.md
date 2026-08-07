@@ -73,6 +73,12 @@ ASK（全站問答）／ACT（確認卡寫入）／scope 自動聚焦專案，�
 - 主幹 story-first（PR #546/#547）被另一 session merge 進本分支：0049_ai_site_trace → 0050 重編號（對方已做）；合併後 migrate/測試/e2e/瀏覽器全綠。
 - 教訓：**遠端分支會被並行 session 推進**（push 被拒＝先 fetch 看對方做了什麼再 pull merge，絕不 force）。
 
+## CI 紅燈修復（2026-08-08，cd0856b→8a33eef）
+
+- cd0856b 兩紅：①`test` job 覆蓋率切片（vitest.client.config.ts 的 include 名單）被第二輪新增的 requestSiteAssistantStream 拉破 85%——**assistantStream.ts 在切片名單內，改它必須帶測試**；②`lint-gates` 的 audit:high 因 nanoid advisory 當日新發布（**主幹同 commit 時段也紅**＝生態噪音，非本分支引入）。
+- 修法：assistantStream.site.test.ts（8 測）＋AICreativeCopilot 行為測試（10 測）＋`npm audit fix`（nanoid，僅 lockfile）。本地 coverage 門檻錯誤 0。
+- 注意：本地 Windows 有 story-first 檔 9 個紅測＋MobileNavigation 在全套平行下偶紅（單跑綠）——**CI 上 client 測試 0 失敗**，D-008 模式。
+
 ## NEXT STEP
 
 （無——見 GLOBAL_AGENT_FINAL_REPORT REMAINING WORK 的後續提案。）
