@@ -216,6 +216,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       exportBoard={exportBoard}
       // 存進素材庫之後這份手稿不再是「未存的草稿」；本機那份留著可繼續改
       onBoardSaved={markSaved}
+      // AI 畫草圖：筆一筆重播進白板（走同一個 pushStroke，上限與尺寸都跟手繪同一套）
+      sketch={{ pushStroke, boardW: boardSize.w, boardH: boardSize.h, maxStrokes: layout.maxStrokes, strokeCount: board.doc.strokes.length }}
     />
   );
 
