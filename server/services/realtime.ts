@@ -478,6 +478,13 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   ws.on("close", () => {
     theRoom.delete(client);
     totalConnections -= 1;
+    // 尚未補送的 invalidate：連線都沒了，那則刷新沒有意義。
+    // 定時器內雖已擋 readyState !== OPEN，但那是最後一道防線——留著它會讓已斷線的 Client
+    // 物件被 timer 多活 400ms，而斷線風暴時這種殘留會一路累積。
+    if (client.pendingInvalidate) {
+      clearTimeout(client.pendingInvalidate.timer);
+      client.pendingInvalidate = null;
+    }
     // 遞減該 user 連線數；歸零即清掉其廣播節流狀態，避免 userThrottle 無限膨脹
     const remaining = (userConnCount.get(client.userId) ?? 1) - 1;
     if (remaining <= 0) {
