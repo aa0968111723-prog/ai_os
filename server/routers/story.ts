@@ -414,6 +414,68 @@ export const storyRouter = router({
     });
   }),
 
+  /**
+   * 雙向影響（PE 計畫 §23）：改一張卡之前，先知道它牽動哪些鏡、哪些畫面會過時。
+   *
+   * 為什麼要有這支：紅傘改成黃傘，引用它的 8 個鏡與已經生成的 3 張畫面會**靜默**變成
+   * 「描述與成品不一致」——使用者不會發現，直到成片才看出傘是紅的。這支把後果先講出來，
+   * 讓「只改這一鏡／改整個專案」是使用者的決定，不是系統替他默默選了。
+   *
+   * 唯讀（不改任何資料、不自動重生成）——重生成永遠是使用者按的。
+   */
+  entityImpact: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        kind: z.enum(["character", "location", "prop", "look"]),
+        entityId: z.string().uuid(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, false);
+      const column =
+        input.kind === "character"
+          ? schema.scenes.characterIds
+          : input.kind === "location"
+            ? schema.scenes.scenePresetIds
+            : input.kind === "prop"
+              ? schema.scenes.propIds
+              : schema.scenes.lookIds;
+
+      // 引用這張卡的鏡（未軟刪）。轉分鏡時場的地點卡已寫進鏡的 scenePresetIds，
+      // 所以這一個 jsonb 包含查詢就涵蓋「繼承自場」的情況，不必再 join story_scenes。
+      const shots = await db
+        .select({ id: schema.scenes.id, title: schema.scenes.title, assetId: schema.scenes.assetId })
+        .from(schema.scenes)
+        .where(
+          and(
+            eq(schema.scenes.projectId, project.id),
+            isNull(schema.scenes.deletedAt),
+            sql`${column} @> ${JSON.stringify([input.entityId])}::jsonb`,
+          ),
+        )
+        .orderBy(asc(schema.scenes.orderIndex))
+        .limit(200);
+
+      const shotIds = shots.map((s) => s.id);
+      const [doneGen] = shotIds.length
+        ? await db
+            .select({ n: sql<number>`count(*)` })
+            .from(schema.generations)
+            .where(and(inArray(schema.generations.sceneId, shotIds), eq(schema.generations.status, "done")))
+        : [{ n: 0 }];
+
+      return {
+        shots: shots.length,
+        /** 已經有落地畫面的鏡：這些是「改了卡但畫面還是舊的」看得見的部分 */
+        shotsWithVisual: shots.filter((s) => s.assetId).length,
+        /** 這些鏡累計完成過的生成數（含舊版本；重生成前的可追溯基準） */
+        generations: Number(doneGen?.n ?? 0),
+        /** 前幾鏡的標題，讓提示句具體（「影響：SHOT 02、SHOT 05…」） */
+        sampleTitles: shots.slice(0, 5).map((s) => s.title),
+      };
+    }),
+
   /* ── 場（story_scenes）管理：分鏡中心的場標頭 ───────────── */
 
   scenesList: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
