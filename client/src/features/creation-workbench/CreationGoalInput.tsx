@@ -132,12 +132,11 @@ export function CreationGoalInput({
           disabled={disabled}
         />
       )}
-      {/* 說明介面行為：切模式不會清空 */}
-      <Hint className="creation-goal-persist-hint" style={{ margin: "4px 0 0" }}>
-        {onSkillIdsChange
-          ? "目標與已請的劇組會跟著你切換能力，不會清空。"
-          : "目標會跨模式保留。"}
-      </Hint>
+      {/*
+        這裡原本有一行「目標會跨模式保留」。拿掉的理由：它解釋的是**不會發生的壞事**
+        （切分頁不會清空你打的字），而不會發生的壞事不該先佔一行畫面——使用者切一次
+        就知道了。真正該說的「按下去會發生什麼」在按鈕旁的 submitHint，那句留著。
+      */}
     </div>
   );
 }
