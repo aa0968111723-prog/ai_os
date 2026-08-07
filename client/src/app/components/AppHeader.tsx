@@ -6,6 +6,7 @@ import { Icon } from "../../components/Icon";
 import { AccountMenu } from "./AccountMenu";
 import { OnlinePresenceMenu } from "./OnlinePresenceMenu";
 import { PendingApprovalsBadge } from "./PendingApprovalsBadge";
+import { NotifyBell } from "./NotifyBell";
 import { PrimaryNavigation } from "./PrimaryNavigation";
 import { Badge } from "../../components/ui";
 
@@ -139,6 +140,8 @@ export function AppHeader({
       {/* 誰在線：常駐頂欄，不必進私訊；與私訊入口分開，避免「要聊天才看得到人在不在」 */}
       {signedIn && <OnlinePresenceMenu />}
       {signedIn && <PrimaryNavigation />}
+      {/* 收件匣在待核徽章之前：待核只給組長看，收件匣是每個人都會用的入口 */}
+      {signedIn && <NotifyBell />}
       {signedIn && <PendingApprovalsBadge groupId={activeGroupId} />}
       {signedIn && <PointsBadge groupId={activeGroupId} />}
       {/* 頂欄收斂：次要入口（模型指南/接上外部 AI/資料下載/管理組/改密碼）＋登出全收進使用者選單 */}

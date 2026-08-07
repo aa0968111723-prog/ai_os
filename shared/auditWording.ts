@@ -234,6 +234,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "adobe.renderTimeline": "在 Adobe 帳號內算圖剪輯",
   "adobe.exportTimelineFormats": "匯出 Adobe 時間軸（FCP／Premiere／EDL）",
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
+  "messages.postAnnotation": "在畫面上標注要改的地方",
+  "messages.resolveAnnotation": "標記標注已改好",
+  "notifications.markRead": "標記通知已讀",
+  "notifications.markAllRead": "全部通知標為已讀",
   "push.subscribe": "連結通知裝置",
   "push.sync": "同步通知裝置",
   "push.unsubscribe": "解除通知裝置",
@@ -325,7 +329,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "community", "attachments"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },

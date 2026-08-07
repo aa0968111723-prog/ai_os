@@ -10,7 +10,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { validateMentions } from "./mentions";
 import { getNoteChecked } from "./notesCore";
-import { pushToUsers } from "./webPush";
+import { notify } from "./notify";
 import { dmSnippet } from "./dmCore";
 
 export const NOTE_COMMENT_BODY_MAX = 2000;
@@ -139,17 +139,19 @@ export async function addNoteCommentCore(input: {
 
   const mentionTargets = (mentions ?? []).filter((id) => id !== input.auth.user.id);
   if (mentionTargets.length) {
-    void pushToUsers(mentionTargets, {
+    void notify({
+      userIds: mentionTargets,
+      groupId: note.groupId,
+      kind: "mention",
+      actorId: input.auth.user.id,
+      refType: "note",
+      refId: note.id,
+      messageId: row.id,
       title: `${input.auth.user.name} 在筆記「${note.title}」提及你`,
       body: dmSnippet(body),
       url: `/planner?focus=note-${note.id}&cid=${row.id}`,
-      tag: `note-comment-mention-${row.id}`,
-    }).catch((err) =>
-      console.warn(
-        "[noteComments] @提及推播失敗：",
-        err instanceof Error ? err.message : err,
-      ),
-    );
+      eventKey: `mention:note-comment:${row.id}`,
+    });
   }
 
   return row;
