@@ -7270,3 +7270,28 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 /* 桌機：球不存在（.mobile-nav 在 >820 隱藏），但 MenuSurface 的 stretch 幾何仍需要
    一個合理下限，免得對話框窄到每行兩個字 */
 .global-assistant { min-width: min(420px, calc(100vw - 32px)); }
+
+/* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
+.agent-hud {
+  position: fixed; left: 0; right: 0; z-index: 43;
+  /* 疊在分頁列之上、之下：分頁列 z44 蓋住它才對——HUD 是資訊列，不該遮住主導覽。
+     bottom 吃 --chrome-bottom（分頁列高度的單一契約）＋鍵盤 inset。 */
+  bottom: calc(var(--chrome-bottom, 48px) + var(--kb-inset, 0px));
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin: 0 8px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-12);
+  background: var(--card); box-shadow: var(--e3);
+}
+.agent-hud__body {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  text-align: start; background: transparent; border: 0; padding: 0;
+}
+/* 步驟說明可能很長：單行截斷，完整內容在專案頁的代理卡 */
+.agent-hud__note {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-13);
+}
+@media (min-width: 821px) {
+  /* 桌機沒有底部分頁列：貼右下角，不橫跨整個視窗 */
+  .agent-hud { left: auto; right: 16px; bottom: 16px; max-width: 420px; margin: 0; }
+}
