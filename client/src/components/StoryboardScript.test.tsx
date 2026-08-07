@@ -10,6 +10,8 @@ import { StoryboardScript } from "./StoryboardScript";
 const applyMutate = vi.fn();
 const splitMutate = vi.fn();
 let applyState: { isPending: boolean; error: { message: string } | null } = { isPending: false, error: null };
+/** 寫回成功時伺服器回什麼（warnings＝看得懂但沒照做的行） */
+let applyResult: { warnings: string[] } = { warnings: [] };
 /** 拆分鏡成功時伺服器回什麼（truncation 非 null＝尾段沒拆進來） */
 let splitResult: { truncation: { sentChars: number; totalChars: number } | null } = { truncation: null };
 
@@ -39,12 +41,22 @@ vi.mock("../api", async () => {
       },
       scenes: {
         applyScript: {
-          useMutation: () => ({
-            mutate: applyMutate,
-            isPending: applyState.isPending,
-            error: applyState.error,
-            reset: vi.fn(),
-          }),
+          // 同樣用真的 useState 存 data：伺服器才知道的 warnings（卡片名字對不上時整行不套用）
+          // 是在寫回成功「之後」才渲染的，沒有真實重新渲染就測不到它看不看得見
+          useMutation: (opts?: { onSuccess?: () => void }) => {
+            const [data, setData] = useState<typeof applyResult | undefined>(undefined);
+            return {
+              mutate: (vars: unknown) => {
+                applyMutate(vars);
+                setData(applyResult);
+                opts?.onSuccess?.();
+              },
+              isPending: applyState.isPending,
+              error: applyState.error,
+              data,
+              reset: () => setData(undefined),
+            };
+          },
         },
       },
     },
@@ -52,7 +64,7 @@ vi.mock("../api", async () => {
 });
 
 const ROWS = [
-  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", cardNames: ["安倢的紅傘"] },
+  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", propNames: ["安倢的紅傘"] },
   { title: "收尾", durationSec: 3, prompt: "關門", voiceover: null },
 ];
 
@@ -62,16 +74,17 @@ describe("StoryboardScript", () => {
     splitMutate.mockReset();
     applyState = { isPending: false, error: null };
     splitResult = { truncation: null };
+    applyResult = { warnings: [] };
   });
 
-  it("展開後可讀到整份腳本（含唯讀的設定卡標注）", async () => {
+  it("展開後可讀到整份腳本（含可寫回的卡片行）", async () => {
     const user = userEvent.setup();
     render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: /文字腳本/ }));
     const pre = screen.getByText(/## 1\. 開場・晨光 \(5s\)/);
     expect(pre).toBeVisible();
-    expect(pre.textContent).toContain("設定卡：安倢的紅傘（唯讀）");
+    expect(pre.textContent).toContain("素材卡：安倢的紅傘");
   });
 
   it("編輯時先預告會動到什麼——少寫的鏡標明保留不動", async () => {
@@ -100,6 +113,24 @@ describe("StoryboardScript", () => {
     const arg = applyMutate.mock.calls[0][0];
     expect(arg.projectId).toBe("p1");
     expect(arg.text).toContain("## 1. 開場・晨光 (5s)");
+  });
+
+  /**
+   * 卡片名字對不上時伺服器整行不套用，而寫回一成功編輯框就收掉了。
+   * 不把這一則講出來，使用者看到的只有「寫回成功」，他寫的角色卻一個都沒進去。
+   */
+  it("寫回成功後仍顯示伺服器回報的「沒照做」的行", async () => {
+    applyResult = { warnings: ["第 1 鏡的「角色卡」裡找不到「小明」，整行不套用（其餘名字也沒動）"] };
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    await user.click(screen.getByRole("button", { name: "寫回分鏡" }));
+
+    // 編輯框已經收掉（onSuccess 清 draft），提示仍在
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/找不到「小明」/));
+    expect(screen.queryByRole("textbox", { name: "分鏡腳本全文" })).toBeNull();
   });
 
   it("格式錯（整段沒有 ##）會擋下寫回並說明原因", async () => {
