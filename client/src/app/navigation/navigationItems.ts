@@ -15,6 +15,141 @@ import {
 
 export type NavSection = "topbar" | "help" | "work" | "manage" | "account";
 
+/**
+ * 全站「去處」單一真相表。
+ *
+ * 為什麼要有這張表——同一個頁面在三個選單裡出現過，而且被叫過三個不同名字：
+ * `/help` 是頂欄「說明」、使用者選單「怎麼用」、手機更多面板「使用說明」；
+ * `/integrations` 是「連接的資料來源」又是「外部資料」；`/downloads` 是
+ * 「共用文件下載」又是「共用下載」。使用者回報「選單好像真的有點亂」，
+ * 亂的來源就是這個：同一個地方三個名字，看起來像三個不同功能。
+ *
+ * 現在名稱、說明與圖示一律以本表為準，各選單只決定「露出哪幾個 key」，
+ * 不再自己寫字。改名只改這裡一處，三個選單同時跟上。
+ */
+export type DestinationKey =
+  | "dashboard"
+  | "planner"
+  | "databases"
+  | "studio"
+  | "community"
+  | "chat"
+  | "help"
+  | "models"
+  | "mcp"
+  | "integrations"
+  | "downloads";
+
+export type Destination = {
+  key: DestinationKey;
+  /** 全站唯一的顯示名稱——與該頁自己的標題一致 */
+  label: string;
+  /** 一句話說明「進去可以做什麼」：手機面板的第二行、頂欄的 title */
+  description: string;
+  href: string;
+  icon: IconName;
+  /** 判斷「目前就在這裡」的路徑前綴；預設就是 href 本身 */
+  match?: string[];
+};
+
+export const DESTINATIONS: Record<DestinationKey, Destination> = {
+  dashboard: {
+    key: "dashboard",
+    label: "今日",
+    description: "待處理、AI 進度與最近專案",
+    href: "/dashboard",
+    icon: "CheckCircle2",
+  },
+  planner: {
+    key: "planner",
+    label: "筆記排程",
+    description: "把筆記排進待辦與行程",
+    href: "/planner",
+    icon: "Clock",
+  },
+  databases: {
+    key: "databases",
+    label: "資料庫",
+    description: "清單、文件與批次匯入",
+    href: "/databases",
+    icon: "Database",
+  },
+  studio: {
+    key: "studio",
+    label: "動畫創作室",
+    description: "手繪白板與順序分鏡表",
+    href: "/studio",
+    icon: "Brush",
+  },
+  community: {
+    key: "community",
+    label: "靈感頻道",
+    description: "全站共用提示詞與素材",
+    href: "/community",
+    icon: "Sparkles",
+  },
+  chat: {
+    key: "chat",
+    label: "私訊",
+    description: "與夥伴和 AI 協作",
+    href: "/chat",
+    icon: "MessageCircle",
+  },
+  help: {
+    key: "help",
+    label: "怎麼用",
+    description: "白話說明與常見問題",
+    href: "/help",
+    icon: "HelpCircle",
+  },
+  models: {
+    key: "models",
+    label: "模型指南",
+    description: "每個模型擅長什麼、要花多少點",
+    href: "/models",
+    icon: "Info",
+  },
+  mcp: {
+    key: "mcp",
+    label: "接上外部 AI",
+    description: "金鑰、客戶端設定與連線測試",
+    href: "/mcp",
+    icon: "Bot",
+  },
+  integrations: {
+    key: "integrations",
+    label: "連接的資料來源",
+    description: "Google、Notion 與外部 API",
+    href: "/integrations",
+    icon: "Waypoints",
+  },
+  downloads: {
+    key: "downloads",
+    label: "共用下載",
+    description: "團隊共用文件與電腦版程式",
+    href: "/downloads",
+    icon: "Download",
+  },
+};
+
+/** 該去處判斷 active 用的路徑前綴 */
+export function destinationMatch(d: Pick<Destination, "href" | "match">): string[] {
+  return d.match ?? [d.href];
+}
+
+/** 由去處表產生選單項目——名稱／圖示／說明都不在呼叫端重寫 */
+function fromDestination(key: DestinationKey, section: NavSection): NavigationItem {
+  const d = DESTINATIONS[key];
+  return {
+    key: d.key,
+    label: d.label,
+    href: d.href,
+    section,
+    icon: d.icon,
+    title: `${d.label}——${d.description}`,
+  };
+}
+
 export type NavigationItem = {
   key: string;
   label: string;
@@ -42,67 +177,38 @@ export type NavigationItem = {
 
 /** High-frequency topbar quick links (excluding special badge components like DM/pending/points). */
 export const topbarNavItems: NavigationItem[] = [
-  {
-    key: "dashboard",
-    label: "今日",
-    href: "/dashboard",
-    section: "topbar",
-    icon: "CheckCircle2",
-    title: "今日工作台——待處理、AI 進度與最近專案",
-  },
-  {
-    key: "planner",
-    label: "筆記排程",
-    href: "/planner",
-    section: "topbar",
-    icon: "Clock",
-    title: "筆記排程——把筆記排進待辦與行程",
-  },
-  {
-    key: "databases",
-    label: "資料庫",
-    href: "/databases",
-    section: "topbar",
-    icon: "Package",
-    title: "資料庫——你的素材與資料集",
-  },
-  {
-    key: "studio",
-    label: "創作室",
-    href: "/studio",
-    section: "topbar",
-    icon: "Brush",
-    title: "動畫創作室——手繪大白板與順序分鏡表",
-  },
-  {
-    key: "community",
-    label: "靈感",
-    href: "/community",
-    section: "topbar",
-    icon: "Sparkles",
-    title: "靈感頻道——全站共用提示詞與多模態素材（Flow TV 風格）",
-  },
-  {
-    key: "help",
-    label: "說明",
-    href: "/help",
-    section: "topbar",
-    icon: "HelpCircle",
-    title: "怎麼用——白話說明與常見問題",
-  },
+  fromDestination("dashboard", "topbar"),
+  fromDestination("planner", "topbar"),
+  fromDestination("databases", "topbar"),
+  fromDestination("studio", "topbar"),
+  fromDestination("community", "topbar"),
+  fromDestination("help", "topbar"),
+];
+
+/**
+ * 手機「更多」面板的分組。
+ *
+ * 手機上這裡就是全站頁面的入口總表——底部分頁列（今日／專案／AI 工作／筆記排程）
+ * 放不下的都收在這裡，因此使用者選單在手機上不再重複列一次（見 AccountMenu）。
+ */
+export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
+
+export const mobileMoreGroups: MobileMoreGroup[] = [
+  { label: "工作", keys: ["studio", "community", "databases", "chat"] },
+  { label: "說明", keys: ["help", "models"] },
+  { label: "連接與下載", keys: ["mcp", "integrations", "downloads"] },
 ];
 
 /** Account menu items, grouped by section. Order within each section is render order. */
 export const accountMenuItems: NavigationItem[] = [
-  // 說明
-  { key: "help", label: "怎麼用", href: "/help", section: "help", icon: "HelpCircle" },
-  { key: "models", label: "模型指南", href: "/models", section: "help", icon: "Info" },
-  // 工作
-  { key: "studio", label: "動畫創作室", href: "/studio", section: "work", icon: "Brush" },
-  { key: "community", label: "靈感頻道", href: "/community", section: "work", icon: "Sparkles" },
-  { key: "mcp", label: "接上外部 AI", href: "/mcp", section: "work", icon: "Sparkles" },
-  { key: "integrations", label: "連接的資料來源", href: "/integrations", section: "work", icon: "Package" },
-  { key: "downloads", label: "共用文件下載", href: "/downloads", section: "work", icon: "FileText" },
+  // 說明／工作＝去處，名稱一律取自 DESTINATIONS（手機由「更多」面板承接，見 AccountMenu）
+  fromDestination("help", "help"),
+  fromDestination("models", "help"),
+  fromDestination("studio", "work"),
+  fromDestination("community", "work"),
+  fromDestination("mcp", "work"),
+  fromDestination("integrations", "work"),
+  fromDestination("downloads", "work"),
   // 管理（capability 對齊 PolicyEngine；UI-only 字串保留 require 回退）
   // 註：「選項」不再放進選單——選項改成「在需要的地方就地新增」（建立專案表單、世界觀 chips）。
   // /options 仍是可用路由（改名／停用／排序的整理頁），由那些就地新增處的連結進入。

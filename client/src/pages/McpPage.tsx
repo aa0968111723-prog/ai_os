@@ -14,6 +14,33 @@ import { Card, Hint, Meta, Pill, Skeleton } from "../components/ui";
  * 你的組、你的專案權限、你的點數額度、你的核准門檻都照算；唯讀金鑰再進一步只准讀取。
  */
 
+/** 三步驟上手的一步：號碼圈＋粗體標題＋白話說明 */
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <span
+        aria-hidden
+        style={{ flex: "none", width: 26, height: 26, borderRadius: "50%", background: "var(--primary-solid)", color: "var(--primary-fg)", display: "grid", placeItems: "center", fontSize: "var(--fs-13)", fontWeight: 700, marginTop: 2 }}
+      >
+        {n}
+      </span>
+      <span style={{ fontSize: "var(--fs-14)", lineHeight: 1.8, minWidth: 0 }}>
+        <b>{title}</b>：{children}
+      </span>
+    </li>
+  );
+}
+
+/** 各客戶端接法：收合卡（同說明頁 Faq 樣式），手機上不佔版面、要看再點開 */
+function ClientGuide({ name, defaultOpen = false, children }: { name: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  return (
+    <Card as="details" open={defaultOpen} variant="quiet" style={{ padding: 0, overflow: "hidden" }}>
+      <summary style={{ minHeight: 44, padding: "12px 16px", cursor: "pointer", fontWeight: 600, fontSize: "var(--fs-14)", userSelect: "none" }}>{name}</summary>
+      <div style={{ padding: "10px 16px 14px", borderTop: "1px solid var(--border)", lineHeight: 1.8, fontSize: "var(--fs-14)" }}>{children}</div>
+    </Card>
+  );
+}
+
 /** 複製鈕：成功顯示「已複製」約 2 秒；剪貼簿不可用時退回 prompt 手動複製 */
 function CopyButton({ text, label = "複製" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -37,6 +64,15 @@ function CopyButton({ text, label = "複製" }: { text: string; label?: string }
     </button>
   );
 }
+
+/** 接上後的照抄範例：白話需求＋對應會動到的工具（維持與 MCP_TOOLS 目錄一致） */
+const EXAMPLE_PROMPTS: { say: string; note: string }[] = [
+  { say: "幫我看看我專案現在的狀態，整理成三行重點。", note: "查全貌（get_project_status）——分鏡、生成、排程一次看" },
+  { say: "幫我找適合做中文對嘴影片的模型，列出價錢，先不要送出生成。", note: "只查不扣點（find_model）——唯讀金鑰也能用" },
+  { say: "用最省的模型幫第 2 場分鏡生一張場景圖，完成後把成品給我。", note: "會扣點（submit_generation）——照你的額度與核准門檻" },
+  { say: "幫我規劃這支影片接下來的製作步驟，列出計畫等我核准再執行。", note: "交給內建助手多步執行（plan_agent → 你核准後才動工）" },
+  { say: "把「下週五交片」加進專案排程。", note: "掛上專案與組行事曆（add_schedule_item）" },
+];
 
 function fmtDate(d: Date | string | null | undefined): string {
   if (!d) return "";
@@ -101,6 +137,7 @@ export function McpPage() {
     { mcpServers: { "ai-director": { type: "http", url: endpoint, headers: { "x-api-key": fresh?.token ?? "你的金鑰" } } } },
     null, 2,
   );
+  const claudeCodeCmd = `claude mcp add --transport http ai-director ${endpoint} --header "x-api-key: ${fresh?.token ?? "你的金鑰"}"`;
 
   // 測試連線（QA-012）：走完整 MCP 握手 initialize → notifications/initialized → tools/list，
   // 再 tools/call whoami 驗身分——只打單一 tools/call 驗不到「客戶端實際連線時會走」的握手路徑。
@@ -165,6 +202,22 @@ export function McpPage() {
             把權限縮到最小；任何一把都能隨時撤銷。
           </div>
         </div>
+      </Card>
+
+      {/* 三步驟上手：多數人卡在「金鑰拿到了，然後呢？」——先給全景，細節在下面各區 */}
+      <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Compass" size={18} />怎麼開始？三步驟</h2>
+      <Card>
+        <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 12 }}>
+          <Step n={1} title="建立一把金鑰">
+            在下方「<b>建立金鑰</b>」取個名字（例如「我的筆電 Claude」）按建立。金鑰原文<b>只顯示一次</b>，先按「複製金鑰」收好。
+          </Step>
+          <Step n={2} title="貼進你的 AI 客戶端">
+            照下方「<a href="#mcp-clients">貼進你的 AI 客戶端</a>」的步驟，把設定貼進 Claude 桌面版或 Claude Code。這一步要在<b>電腦</b>上做——手機的 Claude App 目前沒有地方貼這個設定。
+          </Step>
+          <Step n={3} title="開口叫它做事">
+            回到 Claude 的對話直接說需求，例如「幫我看看我專案現在的狀態」。更多可照抄的說法在下方「<a href="#mcp-examples">接上後可以這樣說</a>」。
+          </Step>
+        </ol>
       </Card>
 
       {/* 連線資訊 */}
@@ -234,13 +287,9 @@ export function McpPage() {
               <CopyButton text={fresh.token} label="複製金鑰" />
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: "var(--fs-13)", fontWeight: 600 }}>貼進 Claude 桌面版（或相容客戶端）的 MCP 設定：</span>
-                <CopyButton text={clientConfig} label="複製設定" />
-              </div>
-              <pre style={{ marginTop: 6, padding: 12, background: "var(--card2)", borderRadius: "var(--r-8)", overflowX: "auto", fontSize: "var(--fs-12)", lineHeight: 1.6 }}>{clientConfig}</pre>
-            </div>
+            <Hint layer="always" style={{ margin: "10px 0 0" }}>
+              下一步：到下方「<a href="#mcp-clients">貼進你的 AI 客戶端</a>」照步驟貼上設定——趁這一頁還開著，範例已自動帶入這把金鑰。
+            </Hint>
 
             <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <button type="button" onClick={testConnection} disabled={testing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -254,6 +303,59 @@ export function McpPage() {
             </div>
           </div>
         )}
+      </Card>
+
+      {/* 各客戶端接法：常駐顯示（先前只在剛建立金鑰時出現設定範例，關掉頁面就找不回教學了） */}
+      <h2 id="mcp-clients" style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Monitor" size={18} />貼進你的 AI 客戶端</h2>
+      <Hint layer="always" style={{ marginTop: 0 }}>
+        {fresh
+          ? "範例已自動帶入剛建立的金鑰，直接複製即可。"
+          : <>範例裡的「<code>你的金鑰</code>」請換成你建立時收好的那一串；忘了存就撤銷舊的再建一把。</>}
+      </Hint>
+      <div className="stack" style={{ gap: 8 }}>
+        <ClientGuide name="Claude 桌面版（最常見）" defaultOpen>
+          <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 4 }}>
+            <li>打開 Claude 桌面版 → 設定（Settings）→「開發者（Developer）」→「編輯設定（Edit Config）」，會開啟 <code>claude_desktop_config.json</code>。</li>
+            <li>把下面整段貼進去存檔（檔案裡已有其他 <code>mcpServers</code> 的話，把 <code>ai-director</code> 那段合併進去）。</li>
+            <li>完全關閉再重開 Claude。輸入框旁多出工具圖示，就代表接上了。</li>
+          </ol>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <span style={{ fontSize: "var(--fs-13)", fontWeight: 600 }}>MCP 設定：</span>
+            <CopyButton text={clientConfig} label="複製設定" />
+          </div>
+          <pre style={{ marginTop: 6, padding: 12, background: "var(--card2)", borderRadius: "var(--r-8)", overflowX: "auto", fontSize: "var(--fs-12)", lineHeight: 1.6 }}>{clientConfig}</pre>
+        </ClientGuide>
+        <ClientGuide name="Claude Code（終端機）">
+          在終端機貼這一行（把金鑰換成你的），之後在 Claude Code 對話裡直接叫它查專案即可：
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <code style={{ flex: "1 1 260px", wordBreak: "break-all", fontSize: "var(--fs-12)", padding: 10, background: "var(--card2)", borderRadius: "var(--r-8)" }}>{claudeCodeCmd}</code>
+            <CopyButton text={claudeCodeCmd} label="複製指令" />
+          </div>
+        </ClientGuide>
+        <ClientGuide name="其他支援 MCP 的工具（Cursor、Cline…）">
+          傳輸方式選「<b>HTTP</b>（Streamable HTTP）」，端點填上方「連線位置」的網址，再加一個 HTTP 標頭 <code>x-api-key: 你的金鑰</code>。各工具的設定介面不同，但要填的就這兩樣。
+        </ClientGuide>
+      </div>
+      <Hint layer="always" style={{ marginTop: 8 }}>
+        <Icon name="Smartphone" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+        手機的 Claude App 目前接不了這種帶金鑰的 MCP 伺服器——第 ② 步請在電腦上完成，接上後在電腦端對話使用。
+      </Hint>
+
+      {/* 範例句：接上之後「要說什麼」——工具名對新手沒意義，給可照抄的白話需求 */}
+      <h2 id="mcp-examples" style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="MessageSquare" size={18} />接上後可以這樣說</h2>
+      <Hint layer="always" style={{ marginTop: 0 }}>對 Claude 照抄或改編下面的話就能開始。不用背工具名——AI 會自己挑對的工具。</Hint>
+      <Card>
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {EXAMPLE_PROMPTS.map((p) => (
+            <li key={p.say} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--border)", alignItems: "baseline", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                <span style={{ fontSize: "var(--fs-14)" }}>「{p.say}」</span>
+                <Meta as="div" style={{ fontSize: 12, marginTop: 2 }}>{p.note}</Meta>
+              </div>
+              <CopyButton text={p.say} />
+            </li>
+          ))}
+        </ul>
       </Card>
 
       {/* 我的金鑰 */}

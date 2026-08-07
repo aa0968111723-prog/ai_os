@@ -93,6 +93,18 @@ describe("ProjectDatabasesCard", () => {
     expect(screen.getByRole("button", { name: /發布計畫/i })).toBeInTheDocument();
   });
 
+  it("collapses tables and external links into an advanced section closed by default", () => {
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    const adv = screen.getByTestId("project-data-advanced");
+    expect(adv).not.toHaveAttribute("open");
+    // 資料表範本與外部連結都收進進階區
+    expect(adv).toContainElement(screen.getByTestId("project-data-templates"));
+    expect(adv).toContainElement(screen.getByRole("link", { name: /Google／Notion／API/i }));
+    expect(adv).toContainElement(screen.getByRole("link", { name: /管理全部資料表/i }));
+    // 簡單路徑（貼文字）留在主畫面，不藏進進階
+    expect(adv).not.toContainElement(screen.getByRole("button", { name: /貼上文字/i }));
+  });
+
   it("shows ok status when knowledge exists", () => {
     knowledgeList.mockReturnValue({
       data: [{ id: "k1" }, { id: "k2" }],

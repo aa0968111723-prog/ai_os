@@ -93,6 +93,7 @@ E2E_MOCK=1 RUN_PG_INTEGRATION=1 npx vitest run \
   server/services/databaseBatchIdempotency.pg.test.ts \
   server/services/agentSplitRecovery.pg.test.ts \
   server/routers/splitScriptOutline.pg.test.ts \
+  server/routers/sceneAmbience.pg.test.ts \
   server/services/agentEffectCore.pg.test.ts \
   server/services/taskWake.pg.test.ts \
   server/services/agentEvents.pg.test.ts \

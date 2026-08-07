@@ -85,6 +85,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.purge": "永久刪除分鏡",
   "scenes.generateInto": "在分鏡格生成",
   "scenes.generateVoiceover": "生成分鏡配音",
+  "scenes.generateAmbience": "生成分鏡環境音",
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
   "director.splitScript": "AI 拆分鏡",

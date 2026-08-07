@@ -26,8 +26,13 @@ export const generations = pgTable("generations", {
   requestId: text("request_id"),
   /** 綁定的分鏡格（可為 null）：草稿分鏡「就地生成」時填入，完成後把成品回填該格 scenes.assetId */
   sceneId: uuid("scene_id"),
-  /** 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、"narration"＝旁白音檔（回填 scenes.narrationAssetId）；null＝視為 visual */
-  sceneRole: text("scene_role", { enum: ["visual", "narration"] }),
+  /**
+   * 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、
+   * "narration"＝旁白音檔（回填 scenes.narrationAssetId）、
+   * "ambience"＝環境音（回填 scenes.ambienceAssetId）；null＝視為 visual。
+   * enum 只是 TS 層註記（DB 欄位為 text），加值不需要 DB 型別 migration。
+   */
+  sceneRole: text("scene_role", { enum: ["visual", "narration", "ambience"] }),
   /** 送出時帶入的角色定裝卡 id（null＝沒帶）——重試/「再用此設定」要能還原錨點，注入不再是黑盒 */
   characterIds: jsonb("character_ids").$type<string[]>(),
   /** 送出時帶入的場景設定卡 id（null＝沒帶） */

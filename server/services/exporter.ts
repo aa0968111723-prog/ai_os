@@ -197,6 +197,8 @@ export type TimelineScene = {
   mediaKind?: "video" | "image" | "audio" | null;
   /** 該鏡旁白音檔的 zip 內相對路徑（02_旁白音檔/…）；null/未給＝無旁白 */
   narrationPath?: string | null;
+  /** 該鏡環境音的 zip 內相對路徑（06_環境音/…）；null/未給＝無環境音 */
+  ambiencePath?: string | null;
 };
 
 /** 這一鏡在時間軸上佔的秒數（與鏡頭表/字幕同規則：最少 3 秒） */
@@ -327,6 +329,12 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
       const sid = audioAsset(sc.mediaPath);
       connectedXml += `\n              <asset-clip ref="${sid}" lane="-2" offset="0s" duration="${dur}" name="${clipName}" audioRole="effects"/>`;
     }
+    // 環境音自己一軌（lane -3）：不與 lane -2 共用，否則「主素材就是音檔」的鏡會兩個 clip 疊在同一軌，
+    // 剪輯師匯進去看到的是互相蓋掉的兩段音訊，而不是可以各自調音量的兩軌。
+    if (sc.ambiencePath) {
+      const bid = audioAsset(sc.ambiencePath);
+      connectedXml += `\n              <asset-clip ref="${bid}" lane="-3" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_環境音`)}" audioRole="effects"/>`;
+    }
 
     const inner = `\n              <note>${escXml(note)}</note>${connectedXml}\n            `;
     if (sc.mediaPath && sc.mediaKind === "image") {
@@ -401,6 +409,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
   const videoItems: string[] = [];
   const audioItems: string[] = []; // A1：旁白
   const audioItems2: string[] = []; // A2：音訊類場景素材
+  const audioItems3: string[] = []; // A3：逐鏡環境音（與 A2 分軌，理由同 fcpxml 的 lane -3）
   let fileSeq = 0;
   let cumSec = 0;
   let startF = 0;
@@ -482,6 +491,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
 
     if (sc.narrationPath) audioItems.push(audioClip("clipitem-a", i, `${i + 1}_旁白`, sc.narrationPath, startF, endF));
     if (sc.mediaPath && sc.mediaKind === "audio") audioItems2.push(audioClip("clipitem-sa", i, label, sc.mediaPath, startF, endF));
+    if (sc.ambiencePath) audioItems3.push(audioClip("clipitem-amb", i, `${i + 1}_環境音`, sc.ambiencePath, startF, endF));
     startF = endF;
   }
   const totalF = startF;
@@ -510,6 +520,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     `        </track>`,
     // A2：音訊類場景素材（有才輸出第二條音軌）
     ...(audioItems2.length ? [[`        <track>`, audioItems2.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
+    ...(audioItems3.length ? [[`        <track>`, audioItems3.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     `      </audio>`,
     `    </media>`,
     `  </sequence>`,
@@ -719,8 +730,8 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     `- 格式：${project.format}（${project.platform}）`,
     formatWorldviewForAi(worldview, "export"),
     "",
-    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 進出點時間碼 | 提示詞 | 模型 |",
-    "|---|---|---|---|---|---|---|---|---|",
+    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 環境音 | 進出點時間碼 | 提示詞 | 模型 |",
+    "|---|---|---|---|---|---|---|---|---|---|",
   ];
 
   // 缺漏素材集中收集、待表格結束後再列——插在表格列中間會把 markdown 表格截斷
@@ -734,6 +745,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
   const writtenKinds: ("video" | "image" | "audio" | null)[] = new Array(scenes.length).fill(null);
   // 逐鏡旁白音檔的實際相對檔名（成功入包後回填），供鏡頭表標明該鏡有無旁白配音。
   const narrationNames: (string | null)[] = new Array(scenes.length).fill(null);
+  const ambienceNames: (string | null)[] = new Array(scenes.length).fill(null);
   let tcAcc = 0;
   const times = scenes.map((sc) => {
     const dur = sc.durationSec > 0 ? sc.durationSec : 3;
@@ -813,56 +825,90 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
 
   if (abortSignal.aborted) return;
 
-  // 02_旁白音檔：逐鏡旁白配音（scenes.narrationAssetId 指向的 asset）。與畫面素材各自獨立——
-  // 一幕即使沒有畫面素材，只要有旁白就照樣輸出，檔名鏡號與畫面素材同一套動態補零，方便對齊字幕與畫面。
-  // 取來源方式比照場景素材：已落地讀 Volume、否則抓外網，逐檔容錯（失敗只記警告、不毀整包）。
-  for (const [i, scene] of scenes.entries()) {
-    if (abortSignal.aborted) return;
-    if (!scene.narrationAssetId) continue;
-    const narr = assets.find((a) => a.id === scene.narrationAssetId);
-    if (!narr || !shouldPack(narr.id)) continue; // 多選打包：未勾選的旁白音檔不入包
-    let source: Readable;
-    try {
-      if (narr.storagePath) {
-        source = await openStoredReadStream(narr.storagePath);
-      } else if (narr.url && /^https?:\/\//.test(narr.url)) {
-        const fileRes = await fetchRemoteAsset(narr.url, abortSignal);
-        if (!fileRes.ok || !fileRes.body) {
-          void fileRes.body?.cancel().catch(() => {});
-          console.warn(`[export] 旁白下載失敗 ${narr.url}: HTTP ${fileRes.status}`);
-          warnings.push(`「${scene.title}」旁白音檔下載失敗（HTTP ${fileRes.status}），未入包`);
+  /**
+   * 逐鏡音軌入包（旁白／環境音共用）。
+   *
+   * 兩軌的取檔、容錯、命名規則字字相同，差別只有「讀哪個指標欄」與「放哪個資料夾」。
+   * 抽成一支而不是複製一份：下載容錯（HTTP 失敗／過大／讀取例外）有三條分支，
+   * 複製之後兩邊遲早分岔，而分岔的那一邊會安靜地少打包一個檔。
+   *
+   * 回傳 "aborted" 讓呼叫端把中止往外傳——helper 裡的 return 只跳得出 helper。
+   */
+  const packSceneAudioTrack = async (opts: {
+    assetIdOf: (scene: (typeof scenes)[number]) => string | null | undefined;
+    folder: string;
+    /** 檔名尾綴與警告訊息共用的人話（「旁白」／「環境音」） */
+    label: string;
+    into: (string | null)[];
+  }): Promise<"ok" | "aborted"> => {
+    for (const [i, scene] of scenes.entries()) {
+      if (abortSignal.aborted) return "aborted";
+      const assetId = opts.assetIdOf(scene);
+      if (!assetId) continue;
+      const audio = assets.find((a) => a.id === assetId);
+      if (!audio || !shouldPack(audio.id)) continue; // 多選打包：未勾選的音檔不入包
+      let source: Readable;
+      try {
+        if (audio.storagePath) {
+          source = await openStoredReadStream(audio.storagePath);
+        } else if (audio.url && /^https?:\/\//.test(audio.url)) {
+          const fileRes = await fetchRemoteAsset(audio.url, abortSignal);
+          if (!fileRes.ok || !fileRes.body) {
+            void fileRes.body?.cancel().catch(() => {});
+            console.warn(`[export] ${opts.label}下載失敗 ${audio.url}: HTTP ${fileRes.status}`);
+            warnings.push(`「${scene.title}」${opts.label}音檔下載失敗（HTTP ${fileRes.status}），未入包`);
+            continue;
+          }
+          const len = Number(fileRes.headers.get("content-length") ?? 0);
+          if (len > REMOTE_FILE_MAX_BYTES) {
+            void fileRes.body.cancel().catch(() => {});
+            console.warn(`[export] ${opts.label}過大跳過 ${audio.url}: ${len} bytes`);
+            warnings.push(`「${scene.title}」${opts.label}音檔過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`);
+            continue;
+          }
+          source = capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
+        } else {
           continue;
         }
-        const len = Number(fileRes.headers.get("content-length") ?? 0);
-        if (len > REMOTE_FILE_MAX_BYTES) {
-          void fileRes.body.cancel().catch(() => {});
-          console.warn(`[export] 旁白過大跳過 ${narr.url}: ${len} bytes`);
-          warnings.push(`「${scene.title}」旁白音檔過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`);
-          continue;
-        }
-        source = capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
-      } else {
+      } catch (err) {
+        if (abortSignal.aborted) return "aborted";
+        console.warn(`[export] ${opts.label}讀取失敗 ${audio.storagePath ?? audio.url}:`, err instanceof Error ? err.message : err);
+        warnings.push(`「${scene.title}」${opts.label}音檔讀取失敗，未入包`);
         continue;
       }
-    } catch (err) {
-      if (abortSignal.aborted) return;
-      console.warn(`[export] 旁白讀取失敗 ${narr.storagePath ?? narr.url}:`, err instanceof Error ? err.message : err);
-      warnings.push(`「${scene.title}」旁白音檔讀取失敗，未入包`);
-      continue;
+      const num = String(i + 1).padStart(sceneNumWidth, "0");
+      const ext = (audio.mime && extFromMime(audio.mime)) || ".mp3";
+      const name = `${opts.folder}/${num}_${opts.label}${ext}`;
+      try {
+        await appendAndWait(archive, source, name, abortSignal);
+        opts.into[i] = name; // 成功入包才回填鏡頭表
+        doneEntries += 1;
+        reportProgress();
+      } catch (err) {
+        if (abortSignal.aborted) return "aborted";
+        throw err;
+      }
     }
-    const num = String(i + 1).padStart(sceneNumWidth, "0");
-    const ext = (narr.mime && extFromMime(narr.mime)) || ".mp3";
-    const name = `02_旁白音檔/${num}_旁白${ext}`;
-    try {
-      await appendAndWait(archive, source, name, abortSignal);
-      narrationNames[i] = name; // 成功入包才回填鏡頭表
-      doneEntries += 1;
-      reportProgress();
-    } catch (err) {
-      if (abortSignal.aborted) return;
-      throw err;
-    }
-  }
+    return "ok";
+  };
+
+  // 02_旁白音檔：逐鏡旁白配音（scenes.narrationAssetId 指向的 asset）。與畫面素材各自獨立——
+  // 一幕即使沒有畫面素材，只要有旁白就照樣輸出，檔名鏡號與畫面素材同一套動態補零，方便對齊字幕與畫面。
+  if (await packSceneAudioTrack({
+    assetIdOf: (s) => s.narrationAssetId,
+    folder: "02_旁白音檔",
+    label: "旁白",
+    into: narrationNames,
+  }) === "aborted") return;
+
+  // 06_環境音：逐鏡環境音／音效。編號接在既有資料夾後面而不是插進 02 之後——
+  // 重新編號會讓既有交付包的資料夾名跟文件、跟剪輯師的肌肉記憶全部對不上。
+  if (await packSceneAudioTrack({
+    assetIdOf: (s) => s.ambienceAssetId,
+    folder: "06_環境音",
+    label: "環境音",
+    into: ambienceNames,
+  }) === "aborted") return;
 
   if (abortSignal.aborted) return;
 
@@ -872,9 +918,10 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const gen = asset ? generations.find((g) => g.id === (asset.meta as { generationId?: string })?.generationId) : undefined;
     const file = writtenNames[i] ?? "（無素材）";
     const narrationFile = narrationNames[i] ?? "（無）";
+    const ambienceFile = ambienceNames[i] ?? "（無）";
     const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
     lines.push(
-      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${scene.durationSec}s`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(tc)} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
+      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${scene.durationSec}s`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(ambienceFile)} | ${mdTableCell(tc)} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
     );
   }
 
@@ -957,6 +1004,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
       mediaPath: writtenNames[i],
       mediaKind: writtenKinds[i],
       narrationPath: narrationNames[i],
+      ambiencePath: ambienceNames[i],
     }));
     // 時間軸檔在 交付/ 子資料夾內，相對媒體資料夾要往上一層；解析度依專案比例（修 fcpxml/xmeml 硬編橫向）
     const res = resolutionForFormat(project.format);
@@ -976,8 +1024,9 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
   }
 
   const hasNarration = narrationNames.some((n) => n !== null);
+  const hasAmbience = ambienceNames.some((n) => n !== null);
   archive.append(
-    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasAmbience ? "06_環境音（逐鏡環境音／音效）／" : ""}${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
       "\n" +
       "【最快組片方式：匯入一個檔，粗剪自動排好】\n" +
       "本包內的時間軸檔已「連結媒體」：先把整個 zip 解壓（保持資料夾結構不動），再依你的剪輯軟體匯入對應檔案，\n" +
@@ -995,6 +1044,9 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
       "\n" +
       (hasNarration
         ? "02_旁白音檔＝逐鏡旁白配音，檔名鏡號對應字幕與畫面（同一套鏡號補零）；fcpxml/Premiere XML 已把旁白排在音軌對齊各鏡，手動組裝時把同鏡號旁白對齊該鏡畫面即可；05_文件的鏡頭表「旁白音檔」欄列出每鏡對應的檔名。\n"
+        : "") +
+      (hasAmbience
+        ? "06_環境音＝逐鏡環境音／音效，檔名鏡號與旁白、畫面同一套補零；fcpxml 掛在 lane -3、Premiere XML 另立一條音軌，與旁白分開才調得動各自音量。\n"
         : "") +
       (hasSubtitle
         ? "字幕.srt 的時間碼依「分鏡規劃秒數」依序累計（每幕佔其設定秒數），組裝時間軸與分鏡順序一致即可對齊；若實際剪輯調整了各幕長度，請在剪輯軟體裡微調字幕時間。\n"
