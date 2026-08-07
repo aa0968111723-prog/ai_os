@@ -193,6 +193,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0031_user_ai_provider_keys",
   // 0032：純新增 community_posts 表＋四個索引與一個部分唯一索引（皆 IF NOT EXISTS）。
   //       發布快照自成一表，不改寫 prompts／generations／assets 任何一列。
+  //       表內含 0040 的 auto_tags／category／taxonomy_version 三個分類欄位——
+  //       表在這一批裡建立，bridge 比對整表 DDL，欄位不能只靠 0040 的 ALTER 補（同 0025／0029）。
   "0032_community_posts",
   // 0033：users 加一個 nullable avatar_url（ADD COLUMN IF NOT EXISTS），既有帳號預設無頭像。
   "0033_user_avatar",

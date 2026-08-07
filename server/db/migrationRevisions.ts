@@ -68,6 +68,17 @@
  * carries exactly the index the corrected file creates. The correction only
  * lets the bridge match the file against the drift plan textually.
  *
+ * 0032 was corrected a second time for exactly the reason 0025 was: it creates
+ * community_posts inside the bridge batch, and 0040 later added the
+ * auto_tags/category/taxonomy_version classification columns to that table. The
+ * bridge compares a table created inside the batch against the drift plan's
+ * whole-table DDL, so the columns had to move into 0032's CREATE TABLE. 0040
+ * keeps the guarded ALTERs for databases that applied the previous 0032, and
+ * all three columns are nullable or defaulted, so both orders converge on the
+ * same table with the same rows — wherever the previous file succeeded,
+ * re-running the corrected one creates the same table with the columns 0040
+ * would have added anyway.
+ *
  * 0035 originally used a composite primary key on (post_id, user_id). That
  * shape makes drizzle-kit 0.31's introspect path throw DrizzleQueryError on
  * `SELECT conname AS primary_key …` (drizzle-kit#5557), which aborted every
@@ -186,6 +197,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "ea558827804441655f3c8827770490eb34fbb6d2d597187a8911a45d4d1996c8",
     "f2c1ea2a71b114dc3ca6f69c63bfe28aadfb83d5dfc0f464cd81ee74ae3936f8",
     "72dfa8e1cdca1d2b5be188f41b7af4abafdb504ee2ebfdd0055e1ffff6231796",
+    "a6c51ee02a8cde9da38821a6e6794a8daafc9c65fdce5e9ce2fb0e43b76bdfec",
   ],
   "0033_user_avatar": [
     "336a82ba3e08d65d7c80736cabdbe328d09ddadcd024de74b7f7ca23cd42c5db",
@@ -217,6 +229,6 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "ad2681feabb586f070788e1987bae7f9df082a90b34622539d74a8e0981071bc",
   ],
   "0040_community_taxonomy": [
-    "0156663792669d1e6223dd9568f4f93f75a6e1bb33d3264fea3f371fe876d1d9",
+    "ffd15f22ce8f3f8563dc01deb3f7dc2361359fc83cbf68a21033977503409b8e",
   ],
 };
