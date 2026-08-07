@@ -13,17 +13,36 @@ import {
   parseStoryboardScript,
   resolveScriptTargets,
   summarizeStoryboardScriptDiff,
+  type StoryboardScriptRow,
 } from "./storyboardScript";
 
+/**
+ * 測試用的列建構子：六個內容欄位預設 null（＝這一鏡沒寫），只寫關心的那幾欄。
+ *
+ * 型別上這六欄是必填的（漏傳＝那一欄在寫回時被判成「使用者刻意清空」，環境音就這樣被清過一次），
+ * 所以**正式呼叫端不該有這種 helper**——它存在只是為了讓測試不必每次抄六個 null。
+ * 要模擬「呼叫端漏傳」那個 bug 時，明確用 `dropField()`，讓意圖寫在程式碼上而不是靠少打一行。
+ */
+const row = (r: Partial<StoryboardScriptRow> & Pick<StoryboardScriptRow, "title" | "durationSec">): StoryboardScriptRow => ({
+  prompt: null, action: null, voiceover: null, dialogue: null, ambience: null, music: null, ...r,
+});
+
+/** 刻意做出「呼叫端漏傳某一欄」的列——只有測試會這樣做，所以斷言型別在這裡收口 */
+const dropField = (r: StoryboardScriptRow, key: keyof StoryboardScriptRow): StoryboardScriptRow => {
+  const { [key]: _omitted, ...rest } = r;
+  void _omitted;
+  return rest as StoryboardScriptRow;
+};
+
 const ROWS = [
-  {
+  row({
     title: "開場・晨光",
     durationSec: 5,
     prompt: "清晨禪堂，柔和光線",
     voiceover: "那一年，我第一次走進禪堂。",
     ambience: "遠處鐘聲，細微鳥鳴",
-  },
-  { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, propNames: ["安倢的紅傘"] },
+  }),
+  row({ title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", propNames: ["安倢的紅傘"] }),
 ];
 
 describe("formatStoryboardScript", () => {
@@ -64,9 +83,8 @@ describe("formatStoryboardScript", () => {
   });
 
   it("唯讀模式明顯比編輯模式短——這是它存在的唯一理由", () => {
-    const many = Array.from({ length: 12 }, (_, i) => ({
-      title: `鏡${i + 1}`, durationSec: 5, prompt: "畫面描述", voiceover: i % 3 ? "旁白" : null,
-    }));
+    const many = Array.from({ length: 12 }, (_, i) =>
+      row({ title: `鏡${i + 1}`, durationSec: 5, prompt: "畫面描述", voiceover: i % 3 ? "旁白" : null }));
     const edit = formatStoryboardScript(many, "edit").split("\n").length;
     const read = formatStoryboardScript(many, "read").split("\n").length;
     expect(read).toBeLessThan(edit * 0.75);
@@ -77,8 +95,23 @@ describe("formatStoryboardScript", () => {
    * 等於繼續藏著它，使用者永遠不知道這一格可以寫。
    */
   it("環境音是空的也照樣輸出一行（讓人知道這一格可以寫）", () => {
-    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫", voiceover: null }]);
+    const out = formatStoryboardScript([row({ title: "T", durationSec: 5, prompt: "畫" })]);
     expect(out).toContain("\n環境音：");
+  });
+
+  /**
+   * scenes.title 在 DB 是 text，沒有任何禁換行的守衛（MCP 與 AI 拆分鏡都只 trim+slice），
+   * 所以帶換行的標題是存得進去的。照原樣寫進「## 」那一行，換行後那半截會被 parse 當成
+   * 續行吃進畫面描述——打開全文再原封不動寫回，那半截就永久消失。
+   */
+  it("標題裡的換行壓成空白，來回一趟不會吃掉換行後的字", () => {
+    const rows = [row({ title: "開場\n（分鏡師版）", durationSec: 5, prompt: "晨光" })];
+    const text = formatStoryboardScript(rows);
+    expect(text.split("\n")[0]).toBe("## 1. 開場 （分鏡師版） (5s)");
+    const back = parseStoryboardScript(text).scenes[0];
+    expect(back?.title).toBe("開場 （分鏡師版）");
+    expect(back?.durationSec).toBe(5);
+    expect(back?.prompt).toBe("晨光");
   });
 
   it("格式化出來的文字，解析回去必須等值（來回不失真）", () => {
@@ -138,7 +171,7 @@ describe("formatStoryboardScript", () => {
 
   it("帶空行的值來回不失真——format 後再 parse 必須拿回同一個字串", () => {
     const rows = [
-      { title: "T", durationSec: 5, prompt: "第一段\n\n第二段", voiceover: "唸第一句\n\n唸第二句", ambience: null },
+      row({ title: "T", durationSec: 5, prompt: "第一段\n\n第二段", voiceover: "唸第一句\n\n唸第二句" }),
     ];
     const back = parseStoryboardScript(formatStoryboardScript(rows)).scenes[0];
     expect(back?.prompt).toBe("第一段\n\n第二段");
@@ -149,7 +182,7 @@ describe("formatStoryboardScript", () => {
     // 沒有跳脫的話：畫面的第二行「旁白：…」會被當成旁白標籤，接著真正的「旁白：」再把它覆蓋成空——
     // 使用者什麼都沒改，那行字卻消失了
     const rows = [
-      { title: "T", durationSec: 5, prompt: "第一行\n旁白：這其實是畫面的第二行\n## 這行也是", voiceover: "旁白第一行\n設定卡：這是旁白" },
+      row({ title: "T", durationSec: 5, prompt: "第一行\n旁白：這其實是畫面的第二行\n## 這行也是", voiceover: "旁白第一行\n設定卡：這是旁白" }),
     ];
     const back = parseStoryboardScript(formatStoryboardScript(rows)).scenes[0];
     expect(back?.prompt).toBe("第一行\n旁白：這其實是畫面的第二行\n## 這行也是");
@@ -157,7 +190,7 @@ describe("formatStoryboardScript", () => {
   });
 
   it("本來就以反斜線開頭的字不會被誤拆（只還原真的長得像結構的那種）", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "第一行\n\\不是結構\n\\旁白：是結構", voiceover: null }];
+    const rows = [row({ title: "T", durationSec: 5, prompt: "第一行\n\\不是結構\n\\旁白：是結構" })];
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.prompt).toBe(
       "第一行\n\\不是結構\n\\旁白：是結構",
     );
@@ -168,12 +201,12 @@ describe("對白：逐句序列，旁白可混在裡面交錯", () => {
   const BLOCK = ["@旁白：那一年。", "@師父：坐吧。", "@安倢（小聲）：謝謝師父。"].join("\n");
 
   it("標籤自己一行、台詞列在下面——第一句不會被擠在冒號後面對不齊", () => {
-    const out = formatStoryboardScript([{ title: "T", durationSec: 5, dialogue: BLOCK }]);
+    const out = formatStoryboardScript([row({ title: "T", durationSec: 5, dialogue: BLOCK })]);
     expect(out).toContain("對白：\n@旁白：那一年。");
   });
 
   it("整段對白來回不失真（@ 行不匹配標籤規則，所以不需要跳脫）", () => {
-    const rows = [{ title: "T", durationSec: 8, prompt: "畫", dialogue: BLOCK }];
+    const rows = [row({ title: "T", durationSec: 8, prompt: "畫", dialogue: BLOCK })];
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.dialogue).toBe(BLOCK);
   });
 
@@ -211,10 +244,10 @@ describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", (
   });
 
   it("配樂空的時候不輸出那一行——它是區間端點，不是每鏡都有的屬性", () => {
-    const out = formatStoryboardScript([{ title: "T", durationSec: 5, prompt: "畫" }]);
+    const out = formatStoryboardScript([row({ title: "T", durationSec: 5, prompt: "畫" })]);
     expect(out).not.toContain("配樂：");
     expect(out).toContain("環境音："); // 描述欄仍是全欄模板
-    expect(formatStoryboardScript([{ title: "T", durationSec: 5, music: "起｜鋼琴" }])).toContain("配樂：起｜鋼琴");
+    expect(formatStoryboardScript([row({ title: "T", durationSec: 5, music: "起｜鋼琴" })])).toContain("配樂：起｜鋼琴");
   });
 
   it("動作走位是獨立欄位，不會混進畫面（畫面是要送圖像模型的）", () => {
@@ -242,7 +275,7 @@ describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", (
 
   it("卡片三行排在一鏡最後，且只在真的綁了卡時才輸出", () => {
     const out = formatStoryboardScript([
-      { title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"], propNames: ["安倢的紅傘"] },
+      row({ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"], propNames: ["安倢的紅傘"] }),
     ]);
     expect(out).toContain("角色卡：安倢・師父");
     expect(out).toContain("素材卡：安倢的紅傘");
@@ -254,7 +287,7 @@ describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", (
   });
 
   it("卡片行來回不失真，且鏡末尾補的筆記不會被吞進名單", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] }];
+    const rows = [row({ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] })];
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.characters).toBe("安倢・師父");
     // 名單型欄位不吃續行——被吞進去的筆記會拿去查卡片，查不到就整行不套用，
     // 使用者會看到「我只是加了一句話，綁定就壞了」
@@ -308,8 +341,17 @@ describe("parseStoryboardScript", () => {
     expect(parsed.warnings.join()).toMatch(/超出 1–60/);
   });
 
-  it("沒有標題時給預設鏡名，不會產生無名分鏡", () => {
-    expect(parseStoryboardScript("## \n畫面：晨光").scenes[0]?.title).toBe("第 1 鏡");
+  // 標題留空與畫面／旁白省略是同一套語意（UI 明寫「省略＝維持原值」）。
+  // 以前這裡補「第 N 鏡」佔位，等於把使用者沒寫的欄位當成有寫，寫回時原標題就被蓋掉——
+  // 而且 N 取的是文字裡的出現順序，只留「## 1. A」與「## 5.」時第 5 鏡會被改名成「第 2 鏡」。
+  it("標題留空＝維持原值，不補佔位（新增鏡的佔位由 applyScript 就地補）", () => {
+    expect(parseStoryboardScript("## \n畫面：晨光").scenes[0]?.title).toBe("");
+  });
+
+  it("標題留空時 diff 不把它算成改動", () => {
+    const rows = [row({ title: "晨光", durationSec: 5, prompt: "清晨" })];
+    const parsed = parseStoryboardScript("## 1.  (5s)\n畫面：清晨\n旁白：\n環境音：");
+    expect(diffStoryboardScript(rows, parsed.scenes).updated).toEqual([]);
   });
 
   it("第一個 ## 之前的抬頭文字會被忽略，但要說出來", () => {
@@ -419,16 +461,34 @@ describe("diffStoryboardScript（保守套用）", () => {
   });
 
   /**
+   * 這條盯的是「編輯全文 → 原封不動寫回 → 全專案環境音被清光」那條資料遺失路徑。
+   * 環境音那一行一律輸出（即使是空的），所以呼叫端只要少傳這一欄，使用者讀到的就是
+   * 一份環境音全空的腳本；寫回時空字串 ≠ 原值成立，一個字都沒改卻整批被清掉。
+   * 型別上這六欄已改必填擋住漏傳，這裡再從行為面把兩側都釘住。
+   */
+  it("環境音有值時來回一趟＝沒有任何變更（漏傳才會被判成清空）", () => {
+    const rows = [row({ title: "晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", ambience: "遠處鐘聲" })];
+    const parsed = parseStoryboardScript(formatStoryboardScript(rows));
+    expect(parsed.scenes[0]?.ambience).toBe("遠處鐘聲");
+    expect(diffStoryboardScript(rows, parsed.scenes)).toEqual({ updated: [], created: [], keptUntouched: 0 });
+
+    // 對照組：呼叫端整個漏傳這一欄（就是被修掉的那個 bug）——使用者什麼都沒動，這一鏡卻算「有變更」。
+    // 用 dropField 而不是塞 null，因為要重現的正是「key 根本不在物件上」那種漏傳。
+    const dropped = parseStoryboardScript(formatStoryboardScript(rows.map((r) => dropField(r, "ambience"))));
+    expect(diffStoryboardScript(rows, dropped.scenes).updated).toEqual([{ index: 0, title: "晨光" }]);
+  });
+
+  /**
    * 卡片行的「空」不等於「清空」，所以預告不能拿字串直接比。
    * 照字串比會把留白算成一筆更新，按下去卻毫無動靜——預覽說謊比不預覽更糟。
    */
   it("卡片行留白不算變更（伺服器也不會動它）", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢"] }];
+    const rows = [row({ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢"] })];
     expect(diffStoryboardScript(rows, parseStoryboardScript("## 1. T (5s)\n角色卡：").scenes).updated).toEqual([]);
   });
 
   it("卡片行寫「無」＝解除，算變更；換名字、換順序也算", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] }];
+    const rows = [row({ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] })];
     const updatedBy = (line: string) =>
       diffStoryboardScript(rows, parseStoryboardScript(`## 1. T (5s)\n${line}`).scenes).updated;
     expect(updatedBy("角色卡：無")).toHaveLength(1);
@@ -439,15 +499,15 @@ describe("diffStoryboardScript（保守套用）", () => {
   });
 
   it("沒綁卡的鏡寫「無」不算變更（不製造一筆什麼都沒動的更新）", () => {
-    const rows = [{ title: "T", durationSec: 5, prompt: "畫" }];
+    const rows = [row({ title: "T", durationSec: 5, prompt: "畫" })];
     expect(diffStoryboardScript(rows, parseStoryboardScript("## 1. T (5s)\n角色卡：無").scenes).updated).toEqual([]);
   });
 
   it("刪掉中間整段：預告與實際一致，動的是第 2 鏡而不是第 1 鏡", () => {
     const rows = [
-      { title: "A", durationSec: 5, prompt: "a", voiceover: null },
-      { title: "B", durationSec: 5, prompt: "b", voiceover: null },
-      { title: "C", durationSec: 5, prompt: "c", voiceover: null },
+      row({ title: "A", durationSec: 5, prompt: "a" }),
+      row({ title: "B", durationSec: 5, prompt: "b" }),
+      row({ title: "C", durationSec: 5, prompt: "c" }),
     ];
     const parsed = parseStoryboardScript("## 1. A (5s)\n畫面：a\n\n## 3. C (5s)\n畫面：改過的 c");
     const diff = diffStoryboardScript(rows, parsed.scenes);

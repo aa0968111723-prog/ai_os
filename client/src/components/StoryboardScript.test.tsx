@@ -14,6 +14,8 @@ let applyState: { isPending: boolean; error: { message: string } | null } = { is
 let applyResult: { warnings: string[] } = { warnings: [] };
 /** 拆分鏡成功時伺服器回什麼（truncation 非 null＝尾段沒拆進來） */
 let splitResult: { truncation: { sentChars: number; totalChars: number } | null } = { truncation: null };
+/** scenes.listByProject 的最小投影：這支元件只用它取 id 當寫回前的分鏡指紋 */
+let sceneRows: Array<{ id: string }> = [];
 
 // useMutation 用真的 useState 存 data：截斷提示是在成功「之後」才渲染的，
 // 沒有真實的重新渲染就測不到「提示到底看不看得見」。
@@ -58,14 +60,19 @@ vi.mock("../api", async () => {
             };
           },
         },
+        // 寫回要帶上「算差異時看到的那份分鏡」的 id 指紋（夥伴刪一格會讓鏡次整批錯位）；
+        // 與 SceneList 同一把 query key，吃的是同一份快取
+        listByProject: { useQuery: () => ({ data: sceneRows }) },
       },
     },
   };
 });
 
+// 六個內容欄位一律寫滿：StoryboardScriptRow 刻意把它們設成必填，漏傳一欄＝寫回時被判成
+// 「使用者刻意清空」（環境音就這樣被清過一次），所以連測試 fixture 也不給省。
 const ROWS = [
-  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", propNames: ["安倢的紅傘"] },
-  { title: "收尾", durationSec: 3, prompt: "關門", voiceover: null },
+  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", action: null, voiceover: "那一年", dialogue: null, ambience: "遠處鐘聲", music: null, propNames: ["安倢的紅傘"] },
+  { title: "收尾", durationSec: 3, prompt: "關門", action: null, voiceover: null, dialogue: null, ambience: null, music: null },
 ];
 
 describe("StoryboardScript", () => {
@@ -74,6 +81,7 @@ describe("StoryboardScript", () => {
     splitMutate.mockReset();
     applyState = { isPending: false, error: null };
     splitResult = { truncation: null };
+    sceneRows = [{ id: "s1" }, { id: "s2" }];
     applyResult = { warnings: [] };
   });
 
@@ -101,18 +109,72 @@ describe("StoryboardScript", () => {
     expect(screen.getByText(/將更新 1 鏡、保留 1 鏡不動（文字裡沒寫到）/)).toBeVisible();
   });
 
+  /**
+   * 「將更新 12 鏡」這種數字看不出動到哪幾格，而寫回會把夥伴寫進那幾格的字整批蓋掉。
+   * 逐格清單就是那道「你正在覆蓋這些」的交代，超過 10 條才收合。
+   */
+  it("預告展開成逐格清單（鏡次＋標題），超過 10 鏡收成「還有 N 鏡」", async () => {
+    const user = userEvent.setup();
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      title: `第${i + 1}景`,
+      durationSec: 5,
+      prompt: "原本的畫面",
+      action: null,
+      voiceover: null,
+      dialogue: null,
+      ambience: null,
+      music: null,
+    }));
+    render(<StoryboardScript projectId="p1" rows={rows} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    const box = screen.getByRole("textbox", { name: "分鏡腳本全文" });
+    await user.clear(box);
+    await user.type(box, rows.map((r, i) => `## ${i + 1}. ${r.title} (5s)\n畫面：改過的畫面`).join("\n\n"));
+
+    const list = screen.getByRole("list", { name: "將被覆蓋的分鏡" });
+    expect(list).toHaveTextContent("第 1 鏡・第1景");
+    expect(list).toHaveTextContent("第 10 鏡・第10景");
+    expect(list).toHaveTextContent("還有 2 鏡");
+    expect(list).not.toHaveTextContent("第 11 鏡");
+  });
+
   it("寫回時把原文整份送出（伺服器自己再解析一次，不信任前端結構）", async () => {
     const user = userEvent.setup();
     render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: /文字腳本/ }));
     await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    // 整批覆寫十幾鏡是破壞性操作，按鈕改成兩段式確認（同專案刪一格也是這樣）
     await user.click(screen.getByRole("button", { name: "寫回分鏡" }));
+    await user.click(screen.getByRole("button", { name: "確認寫回" }));
 
     await waitFor(() => expect(applyMutate).toHaveBeenCalled());
     const arg = applyMutate.mock.calls[0][0];
     expect(arg.projectId).toBe("p1");
     expect(arg.text).toContain("## 1. 開場・晨光 (5s)");
+    // 指紋一起送：夥伴在編輯期間刪掉中間一格時，伺服器要能整批拒絕而不是靜默蓋到隔壁鏡
+    expect(arg.expectedSceneIds).toEqual(["s1", "s2"]);
+  });
+
+  /**
+   * ConfirmButton 的 disabled 只在「還沒按第一段」時求值——armed 之後繼續改草稿，
+   * 送出的會是使用者沒看過的那一份（甚至是解析不過、清單整個消失的那份）。
+   */
+  it("按下寫回後又改了草稿，確認狀態要收掉（確認的一定是看到的那一份）", async () => {
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    await user.click(screen.getByRole("button", { name: "寫回分鏡" }));
+    expect(screen.getByRole("button", { name: "確認寫回" })).toBeVisible();
+
+    await user.type(screen.getByRole("textbox", { name: "分鏡腳本全文" }), "\n畫面：又改了一句");
+
+    expect(screen.queryByRole("button", { name: "確認寫回" })).toBeNull();
+    expect(applyMutate).not.toHaveBeenCalled();
   });
 
   /**
@@ -126,7 +188,9 @@ describe("StoryboardScript", () => {
 
     await user.click(screen.getByRole("button", { name: /文字腳本/ }));
     await user.click(screen.getByRole("button", { name: /編輯全文/ }));
+    // 寫回是兩段式（覆蓋掉的字沒有回收桶可還原）——第一次點只是把確認鈕叫出來
     await user.click(screen.getByRole("button", { name: "寫回分鏡" }));
+    await user.click(screen.getByRole("button", { name: "確認寫回" }));
 
     // 編輯框已經收掉（onSuccess 清 draft），提示仍在
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/找不到「小明」/));

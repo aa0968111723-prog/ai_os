@@ -8,7 +8,14 @@ import {
 } from "@shared/storyboardScript";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 import { Button, Card, Hint, Meta } from "./ui";
+
+/**
+ * 逐格預覽最多列幾條。清單長到要捲就沒人讀了，剩下的收成「還有 N 鏡」——
+ * 重點是讓人看見「動到的是哪幾格」，不是把全部倒出來。
+ */
+const PREVIEW_MAX = 10;
 
 /**
  * 文字分鏡腳本：整份分鏡當一份文件來讀、來寫。
@@ -43,6 +50,16 @@ export function StoryboardScript({
       onApplied();
     },
   });
+
+  /**
+   * 寫回時要一起送出的分鏡指紋。
+   *
+   * rows 是投影過的文字欄位，沒有 id，而寫回是拿「鏡次／位置」對格的——夥伴在使用者編輯期間
+   * 刪掉中間一格，第 3 鏡的文字就會落到原本的第 4 鏡上（見 scenes.applyScript 的 expectedSceneIds）。
+   * 這裡讀的是與 SceneList 同一把 query key 的同一份快取（不會多打 API），
+   * 拿到的正是產生 rows 的那份清單。
+   */
+  const sceneIds = trpc.scenes.listByProject.useQuery({ projectId }).data?.map((s) => s.id);
 
   const current = useMemo(() => formatStoryboardScript(rows), [rows]);
   const editing = draft !== null;
@@ -187,15 +204,65 @@ export function StoryboardScript({
                   {parsed.warnings.join("；")}
                 </Hint>
               ) : null}
-              <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={apply.isPending || !!parsed?.errors.length || !diff}
-                  onClick={() => apply.mutate({ projectId, text })}
+              {/*
+                逐格列出要被蓋掉的鏡。「將更新 12 鏡」這種數字看不出動到哪幾格——
+                而這一按會把夥伴剛寫進那幾格的字整批覆蓋，且沒有回收桶可還原。
+                要人為覆蓋負責，就得先讓人看得見自己在覆蓋什麼。
+              */}
+              {diff && diff.updated.length > 0 && (
+                <ul
+                  aria-label="將被覆蓋的分鏡"
+                  style={{ margin: "6px 0 0", paddingInlineStart: 18, listStyle: "disc" }}
                 >
-                  {apply.isPending ? "寫回中…" : "寫回分鏡"}
-                </Button>
+                  {/* 列的是**現況**標題（rows），不是文字裡的新標題：整份重貼時標題多半也改了，
+                      印新名字等於在「將被覆蓋」底下寫一串分鏡表上根本不存在的鏡名，
+                      使用者對不出自己要蓋掉的是哪幾格。標題本身也要改就補上「→ 新名」。 */}
+                  {diff.updated.slice(0, PREVIEW_MAX).map((u) => {
+                    const from = rows[u.index]?.title;
+                    return (
+                      <li key={u.index}>
+                        <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                          第 {u.index + 1} 鏡・{from ?? u.title}
+                          {/* u.title 為空＝這一鏡的標題留空（維持原值），不是改名，別畫箭頭 */}
+                          {from !== undefined && u.title && from !== u.title ? ` → ${u.title}` : ""}
+                        </Meta>
+                      </li>
+                    );
+                  })}
+                  {diff.updated.length > PREVIEW_MAX && (
+                    <li>
+                      <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                        還有 {diff.updated.length - PREVIEW_MAX} 鏡
+                      </Meta>
+                    </li>
+                  )}
+                </ul>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {/*
+                  整批寫回是站內唯一沒有確認就執行的破壞性操作，可是它一次覆寫十幾鏡：
+                  破壞力遠大於刪一格，而刪一格反而有確認框（SceneList 的刪除鈕）。
+                  刪掉的還能從回收桶還原，被覆蓋掉的字則是真的沒了——這裡更需要那道確認。
+                  動到哪幾鏡由上面的逐格清單與旁邊的摘要交代，確認框只補那件清單講不了的事。
+                */}
+                {apply.isPending ? (
+                  <Button variant="primary" size="sm" disabled>寫回中…</Button>
+                ) : (
+                  <ConfirmButton
+                    // key 綁全文：ConfirmButton 的 disabled 只在「還沒按下第一段」時求值，
+                    // armed 之後繼續打字不會再把關——確認框旁邊還掛著舊 text 算出來的清單，
+                    // 送出的卻是新的（甚至是解析不過、清單整個消失的那份）。
+                    // 換 key 讓它重新掛載＝草稿一動就收掉確認：使用者確認的一定是他看到的那一份。
+                    key={text}
+                    triggerClassName="primary btn-sm"
+                    disabled={!!parsed?.errors.length || !diff}
+                    message="被覆蓋掉的字沒有回收桶可還原，確定寫回？"
+                    confirmLabel="確認寫回"
+                    onConfirm={() => apply.mutate({ projectId, text, expectedSceneIds: sceneIds })}
+                  >
+                    寫回分鏡
+                  </ConfirmButton>
+                )}
                 {diff && (
                   <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
                     將{summarizeStoryboardScriptDiff(diff)}

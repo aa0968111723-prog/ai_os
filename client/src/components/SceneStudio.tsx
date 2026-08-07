@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
-import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion } from "@shared/sceneVersions";
+import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
 import { Icon } from "./Icon";
@@ -49,6 +49,19 @@ const VERSION_STATE: Record<SceneVersion["state"], { label: string; cls: PillSta
   awaiting_approval: { label: "待核", cls: "running" },
   failed: { label: "失敗", cls: "failed" },
 };
+
+/**
+ * 版本清單的三段（畫面／旁白／環境音），順序＝工作室分頁的順序。
+ *
+ * 三軌各自編版次（`buildSceneVersions` 的 counters 就是分 role 數的），所以清單一定要跟著分段：
+ * 混在一起渲染會出現「第 1 版」連續出現三次，而且看不出哪一版屬於哪一軌——
+ * 更糟的是切現用時分不清要寫進哪個指標欄。label 也在這裡定義，避免各處自己拼字串而漏掉環境音。
+ */
+const VERSION_SECTIONS: Array<{ role: SceneVersionRole; label: string; icon: Parameters<typeof Icon>[0]["name"] }> = [
+  { role: "visual", label: "畫面", icon: "Image" },
+  { role: "narration", label: "旁白", icon: "Volume2" },
+  { role: "ambience", label: "環境音", icon: "Music" },
+];
 
 type StudioTab = "regen" | "refine" | "voice" | "ambience" | "versions";
 
@@ -146,6 +159,16 @@ export function SceneStudio({
   const visualVersions = useMemo(() => list.filter((v) => v.role === "visual"), [list]);
   const narrationVersions = useMemo(() => list.filter((v) => v.role === "narration"), [list]);
   const ambienceVersions = useMemo(() => list.filter((v) => v.role === "ambience"), [list]);
+  /** 版本頁分段渲染的資料來源；空的段落先濾掉——沒有環境音的分鏡不該看到一個空的「環境音」標題 */
+  const versionSections = useMemo(
+    () =>
+      VERSION_SECTIONS.map((section) => ({
+        ...section,
+        items:
+          section.role === "narration" ? narrationVersions : section.role === "ambience" ? ambienceVersions : visualVersions,
+      })).filter((section) => section.items.length > 0),
+    [visualVersions, narrationVersions, ambienceVersions],
+  );
   const currentVisual = visualVersions.find((v) => v.isCurrent);
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
@@ -216,12 +239,24 @@ export function SceneStudio({
   const ttsModel = getModel(DEFAULT_TTS_MODEL);
   const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: savedVoiceover.length }) : undefined;
   const currentNarration = narrationVersions.find((v) => v.isCurrent);
-  const isVoicing = narrationVersions.some((v) => v.state === "generating") || generateVoiceover.isPending;
+  /**
+   * 待核准也算「這一軌被佔住」——與後端 generateVoiceover 的在途判定同口徑。
+   * 只看 generating 的話，超額進入待核的那筆不會讓按鈕變成停用狀態，使用者按下去必吃
+   * CONFLICT 紅字，而且畫面上完全沒有「在等組長核准」的線索——看起來就是按鈕壞了。
+   */
+  const isVoicing =
+    narrationVersions.some((v) => v.state === "generating" || v.state === "awaiting_approval")
+    || generateVoiceover.isPending;
+  const voicingAwaitingApproval = narrationVersions.some((v) => v.state === "awaiting_approval");
   // 環境音走 text-to-audio（音效），估點口徑與配音同一支 estimatePoints
   const ambienceModel = getModel(DEFAULT_AMBIENCE_MODEL);
   const ambiencePoints = ambienceModel ? estimatePoints(ambienceModel, { promptChars: savedAmbience.length }) : undefined;
   const currentAmbience = ambienceVersions.find((v) => v.isCurrent);
-  const isAmbiencing = ambienceVersions.some((v) => v.state === "generating") || generateAmbience.isPending;
+  /** 同 isVoicing：後端把 awaiting_approval 也算在途，前端 gate 不跟上就只剩紅字 */
+  const isAmbiencing =
+    ambienceVersions.some((v) => v.state === "generating" || v.state === "awaiting_approval")
+    || generateAmbience.isPending;
+  const ambiencingAwaitingApproval = ambienceVersions.some((v) => v.state === "awaiting_approval");
 
   /** 修正的底圖：指定的那一版，或這一格現用畫面 */
   const baseVersion = baseAssetId ? list.find((v) => v.assetId === baseAssetId) : currentVisual;
@@ -237,6 +272,15 @@ export function SceneStudio({
     setPreviewAssetId(v.assetId);
     setTab("refine");
   };
+
+  /**
+   * 切成現用：音訊一定要把 role 帶上去。
+   * 不帶的話後端 setVisualFromAsset 會走 sceneSlotForAssetKind("audio") 的預設落點（旁白軌），
+   * 於是在環境音那一段按「設為現用」會把音效寫進 narrationAssetId——環境音沒換到、旁白反而被蓋掉。
+   * 反過來，畫面那一段不能帶 role：後端明擋「只有音訊素材可以指定要進旁白還是環境音」。
+   */
+  const setCurrentVersion = (role: SceneVersionRole, assetId: string) =>
+    setCurrent.mutate(role === "visual" ? { sceneId, assetId } : { sceneId, assetId, role });
 
   return (
     <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -648,7 +692,9 @@ export function SceneStudio({
                     )}
                     <div style={{ marginTop: 8 }}>
                       {isVoicing ? (
-                        <Button variant="primary" disabled>配音生成中…</Button>
+                        <Button variant="primary" disabled>
+                          {voicingAwaitingApproval ? "配音待核准中…" : "配音生成中…"}
+                        </Button>
                       ) : (
                         <ConfirmButton
                           triggerClassName="primary"
@@ -728,7 +774,9 @@ export function SceneStudio({
                     )}
                     <div style={{ marginTop: 8 }}>
                       {isAmbiencing ? (
-                        <Button variant="primary" disabled>環境音生成中…</Button>
+                        <Button variant="primary" disabled>
+                          {ambiencingAwaitingApproval ? "環境音待核准中…" : "環境音生成中…"}
+                        </Button>
                       ) : (
                         <ConfirmButton
                           triggerClassName="primary"
@@ -822,63 +870,75 @@ export function SceneStudio({
                     description={<>每按一次「重畫」或「修正」都會留下一版，之後可以隨時切回來。</>}
                   />
                 ) : (
-                  <ul className="scene-studio__versions">
-                    {list.map((v) => (
-                      <li key={v.generationId ?? v.assetId} className={`scene-studio__version${v.isCurrent ? " is-current" : ""}`}>
-                        {v.assetUrl && v.assetKind !== "audio" ? (
-                          <button
-                            type="button"
-                            className="scene-studio__vthumb"
-                            title="在左側看這一版"
-                            aria-label={`預覽第 ${v.index} 版`}
-                            onClick={() => setPreviewAssetId(v.assetId)}
-                          >
-                            {v.assetKind === "video" ? (
-                              <AssetVideo className="gen-thumb" src={v.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="遺失" fallbackIconSize={14} />
-                            ) : (
-                              <AssetImg className="gen-thumb" src={v.assetUrl} alt="" fallbackClassName="gen-thumb" fallbackLabel="遺失" fallbackIconSize={14} />
-                            )}
-                          </button>
-                        ) : (
-                          <div className="gen-thumb scene-studio__vthumb--empty">
-                            <Icon name={v.state === "generating" ? "Loader" : v.role === "narration" ? "Volume2" : "Image"} className={v.state === "generating" ? "spin" : undefined} size={16} />
-                          </div>
-                        )}
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                            <b style={{ fontSize: "var(--fs-13)" }}>{v.role === "narration" ? "旁白" : "畫面"}第 {v.index} 版</b>
-                            <Pill status={VERSION_STATE[v.state].cls}>{VERSION_STATE[v.state].label}</Pill>
-                            {v.sourceUrl && <Meta>由底圖修出</Meta>}
-                          </div>
-                          <Meta as="div">
-                            {v.modelId ? getModel(v.modelId)?.label ?? v.modelId : "外部帶入"}
-                            {v.points > 0 ? `・${v.points} 點` : ""}・{relSeen(v.createdAt)}
-                          </Meta>
-                          {v.prompt && <Meta as="div" style={{ whiteSpace: "pre-wrap" }}>{v.prompt.length > 90 ? `${v.prompt.slice(0, 90)}…` : v.prompt}</Meta>}
-                          {v.error && <Meta as="div" style={{ color: "var(--danger-ink)" }}>失敗：{v.error}（已退點）</Meta>}
-                          {canEdit && (
-                            <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                              {v.canSetCurrent && (
-                                <Button size="sm" disabled={setCurrent.isPending} onClick={() => setCurrent.mutate({ sceneId, assetId: v.assetId! })}>
-                                  <Icon name="Check" size={13} /> 設為現用
-                                </Button>
+                  // 外層沿用 .scene-studio__versions 當唯一的捲動容器（三段共用一條捲軸），
+                  // 段落自己再開一個 ul：版次是分軌編的，同一份清單混排會出現三個「第 1 版」。
+                  <div className="scene-studio__versions">
+                    {versionSections.map((section) => (
+                      <section key={section.role} aria-label={`${section.label}版本`}>
+                        <Meta as="div" style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+                          <Icon name={section.icon} size={12} /> {section.label}・共 {section.items.length} 版
+                        </Meta>
+                        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {section.items.map((v) => (
+                            <li key={v.generationId ?? v.assetId} className={`scene-studio__version${v.isCurrent ? " is-current" : ""}`}>
+                              {v.assetUrl && v.assetKind !== "audio" ? (
+                                <button
+                                  type="button"
+                                  className="scene-studio__vthumb"
+                                  title="在左側看這一版"
+                                  aria-label={`預覽${section.label}第 ${v.index} 版`}
+                                  onClick={() => setPreviewAssetId(v.assetId)}
+                                >
+                                  {v.assetKind === "video" ? (
+                                    <AssetVideo className="gen-thumb" src={v.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="遺失" fallbackIconSize={14} />
+                                  ) : (
+                                    <AssetImg className="gen-thumb" src={v.assetUrl} alt="" fallbackClassName="gen-thumb" fallbackLabel="遺失" fallbackIconSize={14} />
+                                  )}
+                                </button>
+                              ) : (
+                                <div className="gen-thumb scene-studio__vthumb--empty">
+                                  {/* 沒有縮圖時用該軌的圖示代表它是哪一軌（音訊本來就沒有畫面可看） */}
+                                  <Icon name={v.state === "generating" ? "Loader" : section.icon} className={v.state === "generating" ? "spin" : undefined} size={16} />
+                                </div>
                               )}
-                              {v.canRefineFrom && (
-                                <Button size="sm" variant="ghost" onClick={() => useVersionAsBase(v)}>
-                                  <Icon name="Palette" size={13} /> 以這版為底圖
-                                </Button>
-                              )}
-                              {v.canReusePrompt && (
-                                <Button size="sm" variant="ghost" onClick={() => setPromptDraft(v.prompt!)}>
-                                  <Icon name="Copy" size={13} /> 用這版提示詞
-                                </Button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </li>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <b style={{ fontSize: "var(--fs-13)" }}>{section.label}第 {v.index} 版</b>
+                                  <Pill status={VERSION_STATE[v.state].cls}>{VERSION_STATE[v.state].label}</Pill>
+                                  {v.sourceUrl && <Meta>由底圖修出</Meta>}
+                                </div>
+                                <Meta as="div">
+                                  {v.modelId ? getModel(v.modelId)?.label ?? v.modelId : "外部帶入"}
+                                  {v.points > 0 ? `・${v.points} 點` : ""}・{relSeen(v.createdAt)}
+                                </Meta>
+                                {v.prompt && <Meta as="div" style={{ whiteSpace: "pre-wrap" }}>{v.prompt.length > 90 ? `${v.prompt.slice(0, 90)}…` : v.prompt}</Meta>}
+                                {v.error && <Meta as="div" style={{ color: "var(--danger-ink)" }}>失敗：{v.error}（已退點）</Meta>}
+                                {canEdit && (
+                                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                                    {v.canSetCurrent && (
+                                      <Button size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion(section.role, v.assetId!)}>
+                                        <Icon name="Check" size={13} /> 設為現用
+                                      </Button>
+                                    )}
+                                    {v.canRefineFrom && (
+                                      <Button size="sm" variant="ghost" onClick={() => useVersionAsBase(v)}>
+                                        <Icon name="Palette" size={13} /> 以這版為底圖
+                                      </Button>
+                                    )}
+                                    {v.canReusePrompt && (
+                                      <Button size="sm" variant="ghost" onClick={() => setPromptDraft(v.prompt!)}>
+                                        <Icon name="Copy" size={13} /> 用這版提示詞
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
                     ))}
-                  </ul>
+                  </div>
                 )}
                 {data?.truncated && <Hint style={{ marginTop: 6 }}>版本很多，這裡只顯示最近 120 版。</Hint>}
               </div>

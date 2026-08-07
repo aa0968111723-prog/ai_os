@@ -63,17 +63,26 @@ export type StoryboardScriptScene = {
 export type StoryboardScriptRow = {
   title: string;
   durationSec: number;
-  prompt?: string | null;
-  voiceover?: string | null;
-  ambience?: string | null;
-  action?: string | null;
-  dialogue?: string | null;
-  music?: string | null;
   /** 這一鏡綁定的角色卡名字（依綁定順序——順序會影響提示詞組裝，比對時不可忽略） */
   characterNames?: string[];
   scenePresetNames?: string[];
   /** 素材卡顯示名（「安倢的紅傘」；formatPropDisplayName 的結果） */
   propNames?: string[];
+} & {
+  /**
+   * 描述型欄位**一律必填**（值可以是 null／undefined，但欄位不能不寫），
+   * 而且直接由 ScriptTextKey 導出——欄位表長出新的一欄，這裡自動跟上。
+   *
+   * 為什麼要逼呼叫端寫出每一個 key：alwaysEmit 的欄位在格式化時一律輸出標籤（即使是空的），
+   * 所以漏傳一欄＝使用者看到的全文裡那一欄是空的；原封不動按下「寫回分鏡」，解析回來是空字串，
+   * 寫回端判定「"" ≠ 原本的值」成立，**那一欄在使用者一個字都沒改的情況下被清光**。
+   * 環境音就這樣被清過一次。format→parse 的來回測試結構上抓不到這種「呼叫端漏傳」
+   * ——兩邊都缺同一欄時 diff 反而顯示「沒有任何變更」——真正擋得住的是這裡的編譯錯誤。
+   *
+   * 卡片三欄（characters／scenePresets／props）刻意不在這裡：它們在列上是 `*Names` 陣列，
+   * 由 scriptRowCardNames 讀，而且 alwaysEmit=false——留白＝維持原值，漏傳不會清空任何東西。
+   */
+  [K in ScriptTextKey]: string | null | undefined;
 };
 
 export const SCRIPT_SCENE_HEADING = "##";
@@ -226,6 +235,17 @@ function unescapeLine(line: string): string {
 }
 
 /**
+ * 標題寫進 `## ` 那一行前先把換行壓成空白。
+ *
+ * scenes.title 在 DB 是 text，沒有任何禁換行的守衛（scenes.update 只管長度，MCP 與 AI 拆分鏡
+ * 只 trim+slice），所以「開場\n（分鏡師版）」是存得進去的。照原樣輸出的話，換行後那半截會被
+ * parse 當成續行吃進畫面描述，標題只剩「開場」——打開全文再原封不動寫回，那半截就永久消失；
+ * 若它剛好長得像結構（`旁白：…` 或 `## …`），整份腳本還會從那一鏡起錯位一格。
+ * 標題本來就是單行語意，這裡壓掉最省事，也一併擋住所有既有髒資料。
+ */
+const flattenTitle = (title: string): string => title.replace(/\r?\n/g, " ");
+
+/**
  * 兩種輸出模式，因為這份文字有兩種用途，而它們的需求相反：
  *
  * - `"edit"`（編輯／複製）：空欄位也印出標籤。**這是防呆的一部分**——呼叫端漏傳某欄時，
@@ -244,7 +264,7 @@ export function formatStoryboardScript(
 ): string {
   return rows
     .map((row, i) => {
-      const lines = [`${SCRIPT_SCENE_HEADING} ${i + 1}. ${row.title} (${row.durationSec}s)`];
+      const lines = [`${SCRIPT_SCENE_HEADING} ${i + 1}. ${flattenTitle(row.title)} (${row.durationSec}s)`];
       for (const field of SCRIPT_FIELDS) {
         const value = field.card
           ? formatCardNames(scriptRowCardNames(row, field.key))
@@ -306,7 +326,11 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
       const v = scene[field.key];
       if (v !== undefined) scene[field.key] = v.trim();
     }
-    if (!scene.title) scene.title = `第 ${scenes.length + 1} 鏡`;
+    // 標題留空＝「這鏡的標題我不想動」，與其餘欄位的「省略＝維持原值」同一套語意（UI 上就是這樣寫的）。
+    // 以前這裡補「第 N 鏡」佔位，等於把使用者沒寫的欄位當成有寫：寫回端的 `scene.title &&` 守衛
+    // 因此成立、原標題被覆蓋；更糟的是 N 取的是文字裡的出現順序，而目標格是照鏡次算的——
+    // 只留 `## 1. A` 與 `## 5.` 時，第 5 鏡會被改名成「第 2 鏡」。
+    // 新增鏡沒有原值可維持，佔位改在 applyScript 的 insert 分支就地補。
     scenes.push(scene);
     current = null;
   };
@@ -385,7 +409,8 @@ function limitErrors(scenes: StoryboardScriptScene[]): string[] {
     return errors; // 已經爆量就不再逐鏡列，錯誤訊息會洗版
   }
   scenes.forEach((scene, i) => {
-    const where = `第 ${i + 1} 鏡「${scene.title.slice(0, 12)}」`;
+    // 標題可以留空（＝維持原值），錯誤訊息裡別出現一對空引號
+    const where = `第 ${i + 1} 鏡「${scene.title.slice(0, 12) || "未命名"}」`;
     if (scene.title.length > SCRIPT_TITLE_MAX) {
       errors.push(`${where}的標題 ${scene.title.length} 字，超過 ${SCRIPT_TITLE_MAX} 字`);
     }
@@ -448,7 +473,9 @@ export type StoryboardScriptDiff = {
 };
 
 function changed(row: StoryboardScriptRow, scene: StoryboardScriptScene): boolean {
-  if (scene.title !== row.title) return true;
+  // `scene.title &&`：與伺服器端 applyScript 的 patch 判斷同一個守衛（標題留空＝維持原值）。
+  // 兩邊少一個就會分岔——預覽說「這鏡沒變」、寫回卻把標題清成空字串。
+  if (scene.title && scene.title !== row.title) return true;
   if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) return true;
   // 同上：逐欄比對表驅動。漏一欄的症狀是「畫面說沒變更，DB 卻被改了」——最難查的那種。
   for (const field of SCRIPT_FIELDS) {

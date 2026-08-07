@@ -2078,6 +2078,16 @@ audio.dm-attach-media { height: 36px; }
   contain-intrinsic-size: auto 88px;
 }
 
+/* 鏡像跟隨期間的兩條例外（class 由 realtime.tsx 的 useCollabMirrorFollow 掛卸）：
+
+   1. scroll-behavior:auto — 壓過上面 html{scroll-behavior:smooth}。跟隨端寫入捲動後會
+      「同一個 tick 內」重量 rect 做殘差校正，平滑捲動會讓它量到動畫中途值，
+      校正變成對著移動中的目標開槍（prefers-reduced-motion 的使用者反而是唯一體感正常的一群）。
+   2. content-visibility:visible — 離屏的 .gen-row 會回報 contain-intrinsic-size 的 88px 假高度，
+      而分鏡格正是最主要的錨點；「已渲染過」與「沒渲染過」在兩台機器上不同，錨點高度就對不上。 */
+html.collab-mirroring { scroll-behavior: auto; }
+html.collab-mirroring .gen-row { content-visibility: visible; }
+
 /* 回饋浮鈕：避開 Home 指示條與拇指熱區。
    展開後是含 textarea 的表單，鍵盤一彈出就會蓋住輸入框與送出鈕——
    底緣要一起抬過 --kb-inset（見 lib/keyboardInset.ts）。 */

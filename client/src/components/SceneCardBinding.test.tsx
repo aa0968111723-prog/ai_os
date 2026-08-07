@@ -47,7 +47,8 @@ describe("SceneCardBinding", () => {
     expect(screen.getByText(/安倢・安倢的紅傘/)).toBeVisible();
   });
 
-  it("勾一張卡會把三組完整送出（後端才知道另外兩組要清成空）", async () => {
+  // 補齊另外兩排等於拿最舊 10 秒前的快照覆寫回去：夥伴剛在同一格綁上的場景卡會被靜默清掉。
+  it("勾一張卡只送動到的那一排（沒送的欄位維持原值，不會蓋掉夥伴剛綁的卡）", async () => {
     const user = userEvent.setup();
     render(<SceneCardBinding projectId="p1" scene={{ id: "s1" }} canEdit onSaved={vi.fn()} />);
 
@@ -58,8 +59,6 @@ describe("SceneCardBinding", () => {
     expect(setCardsMutate.mock.calls[0][0]).toEqual({
       sceneId: "s1",
       characterIds: ["char-1"],
-      scenePresetIds: [],
-      propIds: [],
     });
   });
 

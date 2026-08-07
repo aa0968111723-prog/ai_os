@@ -479,6 +479,18 @@ export function ProjectPage({ id }: { id: string }) {
   // 協作視角：一般（只看 presence／游標）／鏡像跟隨（捲動跟著對方）
   const [collabMode, setCollabMode] = useState<CollabViewMode>("live");
   const [followUserId, setFollowUserId] = useState<string | null>(null);
+  // 跟隨對象離房就退出鏡像。這條規則必須掛在**永遠存在**的這一層，不能只放 CollabModeBar：
+  // 手機把在場面板收起來時整顆 bar 連同它那支同名 effect 一起卸載，此時對方關掉分頁，
+  // followUserId 沒人歸零 → useCollabMirrorFollow 的 cleanup 不跑 → <html> 上的 collab-mirroring
+  // 留到離開頁面為止（全站平滑捲動失效、.gen-row 的離屏最佳化被關掉），
+  // 而取消鏡像的兩個入口（bar 的「退出鏡像」、對方的名字 chip）都已經不在畫面上了。
+  // 只歸零 followUserId、不動 collabMode：與 CollabModeBar 那支同名規則一模一樣的口徑，
+  // bar 還掛著時它會接手挑下一個人跟（既有行為），這裡純粹補上「bar 不在時也要有人做這件事」。
+  useEffect(() => {
+    if (!followUserId) return;
+    if (collab.peers.some((p) => p.userId === followUserId)) return;
+    setFollowUserId(null);
+  }, [followUserId, collab.peers]);
   useCollabMirrorFollow(collabMode, followUserId, collab.cursorsLiveRef, collab.focusZones, collab.containerRef);
   const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
   /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
@@ -2104,6 +2116,14 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* ── 定調 2：角色與場景定裝 ── */}
           <div style={{ display: toneTab === "costume" ? "block" : "none" }}>
+            {/* 定裝是「分鏡改完會不會前後不一致」的源頭——SceneList 的 SceneCardBinding 直接吃這些卡，
+                改一張角色卡就等於同時改了所有綁它的分鏡，而這裡原本是全頁唯一沒有協作訊號的區塊。
+                zone 名字全站唯一（一個 zone 一個 CtxCollapse，比照世界觀／素材庫），
+                鏡像跟隨的 `document.querySelector('[data-collab-zone=…]')` 才不會抓錯人。
+                已知限制：定調的子分頁是 display:none 切換的，看的人得停在同一個子分頁才看得到這個
+                訊號；跟隨端拿到的隱藏元素 rect 全 0，由 useCollabMirrorFollow 的 0-rect 守衛擋掉。
+                要讓訊號在分頁收起時也看得見，得把 zone 狀態接到上面四顆子分頁鈕上——那是另一件事。 */}
+            <CollabZone {...zoneProps(COLLAB_ZONES.cards)}>
             <CtxCollapse
               compact={mobileCompact}
               sectionId="sec-costume"
@@ -2214,6 +2234,7 @@ export function ProjectPage({ id }: { id: string }) {
                 ) : null}
               </div>
             </CtxCollapse>
+            </CollabZone>
           </div>
 
           {/* ── 定調 3：依據與素材（知識庫／資料表／素材庫） ── */}
@@ -2230,7 +2251,10 @@ export function ProjectPage({ id }: { id: string }) {
               open={ctxGroupOpen.sources}
               onOpenChange={(o) => setCtxGroupSectionOpen("sources", o)}
             >
-            {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
+            {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」）。
+                補 collab zone 的理由與素材庫同一條：這裡是 AI 引用的事實來源，
+                兩個人同時整理（一個刪、一個補）會互相蓋掉，而原本連「有人在這裡」都看不到。 */}
+            <CollabZone {...zoneProps(COLLAB_ZONES.knowledge)}>
             <CtxCollapse
               compact={mobileCompact}
               sectionId="sec-knowledge"
@@ -2241,6 +2265,7 @@ export function ProjectPage({ id }: { id: string }) {
             >
               <KnowledgeBase projectId={id} readOnly={!canEdit} />
             </CtxCollapse>
+            </CollabZone>
 
             {/* 專案資料：AI 可引用狀態 + 一鍵建表；手機受控預設收合，桌機維持展開 */}
             <ProjectDatabasesCard
@@ -2365,7 +2390,9 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} />
+              {/* anchorPeers：分鏡格上「誰在改這一格」。zone 層級的「有人在分鏡」不夠用——
+                  這張卡從分鏡列一路到交付中心，說了等於沒說 */}
+              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
             </div>
           </CollabZone>
           {/* 分享連結緊接在打包下載之後：兩者都是「把成果交出去」，只是一個給檔案、一個給連結。

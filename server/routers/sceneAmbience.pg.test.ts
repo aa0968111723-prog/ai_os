@@ -165,7 +165,10 @@ d("逐鏡環境音（真 PostgreSQL）", () => {
     });
     const rows = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, project.id));
     const text = formatStoryboardScript(
-      rows.map((r) => ({ title: r.title, durationSec: r.durationSec, prompt: r.prompt, voiceover: r.voiceover, ambience: r.ambience })),
+      rows.map((r) => ({
+        title: r.title, durationSec: r.durationSec, prompt: r.prompt, action: r.action,
+        voiceover: r.voiceover, dialogue: r.dialogue, ambience: r.ambience, music: r.music,
+      })),
     );
     expect(text).toContain("環境音：遠處鐘聲");
     expect(parseStoryboardScript(text).scenes[0]?.ambience).toBe("遠處鐘聲");
