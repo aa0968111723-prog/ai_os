@@ -328,7 +328,7 @@ function StorageAlertBannerInner() {
           </div>
           {/* 後端原文（掛載點、錯誤碼）：對維運有用，但不該擋在人話前面 */}
           {status.degraded.note && (
-            <Hint as="div" layer="always" style={{ fontSize: "var(--fs-11)", marginTop: 4 }}>
+            <Hint as="div" style={{ fontSize: "var(--fs-11)", marginTop: 4 }}>
               後端診斷：{status.degraded.note}
               {status.degraded.since ? `（自 ${fmtWhen(status.degraded.since)}）` : ""}
             </Hint>

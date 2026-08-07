@@ -640,17 +640,17 @@ export function AgentCard({
               {plan.isPending ? "排程中…" : "幫我排步驟"}
             </ConfirmButton>
             {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && (
-              <Hint as="span" layer="always">目標至少 5 個字</Hint>
+              <Hint as="span">目標至少 5 個字</Hint>
             )}
           </div>
           {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
         </>
       ) : hideComposer ? (
         !runs.isLoading && !runs.error && runList.length === 0 && (
-          <Hint layer="always" role="status">還沒有計畫——在上方寫目標並掛技能，或切到「執行計畫」直接排步驟。</Hint>
+          <Hint role="status">還沒有計畫——在上方寫目標並掛技能，或切到「執行計畫」直接排步驟。</Hint>
         )
       ) : (
-        <Hint layer="always">你在此專案是檢視者（唯讀）——可以看進度，不能發起或核准。</Hint>
+        <Hint>你在此專案是檢視者（唯讀）——可以看進度，不能發起或核准。</Hint>
       )}
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
@@ -678,7 +678,7 @@ export function AgentCard({
               ・待補資訊 {insights.data.unresolvedInformation}・風險 {insights.data.risks}
             </div>
             {Object.values(insights.data.truncated).some(Boolean) && (
-              <Hint layer="always" style={{ margin: 0 }}>
+              <Hint style={{ margin: 0 }}>
                 資料量超過單頁上限；此處顯示最近項目，完整歷史可透過代理事件分頁查詢。
               </Hint>
             )}
@@ -987,9 +987,7 @@ export function AgentCard({
               <details style={{ marginTop: 10 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   可稽核執行軌跡（{runEvents.length}）
-                  {/* 這句是 <summary> 可及名稱的一部分（內容，非說明）。用 Hint 會在精簡模式
-                      塞一顆「？」按鈕進 <summary> 裡——按鈕點擊會冒泡去開合 details，
-                      說明永遠展不開，且 summary 本身就是互動元素，巢狀按鈕直接壞掉。 */}
+                  {/* 這句是 <summary> 可及名稱的一部分（內容，非說明），所以用 Meta 不用 Hint。 */}
                   <Meta style={{ marginLeft: 8 }}>顯示來源、動作、等待與結果，不顯示私密思考</Meta>
                 </summary>
                 <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
@@ -1032,7 +1030,7 @@ export function AgentCard({
                 {!canApprove && !canControl && (
                   <Meta>等發起人或組長過目</Meta>
                 )}
-                <Hint as="span" layer="always">過目前不扣點</Hint>
+                <Hint as="span">過目前不扣點</Hint>
               </div>
             )}
             {r.status === "failed" && r.error && <Meta as="p" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</Meta>}

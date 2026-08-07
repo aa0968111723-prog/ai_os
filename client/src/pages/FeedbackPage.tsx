@@ -105,7 +105,7 @@ function FeedbackForm({
         badge={`已回答 ${rated}/${ITEMS.length}`}
         description={<>依直覺選 1 到 5 分；沒用到的功能可以留空，再點同一分數即可取消。</>}
       />
-      {hasExisting && <Hint layer="always">你之前填過——直接修改後重新送出即可。</Hint>}
+      {hasExisting && <Hint>你之前填過——直接修改後重新送出即可。</Hint>}
       <Card>
         {ITEMS.map((item) => (
           <RatingRow key={item.key} item={item} value={scores[item.key]} onSet={setScore} />
@@ -129,7 +129,7 @@ function FeedbackForm({
           >
             {submit.isPending ? "送出中…" : hasExisting ? "更新回饋" : "送出回饋"}
           </button>
-          <Hint as="span" layer="always">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</Hint>
+          <Hint as="span">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</Hint>
         </div>
         {submit.error && <p className="error" role="alert">送出失敗，請稍後再試</p>}
       </Card>

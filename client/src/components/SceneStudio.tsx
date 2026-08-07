@@ -369,9 +369,9 @@ export function SceneStudio({
             {tab === "refine" && (
               <div role="tabpanel" id={`studio-panel-refine-${sceneId}`} aria-labelledby={`studio-tab-refine-${sceneId}`}>
                 {!canEdit ? (
-                  <Hint layer="always">你是檢視者，只能回看版本，不能修改這一格。</Hint>
+                  <Hint>你是檢視者，只能回看版本，不能修改這一格。</Hint>
                 ) : !baseUsable ? (
-                  <Hint layer="always">
+                  <Hint>
                     這一格還沒有可以當底圖的圖片。先用「重畫這格」出第一版，或在「版本」挑一版圖片當底圖（影片版本不能拿來修圖）。
                   </Hint>
                 ) : (
@@ -469,7 +469,7 @@ export function SceneStudio({
             {tab === "regen" && (
               <div role="tabpanel" id={`studio-panel-regen-${sceneId}`} aria-labelledby={`studio-tab-regen-${sceneId}`}>
                 {!canEdit ? (
-                  <Hint layer="always">你是檢視者，只能回看版本，不能修改這一格。</Hint>
+                  <Hint>你是檢視者，只能回看版本，不能修改這一格。</Hint>
                 ) : (
                   <>
                     <label htmlFor={`studio-regen-model-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
@@ -487,8 +487,8 @@ export function SceneStudio({
                       ))}
                     </select>
                     {regenModel && <Meta as="div">{regenModel.strengths}</Meta>}
-                    {prompt.trim() === "" && <Hint layer="always">先在上面寫這一格的提示詞才能重畫。</Hint>}
-                    {promptDirty && <Hint layer="always">提示詞還沒儲存——先按「儲存提示詞」，重畫才會用新的。</Hint>}
+                    {prompt.trim() === "" && <Hint>先在上面寫這一格的提示詞才能重畫。</Hint>}
+                    {promptDirty && <Hint>提示詞還沒儲存——先按「儲存提示詞」，重畫才會用新的。</Hint>}
                     <div style={{ marginTop: 8 }}>
                       {isGenerating || regen.isPending ? (
                         <Button variant="primary" disabled>生成中…</Button>
@@ -524,7 +524,7 @@ export function SceneStudio({
             {tab === "voice" && (
               <div role="tabpanel" id={`studio-panel-voice-${sceneId}`} aria-labelledby={`studio-tab-voice-${sceneId}`}>
                 {!canEdit ? (
-                  <Hint layer="always">你是檢視者，只能試聽旁白，不能修改配音詞。</Hint>
+                  <Hint>你是檢視者，只能試聽旁白，不能修改配音詞。</Hint>
                 ) : (
                   <>
                     <label htmlFor={`studio-voiceover-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
@@ -547,9 +547,9 @@ export function SceneStudio({
                       </Button>
                       {voiceDirty ? <Meta>尚未儲存</Meta> : saveVoice.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
                     </div>
-                    {savedVoiceover.trim() === "" && <Hint layer="always">先填配音詞並儲存，才能生成旁白。</Hint>}
+                    {savedVoiceover.trim() === "" && <Hint>先填配音詞並儲存，才能生成旁白。</Hint>}
                     {voiceDirty && savedVoiceover.trim() !== "" && (
-                      <Hint layer="always">配音詞還沒儲存——先按「儲存配音詞」，生成才會用新的稿。</Hint>
+                      <Hint>配音詞還沒儲存——先按「儲存配音詞」，生成才會用新的稿。</Hint>
                     )}
                     <div style={{ marginTop: 8 }}>
                       {isVoicing ? (
@@ -604,7 +604,7 @@ export function SceneStudio({
             {tab === "ambience" && (
               <div role="tabpanel" id={`studio-panel-ambience-${sceneId}`} aria-labelledby={`studio-tab-ambience-${sceneId}`}>
                 {!canEdit ? (
-                  <Hint layer="always">你是檢視者，只能試聽環境音，不能修改描述。</Hint>
+                  <Hint>你是檢視者，只能試聽環境音，不能修改描述。</Hint>
                 ) : (
                   <>
                     <label htmlFor={`studio-ambience-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
@@ -627,9 +627,9 @@ export function SceneStudio({
                       </Button>
                       {ambienceDirty ? <Meta>尚未儲存</Meta> : saveAmbience.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
                     </div>
-                    {savedAmbience.trim() === "" && <Hint layer="always">先填環境音描述並儲存，才能生成。</Hint>}
+                    {savedAmbience.trim() === "" && <Hint>先填環境音描述並儲存，才能生成。</Hint>}
                     {ambienceDirty && savedAmbience.trim() !== "" && (
-                      <Hint layer="always">描述還沒儲存——先按「儲存描述」，生成才會用新的。</Hint>
+                      <Hint>描述還沒儲存——先按「儲存描述」，生成才會用新的。</Hint>
                     )}
                     <div style={{ marginTop: 8 }}>
                       {isAmbiencing ? (

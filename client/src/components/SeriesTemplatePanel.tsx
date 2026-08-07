@@ -87,7 +87,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
         {template.purpose}固定骨架不動，每集只填 4 格。
       </Meta>
 
-      {overview.isLoading && <Hint layer="always">載入中…</Hint>}
+      {overview.isLoading && <Hint>載入中…</Hint>}
 
       {/* 還沒有母版：先建骨架（組長），組員只會看到「請組長先建立」 */}
       {!overview.isLoading && !master && (
@@ -100,12 +100,12 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
               >
                 {createMaster.isPending ? "建立中…" : `建立母版「${masterTitle(template)}」`}
               </Button>
-              <Hint layer="always" style={{ marginTop: 6 }}>
+              <Hint style={{ marginTop: 6 }}>
                 只做一次：會建一個寫死規格的母版專案（規格筆記＋5 段分鏡空殼），不花點數。
               </Hint>
             </>
           ) : (
-            <Hint layer="always">這個組還沒有「{masterTitle(template)}」——請組長先建立母版，才能開每一集。</Hint>
+            <Hint>這個組還沒有「{masterTitle(template)}」——請組長先建立母版，才能開每一集。</Hint>
           )}
           {createMaster.error && <p className="error" role="alert">{createMaster.error.message}</p>}
         </div>
@@ -148,7 +148,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
                   )}
                 </div>
               ))}
-              <Hint layer="always">
+              <Hint>
                 其餘（{template.totalSec} 秒、{template.aspect}、5 段結構、禁忌與交付）全部跟母版，不要自己改。
                 沒有原句或禁忌請明寫「無」。
               </Hint>

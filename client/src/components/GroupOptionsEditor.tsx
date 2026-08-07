@@ -117,7 +117,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
             <Hint style={{ marginTop: 2 }}>{meta.hint}</Hint>
 
             {rows.length === 0 ? (
-              <Hint layer="always" style={{ marginTop: 8 }}>還沒有選項——用下面的欄位加一個。</Hint>
+              <Hint style={{ marginTop: 8 }}>還沒有選項——用下面的欄位加一個。</Hint>
             ) : (
               <div style={{ marginTop: 8 }}>
                 {visible.map((o, i) => (
@@ -300,7 +300,7 @@ function AddRow({ groupId, type, onRefresh }: { groupId: string; type: OptionTyp
       {/* 平台要挑畫面尺寸：改用等比例小圖，模型支援的比例全都在（原本只有三個數字下拉） */}
       {meta.hasFormat && (
         <div style={{ marginTop: 8 }}>
-          <Hint layer="always" id={`add-format-${type}`} style={{ marginTop: 0, fontWeight: 600 }}>畫面尺寸</Hint>
+          <Hint id={`add-format-${type}`} style={{ marginTop: 0, fontWeight: 600 }}>畫面尺寸</Hint>
           <FormatPicker
             value={format}
             onChange={(f) => setFormat(f)}

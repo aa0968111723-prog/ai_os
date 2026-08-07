@@ -13,7 +13,7 @@ const U = {
 
 function auth(over: Partial<AuthState> = {}): AuthState {
   return {
-    user: { id: U.me, name: "我", email: "me@x", isSuperAdmin: false, mustChangePassword: false, uiDensity: null },
+    user: { id: U.me, name: "我", email: "me@x", isSuperAdmin: false, mustChangePassword: false },
     groups: [{ groupId: U.groupA, groupName: "A", teamId: U.team1, teamName: "T1", role: "member" }],
     adminTeamIds: [],
     ...over,

@@ -196,7 +196,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
           aria-label="組內在線"
           style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, alignItems: "center" }}
         >
-          <Hint as="span" layer="always" style={{ margin: 0, fontSize: 12 }}>
+          <Hint as="span" style={{ margin: 0, fontSize: 12 }}>
             組內在線
           </Hint>
           {collab.peers.map((p) => (
@@ -442,7 +442,7 @@ function CreateTableCard({
           <ImportResultView result={finished.result} />
         ) : importSeed ? (
           <>
-            <Hint layer="always" style={{ color: "var(--danger-ink, #a33)" }}>
+            <Hint style={{ color: "var(--danger-ink, #a33)" }}>
               欄位已建好，但尚未收到匯入結果。可用相同安全重試鍵再確認一次，不會重複新增資料。
             </Hint>
             <Button size="sm"
@@ -539,7 +539,7 @@ function CreateTableCard({
         </button>
         <button onClick={onCancel}>取消</button>
       </div>
-      {importSeed && <Hint layer="always" style={{ marginTop: 6 }}>已備妥 {Object.keys(importSeed.headerMap).length} 欄的匯入資料——按「建立並匯入」會一併把列資料灌進新資料庫。</Hint>}
+      {importSeed && <Hint style={{ marginTop: 6 }}>已備妥 {Object.keys(importSeed.headerMap).length} 欄的匯入資料——按「建立並匯入」會一併把列資料灌進新資料庫。</Hint>}
       {(create.error || importData.error) && <p className="error" role="alert">{create.error?.message ?? importData.error?.message}</p>}
     </Card>
   );
@@ -721,7 +721,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       {editStructure && table.access.canManage && (
         <div style={{ margin: "12px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
           <FieldsEditor fields={draftFields} onChange={setDraftFields} />
-          <Hint layer="always" style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</Hint>
+          <Hint style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="primary" size="sm" disabled={updateTable.isPending} onClick={() => updateTable.mutate({ id: table.id, fields: draftFields.map((f) => ({ ...f, label: f.label.trim() })) })}>
               {updateTable.isPending ? "儲存中…" : "儲存欄位"}
@@ -821,7 +821,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
               ))}
             </tbody>
           </table>
-          {rows.data && rows.data.rows.length === 0 && <Hint layer="always" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</Hint>}
+          {rows.data && rows.data.rows.length === 0 && <Hint style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</Hint>}
         </div>
         {mutationError && <p className="error" role="alert">{mutationError}</p>}
       </div>
@@ -1034,7 +1034,7 @@ function ConnectPanel({ table }: { table: TableSummary }) {
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
       </summary>
       <div style={{ marginTop: 10, display: "grid", gap: 12, fontSize: 13 }}>
-        <Hint layer="always" style={{ margin: 0 }}>
+        <Hint style={{ margin: 0 }}>
           用你的<Link href="/help">個人連線金鑰</Link>（在「怎麼用」頁建立，可隨時撤銷）就能從外部連這個資料庫，權限跟你在網頁上一樣。
           反方向——讓本系統去抓「你自己的」Google 雲端／Notion／外部資料庫，到<Link href="/integrations">連接的資料來源</Link>設定。
         </Hint>
@@ -1292,9 +1292,8 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
         Google／Notion 私有連結：到<Link href="/integrations">連接的資料來源</Link>連結你自己的 Google 帳戶或 Notion token，
         之後貼私有連結就能直接匯入（公開連結照舊可用）。
       </Hint>
-      {/* 這句同時帶著「每張扣多少點」與「AI 讀得到什麼」——精簡模式的契約
-          （shared/uiDensity.ts）寫明扣點與權限資訊不隨熟練度消失，故 always。 */}
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      {/* 這句同時帶著「每張扣多少點」與「AI 讀得到什麼」——兩者都是不看到就會做錯決定的資訊。 */}
+      <Hint style={{ marginTop: 4 }}>
         文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
         團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。
       </Hint>
@@ -1366,7 +1365,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
       )}
       {sentMsg && <Meta as="p" style={{ color: "var(--success-ink)" }}>{sentMsg}</Meta>}
 
-      {allFiles.length === 0 && list.data && <Hint layer="always" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</Hint>}
+      {allFiles.length === 0 && list.data && <Hint style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</Hint>}
       {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<Button size="sm" onClick={() => setCatFilter(null)}>顯示全部</Button></p>}
       {files.map((f) => {
         const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;

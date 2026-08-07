@@ -91,7 +91,7 @@ export function SharedProjectPage({ token }: { token: string }) {
         <Card style={{ width: 420, maxWidth: "92vw" }}>
           <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>這個分享連結打不開</h1>
           <p className="error" role="alert">{view.error?.message ?? "分享連結無效"}</p>
-          <Hint layer="always">連結由專案成員產生，可能已被收回或設有期限——請向分享給你的人索取新連結。</Hint>
+          <Hint>連結由專案成員產生，可能已被收回或設有期限——請向分享給你的人索取新連結。</Hint>
         </Card>
       </div>
     );
@@ -125,7 +125,7 @@ export function SharedProjectPage({ token }: { token: string }) {
             style={{ width: "100%", maxHeight: 280, objectFit: "cover", borderRadius: 10, marginTop: 14 }}
           />
         )}
-        <Hint layer="always" style={{ marginTop: 12 }}>
+        <Hint style={{ marginTop: 12 }}>
           這是分享連結的唯讀畫面：看得到內容，但不能編輯，也不會動到專案。
         </Hint>
       </Card>

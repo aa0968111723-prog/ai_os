@@ -184,7 +184,7 @@ export function AiHub({
             {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
             {running === 0 && awaiting === 0 && <Meta>目前沒有進行中的計畫</Meta>}
           </summary>
-          <Hint layer="always" style={{ margin: "8px 0 0" }}>
+          <Hint style={{ margin: "8px 0 0" }}>
             AI 會把多步驟目標整理成可檢查的計畫；核准後由伺服器背景逐步執行，關閉頁面也不會中斷，實際扣點仍經過既有守門。
           </Hint>
           <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />

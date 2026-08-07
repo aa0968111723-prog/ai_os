@@ -34,7 +34,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
   return (
     <Card as="section" data-fb="成本審核門檻卡" style={{ marginBottom: 16 }}>
       <h2>成本審核門檻</h2>
-      <Hint layer="always">組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</Hint>
+      <Hint>組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</Hint>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <label className="hint" htmlFor={`approval-threshold-${groupId}`} style={{ margin: 0 }}>門檻點數</label>
         {usage.isLoading ? (
@@ -147,7 +147,7 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
   return (
     <Card as="section" data-fb="點數分配卡" style={{ marginBottom: 16 }}>
       <h2>點數分配</h2>
-      <Hint layer="always">把「組預算」分給各組員（累計上限，非每週重置）；空白＝不限。組預算由團隊管理員分配給你這個組。</Hint>
+      <Hint>把「組預算」分給各組員（累計上限，非每週重置）；空白＝不限。組預算由團隊管理員分配給你這個組。</Hint>
       {usage.isLoading ? (
         <span className="skeleton" style={{ display: "block", height: 40, borderRadius: "var(--r-12)", marginTop: 8 }} aria-hidden="true" />
       ) : usage.error ? (
@@ -169,7 +169,7 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
             <Meta as="div" style={{ marginTop: 4 }}>這個組沒有設定累計組預算（不限）——仍可為個別組員設個人累計上限。</Meta>
           )}
           {unallocated != null && unallocated < 0 && (
-            <Hint layer="always" style={{ color: "var(--danger-ink)", marginTop: 4 }}>
+            <Hint style={{ color: "var(--danger-ink)", marginTop: 4 }}>
               分配給組員的總和已超過組預算——組員各自的個人上限仍有效，但整組仍受組預算擋著，請斟酌調整。
             </Hint>
           )}

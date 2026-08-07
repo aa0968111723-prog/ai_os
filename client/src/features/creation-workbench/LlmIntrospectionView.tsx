@@ -43,7 +43,7 @@ export function LlmIntrospectionView({ introspection }: { introspection?: LlmInt
       ) : null}
 
       {logprobsUnsupported ? (
-        <Hint as="p" layer="always" style={{ margin: "6px 0 0" }}>
+        <Hint as="p" style={{ margin: "6px 0 0" }}>
           這顆模型不提供逐 token 信心值，已改用不帶 logprobs 的方式完成檢查。
         </Hint>
       ) : null}
@@ -51,7 +51,7 @@ export function LlmIntrospectionView({ introspection }: { introspection?: LlmInt
       {disclosedReasoning ? (
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>供應商回傳的推理摘要</summary>
-          <Hint layer="always" style={{ marginTop: 6 }}>
+          <Hint style={{ marginTop: 6 }}>
             這是供應商在 API 欄位裡主動回傳的文字，站內原樣顯示、不改寫。
             它不等於模型真實的內部思考，也不保證與最終結論一致。
           </Hint>

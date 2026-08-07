@@ -195,7 +195,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
           aria-label="組內在線"
           style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, alignItems: "center" }}
         >
-          <Hint as="span" layer="always" style={{ margin: 0, fontSize: 12 }}>組內在線</Hint>
+          <Hint as="span" style={{ margin: 0, fontSize: 12 }}>組內在線</Hint>
           {collab.peers.map((p) => (
             <Chip
               key={p.userId}
@@ -284,7 +284,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
     return (
       <>
         {icsFallback}
-        <Hint as="span" layer="always" style={{ margin: 0 }}>
+        <Hint as="span" style={{ margin: 0 }}>
           系統尚未設定 Google 日曆連線，目前不會自動同步；請下載 .ics 匯入個人日曆，內容更新後需重新下載
         </Hint>
       </>
@@ -586,7 +586,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         {compact && (
           <Button variant="ghost" style={{ flex: "none" }} onClick={() => setCreateOpen(false)}>收合</Button>
         )}
-        {addDisabledReason && <Hint as="span" layer="always" style={{ alignSelf: "center" }}>{addDisabledReason}</Hint>}
+        {addDisabledReason && <Hint as="span" style={{ alignSelf: "center" }}>{addDisabledReason}</Hint>}
       </div>
       )}
       {/* 結束早於開始屬輸入錯誤：用 .error 樣式即時顯示，別讓人當成普通提示忽略 */}

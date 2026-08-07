@@ -66,7 +66,7 @@ export function AblationPanel({
   return (
     <details data-testid="ablation-panel" style={{ marginTop: 12 }}>
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>實測：這一段到底有沒有影響？</summary>
-      <Hint layer="always" style={{ marginTop: 6 }}>
+      <Hint style={{ marginTop: 6 }}>
         送出「完整版」與「各拿掉一段」的版本，用結果差異量出每一段真正的影響力。
         模型不會回傳注意力權重，這是拿不到內部權重時的實測替代做法。
       </Hint>
@@ -90,7 +90,7 @@ export function AblationPanel({
         共 {runCount} 輪（含基準）
         {totalPoints != null ? `・約 ${totalPoints} 點（每輪 ${pointsPerRun} 點）` : ""}
       </Meta>
-      <Hint as="p" layer="always" style={{ margin: "4px 0 0", color: seedPinned ? undefined : "var(--gold-ink)" }}>
+      <Hint as="p" style={{ margin: "4px 0 0", color: seedPinned ? undefined : "var(--gold-ink)" }}>
         {seedPinned
           ? "這顆模型可固定隨機噪聲：各輪共用同一顆 seed，差異才歸因得到被拿掉的那一段。"
           : "這顆模型固定不了隨機噪聲：各輪的差異裡混著噪聲，結果只能當參考，不要據此直接刪掉設定。"}

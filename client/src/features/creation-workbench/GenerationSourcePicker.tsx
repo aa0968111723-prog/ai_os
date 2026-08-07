@@ -107,7 +107,7 @@ export function GenerationSourcePicker({
 
   return (
     <div role="group" aria-label="來源檔案" style={{ display: "grid", gap: 8 }}>
-      <Hint layer="always" style={{ margin: 0 }}>
+      <Hint style={{ margin: 0 }}>
         需要：{sourceHint || sourceKindLabel(needs)}。可直接上傳，或從素材庫／雲端網址擇一。
       </Hint>
 

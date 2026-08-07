@@ -172,7 +172,7 @@ export function ProactiveModelConverter({
         </Meta>
       ) : (
         <>
-          <Hint as="p" layer="always" style={{ margin: "5px 0 10px" }}>
+          <Hint as="p" style={{ margin: "5px 0 10px" }}>
             這份結果由已驗證模型目錄與情境規則產生，不等待外部 AI；輸入改變時會立即重算。
             不需要的卡可按「略過」；整組可「收合」。皆只帶入草稿，不送出、不扣點。
           </Hint>

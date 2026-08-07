@@ -225,13 +225,13 @@ export function AiUnderstandingPanel({
             <span style={{ flex: 1 }} />
             <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>收合</Button>
           </div>
-          <Hint layer="always" style={{ marginTop: 6 }}>
+          <Hint style={{ marginTop: 6 }}>
             這裡顯示系統真正整理、送出與收到的資料。供應商主動揭露的推理摘要會標明來源原樣呈現；
             未揭露的私密思維鏈與注意力權重不會被保存，也不會假裝呈現。
           </Hint>
 
           {previewPending ? <Meta as="p">正在整理預覽…</Meta> : null}
-          {displayedPreviewError ? <Hint as="p" layer="always">{displayedPreviewError}</Hint> : null}
+          {displayedPreviewError ? <Hint as="p">{displayedPreviewError}</Hint> : null}
           {preview ? (
             <>
               {/* 圖解檢視把 provider／模型／點數收進流程終點，避免同一組資訊重複兩次 */}
@@ -356,7 +356,7 @@ export function AiUnderstandingPanel({
                 </Card>
               ) : null}
               {review.error ? (
-                <Hint as="p" layer="always" style={{ color: "var(--gold-ink)" }}>
+                <Hint as="p" style={{ color: "var(--gold-ink)" }}>
                   雲端 AI 檢查目前無法連線；上方由系統組裝的模型、提示詞與參數仍可直接使用，不必重新提問。
                 </Hint>
               ) : null}

@@ -92,7 +92,7 @@ export function CommandLevelField({ groupId, userId, level, isSelf, onSaved }: {
         </select>
         {setLevel.isPending && <Meta>儲存中…</Meta>}
       </div>
-      <Hint layer="always" style={{ margin: 0, fontSize: 11 }}>{describeCommandLevel(shown)}</Hint>
+      <Hint style={{ margin: 0, fontSize: 11 }}>{describeCommandLevel(shown)}</Hint>
       {/* role="alert" 才會被朗讀出來（比照通訊錄載入失敗那句）：這行字是「權限沒改成功」的唯一證據 */}
       {setLevel.error && (
         <span id={`${fieldId}-error`} className="error" role="alert" style={{ marginTop: 0, fontSize: 11 }}>
@@ -226,18 +226,18 @@ export function MembersPage() {
       ) : dir.error ? (
         // 尚無可見組別（如剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤，給中性提示
         dir.error.data?.code === "FORBIDDEN" ? (
-          <Hint layer="always">還沒有你能看到的組別成員。先到「團隊管理」建立組別、把夥伴加進來，這裡就會出現。</Hint>
+          <Hint>還沒有你能看到的組別成員。先到「團隊管理」建立組別、把夥伴加進來，這裡就會出現。</Hint>
         ) : (
           <p className="error" role="alert">通訊錄載入失敗：{dir.error.message}</p>
         )
       ) : members.length === 0 ? (
-        <Hint layer="always">{debouncedQ.trim() || groupId ? "沒有符合條件的成員。" : "還沒有成員。"}</Hint>
+        <Hint>{debouncedQ.trim() || groupId ? "沒有符合條件的成員。" : "還沒有成員。"}</Hint>
       ) : (
         <>
           <Meta as="p" style={{ marginBottom: 8 }}>共 {members.length} 位</Meta>
           {/* 沒聚焦到單一組時，指揮權設定不會出現——講清楚怎麼叫出來，否則組長會以為這裡根本沒有這個設定 */}
           {!focusGroupId && manageableGroupIds.length > 1 && (
-            <Hint layer="always" style={{ marginBottom: 8 }}>
+            <Hint style={{ marginBottom: 8 }}>
               先在上方選一個組別，就能在每位組員底下直接調整他的「組代理指揮權」。
             </Hint>
           )}

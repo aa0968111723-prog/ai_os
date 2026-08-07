@@ -2,7 +2,6 @@ import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, authedProcedure } from "../trpc";
-import { uiDensitySchema } from "@shared/uiDensity";
 import { db, schema } from "../db";
 import type { Request } from "express";
 import {
@@ -311,15 +310,6 @@ export const authRouter = router({
       setDeviceCookie(ctx.res, issued.device.token);
       console.log(`[audit] deviceTrust 新裝置通過驗證：user=${user.id} device=${issued.device.deviceId}`);
       return okLogin(await loadAuthState(user.id));
-    }),
-
-  /** 介面密度偏好上行（P1c）：本機 localStorage 仍是即時來源，這裡只負責
-   *  跨裝置帶著走——下行採用發生在登入後第一次拿到 me 時（見 AppShell）。 */
-  setUiDensity: authedProcedure
-    .input(z.object({ density: uiDensitySchema }))
-    .mutation(async ({ ctx, input }) => {
-      await db.update(schema.users).set({ uiDensity: input.density }).where(eq(schema.users.id, ctx.auth.user.id));
-      return { ok: true as const };
     }),
 
   /** 上傳/設定個人頭像 */

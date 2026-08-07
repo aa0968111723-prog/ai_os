@@ -5,12 +5,10 @@ import {
   Button,
   Card,
   Chip,
-  DensityProvider,
   EmptyState,
   Hint,
   Pill,
   Skeleton,
-  type Density,
 } from "./components/ui";
 import "./styles.css";
 import { Icon, ICON_NAMES } from "./components/Icon";
@@ -24,8 +22,6 @@ import { Icon, ICON_NAMES } from "./components/Icon";
  * 用途有二：
  * 1. 在真實 styles.css 底下逐一檢視 primitives，作為每階段的瀏覽器驗證基準。
  * 2. 作為 Figma Library 的視覺依據——Figma 端的元件要對著這頁做，而不是對著想像做。
- *
- * 兩種密度並排呈現，讓「引導／精簡」的差異一眼可見。
  */
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -64,7 +60,7 @@ function Gallery() {
       <h1 style={{ fontFamily: "var(--serif)", fontSize: "var(--fs-32)", margin: "0 0 8px" }}>
         Primitives Gallery
       </h1>
-      <Hint layer="always">
+      <Hint>
         client/src/components/ui 的全部元件。輸出的 class 與遷移前逐字相同，故換上元件不改變任何畫面。
       </Hint>
 
@@ -109,19 +105,19 @@ function Gallery() {
         <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
           <Card variant="primary">
             <h2>主卡 card--primary</h2>
-            <Hint layer="always">左緣主色條、較寬內距。用於一頁的主角區塊。</Hint>
+            <Hint>左緣主色條、較寬內距。用於一頁的主角區塊。</Hint>
           </Card>
           <Card>
             <h3 style={{ margin: "0 0 6px" }}>一般卡 card</h3>
-            <Hint layer="always">象牙紙表面，兩層暖陰影。</Hint>
+            <Hint>象牙紙表面，兩層暖陰影。</Hint>
           </Card>
           <Card variant="std">
             <h3 style={{ margin: "0 0 6px" }}>次要卡 card--std</h3>
-            <Hint layer="always">低一階陰影，用於列表項。</Hint>
+            <Hint>低一階陰影，用於列表項。</Hint>
           </Card>
           <Card as="details" variant="quiet">
             <summary>可收合區 card--quiet</summary>
-            <Hint layer="always">透明底髮絲框；展開後才浮起成卡面。</Hint>
+            <Hint>透明底髮絲框；展開後才浮起成卡面。</Hint>
           </Card>
         </div>
       </Group>
@@ -165,17 +161,17 @@ function Gallery() {
         </Row>
       </Group>
 
-      <Group title="Hint — 新手／專家分層（本頁的重點）">
-        <Row label='layer="guide"（預設）'>
+      <Group title="Hint — 說明小字（全站統一常駐）">
+        <Row label="操作說明">
           <div style={{ maxWidth: 420 }}>
             <Hint>選好風格後，之後每次生成都會自動帶入這個語氣與畫風。</Hint>
             <Hint>分鏡助理會先讀知識庫，再把腳本拆成一鏡一鏡。</Hint>
           </div>
         </Row>
-        <Row label='layer="always"'>
+        <Row label="代價與修法">
           <div style={{ maxWidth: 420 }}>
-            <Hint layer="always">本次將扣 12 點，執行後不退。</Hint>
-            <Hint layer="always">Email 格式不對，請確認是否少了 @。</Hint>
+            <Hint>本次將扣 12 點，執行後不退。</Hint>
+            <Hint>Email 格式不對，請確認是否少了 @。</Hint>
           </div>
         </Row>
       </Group>
@@ -191,33 +187,8 @@ function Gallery() {
   );
 }
 
-function DensityColumn({ density, label }: { density: Density; label: string }) {
-  return (
-    <div style={{ flex: "1 1 480px", minWidth: 0 }}>
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 1,
-          background: "var(--popover)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--r-8)",
-          padding: "8px 14px",
-          marginBottom: 8,
-        }}
-      >
-        <strong style={{ fontSize: "var(--fs-13)" }}>{label}</strong>
-      </div>
-      <DensityProvider value={density}>
-        <Gallery />
-      </DensityProvider>
-    </div>
-  );
-}
-
 /**
- * 圖示目錄。放在密度雙欄**之外**只渲染一次——圖示不隨密度變化，
- * 並排兩份只是雜訊。
+ * 圖示目錄。
  *
  * 存在理由：58 個圖示原本埋在一個 480 行的 Icon.tsx 裡，要用的人不知道
  * 有哪些可選，於是不是重複內嵌 SVG，就是退回用 emoji。名單由 ICON_NAMES
@@ -230,7 +201,7 @@ function IconCatalogue() {
       <div className="group-head">
         <span className="eyebrow cjk">Icon — 可用圖示 {names.length} 個</span>
       </div>
-      <Hint layer="always">
+      <Hint>
         寫 <code style={{ fontFamily: "var(--mono)" }}>&lt;Icon name="Search" /&gt;</code>。
         要新增請跑 <code style={{ fontFamily: "var(--mono)" }}>npm run icons:add -- Waypoints</code>，
         不要手抄 SVG 路徑——抄錯不會有測試抓得到。
@@ -291,9 +262,8 @@ holder.__aiosGalleryRoot ??= createRoot(container);
 
 holder.__aiosGalleryRoot.render(
   <StrictMode>
-    <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", padding: "0 16px" }}>
-      <DensityColumn density="guide" label="引導模式 guide（新手預設）" />
-      <DensityColumn density="concise" label="精簡模式 concise（熟手）" />
+    <div style={{ padding: "0 16px" }}>
+      <Gallery />
     </div>
     <div style={{ padding: "0 16px" }}>
       <IconCatalogue />

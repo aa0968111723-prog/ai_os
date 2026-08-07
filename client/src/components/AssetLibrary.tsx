@@ -394,7 +394,7 @@ export function AssetLibrary({
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
           <div data-fb="素材工具列" style={{ margin: "12px 0 4px", display: "flex", flexDirection: "column", gap: 8 }}>
             {revisionOfId && (
-              <Hint layer="always" role="status" style={{ margin: 0, fontSize: 13 }}>
+              <Hint role="status" style={{ margin: 0, fontSize: 13 }}>
                 只顯示「{revisionParentTitle ?? "此素材"}」的直接編輯版本
                 <button
                   type="button"
@@ -494,7 +494,7 @@ export function AssetLibrary({
           </div>
 
           {shown.length === 0 ? (
-            <Hint layer="always" style={{ marginTop: 10 }}>
+            <Hint style={{ marginTop: 10 }}>
               沒有符合條件的素材——換個種類或清掉搜尋字。
               <span
                 role="button"
@@ -803,7 +803,7 @@ export function AssetLibrary({
                                   <Icon name="Download" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
                                 </a>
                               )}
-                              <Hint as="div" layer="always" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
+                              <Hint as="div" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
                                 下載後本機開啟；Aios 桌面版可自動回傳編輯結果
                               </Hint>
                               <div className="menu-sep" />

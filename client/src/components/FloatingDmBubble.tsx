@@ -139,7 +139,7 @@ export function FloatingDmBubble() {
             </Meta>
           ) : recent.length === 0 ? (
             <div style={{ padding: 16 }}>
-              <Hint layer="always" style={{ margin: 0 }}>
+              <Hint style={{ margin: 0 }}>
                 還沒有對話——到私訊頁發起新對話。
               </Hint>
               <Button

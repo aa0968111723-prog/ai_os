@@ -29,7 +29,7 @@ export function AppUpdateBanner() {
       <span className="app-update-banner__signal" aria-hidden>↑</span>
       <div className="app-update-banner__copy">
         <strong>新版已準備好</strong>
-        <Hint layer="always" className="app-update-banner__detail">
+        <Hint className="app-update-banner__detail">
           更新後會重新載入目前頁面。尚未送出的文字請先確認已儲存。
         </Hint>
       </div>

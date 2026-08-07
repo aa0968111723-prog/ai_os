@@ -132,7 +132,7 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
           }}
         />
       )}
-      <Hint as="span" layer="always">空=跟全域・0=不限</Hint>
+      <Hint as="span">空=跟全域・0=不限</Hint>
       {setGroupQuota.error && <span className="error" style={{ marginTop: 0 }}>{setGroupQuota.error.message}</span>}
       {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
     </div>
@@ -373,7 +373,7 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
             <b style={{ fontFamily: "var(--mono)", fontSize: 15, letterSpacing: 1 }}>{tempPassword}</b>
             <CopyButton text={tempPassword} />
           </div>
-          <Hint layer="always" style={{ marginTop: 4 }}>
+          <Hint style={{ marginTop: 4 }}>
             請把密碼傳給 {member.name} 本人；他用這組密碼登入後，可從頂欄「改密碼」換成自己的密碼。
           </Hint>
         </div>
@@ -415,7 +415,7 @@ const AGENT_ACCESS_LABEL: Record<string, string> = {
 /** 資料庫清單（組資料庫／團隊資料庫共用）：名稱＋列/文件/欄位數＋寫入與 AI 存取設定＋建立者 */
 function DatabaseList({ databases }: { databases: GroupDetail["databases"] }) {
   if (databases.length === 0) {
-    return <Hint layer="always" style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</Hint>;
+    return <Hint style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</Hint>;
   }
   return (
     <div style={{ marginTop: 4 }}>
@@ -545,7 +545,7 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
       ) : detail.data ? (
         <>
           {detail.data.members.length === 0 ? (
-            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用「邀請成員」卡把夥伴加進來）</Hint>
+            <Hint style={{ margin: "4px 0 0" }}>（還沒有成員——用「邀請成員」卡把夥伴加進來）</Hint>
           ) : (
             detail.data.members.map((m) => (
               <MemberDetailRow
@@ -601,7 +601,7 @@ function TeamExtras({ teamId }: { teamId: string }) {
       {unassigned.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <Meta as="p" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</Meta>
-          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用「邀請成員」卡輸入同一個 Email 並選好組別即可入組。</Hint>
+          <Hint style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用「邀請成員」卡輸入同一個 Email 並選好組別即可入組。</Hint>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {unassigned.map((m) => (
               <Chip key={m.userId} style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
@@ -613,7 +613,7 @@ function TeamExtras({ teamId }: { teamId: string }) {
       )}
       {detail.data.databases.length > 0 && (
         <DetailBlock title="團隊資料庫" count={detail.data.databases.length}>
-          <Hint layer="always" style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</Hint>
+          <Hint style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</Hint>
           <DatabaseList databases={detail.data.databases} />
         </DetailBlock>
       )}
@@ -1128,7 +1128,7 @@ export function AuditLogCard() {
       ) : audit.error ? (
         // 尚無可見組別（剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤
         audit.error.data?.code === "FORBIDDEN" ? (
-          <Hint layer="always" style={{ marginTop: 10 }}>還沒有你能看到的組別紀錄。先建立組別、把夥伴加進來就會出現。</Hint>
+          <Hint style={{ marginTop: 10 }}>還沒有你能看到的組別紀錄。先建立組別、把夥伴加進來就會出現。</Hint>
         ) : (
           <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
         )
@@ -1461,7 +1461,7 @@ export function InsightsCard() {
               </tbody>
             </table>
             {/* 定義上方表格「成功率」與「點數」欄的算法——藏起來那些數字就無法正確解讀 */}
-            <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</Hint>
+            <Hint style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</Hint>
           </div>
         )
       )}
@@ -1576,9 +1576,8 @@ export function InsightsCard() {
                   })}
                 </tbody>
               </table>
-              {/* 單位是讀懂整張表的前提：新台幣與美元差約 32 倍，且 CSV 兩種都有。
-                  精簡模式收起來，等於讓管理員看一張不知道單位的金額表。 */}
-              <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>
+              {/* 單位是讀懂整張表的前提：新台幣與美元差約 32 倍，且 CSV 兩種都有。 */}
+              <Hint style={{ fontSize: 11, marginTop: 6 }}>
                 金額單位為<strong>新台幣（NT$）</strong>：只計<strong>完成</strong>實花點數換算（{usage.data.fx?.note ?? moneyFxNote()}）。
                 失敗多半已退點，不計入。點人名或模型可下鑽提示詞；CSV 含新台幣、美元與匯率說明。
               </Hint>
@@ -1661,7 +1660,7 @@ export function ConsumptionMonitorCard() {
     <Card data-fb="點數消耗監控卡">
       <h2>點數消耗監控</h2>
       {/* 定義圖表畫的是「毛消耗」而非淨額——不講，管理員會以為退點已經抵銷 */}
-      <Hint layer="always">逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
+      <Hint>逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
       {stats.isLoading ? (
         <div role="status" aria-label="消耗統計載入中">
           <Skeleton style={{ height: 44, marginTop: 10 }} />
@@ -1946,9 +1945,9 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   return (
     <Card data-fb="Fal 帳戶卡">
       <h2>Fal 帳戶</h2>
-      {/* 方案 C 的擋扣規則是成本／阻斷資訊——精簡模式也必須看得到，故 always。
+      {/* 方案 C 的擋扣規則是成本／阻斷資訊，必須看得到。
           舊文案「不自動換算」已因 #220 失真（現在會換算並做硬上限），採 base 新文案。 */}
-      <Hint layer="always">
+      <Hint>
         平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>），並以即時匯率換算台幣等值。
         方案 C：<strong>1 點 ＝ NT$1</strong>，站內可花點數的硬上限即時對齊此餘額——
         Fal 沒錢時扣點會被擋下（查不到餘額則不擋，不因上游異常鎖住全站）。
@@ -2242,7 +2241,7 @@ export function AdminPage() {
         {isSuperAdmin && <CreateTeamCard />}
         <Card data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
-          <Hint layer="always">空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「監控與紀錄」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
+          <Hint>空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「監控與紀錄」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
               三態：error（明講失敗＋重試）／data（表單）／載入中（骨架）——缺 error 分支時
               失敗會永遠停在骨架上，管理員以為還在載入而空等 */}
@@ -2310,7 +2309,7 @@ export function AdminPage() {
             <option value="member">成員</option>
             <option value="admin">團隊管理員</option>
           </select>
-          <Hint layer="always" style={{ margin: "4px 0 0" }}>團隊管理員能管理整個團隊的組別、成員與額度，權限較大，請謹慎授予。</Hint>
+          <Hint style={{ margin: "4px 0 0" }}>團隊管理員能管理整個團隊的組別、成員與額度，權限較大，請謹慎授予。</Hint>
           <label htmlFor="invite-group">組別</label>
           <select
             id="invite-group"
@@ -2331,12 +2330,12 @@ export function AdminPage() {
             <option value="member">組員</option>
             <option value="leader">組長</option>
           </select>
-          {!groupId && <Hint layer="always" style={{ margin: "4px 0 0" }}>未選組時角色不生效——選了組別才需要設定。</Hint>}
+          {!groupId && <Hint style={{ margin: "4px 0 0" }}>未選組時角色不生效——選了組別才需要設定。</Hint>}
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, cursor: "pointer" }}>
             <input type="checkbox" checked={sendEmailInvite} onChange={(e) => setSendEmailInvite(e.target.checked)} style={{ width: "auto" }} />
             <span>同時把邀請連結寄到這個 Email</span>
           </label>
-          <Hint layer="always" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</Hint>
+          <Hint style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</Hint>
           <TestEmailButton />
           <div style={{ marginTop: 16 }}>
             <button
@@ -2364,7 +2363,7 @@ export function AdminPage() {
                 <Meta as="p" style={{ color: "var(--gold-ink)" }}>⚠ 寄信失敗（{invite.data.emailDetail ?? "未知原因"}）。請改用下方連結傳給對方：</Meta>
               )}
               {!invite.data.emailStatus && (
-                <Hint layer="always">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</Hint>
+                <Hint>複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</Hint>
               )}
               {/* flexWrap：360px 上 input 最小內容寬＋兩顆 flex:none 按鈕會超出、
                   分享鈕被 overflow-x:clip 裁掉（比照 McpPage 金鑰列）；桌機不觸發換行 */}

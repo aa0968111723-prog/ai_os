@@ -274,16 +274,16 @@ export function ShareTargetPage({ groupId }: { groupId: string }) {
               </Button>
             </div>
             {files.length === 0 && (
-              <Hint layer="always">純文字／連結：存成筆記（給自己）或傳給夥伴；要進素材庫請分享檔案。</Hint>
+              <Hint>純文字／連結：存成筆記（給自己）或傳給夥伴；要進素材庫請分享檔案。</Hint>
             )}
 
             {dest === "project" ? (
               !groupId ? (
-                <Hint layer="always">你還沒被分進任何組別，暫時無法存進專案——可以先「傳給夥伴」。</Hint>
+                <Hint>你還沒被分進任何組別，暫時無法存進專案——可以先「傳給夥伴」。</Hint>
               ) : projects.isLoading ? (
                 <Meta as="p">載入專案清單…</Meta>
               ) : !projects.data?.length ? (
-                <Hint layer="always">目前組別還沒有專案——請先到今日工作台建立專案，或改「傳給夥伴」。</Hint>
+                <Hint>目前組別還沒有專案——請先到今日工作台建立專案，或改「傳給夥伴」。</Hint>
               ) : (
                 <>
                   <label htmlFor="share-project">選擇專案</label>
@@ -292,15 +292,15 @@ export function ShareTargetPage({ groupId }: { groupId: string }) {
                       <option key={p.id} value={p.id}>{p.title}</option>
                     ))}
                   </select>
-                  <Hint layer="always">檔案會進該專案的素材庫，之後可直接拿來生成、排分鏡或打包交付。</Hint>
+                  <Hint>檔案會進該專案的素材庫，之後可直接拿來生成、排分鏡或打包交付。</Hint>
                 </>
               )
             ) : dest === "note" ? (
-              <Hint layer="always">會存進「筆記排程」的共用筆記（附言全文即內容）——通勤路上的靈感先落地，之後再整理。</Hint>
+              <Hint>會存進「筆記排程」的共用筆記（附言全文即內容）——通勤路上的靈感先落地，之後再整理。</Hint>
             ) : peers.isLoading ? (
               <Meta as="p">載入夥伴清單…</Meta>
             ) : !peers.data?.length ? (
-              <Hint layer="always">目前沒有可私訊的夥伴。</Hint>
+              <Hint>目前沒有可私訊的夥伴。</Hint>
             ) : (
               <>
                 <label htmlFor="share-peer">選擇夥伴</label>
@@ -309,7 +309,7 @@ export function ShareTargetPage({ groupId }: { groupId: string }) {
                     <option key={p.userId} value={p.userId}>{p.name}</option>
                   ))}
                 </select>
-                <Hint layer="always">會以私訊傳送，只有你和對方看得到。</Hint>
+                <Hint>會以私訊傳送，只有你和對方看得到。</Hint>
               </>
             )}
 

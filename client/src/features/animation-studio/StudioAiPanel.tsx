@@ -122,7 +122,7 @@ export function StudioAiPanel({
           這一鏡
         </h3>
         {!shot ? (
-          <Hint layer="always">
+          <Hint>
             還沒選分鏡。白板上畫的東西會存成「自由塗鴉」，選一鏡之後才能把手稿存成那一鏡的畫面。
           </Hint>
         ) : (
@@ -214,7 +214,7 @@ export function StudioAiPanel({
           {suggest.isPending ? "AI 想中…" : "讓 AI 依專案背景給 3 個畫面建議"}
         </Button>
         {suggest.error && <p className="error" role="alert">{suggest.error.message}</p>}
-        {suggest.data?.limitNotice && <Hint layer="always" role="status">{suggest.data.limitNotice}</Hint>}
+        {suggest.data?.limitNotice && <Hint role="status">{suggest.data.limitNotice}</Hint>}
         {suggest.data && (
           <ul className="studio-ai__suggestions">
             {suggest.data.suggestions.map((s, i) => (
@@ -279,7 +279,7 @@ export function StudioAiPanel({
             </div>
             {split.error && <p className="error" role="alert">拆分鏡失敗：{split.error.message}</p>}
             {split.data?.truncation && (
-              <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
+              <Hint role="status" style={{ color: "var(--gold-ink)" }}>
                 腳本過長，這次只送了前 {split.data.truncation.sentChars.toLocaleString()} 字
                 （共 {split.data.truncation.totalChars.toLocaleString()} 字）——尾段沒有拆進來。
                 刪掉已拆好的前段，再按一次就能接著拆。

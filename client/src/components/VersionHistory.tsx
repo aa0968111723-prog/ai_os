@@ -46,7 +46,7 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
           ) : versions.error ? (
             <p className="error">{versions.error.message}</p>
           ) : !versions.data || versions.data.length === 0 ? (
-            <Hint layer="always">還沒有歷史版本——這筆長文「更新內容」後，更新前的舊版會存到這裡。</Hint>
+            <Hint>還沒有歷史版本——這筆長文「更新內容」後，更新前的舊版會存到這裡。</Hint>
           ) : (
             <div>
               <Meta as="p" style={{ marginBottom: 6 }}>

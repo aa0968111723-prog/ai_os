@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trpc, createTrpcClient } from "./api";
 import { App } from "./App";
-import { DensityGate } from "./app/DensityGate";
 import { bootstrapPwa } from "./pwa";
 import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import { installKeyboardInset } from "./lib/keyboardInset";
@@ -121,10 +120,7 @@ function Root() {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        {/* 介面密度（引導／精簡）包在最外層：primitives 在任何頁面都讀得到偏好 */}
-        <DensityGate>
-          <App />
-        </DensityGate>
+        <App />
       </QueryClientProvider>
     </trpc.Provider>
   );

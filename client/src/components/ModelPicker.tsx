@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../api";
 import { MODELS } from "@shared/models";
 import { Icon } from "./Icon";
-import { Button, Chip, Hint, Meta, useDensity } from "./ui";
+import { Button, Chip, Hint, Meta } from "./ui";
 export interface PickedModel {
   id: string;
   label: string;
@@ -88,11 +88,8 @@ export function ModelPicker({
 
   // 匯率換算式（$0.03/image × US$1＝NT$32.308 → 約 NT$1＝1 點）在手機上佔三行，
   // 是這一區最大的視覺負擔，但它是「點數怎麼來的」的透明度依據，不能刪。
-  // 所以收進具名的 <details>：精簡模式預設收起、引導模式預設展開。
-  // 這裡不用 <Hint>——同一畫面已經有兩顆通稱的「說明」小鈕，再加一顆會分不出誰是誰。
-  const density = useDensity();
-  const [costOpen, setCostOpen] = useState(density === "guide");
-  useEffect(() => setCostOpen(density === "guide"), [density]);
+  // 收進具名的 <details>，預設展開——與全站「說明一律常駐」一致，想收起的人自己收。
+  const [costOpen, setCostOpen] = useState(true);
 
   return (
     <div data-fb="模型挑選">

@@ -5,11 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../api", () => ({
   trpc: {
     useUtils: () => ({ auth: { me: { invalidate: vi.fn() } } }),
-    auth: {
-      setUiDensity: {
-        useMutation: () => ({ mutate: vi.fn() }),
-      },
-    },
     quota: {
       my: {
         useQuery: () => ({

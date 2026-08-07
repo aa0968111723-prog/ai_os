@@ -89,7 +89,7 @@ export function PromptLibrary({
         </>
       )}
       {embedded && (
-        <Hint layer="always" style={{ marginTop: 0 }}>
+        <Hint style={{ marginTop: 0 }}>
           成功生成的咒語會自動入庫。按「{reuseLabel}」只帶入、不送出、不扣點。
         </Hint>
       )}

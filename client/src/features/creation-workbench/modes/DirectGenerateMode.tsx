@@ -438,7 +438,7 @@ export function DirectGenerateMode({
       {cardsPicked &&
         fullModel &&
         !supportsCardAnchors(fullModel.category) && (
-          <Hint layer="always" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
+          <Hint role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
             ⚠ 此模型（{CATEGORIES.find((c) => c.id === fullModel.category)?.label ?? fullModel.category}
             ）不會使用角色卡／場景卡／素材卡——已勾選的卡片不影響本次生成
           </Hint>
@@ -493,7 +493,7 @@ export function DirectGenerateMode({
         >
           {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
         </button>
-        <Hint as="span" layer="always">{disableReason ?? "失敗自動退點・額度由管理員調整"}</Hint>
+        <Hint as="span">{disableReason ?? "失敗自動退點・額度由管理員調整"}</Hint>
       </div>
 
       {confirming && model && (
@@ -547,7 +547,7 @@ export function DirectGenerateMode({
             預估{" "}
             <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {estPoints} 點</b>
             {isUsageBasedPoints(model.id) && (
-              <Hint as="span" layer="always" style={{ marginLeft: 6, fontSize: 12 }}>
+              <Hint as="span" style={{ marginLeft: 6, fontSize: 12 }}>
                 （依文字長度即時計費）
               </Hint>
             )}
@@ -570,7 +570,7 @@ export function DirectGenerateMode({
               {approvalThresholdNotice(estPoints, quota.data!.approvalThreshold!)}
             </p>
           )}
-          <Hint layer="always" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</Hint>
+          <Hint style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</Hint>
           {/* MOB-03：長任務可離開——背景 runner 不綁 cookie；完成會推播到已連結裝置 */}
           <Hint style={{ fontSize: 12, marginTop: 6 }}>
             可關閉此頁，完成會推播到已連結裝置。
@@ -675,7 +675,7 @@ export function DirectGenerateMode({
                 >
                   一致性鎖定：{continuityLocked ? "開" : "關"}
                 </button>
-                <Hint as="p" layer="always" style={{ margin: "8px 0 0" }}>
+                <Hint as="p" style={{ margin: "8px 0 0" }}>
                   {continuityLocked
                     ? "會凍結本次角色、場景與素材版本；模型支援時，自動按角色→場景→道具順序送入多張參考圖。"
                     : "仍會注入卡片文字，但不附加多張一致性參考圖；之後重試也不視為鎖定版本。"}
@@ -768,7 +768,7 @@ export function DirectGenerateMode({
       <RecentGenerationsStrip projectId={projectId} />
 
       {/* GenerationList lives in CreationResourceDrawer (WB-05) — avoid duplicate long card here. */}
-      <Hint layer="always" style={{ marginTop: 12 }}>
+      <Hint style={{ marginTop: 12 }}>
         生成紀錄與「再用此設定」已移到下方「資源與結果」抽屜。
       </Hint>
     </div>

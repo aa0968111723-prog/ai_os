@@ -144,7 +144,7 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
               <SeriesTemplatePanel groupId={groupId} isLeader={isLeader} />
             ) : (
               <Card>
-                <Hint layer="always">請先於頂欄選擇或加入一個組別，即可開始建立與執行母版系列。</Hint>
+                <Hint>請先於頂欄選擇或加入一個組別，即可開始建立與執行母版系列。</Hint>
               </Card>
             )}
 

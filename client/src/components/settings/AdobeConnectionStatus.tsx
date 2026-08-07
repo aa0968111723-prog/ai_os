@@ -11,7 +11,7 @@ export function AdobeConnectionStatus({ data }: { data: AdobeConnectionView | nu
 
   if (!data.configured) {
     return (
-      <Hint layer="always">
+      <Hint>
         站方尚未設定 Adobe 正式整合（管理員需設 ADOBE_CLIENT_ID／SECRET／REDIRECT_URI）——
         設定前可把 ADOBE_MODE 留在模擬模式，流程完全跑得動，只是不會真的動到 Adobe 帳號。
       </Hint>

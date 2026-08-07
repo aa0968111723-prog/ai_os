@@ -81,7 +81,7 @@ export function DownloadsPage() {
           <Icon name="Monitor" size={28} style={{ color: "var(--primary-ink)", flex: "none" }} />
           <div style={{ flex: "1 1 240px", minWidth: 0 }}>
             <h2 style={{ margin: 0, fontSize: "var(--fs-18)" }}>電腦版應用程式</h2>
-            <Hint layer="always" style={{ marginTop: 6 }}>
+            <Hint style={{ marginTop: 6 }}>
               {hasDesktopBridge()
                 ? "你已經在 Aios 電腦版裡——不需再下載。素材庫可用「用外部軟體開啟」。"
                 : DESKTOP_INSTALL_HINT}
@@ -156,7 +156,7 @@ export function DownloadsPage() {
               <h2 style={{ marginTop: 0 }}>{cat.label}</h2>
               <Hint style={{ marginTop: 4 }}>{cat.hint}</Hint>
               {items.length === 0 ? (
-                <Hint layer="always" style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</Hint>
+                <Hint style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</Hint>
               ) : (
                 <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
                   {items.map((it) => (

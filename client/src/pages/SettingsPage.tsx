@@ -4,13 +4,6 @@ import { trpc } from "../api";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 import { Icon } from "../components/Icon";
-import { useDensity } from "../components/ui/density";
-import { writeUiDensity } from "../lib/densityPreference";
-import {
-  UI_DENSITY_DESCRIPTION,
-  UI_DENSITY_LABEL,
-  type UiDensity,
-} from "@shared/uiDensity";
 
 const AVATAR_MAX_DATA_URL = 190 * 1024; // ~140KB binary payload
 
@@ -123,7 +116,6 @@ function AvatarPreview({
 export function SettingsPage() {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
-  const density = useDensity();
   const fileRef = useRef<HTMLInputElement>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [avatarBust, setAvatarBust] = useState(0);
@@ -161,13 +153,6 @@ export function SettingsPage() {
     onError: (e) => setLocalError(e.message),
   });
 
-  const setDensity = trpc.auth.setUiDensity.useMutation({
-    onSuccess: (_d, vars) => {
-      writeUiDensity(vars.density);
-      void utils.auth.me.invalidate();
-    },
-  });
-
   const onPickAvatar = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
@@ -197,7 +182,7 @@ export function SettingsPage() {
     return (
       <div className="page-shell secondary-page settings-page" style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px 48px" }}>
         <SecondaryPageHeader eyebrow="帳號與偏好" title="個人設定" icon="User" description="管理個人頭像、顯示名稱與介面風格偏好。" />
-        <Hint as="p" layer="always">請先登入後再進行個人設定</Hint>
+        <Hint as="p">請先登入後再進行個人設定</Hint>
       </div>
     );
   }
@@ -296,28 +281,6 @@ export function SettingsPage() {
         </Meta>
       </Card>
 
-      <Card as="section" style={{ marginTop: 20, padding: "20px 24px" }}>
-        <h2 style={{ fontSize: "var(--fs-15)", fontWeight: 600, margin: "0 0 16px" }}>介面密度偏好</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(["guide", "concise"] as UiDensity[]).map((d) => (
-            <Button
-              key={d}
-              type="button"
-              variant={density === d ? "primary" : "neutral"}
-              size="sm"
-              disabled={setDensity.isPending}
-              onClick={() => setDensity.mutate({ density: d })}
-              title={UI_DENSITY_DESCRIPTION[d]}
-            >
-              {UI_DENSITY_LABEL[d]}
-            </Button>
-          ))}
-        </div>
-        <Hint as="p" layer="always" style={{ marginTop: 8, fontSize: 12 }}>
-          {UI_DENSITY_DESCRIPTION[density]}
-        </Hint>
-      </Card>
-
       {localError ? (
         <p role="alert" className="error" style={{ marginTop: 16, fontSize: 13 }}>
           {localError}
@@ -343,7 +306,7 @@ export function SettingsPage() {
             </a>
           </li>
         </ul>
-        <Hint as="div" layer="always" style={{ marginTop: 12, fontSize: 11 }}>
+        <Hint as="div" style={{ marginTop: 12, fontSize: 11 }}>
           變更密碼、連結手機與電腦、登出裝置——請由頂欄右上角的使用者選單進行操作。
         </Hint>
       </section>

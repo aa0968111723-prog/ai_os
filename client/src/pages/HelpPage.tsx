@@ -212,7 +212,7 @@ export function HelpPage() {
 
       {/* ── 全站地圖：這頁的重點——把每個看得到的地方講白話 ── */}
       <H2 id="help-map" icon="MousePointer2">這個網站有哪些地方？</H2>
-      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
+      <Hint style={{ marginTop: 0, fontSize: 13 }}>
         照你會遇到的順序列出來。<b>不是每個人都看得到全部</b>——管理相關的地方只有組長／管理員會出現。
       </Hint>
       <div className="stack">
@@ -351,7 +351,7 @@ export function HelpPage() {
 
       {/* ── 進階能力：新知識濃縮 ── */}
       <H2 id="help-advanced" icon="Sparkles">進階能力（一看就懂）</H2>
-      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
+      <Hint style={{ marginTop: 0, fontSize: 13 }}>
         主線六步夠做完整支片；下面這些能讓「更穩、更快、更敢放心用」。
       </Hint>
       <div className="stack">
@@ -558,7 +558,7 @@ export function HelpPage() {
 
       {/* ── 安裝成 App（橫幅／帳號選單／深鏈 #help-install 同源；Mobile-First M0-3／M4） ── */}
       <H2 id="help-install" icon="Download">把 Aios 裝到手機或電腦</H2>
-      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
+      <Hint style={{ marginTop: 0, fontSize: 13 }}>
         裝成 App 後可從主畫面一鍵開啟、推播較穩、全螢幕較好用。
         頂欄橫幅按「稍後」只是暫時不煩你——<b>帳號選單裡的「安裝成 App」隨時都在</b>。
       </Hint>

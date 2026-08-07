@@ -6,49 +6,9 @@ import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
-import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
+import { Hint, Meta, Skeleton } from "../../components/ui";
 import { MenuSurface, MENU_SHEET_MQ } from "./MenuSurface";
 import { useMatchMedia } from "../../lib/useMatchMedia";
-import { writeUiDensity } from "../../lib/densityPreference";
-import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
-
-/**
- * 介面密度切換（引導／精簡）。
- *
- * 全站 `hint` 說明小字實測 505 處，佔所有帶樣式元素四分之一以上；對熟手是雜訊，
- * 對第一次上手的夥伴卻是生命線。這個開關讓兩種人共用同一套介面而不必犧牲任一方。
- *
- * 標籤同時說明「現在是哪種」與「按下去會變成哪種」——選單項目若只顯示狀態，
- * 使用者無從得知它可以按。
- */
-function DensityMenuItem({ onDone }: { onDone: () => void }) {
-  const density = useDensity();
-  const next = density === "guide" ? "concise" : "guide";
-  const utils = trpc.useUtils();
-  // 上行同步（P1c）：本機 localStorage 仍是即時來源——先寫本機讓畫面立刻切，
-  // 再 best-effort 帶到帳號。失敗只記 log 不打斷：單機行為與同步前完全一樣，
-  // 下次成功的切換自然會把最新值帶上去。
-  const setUiDensity = trpc.auth.setUiDensity.useMutation({
-    onSuccess: () => utils.auth.me.invalidate(),
-    onError: (err) => console.warn("[density] 偏好同步到帳號失敗（本機已生效）：", err.message),
-  });
-  return (
-    <button
-      type="button"
-      className="menu-item"
-      role="menuitem"
-      title={UI_DENSITY_DESCRIPTION[next]}
-      onClick={() => {
-        onDone();
-        writeUiDensity(next);
-        setUiDensity.mutate({ density: next });
-      }}
-    >
-      <Icon name="HelpCircle" size={15} />
-      介面說明：{UI_DENSITY_LABEL[density]}（改用{UI_DENSITY_LABEL[next]}）
-    </button>
-  );
-}
 
 function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
   const [, bump] = useState(0);
@@ -129,7 +89,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   if (!groupId) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
-        <Hint as="div" layer="always">選好作用組別後可看個人點數用量</Hint>
+        <Hint as="div">選好作用組別後可看個人點數用量</Hint>
       </div>
     );
   }
@@ -181,7 +141,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
           )}
         </Meta>
       )}
-      <Hint as="div" layer="always" style={{ marginTop: 4, fontSize: 10 }}>
+      <Hint as="div" style={{ marginTop: 4, fontSize: 10 }}>
         單位為站內點數（非 Fal USD）
       </Hint>
     </div>
@@ -257,7 +217,7 @@ export function AccountMenu({
           {compact ? (
             /* 手機：頁面入口全歸「更多」面板，這裡只留一句指路，免得有人在頭像下面翻找靈感頻道 */
             <div className="menu-note" role="presentation">
-              <Hint as="span" layer="always">要去其他頁面（靈感頻道、資料庫、怎麼用…）請按最底下的「更多」</Hint>
+              <Hint as="span">要去其他頁面（靈感頻道、資料庫、怎麼用…）請按最底下的「更多」</Hint>
             </div>
           ) : (
             <>
@@ -302,7 +262,6 @@ export function AccountMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
           <InstallAppMenuItem onDone={close} />
-          <DensityMenuItem onDone={close} />
           {accountLinkItems.map((item) => (
             <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
               {item.icon && <Icon name={item.icon} size={15} />}{item.label}

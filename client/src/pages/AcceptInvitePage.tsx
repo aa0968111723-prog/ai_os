@@ -53,7 +53,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
       <>
         <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>這個邀請不能用了</h1>
         <p className="error" role="alert">{preview.data?.reason ?? (preview.error ? friendlyAuthError(preview.error.message) : "邀請連結無效")}</p>
-        <Hint layer="always" style={{ marginTop: 12 }}>
+        <Hint style={{ marginTop: 12 }}>
           已經有帳號了？<Link href="/login">前往登入</Link>
         </Hint>
       </>,
@@ -78,7 +78,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
   return wrap(
     <>
       {me.data && (
-        <Hint layer="always" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", marginTop: 0, marginBottom: "var(--sp-12)" }}>
+        <Hint style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", marginTop: 0, marginBottom: "var(--sp-12)" }}>
           <span style={{ flex: 1 }}>
             你目前已登入為 <b>{me.data.user.name}</b>——完成加入後這個瀏覽器會切換成新帳號
           </span>
@@ -116,7 +116,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
         <input id="inv-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="例：阿哲" autoFocus />
         <label htmlFor="inv-pw">密碼（至少 8 碼）</label>
         <PasswordInput id="inv-pw" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-        {password.length > 0 && password.length < 8 && <Hint layer="always">還差 {8 - password.length} 個字</Hint>}
+        {password.length > 0 && password.length < 8 && <Hint>還差 {8 - password.length} 個字</Hint>}
 
         <div style={{ marginTop: "var(--sp-16)" }}>
           <button className="primary" type="submit" style={{ width: "100%" }} disabled={!canSubmit}>

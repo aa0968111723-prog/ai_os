@@ -233,7 +233,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
                   <p className="error">{preview.error.message}</p>
                 ) : preview.data ? (
                   <>
-                    <Hint layer="always" style={{ marginBottom: 6 }}>
+                    <Hint style={{ marginBottom: 6 }}>
                       導演發想（balanced・{preview.data.budgetChars.toLocaleString()} 字預算）：
                       已納入 {preview.data.includedChars.toLocaleString()}／庫內全文{" "}
                       {preview.data.totalContentChars.toLocaleString()} 字
@@ -255,7 +255,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
                       ))}
                     </ul>
                     {previewSplit.data && (
-                      <Hint layer="always">
+                      <Hint>
                         拆分鏡（script_only・{previewSplit.data.budgetChars.toLocaleString()} 字）：
                         已納入 {previewSplit.data.includedChars.toLocaleString()} 字
                         {previewSplit.data.truncated ? " · 有截斷" : ""}
@@ -309,7 +309,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
       )}
 
       {readOnly ? (
-        <Hint layer="always" style={{ marginTop: 12 }}>你在此專案是檢視者（唯讀）——知識庫可瀏覽、不能新增或修改。</Hint>
+        <Hint style={{ marginTop: 12 }}>你在此專案是檢視者（唯讀）——知識庫可瀏覽、不能新增或修改。</Hint>
       ) : open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
           <label htmlFor={`kb-kind-${projectId}`}>類型</label>
@@ -343,7 +343,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             <button onClick={() => setOpen(false)}>取消</button>
             {/* 沉默 disable 說明：講清楚還差哪個欄位（比照生成鈕 disableReason 模式） */}
             {!add.isPending && (!title.trim() || !content.trim()) && (
-              <Hint as="span" layer="always">{!title.trim() ? "先填標題" : "先貼內容"}</Hint>
+              <Hint as="span">{!title.trim() ? "先填標題" : "先貼內容"}</Hint>
             )}
           </div>
           {add.error && <p className="error">{add.error.message}</p>}

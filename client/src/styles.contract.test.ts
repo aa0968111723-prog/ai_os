@@ -41,15 +41,6 @@ describe("global stylesheet contract", () => {
     expect(rule).toContain("overflow-y: auto");
   });
 
-  // 收合的 Hint 只有靠這條規則才看得出是按鈕（先前用 btn-ghost：透明底＋透明框，
-  // 畫面上只剩一個孤零零的「？」）。觸控下限也寫在這裡，jsdom 測不到樣式表。
-  it("keeps the collapsed-hint toggle visible as a control with a 44px touch target", () => {
-    const rule = styles.slice(styles.indexOf(".hint-toggle {"), styles.indexOf(".hint-toggle:hover"));
-    expect(rule).toContain("border: 1px solid var(--border)");
-    expect(rule).toContain("min-width: 44px");
-    expect(rule).toContain("min-height: 44px");
-  });
-
   // 響應式底部留白契約：一律走 --chrome-bottom，禁止再寫死 88/140 互踩幽靈。
   // 有 .mobile-nav 時 styles.css 設 100px；≤560 由 mobile-fab-01 升到 140px。
   it("uses --chrome-bottom for .app bottom padding instead of hard-coded 88/140 clash", () => {

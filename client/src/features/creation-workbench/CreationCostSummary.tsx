@@ -6,7 +6,7 @@ import { Meta } from "../../components/ui";
  * (generationGates helpers). No mutation or points logic here.
  *
  * 用 <Meta> 而非 <Hint>：這裡每一行都是**內容**（本次模式、預估扣點、剩餘額度、
- * 是否需核准），不是介面說明。收進「？」後面會讓人以為額度讀不到——那正是 Meta 存在的理由。
+ * 是否需核准），不是介面說明——把它降級成旁註會讓人以為額度讀不到，那正是 Meta 存在的理由。
  */
 export function CreationCostSummary({
   modeLabel = "—",

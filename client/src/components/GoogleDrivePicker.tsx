@@ -172,7 +172,7 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
       </div>
 
       {data && !data.ok && data.reason === "not-connected" && (
-        <Hint as="p" layer="always" style={{ marginTop: 8 }}>
+        <Hint as="p" style={{ marginTop: 8 }}>
           還沒連結 Google 雲端。連結後 AI 與匯入只會讀「你選中的檔案」，不是整顆雲端。
           <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往連結 Google <Icon name="ArrowRight" size={13} /></Link>
         </Hint>
@@ -200,7 +200,7 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
           </div>
 
           {data?.ok && files.length === 0 && !list.isFetching && (
-            <Hint as="p" layer="always" style={{ marginTop: 8 }}>找不到符合的檔案——換個關鍵字，或確認檔案在這個 Google 帳戶的雲端裡。</Hint>
+            <Hint as="p" style={{ marginTop: 8 }}>找不到符合的檔案——換個關鍵字，或確認檔案在這個 Google 帳戶的雲端裡。</Hint>
           )}
 
           {folder && (

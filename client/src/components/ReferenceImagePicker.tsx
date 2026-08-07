@@ -115,7 +115,7 @@ export function ReferenceImagePicker({
           </Meta>
         ) : images.length === 0 ? (
           // 空狀態＋下一步：收掉會讓人卡在空面板前不知道能做什麼，所以兩種模式都顯示
-          <Hint as="p" layer="always" style={{ margin: 0, fontSize: 11 }}>素材庫還沒有圖片——用上面的「上傳參考圖」直接傳一張。</Hint>
+          <Hint as="p" style={{ margin: 0, fontSize: 11 }}>素材庫還沒有圖片——用上面的「上傳參考圖」直接傳一張。</Hint>
         ) : (
           <div
             role="listbox"

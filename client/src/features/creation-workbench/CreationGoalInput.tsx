@@ -132,7 +132,7 @@ export function CreationGoalInput({
           disabled={disabled}
         />
       )}
-      {/* 說明介面行為（切模式不會清空），熟手不需要 → 預設 guide 層，精簡模式可收 */}
+      {/* 說明介面行為：切模式不會清空 */}
       <Hint className="creation-goal-persist-hint" style={{ margin: "4px 0 0" }}>
         {onSkillIdsChange
           ? "目標與已請的劇組會跟著你切換能力，不會清空。"

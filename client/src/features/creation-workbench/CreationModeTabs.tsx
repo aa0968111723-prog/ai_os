@@ -81,8 +81,7 @@ export function CreationModeTabs({
             <span className="creation-mode-tab__icon"><Icon name={MODE_ICONS[item.id]} size={17} /></span>
             <span className="creation-mode-tab__copy">
               <b>{item.label}</b>
-              {/* 分頁標籤的第二行文字＝tab 可及名稱的一部分（內容，非說明）。
-                  用 Hint 會在精簡模式塞一顆「？」按鈕進 <button role="tab"> 裡——巢狀按鈕，直接壞掉。 */}
+              {/* 分頁標籤的第二行文字＝tab 可及名稱的一部分（內容，非說明），所以用 Meta 不用 Hint。 */}
               <Meta>{item.description}</Meta>
             </span>
           </button>

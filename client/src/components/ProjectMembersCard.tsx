@@ -25,7 +25,7 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
   const body = (
     <>
       {!bare && <h2>專案權限</h2>}
-      <Hint layer="always" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
       </Hint>
       {/* 專案負責人：組長以上可轉移（人員異動交接）；一般成員唯讀顯示 */}
@@ -62,7 +62,7 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
         </div>
       ) : data.members.length === 0 ? (
         // 防禦性空狀態（正常不會出現：有效成員至少含目前使用者）——留一句話總比整卡靜默空白好
-        <Hint layer="always" style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</Hint>
+        <Hint style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</Hint>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
           {data.members.map((m) => (

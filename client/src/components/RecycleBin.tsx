@@ -115,7 +115,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           回收桶
         </button>
         {data && total > 0 && <Badge><span className="mono">{total}</span> 項可還原</Badge>}
-        <Hint as="span" layer="always" style={{ flex: "1 1 auto", fontSize: 12 }}>
+        <Hint as="span" style={{ flex: "1 1 auto", fontSize: 12 }}>
           刪除的素材／分鏡／知識暫存於此，可還原（不扣點）
         </Hint>
       </div>
@@ -136,7 +136,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           ) : deleted.error ? (
             <p className="error">載入回收桶失敗：{deleted.error.message}</p>
           ) : total === 0 ? (
-            <Hint layer="always">回收桶是空的——刪除的項目會出現在這裡。</Hint>
+            <Hint>回收桶是空的——刪除的項目會出現在這裡。</Hint>
           ) : (
             <>
               {err && <p className="error">操作失敗：{err.message}</p>}

@@ -60,7 +60,7 @@ export function ModelArena({
 
   if (models.length === 0) {
     return (
-      <Hint layer="always" style={{ margin: 0 }}>
+      <Hint style={{ margin: 0 }}>
         還沒選模型——到下方<b>完整目錄</b>勾 2–4 個「比較」，或用「比風格／看情境」找到候選後回到這裡，就能拿同一個題目讓它們實際跑一次。
       </Hint>
     );
@@ -68,7 +68,7 @@ export function ModelArena({
 
   return (
     <div className="model-arena" data-testid="model-arena">
-      <Hint layer="always" style={{ marginTop: 0 }}>
+      <Hint style={{ marginTop: 0 }}>
         同一個提示詞、同一組設定，一次送進所選的模型各跑一輪。<b>每一顆都是真的生成，照常扣點</b>；
         成品會落在所選專案的生成紀錄裡，失敗會自動退點。
       </Hint>

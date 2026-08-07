@@ -144,7 +144,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                 />
               ))}
               {filteredThreads.length === 0 && needle === "" && (
-                <Hint layer="always" style={{ fontSize: 12 }}>還沒有對話——從下面的夥伴名單挑一位開始聊。</Hint>
+                <Hint style={{ fontSize: 12 }}>還沒有對話——從下面的夥伴名單挑一位開始聊。</Hint>
               )}
               {newPeers.length > 0 && (
                 <>
@@ -407,7 +407,7 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
         {history.isLoading ? (
           <Skeleton style={{ height: 160, borderRadius: 8 }} role="status" aria-label="訊息載入中" />
         ) : items.length === 0 ? (
-          <Hint layer="always" style={{ textAlign: "center", marginTop: 24 }}>還沒有訊息——打個招呼吧 🙏</Hint>
+          <Hint style={{ textAlign: "center", marginTop: 24 }}>還沒有訊息——打個招呼吧 🙏</Hint>
         ) : (
           items.map((m) => {
             const day = dayKey(m.createdAt);
@@ -528,7 +528,7 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
                 ) : mentionables.isLoading ? (
                   <Meta style={{ padding: "8px 12px" }}>載入中…</Meta>
                 ) : refItems.length === 0 ? (
-                  <Hint as="span" layer="always" style={{ padding: "8px 12px", display: "block" }}>
+                  <Hint as="span" style={{ padding: "8px 12px", display: "block" }}>
                     沒有可標注的{REF_LABEL[refTab]}。
                     {refTab === "project" && "（僅顯示你所在組的未封存專案）"}
                     {refTab === "database" && "（僅顯示你看得到的資料表）"}

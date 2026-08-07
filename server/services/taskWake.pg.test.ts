@@ -24,7 +24,6 @@ describe.skipIf(!RUN_PG).sequential("human task wake-up (real PostgreSQL)", () =
       email: "human-task@example.test",
       isSuperAdmin: false,
       mustChangePassword: false,
-    uiDensity: null,
     },
     groups: [{
       groupId,

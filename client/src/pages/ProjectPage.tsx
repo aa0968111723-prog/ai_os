@@ -1192,7 +1192,7 @@ export function ProjectPage({ id }: { id: string }) {
           </Meta>
         )}
         {overSoft && (
-          <Hint layer="always" style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
+          <Hint style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
             已選 {selected.length} 個——{chipSoftMaxLabel[field]}
           </Hint>
         )}
@@ -1358,7 +1358,7 @@ export function ProjectPage({ id }: { id: string }) {
           )}
         </span>
         {collabMode === "mirror" && followUserId && (
-          <Hint layer="always" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
+          <Hint style={{ flexBasis: "100%", margin: "4px 0 0" }}>
             極限精準鏡像：錨點＋螢幕比例鎖定，巢狀捲動雙次校正（非螢幕串流）。
             可點「退出鏡像」或再點對方名字取消。
           </Hint>
@@ -1614,7 +1614,7 @@ export function ProjectPage({ id }: { id: string }) {
                   </Meta>
                 ) : null}
               </h2>
-              {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
+              {!canEdit && <Hint style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
               {/* C0 (#402)：就緒狀態一句話 + 未就緒 CTA——對齊 isWorldviewReady（一句話＋氣氛或畫風） */}
               <div
                 className="wv-ready-strip"
@@ -1752,7 +1752,7 @@ export function ProjectPage({ id }: { id: string }) {
               </label>
               {stylePicker("wv-styles")}
               {wvChipWarnings.length > 0 && (
-                <Hint layer="always" role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                <Hint role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
                   {wvChipWarnings.map((w) => (
                     <div key={w}>{w}</div>
                   ))}
@@ -1847,7 +1847,7 @@ export function ProjectPage({ id }: { id: string }) {
                   進階：故事走向、給寫字的 AI、交接備註（可以晚點再填）
                 </summary>
                 <div style={{ marginTop: 8 }}>
-                  <Hint layer="always" style={{ marginBottom: 12, fontSize: 12 }}>
+                  <Hint style={{ marginBottom: 12, fontSize: 12 }}>
                     <strong>上面填完就能出圖。</strong>
                     這裡填了，寫腳本／拆分鏡／問助手會更準；
                     <strong>直接出圖不吃</strong>故事走向／觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
@@ -2054,7 +2054,7 @@ export function ProjectPage({ id }: { id: string }) {
                       )}
                     </div>
                     {canEdit && wv.people.length > 0 && (charCount === 0 || charCount == null) && (
-                      <Hint layer="always" style={{ marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                      <Hint style={{ marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
                         已有敘事人物、尚無角色定裝——出圖外觀可能不穩。點人物旁「建定裝」或到下方角色定裝建卡。
                       </Hint>
                     )}

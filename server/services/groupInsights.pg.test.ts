@@ -26,7 +26,7 @@ describe.skipIf(!RUN_PG).sequential("組級洞察：任務史很長的組（real
   const auth: AuthState = {
     user: {
       id: userId, name: "Group insight test", email: "group-insight@example.test",
-      isSuperAdmin: false, mustChangePassword: false, uiDensity: null,
+      isSuperAdmin: false, mustChangePassword: false,
     },
     groups: [{ groupId, groupName: "Insight group", teamId: randomUUID(), teamName: "Insight team", role: "leader" }],
     adminTeamIds: [],
