@@ -637,7 +637,7 @@ const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
 /** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
  *  深改（提示詞/配音/換模型/版本）集中在單格工作室；打包照舊。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
-export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds }: { projectId: string; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[] }) {
+export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds, format }: { projectId: string; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[]; format?: string | null }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -650,6 +650,9 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   };
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
+  // 預覽台的 I／O 寫回修剪：SceneRow 的 update 在各列自己的 scope 裡，播放器搆不到，
+  // 所以這裡另起一支（同一個 procedure、同一套 invalidate，行為一致）。
+  const trimFromPlayer = trpc.scenes.update.useMutation({ onSuccess: invalidate });
   // 統一小紅字：這兩個共用 mutation 失敗時（排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
   const actionError = move.error ?? remove.error;
 
@@ -997,7 +1000,14 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
-              <StoryboardPlayer scenes={list} onClose={() => setShowPreview(false)} />
+              <StoryboardPlayer
+                scenes={list}
+                format={format}
+                onClose={() => setShowPreview(false)}
+                // 預覽台的 I／O 直接寫回修剪欄位：播到想要的地方按兩下鍵，初稿就剪好了。
+                // 沒有編輯權就不給，維持與分鏡卡同一套權限口徑。
+                onTrim={canEdit ? (sceneId, patch) => trimFromPlayer.mutate({ sceneId, ...patch }) : undefined}
+              />
             </div>
           )}
           {studioScene && (
