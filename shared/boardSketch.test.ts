@@ -35,6 +35,15 @@ describe("sketchPlanSchema", () => {
     const tooMany = Array.from({ length: 65 }, (_, i) => [i, i] as [number, number]);
     expect(sketchPlanSchema.safeParse({ primitives: [{ kind: "polyline", points: tooMany }] }).success).toBe(false);
   });
+
+  it("curve 至少 3 個控制點（2 點沒有東西可平滑，該用 line）", () => {
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "curve", points: [[0, 500], [300, 300], [700, 520]] }],
+    }).success).toBe(true);
+    expect(sketchPlanSchema.safeParse({
+      primitives: [{ kind: "curve", points: [[0, 500], [300, 300]] }],
+    }).success).toBe(false);
+  });
 });
 
 describe("expandSketch", () => {
@@ -54,14 +63,15 @@ describe("expandSketch", () => {
       { kind: "frame" },
       { kind: "line", x1: -50, y1: 0, x2: 1200, y2: 1050 }, // 刻意超界
       { kind: "polyline", points: [[0, 900], [300, 700], [600, 860], [1000, 640]] },
+      { kind: "curve", points: [[0, 520], [250, 380], [520, 500], [1000, 420]] },
       { kind: "rect", x: 100, y: 100, w: 300, h: 200 },
       { kind: "ellipse", cx: 500, cy: 500, rx: 120, ry: 80 },
       { kind: "arrow", x1: 200, y1: 200, x2: 600, y2: 400 },
       { kind: "stick_figure", cx: 700, cy: 300, h: 380 },
     ]);
     const { doc } = expandSketch(p, BOARD);
-    // frame1 + line1 + polyline1 + rect1 + ellipse1 + arrow3 + stick(頭1+軀幹1+手2+腳2)
-    expect(doc.strokes.length).toBeGreaterThanOrEqual(13);
+    // frame1 + line1 + polyline1 + curve1 + rect1 + ellipse1 + arrow3 + stick(頭1+軀幹1+手2+腳2+腳掌2)
+    expect(doc.strokes.length).toBeGreaterThanOrEqual(14);
     for (const stroke of doc.strokes) {
       expect(stroke.points.length).toBeGreaterThanOrEqual(2);
       for (const pt of stroke.points) {
@@ -123,6 +133,26 @@ describe("expandSketch", () => {
     expect(doc.strokes[0]!.points.length).toBeLessThanOrEqual(2000);
   });
 
+  it("curve 真的有平滑：展開出的頂點比控制點密，而且全部在白板內", () => {
+    const control: Array<[number, number]> = [[0, 500], [300, 250], [600, 550], [1000, 400]];
+    const { doc } = expandSketch(plan([{ kind: "curve", points: control }]), BOARD);
+    const stroke = doc.strokes[0]!;
+    // 3 段 × 至少 4 步取樣 ≫ 4 個控制點——不是把控制點直接連起來
+    expect(stroke.points.length).toBeGreaterThan(control.length * 4);
+    for (const pt of stroke.points) {
+      expect(pt.x).toBeGreaterThanOrEqual(0);
+      expect(pt.x).toBeLessThanOrEqual(BOARD.w);
+      expect(pt.y).toBeGreaterThanOrEqual(0);
+      expect(pt.y).toBeLessThanOrEqual(BOARD.h);
+    }
+  });
+
+  it("站姿火柴人有腳掌短撇（站在地上，不是懸空）", () => {
+    const withFeet = expandSketch(plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400, pose: "stand" }]), BOARD);
+    // 頭1＋軀幹1＋手2＋腳2＋腳掌2
+    expect(withFeet.doc.strokes.length).toBe(8);
+  });
+
   it("直式白板（9:16）：同一份計畫按比例縮放，不變形出界", () => {
     const p = plan([{ kind: "stick_figure", cx: 500, cy: 300, h: 400 }]);
     const { doc } = expandSketch(p, { w: 900, h: 1600, maxStrokes: 400 });
@@ -148,8 +178,15 @@ describe("expandSketch", () => {
 describe("sketchDslPromptBlock", () => {
   it("提示詞涵蓋 schema 的每一種原語——兩邊漂移時這裡會先紅", () => {
     const block = sketchDslPromptBlock();
-    for (const kind of ["frame", "line", "polyline", "rect", "ellipse", "arrow", "stick_figure"]) {
+    for (const kind of ["frame", "line", "polyline", "curve", "rect", "ellipse", "arrow", "stick_figure"]) {
       expect(block).toContain(`"${kind}"`);
     }
+  });
+
+  it("提示詞帶著構圖與對齊要求——精準度的關鍵指令不能在改版時默默消失", () => {
+    const block = sketchDslPromptBlock();
+    expect(block).toContain("對齊");
+    expect(block).toContain("主體要夠大");
+    expect(block).toContain("多個原語組合");
   });
 });

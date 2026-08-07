@@ -42,7 +42,7 @@ const SHOT: StudioShot = {
   ambience: "遠處鐘聲",
 };
 
-const SKETCH = { pushStroke: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
+const SKETCH = { pushStroke: vi.fn(), preview: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
 
 function setup(shot: StudioShot | null = SHOT) {
   render(

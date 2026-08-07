@@ -7,7 +7,7 @@ import { Button, Card, Hint, Meta } from "../../components/ui";
 import type { Stroke } from "./boardDoc";
 import { boardFileName, type ExportResult } from "./boardExport";
 import { boardDocFromSketch, clampSketchToCapacity } from "./sketchImport";
-import { replaySketch, type ReplayHandle } from "./sketchReplay";
+import { replaySketch, type ReplayHandle, type SketchPreview } from "./sketchReplay";
 import type { StudioShot } from "./ShotStrip";
 import type { StudioLayout } from "./studioLayout";
 
@@ -25,6 +25,8 @@ export interface StudioAiPanelProps {
   /** AI 畫草圖：逐筆重播進白板（與手繪共用 pushStroke，尺寸與筆畫上限同一套） */
   sketch: {
     pushStroke: (stroke: Stroke) => void;
+    /** 正在畫的那一筆的逐點預覽（白板 live 層）；null＝畫完或停止，要把預覽清掉 */
+    preview: (preview: SketchPreview | null) => void;
     boardW: number;
     boardH: number;
     maxStrokes: number;
@@ -117,6 +119,8 @@ export function StudioAiPanel({
       setReplaying(true);
       replayRef.current = replaySketch(doc, sketch.pushStroke, {
         reducedMotion,
+        // 逐點預覽進白板 live 層：使用者看得到筆尖在走、線一段一段長出來
+        onPreview: sketch.preview,
         onDone: () => setReplaying(false),
       });
     },

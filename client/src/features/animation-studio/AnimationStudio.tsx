@@ -13,6 +13,7 @@ import { exportBoardPng } from "./boardExport";
 import { allBrushes, readSavedBrushes, writeSavedBrushes } from "./studioStorage";
 import { clampZoom, fitBoardToBox } from "./studioLayout";
 import { resolveShortcut, SHORTCUT_HINTS } from "./studioShortcuts";
+import type { SketchPreview } from "./sketchReplay";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -94,6 +95,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
 
   // ── 白板檢視（縮放、平移、描圖底稿）──────────────────────
   const [view, setView] = useState<BoardView>({ scale: 1, offsetX: 0, offsetY: 0 });
+  /** AI 正在畫的那一筆（逐點預覽）：由 StudioAiPanel 的重播驅動，畫在白板 live 層 */
+  const [aiPreview, setAiPreview] = useState<SketchPreview | null>(null);
   const [panMode, setPanMode] = useState(false);
   const [showReference, setShowReference] = useState(true);
   const boardRef = useRef(board);
@@ -216,8 +219,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       exportBoard={exportBoard}
       // 存進素材庫之後這份手稿不再是「未存的草稿」；本機那份留著可繼續改
       onBoardSaved={markSaved}
-      // AI 畫草圖：筆一筆重播進白板（走同一個 pushStroke，上限與尺寸都跟手繪同一套）
-      sketch={{ pushStroke, boardW: boardSize.w, boardH: boardSize.h, maxStrokes: layout.maxStrokes, strokeCount: board.doc.strokes.length }}
+      // AI 畫草圖：筆一筆重播進白板（走同一個 pushStroke，上限與尺寸都跟手繪同一套）；
+      // preview 讓「正在畫的那一筆」逐點出現在白板上（live 層，不進文件）
+      sketch={{ pushStroke, preview: setAiPreview, boardW: boardSize.w, boardH: boardSize.h, maxStrokes: layout.maxStrokes, strokeCount: board.doc.strokes.length }}
     />
   );
 
@@ -321,6 +325,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             onStrokeEnd={pushStroke}
             referenceUrl={referenceUrl}
             readOnly={!canEdit}
+            aiPreview={aiPreview}
           />
           {/* 狀態晶片：浮在畫布角落而不是佔一整列——這是給人「瞄一眼」的資訊，
               不該跟工具搶版面（先前那行「0／400 筆・9%・輕量版」看起來像除錯輸出） */}
