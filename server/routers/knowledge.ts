@@ -597,6 +597,111 @@ export const knowledgeRouter = router({
       return { id: row.id, title: row.title, chars: content.length, truncated: raw.trim().length > content.length };
     }),
 
+  /**
+   * 網址／Notion 頁面直接進專案知識庫（資料中心 P2「＋加入資料」的網址與 Notion 路徑）。
+   *
+   * 為什麼不是沿用 databases.importUrl：那支的責任是「原檔落地 + 配額 + 抽文字」進資料表文件區，
+   * 這裡的目的地是知識庫——純文字、40k 上限、不落地原檔、不吃檔案配額。抓取本身完全共用
+   * services/databaseFiles 與 services/integrations 的既有函式（SSRF 守衛、Notion 官方 API、
+   * Google 個人授權與公開退回），沒有第二套抓取邏輯。
+   *
+   * NotionPagePicker 選中的頁面也走這裡（以 notion.so/<id> 組網址，與既有做法一致）。
+   */
+  importUrl: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      url: z.string().min(1).max(2000),
+      title: z.string().trim().max(120).optional(),
+      kind: z.enum(["transcript", "testimony", "script", "note"]).default("note"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project); // 檢視者不能寫知識庫（與 add 同口徑）
+
+      const {
+        extractTextFromBuffer,
+        fetchImport,
+        fetchNotionText,
+        htmlToText,
+        normalizeImportUrl,
+        notionPageIdFromUrl,
+        ssrfGuardError,
+      } = await import("../services/databaseFiles");
+      const ssrf = ssrfGuardError(input.url);
+      if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
+      const normalized = normalizeImportUrl(input.url);
+
+      let raw: string;
+      let fallbackName = "匯入資料";
+      try {
+        if (normalized.kind === "notion") {
+          const pageId = notionPageIdFromUrl(input.url);
+          if (!pageId) {
+            throw new Error("看不出這個 Notion 網址的頁面 id——請貼「複製連結」取得的完整頁面網址");
+          }
+          const { getNotionToken } = await import("../services/integrations");
+          raw = await fetchNotionText(pageId, await getNotionToken(ctx.auth.user.id));
+          fallbackName = "Notion 頁面";
+        } else {
+          // Google 連結先試「操作者自己的」授權（可讀私有檔），失敗退回公開路徑——與 databases.importUrl 同一條政策
+          const { fetchDriveFile, fetchDriveWithPublicFallback } = await import("../services/integrations");
+          const priv = normalized.kind !== "web" && normalized.fileId
+            ? await fetchDriveFile(
+              ctx.auth.user.id,
+              normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive",
+              normalized.fileId,
+            )
+            : null;
+          if (priv?.ok && priv.name) fallbackName = priv.name;
+          const fetched = await fetchDriveWithPublicFallback(priv, () => fetchImport(normalized.fetchUrl), "Google 雲端匯入失敗");
+          // 期望匯出文字卻拿到 HTML＝私有檔轉跳登入頁：報錯而非把登入頁當內容存進知識庫
+          const expectsExport = normalized.kind === "google-doc" || normalized.kind === "google-sheet" || normalized.kind === "google-slides";
+          if (expectsExport && !priv?.ok && fetched.mime === "text/html") {
+            throw new Error("Google 回了登入頁——把該文件的共用設成「任何人知道連結都能檢視」，或先連結你的 Google 帳戶");
+          }
+          raw = fetched.mime === "text/html"
+            ? htmlToText(fetched.buf.toString("utf8"))
+            : fetched.mime.startsWith("text/")
+              ? fetched.buf.toString("utf8")
+              : (await extractTextFromBuffer(fetched.mime, fallbackName, fetched.buf)) ?? "";
+          if (fallbackName === "匯入資料") {
+            try {
+              fallbackName = decodeURIComponent(new URL(normalized.fetchUrl).pathname.split("/").filter(Boolean).pop() ?? "匯入資料");
+            } catch {
+              fallbackName = "匯入資料";
+            }
+          }
+        }
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "匯入失敗" });
+      }
+
+      const trimmed = raw.trim();
+      const content = trimmed.slice(0, MAX_CONTENT);
+      if (!content) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "這個網址抓不到可讀文字（可能是純前端渲染的頁面或圖影檔）——試試該平台的匯出功能後上傳",
+        });
+      }
+      const [row] = await db
+        .insert(schema.knowledge)
+        .values({
+          projectId: project.id,
+          groupId: project.groupId,
+          kind: input.kind,
+          title: (input.title?.trim() || fallbackName).slice(0, 120),
+          content,
+          summary: extractKnowledgeSummary(content) || null,
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+      // truncated 誠實回報：內容被 40k 上限腰斬時 UI 要說得出來，不 silent truncate
+      return { id: row.id, title: row.title, chars: content.length, truncated: trimmed.length > content.length };
+    }),
+
   /** 把已上傳的文字素材（txt/md）轉成知識——去重：同 asset 只建一次 */
   addFromAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     // 回收桶裡的素材視為不存在（比照 describeImageAsset）——否則已刪逐字稿可被復活成知識、

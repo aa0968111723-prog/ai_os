@@ -22,6 +22,7 @@ import { db, schema } from "../db";
 import { proxyFetch } from "./http";
 import { STORAGE_ROOT, storageBackend } from "./storage";
 import { assertPublicHostOrError, MAX_IMPORT_BYTES, readBodyCapped, ssrfGuardError } from "./databaseFiles";
+import { sanitizeReturnTo } from "../../shared/returnTo";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -144,15 +145,8 @@ function stateSig(payload: string): string {
  *   （open redirect）。任何不合格的值一律丟掉，退回預設頁，絕不「盡量照做」。
  */
 export function sanitizeIntegrationReturnTo(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  if (raw.length > 512) return null;
-  // 必須是單一斜線開頭的站內路徑：擋掉 //evil.com、https://evil.com、\\evil.com、
-  // 以及任何含反斜線或控制字元的變形（瀏覽器對這些的正規化各家不同）。
-  if (!raw.startsWith("/")) return null;
-  if (raw.startsWith("//")) return null;
-  if (raw.includes("\\")) return null;
-  if (/[\u0000-\u0020\u007f]/.test(raw)) return null;
-  return raw;
+  // 白名單本體在 shared/returnTo——前端組連結時用的是同一支，兩邊不會漂移
+  return sanitizeReturnTo(raw);
 }
 
 /** 以明確到期時刻簽發 state（可測接縫：讓測試造出「簽章正確但已過期」的樣本驗 TTL） */

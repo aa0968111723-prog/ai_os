@@ -12,11 +12,17 @@ const { queryState } = vi.hoisted(() => ({ queryState: { data: null as unknown }
 
 vi.mock("../api", () => ({
   trpc: {
-    useUtils: () => ({ databases: { listFiles: { invalidate: () => {} } } }),
+    useUtils: () => ({
+      databases: { listFiles: { invalidate: () => {} } },
+      knowledge: { list: { invalidate: () => {} } },
+    }),
     integrations: {
       listDriveFiles: { useQuery: () => ({ data: queryState.data, error: null, isFetching: false }) },
     },
     databases: {
+      importDriveFile: { useMutation: () => ({ mutateAsync: async () => ({}), isPending: false, error: null }) },
+    },
+    knowledge: {
       importDriveFile: { useMutation: () => ({ mutateAsync: async () => ({}), isPending: false, error: null }) },
     },
   },
@@ -38,12 +44,31 @@ const FOLDER = {
 describe("GoogleDrivePicker", () => {
   beforeEach(() => { queryState.data = null; });
 
-  it("未連結：顯示「只讀你選中的檔案」CTA，不出現匯入按鈕", () => {
+  // 資料中心 P2 契約變更：未連結不再把人丟到 /integrations 自己找路走回來。
+  // CTA 直接開始授權，並把「現在這個畫面」簽進 return，callback 會導回這裡（Golden Path 1／5）。
+  it("未連結：顯示「只讀你選中的檔案」CTA，且直接開始授權並帶回跳目的地", () => {
     queryState.data = { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
     render(<GoogleDrivePicker tableId="t1" onImported={() => {}} onClose={() => {}} />);
     expect(screen.getByText(/只會讀「你選中的檔案」，不是整顆雲端/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /前往連結 Google/ })).toHaveAttribute("href", "/integrations");
+    const cta = screen.getByRole("link", { name: /連接 Google 雲端/ });
+    expect(cta.getAttribute("href")).toContain("/api/integrations/google-drive/start");
+    expect(cta.getAttribute("href")).toContain("return=");
     expect(screen.queryByRole("button", { name: /匯入選取/ })).toBeNull();
+  });
+
+  it("授權失效：錯誤訊息旁就有「重新連接」，不必離開這個畫面", () => {
+    queryState.data = { ok: false, reason: "error", message: "授權已失效" };
+    render(<GoogleDrivePicker tableId="t1" onImported={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("授權已失效");
+    expect(screen.getByRole("link", { name: /重新連接/ }).getAttribute("href"))
+      .toContain("/api/integrations/google-drive/start");
+  });
+
+  it("專案目的地：主按鈕改成「加入這個專案」，文案講的是 AI 讀得到什麼", () => {
+    queryState.data = { ok: true, email: "me@gmail.com", files: [FILE], nextPageToken: null };
+    render(<GoogleDrivePicker projectId="p1" onImported={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: /加入這個專案/ })).toBeInTheDocument();
+    expect(screen.getByText(/加入後這個專案的 AI 就讀得到/)).toBeInTheDocument();
   });
 
   it("選取模式：勾選後按「僅本次規劃」回傳檔案並關閉；不打匯入 API", async () => {

@@ -17,6 +17,8 @@ vi.mock("../api", () => ({
         linkedToProject: { invalidate: (...args: unknown[]) => invalidateLinked(...args) },
         list: { invalidate: (...args: unknown[]) => invalidateList(...args) },
       },
+      knowledge: { list: { invalidate: vi.fn() } },
+      projects: { assets: { invalidate: vi.fn() } },
     }),
     databases: {
       linkedToProject: {
@@ -54,8 +56,16 @@ vi.mock("../api", () => ({
       assets: {
         useQuery: (...args: unknown[]) => assetsList(...args),
       },
+      get: {
+        useQuery: () => ({ data: { id: "p1", title: "測試專案" }, isLoading: false }),
+      },
     },
   },
+}));
+
+// 「＋加入資料」自己有一整組查詢與 picker（另有專屬測試）；這支測的是專案資料卡本身
+vi.mock("./AddDataSheet", () => ({
+  AddDataSheet: ({ open }: { open: boolean }) => (open ? <div data-testid="add-data-sheet" /> : null),
 }));
 
 vi.mock("wouter", () => ({
@@ -83,11 +93,12 @@ describe("ProjectDatabasesCard", () => {
 
     expect(screen.getByText("專案依據")).toBeInTheDocument();
     expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "empty");
-    // 收合狀態就要有得按：沒有依據時 summary 內常駐「加資料」，
-    // 否則使用者得先展開一張卡才會發現裡面能貼文字／上傳（實測痛點）
-    expect(screen.getByRole("button", { name: /加資料/i })).toBeInTheDocument();
+    // 收合狀態就要有得按：沒有依據時 summary 內常駐「加入資料」，
+    // 否則使用者得先展開一張卡才會發現裡面能加東西（實測痛點）。
+    // 資料中心 P2 之後這顆與展開後的主要動作是同一件事——開「＋加入資料」，
+    // 不再要求使用者自己判斷這份資料算貼文字、上傳還是外部來源。
+    expect(screen.getAllByRole("button", { name: /加入資料/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/本專案還沒有可給 AI 的依據/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /貼上文字/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /問 AI 助手/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Google／Notion／API/i })).toHaveAttribute("href", "/integrations");
     expect(screen.getByTestId("project-data-templates")).toBeInTheDocument();
@@ -104,8 +115,8 @@ describe("ProjectDatabasesCard", () => {
     expect(adv).toContainElement(screen.getByTestId("project-data-templates"));
     expect(adv).toContainElement(screen.getByRole("link", { name: /Google／Notion／API/i }));
     expect(adv).toContainElement(screen.getByRole("link", { name: /管理全部資料表/i }));
-    // 簡單路徑（貼文字）留在主畫面，不藏進進階
-    expect(adv).not.toContainElement(screen.getByRole("button", { name: /貼上文字/i }));
+    // 主要動作（＋加入資料）留在主畫面，不藏進進階
+    expect(adv).not.toContainElement(screen.getAllByRole("button", { name: /加入資料/i })[0]);
   });
 
   it("shows ok status when knowledge exists", () => {

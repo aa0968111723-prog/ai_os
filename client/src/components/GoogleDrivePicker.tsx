@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Meta, Badge, Button, Hint } from "./ui";
-import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { currentReturnTo, withReturnTo } from "@shared/returnTo";
 
 /**
  * Google 雲端選檔器（PR-E1 使用者主路徑）：已連結者不必貼網址——搜尋自己的雲端、
@@ -54,9 +54,15 @@ function formatSize(size: number | null): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLabel, onSaveToKnowledge }: {
+export function GoogleDrivePicker({ tableId, projectId, onImported, onClose, onPick, pickLabel, onSaveToKnowledge }: {
   /** 匯入模式：目的資料庫（有 onPick 時可省略） */
   tableId?: string;
+  /**
+   * 匯入模式：目的專案（資料中心「＋加入資料」用）。
+   * 選中的檔案抽文字進該專案的知識庫（knowledge.importDriveFile，既有路徑），
+   * 之後專案 AI 自動讀得到。與 tableId 互斥——tableId 優先。
+   */
+  projectId?: string;
   /** 至少一檔匯入成功後呼叫（呼叫端刷新文件清單） */
   onImported?: () => void;
   onClose: () => void;
@@ -82,6 +88,9 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<Array<{ name: string; ok: boolean; message?: string }>>([]);
+  // 授權完成後回到「使用者現在正在看的這個畫面」——含查詢字串與 hash，
+  // 所以在專案裡按連接，連完就回到那個專案的加入資料流程（Golden Path 1／5）。
+  const connectHref = withReturnTo("/api/integrations/google-drive/start", currentReturnTo());
 
   const list = trpc.integrations.listDriveFiles.useQuery(
     { query: submittedQuery || undefined, pageToken, folderId: folder?.id },
@@ -89,6 +98,7 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
     { staleTime: 30_000, placeholderData: (prev) => prev },
   );
   const importFile = trpc.databases.importDriveFile.useMutation();
+  const importToKnowledge = trpc.knowledge.importDriveFile.useMutation();
   const utils = trpc.useUtils();
 
   const data = list.data;
@@ -137,14 +147,17 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
       onClose();
       return;
     }
-    if (!tableId) return;
+    if (!tableId && !projectId) return;
     setImporting(true);
     setResults([]);
     const out: Array<{ name: string; ok: boolean; message?: string }> = [];
     let okCount = 0;
     for (const f of picked) {
       try {
-        await importFile.mutateAsync({ tableId, fileId: f.id });
+        // 目的地決定走哪條既有路徑：資料表文件區 vs 專案知識庫。兩條都是既有 procedure，
+        // 這裡不重寫抓取／權限／配額任何一段。
+        if (tableId) await importFile.mutateAsync({ tableId, fileId: f.id });
+        else await importToKnowledge.mutateAsync({ projectId: projectId!, fileId: f.id });
         out.push({ name: f.name, ok: true });
         okCount += 1;
       } catch (err) {
@@ -156,7 +169,8 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
     if (okCount > 0) {
       setSelected(new Set());
       onImported?.();
-      utils.databases.listFiles.invalidate({ tableId });
+      if (tableId) utils.databases.listFiles.invalidate({ tableId });
+      else if (projectId) utils.knowledge.list.invalidate({ projectId });
     }
   };
 
@@ -174,11 +188,20 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
       {data && !data.ok && data.reason === "not-connected" && (
         <Hint as="p" style={{ marginTop: 8 }}>
           還沒連結 Google 雲端。連結後 AI 與匯入只會讀「你選中的檔案」，不是整顆雲端。
-          <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往連結 Google <Icon name="ArrowRight" size={13} /></Link>
+          {/* 直接開始授權，不再把人丟到整合設定頁自己找路回來：
+              授權完成後 callback 依 state 裡簽過的 return 導回這個畫面（見 shared/returnTo）。 */}
+          <a href={connectHref} className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>
+            連接 Google 雲端 <Icon name="ArrowRight" size={13} />
+          </a>
         </Hint>
       )}
       {data && !data.ok && data.reason === "error" && (
-        <p className="error" role="alert" style={{ marginTop: 8 }}>{data.message}</p>
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          {data.message}
+          <a href={connectHref} className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>
+            重新連接 <Icon name="ArrowRight" size={13} />
+          </a>
+        </p>
       )}
       {list.error && <p className="error" role="alert" style={{ marginTop: 8 }}>{list.error.message}</p>}
 
@@ -290,7 +313,11 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
             >
               {onPick
                 ? `${pickLabel ?? "僅本次規劃"}（${selected.size}）`
-                : importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
+                : importing
+                  ? `加入中（${results.length}/${selected.size}）…`
+                  : projectId && !tableId
+                    ? `加入這個專案（${selected.size}）`
+                    : `匯入選取（${selected.size}）`}
             </Button>
             {data?.ok && data.nextPageToken && (
               <Button size="sm" onClick={loadMore} disabled={list.isFetching}>載入更多</Button>
@@ -300,7 +327,9 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
                 ? onSaveToKnowledge
                   ? "轉存＝進知識庫可重複使用（建議）；僅本次＝這次規劃看完就丟（每檔最多 8,000 字、不落庫）。未勾選的搜尋結果 AI 看不到。"
                   : "只有勾選的檔案會進本次規劃（每檔最多 8,000 字、不會存進站內）；未勾選的搜尋結果 AI 看不到。"
-                : "只會匯入你勾選的檔案；內容進站後才會被 AI 讀到。"}
+                : projectId && !tableId
+                  ? "只會加入你勾選的檔案，加入後這個專案的 AI 就讀得到；沒勾選的搜尋結果 AI 看不到。"
+                  : "只會匯入你勾選的檔案；內容進站後才會被 AI 讀到。"}
             </span>
           </div>
 

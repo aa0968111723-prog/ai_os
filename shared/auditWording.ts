@@ -221,6 +221,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.importUrl": "從網址匯入資料庫文件",
   "databases.importDriveFile": "從 Google 雲端選檔匯入資料庫文件",
   "knowledge.importDriveFile": "從 Google 雲端選檔轉存進知識庫",
+  "knowledge.importUrl": "從網址或 Notion 頁面加入專案資料",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { AddDataSheet } from "./AddDataSheet";
 import type { DataField, DataRowData, DataRowValue } from "@shared/databaseFields";
 import {
   PROJECT_DATA_TEMPLATES,
@@ -83,6 +84,9 @@ export function ProjectDatabasesCard({
   const [quickDraft, setQuickDraft] = useState<Record<string, string>>({});
   const [quickError, setQuickError] = useState<Record<string, string>>({});
   const [quickOk, setQuickOk] = useState<Record<string, string>>({});
+  // 全站唯一的「＋加入資料」：就地開，不跳頁、不先問使用者這份資料屬於哪個系統
+  const [addOpen, setAddOpen] = useState(false);
+  const project = trpc.projects.get.useQuery({ id: projectId });
 
   const createBound = trpc.databases.createBoundToProject.useMutation({
     onSuccess: (res) => {
@@ -183,10 +187,10 @@ export function ProjectDatabasesCard({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              scrollTo("sec-knowledge");
+              setAddOpen(true);
             }}
           >
-            <Icon name="Plus" size={13} /> 加資料
+            <Icon name="Plus" size={13} /> 加入資料
           </Button>
         )}
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -224,23 +228,38 @@ export function ProjectDatabasesCard({
           <Meta as="p" style={{ margin: 0 }}>正在判斷專案資料狀態…</Meta>
         )}
 
-        {/* 簡單路徑放前面：多數人「貼文字＋上傳檔案」就夠 AI 用，資料表與外部連結收進下方進階區 */}
-        <div>
-          <Hint style={{ margin: "0 0 8px" }}>
-            給 AI 依據最簡單的方式：貼文字或上傳檔案，AI 就會自動讀取——不用建資料表、也不用連 Notion。
-          </Hint>
-          <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-            <Button size="sm" variant="primary" onClick={() => scrollTo("sec-knowledge")}>
-              <Icon name="FileText" size={13} /> 貼上文字
+        {/*
+          一個畫面一個主要動作（§63）：以前這裡是「貼上文字／上傳圖片／問 AI」三顆並排，
+          等於要使用者先自己判斷「我這份資料算哪一種」。現在只留一顆「＋加入資料」——
+          從哪裡加入由 AddDataSheet 問，且就地完成，不跳到別的區塊或別的頁。
+        */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {canEdit && (
+            <Button size="sm" variant="primary" onClick={() => setAddOpen(true)}>
+              <Icon name="Plus" size={13} /> 加入資料
             </Button>
-            <Button size="sm" onClick={() => scrollTo("sec-assets")}>
-              <Icon name="Image" size={13} /> 上傳圖片、影片
-            </Button>
-            <Button size="sm" onClick={() => scrollTo("sec-ai-hub")}>
-              <Icon name="Sparkles" size={13} /> 問 AI 助手
-            </Button>
-          </div>
+          )}
+          <Link
+            href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}
+            className="btn-sm"
+            style={{ textDecoration: "none" }}
+          >
+            <Icon name="Database" size={13} /> 管理資料
+          </Link>
+          <Button size="sm" variant="ghost" onClick={() => scrollTo("sec-ai-hub")}>
+            <Icon name="Sparkles" size={13} /> 問 AI 助手
+          </Button>
         </div>
+
+        <AddDataSheet
+          open={addOpen}
+          destination={{ kind: "project", projectId, projectTitle: project.data?.title ?? null }}
+          onClose={() => setAddOpen(false)}
+          onAdded={() => {
+            void utils.knowledge.list.invalidate({ projectId });
+            void utils.projects.assets.invalidate({ projectId });
+          }}
+        />
 
         {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (

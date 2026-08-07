@@ -8098,3 +8098,135 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   .story-parse-bar__actions { width: 100%; }
   .story-parse-bar__actions .btn { flex: 1 1 auto; }
 }
+
+/* ── ＋加入資料（AddDataSheet，資料中心 P2）──────────────────────────
+   全站唯一的「加入資料」入口。桌機是置中對話框，手機轉貼底 sheet——
+   契約與 .new-project-modal-* 逐條對齊（--kb-inset 讓開鍵盤、dvh 取代 vh、
+   safe-bottom、overscroll 圍堵），因為它一樣有輸入框且一樣會在手機被鍵盤蓋住。 */
+.add-data-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(28, 25, 23, 0.48);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeInModal 180ms var(--ease-out);
+}
+.add-data-card {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+  animation: scaleInModal 200ms var(--ease-out);
+}
+.add-data-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.add-data-card__head h2 {
+  margin: 0;
+  font-size: var(--fs-18, 18px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.add-data-question {
+  margin: 0;
+  font-weight: 600;
+}
+.add-data-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.add-data-destination select { width: 100%; }
+.add-data-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+/* 單欄直式清單而非水平大卡：390px 上水平卡一定被裁掉（見 docs 第 13.8 點） */
+.add-data-method {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--surface-2, var(--muted));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12, 12px);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.add-data-method:hover:not(:disabled) {
+  border-color: var(--primary-ink);
+  background: var(--card);
+}
+.add-data-method:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.add-data-method__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--primary-ink);
+}
+.add-data-method__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.add-data-method__copy strong { font-size: var(--fs-14, 14px); }
+/* 長來源名稱不撐破：省略而不是把卡片撐出畫面 */
+.add-data-method__copy small {
+  color: var(--fg-secondary);
+  font-size: var(--fs-12, 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.add-data-method.is-advanced { background: transparent; }
+.add-data-back { align-self: flex-start; }
+.add-data-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.add-data-panel textarea { width: 100%; }
+
+@media (max-width: 560px) {
+  .add-data-backdrop {
+    bottom: var(--kb-inset, 0px);
+    align-items: flex-end;
+    padding: max(8px, var(--safe-top)) 0 0 0;
+    overscroll-behavior: contain;
+  }
+  .add-data-card {
+    max-height: min(92dvh, 100%);
+    border-radius: var(--r-16) var(--r-16) 0 0;
+    padding-bottom: max(16px, var(--safe-bottom));
+    animation: modal-sheet-in 280ms var(--ease-out);
+  }
+  .add-data-methods { grid-template-columns: 1fr; }
+  /* iOS 聚焦自動放大會把整個 sheet 推歪：加入資料的輸入框一律 ≥16px */
+  .add-data-panel input,
+  .add-data-panel textarea,
+  .add-data-destination select { font-size: 16px; }
+}

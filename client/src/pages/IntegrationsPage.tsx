@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { sanitizeReturnTo, withReturnTo } from "@shared/returnTo";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
@@ -21,6 +22,17 @@ export function IntegrationsPage() {
   const utils = trpc.useUtils();
   const list = trpc.integrations.list.useQuery();
   const remove = trpc.integrations.remove.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
+
+  /**
+   * 使用者可能是從某個「加入資料」流程被帶來這裡的（?return=<站內路徑>）。
+   * 連接完成後要送他回去，而不是留在設定頁自己找路。掛載時讀一次即可——
+   * 之後的操作交回使用者。
+   */
+  const returnTo = useMemo(
+    () => sanitizeReturnTo(new URLSearchParams(window.location.search).get("return")),
+    [],
+  );
+  const driveStartHref = withReturnTo("/api/integrations/google-drive/start", returnTo);
 
   // Google OAuth 回跳的一次性訊息（?gdrive=...）：顯示後清掉網址參數，重新整理不再重播
   const [flash, setFlash] = useState<string | null>(null);
@@ -134,7 +146,7 @@ export function IntegrationsPage() {
         ) : !d.googleDrive.configured ? (
           <Hint>站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</Hint>
         ) : !d.googleDrive.connected ? (
-          <a className="btn-sm primary" href="/api/integrations/google-drive/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <a className="btn-sm primary" href={driveStartHref} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Plus" size={14} /> 連結 Google 雲端
           </a>
         ) : (
@@ -144,7 +156,7 @@ export function IntegrationsPage() {
                 <Meta style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={d.googleDrive.lastError ?? undefined}>
                   授權已失效{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}
                 </Meta>
-                <a className="btn-sm" href="/api/integrations/google-drive/start">重新連結</a>
+                <a className="btn-sm" href={driveStartHref}>重新連結</a>
               </>
             ) : (
               <Meta style={{ margin: 0 }}>
@@ -157,7 +169,7 @@ export function IntegrationsPage() {
       </Card>
 
       {/* ── Notion ── */}
-      <NotionCard data={d?.notion ?? null} />
+      <NotionCard data={d?.notion ?? null} returnTo={returnTo} />
 
       {/* ── 個人 AI 金鑰（BYOK fal.ai）── */}
       <PersonalAiKeyCard />
@@ -219,12 +231,24 @@ function AdobeCard() {
   );
 }
 
-function NotionCard({ data }: { data: { connected: boolean; workspace: string | null; last4: string | null; status: string | null; lastError: string | null; siteTokenAvailable: boolean } | null }) {
+function NotionCard({ data, returnTo }: {
+  data: { connected: boolean; workspace: string | null; last4: string | null; status: string | null; lastError: string | null; siteTokenAvailable: boolean } | null;
+  /** 使用者是從哪個「加入資料」流程來的（?return=）——設定完成後送他回去 */
+  returnTo: string | null;
+}) {
   const utils = trpc.useUtils();
+  const [, navigate] = useLocation();
   const [token, setToken] = useState("");
   const [editing, setEditing] = useState(false);
   const setNotion = trpc.integrations.setNotion.useMutation({
-    onSuccess: () => { utils.integrations.list.invalidate(); setToken(""); setEditing(false); },
+    onSuccess: () => {
+      utils.integrations.list.invalidate();
+      setToken("");
+      setEditing(false);
+      // Notion 是貼 token（沒有 OAuth 重導），所以「回到原本流程」得由前端做。
+      // 目的地已過 shared/returnTo 白名單，與 Google callback 同一條規則。
+      if (returnTo) navigate(returnTo);
+    },
   });
   const removeNotion = trpc.integrations.removeNotion.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
