@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { getModel } from "../../shared/models";
 import { SCRIPT_PROMPT_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "../../shared/storyboardScript";
 import { MAX_PROMPT_CHARS } from "./prompts";
-import { refineRejection, regenRejection, sceneSlotForAssetKind } from "./scenes";
+import { cardPatchFromScript, refineRejection, regenRejection, sceneSlotForAssetKind } from "./scenes";
 
 const PROJECT = "p-1";
 const imageSource = { projectId: PROJECT, kind: "image" };
@@ -114,5 +114,65 @@ describe("文字腳本寫回的上限與單格編輯同口徑", () => {
 
   it("標題與旁白上限是同一組常數（scenes.update 直接吃 shared 的值，不另寫數字）", () => {
     expect([SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX]).toEqual([60, 2000]);
+  });
+});
+
+/**
+ * 文字腳本的三行卡片 → 要寫進哪幾欄。
+ *
+ * 名字回推卡片的規則本身在 shared/sceneCards.ts（有自己的測試）；這裡守的是接縫：
+ * 不套用時**一定要出聲**、沒變的不算更新、解除要真的寫成 null。
+ * 整行靜默跳過的話，使用者看到的是「更新 3 鏡」而他寫的角色一個都沒進去。
+ */
+describe("cardPatchFromScript（文字腳本的卡片行 → 分鏡欄位）", () => {
+  const LOOKUP = {
+    characters: [{ id: "c-anjie", names: ["安倢"] }, { id: "c-master", names: ["師父"] }],
+    scenePresets: [{ id: "s-hall", names: ["禪堂"] }],
+    props: [{ id: "p-umbrella", names: ["安倢的紅傘", "紅傘"] }],
+  };
+  const patchOf = (scene: Record<string, string>, current: Record<string, string[] | null> | null = null) => {
+    const warnings: string[] = [];
+    const patch = cardPatchFromScript(scene as never, current, LOOKUP, "第 1 鏡的", warnings);
+    return { patch, warnings };
+  };
+
+  it("三行各自寫進各自的欄位", () => {
+    const { patch, warnings } = patchOf({ characters: "師父・安倢", scenePresets: "禪堂", props: "紅傘" });
+    expect(patch).toEqual({
+      characterIds: ["c-master", "c-anjie"],
+      scenePresetIds: ["s-hall"],
+      propIds: ["p-umbrella"],
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it("「無」寫成 null，不是空陣列——空陣列會被讀成「指定了空的」", () => {
+    expect(patchOf({ characters: "無" }, { characterIds: ["c-anjie"] }).patch).toEqual({ characterIds: null });
+  });
+
+  it("名單一模一樣就不算更新（連順序都一樣才算沒變）", () => {
+    expect(patchOf({ characters: "安倢・師父" }, { characterIds: ["c-anjie", "c-master"] }).patch).toEqual({});
+    expect(patchOf({ characters: "師父・安倢" }, { characterIds: ["c-anjie", "c-master"] }).patch).toEqual({
+      characterIds: ["c-master", "c-anjie"],
+    });
+  });
+
+  it("名字對不上 → 那一欄不動，而且一定講出來（靜默跳過最難查）", () => {
+    const { patch, warnings } = patchOf({ characters: "安倢・小明" }, { characterIds: ["c-anjie"] });
+    expect(patch).toEqual({});
+    expect(warnings).toEqual([expect.stringContaining("第 1 鏡的")]);
+    expect(warnings[0]).toContain("小明");
+  });
+
+  it("留白＝維持原值，並在真的有東西會被誤清時提醒怎麼解除", () => {
+    const bound = patchOf({ characters: "" }, { characterIds: ["c-anjie"] });
+    expect(bound.patch).toEqual({});
+    expect(bound.warnings[0]).toContain("角色卡：無");
+    // 沒綁卡的鏡留白是常態，不出聲
+    expect(patchOf({ characters: "" }).warnings).toEqual([]);
+  });
+
+  it("沒寫卡片行的鏡完全不產生 patch（省略＝維持原值）", () => {
+    expect(patchOf({}, { characterIds: ["c-anjie"] })).toEqual({ patch: {}, warnings: [] });
   });
 });

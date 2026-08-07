@@ -19,6 +19,12 @@ const moveMutate = vi.fn();
 const removeMutate = vi.fn();
 const exportCreateMutate = vi.fn();
 const invalidate = vi.fn();
+/** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
+const cardLists: {
+  characters: Array<{ id: string; name: string }>;
+  scenePresets: Array<{ id: string; name: string }>;
+  props: Array<{ id: string; name: string; ownerName: string | null }>;
+} = { characters: [], scenePresets: [], props: [] };
 
 vi.mock("../api", () => ({
   trpc: {
@@ -36,10 +42,10 @@ vi.mock("../api", () => ({
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
     },
-    // 文字腳本的「設定卡」唯讀標注要讀這三份清單（SceneList 自己查，不能靠 stub 子元件躲掉）
-    characters: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
-    scenePresets: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
-    props: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
+    // 文字腳本的卡片三行要讀這三份清單才翻得出名字（SceneList 自己查，不能靠 stub 子元件躲掉）
+    characters: { list: { useQuery: () => ({ data: cardLists.characters, isLoading: false }) } },
+    scenePresets: { list: { useQuery: () => ({ data: cardLists.scenePresets, isLoading: false }) } },
+    props: { list: { useQuery: () => ({ data: cardLists.props, isLoading: false }) } },
     exportJobs: {
       create: { useMutation: () => ({ mutate: exportCreateMutate, isPending: false, error: null }) },
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
@@ -82,6 +88,9 @@ type SceneOver = {
   action?: string | null;
   dialogue?: string | null;
   music?: string | null;
+  characterIds?: string[] | null;
+  scenePresetIds?: string[] | null;
+  propIds?: string[] | null;
 };
 
 function scene(over: SceneOver) {
@@ -107,6 +116,9 @@ function scene(over: SceneOver) {
     music: over.music ?? null,
     ambienceUrl: null,
     pendingAmbienceStatus: null,
+    characterIds: over.characterIds ?? null,
+    scenePresetIds: over.scenePresetIds ?? null,
+    propIds: over.propIds ?? null,
   };
 }
 
@@ -125,6 +137,9 @@ beforeEach(() => {
   window.localStorage.clear();
   meQuery.mockReturnValue({ isLoading: false, data: { id: "u-1" } });
   scenesQuery.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+  cardLists.characters = [];
+  cardLists.scenePresets = [];
+  cardLists.props = [];
 });
 
 describe("SceneList 流程引導（C）", () => {
@@ -327,5 +342,42 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
       dialogue: "@師父：坐吧。",
       music: "起｜鋼琴",
     });
+  });
+
+  /**
+   * 卡片三行現在是**可寫回**的，所以名字錯了不只是顯示問題：
+   * 伺服器拿名字回推卡片，對不上就整行不套用——使用者會看到「我明明沒改角色，
+   * 寫回一次綁定就說找不到」。素材卡尤其要用顯示名（「安倢的紅傘」），
+   * 因為原名撞名時伺服器會判成有歧義而整行不套用。
+   */
+  it("卡片三行各自帶名字，素材卡用含主人的顯示名", () => {
+    cardLists.characters = [{ id: "c1", name: "安倢" }, { id: "c2", name: "師父" }];
+    cardLists.scenePresets = [{ id: "p1", name: "禪堂" }];
+    cardLists.props = [{ id: "r1", name: "紅傘", ownerName: "安倢" }];
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", characterIds: ["c2", "c1"], scenePresetIds: ["p1"], propIds: ["r1"] })],
+      isLoading: false,
+      isError: false,
+    });
+    mount();
+    const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(rows[0]).toMatchObject({
+      // 順序照綁定順序，不重排——它決定提示詞裡卡片的組裝順序
+      characterNames: ["師父", "安倢"],
+      scenePresetNames: ["禪堂"],
+      propNames: ["安倢的紅傘"],
+    });
+  });
+
+  it("卡片被刪掉時那個名字直接消失，不會寫出一個回不去的名字", () => {
+    cardLists.characters = [{ id: "c1", name: "安倢" }];
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", characterIds: ["c1", "c-gone"] })],
+      isLoading: false,
+      isError: false,
+    });
+    mount();
+    const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(rows[0]!.characterNames).toEqual(["安倢"]);
   });
 });

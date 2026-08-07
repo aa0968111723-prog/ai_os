@@ -6,9 +6,18 @@ import { db, schema } from "../db";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
-import { resolveSceneCards } from "../../shared/sceneCards";
+import {
+  SCENE_CARD_COLUMN,
+  SCENE_CARD_KINDS,
+  resolveCardLine,
+  resolveSceneCards,
+  type CardLookupEntry,
+  type SceneCardKind,
+} from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import {
+  SCRIPT_CARD_LABELS,
+  SCRIPT_CARD_MAX,
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
   SCRIPT_AMBIENCE_MAX,
@@ -17,8 +26,9 @@ import {
   SCRIPT_MUSIC_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
+  type StoryboardScriptScene,
 } from "../../shared/storyboardScript";
-import { sceneCardColumns } from "../services/sceneCards";
+import { loadSceneCardLookup, sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
 import {
   buildSceneVersions,
@@ -127,6 +137,43 @@ async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Cont
   requireGroup(ctx.auth, project.groupId);
   if (forEdit) await assertProjectEditable(ctx.auth, project);
   return project;
+}
+
+/**
+ * 文字腳本的三行卡片 → 要寫進哪幾欄。
+ *
+ * 三條規則都在 resolveCardLine 裡，這裡只負責把結果變成 patch 並把「看得懂但不照做」
+ * 的理由講出來。**不套用時一定要出聲**：整行靜默跳過的話，使用者看到的是
+ * 「更新 3 鏡」而他寫的角色一個都沒進去——那比報錯難查得多。
+ *
+ * 不必再過一次 assertGenerationEntityIds：id 全部來自 loadSceneCardLookup(project.id)，
+ * 名冊本身就只撈本專案的卡片，寫不出跨專案的引用（與 setCards 收外部 UUID 的處境不同）。
+ */
+export function cardPatchFromScript(
+  scene: StoryboardScriptScene,
+  current: Partial<Record<"characterIds" | "scenePresetIds" | "propIds", string[] | null>> | null,
+  lookup: Record<SceneCardKind, CardLookupEntry[]>,
+  where: string,
+  warnings: string[],
+): Partial<typeof schema.scenes.$inferInsert> {
+  const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+  for (const kind of SCENE_CARD_KINDS) {
+    const column = SCENE_CARD_COLUMN[kind];
+    const now = current?.[column] ?? [];
+    const outcome = resolveCardLine(scene[kind], lookup[kind], {
+      max: SCRIPT_CARD_MAX[kind],
+      human: SCRIPT_CARD_LABELS[kind],
+      currentCount: now.length,
+    });
+    if (outcome.kind === "keep") {
+      if (outcome.warning) warnings.push(`${where}${outcome.warning}`);
+      continue;
+    }
+    // 名單一模一樣就不算更新——順序也要一樣，因為它決定提示詞裡卡片的組裝順序
+    if (outcome.ids.length === now.length && outcome.ids.every((id, i) => id === now[i])) continue;
+    patch[column] = outcome.ids.length ? outcome.ids : null;
+  }
+  return patch;
 }
 
 /** 分鏡：簡易排序（↑↓）＋從生成成品加入（定案：不做拖曳時間軸） */
@@ -707,6 +754,11 @@ export const scenesRouter = router({
         return { updated: 0, created: 0, keptUntouched: 0, warnings: parsed.warnings };
       }
 
+      const warnings = [...parsed.warnings];
+      // 名冊只在文字裡真的寫了卡片行時才撈——沒寫的那絕大多數次寫回不該多打三支查詢
+      const wroteCards = parsed.scenes.some((s) => SCENE_CARD_KINDS.some((k) => s[k] !== undefined));
+      const cardLookup = wroteCards ? await loadSceneCardLookup(project.id) : null;
+
       // 與拆分鏡／新增分鏡共用同一把序號鎖：併發寫回不會插出重複 orderIndex
       return db.transaction(async (tx) => {
         await lockSceneOrder(tx, project.id);
@@ -724,6 +776,8 @@ export const scenesRouter = router({
         const targets = resolveScriptTargets(rows.length, parsed.scenes);
         for (const { scene, rowIndex } of targets) {
           const row = rowIndex === null ? null : rows[rowIndex];
+          const where = row ? `第 ${(rowIndex ?? 0) + 1} 鏡的` : `新增的「${scene.title.slice(0, 12)}」的`;
+          const cardPatch = cardLookup ? cardPatchFromScript(scene, row, cardLookup, where, warnings) : {};
           if (!row) {
             await tx.insert(schema.scenes).values({
               projectId: project.id,
@@ -737,6 +791,7 @@ export const scenesRouter = router({
               action: scene.action ?? null,
               dialogue: scene.dialogue ?? null,
               music: scene.music ?? null,
+              ...cardPatch,
             });
             created += 1;
             continue;
@@ -765,6 +820,7 @@ export const scenesRouter = router({
           if (scene.music !== undefined && scene.music !== (row.music ?? "").trim()) {
             patch.music = scene.music;
           }
+          Object.assign(patch, cardPatch);
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
           updated += 1;
@@ -774,7 +830,7 @@ export const scenesRouter = router({
           updated,
           created,
           keptUntouched: Math.max(0, rows.length - targets.filter((t) => t.rowIndex !== null).length),
-          warnings: parsed.warnings,
+          warnings,
         };
       });
     }),

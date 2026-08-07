@@ -23,7 +23,7 @@ const ROWS = [
     voiceover: "那一年，我第一次走進禪堂。",
     ambience: "遠處鐘聲，細微鳥鳴",
   },
-  { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, cardNames: ["安倢的紅傘"] },
+  { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: null, propNames: ["安倢的紅傘"] },
 ];
 
 describe("formatStoryboardScript", () => {
@@ -43,7 +43,7 @@ describe("formatStoryboardScript", () => {
         "旁白：",
         "對白：",
         "環境音：",
-        "設定卡：安倢的紅傘（唯讀）",
+        "素材卡：安倢的紅傘",
       ].join("\n"),
     );
   });
@@ -95,7 +95,17 @@ describe("formatStoryboardScript", () => {
         ambience: "遠處鐘聲，細微鳥鳴",
         ordinal: 1,
       },
-      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", action: "", voiceover: "", dialogue: "", ambience: "", ordinal: 2 },
+      {
+        title: "紅傘特寫",
+        durationSec: 4,
+        prompt: "正紅長柄傘立在門邊",
+        action: "",
+        voiceover: "",
+        dialogue: "",
+        ambience: "",
+        props: "安倢的紅傘",
+        ordinal: 2,
+      },
     ]);
   });
 
@@ -228,6 +238,31 @@ describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", (
         new RegExp(`的${field.human} ${field.max + 1} 字`),
       );
     }
+  });
+
+  it("卡片三行排在一鏡最後，且只在真的綁了卡時才輸出", () => {
+    const out = formatStoryboardScript([
+      { title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"], propNames: ["安倢的紅傘"] },
+    ]);
+    expect(out).toContain("角色卡：安倢・師父");
+    expect(out).toContain("素材卡：安倢的紅傘");
+    // 沒綁場景卡就不印那一行：空的卡片行是**沒有作用**的（留白＝維持原值），
+    // 印在編輯模板裡會誤導人以為清空它就能解除綁定
+    expect(out).not.toContain("場景卡：");
+    // 排在最後：讀起來像分場表的場末註記，也讓單行欄位的續行落回前一個描述欄
+    expect(out.trim().split("\n").at(-1)).toBe("素材卡：安倢的紅傘");
+  });
+
+  it("卡片行來回不失真，且鏡末尾補的筆記不會被吞進名單", () => {
+    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] }];
+    expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.characters).toBe("安倢・師父");
+    // 名單型欄位不吃續行——被吞進去的筆記會拿去查卡片，查不到就整行不套用，
+    // 使用者會看到「我只是加了一句話，綁定就壞了」
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "環境音：蟲鳴", "角色卡：安倢", "這是鏡末尾的筆記"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.characters).toBe("安倢");
+    expect(parsed.scenes[0]?.ambience).toBe("蟲鳴\n這是鏡末尾的筆記");
   });
 
   it("舊腳本的「設定卡：」仍被安全忽略，且不會吃掉它後面的行", () => {
@@ -381,6 +416,31 @@ describe("diffStoryboardScript（保守套用）", () => {
   it("省略的欄位不會被當成「清空」（只寫標題不該把畫面洗掉）", () => {
     const parsed = parseStoryboardScript("## 1. 開場・晨光 (5s)");
     expect(diffStoryboardScript(ROWS, parsed.scenes).updated).toEqual([]);
+  });
+
+  /**
+   * 卡片行的「空」不等於「清空」，所以預告不能拿字串直接比。
+   * 照字串比會把留白算成一筆更新，按下去卻毫無動靜——預覽說謊比不預覽更糟。
+   */
+  it("卡片行留白不算變更（伺服器也不會動它）", () => {
+    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢"] }];
+    expect(diffStoryboardScript(rows, parseStoryboardScript("## 1. T (5s)\n角色卡：").scenes).updated).toEqual([]);
+  });
+
+  it("卡片行寫「無」＝解除，算變更；換名字、換順序也算", () => {
+    const rows = [{ title: "T", durationSec: 5, prompt: "畫", characterNames: ["安倢", "師父"] }];
+    const updatedBy = (line: string) =>
+      diffStoryboardScript(rows, parseStoryboardScript(`## 1. T (5s)\n${line}`).scenes).updated;
+    expect(updatedBy("角色卡：無")).toHaveLength(1);
+    expect(updatedBy("角色卡：安倢")).toHaveLength(1);
+    // 順序會決定提示詞裡卡片的組裝順序，不能當成無序集合
+    expect(updatedBy("角色卡：師父・安倢")).toHaveLength(1);
+    expect(updatedBy("角色卡：安倢・師父")).toEqual([]);
+  });
+
+  it("沒綁卡的鏡寫「無」不算變更（不製造一筆什麼都沒動的更新）", () => {
+    const rows = [{ title: "T", durationSec: 5, prompt: "畫" }];
+    expect(diffStoryboardScript(rows, parseStoryboardScript("## 1. T (5s)\n角色卡：無").scenes).updated).toEqual([]);
   });
 
   it("刪掉中間整段：預告與實際一致，動的是第 2 鏡而不是第 1 鏡", () => {
