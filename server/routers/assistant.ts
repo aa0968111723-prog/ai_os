@@ -100,12 +100,18 @@ export function pickGenerateModel(proposedId?: string): ModelEntry {
   }).model;
 }
 /**
- * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面 assetId；旁白語音→旁白音檔 narrationAssetId。
- * 配樂/音效（text-to-audio）與純文字（llm）沒有對應的分鏡格 → null（綁分鏡會落空或覆蓋旁白，故不准綁）。
+ * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面 assetId；旁白語音→旁白音檔 narrationAssetId；
+ * 音效／配樂（text-to-audio）→環境音 ambienceAssetId。
+ *
+ * text-to-audio 以前回 null——那時候環境音沒有欄位，綁分鏡只會覆蓋旁白槽，擋下來是對的。
+ * 0038 之後它有自己的槽了，繼續擋等於讓助手做不到使用者明明可以在單格工作室做的事。
+ *
+ * 純文字（llm）仍是 null：文字成品沒有任何分鏡格可填，綁了只會靜默落空。
  */
-export function sceneFillRole(model: ModelEntry): "visual" | "narration" | null {
+export function sceneFillRole(model: ModelEntry): "visual" | "narration" | "ambience" | null {
   if (model.category === "text-to-image" || model.category === "text-to-video") return "visual";
   if (model.category === "text-to-speech") return "narration";
+  if (model.category === "text-to-audio") return "ambience";
   return null;
 }
 /** 提示詞用「可用工作流速查」：LLM 只能從這裡挑 presetId（resolve／startWorkflowCore 都會再過 getWorkflow 白名單） */
@@ -849,13 +855,14 @@ export const assistantRouter = router({
           // 命中 resolver 但過不了 assistantModel＝退役或非現役端點：不得經助手代送
           throw new TRPCError({ code: "BAD_REQUEST", message: `「${known.label}」是已退役的模型，助手不再代送——請改用目前的模型或到生成台操作` });
         }
-        // 綁分鏡：只有能填進分鏡格的成品才准綁——文字（LLM）不會入分鏡、配樂（text-to-audio）沒有專屬槽會覆蓋旁白，
-        // 兩者綁鏡都會「回報成功卻靜默落空／覆蓋」，故明確擋下並指路，而非讓它默默扣點又不回填。
+        // 綁分鏡：只有能填進分鏡格的成品才准綁。現在剩純文字（LLM）沒有格可填——綁了會
+        // 「回報成功卻靜默落空」，故明確擋下並指路，而非讓它默默扣點又不回填。
+        //（音效／配樂自 0038 起有環境音槽，不再擋。）
         const role = a.sceneId ? sceneFillRole(model) : undefined;
         if (a.sceneId && role === null) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `「${model.label}」的成品是${model.kind === "text" ? "文字" : "配樂/音效"}，不會填入分鏡，只會進生成紀錄／素材庫——請改用圖像／影片／旁白語音模型，或不要綁分鏡`,
+            message: `「${model.label}」的成品是文字，不會填入分鏡，只會進生成紀錄／素材庫——請改用圖像／影片／旁白語音／音效模型，或不要綁分鏡`,
           });
         }
         // 綁分鏡回填前，先比照 update_scene 驗證 sceneId 歸屬（同專案、未軟刪）——否則生成完成時
@@ -868,7 +875,7 @@ export const assistantRouter = router({
           if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
         }
         // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）。
-        // sceneRole 依模型類別決定：視覺（圖/影）→主畫面、旁白語音→旁白音檔（配樂/文字已在上面擋掉不會走到這）
+        // sceneRole 依模型類別決定：視覺（圖/影）→主畫面、旁白語音→旁白音檔、音效/配樂→環境音（純文字已在上面擋掉不會走到這）
         const gen = await submitGenerationCore({
           userId: ctx.auth.user.id,
           projectId: project.id,
