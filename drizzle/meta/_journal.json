@@ -293,7 +293,14 @@
       "idx": 41,
       "version": "7",
       "when": 1786700000000,
-      "tag": "0041_content_attachments",
+      "tag": "0041_push_device_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786800000000,
+      "tag": "0042_content_attachments",
       "breakpoints": true
     }
   ]

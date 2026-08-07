@@ -558,7 +558,7 @@ function KnowledgeRow({
               )}
             </p>
           )}
-          {/* 附件（0041）：PDF／Word 的開示稿直接收進這一筆，抽出的文字會跟著注入 AI 導演 */}
+          {/* 附件（0042）：PDF／Word 的開示稿直接收進這一筆，抽出的文字會跟著注入 AI 導演 */}
           <label style={{ marginTop: 10 }}>附件（PDF、Word、照片…）</label>
           <AttachmentPanel
             kind="knowledge"

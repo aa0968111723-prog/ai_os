@@ -3,8 +3,10 @@ import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
-import { deviceDetailLines } from "@shared/deviceDetails";
+import { deviceDetailLines, type DeviceDetails } from "@shared/deviceDetails";
+import { deviceKindFrom, deviceLabelFrom } from "@shared/deviceNaming";
 import {
+  collectDeviceProfile,
   copyLinkDeviceGuide,
   deviceKind,
   deviceLabel,
@@ -18,6 +20,7 @@ import {
   subscribeThisDevice,
   unsubscribeThisDevice,
   type DeviceKind,
+  type DeviceProfile,
 } from "../push";
 
 function kindIcon(kind: DeviceKind): "Smartphone" | "Tablet" | "Monitor" | "Bell" {
@@ -37,26 +40,44 @@ function kindLabel(kind: DeviceKind): string {
 /**
  * 跨裝置通知設定（UserMenu →「連結手機與電腦」）：
  * - 本裝置：一鍵啟用／停用；iPhone 未加入主畫面時給步驟引導
- * - 已連結裝置：手機／電腦分類圖示、最近同步、可移除
+ * - 已連結裝置：手機／電腦分類圖示、機型與規格細節、最近同步、可移除
  * - 測試通知：驗證通不通
  * - 複製引導：方便在另一台裝置完成連結
  */
+
+/**
+ * 登入工作階段的名稱。伺服器只存 UA 字串（session 建立時沒有 UA-CH），
+ * 故這裡只講得出系統與瀏覽器——但那也比原本一句「Chrome」強得多：
+ * 三台機器同時登入時，至少分得出哪台是手機、哪台是公司電腦。
+ */
 function summarizeUserAgent(ua: string | null | undefined): string {
   if (!ua) return "未知瀏覽器／裝置";
-  const s = ua.slice(0, 120);
-  if (/Edg\//i.test(s)) return "Microsoft Edge";
-  if (/Chrome\//i.test(s) && !/Edg\//i.test(s)) return "Chrome";
-  if (/Firefox\//i.test(s)) return "Firefox";
-  if (/Safari\//i.test(s) && !/Chrome\//i.test(s)) return "Safari";
-  if (/iPhone|iPad/i.test(s)) return "iOS 裝置";
-  if (/Android/i.test(s)) return "Android 裝置";
-  return s.length > 48 ? `${s.slice(0, 48)}…` : s;
+  return deviceLabelFrom(ua.slice(0, 400));
+}
+
+/** 清單列的圖示類型：優先用存下來的細節，舊資料才退回從標籤猜 */
+function rowKind(details: DeviceDetails | null | undefined, label: string | null | undefined): DeviceKind {
+  return details?.kind ?? kindFromLabel(label);
+}
+
+/** 細節行（機型／系統／處理器／螢幕…）；沒有細節的舊列就不出現這一段 */
+function DeviceDetailLines({ details }: { details: DeviceDetails | null | undefined }) {
+  const lines = deviceDetailLines(details);
+  if (lines.length === 0) return null;
+  return (
+    <span className="meta" style={{ display: "block", marginTop: 2, lineHeight: 1.6 }}>
+      {lines.join("｜")}
+    </span>
+  );
 }
 
 export function NotificationSettingsDialog({ onClose }: { onClose: () => void }) {
   const utils = trpc.useUtils();
   const supported = isPushSupported();
-  const thisKind = deviceKind();
+  // UA-CH 是非同步的（機型／版本要等 getHighEntropyValues），故先用 UA 版把畫面畫出來，
+  // 收齊後再換成完整版——標題會從「Android・Chrome」升級成「Samsung Galaxy S24 Ultra・Chrome 131」
+  const [profile, setProfile] = useState<DeviceProfile | null>(null);
+  const thisKind = profile?.kind ?? deviceKind();
   const publicKey = trpc.push.publicKey.useQuery(undefined, { staleTime: Infinity });
   const devices = trpc.push.devices.useQuery();
   const sessions = trpc.auth.listSessions.useQuery();
@@ -112,6 +133,11 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
         })
         .catch(() => {});
     }
+    collectDeviceProfile()
+      .then((p) => {
+        if (alive) setProfile(p);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -124,7 +150,10 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
     setNotice(null);
     try {
       const sub = await subscribeThisDevice(publicKey.data.publicKey);
-      await subscribe.mutateAsync({ endpoint: sub.endpoint, keys: sub.keys, label: deviceLabel() });
+      // 啟用當下重新收一次特徵：對話框開著時使用者可能已經把它加到主畫面／轉了螢幕
+      const me = await collectDeviceProfile();
+      setProfile(me);
+      await subscribe.mutateAsync({ endpoint: sub.endpoint, keys: sub.keys, label: me.label, details: me.details });
       setThisEndpoint(sub.endpoint);
       setNotice("本裝置已連結——成本核准、私訊、@提及、生成完成都會推到這裡（關頁也收得到）");
       await utils.push.devices.invalidate();
@@ -202,8 +231,10 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
   const deviceRows = devices.data ?? [];
   const otherDevices = deviceRows.filter((d) => d.endpoint !== thisEndpoint);
-  const phones = deviceRows.filter((d) => kindFromLabel(d.label) === "phone" || kindFromLabel(d.label) === "tablet");
-  const desktops = deviceRows.filter((d) => kindFromLabel(d.label) === "desktop");
+  // 「還缺手機／還缺電腦」提示看的是同一份判定：只看標籤的話，
+  // 機型標籤（「CPH2451・Chrome 131」）會被判成 unknown，兩邊都算不進去
+  const phones = deviceRows.filter((d) => ["phone", "tablet"].includes(rowKind(d.details, d.label)));
+  const desktops = deviceRows.filter((d) => rowKind(d.details, d.label) === "desktop");
   const linkedBothSides = phones.length > 0 && desktops.length > 0;
   const perm = notificationPermission();
 
@@ -267,7 +298,8 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
         {/* 本裝置 */}
         <section aria-label="本裝置">
-          <h3>本裝置（{deviceLabel()}）</h3>
+          <h3>本裝置（{profile?.label ?? deviceLabel()}）</h3>
+          {profile && <DeviceDetailLines details={profile.details} />}
           {!supported ? (
             <div className="device-link-guide" role="status">
               <Icon name="TriangleAlert" size={16} />
@@ -337,8 +369,10 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           ) : (
             <ul className="device-link-list">
               {deviceRows.map((d) => {
-                const kind = kindFromLabel(d.label);
                 const isThis = d.endpoint === thisEndpoint;
+                // 本裝置優先用剛收到的即時細節：舊分頁存的可能還是升級前的版本
+                const details = isThis ? profile?.details ?? d.details : d.details;
+                const kind = rowKind(details, d.label);
                 return (
                   <li key={d.id} className={isThis ? "is-this" : undefined}>
                     <span className="device-link-icon" aria-hidden>
@@ -346,10 +380,13 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     </span>
                     <span className="device-link-meta">
                       <span className="device-link-name">
-                        {d.label ?? "未知裝置"}
+                        {(isThis ? profile?.label : null) ?? d.label ?? "未知裝置"}
                         {isThis && <Chip>本裝置</Chip>}
                       </span>
                       <span className="meta">最近同步 {relSeen(d.lastSeenAt)}</span>
+                      {/* 細節攤開顯示：同型號的兩支手機、辦公室裡每台 Windows 的標籤都一樣，
+                          要靠機型代碼／處理器／記憶體／螢幕才分得出是哪一台 */}
+                      <DeviceDetailLines details={details} />
                     </span>
                     <Button variant="ghost"
                       type="button"
@@ -392,10 +429,13 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               {(sessions.data ?? []).map((s) => {
                 const label = summarizeUserAgent(s.userAgent);
                 const seen = s.lastSeenAt ?? s.createdAt;
+                // 非本機的列原本一律畫成螢幕圖示——手機登入被畫成電腦，看起來像別人的登入。
+                // session 只存得到 UA，判不出 Android 平板/手機時 deviceKindFrom 會回 unknown（鈴鐺）
+                const kind = s.isCurrent ? thisKind : deviceKindFrom(s.userAgent ?? "");
                 return (
                   <li key={s.id} className={s.isCurrent ? "is-this" : undefined}>
                     <span className="device-link-icon" aria-hidden>
-                      <Icon name={s.isCurrent ? kindIcon(thisKind) : "Monitor"} size={18} />
+                      <Icon name={kindIcon(kind)} size={18} />
                     </span>
                     <span className="device-link-meta">
                       <span className="device-link-name">
@@ -477,7 +517,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                 {trustedDevices.data.devices.map((d) => (
                   <li key={d.id} className={d.isCurrent ? "is-this" : undefined}>
                     <span className="device-link-icon" aria-hidden>
-                      <Icon name={d.isCurrent ? kindIcon(thisKind) : "Monitor"} size={18} />
+                      <Icon name={kindIcon(d.isCurrent ? thisKind : rowKind(d.details, d.label))} size={18} />
                     </span>
                     <span className="device-link-meta">
                       <span className="device-link-name">
@@ -487,13 +527,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                       <span className="meta">
                         最近登入 {relSeen(d.lastSeenAt ?? d.trustedAt)}
                       </span>
-                      {/* 細節攤開顯示：辦公室裡每台「Windows · Chrome」看起來都一樣，
+                      {/* 細節攤開顯示：辦公室裡每台「Windows 11・Chrome」看起來都一樣，
                           要靠處理器／記憶體／顯示卡／螢幕才分得出是哪一台 */}
-                      {deviceDetailLines(d.details).length > 0 && (
-                        <span className="meta" style={{ display: "block", marginTop: 2, lineHeight: 1.6 }}>
-                          {deviceDetailLines(d.details).join("｜")}
-                        </span>
-                      )}
+                      <DeviceDetailLines details={d.details} />
                     </span>
                     <Button
                       variant="ghost"
@@ -649,10 +685,14 @@ export function PushSubscriptionSync() {
       const existing = await getExistingSubscription();
       if (!existing) return;
       const fresh = await subscribeThisDevice(publicKey.data.publicKey);
+      // 每次開 App 順便重報一次標籤與細節：系統升級、換瀏覽器、加到主畫面之後，
+      // 清單上那一列才會跟著更新，而不是停在當初啟用時的樣子
+      const me = await collectDeviceProfile();
       sync.mutate({
         endpoint: fresh.endpoint,
         keys: fresh.keys,
-        label: deviceLabel(),
+        label: me.label,
+        details: me.details,
         oldEndpoint: fresh.endpoint !== existing.endpoint ? existing.endpoint : undefined,
       });
     })().catch(() => {});

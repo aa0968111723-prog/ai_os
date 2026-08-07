@@ -219,7 +219,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0040_scene_trim": [
     "fb178972588a7a8f07771d99f5abb63f9907bdbd90d5949493f30681db66f1e9",
   ],
-  "0041_content_attachments": [
+  "0041_push_device_details": [
+    "b4e343f590fd5bc72459f0b9965dd8fef30db80cd85b226446e5bf7fa2a7754f",
+  ],
+  "0042_content_attachments": [
     "1a3096e7d55b73bb9f252f57a79b8409390c87c27a9efa7209fb354a1076c3dd",
   ],
 };

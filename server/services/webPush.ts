@@ -11,6 +11,7 @@
 import webpush from "web-push";
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
+import type { DeviceDetails } from "../../shared/deviceDetails";
 
 /** 單一使用者可連結的裝置上限：超過即淘汰 lastSeenAt 最舊的列（防無限長訂閱列） */
 export const MAX_DEVICES_PER_USER = 10;
@@ -174,6 +175,8 @@ export async function saveSubscription(input: {
   p256dh: string;
   auth: string;
   label?: string;
+  /** 廠牌／機型／系統／處理器／螢幕等辨識細節（見 shared/deviceDetails.ts）；舊版前端不送 */
+  details?: DeviceDetails;
 }): Promise<void> {
   await db
     .insert(schema.pushSubscriptions)
@@ -183,11 +186,21 @@ export async function saveSubscription(input: {
       p256dh: input.p256dh,
       auth: input.auth,
       label: input.label ?? null,
+      details: input.details ?? null,
       lastSeenAt: new Date(),
     })
     .onConflictDoUpdate({
       target: schema.pushSubscriptions.endpoint,
-      set: { userId: input.userId, p256dh: input.p256dh, auth: input.auth, label: input.label ?? null, lastSeenAt: new Date() },
+      set: {
+        userId: input.userId,
+        p256dh: input.p256dh,
+        auth: input.auth,
+        label: input.label ?? null,
+        // 細節每次重寫（系統／瀏覽器升級後清單顯示的才是現況）；沒送就保留既有的，
+        // 不要用 null 把先前抓到的細節洗掉——那會讓清單在舊分頁同步一次後倒退回沒細節。
+        ...(input.details ? { details: input.details } : {}),
+        lastSeenAt: new Date(),
+      },
     });
   // 超額淘汰：保留 lastSeenAt 最新的 MAX_DEVICES_PER_USER 筆
   const keep = db
@@ -214,6 +227,7 @@ export async function syncSubscription(input: {
   p256dh: string;
   auth: string;
   label?: string;
+  details?: DeviceDetails;
   oldEndpoint?: string;
 }): Promise<void> {
   const updated = await db
@@ -223,6 +237,7 @@ export async function syncSubscription(input: {
       p256dh: input.p256dh,
       auth: input.auth,
       ...(input.label ? { label: input.label } : {}),
+      ...(input.details ? { details: input.details } : {}),
       lastSeenAt: new Date(),
     })
     .where(eq(schema.pushSubscriptions.endpoint, input.endpoint))
@@ -231,6 +246,13 @@ export async function syncSubscription(input: {
   // 換訂路徑：新 endpoint 沒有列 → 找舊 endpoint 的列（限本人，不奪他人訂閱）就地改寫
   await db
     .update(schema.pushSubscriptions)
-    .set({ endpoint: input.endpoint, p256dh: input.p256dh, auth: input.auth, lastSeenAt: new Date() })
+    .set({
+      endpoint: input.endpoint,
+      p256dh: input.p256dh,
+      auth: input.auth,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.details ? { details: input.details } : {}),
+      lastSeenAt: new Date(),
+    })
     .where(and(eq(schema.pushSubscriptions.endpoint, input.oldEndpoint), eq(schema.pushSubscriptions.userId, input.userId)));
 }

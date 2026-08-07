@@ -126,7 +126,7 @@ export async function buildKnowledgeContextWithMeta(
   if (propBlock) cardParts.push(propBlock);
   const cardBlock = cardParts.join("\n");
 
-  // 附件文字（0041）：知識庫收得進 PDF／Word 之後，那份檔案的內文才是使用者心目中的「素材」。
+  // 附件文字（0042）：知識庫收得進 PDF／Word 之後，那份檔案的內文才是使用者心目中的「素材」。
   // 只撈有抽到文字的列（照片沒有 text_content），組成每筆知識一段附件區塊。
   const attachmentTextByRef = new Map<string, string>();
   if (rows.length > 0) {
