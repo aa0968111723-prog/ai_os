@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -51,6 +51,20 @@ import {
   recordAiTraceEventSafely,
   updateAiTraceSession,
 } from "../services/aiTrace";
+import {
+  toolLabel,
+  type AssetTilePreview,
+  type GenerationTilePreview,
+  type ModelRowPreview,
+  type PreviewMedia,
+  type PreviewMediaKind,
+  type ToolResultPreview,
+} from "../../shared/toolResultPreview";
+
+/** assets.kind 是自由文字欄位；只認識這四種，其餘一律當作可下載的文件。 */
+function previewMediaKind(kind: string | null | undefined): PreviewMediaKind {
+  return kind === "image" || kind === "video" || kind === "audio" ? kind : "doc";
+}
 
 /**
  * 專案 AI 代理系統（統一入口）：一個對話統包「問答、發想、拆分鏡、排計畫執行、查資料庫」——
@@ -296,35 +310,91 @@ export function searchCatalogText(keyword?: string, category?: string): string {
     .join("\n");
 }
 
+/**
+ * 挑模型的結構化版本：與 searchCatalogText 同一組查詢參數、同一個 slice(0, 12)，
+ * 所以兩者列出的模型必然一致——一個給 LLM 讀，一個給人看。
+ *
+ * 刻意不改 searchCatalogText 去共用中間結果：那段文字的格式是模型行為的一部分
+ * （系統提示教它怎麼讀），動它的風險遠大於這裡多跑一次純記憶體的目錄查詢。
+ */
+export function searchCatalogRows(keyword?: string, category?: string): ModelRowPreview[] {
+  return searchAiModels(keyword, category, { includeSourceRequired: true })
+    .slice(0, 12)
+    .map((m) => ({
+      id: m.id,
+      label: m.label,
+      tierLabel: tierLabel(m.tier),
+      points: m.points,
+      ready: modelIsOperationallyReady(m),
+      needsSource: m.needs ? (m.sourceHint ?? m.needs) : null,
+      bestFor: m.bestFor,
+    }));
+}
+
 const GEN_STATUS_LABEL: Record<string, string> = {
   queued: "排隊中", running: "生成中", done: "完成", failed: "失敗", awaiting_approval: "待組長核准", rejected: "已駁回",
 };
 
-/** 執行一個唯讀查詢工具（範圍鎖死本專案／此人可讀的資料庫＋軟刪過濾）；回傳給 LLM 的結果文字＋給使用者看的步驟摘要 */
+/** list_assets 的硬上限；`truncated` 以此判定，改這個常數就好，不要在別處抄數字。 */
+const ASSET_PREVIEW_LIMIT = 30;
+/** list_generations 的硬上限，同上。 */
+const GENERATION_PREVIEW_LIMIT = 15;
+
+/**
+ * 執行一個唯讀查詢工具（範圍鎖死本專案／此人可讀的資料庫＋軟刪過濾）。
+ *
+ * 回三樣東西：
+ * - `text`：餵回 LLM 的結果摘要（**不可改格式**，系統提示與模型行為都依賴它）
+ * - `step`：給使用者看的一行步驟摘要
+ * - `preview`：結構化的視覺預覽，讓 UI 能顯示「這次工具實際查到什麼」
+ *
+ * `preview` 與 `text` 一律由**同一次迭代**產生。分開查兩次就會出現「AI 說找不到、
+ * 畫面卻顯示縮圖」這種自相矛盾——而系統提示明訂 AI 只能引用工具結果裡實際列出的項目。
+ */
 async function runLookupTool(
   project: typeof schema.projects.$inferSelect,
   scenes: Array<typeof schema.scenes.$inferSelect>,
   readableDbs: ReadableDb[],
   call: z.infer<typeof toolCallSchema>,
-): Promise<{ step: string; text: string }> {
+): Promise<{ step: string; text: string; preview: ToolResultPreview }> {
   if (call.tool === "query_database") {
     const ref = call.args?.dbRef?.trim() ?? "";
     const target = readableDbs.find((d) => d.ref === ref);
     if (!target) {
-      return {
-        step: `查資料庫(代號 ${ref || "未填"} 不存在)`,
-        text: readableDbs.length
-          ? `沒有代號「${ref}」的資料庫——可用代號：${readableDbs.map((d) => `${d.ref}(${d.name})`).join("、")}`
-          : "目前沒有 AI 可讀的資料庫",
-      };
+      const text = readableDbs.length
+        ? `沒有代號「${ref}」的資料庫——可用代號：${readableDbs.map((d) => `${d.ref}(${d.name})`).join("、")}`
+        : "目前沒有 AI 可讀的資料庫";
+      return { step: `查資料庫(代號 ${ref || "未填"} 不存在)`, text, preview: { kind: "text", text } };
     }
     // 關鍵字由 PostgreSQL 對此已授權 tableId 的完整資料集過濾，再硬限 20 列；
     // 不可先 limit 再於 Node 篩，否則第 101 列以後即使命中也永遠不可見。
     const { keyword: kw, rows: matched } = await searchAssistantDatabaseRows(target.id, call.args?.keyword);
-    const text = matched.length
-      ? matched.map((r, i) => `${i + 1}. ${rowLine(target.fields, r.data as Record<string, unknown>)}`).join("\n")
-      : kw ? `「${target.name}」裡沒有含「${kw}」的列（共 ${target.rowCount} 列）` : `「${target.name}」目前沒有資料列`;
-    return { step: `查了資料庫「${target.name}」(${matched.length} 筆)`, text };
+    if (!matched.length) {
+      const text = kw
+        ? `「${target.name}」裡沒有含「${kw}」的列（共 ${target.rowCount} 列）`
+        : `「${target.name}」目前沒有資料列`;
+      return { step: `查了資料庫「${target.name}」(0 筆)`, text, preview: { kind: "text", text } };
+    }
+    // 同一次迭代同時產出 text 與 preview：rowLine 只取前 8 欄，預覽也必須是同樣那 8 欄，
+    // 否則使用者會看到 AI 沒讀到的欄位，誤以為 AI 看過了。
+    const previewRows = matched.map((r) => {
+      const data = r.data as Record<string, unknown>;
+      return {
+        cells: target.fields.slice(0, 8).map((f) => {
+          const v = data?.[f.key];
+          const s = v === null || v === undefined || v === "" ? "—"
+            : typeof v === "boolean" ? (v ? "✓" : "—")
+            : String(v).slice(0, 40);
+          return { label: f.label, value: s };
+        }),
+      };
+    });
+    const text = matched.map((r, i) => `${i + 1}. ${rowLine(target.fields, r.data as Record<string, unknown>)}`).join("\n");
+    return {
+      step: `查了資料庫「${target.name}」(${matched.length} 筆)`,
+      text,
+      preview: { kind: "rows", tableName: target.name, rows: previewRows, total: target.rowCount },
+    };
   }
   if (call.tool === "list_assets") {
     const kind = call.args?.kind?.trim();
@@ -337,24 +407,75 @@ async function runLookupTool(
         ...(kind ? [eq(schema.assets.kind, kind)] : []),
       ))
       .orderBy(desc(schema.assets.createdAt))
-      .limit(30);
-    const text = rows.length
-      ? rows.map((a, i) => `${i + 1}. ${a.title}｜${a.kind}${a.isAiGenerated ? "｜AI生成" : "｜上傳"}${a.locked ? "｜鎖定素材(不可更動)" : ""}`).join("\n")
-      : kind ? `（沒有 ${kind} 類素材）` : "（素材庫是空的）";
-    return { step: `查了素材庫(${rows.length} 筆)`, text };
+      .limit(ASSET_PREVIEW_LIMIT);
+    if (!rows.length) {
+      const text = kind ? `（沒有 ${kind} 類素材）` : "（素材庫是空的）";
+      return { step: "查了素材庫(0 筆)", text, preview: { kind: "text", text } };
+    }
+    // rows 是完整的 asset row（select() 無投影），id 與 kind 本來就在手上——
+    // 做縮圖不需要任何額外查詢，先前只是在折成字串時把它們丟掉了。
+    const items: AssetTilePreview[] = rows.map((a) => ({
+      assetId: a.id,
+      title: a.title,
+      mediaKind: previewMediaKind(a.kind),
+      aiGenerated: a.isAiGenerated,
+      locked: a.locked,
+    }));
+    const text = rows
+      .map((a, i) => `${i + 1}. ${a.title}｜${a.kind}${a.isAiGenerated ? "｜AI生成" : "｜上傳"}${a.locked ? "｜鎖定素材(不可更動)" : ""}`)
+      .join("\n");
+    return {
+      step: `查了素材庫(${rows.length} 筆)`,
+      text,
+      preview: { kind: "assets", items, truncated: rows.length === ASSET_PREVIEW_LIMIT },
+    };
   }
 
   if (call.tool === "read_scene") {
     const no = call.args?.sceneNo ?? 0;
     const scene = scenes[no - 1];
-    if (!scene) return { step: `讀分鏡(第 ${no} 鏡不存在)`, text: `第 ${no} 鏡不存在——目前共 ${scenes.length} 個分鏡` };
+    if (!scene) {
+      const text = `第 ${no} 鏡不存在——目前共 ${scenes.length} 個分鏡`;
+      return { step: `讀分鏡(第 ${no} 鏡不存在)`, text, preview: { kind: "text", text } };
+    }
+    // 這一鏡綁的素材只有 id，沒有 kind——要知道畫面是圖還是影片才決定怎麼渲染。
+    // 一次 inArray 拿兩個（畫面＋旁白），沒有素材時完全不查。
+    const assetIds = [scene.assetId, scene.narrationAssetId].filter((id): id is string => Boolean(id));
+    const sceneAssets = assetIds.length
+      ? await db
+          .select({ id: schema.assets.id, kind: schema.assets.kind })
+          .from(schema.assets)
+          .where(and(inArray(schema.assets.id, assetIds), isNull(schema.assets.deletedAt)))
+      : [];
+    /** 綁了 id 卻查不到列＝素材已被刪或進了回收桶：對使用者是「壞掉」，不是「還沒做」。 */
+    const mediaFor = (assetId: string | null): PreviewMedia => {
+      if (!assetId) return { source: "none", reason: "not_generated" };
+      const found = sceneAssets.find((a) => a.id === assetId);
+      if (!found) return { source: "none", reason: "missing" };
+      return { source: "asset", assetId, mediaKind: previewMediaKind(found.kind) };
+    };
     const text = [
       `第 ${no} 鏡「${scene.title}」｜${scene.durationSec} 秒`,
       `畫面素材:${scene.assetId ? "有" : "無"}｜旁白音檔:${scene.narrationAssetId ? "有" : "無"}`,
       `建議提示詞:${scene.prompt || "（未填）"}`,
       `旁白/配音詞:${scene.voiceover || "（未填）"}`,
     ].join("\n");
-    return { step: `讀了第 ${no} 鏡`, text };
+    return {
+      step: `讀了第 ${no} 鏡`,
+      text,
+      preview: {
+        kind: "scene",
+        scene: {
+          sceneNo: no,
+          title: scene.title,
+          durationSec: scene.durationSec,
+          prompt: scene.prompt || null,
+          voiceover: scene.voiceover || null,
+          visual: mediaFor(scene.assetId),
+          narration: mediaFor(scene.narrationAssetId),
+        },
+      },
+    };
   }
 
   if (call.tool === "list_generations") {
@@ -363,19 +484,54 @@ async function runLookupTool(
       .from(schema.generations)
       .where(eq(schema.generations.projectId, project.id))
       .orderBy(desc(schema.generations.createdAt))
-      .limit(15);
-    const text = rows.length
-      ? rows.map((g, i) => {
-          const model = resolveModel(g.modelId);
-          return `${i + 1}. ${model?.label ?? g.modelId}｜${GEN_STATUS_LABEL[g.status] ?? g.status}｜${g.pointsActual ?? g.pointsEst} 點｜「${g.prompt.slice(0, 40)}」`;
-        }).join("\n")
-      : "（還沒有任何生成紀錄）";
-    return { step: `查了生成紀錄(${rows.length} 筆)`, text };
+      .limit(GENERATION_PREVIEW_LIMIT);
+    if (!rows.length) {
+      const text = "（還沒有任何生成紀錄）";
+      return { step: "查了生成紀錄(0 筆)", text, preview: { kind: "text", text } };
+    }
+    const items: GenerationTilePreview[] = [];
+    const lines: string[] = [];
+    rows.forEach((g, i) => {
+      const model = resolveModel(g.modelId);
+      const label = model?.label ?? g.modelId;
+      const statusLabel = GEN_STATUS_LABEL[g.status] ?? g.status;
+      const points = g.pointsActual ?? g.pointsEst;
+      lines.push(`${i + 1}. ${label}｜${statusLabel}｜${points} 點｜「${g.prompt.slice(0, 40)}」`);
+      // resultUrl 落地後是 /api/assets/{id}/file，未落地時是供應商 CDN 的絕對網址。
+      // 只採前者的 id——外部網址一旦寫進 trace 會被 sanitizeUrl 剝掉 query 變成死連結
+      // （見 shared/toolResultPreview.ts 檔頭鐵則 1），寧可顯示「尚未落地」也不放死連結。
+      const landed = g.resultUrl?.match(/^\/api\/assets\/([0-9a-f-]{36})\/file/i);
+      items.push({
+        modelLabel: label,
+        status: g.status,
+        statusLabel,
+        points,
+        prompt: g.prompt.slice(0, 40),
+        // 模型的 OutputKind（image/video/audio/text）與 PreviewMediaKind 同名對應，
+        // text 落到 previewMediaKind 的 doc——文字成品本來就不該當媒體渲染。
+        media: landed
+          ? { source: "asset", assetId: landed[1], mediaKind: previewMediaKind(model?.kind) }
+          : { source: "none", reason: g.status === "done" ? "missing" : "not_generated" },
+      });
+    });
+    return {
+      step: `查了生成紀錄(${rows.length} 筆)`,
+      text: lines.join("\n"),
+      preview: { kind: "generations", items, truncated: rows.length === GENERATION_PREVIEW_LIMIT },
+    };
   }
 
   // find_model
   const kw = call.args?.keyword?.trim();
-  return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
+  const category = call.args?.category?.trim();
+  const text = searchCatalogText(kw, category);
+  return {
+    step: `查了模型目錄(${kw || "全部"})`,
+    text,
+    // searchCatalogRows 與 searchCatalogText 走同一組查詢參數與同一個 slice(0, 12)，
+    // 兩者列出的模型必然一致。
+    preview: { kind: "models", items: searchCatalogRows(kw, category) },
+  };
 }
 
 /**
@@ -428,8 +584,22 @@ export function listAssistantGenerateModels() {
     }));
 }
 
-/** 思考過程串流事件（給前端即時呈現「AI 在想什麼」）：思考中／正在查什麼／查到什麼 */
-export type AskStreamEvent = { phase: "thinking" | "lookup" | "step"; text: string };
+/**
+ * 思考過程串流事件（給前端即時呈現「AI 在想什麼」）：思考中／正在查什麼／查到什麼。
+ *
+ * `tool` 與 `preview` 是選填擴充，只有 phase="step"（工具跑完那一筆）會帶：
+ * - `tool`：工具真名。原本前端只收得到「正在查素材庫…」這種中文標籤，反查不回工具是誰，
+ *   任何依工具分類的呈現都做不到。
+ * - `preview`：這次工具實際查到什麼，讓即時軌跡也能直接畫出結果而不是只有一行字。
+ *
+ * 兩者皆選填，舊前端收到多的欄位會忽略——不需要同步部署。
+ */
+export type AskStreamEvent = {
+  phase: "thinking" | "lookup" | "step";
+  text: string;
+  tool?: string;
+  preview?: ToolResultPreview;
+};
 export interface AskCoreInput {
   projectId: string;
   message: string;
@@ -473,8 +643,12 @@ const LOOKUP_LABEL: Record<string, string> = {
  */
 export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
   let traceSessionId = input.traceSessionId;
-  const emit = (phase: AskStreamEvent["phase"], text: string) => {
-    try { onEvent?.({ phase, text }); } catch { /* 串流端斷線不影響問答本身 */ }
+  const emit = (
+    phase: AskStreamEvent["phase"],
+    text: string,
+    extra?: { tool?: string; preview?: ToolResultPreview },
+  ) => {
+    try { onEvent?.({ phase, text, ...extra }); } catch { /* 串流端斷線不影響問答本身 */ }
   };
   try {
     if (await overLimit(input.auth.user.id, input.dedupeKey)) {
@@ -723,11 +897,18 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             const toolCall = toolCallSchema.safeParse(json);
             if (toolCall.success) {
               await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${toolCall.data.tool}`, payload: toolCall.data });
-              emit("lookup", `正在查${LOOKUP_LABEL[toolCall.data.tool] ?? "資料"}…`);
+              emit("lookup", `正在查${LOOKUP_LABEL[toolCall.data.tool] ?? "資料"}…`, { tool: toolCall.data.tool });
               const r = await runLookupTool(project, scenes, readableDbs, toolCall.data);
-              await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_result", summary: r.step, payload: { tool: toolCall.data.tool, result: r.text } });
+              // preview 一併落庫：trace 是「實際運作紀錄」，只存一段給 LLM 讀的文字摘要，
+              // 使用者事後回看仍然看不到工具究竟查到了什麼。
+              await recordAiTraceEventSafely({
+                sessionId: traceSessionId,
+                eventType: "tool_result",
+                summary: r.step,
+                payload: { tool: toolCall.data.tool, result: r.text, preview: r.preview },
+              });
               steps.push(r.step);
-              emit("step", r.step);
+              emit("step", r.step, { tool: toolCall.data.tool, preview: r.preview });
               toolBlocks += `\n<工具結果 tool="${toolCall.data.tool}" 第${round + 1}輪>\n${r.text}\n</工具結果>`;
               continue;
             }
