@@ -295,6 +295,148 @@ export function sameEntityName(a: string, b: string): boolean {
   return ka === kb;
 }
 
+/* ── 轉分鏡的逐場 diff（PE 計畫 §22／§33） ─────────────────────
+ *
+ * 為什麼要 diff 而不是一律 append：使用者改了故事、重新解析、再按一次「產生分鏡」，
+ * 舊做法會把同一場再建一次，分鏡中心出現兩個「第一幕」。但也**不能**反過來拿新計畫
+ * 覆蓋舊場——那會清掉使用者在分鏡上調過的鏡頭語言、造型、生成結果。
+ *
+ * 折衷：以場名配對。
+ *  - 配不到既有場        → create：整場連鏡一起建
+ *  - 配到、但底下沒有活鏡 → fill：只補鏡（沒有東西會被蓋掉）
+ *  - 配到、底下有鏡      → reuse：完全不動（使用者的編輯優先於 AI 的新計畫）
+ */
+
+export interface StoryboardPlanScene {
+  title: string;
+  shots: unknown[];
+}
+export interface ExistingStoryScene {
+  id: string;
+  title: string;
+  /** 這一場底下還活著的鏡數（軟刪不算） */
+  liveShots: number;
+}
+
+export interface StoryboardSceneDiff {
+  title: string;
+  action: "create" | "fill" | "reuse";
+  /** create 以外會帶既有場 id */
+  storySceneId?: string;
+  /** 這次會新增幾鏡（reuse＝0） */
+  shots: number;
+}
+
+/**
+ * 逐場比對計畫與既有分鏡。純函式：同一份輸入永遠得到同一份計畫，
+ * 預覽（使用者看到的數字）與實際套用（materializeStoryboard）共用它，兩邊不會說不同的話。
+ */
+export function diffStoryboardPlan(
+  planScenes: StoryboardPlanScene[],
+  existing: ExistingStoryScene[],
+): StoryboardSceneDiff[] {
+  // 一個既有場只能被一個計畫場認領，避免同名兩場都指到同一個既有場
+  const claimed = new Set<string>();
+  return planScenes.map((sc) => {
+    const key = nameKey(sc.title);
+    const match = existing.find((e) => !claimed.has(e.id) && nameKey(e.title) === key);
+    if (!match) return { title: sc.title, action: "create" as const, shots: sc.shots.length };
+    claimed.add(match.id);
+    if (match.liveShots > 0) {
+      return { title: sc.title, action: "reuse" as const, storySceneId: match.id, shots: 0 };
+    }
+    return { title: sc.title, action: "fill" as const, storySceneId: match.id, shots: sc.shots.length };
+  });
+}
+
+/** 預覽摘要：「新增 3 場 12 鏡・補 1 場 4 鏡・沿用 8 場」 */
+export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
+  createScenes: number;
+  fillScenes: number;
+  reuseScenes: number;
+  newShots: number;
+} {
+  return {
+    createScenes: diff.filter((d) => d.action === "create").length,
+    fillScenes: diff.filter((d) => d.action === "fill").length,
+    reuseScenes: diff.filter((d) => d.action === "reuse").length,
+    newShots: diff.reduce((n, d) => n + d.shots, 0),
+  };
+}
+
+/* ── Shot 素材推薦（PE 計畫 §13／§26） ────────────────────────
+ *
+ * 刻意**不做**語意向量檢索，也刻意不寫「AI 已分析」這種文案——現在沒有那個能力，
+ * 假裝有就是騙使用者（§60）。這一版誠實地做「名稱或標籤對得上」：
+ * 用這一鏡已經綁定的角色／場景／道具名字去比對素材的標題與標籤，
+ * 並把**命中的詞**一起回給 UI，讓推薦理由看得見（「符合：安倢、紅傘」）。
+ *
+ * 之後要接向量檢索時，換掉的是 buildShotSearchTerms 的來源與這支的分數來源，
+ * 回傳形狀（matched/score）不用動——介面先長對，能力再長進來。
+ */
+
+export interface AssetLike {
+  id: string;
+  title: string;
+  tags: unknown;
+}
+
+export interface AssetSuggestion {
+  assetId: string;
+  /** 命中的詞（給使用者看推薦理由，不是黑盒分數） */
+  matched: string[];
+}
+
+/** tags 是 jsonb，實務上可能是字串陣列、也可能被寫成別的東西——只取字串 */
+function toTagList(tags: unknown): string[] {
+  return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === "string") : [];
+}
+
+/**
+ * 這一鏡拿哪些詞去找素材：綁定的實體名字（精準、有意義），不是把整段畫面描述斷詞。
+ * 中文斷詞在沒有詞庫的情況下只會製造雜訊命中，寧可少而準。
+ */
+export function buildShotSearchTerms(input: {
+  characterNames?: string[];
+  locationNames?: string[];
+  propNames?: string[];
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of [...(input.characterNames ?? []), ...(input.locationNames ?? []), ...(input.propNames ?? [])]) {
+    const t = name.trim();
+    const key = nameKey(t);
+    // 一個字的名字（「傘」）會命中太多不相干素材，門檻設兩個字
+    if (!key || key.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * 依「標題或標籤含有這些詞」挑素材，命中越多詞越前面。
+ * 完全沒命中的素材不回——寧可一個都不推薦，也不要推一堆不相干的讓使用者自己過濾。
+ */
+export function suggestAssetsForShot(terms: string[], assets: AssetLike[], limit = 6): AssetSuggestion[] {
+  if (!terms.length) return [];
+  const termKeys = terms.map((t) => ({ raw: t, key: nameKey(t) })).filter((t) => t.key);
+  const scored: Array<{ s: AssetSuggestion; score: number }> = [];
+  for (const asset of assets) {
+    const haystack = nameKey([asset.title, ...toTagList(asset.tags)].join(" "));
+    if (!haystack) continue;
+    const matched = termKeys.filter((t) => haystack.includes(t.key)).map((t) => t.raw);
+    if (!matched.length) continue;
+    scored.push({ s: { assetId: asset.id, matched }, score: matched.length });
+  }
+  // 命中詞數多的優先；同分維持原順序（呼叫端已依時間排序，較新的在前）
+  return scored
+    .map((x, i) => ({ ...x, i }))
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, limit)
+    .map((x) => x.s);
+}
+
 /* ── 解析摘要（story.get 回給 UI 的 counts 形狀） ─────────────── */
 
 export interface StoryParseSummary {

@@ -125,6 +125,7 @@ export async function buildContinuitySnapshot(
   const lookRows = lookIds.length
     ? await db
         .select({
+          id: schema.characterLooks.id,
           characterId: schema.characterLooks.characterId,
           name: schema.characterLooks.name,
           costume: schema.characterLooks.costume,
@@ -133,13 +134,14 @@ export async function buildContinuitySnapshot(
         .where(and(eq(schema.characterLooks.projectId, projectId), inArray(schema.characterLooks.id, lookIds)))
     : [];
   // costume 可為空（只給造型名沒寫描述）——錨點會退回用造型名，不是漏掉這一鏡的造型
-  const lookByCharacter = new Map<string, { name: string; costume: string | null }>();
+  const lookByCharacter = new Map<string, { id: string; name: string; costume: string | null }>();
   for (const row of lookRows) {
-    if (!lookByCharacter.has(row.characterId)) lookByCharacter.set(row.characterId, { name: row.name, costume: row.costume });
+    if (!lookByCharacter.has(row.characterId)) lookByCharacter.set(row.characterId, row);
   }
   const charactersWithLook = characterRows.map((row) => {
     const look = lookByCharacter.get(row.id);
-    return look ? { ...row, lookName: look.name, lookCostume: look.costume } : row;
+    // lookId 一起凍：過時偵測要比對同一張卡，只有名字/描述比不出「是不是同一套」
+    return look ? { ...row, lookId: look.id, lookName: look.name, lookCostume: look.costume } : row;
   });
 
   const requestedReferenceAssetIds = uniquePresent([
