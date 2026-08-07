@@ -3,6 +3,20 @@
 > 回答產品擁有者的方向性問題：「AI 工作那邊要不要變成全站超級 AI，像 Google 助手一樣一按就可以幫使用者解惑或創建全站的工具，依權限去做。」
 > 撰於 2026-08-07。所有 file:line 皆已對照現行程式碼核實；不確定處明文標注。
 
+## 實作狀態（2026-08-08，分支 claude/site-wide-super-agent）
+
+- **Phase 1 已上線**（先前 PR）：Orb=按鈕、GlobalAssistantSheet、桌機 AssistantLauncher。
+- **Phase 2 已實作**（本分支）：`server/services/assistantCore.ts`（extractJsonObject＋runToolLoop 收斂）、
+  `server/routers/globalAssistant.ts`（ask＋runSiteAction＋traces 回看）、`ai_site_trace_sessions` 分表
+  （migration 0049）、SSE `/api/assistant/site-ask`、sheet 專案聚焦 scope chip（§3.3 的「同一顆球，自動聚焦，可切換」）、
+  站級動作確認卡（create_project／add_note／add_schedule_item／create_task／send_dm）。
+- **與本文件的偏差**（開工盤點修正）：①`reserveQuota(0)` 實為 no-op，限流改用獨立
+  `RATE_LIMIT_SCOPES.globalAssistant`；②寫入動作走 **Command layer**（executeNote/Schedule/TaskCommand，
+  含 policyEngine）而非 callTool——policy 檢查更完整，且 tRPC mutation 本身落審計；③`projects.create`
+  的 core 抽取早已存在（createProjectCore）；④§4.1 的「teamAssistant 迴圈遷入 assistantCore」以
+  buildTeamAskContext 抽取共用達成視野同源，迴圈本體遷移列 Phase 3。
+- 細節見 `docs/GLOBAL_AGENT_FINAL_REPORT.md`＋`docs/agent-implementation-worklog.md`。
+
 ---
 
 ## 1. 回答「要不要」

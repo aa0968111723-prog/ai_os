@@ -36,21 +36,36 @@ ASK（全站問答）／ACT（確認卡寫入）／scope 自動聚焦專案，�
 
 ## COMPLETED
 
-- 六路多代理 audit（825k tokens）＋核心檔案自讀核實。
-- Ledger／Worklog 建立。
+- 六路多代理 audit（825k tokens）＋核心檔案自讀核實；Ledger／Worklog 建立。
+- Step 1 assistantCore.ts＋13 單元測試（09d2253）。
+- Step 2 rateLimit globalAssistant scope（09d2253）。
+- Step 3 teamAssistant buildTeamAskContext 抽取（行為不變，66 測試綠）＋runTeamTool/schema export（09d2253）。
+- Step 4 globalAssistant router：ask／runSiteAction／traces／trace＋resolveSiteActions 純函式＋13 測試（22dcb56）。
+- Step 5 ai_site_trace_sessions 分表＋手寫冪等 migration 0049（drizzle snapshot 已脫節，不可用 db:generate——踩坑：自動生成會混入 27 支既有表）＋aiSiteTrace 服務（22dcb56）。
+- Step 6 SSE /api/assistant/site-ask（45b5e36）。
+- Step 7 client：sheet scope chip＋ProjectAssistant 嵌入＋AICreativeCopilot 三種確認卡＋styles＋測試 mock 更新（45b5e36）。
+- 守門對齊：auditWording（文案＋分類前綴）、migrationRevisions 釘 0049、bridge 計數 41→44、ADR-009 邊界改走 api.ts type re-export（7e1400f）。
+- Step 8 e2e-global-assistant.py 22 斷言全綠（d31f069）：ASK mock／trace 分表落庫＋owner-scoped／五動作真寫入／壞時間、跨組借道、非組員、他人軌跡、限流五負例／SSE open→done。
+- 瀏覽器實測（E2E_MOCK 全站 :3311）：桌機 launcher→sheet→組級問答（Orb thinking→speaking）；/p/:id 開 sheet→chip「這個專案／整個組」→ProjectAssistant SSE 軌跡＋plan_agent 提議卡；chip 切換正常；375px Orb→貼底 sheet 正常。
 
 ## CURRENT TASK
 
-Step 1：server/services/assistantCore.ts（extractJsonObject＋runToolLoop）＋單元測試。
+多代理對抗式自審（Review→Verify）→修 confirmed 缺陷→final report→push＋PR。
 
 ## TEST RESULTS
 
-- 基線（開工時未跑，沿用 D-007/D-008 記載的本地 Windows 紅測基線；以「失敗集不增加」為判準）。
+- `npx tsc --noEmit` ✓；`npm run build` ✓；boundaries/ui-primitives/hooks ✓。
+- server vitest：2032 passed；僅餘 userAvatar POSIX 路徑（D-007 既有本地紅）＋storage.persist 偶發 hook timeout（單跑即綠）。
+- client：受影響 5 檔（sheet/copilot/mobileNav/launcher/styles 契約）全綠；多檔平行會 worker 逾時（本機資源），逐檔跑。
+- e2e-global-assistant.py：22/22。
+- check:agent-planner canary 需真 FAL_KEY（本機無金鑰，既有環境限制、非本輪回歸）。
 
 ## KNOWN ISSUES
 
-- 本地 Windows 有既有紅測（userAvatar POSIX 路徑等，見 DECISIONS.md D-007/D-008）；CI Linux 為準。
+- 本地 Windows 既有紅測見 DECISIONS.md D-007/D-008；CI Linux 為準。
+- 全站模式 SSE 端點已就緒，但 AICreativeCopilot 仍走 tRPC mutation（一次性回覆＋steps 摘要）；接 AssistantSseDecoder 列 Phase 3（前端即時軌跡）。
+- teamAssistant.ask 迴圈本體尚未遷入 assistantCore（僅上下文共用）；assistant.ts 同。列 Phase 3 收斂。
 
 ## NEXT STEP
 
-Step 1 → 2（rateLimit scope）→ 3（teamAssistant 抽取）→ 4（globalAssistant router）→ 5（site trace）→ 6（SSE 端點)→ 7（client scope 路由＋動作卡）→ 8（安全/整合測試）→ 9（docs＋final report）。
+修自審 confirmed → docs/GLOBAL_AGENT_FINAL_REPORT.md → push → PR（繁中描述）。
