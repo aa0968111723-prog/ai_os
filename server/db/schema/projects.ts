@@ -300,6 +300,34 @@ export const notes = pgTable("notes", {
   planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
 }));
 
+/**
+ * 筆記／知識庫的檔案附件（0043_content_attachments）：
+ * 會議紀錄要能夾照片、簽到表掃描檔、講義 PDF；知識庫的開示稿本來就常是一份 PDF/Word。
+ * 原檔落在同一套素材儲存（storage_path，與素材庫／私訊附件共用 Volume 與備份），
+ * text_content 存抽出的純文字——知識庫附件的文字會跟著注入 AI 導演，PDF 不再是「只能下載的死檔」。
+ *
+ * 刻意不加 FK：ref_id 依 kind 指向不同表（note／knowledge），刪除一律由 core 服務同交易清乾淨。
+ * group_id 冗餘存一份，讓檔案服務不必先 join 母表就能做多組隔離的第一道守門。
+ */
+export const contentAttachments = pgTable("content_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  /** note=筆記附件（ref_id→notes.id）・knowledge=知識庫附件（ref_id→knowledge.id） */
+  kind: text("kind", { enum: ["note", "knowledge"] }).notNull(),
+  refId: uuid("ref_id").notNull(),
+  name: text("name").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  storagePath: text("storage_path").notNull(),
+  /** 抽出的純文字（pdf/docx/txt…）：知識庫注入與未來全文搜尋讀這裡；null＝圖片/影音或抽取失敗 */
+  textContent: text("text_content"),
+  uploadedBy: uuid("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  refIdx: index("content_attachments_ref_idx").on(t.kind, t.refId, t.createdAt),
+  groupIdx: index("content_attachments_group_idx").on(t.groupId),
+}));
+
 /** 筆記留言（討論串）— 0034_note_comments */
 export const noteComments = pgTable("note_comments", {
   id: uuid("id").primaryKey().defaultRandom(),

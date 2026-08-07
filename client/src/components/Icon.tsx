@@ -122,7 +122,9 @@ export type IconName =
   | "Expand"
   | "Shrink"
   | "Scan"
-  | "Keyboard";
+  | "Keyboard"
+  | "Paperclip"
+  | "Upload";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -868,6 +870,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M7 16h10" />
       <path d="M8 12h.01" />
       <rect width="20" height="16" x="2" y="4" rx="2" />
+    </>
+  ),
+  Paperclip: <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" />,
+  Upload: (
+    <>
+      <path d="M12 3v12" />
+      <path d="m17 8-5-5-5 5" />
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     </>
   ),
 };

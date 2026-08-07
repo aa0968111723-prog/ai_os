@@ -302,6 +302,13 @@
       "when": 1786800000000,
       "tag": "0042_community_taxonomy",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786900000000,
+      "tag": "0043_content_attachments",
+      "breakpoints": true
     }
   ]
 }

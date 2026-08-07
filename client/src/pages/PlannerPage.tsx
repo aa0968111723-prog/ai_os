@@ -16,6 +16,7 @@ import {
 } from "../components/knowledgeMapModel";
 import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
+import { AttachmentPanel } from "../components/AttachmentPanel";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
 import { Button, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
@@ -963,6 +964,8 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
   // 筆記清單原本沒有任何搜尋——三個月的會議紀錄堆起來只能一列一列往下看。
   // 標題與摘要都比對（摘要就是內文開頭，找「那次講到分鏡的會」靠的是它）。
   const notes = list.data ?? [];
+  // 一次只展開一則的附件區：附件查詢是每則一支，全部常駐會在筆記一多時打爆後端
+  const [openAttachments, setOpenAttachments] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const filtered = needle
@@ -1039,6 +1042,20 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
             />
           )}
 
+          {/* 附件：新增時還沒有筆記 id 可掛，儲存後從清單列的「附件」加 */}
+          {editingId ? (
+            <>
+              <label>附件（照片、PDF、Word…）</label>
+              <AttachmentPanel
+                kind="note"
+                refId={editingId}
+                onChanged={() => utils.notes.list.invalidate({ groupId })}
+              />
+            </>
+          ) : (
+            <Hint style={{ marginTop: 8 }}>要夾白板照片或講義 PDF？先儲存這則筆記，再從清單上的「附件」加。</Hint>
+          )}
+
           <label htmlFor="note-project">掛在專案（選填）</label>
           <select
             id="note-project"
@@ -1084,6 +1101,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
         <div style={{ marginTop: 8 }}>
           {filtered.map((n) => {
             const projTitle = projectTitleOf(n.projectId);
+            const attachOpen = openAttachments === n.id;
             return (
               <div key={n.id} id={`note-${n.id}`} className="gen-row gen-row--note" style={{ alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
@@ -1091,6 +1109,11 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                     {n.title}
                     {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
                     {n.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</Chip> : null}
+                    {n.attachmentCount > 0 && (
+                      <Chip style={{ margin: "0 0 0 6px" }} title={`夾了 ${n.attachmentCount} 個附件`}>
+                        <Icon name="Paperclip" size={11} style={{ verticalAlign: "-1px" }} /> {n.attachmentCount}
+                      </Chip>
+                    )}
                   </div>
                   <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
                   <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
@@ -1104,8 +1127,25 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                       <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
                     </Link>
                   )}
+                  {/* 附件（照片／PDF）預設收合：一次展開一則，避免 200 則筆記各發一支查詢 */}
+                  {attachOpen && (
+                    <AttachmentPanel
+                      kind="note"
+                      refId={n.id}
+                      compact
+                      onChanged={() => utils.notes.list.invalidate({ groupId })}
+                    />
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
+                  <Button
+                    size="sm"
+                    aria-expanded={attachOpen}
+                    title="加照片、PDF 等附件"
+                    onClick={() => setOpenAttachments(attachOpen ? null : n.id)}
+                  >
+                    <Icon name="Paperclip" size={13} />附件{n.attachmentCount > 0 ? ` ${n.attachmentCount}` : ""}
+                  </Button>
                   <Button size="sm" onClick={() => openEdit(n)}>編輯</Button>
                   <ConfirmButton
                     onConfirm={() => remove.mutate({ id: n.id })}

@@ -237,4 +237,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0042_community_taxonomy": [
     "ffd15f22ce8f3f8563dc01deb3f7dc2361359fc83cbf68a21033977503409b8e",
   ],
+  "0043_content_attachments": [
+    "1a3096e7d55b73bb9f252f57a79b8409390c87c27a9efa7209fb354a1076c3dd",
+  ],
 };
