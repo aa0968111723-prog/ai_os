@@ -42,10 +42,19 @@ const GroupCampaignPanel = lazy(() =>
  * ## 範圍（scope）
  *
  * 目前一律是「組級」——teamAssistant 的視野本來就是跨專案的組內全貌。
- * sheet 頂部的 chip 誠實顯示這件事；使用者在專案頁裡按球，看到的仍是組級
- * 視角而不是該專案的助手（專案助手在工作台裡，另一個入口）。
+ * 使用者在專案頁裡叫出助手，看到的仍是組級視角而不是該專案的助手
+ * （專案助手在工作台裡，另一個入口）。這件事現在由 MenuSurface 的
+ * `label="AI 助手"`（＝對話框的 aria-label）承擔，畫面上不再放說明 chip。
  * 「在專案頁自動聚焦該專案」是下一階段的事，需要先把兩個核心收斂成一個，
  * 現在硬做只會變成第三套問答框。
+ *
+ * ## 兩個入口，同一張面板
+ *
+ * 手機是底部導覽正中央那顆球（MobileNavigation），桌機是頂欄的
+ * AssistantLauncher——`.mobile-nav` 在 >820 是 display:none，所以在補上頂欄
+ * 入口之前，桌機**完全叫不出助手**（球在 DOM 裡但按不到）。
+ * 兩邊各自持有自己的開闔狀態，但因為兩顆觸發器互斥（一個只在 ≤820 顯示、
+ * 另一個只在 >820 渲染），同一時間只有一張面板打得開。
  */
 export function GlobalAssistantSheet({
   open,
@@ -69,6 +78,9 @@ export function GlobalAssistantSheet({
       id="global-assistant-sheet"
       surfaceRole="dialog"
       roving={false}
+      /* 桌機也用同一套浮層：助手的外觀是「鋪滿視窗的感知光 ＋ 浮著的輸入框」，
+         退回頂欄底下的錨定下拉會變成兩種完全不同的東西。 */
+      forceSheet
       placement="stretch"
       minWidth={360}
       className="global-assistant"

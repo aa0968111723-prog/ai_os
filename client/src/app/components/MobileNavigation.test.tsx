@@ -6,13 +6,28 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileNavigation } from "./MobileNavigation";
 import { DESTINATIONS } from "../navigation/navigationItems";
 
-/** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例） */
+/** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例）。
+ *
+ *  面板裡不只有問答：GroupCampaignPanel 也在這張 sheet 內，且同樣 lazy 載入。
+ *  它少一支就整棵樹拋 `Cannot read properties of undefined (reading 'useQuery')`，
+ *  而且錯誤是在 lazy chunk resolve 之後才丟出來——表現成「面板整個不見」而不是
+ *  某個欄位缺值，光看斷言訊息會誤判成 sheet 沒開。teamAssistant 這幾支要補齊。 */
 vi.mock("../../api", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
+  const query = () => ({ data: undefined, isLoading: false, isPending: false, error: null, refetch: vi.fn() });
   return {
     trpc: {
       useUtils: () => ({}),
-      teamAssistant: { ask: { useMutation: mutation } },
+      teamAssistant: {
+        ask: { useMutation: mutation },
+        commandLevel: { useQuery: query },
+        campaigns: { useQuery: query },
+        planCampaign: { useMutation: mutation },
+        approveCampaign: { useMutation: mutation },
+        discardCampaign: { useMutation: mutation },
+        stopCampaign: { useMutation: mutation },
+        resumeCampaign: { useMutation: mutation },
+      },
     },
   };
 });

@@ -7564,30 +7564,138 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   box-shadow: none;
   --fg-secondary: #423d38;
 }
-@media (max-width: 820px) {
+/* ── 助手在桌機也是浮層，不是下拉（MenuSurface 的 forceSheet）──────────────
+ *
+ * `.menu-surface.is-sheet` 與 `.menu-surface__scrim` 的幾何原本整組寫在
+ * `@media (max-width: 820px)` 裡，而 `.menu-surface__scrim` 在 media query 外
+ * 還有一條 `display: none`。forceSheet 只讓 JS 掛上 `.is-sheet` 並 portal 出去，
+ * **樣式不會自己跟過來**——不把這幾條搬出 media query，桌機會得到一個沒有定位、
+ * 沒有遮罩、跟著頁面捲走的裸 div。
+ *
+ * 只針對 .global-assistant 複寫，其他選單在桌機仍然是錨定下拉，行為不變。 */
+.menu-surface.is-sheet.global-assistant {
+  position: fixed;
+  z-index: 47;
+  inset-inline: 0;
+  top: auto;
+  /* bottom 吃 --kb-inset：面板裡有輸入框，鍵盤彈出會直接蓋住輸入列
+     （與 .menu-surface.is-sheet 同一條契約，桌機恆為 0） */
+  bottom: var(--kb-inset, 0px);
+  max-width: none;
+  border: 0;
+  box-shadow: none;
+  border-radius: 22px 22px 0 0;
+  max-height: calc(100dvh - 48px - var(--safe-top));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: max(16px, var(--safe-bottom));
+  animation: ai-assistant-in 260ms var(--ease-out);
+}
+/* 拖曳把手是唯一保留的裝飾：它是「可下滑關閉」的手勢提示，不是文案。
+   底色沒了之後把手要自己看得見，換成半透明白＋一點暗邊。 */
+.menu-surface.is-sheet.global-assistant::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.12);
+}
+/* 遮罩：桌機的 .menu-surface__scrim 是 display:none（下拉不需要遮罩），
+   助手需要它——外點關閉與「這層在最上面」都靠它。 */
+.menu-surface__scrim:has(+ .global-assistant),
+button.menu-surface__scrim:has(+ .global-assistant):hover {
+  position: fixed;
+  z-index: 46;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  /* 比其他 sheet 淡得多：其他選單壓暗底下是為了「別看那裡」，助手相反——
+     底下的網站要看得見，助手只是浮在上面。0.38 會把整頁壓成灰的，感知光也跟著髒。
+     :has 不支援時手機退回 0.38（只是暗一點），桌機則整顆規則失效、退回下拉語意。
+     （逐像素實測：淺色頁面全部 ≥8:1、背後整片純黑也全部 ≥5:1。） */
+  background: rgba(28, 25, 23, 0.16);
+}
+@media (min-width: 821px) {
+  /* 桌機不貼滿整個寬度：1920px 的螢幕上一條橫貫到底的輸入列會離觸發器很遠，
+     而且行長超過 100 字元。收成置中的浮動面板，離下緣留一段。
+     置中刻意用 margin-inline: auto 而不是 transform: translateX(-50%)——
+     transform 會建立包含區塊，把 .ai-copilot-halo 的 position: fixed 關進面板裡，
+     鋪滿視窗的感知光會整個縮回這個框。 */
   .menu-surface.is-sheet.global-assistant {
-    border: 0;
-    box-shadow: none;
-    animation: ai-assistant-in 260ms var(--ease-out);
+    width: min(600px, calc(100vw - 48px));
+    margin-inline: auto;
+    bottom: calc(24px + var(--kb-inset, 0px));
+    border-radius: 22px;
+    max-height: min(calc(100dvh - 96px), 720px);
   }
-  /* 拖曳把手是唯一保留的裝飾：它是關閉這張 sheet 的手勢提示，不是文案。
-     底色沒了之後把手要自己看得見，換成半透明白＋一點暗邊。 */
-  .menu-surface.is-sheet.global-assistant::before {
-    background: rgba(255, 255, 255, 0.7);
-    box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.12);
-  }
+  /* 下滑關閉是觸控手勢（MenuSurface 對 pointerType === "mouse" 直接跳過），
+     桌機留著把手等於畫一個按不動的東西 */
+  .menu-surface.is-sheet.global-assistant::before { display: none; }
 }
 @keyframes ai-assistant-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-/* 助手的遮罩比其他 sheet 淡：其他選單壓暗底下是為了「別看那裡」，助手相反——
-   底下的網站要看得見，助手只是浮在上面。0.38 會把整頁壓成灰的，感知光也跟著髒。
-   「這層在最上面」的訊號改由鋪滿視窗的光暈承擔。
-   :has 不支援時退回 0.38，只是暗一點，功能與可讀性都不變。
-   （逐像素實測：淺色頁面全部 ≥8:1、背後整片純黑也全部 ≥5:1。） */
-.menu-surface__scrim:has(+ .global-assistant) {
-  background: rgba(28, 25, 23, 0.16);
+
+/* 頂欄的助手入口：一顆會發光的小球＋字，語彙與底部導覽那顆 orb、
+   與助手頭像同一個身分（彩環＋左上高光＋彩色外光）。 */
+.assistant-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.assistant-launcher svg {
+  /* 圖示本身就是那顆球：塞進一個彩色圓底裡 */
+  color: #fff;
+  border-radius: 50%;
+  padding: 3px;
+  box-sizing: content-box;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.72), transparent 46%),
+    conic-gradient(from 200deg,
+      var(--brand-orange), var(--brand-amber), var(--brand-lime),
+      var(--brand-teal), var(--brand-red), var(--brand-orange));
+  box-shadow: 0 1px 6px -1px rgba(246, 119, 30, 0.6);
+}
+.assistant-launcher:hover,
+.assistant-launcher.active {
+  border-color: transparent;
+  background: var(--primary-tint);
+  box-shadow:
+    0 0 0 1px rgba(246, 119, 30, 0.45),
+    0 6px 16px -10px rgba(246, 119, 30, 0.7);
+}
+/* 助手開著時球跟著呼吸，跟手機那顆 orb 是同一個訊號 */
+.assistant-launcher.active svg {
+  animation: ai-orb-breathe 3.4s var(--ease-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-launcher.active svg { animation: none; }
+}
+/* 窄桌機（頂欄開始擠）只留球，字收起來——它已經有 title 與 aria-label */
+@media (max-width: 1100px) {
+  .assistant-launcher { padding: 5px 8px; gap: 0; }
+  .assistant-launcher span { display: none; }
 }
 
 /* ── 圖上定點標注 ───────────────────────────────────────────────
