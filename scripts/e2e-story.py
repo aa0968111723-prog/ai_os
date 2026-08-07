@@ -140,6 +140,47 @@ upd = call("POST", admin, "scenes.update", {"sceneId": shot0["id"], "lookIds": [
 ok("鏡採用造型（lookIds）", upd["lookIds"] == [lk["id"]])
 ok("Identity 未被造型污染", call("GET", admin, "characters.list", {"projectId": pid})[0]["appearance"] != "俐落短髮、深色大衣")
 
+# ── 8.5 連戲檢查（§23 雙向影響 / P3 Continuity Checker）：改了卡片，既有畫面要被標成過時 ──
+# 要挑「真的引用紅傘」的那一鏡：純寫景的鏡（「清晨的克難坡下著雨」）本來就沒有角色與道具錨點，
+# 拿它來測會測不到東西——這正是第一版斷言挑錯鏡踩到的坑。
+import time as _time
+umbrella = next(p for p in call("GET", admin, "props.list", {"projectId": pid}) if p["name"] == "紅傘")
+shot_umbrella = next((s for s in shots if umbrella["id"] in (s.get("propIds") or [])), None)
+ok("有鏡引用紅傘（錨點鏈的起點）", shot_umbrella is not None)
+
+if shot_umbrella:
+    g2 = call("POST", admin, "scenes.generateInto", {"sceneId": shot_umbrella["id"], "modelId": "fal-ai/flux/schnell"})
+    landed = None
+    for _ in range(40):
+        _rows = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+        _s = next((r for r in _rows if r["id"] == shot_umbrella["id"]), None)
+        if _s and _s.get("assetId"):
+            landed = _s
+            break
+        _time.sleep(1)
+    ok("生成落地回填分鏡畫面", landed is not None)
+
+    grow2 = next(g for g in call("GET", admin, "generation.listByProject", {"projectId": pid}) if g["id"] == g2["generationId"])
+    ok("生成凍結了道具卡（錨點可回溯）", umbrella["id"] in (grow2.get("propIds") or []))
+
+    fresh = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("卡片沒動時不誤報過時", fresh["total"] == 0)
+
+    # 紅傘 → 黃傘：正是 PDF §23 的例子
+    call("POST", admin, "props.update", {"id": umbrella["id"], "appearance": "鮮黃色油紙傘、竹骨"})
+    stale = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("改道具外觀後畫面標成過時", stale["total"] >= 1)
+    ok("過時原因指名是哪張卡的哪個欄位", any("紅傘" in o["reason"] and "外觀" in o["reason"] for o in stale["outdated"]))
+
+    impact = call("GET", admin, "story.entityImpact", {"projectId": pid, "kind": "prop", "entityId": umbrella["id"]})
+    ok("影響查詢回報過時鏡數", impact["outdatedShots"] >= 1 and impact["shots"] >= 1)
+
+    # 只改備註不影響畫面——誤報會讓提示變雜訊，這條守住「不亂叫」
+    char0 = call("GET", admin, "characters.list", {"projectId": pid})[0]
+    call("POST", admin, "characters.update", {"id": char0["id"], "notes": "備註改一下，不該影響畫面"})
+    after_notes = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("只改備註不新增過時項", after_notes["total"] == stale["total"])
+
 # ── 9. 修改故事 → 差異訊號（不整部重算） ──
 saved = call("POST", admin, "story.save", {"projectId": pid, "content": STORY + "\n\n三年後，她剪了短髮回到克難坡。"})
 st = call("GET", admin, "story.get", {"projectId": pid})

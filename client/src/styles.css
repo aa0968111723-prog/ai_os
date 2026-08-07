@@ -7978,6 +7978,12 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; height: 100%; color: var(--muted-ink, inherit); opacity: .75;
 }
+/* §23 畫面過時：警示語氣但不搶戲——內容仍比 controls 重要，用細左邊條而非整塊底色 */
+.shot-card__outdated {
+  margin: 0; font-size: var(--fs-11); line-height: 1.5;
+  color: var(--danger-ink); border-left: 2px solid var(--danger-ink);
+  padding-left: var(--sp-6); opacity: .9;
+}
 .shot-card__prompt, .shot-card__action { width: 100%; font-size: var(--fs-13); line-height: 1.6; resize: vertical; }
 .shot-card__refs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .shot-card__looks { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }

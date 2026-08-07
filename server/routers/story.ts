@@ -19,6 +19,7 @@ import {
   sha256Hex,
   undoParseRun,
 } from "../services/storyParse";
+import { checkProjectContinuity } from "../services/continuityCheck";
 import {
   environmentStateSchema,
   STORY_MAX_CHARS,
@@ -465,6 +466,12 @@ export const storyRouter = router({
             .where(and(inArray(schema.generations.sceneId, shotIds), eq(schema.generations.status, "done")))
         : [{ n: 0 }];
 
+      // 已經對不上卡片的畫面（比對凍結快照；不自動重生成，只回報）
+      const shotIdSet = new Set(shotIds);
+      const outdated = shotIds.length
+        ? (await checkProjectContinuity(project.id)).filter((s) => shotIdSet.has(s.shotId))
+        : [];
+
       return {
         shots: shots.length,
         /** 已經有落地畫面的鏡：這些是「改了卡但畫面還是舊的」看得見的部分 */
@@ -473,8 +480,23 @@ export const storyRouter = router({
         generations: Number(doneGen?.n ?? 0),
         /** 前幾鏡的標題，讓提示句具體（「影響：SHOT 02、SHOT 05…」） */
         sampleTitles: shots.slice(0, 5).map((s) => s.title),
+        /** 其中畫面已經與卡片對不上的鏡數（＝這次修改真正「已經造成落差」的部分） */
+        outdatedShots: outdated.length,
       };
     }),
+
+  /**
+   * 連戲檢查（PE 計畫 P3 Continuity Checker 第一版）：全專案哪些鏡的畫面已經跟卡片對不上。
+   * 唯讀——只回報，重生成由使用者逐鏡決定。
+   */
+  continuityCheck: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const project = await getProjectChecked(ctx, input.projectId, false);
+    const stale = await checkProjectContinuity(project.id);
+    return {
+      outdated: stale.map((s) => ({ shotId: s.shotId, title: s.title, reason: s.reason })),
+      total: stale.length,
+    };
+  }),
 
   /* ── 場（story_scenes）管理：分鏡中心的場標頭 ───────────── */
 

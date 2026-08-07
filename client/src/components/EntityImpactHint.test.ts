@@ -44,6 +44,17 @@ describe("impactSentence", () => {
     expect(s).not.toContain("…");
   });
 
+  it("已經對不上的畫面要講成現況，不是風險", () => {
+    const s = impactSentence({ ...base, shots: 8, shotsWithVisual: 5, outdatedShots: 3, sampleTitles: [] });
+    expect(s).toContain("3 鏡的畫面已經跟現在的卡片對不上");
+    expect(s).toContain("不會自動重畫");
+  });
+
+  it("沒有過時畫面時不提這件事（0 不該變成一句話）", () => {
+    const s = impactSentence({ ...base, shots: 4, shotsWithVisual: 2, outdatedShots: 0, sampleTitles: [] });
+    expect(s).not.toContain("對不上");
+  });
+
   it("無標題的鏡不會變成空的頓號項；但它仍算一鏡，所以刪節號要留著", () => {
     const s = impactSentence({ ...base, shots: 2, sampleTitles: ["  ", "SHOT 02"] });
     expect(s).toContain("SHOT 02");

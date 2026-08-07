@@ -129,6 +129,9 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     .slice(0, 8);
 
   const knownNames = characters.map((c) => c.name);
+  // 道具名同樣要逐句比對掛到鏡上：真模式的 schema 有 propRefs、materializeStoryboard 也吃它，
+  // 假模式漏掛的話「道具 → 鏡 → 錨點 → 連戲檢查」這條鏈在 e2e 永遠測不到（假綠燈）。
+  const knownProps = props.map((p) => p.name);
   const scenes: StoryParsePlan["scenes"] = (paras.length ? paras : [content.slice(0, 120) || "第一場"]).map((p, i) => {
     const sentences = p
       .split(/[。！？!?]/)
@@ -144,6 +147,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
       prompt: s.slice(0, 200),
       voiceover: s.slice(0, 100),
       characterRefs: knownNames.filter((n) => s.includes(n)).slice(0, MAX_GENERATE_CHARACTERS),
+      propRefs: knownProps.filter((n) => s.includes(n)).slice(0, MAX_GENERATE_PROPS),
       durationSec: 5,
     }));
     return {
