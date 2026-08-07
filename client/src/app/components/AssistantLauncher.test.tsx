@@ -10,8 +10,14 @@ vi.mock("../../api", () => {
   return {
     trpc: {
       useUtils: () => ({}),
+      globalAssistant: {
+        ask: { useMutation: mutation },
+        runSiteAction: { useMutation: mutation },
+      },
       teamAssistant: {
         ask: { useMutation: mutation },
+        dispatch: { useMutation: mutation },
+        command: { useMutation: mutation },
         commandLevel: { useQuery: query },
         campaigns: { useQuery: query },
         planCampaign: { useMutation: mutation },

@@ -13,13 +13,21 @@ import { DESTINATIONS } from "../navigation/navigationItems";
  *  而且錯誤是在 lazy chunk resolve 之後才丟出來——表現成「面板整個不見」而不是
  *  某個欄位缺值，光看斷言訊息會誤判成 sheet 沒開。teamAssistant 這幾支要補齊。 */
 vi.mock("../../api", () => {
-  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
+  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined });
   const query = () => ({ data: undefined, isLoading: false, isPending: false, error: null, refetch: vi.fn() });
   return {
     trpc: {
       useUtils: () => ({}),
+      // 問答本體已改走 globalAssistant.ask（站級動作提議＋trace）；
+      // 確認卡用 runSiteAction 與 teamAssistant 的 dispatch/command
+      globalAssistant: {
+        ask: { useMutation: mutation },
+        runSiteAction: { useMutation: mutation },
+      },
       teamAssistant: {
         ask: { useMutation: mutation },
+        dispatch: { useMutation: mutation },
+        command: { useMutation: mutation },
         commandLevel: { useQuery: query },
         campaigns: { useQuery: query },
         planCampaign: { useMutation: mutation },

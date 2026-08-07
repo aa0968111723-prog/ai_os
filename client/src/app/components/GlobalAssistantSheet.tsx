@@ -1,4 +1,4 @@
-import { lazy, Suspense, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useState, type RefObject } from "react";
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
@@ -24,13 +24,36 @@ const GroupCampaignPanel = lazy(() =>
   import("../../features/group-campaign/GroupCampaignPanel").then((m) => ({ default: m.GroupCampaignPanel })),
 );
 
+/** 專案模式的本體：既有的專案助手（SSE 軌跡＋工具預覽＋動作確認卡全部內建），embedded 由外殼供框 */
+const ProjectAssistant = lazy(() =>
+  import("../../components/ProjectAssistant").then((m) => ({ default: m.ProjectAssistant })),
+);
+
 /**
- * 全站 AI 助手：底部導覽正中央那顆球按下去的東西。
+ * Scope 路由（deterministic，GLOBAL_ASSISTANT_PLAN §3.3）：
+ * 只認兩種專案路徑（/p/:id、/studio/:projectId）。不靠 LLM、不靠猜——
+ * route 說你在專案裡，助手就預設聚焦這個專案；chip 可一鍵切回整個組。
+ * 伺服器端永遠用 requireGroup／專案查詢重驗，偽造 route 只會看到你本來就有權看的東西。
+ */
+export function projectIdFromRoute(path: string): string | null {
+  const m = /^\/(?:p|studio)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(path);
+  return m ? m[1] : null;
+}
+
+/**
+ * 全站 AI 助手：底部導覽正中央那顆球（手機）與頂欄 AssistantLauncher（桌機）按下去的東西。
  *
- * 在這之前，那顆球只是 `/dashboard#ai-work` 的捲動錨點——按下去會跳回今日
- * 工作台捲到「繼續創作」那一格。而組級問答的後端（teamAssistant.ask，9 個
- * 跨專案唯讀工具）與前端（AICreativeCopilot）**都已經寫好，只是全站沒有任何
- * 頁面 import 它**。這張 sheet 就是把兩者接起來。
+ * ## 範圍（scope）
+ *
+ * 這張 sheet 現在有兩種視野，由目前路徑 deterministic 決定預設：
+ * - **專案頁**（/p/:id、/studio/:projectId）：預設聚焦該專案——直接渲染既有的
+ *   ProjectAssistant（SSE 軌跡、工具結果預覽、七種動作確認卡全數繼承），
+ *   頂部 chip 可切回「整個組」。
+ * - **其他頁**：組級視野（globalAssistant.ask）——組內全專案現況問答、派工／指令提議，
+ *   以及站級動作確認卡（建專案／筆記／行程／任務／私訊）。
+ *
+ * 兩種視野是同一顆球的兩個焦距，不是兩個產品：組級核心（globalAssistant.ask）
+ * 與組助手共用同一份上下文組裝；專案模式與工作台側欄共用同一個 ProjectAssistant。
  *
  * ## 為什麼用 MenuSurface 而不是自己做一個浮層
  *
@@ -38,23 +61,6 @@ const GroupCampaignPanel = lazy(() =>
  * z-index 被分頁列蓋住、portal 後外點誤判），MenuSurface 的檔頭把它們都記錄
  * 並解掉了。`surfaceRole="dialog"` 是刻意的：內容是輸入框與對話卡片，不是
  * role="menuitem" 的清單，宣告成 menu 等於對讀屏承諾了沒實作的方向鍵模型。
- *
- * ## 範圍（scope）
- *
- * 目前一律是「組級」——teamAssistant 的視野本來就是跨專案的組內全貌。
- * 使用者在專案頁裡叫出助手，看到的仍是組級視角而不是該專案的助手
- * （專案助手在工作台裡，另一個入口）。這件事現在由 MenuSurface 的
- * `label="AI 助手"`（＝對話框的 aria-label）承擔，畫面上不再放說明 chip。
- * 「在專案頁自動聚焦該專案」是下一階段的事，需要先把兩個核心收斂成一個，
- * 現在硬做只會變成第三套問答框。
- *
- * ## 兩個入口，同一張面板
- *
- * 手機是底部導覽正中央那顆球（MobileNavigation），桌機是頂欄的
- * AssistantLauncher——`.mobile-nav` 在 >820 是 display:none，所以在補上頂欄
- * 入口之前，桌機**完全叫不出助手**（球在 DOM 裡但按不到）。
- * 兩邊各自持有自己的開闔狀態，但因為兩顆觸發器互斥（一個只在 ≤820 顯示、
- * 另一個只在 >820 渲染），同一時間只有一張面板打得開。
  */
 export function GlobalAssistantSheet({
   open,
@@ -68,7 +74,19 @@ export function GlobalAssistantSheet({
   groupId: string;
   triggerRef: RefObject<HTMLElement | null>;
 }) {
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
+  const projectId = projectIdFromRoute(location);
+  // 使用者手動切過的視野；換到另一個專案（或離開專案頁）就回到 route 的預設
+  const [scopeOverride, setScopeOverride] = useState<"project" | "group" | null>(null);
+  useEffect(() => {
+    setScopeOverride(null);
+  }, [projectId]);
+  const scope: "project" | "group" = projectId ? (scopeOverride ?? "project") : "group";
+
+  const goTo = (href: string) => {
+    onClose();
+    navigate(href);
+  };
 
   return (
     <MenuSurface
@@ -86,29 +104,59 @@ export function GlobalAssistantSheet({
       className="global-assistant"
       triggerRef={triggerRef}
     >
-      {/* 可見標題與「範圍：整個組」的 chip 拿掉了：畫面上只留輸入框與四周的感知光。
-          範圍資訊沒有消失——MenuSurface 的 label="AI 助手" 仍是這張對話框的
-          aria-label，助手的視野本來就一律是組級，沒有第二種可選。 */}
       {groupId ? (
-        <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
-        {/* 調度面板放在問答上面：「叫 AI 去做一整件事」比「問 AI 一個問題」是更重的意圖，
-            而它在自己不可用時（權限不足）完全不渲染，不會白佔一般組員的畫面。
-            collapsible：攤開是一整版說明＋表單，會把問答輸入框推到看不見——
-            sheet 裡收成一列，有計畫等人時徽章會提醒展開。 */}
-        <GroupCampaignPanel groupId={groupId} collapsible />
-        <AICreativeCopilot
-          groupId={groupId}
-          onUseIdeaForNewProject={(ideaTitle) => {
-            // 建專案是寫入動作——這裡只把想法帶到建立流程，不代按確認。
-            // 真正的建立仍在 Launchpad 的建立專案表單，由使用者自己送出。
-            onClose();
-            navigate(`/dashboard#projects`);
-            window.setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("aios:new-project-idea", { detail: { ideaTitle } }));
-            }, 0);
-          }}
-        />
-        </Suspense>
+        <>
+          {/* 視野 chip：只在專案頁出現（其他頁只有一種視野，chip 是噪音）。
+              radiogroup 語義：兩檔互斥、恆有一檔選中。 */}
+          {projectId && (
+            <div className="ga-scope" role="radiogroup" aria-label="助手視野">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scope === "project"}
+                className={`ga-scope__chip${scope === "project" ? " is-active" : ""}`}
+                onClick={() => setScopeOverride("project")}
+              >
+                這個專案
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scope === "group"}
+                className={`ga-scope__chip${scope === "group" ? " is-active" : ""}`}
+                onClick={() => setScopeOverride("group")}
+              >
+                整個組
+              </button>
+            </div>
+          )}
+          <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
+            {scope === "project" && projectId ? (
+              /* key=projectId：換專案時整棵重掛，對話與軌跡不殘留上一個專案的內容 */
+              <ProjectAssistant key={projectId} projectId={projectId} embedded />
+            ) : (
+              <>
+                {/* 調度面板放在問答上面：「叫 AI 去做一整件事」比「問 AI 一個問題」是更重的意圖，
+                    而它在自己不可用時（權限不足）完全不渲染，不會白佔一般組員的畫面。 */}
+                <GroupCampaignPanel groupId={groupId} collapsible />
+                <AICreativeCopilot
+                  groupId={groupId}
+                  projectId={projectId ?? undefined}
+                  onNavigate={goTo}
+                  onUseIdeaForNewProject={(ideaTitle) => {
+                    // 建專案是寫入動作——這裡只把想法帶到建立流程，不代按確認。
+                    // 真正的建立仍在 Launchpad 的建立專案表單，由使用者自己送出。
+                    onClose();
+                    navigate(`/dashboard#projects`);
+                    window.setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("aios:new-project-idea", { detail: { ideaTitle } }));
+                    }, 0);
+                  }}
+                />
+              </>
+            )}
+          </Suspense>
+        </>
       ) : (
         <Meta as="p">還沒有選定的組——到頂欄選一個組之後，助手才知道要看誰的專案。</Meta>
       )}
