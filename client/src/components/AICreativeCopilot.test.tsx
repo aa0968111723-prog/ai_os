@@ -13,6 +13,7 @@ vi.mock("../api", () => {
     error: null,
     data: undefined,
   });
+  const query = () => ({ data: undefined, isLoading: false, isPending: false, error: null, refetch: vi.fn() });
   return {
     trpc: {
       // 問答已改走全站助手（globalAssistant.ask）；確認卡另用 runSiteAction 與
@@ -23,6 +24,8 @@ vi.mock("../api", () => {
       },
       teamAssistant: {
         dispatch: { useMutation: mutation },
+        groupInsights: { useQuery: query },
+        agentOverview: { useQuery: query },
         command: { useMutation: mutation },
       },
     },

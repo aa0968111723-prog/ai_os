@@ -17,6 +17,8 @@ vi.mock("../../api", () => {
       teamAssistant: {
         ask: { useMutation: mutation },
         dispatch: { useMutation: mutation },
+        groupInsights: { useQuery: query },
+        agentOverview: { useQuery: query },
         command: { useMutation: mutation },
         commandLevel: { useQuery: query },
         campaigns: { useQuery: query },

@@ -387,16 +387,36 @@ export async function runGlobalAsk(
     canDispatch, commandLevel, degraded, traceSessionId,
   };
 
-  // 假模式：不打 LLM，回確定性摘要（可測、不花錢），不提議任何動作
+  // 假模式：不打 LLM，回確定性摘要（可測、不花錢）。
+  // 站級提議也給**確定性**的一批——「提議→確認卡→runSiteAction→真寫入」這條 ACT 鏈路
+  // 是本功能的主線，不能只有正式模型環境才驗得到。規則刻意簡單可預測（e2e 據此斷言）：
+  // 訊息含「專案」→ create_project；含「筆記」→ add_note；提議一樣走 resolveSiteActions
+  // 的同一條驗證（platform 白名單、去重、上限），mock 與正式只差「誰產生提議」。
   if (isMockMode()) {
     const lines = teamCtx.projectLines;
     const preview = lines.slice(0, 3).join("\n");
     const answer = `（測試模式）本組共 ${teamCtx.totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析，並可提議建專案／筆記／行程／任務／私訊等動作（一律經你確認才執行）。`;
+    const mockProposals: SiteActionProposal[] = [];
+    if (input.message.includes("專案") && creationOptions.platforms.length) {
+      mockProposals.push({
+        type: "create_project",
+        title: input.message.replace(/[「」]/g, "").slice(0, 40) || "測試模式專案",
+        kind: creationOptions.kinds[0] ?? "測試",
+        platform: creationOptions.platforms[0].value,
+      });
+    }
+    if (input.message.includes("筆記")) {
+      mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
+    }
+    const siteActions = resolveSiteActions(siteRefs, mockProposals);
     if (traceSessionId) {
-      await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成", payload: { answer } }).catch(() => undefined);
+      await finalizeSiteTraceSession({
+        sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成",
+        payload: { answer, siteActions: siteActions.map((a) => a.label) },
+      }).catch(() => undefined);
     }
     return {
-      answer, dispatches: [], actions: [], siteActions: [], steps: [],
+      answer, dispatches: [], actions: [], siteActions, steps: [],
       mock: true, rationale: undefined, contextUsed: [], ...base,
     };
   }

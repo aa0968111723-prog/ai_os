@@ -59,8 +59,21 @@ ok("組員就位", acc["user"]["name"] == "全站助手組員")
 # ── ASK（mock 短路）＋trace 落庫 ──
 a1 = call("POST", admin, "globalAssistant.ask", {"groupId": gid, "message": "目前全組進度如何？"})
 ok("ASK：mock 回覆", a1.get("mock") is True and "測試模式" in a1.get("answer", ""))
-ok("ASK：不在 mock 提議任何動作", a1.get("siteActions") == [] and a1.get("dispatches") == [])
+ok("ASK：無動作意圖時不提議", a1.get("siteActions") == [] and a1.get("dispatches") == [])
 ok("ASK：帶回 traceSessionId", bool(a1.get("traceSessionId")))
+
+# ── ASK→提議→確認→ACT 全鏈路（mock 確定性提議走同一條 resolveSiteActions 驗證）──
+a2 = call("POST", admin, "globalAssistant.ask", {"groupId": gid, "message": "幫我開一個中秋活動宣傳專案"})
+props = a2.get("siteActions") or []
+ok("提議：mock 產 create_project 確認卡", len(props) == 1 and props[0]["type"] == "create_project" and "label" in props[0])
+card = props[0]
+done = call("POST", admin, "globalAssistant.runSiteAction", {
+    "type": "create_project", "groupId": card["groupId"],
+    "title": card["title"], "kind": card["kind"], "platform": card["platform"],
+})
+ok("提議→確認→真寫入：專案建立", bool(done.get("projectId")))
+plist0 = call("GET", admin, "projects.list", {"groupId": gid})
+ok("提議鏈路：專案出現在列表", any(x["id"] == done["projectId"] for x in plist0))
 
 traces = call("GET", admin, "globalAssistant.traces", {"groupId": gid})
 ok("trace 落庫（分表）", any(t["id"] == a1["traceSessionId"] for t in traces))

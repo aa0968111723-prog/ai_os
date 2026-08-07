@@ -30,13 +30,14 @@ export function stripJsonObject(raw: string): string {
   return raw.replace(/\{[\s\S]*\}/, "").trim();
 }
 
-/** 一次工具執行的結果：step＝給使用者看的一行摘要；text＝回餵 LLM 的結果文字 */
+/** 一次工具執行的結果：step＝給使用者看的一行摘要；text＝回餵 LLM 的結果文字。
+ *  呼叫端可帶更多欄位（如 preview）——execTool/onToolResult 以 TResult 泛型穿透。 */
 export interface ToolLoopStepResult {
   step: string;
   text: string;
 }
 
-export interface ToolLoopOptions<TToolCall, TReply> {
+export interface ToolLoopOptions<TToolCall, TReply, TResult extends ToolLoopStepResult = ToolLoopStepResult> {
   /** 最多幾輪工具查詢（每輪一次 LLM 呼叫；超過強制收尾） */
   maxToolRounds: number;
   /** 用戶端斷線訊號：中止時不再發起下一輪 LLM 呼叫 */
@@ -48,7 +49,7 @@ export interface ToolLoopOptions<TToolCall, TReply> {
   /** JSON → 工具呼叫（解析失敗回 null＝走 reply 分支）。用呼叫端自己的 zod schema。 */
   tryToolCall: (json: unknown) => TToolCall | null;
   /** 執行一個唯讀工具。**這一層不做權限判斷**——ACL 在被呼叫的 core/service 內部。 */
-  execTool: (call: TToolCall, round: number) => Promise<ToolLoopStepResult>;
+  execTool: (call: TToolCall, round: number) => Promise<TResult>;
   /** 工具名（工具結果區塊標籤＋onToolResult 回報用） */
   toolName: (call: TToolCall) => string;
   /** JSON → 最終回答（解析失敗回 null＝走 fallback） */
@@ -62,7 +63,7 @@ export interface ToolLoopOptions<TToolCall, TReply> {
   /** 工具即將執行（SSE「正在查…」與 trace tool_call 用） */
   onToolCall?: (call: TToolCall, round: number) => void | Promise<void>;
   /** 工具跑完（SSE step 與 trace tool_result 用） */
-  onToolResult?: (call: TToolCall, result: ToolLoopStepResult, round: number) => void | Promise<void>;
+  onToolResult?: (call: TToolCall, result: TResult, round: number) => void | Promise<void>;
 }
 
 export interface ToolLoopOutcome<TReply> {
@@ -81,8 +82,8 @@ export interface ToolLoopOutcome<TReply> {
  * 每輪 LLM 回「工具呼叫」就執行並把結果附進下一輪；回「最終回答」就結束；
  * 超過 maxToolRounds 強制收尾（提示詞明講不得再用工具、也不再受理工具 JSON）。
  */
-export async function runToolLoop<TToolCall, TReply>(
-  opts: ToolLoopOptions<TToolCall, TReply>,
+export async function runToolLoop<TToolCall, TReply, TResult extends ToolLoopStepResult = ToolLoopStepResult>(
+  opts: ToolLoopOptions<TToolCall, TReply, TResult>,
 ): Promise<ToolLoopOutcome<TReply>> {
   const steps: string[] = [];
   let toolBlocks = "";
