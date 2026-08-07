@@ -1045,10 +1045,20 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   align-items: flex-start;
   gap: 6px;
   line-height: 1.45;
+  /* 工具結果預覽要換到下一行整寬顯示；沒有預覽時 wrap 不影響原本的單行版面 */
+  flex-wrap: wrap;
 }
 .assistant-trace__event > svg {
   flex: none;
   margin-top: 2px;
+}
+/* 即時軌跡裡的工具結果預覽：整寬另起一行，縮排對齊上一行的文字（icon 12px + gap 6px）。
+   min-width:0 是必要的——沒有它，內層的素材網格會把 flex 容器撐破，
+   在 390px 上把整條軌跡推出可視範圍（而 html/body 是 overflow-x: clip，不會給捲軸）。 */
+.assistant-trace__preview {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin: 4px 0 2px 18px;
 }
 .assistant-trace--live {
   margin-bottom: 0;

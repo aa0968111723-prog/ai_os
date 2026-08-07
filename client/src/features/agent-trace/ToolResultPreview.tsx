@@ -288,5 +288,9 @@ export function ToolResultPreview({ preview }: { preview: Preview }) {
           {preview.text}
         </Meta>
       );
+    // TS 認為上面已窮舉，但 preview 是從 SSE／資料庫 JSON 來的執行期資料——
+    // 舊資料或未來新增的 kind 會落到這裡。安靜不渲染，不要讓整條軌跡爆掉。
+    default:
+      return null;
   }
 }
