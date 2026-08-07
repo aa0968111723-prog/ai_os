@@ -7,12 +7,14 @@ import { ShotStrip, type StudioShot } from "./ShotStrip";
 import { StudioAiPanel } from "./StudioAiPanel";
 import { WhiteboardCanvas, type BoardView } from "./WhiteboardCanvas";
 import { collectBrush, updateSavedBrush, workingCopy } from "./brushCollection";
-import { DEFAULT_BRUSH_ID, findBrush, type BrushSpec } from "./brushes";
+import { BRUSH_LIMITS, DEFAULT_BRUSH_ID, findBrush, type BrushSpec } from "./brushes";
 import { boardSizeForFormat, isBoardEmpty } from "./boardDoc";
 import { exportBoardPng } from "./boardExport";
 import { allBrushes, readSavedBrushes, writeSavedBrushes } from "./studioStorage";
 import { clampZoom, fitBoardToBox } from "./studioLayout";
+import { resolveShortcut, SHORTCUT_HINTS } from "./studioShortcuts";
 import { useBoardSession } from "./useBoardSession";
+import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
 import "./studio.css";
 
@@ -119,6 +121,15 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setView({ scale: fit.scale, offsetX: fit.offsetX + 16, offsetY: fit.offsetY + 16 });
   };
 
+  /** 快捷鍵要呼叫的東西每次 render 都是新函式；用 ref 轉一手，
+   *  keydown 監聽器才不必每次重掛（重掛本身沒錯，但按鍵在重掛的空檔會漏接）。 */
+  const zoomByRef = useRef(zoomBy);
+  zoomByRef.current = zoomBy;
+  const fitToScreenRef = useRef(fitToScreen);
+  fitToScreenRef.current = fitToScreen;
+  const selectBrushRef = useRef(selectBrush);
+  selectBrushRef.current = selectBrush;
+
   // ── 分鏡表操作 ────────────────────────────────────────────
   const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
   const addShot = trpc.scenes.addDraft.useMutation({
@@ -130,12 +141,52 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidateScenes });
   const reorder = trpc.scenes.reorder.useMutation({ onSuccess: invalidateScenes });
 
-  // ── 手機輕量版的面板 ──────────────────────────────────────
+  // ── 收成 sheet 的面板（手機全部、窄桌機只有 AI 欄）────────────
   const [sheet, setSheet] = useState<LiteSheet>("none");
   const lite = layout.mode === "lite";
-  useEffect(() => { if (!lite) setSheet("none"); }, [lite]);
+  const shotsAsSheet = layout.shotStrip === "sheet";
+  const aiAsSheet = layout.aiPanel === "sheet";
+  const panelsAsSheet = shotsAsSheet || aiAsSheet;
+  // 版面切換（轉向、拉視窗、進出全螢幕）時把開著的 sheet 收掉，
+  // 否則常駐欄與 sheet 會同時出現同一塊內容
+  useEffect(() => {
+    setSheet((cur) => (cur === "shots" && !shotsAsSheet) || (cur === "ai" && !aiAsSheet) ? "none" : cur);
+  }, [shotsAsSheet, aiAsSheet]);
+
+  // ── 全螢幕專注模式 ────────────────────────────────────────
+  const { immersive, exit: exitImmersive, toggle: toggleImmersive } = useImmersive(hostRef);
 
   const exportBoard = useCallback(() => exportBoardPng(boardRef.current.doc, layout.exportMaxEdge), [layout.exportMaxEdge]);
+
+  /**
+   * 鍵盤快捷鍵：手不離開畫布就能換筆、調粗細、復原、全螢幕。
+   * 對照表在 studioShortcuts（純函式、可測），這裡只負責接線——
+   * 尤其是「焦點在輸入框時一律讓路」那一條，壞掉會讓人在提示詞裡打個 e 就換成橡皮擦。
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = resolveShortcut(event);
+      if (!action) return;
+      if (action === "exitImmersive" && !immersive) return;
+      event.preventDefault();
+      switch (action) {
+        case "undo": undo(); break;
+        case "redo": redo(); break;
+        case "toggleImmersive": toggleImmersive(); break;
+        case "exitImmersive": exitImmersive(); break;
+        case "brushBigger": setBrush((b) => ({ ...b, size: Math.min(BRUSH_LIMITS.size.max, b.size + 1) })); break;
+        case "brushSmaller": setBrush((b) => ({ ...b, size: Math.max(BRUSH_LIMITS.size.min, b.size - 1) })); break;
+        case "eraser": selectBrushRef.current("builtin.eraser"); break;
+        case "brush": selectBrushRef.current(DEFAULT_BRUSH_ID); break;
+        case "pan": setPanMode((v) => !v); break;
+        case "fit": fitToScreenRef.current(); break;
+        case "zoomIn": zoomByRef.current(1.2); break;
+        case "zoomOut": zoomByRef.current(1 / 1.2); break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo, toggleImmersive, exitImmersive, immersive]);
 
   const referenceUrl = showReference && shot?.assetUrl && shot.assetKind !== "audio" ? shot.assetUrl : null;
   const boardEmpty = isBoardEmpty(board.doc);
@@ -182,10 +233,35 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     />
   );
 
+  const tool = (
+    action: string,
+    label: string,
+    icon: Parameters<typeof Icon>[0]["name"],
+    onClick: () => void,
+    opts: { disabled?: boolean; on?: boolean } = {},
+  ) => (
+    <button
+      type="button"
+      className={opts.on ? "is-on" : undefined}
+      aria-pressed={opts.on === undefined ? undefined : opts.on}
+      aria-label={label}
+      title={SHORTCUT_HINTS[action] ? `${label}（${SHORTCUT_HINTS[action]}）` : label}
+      disabled={opts.disabled}
+      onClick={onClick}
+    >
+      <Icon name={icon} size={16} />
+    </button>
+  );
+
   return (
-    <div className="studio" data-mode={layout.mode} ref={hostRef}>
+    <div
+      className={`studio${immersive ? " is-immersive" : ""}`}
+      data-mode={layout.mode}
+      data-ai={layout.aiPanel}
+      ref={hostRef}
+    >
       <header className="studio__bar">
-        <div className="studio__bar-group">
+        <div className="studio__bar-group studio__identity">
           <strong className="studio__title" title={projectTitle}>{projectTitle}</strong>
           <Meta as="span" className="studio__where">
             {shot ? `第 ${shots.findIndex((s) => s.id === shot.id) + 1} 鏡・${shot.title}` : "自由塗鴉（未選分鏡）"}
@@ -193,51 +269,24 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         </div>
 
         <div className="studio__bar-group studio__tools" role="toolbar" aria-label="白板工具">
-          <button type="button" aria-label="復原" title="復原" disabled={board.doc.strokes.length === 0} onClick={undo}>
-            <Icon name="Undo2" size={15} />
-          </button>
-          <button type="button" aria-label="重做" title="重做" disabled={board.redo.length === 0} onClick={redo}>
-            <Icon name="RotateCw" size={15} />
-          </button>
-          <button type="button" aria-label="清空白板" title="清空白板（可逐筆復原）" disabled={boardEmpty} onClick={clear}>
-            <Icon name="Trash2" size={15} />
-          </button>
+          {tool("undo", "復原", "Undo2", undo, { disabled: board.doc.strokes.length === 0 })}
+          {tool("redo", "重做", "RotateCw", redo, { disabled: board.redo.length === 0 })}
+          {tool("clear", "清空白板（可逐筆復原）", "Trash2", clear, { disabled: boardEmpty })}
           <span className="studio__divider" aria-hidden="true" />
-          <button type="button" aria-label="縮小" title="縮小" onClick={() => zoomBy(1 / 1.2)}>
-            <Icon name="ZoomOut" size={15} />
-          </button>
-          <button type="button" aria-label="整張放進畫面" title="整張放進畫面" onClick={fitToScreen}>
-            <Icon name="Maximize" size={15} />
-          </button>
-          <button type="button" aria-label="放大" title="放大" onClick={() => zoomBy(1.2)}>
-            <Icon name="ZoomIn" size={15} />
-          </button>
-          <button
-            type="button"
-            className={panMode ? "is-on" : undefined}
-            aria-pressed={panMode}
-            aria-label="移動畫布"
-            title="移動畫布（兩指拖曳也可以）"
-            onClick={() => setPanMode((v) => !v)}
-          >
-            <Icon name="Hand" size={15} />
-          </button>
-          {shot?.assetUrl && shot.assetKind !== "audio" && (
-            <button
-              type="button"
-              className={showReference ? "is-on" : undefined}
-              aria-pressed={showReference}
-              aria-label="描圖底稿"
-              title="把這一鏡目前的畫面當底稿描"
-              onClick={() => setShowReference((v) => !v)}
-            >
-              <Icon name="Layers" size={15} />
-            </button>
-          )}
+          {tool("zoomOut", "縮小", "ZoomOut", () => zoomBy(1 / 1.2))}
+          {tool("fit", "整張放進畫面", "Scan", fitToScreen)}
+          {tool("zoomIn", "放大", "ZoomIn", () => zoomBy(1.2))}
+          {tool("pan", "移動畫布（兩指拖曳也可以）", "Hand", () => setPanMode((v) => !v), { on: panMode })}
+          {shot?.assetUrl && shot.assetKind !== "audio" &&
+            tool("reference", "描圖底稿", "Layers", () => setShowReference((v) => !v), { on: showReference })}
+          <span className="studio__divider" aria-hidden="true" />
+          {tool("toggleImmersive", immersive ? "離開全螢幕" : "全螢幕專注模式", immersive ? "Shrink" : "Expand", toggleImmersive, { on: immersive })}
         </div>
 
-        {lite && (
-          <div className="studio__bar-group studio__lite-tabs">
+        {/* 分鏡／AI 的入口：手機一律 sheet，窄桌機也走 sheet（先前是直接藏起來，
+            821–1180px 的使用者連叫都叫不出來） */}
+        {panelsAsSheet && (
+          <div className="studio__bar-group studio__panel-tabs">
             <Button size="sm" variant={sheet === "shots" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "shots" ? "none" : "shots"))}>
               <Icon name="Film" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
               分鏡{shots.length ? `（${shots.length}）` : ""}
@@ -271,36 +320,34 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             referenceUrl={referenceUrl}
             readOnly={!canEdit}
           />
-          <div className="studio__canvas-meta">
-            <Meta as="span">
-              {board.doc.strokes.length}／{layout.maxStrokes} 筆・{Math.round(view.scale * 100)}%
-              {layout.mode === "lite" ? "・輕量版" : ""}
-            </Meta>
+          {/* 狀態晶片：浮在畫布角落而不是佔一整列——這是給人「瞄一眼」的資訊，
+              不該跟工具搶版面（先前那行「0／400 筆・9%・輕量版」看起來像除錯輸出） */}
+          <div className="studio__status" aria-hidden="true">
+            <span>{Math.round(view.scale * 100)}%</span>
+            <span className="studio__status-sep" />
+            <span>{board.doc.strokes.length}/{layout.maxStrokes}</span>
           </div>
         </div>
 
-        {!lite && <aside className="studio__side">{aiPanel}</aside>}
+        {!lite && layout.aiPanel === "column" && <aside className="studio__side">{aiPanel}</aside>}
       </div>
 
       {!lite && <div className="studio__rail">{shotStrip}</div>}
 
-      {lite && (
+      {lite && <div className="studio__dock">{brushShelf}</div>}
+
+      {panelsAsSheet && sheet !== "none" && (
         <>
-          <div className="studio__dock">{brushShelf}</div>
-          {sheet !== "none" && (
-            <>
-              <button type="button" className="studio-sheet__scrim" aria-label="關閉面板" onClick={() => setSheet("none")} />
-              <aside className="studio-sheet" aria-label={sheet === "shots" ? "順序分鏡表" : "AI 協作"}>
-                <div className="studio-sheet__head">
-                  <span className="studio-sheet__grip" aria-hidden="true" />
-                  <Button size="sm" variant="ghost" onClick={() => setSheet("none")} aria-label="關閉面板">
-                    <Icon name="X" size={16} />
-                  </Button>
-                </div>
-                <div className="studio-sheet__body">{sheet === "shots" ? shotStrip : aiPanel}</div>
-              </aside>
-            </>
-          )}
+          <button type="button" className="studio-sheet__scrim" aria-label="關閉面板" onClick={() => setSheet("none")} />
+          <aside className="studio-sheet" aria-label={sheet === "shots" ? "順序分鏡表" : "AI 協作"}>
+            <div className="studio-sheet__head">
+              <span className="studio-sheet__grip" aria-hidden="true" />
+              <Button size="sm" variant="ghost" onClick={() => setSheet("none")} aria-label="關閉面板">
+                <Icon name="X" size={16} />
+              </Button>
+            </div>
+            <div className="studio-sheet__body">{sheet === "shots" ? shotStrip : aiPanel}</div>
+          </aside>
         </>
       )}
     </div>

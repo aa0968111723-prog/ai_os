@@ -118,7 +118,11 @@ export type IconName =
   | "ArrowLeft"
   | "ZoomIn"
   | "ZoomOut"
-  | "Maximize";
+  | "Maximize"
+  | "Expand"
+  | "Shrink"
+  | "Scan"
+  | "Keyboard";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -823,6 +827,47 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
       <path d="M3 16v3a2 2 0 0 0 2 2h3" />
       <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </>
+  ),
+  Expand: (
+    <>
+      <path d="m15 15 6 6" />
+      <path d="m15 9 6-6" />
+      <path d="M21 16v5h-5" />
+      <path d="M21 8V3h-5" />
+      <path d="M3 16v5h5" />
+      <path d="m3 21 6-6" />
+      <path d="M3 8V3h5" />
+      <path d="M9 9 3 3" />
+    </>
+  ),
+  Shrink: (
+    <>
+      <path d="m15 15 6 6m-6-6v4.8m0-4.8h4.8" />
+      <path d="M9 19.8V15m0 0H4.2M9 15l-6 6" />
+      <path d="M15 4.2V9m0 0h4.8M15 9l6-6" />
+      <path d="M9 4.2V9m0 0H4.2M9 9 3 3" />
+    </>
+  ),
+  Scan: (
+    <>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+    </>
+  ),
+  Keyboard: (
+    <>
+      <path d="M10 8h.01" />
+      <path d="M12 12h.01" />
+      <path d="M14 8h.01" />
+      <path d="M16 12h.01" />
+      <path d="M18 8h.01" />
+      <path d="M6 8h.01" />
+      <path d="M7 16h10" />
+      <path d="M8 12h.01" />
+      <rect width="20" height="16" x="2" y="4" rx="2" />
     </>
   ),
 };
