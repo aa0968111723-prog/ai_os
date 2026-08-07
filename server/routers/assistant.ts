@@ -246,6 +246,12 @@ interface ReadableDb { ref: string; id: string; name: string; fields: DataField[
 async function listAssistantReadableDbs(auth: AuthState): Promise<ReadableDb[]> {
   const tables = await listVisibleTables(auth);
   return tables
+    // 排除個人庫：專案助手是「專案內共用」的對話（同專案成員都問得到），
+    // 個人庫是使用者自己的空間——名稱與欄位不該出現在共用對話的提示詞裡。
+    // 團隊助手早就這樣做（teamAssistant.ts 的 dbConds 只收 group/team/global），
+    // 這裡用的 listVisibleTables 卻含 personal，兩邊口徑不一致。
+    // 要讓 AI 讀個人庫，把它改成組層庫即可。
+    .filter((t) => t.scope !== "personal")
     .map((t) => ({ t, access: resolveAgentAccess(auth, t) }))
     .filter((x) => x.access.canRead)
     .slice(0, 8)

@@ -81,8 +81,11 @@ describe("ProjectDatabasesCard", () => {
   it("shows project data entry and empty AI status", () => {
     render(<ProjectDatabasesCard projectId="project-1" />);
 
-    expect(screen.getByText("專案資料")).toBeInTheDocument();
+    expect(screen.getByText("專案依據")).toBeInTheDocument();
     expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "empty");
+    // 收合狀態就要有得按：沒有依據時 summary 內常駐「加資料」，
+    // 否則使用者得先展開一張卡才會發現裡面能貼文字／上傳（實測痛點）
+    expect(screen.getByRole("button", { name: /加資料/i })).toBeInTheDocument();
     expect(screen.getByText(/本專案還沒有可給 AI 的依據/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /貼上文字/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /問 AI 助手/i })).toBeInTheDocument();
