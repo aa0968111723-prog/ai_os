@@ -5,7 +5,6 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { AdobeConnectButton } from "../components/settings/AdobeConnectButton";
 import { AdobeConnectionStatus } from "../components/settings/AdobeConnectionStatus";
 import { useAdobeConnection } from "../hooks/useAdobeConnection";
@@ -49,42 +48,20 @@ export function IntegrationsPage() {
   }, []);
 
   const d = list.data;
-  const connectedSourceCount = d
-    ? Number(d.googleDrive.connected) + Number(d.notion.connected) + d.apis.length
-    : 0;
-  const hasConnectedSource = connectedSourceCount > 0;
-  const integrationJourney: VisualJourneyStep[] = [
-    {
-      id: "connect",
-      label: "連接來源",
-      detail: hasConnectedSource ? `已有 ${connectedSourceCount} 個來源可使用` : "選擇一種來源開始",
-      icon: "Lock",
-      state: hasConnectedSource ? "done" : "current",
-    },
-    {
-      id: "import",
-      label: "挑選內容",
-      detail: "只匯入這次需要的資料",
-      icon: "Download",
-      state: hasConnectedSource ? "current" : "upcoming",
-    },
-    {
-      id: "use",
-      label: "交給專案與 AI",
-      detail: "綁定後才能引用與分析",
-      icon: "Sparkles",
-      state: "upcoming",
-    },
-  ];
 
   return (
     <div className="page-shell secondary-page integrations-page">
+      {/*
+        §24 重新定位：這一頁不只放資料來源（還有 Adobe、個人 AI 金鑰等服務），
+        所以名稱與導覽一致改成「連接與服務」。日常加入資料不必來這裡——
+        Google／Notion 的連接已經內建在「＋加入資料」的流程裡。
+      */}
       <SecondaryPageHeader
-        eyebrow="外部資料"
-        title="連接資料來源"
+        eyebrow="進階設定"
+        title="連接與服務"
         icon="ArrowRight"
         badge="連接不等於自動匯入"
-        description={<>把 Google 雲端、Notion 或自有 API 接進來；之後仍由你挑選哪些內容能提供給專案與 AI。</>}
+        description={<>管理已連接的帳號與服務。日常要加資料不用來這裡——在專案或資料中心按「＋加入資料」就好。</>}
       />
       {flash && <Meta as="p" style={{ color: "var(--success-ink)" }}>{flash}</Meta>}
       {list.error && (
@@ -123,13 +100,16 @@ export function IntegrationsPage() {
         </a>
       </section>
 
-      <Card as="section" className="integration-flow-card" data-fb="資料來源使用方式">
-        <div className="integration-flow-card__head">
-          <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
-          <Link href="/databases" className="btn-tonal btn-sm">前往資料中心 <Icon name="ArrowRight" size={13} /></Link>
-        </div>
-        <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
-      </Card>
+      {/*
+        §64：不要用 UI 教使用者架構。這裡原本是「連接 → 挑選 → 交給 AI」三步驟圖——
+        那張圖的存在本身就是在說「這個流程需要解釋」。操作本身就該是教學：
+        連接內建在「＋加入資料」裡，所以這裡只留一句話與一個回去的入口。
+      */}
+      <Hint>
+        連接只是讓你可以去自己的帳號挑東西；AI 只讀得到你選中並加入站內的內容。
+        {" "}
+        <Link href="/databases">回資料中心加入資料 →</Link>
+      </Hint>
 
       {/* ── Google 雲端硬碟 ── */}
       <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">

@@ -4939,15 +4939,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 @media (max-width: 820px) {
   .page-intro { align-items: flex-start; }
   .secondary-page-header { align-items: flex-start; }
+  /* 來源狀態改成直式清單（資料中心 §34）：原本是水平捲動的 230px 大卡，
+     390px 上第二張以後永遠被裁掉一半，使用者不捲就不知道還有 Notion／API。
+     連線狀態是「一眼要看完」的資訊，不該藏在水平捲動裡。 */
   .integration-status-grid {
     display: flex;
-    padding-bottom: 3px;
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
+    flex-direction: column;
+    gap: 8px;
   }
-  .integration-status-grid::-webkit-scrollbar { display: none; }
-  .integration-status-card { min-width: 230px; flex: 0 0 230px; scroll-snap-align: start; }
+  .integration-status-card { min-width: 0; width: 100%; min-height: 56px; }
   .daily-quick-links { grid-template-columns: repeat(3, minmax(180px, 1fr)); overflow-x: auto; scroll-snap-type: x proximity; }
   .daily-quick-links a { scroll-snap-align: start; }
   .daily-overview .continue-work__grid { grid-template-columns: 1fr; }

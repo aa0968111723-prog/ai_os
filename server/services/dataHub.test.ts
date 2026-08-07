@@ -211,6 +211,18 @@ describe("組隔離守門（跨組 metadata 不得外洩）", () => {
     expect(whereByTable.assets).toBeUndefined();
   });
 
+  it("★ 資料表一律經 databaseAcl.listVisibleTables——不自己查 data_tables", async () => {
+    // 個人庫「只有本人看得到」這條規則活在 listVisibleTables 的 or 條件裡。
+    // 只要 facade 自己下一條 data_tables 查詢，那條規則就被繞過了——
+    // 這支測試釘住「這裡沒有第二條路」。
+    rowsByTable.dataTables = [{ id: "leaked", scope: "personal", name: "別人的私人清單" }];
+    listVisibleTables.mockResolvedValue([]);
+    const result = await listDataHubResources(auth(), { kinds: ["table"] });
+    expect(listVisibleTables).toHaveBeenCalled();
+    expect(whereByTable.dataTables).toBeUndefined();
+    expect(result.resources).toEqual([]);
+  });
+
   it("文件只查「已通過 databaseAcl 的表」底下的檔案", async () => {
     listVisibleTables.mockResolvedValue([visibleTable()]);
     await listDataHubResources(auth(), { kinds: ["document"] });
