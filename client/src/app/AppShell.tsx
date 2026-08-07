@@ -11,6 +11,7 @@ import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
+import { AgentActivityHud } from "./components/AgentActivityHud";
 import { RouteFallback } from "../components/RouteFallback";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
@@ -260,6 +261,7 @@ export function AppShell() {
                 />
               </Suspense>
             </main>
+            <AgentActivityHud groupId={activeGroupId} />
             <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} groupId={activeGroupId} />
           </>
         ) : (
