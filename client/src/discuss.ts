@@ -39,17 +39,34 @@ export function jumpToRef(refType: string, refId: string): boolean {
   return flashAnchor(`${refType}-${refId}`);
 }
 
-/** 捲到指定 id 元素並短暫高亮(找不到回 false) */
-export function flashAnchor(anchorId: string): boolean {
+/**
+ * 只高亮，**不捲動**（找不到回 false）。
+ *
+ * 這支存在的唯一理由：協作事件（別人改了某一格）要讓畫面亮一下，但**絕不能捲走**。
+ * 直接沿用 flashAnchor 的話，別人每存一次分鏡標題、全房的畫面就被強制平滑捲走一次——
+ * 而 smooth 捲動正是鏡像跟隨那批修掉的抖動來源，等於把它從另一條路放回來。
+ */
+export function highlightAnchor(anchorId: string): boolean {
   const el = document.getElementById(anchorId);
   if (!el) return false;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash-target");
   // 強制 reflow 讓動畫可重播(連點兩次也會再閃一次)
   void el.offsetWidth;
   el.classList.add("flash-target");
   window.setTimeout(() => el.classList.remove("flash-target"), 2400);
   return true;
+}
+
+/**
+ * 捲到指定 id 元素並短暫高亮(找不到回 false)。
+ * **只用在使用者自己觸發的跳轉**（點引用卡、點通知深連結）——不是給協作事件用的，
+ * 那條路要用 highlightAnchor。
+ */
+export function flashAnchor(anchorId: string): boolean {
+  const el = document.getElementById(anchorId);
+  if (!el) return false;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  return highlightAnchor(anchorId);
 }
 
 /**

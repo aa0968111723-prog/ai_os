@@ -220,7 +220,17 @@ export function SceneStudio({
     },
   });
   const resolveAnnotation = trpc.messages.resolveAnnotation.useMutation({ onSuccess: refreshAnnotations });
-  const update = trpc.scenes.update.useMutation({ onSuccess: () => { setPromptDraft(null); refresh(); } });
+  /**
+   * meta.collabScope：讓協作廣播帶得出「改的是哪一格」，接收端才只失效分鏡相關查詢
+   * 而不是整棵 tRPC 快取，並在那一格上亮一下。**沒標的沿用全域失效**——這是刻意的
+   * 漸進遷移，首波只標分鏡這幾支（標錯 scope 比不標更糟：對方該刷新的東西沒刷新，
+   * 而且畫面上完全看不出來）。
+   */
+  const sceneScope = { collabScope: { kind: "scene", id: sceneId } } as const;
+  const update = trpc.scenes.update.useMutation({
+    meta: { ...sceneScope, collabLabel: "改了這一鏡的內容" },
+    onSuccess: () => { setPromptDraft(null); refresh(); },
+  });
   // 配音詞另開一支 update：存提示詞與存配音詞的 pending／已儲存回饋各自獨立，不互相污染
   const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
   // 冪等鍵（QA-007）：還沒成功的重送沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
@@ -248,6 +258,7 @@ export function SceneStudio({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
   });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
+    meta: { ...sceneScope, collabLabel: "換了這一鏡的現用版本" },
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
   const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;

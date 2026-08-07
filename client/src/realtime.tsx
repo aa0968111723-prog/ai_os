@@ -12,6 +12,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "./api";
+import { highlightAnchor } from "./discuss";
 import { Button, Hint } from "./components/ui";
 
 export interface CollabPeer {
@@ -577,6 +578,8 @@ export function useCollab(
   containerRef: RefObject<HTMLDivElement | null>;
   onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
   connected: boolean;
+  /** 最近一次帶說明的協作改動（「小明改了第 5 鏡」）；null＝還沒有 */
+  lastChange: { name: string; label: string; at: number } | null;
 } {
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
@@ -586,6 +589,13 @@ export function useCollab(
   const [cursors, setCursors] = useState<Map<string, CollabCursor>>(() => new Map());
   const cursorsLiveRef = useRef<Map<string, CollabCursor>>(new Map());
   const [zoneByUser, setZoneByUser] = useState<Record<string, string>>({});
+  /**
+   * 「誰剛改了什麼」——只有帶 label 的 invalidate 會設。
+   *
+   * 刻意用既有的 Hint 元件顯示，不引入 toast 基礎設施（全庫 grep `toast` 只有兩處註解）：
+   * 為了一行「小明改了第 5 鏡」而長出一整套彈出訊息系統，之後每個人都會拿它來洗版。
+   */
+  const [lastChange, setLastChange] = useState<{ name: string; label: string; at: number } | null>(null);
   /**
    * 每人最後一則帶錨點的 cursor。放 ref 不放 state：cursor 封包最高約 30Hz，
    * 每一則都 setState 會讓整份分鏡列跟著封包率重繪。真正需要重畫的時機由 anchorEpoch 決定。
@@ -676,7 +686,25 @@ export function useCollab(
             return next;
           });
         } else if (msg.type === "invalidate") {
-          void utilsRef.current.invalidate();
+          const scope = msg.scope as { kind?: string; id?: string | null } | undefined;
+          if (scope?.kind === "scene" || scope?.kind === "annotation") {
+            // 只失效分鏡相關的查詢：舊行為是無參數 invalidate（整棵 tRPC 快取），
+            // 順帶讓 generation.listByProject 每次被抓都跑一次 sweepStaleGenerations——
+            // 五人同房就是五次全專案掃描，而其中四次什麼都不會變
+            void utilsRef.current.scenes.invalidate();
+            void utilsRef.current.messages.invalidate();
+          } else if (scope?.kind) {
+            // 已知 kind 但沒有專屬處理：仍走全域失效（保守，寧可多抓一次）
+            void utilsRef.current.invalidate();
+          } else {
+            void utilsRef.current.invalidate();
+          }
+          // 讓改動處亮一下——**只高亮不捲動**。用 flashAnchor 的話，別人每存一次分鏡標題
+          // 全房畫面就被強制平滑捲走，而 smooth 捲動正是鏡像那批修掉的抖動來源
+          if (scope?.id) highlightAnchor(`scene-${scope.id}`);
+          if (typeof msg.label === "string" && msg.label) {
+            setLastChange({ name: typeof msg.name === "string" ? msg.name : "夥伴", label: msg.label, at: Date.now() });
+          }
         }
       };
       ws.onerror = () => {
@@ -748,9 +776,19 @@ export function useCollab(
   useEffect(() => {
     return queryClient.getMutationCache().subscribe((event) => {
       if (event.type === "updated" && event.action.type === "success") {
-        if (event.mutation?.options?.meta?.silentSync) return;
+        const meta = event.mutation?.options?.meta as
+          | { silentSync?: boolean; collabScope?: { kind: string; id?: string | null }; collabLabel?: string }
+          | undefined;
+        if (meta?.silentSync) return;
         const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "invalidate" }));
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        // scope 由 mutation 定義處顯式標註（meta.collabScope）。**沒標的沿用原本的全域失效**——
+        // 這是刻意的漸進遷移：發送端無從自己推導「這次改的是哪一格」，猜錯比不猜更糟
+        //（標錯 scope＝對方該刷新的東西沒刷新，而且畫面上完全看不出來）。
+        const payload: Record<string, unknown> = { type: "invalidate" };
+        if (meta?.collabScope) payload.scope = meta.collabScope;
+        if (meta?.collabLabel) payload.label = meta.collabLabel;
+        ws.send(JSON.stringify(payload));
       }
     });
   }, [queryClient]);
@@ -943,7 +981,7 @@ export function useCollab(
     [peers, anchorEpoch],
   );
 
-  return { peers, cursors, cursorsLiveRef, focusZones, anchorPeers, self, sendFocus, containerRef, onPointerMove, connected };
+  return { peers, cursors, cursorsLiveRef, focusZones, anchorPeers, self, sendFocus, containerRef, onPointerMove, connected, lastChange };
 }
 
 export type CollabViewMode = "live" | "mirror";

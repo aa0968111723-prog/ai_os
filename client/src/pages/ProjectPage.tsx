@@ -89,6 +89,14 @@ import {
   type CollabViewMode,
 } from "../realtime";
 
+/**
+ * 協作廣播的保底輪詢間隔。
+ *
+ * 60 秒是刻意放慢的：廣播正常時它幾乎不會派上用場，而它存在的意義是讓「訊號沒送到」
+ * 退化成「慢一分鐘」而不是「永遠停在舊值」。夠慢到不浪費，夠快到不會有人真的被卡住。
+ */
+const COLLAB_FALLBACK_POLL_MS = 60_000;
+
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
@@ -471,6 +479,10 @@ export function ProjectPage({ id }: { id: string }) {
         const code = err.data?.code;
         return code !== "FORBIDDEN" && code !== "NOT_FOUND" && count < 2;
       },
+      // 保底輪詢：協作廣播是「更快知道」，不是唯一的知道方式。
+      // 全域 refetchOnWindowFocus 是 false（main.tsx），所以少了這一條，
+      // 只要那則 invalidate 沒送到（WS 斷線、跨實例而沒開 Redis），世界觀可以整場停在舊值。
+      refetchInterval: COLLAB_FALLBACK_POLL_MS,
     },
   );
   // 即時協作：presence／彩色游標／編輯指示／mutation 成功時廣播「有東西變了」。
@@ -686,14 +698,14 @@ export function ProjectPage({ id }: { id: string }) {
       if (prev.includes(pid) || prev.length >= MAX_GENERATE_PROPS) return prev;
       return [...prev, pid];
     });
-  const assets = trpc.projects.assets.useQuery({ projectId: id });
+  const assets = trpc.projects.assets.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   // 留言未讀數（餵 TocNav ③分鏡・交付 徽章）：15 秒輪詢已夠即時，同房夥伴留言另有 WS invalidate 立即刷新
   const unread = trpc.messages.unread.useQuery({ projectId: id }, { refetchInterval: 15000 });
   // 「從這裡開始」步驟列與三幕進度 hint 用：讀既有查詢判定（與子元件共用快取，不額外增負擔）
   const generations = trpc.generation.listByProject.useQuery({ projectId: id });
   const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
   // 上下文摘要條的計數查詢：key 與各子元件內部完全相同 → 共用快取，零額外請求
-  const knowledge = trpc.knowledge.list.useQuery({ projectId: id });
+  const knowledge = trpc.knowledge.list.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
   const propCards = trpc.props.list.useQuery({ projectId: id });
@@ -1282,6 +1294,14 @@ export function ProjectPage({ id }: { id: string }) {
             >
               {onlineCount > 0 ? `${onlineCount} 人在線` : "即時同步已連線"}
             </button>
+          )}
+          {/* 「誰剛改了什麼」——別人改動時畫面不再是靜默換掉。
+              刻意用既有的 Meta 而不是引入 toast 基礎設施：為了一行字長出一整套彈出訊息系統，
+              之後每個人都會拿它來洗版。60 秒後自然過期（lastChange.at 是時間戳）。 */}
+          {collab.lastChange && Date.now() - collab.lastChange.at < 60_000 && (
+            <Meta aria-live="polite">
+              {collab.lastChange.name} {collab.lastChange.label}
+            </Meta>
           )}
           {showPresenceDetails && (
             <span id="project-presence-details" className="project-presence__details" style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>

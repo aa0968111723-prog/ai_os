@@ -7,6 +7,7 @@ import { ASSISTANT_TRIGGER, replyAsAssistant } from "../services/messageAssistan
 import { resolveMentions } from "../services/mentions";
 import { notify } from "../services/notify";
 import { dmSnippet } from "../services/dmCore";
+import { publishToProject } from "../services/realtime";
 
 /**
  * 站內留言（協作強化版）。隔離：以專案的 group 為準；檢視者(viewer)也能留言——
@@ -414,6 +415,8 @@ export const messagesRouter = router({
           eventKey: `annotation:${msg.id}:posted`,
         });
       }
+      // 全房即時看到那一格多了一則標注（⚑ N 角標會跳），而不是等 30 秒輪詢
+      publishToProject(input.projectId, { kind: "annotation", id: input.sceneId }, "標注了要改的地方");
       return msg;
     }),
 
@@ -510,6 +513,9 @@ export const messagesRouter = router({
           url: `/p/${msg.projectId}?focus=annotation&mid=${msg.id}`,
           eventKey: `annotation_resolved:${msg.id}`,
         });
+      }
+      if (msg.projectId) {
+        publishToProject(msg.projectId, { kind: "annotation", id: msg.refId }, input.resolved ? "標記已改好" : "重新開啟標注");
       }
       return { ok: true as const };
     }),
