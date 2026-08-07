@@ -8,6 +8,7 @@ const projectPage = readFileSync(resolve(process.cwd(), "client/src/pages/Projec
 const planner = readFileSync(resolve(process.cwd(), "client/src/pages/PlannerPage.tsx"), "utf8");
 const mobileNav = readFileSync(resolve(process.cwd(), "client/src/app/components/MobileNavigation.tsx"), "utf8");
 const menuSurface = readFileSync(resolve(process.cwd(), "client/src/app/components/MenuSurface.tsx"), "utf8");
+const sheetDismiss = readFileSync(resolve(process.cwd(), "client/src/lib/useSheetSwipeDismiss.ts"), "utf8");
 
 /** 手機批次 H3（互動）契約 */
 describe("mobile interaction contract (batch H3)", () => {
@@ -26,20 +27,24 @@ describe("mobile interaction contract (batch H3)", () => {
     expect(declarations).toMatch(/\.gen-row--schedule, \.gen-row--note\s*\{\s*grid-template-columns: 1fr/);
   });
 
-  // 把手畫在那裡就是承諾可下滑關閉：兩個 sheet 都要有 pointer 手勢。
-  //
-  // 這條先前盯的是 MenuSurface 的「頂端 32px 帶」寫法，而那個寫法**從來沒有生效過**：
-  // sheet 是 overflow-y: auto，把手又沒有 touch-action，瀏覽器在滑約 16px 時就把手勢
-  // 判成捲動並送出 pointercancel（真機實測 `down → move → move → CANCEL`），
-  // 永遠走不到 48px 門檻。契約因此改成盯住真正讓手勢成立的三件事：
-  // 門檻、pointer capture（串流不被祖先接走）、以及把手的 touch-action: none。
+  // 把手畫在那裡就是承諾可下滑關閉。這條契約改寫過兩次，都是同一個教訓：
+  // 手勢輸給瀏覽器的捲動仲裁。
+  //  v1 盯「頂端 32px 帶」——滑 16px 就 pointercancel，從未生效。
+  //  v2 盯「把手 + setPointerCapture + touch-action:none」——把手上的下滑能關了，
+  //     但把手只有 26px 高；實機回報「還是關不掉」，因為正常人從面板中間起手。
+  // 現行做法：手勢掛在**整張 sheet**（useSheetSwipeDismiss），touchmove 非被動
+  // ＋確定接手時 preventDefault，內容捲動中讓路。契約盯住讓它成立的各個要件。
   it("backs the sheet grips with a swipe-down dismiss gesture", () => {
-    for (const src of [mobileNav, menuSurface]) {
-      expect(src).toContain("sheetDragY");
-      expect(src).toMatch(/e\.clientY - sheetDragY\.current > 48/);
-      expect(src).toMatch(/setPointerCapture\(e\.pointerId\)/);
-    }
-    // 少了 touch-action: none，上面兩件事都還在也一樣收不到手勢
+    // 兩張 sheet 都要用共用 hook，而不是各自手刻（手刻就是前兩輪壞掉的方式）
+    expect(mobileNav).toContain("useSheetSwipeDismiss(");
+    expect(menuSurface).toContain("useSheetSwipeDismiss(");
+    // hook 本體：非被動 touchmove（否則 preventDefault 無效）、接手後 preventDefault、
+    // 關閉門檻、以及「內容已捲動就讓路」的檢查
+    expect(sheetDismiss).toMatch(/addEventListener\("touchmove", onMove, \{ passive: false \}\)/);
+    expect(sheetDismiss).toMatch(/e\.preventDefault\(\)/);
+    expect(sheetDismiss).toMatch(/CLOSE_PX = 48/);
+    expect(sheetDismiss).toMatch(/scrollTop > 0/);
+    // 把手仍保留 touch-action: none：從把手起手的路徑連捲動仲裁都不參與
     expect(declarations).toMatch(/\.menu-surface__grip\s*\{[^}]*touch-action: none/);
     expect(declarations).toMatch(/\.mobile-more-sheet__grip\s*\{[^}]*touch-action: none/);
   });
