@@ -88,6 +88,18 @@ function ImportResultView({ result }: { result: ImportResult }) {
  * AI 也看得到：組/團隊/全站庫會進團隊助手的上下文，外部代理走 MCP 三工具。
  */
 
+/**
+ * 每頁列數。刻意等於伺服器原本的 LIST_LIMIT_DEFAULT：第一頁看到的內容與加分頁前一模一樣，
+ * 差別只在「第 201 列之後不再永遠被截掉」，而不是換一種瀏覽方式。
+ */
+const ROWS_PAGE_SIZE = 200;
+
+/** 單欄篩選的比對方式（與 databases.listRows 的 filter.mode 同字） */
+const ROW_FILTER_MODES: Array<{ value: "contains" | "equals"; label: string }> = [
+  { value: "contains", label: "包含" },
+  { value: "equals", label: "完全等於" },
+];
+
 const SCOPE_LABEL: Record<string, string> = { personal: "個人", group: "組", team: "團隊", global: "全站" };
 const SCOPE_HINT: Record<string, string> = {
   personal: "只有你自己看得到",
@@ -672,8 +684,46 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
   const [q, setQ] = useState("");
   const [detailTab, setDetailTab] = useState<DatabaseDetailTab>("rows");
   const [editStructure, setEditStructure] = useState(false);
-  const rows = trpc.databases.listRows.useQuery({ tableId: table.id, q: q.trim() || undefined });
-  const invalidate = () => { utils.databases.listRows.invalidate({ tableId: table.id, q: q.trim() || undefined }); utils.databases.list.invalidate(); };
+  const [page, setPage] = useState(0);
+  const [filterKey, setFilterKey] = useState("");
+  const [filterMode, setFilterMode] = useState<"contains" | "equals">("contains");
+  const [filterValue, setFilterValue] = useState("");
+  // 管理者可能在別的分頁把欄位刪掉；拿已不存在的 key 去查會被伺服器擋成錯誤畫面，
+  // 這裡直接當作「沒有篩選」，讓格線繼續看得到資料。
+  const activeFilterKey = table.fields.some((f) => f.key === filterKey) ? filterKey : "";
+  const filter = activeFilterKey && filterValue.trim()
+    ? { key: activeFilterKey, value: filterValue.trim(), mode: filterMode }
+    : undefined;
+  const rows = trpc.databases.listRows.useQuery(
+    {
+      tableId: table.id,
+      q: q.trim() || undefined,
+      limit: ROWS_PAGE_SIZE,
+      offset: page * ROWS_PAGE_SIZE,
+      filter,
+    },
+    // 換頁時保留上一頁的資料：否則格線會先整個清空再填回，手機上像是「資料閃不見了」
+    { placeholderData: (prev) => prev },
+  );
+  const total = rows.data?.total ?? 0;
+  const shown = rows.data?.rows.length ?? 0;
+  const rangeStart = total === 0 ? 0 : page * ROWS_PAGE_SIZE + 1;
+  const rangeEnd = page * ROWS_PAGE_SIZE + shown;
+  const hasNextPage = rangeEnd < total;
+  const pageCount = Math.max(1, Math.ceil(total / ROWS_PAGE_SIZE));
+
+  // 換搜尋或篩選條件一定要回第一頁：沿用舊的 offset 會落在較短結果的空白區，看起來像「查無資料」
+  useEffect(() => { setPage(0); }, [q, activeFilterKey, filterMode, filterValue]);
+  // 刪列後總數縮短，停在已不存在的頁只會看到空格線——自動退回最後一頁
+  useEffect(() => {
+    if (!rows.data) return;
+    const lastPage = Math.max(0, Math.ceil(rows.data.total / ROWS_PAGE_SIZE) - 1);
+    setPage((p) => (p > lastPage ? lastPage : p));
+  }, [rows.data]);
+
+  // 只帶 tableId＝部分比對，一次讓這張表的所有分頁／篩選結果失效；
+  // 帶上當下條件只會失效「目前這一頁」，換回上一頁還是舊資料。
+  const invalidate = () => { utils.databases.listRows.invalidate({ tableId: table.id }); utils.databases.list.invalidate(); };
   const addRow = trpc.databases.addRow.useMutation({ onSuccess: invalidate });
   const updateRow = trpc.databases.updateRow.useMutation({ onSuccess: invalidate });
   const removeRow = trpc.databases.removeRow.useMutation({ onSuccess: invalidate });
@@ -760,8 +810,12 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
         hidden={detailTab !== "rows"}
       >
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-          <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220 }} />
-          <span className="meta">{rows.data ? `${rows.data.total.toLocaleString()} 列` : "…"}</span>
+          <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220, minHeight: 44 }} />
+          <span className="meta" data-testid="db-row-range">
+            {!rows.data ? "…"
+              : total === 0 ? "0 列"
+              : `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} 列，共 ${total.toLocaleString()}`}
+          </span>
           <span className="spacer" />
           {/* 匯出 CSV（接 Excel／其他資料庫）；同源 a 標籤帶 cookie 認證 */}
           <a className="btn-sm" href={`/api/databases/${table.id}/rows.csv`} download title="匯出成 CSV（可用 Excel/其他資料庫開啟）">
@@ -771,6 +825,43 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
             <Button size="sm" onClick={() => setShowImport((v) => !v)} title="批次匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
               <Icon name="Package" size={13} /> {showImport ? "收合批次匯入" : "批次匯入"}
             </Button>
+          )}
+        </div>
+        {/* 欄位篩選：先挑欄位再輸入值。與上方全文搜尋可以並用（兩個條件都成立才算命中），
+            換條件會自動回到第一頁。控制項高度 44 以上，手機單手也按得到。 */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+          <span className="meta">篩選：</span>
+          <select
+            aria-label="篩選欄位"
+            value={activeFilterKey}
+            onChange={(e) => setFilterKey(e.target.value)}
+            style={{ width: "auto", maxWidth: "100%", minHeight: 44 }}
+          >
+            <option value="">不篩選欄位</option>
+            {table.fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+          {activeFilterKey && (
+            <>
+              <select
+                aria-label="比對方式"
+                value={filterMode}
+                onChange={(e) => setFilterMode(e.target.value as typeof filterMode)}
+                style={{ width: "auto", minHeight: 44 }}
+              >
+                {ROW_FILTER_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <input
+                aria-label="篩選值"
+                value={filterValue}
+                maxLength={200}
+                onChange={(e) => setFilterValue(e.target.value)}
+                placeholder="輸入要比對的內容"
+                style={{ maxWidth: 200, minHeight: 44 }}
+              />
+              <Button size="sm" style={{ minHeight: 44 }} onClick={() => { setFilterKey(""); setFilterValue(""); }}>
+                清除篩選
+              </Button>
+            </>
           )}
         </div>
         {showImport && canWrite && <DataImportPanel table={table} onImported={invalidate} />}
@@ -821,8 +912,23 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
               ))}
             </tbody>
           </table>
-          {rows.data && rows.data.rows.length === 0 && <Hint style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</Hint>}
+          {rows.data && rows.data.rows.length === 0 && <Hint style={{ marginTop: 8 }}>{q || filter ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</Hint>}
         </div>
+        {(page > 0 || hasNextPage) && (
+          <nav
+            aria-label="資料列分頁"
+            style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", marginTop: 12 }}
+          >
+            <Button size="sm" style={{ minHeight: 44 }} disabled={page === 0 || rows.isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+              <Icon name="ArrowLeft" size={14} /> 上一頁
+            </Button>
+            <span className="meta" data-testid="db-page-indicator">第 {page + 1} / {pageCount} 頁</span>
+            <Button size="sm" style={{ minHeight: 44 }} disabled={!hasNextPage || rows.isFetching} onClick={() => setPage((p) => p + 1)}>
+              下一頁 <Icon name="ArrowRight" size={14} />
+            </Button>
+          </nav>
+        )}
+        {rows.error && <p className="error" role="alert">{rows.error.message}</p>}
         {mutationError && <p className="error" role="alert">{mutationError}</p>}
       </div>
 

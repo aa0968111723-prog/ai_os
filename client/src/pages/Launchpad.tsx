@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
+import { AgentRunsCard } from "../components/AgentRunsCard";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { ProgressStepper, inferProjectCurrentStep } from "../components/ProgressStepper";
@@ -542,6 +543,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
        *  錨點，點下去只亮起、捲不到任何地方（scrollToAnchorWhenReady 輪詢 3 秒後放棄）。
        *  這塊是 dashboard 上唯一承載 AI 產出的區域（最近專案＋待處理生成），掛在這裡。 */}
       <div className="daily-bento-grid" id="ai-work">
+        {/* 需要注意的 AI 工作：擺在「繼續創作」之前——卡住的案子比「接著上次」更急，
+            使用者不必先自己去問「我那件在跑的怎麼了」 */}
+        <AgentRunsCard
+          runs={agentOverview.data?.runs}
+          isLoading={agentOverview.isLoading}
+          errorMessage={agentOverview.error?.message ?? null}
+          onRetry={() => agentOverview.refetch()}
+          listLimit={agentOverview.data?.listLimit}
+        />
         {/* 繼續創作（最近專案） */}
         <div className="bento-card bento-continue">
           <div className="bento-card__head">

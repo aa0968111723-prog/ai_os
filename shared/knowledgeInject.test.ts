@@ -30,6 +30,20 @@ describe("rankKnowledgeRows", () => {
     expect(ranked.map((r) => r.id)).toEqual(["c", "b", "a"]);
   });
 
+  /**
+   * 這條界線決定了「本次知識優先」能不能收資料庫文件：preferIds 只認得 knowledge 列，
+   * 對不上的 id 會被無聲丟掉——不報錯、不回報。代理規劃（agentCore.loadPickedPlannerSources）
+   * 走的是另一條路、認得 dataFiles，兩邊契約不同。若哪天要讓資料庫文件也能在「問 AI」勾選，
+   * 得先讓助手端真的載得到那些檔，而不是把 dataFile id 塞進 preferIds 就當支援了。
+   */
+  it("preferIds 出現不屬於本專案知識的 id 時無聲略過（不丟錯、不佔位）", () => {
+    const rows = [
+      row({ id: "know-1", kind: "transcript", title: "開示逐字稿", content: "a", createdAt: new Date("2026-01-01") }),
+    ];
+    const ranked = rankKnowledgeRows(rows, ["file-在資料庫的PDF", "know-1"], "flat");
+    expect(ranked.map((r) => r.id)).toEqual(["know-1"]);
+  });
+
   it("script_first 把腳本提前（非 prefer 區）", () => {
     const rows = [
       row({ id: "n", kind: "note", title: "n", content: "n", createdAt: new Date("2026-03-01") }),
@@ -72,6 +86,23 @@ describe("assembleKnowledgeContext", () => {
     });
     expect(r.text.indexOf("AAA-CONTENT")).toBeGreaterThan(-1);
     expect(r.items.find((i) => i.id === "a")?.includedChars).toBeGreaterThan(0);
+  });
+
+  /**
+   * 使用者實際會體驗到的後果：勾了一份不在 knowledge 表的文件，組出來的上下文完全沒有它，
+   * 而 truncated／items 也不會留下任何痕跡可讓 UI 說「你勾的那份沒進去」。
+   * 所以在助手端補上載入能力之前，介面上就不該讓資料庫文件可勾。
+   */
+  it("非知識庫的 preferId 既不注入內容、也不在 items 留下痕跡", () => {
+    const rows = [row({ id: "know-1", kind: "note", title: "站內筆記", content: "KNOWN-CONTENT" })];
+    const r = assembleKnowledgeContext(rows, "", labelOf, {
+      budgetChars: 500,
+      preferIds: ["file-法會流程PDF", "know-1"],
+      mode: "balanced",
+    });
+    expect(r.text).toContain("KNOWN-CONTENT");
+    expect(r.text).not.toContain("法會流程PDF");
+    expect(r.items.map((i) => i.id)).toEqual(["know-1"]);
   });
 
   it("script_only 不含卡片、優先腳本", () => {

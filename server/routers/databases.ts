@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -92,6 +92,28 @@ async function getFileChecked(auth: Parameters<typeof resolveTableAccess>[0], fi
   } catch {
     throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
   }
+}
+
+/**
+ * 單欄篩選條件（listRows 用）。沿用 databaseMcp.queryMcpDatabase 的 equals 作法：
+ * 只認這張表宣告過的欄位 key，值一律以參數化 `data ->> key` 比對，使用者輸入不會變成
+ * JSON path 或 LIKE 萬用字元。抽成純函式是為了讓「白名單 × 兩種比對」能單獨驗證，不必連資料庫。
+ */
+export function buildRowFieldFilter(
+  fields: DataField[],
+  filter?: { key: string; value: string; mode: "contains" | "equals" },
+): SQL | null {
+  if (!filter) return null;
+  const value = normalizeDatabaseSearchKeyword(filter.value);
+  // 只挑了欄位還沒輸入值＝篩選尚未開始，這時篩掉全部列會讓使用者以為資料不見了
+  if (!value) return null;
+  // 未宣告的 key 直接擋下：靜默忽略會讓畫面標著「已篩選」卻回全部列，比報錯更難察覺
+  if (!fields.some((f) => f.key === filter.key)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "找不到要篩選的欄位（可能已被移除）" });
+  }
+  return filter.mode === "equals"
+    ? sql`${schema.dataRows.data} ->> ${filter.key} = ${value}`
+    : sql`${schema.dataRows.data} ->> ${filter.key} ilike ${`%${escapeLikeLiteral(value)}%`} escape ${"\\"}`;
 }
 
 export const databasesRouter = router({
@@ -194,13 +216,19 @@ export const databasesRouter = router({
     return { ok: true };
   }),
 
-  /** 列清單：keyword 以資料 JSON 全文粗篩（jsonb::text ilike）；offset 分頁 */
+  /** 列清單：keyword 以資料 JSON 全文粗篩（jsonb::text ilike）；filter 單欄比對；offset 分頁 */
   listRows: authedProcedure
     .input(z.object({
       tableId: z.string().uuid(),
       q: z.string().max(200).optional(),
       limit: z.number().int().min(1).max(500).optional(),
       offset: z.number().int().min(0).optional(),
+      /** 單欄篩選；與 q 並存時兩個條件都要成立（選填，不帶＝維持舊行為） */
+      filter: z.object({
+        key: z.string().min(1).max(80),
+        value: z.string().max(200),
+        mode: z.enum(["contains", "equals"]).default("contains"),
+      }).optional(),
     }))
     .query(async ({ ctx, input }) => {
       const { table } = await getTableChecked(ctx.auth, input.tableId);
@@ -209,6 +237,8 @@ export const databasesRouter = router({
       if (keyword) {
         conds.push(sql`${schema.dataRows.data}::text ilike ${`%${escapeLikeLiteral(keyword)}%`} escape ${"\\"}`);
       }
+      const fieldFilter = buildRowFieldFilter(table.fields as DataField[], input.filter);
+      if (fieldFilter) conds.push(fieldFilter);
       const rows = await db
         .select({
           id: schema.dataRows.id,
@@ -223,7 +253,7 @@ export const databasesRouter = router({
         .orderBy(desc(schema.dataRows.createdAt))
         .limit(input.limit ?? LIST_LIMIT_DEFAULT)
         .offset(input.offset ?? 0);
-      // total 要套用與列查詢相同的條件（含 q 全文粗篩），否則搜尋時分頁器會依全表列數
+      // total 要套用與列查詢相同的條件（含 q 全文粗篩與單欄 filter），否則搜尋時分頁器會依全表列數
       // 算出一堆空白頁（顯示「1-3 of 10000」）。
       const [{ n }] = await db
         .select({ n: sql<number>`count(*)` })
