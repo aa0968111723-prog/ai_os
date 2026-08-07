@@ -10,6 +10,7 @@ import {
   stopAgentCore,
 } from "./agentCore";
 import { updateProjectTaskCore } from "./taskCore";
+import { createProjectCore } from "./projectCore";
 import {
   COMMAND_LABEL,
   COMMAND_LEVEL_LABEL,
@@ -175,6 +176,34 @@ export async function runGroupCommand(input: {
     });
 
   switch (command.kind) {
+    case "create_project": {
+      // 建立走 createProjectCore（與人從表單建同一支）：平台必須是該組啟用中的選項、
+      // 比例由平台推導、worldview 給預設形狀。代理不另插一列走樣的專案。
+      const project = await createProjectCore({
+        auth,
+        groupId,
+        title: command.title,
+        kind: command.projectKind,
+        platform: command.platform,
+      });
+      await record({
+        // 專案已經建成才記事件，而 eventKey 用 projectId：崩潰重播時同一步驟不會產生第二筆軌跡。
+        // 但要講清楚它擋不住「重複建立」本身——真正擋重播的是 executeStep 的先落庫，
+        // 以及 campaign 執行器讀事件軌跡判斷這一步做過沒有（recoverInterruptedCampaigns）。
+        eventKey: `cmd:create-project:${project.id}`,
+        eventType: "command",
+        projectId: project.id,
+        summary: `開了新專案「${project.title}」（${project.kind}／${project.platform}）`,
+        data: { origin, kind: project.kind, platform: project.platform, format: project.format },
+      });
+      return {
+        kind: "create_project",
+        message: `已建立專案「${project.title}」（${project.kind}・${project.platform}）`,
+        projectId: project.id,
+        projectTitle: project.title,
+      };
+    }
+
     case "dispatch": {
       const [project] = await db
         .select({ id: schema.projects.id, groupId: schema.projects.groupId, title: schema.projects.title })
