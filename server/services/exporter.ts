@@ -12,8 +12,17 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { resolutionForFormat } from "../../shared/options";
-import { TIMELINE_FPS, fcpTimeFromFrames, framesToSec, layoutTimeline, shotFrames } from "../../shared/timeline";
+import {
+  TIMELINE_FPS,
+  fcpTimeFromFrames,
+  framesToSec,
+  isTrimmed,
+  layoutTimeline,
+  shotDurationFrames,
+  type ShotSource,
+} from "../../shared/timeline";
 import { extFromMime, openStoredReadStream } from "./storage";
+import { sceneSpeechLines, speechForSubtitle } from "../../shared/sceneSpeech";
 
 export function safeName(value: string): string {
   // 控制字元一併置換：進 zip entry 名會讓部分解壓工具出錯，經 escXml 進 XML 則是 1.0 非法字元
@@ -160,16 +169,18 @@ export function splitCue(voiceover: string, startSec: number, endSec: number): A
  * 回空字串代表整片都沒有配音詞（不放空字幕檔）。
  * ※ 與下方匯出用的 buildSrt（每鏡一塊、空詞用標題）是兩套用途：這套給觀眾看，那套給剪輯對位。
  */
-function buildVoiceoverSrt(scenes: Array<{ durationSec: number; voiceover: string | null }>): string {
+function buildVoiceoverSrt(
+  scenes: Array<ShotSource & { voiceover: string | null; dialogue?: string | null }>,
+): string {
   const blocks: string[] = [];
-  let t = 0;
   let idx = 0;
-  for (const sc of scenes) {
-    const dur = sc.durationSec > 0 ? sc.durationSec : 3;
-    const start = t;
-    const end = t + dur;
-    t = end;
-    for (const cue of splitCue(sc.voiceover ?? "", start, end)) {
+  // 切點與匯出用 srt/fcpxml/xmeml/edl 同源（見 shared/timeline.ts）——這裡先前是另一個獨立累加器
+  const { shots } = layoutTimeline(scenes);
+  for (const [i, sc] of scenes.entries()) {
+    const { startSec: start, endSec: end } = shots[i];
+    // 字幕吃整條說話序列：角色台詞冠上名字、旁白不冠（speechForSubtitle 的規則）。
+    // 只讀 voiceover 會讓純對白的鏡整鏡沒有字幕。
+    for (const cue of splitCue(speechForSubtitle(sceneSpeechLines(sc)), start, end)) {
       idx += 1;
       blocks.push(`${idx}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${cue.text}`);
     }
@@ -200,15 +211,23 @@ export type TimelineScene = {
   narrationPath?: string | null;
   /** 該鏡環境音的 zip 內相對路徑（06_環境音/…）；null/未給＝無環境音 */
   ambiencePath?: string | null;
+  /** 動作走位——只進備註欄給人看，不產生任何媒體檔 */
+  action?: string | null;
+  /** 該鏡配樂的 zip 內相對路徑（07_配樂/…）；只有「起鏡」會有 */
+  musicPath?: string | null;
+  /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
+  trimStartMs?: number | null;
+  /** 畫面素材來源出點（毫秒）；null＝未修剪 */
+  trimEndMs?: number | null;
 };
 
 /**
- * 這一鏡在時間軸上佔的秒數。
+ * 這一鏡在時間軸上佔的秒數（含修剪）。
  * 規則本體在 `shared/timeline.ts`（前後端單一真相），這裡只是薄轉接——秒值一律由影格推回，
  * 確保與 fcpxml/xmeml 的影格邊界同源。
  */
-export function sceneDur(sc: { durationSec: number }): number {
-  return framesToSec(shotFrames(sc.durationSec));
+export function sceneDur(sc: ShotSource): number {
+  return framesToSec(shotDurationFrames(sc));
 }
 
 /**
@@ -220,7 +239,7 @@ export function sceneDur(sc: { durationSec: number }): number {
  */
 export function buildSrt(scenes: TimelineScene[]): string {
   const blocks: string[] = [];
-  const { shots } = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
+  const { shots } = layoutTimeline(scenes);
   for (const [i, sc] of scenes.entries()) {
     const text = (sc.voiceover ?? "").trim() || sc.title;
     blocks.push(`${i + 1}\n${srtTime(shots[i].startSec)} --> ${srtTime(shots[i].endSec)}\n${text}`);
@@ -289,12 +308,18 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
   const spineItems: string[] = [];
   let assetSeq = 0;
   // 累計影格由共用排版給（相鄰鏡頭必然無縫、無重疊）；srt/edl 吃的是同一份結果
-  const layout = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
+  const layout = layoutTimeline(scenes);
   for (const [i, sc] of scenes.entries()) {
     const offset = fcpTimeFromFrames(layout.shots[i].startFrames);
     const dur = fcpTimeFromFrames(layout.shots[i].durationFrames);
+    // 修剪後的來源入點：FCPXML 的 clip `start` 就是「從素材第幾秒開始取」。
+    // 未修剪＝0s，與修剪功能上線前輸出的字串完全相同。旁白/環境音不套修剪——
+    // 它們是為這一鏡生成的、本來就對齊鏡長，套上畫面的入點只會讓聲音憑空少一截。
+    const srcIn = fcpTimeFromFrames(layout.shots[i].sourceInFrames);
 
-    const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
+    // 備註帶走位：剪輯師在時間軸上點開這一鏡，看得到它要演什麼（旁白是聲音、走位是畫面）
+    const noteParts = [sc.title, (sc.action ?? "").trim(), (sc.voiceover ?? "").trim()].filter(Boolean);
+    const note = noteParts.join("｜");
     const clipName = escXml(`${i + 1}_${sc.title}`);
 
     // 音訊 asset（旁白與音訊類場景素材共用）。duration 宣告該鏡秒數：省略的話 DTD 預設 0s，
@@ -323,6 +348,11 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
       const sid = audioAsset(sc.mediaPath);
       connectedXml += `\n              <asset-clip ref="${sid}" lane="-2" offset="0s" duration="${dur}" name="${clipName}" audioRole="effects"/>`;
     }
+    // 配樂自己一軌（lane -4）：與環境音（-3）分開，剪輯師要能各自調音量、各自靜音
+    if (sc.musicPath) {
+      const mid = audioAsset(sc.musicPath);
+      connectedXml += `\n              <asset-clip ref="${mid}" lane="-4" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_配樂`)}" audioRole="music"/>`;
+    }
     // 環境音自己一軌（lane -3）：不與 lane -2 共用，否則「主素材就是音檔」的鏡會兩個 clip 疊在同一軌，
     // 剪輯師匯進去看到的是互相蓋掉的兩段音訊，而不是可以各自調音量的兩軌。
     if (sc.ambiencePath) {
@@ -345,15 +375,17 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     } else if (sc.mediaPath && sc.mediaKind === "video") {
       assetSeq += 1;
       const aid = `a${assetSeq}`;
-      // 影片 asset：duration 同音訊 asset 的理由宣告該鏡秒數（離線匯入自洽）；只宣告視訊——
+      // 影片 asset：duration 同音訊 asset 的理由宣告長度（離線匯入自洽）；只宣告視訊——
       // 與 xmeml 的 <media><video/></media> 一致（兩份時間軸聲音行為才不會不同軟體不同結果），
-      // 實檔有無音軌在場時由剪輯軟體讀實檔決定
+      // 實檔有無音軌在場時由剪輯軟體讀實檔決定。
+      // 宣告值取「入點＋鏡長」而非鏡長：修剪過的鏡從第 5 秒取 3 秒時，素材至少要有 8 秒，
+      // 只宣告 3 秒會讓離線匯入看到「clip 取用範圍超出素材」——與 0s 素材那個越界同一類。
       resources.push(
-        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="${dur}" hasVideo="1" videoSources="1" format="r1">\n` +
+        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="${fcpTimeFromFrames(layout.shots[i].sourceOutFrames)}" hasVideo="1" videoSources="1" format="r1">\n` +
           `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.mediaPath))}"/>\n` +
           `    </asset>`,
       );
-      spineItems.push(`            <asset-clip ref="${aid}" offset="${offset}" start="0s" duration="${dur}" name="${clipName}">${inner}</asset-clip>`);
+      spineItems.push(`            <asset-clip ref="${aid}" offset="${offset}" start="${srcIn}" duration="${dur}" name="${clipName}">${inner}</asset-clip>`);
     } else {
       // 無畫面素材（或素材是音訊）：gap 佔位保住時間軸節奏；旁白/音訊素材仍掛 gap 下照常出聲
       spineItems.push(`            <gap name="${clipName}" offset="${offset}" start="0s" duration="${dur}">${inner}</gap>`);
@@ -404,9 +436,10 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
   const audioItems: string[] = []; // A1：旁白
   const audioItems2: string[] = []; // A2：音訊類場景素材
   const audioItems3: string[] = []; // A3：逐鏡環境音（與 A2 分軌，理由同 fcpxml 的 lane -3）
+  const audioItems4: string[] = []; // A4：配樂（與環境音分軌，要能各自調音量）
   let fileSeq = 0;
   // 影格邊界與 fcpxml/srt/edl 同源（見 shared/timeline.ts）
-  const layout = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
+  const layout = layoutTimeline(scenes);
   // 音訊 clipitem 模板（A1 旁白/A2 場景音訊共用）：file 帶 pathurl、不帶 duration
   const audioClip = (idPrefix: string, i: number, name: string, path: string, startF: number, endF: number) => {
     fileSeq += 1;
@@ -433,6 +466,9 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     const startF = layout.shots[i].startFrames;
     const endF = layout.shots[i].endFrames;
     const durF = layout.shots[i].durationFrames;
+    // 素材上的取用範圍（修剪）——旁白/環境音不套，理由同 fcpxml
+    const srcInF = layout.shots[i].sourceInFrames;
+    const srcOutF = layout.shots[i].sourceOutFrames;
     const label = `${i + 1}_${sc.title}`;
 
     fileSeq += 1;
@@ -476,7 +512,9 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
         `            <duration>${durF}</duration>`,
         `            ${rate}`,
         `            <start>${startF}</start><end>${endF}</end>`,
-        `            <in>0</in><out>${durF}</out>`,
+        // in/out 是「素材上」的取用範圍（start/end 才是時間軸位置）。修剪過就從入點取，
+        // 未修剪＝<in>0</in>，輸出字串與修剪功能上線前完全相同。
+        `            <in>${srcInF}</in><out>${srcOutF}</out>`,
         fileXml,
         `            <comments><mastercomment1>${escXml((sc.voiceover ?? "").trim() || sc.title)}</mastercomment1></comments>`,
         `          </clipitem>`,
@@ -486,6 +524,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     if (sc.narrationPath) audioItems.push(audioClip("clipitem-a", i, `${i + 1}_旁白`, sc.narrationPath, startF, endF));
     if (sc.mediaPath && sc.mediaKind === "audio") audioItems2.push(audioClip("clipitem-sa", i, label, sc.mediaPath, startF, endF));
     if (sc.ambiencePath) audioItems3.push(audioClip("clipitem-amb", i, `${i + 1}_環境音`, sc.ambiencePath, startF, endF));
+    if (sc.musicPath) audioItems4.push(audioClip("clipitem-mus", i, `${i + 1}_配樂`, sc.musicPath, startF, endF));
   }
   const totalF = layout.totalFrames;
   return [
@@ -514,6 +553,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     // A2：音訊類場景素材（有才輸出第二條音軌）
     ...(audioItems2.length ? [[`        <track>`, audioItems2.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     ...(audioItems3.length ? [[`        <track>`, audioItems3.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
+    ...(audioItems4.length ? [[`        <track>`, audioItems4.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     `      </audio>`,
     `    </media>`,
     `  </sequence>`,
@@ -536,20 +576,21 @@ function edlTime(totalSec: number): string {
 
 /**
  * CMX 3600 EDL 剪輯表（DaVinci Resolve／Premiere 可讀）：TITLE 行＋每鏡一行事件（V 軌、Cut），
- * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數）。
+ * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（來源進出點反映修剪，未修剪即從 0 起算）。
  * 有媒體的鏡（mediaFile 非空）：FROM CLIP NAME 用交付包內「真實檔名」、另附 SOURCE FILE 相對路徑，
  * 匯入後可依檔名自動 relink（QA-006）；無媒體的鏡維持分鏡標題供人工替換。
  */
 export function buildEdl(scenes: TimelineScene[], projectTitle: string): string {
   const lines: string[] = [`TITLE: ${projectTitle.replace(/\s+/g, " ").trim() || "未命名"}`, "FCM: NON-DROP FRAME", ""];
   // 時間碼與 fcpxml/xmeml/srt 同源（見 shared/timeline.ts）——EDL 先前自行累加浮點秒
-  const { shots } = layoutTimeline(scenes.map((sc) => ({ durationSec: sceneDur(sc) })));
+  const { shots } = layoutTimeline(scenes);
   for (const [i, sc] of scenes.entries()) {
-    const { startSec, endSec, durationSec: dur } = shots[i];
+    const { startSec, endSec, sourceInFrames: inF, sourceOutFrames: outF } = shots[i];
     const num = String(i + 1).padStart(3, "0");
     const clipName = sc.mediaPath ? baseName(sc.mediaPath) : sc.title.replace(/\s+/g, " ").trim();
     lines.push(
-      `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(startSec)} ${edlTime(endSec)}`,
+      // 前兩個時間碼是「來源」進出點（修剪），後兩個是「錄製」進出點（時間軸位置）
+      `${num}  AX       V     C        ${edlTime(framesToSec(inF))} ${edlTime(framesToSec(outF))} ${edlTime(startSec)} ${edlTime(endSec)}`,
       `* FROM CLIP NAME: ${clipName}`,
       ...(sc.mediaPath ? [`* SOURCE FILE: ${sc.mediaPath}`] : []),
       "",
@@ -723,8 +764,8 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     `- 格式：${project.format}（${project.platform}）`,
     formatWorldviewForAi(worldview, "export"),
     "",
-    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 環境音 | 進出點時間碼 | 提示詞 | 模型 |",
-    "|---|---|---|---|---|---|---|---|---|---|",
+    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 環境音 | 進出點時間碼 | 動作走位 | 提示詞 | 模型 |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
   ];
 
   // 缺漏素材集中收集、待表格結束後再列——插在表格列中間會把 markdown 表格截斷
@@ -739,13 +780,10 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
   // 逐鏡旁白音檔的實際相對檔名（成功入包後回填），供鏡頭表標明該鏡有無旁白配音。
   const narrationNames: (string | null)[] = new Array(scenes.length).fill(null);
   const ambienceNames: (string | null)[] = new Array(scenes.length).fill(null);
-  let tcAcc = 0;
-  const times = scenes.map((sc) => {
-    const dur = sc.durationSec > 0 ? sc.durationSec : 3;
-    const inSec = tcAcc;
-    tcAcc += dur;
-    return { in: inSec, out: tcAcc };
-  });
+  const musicNames: (string | null)[] = new Array(scenes.length).fill(null);
+  // 鏡頭表時間碼與交付的時間軸檔同源（見 shared/timeline.ts）——先前是第七個獨立累加器，
+  // 修剪過的鏡在這裡會報出未修剪的長度，剪輯師照著鏡頭表對位就會整片錯開。
+  const times = layoutTimeline(scenes).shots.map((t) => ({ in: t.startSec, out: t.endSec }));
   // 序號動態補零：依總鏡數決定位數（至少 2 位），避免破百鏡在檔案總管字典序亂序。
   const sceneNumWidth = Math.max(2, String(scenes.length).length);
   for (const [i, scene] of scenes.entries()) {
@@ -903,6 +941,15 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     into: ambienceNames,
   }) === "aborted") return;
 
+  // 07_配樂：配樂只落在「起鏡」上，區間由 shared/sceneMusic 推導——這裡照樣逐鏡掃，
+  // 沒有 musicAssetId 的鏡自然跳過，所以一段配樂只會入包一次。
+  if (await packSceneAudioTrack({
+    assetIdOf: (s) => s.musicAssetId,
+    folder: "07_配樂",
+    label: "配樂",
+    into: musicNames,
+  }) === "aborted") return;
+
   if (abortSignal.aborted) return;
 
   // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）、旁白音檔檔名與累計進出點時間碼。
@@ -914,7 +961,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const ambienceFile = ambienceNames[i] ?? "（無）";
     const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
     lines.push(
-      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${scene.durationSec}s`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(ambienceFile)} | ${mdTableCell(tc)} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
+      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${times[i].out - times[i].in}s${isTrimmed(scene) ? "（已修剪）" : ""}`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(ambienceFile)} | ${mdTableCell(tc)} | ${mdTableCell(scene.action ?? "—")} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
     );
   }
 
@@ -993,11 +1040,15 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const timelineScenes: TimelineScene[] = scenes.map((sc, i) => ({
       title: sc.title,
       durationSec: sc.durationSec,
-      voiceover: sc.voiceover,
+      voiceover: speechForSubtitle(sceneSpeechLines(sc)) || sc.voiceover,
       mediaPath: writtenNames[i],
       mediaKind: writtenKinds[i],
       narrationPath: narrationNames[i],
       ambiencePath: ambienceNames[i],
+      action: sc.action,
+      musicPath: musicNames[i],
+      trimStartMs: sc.trimStartMs,
+      trimEndMs: sc.trimEndMs,
     }));
     // 時間軸檔在 交付/ 子資料夾內，相對媒體資料夾要往上一層；解析度依專案比例（修 fcpxml/xmeml 硬編橫向）
     const res = resolutionForFormat(project.format);
@@ -1018,8 +1069,9 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
 
   const hasNarration = narrationNames.some((n) => n !== null);
   const hasAmbience = ambienceNames.some((n) => n !== null);
+  const hasMusic = musicNames.some((n) => n !== null);
   archive.append(
-    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasAmbience ? "06_環境音（逐鏡環境音／音效）／" : ""}${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasAmbience ? "06_環境音（逐鏡環境音／音效）／" : ""}${hasMusic ? "07_配樂（跨鏡配樂，落在起鏡）／" : ""}${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
       "\n" +
       "【最快組片方式：匯入一個檔，粗剪自動排好】\n" +
       "本包內的時間軸檔已「連結媒體」：先把整個 zip 解壓（保持資料夾結構不動），再依你的剪輯軟體匯入對應檔案，\n" +

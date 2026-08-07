@@ -2,6 +2,7 @@
  * Integrations domain schema（Google 日曆、外部整合、Web Push、BYOK）
  */
 import { pgTable, uuid, text, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import type { DeviceDetails } from "../../../shared/deviceDetails";
 
 /* ── Web Push 跨裝置通知（push_*）與外部整合 ────────────────────────── */
 
@@ -159,8 +160,15 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   p256dh: text("p256dh").notNull(),
   /** 瀏覽器產生的驗證密鑰 */
   auth: text("auth").notNull(),
-  /** 裝置標籤（如「iPhone・Safari」「Windows・Chrome」）：前端從 UA 推導，設定頁列裝置清單用 */
+  /** 裝置標籤（如「iPhone・Safari 17.5」「Samsung Galaxy S24 Ultra・Chrome 131・主畫面」）：前端推導，設定頁列裝置清單用 */
   label: text("label"),
+  /**
+   * 裝置細節（廠牌／機型／系統／處理器／記憶體／螢幕／顯示卡，型別見 shared/deviceDetails.ts）。
+   * 只有一句標籤時，同型號的兩支手機、辦公室裡每台 Windows 都長得一模一樣，
+   * 要移除哪一台只能猜——信任裝置（user_devices.details）早就存這個，這裡補齊。
+   * nullable：舊列與不送細節的舊版前端維持 null，清單只是少了那幾行。
+   */
+  details: jsonb("details").$type<DeviceDetails>(),
   /** 最後同步時刻：每次 App 載入時前端回報一次，供「清最舊裝置」與設定頁排序 */
   lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

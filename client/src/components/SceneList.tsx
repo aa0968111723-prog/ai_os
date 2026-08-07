@@ -80,8 +80,18 @@ type Scene = {
   pendingVoiceStatus?: string | null;
   /** 這一鏡聽得到什麼（環境音描述）；空＝還沒寫。 */
   ambience?: string | null;
+  /** 誰做了什麼、從哪走到哪；空＝還沒寫。 */
+  action?: string | null;
+  /** 說話序列（@說話者：台詞，旁白用 @旁白）；空＝這鏡沒有台詞。 */
+  dialogue?: string | null;
+  /** 配樂端點標記（起｜描述／止）；空＝這鏡沒有配樂變化。 */
+  music?: string | null;
   /** 已生成且未軟刪的環境音網址——判斷「這格有沒有環境音」的唯一依據（理由同 narrationUrl）。 */
   ambienceUrl?: string | null;
+  /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
+  trimStartMs?: number | null;
+  /** 畫面素材來源出點（毫秒）；null＝未修剪 */
+  trimEndMs?: number | null;
   /** 該格若有進行中的「環境音」生成，回 queued/running；無則 null。 */
   pendingAmbienceStatus?: string | null;
   /** 逐鏡卡片綁定：這一鏡指定要用的設定卡（皆空＝沿用生成台勾選） */
@@ -89,6 +99,92 @@ type Scene = {
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
 };
+
+/** 毫秒 → 秒（顯示用，一位小數；剛好整秒不留 .0） */
+function msToSecLabel(ms: number): string {
+  const sec = ms / 1000;
+  return Number.isInteger(sec) ? String(sec) : sec.toFixed(1);
+}
+
+/**
+ * 逐鏡修剪（in/out）——「剪初稿」被卡住的那個動作。
+ *
+ * 只給影片鏡：靜態圖沒有「取素材的哪一段」可言，音訊鏡的長度由旁白決定。
+ * 以秒輸入、存毫秒（欄位是整數毫秒，見 shared/timeline.ts 的 ShotSource）。
+ * 出點留空＝取消修剪，鏡長回到 durationSec。
+ */
+function SceneTrim({
+  scene,
+  index,
+  disabled,
+  onCommit,
+}: {
+  scene: Scene;
+  index: number;
+  disabled: boolean;
+  onCommit: (patch: { trimStartMs?: number; trimEndMs?: number | null }) => void;
+}) {
+  const startMs = scene.trimStartMs ?? 0;
+  const endMs = scene.trimEndMs ?? null;
+  const trimmed = startMs > 0 || endMs !== null;
+
+  const field: CSSProperties = { width: 52, textAlign: "center", fontSize: 11, padding: "1px 3px" };
+  // 秒→毫秒，負數與非數字一律當 0；空字串在出點欄位代表「取消修剪」，由呼叫端分開處理
+  const toMs = (raw: string) => Math.max(0, Math.round((Number.parseFloat(raw) || 0) * 1000));
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span>・修剪</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        defaultValue={msToSecLabel(startMs)}
+        disabled={disabled}
+        aria-label={`第 ${index + 1} 鏡修剪起點（秒）`}
+        style={field}
+        key={`in-${startMs}`}
+        onBlur={(e) => {
+          const next = toMs(e.currentTarget.value);
+          if (next !== startMs) onCommit({ trimStartMs: next });
+        }}
+      />
+      <span>–</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        placeholder="迄"
+        defaultValue={endMs === null ? "" : msToSecLabel(endMs)}
+        disabled={disabled}
+        aria-label={`第 ${index + 1} 鏡修剪結束點（秒）；留空＝不修剪`}
+        style={field}
+        key={`out-${endMs ?? "none"}`}
+        onBlur={(e) => {
+          const raw = e.currentTarget.value.trim();
+          if (raw === "") {
+            if (endMs !== null) onCommit({ trimEndMs: null });
+            return;
+          }
+          const next = toMs(raw);
+          if (next !== endMs) onCommit({ trimEndMs: next });
+        }}
+      />
+      <span>秒</span>
+      {trimmed && (
+        <Button
+          variant="ghost"
+          disabled={disabled}
+          onClick={() => onCommit({ trimStartMs: 0, trimEndMs: null })}
+          aria-label={`取消第 ${index + 1} 鏡的修剪`}
+          style={{ padding: "0 4px", fontSize: 11, lineHeight: 1.4 }}
+        >
+          取消修剪
+        </Button>
+      )}
+    </span>
+  );
+}
 
 /**
  * 行內可編輯欄位（標題／秒數）：草稿即所見。
@@ -373,6 +469,15 @@ function SceneRow({
             秒
           </label>
           <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無畫面"}</span>
+          {/* 修剪只對影片鏡有意義：靜態圖沒有「取哪一段」，音訊鏡的長度由旁白決定 */}
+          {s.assetKind === "video" && (
+            <SceneTrim
+              scene={s}
+              index={i}
+              disabled={update.isPending || !canEdit}
+              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch })}
+            />
+          )}
           {isGenerating && <Pill status="running">生成中…</Pill>}
           {isAwaitingApproval && <Pill status="queued">待核准…</Pill>}
           {/* 旁白狀態一眼可見（編輯入口在單格工作室・配音） */}
@@ -595,12 +700,13 @@ const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
 /** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
  *  深改（提示詞/配音/換模型/版本）集中在單格工作室；打包照舊。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
-export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds, anchorPeers }: {
+export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propIds, format, anchorPeers }: {
   projectId: string;
   canEdit?: boolean;
   charIds?: string[];
   sceneIds?: string[];
   propIds?: string[];
+  format?: string | null;
   /** 錨點 → 在場者（useCollab 的衍生值）。optional：沒連上協作、或在沒有協作的地方
    *  單獨渲染這張卡時就是沒有訊號，不該逼呼叫端生一個假的空 Map。 */
   anchorPeers?: Map<string, CollabAnchorPeer[]>;
@@ -617,6 +723,9 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   };
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
+  // 預覽台的 I／O 寫回修剪：SceneRow 的 update 在各列自己的 scope 裡，播放器搆不到，
+  // 所以這裡另起一支（同一個 procedure、同一套 invalidate，行為一致）。
+  const trimFromPlayer = trpc.scenes.update.useMutation({ onSuccess: invalidate });
   // 統一小紅字：這兩個共用 mutation 失敗時（排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
   const actionError = move.error ?? remove.error;
 
@@ -781,9 +890,13 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             durationSec: s.durationSec,
             prompt: s.prompt,
             voiceover: s.voiceover,
-            // 環境音一定要傳：全文一律輸出「環境音：」那一行，這裡漏掉就等於讓使用者
-            // 讀到一份「環境音全空」的腳本，原封不動寫回會把整個專案的環境音清光
+            // 漏掉 ambience 會靜默清空環境音：格式化時輸出空的「環境音：」，前端 diff 拿同樣缺值的
+            // rows 比對而顯示「沒有任何變更」，伺服器卻是拿 DB 真值比對——照原樣寫回就把它刪了。
+            // 這四欄現在由 StoryboardScriptRow 的映射型別逼著寫出來，漏傳會是編譯錯誤而不是資料遺失。
             ambience: s.ambience,
+            action: s.action,
+            dialogue: s.dialogue,
+            music: s.music,
             cardNames: sceneCardNames(s),
           }))}
           canEdit={canEdit}
@@ -966,7 +1079,14 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
-              <StoryboardPlayer scenes={list} onClose={() => setShowPreview(false)} />
+              <StoryboardPlayer
+                scenes={list}
+                format={format}
+                onClose={() => setShowPreview(false)}
+                // 預覽台的 I／O 直接寫回修剪欄位：播到想要的地方按兩下鍵，初稿就剪好了。
+                // 沒有編輯權就不給，維持與分鏡卡同一套權限口徑。
+                onTrim={canEdit ? (sceneId, patch) => trimFromPlayer.mutate({ sceneId, ...patch }) : undefined}
+              />
             </div>
           )}
           {studioScene && (

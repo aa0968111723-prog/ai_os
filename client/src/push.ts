@@ -3,9 +3,23 @@
  * SW 註冊、訂閱/退訂、環境偵測（是否支援、iOS 是否需先加入主畫面）、裝置標籤推導。
  * tRPC 呼叫（subscribe/unsubscribe 上報伺服器）由呼叫端（NotificationSettings／App 同步）負責，
  * 這裡只管瀏覽器端的訂閱本體。
+ *
+ * ★裝置命名一律走 shared/deviceNaming.ts：這裡原本自己寫了一套只認 6 個平台、
+ *   5 個瀏覽器的簡版，產出的「Android・Chrome」在有兩支 Android 的人身上完全分不出誰是誰，
+ *   而伺服器早就有機型／版本的完整版。合併之後兩邊必然同名。
  */
 
-export type DeviceKind = "phone" | "tablet" | "desktop" | "unknown";
+import { collectDeviceHint } from "./deviceHint";
+import type { DeviceDetails, DeviceKind } from "@shared/deviceDetails";
+import {
+  deviceKindFrom,
+  deviceLabelFrom,
+  describeDevice,
+  kindFromLabel as kindFromLabelShared,
+  type DeviceHint,
+} from "@shared/deviceNaming";
+
+export type { DeviceKind };
 
 /** 這個瀏覽器能不能做 Web Push（SW＋PushManager＋Notification 三者齊備才行） */
 export function isPushSupported(): boolean {
@@ -33,50 +47,62 @@ export function isAndroid(): boolean {
 }
 
 /**
+ * 本機的「立即可得」特徵：不含 UA-CH（那是非同步的），供第一畫面渲染用。
+ * 真正要送出去的完整特徵走 collectDeviceProfile()。
+ */
+function localHint(): DeviceHint {
+  return {
+    standalone: isStandalone(),
+    touchPoints: typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints,
+  };
+}
+
+/**
  * 粗分裝置類型（設定頁圖示／引導用）。
- * 僅依 UA／觸控推斷，不請求額外權限。
+ * 僅依 UA／觸控推斷，不請求額外權限；要更準的（Android 手機/平板之分）走 collectDeviceProfile。
  */
 export function deviceKind(): DeviceKind {
   if (typeof navigator === "undefined") return "unknown";
-  const ua = navigator.userAgent;
-  if (/iPhone|iPod/.test(ua)) return "phone";
-  if (/Android/.test(ua) && /Mobile/.test(ua)) return "phone";
-  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "tablet";
-  if (/Android/.test(ua)) return "tablet";
-  if (/Windows|Macintosh|Linux|CrOS/.test(ua)) return "desktop";
-  return navigator.maxTouchPoints > 1 ? "tablet" : "desktop";
+  return deviceKindFrom(navigator.userAgent, localHint());
 }
 
-/** 從已存 label 字串推斷類型（清單列無法讀對方 UA） */
-export function kindFromLabel(label: string | null | undefined): DeviceKind {
-  if (!label) return "unknown";
-  if (/iPad|平板|Tablet/i.test(label)) return "tablet";
-  if (/iPhone|Android/i.test(label)) return "phone";
-  if (/Windows|Mac|Linux|ChromeOS|桌面/i.test(label)) return "desktop";
-  return "unknown";
-}
+/** 從已存 label 字串推斷類型（清單列無法讀對方 UA；有 details.kind 時優先用那個） */
+export const kindFromLabel = kindFromLabelShared;
 
-/** 裝置標籤（設定頁「已連結裝置」清單用）：平台＋瀏覽器，如「iPhone・Safari」「Windows・Chrome」 */
+/**
+ * 本裝置標籤的「立即版」：只有 UA 讀得到的東西（無機型、無版本號）。
+ * 畫面要先出得來，故保留這條同步路徑；送去伺服器存的是 collectDeviceProfile() 的完整版。
+ */
 export function deviceLabel(): string {
   if (typeof navigator === "undefined") return "裝置";
-  const ua = navigator.userAgent;
-  const platform = /iPhone|iPod/.test(ua) ? "iPhone"
-    : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "iPad"
-    : /Android/.test(ua) ? ( /Mobile/.test(ua) ? "Android" : "Android 平板" )
-    : /Windows/.test(ua) ? "Windows"
-    : /Macintosh/.test(ua) ? "Mac"
-    : /CrOS/.test(ua) ? "ChromeOS"
-    : /Linux/.test(ua) ? "Linux"
-    : "裝置";
-  // 順序有講究：Edg/OPR 的 UA 也含 Chrome、Chrome 的 UA 也含 Safari——先驗特徵字串再驗通用字串
-  const browser = /Edg\//.test(ua) ? "Edge"
-    : /OPR\//.test(ua) ? "Opera"
-    : /Firefox\//.test(ua) ? "Firefox"
-    : /Chrome\//.test(ua) || /CriOS\//.test(ua) ? "Chrome"
-    : /Safari\//.test(ua) ? "Safari"
-    : "瀏覽器";
-  const mode = isStandalone() ? "・主畫面" : "";
-  return `${platform}・${browser}${mode}`;
+  return deviceLabelFrom(navigator.userAgent, localHint());
+}
+
+/** 本裝置的完整檔案：標籤、細節、類型——上報伺服器與設定頁標題共用 */
+export interface DeviceProfile {
+  label: string;
+  details: DeviceDetails;
+  kind: DeviceKind;
+}
+
+/**
+ * 收齊 UA-CH 後的完整裝置檔案（機型、系統版本、瀏覽器版本、螢幕、處理器、顯示卡）。
+ *
+ * 「已連結裝置」清單原本只存得下一句「Android・Chrome・主畫面」——同型號的兩支手機、
+ * 辦公室裡的每一台 Windows 都長得一模一樣，要移除哪一台只能猜。這支把信任裝置那邊
+ * 早就有的細節補到推播裝置上，兩份清單看到的資訊因此對齊。
+ *
+ * UA-CH 取不到（Safari／Firefox／逾時）時自動退回 UA 能講的部分，永不拋例外。
+ */
+export async function collectDeviceProfile(): Promise<DeviceProfile> {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  const collected = await collectDeviceHint().catch(() => undefined);
+  const hint: DeviceHint = { ...localHint(), ...(collected ?? {}) };
+  return {
+    label: deviceLabelFrom(ua, hint),
+    details: describeDevice(ua, hint),
+    kind: deviceKindFrom(ua, hint),
+  };
 }
 
 /** 通知權限狀態（含不支援） */

@@ -1004,6 +1004,135 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
   }
 });
 
+// ── 筆記／知識庫附件：上傳＋下載。權限回推母體（筆記＝作者或組長以上、知識庫＝專案可編輯者） ──
+
+/**
+ * 上傳附件（multipart: file + kind[note|knowledge] + refId [+ name]）。
+ * 會議紀錄夾白板照、講義 PDF；知識庫直接收整份開示稿 PDF/Word——
+ * 文件類會抽出純文字存 text_content，知識庫附件的文字之後會跟著注入 AI 導演。
+ */
+app.post("/api/attachments/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) { await cleanup(); return; }
+    if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
+
+    const {
+      parseAttachmentKind, assertAttachTarget, addAttachmentCore, attachmentUrl,
+    } = await import("./services/attachmentsCore");
+    // 母體與寫入權先驗：檔案已落在 tmp，任何一關不過都要清掉，不留孤兒檔
+    let target;
+    try {
+      const kind = parseAttachmentKind(String(req.body?.kind ?? ""));
+      target = await assertAttachTarget(auth, kind, String(req.body?.refId ?? ""), "write");
+    } catch (aclErr) {
+      await cleanup();
+      const code = (aclErr as { code?: string })?.code;
+      const message = (aclErr as { message?: string })?.message ?? "沒有權限加附件";
+      return res.status(code === "FORBIDDEN" ? 403 : code === "NOT_FOUND" ? 404 : 400).json({ error: message });
+    }
+
+    let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    if (mime === "application/octet-stream" || mime === "") mime = mimeFromPath(req.file.originalname);
+    if (!isAllowedUploadMime(mime)) {
+      await cleanup();
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Word/Excel/PowerPoint/文字/字幕/壓縮檔等常見格式` });
+    }
+    // 與其他上傳端點同一套檔頭簽名驗證：不只信宣稱 MIME／副檔名
+    const verdict = resolveUploadMime(mime, await readFileHead(req.file.path));
+    if (!verdict) {
+      await cleanup();
+      return res.status(415).json({ error: "檔案內容與宣稱的格式不符（無法辨識檔案簽名）——請確認檔案未損壞、副檔名正確" });
+    }
+    mime = verdict.mime;
+    const guard = await checkDiskSpace(req.file.size, true);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+
+    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const name = String(req.body?.name ?? "").trim() || originalName || "附件";
+    // 抽純文字要在 adopt 之前讀（之後就換成正式路徑）；超大檔一律只存檔不抽字
+    const { extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
+    let textContent: string | null = null;
+    if (req.file.size <= MAX_EXTRACT_BYTES) {
+      const { readFile } = await import("node:fs/promises");
+      textContent = await extractTextFromBuffer(mime, name, await readFile(req.file.path));
+    }
+
+    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
+    try {
+      const inserted = await addAttachmentCore({
+        auth, target, name, mime, sizeBytes, storagePath, textContent,
+      });
+      if (!inserted.ok) {
+        const { removeStoredFile } = await import("./services/storage");
+        await removeStoredFile(storagePath).catch(() => {});
+        return res.status(409).json({ error: inserted.error });
+      }
+      const row = inserted.row;
+      // REST 上傳繞過 tRPC 的 mutation 審計中介層——比照資料庫上傳自行落一筆（fire-and-forget）
+      void (async () => {
+        const { sanitizeAuditInput } = await import("./services/audit");
+        await db.insert(schema.auditLog).values({
+          actorId: auth.user.id,
+          action: "attachments.upload",
+          groupId: target.groupId,
+          input: sanitizeAuditInput({ kind: target.kind, refId: target.refId, name, mime, sizeBytes }) as Record<string, unknown>,
+          ok: true,
+        });
+      })().catch((e) => console.warn("[attachments:upload] 審計寫入失敗（不影響主流程）：", e instanceof Error ? e.message : e));
+      res.json({
+        ok: true,
+        attachment: {
+          id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
+          readableChars: textContent?.length ?? 0, url: attachmentUrl(row.id),
+        },
+      });
+    } catch (dbErr) {
+      const { removeStoredFile } = await import("./services/storage");
+      await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
+      throw dbErr;
+    }
+  } catch (err) {
+    await cleanup();
+    console.error("[attachments:upload]", err);
+    recordError("attachments:upload", err);
+    if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
+  }
+});
+app.use("/api/attachments/upload", (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === "LIMIT_FILE_SIZE" ? `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）` : `上傳失敗：${err.code}`;
+    return res.status(413).json({ error: msg });
+  }
+  next(err);
+});
+
+/** 附件下載／預覽：登入＋母體可讀（同組；知識庫附件另要該筆未進回收桶）；非影音一律 attachment */
+app.get("/api/attachments/:id/file", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
+    const { getAttachmentChecked } = await import("./services/attachmentsCore");
+    let row;
+    try {
+      row = await getAttachmentChecked(auth, req.params.id);
+    } catch {
+      // 不區分「不存在」與「沒權限」：附件 id 不該成為探測他組內容的側信道
+      return res.status(404).json({ error: "找不到這個附件" });
+    }
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (shouldForceAttachment(row.mime)) {
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(row.name)}`);
+    }
+    sendStoredFile(req, res, row.storagePath, { headers: { "Content-Type": row.mime } }, "附件檔案遺失（可能是伺服器重啟前的舊檔）");
+  } catch (err) {
+    console.error("[attachments:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取附件失敗" });
+  }
+});
+
 // ── 資料下載區（需求 #11）：docs/README 白名單清單＋下載（登入即可，全站內部文件） ──
 app.get("/api/downloads", async (req, res) => {
   try {

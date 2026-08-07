@@ -31,6 +31,8 @@ export interface NoteSummary {
   mentions: string[] | null;
   planRunId: string | null;
   planStepId: string | null;
+  /** 夾了幾個附件（照片／PDF…）：清單直接看得出來，不必逐則展開 */
+  attachmentCount: number;
 }
 
 function titleChecked(value: string): string {
@@ -161,6 +163,9 @@ export async function listNotesCore(
     .where(and(...conditions))
     .orderBy(desc(schema.notes.updatedAt))
     .limit(200);
+  // 動態 import 避開與 attachmentsCore 的循環相依（它要 noteWriteDenied 做權限判定）
+  const { countAttachmentsByRef } = await import("./attachmentsCore");
+  const attachmentCounts = await countAttachmentsByRef("note", rows.map((row) => row.id));
   return rows.map((row) => ({
     id: row.id,
     projectId: row.projectId,
@@ -174,6 +179,7 @@ export async function listNotesCore(
     mentions: row.mentions,
     planRunId: row.planRunId,
     planStepId: row.planStepId,
+    attachmentCount: attachmentCounts.get(row.id) ?? 0,
   }));
 }
 
@@ -349,12 +355,18 @@ export async function removeNoteCore(auth: AuthState, id: string): Promise<{ ok:
   const row = await getNoteChecked(auth, id);
   assertCanWriteNote(auth, row, "刪除");
   if (row.projectId) await projectChecked(auth, row.groupId, row.projectId, true);
+  // 附件（照片／PDF）跟著筆記一起走：列在同一交易刪，原檔等交易提交後才 unlink——
+  // 交易 rollback 救得回列，救不回已刪的檔案（動態 import 避開與 attachmentsCore 的循環相依）
+  const { purgeAttachmentsFor, removeStoredFiles } = await import("./attachmentsCore");
+  let orphanFiles: string[] = [];
   await db.transaction(async (tx) => {
     await tx.delete(schema.textVersions).where(and(
       eq(schema.textVersions.kind, "note"),
       eq(schema.textVersions.refId, row.id),
     ));
+    orphanFiles = await purgeAttachmentsFor("note", row.id, tx);
     await tx.delete(schema.notes).where(eq(schema.notes.id, row.id));
   });
+  await removeStoredFiles(orphanFiles);
   return { ok: true };
 }

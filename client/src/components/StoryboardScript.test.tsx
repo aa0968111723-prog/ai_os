@@ -56,9 +56,11 @@ vi.mock("../api", async () => {
   };
 });
 
+// 六個內容欄位一律寫滿：StoryboardScriptRow 刻意把它們設成必填，漏傳一欄＝寫回時被判成
+// 「使用者刻意清空」（環境音就這樣被清過一次），所以連測試 fixture 也不給省。
 const ROWS = [
-  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", ambience: "遠處鐘聲", cardNames: ["安倢的紅傘"] },
-  { title: "收尾", durationSec: 3, prompt: "關門", voiceover: null, ambience: null },
+  { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", action: null, voiceover: "那一年", dialogue: null, ambience: "遠處鐘聲", music: null, cardNames: ["安倢的紅傘"] },
+  { title: "收尾", durationSec: 3, prompt: "關門", action: null, voiceover: null, dialogue: null, ambience: null, music: null },
 ];
 
 describe("StoryboardScript", () => {
@@ -104,8 +106,11 @@ describe("StoryboardScript", () => {
       title: `第${i + 1}景`,
       durationSec: 5,
       prompt: "原本的畫面",
+      action: null,
       voiceover: null,
+      dialogue: null,
       ambience: null,
+      music: null,
     }));
     render(<StoryboardScript projectId="p1" rows={rows} canEdit onApplied={vi.fn()} />);
 

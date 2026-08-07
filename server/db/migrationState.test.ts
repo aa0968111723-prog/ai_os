@@ -263,15 +263,22 @@ describe("legacy migration adoption bridge", () => {
     );
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
-    // 8 項來自 bridge 前綴；另外 6 項來自 bridge 之後的 0036／0037／0038／0039——這份合成
-    // drift 只放了 bridge 的語句，那幾支的最終形狀自然不在裡面。它們都寫了 IF NOT EXISTS，
-    // 重跑是 no-op，所以同樣計入 alreadyPresent 而不是判成缺漏。
+    // 8 項來自 bridge 前綴；另外 17 項來自 bridge 之後的 0036／0037／0038／0039／0040／0041／0042／0043
+    // ——這份合成 drift 只放了 bridge 的語句，那幾支的最終形狀自然不在裡面。它們都寫了
+    // IF NOT EXISTS，重跑是 no-op，所以同樣計入 alreadyPresent 而不是判成缺漏。
     //（0038 是 scenes 的兩個環境音欄位，一支 migration 兩句 ADD COLUMN；
-    //   0039 是 project_share_links 的建表與建索引，同樣兩句，故合計 +4 而非 +2。）
+    //   0039 是 project_share_links 的建表與建索引，同樣兩句；
+    //   0040 是 scenes 的兩個修剪欄位，同樣兩句 ADD COLUMN IF NOT EXISTS；
+    //   0041 是 push_subscriptions 的裝置細節欄位，單句 ADD COLUMN IF NOT EXISTS；
+    //   0042 是 community_posts 的三個分類欄位＋兩個索引，五句皆 IF NOT EXISTS；
+    //   0043 是 content_attachments 的建表與兩個索引，三句；
+    //   0044 是 scenes 的動作走位欄位，單句 ADD COLUMN IF NOT EXISTS；
+    //   0045 是 scenes 的對白欄位，單句 ADD COLUMN IF NOT EXISTS；
+    //   0046 是 scenes 的配樂標記與配樂音檔，兩句 ADD COLUMN IF NOT EXISTS。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 6);
+    expect(result.alreadyPresent).toBe(8 + 21);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

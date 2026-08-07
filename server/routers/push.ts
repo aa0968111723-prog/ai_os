@@ -18,6 +18,32 @@ async function assertSafeEndpoint(endpoint: string): Promise<void> {
 }
 
 /**
+ * 裝置細節（廠牌／機型／系統／處理器／螢幕…，見 shared/deviceDetails.ts）。
+ *
+ * 這是前端自陳的顯示資料，只回給本人看、不參與任何授權判斷，所以不需要驗真；
+ * 但每個欄位都限長、白名單欄位、strict 拒絕多餘鍵——避免有人把訂閱列當成
+ * 免費的 JSON 儲存空間塞大物件進來。
+ */
+const deviceDetailsInput = z
+  .object({
+    kind: z.enum(["phone", "tablet", "desktop", "unknown"]).optional(),
+    brand: z.string().max(40).optional(),
+    model: z.string().max(60).optional(),
+    modelCode: z.string().max(40).optional(),
+    os: z.string().max(40).optional(),
+    browser: z.string().max(40).optional(),
+    browserVersion: z.string().max(40).optional(),
+    standalone: z.boolean().optional(),
+    cpu: z.string().max(60).optional(),
+    memoryGb: z.number().int().min(0).max(4096).optional(),
+    screen: z.string().max(40).optional(),
+    gpu: z.string().max(100).optional(),
+    modelNote: z.string().max(120).optional(),
+  })
+  .strict()
+  .optional();
+
+/**
  * 跨裝置通知（Web Push）設定：使用者在「通知設定」把手機/電腦連結進來後，
  * 成本核准、私訊、@提及、生成與代理完成等事件會推到所有已連結裝置（關頁也收得到）。
  * 訂閱歸屬嚴格以本人為界——裝置清單/移除只操作自己的列，組長/管理員也看不到別人的裝置。
@@ -38,7 +64,8 @@ export const pushRouter = router({
       z.object({
         endpoint: z.string().url().max(1024).refine((u) => u.startsWith("https://"), "訂閱端點必須是 https"),
         keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(256) }),
-        label: z.string().max(80).optional(),
+        label: z.string().max(120).optional(),
+        details: deviceDetailsInput,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -49,6 +76,7 @@ export const pushRouter = router({
         p256dh: input.keys.p256dh,
         auth: input.keys.auth,
         label: input.label,
+        details: input.details,
       });
       return { ok: true };
     }),
@@ -63,7 +91,8 @@ export const pushRouter = router({
       z.object({
         endpoint: z.string().url().max(1024).refine((u) => u.startsWith("https://"), "訂閱端點必須是 https"),
         keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(256) }),
-        label: z.string().max(80).optional(),
+        label: z.string().max(120).optional(),
+        details: deviceDetailsInput,
         oldEndpoint: z.string().url().max(1024).optional(),
       }),
     )
@@ -75,6 +104,7 @@ export const pushRouter = router({
         p256dh: input.keys.p256dh,
         auth: input.keys.auth,
         label: input.label,
+        details: input.details,
         oldEndpoint: input.oldEndpoint,
       });
       return { ok: true };
@@ -97,6 +127,7 @@ export const pushRouter = router({
         id: schema.pushSubscriptions.id,
         endpoint: schema.pushSubscriptions.endpoint,
         label: schema.pushSubscriptions.label,
+        details: schema.pushSubscriptions.details,
         lastSeenAt: schema.pushSubscriptions.lastSeenAt,
         createdAt: schema.pushSubscriptions.createdAt,
       })

@@ -7,11 +7,15 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
   SCRIPT_AMBIENCE_MAX,
+  SCRIPT_ACTION_MAX,
+  SCRIPT_DIALOGUE_MAX,
+  SCRIPT_MUSIC_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
 } from "../../shared/storyboardScript";
@@ -21,6 +25,7 @@ import {
   buildSceneVersions,
   findDuplicateCurrent,
   isSceneRefineModel,
+  sceneVisualPrompt,
   isSceneRegenModel,
   summarizeSceneVersions,
   type SceneExternalAsset,
@@ -33,7 +38,13 @@ import { MAX_PROMPT_CHARS } from "./prompts";
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
 
-export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId";
+/**
+ * 修剪點的上限（毫秒）＝60 分鐘。這不是業務規則，是「素材長度的寬鬆天花板」：
+ * 站上生成的素材以秒計，60 分鐘遠超任何合理值，純粹擋住把整數欄位撐爆的輸入。
+ */
+const TRIM_MAX_MS = 60 * 60 * 1000;
+
+export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId" | "musicAssetId";
 
 /**
  * 素材 kind → 這一格的哪個現用指標欄；null＝不能當分鏡素材（例如 doc）。
@@ -133,11 +144,17 @@ export const scenesRouter = router({
         title: schema.scenes.title,
         orderIndex: schema.scenes.orderIndex,
         durationSec: schema.scenes.durationSec,
+        // 修剪：分鏡表要標「已修剪」，粗剪預覽要照著入點播（見 shared/timeline.ts）
+        trimStartMs: schema.scenes.trimStartMs,
+        trimEndMs: schema.scenes.trimEndMs,
         status: schema.scenes.status,
         assetId: schema.scenes.assetId,
         prompt: schema.scenes.prompt,
         voiceover: schema.scenes.voiceover,
         ambience: schema.scenes.ambience,
+        action: schema.scenes.action,
+        dialogue: schema.scenes.dialogue,
+        music: schema.scenes.music,
         // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
@@ -357,7 +374,7 @@ export const scenesRouter = router({
 
     // 現在被引用、但不是本格生成產出的素材（例：素材庫直接指派、或舊資料沒回綁的「＋加入分鏡」）。
     // 沒有這一段，該素材不會出現在版本清單裡，切走之後就再也切不回來。
-    const pointerIds = [scene.assetId, scene.narrationAssetId, scene.ambienceAssetId].filter((id): id is string => !!id);
+    const pointerIds = [scene.assetId, scene.narrationAssetId, scene.ambienceAssetId, scene.musicAssetId].filter((id): id is string => !!id);
     const pointerRows = pointerIds.length
       ? await db
           .select({
@@ -398,6 +415,9 @@ export const scenesRouter = router({
       narrationAssetId: scene.narrationAssetId,
       ambience: scene.ambience,
       ambienceAssetId: scene.ambienceAssetId,
+      action: scene.action,
+      dialogue: scene.dialogue,
+      music: scene.music,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -414,7 +434,7 @@ export const scenesRouter = router({
       sceneId: z.string().uuid(),
       assetId: z.string().uuid(),
       /** 音訊要進哪一軌；不給＝沿用 sceneSlotForAssetKind 的既有預設（旁白） */
-      role: z.enum(["narration", "ambience"]).optional(),
+      role: z.enum(["narration", "ambience", "music"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -436,9 +456,14 @@ export const scenesRouter = router({
       if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "只有圖片／影片／音訊可以設為分鏡素材" });
       // role 只對音訊有意義：拿它去改圖／影的落點會把畫面塞進音軌
       if (input.role && asset.kind !== "audio") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "只有音訊素材可以指定要進旁白還是環境音" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "只有音訊素材可以指定要進旁白、環境音還是配樂" });
       }
-      const target: SceneAssetSlot = input.role === "ambience" ? "ambienceAssetId" : slot;
+      const ROLE_SLOT: Record<string, SceneAssetSlot> = {
+        ambience: "ambienceAssetId",
+        music: "musicAssetId",
+        narration: "narrationAssetId",
+      };
+      const target: SceneAssetSlot = input.role ? ROLE_SLOT[input.role]! : slot;
       const patch = { [target]: asset.id };
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
       return updated;
@@ -565,6 +590,10 @@ export const scenesRouter = router({
             voiceover: dup ? cur.voiceover : null,
             // 環境音的「文字」跟 prompt/voiceover 同類（是設定），音檔本身不複製——與 assetId 同規則
             ambience: dup ? cur.ambience : null,
+            // 走位是設定不是產物，跟著複製（同 prompt/voiceover/ambience）
+            action: dup ? cur.action : null,
+            dialogue: dup ? cur.dialogue : null,
+            music: dup ? cur.music : null,
             // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
@@ -624,8 +653,14 @@ export const scenesRouter = router({
         durationSec: z.number().int().min(1).max(60).optional(),
         voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
         ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
+        action: z.string().max(SCRIPT_ACTION_MAX).optional(),
+        dialogue: z.string().max(SCRIPT_DIALOGUE_MAX).optional(),
+        music: z.string().max(SCRIPT_MUSIC_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
+        // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
+        trimStartMs: z.number().int().min(0).max(TRIM_MAX_MS).optional(),
+        trimEndMs: z.number().int().min(0).max(TRIM_MAX_MS).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -640,7 +675,19 @@ export const scenesRouter = router({
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
       if (input.ambience !== undefined) patch.ambience = input.ambience;
+      if (input.action !== undefined) patch.action = input.action;
+      if (input.dialogue !== undefined) patch.dialogue = input.dialogue;
+      if (input.music !== undefined) patch.music = input.music;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
+      if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
+      if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
+      // 出點必須大於入點，否則是零長度或負長度剪輯——交付出去的時間軸會打不開。
+      // 兩欄可以分開送，所以要拿「合併後」的值判斷，不能只看這次送了什麼。
+      const nextStart = patch.trimStartMs ?? scene.trimStartMs;
+      const nextEnd = patch.trimEndMs !== undefined ? patch.trimEndMs : scene.trimEndMs;
+      if (nextEnd !== null && nextEnd !== undefined && nextEnd <= nextStart) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "修剪的結束點必須晚於開始點" });
+      }
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
       return updated;
@@ -720,6 +767,9 @@ export const scenesRouter = router({
               prompt: scene.prompt ?? null,
               voiceover: scene.voiceover ?? null,
               ambience: scene.ambience ?? null,
+              action: scene.action ?? null,
+              dialogue: scene.dialogue ?? null,
+              music: scene.music ?? null,
             });
             created += 1;
             continue;
@@ -738,6 +788,15 @@ export const scenesRouter = router({
           }
           if (scene.ambience !== undefined && scene.ambience !== (row.ambience ?? "").trim()) {
             patch.ambience = scene.ambience;
+          }
+          if (scene.action !== undefined && scene.action !== (row.action ?? "").trim()) {
+            patch.action = scene.action;
+          }
+          if (scene.dialogue !== undefined && scene.dialogue !== (row.dialogue ?? "").trim()) {
+            patch.dialogue = scene.dialogue;
+          }
+          if (scene.music !== undefined && scene.music !== (row.music ?? "").trim()) {
+            patch.music = scene.music;
           }
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
@@ -834,7 +893,8 @@ export const scenesRouter = router({
       const model = getModel(input.modelId);
       const modelRejection = regenRejection(model);
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
-      const prompt = input.prompt ?? scene.prompt ?? "";
+      // 呼叫端指定的提示詞優先；否則用這一鏡的畫面描述，影片類模型再接上走位
+      const prompt = input.prompt ?? sceneVisualPrompt(scene, model);
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
@@ -950,8 +1010,13 @@ export const scenesRouter = router({
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒有送出配音生成，也沒有扣點" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
-      const prompt = scene.voiceover ?? "";
-      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
+      // 旁白與對白是同一條說話序列：只寫了對白的鏡也要能配音，否則使用者明明滿滿台詞
+      // 卻被擋在「還沒有配音詞」。括號指示（小聲、畫外）不進唸詞——唸出來是廢音檔。
+      const speech = sceneSpeechLines(scene);
+      const prompt = speechForTts(speech).map((l) => l.text).join("\n");
+      if (!prompt.trim()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有旁白或對白，請先在分鏡或文字腳本裡填" });
+      }
       // 只放行「文字轉語音(TTS)」類：text-to-audio（配樂/音效）雖同為 kind=audio，但會生出音樂而非旁白，
       // 混入 narration 槽＝扣點又拿到錯內容，故以 category 精確把關（不能只看 kind）。
       const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";

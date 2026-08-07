@@ -35,6 +35,29 @@ describe("mobile batch-F contract", () => {
     expect(declarations).toMatch(/\.map-svg\s*\{[^}]*min-width: 720px/);
   });
 
+  // 全螢幕：橫捲畫布仍只有一小塊，攤開整個視窗才看得懂 35 個節點的族譜。
+  // 原生 Fullscreen API 之外一定要有 CSS 沉浸這一層——iOS Safari 不支援對元素
+  // requestFullscreen，少了它 iPhone 使用者按下按鈕會完全沒反應。
+  it("gives the knowledge map a CSS-only fullscreen layer (iOS Safari has no element fullscreen)", () => {
+    const host = declarations.match(/\.map-host\.is-immersive\s*\{[^}]*\}/);
+    expect(host).not.toBeNull();
+    expect(host![0]).toContain("position: fixed");
+    expect(host![0]).toContain("inset: 0");
+    // 全螢幕的畫布撐滿容器、不再橫捲（viewBox 改吃容器實際像素，見 KnowledgeMapCard）
+    expect(declarations).toMatch(/\.map-host\.is-immersive \.map-svg\s*\{[^}]*height: 100%/);
+    expect(declarations).toMatch(/\.map-host\.is-immersive \.map-svg\s*\{[^}]*min-width: 0/);
+    // 觸控手勢（單指平移／雙指縮放）要拿得到，全螢幕時沒有頁面要捲
+    expect(declarations).toMatch(/\.map-host\.is-immersive \.map-svg\s*\{[^}]*touch-action: none/);
+  });
+
+  // 沉浸時全站浮動殼層一律讓開，否則頂欄與分頁列會壓在攤開的族譜上
+  it("hides the app chrome while the knowledge map is fullscreen", () => {
+    for (const sel of [".topbar", ".mobile-nav", ".dm-bubble-root", ".fb-fab-root"]) {
+      expect(declarations).toContain(`body.map-immersive ${sel}`);
+    }
+    expect(declarations).toMatch(/body\.map-immersive\s*\{[^}]*overflow: hidden/);
+  });
+
   // 模型頁並排比較卡：行內 sticky top:8px/z-30 會蓋住手機頂欄、釘住後吃掉整個視口
   it("keeps the model compare card below the mobile topbar with a height cap", () => {
     const m = declarations.match(/section\[data-fb="模型並排比較"\]\s*\{[^}]*\}/);

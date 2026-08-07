@@ -90,6 +90,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.generateAmbience": "生成分鏡環境音",
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
+  "director.sketchBoard": "AI 畫白板草圖",
   "director.splitScript": "AI 拆分鏡",
   "assistant.ask": "詢問專案 AI 助手",
   "assistant.preview": "預覽專案 AI 助手上下文",
@@ -157,6 +158,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "notes.remove": "刪除會議筆記",
   "notes.postComment": "在筆記上留言",
   "notes.removeComment": "刪除筆記留言",
+  // 筆記／知識庫附件（上傳走 REST，審計由端點自行落一筆）
+  "attachments.upload": "上傳筆記／知識庫附件",
+  "attachments.remove": "刪除筆記／知識庫附件",
   "schedule.add": "新增排程",
   "schedule.update": "更新排程",
   "schedule.remove": "刪除排程",
@@ -164,6 +168,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 靈感頻道（Flow-TV）：把成品／筆記等來源發布成站內公開貼文
   "community.publishFromSource": "發布到靈感頻道",
   "community.unpublish": "從靈感頻道下架",
+  "community.republish": "重新上架靈感貼文",
   "community.recordUse": "記錄靈感被引用一次",
   "community.toggleLike": "按讚／取消按讚靈感貼文",
   // 個人 AI 金鑰（BYOK）：只記動作與供應商，金鑰本身不落審計
@@ -318,7 +323,9 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "storyboard", label: "分鏡", prefixes: ["scenes"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "community"] },
+  // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
+  // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "community", "attachments"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },

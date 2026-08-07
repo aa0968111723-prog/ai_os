@@ -21,7 +21,6 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("link", { name: "筆記排程" })).toHaveAttribute("aria-current", "page");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /資料庫/ })).toHaveAttribute("href", "/databases");
     expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
     expect(screen.getByRole("link", { name: /怎麼用/ })).toHaveAttribute("href", "/help");
   });
@@ -31,10 +30,16 @@ describe("MobileNavigation", () => {
     render(<MobileNavigation />);
     await user.click(screen.getByRole("button", { name: "更多" }));
 
-    // 面板收全站頁面：使用者選單在手機上不再重複列一次，因此這裡必須齊全
-    for (const key of ["studio", "community", "databases", "chat", "help", "models", "mcp", "integrations", "downloads"] as const) {
+    // 面板收日常會用到的頁面，名稱一律取自 DESTINATIONS（同一頁不得有第二個名字）
+    for (const key of ["studio", "community", "chat", "help", "models", "downloads"] as const) {
       const d = DESTINATIONS[key];
       expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
+    }
+    // 資料庫／外部資料／MCP 刻意不在這裡：三者已改為情境化入口
+    //（資料在專案頁就地加，進階設定走 /settings 的「進階與相關功能」）。
+    // 路由與深連結仍然有效，只是不再出現在手機的頁面總表裡。
+    for (const key of ["databases", "mcp", "integrations"] as const) {
+      expect(screen.queryByRole("link", { name: new RegExp(DESTINATIONS[key].label) })).not.toBeInTheDocument();
     }
     // 舊的第二套名字不得復活
     expect(screen.queryByText("使用說明")).not.toBeInTheDocument();

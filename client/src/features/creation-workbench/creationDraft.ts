@@ -18,7 +18,7 @@ export interface CreationDraft {
   scenePresetIds: string[];
   /** 生成帶入的素材設定卡 id（道具外觀一致） */
   propIds: string[];
-  /** 問 AI／多步開拍：優先注入的知識庫篇目 id（≤20） */
+  /** 問 AI／多步開拍：優先注入的知識庫篇目 id（≤10，與 server 的 extraSourceIds .max(10) 對齊） */
   knowledgeIds: string[];
   worldviewEnabled: boolean;
   templateId?: string;
@@ -91,7 +91,7 @@ function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "generate"): 
       ? o.propIds.filter((x): x is string => typeof x === "string")
       : base.propIds,
     knowledgeIds: Array.isArray(o.knowledgeIds)
-      ? o.knowledgeIds.filter((x): x is string => typeof x === "string").slice(0, 20)
+      ? o.knowledgeIds.filter((x): x is string => typeof x === "string").slice(0, 10)
       : base.knowledgeIds,
     worldviewEnabled: typeof o.worldviewEnabled === "boolean" ? o.worldviewEnabled : base.worldviewEnabled,
     templateId: typeof o.templateId === "string" ? o.templateId : undefined,

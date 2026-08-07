@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { useImmersive } from "../lib/useImmersive";
 import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
@@ -16,6 +17,7 @@ import {
 } from "../components/knowledgeMapModel";
 import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
+import { AttachmentPanel } from "../components/AttachmentPanel";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
 import { Button, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
@@ -963,6 +965,8 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
   // 筆記清單原本沒有任何搜尋——三個月的會議紀錄堆起來只能一列一列往下看。
   // 標題與摘要都比對（摘要就是內文開頭，找「那次講到分鏡的會」靠的是它）。
   const notes = list.data ?? [];
+  // 一次只展開一則的附件區：附件查詢是每則一支，全部常駐會在筆記一多時打爆後端
+  const [openAttachments, setOpenAttachments] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const filtered = needle
@@ -1039,6 +1043,20 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
             />
           )}
 
+          {/* 附件：新增時還沒有筆記 id 可掛，儲存後從清單列的「附件」加 */}
+          {editingId ? (
+            <>
+              <label>附件（照片、PDF、Word…）</label>
+              <AttachmentPanel
+                kind="note"
+                refId={editingId}
+                onChanged={() => utils.notes.list.invalidate({ groupId })}
+              />
+            </>
+          ) : (
+            <Hint style={{ marginTop: 8 }}>要夾白板照片或講義 PDF？先儲存這則筆記，再從清單上的「附件」加。</Hint>
+          )}
+
           <label htmlFor="note-project">掛在專案（選填）</label>
           <select
             id="note-project"
@@ -1084,6 +1102,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
         <div style={{ marginTop: 8 }}>
           {filtered.map((n) => {
             const projTitle = projectTitleOf(n.projectId);
+            const attachOpen = openAttachments === n.id;
             return (
               <div key={n.id} id={`note-${n.id}`} className="gen-row gen-row--note" style={{ alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
@@ -1091,6 +1110,11 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                     {n.title}
                     {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
                     {n.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</Chip> : null}
+                    {n.attachmentCount > 0 && (
+                      <Chip style={{ margin: "0 0 0 6px" }} title={`夾了 ${n.attachmentCount} 個附件`}>
+                        <Icon name="Paperclip" size={11} style={{ verticalAlign: "-1px" }} /> {n.attachmentCount}
+                      </Chip>
+                    )}
                   </div>
                   <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
                   <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
@@ -1104,8 +1128,25 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                       <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
                     </Link>
                   )}
+                  {/* 附件（照片／PDF）預設收合：一次展開一則，避免 200 則筆記各發一支查詢 */}
+                  {attachOpen && (
+                    <AttachmentPanel
+                      kind="note"
+                      refId={n.id}
+                      compact
+                      onChanged={() => utils.notes.list.invalidate({ groupId })}
+                    />
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
+                  <Button
+                    size="sm"
+                    aria-expanded={attachOpen}
+                    title="加照片、PDF 等附件"
+                    onClick={() => setOpenAttachments(attachOpen ? null : n.id)}
+                  >
+                    <Icon name="Paperclip" size={13} />附件{n.attachmentCount > 0 ? ` ${n.attachmentCount}` : ""}
+                  </Button>
                   <Button size="sm" onClick={() => openEdit(n)}>編輯</Button>
                   <ConfirmButton
                     onConfirm={() => remove.mutate({ id: n.id })}
@@ -1230,6 +1271,11 @@ const LIST_PAGE = 8;
 /** 心智圖畫得下的分支數／每支葉數；超過的分別由「另有 N 支」與「+N」節點交棒給清單 */
 const MAP_MAX_BRANCHES = 10;
 const MAP_MAX_LEAVES = 6;
+/** 全螢幕時掛在 <body>：全站浮動殼層（頂欄、分頁列、私訊球、回饋浮標）讓開 */
+const MAP_IMMERSIVE_BODY_CLASS = "map-immersive";
+/** 縮放範圍。下限壓到 0.25：全螢幕在手機直向只有 ~360px 寬，要裝下 920 寬的圖得縮到 0.4 以下 */
+const MAP_MIN_SCALE = 0.25;
+const MAP_MAX_SCALE = 2.5;
 
 const isMapView = (v: string | null): v is MapView => v === "list" || v === "map";
 
@@ -1409,6 +1455,23 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
   // 使用者自己縮放／平移過就別再自動套「剛好裝滿」的檢視——那會把他調好的視角搶回去
   const [viewTouched, setViewTouched] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const mapWrapRef = useRef<HTMLDivElement | null>(null);
+
+  /* ── 全螢幕（沉浸）──
+   * 卡片裡的族譜在手機上只有一小塊：等比縮到 0.39x 後字剩 4px、節點剩 2px，
+   * 35 個節點糊成一團——這張圖真正能看的前提是「攤開整個視窗」。
+   * 原生 Fullscreen API ＋ CSS 沉浸兩層（iOS Safari 沒有前者，見 lib/useImmersive）。
+   * 搜尋、篩選與檢視切換一起帶進全螢幕，進去以後才不用退出來才能換條件。 */
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const { immersive, exit: exitImmersive, toggle: toggleImmersive } = useImmersive(hostRef, MAP_IMMERSIVE_BODY_CLASS);
+
+  /* 畫布的可視座標系：卡片內沿用固定的 920×560（維持既有的等比縮放與手機橫捲）；
+     全螢幕時改吃容器的實際像素（1 單位＝1px）——沿用 920×560 會被 preserveAspectRatio
+     信箱化，手機直向下整張圖只佔螢幕中間一條，等於白開了全螢幕。 */
+  const [stageBox, setStageBox] = useState<{ w: number; h: number } | null>(null);
+  const VW = stageBox ? stageBox.w : W;
+  const VH = stageBox ? stageBox.h : H;
+
   const dragRef = useRef<
     | { mode: "node"; id: string; startX: number; startY: number; baseDx: number; baseDy: number; moved: boolean }
     | { mode: "pan"; startX: number; startY: number; baseTx: number; baseTy: number }
@@ -1416,10 +1479,10 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
   >(null);
   const suppressClickRef = useRef(false);
 
-  /** client px → viewBox 座標係數（viewBox 寬固定 W、SVG 依容器寬縮放，等比） */
+  /** client px → viewBox 座標係數（viewBox 寬＝VW、SVG 依容器寬縮放，等比） */
   const pxToSvg = () => {
     const rect = svgRef.current?.getBoundingClientRect();
-    return rect && rect.width > 0 ? W / rect.width : 1;
+    return rect && rect.width > 0 ? VW / rect.width : 1;
   };
   /** 存佈局到本機：只留「目前圖上存在」的節點（已刪內容的偏移不無限累積） */
   const persistOverrides = (o: Record<string, { dx: number; dy: number }>) => {
@@ -1465,28 +1528,58 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
     setSelected(sel ?? null);
   };
 
+  /* 全螢幕的觸控手勢：單指平移、雙指縮放。卡片內刻意不接觸控平移（畫布只佔一小塊，
+     攔掉手指就捲不動整頁）；全螢幕時整個視窗都是畫布，沒有頁面要捲，手勢才給得下去。 */
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<number | null>(null); // 上一幀的兩指距離
+  const pinchPoints = () => [...pointersRef.current.values()];
+
   const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if ((e.target as Element).closest?.(".map-node")) return; // 節點自己處理
-    if (e.pointerType !== "mouse") return; // 觸控時空白處保留頁面捲動
+    if (e.pointerType !== "mouse" && !immersive) return; // 卡片內：觸控時空白處保留頁面捲動
     svgRef.current?.setPointerCapture?.(e.pointerId);
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size >= 2) {
+      // 第二根手指落下＝改成縮放；平移中途轉縮放要先把平移停掉，否則兩者互相打架
+      const [a, b] = pinchPoints();
+      pinchRef.current = Math.hypot(a.x - b.x, a.y - b.y);
+      dragRef.current = null;
+      return;
+    }
     dragRef.current = { mode: "pan", startX: e.clientX, startY: e.clientY, baseTx: view.tx, baseTy: view.ty };
   };
   const onSvgPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size >= 2 && pinchRef.current !== null) {
+      const [a, b] = pinchPoints();
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (dist > 0 && pinchRef.current > 0 && rect && rect.width > 0) {
+        const k = VW / rect.width;
+        // 以兩指中點為錨：捏合時使用者盯著的是中間那塊，錨在畫布中央會把它推走
+        zoomAt(((a.x + b.x) / 2 - rect.left) * k, ((a.y + b.y) / 2 - rect.top) * k, dist / pinchRef.current);
+      }
+      pinchRef.current = dist;
+      return;
+    }
     const d = dragRef.current;
     if (!d || d.mode !== "pan") return;
     const k = pxToSvg();
     setViewTouched(true);
     setView((v) => ({ ...v, tx: d.baseTx + (e.clientX - d.startX) * k, ty: d.baseTy + (e.clientY - d.startY) * k }));
   };
-  const onSvgPointerUp = () => {
+  const onSvgPointerUp = (e?: React.PointerEvent<SVGSVGElement>) => {
+    if (e) pointersRef.current.delete(e.pointerId);
+    else pointersRef.current.clear();
+    if (pointersRef.current.size < 2) pinchRef.current = null;
     if (dragRef.current?.mode === "pan") dragRef.current = null;
   };
 
-  /** 縮放（限 0.5–2.5 倍）：以指定的 viewBox 錨點為中心，錨點在畫面上不動 */
+  /** 縮放（限 0.25–2.5 倍）：以指定的 viewBox 錨點為中心，錨點在畫面上不動 */
   const zoomAt = (px: number, py: number, factor: number) => {
     setViewTouched(true);
     setView((v) => {
-      const s2 = Math.min(2.5, Math.max(0.5, v.s * factor));
+      const s2 = Math.min(MAP_MAX_SCALE, Math.max(MAP_MIN_SCALE, v.s * factor));
       if (s2 === v.s) return v;
       const wx = (px - v.tx) / v.s;
       const wy = (py - v.ty) / v.s;
@@ -1509,9 +1602,9 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
     const maxX = Math.max(...pts.map((p) => p.x)) + PAD;
     const minY = Math.min(...pts.map((p) => p.y)) - PAD;
     const maxY = Math.max(...pts.map((p) => p.y)) + PAD;
-    const s = Math.min(2.5, Math.max(0.5, Math.min(W / (maxX - minX), H / (maxY - minY))));
-    return { s, tx: W / 2 - ((minX + maxX) / 2) * s, ty: H / 2 - ((minY + maxY) / 2) * s };
-  }, [layout, overrides]);
+    const s = Math.min(MAP_MAX_SCALE, Math.max(MAP_MIN_SCALE, Math.min(VW / (maxX - minX), VH / (maxY - minY))));
+    return { s, tx: VW / 2 - ((minX + maxX) / 2) * s, ty: VH / 2 - ((minY + maxY) / 2) * s };
+  }, [layout, overrides, VW, VH]);
   useEffect(() => {
     if (!viewTouched) setView(fitView);
   }, [fitView, viewTouched]);
@@ -1526,25 +1619,61 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       if (!rect.width) return;
-      const k = W / rect.width;
+      const k = VW / rect.width;
       zoomAt((e.clientX - rect.left) * k, (e.clientY - rect.top) * k, e.deltaY < 0 ? 1.12 : 1 / 1.12);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
     // zoomAt 是穩定閉包（只用 setView 函式式更新），不入依賴
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapVisible]);
+  }, [mapVisible, VW]);
+
+  /* 全螢幕時量畫布的實際像素當 viewBox（見 stageBox）。轉向、鍵盤彈出、退出全螢幕
+     都會改尺寸，用 ResizeObserver 跟著走；不在全螢幕就清掉，回到固定的 920×560。 */
+  useEffect(() => {
+    const el = mapWrapRef.current;
+    if (!immersive || !mapVisible || !el) {
+      setStageBox(null);
+      return;
+    }
+    const sync = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) setStageBox({ w: Math.round(r.width), h: Math.round(r.height) });
+    };
+    sync();
+    if (typeof ResizeObserver === "undefined") return; // jsdom／舊瀏覽器：量一次就好
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [immersive, mapVisible]);
+
+  /* 進出全螢幕＝可視區整個換掉，使用者原本調好的縮放平移已經對不上新畫布，
+     重新套一次「剛好裝滿」；他在全螢幕裡再動手，一樣以他的視角為準。 */
+  useEffect(() => {
+    setViewTouched(false);
+  }, [immersive]);
+
+  /* Esc 退出全螢幕。原生全螢幕時瀏覽器自己會處理（useImmersive 接 fullscreenchange 收斂），
+     iOS Safari 只有 CSS 沉浸那一層，沒有這個監聽就只剩按鈕能出去。 */
+  useEffect(() => {
+    if (!immersive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitImmersive();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [immersive, exitImmersive]);
 
   /* 手機把畫布放大成 720px 橫捲（等比縮到螢幕寬會讓字剩 4px），但捲軸起點在最左邊——
-     中心節點在畫布正中央，使用者一打開只看到整片空白，以為地圖壞了。開圖時先捲到中央。 */
-  const mapWrapRef = useRef<HTMLDivElement | null>(null);
+     中心節點在畫布正中央，使用者一打開只看到整片空白，以為地圖壞了。開圖時先捲到中央。
+     全螢幕沒有橫捲（畫布就是整個視窗），overflow 是 0，這裡自然不做事。 */
   useEffect(() => {
     if (!mapVisible) return;
     const el = mapWrapRef.current;
     if (!el) return;
     const overflow = el.scrollWidth - el.clientWidth;
     if (overflow > 0) el.scrollLeft = overflow / 2;
-  }, [mapVisible]);
+  }, [mapVisible, immersive]);
 
   /** 節點的有效位置＝自動佈局＋使用者拖出的偏移 */
   const posOf = (n: { id: string; x: number; y: number }) => {
@@ -1669,8 +1798,12 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
         本組知識族譜：先用搜尋或篩選收斂，再挑檢視——「清單」一列一個節點、點一下直接開那一筆（手機建議）；
         「心智圖」把專案／組層級／資料庫織成放射圖看關聯，節點可拖拉排版（位置記在這台裝置）、可縮放平移。
         顏色：筆記（藍）、行程（琥珀）、知識庫（綠）、AI 執行計畫（紫）、資料庫（青）。
+        圖太擠就按「全螢幕」，整張族譜攤到整個視窗（Esc 或再按一次退出）。
       </Hint>
 
+      {/* 全螢幕包住「搜尋＋篩選＋族譜本體」而不是只包畫布：
+          進了全螢幕還要能換關鍵字與檢視，不然得退出來改條件再進去一次 */}
+      <div className={`map-host${immersive ? " is-immersive" : ""}`} ref={hostRef}>
       {/* 搜尋＋檢視切換：兩者對清單與心智圖同時生效 */}
       <div className="map-bar">
         <span className="map-search">
@@ -1708,6 +1841,14 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
             </button>
           ))}
         </div>
+        <Button
+          size="sm"
+          onClick={toggleImmersive}
+          aria-pressed={immersive}
+          title={immersive ? "退出全螢幕（Esc）" : "把知識族譜攤到整個視窗"}
+        >
+          <Icon name={immersive ? "Shrink" : "Expand"} size={13} /> {immersive ? "退出全螢幕" : "全螢幕"}
+        </Button>
       </div>
 
       {compact ? (
@@ -1806,11 +1947,11 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
           })}
         </div>
       ) : (
-        <div className="map-stage" style={{ marginTop: 12 }}>
+        <div className="map-stage">
           {/* 畫布工具：縮放與重設（浮在右上角）；佈局被拖過才出現「重設佈局」 */}
           <div className="map-tools">
-            <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1.2)} aria-label="放大" title="放大">＋</Button>
-            <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</Button>
+            <Button size="sm" onClick={() => zoomAt(VW / 2, VH / 2, 1.2)} aria-label="放大" title="放大">＋</Button>
+            <Button size="sm" onClick={() => zoomAt(VW / 2, VH / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</Button>
             {viewTouched && (
               <Button size="sm" onClick={resetView} title="回到「剛好裝滿畫布」的檢視">重設檢視</Button>
             )}
@@ -1822,7 +1963,7 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
           {/* role=group（非 img）：img 會讓報讀器把整張圖當單一圖片，內部所有可點節點對 AT 隱形 */}
           <svg
             ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
+            viewBox={`0 0 ${VW} ${VH}`}
             className="map-svg"
             role="group"
             aria-label="知識地圖（可 Tab 到各節點，Enter 開啟詳情）"
@@ -1910,6 +2051,7 @@ export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; 
           )}
         </div>
       )}
+      </div>
     </PlannerSection>
   );
 }

@@ -25,6 +25,26 @@ import { db, schema } from "../db";
 import { hashSessionIp, sha256 } from "./auth";
 import { isEmailConfigured, sendEmail } from "./email";
 import { deviceDetailLines, type DeviceDetails } from "../../shared/deviceDetails";
+import { browserFamily, deviceLabelFrom, describeDevice, osFamily, type DeviceHint } from "../../shared/deviceNaming";
+
+/**
+ * 裝置命名（家族判定、機型翻譯、標籤與細節）全部住在 shared/deviceNaming.ts——
+ * 前端的通知設定頁與這裡必須產出同一個名字，否則同一台手機在「已連結裝置」
+ * 與「信任裝置」兩份清單裡叫兩個名字，使用者不敢按移除。
+ * 這裡轉出去是為了不動既有匯入點（auth router、測試）。
+ */
+export {
+  brandOfModel,
+  browserFamily,
+  deviceKindFrom,
+  deviceLabelFrom,
+  describeDevice,
+  marketingModel,
+  osDescription,
+  osFamily,
+  screenText,
+} from "../../shared/deviceNaming";
+export type { DeviceHint } from "../../shared/deviceNaming";
 
 /* ── 模式開關 ────────────────────────────────── */
 
@@ -86,194 +106,6 @@ export function breakGlassActive(
 /* ── 裝置特徵 ────────────────────────────────── */
 
 /**
- * 前端送來的被動特徵。全部選「穩定」欄位——刻意不含瀏覽器/OS 版本號：
- * Chrome 每四週自動更新，含版本號等於每個月讓全公司重驗一次。
- * 也刻意不用 Canvas／WebGL／AudioContext 指紋：那是廣告追蹤手法，隱私侵入、
- * 瀏覽器正在積極封鎖、且結果不穩定。
- */
-export interface DeviceHint {
-  /* ── 比對用：穩定欄位（進指紋） ── */
-  /** screen.width×screen.height（用 screen 不是 window，改視窗大小不影響） */
-  screen?: string;
-  /** IANA 時區，如 Asia/Taipei */
-  tz?: string;
-  /** navigator.language */
-  lang?: string;
-  /** navigator.hardwareConcurrency */
-  cores?: number;
-  /** 是否為「加到主畫面」的獨立 App（iOS 的 Safari 與 PWA 是不同 cookie 空間，算兩台裝置） */
-  standalone?: boolean;
-  /** 裝置機型（Android 給得到，如 "Pixel 8"／"SM-S928B"；桌機與 Apple 裝置為空） */
-  model?: string;
-  /** CPU 架構 x86／arm */
-  arch?: string;
-  /** 位元數 64／32 */
-  bitness?: string;
-  /** 記憶體 GB */
-  memoryGb?: number;
-  /** 觸控點數上限（硬體特性，不會變） */
-  touchPoints?: number;
-
-  /* ── 顯示用：會漂移的細節（★不進指紋） ── */
-  /** 作業系統版本 */
-  detailOsVersion?: string;
-  /** 瀏覽器版本 */
-  detailBrowserVersion?: string;
-  /** 顯示卡型號 */
-  detailGpu?: string;
-  /** 螢幕像素密度倍率 */
-  detailPixelRatio?: number;
-}
-
-/** UA → 作業系統家族（不含版本號） */
-export function osFamily(ua: string): string {
-  if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
-  if (/Android/i.test(ua)) return "Android";
-  if (/Windows/i.test(ua)) return "Windows";
-  if (/Macintosh|Mac OS X/i.test(ua)) return "macOS";
-  if (/CrOS/i.test(ua)) return "ChromeOS";
-  if (/Linux/i.test(ua)) return "Linux";
-  return "未知系統";
-}
-
-/**
- * UA → 瀏覽器家族（不含版本號）。
- * ★順序有意義：Edge 的 UA 同時含 Chrome 與 Safari、Chrome 的 UA 含 Safari，
- * 由窄到寬比對否則全部會被誤判成 Safari。
- */
-export function browserFamily(ua: string): string {
-  if (/Edg\//i.test(ua)) return "Edge";
-  if (/OPR\/|Opera/i.test(ua)) return "Opera";
-  if (/Firefox\/|FxiOS/i.test(ua)) return "Firefox";
-  if (/CriOS/i.test(ua)) return "Chrome";
-  if (/Chrome\//i.test(ua)) return "Chrome";
-  if (/Safari\//i.test(ua)) return "Safari";
-  return "未知瀏覽器";
-}
-
-/**
- * 由機型代碼推廠牌。
- *
- * Android 的 UA-CH model 回的是原廠代碼（"SM-S928B"、"Pixel 8"、"2201123G"），
- * 一般人看不懂，故盡量翻成「廠牌＋看得懂的名字」。
- * 這裡只做「有把握的前綴對應」——猜錯廠牌比不寫更糟（使用者會以為是別人的裝置）。
- */
-export function brandOfModel(model: string | undefined): string | undefined {
-  if (!model) return undefined;
-  const m = model.trim();
-  if (!m) return undefined;
-  if (/^Pixel/i.test(m)) return "Google";
-  if (/^SM-|^GT-|^SCH-|^SPH-/i.test(m)) return "Samsung";
-  if (/^iPhone|^iPad|^Mac/i.test(m)) return "Apple";
-  if (/^Mi\b|^Redmi|^POCO|^M20\d{2}|^22\d{6}|^23\d{6}|^24\d{6}/i.test(m)) return "Xiaomi";
-  if (/^CPH\d|^OPPO/i.test(m)) return "OPPO";
-  if (/^V\d{4}|^vivo/i.test(m)) return "vivo";
-  if (/^RMX\d/i.test(m)) return "realme";
-  if (/^Nokia/i.test(m)) return "Nokia";
-  if (/^Pixel|^Nexus/i.test(m)) return "Google";
-  if (/^ASUS|^ZS\d|^AI\d{4}/i.test(m)) return "ASUS";
-  if (/^HTC/i.test(m)) return "HTC";
-  if (/^LM-|^LG-/i.test(m)) return "LG";
-  if (/^Mate|^P\d{2}|^ELS-|^ANA-|^NOH-/i.test(m)) return "HUAWEI";
-  if (/^moto|^XT\d{4}/i.test(m)) return "Motorola";
-  if (/^Nothing|^A0\d{2}/i.test(m)) return "Nothing";
-  return undefined;
-}
-
-/**
- * Windows 的 UA-CH platformVersion 主版本 ≥ 13 代表 Windows 11，1–12 代表 Windows 10。
- * 這是微軟文件的對應方式——UA 字串本身永遠寫 "Windows NT 10.0"，分不出 10 與 11。
- */
-function windowsName(platformVersion: string | undefined): string {
-  const major = Number.parseInt(platformVersion?.split(".")[0] ?? "", 10);
-  if (Number.isNaN(major)) return "Windows";
-  return major >= 13 ? "Windows 11" : "Windows 10";
-}
-
-/** UA 取 iOS 主版本（"iPhone OS 17_5" → "17"）——Safari 沒有 UA-CH，只能從 UA 撈 */
-function iosMajor(ua: string): string | undefined {
-  const m = /OS (\d+)[_.]/.exec(ua);
-  return m?.[1];
-}
-
-/** 作業系統名稱＋版本，如「Windows 11」「Android 14」「iOS 17」「macOS」 */
-export function osDescription(ua: string, hint?: DeviceHint): string {
-  const family = osFamily(ua);
-  const version = hint?.detailOsVersion?.replace(/(\.0)+$/, "");
-  if (family === "Windows") return windowsName(hint?.detailOsVersion);
-  if (family === "Android") return version ? `Android ${version}` : "Android";
-  if (family === "iOS") {
-    const major = iosMajor(ua);
-    return major ? `iOS ${major}` : "iOS";
-  }
-  if (family === "macOS") return version ? `macOS ${version}` : "macOS";
-  return family;
-}
-
-/**
- * 螢幕描述。像素倍率要四捨五入到小數點後兩位再去掉尾隨的 0——
- * Windows 縮放 130% 時 devicePixelRatio 是 1.309999942779541，
- * 原樣顯示成「@1.309999942779541x」沒有人看得懂（實機實測抓到）。
- * export 供測試。
- */
-export function screenText(screen: string, pixelRatio?: number): string {
-  if (!pixelRatio || Math.abs(pixelRatio - 1) < 0.01) return screen;
-  const rounded = Number(pixelRatio.toFixed(2));
-  return `${screen} @${rounded}x`;
-}
-
-/**
- * 組出完整的裝置細節（給人看，不參與比對）。
- *
- * 各平台實際能有多細差很多，故 modelNote 會直接寫明「為什麼看不到機型」，
- * 免得使用者以為功能壞了。
- */
-export function describeDevice(ua: string, hint?: DeviceHint): DeviceDetails {
-  const family = osFamily(ua);
-  const browser = hint?.standalone ? "主畫面App" : browserFamily(ua);
-  const details: DeviceDetails = {
-    os: osDescription(ua, hint),
-    browser,
-    browserVersion: hint?.detailBrowserVersion,
-    memoryGb: hint?.memoryGb,
-    screen: hint?.screen ? screenText(hint.screen, hint.detailPixelRatio) : undefined,
-    gpu: hint?.detailGpu,
-  };
-
-  if (hint?.cores) {
-    details.cpu = [
-      hint.arch ? hint.arch.toUpperCase() : undefined,
-      hint.bitness ? `${hint.bitness} 位元` : undefined,
-      `${hint.cores} 核心`,
-    ].filter(Boolean).join(" · ");
-  }
-
-  if (hint?.model) {
-    details.model = hint.model;
-    details.brand = brandOfModel(hint.model);
-  } else if (family === "iOS" || family === "macOS") {
-    // Apple 刻意不對網頁公開機型——iPhone 12 與 iPhone 16 的 UA 完全相同。
-    // 這不是我們的實作缺陷，寫清楚免得被當成 bug 回報。
-    details.brand = "Apple";
-    details.modelNote = "Apple 不對網頁公開機型（各代 iPhone／iPad 無法區分）";
-  } else if (family === "Android") {
-    details.modelNote = "這個瀏覽器沒有提供機型（換用 Chrome 或 Edge 可顯示）";
-  }
-  return details;
-}
-
-/** 給人看的裝置名稱：盡量帶到廠牌與機型，如「Samsung SM-S928B · Chrome」「iPhone · Safari」 */
-export function deviceLabelFrom(ua: string, hint?: DeviceHint): string {
-  const browser = hint?.standalone ? "主畫面App" : browserFamily(ua);
-  if (hint?.model) {
-    const brand = brandOfModel(hint.model);
-    return `${brand ? `${brand} ` : ""}${hint.model} · ${browser}`;
-  }
-  const os = /iPhone/i.test(ua) ? "iPhone" : /iPad/i.test(ua) ? "iPad" : osDescription(ua, hint);
-  return `${os} · ${browser}`;
-}
-
-/**
  * 裝置特徵雜湊。加 pepper 讓 DB 外洩者無法用彩虹表反推使用者的螢幕/時區組合，
  * 沿用 sessions.ipHash 同一組來源（SESSION_IP_PEPPER || RATE_LIMIT_SECRET）。
  */
@@ -292,6 +124,12 @@ export function fingerprintOf(
   // 任何一個進指紋都等於每個月要求全公司重驗一次信箱，
   // 使用者會被訓練成「看到驗證碼就無腦輸入」，那比不做驗證還危險。
   // model／arch／bitness／memoryGb／touchPoints 是硬體特性，換機才會變，可安全納入。
+  //
+  // ★osFamily 這裡刻意只餵 UA、不餵 hint：hint.detailPlatform 是顯示用的補強訊號，
+  //   讓它參與指紋等於把「瀏覽器哪天開始送 UA-CH」變成一次全員重驗。
+  // ★browserFamily 認得更多瀏覽器之後（Samsung 瀏覽器、LINE 內建瀏覽器等原本都被歸為
+  //   Chrome/Safari），那些裝置的指紋會變動一次。指紋漂移只記審計不封鎖（見設計 §6），
+  //   使用者無感；下次登入 touchDevice 就會把新值連同新標籤一起寫回。
   const parts = [
     osFamily(ua),
     browserFamily(ua),
@@ -402,8 +240,10 @@ export async function deviceIdForToken(
 }
 
 /**
- * 成功以既有裝置登入：更新最近使用足跡與裝置細節（fire-and-forget 等級，失敗不擋登入）。
- * 細節每次重寫：系統或瀏覽器升級後，「我的裝置」清單顯示的才是目前狀態而非當初註冊時的。
+ * 成功以既有裝置登入：更新最近使用足跡、標籤與裝置細節（fire-and-forget 等級，失敗不擋登入）。
+ * 每次重寫：系統或瀏覽器升級後，「我的裝置」清單顯示的才是目前狀態而非當初註冊時的。
+ * 標籤一併重寫（原本只更新 details），否則辨識力提升後，舊裝置永遠停在當初那個
+ * 「Android・Chrome」——名字正是使用者用來認出哪一台的東西。
  */
 export async function touchDevice(deviceId: string, ctx: DeviceContext): Promise<void> {
   await db
@@ -411,6 +251,7 @@ export async function touchDevice(deviceId: string, ctx: DeviceContext): Promise
     .set({
       lastSeenAt: new Date(),
       lastSeenIpHash: hashSessionIp(ctx.ip),
+      label: deviceLabelFrom(ctx.userAgent, ctx.hint),
       details: describeDevice(ctx.userAgent, ctx.hint),
     })
     .where(eq(schema.userDevices.id, deviceId));

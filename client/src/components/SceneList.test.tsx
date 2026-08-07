@@ -56,8 +56,16 @@ vi.mock("./StoryboardPlayer", () => ({ StoryboardPlayer: () => <div aria-label="
 vi.mock("./SceneCardBinding", () => ({ SceneCardBinding: () => <div aria-label="逐鏡卡片綁定 stub" /> }));
 // 逐鏡預覽自帶 generation.preview mutation，同樣另有專屬測試
 vi.mock("./ScenePromptPreview", () => ({ ScenePromptPreview: () => <div aria-label="逐鏡預覽 stub" /> }));
-// 文字腳本另有專屬測試（StoryboardScript.test.tsx）；本檔專注在分鏡格的狀態機
-vi.mock("./StoryboardScript", () => ({ StoryboardScript: () => <div aria-label="文字腳本 stub" /> }));
+// 文字腳本另有專屬測試（StoryboardScript.test.tsx）；本檔專注在分鏡格的狀態機。
+// stub 仍然捕捉 rows——「傳了哪些欄位進去」是 SceneList 的責任，而漏一個欄位不會讓
+// 任何既有測試變紅（環境音就這樣漏過一次，還把使用者寫好的值靜默清空）。
+const storyboardRows = vi.fn();
+vi.mock("./StoryboardScript", () => ({
+  StoryboardScript: (props: { rows: unknown[] }) => {
+    storyboardRows(props.rows);
+    return <div aria-label="文字腳本 stub" />;
+  },
+}));
 vi.mock("../discuss", () => ({ discussInMessages: vi.fn() }));
 
 type SceneOver = {
@@ -70,6 +78,10 @@ type SceneOver = {
   /** 旁白音檔網址。刻意只用 narrationUrl——scenes.listByProject 的投影就只有它，
    *  mock 若多餵一個 narrationAssetId，測試會綠但實機永遠判為「沒有旁白」。 */
   narrationUrl?: string | null;
+  ambience?: string | null;
+  action?: string | null;
+  dialogue?: string | null;
+  music?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -89,6 +101,12 @@ function scene(over: SceneOver) {
     pendingGenStatus: null,
     narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
+    ambience: over.ambience ?? null,
+    action: over.action ?? null,
+    dialogue: over.dialogue ?? null,
+    music: over.music ?? null,
+    ambienceUrl: null,
+    pendingAmbienceStatus: null,
   };
 }
 
@@ -267,5 +285,47 @@ describe("SceneList 交付中心（B）", () => {
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute("open");
     expect(screen.getByText(/進階：只要單檔/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * 文字腳本吃到的欄位。
+ *
+ * 這一組守的是一條會**吃掉使用者資料**的連鎖，而不是「props 有沒有傳對」的形式檢查：
+ * formatStoryboardScript 一律輸出「環境音：」那一行（空的也輸出，讓人知道可以寫），
+ * 所以 rows 少帶 ambience 時，畫面上永遠是空的；前端 diff 拿同樣缺值的 rows 比對，
+ * 會顯示「沒有任何變更」；但伺服器是拿 DB 真值比對，於是「原封不動寫回」就把
+ * 單格工作室寫好的環境音清成空字串——全程沒有任何警告。
+ */
+describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
+  it("帶上環境音——漏掉它，照原樣寫回就會把 DB 裡的環境音清空", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", ambience: "遠處鐘聲，細微蟲鳴" })],
+      isLoading: false,
+      isError: false,
+    });
+    mount();
+    const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(rows[0]!.ambience).toBe("遠處鐘聲，細微蟲鳴");
+  });
+
+  it("畫面／旁白／標題／秒數一併帶到——任何一欄漏掉都是同一條清空連鎖", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", prompt: "夜裡的禪堂", voiceover: "那一年…", ambience: "蟲鳴", action: "從門口走到窗邊", dialogue: "@師父：坐吧。", music: "起｜鋼琴" })],
+      isLoading: false,
+      isError: false,
+    });
+    mount();
+    const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(rows[0]).toMatchObject({
+      title: "鏡 s1",
+      durationSec: 5,
+      prompt: "夜裡的禪堂",
+      voiceover: "那一年…",
+      ambience: "蟲鳴",
+      action: "從門口走到窗邊",
+      dialogue: "@師父：坐吧。",
+      music: "起｜鋼琴",
+    });
   });
 });

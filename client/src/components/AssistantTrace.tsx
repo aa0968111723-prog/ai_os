@@ -1,5 +1,7 @@
 import { Icon, type IconName } from "./Icon";
 import { Button } from "./ui";
+import { ToolResultPreview } from "../features/agent-trace/ToolResultPreview";
+import type { ToolResultPreview as Preview } from "@shared/toolResultPreview";
 
 /**
  * 可對使用者揭露的 AI 活動事件。
@@ -10,6 +12,15 @@ import { Button } from "./ui";
 export type AssistantActivityEvent = {
   phase: "thinking" | "lookup" | "step";
   text: string;
+  /** 工具真名（伺服器 AskStreamEvent 帶入）。中文標籤反查不回工具是誰，分類呈現需要它。 */
+  tool?: string;
+  /**
+   * 這一步工具實際查到什麼。只有 phase="step" 會帶。
+   *
+   * 有它之前，問答進行中使用者只看得到「正在查素材庫…」一行字，要等到事後打開
+   * 「實際運作紀錄」才看得到查到了什麼——而那正是他當下最想知道的事。
+   */
+  preview?: Preview;
 };
 
 function activityIcon(phase: AssistantActivityEvent["phase"]): IconName {
@@ -36,6 +47,13 @@ function ActivityRows({
               style={event.phase === "step" ? { color: "var(--success-ink, var(--primary-ink))" } : undefined}
             />
             <span>{event.text}</span>
+            {/* 預覽是選填的：舊伺服器（或不帶預覽的工具）照舊只顯示那一行字，
+                不需要前後端同步部署。kind:"text" 由 ToolResultPreview 自行降級。 */}
+            {event.preview ? (
+              <div className="assistant-trace__preview">
+                <ToolResultPreview preview={event.preview} />
+              </div>
+            ) : null}
           </div>
         );
       })}

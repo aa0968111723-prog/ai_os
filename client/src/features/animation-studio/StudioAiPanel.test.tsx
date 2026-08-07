@@ -24,6 +24,7 @@ vi.mock("../../api", () => {
       director: {
         suggest: { useMutation: mutation },
         splitScript: { useMutation: mutation },
+        sketchBoard: { useMutation: mutation },
       },
     },
   };
@@ -41,6 +42,8 @@ const SHOT: StudioShot = {
   ambience: "遠處鐘聲",
 };
 
+const SKETCH = { pushStroke: vi.fn(), boardW: 1600, boardH: 900, maxStrokes: 1200, strokeCount: 0 };
+
 function setup(shot: StudioShot | null = SHOT) {
   render(
     <StudioAiPanel
@@ -51,6 +54,7 @@ function setup(shot: StudioShot | null = SHOT) {
       boardEmpty
       exportBoard={vi.fn()}
       onBoardSaved={vi.fn()}
+        sketch={SKETCH}
     />,
   );
 }
@@ -115,6 +119,7 @@ describe("StudioAiPanel・這一鏡", () => {
         boardEmpty
         exportBoard={vi.fn()}
         onBoardSaved={vi.fn()}
+        sketch={SKETCH}
       />,
     );
     expect(screen.getByLabelText(/環境音/)).toBeDisabled();

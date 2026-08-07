@@ -2392,7 +2392,7 @@ export function ProjectPage({ id }: { id: string }) {
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
               {/* anchorPeers：分鏡格上「誰在改這一格」。zone 層級的「有人在分鏡」不夠用——
                   這張卡從分鏡列一路到交付中心，說了等於沒說 */}
-              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} anchorPeers={collab.anchorPeers} />
+              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
             </div>
           </CollabZone>
           {/* 分享連結緊接在打包下載之後：兩者都是「把成果交出去」，只是一個給檔案、一個給連結。

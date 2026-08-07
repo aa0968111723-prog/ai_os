@@ -3,6 +3,8 @@ import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
+import { parseSpeechLines } from "@shared/sceneSpeech";
+import { parseMusicMarker } from "@shared/sceneMusic";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
 import { AssetAudio, AssetImg, AssetVideo } from "./MediaFallback";
@@ -15,6 +17,15 @@ const MAX_PROMPT_CHARS = 4000;
 const MAX_VOICEOVER_CHARS = 2000;
 /** 逐格生成的預設模型（與 SceneList 同一支，換頁不會突然變別的模型） */
 const DEFAULT_REGEN_MODEL = "fal-ai/fast-lightning-sdxl";
+/** 對白上限：與後端 scenes.update 的 dialogue z.string().max(2000) 同口徑 */
+const MAX_DIALOGUE_CHARS = 2000;
+
+/** 配樂標記上限：與後端 scenes.update 的 music z.string().max(300) 同口徑 */
+const MAX_MUSIC_CHARS = 300;
+
+/** 動作走位上限：與後端 scenes.update 的 action z.string().max(500) 同口徑 */
+const MAX_ACTION_CHARS = 500;
+
 /** 環境音描述上限：與後端 scenes.update 的 ambience z.string().max(500) 同口徑 */
 const MAX_AMBIENCE_CHARS = 500;
 
@@ -118,6 +129,9 @@ export function SceneStudio({
   const [promptDraft, setPromptDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [voiceDraft, setVoiceDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [ambienceDraft, setAmbienceDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [actionDraft, setActionDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [dialogueDraft, setDialogueDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [musicDraft, setMusicDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [instruction, setInstruction] = useState("");
   /** 修正用的底圖；null＝這一格目前的畫面 */
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
@@ -186,13 +200,17 @@ export function SceneStudio({
   });
   // 環境音描述另開一支 update，理由同配音詞：三種「儲存中／已儲存」回饋不能互相污染
   const saveAmbience = trpc.scenes.update.useMutation({ onSuccess: () => { setAmbienceDraft(null); refresh(); } });
+  // 走位另開一支 update，理由同配音詞與環境音：各自的「儲存中／已儲存」不能互相污染
+  const saveAction = trpc.scenes.update.useMutation({ onSuccess: () => { setActionDraft(null); refresh(); } });
+  const saveDialogue = trpc.scenes.update.useMutation({ onSuccess: () => { setDialogueDraft(null); refresh(); } });
+  const saveMusic = trpc.scenes.update.useMutation({ onSuccess: () => { setMusicDraft(null); refresh(); } });
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
   });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
@@ -200,6 +218,16 @@ export function SceneStudio({
   const voiceDirty = voiceDraft !== null && voiceDraft !== (data?.voiceover ?? "");
   /** 後端生成旁白吃的是「已儲存」的配音詞——估點與可否生成都以它為準 */
   const savedVoiceover = data?.voiceover ?? "";
+  const dialogue = dialogueDraft ?? data?.dialogue ?? "";
+  const dialogueDirty = dialogueDraft !== null && dialogueDraft !== (data?.dialogue ?? "");
+  const savedDialogue = data?.dialogue ?? "";
+  // 即時回饋「系統讀懂了幾句、誰是誰」——@ 打錯就會看到句數不對，不必等生成完才發現
+  const speechPreview = useMemo(() => parseSpeechLines(dialogue), [dialogue]);
+  const music = musicDraft ?? data?.music ?? "";
+  const musicDirty = musicDraft !== null && musicDraft !== (data?.music ?? "");
+  const musicMarker = useMemo(() => parseMusicMarker(music), [music]);
+  const action = actionDraft ?? data?.action ?? "";
+  const actionDirty = actionDraft !== null && actionDraft !== (data?.action ?? "");
   const ambience = ambienceDraft ?? data?.ambience ?? "";
   const ambienceDirty = ambienceDraft !== null && ambienceDraft !== (data?.ambience ?? "");
   const savedAmbience = data?.ambience ?? "";
@@ -387,6 +415,32 @@ export function SceneStudio({
                     {update.isPending ? "儲存中…" : "儲存提示詞"}
                   </Button>
                   {promptDirty ? <Meta>尚未儲存</Meta> : update.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor={`studio-action-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
+                這一鏡的動作走位
+                <HelpTip text="誰做了什麼、從哪走到哪。刻意與提示詞分開：走位是會動的，單張圖畫不出來——所以它只會送給影片類模型，重畫靜圖時不會用到。" />
+              </label>
+              <textarea
+                id={`studio-action-${sceneId}`}
+                value={action}
+                disabled={!canEdit || saveAction.isPending}
+                maxLength={MAX_ACTION_CHARS}
+                rows={2}
+                placeholder="例：安倢從門口走到窗邊，停下（可留白＝這鏡沒有特別的走位）"
+                onChange={(e) => setActionDraft(e.target.value)}
+                style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+              />
+              {canEdit && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Button size="sm" disabled={!actionDirty || saveAction.isPending} onClick={() => saveAction.mutate({ sceneId, action })}>
+                    {saveAction.isPending ? "儲存中…" : "儲存走位"}
+                  </Button>
+                  {actionDirty ? <Meta>尚未儲存</Meta> : saveAction.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                  <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>只送影片模型，出靜圖不吃</Meta>
                 </div>
               )}
             </div>
@@ -591,7 +645,33 @@ export function SceneStudio({
                       </Button>
                       {voiceDirty ? <Meta>尚未儲存</Meta> : saveVoice.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
                     </div>
-                    {savedVoiceover.trim() === "" && <Hint>先填配音詞並儲存，才能生成旁白。</Hint>}
+                    <label htmlFor={`studio-dialogue-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: "10px 0 0" }}>
+                      這一鏡的對白
+                      <HelpTip text="一行一句：@師父：坐吧。旁白要插在中間就寫 @旁白：…，順序就是唸出來的順序。括號寫表演指示（@安倢（小聲）：…），不會被唸出來。" />
+                    </label>
+                    <textarea
+                      id={`studio-dialogue-${sceneId}`}
+                      value={dialogue}
+                      disabled={saveDialogue.isPending}
+                      maxLength={MAX_DIALOGUE_CHARS}
+                      rows={4}
+                      placeholder={"@師父：坐吧。心急的人，茶會燙。\n@安倢（小聲）：謝謝師父。"}
+                      onChange={(e) => setDialogueDraft(e.target.value)}
+                      style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Button size="sm" disabled={!dialogueDirty || saveDialogue.isPending} onClick={() => saveDialogue.mutate({ sceneId, dialogue })}>
+                        {saveDialogue.isPending ? "儲存中…" : "儲存對白"}
+                      </Button>
+                      {dialogueDirty ? <Meta>尚未儲存</Meta> : saveDialogue.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                      {speechPreview.length > 0 && (
+                        <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                          {speechPreview.filter((l) => !l.isNarration).length} 句對白・
+                          {speechPreview.filter((l) => l.isNarration).length} 句旁白
+                        </Meta>
+                      )}
+                    </div>
+                    {savedVoiceover.trim() === "" && savedDialogue.trim() === "" && <Hint>先填旁白或對白並儲存，才能生成配音。</Hint>}
                     {voiceDirty && savedVoiceover.trim() !== "" && (
                       <Hint>配音詞還沒儲存——先按「儲存配音詞」，生成才會用新的稿。</Hint>
                     )}
@@ -603,7 +683,7 @@ export function SceneStudio({
                       ) : (
                         <ConfirmButton
                           triggerClassName="primary"
-                          disabled={savedVoiceover.trim() === "" || voiceDirty}
+                          disabled={(savedVoiceover.trim() === "" && savedDialogue.trim() === "") || voiceDirty || dialogueDirty}
                           triggerTitle="用已儲存的配音詞生成中文旁白，完成後就在下方試聽"
                           message={`即將生成旁白配音（${ttsModel?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
                           confirmLabel="確認生成"
@@ -701,6 +781,34 @@ export function SceneStudio({
                             </span>
                           )}
                         </ConfirmButton>
+                      )}
+                    </div>
+                  </>
+                )}
+                {canEdit && (
+                  <>
+                    <label htmlFor={`studio-music-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: "12px 0 0" }}>
+                      配樂（跨鏡）
+                      <HelpTip text="配樂通常橫跨好幾鏡：在開始的那一鏡寫「起｜描述」，在結束的下一鏡寫「止」。中間的鏡不必寫。鏡被搬動時區間會自動跟著走。" />
+                    </label>
+                    <input
+                      id={`studio-music-${sceneId}`}
+                      value={music}
+                      disabled={saveMusic.isPending}
+                      maxLength={MAX_MUSIC_CHARS}
+                      placeholder="起｜單音鋼琴，極簡，很慢　或　止"
+                      onChange={(e) => setMusicDraft(e.target.value)}
+                      style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Button size="sm" disabled={!musicDirty || saveMusic.isPending} onClick={() => saveMusic.mutate({ sceneId, music })}>
+                        {saveMusic.isPending ? "儲存中…" : "儲存配樂標記"}
+                      </Button>
+                      {musicDirty ? <Meta>尚未儲存</Meta> : saveMusic.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                      {musicMarker && (
+                        <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                          {musicMarker.kind === "stop" ? "這一鏡起停止配樂" : "從這一鏡開始播"}
+                        </Meta>
                       )}
                     </div>
                   </>

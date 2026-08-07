@@ -210,6 +210,23 @@ describe("CreationWorkbench", () => {
   });
 
   /**
+   * 實測回報「不知道該如何使用在專案上」的直接解答：四個模式的上下文語意不同，
+   * 而直接出圖／套範本完全不讀專案依據與資料表。切模式時這行必須跟著變，
+   * 否則使用者只會體驗到「有時候有用、有時候沒用」。語意本體有 aiContextSummary.test.ts。
+   */
+  it("切模式時「本次 AI 會讀到」跟著變", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    const line = () => screen.getByTestId("ai-context-line").getAttribute("aria-label") ?? "";
+    expect(line()).toContain("不含專案依據與團隊資料表");
+
+    await user.click(screen.getByRole("tab", { name: /一起想/ }));
+    expect(line()).toContain("專案依據");
+    expect(line()).not.toContain("不含");
+  });
+
+  /**
    * QA 2026-08-01：頂部「你想完成什麼畫面？」先前只把字鏡射到下面的模式面板，本身沒有送出行為，
    * 使用者回報「上面那個框不能用」。以下四個案例釘住「每個模式按下去各自會做什麼」。
    */

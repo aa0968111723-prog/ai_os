@@ -173,6 +173,16 @@ export const scenes = pgTable("scenes", {
   orderIndex: integer("order_index").notNull().default(0),
   title: text("title").notNull(),
   durationSec: integer("duration_sec").notNull().default(5),
+  /**
+   * 畫面素材的來源入點（毫秒）——「剪初稿」要切的就是這個。
+   * 0＝從素材開頭播。與 trimEndMs 一組，語義見 shared/timeline.ts 的 ShotSource。
+   */
+  trimStartMs: integer("trim_start_ms").notNull().default(0),
+  /**
+   * 畫面素材的來源出點（毫秒）；null＝這一鏡沒修剪過，鏡長仍由 durationSec 決定。
+   * 存絕對出點而非「尾巴切掉多少」：素材重生成、長度變了時，絕對位置仍指向同一個時間點。
+   */
+  trimEndMs: integer("trim_end_ms"),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
   narrationAssetId: uuid("narration_asset_id"),
@@ -180,6 +190,25 @@ export const scenes = pgTable("scenes", {
   voiceover: text("voiceover"),
   /** 這一鏡聽得到什麼（蟲鳴、鐘聲、腳步）——餵給音效／配樂模型的提示詞。與 voiceover 對稱。 */
   ambience: text("ambience"),
+  /**
+   * 動作走位：誰做了什麼、從哪走到哪。
+   * 與 prompt 分開是刻意的——prompt 直接送擴散模型，而走位是時間性的，
+   * 單張圖畫不出「從門口走到窗邊」，混進去只會生出多重人影。
+   */
+  action: text("action"),
+  /**
+   * 對白序列（原文）：「@師父：坐吧。」這樣的一段，旁白以 @旁白 標記，可與對白交錯。
+   * 結構由 shared/sceneSpeech.ts 讀取時導出、永不落庫——結構化儲存會讓來回之後的
+   * 正規化改寫使用者自己打的字。
+   */
+  dialogue: text("dialogue"),
+  /**
+   * 配樂端點標記（「起｜描述」或「止」）。區間由 shared/sceneMusic.ts 掃相鄰鏡推導——
+   * 存區間本身會在鏡被重排／刪除／改秒數之後錯位，存端點則自動跟著鏡走。
+   */
+  music: text("music"),
+  /** 配樂音檔，落在起鏡上；與畫面／旁白／環境音三個指標欄同構。 */
+  musicAssetId: uuid("music_asset_id"),
   /** 環境音成品音檔。與 narrationAssetId 對稱；null＝這一鏡還沒有環境音。 */
   ambienceAssetId: uuid("ambience_asset_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),
@@ -288,6 +317,34 @@ export const notes = pgTable("notes", {
 }, (t) => ({
   groupIdx: index("notes_group_idx").on(t.groupId),
   planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
+}));
+
+/**
+ * 筆記／知識庫的檔案附件（0043_content_attachments）：
+ * 會議紀錄要能夾照片、簽到表掃描檔、講義 PDF；知識庫的開示稿本來就常是一份 PDF/Word。
+ * 原檔落在同一套素材儲存（storage_path，與素材庫／私訊附件共用 Volume 與備份），
+ * text_content 存抽出的純文字——知識庫附件的文字會跟著注入 AI 導演，PDF 不再是「只能下載的死檔」。
+ *
+ * 刻意不加 FK：ref_id 依 kind 指向不同表（note／knowledge），刪除一律由 core 服務同交易清乾淨。
+ * group_id 冗餘存一份，讓檔案服務不必先 join 母表就能做多組隔離的第一道守門。
+ */
+export const contentAttachments = pgTable("content_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  /** note=筆記附件（ref_id→notes.id）・knowledge=知識庫附件（ref_id→knowledge.id） */
+  kind: text("kind", { enum: ["note", "knowledge"] }).notNull(),
+  refId: uuid("ref_id").notNull(),
+  name: text("name").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  storagePath: text("storage_path").notNull(),
+  /** 抽出的純文字（pdf/docx/txt…）：知識庫注入與未來全文搜尋讀這裡；null＝圖片/影音或抽取失敗 */
+  textContent: text("text_content"),
+  uploadedBy: uuid("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  refIdx: index("content_attachments_ref_idx").on(t.kind, t.refId, t.createdAt),
+  groupIdx: index("content_attachments_group_idx").on(t.groupId),
 }));
 
 /** 筆記留言（討論串）— 0034_note_comments */
