@@ -34,7 +34,7 @@ import { completeText, LlmServiceError, type LlmProvider } from "../services/llm
 import { runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
-import { submitGenerationCore } from "../services/generationCore";
+import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
@@ -1211,15 +1211,18 @@ export const assistantRouter = router({
         }
         // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）。
         // sceneRole 依模型類別決定：視覺（圖/影）→主畫面、旁白語音→旁白音檔、音效/配樂→環境音（純文字已在上面擋掉不會走到這）
-        const gen = await submitGenerationCore({
-          userId: ctx.auth.user.id,
+        // 對齊 GLOBAL_ASSISTANT_PLAN §4.4：改走 executeGenerationCommand——
+        // 舊路直呼 submitGenerationCore 只有 requireGroup，繞過了狀態機（封存/暫停可生成）、
+        // 專案 viewer 檢查與 policyEngine；MCP／工作流／代理早就全走 Command，這裡是最後一個旁路。
+        const gen = await executeGenerationCommand({
+          auth: ctx.auth,
+          source: "web",
           projectId: project.id,
           modelId: model.id,
           prompt: a.prompt,
           sceneId: a.sceneId,
           sceneRole: role ?? undefined,
           reasonPrefix: "助手生成",
-          assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
         });
         return { ok: true, kind: "generate" as const, generationId: gen.id, message: "已送出生成，完成後會出現在生成紀錄" };
       }

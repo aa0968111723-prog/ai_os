@@ -64,6 +64,8 @@ export function toSiteActionInput(a: SiteAction) {
       return { type: a.type, groupId: a.groupId, projectId: a.projectId, title: a.title, description: a.description, assigneeId: a.assigneeId, dueAt: a.dueAt, priority: a.priority } as const;
     case "send_dm":
       return { type: a.type, peerId: a.peerId, body: a.body } as const;
+    case "add_database_row":
+      return { type: a.type, tableId: a.tableId, data: a.data } as const;
   }
 }
 
@@ -73,6 +75,7 @@ export function siteActionDoneLink(a: SiteAction, result: { type: string; projec
   if (a.type === "add_schedule_item" || a.type === "add_note") return { href: "/planner", label: "查看筆記排程" };
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
+  if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
   return null;
 }
 
@@ -97,9 +100,13 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
       </div>
     );
   }
-  // 以本人名義送出的內容必須全文可見再確認：label 只有摘要，私訊本文與筆記內容整段亮出來
+  // 以本人名義送出的內容必須全文可見再確認：label 只有摘要——私訊本文、筆記內容、
+  // 資料列的每一欄值整段亮出來
   const fullText =
-    action.type === "send_dm" ? action.body : action.type === "add_note" ? action.content : null;
+    action.type === "send_dm" ? action.body
+    : action.type === "add_note" ? action.content
+    : action.type === "add_database_row" ? action.preview
+    : null;
   return (
     <div className="ai-copilot-action-card" data-fb="站級動作卡">
       <span className="ai-copilot-action-card__label">{action.label}</span>

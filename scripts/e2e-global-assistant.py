@@ -106,6 +106,17 @@ ok("ACT：任務出現在專案任務清單", any(x["id"] == t["taskId"] for x i
 d = call("POST", admin, "globalAssistant.runSiteAction", {"type": "send_dm", "peerId": acc["user"]["id"], "body": "明早十點對稿，帶腳本"})
 ok("ACT：私訊", d.get("type") == "send_dm" and bool(d.get("messageId")))
 
+# ── 第二批寫入：資料列（雙重閘——agentAccess=write 才可寫；唯讀庫要被擋）──
+db_w = call("POST", admin, "databases.create", {"scope": "group", "groupId": gid, "name": "器材清單",
+    "fields": [{"key": "name", "label": "名稱", "type": "text"}, {"key": "qty", "label": "數量", "type": "text"}],
+    "agentAccess": "write"})
+db_r = call("POST", admin, "databases.create", {"scope": "group", "groupId": gid, "name": "唯讀名單",
+    "fields": [{"key": "name", "label": "名稱", "type": "text"}], "agentAccess": "read"})
+row = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_database_row", "tableId": db_w["id"], "data": {"name": "三腳架", "qty": "2"}})
+ok("ACT：資料列（真寫入）", row.get("type") == "add_database_row" and bool(row.get("rowId")))
+blocked = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_database_row", "tableId": db_r["id"], "data": {"name": "偷寫"}})
+ok("🔒 AI 唯讀庫確認卡路徑也被擋", "__error__" in blocked and "AI" in blocked["__error__"])
+
 # 時間格式負例：壞 startsAt 要被擋（不是寫進去一筆壞資料）
 bad = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_schedule_item", "groupId": gid, "title": "壞時間", "startsAt": "明天早上"})
 ok("🔒 壞時間格式被擋", "__error__" in bad)
