@@ -11,6 +11,7 @@ import {
   SCRIPT_TITLE_MAX,
   SCRIPT_VOICEOVER_MAX,
   SCRIPT_AMBIENCE_MAX,
+  SCRIPT_ACTION_MAX,
   parseStoryboardScript,
   resolveScriptTargets,
 } from "../../shared/storyboardScript";
@@ -20,6 +21,7 @@ import {
   buildSceneVersions,
   findDuplicateCurrent,
   isSceneRefineModel,
+  sceneVisualPrompt,
   isSceneRegenModel,
   summarizeSceneVersions,
   type SceneExternalAsset,
@@ -146,6 +148,7 @@ export const scenesRouter = router({
         prompt: schema.scenes.prompt,
         voiceover: schema.scenes.voiceover,
         ambience: schema.scenes.ambience,
+        action: schema.scenes.action,
         // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
@@ -406,6 +409,7 @@ export const scenesRouter = router({
       narrationAssetId: scene.narrationAssetId,
       ambience: scene.ambience,
       ambienceAssetId: scene.ambienceAssetId,
+      action: scene.action,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -563,6 +567,8 @@ export const scenesRouter = router({
             voiceover: dup ? cur.voiceover : null,
             // 環境音的「文字」跟 prompt/voiceover 同類（是設定），音檔本身不複製——與 assetId 同規則
             ambience: dup ? cur.ambience : null,
+            // 走位是設定不是產物，跟著複製（同 prompt/voiceover/ambience）
+            action: dup ? cur.action : null,
             // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
@@ -622,6 +628,7 @@ export const scenesRouter = router({
         durationSec: z.number().int().min(1).max(60).optional(),
         voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
         ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
+        action: z.string().max(SCRIPT_ACTION_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
         // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
@@ -641,6 +648,7 @@ export const scenesRouter = router({
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
       if (input.ambience !== undefined) patch.ambience = input.ambience;
+      if (input.action !== undefined) patch.action = input.action;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
@@ -708,6 +716,7 @@ export const scenesRouter = router({
               prompt: scene.prompt ?? null,
               voiceover: scene.voiceover ?? null,
               ambience: scene.ambience ?? null,
+              action: scene.action ?? null,
             });
             created += 1;
             continue;
@@ -726,6 +735,9 @@ export const scenesRouter = router({
           }
           if (scene.ambience !== undefined && scene.ambience !== (row.ambience ?? "").trim()) {
             patch.ambience = scene.ambience;
+          }
+          if (scene.action !== undefined && scene.action !== (row.action ?? "").trim()) {
+            patch.action = scene.action;
           }
           if (Object.keys(patch).length === 0) continue;
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
@@ -803,7 +815,8 @@ export const scenesRouter = router({
       const model = getModel(input.modelId);
       const modelRejection = regenRejection(model);
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
-      const prompt = input.prompt ?? scene.prompt ?? "";
+      // 呼叫端指定的提示詞優先；否則用這一鏡的畫面描述，影片類模型再接上走位
+      const prompt = input.prompt ?? sceneVisualPrompt(scene, model);
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選

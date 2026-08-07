@@ -190,6 +190,12 @@ export const scenes = pgTable("scenes", {
   voiceover: text("voiceover"),
   /** 這一鏡聽得到什麼（蟲鳴、鐘聲、腳步）——餵給音效／配樂模型的提示詞。與 voiceover 對稱。 */
   ambience: text("ambience"),
+  /**
+   * 動作走位：誰做了什麼、從哪走到哪。
+   * 與 prompt 分開是刻意的——prompt 直接送擴散模型，而走位是時間性的，
+   * 單張圖畫不出「從門口走到窗邊」，混進去只會生出多重人影。
+   */
+  action: text("action"),
   /** 環境音成品音檔。與 narrationAssetId 對稱；null＝這一鏡還沒有環境音。 */
   ambienceAssetId: uuid("ambience_asset_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),

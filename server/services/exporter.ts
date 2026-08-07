@@ -206,6 +206,8 @@ export type TimelineScene = {
   narrationPath?: string | null;
   /** 該鏡環境音的 zip 內相對路徑（06_環境音/…）；null/未給＝無環境音 */
   ambiencePath?: string | null;
+  /** 動作走位——只進備註欄給人看，不產生任何媒體檔 */
+  action?: string | null;
   /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
   trimStartMs?: number | null;
   /** 畫面素材來源出點（毫秒）；null＝未修剪 */
@@ -308,7 +310,9 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     // 它們是為這一鏡生成的、本來就對齊鏡長，套上畫面的入點只會讓聲音憑空少一截。
     const srcIn = fcpTimeFromFrames(layout.shots[i].sourceInFrames);
 
-    const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
+    // 備註帶走位：剪輯師在時間軸上點開這一鏡，看得到它要演什麼（旁白是聲音、走位是畫面）
+    const noteParts = [sc.title, (sc.action ?? "").trim(), (sc.voiceover ?? "").trim()].filter(Boolean);
+    const note = noteParts.join("｜");
     const clipName = escXml(`${i + 1}_${sc.title}`);
 
     // 音訊 asset（旁白與音訊類場景素材共用）。duration 宣告該鏡秒數：省略的話 DTD 預設 0s，
@@ -745,8 +749,8 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     `- 格式：${project.format}（${project.platform}）`,
     formatWorldviewForAi(worldview, "export"),
     "",
-    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 環境音 | 進出點時間碼 | 提示詞 | 模型 |",
-    "|---|---|---|---|---|---|---|---|---|---|",
+    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 環境音 | 進出點時間碼 | 動作走位 | 提示詞 | 模型 |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
   ];
 
   // 缺漏素材集中收集、待表格結束後再列——插在表格列中間會把 markdown 表格截斷
@@ -932,7 +936,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const ambienceFile = ambienceNames[i] ?? "（無）";
     const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
     lines.push(
-      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${times[i].out - times[i].in}s${isTrimmed(scene) ? "（已修剪）" : ""}`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(ambienceFile)} | ${mdTableCell(tc)} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
+      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${times[i].out - times[i].in}s${isTrimmed(scene) ? "（已修剪）" : ""}`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(ambienceFile)} | ${mdTableCell(tc)} | ${mdTableCell(scene.action ?? "—")} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
     );
   }
 
@@ -1016,6 +1020,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
       mediaKind: writtenKinds[i],
       narrationPath: narrationNames[i],
       ambiencePath: ambienceNames[i],
+      action: sc.action,
       trimStartMs: sc.trimStartMs,
       trimEndMs: sc.trimEndMs,
     }));

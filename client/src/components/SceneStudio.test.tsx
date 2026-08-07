@@ -52,7 +52,7 @@ function genRow(over: Partial<SceneVersionGenerationRow> & { generationId: strin
 }
 
 /** 伺服器回傳的形狀（scenes.versions）——用真的 buildSceneVersions 產生，避免 mock 與正式投影分岔 */
-function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null; ambience?: string | null } = {}) {
+function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null; ambience?: string | null; action?: string | null } = {}) {
   const rows = opts.rows ?? [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" })];
   const currentAssetId = opts.currentAssetId === undefined ? "asset-g1" : opts.currentAssetId;
   const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null, ambienceAssetId: null });
@@ -63,6 +63,7 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
     prompt: opts.prompt === undefined ? "黃昏的海邊" : opts.prompt,
     voiceover: opts.voiceover ?? null,
     ambience: opts.ambience ?? null,
+    action: opts.action ?? null,
     assetId: currentAssetId,
     narrationAssetId: null,
     ambienceAssetId: null,
@@ -337,6 +338,19 @@ describe("SceneStudio", () => {
     const arg = voiceMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.sceneId).toBe("s-1");
     expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("走位是獨立欄位，與提示詞各自儲存（不互相污染 pending 狀態）", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.type(screen.getByRole("textbox", { name: /這一鏡的動作走位/ }), "從門口走到窗邊");
+    await user.click(screen.getByRole("button", { name: /儲存走位/ }));
+    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", action: "從門口走到窗邊" });
+  });
+
+  it("走位欄位明講「只送影片模型」——使用者才知道重畫靜圖時它不會生效", async () => {
+    mountStudio();
+    expect(screen.getByText(/只送影片模型，出靜圖不吃/)).toBeInTheDocument();
   });
 
   it("環境音頁：還沒填描述→生成鈕鎖住並指路；填了要先儲存", async () => {

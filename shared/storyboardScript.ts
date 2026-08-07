@@ -23,6 +23,8 @@ export type StoryboardScriptScene = {
   voiceover?: string;
   /** 這一鏡聽得到什麼（環境音／音效）。與 voiceover 對稱，同樣是可寫回的文字。 */
   ambience?: string;
+  /** 誰做了什麼、從哪走到哪。刻意與 prompt 分開：走位是時間性的，單張圖畫不出來。 */
+  action?: string;
   /**
    * 標題上的鏡次（`## 3.` 的 3）。這不是裝飾，是**身分證**：中間整段沒寫時，
    * 靠它才知道「## 3.」指的仍是第 3 鏡，而不是往前遞補成第 2 鏡。見 resolveScriptTargets。
@@ -37,22 +39,77 @@ export type StoryboardScriptRow = {
   prompt?: string | null;
   voiceover?: string | null;
   ambience?: string | null;
+  action?: string | null;
   /** 這一鏡綁定的卡片名字，僅供閱讀時標注 */
   cardNames?: string[];
 };
 
 export const SCRIPT_SCENE_HEADING = "##";
 const VISUAL_LABEL = "畫面";
+const ACTION_LABEL = "動作";
 const VOICE_LABEL = "旁白";
 const AMBIENCE_LABEL = "環境音";
 const CARDS_LABEL = "設定卡";
 
+/**
+ * 欄位表：新增一個欄位只改這裡，parse／format／上限檢查全部由它導出。
+ *
+ * 為什麼要有這張表：欄位從三個長到六個以上之後，逐欄寫 if 會讓三件事各自漂移——
+ * 哪些吃續行、哪些空的也印、上限幾字。三者只要有一處對不上，症狀都是「使用者的字
+ * 被系統改掉」而不是報錯（環境音漏傳那次就是這樣）。
+ *
+ * multiline=false 的欄位**不吃續行**：它們的值是一行寫完的短指示，後面若接自由文字
+ * （例如在鏡末尾補一句筆記），那句話不該被吞進這個欄位。
+ */
+export type ScriptFieldKey = "prompt" | "action" | "voiceover" | "ambience";
+
+type ScriptFieldSpec = {
+  key: ScriptFieldKey;
+  label: string;
+  /** 吃續行？false＝只收標籤同一行的內容，後續行落回上一個 multiline 欄位 */
+  multiline: boolean;
+  /** 空的也輸出一行？（只影響「編輯用」的全欄模板，唯讀通讀一律省略空欄） */
+  alwaysEmit: boolean;
+  max: number;
+  /** 錯誤訊息裡的人話欄位名 */
+  human: string;
+};
+
+export const SCRIPT_FIELDS: readonly ScriptFieldSpec[] = [
+  { key: "prompt", label: VISUAL_LABEL, multiline: true, alwaysEmit: true, max: 4000, human: "畫面" },
+  // 動作走位：與畫面同為描述，吃續行。上限比畫面小一個量級——它是指示不是全景描述。
+  { key: "action", label: ACTION_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "動作" },
+  { key: "voiceover", label: VOICE_LABEL, multiline: true, alwaysEmit: true, max: 2000, human: "旁白" },
+  { key: "ambience", label: AMBIENCE_LABEL, multiline: true, alwaysEmit: true, max: 500, human: "環境音" },
+] as const;
+
+/**
+ * multiline=false 保留給「名單型」欄位（角色／場景／道具／配樂）——它們排在一鏡的最後，
+ * 使用者在鏡末尾補一句筆記時，那句話會被吞進名單再拿去查卡片，命中 0 張就把整鏡綁定解掉。
+ *
+ * 描述型欄位（畫面／動作／旁白／環境音）一律 multiline：把它們設成單行會讓續行落回
+ * 前一個 multiline 欄位，而那個欄位可能在後面被自己的標籤覆寫——使用者的字就這樣無聲消失。
+ * 這是實測出來的：環境音一度被設成單行，「環境音：蟲鳴 / 遠處狗吠 / 旁白：說話」會讓
+ * 「遠處狗吠」完全不見。
+ */
+
+const FIELD_BY_LABEL = new Map(SCRIPT_FIELDS.map((f) => [f.label, f]));
+/** 最後一個 multiline 欄位——單行欄位後面的續行落回這裡，而不是被單行欄位吞掉 */
+const LAST_MULTILINE_BEFORE = new Map<string, ScriptFieldKey>();
+{
+  let last: ScriptFieldKey = "prompt";
+  for (const f of SCRIPT_FIELDS) {
+    LAST_MULTILINE_BEFORE.set(f.label, last);
+    if (f.multiline) last = f.key;
+  }
+}
+
 /** 冒號：全形半形都收（中文輸入法預設打出全形） */
 const COLON = "[：:]";
 const HEADING_RE = /^##\s*(?:(\d+)\s*[.、．]\s*)?(.*?)\s*(?:[（(]\s*(\d+)\s*(?:s|秒)?\s*[）)])?\s*$/;
-const LABEL_RE = new RegExp(
-  `^(${VISUAL_LABEL}|${VOICE_LABEL}|${AMBIENCE_LABEL}|${CARDS_LABEL})${COLON}\\s*(.*)$`,
-);
+// CARDS_LABEL 仍留在集合裡：舊文字貼回來時那一行要被安全忽略，不能被當成自由文字寫進畫面
+const ALL_LABELS = [...SCRIPT_FIELDS.map((f) => f.label), CARDS_LABEL];
+const LABEL_RE = new RegExp(`^(${ALL_LABELS.join("|")})${COLON}\\s*(.*)$`);
 
 /** 跳脫字元：內容裡「長得像結構」的那一行前面加一個反斜線 */
 const ESCAPE = "\\";
@@ -81,16 +138,31 @@ function unescapeLine(line: string): string {
   return line.startsWith(ESCAPE) && looksStructural(line.slice(1)) ? line.slice(1) : line;
 }
 
+/**
+ * 兩種輸出模式，因為這份文字有兩種用途，而它們的需求相反：
+ *
+ * - `"edit"`（編輯／複製）：空欄位也印出標籤。**這是防呆的一部分**——呼叫端漏傳某欄時，
+ *   全欄模板讓那一欄在寫回時被判成「使用者刻意清空」而不是「不存在」，
+ *   而測試斷言得到它（環境音漏傳那次的教訓）。也讓人知道這一格可以寫。
+ * - `"read"`（唯讀通讀）：省略空欄。欄位變多之後，一律輸出會讓 12 鏡從 59 行漲到 119 行，
+ *   編輯框一眼從 3.7 鏡掉到 1.8 鏡——連「這一鏡接不接得上下一鏡」都看不到，
+ *   而那正是打開全文的主要動作。唯讀那份從來不會被 parse，壓縮它不影響任何契約。
+ */
+export type ScriptFormatMode = "edit" | "read";
+
 /** 分鏡 → 文字腳本（可複製、可貼回來改） */
-export function formatStoryboardScript(rows: StoryboardScriptRow[]): string {
+export function formatStoryboardScript(
+  rows: StoryboardScriptRow[],
+  mode: ScriptFormatMode = "edit",
+): string {
   return rows
     .map((row, i) => {
       const lines = [`${SCRIPT_SCENE_HEADING} ${i + 1}. ${row.title} (${row.durationSec}s)`];
-      lines.push(`${VISUAL_LABEL}：${escapeBody((row.prompt ?? "").trim())}`);
-      lines.push(`${VOICE_LABEL}：${escapeBody((row.voiceover ?? "").trim())}`);
-      // 環境音與畫面／旁白同層級一律輸出（即使是空的）：它剛從「沒有家」變成鏡規格的一員，
-      // 有空欄位在那裡，使用者才知道這一格可以寫；只在有值時才出現等於繼續藏著它。
-      lines.push(`${AMBIENCE_LABEL}：${escapeBody((row.ambience ?? "").trim())}`);
+      for (const field of SCRIPT_FIELDS) {
+        const value = (row[field.key] ?? "").trim();
+        if (!value && (mode === "read" || !field.alwaysEmit)) continue;
+        lines.push(`${field.label}：${escapeBody(value)}`);
+      }
       // 卡片是唯讀標注：讓人讀腳本時知道這鏡會帶誰，但改文字不會動到綁定
       if (row.cardNames?.length) lines.push(`${CARDS_LABEL}：${row.cardNames.join("・")}（唯讀）`);
       return lines.join("\n");
@@ -107,6 +179,8 @@ export const SCRIPT_PROMPT_MAX = 4000;
 export const SCRIPT_VOICEOVER_MAX = 2000;
 /** 環境音是給音效模型的提示詞，不是台詞——比旁白短得多就夠用 */
 export const SCRIPT_AMBIENCE_MAX = 500;
+/** 動作走位是指示不是全景描述，與環境音同量級 */
+export const SCRIPT_ACTION_MAX = 500;
 /** 一份腳本最多幾鏡：寫回是逐鏡 insert/update，沒上限等於讓一份貼錯的文件在交易裡跑幾千趟 */
 export const MAX_SCRIPT_SCENES = 200;
 
@@ -124,7 +198,7 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
   const scenes: StoryboardScriptScene[] = [];
 
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  let current: (StoryboardScriptScene & { _label?: string }) | null = null;
+  let current: (StoryboardScriptScene & { _label?: ScriptFieldKey }) | null = null;
   let leading = true;
 
   const flush = () => {
@@ -132,9 +206,10 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
     const { _label, ...scene } = current;
     void _label;
     scene.title = scene.title.trim();
-    scene.prompt = scene.prompt?.trim();
-    scene.voiceover = scene.voiceover?.trim();
-    scene.ambience = scene.ambience?.trim();
+    for (const field of SCRIPT_FIELDS) {
+      const v = scene[field.key];
+      if (v !== undefined) scene[field.key] = v.trim();
+    }
     if (!scene.title) scene.title = `第 ${scenes.length + 1} 鏡`;
     scenes.push(scene);
     current = null;
@@ -171,37 +246,31 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
     const label = LABEL_RE.exec(line.trim());
     if (label) {
       const [, name, rest] = label;
-      if (name === VISUAL_LABEL) {
-        current._label = VISUAL_LABEL;
-        current.prompt = rest ?? "";
-      } else if (name === VOICE_LABEL) {
-        current._label = VOICE_LABEL;
-        current.voiceover = rest ?? "";
-      } else if (name === AMBIENCE_LABEL) {
-        current._label = AMBIENCE_LABEL;
-        current.ambience = rest ?? "";
+      const spec = FIELD_BY_LABEL.get(name!);
+      if (spec) {
+        // 標籤是**賦值**不是附加：連寫兩行「旁白：」只會留下第二句。這是既有行為，
+        // 但它會安靜地吃掉第一句，所以這裡把它講出來。
+        if (current[spec.key] !== undefined) {
+          warnings.push(`第 ${scenes.length + 1} 鏡的「${spec.human}」寫了不只一次，只會採用最後一次`);
+        }
+        current._label = spec.multiline ? spec.key : LAST_MULTILINE_BEFORE.get(name!);
+        current[spec.key] = rest ?? "";
       } else {
-        // 設定卡是唯讀標注，讀回來就丟掉（改綁定請到分鏡表那一列）
-        current._label = CARDS_LABEL;
+        // 設定卡：唯讀標注，讀回來就丟掉（改綁定請到分鏡表那一列）。
+        // _label 指回上一個 multiline 欄位——它後面的續行不該憑空消失。
+        current._label = LAST_MULTILINE_BEFORE.get(name!);
       }
       continue;
     }
 
-    // 續行：接在最後一個標籤底下（沒有標籤就當畫面描述——最常見的手打情況）。
+    // 續行：接在最後一個 multiline 標籤底下（沒有標籤就當畫面描述——最常見的手打情況）。
     //
     // 這裡**只接、不 trim**：逐行 trim 會把值中間的空行吃掉（「第一句」+空行+「第二句」
     // 會變成兩行相鄰），而使用者原封不動貼回來時，那個差異會被判成「有變更」寫進 DB——
     // 等於系統偷改了他寫的字。頭尾空白留到 flush() 一次處理即可。
     const content = unescapeLine(line);
-    if (current._label === VOICE_LABEL) {
-      current.voiceover = `${current.voiceover ?? ""}\n${content}`;
-    } else if (current._label === AMBIENCE_LABEL) {
-      current.ambience = `${current.ambience ?? ""}\n${content}`;
-    } else if (current._label === CARDS_LABEL) {
-      // 唯讀區塊的續行一併忽略
-    } else {
-      current.prompt = `${current.prompt ?? ""}\n${content}`;
-    }
+    const target: ScriptFieldKey = current._label ?? "prompt";
+    current[target] = `${current[target] ?? ""}\n${content}`;
   }
   flush();
 
@@ -224,14 +293,13 @@ function limitErrors(scenes: StoryboardScriptScene[]): string[] {
     if (scene.title.length > SCRIPT_TITLE_MAX) {
       errors.push(`${where}的標題 ${scene.title.length} 字，超過 ${SCRIPT_TITLE_MAX} 字`);
     }
-    if ((scene.prompt?.length ?? 0) > SCRIPT_PROMPT_MAX) {
-      errors.push(`${where}的畫面 ${scene.prompt?.length} 字，超過 ${SCRIPT_PROMPT_MAX} 字`);
-    }
-    if ((scene.voiceover?.length ?? 0) > SCRIPT_VOICEOVER_MAX) {
-      errors.push(`${where}的旁白 ${scene.voiceover?.length} 字，超過 ${SCRIPT_VOICEOVER_MAX} 字`);
-    }
-    if ((scene.ambience?.length ?? 0) > SCRIPT_AMBIENCE_MAX) {
-      errors.push(`${where}的環境音 ${scene.ambience?.length} 字，超過 ${SCRIPT_AMBIENCE_MAX} 字`);
+    // 逐欄上限一律由 SCRIPT_FIELDS 導出——各寫一份 if 就是讓「新增欄位忘了加檢查」
+    // 變成靜默通過，而繞過的正是單格編輯的護欄。
+    for (const field of SCRIPT_FIELDS) {
+      const len = scene[field.key]?.length ?? 0;
+      if (len > field.max) {
+        errors.push(`${where}的${field.human} ${len} 字，超過 ${field.max} 字`);
+      }
     }
   });
   return errors;
@@ -286,9 +354,11 @@ export type StoryboardScriptDiff = {
 function changed(row: StoryboardScriptRow, scene: StoryboardScriptScene): boolean {
   if (scene.title !== row.title) return true;
   if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) return true;
-  if (scene.prompt !== undefined && scene.prompt !== (row.prompt ?? "").trim()) return true;
-  if (scene.voiceover !== undefined && scene.voiceover !== (row.voiceover ?? "").trim()) return true;
-  if (scene.ambience !== undefined && scene.ambience !== (row.ambience ?? "").trim()) return true;
+  // 同上：逐欄比對表驅動。漏一欄的症狀是「畫面說沒變更，DB 卻被改了」——最難查的那種。
+  for (const field of SCRIPT_FIELDS) {
+    const next = scene[field.key];
+    if (next !== undefined && next !== (row[field.key] ?? "").trim()) return true;
+  }
   return false;
 }
 

@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_SCRIPT_SCENES,
+  SCRIPT_FIELDS,
   SCRIPT_PROMPT_MAX,
   SCRIPT_VOICEOVER_MAX,
   diffStoryboardScript,
@@ -26,21 +27,47 @@ const ROWS = [
 ];
 
 describe("formatStoryboardScript", () => {
-  it("每鏡一段：標題帶序號與秒數，畫面／旁白／環境音各一行", () => {
+  it("每鏡一段：標題帶序號與秒數，四個描述欄各一行（編輯模式）", () => {
     expect(formatStoryboardScript(ROWS)).toBe(
       [
         "## 1. 開場・晨光 (5s)",
         "畫面：清晨禪堂，柔和光線",
+        "動作：",
         "旁白：那一年，我第一次走進禪堂。",
         "環境音：遠處鐘聲，細微鳥鳴",
         "",
         "## 2. 紅傘特寫 (4s)",
         "畫面：正紅長柄傘立在門邊",
+        "動作：",
         "旁白：",
         "環境音：",
         "設定卡：安倢的紅傘（唯讀）",
       ].join("\n"),
     );
+  });
+
+  /**
+   * 唯讀通讀省略空欄。欄位變多之後一律輸出會讓 12 鏡從 59 行漲到 119 行，
+   * 編輯框一眼從 3.7 鏡掉到 1.8 鏡——連相鄰兩鏡都看不到，而「這鏡接不接得上下一鏡」
+   * 正是打開全文的主要動作。唯讀那份不會被 parse，壓縮它不影響任何契約。
+   */
+  it("唯讀模式省略空欄——通讀時篇幅不被空標籤灌水", () => {
+    const out = formatStoryboardScript(ROWS, "read");
+    expect(out).not.toContain("動作：");
+    expect(out).not.toContain("旁白：\n");
+    expect(out).toContain("畫面：清晨禪堂，柔和光線");
+    expect(out).toContain("環境音：遠處鐘聲，細微鳥鳴");
+    // 編輯模式仍然是全欄模板（那是漏傳欄位的防呆）
+    expect(formatStoryboardScript(ROWS, "edit")).toContain("動作：");
+  });
+
+  it("唯讀模式明顯比編輯模式短——這是它存在的唯一理由", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      title: `鏡${i + 1}`, durationSec: 5, prompt: "畫面描述", voiceover: i % 3 ? "旁白" : null,
+    }));
+    const edit = formatStoryboardScript(many, "edit").split("\n").length;
+    const read = formatStoryboardScript(many, "read").split("\n").length;
+    expect(read).toBeLessThan(edit * 0.75);
   });
 
   /**
@@ -60,11 +87,12 @@ describe("formatStoryboardScript", () => {
         title: "開場・晨光",
         durationSec: 5,
         prompt: "清晨禪堂，柔和光線",
+        action: "",
         voiceover: "那一年，我第一次走進禪堂。",
         ambience: "遠處鐘聲，細微鳥鳴",
         ordinal: 1,
       },
-      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", voiceover: "", ambience: "", ordinal: 2 },
+      { title: "紅傘特寫", durationSec: 4, prompt: "正紅長柄傘立在門邊", action: "", voiceover: "", ambience: "", ordinal: 2 },
     ]);
   });
 
@@ -120,6 +148,49 @@ describe("formatStoryboardScript", () => {
     expect(parseStoryboardScript(formatStoryboardScript(rows)).scenes[0]?.prompt).toBe(
       "第一行\n\\不是結構\n\\旁白：是結構",
     );
+  });
+});
+
+describe("SCRIPT_FIELDS（欄位表是 parse/format/上限的單一來源）", () => {
+  it("描述型欄位一律吃續行——設成單行會讓續行落回前一欄再被覆寫，字無聲消失", () => {
+    // 實測過的回歸：環境音一度被設成 multiline:false，這份輸入會讓「遠處狗吠」完全不見
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "環境音：蟲鳴", "遠處狗吠", "旁白：說話"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.ambience).toBe("蟲鳴\n遠處狗吠");
+    expect(parsed.scenes[0]?.voiceover).toBe("說話");
+    expect(SCRIPT_FIELDS.every((f) => f.multiline)).toBe(true); // 目前四欄都是描述型
+  });
+
+  it("動作走位是獨立欄位，不會混進畫面（畫面是要送圖像模型的）", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "畫面：禪堂夜坐，中景", "動作：安倢從門口走到窗邊，停下"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.prompt).toBe("禪堂夜坐，中景");
+    expect(parsed.scenes[0]?.action).toBe("安倢從門口走到窗邊，停下");
+  });
+
+  it("同一欄寫兩次會出聲——標籤是賦值不是附加，第一次的字會被蓋掉", () => {
+    const parsed = parseStoryboardScript(["## 1. T (5s)", "旁白：第一句", "旁白：第二句"].join("\n"));
+    expect(parsed.scenes[0]?.voiceover).toBe("第二句");
+    expect(parsed.warnings.join()).toMatch(/「旁白」寫了不只一次/);
+  });
+
+  it("每一欄的上限都由表導出，不會有欄位漏掉檢查", () => {
+    for (const field of SCRIPT_FIELDS) {
+      const parsed = parseStoryboardScript(`## 1. 開場\n${field.label}：${"字".repeat(field.max + 1)}`);
+      expect(parsed.errors.join(), `${field.human} 沒有上限檢查`).toMatch(
+        new RegExp(`的${field.human} ${field.max + 1} 字`),
+      );
+    }
+  });
+
+  it("舊腳本的「設定卡：」仍被安全忽略，且不會吃掉它後面的行", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "畫面：晨光", "設定卡：安倢・禪堂（唯讀）", "這行是補充"].join("\n"),
+    );
+    expect(JSON.stringify(parsed.scenes[0])).not.toContain("安倢");
+    expect(parsed.scenes[0]?.prompt).toBe("晨光\n這行是補充");
   });
 });
 

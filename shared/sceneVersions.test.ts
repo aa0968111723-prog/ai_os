@@ -5,6 +5,8 @@ import {
   findDuplicateCurrent,
   isSceneRefineModel,
   isSceneRegenModel,
+  sceneActionAppliesTo,
+  sceneVisualPrompt,
   refineGroupOf,
   summarizeSceneVersions,
   type SceneVersionGenerationRow,
@@ -245,5 +247,50 @@ describe("單格工作室的模型判斷", () => {
     const refine = MODELS.filter(isSceneRefineModel);
     expect(refine.some((m) => refineGroupOf(m) === "image")).toBe(true);
     expect(refine.some((m) => refineGroupOf(m) === "video")).toBe(true);
+  });
+});
+
+/**
+ * 動作走位的注入規則。
+ *
+ * 把 action 從 prompt 拆出來的**唯一目的**就是這件事：走位是時間性的，
+ * 「從門口走到窗邊」在單張圖上畫不出來，擴散模型收到只會同時呈現起點與終點
+ * （多重人影、糊掉的肢體）。拆開之後才有辦法只送給影片類。
+ * 這組測試守的就是「拆了之後真的有分開送」，否則拆開只是多一個欄位。
+ */
+describe("sceneVisualPrompt（動作走位只送影片類模型）", () => {
+  const scene = { prompt: "禪堂夜坐，中景", action: "安倢從門口走到窗邊" };
+
+  it("純圖像模型不吃走位——這一格就是拆開 action 要修的東西", () => {
+    expect(sceneVisualPrompt(scene, { kind: "image" })).toBe("禪堂夜坐，中景");
+    expect(sceneVisualPrompt(scene, { kind: "image" })).not.toContain("走到窗邊");
+  });
+
+  it("影片類模型吃走位", () => {
+    const out = sceneVisualPrompt(scene, { kind: "video" });
+    expect(out).toContain("禪堂夜坐，中景");
+    expect(out).toContain("安倢從門口走到窗邊");
+  });
+
+  it("沒有走位時，影片類拿到的與圖像類完全一樣（不憑空加分隔符）", () => {
+    const noAction = { prompt: "禪堂夜坐", action: null };
+    expect(sceneVisualPrompt(noAction, { kind: "video" })).toBe("禪堂夜坐");
+    expect(sceneVisualPrompt(noAction, { kind: "image" })).toBe("禪堂夜坐");
+  });
+
+  it("只有走位沒有畫面時，影片類仍拿得到內容，圖像類則是空的", () => {
+    const onlyAction = { prompt: null, action: "緩緩推軌前進" };
+    expect(sceneVisualPrompt(onlyAction, { kind: "video" })).toContain("緩緩推軌前進");
+    // 圖像類回空字串 → 呼叫端會擋下「沒有提示詞就送生成」，而不是送一個空 prompt 去扣點
+    expect(sceneVisualPrompt(onlyAction, { kind: "image" })).toBe("");
+  });
+
+  it("模型未知（getModel 找不到）時當作不吃——寧可少注入，不要污染出圖", () => {
+    expect(sceneVisualPrompt(scene, undefined)).toBe("禪堂夜坐，中景");
+  });
+
+  it("sceneActionAppliesTo 與目錄一致：真的有影片模型，也真的有圖像模型", () => {
+    expect(MODELS.some((m) => sceneActionAppliesTo(m))).toBe(true);
+    expect(MODELS.some((m) => !sceneActionAppliesTo(m))).toBe(true);
   });
 });
