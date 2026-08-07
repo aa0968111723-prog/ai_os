@@ -141,6 +141,9 @@ export interface SharedProjectView {
     status: string;
     prompt: string | null;
     voiceover: string | null;
+    /** 這一鏡聽得到什麼（環境音描述）＋成品音檔，與 voiceover／畫面同層 */
+    ambience: string | null;
+    ambienceUrl: string | null;
     imageUrl: string | null;
     mime: string | null;
   }[];
@@ -242,6 +245,8 @@ export async function buildSharedProjectView(projectId: string): Promise<SharedP
       status: s.status,
       prompt: s.prompt,
       voiceover: s.voiceover,
+      ambience: s.ambience,
+      ambienceUrl: refUrl(s.ambienceAssetId),
       imageUrl: refUrl(s.assetId),
       mime: s.assetId ? mimeById.get(s.assetId) ?? null : null,
     })),

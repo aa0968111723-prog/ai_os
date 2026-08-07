@@ -28,7 +28,8 @@ const view = (over: Record<string, unknown> = {}) => ({
   assets: [],
   scenes: [{
     id: "s1", orderIndex: 0, title: "雨中的傘", durationSec: 5, status: "done",
-    prompt: null, voiceover: "旁白", imageUrl: null, mime: null,
+    prompt: null, voiceover: "旁白", ambience: "雨聲與遠處鐘響", ambienceUrl: null,
+    imageUrl: null, mime: null,
   }],
   ...over,
 });
@@ -48,6 +49,8 @@ describe("SharedProjectPage（分享連結的唯讀檢視）", () => {
     expect(screen.getByText("安倢")).toBeInTheDocument();
     expect(screen.getByText("師父開示")).toBeInTheDocument();
     expect(screen.getByText("雨中的傘")).toBeInTheDocument();
+    // 環境音是分鏡規格的一部分（0038 之後）——「完整專案頁唯讀」就得含它，不能悄悄漏掉
+    expect(screen.getByText("雨聲與遠處鐘響")).toBeInTheDocument();
   });
 
   it("整頁沒有任何可寫入的控制項——這是「唯讀」在畫面上的真正定義", () => {

@@ -8,7 +8,7 @@
 import { useEffect } from "react";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
-import { AssetImg, AssetVideo } from "../components/MediaFallback";
+import { AssetAudio, AssetImg, AssetVideo } from "../components/MediaFallback";
 import { Card, Hint, Meta, Pill, Skeleton } from "../components/ui";
 
 /** 素材簽名網址效期 1 小時（後端 SHARE_MEDIA_TTL_SECONDS）——過期前重抓一次，圖才不會突然變破圖。
@@ -204,6 +204,14 @@ export function SharedProjectPage({ token }: { token: string }) {
                   />
                 )}
                 {scene.voiceover && <p style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>{scene.voiceover}</p>}
+                {scene.ambience && (
+                  <Meta as="p" style={{ marginTop: 6, marginBottom: 0 }}>
+                    <Icon name="Music" size={13} /> {scene.ambience}
+                  </Meta>
+                )}
+                {scene.ambienceUrl && (
+                  <AssetAudio src={scene.ambienceUrl} controls style={{ width: "100%", marginTop: 6 }} />
+                )}
               </Card>
             ))}
           </div>
