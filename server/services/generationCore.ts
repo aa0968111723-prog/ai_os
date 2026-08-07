@@ -195,6 +195,8 @@ export interface SubmitCoreInput {
   scenePresetIds?: string[];
   /** 選定的素材設定卡：道具外觀/材質錨點注入,同一件道具跨鏡不變樣 */
   propIds?: string[];
+  /** 這一鏡選用的造型（Story-first）：併進角色錨點成為「造型鎖定」，跟角色身份同一句、同一強度 */
+  lookIds?: string[];
   /** 帳本理由前綴（預設「生成」；工作流帶「工作流生成」以便帳本可辨識來源） */
   reasonPrefix?: string;
   /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
@@ -307,6 +309,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     characterIds: input.characterIds,
     scenePresetIds: input.scenePresetIds,
     propIds: effectivePropIds,
+    lookIds: input.lookIds,
   }, input.continuityMode !== false);
 
   let effectiveSourceAssetId = input.sourceAssetId;

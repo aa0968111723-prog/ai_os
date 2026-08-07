@@ -94,6 +94,41 @@ describe("formatCharacterAnchor 仍可用（與場景並存）", () => {
   });
 });
 
+describe("formatCharacterAnchor × 造型（Identity/Look 分層）", () => {
+  const anjie = { id: "c1", name: "安倢", appearance: "黑色長髮、柔和五官", notes: "溫柔" };
+
+  it("沒選造型＝只有身份外觀（舊專案零影響）", () => {
+    expect(formatCharacterAnchor([anjie], ["c1"])).toBe("外觀鎖定 安倢：黑色長髮、柔和五官");
+  });
+
+  it("選了造型＝身份與造型同一句、同一強度", () => {
+    const withLook = { ...anjie, lookName: "開學日", lookCostume: "米白外套、帆布包" };
+    expect(formatCharacterAnchor([withLook], ["c1"])).toBe(
+      "外觀鎖定 安倢：黑色長髮、柔和五官，造型鎖定：米白外套、帆布包",
+    );
+  });
+
+  it("造型只有名字沒寫描述時退回用名字（不是整段漏掉）", () => {
+    const nameOnly = { ...anjie, lookName: "三年後", lookCostume: null };
+    expect(formatCharacterAnchor([nameOnly], ["c1"])).toBe("外觀鎖定 安倢：黑色長髮、柔和五官，造型鎖定：三年後");
+  });
+
+  it("身份不會被造型取代——換裝不等於換人", () => {
+    const withLook = { ...anjie, lookName: "社團", lookCostume: "運動外套" };
+    const out = formatCharacterAnchor([withLook], ["c1"]);
+    expect(out).toContain("黑色長髮、柔和五官");
+    expect(out).toContain("運動外套");
+  });
+
+  it("多角色各鎖各的造型，分號分隔不互相污染", () => {
+    const a = { ...anjie, lookName: "開學日", lookCostume: "米白外套" };
+    const b = { id: "c2", name: "韋澔", appearance: "短髮", lookName: "雨天", lookCostume: "深藍雨衣" };
+    expect(formatCharacterAnchor([a, b], ["c1", "c2"])).toBe(
+      "外觀鎖定 安倢：黑色長髮、柔和五官，造型鎖定：米白外套；外觀鎖定 韋澔：短髮，造型鎖定：深藍雨衣",
+    );
+  });
+});
+
 describe("orderRowsByIds / clipCardField", () => {
   it("順序與截短", () => {
     expect(orderRowsByIds([S_RAIN, S_ZEN], ["s1", "s2"])).toEqual([S_ZEN, S_RAIN]);

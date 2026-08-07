@@ -31,6 +31,9 @@ export type CharacterAnchorRow = {
   name: string;
   appearance: string;
   notes?: string | null;
+  /** 這一鏡選用的造型（Identity 不變、Look 逐鏡換；沒選就沿用角色卡本身的外觀） */
+  lookName?: string | null;
+  lookCostume?: string | null;
 };
 
 export type SceneAnchorRow = {
@@ -69,11 +72,24 @@ export function clipCardField(text: string, max: number = CARD_FIELD_MAX): strin
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-/** 視覺生成：角色定裝錨點（只外觀；「外觀鎖定」指令提高擴散模型對身份的注意力） */
+/**
+ * 視覺生成：角色定裝錨點（只外觀；「外觀鎖定」指令提高擴散模型對身份的注意力）。
+ *
+ * Identity/Look 分層（Story-first §14）：角色卡的 appearance 是「不會變的身份」（臉、髮、體型），
+ * 這一鏡選用的造型（服裝、配件）接在同一句後面成為「造型鎖定」。
+ * 為什麼放在同一個錨點而不是另開一個 marker：造型是這個角色的外觀，不是獨立實體——
+ * 拆開會讓模型把服裝當成畫面裡另一個東西，也會讓消融測試的三段錨點語意變糊。
+ */
 export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
-  return ordered.map((c) => `外觀鎖定 ${c.name}：${clipCardField(c.appearance)}`).join("；");
+  return ordered
+    .map((c) => {
+      const base = `外觀鎖定 ${c.name}：${clipCardField(c.appearance)}`;
+      const costume = c.lookCostume?.trim() || c.lookName?.trim() || "";
+      return costume ? `${base}，造型鎖定：${clipCardField(costume)}` : base;
+    })
+    .join("；");
 }
 
 /** 視覺生成：場景設定錨點（色板＋可選光線；「光影鎖定」指令提高跨鏡光影一致性） */

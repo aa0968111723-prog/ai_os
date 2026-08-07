@@ -282,7 +282,12 @@ export function nameKey(raw: string): string {
     .toLowerCase();
 }
 
-/** 兩個名字是否指同一實體：正規化鍵相等，或一方是另一方的結尾（「紅傘」←→「紅色雨傘」不算；「安倢」←→「小安倢」算尾綴） */
+/**
+ * 兩個名字是否指同一實體：**只認正規化鍵完全相等**。
+ * 刻意不做前後綴猜測（「紅傘」←→「紅色雨傘」一律不算同一件）——
+ * 縮寫與代稱的歸併是語意問題，交給 LLM 的 aliases／existingRef 去判斷並標信心，
+ * 規則層猜錯會把兩件道具靜默併成一件，比漏併難發現得多。
+ */
 export function sameEntityName(a: string, b: string): boolean {
   const ka = nameKey(a);
   const kb = nameKey(b);

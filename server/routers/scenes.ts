@@ -206,22 +206,9 @@ async function buildShotContextPrompt(
   const direction = formatShotDirection(scene.camera, scene.performance);
   if (direction) parts.push(`[鏡頭語言] ${direction}`);
 
-  if (scene.lookIds?.length) {
-    const looks = await db
-      .select({
-        name: schema.characterLooks.name,
-        costume: schema.characterLooks.costume,
-        characterName: schema.characters.name,
-      })
-      .from(schema.characterLooks)
-      .leftJoin(schema.characters, eq(schema.characters.id, schema.characterLooks.characterId))
-      .where(inArray(schema.characterLooks.id, scene.lookIds));
-    const lookText = looks
-      .map((l) => `${l.characterName ?? ""}：${(l.costume || l.name).slice(0, 120)}`)
-      .filter((s) => s.length > 1)
-      .join("；");
-    if (lookText) parts.push(`[造型鎖定] ${lookText}`);
-  }
+  // 造型（Look）不在這裡注入：它已經提到 generationCore 的錨點層，
+  // 與角色身份併成同一句「外觀鎖定 安倢：…，造型鎖定：米白外套」（見 cardAnchors.formatCharacterAnchor）。
+  // 在這裡再寫一次會變成同一件衣服講兩遍，對擴散模型是雜訊不是加強。
 
   return parts.join("\n\n");
 }
@@ -1036,8 +1023,8 @@ export const scenesRouter = router({
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
       // Shot Context Builder（PE 計畫 §11）：呼叫端指定的提示詞優先；否則以這一鏡的畫面描述為底，
       // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
-      // 表演（表情/視線）→ 造型鎖定（本鏡指定的 Look）。Project 風格與角色/場景/道具錨點
-      // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的上下文。
+      // 表演（表情/視線）。Project 風格、角色/場景/道具錨點與本鏡造型（lookIds）
+      // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的文字上下文。
       const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
@@ -1059,6 +1046,8 @@ export const scenesRouter = router({
         characterIds: cards.characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
+        // 本鏡造型：進錨點層與角色身份同句同強度（Identity 不變、Look 逐鏡換）
+        lookIds: scene.lookIds ?? undefined,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
