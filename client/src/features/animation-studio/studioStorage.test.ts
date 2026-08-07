@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_BRUSHES, sanitizeBrush } from "./brushes";
-import { addStroke, emptyBoardState, type Stroke } from "./boardDoc";
+import { addStroke, emptyBoardState, estimateBoardBytes, type Stroke } from "./boardDoc";
 import {
   allBrushes,
   boardStorageKey,
   BRUSH_LIBRARY_KEY,
   clearStoredBoard,
+  MAX_BOARD_BYTES,
   MAX_SAVED_BRUSHES,
   readBoard,
   readSavedBrushes,
@@ -99,8 +100,9 @@ describe("白板草稿", () => {
     expect([...shotsWithDraft(PROJECT)]).toEqual(["shot-1"]);
   });
 
-  it("配額滿時清掉同專案其他鏡的草稿再試一次，成功就回 true", () => {
+  it("配額滿時只犧牲自由塗鴉，**絕不**動其他鏡的草稿", () => {
     writeBoard(PROJECT, "shot-old", addStroke(emptyBoardState(), stroke("old"), 10).doc);
+    writeBoard(PROJECT, null, addStroke(emptyBoardState(), stroke("塗鴉"), 10).doc);
     let failures = 1;
     const real = window.localStorage.setItem.bind(window.localStorage);
     vi.spyOn(window.localStorage, "setItem").mockImplementation((key: string, value: string) => {
@@ -111,7 +113,27 @@ describe("白板草稿", () => {
       real(key, value);
     });
     expect(writeBoard(PROJECT, "shot-new", addStroke(emptyBoardState(), stroke("new"), 10).doc)).toBe(true);
-    expect(readBoard(PROJECT, "shot-old")).toBeNull();
+    // 讓位的是暫存區
+    expect(readBoard(PROJECT, null)).toBeNull();
+    // 別鏡畫好的東西必須完好——為了存這一鏡而刪掉它，是把資料遺失偽裝成復原
+    expect(readBoard(PROJECT, "shot-old")!.strokes.map((s) => s.id)).toEqual(["old"]);
+  });
+
+  it("超過單張白板的存檔預算時直接回 false，不做那一次卡住主執行緒的序列化", () => {
+    const serialize = vi.spyOn(window.localStorage, "setItem");
+    const huge = {
+      v: 1 as const,
+      w: 1600,
+      h: 900,
+      strokes: Array.from({ length: 500 }, (_, i) => ({
+        id: `s${i}`,
+        brush,
+        points: Array.from({ length: 400 }, (_, j) => ({ x: j, y: j, p: 0.5 })),
+      })),
+    };
+    expect(estimateBoardBytes(huge)).toBeGreaterThan(MAX_BOARD_BYTES);
+    expect(writeBoard(PROJECT, "shot-1", huge)).toBe(false);
+    expect(serialize).not.toHaveBeenCalled();
   });
 
   it("清乾淨仍寫不進去時回 false，讓 UI 有辦法講實話", () => {

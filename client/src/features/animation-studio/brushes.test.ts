@@ -9,6 +9,7 @@ import {
   resamplePath,
   sanitizeBrush,
   sanitizeColor,
+  simplifyStroke,
   smoothPoints,
   speedBetween,
   strokeWidthAt,
@@ -175,6 +176,73 @@ describe("speedBetween", () => {
 
   it("距離除以時間", () => {
     expect(speedBetween({ x: 0, y: 0, t: 0 }, { x: 30, y: 40, t: 10 })).toBeCloseTo(5);
+  });
+});
+
+describe("simplifyStroke", () => {
+  it("共線的中間點被拿掉，端點永遠保留", () => {
+    const line = Array.from({ length: 50 }, (_, i) => ({ x: i * 2, y: 0, p: 0.5 }));
+    const out = simplifyStroke(line);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual(line[0]);
+    expect(out[1]).toEqual(line[line.length - 1]);
+  });
+
+  it("轉角保留——抽稀不能把形狀改掉", () => {
+    const corner = [
+      { x: 0, y: 0, p: 0.5 },
+      { x: 10, y: 0, p: 0.5 },
+      { x: 20, y: 0, p: 0.5 },
+      { x: 20, y: 20, p: 0.5 },
+      { x: 20, y: 40, p: 0.5 },
+    ];
+    const out = simplifyStroke(corner);
+    expect(out.map((p) => [p.x, p.y])).toEqual([[0, 0], [20, 0], [20, 40]]);
+  });
+
+  it("真實塗鴉可以少掉一半以上的點（體積與重畫成本都跟著降）", () => {
+    // 手抖但整體平順的一筆：取樣密、位移小
+    const scribble = Array.from({ length: 400 }, (_, i) => ({
+      x: i * 0.9 + Math.sin(i / 9) * 0.4,
+      y: Math.sin(i / 30) * 60,
+      p: 0.5,
+    }));
+    const out = simplifyStroke(scribble);
+    expect(out.length).toBeLessThan(scribble.length / 2);
+    // 形狀仍在：每個保留點都還在原始路徑上
+    expect(out[0]).toEqual(scribble[0]);
+    expect(out[out.length - 1]).toEqual(scribble[scribble.length - 1]);
+  });
+
+  it("壓力跟著保留點走（線寬的來源不能被平均掉）", () => {
+    const pts = [
+      { x: 0, y: 0, p: 0.1 },
+      { x: 10, y: 30, p: 0.9 },
+      { x: 20, y: 0, p: 0.2 },
+    ];
+    const out = simplifyStroke(pts);
+    expect(out.find((p) => p.x === 10)?.p).toBe(0.9);
+  });
+
+  it("兩點以下原樣回傳（複本）", () => {
+    const one = [{ x: 1, y: 2, p: 0.3 }];
+    expect(simplifyStroke(one)).toEqual(one);
+    expect(simplifyStroke(one)[0]).not.toBe(one[0]);
+    expect(simplifyStroke([])).toEqual([]);
+  });
+
+  it("起訖同點的圈狀筆畫不會被壓成一個點", () => {
+    const loop = [
+      { x: 0, y: 0, p: 0.5 },
+      { x: 30, y: 30, p: 0.5 },
+      { x: 0, y: 0, p: 0.5 },
+    ];
+    expect(simplifyStroke(loop)).toHaveLength(3);
+  });
+
+  it("一萬個點也不會爆堆疊（長筆畫用迭代不用遞迴）", () => {
+    const long = Array.from({ length: 10_000 }, (_, i) => ({ x: i, y: (i % 7) * 3, p: 0.5 }));
+    expect(() => simplifyStroke(long)).not.toThrow();
   });
 });
 

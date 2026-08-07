@@ -16,7 +16,7 @@ import {
   sanitizeBrush,
   type BrushSpec,
 } from "./brushes";
-import { parseBoard, serializeBoard, type BoardDoc } from "./boardDoc";
+import { estimateBoardBytes, parseBoard, serializeBoard, type BoardDoc } from "./boardDoc";
 
 export const BRUSH_LIBRARY_KEY = "aios.studio.brushes";
 const BOARD_KEY_PREFIX = "aios.studio.board.";
@@ -85,23 +85,36 @@ export function readBoard(projectId: string, shotId: string | null): BoardDoc | 
 }
 
 /**
- * 寫回草稿。配額滿時**先清掉這個專案其他鏡的草稿再試一次**——
- * 直接放棄會讓使用者以為畫好的東西有存到（畫面上還在），關掉分頁才發現全沒了。
- * 回傳是否真的寫成功，UI 據此顯示「本機草稿已滿」。
+ * 單張白板的本機存檔預算。localStorage 全站配額大約 5MB，而且是**整個網域共用**
+ * （偏好、草稿、快取都在裡面）——一張白板吃掉全部，代價是站上其他功能開始寫不進去。
+ */
+export const MAX_BOARD_BYTES = 1_200_000;
+
+/**
+ * 寫回草稿。回傳是否真的寫成功，UI 據此顯示「本機草稿已滿」。
+ *
+ * 兩個刻意的設計：
+ * 1. **先估大小再決定要不要序列化**。太大時直接回 false，不做那一次
+ *    數百毫秒、同步卡住主執行緒的 stringify（見 estimateBoardBytes）。
+ * 2. **配額滿時只犧牲「自由塗鴉」那一份**，絕不動其他鏡的草稿。
+ *    為了存這一鏡而默默刪掉別鏡畫好的東西，是把資料遺失偽裝成復原——
+ *    使用者看不到那些草稿消失，只會在切回去時發現畫沒了。
  */
 export function writeBoard(projectId: string, shotId: string | null, doc: BoardDoc): boolean {
   const store = storage();
   if (!store) return false;
+  if (estimateBoardBytes(doc) > MAX_BOARD_BYTES) return false;
   const key = boardStorageKey(projectId, shotId);
   const payload = serializeBoard(doc);
   try {
     store.setItem(key, payload);
     return true;
   } catch {
+    // 自由塗鴉是暫存區，讓位給「有歸屬的那一鏡」是合理的取捨；其他鏡不動。
+    const scratch = boardStorageKey(projectId, null);
+    if (key === scratch) return false;
     try {
-      for (const other of listBoardKeys(store, projectId)) {
-        if (other !== key) store.removeItem(other);
-      }
+      store.removeItem(scratch);
       store.setItem(key, payload);
       return true;
     } catch {

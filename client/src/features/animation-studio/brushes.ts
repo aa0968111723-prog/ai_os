@@ -236,6 +236,56 @@ export function resamplePath(points: readonly StrokePoint[], spacing: number): S
   return out;
 }
 
+/**
+ * 落筆取樣抽稀（Ramer–Douglas–Peucker）。
+ *
+ * pointermove 給的點極度冗餘——手停在原地、或畫一條直線時，一秒可以收到上百個
+ * 幾乎共線的點。它們對畫面毫無貢獻，卻要付三份成本：重畫時的線段數、
+ * 記憶體、以及存進本機時的 JSON 體積（實測佔一半以上）。
+ *
+ * 只在**落筆結束時**抽一次：畫的當下不動（手感要跟著每一個取樣點走），
+ * 存進文件的才是抽稀後的版本。容差 0.75px 在肉眼下看不出差別。
+ *
+ * 壓力跟著保留點走——壓力是決定線寬的來源，不能在抽稀時被平均掉。
+ */
+export function simplifyStroke(points: readonly StrokePoint[], tolerance = 0.75): StrokePoint[] {
+  if (points.length <= 2) return points.map((p) => ({ ...p }));
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  // 迭代式（不遞迴）：長筆畫有上萬個點，遞迴會爆堆疊
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length) {
+    const [first, last] = stack.pop()!;
+    if (last <= first + 1) continue;
+    const a = points[first]!;
+    const b = points[last]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    let worst = -1;
+    let worstIndex = -1;
+    for (let i = first + 1; i < last; i += 1) {
+      const p = points[i]!;
+      // 起訖同點時退化成「離起點多遠」
+      const dist = len === 0
+        ? Math.hypot(p.x - a.x, p.y - a.y)
+        : Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
+      if (dist > worst) {
+        worst = dist;
+        worstIndex = i;
+      }
+    }
+    if (worst > tolerance && worstIndex > 0) {
+      keep[worstIndex] = 1;
+      stack.push([first, worstIndex], [worstIndex, last]);
+    }
+  }
+  const out: StrokePoint[] = [];
+  for (let i = 0; i < points.length; i += 1) if (keep[i]) out.push({ ...points[i]! });
+  return out;
+}
+
 /** 兩點間的速度（px/ms）；時間差為 0 或負值時回 0（不是無限大） */
 export function speedBetween(a: { x: number; y: number; t: number }, b: { x: number; y: number; t: number }): number {
   const dt = b.t - a.t;

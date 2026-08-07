@@ -71,7 +71,9 @@ export function resolveStudioLayout(env: StudioEnv): StudioLayout {
   }
   return {
     mode: "desktop",
-    maxStrokes: 2000,
+    // 上限與本機存檔預算對齊（studioStorage.MAX_BOARD_BYTES）：抽稀後一筆約 0.8KB，
+    // 1200 筆剛好在預算內。設得更高只會讓後半段畫的東西存不進去。
+    maxStrokes: 1200,
     maxUndo: 60,
     maxDpr: Math.min(2, dpr),
     exportMaxEdge: 2048,

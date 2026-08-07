@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addStroke,
   boardSizeForFormat,
+  estimateBoardBytes,
   clearBoard,
   emptyBoard,
   emptyBoardState,
@@ -80,11 +81,24 @@ describe("序列化", () => {
     expect(restored).toEqual(state.doc);
   });
 
+  it("點存成扁平三元組並取整——體積與 stringify 成本直接決定會不會卡頓", () => {
+    const doc = {
+      ...emptyBoard(100, 50),
+      strokes: [{ id: "a", brush, points: [{ x: 12.3456789, y: 98.7654321, p: 0.123456 }] }],
+    };
+    const json = serializeBoard(doc);
+    expect(JSON.parse(json).s[0].p).toEqual([12.3, 98.8, 0.12]);
+    // 物件形狀（{"x":…,"y":…,"p":…}）會大上數倍
+    expect(json.length).toBeLessThan(JSON.stringify(doc).length);
+    const back = parseBoard(json)!;
+    expect(back.strokes[0].points[0]).toEqual({ x: 12.3, y: 98.8, p: 0.12 });
+  });
+
   it("壞掉、空的、版本不符的一律回 null（不猜舊格式）", () => {
     expect(parseBoard(null)).toBeNull();
     expect(parseBoard("")).toBeNull();
     expect(parseBoard("{壞掉的 JSON")).toBeNull();
-    expect(parseBoard(JSON.stringify({ v: 99, w: 1, h: 1, strokes: [] }))).toBeNull();
+    expect(parseBoard(JSON.stringify({ v: 99, w: 1, h: 1, s: [] }))).toBeNull();
     expect(parseBoard(JSON.stringify({ v: 1, w: 1, h: 1 }))).toBeNull();
   });
 
@@ -93,10 +107,10 @@ describe("序列化", () => {
       v: 1,
       w: 100,
       h: 50,
-      strokes: [
-        { id: "ok", brush, points: [{ x: 1, y: 1, p: 0.5 }] },
-        { id: "沒有點", brush, points: [] },
-        { id: "座標壞掉", brush, points: [{ x: "左邊", y: null, p: 1 }] },
+      s: [
+        { i: "ok", b: brush, p: [1, 1, 0.5] },
+        { i: "沒有點", b: brush, p: [] },
+        { i: "座標壞掉", b: brush, p: ["左邊", null, 1] },
         null,
       ],
     });
@@ -104,12 +118,17 @@ describe("序列化", () => {
     expect(doc.strokes.map((s) => s.id)).toEqual(["ok"]);
   });
 
+  it("長度不是三的倍數（檔案被截斷）時只忽略殘餘，不炸掉整張白板", () => {
+    const doc = parseBoard(JSON.stringify({ v: 1, w: 100, h: 50, s: [{ i: "a", b: brush, p: [1, 2, 0.5, 3, 4] }] }))!;
+    expect(doc.strokes[0].points).toEqual([{ x: 1, y: 2, p: 0.5 }]);
+  });
+
   it("筆刷欄位被竄改時收斂成合法筆刷，不讓壞資料進到渲染層", () => {
     const raw = JSON.stringify({
       v: 1,
       w: 100,
       h: 50,
-      strokes: [{ id: "x", brush: { engine: "雷射", size: 1e9, color: "url(http://evil)" }, points: [{ x: 0, y: 0, p: 1 }] }],
+      s: [{ i: "x", b: { engine: "雷射", size: 1e9, color: "url(http://evil)" }, p: [0, 0, 1] }],
     });
     const doc = parseBoard(raw)!;
     expect(doc.strokes[0].brush.engine).toBe("pen");
@@ -118,9 +137,32 @@ describe("序列化", () => {
   });
 
   it("尺寸不合法時退回預設，不會產生 0 或負的白板", () => {
-    const doc = parseBoard(JSON.stringify({ v: 1, w: -5, h: "高", strokes: [] }))!;
+    const doc = parseBoard(JSON.stringify({ v: 1, w: -5, h: "高", s: [] }))!;
     expect(doc.w).toBeGreaterThan(0);
     expect(doc.h).toBeGreaterThan(0);
+  });
+});
+
+describe("estimateBoardBytes", () => {
+  it("不必序列化就估得出大小（先 stringify 再嫌太大＝白卡主執行緒一次）", () => {
+    const doc = {
+      ...emptyBoard(),
+      strokes: Array.from({ length: 20 }, (_, i) => ({
+        id: `s${i}`,
+        brush,
+        points: Array.from({ length: 50 }, (_, j) => ({ x: j, y: j, p: 0.5 })),
+      })),
+    };
+    const actual = serializeBoard(doc).length;
+    const estimate = estimateBoardBytes(doc);
+    // 只要同一個數量級、且不低估（低估會讓超大白板溜過守門）
+    expect(estimate).toBeGreaterThanOrEqual(actual * 0.8);
+    expect(estimate).toBeLessThan(actual * 3);
+  });
+
+  it("空白板估出來是很小的正數", () => {
+    expect(estimateBoardBytes(emptyBoard())).toBeGreaterThan(0);
+    expect(estimateBoardBytes(emptyBoard())).toBeLessThan(1000);
   });
 });
 
