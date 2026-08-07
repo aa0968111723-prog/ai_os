@@ -1988,6 +1988,80 @@ app.post("/api/assistant/ask", async (req, res) => {
   }
 });
 
+/**
+ * 全站助手問答（SSE）：與 /api/assistant/ask 同一套串流協定（open/step/done/error＋15s 心跳），
+ * 差別只在核心換成 runGlobalAsk（組級視野＋站級動作提議）、projectId 從必填變成選填脈絡提示。
+ * 前端用同一個 AssistantSseDecoder 解碼，不需要新解析器。
+ */
+app.post("/api/assistant/site-ask", async (req, res) => {
+  const auth = await resolveSession(req);
+  if (!requireUsableSession(auth, res)) return;
+  const groupId = String(req.body?.groupId ?? "");
+  const message = String(req.body?.message ?? "").trim();
+  const projectIdRaw = String(req.body?.projectId ?? "");
+  const projectId = UUID_RE.test(projectIdRaw) ? projectIdRaw : undefined;
+  // 追問脈絡（形狀同 tRPC ask；壞形狀整包忽略——寧可少脈絡也不要 400 斷流）
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history.slice(0, 8) : [];
+  const history = rawHistory
+    .filter((t: unknown): t is { role: "user" | "assistant"; text: string } =>
+      !!t && typeof t === "object"
+      && ((t as { role?: unknown }).role === "user" || (t as { role?: unknown }).role === "assistant")
+      && typeof (t as { text?: unknown }).text === "string")
+    .map((t: { role: "user" | "assistant"; text: string }) => ({ role: t.role, text: t.text.slice(0, 2000) }));
+  if (!UUID_RE.test(groupId) || !message || message.length > 500) {
+    return res.status(400).json({ error: "參數不正確（需 groupId 與 1–500 字的問題）" });
+  }
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const clientAbort = new AbortController();
+  let closed = false;
+  res.on("close", () => { closed = true; if (!res.writableEnded) clientAbort.abort(); });
+  res.on("error", (e) => recordError("globalAssistant:stream", e));
+
+  const sse = (event: string, data: unknown) => {
+    if (closed || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
+
+  sse("open", { ok: true });
+  // 與 tRPC 雙生路徑同一份審計口徑：走 SSE 問的也要在操作紀錄裡看得到（成功與失敗都記）。
+  // tRPC 端由 authedProcedure 中介層記；這裡是 Express 路由，得自己補一筆同名 action。
+  const { recordAudit } = await import("./services/audit");
+  try {
+    const { runGlobalAsk } = await import("./routers/globalAssistant");
+    const result = await runGlobalAsk(
+      {
+        auth,
+        groupId,
+        message,
+        history: history.length ? history : undefined,
+        projectId,
+        signal: clientAbort.signal,
+      },
+      (e) => sse("step", e),
+    );
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, { ok: true });
+    sse("done", result);
+  } catch (err) {
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    if (!closed) {
+      recordError("globalAssistant:stream", err);
+      sse("error", { message: err instanceof Error ? err.message : "全站 AI 助手暫時沒回應，請稍後再試" });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+});
+
 // ── 元件級回饋截圖（R23）：上傳（登入即可）＋依報告權限服務 ──
 app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };

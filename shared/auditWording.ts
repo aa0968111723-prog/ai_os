@@ -120,6 +120,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "tasks.complete": "人類任務：標記完成",
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
+  "globalAssistant.ask": "詢問全站 AI 助手",
+  "globalAssistant.runSiteAction": "執行全站助手確認卡動作",
   "teamAssistant.dispatch": "團隊代理派工到專案",
   "quota.setMemberCommandLevel": "調整組員的組代理指揮權",
   "teamAssistant.command": "組代理下指令",
@@ -339,7 +341,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // story 歸在分鏡：故事、自動解析與轉分鏡是同一條創作鏈（Story-first），組長查「分鏡怎麼來的」
   // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。
   { key: "storyboard", label: "故事與分鏡", prefixes: ["scenes", "story"] },
-  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },
+  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導

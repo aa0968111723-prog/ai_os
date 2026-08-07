@@ -7100,6 +7100,91 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   cursor: not-allowed;
 }
 
+/* ── 全站助手視野 chip（sheet 頂部；只在專案頁出現）──
+   注意：chip 在 .ai-copilot-shell **外面**（sheet 直屬子層），拿不到 shell 上宣告的
+   --ai-glass 系列變數——var() 一律帶字面 fallback（值同 .ai-copilot-shell:6951-6953），
+   否則背景直接失效變透明。 */
+.ga-scope {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ga-scope__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.8));
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid var(--ai-glass-edge, rgba(255, 255, 255, 0.75));
+  color: var(--fg-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.ga-scope__chip.is-active {
+  background: var(--ai-glass-strong, rgba(255, 254, 250, 0.92));
+  color: var(--primary-ink);
+  border-color: rgba(246, 119, 30, 0.45);
+}
+
+/* ── 站級動作確認卡（AI 提議 → 使用者按下才執行）── */
+.ai-copilot-action-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--ai-glass);
+  border: 1px solid var(--ai-glass-edge);
+}
+.ai-copilot-action-card.is-done {
+  color: var(--fg-secondary);
+}
+.ai-copilot-action-card__label {
+  flex: 1 1 100%;
+  font-size: 13px;
+  color: var(--fg);
+}
+.ai-copilot-action-card.is-done .ai-copilot-action-card__label {
+  flex: 1 1 auto;
+}
+.ai-copilot-action-card__reason {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--fg-secondary);
+}
+/* 私訊本文／筆記內容全文：以本人名義送出的東西必須全文看過才確認——長文自己捲，不撐爆卡片 */
+.ai-copilot-action-card__detail {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.ai-copilot-action-card__error {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--danger-ink);
+}
+.ai-copilot-action-card__buttons {
+  display: flex;
+  gap: 8px;
+}
+.ai-copilot-bubble__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* feed 也不再是一個框：它先前的 card2 底＋邊框，是「卡中卡」——去掉白底之後
    若留著，畫面上就會出現一塊唯一還是實色的方塊，比原本更突兀。
    padding 只留橫向 2px 讓氣泡陰影不貼邊；捲動與限高照舊。 */
