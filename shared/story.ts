@@ -295,6 +295,75 @@ export function sameEntityName(a: string, b: string): boolean {
   return ka === kb;
 }
 
+/* ── 轉分鏡的逐場 diff（PE 計畫 §22／§33） ─────────────────────
+ *
+ * 為什麼要 diff 而不是一律 append：使用者改了故事、重新解析、再按一次「產生分鏡」，
+ * 舊做法會把同一場再建一次，分鏡中心出現兩個「第一幕」。但也**不能**反過來拿新計畫
+ * 覆蓋舊場——那會清掉使用者在分鏡上調過的鏡頭語言、造型、生成結果。
+ *
+ * 折衷：以場名配對。
+ *  - 配不到既有場        → create：整場連鏡一起建
+ *  - 配到、但底下沒有活鏡 → fill：只補鏡（沒有東西會被蓋掉）
+ *  - 配到、底下有鏡      → reuse：完全不動（使用者的編輯優先於 AI 的新計畫）
+ */
+
+export interface StoryboardPlanScene {
+  title: string;
+  shots: unknown[];
+}
+export interface ExistingStoryScene {
+  id: string;
+  title: string;
+  /** 這一場底下還活著的鏡數（軟刪不算） */
+  liveShots: number;
+}
+
+export interface StoryboardSceneDiff {
+  title: string;
+  action: "create" | "fill" | "reuse";
+  /** create 以外會帶既有場 id */
+  storySceneId?: string;
+  /** 這次會新增幾鏡（reuse＝0） */
+  shots: number;
+}
+
+/**
+ * 逐場比對計畫與既有分鏡。純函式：同一份輸入永遠得到同一份計畫，
+ * 預覽（使用者看到的數字）與實際套用（materializeStoryboard）共用它，兩邊不會說不同的話。
+ */
+export function diffStoryboardPlan(
+  planScenes: StoryboardPlanScene[],
+  existing: ExistingStoryScene[],
+): StoryboardSceneDiff[] {
+  // 一個既有場只能被一個計畫場認領，避免同名兩場都指到同一個既有場
+  const claimed = new Set<string>();
+  return planScenes.map((sc) => {
+    const key = nameKey(sc.title);
+    const match = existing.find((e) => !claimed.has(e.id) && nameKey(e.title) === key);
+    if (!match) return { title: sc.title, action: "create" as const, shots: sc.shots.length };
+    claimed.add(match.id);
+    if (match.liveShots > 0) {
+      return { title: sc.title, action: "reuse" as const, storySceneId: match.id, shots: 0 };
+    }
+    return { title: sc.title, action: "fill" as const, storySceneId: match.id, shots: sc.shots.length };
+  });
+}
+
+/** 預覽摘要：「新增 3 場 12 鏡・補 1 場 4 鏡・沿用 8 場」 */
+export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
+  createScenes: number;
+  fillScenes: number;
+  reuseScenes: number;
+  newShots: number;
+} {
+  return {
+    createScenes: diff.filter((d) => d.action === "create").length,
+    fillScenes: diff.filter((d) => d.action === "fill").length,
+    reuseScenes: diff.filter((d) => d.action === "reuse").length,
+    newShots: diff.reduce((n, d) => n + d.shots, 0),
+  };
+}
+
 /* ── 解析摘要（story.get 回給 UI 的 counts 形狀） ─────────────── */
 
 export interface StoryParseSummary {

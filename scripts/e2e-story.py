@@ -190,6 +190,20 @@ ok("增量重解不重複建卡", re3["stats"]["characters"]["created"] == 0)
 shots_after = call("GET", admin, "scenes.listByProject", {"projectId": pid})
 ok("既有分鏡不被重解洗掉", len(shots_after) == len(shots))
 
+# ── 9.5 逐場套用（§22）：重解之後再產生分鏡，同名的場不重建、也不覆蓋 ──
+scenes_before = call("GET", admin, "story.scenesList", {"projectId": pid})
+prev = call("GET", admin, "story.storyboardPreview", {"projectId": pid})
+ok("預覽有逐場計畫", "summary" in prev and prev["summary"]["reuseScenes"] >= 1)
+ok("已有鏡的場計畫為沿用", any(d["action"] == "reuse" for d in prev["diff"]))
+call("POST", admin, "story.generateStoryboard", {"projectId": pid})
+scenes_after2 = call("GET", admin, "story.scenesList", {"projectId": pid})
+ok("同名場不重建（不會出現兩個「第 1 場」）",
+   len([s for s in scenes_after2 if s["title"] == scenes_before[0]["title"]]) == 1)
+shot_titles_before = {s["id"]: s["title"] for s in shots_after}
+shots_after2 = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+ok("沿用的場底下的鏡原封不動",
+   all(s["title"] == shot_titles_before[s["id"]] for s in shots_after2 if s["id"] in shot_titles_before))
+
 # ── 10. Undo：撤銷最新一次解析（無新建→無移除；run 標記 undone） ──
 undo = call("POST", admin, "story.undoRun", {"runId": re3["runId"]})
 ok("撤銷解析成功", undo.get("ok") is True)

@@ -12,6 +12,8 @@ import {
   mergeShotDirection,
   describeDirectionChange,
   storyParseModelSchema,
+  diffStoryboardPlan,
+  summarizeStoryboardDiff,
   environmentStateSchema,
   CONFIDENCE_AUTO,
   CONFIDENCE_FLAG,
@@ -130,6 +132,67 @@ describe("describeDirectionChange（§14 變更預覽：確認前看得到改什
       "情緒 平靜→若有所思",
       "視線 －→看向遠方",
     ]);
+  });
+});
+
+describe("diffStoryboardPlan（§22 逐場套用：不重複建、也不蓋掉使用者的編輯）", () => {
+  const plan = [
+    { title: "第一幕｜克難坡的雨", shots: [1, 2, 3] },
+    { title: "第二幕｜禪堂", shots: [1, 2] },
+  ];
+
+  it("全新專案：每一場都建", () => {
+    expect(diffStoryboardPlan(plan, [])).toEqual([
+      { title: "第一幕｜克難坡的雨", action: "create", shots: 3 },
+      { title: "第二幕｜禪堂", action: "create", shots: 2 },
+    ]);
+  });
+
+  it("同名且底下有鏡＝沿用，一鏡都不新增（使用者調過的鏡頭語言不能被蓋掉）", () => {
+    const existing = [{ id: "s1", title: "第一幕｜克難坡的雨", liveShots: 4 }];
+    expect(diffStoryboardPlan(plan, existing)).toEqual([
+      { title: "第一幕｜克難坡的雨", action: "reuse", storySceneId: "s1", shots: 0 },
+      { title: "第二幕｜禪堂", action: "create", shots: 2 },
+    ]);
+  });
+
+  it("同名但底下空了＝補鏡（沒有東西會被蓋掉）", () => {
+    const existing = [{ id: "s1", title: "第一幕｜克難坡的雨", liveShots: 0 }];
+    expect(diffStoryboardPlan(plan, existing)[0]).toEqual({
+      title: "第一幕｜克難坡的雨",
+      action: "fill",
+      storySceneId: "s1",
+      shots: 3,
+    });
+  });
+
+  it("場名比對走 nameKey：引號與空白差異視為同一場", () => {
+    const existing = [{ id: "s1", title: "「第一幕｜克難坡的雨」 ", liveShots: 2 }];
+    expect(diffStoryboardPlan(plan, existing)[0].action).toBe("reuse");
+  });
+
+  it("一個既有場只被認領一次——同名兩場不會都指到同一個既有場", () => {
+    const dupPlan = [
+      { title: "第一幕", shots: [1] },
+      { title: "第一幕", shots: [1, 2] },
+    ];
+    const existing = [{ id: "s1", title: "第一幕", liveShots: 3 }];
+    const d = diffStoryboardPlan(dupPlan, existing);
+    expect(d[0]).toEqual({ title: "第一幕", action: "reuse", storySceneId: "s1", shots: 0 });
+    expect(d[1]).toEqual({ title: "第一幕", action: "create", shots: 2 });
+  });
+
+  it("摘要數字＝預覽與實際套用共用的同一份計畫", () => {
+    const existing = [
+      { id: "s1", title: "第一幕｜克難坡的雨", liveShots: 4 },
+      { id: "s2", title: "第二幕｜禪堂", liveShots: 0 },
+    ];
+    expect(summarizeStoryboardDiff(diffStoryboardPlan(plan, existing))).toEqual({
+      createScenes: 0,
+      fillScenes: 1,
+      reuseScenes: 1,
+      newShots: 2,
+    });
   });
 });
 

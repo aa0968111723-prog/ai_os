@@ -14,6 +14,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import {
+  loadExistingStoryScenes,
   materializeStoryboard,
   runStoryParse,
   sha256Hex,
@@ -21,6 +22,8 @@ import {
 } from "../services/storyParse";
 import { checkProjectContinuity } from "../services/continuityCheck";
 import {
+  diffStoryboardPlan,
+  summarizeStoryboardDiff,
   environmentStateSchema,
   STORY_MAX_CHARS,
   STORY_SCENE_TITLE_MAX,
@@ -375,6 +378,14 @@ export const storyRouter = router({
       .from(schema.scenes)
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     if (!run?.plan) return { ready: false as const, existingShots: Number(existingShots) };
+
+    // §22／§33 變更預覽：用與實際套用同一支純函式算逐場計畫，
+    // 使用者按下前看到的數字就是待會真的會發生的事（不是另外估一份）。
+    const existingScenes = await loadExistingStoryScenes(db, project.id);
+    const diff = diffStoryboardPlan(
+      run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots })),
+      existingScenes,
+    );
     return {
       ready: true as const,
       runId: run.id,
@@ -383,6 +394,9 @@ export const storyRouter = router({
       planShots: run.plan.scenes.reduce((s, sc) => s + sc.shots.length, 0),
       existingShots: Number(existingShots),
       scenes: run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots.length })),
+      /** 逐場計畫：哪一場會新建、哪一場只補鏡、哪一場完全不動 */
+      diff,
+      summary: summarizeStoryboardDiff(diff),
     };
   }),
 

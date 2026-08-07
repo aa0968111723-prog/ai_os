@@ -11,7 +11,7 @@
  * 假模式（E2E_MOCK=1）：確定性抽取（標記行驅動），零成本可測——與 director/assistant 的假分支同慣例。
  */
 import { createHash } from "node:crypto";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { ParseCandidatePayload, ParseRunApplied, ParseRunStats } from "../db/schema/story";
@@ -24,8 +24,10 @@ import {
   LOOK_NAME_MAX,
   MAX_PROJECT_LOOKS,
   STORY_PARSE_BUDGET,
+  diffStoryboardPlan,
   type StoryParsePlan,
   type ParsedShot,
+  type ExistingStoryScene,
 } from "../../shared/story";
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
@@ -661,6 +663,40 @@ export interface MaterializeResult {
   reused: boolean;
 }
 
+/**
+ * 既有的場＋各場底下還活著的鏡數（§22 逐場 diff 的右手邊）。
+ * 軟刪的鏡不算「還有內容」——整場被丟進回收桶之後再產生分鏡，應該要能把鏡補回來。
+ * 交易內外都要用同一份定義，所以吃 tx（呼叫端在 order lock 之後傳進來）。
+ */
+export async function loadExistingStoryScenes(
+  tx: Pick<typeof db, "select">,
+  projectId: string,
+): Promise<ExistingStoryScene[]> {
+  // 兩支查詢再在 JS 併，不寫相關子查詢：drizzle 把 sql`` 片段裡的欄位渲染成**未限定表名**
+  // （`where "story_scene_id" = "id"` 兩邊都被解讀成子查詢自己的 scenes），恆為 false、
+  // 每一場都算成 0 鏡，於是「沿用」全被誤判成「補鏡」而重複塞鏡。踩過一次，別再用那個寫法。
+  const [rows, counts] = await Promise.all([
+    tx
+      .select({ id: schema.storyScenes.id, title: schema.storyScenes.title })
+      .from(schema.storyScenes)
+      .where(eq(schema.storyScenes.projectId, projectId))
+      .orderBy(asc(schema.storyScenes.orderIndex)),
+    tx
+      .select({ storySceneId: schema.scenes.storySceneId, n: sql<number>`count(*)` })
+      .from(schema.scenes)
+      .where(
+        and(
+          eq(schema.scenes.projectId, projectId),
+          isNull(schema.scenes.deletedAt),
+          isNotNull(schema.scenes.storySceneId),
+        ),
+      )
+      .groupBy(schema.scenes.storySceneId),
+  ]);
+  const liveByScene = new Map(counts.map((c) => [c.storySceneId as string, Number(c.n)]));
+  return rows.map((r) => ({ id: r.id, title: r.title, liveShots: liveByScene.get(r.id) ?? 0 }));
+}
+
 export async function materializeStoryboard(input: {
   userId: string;
   projectId: string;
@@ -714,26 +750,53 @@ export async function materializeStoryboard(input: {
       .from(schema.storyScenes)
       .where(eq(schema.storyScenes.projectId, project.id));
 
+    // §22 逐場套用：先算 diff，才知道哪一場要建、哪一場只補鏡、哪一場完全不動。
+    // 用的是與 storyboardPreview 同一支純函式——預覽講的數字就是實際會做的事。
+    const existingScenes = await loadExistingStoryScenes(tx, project.id);
+    const diff = diffStoryboardPlan(
+      plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots })),
+      existingScenes,
+    );
+
     let shotOrder = Number(maxOrder);
     let sceneOrder = Number(maxSceneOrder);
     const storySceneIds: string[] = [];
     const sceneIds: string[] = [];
 
-    for (const sc of plan.scenes) {
+    for (const [i, sc] of plan.scenes.entries()) {
+      const plannedAction = diff[i];
+      // reuse＝這一場已經有鏡了，使用者可能調過鏡頭語言/造型/生成，一律不動
+      if (plannedAction?.action === "reuse") continue;
+
       const env = sc.environment ? environmentStateSchema.parse(sc.environment) : null;
-      const [storyScene] = await tx
-        .insert(schema.storyScenes)
-        .values({
-          projectId: project.id,
-          orderIndex: ++sceneOrder,
-          title: sc.title.slice(0, 60),
-          summary: sc.summary ?? null,
-          storyExcerpt: sc.excerpt ?? null,
-          locationId: resolveLocRef(sc.locationRef),
-          environment: env && Object.keys(env).length ? env : null,
-        })
-        .returning();
-      storySceneIds.push(storyScene.id);
+      let storyScene: typeof schema.storyScenes.$inferSelect;
+      if (plannedAction?.action === "fill" && plannedAction.storySceneId) {
+        // 場已存在但底下空了：沿用這一場（連同使用者可能改過的標題大小寫／地點），只補鏡
+        const [row] = await tx
+          .select()
+          .from(schema.storyScenes)
+          .where(eq(schema.storyScenes.id, plannedAction.storySceneId));
+        if (!row) continue;
+        storyScene = row;
+      } else {
+        const [row] = await tx
+          .insert(schema.storyScenes)
+          .values({
+            projectId: project.id,
+            orderIndex: ++sceneOrder,
+            title: sc.title.slice(0, 60),
+            summary: sc.summary ?? null,
+            storyExcerpt: sc.excerpt ?? null,
+            locationId: resolveLocRef(sc.locationRef),
+            environment: env && Object.keys(env).length ? env : null,
+          })
+          .returning();
+        storyScene = row;
+        // 只有「這次真的建出來的場」才記進 applied.storyboard——Undo 的語義是
+        // 「每個 run 只撤自己做過的事」。fill 沿用的是別人建的場，認領它會讓後來這個 run
+        // 的 Undo 把前一個 run 的場一起刪掉。
+        storySceneIds.push(storyScene.id);
+      }
 
       const locationPresetIds = storyScene.locationId ? [storyScene.locationId] : [];
       const rows = await tx
