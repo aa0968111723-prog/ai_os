@@ -182,6 +182,16 @@ p > .btn-ghost,
 .cal-cell {
   min-width: 0;
 }
+/* HelpTip 的問號鈕：元件 inline 寫了 minHeight:0（要貼齊標題基線），因此逃過上面的
+ * 44px 全站下限——實測 44×18，桌機與平板都不過關（原本只在 ≤560px 補回 44×44）。
+ * :root 的註解已寫明「提到 44 並讓規則全站生效」，所以這裡照同一條規則不分寬度補上；
+ * 負邊距抵銷放大後的盒子，標題行高與視覺尺寸都不變（只有可點範圍變大）。 */
+.project-page .help-tip-trigger {
+  width: 44px;
+  height: 44px;
+  margin: -13px -9px -13px -4px !important;
+}
+
 /* chip 裡的移除小叉。位於密排 chip 內，44px 下限會把整顆 chip 撐爆（chip 本身
  * 才 ~24px 高）；取 WCAG 2.5.8 AA 的 24px 下限再加一點餘裕，並置中圖示——
  * inline-flex 預設 align-items:stretch 會把小圖示釘在盒子左上角。 */
@@ -5326,11 +5336,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .project-guide .visual-journey__item > button { min-height: 64px; }
   .project-guide .visual-journey__copy small { display: none; }
   .project-guide .visual-journey__now { display: none; }
-  .project-page .help-tip-trigger {
-    width: 44px;
-    height: 44px;
-    margin: -13px -9px -13px -4px !important;
-  }
+  /* 這條已改成不分寬度生效（見 :root 附近的 .help-tip-trigger）；此處不再重複。 */
   .project-guide__steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .project-guide__step-wrap { min-width: 0; }
   .project-guide__step { width: 100%; min-width: 0; padding: 7px 8px; }
@@ -8006,7 +8012,13 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .story-chip-dirty { border-style: dashed; color: var(--warn, #b45309); border-color: currentColor; }
 .story-confirm-card { margin-top: 8px; }
 .story-confirm-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.story-confirm-card__excerpt { margin: 4px 0 0; font-size: var(--fs-12); opacity: .85; }
+/* 來源片段最多三行：確認卡的工作是「回答一個問題」，不是把原文貼回來給人重讀。
+ * schema 允許到 400 字，真模式的 LLM 會用滿——不夾住的話手機上單張卡就吃掉半個螢幕，
+ * 兩三張疊起來使用者根本看不到下面的動作鈕。全文仍在 title 裡（滑過/長按可看）。 */
+.story-confirm-card__excerpt {
+  margin: 4px 0 0; font-size: var(--fs-12); opacity: .85;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
 .story-confirm-card__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .story-version-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--border-soft); }
 .story-version-row:first-of-type { border-top: 0; }
@@ -8053,6 +8065,16 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .shot-card__title:hover, .shot-card__title:focus { border-color: var(--border); background: var(--field); }
 .shot-card__dur { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); white-space: nowrap; }
 .shot-card__dur input { width: 3.2em; text-align: right; padding: 2px 6px; }
+/* 窄幅：鏡號／秒數／狀態共用第一行，標題獨佔第二行整寬。
+ * 為什麼要拆行：分鏡標題是從故事句子來的，中文常有 20 字以上；
+ * 擠在同一行時（390px 實測）只看得到 43–45%，等於得先點進去才知道這是哪一鏡。
+ * input 不會換行，只能靠給它整行寬度來解決。 */
+@media (max-width: 640px) {
+  .shot-card__num { order: 1; }
+  .shot-card__dur { order: 2; }
+  .shot-card__head > .pill { order: 3; }
+  .shot-card__title { order: 4; flex: 1 1 100%; min-width: 0; }
+}
 .shot-card__preview {
   display: block; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
   border: 1px dashed var(--border); border-radius: var(--r-md, 10px);

@@ -70,7 +70,9 @@ function CandidateCard({
       </div>
       {desc && <Meta as="p" style={{ margin: "4px 0 0" }}>{desc}</Meta>}
       {candidate.sourceExcerpt && (
-        <Meta as="p" className="story-confirm-card__excerpt">「…{candidate.sourceExcerpt}…」</Meta>
+        <Meta as="p" className="story-confirm-card__excerpt" title={candidate.sourceExcerpt}>
+          「…{candidate.sourceExcerpt}…」
+        </Meta>
       )}
       {canEdit && (
         <div className="story-confirm-card__actions">

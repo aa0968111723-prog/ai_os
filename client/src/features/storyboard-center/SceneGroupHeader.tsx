@@ -97,6 +97,8 @@ export function SceneGroupHeader({
       {canEdit && (
         <ConfirmButton
           triggerClassName="btn-sm btn-ghost"
+          // 同 ShotCard：圖示鈕一定要給可讀名稱
+          triggerAriaLabel={`刪除「${scene.title || `場 ${index + 1}`}」這一場`}
           message={`刪除「${scene.title || `場 ${index + 1}`}」這一場？底下的鏡不會被刪，只會變成「未分場」。`}
           confirmLabel="刪除場"
           disabled={remove.isPending}

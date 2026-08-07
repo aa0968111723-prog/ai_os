@@ -153,7 +153,7 @@ export function ShotCard({
       {outdatedReason && (
         <Meta as="p" role="status" className="shot-card__outdated">
           <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-          這張圖是舊設定畫的（{outdatedReason} 後來改過）——要更新請打開單格工作室重畫。
+          這張圖是舊設定畫的（{outdatedReason}後來改過）——要更新請打開單格工作室重畫。
         </Meta>
       )}
 
@@ -352,6 +352,8 @@ export function ShotCard({
         {canEdit && (
           <ConfirmButton
             triggerClassName="btn-sm btn-ghost"
+            // 只有垃圾桶圖示，沒有可讀名稱＝讀螢幕軟體只會唸「按鈕」（實測抓到）
+            triggerAriaLabel={`刪除第 ${shotNumber} 鏡`}
             message={`刪除第 ${shotNumber} 鏡？會移到回收桶，可還原。`}
             confirmLabel="刪除"
             disabled={removeShot.isPending}
