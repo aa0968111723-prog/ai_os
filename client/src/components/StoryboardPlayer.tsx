@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { framesToSec, shotFrames } from "@shared/timeline";
+import { framesToSec, shotDurationFrames, sourceInFrames, type ShotSource } from "@shared/timeline";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
 
@@ -13,6 +13,10 @@ export type StoryboardPlayerScene = {
   assetKind: string | null;
   /** 逐鏡配音音檔（W5 同步播放；沒有就靜靜跳過） */
   narrationUrl?: string | null;
+  /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
+  trimStartMs?: number | null;
+  /** 畫面素材來源出點（毫秒）；null＝未修剪 */
+  trimEndMs?: number | null;
 };
 
 /**
@@ -23,7 +27,7 @@ export type StoryboardPlayerScene = {
  * 所以這是舊資料才踩得到的潛在落差；但「預覽看到的不是交付出去的」正是剪輯台最不能有的病，
  * 規則收斂進 shared/timeline.ts 之後不會再各自演化。
  */
-const clampDur = (s: number) => framesToSec(shotFrames(s));
+const clampDur = (shot: ShotSource) => framesToSec(shotDurationFrames(shot));
 
 /** 秒數 → m:ss（時間軸經過/總長顯示用） */
 const fmtTime = (s: number) => {
@@ -126,7 +130,7 @@ export function StoryboardPlayer({
     setPlaying((p) => !p);
   }, [playing, index, total, jumpTo]);
 
-  const dur = scene ? clampDur(scene.durationSec) : 1;
+  const dur = scene ? clampDur(scene) : 1;
 
   // 播放中計時：驅動時間軸與經過時間；暫停即停、保留進度（舊版 setTimeout 一暫停就整鏡重來）
   useEffect(() => {
@@ -150,6 +154,34 @@ export function StoryboardPlayer({
     if (playing) v.play().catch(() => {});
     else v.pause();
   }, [playing, index]);
+
+  // 修剪入點：把播放頭移到素材的來源入點。沒有這段，預覽播的是整段素材、交付包卻只取修剪區間，
+  // 「預覽看到的不是交付出去的」就又回來了。
+  // metadata 未載入時 currentTime 設不進去，所以 loadedmetadata 也要再設一次。
+  const srcInSec = scene ? framesToSec(sourceInFrames(scene)) : 0;
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || srcInSec <= 0) return;
+    const seek = () => {
+      if (Math.abs(v.currentTime - srcInSec) > 0.05) v.currentTime = srcInSec;
+    };
+    seek();
+    v.addEventListener("loadedmetadata", seek);
+    return () => v.removeEventListener("loadedmetadata", seek);
+  }, [index, srcInSec]);
+
+  // 修剪出點：播到出點就停住，不讓畫面繼續播進被剪掉的部分。
+  // 這裡刻意**不**呼叫 autoNext——換鏡由上面的 elapsed 計時驅動，兩邊都推會一次前進兩鏡。
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const outSec = srcInSec + dur;
+    const onTime = () => {
+      if (v.currentTime >= outSec - 0.02) v.pause();
+    };
+    v.addEventListener("timeupdate", onTime);
+    return () => v.removeEventListener("timeupdate", onTime);
+  }, [index, srcInSec, dur]);
 
   // 旁白音檔跟著畫面走：播放中且開啟旁白才播；暫停/關閉即停（換鏡因 key 重掛從頭播）
   useEffect(() => {
@@ -233,8 +265,8 @@ export function StoryboardPlayer({
   const audioSrc = scene.narrationUrl ?? (kind === "audio" ? scene.assetUrl : null);
 
   // 時間軸總長與經過（各鏡秒數累計；經過＝之前所有鏡＋本鏡進度）
-  const totalSec = scenes.reduce((sum, s) => sum + clampDur(s.durationSec), 0);
-  const elapsedTotal = scenes.slice(0, index).reduce((sum, s) => sum + clampDur(s.durationSec), 0) + Math.min(elapsed, dur);
+  const totalSec = scenes.reduce((sum, s) => sum + clampDur(s), 0);
+  const elapsedTotal = scenes.slice(0, index).reduce((sum, s) => sum + clampDur(s), 0) + Math.min(elapsed, dur);
 
   // 過場（reduced motion 全關）：換鏡淡入；圖像鏡在停留期間緩慢推近（Ken Burns，暫停跟著停）
   const fadeAnim = reducedMotion ? undefined : "sbp-fade 0.45s var(--ease-out) both";
@@ -305,7 +337,7 @@ export function StoryboardPlayer({
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }} role="group" aria-label="時間軸（點一段跳到那一鏡）">
           {scenes.map((s, i) => {
-            const segDur = clampDur(s.durationSec);
+            const segDur = clampDur(s);
             return (
               <button
                 key={s.id}

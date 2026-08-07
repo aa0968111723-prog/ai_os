@@ -313,3 +313,54 @@ describe("buildEdl", () => {
     expect(edl.split("SOURCE FILE").length - 1).toBe(1);
   });
 });
+
+describe("修剪進到時間軸檔（PR 2）", () => {
+  // 8 秒素材只取 2.0s–5.0s：時間軸上佔 3 秒，但素材的取用範圍是第 60–150 影格
+  const trimmed: TimelineScene[] = [
+    { title: "取中段", durationSec: 8, voiceover: null, mediaPath: "01_視頻素材/01_a.mp4", mediaKind: "video", trimStartMs: 2000, trimEndMs: 5000 },
+    { title: "整段", durationSec: 2, voiceover: null, mediaPath: "01_視頻素材/02_b.mp4", mediaKind: "video" },
+  ];
+
+  it("FCPXML：clip start＝來源入點，時間軸位置與長度看修剪後的值", () => {
+    const xml = buildFcpxml(trimmed, "P");
+    // 第一鏡：offset 0s（時間軸開頭）、start 2s（素材入點）、duration 3s（修剪長度）
+    expect(xml).toContain(`offset="0s" start="2s" duration="3s"`);
+    // 第二鏡緊接在 3s，未修剪＝start 0s
+    expect(xml).toContain(`offset="3s" start="0s" duration="2s"`);
+    // asset 宣告長度要涵蓋到出點（2+3=5s），否則離線匯入會看到「取用範圍超出素材」
+    expect(xml).toContain(`start="0s" duration="5s" hasVideo="1"`);
+    expect(xml).toContain(`<sequence format="r1" duration="5s"`);
+  });
+
+  it("Premiere XML：in/out 是素材上的取用範圍，start/end 才是時間軸位置", () => {
+    const xml = buildXmeml(trimmed, "P");
+    expect(xml).toContain("<start>0</start><end>90</end>");
+    expect(xml).toContain("<in>60</in><out>150</out>");
+    expect(xml).toContain("<start>90</start><end>150</end>");
+    expect(xml).toContain("<in>0</in><out>60</out>");
+  });
+
+  it("EDL：前兩個時間碼是來源進出點，後兩個是時間軸進出點", () => {
+    const edl = buildEdl(trimmed, "P");
+    expect(edl).toContain("00:00:02:00 00:00:05:00 00:00:00:00 00:00:03:00");
+    expect(edl).toContain("00:00:00:00 00:00:02:00 00:00:03:00 00:00:05:00");
+  });
+
+  it("SRT：字幕跟著修剪後的鏡長走，不是原始 durationSec", () => {
+    const srt = buildSrt(trimmed);
+    expect(srt).toContain("00:00:00,000 --> 00:00:03,000");
+    expect(srt).toContain("00:00:03,000 --> 00:00:05,000");
+  });
+
+  it("未修剪的分鏡輸出與修剪功能上線前逐字相同（回歸保護）", () => {
+    const plain: TimelineScene[] = [
+      { title: "A", durationSec: 5, voiceover: null, mediaPath: "01_視頻素材/01_a.mp4", mediaKind: "video" },
+    ];
+    // 顯式帶 trim 的預設值，應與完全不帶欄位產出同一份字串
+    const withDefaults: TimelineScene[] = [{ ...plain[0], trimStartMs: 0, trimEndMs: null }];
+    expect(buildFcpxml(withDefaults, "P")).toBe(buildFcpxml(plain, "P"));
+    expect(buildXmeml(withDefaults, "P")).toBe(buildXmeml(plain, "P"));
+    expect(buildEdl(withDefaults, "P")).toBe(buildEdl(plain, "P"));
+    expect(buildSrt(withDefaults)).toBe(buildSrt(plain));
+  });
+});
