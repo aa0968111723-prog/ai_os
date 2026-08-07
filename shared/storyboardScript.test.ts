@@ -76,6 +76,34 @@ describe("formatStoryboardScript", () => {
     expect(parsed.scenes[0]?.voiceover).toBe("說話");
   });
 
+  /**
+   * 值中間的空行。
+   *
+   * 這條守的是「原封不動貼回來不會被改寫」：逐行 trim 會把段落之間的空行併掉，
+   * 而使用者什麼都沒改、diff 卻判定有變更 → applyScript 把少了空行的版本寫進 DB。
+   * 旁白目前少用空行所以沒人踩到，但對白幾乎必然用空行分段。
+   */
+  it("欄位值中間的空行原樣保留——使用者用空行分段，貼回來不能被併掉", () => {
+    const parsed = parseStoryboardScript(
+      ["## 1. T (5s)", "旁白：第一段", "", "第二段", "", "", "第三段"].join("\n"),
+    );
+    expect(parsed.scenes[0]?.voiceover).toBe("第一段\n\n第二段\n\n\n第三段");
+  });
+
+  it("值的頭尾空白仍然修掉（只有中間的空行要留）", () => {
+    const parsed = parseStoryboardScript(["## 1. T (5s)", "畫面：", "", "  正文  ", "", ""].join("\n"));
+    expect(parsed.scenes[0]?.prompt).toBe("正文");
+  });
+
+  it("帶空行的值來回不失真——format 後再 parse 必須拿回同一個字串", () => {
+    const rows = [
+      { title: "T", durationSec: 5, prompt: "第一段\n\n第二段", voiceover: "唸第一句\n\n唸第二句", ambience: null },
+    ];
+    const back = parseStoryboardScript(formatStoryboardScript(rows)).scenes[0];
+    expect(back?.prompt).toBe("第一段\n\n第二段");
+    expect(back?.voiceover).toBe("唸第一句\n\n唸第二句");
+  });
+
   it("內容裡長得像結構的行會跳脫，原封不動寫回不會吃掉字", () => {
     // 沒有跳脫的話：畫面的第二行「旁白：…」會被當成旁白標籤，接著真正的「旁白：」再把它覆蓋成空——
     // 使用者什麼都沒改，那行字卻消失了

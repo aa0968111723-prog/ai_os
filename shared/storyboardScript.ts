@@ -187,16 +187,20 @@ export function parseStoryboardScript(text: string): ParsedStoryboardScript {
       continue;
     }
 
-    // 續行：接在最後一個標籤底下（沒有標籤就當畫面描述——最常見的手打情況）
+    // 續行：接在最後一個標籤底下（沒有標籤就當畫面描述——最常見的手打情況）。
+    //
+    // 這裡**只接、不 trim**：逐行 trim 會把值中間的空行吃掉（「第一句」+空行+「第二句」
+    // 會變成兩行相鄰），而使用者原封不動貼回來時，那個差異會被判成「有變更」寫進 DB——
+    // 等於系統偷改了他寫的字。頭尾空白留到 flush() 一次處理即可。
     const content = unescapeLine(line);
     if (current._label === VOICE_LABEL) {
-      current.voiceover = `${current.voiceover ?? ""}\n${content}`.trim();
+      current.voiceover = `${current.voiceover ?? ""}\n${content}`;
     } else if (current._label === AMBIENCE_LABEL) {
-      current.ambience = `${current.ambience ?? ""}\n${content}`.trim();
+      current.ambience = `${current.ambience ?? ""}\n${content}`;
     } else if (current._label === CARDS_LABEL) {
       // 唯讀區塊的續行一併忽略
     } else {
-      current.prompt = `${current.prompt ?? ""}\n${content}`.trim();
+      current.prompt = `${current.prompt ?? ""}\n${content}`;
     }
   }
   flush();
