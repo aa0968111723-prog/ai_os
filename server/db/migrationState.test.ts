@@ -266,10 +266,10 @@ describe("legacy migration adoption bridge", () => {
     // 8 項來自 bridge 前綴；另外 4 項來自 bridge 之後的 0036／0037／0038——這份合成 drift
     // 只放了 bridge 的語句，那幾支的最終形狀自然不在裡面。它們都寫了 IF NOT EXISTS，
     // 重跑是 no-op，所以同樣計入 alreadyPresent 而不是判成缺漏。
+    //（0038 是 scenes 的兩個環境音欄位，一支 migration 兩句 ADD COLUMN，故是 +2 不是 +1。）
     //
-    // 這個數字是人工計數：每當 bridge 之後又多一支寫 IF NOT EXISTS 的遷移，就要跟著加。
-    // 上一次漏加是 0038_scene_ambience（兩條 ADD COLUMN IF NOT EXISTS）——
-    // 遷移本身沒問題，只是這裡的計數沒跟上，測試就紅了。
+    // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
+    // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
     expect(result.alreadyPresent).toBe(8 + 4);
   });
 
