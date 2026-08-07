@@ -50,6 +50,7 @@ export function MenuSurface({
   surfaceRole = "menu",
   placement = "anchored",
   id,
+  forceSheet = false,
   children,
 }: {
   open: boolean;
@@ -77,9 +78,19 @@ export function MenuSurface({
   className?: string;
   /** 關掉方向鍵漫遊與自動聚焦（子項不是真正的 menuitem 時用） */
   roving?: boolean;
+  /**
+   * 桌機也一律用 sheet（portal ＋ fixed ＋ scrim），不退回錨定下拉。
+   *
+   * 全站 AI 助手用這個：它的外觀是「鋪滿視窗的感知光 ＋ 一個浮著的輸入框」，
+   * 縮成頂欄底下 184px 的下拉就整個講不通了——光暈是 position: fixed 鋪滿視窗的，
+   * 而下拉是 .menu-wrap 內的 absolute，兩者的幾何互相矛盾。
+   * 呼叫端要自己把 .is-sheet 的幾何補進非 media query 的規則裡（見 .global-assistant）。
+   */
+  forceSheet?: boolean;
   children: ReactNode;
 }) {
-  const compact = useMatchMedia(MENU_SHEET_MQ);
+  // hook 一律呼叫（不可放進條件式），只有結果被 forceSheet 蓋過
+  const compact = useMatchMedia(MENU_SHEET_MQ) || forceSheet;
   // sheet 下滑關閉手勢的起手 Y（僅 compact 使用；見 surface 的 onPointerDown）
   const sheetDragY = useRef<number | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
