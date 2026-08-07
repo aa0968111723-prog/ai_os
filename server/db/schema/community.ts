@@ -76,8 +76,22 @@ export const communityPosts = pgTable(
     scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
     propIds: jsonb("prop_ids").$type<string[]>(),
 
-    /** 標籤（頻道／搜尋） */
+    /** 作者自填標籤（頻道／搜尋） */
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
+
+    /**
+     * 自動細化分類（shared/inspirationTaxonomy.ts）：`facet:value` 標籤陣列。
+     * 與 tags 分開存的理由：作者標籤是人寫的、可以是任何字串；autoTags 是字典產物，
+     * 值域封閉才敢拿來做篩選面與計數。重算時只覆寫 autoTags，永不動作者的 tags。
+     */
+    autoTags: jsonb("auto_tags").$type<string[]>().notNull().default([]),
+    /** 主分類（autoTags 之一；列表卡片一眼看出「這是什麼」） */
+    category: text("category"),
+    /**
+     * 產生 autoTags 時的字典版本。落後 TAXONOMY_VERSION 的列會被讀取端自動重算，
+     * 所以改字典不需要停機補資料，也不需要一次性 backfill 才敢上線。
+     */
+    taxonomyVersion: integer("taxonomy_version").notNull().default(0),
 
     /** 互動計數（之後 PR 可接真實 like 表；先 denormalized） */
     likeCount: integer("like_count").notNull().default(0),
@@ -103,6 +117,9 @@ export const communityPosts = pgTable(
       .where(sql`${t.status} = 'published'`),
     authorIdx: index("community_posts_author_idx").on(t.authorId, t.publishedAt),
     sourceTypeIdx: index("community_posts_source_type_idx").on(t.sourceType, t.publishedAt),
+    // 細化分類篩選：auto_tags @> '["subject:city"]' 走 GIN；主分類走一般 btree
+    categoryIdx: index("community_posts_category_idx").on(t.category, t.publishedAt),
+    autoTagsIdx: index("community_posts_auto_tags_idx").using("gin", t.autoTags),
     // 同一來源避免重複發布（作者可 hidden 後再發新版；active 唯一）
     sourceActiveUq: uniqueIndex("community_posts_source_active_uq")
       .on(t.sourceType, t.sourceId)

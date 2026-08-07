@@ -12,6 +12,9 @@ import "./styles.mobile-fab-01.css";
 // 手機 design token（MOB-T）：必須在 styles.css/styles.mobile-fab-01.css 之後載入
 // （同特異性覆寫靠載入順序勝出）；全檔規則都包在 ≤820 media 內，桌機零改動
 import "./styles.mobile-tokens.css";
+// 靈感頻道深色舞台（flow-*）：全站唯一的深色區塊，class 前綴獨立、不覆寫任何既有規則，
+// 載入順序放在手機 token 之後只是為了讓 --safe-bottom 等變數已經就位
+import "./styles.inspiration.css";
 import "./splash.css";
 // 中文字型 CSS（MOB-G）：兩份 fontsource variable index.css 共 ~300KB raw 的 @font-face
 // 宣告，先前 @import 在 styles.css 頂端＝跟主樣式合成單一 render-blocking CSS，
