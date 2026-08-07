@@ -78,6 +78,10 @@ type Scene = {
   ambience?: string | null;
   /** 已生成且未軟刪的環境音網址——判斷「這格有沒有環境音」的唯一依據（理由同 narrationUrl）。 */
   ambienceUrl?: string | null;
+  /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
+  trimStartMs?: number | null;
+  /** 畫面素材來源出點（毫秒）；null＝未修剪 */
+  trimEndMs?: number | null;
   /** 該格若有進行中的「環境音」生成，回 queued/running；無則 null。 */
   pendingAmbienceStatus?: string | null;
   /** 逐鏡卡片綁定：這一鏡指定要用的設定卡（皆空＝沿用生成台勾選） */
@@ -85,6 +89,92 @@ type Scene = {
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
 };
+
+/** 毫秒 → 秒（顯示用，一位小數；剛好整秒不留 .0） */
+function msToSecLabel(ms: number): string {
+  const sec = ms / 1000;
+  return Number.isInteger(sec) ? String(sec) : sec.toFixed(1);
+}
+
+/**
+ * 逐鏡修剪（in/out）——「剪初稿」被卡住的那個動作。
+ *
+ * 只給影片鏡：靜態圖沒有「取素材的哪一段」可言，音訊鏡的長度由旁白決定。
+ * 以秒輸入、存毫秒（欄位是整數毫秒，見 shared/timeline.ts 的 ShotSource）。
+ * 出點留空＝取消修剪，鏡長回到 durationSec。
+ */
+function SceneTrim({
+  scene,
+  index,
+  disabled,
+  onCommit,
+}: {
+  scene: Scene;
+  index: number;
+  disabled: boolean;
+  onCommit: (patch: { trimStartMs?: number; trimEndMs?: number | null }) => void;
+}) {
+  const startMs = scene.trimStartMs ?? 0;
+  const endMs = scene.trimEndMs ?? null;
+  const trimmed = startMs > 0 || endMs !== null;
+
+  const field: CSSProperties = { width: 52, textAlign: "center", fontSize: 11, padding: "1px 3px" };
+  // 秒→毫秒，負數與非數字一律當 0；空字串在出點欄位代表「取消修剪」，由呼叫端分開處理
+  const toMs = (raw: string) => Math.max(0, Math.round((Number.parseFloat(raw) || 0) * 1000));
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span>・修剪</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        defaultValue={msToSecLabel(startMs)}
+        disabled={disabled}
+        aria-label={`第 ${index + 1} 鏡修剪起點（秒）`}
+        style={field}
+        key={`in-${startMs}`}
+        onBlur={(e) => {
+          const next = toMs(e.currentTarget.value);
+          if (next !== startMs) onCommit({ trimStartMs: next });
+        }}
+      />
+      <span>–</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        placeholder="迄"
+        defaultValue={endMs === null ? "" : msToSecLabel(endMs)}
+        disabled={disabled}
+        aria-label={`第 ${index + 1} 鏡修剪結束點（秒）；留空＝不修剪`}
+        style={field}
+        key={`out-${endMs ?? "none"}`}
+        onBlur={(e) => {
+          const raw = e.currentTarget.value.trim();
+          if (raw === "") {
+            if (endMs !== null) onCommit({ trimEndMs: null });
+            return;
+          }
+          const next = toMs(raw);
+          if (next !== endMs) onCommit({ trimEndMs: next });
+        }}
+      />
+      <span>秒</span>
+      {trimmed && (
+        <Button
+          variant="ghost"
+          disabled={disabled}
+          onClick={() => onCommit({ trimStartMs: 0, trimEndMs: null })}
+          aria-label={`取消第 ${index + 1} 鏡的修剪`}
+          style={{ padding: "0 4px", fontSize: 11, lineHeight: 1.4 }}
+        >
+          取消修剪
+        </Button>
+      )}
+    </span>
+  );
+}
 
 /**
  * 行內可編輯欄位（標題／秒數）：草稿即所見。
@@ -316,6 +406,15 @@ function SceneRow({
             秒
           </label>
           <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無畫面"}</span>
+          {/* 修剪只對影片鏡有意義：靜態圖沒有「取哪一段」，音訊鏡的長度由旁白決定 */}
+          {s.assetKind === "video" && (
+            <SceneTrim
+              scene={s}
+              index={i}
+              disabled={update.isPending || !canEdit}
+              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch })}
+            />
+          )}
           {isGenerating && <Pill status="running">生成中…</Pill>}
           {isAwaitingApproval && <Pill status="queued">待核准…</Pill>}
           {/* 旁白狀態一眼可見（編輯入口在單格工作室・配音） */}

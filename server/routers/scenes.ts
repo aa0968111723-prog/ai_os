@@ -32,6 +32,12 @@ import { MAX_PROMPT_CHARS } from "./prompts";
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
 
+/**
+ * 修剪點的上限（毫秒）＝60 分鐘。這不是業務規則，是「素材長度的寬鬆天花板」：
+ * 站上生成的素材以秒計，60 分鐘遠超任何合理值，純粹擋住把整數欄位撐爆的輸入。
+ */
+const TRIM_MAX_MS = 60 * 60 * 1000;
+
 export type SceneAssetSlot = "assetId" | "narrationAssetId" | "ambienceAssetId";
 
 /**
@@ -132,6 +138,9 @@ export const scenesRouter = router({
         title: schema.scenes.title,
         orderIndex: schema.scenes.orderIndex,
         durationSec: schema.scenes.durationSec,
+        // 修剪：分鏡表要標「已修剪」，粗剪預覽要照著入點播（見 shared/timeline.ts）
+        trimStartMs: schema.scenes.trimStartMs,
+        trimEndMs: schema.scenes.trimEndMs,
         status: schema.scenes.status,
         assetId: schema.scenes.assetId,
         prompt: schema.scenes.prompt,
@@ -615,6 +624,9 @@ export const scenesRouter = router({
         ambience: z.string().max(SCRIPT_AMBIENCE_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
+        // 修剪（毫秒）：上限 60 分鐘＝素材長度的寬鬆天花板；trimEndMs 可傳 null 表示「取消修剪」
+        trimStartMs: z.number().int().min(0).max(TRIM_MAX_MS).optional(),
+        trimEndMs: z.number().int().min(0).max(TRIM_MAX_MS).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -630,6 +642,15 @@ export const scenesRouter = router({
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
       if (input.ambience !== undefined) patch.ambience = input.ambience;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
+      if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
+      if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
+      // 出點必須大於入點，否則是零長度或負長度剪輯——交付出去的時間軸會打不開。
+      // 兩欄可以分開送，所以要拿「合併後」的值判斷，不能只看這次送了什麼。
+      const nextStart = patch.trimStartMs ?? scene.trimStartMs;
+      const nextEnd = patch.trimEndMs !== undefined ? patch.trimEndMs : scene.trimEndMs;
+      if (nextEnd !== null && nextEnd !== undefined && nextEnd <= nextStart) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "修剪的結束點必須晚於開始點" });
+      }
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
       return updated;

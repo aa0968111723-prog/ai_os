@@ -53,6 +53,67 @@ export function shotFrames(durationSec: number): Frames {
 }
 
 /**
+ * 毫秒 → 影格。修剪點以毫秒儲存（整數欄位、不吃浮點），進時間軸一律吸到影格。
+ *
+ * 先乘後除，不是 `(ms / 1000) * FPS`：後者在 2050ms 會算出 61.4999…（2.05 在 IEEE754 沒有
+ * 精確表示），四捨五入掉到 61 影格而不是 62。兩個整數先相乘沒有這個問題。
+ */
+export function msToFrames(ms: number): Frames {
+  if (!Number.isFinite(ms)) return 0;
+  return Math.round((ms * TIMELINE_FPS) / 1000);
+}
+
+/**
+ * 一鏡的來源與修剪。
+ *
+ * 修剪採 NLE 慣用的「來源入點 ＋ 時間軸長度」模型，不是「頭尾各切掉多少」：
+ * - `trimStartMs`＝從素材第幾毫秒開始播（來源入點）
+ * - `trimEndMs`＝素材的出點；**null 表示沒修剪過**，鏡長仍由 `durationSec` 決定
+ *
+ * 為什麼出點存絕對位置而不是「尾巴切掉多少」：素材被重新生成、長度變了的時候，
+ * 絕對出點仍指向素材上的同一個時間點，「切掉最後 2 秒」則會跟著素材長度飄。
+ *
+ * 舊資料 `trimStartMs=0`／`trimEndMs=null`，行為與修剪功能上線前完全相同。
+ */
+export type ShotSource = {
+  durationSec: number;
+  /** 來源入點（毫秒）；null/0＝從頭 */
+  trimStartMs?: number | null;
+  /** 來源出點（毫秒）；null＝未修剪，鏡長走 durationSec */
+  trimEndMs?: number | null;
+};
+
+/** 這一鏡從素材的第幾影格開始取（來源入點）。 */
+export function sourceInFrames(shot: ShotSource): Frames {
+  const ms = shot.trimStartMs;
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return 0;
+  return msToFrames(ms);
+}
+
+/**
+ * 這一鏡在時間軸上佔多少影格——**含修剪的鏡長規則**。
+ *
+ * 修剪過（出點有效且大於入點）就用修剪區間，否則退回 `durationSec`。
+ * 區間短於一影格時給 1 影格：零長度剪輯會讓 Premiere／FCP 匯入時整條軌報錯，
+ * 寧可留一格可見的殘影讓人發現，也不要產出一個打不開的時間軸檔。
+ */
+export function shotDurationFrames(shot: ShotSource): Frames {
+  const inFrames = sourceInFrames(shot);
+  const outMs = shot.trimEndMs;
+  if (outMs != null && Number.isFinite(outMs)) {
+    const outFrames = msToFrames(outMs);
+    if (outFrames > inFrames) return outFrames - inFrames;
+    if (outFrames === inFrames) return 1;
+  }
+  return shotFrames(shot.durationSec);
+}
+
+/** 這一鏡有沒有被修剪過（UI 顯示「已修剪」標記用） */
+export function isTrimmed(shot: ShotSource): boolean {
+  return sourceInFrames(shot) > 0 || (shot.trimEndMs != null && Number.isFinite(shot.trimEndMs));
+}
+
+/**
  * 影格 → FCPXML 時間值。
  * 整秒輸出「Ns」（可讀），非整秒輸出影格有理數「F/30s」（保證影格對齊，不留浮點尾巴）。
  */
@@ -69,6 +130,10 @@ export type ShotTiming = {
   startSec: number;
   endSec: number;
   durationSec: number;
+  /** 來源入點（影格）——匯出時要寫進 clip 的 in 點，預覽時是 video.currentTime 的起點 */
+  sourceInFrames: Frames;
+  /** 來源出點（影格）＝入點＋鏡長 */
+  sourceOutFrames: Frames;
 };
 
 export type TimelineLayout = {
@@ -84,13 +149,14 @@ export type TimelineLayout = {
  * 相鄰鏡以「累計影格」交棒——前一鏡的 end 就是後一鏡的 start，中間不可能長出縫或重疊。
  * 這是 `buildFcpxml` 原本就在做的事，現在其餘格式與預覽器共用同一份結果。
  */
-export function layoutTimeline(shots: ReadonlyArray<{ durationSec: number }>): TimelineLayout {
+export function layoutTimeline(shots: ReadonlyArray<ShotSource>): TimelineLayout {
   const out: ShotTiming[] = [];
   let cursor = 0;
   for (const [index, shot] of shots.entries()) {
-    const durationFrames = shotFrames(shot.durationSec);
+    const durationFrames = shotDurationFrames(shot);
     const startFrames = cursor;
     const endFrames = startFrames + durationFrames;
+    const inFrames = sourceInFrames(shot);
     cursor = endFrames;
     out.push({
       index,
@@ -100,6 +166,8 @@ export function layoutTimeline(shots: ReadonlyArray<{ durationSec: number }>): T
       startSec: framesToSec(startFrames),
       endSec: framesToSec(endFrames),
       durationSec: framesToSec(durationFrames),
+      sourceInFrames: inFrames,
+      sourceOutFrames: inFrames + durationFrames,
     });
   }
   return { fps: TIMELINE_FPS, shots: out, totalFrames: cursor, totalSec: framesToSec(cursor) };

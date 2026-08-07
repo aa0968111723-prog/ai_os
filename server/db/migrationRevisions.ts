@@ -216,4 +216,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0039_project_share_links": [
     "ad2681feabb586f070788e1987bae7f9df082a90b34622539d74a8e0981071bc",
   ],
+  "0040_scene_trim": [
+    "fb178972588a7a8f07771d99f5abb63f9907bdbd90d5949493f30681db66f1e9",
+  ],
 };
