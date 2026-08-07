@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
-import { trpc } from "../api";
-import type { AppRouter } from "../../../server/routers";
+import { trpc, type AppRouter } from "../api";
 import { setOrbState } from "../lib/orbState";
 import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";

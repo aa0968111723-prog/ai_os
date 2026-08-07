@@ -281,11 +281,13 @@ describe("legacy migration adoption bridge", () => {
     //   沒有任何 ALTER 既有欄位或資料搬移；
     //   0048 是 messages 的六個標注欄位與兩個索引，八句皆 IF NOT EXISTS——
     //   六句 ADD COLUMN IF NOT EXISTS 加兩句 CREATE INDEX IF NOT EXISTS，
-    //   同樣沒有改動既有欄位型別，也沒有任何資料搬移。）
+    //   同樣沒有改動既有欄位型別，也沒有任何資料搬移；
+    //   0049 是 ai_site_trace_sessions 的建表與兩個索引，三句皆 IF NOT EXISTS——
+    //   純新增全站助手軌跡分表，不動任何既有表、欄位或資料，重跑是 no-op。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33);
+    expect(result.alreadyPresent).toBe(8 + 36);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

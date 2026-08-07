@@ -120,6 +120,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "tasks.complete": "人類任務：標記完成",
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
+  "globalAssistant.ask": "詢問全站 AI 助手",
+  "globalAssistant.runSiteAction": "執行全站助手確認卡動作",
   "teamAssistant.dispatch": "團隊代理派工到專案",
   "quota.setMemberCommandLevel": "調整組員的組代理指揮權",
   "teamAssistant.command": "組代理下指令",
@@ -325,7 +327,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs", "share"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
   { key: "storyboard", label: "分鏡", prefixes: ["scenes"] },
-  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "workflows"] },
+  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導

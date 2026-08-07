@@ -255,4 +255,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0048_scene_annotations": [
     "f37176d150426acf3c5e9dcab6b753326139fa369e1987b97092a371fb8cccda",
   ],
+  "0049_ai_site_trace": [
+    "0be767b4aa33373ede24590a6949651a1b87e8e9c5db95eee4e7b52d675d3f9c",
+  ],
 };
