@@ -42,6 +42,7 @@ import { userAiKeysRouter } from "./userAiKeys";
 import { communityRouter } from "./community";
 import { shareRouter } from "./share";
 import { attachmentsRouter } from "./attachments";
+import { notificationsRouter } from "./notifications";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -87,6 +88,7 @@ export const appRouter = router({
   community: communityRouter,
   share: shareRouter,
   attachments: attachmentsRouter,
+  notifications: notificationsRouter,
 });
 
 export type AppRouter = typeof appRouter;

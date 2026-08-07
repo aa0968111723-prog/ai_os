@@ -11,6 +11,7 @@ export * from "./generation";
 export * from "./agents";
 export * from "./databases";
 export * from "./messaging";
+export * from "./notifications";
 export * from "./integrations";
 export * from "./catalog";
 export * from "./storage";

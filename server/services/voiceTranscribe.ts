@@ -10,6 +10,9 @@ import { signAssetUrl } from "./storage";
 import { falSubmit, falStatus, billingBypassed } from "./fal";
 import { getModel } from "../../shared/models";
 import { reserveQuota, refund } from "./points";
+import { resolveMentions } from "./mentions";
+import { notify } from "./notify";
+import { dmSnippet } from "./dmCore";
 
 const STT_MODEL_ID = "fal-ai/wizper"; // 便宜快速、中文可用;逐字稿只求「看得懂/可搜尋」,非交付級
 const POLL_TIMEOUT_MS = 120_000;
@@ -29,6 +32,43 @@ const openJobs = new Map<
   string,
   { requestId: string; cost: number; endpoint: string; startedAt: number; userId: string; groupId: string }
 >();
+
+/**
+ * 逐字稿回填後補算 @提及並通知。
+ *
+ * 語音留言送出的當下 body 是佔位字串（「🎙️ 語音訊息…」），裡面不可能有 @——
+ * 真正的內容是這裡才長出來的。沒有這一段的話，「@阿明 這一鏡的鐘聲太大聲」用講的
+ * 永遠不會通知阿明，而錄音正是產品為「長輩志工零打字」明確設計的入口。
+ *
+ * eventKey 帶 `:transcribed` 階段：與送出當下可能已發過的 `:posted` 是兩件事，
+ * 粒度取太粗會被 notify 自己的 onConflictDoNothing 吃掉。
+ */
+async function notifyTranscribedMentions(msg: typeof schema.messages.$inferSelect, text: string): Promise<void> {
+  try {
+    if (!msg.projectId) return;
+    const mentions = await resolveMentions(msg.groupId, undefined, text);
+    const targets = (mentions ?? []).filter((id) => id !== msg.userId);
+    if (!targets.length) return;
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, msg.projectId));
+    const [speaker] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, msg.userId));
+    await db.update(schema.messages).set({ mentions }).where(eq(schema.messages.id, msg.id));
+    void notify({
+      userIds: targets,
+      groupId: msg.groupId,
+      projectId: msg.projectId,
+      kind: "mention",
+      actorId: msg.userId,
+      messageId: msg.id,
+      title: `${speaker?.name ?? "夥伴"} 在「${project?.title ?? "專案"}」的語音留言提及你`,
+      body: dmSnippet(text),
+      url: `/p/${msg.projectId}?focus=messages&mid=${msg.id}`,
+      eventKey: `mention:${msg.id}:transcribed`,
+    });
+  } catch (err) {
+    // 逐字稿本身已經存好了，通知失敗不該讓整輪轉錄被判定成失敗而退點
+    console.warn("[voice] 逐字稿 @提及通知略過：", err instanceof Error ? err.message : err);
+  }
+}
 
 /** 掃一批待轉錄的語音留言並補逐字稿;回傳完成筆數。失敗只標記 failed，不擋其他。 */
 const STALE_RUNNING_MS = 15 * 60 * 1000; // running 陳屍門檻：正常全程 <3 分，逾此即崩潰孤兒
@@ -164,6 +204,8 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
         .update(schema.messages)
         .set({ body: polled.text.slice(0, 2000), voiceStatus: "done" })
         .where(eq(schema.messages.id, msg.id));
+      // 逐字稿是這一刻才長出來的——送出當下的 body 只是佔位字串，@提及要到現在才解析得出來
+      await notifyTranscribedMentions(msg, polled.text.slice(0, 2000));
       return true;
     }
     if (polled.status === "failed") {
@@ -232,6 +274,8 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
         .update(schema.messages)
         .set({ body: polled.text.slice(0, 2000), voiceStatus: "done" })
         .where(eq(schema.messages.id, msg.id));
+      // 逐字稿是這一刻才長出來的——送出當下的 body 只是佔位字串，@提及要到現在才解析得出來
+      await notifyTranscribedMentions(msg, polled.text.slice(0, 2000));
       return true;
     }
     if (polled.status === "failed") {

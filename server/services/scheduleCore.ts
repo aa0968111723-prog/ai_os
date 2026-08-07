@@ -10,6 +10,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
+import { notify } from "./notify";
 import { queueGroupSync } from "./googleCalendar";
 import { executeAgentEffectOnce } from "./agentEffectCore";
 
@@ -184,6 +185,24 @@ export async function addScheduleItemCore(input: {
     })
     .returning();
   queueGroupSync(input.groupId); // Google 日曆直連同步：把該組已連結成員的個人日曆排進推送佇列（fire-and-forget）
+  // 排程的 @提及在此之前**只存不送**：欄位寫進 DB，全檔卻沒有任何一處通知——
+  // 被排進某件事的人除非自己去翻行事曆，否則永遠不會知道。比照筆記留言補上送達端。
+  const mentionTargets = (mentions ?? []).filter((id) => id !== auth.user.id);
+  if (mentionTargets.length) {
+    void notify({
+      userIds: mentionTargets,
+      groupId: input.groupId,
+      projectId: input.projectId ?? null,
+      kind: "schedule_mention",
+      actorId: auth.user.id,
+      refType: "schedule",
+      refId: row.id,
+      title: `${auth.user.name} 在排程「${title}」提及你`,
+      body: note?.trim() || title,
+      url: `/planner?focus=schedule-${row.id}`,
+      eventKey: `schedule_mention:${row.id}:created`,
+    });
+  }
   return row;
 }
 

@@ -249,4 +249,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0046_scene_music": [
     "7315c765d3f58f7ab84264d069b16e091074d7a300e8a7df9ecaddf9f0dd50a9",
   ],
+  "0047_notifications": [
+    "a3a6b4f875704d3d2419ea1cfbed2703adb3d9964327721f92eab4893934210d",
+  ],
 };

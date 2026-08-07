@@ -4,8 +4,8 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { ASSISTANT_TRIGGER, replyAsAssistant } from "../services/messageAssistant";
-import { validateMentions } from "../services/mentions";
-import { pushToUsers } from "../services/webPush";
+import { resolveMentions } from "../services/mentions";
+import { notify } from "../services/notify";
 import { dmSnippet } from "../services/dmCore";
 
 /**
@@ -213,9 +213,11 @@ export const messagesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const project = await loadProject(input.projectId);
       requireGroup(ctx.auth, project.groupId);
+      let parentAuthorId: string | null = null;
       if (input.replyToId) {
         const parent = await loadMessage(input.replyToId);
         if (parent.projectId !== input.projectId) throw new TRPCError({ code: "BAD_REQUEST", message: "只能回覆本專案的留言" });
+        parentAuthorId = parent.userId;
       }
       if (!!input.refType !== !!input.refId) throw new TRPCError({ code: "BAD_REQUEST", message: "引用參數不完整" });
       if (input.refType && input.refId) {
@@ -223,7 +225,9 @@ export const messagesRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "引用的項目不在本專案／本組" });
         }
       }
-      const mentions = await validateMentions(project.groupId, input.mentions);
+      // 伺服器自己也從 body 解析一次：前端的名單是非同步載入的，打開專案立刻打字送出時
+      // 它算出來的 mentions 是空的，而在此之前伺服器從頭到尾不看 body——那則 @ 就永遠消失了
+      const mentions = await resolveMentions(project.groupId, input.mentions, input.body);
       const [msg] = await db
         .insert(schema.messages)
         .values({
@@ -239,13 +243,35 @@ export const messagesRouter = router({
         .returning();
       const mentionTargets = (mentions ?? []).filter((id) => id !== ctx.auth.user.id);
       if (mentionTargets.length) {
-        void pushToUsers(mentionTargets, {
+        void notify({
+          userIds: mentionTargets,
+          groupId: project.groupId,
+          projectId: project.id,
+          kind: "mention",
+          actorId: ctx.auth.user.id,
+          messageId: msg.id,
           title: `${ctx.auth.user.name} 在「${project.title}」提及你`,
           body: dmSnippet(input.body),
           // mid 讓收端捲到並高亮「被提及的那一則」，而不只是打開留言面板
           url: `/p/${project.id}?focus=messages&mid=${msg.id}`,
-          tag: `mention-${msg.id}`,
-        }).catch((err) => console.warn("[messages] @提及推播失敗：", err instanceof Error ? err.message : err));
+          eventKey: `mention:${msg.id}:posted`,
+        });
+      }
+      // 回覆要通知被回覆的人。沒有這一段的話，內建快速短語裡的「請組長過目 🙏」
+      // （它不帶任何 @）**組長絕對收不到**——按了等於什麼都沒做。
+      if (parentAuthorId && parentAuthorId !== ctx.auth.user.id && !mentionTargets.includes(parentAuthorId)) {
+        void notify({
+          userIds: [parentAuthorId],
+          groupId: project.groupId,
+          projectId: project.id,
+          kind: "reply",
+          actorId: ctx.auth.user.id,
+          messageId: msg.id,
+          title: `${ctx.auth.user.name} 回覆了你在「${project.title}」的留言`,
+          body: dmSnippet(input.body),
+          url: `/p/${project.id}?focus=messages&mid=${msg.id}`,
+          eventKey: `reply:${msg.id}:posted`,
+        });
       }
       if (input.body.includes(ASSISTANT_TRIGGER)) {
         void replyAsAssistant({
