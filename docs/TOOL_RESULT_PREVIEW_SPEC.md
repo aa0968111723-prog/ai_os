@@ -1,8 +1,44 @@
 # 工具結果視覺化預覽（Tool Result Preview）規格
 
-> 狀態：可直接開工的實作規格
 > 對應需求：「AI 代理輔助協助使用者創作和操作呼叫專案工具的能力，並且更視覺化輔助使用者」
 > 澄清：「示圖是操作工具後截圖或是一些細節」
+
+## ⚠️ 實作狀態（2026-08-07，PR #508 合併後補記）
+
+**這份文件是規劃階段的產物，實作時偏離了它的分批策略。先讀這一節再讀下面。**
+
+### 已經做完的
+
+伺服器端與歷史紀錄的視覺化都完成了，對應本文的**批次二**：
+
+| 交付物 | 位置 |
+|---|---|
+| 預覽型別、`assetFileUrl`、`toolLabel` | `shared/toolResultPreview.ts` |
+| `runLookupTool` 回傳第三個欄位 `preview` | `server/routers/assistant.ts` |
+| preview 落進 trace payload | 同上，`recordAiTraceEventSafely` 的 `tool_result` |
+| `AskStreamEvent` 加選填的 `tool` / `preview` | 同上 |
+| 預覽渲染（素材網格／分鏡／生成／資料列／模型） | `client/src/features/agent-trace/ToolResultPreview.tsx` |
+| 事件時間軸（取代 `<pre>` JSON dump） | `client/src/features/agent-trace/TraceEventList.tsx` |
+
+### 刻意沒做的：批次一的用戶端回接（§1.3、§2.2）
+
+**`shared/assistantToolText.ts` 不存在，也不會存在。** 本文 §1.3 與 §2.2 設計的「把工具輸出的中文文字反解析回結構化資料，再用標題＋類型比對素材清單」那一整層被放棄，理由：
+
+1. **它會產生無聲的錯誤。** 同名素材加上游標偏移，會在某一列旁邊顯示**錯的縮圖**。使用者無從察覺，比不顯示縮圖更糟。
+2. **它寫完就等著刪。** 本文自己標了「有拆除日期」——為了迴避後端改動而寫一整層含測試的解析器，再在下一批刪掉，划不來。
+3. **它要迴避的後端改動其實很小。** `runLookupTool` 撈的是 `db.select()` 無投影的完整 row，`id` / `kind` 本來就在手上，只是在折成字串那一行被丟掉。直接補一個回傳欄位，縮圖由建構保證正確。
+
+因此「零後端改動先出貨」這個前提不成立時，分批就沒有意義——直接做正確的版本。
+
+### 還沒做的：即時軌跡
+
+`AskStreamEvent` 已經帶得動 `tool` 與 `preview`（選填，舊前端會忽略），但 `client/src/components/AssistantTrace.tsx` 的 `AssistantActivityEvent` 仍是 `{ phase, text }`。**目前只有事後回看「實際運作紀錄」才看得到預覽，問答進行中仍然只有一行字。** 對應本文 §5.2、§5.3。
+
+### 怎麼讀本文其餘部分
+
+- **§1.1、§1.5、§4、§6 仍然有效**——資料流實況、素材網址的授權決策（一律相對路徑、永不簽章）、390px 版面約束、測試計畫，都經過查證且與實作一致。
+- **§1.2、§1.3、§2.2、§3 的批次一段落已作廢**，見上。
+- **§2.1 的型別已被 `shared/toolResultPreview.ts` 取代**：實作版更小（少了回接所需的 `unresolved` 之類狀態），以程式碼為準。
 
 ---
 
