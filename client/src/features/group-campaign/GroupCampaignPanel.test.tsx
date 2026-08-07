@@ -164,7 +164,9 @@ describe("GroupCampaignPanel", () => {
     render(<GroupCampaignPanel groupId="g1" />);
     await user.click(screen.getByRole("button", { name: /停止/ }));
     expect(stopMutate).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "停止", exact: true }));
+    // armed 之後觸發鈕會被確認／取消取代（ConfirmButton 在 !armed 時就 return 了），
+    // 所以這裡的「停止」必然是確認鈕，不會跟觸發鈕撞名
+    await user.click(screen.getByRole("button", { name: "停止" }));
     expect(stopMutate).toHaveBeenCalledWith({ runId: "run-1" });
   });
 
