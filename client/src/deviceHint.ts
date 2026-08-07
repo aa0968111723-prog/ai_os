@@ -6,8 +6,11 @@
  *   只有上架 App Store／Play 商店的原生 App 才拿得到部分裝置識別碼。
  *
  * ★拿得到的（依平台而異，見 collectDeviceHint 註解）：
- *   Android 的實際機型（Pixel 8／SM-S928B…）、作業系統版本、CPU 架構與位元數、
- *   核心數、記憶體、螢幕、顯示卡型號。
+ *   Android 的實際機型（Pixel 8／SM-S928B…）、作業系統版本、瀏覽器品牌與版本、
+ *   機身型態（手機／平板／桌機）、CPU 架構與位元數、核心數、記憶體、螢幕、顯示卡型號。
+ *
+ * 收到的原始值怎麼翻成人看得懂的名字（SM-S928B → Galaxy S24 Ultra）見
+ * shared/deviceNaming.ts——那份前後端共用，兩邊產出的名字必然一致。
  *
  * ★資料分成兩類，用途完全不同（這是本檔最重要的設計）：
  *
@@ -21,39 +24,12 @@
  *      以及收到驗證信時判斷「這是不是我剛才登入的那台」。
  */
 
-export interface DeviceHint {
-  /* ── 比對用：穩定欄位（進指紋） ── */
-  /** screen.width×screen.height（用 screen 不是 window，改視窗大小不影響） */
-  screen?: string;
-  /** IANA 時區，如 Asia/Taipei */
-  tz?: string;
-  /** navigator.language */
-  lang?: string;
-  /** CPU 核心數 */
-  cores?: number;
-  /** 是否為「加到主畫面」的獨立 App（iOS 上與 Safari 是不同 cookie 空間，算兩台裝置） */
-  standalone?: boolean;
-  /** 裝置機型（Android 給得到，如 "Pixel 8"／"SM-S928B"；桌機與 Apple 裝置為空） */
-  model?: string;
-  /** CPU 架構："x86" / "arm" */
-  arch?: string;
-  /** 位元數："64" / "32" */
-  bitness?: string;
-  /** 記憶體 GB（Chromium 上限回報 8） */
-  memoryGb?: number;
-  /** 觸控點數上限——用來區分觸控筆電與一般桌機，屬硬體特性不會變 */
-  touchPoints?: number;
-
-  /* ── 顯示用：會漂移的細節（不進指紋） ── */
-  /** 作業系統版本，如 Windows 的 "15.0.0"、Android 的 "14.0.0" */
-  detailOsVersion?: string;
-  /** 瀏覽器版本，如 "131.0.6778.86" */
-  detailBrowserVersion?: string;
-  /** 顯示卡型號，如 "NVIDIA GeForce RTX 4070" */
-  detailGpu?: string;
-  /** 螢幕像素密度倍率（Retina 為 2 或 3） */
-  detailPixelRatio?: number;
-}
+/**
+ * 欄位定義住在 shared/deviceNaming.ts（伺服器與這裡共用同一份），
+ * 這裡轉出去讓既有匯入點（LoginPage／AcceptInvitePage）不用改。
+ */
+export type { DeviceHint } from "@shared/deviceNaming";
+import type { DeviceHint } from "@shared/deviceNaming";
 
 /** Chromium 的 UA Client Hints；Safari／Firefox 沒有這個 API */
 interface UADataValues {
@@ -62,6 +38,8 @@ interface UADataValues {
   architecture?: string;
   bitness?: string;
   model?: string;
+  /** 機身型態（新版 Chromium）："Mobile"／"Tablet"／"Desktop"／"XR" */
+  formFactors?: string[];
   fullVersionList?: Array<{ brand: string; version: string }>;
 }
 interface NavigatorUAData {
@@ -171,7 +149,10 @@ export async function collectDeviceHint(): Promise<DeviceHint | undefined> {
           "architecture",
           "bitness",
           "model",
+          "platform",
           "platformVersion",
+          // 舊版 Chromium 不認得的 hint 名稱會被忽略（不丟例外），故可以直接要
+          "formFactors",
           "fullVersionList",
         ]);
         const timeoutPromise = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 200));
@@ -181,9 +162,17 @@ export async function collectDeviceHint(): Promise<DeviceHint | undefined> {
           hint.arch = high.architecture || undefined;
           hint.bitness = high.bitness || undefined;
           hint.detailOsVersion = high.platformVersion || undefined;
-          // fullVersionList 含 "Not_A Brand" 之類的防呆假品牌，取最後一個真實品牌的版本
+          // UA 字串正在被 Chrome 逐步精簡，平台改以 UA-CH 為準、UA 只作退路
+          hint.detailPlatform = high.platform || undefined;
+          // formFactors 是陣列（可能同時是 "Tablet" 與 "EInk"）；取第一個主型態即可
+          hint.detailFormFactor = high.formFactors?.[0] || undefined;
+          // fullVersionList 含 "Not_A Brand" 之類的防呆假品牌，取最後一個真實品牌
+          // ——★這也是唯一認得出 Brave 的地方：它的 UA 字串偽裝成純 Chrome（反追蹤），
+          //   只有這份品牌清單誠實列出自己。
           const real = high.fullVersionList?.filter((b) => !/not[\W_]*a[\W_]*brand/i.test(b.brand));
-          hint.detailBrowserVersion = real?.[real.length - 1]?.version;
+          const primary = real?.[real.length - 1];
+          hint.detailBrowserVersion = primary?.version;
+          hint.detailBrowserBrand = primary?.brand;
         }
       } catch {
         /* ignore UA client hints errors */

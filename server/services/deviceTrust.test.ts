@@ -1,22 +1,19 @@
 /**
  * 裝置綁定登入的純函式測試（無 DB／無網路）。
  * DB 相關路徑（lookupDevice／trustDevice／revokeDevice）另由 e2e 與 pg 測試覆蓋。
+ *
+ * 命名（osFamily／browserFamily／機型翻譯／標籤／細節）搬到 shared/deviceNaming.ts
+ * 與前端共用之後，那些測試也一起搬到 shared/deviceNaming.test.ts——同一套判斷不該有
+ * 兩份會各自漂移的期望值。這裡留下的是只有伺服器才有的東西：指紋、模式解析、驗證信。
  */
 import { describe, expect, it } from "vitest";
 import {
-  brandOfModel,
   breakGlassActive,
-  browserFamily,
   buildDeviceChallengeEmail,
   codesMatch,
-  describeDevice,
-  deviceLabelFrom,
   deviceTrustMisconfigured,
   fingerprintOf,
   graceActive,
-  osDescription,
-  osFamily,
-  screenText,
   resolveDeviceTrustMode,
 } from "./deviceTrust";
 import { deviceDetailLines } from "../../shared/deviceDetails";
@@ -36,29 +33,6 @@ const UA = {
 };
 
 const ENV_BASE = { RATE_LIMIT_SECRET: "test-pepper", NODE_ENV: "test" } as NodeJS.ProcessEnv;
-
-describe("osFamily / browserFamily", () => {
-  it("辨識常見平台", () => {
-    expect(osFamily(UA.iphoneSafari)).toBe("iOS");
-    expect(osFamily(UA.winChrome)).toBe("Windows");
-    expect(osFamily(UA.macFirefox)).toBe("macOS");
-    expect(osFamily(UA.androidChrome)).toBe("Android");
-  });
-
-  // Edge 的 UA 同時含 Chrome 與 Safari、Chrome 的 UA 含 Safari；比對順序錯就會全被判成 Safari。
-  it("由窄到寬比對，不把 Edge/Chrome 誤判成 Safari", () => {
-    expect(browserFamily(UA.winEdge)).toBe("Edge");
-    expect(browserFamily(UA.winChrome)).toBe("Chrome");
-    expect(browserFamily(UA.androidChrome)).toBe("Chrome");
-    expect(browserFamily(UA.iphoneSafari)).toBe("Safari");
-    expect(browserFamily(UA.macFirefox)).toBe("Firefox");
-  });
-
-  // Android 的 UA 也含 Linux——順序必須先判 Android
-  it("Android 不被 Linux 規則吃掉", () => {
-    expect(osFamily(UA.androidChrome)).not.toBe("Linux");
-  });
-});
 
 describe("fingerprintOf", () => {
   const hint = { screen: "1920x1080", tz: "Asia/Taipei", lang: "zh-TW", cores: 8 };
@@ -129,117 +103,6 @@ describe("fingerprintOf", () => {
     expect(fingerprintOf(UA.winChrome, { ...hint, memoryGb: 8 }, ENV_BASE)).not.toBe(
       fingerprintOf(UA.winChrome, { ...hint, memoryGb: 4 }, ENV_BASE),
     );
-  });
-});
-
-describe("deviceLabelFrom", () => {
-  it("產生看得懂的名稱", () => {
-    expect(deviceLabelFrom(UA.iphoneSafari)).toBe("iPhone · Safari");
-    expect(deviceLabelFrom(UA.winChrome)).toBe("Windows · Chrome");
-    expect(deviceLabelFrom(UA.macFirefox)).toBe("macOS · Firefox");
-  });
-
-  it("PWA 標成主畫面App，使用者才分得出同一支手機上的兩台", () => {
-    expect(deviceLabelFrom(UA.iphoneSafari, { standalone: true })).toBe("iPhone · 主畫面App");
-  });
-
-  it("拿得到機型時帶上廠牌與型號", () => {
-    expect(deviceLabelFrom(UA.androidChrome, { model: "SM-S928B" })).toBe("Samsung SM-S928B · Chrome");
-    expect(deviceLabelFrom(UA.androidChrome, { model: "Pixel 8" })).toBe("Google Pixel 8 · Chrome");
-  });
-
-  it("有 OS 版本時標題就帶版本（Win10／Win11 分得出來）", () => {
-    expect(deviceLabelFrom(UA.winChrome, { detailOsVersion: "15.0.0" })).toBe("Windows 11 · Chrome");
-    expect(deviceLabelFrom(UA.winChrome, { detailOsVersion: "10.0.0" })).toBe("Windows 10 · Chrome");
-  });
-});
-
-describe("brandOfModel", () => {
-  it("由原廠代碼推廠牌", () => {
-    expect(brandOfModel("SM-S928B")).toBe("Samsung");
-    expect(brandOfModel("Pixel 8")).toBe("Google");
-    expect(brandOfModel("CPH2451")).toBe("OPPO");
-    expect(brandOfModel("RMX3771")).toBe("realme");
-    expect(brandOfModel("XT2315-2")).toBe("Motorola");
-  });
-
-  // 猜錯廠牌比不寫更糟——使用者會以為清單裡是別人的裝置
-  it("認不出來就不猜", () => {
-    expect(brandOfModel("QQQ-9999")).toBeUndefined();
-    expect(brandOfModel("")).toBeUndefined();
-    expect(brandOfModel(undefined)).toBeUndefined();
-  });
-});
-
-describe("osDescription", () => {
-  // UA 字串永遠寫 "Windows NT 10.0"，只有 UA-CH 的 platformVersion 分得出 10 與 11
-  it("Windows 依 platformVersion 主版本分辨 10／11", () => {
-    expect(osDescription(UA.winChrome, { detailOsVersion: "15.0.0" })).toBe("Windows 11");
-    expect(osDescription(UA.winChrome, { detailOsVersion: "13.0.0" })).toBe("Windows 11");
-    expect(osDescription(UA.winChrome, { detailOsVersion: "12.0.0" })).toBe("Windows 10");
-    expect(osDescription(UA.winChrome)).toBe("Windows");
-  });
-
-  it("Android 帶版本、iOS 從 UA 取主版本", () => {
-    expect(osDescription(UA.androidChrome, { detailOsVersion: "14.0.0" })).toBe("Android 14");
-    expect(osDescription(UA.iphoneSafari)).toBe("iOS 17");
-  });
-});
-
-describe("describeDevice", () => {
-  it("桌機組出處理器／記憶體／螢幕／顯示卡", () => {
-    const d = describeDevice(UA.winChrome, {
-      screen: "2560x1440",
-      cores: 16,
-      arch: "x86",
-      bitness: "64",
-      memoryGb: 8,
-      detailOsVersion: "15.0.0",
-      detailBrowserVersion: "131.0.6778.86",
-      detailGpu: "NVIDIA GeForce RTX 4070",
-      detailPixelRatio: 1,
-    });
-    expect(d.os).toBe("Windows 11");
-    expect(d.cpu).toBe("X86 · 64 位元 · 16 核心");
-    expect(d.memoryGb).toBe(8);
-    expect(d.gpu).toBe("NVIDIA GeForce RTX 4070");
-    expect(d.browserVersion).toBe("131.0.6778.86");
-  });
-
-  it("Android 帶出廠牌與機型", () => {
-    const d = describeDevice(UA.androidChrome, { model: "SM-S928B", detailOsVersion: "14.0.0" });
-    expect(d.brand).toBe("Samsung");
-    expect(d.model).toBe("SM-S928B");
-    expect(d.os).toBe("Android 14");
-  });
-
-  // Apple 刻意不公開機型；要寫清楚原因，否則會被當成功能壞掉回報
-  it("Apple 裝置說明為何看不到機型", () => {
-    const d = describeDevice(UA.iphoneSafari, { screen: "390x844" });
-    expect(d.brand).toBe("Apple");
-    expect(d.model).toBeUndefined();
-    expect(d.modelNote).toMatch(/Apple 不對網頁公開機型/);
-  });
-
-  it("高解析螢幕標出倍率", () => {
-    const d = describeDevice(UA.iphoneSafari, { screen: "390x844", detailPixelRatio: 3 });
-    expect(d.screen).toBe("390x844 @3x");
-  });
-});
-
-describe("screenText", () => {
-  // 實機實測：Windows 縮放 130% 時 devicePixelRatio 是 1.309999942779541，
-  // 原樣顯示成「@1.309999942779541x」沒有人看得懂
-  it("像素倍率四捨五入到兩位，不噴浮點數尾巴", () => {
-    expect(screenText("1466x825", 1.309999942779541)).toBe("1466x825 @1.31x");
-    expect(screenText("390x844", 3)).toBe("390x844 @3x");
-    expect(screenText("2560x1440", 2)).toBe("2560x1440 @2x");
-  });
-
-  it("一般螢幕不加倍率（1x 沒有資訊量）", () => {
-    expect(screenText("1920x1080", 1)).toBe("1920x1080");
-    expect(screenText("1920x1080")).toBe("1920x1080");
-    expect(screenText("1920x1080", 1.001)).toBe("1920x1080");
   });
 });
 
