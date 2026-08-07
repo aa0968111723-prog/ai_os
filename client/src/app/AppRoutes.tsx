@@ -28,6 +28,8 @@ const Launchpad = lazyWithRetry(() => import("../pages/Launchpad").then((m) => (
 const ProjectPage = lazyWithRetry(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 const ShareTargetPage = lazyWithRetry(() => import("../pages/ShareTargetPage").then((m) => ({ default: m.ShareTargetPage })));
 const CommunityPage = lazyWithRetry(() => import("../pages/CommunityPage").then((m) => ({ default: m.CommunityPage })));
+// 創作室連白板引擎與自己的 CSS chunk 一起走，尤其不該進首屏 bundle
+const AnimationStudioPage = lazyWithRetry(() => import("../pages/AnimationStudioPage").then((m) => ({ default: m.AnimationStudioPage })));
 
 export type AppRoutesProps = {
   activeGroupId: string;
@@ -121,6 +123,12 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/share-target"><ShareTargetPage groupId={activeGroupId} /></Route>
       <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
       <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
+      {/* 動畫創作室：/studio 先挑專案，/studio/:id 直接進那一案的白板與分鏡表。
+          key=id 與專案頁同理——換案要重建，否則白板草稿與選中的分鏡會殘留到新案。 */}
+      <Route path="/studio/:projectId">
+        {(params) => <AnimationStudioPage key={params.projectId} groupId={activeGroupId} projectId={params.projectId} />}
+      </Route>
+      <Route path="/studio"><AnimationStudioPage groupId={activeGroupId} /></Route>
       <Route path="/community"><CommunityPage /></Route>
       {/* key=id：從通知、待辦或上一頁／下一頁切換專案時強制重建 ProjectPage。
           否則前一案的提示詞、模型、角色場景勾選與 localStorage 初始化狀態可能殘留到新案。 */}

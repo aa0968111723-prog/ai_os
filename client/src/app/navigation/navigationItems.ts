@@ -67,6 +67,14 @@ export const topbarNavItems: NavigationItem[] = [
     title: "資料庫——你的素材與資料集",
   },
   {
+    key: "studio",
+    label: "創作室",
+    href: "/studio",
+    section: "topbar",
+    icon: "Brush",
+    title: "動畫創作室——手繪大白板與順序分鏡表",
+  },
+  {
     key: "community",
     label: "靈感",
     href: "/community",
@@ -90,6 +98,7 @@ export const accountMenuItems: NavigationItem[] = [
   { key: "help", label: "怎麼用", href: "/help", section: "help", icon: "HelpCircle" },
   { key: "models", label: "模型指南", href: "/models", section: "help", icon: "Info" },
   // 工作
+  { key: "studio", label: "動畫創作室", href: "/studio", section: "work", icon: "Brush" },
   { key: "community", label: "靈感頻道", href: "/community", section: "work", icon: "Sparkles" },
   { key: "mcp", label: "接上外部 AI", href: "/mcp", section: "work", icon: "Sparkles" },
   { key: "integrations", label: "連接的資料來源", href: "/integrations", section: "work", icon: "Package" },
