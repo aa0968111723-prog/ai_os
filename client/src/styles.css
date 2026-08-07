@@ -5676,9 +5676,16 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     padding-bottom: max(16px, var(--safe-bottom));
     animation: mobile-sheet-up 260ms var(--ease-out);
   }
-  .menu-surface.is-sheet::before {
-    content: ""; display: block;
-    width: 36px; height: 4px; margin: 8px auto 6px;
+  /* 把手：外層是觸控靶（26px 高、滿寬），視覺條在 ::before。
+     touch-action: none 是這條的重點——沒有它，瀏覽器會把把手上的直向拖曳
+     判成 sheet 的捲動並送出 pointercancel，下滑關閉永遠走不到門檻。 */
+  .menu-surface__grip {
+    display: flex; align-items: center; justify-content: center;
+    height: 26px; margin: -2px 0 2px;
+    touch-action: none; cursor: grab;
+  }
+  .menu-surface__grip::before {
+    content: ""; width: 36px; height: 4px;
     border-radius: 999px; background: var(--border-strong);
   }
   .menu-surface.is-sheet .menu-item { min-height: 48px; }
@@ -5713,8 +5720,16 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     max-height: calc(100dvh - 72px - var(--safe-top));
     overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
+  /* 外層是觸控靶（滿寬、26px 高），視覺條在 ::before。
+     touch-action: none 是重點：沒有它，瀏覽器會把把手上的直向拖曳判成 sheet 的
+     捲動並送出 pointercancel，下滑關閉永遠走不到門檻（同 .menu-surface__grip）。 */
   .mobile-more-sheet__grip {
-    width: 36px; height: 4px; margin: 2px auto 10px;
+    display: flex; align-items: center; justify-content: center;
+    height: 26px; margin: -4px 0 6px;
+    touch-action: none; cursor: grab;
+  }
+  .mobile-more-sheet__grip::before {
+    content: ""; width: 36px; height: 4px;
     border-radius: 999px; background: var(--border-strong);
   }
   .mobile-more-sheet__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -7602,13 +7617,22 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   animation: ai-assistant-in 260ms var(--ease-out);
 }
 /* 拖曳把手是唯一保留的裝飾：它是「可下滑關閉」的手勢提示，不是文案。
-   底色沒了之後把手要自己看得見，換成半透明白＋一點暗邊。 */
-.menu-surface.is-sheet.global-assistant::before {
+   幾何（含 touch-action: none）在 .menu-surface__grip，這裡只換外觀——
+   底色沒了之後把手要自己看得見，換成半透明白＋一點暗邊。
+   基準規則寫在 ≤820 的 media query 裡，助手在桌機也是 sheet，所以要在這裡重述。 */
+.menu-surface.is-sheet.global-assistant .menu-surface__grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  margin: -2px 0 2px;
+  touch-action: none;
+  cursor: grab;
+}
+.menu-surface.is-sheet.global-assistant .menu-surface__grip::before {
   content: "";
-  display: block;
   width: 36px;
   height: 4px;
-  margin: 8px auto 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.7);
   box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.12);
@@ -7654,7 +7678,7 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   }
   /* 下滑關閉是觸控手勢（MenuSurface 對 pointerType === "mouse" 直接跳過），
      桌機留著把手等於畫一個按不動的東西 */
-  .menu-surface.is-sheet.global-assistant::before { display: none; }
+  .menu-surface.is-sheet.global-assistant .menu-surface__grip { display: none; }
 }
 @keyframes ai-assistant-in {
   from { opacity: 0; }

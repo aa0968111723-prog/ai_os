@@ -172,23 +172,40 @@ export function MenuSurface({
         aria-label={label}
         className={`menu menu-surface${placement === "stretch" ? " menu-surface--stretch" : ""}${compact ? " is-sheet" : ""}${className ? ` ${className}` : ""}`}
         style={!compact && minWidth ? { minWidth } : undefined}
-        // sheet 把手（::before 畫的 grip）承諾「可下滑關閉」——補最小手勢。
-        // 只在 compact、非滑鼠、且於頂端把手帶（32px 內）起手才追蹤，
-        // 不與選單內容自身的捲動打架；桌機路徑（!compact）完全不進來。
-        onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
-          if (!compact || e.pointerType === "mouse") return;
-          if (e.clientY - e.currentTarget.getBoundingClientRect().top > 32) return;
-          sheetDragY.current = e.clientY;
-        }}
-        onPointerMove={(e: ReactPointerEvent<HTMLDivElement>) => {
-          if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
-            sheetDragY.current = null;
-            onClose();
-          }
-        }}
-        onPointerUp={() => { sheetDragY.current = null; }}
-        onPointerCancel={() => { sheetDragY.current = null; }}
       >
+        {/* sheet 把手：畫出「可下滑關閉」這個承諾，也真的收下那個手勢。
+         *
+         * 為什麼是真的元素而不是 .is-sheet::before：把手必須帶 `touch-action: none`。
+         * sheet 是 overflow-y: auto，把手先前畫在偽元素上、手勢掛在整個 surface 的
+         * 頂端 32px 帶——瀏覽器會把那條直向拖曳判成捲動，滑到約 16px 就送出
+         * pointercancel 收走 pointer 串流。真機實測序列是
+         * `down → move → move → CANCEL`：永遠走不到 48px 的關閉門檻，
+         * 也就是說這個手勢從落地起就沒有生效過（所有 sheet 皆然，不只 AI 助手）。
+         * 偽元素接不到事件、也吃不到 touch-action，只能換成真的節點。
+         *
+         * setPointerCapture：把串流釘在把手上，中途滑出把手範圍也不會被祖先接走。
+         *
+         * aria-hidden：它是冗餘控制項——關閉手段鍵盤有 Esc、指標有遮罩，
+         * 讀屏不需要再多一個沒有鍵盤等價操作的拖曳目標。 */}
+        {compact && (
+          <div
+            className="menu-surface__grip"
+            aria-hidden
+            onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
+              if (e.pointerType === "mouse") return;
+              sheetDragY.current = e.clientY;
+              e.currentTarget.setPointerCapture(e.pointerId);
+            }}
+            onPointerMove={(e: ReactPointerEvent<HTMLDivElement>) => {
+              if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
+                sheetDragY.current = null;
+                onClose();
+              }
+            }}
+            onPointerUp={() => { sheetDragY.current = null; }}
+            onPointerCancel={() => { sheetDragY.current = null; }}
+          />
+        )}
         {children}
       </div>
     </>
