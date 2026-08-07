@@ -86,7 +86,23 @@ const BUDGET_CHOICES: ReadonlyArray<{ points: number; label: string; note: strin
   { points: 200, label: "200 點內自動", note: "整條線大致跑得完；超過仍會停下來問你" },
 ];
 
-export function GroupCampaignPanel({ groupId }: { groupId: string }) {
+export function GroupCampaignPanel({
+  groupId,
+  collapsible = false,
+}: {
+  groupId: string;
+  /**
+   * 收合成一列（助手 sheet 用）。
+   *
+   * 這張面板攤開是一整版說明＋表單＋預算選項——放在助手 sheet 最上方時，
+   * 問答的輸入框被推到看不見，整張 sheet 變成一面字牆（實機截圖回報「字太多」）。
+   * 收合後只剩一列「AI 調度」，有計畫等人核准／等授權時掛上計數徽章提醒展開。
+   *
+   * 做成 prop 而不是一律收合：工作台等寬裕版位仍可整張攤開，
+   * 且既有測試（直接 render 本元件、斷言內部欄位 toBeVisible）不必每案先點一下。
+   */
+  collapsible?: boolean;
+}) {
   const [goal, setGoal] = useState("");
   const [budgetPoints, setBudgetPoints] = useState(0);
   const utils = trpc.useUtils();
@@ -116,13 +132,11 @@ export function GroupCampaignPanel({ groupId }: { groupId: string }) {
   if (!allowed) return null;
 
   const runs = campaigns.data ?? [];
+  // 等人的計畫數：awaiting_approval 等核准、waiting 等人工關卡或加授權——收合時靠徽章提醒
+  const attention = runs.filter((r) => r.status === "awaiting_approval" || r.status === "waiting").length;
 
-  return (
-    <section className="campaign-panel">
-      <div className="campaign-panel__head">
-        <strong>AI 調度</strong>
-        <Chip>整個組</Chip>
-      </div>
+  const body = (
+    <>
       <Hint>
         說一個跨專案的目標，組代理會排一份多步計畫：需要的話先開新專案，再把內容派給各專案的
         AI 去做，並盯著跑完。排完會先給你過目，你按核准它才開始動。
@@ -168,6 +182,33 @@ export function GroupCampaignPanel({ groupId }: { groupId: string }) {
       {runs.map((run) => (
         <CampaignCard key={run.id} run={run} onChanged={invalidate} />
       ))}
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <details className="campaign-panel campaign-panel--fold">
+        <summary className="campaign-panel__summary">
+          <Icon name="Compass" size={15} />
+          <strong>AI 調度</strong>
+          <Meta as="span">說個目標，AI 排計畫、開專案、派工</Meta>
+          {attention > 0 && (
+            <span className="campaign-panel__attention">{attention} 份等你</span>
+          )}
+          <Icon name="ChevronDown" size={15} className="campaign-panel__chevron" />
+        </summary>
+        {body}
+      </details>
+    );
+  }
+
+  return (
+    <section className="campaign-panel">
+      <div className="campaign-panel__head">
+        <strong>AI 調度</strong>
+        <Chip>整個組</Chip>
+      </div>
+      {body}
     </section>
   );
 }

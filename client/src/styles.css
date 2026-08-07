@@ -6927,13 +6927,15 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 毛玻璃兩檔，集中在這裡改。底色用 --card 的通道值（暖白 #fffefa）而不是純白——
      純白壓在暖象牙底上會浮出一層冷調，整片光暈跟著偏灰。
 
-     0.72 / 0.85 這兩個數字是量出來的：面板底色拿掉之後，這層玻璃是文字與
-     背後網站之間**唯一**的東西。實測 0.58 / 0.74 那組在淺色頁面就有字掉到
-     3.4:1，背後全黑時只剩 2.5:1。現在這組即使背後整片純黑也全部 ≥7:1。
+     這兩個數字是量出來的：面板底色拿掉之後，這層玻璃是文字與背後網站之間
+     **唯一**的東西。實測 0.58 / 0.74 那組在淺色頁面就有字掉到 3.4:1，
+     背後全黑時只剩 2.5:1；0.72 / 0.85 全過 AA 但實機回報「還是有點吵」，
+     再加半檔到 0.8 / 0.92——scrim 那層暖紗（見 .menu-surface__scrim）也同時
+     把背後糊掉，兩層合起來字才真正安靜。
      再透就是拿可讀性換透明度，而透明度已經由「面板沒有底」交代完了。 */
-  --ai-glass:        rgba(255, 254, 250, 0.72);
-  --ai-glass-strong: rgba(255, 254, 250, 0.85);
-  --ai-glass-edge:   rgba(255, 255, 255, 0.7);
+  --ai-glass:        rgba(255, 254, 250, 0.8);
+  --ai-glass-strong: rgba(255, 254, 250, 0.92);
+  --ai-glass-edge:   rgba(255, 255, 255, 0.75);
 }
 
 /* 感知光鋪滿整個視窗，而不是只圍著面板：光是「助手醒著」的訊號，訊號的範圍
@@ -7559,7 +7561,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .global-assistant {
   min-width: min(420px, calc(100vw - 32px));
   overflow-x: clip;
-  background: none;
+  /* 一道由上而下漸濃的暖紗（單純 rgba 漸層，不是 backdrop-filter——見上方禁令）：
+     上緣幾乎沒有、到輸入列附近最濃。它讓面板區比 scrim 那層紗再亮半步，
+     內容「成一塊」而不是散落在糊掉的頁面上；透明感由上緣保留。 */
+  background: linear-gradient(
+    rgba(255, 254, 250, 0.12),
+    rgba(255, 254, 250, 0.5) 70%,
+    rgba(255, 254, 250, 0.58)
+  );
   border-color: transparent;
   box-shadow: none;
   --fg-secondary: #423d38;
@@ -7617,11 +7626,18 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   padding: 0;
   border: 0;
   border-radius: 0;
-  /* 比其他 sheet 淡得多：其他選單壓暗底下是為了「別看那裡」，助手相反——
-     底下的網站要看得見，助手只是浮在上面。0.38 會把整頁壓成灰的，感知光也跟著髒。
-     :has 不支援時手機退回 0.38（只是暗一點），桌機則整顆規則失效、退回下拉語意。
-     （逐像素實測：淺色頁面全部 ≥8:1、背後整片純黑也全部 ≥5:1。） */
-  background: rgba(28, 25, 23, 0.16);
+  /* 毛玻璃紗，不是壓暗：其他選單的深遮罩是「別看那裡」，助手相反——底下的網站
+     要看得見「在」，但不能讀得出「字」。純降透明度（0.16 深灰）實機踩過坑：
+     頁面的字與助手的字直接疊在一起變成字壓字。blur 把背後糊成形狀——
+     版面還認得出來，字讀不到，助手的字就孤立乾淨了。
+     紗用暖紙色而不是黑：整個視覺是「光」，深遮罩會把光壓髒。
+     scrim 在面板（z47）之下，backdrop-filter 只糊它背後的頁面，
+     面板裡 position: fixed 的光暈在它之上、不受影響也不被建立包含區塊。
+     backdrop-filter 不支援時剩半透明暖紗（沒有糊），仍比 0.16 深灰乾淨。
+     :has 不支援時手機退回 0.38 深遮罩（可用但醜），桌機整顆規則失效、退回下拉語意。 */
+  background: rgba(243, 240, 232, 0.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.05);
+          backdrop-filter: blur(16px) saturate(1.05);
 }
 @media (min-width: 821px) {
   /* 桌機不貼滿整個寬度：1920px 的螢幕上一條橫貫到底的輸入列會離觸發器很遠，
@@ -7761,6 +7777,66 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .campaign-panel__budget { display: flex; flex-direction: column; gap: 6px; }
 /* 選項換行而不是橫向捲：html/body 是 overflow-x: clip，捲不出去的東西會被硬裁掉 */
 .campaign-panel__choices { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── 收合版（助手 sheet 用；GroupCampaignPanel collapsible）──
+   攤開是一整版說明＋表單，在 sheet 裡會把問答輸入框推到看不見。
+   收合後只剩一列玻璃膠囊，與快捷提示同語彙；等人的計畫用徽章提醒展開。 */
+.campaign-panel--fold {
+  border-bottom: 0;
+  margin-bottom: 4px;
+  padding: 0;
+}
+.campaign-panel--fold[open] { padding-bottom: 12px; }
+.campaign-panel__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: var(--ai-glass);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid var(--ai-glass-edge);
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+  /* 原生的三角形提示換成右端自己畫的 chevron（能旋轉、位置可控） */
+  list-style: none;
+}
+.campaign-panel__summary::-webkit-details-marker { display: none; }
+.campaign-panel__summary > svg:first-child { color: var(--collab-ink); flex: none; }
+.campaign-panel__summary strong { flex: none; }
+/* 說明句在窄螢幕先被壓縮截斷，不擠掉徽章與 chevron */
+.campaign-panel__summary > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-panel__attention {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-border);
+  color: var(--primary-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+.campaign-panel__chevron {
+  flex: none;
+  color: var(--fg-secondary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+/* 沒有徽章時 chevron 自己靠右 */
+.campaign-panel__summary > .campaign-panel__chevron:last-child { margin-left: auto; }
+.campaign-panel__attention + .campaign-panel__chevron { margin-left: 0; }
+.campaign-panel--fold[open] .campaign-panel__chevron { transform: rotate(180deg); }
+.campaign-panel--fold[open] .campaign-panel__summary { margin-bottom: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .campaign-panel__chevron { transition: none; }
+}
 
 .campaign-card { display: flex; flex-direction: column; gap: 6px; }
 .campaign-card__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
