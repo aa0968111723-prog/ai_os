@@ -715,6 +715,9 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             durationSec: s.durationSec,
             prompt: s.prompt,
             voiceover: s.voiceover,
+            // 漏掉 ambience 會靜默清空環境音：格式化時輸出空的「環境音：」，前端 diff 拿同樣缺值的
+            // rows 比對而顯示「沒有任何變更」，伺服器卻是拿 DB 真值比對——照原樣寫回就把它刪了。
+            ambience: s.ambience,
             cardNames: sceneCardNames(s),
           }))}
           canEdit={canEdit}
