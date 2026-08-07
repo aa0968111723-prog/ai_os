@@ -252,12 +252,38 @@ async function executeStep(
 
   try {
     switch (step.kind) {
-      case "dispatch": {
-        if (!step.projectId || !step.goal) throw new Error("這一步缺少專案或目標");
+      case "create_project": {
+        if (!step.projectTitle || !step.projectKind || !step.platform) throw new Error("這一步缺少專案名稱、內容類型或發布平台");
         const result = await runGroupCommand({
           auth,
           groupId: run.groupId,
-          command: { kind: "dispatch", projectId: step.projectId, goal: step.goal, plannerMode: step.plannerMode, playbookId: step.playbookId },
+          command: { kind: "create_project", title: step.projectTitle, projectKind: step.projectKind, platform: step.platform },
+          origin: "campaign",
+          campaignRunId: run.id,
+          campaignStepId: step.id,
+          level: commandLevel,
+        });
+        // 後續的 dispatch 靠這個 projectId 找到要派工的專案（projectFromStepId → 這一步）
+        step.projectId = result.projectId;
+        step.projectTitle = result.projectTitle ?? step.projectTitle;
+        step.result = result.message;
+        step.transientWaits = 0;
+        step.status = "done";
+        break;
+      }
+      case "dispatch": {
+        // 派到「這份計畫剛開出來的專案」時，projectId 要到現在才讀得到。
+        // 讀不到就判失敗而不是自己去挑一個專案——猜錯的代價是把一份計畫派進不相干的專案裡。
+        const source = step.projectId ? undefined : steps.find((s) => s.id === step.projectFromStepId);
+        const projectId = step.projectId ?? source?.projectId;
+        if (!projectId || !step.goal) throw new Error("這一步缺少專案或目標");
+        step.projectId = projectId;
+        // 進度列上要看得到專案名字（規劃當下它還不存在，只有這一刻補得上）
+        step.projectTitle = step.projectTitle ?? source?.projectTitle;
+        const result = await runGroupCommand({
+          auth,
+          groupId: run.groupId,
+          command: { kind: "dispatch", projectId, goal: step.goal, plannerMode: step.plannerMode, playbookId: step.playbookId },
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
@@ -573,7 +599,15 @@ export async function recoverInterruptedCampaigns(): Promise<number> {
     const stuck = steps.filter((s) => s.status === "running" && s.kind !== "watch");
     if (!stuck.length) continue;
     const events = await db
-      .select({ stepId: schema.groupAgentEvents.stepId, childRunId: schema.groupAgentEvents.childRunId, summary: schema.groupAgentEvents.summary })
+      // projectId 也要撈：create_project 的憑證裡帶的是新專案的 id，而不是 childRunId。
+      // 不撈的話那一步會被標成 done 卻沒有 projectId，接在它後面的 dispatch 讀不到專案，
+      // 直接失敗在「這一步缺少專案或目標」——重啟修復反而把計畫修死。
+      .select({
+        stepId: schema.groupAgentEvents.stepId,
+        childRunId: schema.groupAgentEvents.childRunId,
+        projectId: schema.groupAgentEvents.projectId,
+        summary: schema.groupAgentEvents.summary,
+      })
       .from(schema.groupAgentEvents)
       .where(and(
         eq(schema.groupAgentEvents.runId, run.id),
@@ -585,6 +619,7 @@ export async function recoverInterruptedCampaigns(): Promise<number> {
       if (evidence) {
         step.status = "done";
         step.childRunId = step.childRunId ?? evidence.childRunId ?? undefined;
+        step.projectId = step.projectId ?? evidence.projectId ?? undefined;
         step.result = step.result ?? evidence.summary;
       } else {
         step.status = "pending";

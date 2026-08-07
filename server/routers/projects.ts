@@ -21,6 +21,7 @@ import {
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
+import { createProjectCore } from "../services/projectCore";
 import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
@@ -150,32 +151,10 @@ export const projectsRouter = router({
         format: z.enum(PROJECT_FORMAT_IDS as [ProjectFormat, ...ProjectFormat[]]).optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      requireGroup(ctx.auth, input.groupId);
-      // 平台與畫面比例查該組自訂選項（type=platform、啟用中）；kind 不硬性驗證（自由字串），直接存原值。
-      await ensureGroupOptions(input.groupId); // 保證已 seed，下面才能以「該組是否有 platform 選項」判斷
-      const platformOptions = await getGroupOptions(input.groupId, "platform");
-      const match = platformOptions.find((o) => o.value === input.platform && o.active);
-      // 該組已有 platform 選項（一定有，seed 過）→ 只認啟用中的；停用/刪除的平台一律拒絕，不再退回內建。
-      // 僅在極端「該組完全沒有 platform 選項」時才退回 shared/models 內建（理論上 seed 後不會發生）。
-      const platformFormat = match?.format ?? (platformOptions.length === 0 ? PLATFORMS.find((p) => p.id === input.platform)?.format : undefined);
-      if (!platformFormat) throw new TRPCError({ code: "BAD_REQUEST", message: "這個發布平台已停用或不存在，請重新選一個" });
-      // 使用者在建立表單挑過尺寸就以它為準（平台仍要合法，只是比例可另選）
-      const format = input.format ?? platformFormat;
-      const [project] = await db
-        .insert(schema.projects)
-        .values({
-          groupId: input.groupId,
-          ownerId: ctx.auth.user.id,
-          title: input.title,
-          kind: input.kind,
-          platform: input.platform,
-          format,
-          worldview: worldviewSchema.parse({}),
-        })
-        .returning();
-      return project;
-    }),
+    // 落地在 createProjectCore（組代理的 create_project 步驟走同一支）：
+    // 平台必須是該組啟用中的選項、比例從平台推導、worldview 給預設形狀——
+    // 兩個入口共用一份規則，代理開出來的專案才不會跟人建的長得不一樣。
+    .mutation(({ ctx, input }) => createProjectCore({ auth: ctx.auth, ...input })),
 
   /**
    * 建立「範例專案」——新夥伴一鍵看完整可運作範例：已填好世界觀＋3-4 格草稿分鏡（含提示詞與配音詞）

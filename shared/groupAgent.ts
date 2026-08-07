@@ -61,6 +61,7 @@ export function resolveCommandLevel(
 
 /** 組代理可下的指令種類（ask 會提議、UI 會按、campaign 會自己用） */
 export const groupCommandKindSchema = z.enum([
+  "create_project", // 在組內開一個新專案（沒有既有專案可派工時的第一步）
   "dispatch",      // 在某專案發起代理計畫（建立待核計畫）
   "approve_run",   // 核准某份待核子計畫（這一刻起才開始花點）
   "stop_run",      // 停止執行中／等待中的子計畫
@@ -72,6 +73,9 @@ export type GroupCommandKind = z.infer<typeof groupCommandKindSchema>;
 
 /** 每種指令所需的最低等級（唯一出處：router、campaign 執行器、前端露出都讀這張表） */
 export const COMMAND_MIN_LEVEL: Record<GroupCommandKind, GroupCommandLevel> = {
+  // 開專案本身不花點、可封存還原，門檻與 dispatch 同級：它存在的理由就是「還沒有專案可派工」，
+  // 訂得比 dispatch 高的話，被授權派工的人會遇到「代理說要先開專案、但開不了」的死路。
+  create_project: "dispatch",
   dispatch: "dispatch",
   approve_run: "supervise",
   stop_run: "supervise",
@@ -90,6 +94,7 @@ export const COMMAND_LEVEL_LABEL: Record<GroupCommandLevel, string> = {
 
 /** 指令的人話標籤（審計摘要與 UI 共用，避免兩邊各寫一份中文） */
 export const COMMAND_LABEL: Record<GroupCommandKind, string> = {
+  create_project: "開專案",
   dispatch: "派工",
   approve_run: "核准計畫",
   stop_run: "停止計畫",
@@ -130,6 +135,14 @@ export const taskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
  */
 export const groupCommandSchema = z.discriminatedUnion("kind", [
   z.object({
+    kind: z.literal("create_project"),
+    title: z.string().trim().min(1, "請填專案名稱").max(80),
+    // 欄位名是 projectKind 而不是 kind：kind 已經是這個 union 的判別欄位，
+    // 再叫一次 kind 會讓「這個專案是什麼內容類型」與「這是哪一種指令」在同一個物件裡打架。
+    projectKind: z.string().min(1).max(40),
+    platform: z.string().min(1).max(40),
+  }),
+  z.object({
     kind: z.literal("dispatch"),
     projectId: z.string().uuid(),
     goal: z.string().min(5, "目標至少 5 個字").max(1000),
@@ -161,6 +174,8 @@ export interface GroupCommandResult {
   kind: GroupCommandKind;
   message: string;
   projectId?: string;
+  /** create_project 才有：讓 campaign 的步驟能把新專案的名字寫在進度上，不必再查一次 DB */
+  projectTitle?: string;
   runId?: string;
   taskId?: string;
   estPoints?: number;
@@ -173,6 +188,7 @@ export interface GroupCommandResult {
  * 那些是專案代理的工作。它只做「調度」：派下去、盯著、修、找人、下結論。
  */
 export const groupStepKindSchema = z.enum([
+  "create_project", // 開一個新專案（後續的 dispatch 可以指向它）
   "dispatch",       // 在某專案建立子計畫（planAgentCore）
   "watch",          // 盯著某個 dispatch 步驟的子計畫：核准 → 等終局 → 失敗在授權內重試
   "assign_task",    // 指派／改期一件既有人類任務
@@ -197,9 +213,21 @@ export interface GroupCampaignStep {
   status: GroupStepStatus;
   /** 真實依賴（不硬湊線性流程）：全部 done 才輪得到這步 */
   dependsOn?: string[];
+  /* create_project：規劃時就決定好要開什麼；projectId／projectTitle 由執行器建完回填 */
+  projectKind?: string;
+  platform?: string;
   /* dispatch */
   projectId?: string;
   projectTitle?: string;
+  /**
+   * 這一步要派工到「某個 create_project 步驟開出來的專案」。
+   *
+   * 為什麼需要：規劃當下那個專案還不存在，沒有 projectId 可以寫。若不支援這個指向，
+   * create_project 就只能開出一個空專案然後整份計畫結束——「幫我開一個中秋活動宣傳專案」
+   * 會得到一個什麼都沒有的殼，而使用者要的是連內容一起。
+   * 執行期由執行器讀那一步的 projectId 補上（該步必為前置依賴，見 resolveCampaignPlan）。
+   */
+  projectFromStepId?: string;
   goal?: string;
   plannerMode?: z.infer<typeof agentPlannerModeSchema>;
   playbookId?: string;
@@ -230,8 +258,15 @@ export const groupStepDraftSchema = z.object({
   title: z.string().min(1).max(120),
   note: z.string().max(600).optional(),
   dependsOn: z.array(z.string().min(1).max(40)).max(8).optional(),
-  projectRef: z.string().max(8).optional(),
+  // 既有專案代號（p1…）**或**某個 create_project 步驟的 id，所以長度放寬到步驟 id 的上限。
+  // 用同一個欄位而不是再開一個 fromStepId：規劃器每多一個欄位就多一種填錯的方式，
+  // 而「派到哪個專案」在人的腦裡本來就是一件事。
+  projectRef: z.string().max(40).optional(),
   goal: z.string().max(1000).optional(),
+  /* create_project */
+  projectTitle: z.string().max(80).optional(),
+  projectKind: z.string().max(40).optional(),
+  platform: z.string().max(40).optional(),
   targetStepId: z.string().max(40).optional(),
   maxAttempts: z.number().int().min(0).max(3).optional(),
   taskRef: z.string().max(8).optional(),
@@ -250,6 +285,14 @@ export type GroupPlanDraft = z.infer<typeof groupPlanDraftSchema>;
 
 /** 一份 campaign 最多幾步：組級調度再多就不是計畫、是失控 */
 export const MAX_CAMPAIGN_STEPS = 12;
+/**
+ * 一份 campaign 最多開幾個新專案。
+ *
+ * 沒有這個上限的話，一句含糊的目標（「幫我把明年的內容都規劃好」）足以讓規劃器排出十二步
+ * create_project，一次在組裡長出十二個空專案。專案本身刪不掉（只能封存），使用者要一個一個
+ * 收拾。三個是「主活動＋兩條支線」的合理上限；真的需要更多，人再排第二份計畫。
+ */
+export const MAX_CAMPAIGN_NEW_PROJECTS = 3;
 /**
  * 遇到「暫時性阻礙」最多空轉幾輪才改成停下來等人（8 秒一輪 ≈ 8 分鐘）。
  *
@@ -273,6 +316,7 @@ export function isTransientCommandError(code: string | undefined): boolean {
 export const MAX_WATCH_ATTEMPTS = 3;
 
 export const GROUP_STEP_KIND_LABEL: Record<GroupStepKind, string> = {
+  create_project: "開專案",
   dispatch: "派工",
   watch: "盯進度",
   assign_task: "調整任務",

@@ -7,6 +7,7 @@ import { isMockMode } from "./fal";
 import { completeText, FAL_AGENT_PROFILES, LlmServiceError, type FalAgentMode } from "./llmProvider";
 import { reserveQuota, refund, settleUsagePoints } from "./points";
 import { listGroupTasks } from "./taskCore";
+import { listProjectCreationOptions } from "./projectCore";
 import { getGroupCommandLevel, recordGroupAgentEventSafely } from "./groupCommand";
 import {
   consumeRateLimit,
@@ -23,6 +24,7 @@ import {
 import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
 import {
   CAMPAIGN_MIN_LEVEL,
+  MAX_CAMPAIGN_NEW_PROJECTS,
   MAX_CAMPAIGN_STEPS,
   MAX_WATCH_ATTEMPTS,
   campaignHasActiveWork,
@@ -41,8 +43,12 @@ import {
  * L3 常駐總指揮：組代理自己的多步計畫（campaign）。
  *
  * 與專案代理的分工刻意分明——組代理不生圖、不寫分鏡、不寫資料庫，那些是專案代理的事。
- * 它只做調度：派下去、盯著、在授權內修、找人、下結論。所以它的步驟種類只有五種，
+ * 它只做調度：開專案、派下去、盯著、在授權內修、找人、下結論。所以它的步驟種類只有六種，
  * 每一種的落地都轉呼叫 runGroupCommand（L1/L2），不另開一條繞過守門的捷徑。
+ *
+ * 為什麼「開專案」落在這一層而不是專案代理：agentRunner 的每份 run 都綁死一個 projectId，
+ * 一份還不存在的專案沒有 run 可以掛。「幫我開一個中秋活動宣傳專案」這種話要成立，
+ * 唯一能同時「開專案」與「叫新專案的代理去做事」的地方就是這裡。
  *
  * 這一支負責「規劃與生命週期」，實際推進在 groupCampaignRunner（背景執行器）。
  */
@@ -54,16 +60,27 @@ export interface CampaignRefs {
   projects: Array<{ ref: string; id: string; title: string; note: string }>;
   tasks: Array<{ ref: string; id: string; title: string; note: string }>;
   members: Array<{ ref: string; id: string; name: string }>;
+  /**
+   * 這個組現在能用的內容類型／發布平台（只有啟用中的）。
+   *
+   * create_project 步驟一定要挑一個平台，而平台是**每組自訂**的、不是全域常數。
+   * 不餵這份清單，規劃器只能猜內建值，猜錯會在建立那一刻被 createProjectCore 擋成
+   * 「這個發布平台已停用或不存在」——一份計畫跑到第三步才死，理由還是使用者看不懂的話。
+   */
+  kinds: string[];
+  platforms: string[];
 }
 
 /** 規劃上下文的規模上限（提示詞預算：夠排一份組級計畫，又不會被一個大組灌爆） */
 const CAMPAIGN_PROJECT_LIMIT = 12;
 const CAMPAIGN_TASK_LIMIT = 20;
 const CAMPAIGN_MEMBER_LIMIT = 20;
+/** 內容類型／發布平台各列幾個（組可以自訂到幾十個，提示詞不必全收） */
+const CAMPAIGN_OPTION_LIMIT = 16;
 
 /** 撈規劃用的組內資源並編號（p1…／t1…／u1…） */
 export async function buildCampaignRefs(auth: AuthState, groupId: string): Promise<CampaignRefs> {
-  const [projRows, taskRows, memberRows] = await Promise.all([
+  const [projRows, taskRows, memberRows, creationOptions] = await Promise.all([
     db
       .select({ id: schema.projects.id, title: schema.projects.title, kind: schema.projects.kind, status: schema.projects.status })
       .from(schema.projects)
@@ -77,6 +94,7 @@ export async function buildCampaignRefs(auth: AuthState, groupId: string): Promi
       .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
       .where(eq(schema.groupMembers.groupId, groupId))
       .limit(CAMPAIGN_MEMBER_LIMIT),
+    listProjectCreationOptions(groupId),
   ]);
   const now = Date.now();
   return {
@@ -95,6 +113,8 @@ export async function buildCampaignRefs(auth: AuthState, groupId: string): Promi
       }`,
     })),
     members: memberRows.map((m, i) => ({ ref: `u${i + 1}`, id: m.id, name: m.name ?? "未命名成員" })),
+    kinds: creationOptions.kinds.slice(0, CAMPAIGN_OPTION_LIMIT),
+    platforms: creationOptions.platforms.map((p) => p.value).slice(0, CAMPAIGN_OPTION_LIMIT),
   };
 }
 
@@ -105,6 +125,8 @@ export async function buildCampaignRefs(auth: AuthState, groupId: string): Promi
  *  - 代號幻覺（p9／t7／u4 不存在）→ 整步丟掉，不留一顆註定失敗的按鈕給執行器。
  *  - dispatch 目標不足 5 字 → 丟掉（與 planAgentCore 的下限一致）。
  *  - watch 指不到任何 dispatch 步驟 → 丟掉（沒有子計畫可盯的 watch 是死步）。
+ *  - create_project 沒有標題、或平台不是該組啟用中的選項 → 平台退回第一個可用的；標題沒有就丟掉。
+ *  - create_project 超過 MAX_CAMPAIGN_NEW_PROJECTS → 丟掉多的，不讓一句含糊的目標長出十二個空專案。
  *  - dependsOn 指向被丟掉或不存在的步驟 → 移除該依賴，否則整條支線永遠等不到。
  *  - 自我依賴 / 步數超上限 → 砍掉。
  * 回傳的步驟一律 status=pending、attempts=0，執行期欄位（childRunId 等）不接受 LLM 指定。
@@ -114,8 +136,20 @@ export function resolveCampaignPlan(draft: GroupPlanDraft, refs: CampaignRefs): 
   const taskByRef = new Map(refs.tasks.map((t) => [t.ref, t]));
   const memberByRef = new Map(refs.members.map((m) => [m.ref, m]));
 
+  // 先掃一遍收下「這份草稿裡哪些步驟會開新專案」——dispatch 可能寫在 create_project 前面，
+  // 邊走邊收會讓「先派工、後建專案」這種順序的計畫整條被判成幻覺代號而丟光。
+  // 這裡只認會被下面主迴圈收下的那些（有標題、且在新專案上限內），兩邊的判斷條件要一致。
+  const plannedProjectStepIds = new Set<string>();
+  for (const raw of draft.steps) {
+    if (raw.kind !== "create_project") continue;
+    if (!(raw.projectTitle ?? raw.title ?? "").trim()) continue;
+    if (plannedProjectStepIds.size >= MAX_CAMPAIGN_NEW_PROJECTS) break;
+    plannedProjectStepIds.add(raw.id.trim());
+  }
+
   const accepted: GroupCampaignStep[] = [];
   const seenIds = new Set<string>();
+  let newProjects = 0;
   for (const raw of draft.steps) {
     if (accepted.length >= MAX_CAMPAIGN_STEPS) break;
     const id = raw.id.trim();
@@ -130,12 +164,34 @@ export function resolveCampaignPlan(draft: GroupPlanDraft, refs: CampaignRefs): 
       dependsOn: raw.dependsOn?.map((d) => d.trim()).filter(Boolean),
     };
 
-    if (raw.kind === "dispatch") {
-      const project = raw.projectRef ? projectByRef.get(raw.projectRef.trim()) : undefined;
+    if (raw.kind === "create_project") {
+      const title = (raw.projectTitle ?? raw.title ?? "").trim();
+      if (!title || newProjects >= MAX_CAMPAIGN_NEW_PROJECTS) continue;
+      step.projectTitle = title.slice(0, 80);
+      // 內容類型是自由字串（createProjectCore 不驗），照收；平台必須是該組啟用中的，
+      // 猜錯就退回第一個可用的——為了一個平台名字讓整份計畫作廢不划算，而退回的那個
+      // 一定開得起來。完全沒有可用平台的組（理論上 seed 過不會發生）才丟掉這一步。
+      const platform = (raw.platform ?? "").trim();
+      const resolvedPlatform = refs.platforms.includes(platform) ? platform : refs.platforms[0];
+      if (!resolvedPlatform) continue;
+      step.platform = resolvedPlatform;
+      const kind = (raw.projectKind ?? "").trim();
+      step.projectKind = (kind || refs.kinds[0] || "影片").slice(0, 40);
+      newProjects += 1;
+    } else if (raw.kind === "dispatch") {
+      const ref = raw.projectRef?.trim() ?? "";
+      const project = projectByRef.get(ref);
       const goal = (raw.goal ?? "").trim();
-      if (!project || goal.length < 5) continue;
-      step.projectId = project.id;
-      step.projectTitle = project.title;
+      if (goal.length < 5) continue;
+      if (project) {
+        step.projectId = project.id;
+        step.projectTitle = project.title;
+      } else if (plannedProjectStepIds.has(ref)) {
+        // 派到「這份計畫等一下才會開出來的專案」：規劃當下沒有 projectId，執行期才補。
+        step.projectFromStepId = ref;
+      } else {
+        continue; // 代號幻覺
+      }
       step.goal = goal.slice(0, 1000);
     } else if (raw.kind === "watch") {
       const target = raw.targetStepId?.trim();
@@ -160,9 +216,13 @@ export function resolveCampaignPlan(draft: GroupPlanDraft, refs: CampaignRefs): 
     seenIds.add(id);
   }
 
+  // 指向新專案的 dispatch，必須真的有那一步活下來（預掃時符合條件、主迴圈仍可能因步數上限
+  // 或重複 id 丟掉它）。指不到就整步移除——留著只會在執行期變成「找不到要派工的專案」。
+  const newProjectIds = new Set(accepted.filter((s) => s.kind === "create_project").map((s) => s.id));
+  const withProject = accepted.filter((s) => !s.projectFromStepId || newProjectIds.has(s.projectFromStepId));
   // watch 必須指得到一個真的存在的 dispatch 步驟；指不到的整步移除
-  const dispatchIds = new Set(accepted.filter((s) => s.kind === "dispatch").map((s) => s.id));
-  const kept = accepted.filter((s) => s.kind !== "watch" || (s.targetStepId && dispatchIds.has(s.targetStepId)));
+  const dispatchIds = new Set(withProject.filter((s) => s.kind === "dispatch").map((s) => s.id));
+  const kept = withProject.filter((s) => s.kind !== "watch" || (s.targetStepId && dispatchIds.has(s.targetStepId)));
   const keptIds = new Set(kept.map((s) => s.id));
 
   for (const step of kept) {
@@ -170,6 +230,11 @@ export function resolveCampaignPlan(draft: GroupPlanDraft, refs: CampaignRefs): 
     // watch 天然依賴它盯的那步：LLM 漏寫也要補上，否則會在子計畫還沒建立時就開始盯
     if (step.kind === "watch" && step.targetStepId && !deps.includes(step.targetStepId)) {
       deps.push(step.targetStepId);
+    }
+    // 派到新專案的 dispatch 同理天然依賴那一步：漏寫的話執行器會在專案還沒建出來時就去派工，
+    // 讀不到 projectId 直接判失敗——而且失敗的是使用者最在意的那一步。
+    if (step.projectFromStepId && !deps.includes(step.projectFromStepId)) {
+      deps.push(step.projectFromStepId);
     }
     step.dependsOn = deps.length ? deps : undefined;
   }
@@ -179,7 +244,11 @@ export function resolveCampaignPlan(draft: GroupPlanDraft, refs: CampaignRefs): 
 /** 計畫摘要一行（核准畫面與清單共用） */
 export function campaignSummaryText(goal: string, steps: GroupCampaignStep[], budgetPoints: number): string {
   const dispatches = steps.filter((s) => s.kind === "dispatch").length;
-  return `${goal.slice(0, 60)}｜${steps.length} 步（派工 ${dispatches}）｜自動核准授權 ${budgetPoints} 點`;
+  // 「會開幾個新專案」要寫在核准畫面第一行：那是這份計畫唯一一種**會在組裡長出新東西**
+  // 的步驟，而專案只能封存不能刪。人按核准之前就該看見，不必展開步驟清單才發現。
+  const creates = steps.filter((s) => s.kind === "create_project").length;
+  const what = [creates > 0 ? `開專案 ${creates}` : null, `派工 ${dispatches}`].filter(Boolean).join("、");
+  return `${goal.slice(0, 60)}｜${steps.length} 步（${what}）｜自動核准授權 ${budgetPoints} 點`;
 }
 
 /** 假模式的確定性計畫：不呼叫 LLM、不花錢，讓 e2e 與單元測試跑得動 */
@@ -189,6 +258,12 @@ function mockCampaignDraft(goal: string, refs: CampaignRefs): GroupPlanDraft {
   if (project) {
     steps.push({ id: "s1", kind: "dispatch", title: `派工「${project.title}」`, note: goal.slice(0, 200), projectRef: project.ref, goal: goal.slice(0, 200) });
     steps.push({ id: "s2", kind: "watch", title: `盯著「${project.title}」的計畫`, note: "核准後盯到終局，失敗重規劃一次", targetStepId: "s1", maxAttempts: 1 });
+  } else if (refs.platforms.length) {
+    // 沒有既有專案的組：走「開專案 → 派工 → 盯」這條，讓 e2e 也蓋得到 create_project 這一段
+    const title = goal.slice(0, 40) || "新專案";
+    steps.push({ id: "s0", kind: "create_project", title: `開專案「${title}」`, note: "（測試模式）先開一個專案再派工", projectTitle: title, projectKind: refs.kinds[0], platform: refs.platforms[0] });
+    steps.push({ id: "s1", kind: "dispatch", title: `派工「${title}」`, note: goal.slice(0, 200), projectRef: "s0", goal: goal.slice(0, 200) });
+    steps.push({ id: "s2", kind: "watch", title: `盯著「${title}」的計畫`, note: "核准後盯到終局，失敗重規劃一次", targetStepId: "s1", maxAttempts: 1 });
   }
   steps.push({ id: "s9", kind: "report", title: "彙整結論", note: "（測試模式）回報這一輪做了什麼", dependsOn: steps.map((s) => s.id) });
   return { summary: `（測試模式）${goal.slice(0, 60)}`, rationale: "測試模式的固定計畫", steps };
@@ -256,8 +331,16 @@ export async function planGroupCampaign(input: {
   }
 
   const refs = await buildCampaignRefs(auth, groupId);
-  if (refs.projects.length === 0) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個組目前沒有可派工的專案（封存的不算）" });
+  // 這裡本來擋掉「沒有可派工的專案」的組。現在不擋了——組代理自己會開專案（create_project），
+  // 而「還沒有任何專案」正是最需要它的時候：新組的第一句話往往就是「幫我開一個中秋活動宣傳專案」。
+  // 真的排不出東西仍會被下面的空計畫檢查擋下，訊息也講得比這一句具體。
+  // 但沒有任何可用平台就真的開不了專案，也派不了工——這種組（理論上 seed 過不會出現）先擋在門口，
+  // 不要讓人花一次 LLM 才知道。
+  if (refs.projects.length === 0 && refs.platforms.length === 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "這個組還沒有專案，也沒有可用的發布平台——請先到組設定啟用至少一個平台",
+    });
   }
 
   let draft: GroupPlanDraft;
@@ -362,13 +445,17 @@ export async function planGroupCampaign(input: {
 }
 
 function buildCampaignPrompt(goal: string, refs: CampaignRefs, budgetPoints: number): string {
-  const projectLines = refs.projects.map((p) => `${p.ref}=「${p.title}」（${p.note}）`).join("\n") || "（沒有可派工的專案）";
+  const projectLines = refs.projects.map((p) => `${p.ref}=「${p.title}」（${p.note}）`).join("\n")
+    || "（這個組還沒有任何專案——要做事就必須先排一個 create_project）";
   const taskLines = refs.tasks.map((t) => `${t.ref}=「${t.title}」${t.note}`).join("\n") || "（沒有未結的人員任務）";
   const memberLines = refs.members.map((m) => `${m.ref}=${m.name}`).join("、") || "（沒有成員）";
+  const kindLine = refs.kinds.join("、") || "（沒有可用的內容類型）";
+  const platformLine = refs.platforms.join("、") || "（沒有可用的發布平台，不要排 create_project）";
   return `你是一個創作組的「組代理總指揮」的規劃器。你負責調度，不負責動手。
-你**不會**生圖、配音、改分鏡或寫資料庫——那些是各專案的專案代理做的事。你能做的只有五種步驟：
+你**不會**生圖、配音、改分鏡或寫資料庫——那些是各專案的專案代理做的事。你能做的只有六種步驟：
 
-- dispatch：把一個目標交給某專案的專案代理去規劃執行。欄位：projectRef、goal（5–1000 字，具體說明做什麼）。
+- create_project：在組裡開一個新專案。欄位：projectTitle（≤80 字的專案名）、projectKind（內容類型）、platform（發布平台，必須是下面列出的其中一個）。只有在「現有專案都不適合承接這件事」時才用；最多 ${MAX_CAMPAIGN_NEW_PROJECTS} 個。開完的專案是空的，一定要再配一個 dispatch 把內容做出來，否則使用者只會拿到一個空殼。
+- dispatch：把一個目標交給某專案的專案代理去規劃執行。欄位：projectRef、goal（5–1000 字，具體說明做什麼）。projectRef 可以是既有專案的代號（p1…），**也可以是這份計畫裡某個 create_project 步驟的 id**（例如 "s1"），代表派到那一步剛開出來的新專案。
 - watch：盯著某個 dispatch 步驟產生的子計畫——核准它、等它跑完；失敗時在授權內重新規劃。欄位：targetStepId（指向那個 dispatch 步驟的 id）、maxAttempts（0–${MAX_WATCH_ATTEMPTS}，失敗可重規劃幾次）。每個 dispatch 都應該配一個 watch，否則派出去沒人盯。
 - assign_task：調整一件既有的人員任務。欄位：taskRef，加上 assigneeRef／dueAt／priority 至少一項（dueAt 只能是含時區的 ISO 8601；只有明確日期時才用，猜的不要寫）。
 - wait_for_human：需要人做決定或做實體的事時，讓整份計畫停下來等人。欄位：note 說明要等什麼。
@@ -378,7 +465,7 @@ function buildCampaignPrompt(goal: string, refs: CampaignRefs, budgetPoints: num
 {"summary":"這份計畫要達成什麼（≤200字）","rationale":"1–3 句說明為何這樣排","steps":[{"id":"s1","kind":"dispatch","title":"人看得懂的標題","note":"說明","dependsOn":["前置步驟id"],"projectRef":"p1","goal":"…"}]}
 
 硬性規則：
-1. 只能用下面列出的代號（p／t／u）；不得輸出 UUID、email 或未提供的人名。
+1. 只能用下面列出的代號（p／t／u）或這份計畫裡的步驟 id；不得輸出 UUID、email 或未提供的人名。
 2. 最多 ${MAX_CAMPAIGN_STEPS} 步。每步 id 唯一。dependsOn 只寫真實依賴，不要硬湊線性流程。
 3. 自動核准的授權上限是 ${budgetPoints} 點；超過的子計畫組代理會停下來等人核准。派工不要一次開得比授權還大。
 4. 不要發明其他 kind；不要輸出思考過程或 Markdown。
@@ -386,6 +473,12 @@ function buildCampaignPrompt(goal: string, refs: CampaignRefs, budgetPoints: num
 <可派工的專案>
 ${projectLines}
 </可派工的專案>
+<開新專案可用的內容類型>
+${kindLine}
+</開新專案可用的內容類型>
+<開新專案可用的發布平台>
+${platformLine}
+</開新專案可用的發布平台>
 <未結的人員任務>
 ${taskLines}
 </未結的人員任務>

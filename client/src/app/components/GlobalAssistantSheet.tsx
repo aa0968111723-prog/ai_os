@@ -16,6 +16,15 @@ const AICreativeCopilot = lazy(() =>
 );
 
 /**
+ * 調度面板同樣延後載入，而且是**條件渲染**：只有「可總指揮」的人看得到它，
+ * 但 lazy 是以 import 為單位的——寫成靜態 import 的話，全站每個人的首屏都會扛上
+ * 這段只有少數人按得到的程式碼。
+ */
+const GroupCampaignPanel = lazy(() =>
+  import("../../features/group-campaign/GroupCampaignPanel").then((m) => ({ default: m.GroupCampaignPanel })),
+);
+
+/**
  * 全站 AI 助手：底部導覽正中央那顆球按下去的東西。
  *
  * 在這之前，那顆球只是 `/dashboard#ai-work` 的捲動錨點——按下去會跳回今日
@@ -70,6 +79,9 @@ export function GlobalAssistantSheet({
           aria-label，助手的視野本來就一律是組級，沒有第二種可選。 */}
       {groupId ? (
         <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
+        {/* 調度面板放在問答上面：「叫 AI 去做一整件事」比「問 AI 一個問題」是更重的意圖，
+            而它在自己不可用時（權限不足）完全不渲染，不會白佔一般組員的畫面。 */}
+        <GroupCampaignPanel groupId={groupId} />
         <AICreativeCopilot
           groupId={groupId}
           onUseIdeaForNewProject={(ideaTitle) => {
