@@ -268,6 +268,31 @@ export function isSceneRegenModel(model: Pick<ModelEntry, "kind" | "needs">): bo
 }
 
 /**
+ * 動作走位要不要注入這個模型。
+ *
+ * 只有影片類吃。走位是時間性的——「從門口走到窗邊」在單張圖上畫不出來，
+ * 擴散模型收到只會試圖同時呈現起點與終點，生出多重人影或糊掉的肢體。
+ * 這正是把 action 從 prompt 拆出來的目的：拆開之後才有辦法各自注入。
+ */
+export function sceneActionAppliesTo(model: Pick<ModelEntry, "kind"> | undefined): boolean {
+  return model?.kind === "video";
+}
+
+/**
+ * 這一鏡送給模型的畫面提示詞：畫面描述，影片類再接上走位。
+ * 兩者都空就回空字串（呼叫端據此擋下「沒有提示詞就送生成」）。
+ */
+export function sceneVisualPrompt(
+  scene: { prompt?: string | null; action?: string | null },
+  model: Pick<ModelEntry, "kind"> | undefined,
+): string {
+  const base = (scene.prompt ?? "").trim();
+  const action = (scene.action ?? "").trim();
+  if (!action || !sceneActionAppliesTo(model)) return base;
+  return base ? `${base}｜動作：${action}` : `動作：${action}`;
+}
+
+/**
  * 「以這張為底圖修正」可用的模型：吃圖片來源、輸出仍是畫面。
  * 這一類就是 Adobe 式「把單張拉出來改」的核心——重繪／局部修／放大／去背／轉場動態，
  * 全都在 image-to-image 與 image-to-video 兩個類別裡。

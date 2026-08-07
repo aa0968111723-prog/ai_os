@@ -79,6 +79,7 @@ type SceneOver = {
    *  mock 若多餵一個 narrationAssetId，測試會綠但實機永遠判為「沒有旁白」。 */
   narrationUrl?: string | null;
   ambience?: string | null;
+  action?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -99,6 +100,7 @@ function scene(over: SceneOver) {
     narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
     ambience: over.ambience ?? null,
+    action: over.action ?? null,
     ambienceUrl: null,
     pendingAmbienceStatus: null,
   };
@@ -305,7 +307,7 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
 
   it("畫面／旁白／標題／秒數一併帶到——任何一欄漏掉都是同一條清空連鎖", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", prompt: "夜裡的禪堂", voiceover: "那一年…", ambience: "蟲鳴" })],
+      data: [scene({ id: "s1", prompt: "夜裡的禪堂", voiceover: "那一年…", ambience: "蟲鳴", action: "從門口走到窗邊" })],
       isLoading: false,
       isError: false,
     });
@@ -317,6 +319,7 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
       prompt: "夜裡的禪堂",
       voiceover: "那一年…",
       ambience: "蟲鳴",
+      action: "從門口走到窗邊",
     });
   });
 });

@@ -15,6 +15,9 @@ const MAX_PROMPT_CHARS = 4000;
 const MAX_VOICEOVER_CHARS = 2000;
 /** 逐格生成的預設模型（與 SceneList 同一支，換頁不會突然變別的模型） */
 const DEFAULT_REGEN_MODEL = "fal-ai/fast-lightning-sdxl";
+/** 動作走位上限：與後端 scenes.update 的 action z.string().max(500) 同口徑 */
+const MAX_ACTION_CHARS = 500;
+
 /** 環境音描述上限：與後端 scenes.update 的 ambience z.string().max(500) 同口徑 */
 const MAX_AMBIENCE_CHARS = 500;
 
@@ -105,6 +108,7 @@ export function SceneStudio({
   const [promptDraft, setPromptDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [voiceDraft, setVoiceDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [ambienceDraft, setAmbienceDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [actionDraft, setActionDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [instruction, setInstruction] = useState("");
   /** 修正用的底圖；null＝這一格目前的畫面 */
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
@@ -163,13 +167,15 @@ export function SceneStudio({
   });
   // 環境音描述另開一支 update，理由同配音詞：三種「儲存中／已儲存」回饋不能互相污染
   const saveAmbience = trpc.scenes.update.useMutation({ onSuccess: () => { setAmbienceDraft(null); refresh(); } });
+  // 走位另開一支 update，理由同配音詞與環境音：各自的「儲存中／已儲存」不能互相污染
+  const saveAction = trpc.scenes.update.useMutation({ onSuccess: () => { setActionDraft(null); refresh(); } });
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
   });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
@@ -177,6 +183,8 @@ export function SceneStudio({
   const voiceDirty = voiceDraft !== null && voiceDraft !== (data?.voiceover ?? "");
   /** 後端生成旁白吃的是「已儲存」的配音詞——估點與可否生成都以它為準 */
   const savedVoiceover = data?.voiceover ?? "";
+  const action = actionDraft ?? data?.action ?? "";
+  const actionDirty = actionDraft !== null && actionDraft !== (data?.action ?? "");
   const ambience = ambienceDraft ?? data?.ambience ?? "";
   const ambienceDirty = ambienceDraft !== null && ambienceDraft !== (data?.ambience ?? "");
   const savedAmbience = data?.ambience ?? "";
@@ -343,6 +351,32 @@ export function SceneStudio({
                     {update.isPending ? "儲存中…" : "儲存提示詞"}
                   </Button>
                   {promptDirty ? <Meta>尚未儲存</Meta> : update.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor={`studio-action-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
+                這一鏡的動作走位
+                <HelpTip text="誰做了什麼、從哪走到哪。刻意與提示詞分開：走位是會動的，單張圖畫不出來——所以它只會送給影片類模型，重畫靜圖時不會用到。" />
+              </label>
+              <textarea
+                id={`studio-action-${sceneId}`}
+                value={action}
+                disabled={!canEdit || saveAction.isPending}
+                maxLength={MAX_ACTION_CHARS}
+                rows={2}
+                placeholder="例：安倢從門口走到窗邊，停下（可留白＝這鏡沒有特別的走位）"
+                onChange={(e) => setActionDraft(e.target.value)}
+                style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+              />
+              {canEdit && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Button size="sm" disabled={!actionDirty || saveAction.isPending} onClick={() => saveAction.mutate({ sceneId, action })}>
+                    {saveAction.isPending ? "儲存中…" : "儲存走位"}
+                  </Button>
+                  {actionDirty ? <Meta>尚未儲存</Meta> : saveAction.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                  <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>只送影片模型，出靜圖不吃</Meta>
                 </div>
               )}
             </div>

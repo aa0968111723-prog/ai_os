@@ -240,4 +240,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0043_content_attachments": [
     "1a3096e7d55b73bb9f252f57a79b8409390c87c27a9efa7209fb354a1076c3dd",
   ],
+  "0044_scene_action": [
+    "e1c0a51c1c100791c3130b68fd63d310ef9cff3284607067b2d82a0211e35166",
+  ],
 };

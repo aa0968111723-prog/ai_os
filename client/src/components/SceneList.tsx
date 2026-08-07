@@ -76,6 +76,8 @@ type Scene = {
   pendingVoiceStatus?: string | null;
   /** 這一鏡聽得到什麼（環境音描述）；空＝還沒寫。 */
   ambience?: string | null;
+  /** 誰做了什麼、從哪走到哪；空＝還沒寫。 */
+  action?: string | null;
   /** 已生成且未軟刪的環境音網址——判斷「這格有沒有環境音」的唯一依據（理由同 narrationUrl）。 */
   ambienceUrl?: string | null;
   /** 畫面素材來源入點（毫秒）；語義見 shared/timeline.ts 的 ShotSource */
@@ -820,6 +822,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             // 漏掉 ambience 會靜默清空環境音：格式化時輸出空的「環境音：」，前端 diff 拿同樣缺值的
             // rows 比對而顯示「沒有任何變更」，伺服器卻是拿 DB 真值比對——照原樣寫回就把它刪了。
             ambience: s.ambience,
+            action: s.action,
             cardNames: sceneCardNames(s),
           }))}
           canEdit={canEdit}
