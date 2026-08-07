@@ -263,10 +263,14 @@ describe("legacy migration adoption bridge", () => {
     );
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
-    // 8 項來自 bridge 前綴；另外 2 項來自 bridge 之後的 0036／0037——這份合成 drift
-    // 只放了 bridge 的語句，那兩支的最終形狀自然不在裡面。兩者都寫了 IF NOT EXISTS，
+    // 8 項來自 bridge 前綴；另外 4 項來自 bridge 之後的 0036／0037／0038——這份合成 drift
+    // 只放了 bridge 的語句，那幾支的最終形狀自然不在裡面。它們都寫了 IF NOT EXISTS，
     // 重跑是 no-op，所以同樣計入 alreadyPresent 而不是判成缺漏。
-    expect(result.alreadyPresent).toBe(8 + 2);
+    //
+    // 這個數字是人工計數：每當 bridge 之後又多一支寫 IF NOT EXISTS 的遷移，就要跟著加。
+    // 上一次漏加是 0038_scene_ambience（兩條 ADD COLUMN IF NOT EXISTS）——
+    // 遷移本身沒問題，只是這裡的計數沒跟上，測試就紅了。
+    expect(result.alreadyPresent).toBe(8 + 4);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {
