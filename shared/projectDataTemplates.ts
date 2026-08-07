@@ -189,12 +189,12 @@ export function buildBoundTableFields(templateId: ProjectDataTemplateId): {
 /**
  * 狀態文案：本專案是否已有 AI 可引用的資料。
  * linkedAiReadableRowCount 必須只計 agentAccess≠none 的關聯列——避免「UI 說 ok、AI 其實不可見」。
- * linkedRowCount 可含全部關聯列（含 AI 不可見），僅作補充說明。
+ * linkedRowCount 可含全部關聯列（含不提供 AI 的），僅作補充說明。
  */
 export function projectDataAiHint(input: {
   knowledgeCount: number;
   assetCount: number;
-  /** 全部已關聯列數（含 AI 不可見）；僅顯示用 */
+  /** 全部已關聯列數（含不提供 AI 的）；僅顯示用 */
   linkedRowCount: number;
   /**
    * AI 實際可讀的關聯列數（agentAccess read/write）。
@@ -215,9 +215,9 @@ export function projectDataAiHint(input: {
       label: "AI 已可引用本專案部分資料",
       detail: [
         hasText ? `文字 ${knowledgeCount} 筆` : null,
-        hasStruct ? `AI 可讀表列 ${aiRows}` : null,
+        hasStruct ? `資料表 AI 可讀 ${aiRows} 列` : null,
         hasMedia ? `素材 ${assetCount} 件` : null,
-        hiddenLinked > 0 ? `另有 ${hiddenLinked} 列 AI 不可見` : null,
+        hiddenLinked > 0 ? `另有 ${hiddenLinked} 列不提供 AI` : null,
       ]
         .filter(Boolean)
         .join(" · "),

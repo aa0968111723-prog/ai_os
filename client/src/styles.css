@@ -8230,3 +8230,141 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   .add-data-panel textarea,
   .add-data-destination select { font-size: 16px; }
 }
+
+/* ── 資料中心總覽（Data Hub，P1／P3）────────────────────────────────
+   跨知識／資料表／文件／素材的統一清單。手機一律單欄直式——
+   來源與資源都不用水平大卡，因為 390px 上水平卡一定被裁掉。 */
+.database-intro__cta { flex: none; display: flex; align-items: center; }
+.hub-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.hub-overview__bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.hub-search {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-12);
+  background: var(--card);
+  color: var(--fg-secondary);
+}
+.hub-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 9px 0;
+}
+.hub-search input:focus { outline: none; }
+.hub-overview__summary { margin: 0; flex: none; }
+.hub-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.hub-list__title { margin: 4px 0 0; font-weight: 600; font-size: var(--fs-13); color: var(--fg-secondary); }
+.hub-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hub-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 56px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: var(--card);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--dur-fast);
+}
+.hub-item:hover { border-color: var(--primary-ink); }
+.hub-item__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--surface-2, var(--muted));
+  color: var(--primary-ink);
+}
+.hub-item__copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+/* 長檔名不撐破版面：省略，不換行成三行也不把卡片推出畫面 */
+.hub-item__copy strong,
+.hub-item__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-item__copy small { color: var(--fg-secondary); font-size: var(--fs-12); }
+.hub-item__state {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.hub-sources { margin-top: 4px; }
+.hub-sources > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  min-height: 44px;
+}
+.hub-source-list { list-style: none; margin: 10px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hub-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 52px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: var(--card);
+}
+.hub-source__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--surface-2, var(--muted));
+  color: var(--primary-ink);
+}
+.hub-source__copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.hub-source__copy small {
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-source > a { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 4px; }
+.hub-section-title {
+  margin: 4px 0 0;
+  font-size: var(--fs-16, 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .database-intro__cta { width: 100%; }
+  .database-intro__cta > .btn { width: 100%; justify-content: center; min-height: 44px; }
+  .hub-overview__summary { width: 100%; }
+  /* 狀態徽章換到第二行，才不會把標題擠成一個字一行 */
+  .hub-item { align-items: flex-start; flex-wrap: wrap; }
+  .hub-item__state { width: 100%; justify-content: flex-start; padding-left: 42px; }
+  /* iOS 聚焦自動放大：搜尋框 ≥16px */
+  .hub-search input { font-size: 16px; }
+}

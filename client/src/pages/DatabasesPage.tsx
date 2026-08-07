@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { AddDataSheet } from "../components/AddDataSheet";
+import { DataHubOverview } from "../components/DataHubOverview";
 import { GoogleDrivePicker } from "../components/GoogleDrivePicker";
 import { NotionPagePicker } from "../components/NotionPagePicker";
 import { ConfirmButton } from "../components/interactions";
@@ -110,20 +112,26 @@ type TableSummary = {
   access: { canRead: boolean; canWriteRows: boolean; canManage: boolean };
 };
 
-/** AI／MCP 存取等級的顯示文案（管理者在建立與詳頁都能調） */
+/**
+ * AI 使用方式（管理者在建立與詳頁都能調）。
+ * 文案改成「AI 能做什麼」而不是工程術語——底層仍是同一個 agentAccess 欄位，
+ * 權限完全沒動（見 shared/dataHub 的 DATA_HUB_AI_ACCESS_LABEL）。
+ */
 const AGENT_ACCESS_OPTIONS: Array<{ value: TableSummary["agentAccess"]; label: string; hint: string }> = [
-  { value: "write", label: "AI 可查可寫", hint: "團隊助手看得到；MCP 代理可查詢、可新增列（仍受本人權限限制）" },
-  { value: "read", label: "AI 唯讀", hint: "團隊助手看得到；MCP 代理只能查詢、不能寫" },
-  { value: "none", label: "不開放 AI", hint: "團隊助手與 MCP 代理完全看不到這個庫" },
+  { value: "write", label: "AI 可以協作", hint: "AI 可以搜尋、引用，也能新增或修改列（仍受你本人的權限限制）" },
+  { value: "read", label: "AI 只能讀取", hint: "AI 可以搜尋與引用，但不能修改" },
+  { value: "none", label: "不提供 AI", hint: "只有成員可以使用；AI 與外部代理完全看不到這張表" },
 ];
 
 export function DatabasesPage({ groupId }: { groupId: string }) {
   // 全組協作：presence + 游標（組房 g:${groupId}）
   const collab = useCollab(groupId, !!groupId, "group");
+  const utils = trpc.useUtils();
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [databaseQuery, setDatabaseQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
   // 從專案頁深鏈：?projectId=&from=project —— 麵包屑回專案、建表可預綁關聯專案
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
   const [fromProject, setFromProject] = useState(false);
@@ -165,7 +173,6 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
     ) as Record<string, TableSummary[]>;
   }, [byScope, databaseQuery]);
   const totalRows = tables.reduce((sum, table) => sum + table.rowCount, 0);
-  const aiReadyCount = tables.filter((table) => table.agentAccess !== "none").length;
 
   const projectBackHref = contextProjectId
     ? `/p/${encodeURIComponent(contextProjectId)}#sec-databases`
@@ -181,16 +188,38 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       <CursorOverlay cursors={collab.cursors} />
       <header className="page-intro database-intro">
         <div>
-          <p className="eyebrow">團隊資料中心</p>
-          <h1>資料庫</h1>
-          <p className="page-lede">把名單、素材、任務與文件變成團隊和 AI 都能安全使用的共同資料。</p>
+          <p className="eyebrow">所有資料</p>
+          <h1>資料中心</h1>
+          <p className="page-lede">
+            所有專案、文件與團隊資料都在這裡。加進來之後，你決定哪個專案和 AI 可以使用。
+          </p>
         </div>
-        <div className="database-intro__stats" aria-label="資料庫摘要">
-          <span><strong>{tables.length}</strong><small>資料庫</small></span>
-          <span><strong>{totalRows.toLocaleString()}</strong><small>資料列</small></span>
-          <span><strong>{aiReadyCount}</strong><small>AI 可使用</small></span>
+        {/*
+          首屏主要動作只有一個（§63）。以前這裡是「10 資料庫 / 64 資料列 / 10 AI 可使用」——
+          一般創作者不知道「資料列」是什麼，也不在乎；數字降為次要資訊（見 hub 區塊）。
+        */}
+        <div className="database-intro__cta">
+          <Button variant="primary" onClick={() => setAddOpen(true)}>
+            <Icon name="Plus" size={15} /> 加入資料
+          </Button>
         </div>
       </header>
+
+      <AddDataSheet
+        open={addOpen}
+        destination={
+          contextProjectId
+            ? { kind: "project", projectId: contextProjectId, projectTitle: contextProject.data?.title ?? null }
+            : { kind: "hub" }
+        }
+        onClose={() => setAddOpen(false)}
+        onAdded={() => {
+          void utils.dataHub.list.invalidate();
+          void utils.dataHub.summary.invalidate();
+        }}
+        // 結構化資料表／外部 API 走既有的建表與匯入流程（就在這一頁下方）
+        onOpenTableFlow={() => { setCreating(true); setSelectedId(null); }}
+      />
       {collab.connected && collab.peers.length > 0 && (
         <div
           aria-label="組內在線"
@@ -218,23 +247,41 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
           {" · "}從此建立的表可勾選「關聯此專案」，才會出現在專案資料卡。
         </p>
       )}
+
+      {/*
+        資料中心的主體：跨知識／資料表／文件／素材的統一清單與搜尋。
+        帶專案上下文時預設就只看那個專案的資料——不把使用者丟回全站首頁（§28）。
+        下面的兩欄版面是「結構化資料表」這一區的完整編輯器，Data Hub 不重寫它。
+      */}
+      <DataHubOverview
+        projectId={contextProjectId}
+        projectTitle={contextProject.data?.title ?? null}
+        onAddData={() => setAddOpen(true)}
+      />
+
+      <h2 className="hub-section-title">
+        <Icon name="Database" size={16} /> 結構化資料表
+      </h2>
+      <Hint style={{ marginTop: 0 }}>
+        名單、待辦、借用與發布排程這類「一列一筆」的資料才需要資料表。一般文件與素材用上方的「加入資料」就好。
+      </Hint>
       <div className={`database-layout${selected || creating ? " has-detail" : ""}${list.data && tables.length === 0 ? " is-empty" : ""}`}>
         {/* 左欄：清單＋建立 */}
-        <Card as="aside" className="database-sidebar" aria-label="資料庫清單">
+        <Card as="aside" className="database-sidebar" aria-label="結構化資料表清單">
           <div className="database-sidebar__head">
-            <div><strong>我的資料庫</strong><small>{tables.length} 個空間</small></div>
-            <Button size="sm" variant="primary" aria-label="建立資料庫" onClick={() => { setCreating(true); setSelectedId(null); }}>
+            <div><strong>結構化資料表</strong><small>{tables.length} 張表・{totalRows.toLocaleString()} 列</small></div>
+            <Button size="sm" aria-label="建立資料表" onClick={() => { setCreating(true); setSelectedId(null); }}>
               <Icon name="Plus" size={14} /> 建立
             </Button>
           </div>
           <label className="database-search">
-            <span className="sr-only">搜尋資料庫</span>
+            <span className="sr-only">搜尋資料表</span>
             <Icon name="Search" size={15} />
             <input
               type="search"
               value={databaseQuery}
               onChange={(event) => setDatabaseQuery(event.target.value)}
-              placeholder="搜尋資料庫…"
+              placeholder="搜尋資料表…"
             />
           </label>
           {(["personal", "group", "team", "global"] as const).map((scope) =>
@@ -262,17 +309,17 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
             <Meta as="p" className="database-search-empty">找不到「{databaseQuery.trim()}」</Meta>
           )}
           {list.data && tables.length === 0 && !creating && (
-            <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料庫</>} description={<>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</>} style={{ marginTop: 16 }} />
+            <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表</>} description={<>名單、待辦與排程這類「一列一筆」的資料才需要資料表；一般文件用上方的「加入資料」就好。</>} style={{ marginTop: 16 }} />
           )}
         </Card>
 
         {/* 右欄：建立表單 or 選中庫的格線 */}
-        <section className="database-main" aria-label={creating ? "建立資料庫" : selected?.name ?? "資料庫內容"}>
+        <section className="database-main" aria-label={creating ? "建立資料表" : selected?.name ?? "資料表內容"}>
           {(creating || selected) && (
             <Button variant="ghost" className="database-mobile-back"
               type="button"
               onClick={() => { setCreating(false); setSelectedId(null); }}>
-              <Icon name="Undo2" size={14} /> 返回資料庫清單
+              <Icon name="Undo2" size={14} /> 返回資料表清單
             </Button>
           )}
           {creating ? (
@@ -292,19 +339,16 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
                 <span><Icon name="FileText" size={20} /></span>
                 <span><Icon name="Sparkles" size={20} /></span>
               </div>
-              <p className="eyebrow">從日常資料開始</p>
-              <h2>選一個資料庫，或把現有檔案直接帶進來</h2>
+              <p className="eyebrow">一列一筆的資料</p>
+              <h2>選一張資料表，或把現有清單直接帶進來</h2>
               <p>
                 名單、待辦、素材表與發布計畫都可以。建立時可從 CSV／TSV／JSON 推斷欄位，不必逐筆手動輸入。
-                {contextProjectId ? " 新資料庫也能直接關聯目前專案。" : null}
+                {contextProjectId ? " 新資料表也能直接關聯目前專案。" : null}
               </p>
               <div className="database-welcome__actions">
                 <button className="primary" onClick={() => { setCreating(true); setSelectedId(null); }}>
-                  <Icon name="Plus" size={15} />建立或匯入資料庫
+                  <Icon name="Plus" size={15} />建立或匯入資料表
                 </button>
-                <Link href="/integrations" className="btn">
-                  <Icon name="ArrowRight" size={15} />連接外部資料
-                </Link>
               </div>
             </div>
           )}

@@ -15,7 +15,7 @@ import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
- * 連上後在「知識與資料」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁與資料庫、
+ * 連上後在「資料中心」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁與資料庫、
  * 自家系統的 API 都抓得到。憑證加密存放、永不回顯；權限只及本人，隨時可移除。
  */
 export function IntegrationsPage() {
@@ -40,7 +40,7 @@ export function IntegrationsPage() {
     const q = new URLSearchParams(window.location.search).get("gdrive");
     if (!q) return;
     setFlash(
-      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「知識與資料」匯入你的私人文件"
+      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「資料中心」匯入你的私人文件"
       : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
       : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 雲端」"
       : "連結失敗，請稍後再試",
@@ -126,7 +126,7 @@ export function IntegrationsPage() {
       <Card as="section" className="integration-flow-card" data-fb="資料來源使用方式">
         <div className="integration-flow-card__head">
           <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
-          <Link href="/databases" className="btn-tonal btn-sm">前往知識與資料 <Icon name="ArrowRight" size={13} /></Link>
+          <Link href="/databases" className="btn-tonal btn-sm">前往資料中心 <Icon name="ArrowRight" size={13} /></Link>
         </div>
         <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
       </Card>
@@ -135,7 +135,7 @@ export function IntegrationsPage() {
       <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
-          連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
+          連結後，到「資料中心」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
         </Hint>
         {/* 權限範圍是「按下連結鍵之前必須看到」的資訊：不知道我們拿到什麼權限就交出雲端帳號，不行。 */}
         <Hint style={{ marginTop: 4 }}>
@@ -160,7 +160,7 @@ export function IntegrationsPage() {
               </>
             ) : (
               <Meta style={{ margin: 0 }}>
-                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」選檔或貼連結匯入私人檔案
+                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「資料中心」選檔或貼連結匯入私人檔案
               </Meta>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
@@ -180,7 +180,7 @@ export function IntegrationsPage() {
       {/* ── 外部資料來源/API ── */}
       <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
-      <p style={{ marginTop: 24 }}><Link href="/databases">前往知識與資料 →</Link>　<Link href="/dashboard">回今日工作台</Link></p>
+      <p style={{ marginTop: 24 }}><Link href="/databases">前往資料中心 →</Link>　<Link href="/dashboard">回今日工作台</Link></p>
     </div>
   );
 }
@@ -259,7 +259,7 @@ function NotionCard({ data, returnTo }: {
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面或資料庫「連結」給該整合（右上 ⋯ → Connections；
         資料庫要在資料庫本身那一頁操作，不是在單一列的頁面）。
-        完成後到「知識與資料」用「從 Notion 選頁／資料庫」搜尋並多選匯入（也可照舊貼連結）。
+        完成後到「資料中心」用「從 Notion 選頁／資料庫」搜尋並多選匯入（也可照舊貼連結）。
         AI 只會讀「你選中並匯入」的內容——連接整合不等於把整個 workspace 交給 AI。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </Hint>
@@ -348,7 +348,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
       <Hint style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
-        真正要使用哪些內容，仍到「知識與資料」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
+        真正要使用哪些內容，仍到「資料中心」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
       </Hint>
 
       {apis.length === 0 && !adding && <Hint>還沒有外部資料來源——按下面「新增連接」開始。</Hint>}

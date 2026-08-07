@@ -9,6 +9,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
+import { dataHubAiAccessLabel } from "@shared/dataHub";
 import { Button, Card, EmptyState, Hint, Meta, Pill } from "./ui";
 /**
  * 專案資料卡：
@@ -27,10 +28,14 @@ function scrollTo(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/**
+ * AI 使用方式的人話（單一真相在 shared/dataHub）。
+ * 底層仍是同一個 agentAccess 欄位，權限沒有任何變化——只是不再用工程術語當主要文案。
+ */
 function agentAccessLabel(access: "none" | "read" | "write" | undefined): string {
-  if (access === "none") return "AI 不可見";
-  if (access === "read") return "AI 可讀";
-  return "AI 可讀寫";
+  if (access === "none") return dataHubAiAccessLabel("none");
+  if (access === "read") return dataHubAiAccessLabel("readable");
+  return dataHubAiAccessLabel("writable");
 }
 
 const TONE_STYLE: Record<"ok" | "partial" | "empty", { border: string; bg: string }> = {
@@ -367,7 +372,7 @@ export function ProjectDatabasesCard({
             })}
             <Hint style={{ margin: 0 }}>
               要改欄位或大量編輯，請到
-              <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
+              <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>資料中心</Link>
               。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
             </Hint>
           </div>
@@ -429,7 +434,7 @@ export function ProjectDatabasesCard({
 
             {!linked.isLoading && !linked.error && groups.length === 0 && (
               <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
-                    ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
+                    ? "用上方一鍵範本最快；或到資料中心匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
                     : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
             )}
 

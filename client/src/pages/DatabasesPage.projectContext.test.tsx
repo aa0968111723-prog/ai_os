@@ -16,6 +16,7 @@ vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({
       databases: { list: { invalidate: vi.fn() } },
+      dataHub: { list: { invalidate: vi.fn() }, summary: { invalidate: vi.fn() } },
     }),
     databases: {
       list: { useQuery: () => listQuery() },
@@ -78,6 +79,14 @@ vi.mock("../components/DatabaseDetailTabs", () => ({
   DatabaseDetailTabs: () => null,
 }));
 
+// 資料中心總覽與「＋加入資料」各有自己的測試；這支測的是深鏈與建表表單
+vi.mock("../components/DataHubOverview", () => ({
+  DataHubOverview: () => null,
+}));
+vi.mock("../components/AddDataSheet", () => ({
+  AddDataSheet: () => null,
+}));
+
 // 全組 presence／游標走真的 WebSocket＋react-query client，這支測的是深鏈與建庫表單，
 // 不架 QueryClientProvider；比照 ../api 直接把 realtime 也換成靜態替身。
 vi.mock("../realtime", () => ({
@@ -131,7 +140,7 @@ describe("DatabasesPage project deep link (user journey)", () => {
 
   it("create form defaults to group scope and offers link-to-project checkbox", async () => {
     render(<DatabasesPage groupId="g1" />);
-    const createBtn = screen.getByRole("button", { name: /建立資料庫/i });
+    const createBtn = screen.getByRole("button", { name: /建立資料表/i });
     createBtn.click();
     await waitFor(() => {
       expect(screen.getByTestId("db-link-project")).toBeInTheDocument();

@@ -175,7 +175,7 @@ describe("ProjectDatabasesCard", () => {
     });
     render(<ProjectDatabasesCard projectId="project-1" />);
     expect(screen.getByText("摘錄與重點")).toBeInTheDocument();
-    expect(screen.getByText("AI 可讀寫")).toBeInTheDocument();
+    expect(screen.getByText("AI 可以協作")).toBeInTheDocument();
     expect(screen.getByText("一段重點")).toBeInTheDocument();
   });
 
@@ -285,11 +285,11 @@ describe("ProjectDatabasesCard", () => {
     knowledgeList.mockReturnValue({ data: [{ id: "k1" }], isLoading: false, error: null });
     render(<ProjectDatabasesCard projectId="project-1" />);
     expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "ok");
-    expect(screen.getByText(/AI 可讀 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/另有 1 列 AI 不可見/i)).toBeInTheDocument();
+    expect(screen.getByText(/資料表 AI 可讀 2 列/i)).toBeInTheDocument();
+    expect(screen.getByText(/另有 1 列不提供 AI/i)).toBeInTheDocument();
     expect(screen.getByText(/關聯表列 3/i)).toBeInTheDocument();
-    expect(screen.getByText("AI 不可見")).toBeInTheDocument();
-    expect(screen.getByText("AI 可讀寫")).toBeInTheDocument();
+    expect(screen.getByText("不提供 AI")).toBeInTheDocument();
+    expect(screen.getByText("AI 可以協作")).toBeInTheDocument();
   });
 
   it("user journey: read-only member cannot quick-add", () => {

@@ -57,8 +57,8 @@ describe("projectDataAiHint", () => {
       linkedAiReadableRowCount: 2,
     });
     expect(h.tone).toBe("ok");
-    expect(h.detail).toMatch(/AI 可讀表列 2/);
-    expect(h.detail).toMatch(/另有 3 列 AI 不可見/);
+    expect(h.detail).toMatch(/資料表 AI 可讀 2 列/);
+    expect(h.detail).toMatch(/另有 3 列不提供 AI/);
   });
 });
 
