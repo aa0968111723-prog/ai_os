@@ -234,6 +234,7 @@ export function HelpPage() {
           </Spot>
           <Spot icon="Clock" name="筆記排程" where="電腦頂欄／手機分頁列">
             週會、腳本審稿、待辦排進行事曆，也能寫會議紀錄。標題打 @人 可通知對方；可串 Google 日曆（整合連接）。
+            筆記可以夾附件——白板照片、簽到表、講義 PDF 都直接掛在那則紀錄底下。
           </Spot>
           <Spot icon="Package" name="資料庫" where="電腦頂欄／手機「更多」">
             你自己的表格與資料集（例：器材借用表、拍攝清單）。可上傳文件、匯入 Google／Notion，給 AI 讀。
@@ -281,7 +282,8 @@ export function HelpPage() {
             角色定裝卡鎖定外觀、場景設定卡鎖定色板／光線；生成時勾選注入，跨鏡較一致（最多角色 6、場景 4）。
           </Spot>
           <Spot icon="FileText" name="知識庫" where="專案頁">
-            貼上參考語料（文字／從素材轉入），讓 AI 有依據。可<b>置頂</b>優先注入；工作台可勾
+            貼上參考語料（文字／從素材轉入），讓 AI 有依據。也可以直接<b>夾檔案</b>——PDF、Word
+            會自動抽出文字跟著注入，照片則單純留存。可<b>置頂</b>優先注入；工作台可勾
             <b>本次知識優先</b>只餵你點名的幾筆。不宜外流的個資請別放。
           </Spot>
           <Spot icon="Image" name="素材庫" where="專案頁">

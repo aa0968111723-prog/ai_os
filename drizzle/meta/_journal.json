@@ -281,6 +281,13 @@
       "when": 1786500000000,
       "tag": "0039_project_share_links",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786600000000,
+      "tag": "0040_content_attachments",
+      "breakpoints": true
     }
   ]
 }

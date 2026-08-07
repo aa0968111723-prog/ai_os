@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, isNull, like, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -9,6 +9,12 @@ import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
+import {
+  countAttachmentsByRef,
+  formatAttachmentInjectBlock,
+  purgeAttachmentsFor,
+  removeStoredFiles,
+} from "../services/attachmentsCore";
 import {
   formatCharacterKnowledgeBlock,
   formatPropKnowledgeBlock,
@@ -120,12 +126,39 @@ export async function buildKnowledgeContextWithMeta(
   if (propBlock) cardParts.push(propBlock);
   const cardBlock = cardParts.join("\n");
 
+  // 附件文字（0040）：知識庫收得進 PDF／Word 之後，那份檔案的內文才是使用者心目中的「素材」。
+  // 只撈有抽到文字的列（照片沒有 text_content），組成每筆知識一段附件區塊。
+  const attachmentTextByRef = new Map<string, string>();
+  if (rows.length > 0) {
+    const attachmentRows = await db
+      .select({
+        refId: schema.contentAttachments.refId,
+        name: schema.contentAttachments.name,
+        textContent: schema.contentAttachments.textContent,
+      })
+      .from(schema.contentAttachments)
+      .where(and(
+        eq(schema.contentAttachments.kind, "knowledge"),
+        inArray(schema.contentAttachments.refId, rows.map((r) => r.id)),
+        isNotNull(schema.contentAttachments.textContent),
+      ))
+      .orderBy(asc(schema.contentAttachments.createdAt));
+    for (const refId of new Set(attachmentRows.map((a) => a.refId))) {
+      const block = formatAttachmentInjectBlock(attachmentRows.filter((a) => a.refId === refId));
+      if (block) attachmentTextByRef.set(refId, block);
+    }
+  }
+
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
   const injectRows: KnowledgeRowForInject[] = rows.map((r) => ({
     id: r.id,
     kind: r.kind,
     title: r.title,
-    content: r.content,
+    content: attachmentTextByRef.has(r.id)
+      // 附件的抽取文字接在該筆內容之後：PDF 開示稿／Word 腳本上傳進知識庫後，AI 導演讀得到
+      // 內文本身。整段一起計入注入預算，超出時與長文走同一套截斷，不會偷偷突破上限。
+      ? `${r.content}\n\n${attachmentTextByRef.get(r.id)!}`
+      : r.content,
     pinned: r.pinned,
     summary: r.summary,
     createdAt: r.createdAt,
@@ -279,7 +312,9 @@ export const knowledgeRouter = router({
       .where(and(...filters))
       // 釘選在前，再依建立時間新→舊（與注入 rank 一致，方便使用者掃清單）
       .orderBy(desc(schema.knowledge.pinned), desc(schema.knowledge.createdAt));
-    return rows;
+    // 附件數：清單上直接看得出哪幾筆夾了 PDF／照片，不必逐筆展開才知道
+    const counts = await countAttachmentsByRef("knowledge", rows.map((r) => r.id));
+    return rows.map((r) => ({ ...r, attachmentCount: counts.get(r.id) ?? 0 }));
   }),
 
   /**
@@ -508,10 +543,15 @@ export const knowledgeRouter = router({
     await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     // 修 R3-KNOW-01：級聯清版本快照——update/restoreVersion 會把每次改動前的全文寫進 text_versions
     //（kind='knowledge', refId=知識id）；purge 只刪本體會讓完整逐字稿/見證全文永久殘留，「永久刪除」名不副實。
+    // 附件同理：一份 PDF 開示稿的抽取文字就存在 content_attachments.text_content，
+    // 不一起刪就等於「永久刪除」後全文還躺在 DB 裡、原檔也還在 Volume 上。
+    let orphanFiles: string[] = [];
     await db.transaction(async (tx) => {
       await tx.delete(schema.textVersions).where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, input.id)));
+      orphanFiles = await purgeAttachmentsFor("knowledge", input.id, tx);
       await tx.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
     });
+    await removeStoredFiles(orphanFiles);
     return { ok: true };
   }),
 

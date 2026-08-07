@@ -4,6 +4,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
+import { AttachmentPanel } from "./AttachmentPanel";
 import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -20,6 +21,8 @@ type KnowledgeListItem = {
   chars: number;
   excerpt: string;
   pinned?: boolean;
+  /** 夾了幾份檔案（PDF 開示稿、掃描檔…）；文件類的抽取文字會一起注入 AI 導演 */
+  attachmentCount?: number;
 };
 
 /* ── 需求 6.3：批次匯入 txt/md 的限制 ── */
@@ -427,6 +430,8 @@ function KnowledgeRow({
 }) {
   const utils = trpc.useUtils();
   const [editing, setEditing] = useState(false);
+  // 附件區預設收合：每筆各一支查詢，全部常駐會讓大知識庫一開頁就發數十支
+  const [showAttachments, setShowAttachments] = useState(false);
   // 全文只在編輯時才抓（列表 API 只回摘要）。
   const full = trpc.knowledge.get.useQuery({ id: k.id }, { enabled: editing });
   const update = trpc.knowledge.update.useMutation({
@@ -553,6 +558,16 @@ function KnowledgeRow({
               )}
             </p>
           )}
+          {/* 附件（0040）：PDF／Word 的開示稿直接收進這一筆，抽出的文字會跟著注入 AI 導演 */}
+          <label style={{ marginTop: 10 }}>附件（PDF、Word、照片…）</label>
+          <AttachmentPanel
+            kind="knowledge"
+            refId={k.id}
+            onChanged={() => {
+              utils.knowledge.list.invalidate({ projectId });
+              utils.knowledge.injectPreview.invalidate({ projectId });
+            }}
+          />
           {/* 長文版本歷史（#29）：編輯這筆時可展開檢視／還原歷次「更新前」的舊版全文 */}
           <VersionHistory knowledgeId={k.id} projectId={projectId} />
         </div>
@@ -571,11 +586,53 @@ function KnowledgeRow({
         )}
       </div>
       <div>
-        <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{k.title}</div>
+        <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
+          {k.title}
+          {!!k.attachmentCount && (
+            <Chip style={{ margin: "0 0 0 6px" }} title={`夾了 ${k.attachmentCount} 份檔案`}>
+              <Icon name="Paperclip" size={11} style={{ verticalAlign: "-1px" }} /> {k.attachmentCount}
+            </Chip>
+          )}
+        </div>
         <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>
+        {showAttachments && (
+          <AttachmentPanel
+            kind="knowledge"
+            refId={k.id}
+            readOnly={readOnly}
+            compact
+            onChanged={() => {
+              utils.knowledge.list.invalidate({ projectId });
+              utils.knowledge.injectPreview.invalidate({ projectId });
+            }}
+          />
+        )}
       </div>
-      {!readOnly && (
+      {readOnly ? (
+        // 檢視者也看得到附件（唯讀）：不能改內容，不代表不能讀那份 PDF
+        !!k.attachmentCount && (
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
+              aria-expanded={showAttachments}
+              onClick={() => setShowAttachments((v) => !v)}
+            >
+              附件 {k.attachmentCount}
+            </button>
+          </div>
+        )
+      ) : (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
+            title="加 PDF、Word、照片等檔案；文件的文字會注入 AI 導演"
+            aria-expanded={showAttachments}
+            onClick={() => setShowAttachments((v) => !v)}
+          >
+            附件{k.attachmentCount ? ` ${k.attachmentCount}` : ""}
+          </button>
           <button
             type="button"
             style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}

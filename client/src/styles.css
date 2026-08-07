@@ -7095,6 +7095,62 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .ai-copilot-chat-feed { max-height: min(420px, 48dvh); }
 }
 
+/* ═══ 筆記／知識庫附件（0040 content_attachments） ═══ */
+/* 一列一個附件：縮圖／型別圖示 + 檔名（截斷）在左，大小／可讀字數／刪除在右。
+   手機（≤560）改成堆疊，否則 360px 下檔名只剩一個字寬。 */
+.attachment-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--muted);
+}
+.attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: inherit;
+  text-decoration: none;
+}
+.attachment-link:hover .attachment-name { text-decoration: underline; }
+.attachment-thumb {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--border-soft);
+}
+.attachment-thumb--file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-fg);
+}
+.attachment-name {
+  font-size: var(--fs-13);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .attachment-item { flex-direction: column; align-items: stretch; }
+  .attachment-item > span:last-child { justify-content: flex-end; }
+}
+
 /* ═══ 手機修正（MOB-H3）：工作台/排程互動 ═══ */
 /* 排程/筆記列欄位模板：原為 TSX 行內樣式，特異性蓋掉 ≤560 的 .gen-row { 1fr } 堆疊——
  * 改成修飾 class（值與原行內相同、桌機渲染不變），讓媒體查詢接得了手。 */
