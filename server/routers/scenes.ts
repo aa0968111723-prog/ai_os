@@ -255,6 +255,11 @@ export const scenesRouter = router({
         characterIds: schema.scenes.characterIds,
         scenePresetIds: schema.scenes.scenePresetIds,
         propIds: schema.scenes.propIds,
+        // Story-first：所屬場＋鏡頭語言＋表演＋造型（分鏡中心的分場群組與 Direction 區塊）
+        storySceneId: schema.scenes.storySceneId,
+        camera: schema.scenes.camera,
+        performance: schema.scenes.performance,
+        lookIds: schema.scenes.lookIds,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
         // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用

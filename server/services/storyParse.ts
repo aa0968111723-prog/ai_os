@@ -78,9 +78,10 @@ export function mockStoryExtract(content: string): StoryParsePlan {
   const props: StoryParsePlan["props"] = [];
   const bodyLines: string[] = [];
 
-  const parseItems = (rest: string): Array<{ name: string; desc?: string }> =>
-    rest
-      .split(/[、,，]/)
+  // 括號感知切分：「安倢（黑髮、柔和五官）、師父」的頓號不能切進括號內描述
+  const parseItems = (rest: string): Array<{ name: string; desc?: string }> => {
+    const tokens = rest.match(/[^、，,（(]+(?:[（(][^）)]*[）)])?/g) ?? [];
+    return tokens
       .map((s) => s.trim())
       .filter(Boolean)
       .map((item) => {
@@ -88,6 +89,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
         return m ? { name: m[1].trim(), desc: m[2].trim() || undefined } : { name: item };
       })
       .filter((it) => it.name.length > 0 && it.name.length <= 40);
+  };
 
   for (const line of lines) {
     const t = line.trim();

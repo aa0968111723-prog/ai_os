@@ -1,12 +1,14 @@
 /**
- * WB-06: TocNav defaults to three stage anchors (not per-mode AI sections).
+ * WB-06 + Story-first：TocNav defaults to the four stage anchors (not per-mode AI sections).
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_ITEMS, TocNav } from "./TocNav";
+import { DEFAULT_ITEMS, LEGACY_STAGE_ALIAS, TocNav } from "./TocNav";
 
-describe("TocNav (WB-06)", () => {
+const STAGE_IDS = ["stage-story", "stage-board", "stage-create", "stage-deliver"];
+
+describe("TocNav (WB-06 / Story-first)", () => {
   const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   let scrollIntoView: ReturnType<typeof vi.fn>;
 
@@ -35,7 +37,7 @@ describe("TocNav (WB-06)", () => {
         constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {}
       },
     );
-    for (const id of ["stage-context", "stage-create", "stage-deliver"]) {
+    for (const id of STAGE_IDS) {
       const el = document.createElement("div");
       el.id = id;
       document.body.appendChild(el);
@@ -44,19 +46,22 @@ describe("TocNav (WB-06)", () => {
 
   afterEach(() => {
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    for (const id of ["stage-context", "stage-create", "stage-deliver"]) {
+    for (const id of STAGE_IDS) {
       document.getElementById(id)?.remove();
     }
   });
 
-  it("DEFAULT_ITEMS is three stages: 定調 → 創作 → 交付 (C3)", () => {
+  it("DEFAULT_ITEMS is four stages: 故事 → 分鏡 → 製作 → 成片 (PE 計畫 §03)", () => {
     expect(DEFAULT_ITEMS).toEqual([
-      { id: "stage-context", label: "① 定調" },
-      { id: "stage-create", label: "② 創作" },
-      { id: "stage-deliver", label: "③ 交付" },
+      { id: "stage-story", label: "① 故事" },
+      { id: "stage-board", label: "② 分鏡" },
+      { id: "stage-create", label: "③ 製作" },
+      { id: "stage-deliver", label: "④ 成片" },
     ]);
-    // Must not list mode anchors as separate page sections
+    // 「定調」不再是必經頁面：不得回到目錄
     const ids = DEFAULT_ITEMS.map((i) => i.id);
+    expect(ids).not.toContain("stage-context");
+    // Must not list mode anchors as separate page sections
     expect(ids).not.toContain("sec-studio");
     expect(ids).not.toContain("sec-workflow");
     expect(ids).not.toContain("sec-agent");
@@ -66,15 +71,21 @@ describe("TocNav (WB-06)", () => {
     expect(ids).not.toContain("stage-assets");
   });
 
-  it("renders default three links and jumps to #stage-create for workbench", async () => {
+  it("legacy #stage-context deep links map to the new story stage", () => {
+    // 舊書籤／推播 URL 不能斷（重構前的「① 定調」）
+    expect(LEGACY_STAGE_ALIAS["stage-context"]).toBe("stage-story");
+  });
+
+  it("renders default four links and jumps to #stage-create for workbench", async () => {
     const user = userEvent.setup();
     render(<TocNav />);
 
-    expect(screen.getByRole("button", { name: /① 定調/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /② 創作/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /③ 交付/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /① 故事/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /② 分鏡/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /③ 製作/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /④ 成片/ })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /② 創作/ }));
+    await user.click(screen.getByRole("button", { name: /③ 製作/ }));
     expect(scrollIntoView).toHaveBeenCalled();
     expect(window.location.hash).toBe("#stage-create");
   });
