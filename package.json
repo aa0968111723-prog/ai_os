@@ -72,6 +72,7 @@
     "multer": "^2.2.0",
     "pdf-parse": "^1.1.1",
     "pg": "^8.13.1",
+    "posthog-js": "^1.414.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "superjson": "^2.2.1",

@@ -15,6 +15,7 @@ import { useMatchMedia } from "../lib/useMatchMedia";
 import { useCollab, CursorOverlay } from "../realtime";
 import { CollabPanel } from "../features/collaboration/CollabPanel";
 import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
+import posthog from "../posthog";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -129,7 +130,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const platformOptions = (options.data ?? []).filter((o) => o.type === "platform" && o.active);
   const kindLabelOf = (value: string) => (options.data ?? []).find((o) => o.type === "kind" && o.value === value)?.label ?? value;
   const create = trpc.projects.create.useMutation({
-    onSuccess: (project) => {
+    onSuccess: (project, variables) => {
+      posthog.capture("project_created", {
+        project_kind: variables.kind,
+        project_format: variables.format,
+      });
       utils.projects.list.invalidate();
       navigate(`/p/${project.id}`);
     },
@@ -138,6 +143,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
   // 「略過」導覽不該讓唯一的安全沙盒永久消失，一次誤點要可回復
   const createSample = trpc.projects.createSample.useMutation({
     onSuccess: (project) => {
+      posthog.capture("sample_project_created");
       utils.projects.list.invalidate();
       navigate(`/p/${project.id}`);
     },

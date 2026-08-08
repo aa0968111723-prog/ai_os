@@ -10,6 +10,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
+import posthog from "../posthog";
 
 /** 有效期選項：預設 30 天——「永久」要是自己選的，不能是預設值 */
 const EXPIRY_CHOICES: { label: string; days?: number }[] = [
@@ -37,7 +38,10 @@ export function ProjectShareCard({ projectId, canEdit }: { projectId: string; ca
   const [copied, setCopied] = useState(false);
 
   const create = trpc.share.create.useMutation({
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
+      posthog.capture("project_share_link_created", {
+        expires_in_days: variables.expiresInDays ?? null,
+      });
       setFresh(fullUrl(result.url));
       setCopied(false);
       setLabel("");

@@ -16,6 +16,7 @@ import { RouteFallback } from "../components/RouteFallback";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { safeInternalPath } from "../lib/safePath";
+import posthog from "../posthog";
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 
@@ -79,6 +80,7 @@ function pageTitle(pathname: string): string {
 export function AppShell() {
   const utils = trpc.useUtils();
   const [location, navigate] = useLocation();
+  const identifiedUserId = useRef<string | null>(null);
   /**
    * 首屏只打一支 sessionBoot.bootstrap（伺服器聚合 me + 未讀 + mock）。
    * 裝置不再並行三支 API；輪詢也只打這一支，由伺服器重算未讀。
@@ -106,18 +108,31 @@ export function AppShell() {
 
   const logout = trpc.auth.logout.useMutation({
     onSuccess: () => {
+      posthog.reset();
+      identifiedUserId.current = null;
       void utils.sessionBoot.bootstrap.invalidate();
       void utils.auth.me.invalidate();
     },
   });
   const logoutAll = trpc.auth.logoutAll.useMutation({
     onSuccess: () => {
+      posthog.reset();
+      identifiedUserId.current = null;
       void utils.sessionBoot.bootstrap.invalidate();
       void utils.auth.me.invalidate();
     },
   });
   const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
+
+  useEffect(() => {
+    const user = me.data?.user;
+    if (!user?.id || identifiedUserId.current === user.id) return;
+
+    if (identifiedUserId.current) posthog.reset();
+    posthog.identify(user.id, { email: user.email, name: user.name });
+    identifiedUserId.current = user.id;
+  }, [me.data?.user?.id, me.data?.user?.email, me.data?.user?.name]);
   // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/核准通知）。
   // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
   const logoutWithPushCleanup = async () => {
