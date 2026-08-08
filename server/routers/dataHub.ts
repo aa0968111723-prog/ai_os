@@ -1,9 +1,18 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { listDataHubResources, listDataHubSources } from "../services/dataHub";
+import { listVisibleTables } from "../services/databaseAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import {
+  BINDABLE_RESOURCE_KINDS,
+  bindableDenyReason,
+  createBinding,
+  listProjectBoundTableIds,
+  removeBinding,
+} from "../services/projectDataBindings";
 import { DATA_HUB_KINDS, DATA_HUB_SCOPES } from "../../shared/dataHub";
 
 /**
@@ -29,9 +38,15 @@ const scopesInput = z.array(z.enum(DATA_HUB_SCOPES)).max(DATA_HUB_SCOPES.length)
  * service 層還會再套一次組隔離，但**入口就要擋**——不靠下游兜底。
  */
 async function assertProjectVisible(auth: Parameters<typeof requireGroup>[0], projectId: string): Promise<void> {
+  await loadProjectVisible(auth, projectId);
+}
+
+/** 同上，但把專案列回傳給需要它的呼叫端（綁定要用 groupId 與封存狀態） */
+async function loadProjectVisible(auth: Parameters<typeof requireGroup>[0], projectId: string) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
+  return project;
 }
 
 export const dataHubRouter = router({
@@ -110,4 +125,90 @@ export const dataHubRouter = router({
    *   **不代表** AI 可以讀整顆雲端。UI 文案不得混淆這兩件事。
    */
   sources: authedProcedure.query(({ ctx }) => listDataHubSources(ctx.auth.user.id)),
+
+  /* ── 專案 × 資源綁定（P4）──────────────────────────────────────
+   * Golden Path 3：資料已經在站內了，要給另一個專案用不該叫使用者「再從 Google 匯入一次」。
+   * 這三支就是「加入既有資料」的後端。綁定不放寬任何權限，見 services/projectDataBindings。 */
+
+  /**
+   * 可以提供給這個專案的既有資料表（含已提供的，附 alreadyBound 旗標）。
+   * 不可提供的（個人庫、別組的表）**不列出來**——不做一個按了會被擋的選項。
+   */
+  bindableResources: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const project = await loadProjectVisible(ctx.auth, input.projectId);
+      const [tables, bound] = await Promise.all([
+        listVisibleTables(ctx.auth),
+        listProjectBoundTableIds(input.projectId),
+      ]);
+      return tables
+        .filter((t) => bindableDenyReason(ctx.auth, t, project) === null)
+        .map((t) => ({
+          resourceKind: "table" as const,
+          resourceId: t.id,
+          title: t.name,
+          description: t.description,
+          scope: t.scope,
+          rowCount: t.rowCount,
+          agentAccess: (t.agentAccess as "none" | "read" | "write") ?? "write",
+          alreadyBound: bound.has(t.id),
+        }));
+    }),
+
+  /** 把整份資源提供給這個專案（冪等：重複按不會長出第二筆） */
+  bindResource: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      resourceKind: z.enum(BINDABLE_RESOURCE_KINDS),
+      resourceId: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await loadProjectVisible(ctx.auth, input.projectId);
+      assertProjectNotArchived(project);
+      // 專案側：檢視者不能改專案要用哪些資料
+      await assertProjectEditable(ctx.auth, project);
+      // 資源側：本人要看得到、且該範圍可以提供給這個專案（個人庫永遠不行）
+      const [table] = await db
+        .select()
+        .from(schema.dataTables)
+        .where(and(eq(schema.dataTables.id, input.resourceId), isNull(schema.dataTables.deletedAt)));
+      // 無讀取權與不存在回同一句——不洩漏「存在但你看不到」
+      if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這張資料表" });
+      const denied = bindableDenyReason(ctx.auth, table, project);
+      if (denied) {
+        throw new TRPCError({
+          code: denied.startsWith("找不到") ? "NOT_FOUND" : "FORBIDDEN",
+          message: denied,
+        });
+      }
+      const result = await createBinding({
+        project,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
+        actorId: ctx.auth.user.id,
+      });
+      return { ok: true, created: result.created, title: table.name };
+    }),
+
+  /**
+   * 不再提供給這個專案。
+   * ★ 只移除「提供」這件事，資料本身完全不動——與「中斷來源不刪已匯入內容」同一條原則。
+   */
+  unbindResource: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      resourceKind: z.enum(BINDABLE_RESOURCE_KINDS),
+      resourceId: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await loadProjectVisible(ctx.auth, input.projectId);
+      await assertProjectEditable(ctx.auth, project);
+      const result = await removeBinding({
+        projectId: input.projectId,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
+      });
+      return { ok: true, removed: result.removed };
+    }),
 });

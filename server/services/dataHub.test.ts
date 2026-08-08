@@ -94,6 +94,9 @@ vi.mock("./databaseAcl", async (importOriginal) => {
 const findProjectLinkedRows = vi.hoisted(() => vi.fn(async () => [] as Array<{ tableId: string }>));
 vi.mock("./databaseProjectLinks", () => ({ findProjectLinkedRows }));
 
+const listProjectBoundTableIds = vi.hoisted(() => vi.fn(async () => new Set<string>()));
+vi.mock("./projectDataBindings", () => ({ listProjectBoundTableIds }));
+
 const listIntegrations = vi.hoisted(() => vi.fn());
 vi.mock("./integrations", () => ({ listIntegrations }));
 
@@ -171,6 +174,8 @@ beforeEach(() => {
   listVisibleTables.mockResolvedValue([]);
   findProjectLinkedRows.mockReset();
   findProjectLinkedRows.mockResolvedValue([]);
+  listProjectBoundTableIds.mockReset();
+  listProjectBoundTableIds.mockResolvedValue(new Set<string>());
   listIntegrations.mockReset();
 });
 
@@ -368,6 +373,43 @@ describe("專案上下文", () => {
     const result = await listDataHubResources(auth(), { kinds: ["table"], projectId: U.project1 });
     expect(result.resources).toEqual([]);
     expect(findProjectLinkedRows).not.toHaveBeenCalled();
+  });
+
+  /* ── DUAL READ（P4）：綁定是加法，不是取代 ── */
+
+  it("★ 整張表綁定給專案時列入——即使它一個 project 欄位都沒有", async () => {
+    listVisibleTables.mockResolvedValue([visibleTable({ id: "t1", fields: [] })]);
+    listProjectBoundTableIds.mockResolvedValue(new Set(["t1"]));
+    const result = await listDataHubResources(auth(), { kinds: ["table"], projectId: U.project1 });
+    expect(result.resources.map((r) => r.rawId)).toEqual(["t1"]);
+  });
+
+  it("★ legacy project link field 仍然有效——綁定沒有取代它", async () => {
+    listVisibleTables.mockResolvedValue([
+      visibleTable({ id: "t1", fields: [{ key: "proj", label: "專案", type: "project" }] }),
+    ]);
+    findProjectLinkedRows.mockResolvedValue([{ tableId: "t1" }]);
+    listProjectBoundTableIds.mockResolvedValue(new Set<string>());
+    const result = await listDataHubResources(auth(), { kinds: ["table"], projectId: U.project1 });
+    expect(result.resources.map((r) => r.rawId)).toEqual(["t1"]);
+  });
+
+  it("兩條路都命中時不重複列出同一張表", async () => {
+    listVisibleTables.mockResolvedValue([
+      visibleTable({ id: "t1", fields: [{ key: "proj", label: "專案", type: "project" }] }),
+    ]);
+    findProjectLinkedRows.mockResolvedValue([{ tableId: "t1" }]);
+    listProjectBoundTableIds.mockResolvedValue(new Set(["t1"]));
+    const result = await listDataHubResources(auth(), { kinds: ["table"], projectId: U.project1 });
+    expect(result.resources.map((r) => r.rawId)).toEqual(["t1"]);
+  });
+
+  it("★ 綁定不放寬可見性：綁了一張這個人看不到的表，仍然不會出現", async () => {
+    // listVisibleTables 已經是 ACL 過濾後的結果——綁定 id 不在其中就不算數
+    listVisibleTables.mockResolvedValue([visibleTable({ id: "visible" })]);
+    listProjectBoundTableIds.mockResolvedValue(new Set(["someone-elses-personal-table"]));
+    const result = await listDataHubResources(auth(), { kinds: ["table"], projectId: U.project1 });
+    expect(result.resources).toEqual([]);
   });
 });
 

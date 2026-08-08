@@ -288,11 +288,18 @@ describe("legacy migration adoption bridge", () => {
     //   （皆 ADD COLUMN IF NOT EXISTS）＋一個 scenes 索引，共 17 句——
     //   逐句確認過純新增、無資料搬移、無既有欄位改動，重跑必為 no-op；
     //   0050 是 ai_site_trace_sessions 的建表與兩個索引，三句皆 IF NOT EXISTS——
-    //   純新增全站助手軌跡分表，不動任何既有表、欄位或資料，重跑是 no-op。）
+    //   純新增全站助手軌跡分表，不動任何既有表、欄位或資料，重跑是 no-op；
+    //   0051 是資料中心的專案×資源綁定與來源譜系，共 12 句皆 IF NOT EXISTS——
+    //   CREATE TABLE IF NOT EXISTS "project_data_bindings" 一句（欄位全部寫在建表裡，
+    //   不靠同批 ALTER 補，故整表 DDL 對得起來）、CREATE UNIQUE INDEX IF NOT EXISTS
+    //   與 CREATE INDEX IF NOT EXISTS 各一句，再加九句 ADD COLUMN IF NOT EXISTS
+    //  （data_files 四個、knowledge 五個，全部 nullable 且無 default）——
+    //   逐句確認過：沒有改動任何既有欄位的型別或約束、沒有 UPDATE／DELETE、
+    //   沒有資料搬移，舊列一律留 null，重跑必為 no-op。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 12);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

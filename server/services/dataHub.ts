@@ -396,23 +396,38 @@ export async function listDataHubResources(auth: AuthState, query: DataHubQuery 
 }
 
 /**
- * 哪些可見的表「有列指向這個專案」——沿用既有 project link field 語意。
- * 一次 SQL（databaseProjectLinks 已把 per-table 條件組成單一 OR），不是逐表查。
+ * 哪些可見的表算是「這個專案的」。
+ *
+ * ★ DUAL READ（P4）：兩條路都算，兩條都保留——
+ *   (a) legacy：表裡某一列的 project 欄指向本專案（既有 project link field，完全不動）
+ *   (b) 新增：整張表被綁定給本專案（services/projectDataBindings）
+ * 兩邊都只在「已通過 databaseAcl 的可見表」裡挑，綁定不會讓看不到的表變看得到。
  */
 async function projectLinkedTableIds(
   projectId: string,
   visibleTables: Awaited<ReturnType<typeof listVisibleTables>>,
 ): Promise<Set<string>> {
-  const { findProjectLinkedRows } = await import("./databaseProjectLinks");
+  const [{ findProjectLinkedRows }, { listProjectBoundTableIds }] = await Promise.all([
+    import("./databaseProjectLinks"),
+    import("./projectDataBindings"),
+  ]);
   const targets = visibleTables
     .map((t) => ({
       tableId: t.id,
       fieldKeys: (t.fields as Array<{ key: string; type: string }>).filter((f) => f.type === "project").map((f) => f.key),
     }))
     .filter((t) => t.fieldKeys.length > 0);
-  if (targets.length === 0) return new Set();
-  const rows = await findProjectLinkedRows(projectId, targets);
-  return new Set(rows.map((r) => r.tableId));
+  const [linkedRows, bound] = await Promise.all([
+    targets.length > 0 ? findProjectLinkedRows(projectId, targets) : Promise.resolve([]),
+    listProjectBoundTableIds(projectId),
+  ]);
+  const out = new Set(linkedRows.map((r) => r.tableId));
+  // 綁定的表也要在可見範圍內才列入——綁定只決定「算不算這個專案的」，不放寬可見性
+  const visibleIds = new Set(visibleTables.map((t) => t.id));
+  for (const id of bound) {
+    if (visibleIds.has(id)) out.add(id);
+  }
+  return out;
 }
 
 export interface DataHubSourceState {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -22,6 +22,7 @@ import { classifyDatabaseFile, mediaKindOf, tableStats } from "../services/datab
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import { findProjectLinkedRows } from "../services/databaseProjectLinks";
+import { listProjectBoundTableIds } from "../services/projectDataBindings";
 import {
   buildBoundTableFields,
   getProjectDataTemplate,
@@ -263,25 +264,51 @@ export const databasesRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId);
       const tables = await listVisibleTables(ctx.auth);
-      // 只看「有 project 型別欄位」的可見庫
+      // ★ DUAL READ（P4）：一張表屬於這個專案有兩條路，兩條都要看，且兩條都保留——
+      //   (a) legacy：表裡某一列的 project 欄指向本專案（既有機制，完全不動）
+      //   (b) 新增：整張表被綁定給本專案（services/projectDataBindings）
+      //   綁定不放寬權限：這裡的 tables 已經過 databaseAcl，綁定只決定「列不列進來」。
+      const boundTableIds = await listProjectBoundTableIds(input.projectId);
+      // 只看「有 project 型別欄位」的可見庫（legacy 路徑）
       const relevant = tables
         .map((t) => ({ table: t, projectFields: (t.fields as DataField[]).filter((f) => f.type === "project") }))
         .filter((x) => x.projectFields.length > 0);
-      if (relevant.length === 0) return [];
+      const boundTables = tables.filter((t) => boundTableIds.has(t.id));
+      if (relevant.length === 0 && boundTables.length === 0) return [];
       // 每個庫的 project 欄 key 不同；在 PostgreSQL 組成「tableId + JSON 欄位值」條件，只把命中列
       // 傳回 Node。舊版先載入全部可見列再過濾，庫一多時可一次吃進數十萬列與大量 JSON。
-      const allRows = await findProjectLinkedRows(
-        input.projectId,
-        relevant.map(({ table, projectFields }) => ({
-          tableId: table.id,
-          fieldKeys: projectFields.map((field) => field.key),
-        })),
-      );
+      const allRows = relevant.length
+        ? await findProjectLinkedRows(
+          input.projectId,
+          relevant.map(({ table, projectFields }) => ({
+            tableId: table.id,
+            fieldKeys: projectFields.map((field) => field.key),
+          })),
+        )
+        : [];
       const rowsByTable = new Map<string, Array<{ id: string; data: DataRowData }>>();
       for (const row of allRows) {
         const bucket = rowsByTable.get(row.tableId) ?? [];
         bucket.push({ id: row.id, data: row.data as DataRowData });
         rowsByTable.set(row.tableId, bucket);
+      }
+      // 整張表綁定的：專案卡只是預覽，取前幾列即可——整表可能上萬列，不該為了一張卡全撈。
+      // 一次 SQL 撈齊全部綁定表的預覽列，不逐表查（N+1）。
+      const BOUND_PREVIEW_ROWS = 20;
+      const boundRowsByTable = new Map<string, Array<{ id: string; data: DataRowData }>>();
+      if (boundTables.length > 0) {
+        const previewRows = await db
+          .select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId, data: schema.dataRows.data })
+          .from(schema.dataRows)
+          .where(inArray(schema.dataRows.tableId, boundTables.map((t) => t.id)))
+          .orderBy(desc(schema.dataRows.createdAt))
+          .limit(BOUND_PREVIEW_ROWS * boundTables.length);
+        for (const row of previewRows) {
+          const bucket = boundRowsByTable.get(row.tableId) ?? [];
+          if (bucket.length >= BOUND_PREVIEW_ROWS) continue;
+          bucket.push({ id: row.id, data: row.data as DataRowData });
+          boundRowsByTable.set(row.tableId, bucket);
+        }
       }
       const out: Array<{
         tableId: string;
@@ -290,8 +317,24 @@ export const databasesRouter = router({
         rows: Array<{ id: string; data: DataRowData }>;
         /** AI 對此庫的存取（與 databaseAcl.agentAccess 同字） */
         agentAccess: "none" | "read" | "write";
+        /** true＝整張表提供給本專案（P4 綁定）；false＝只有指向本專案的那幾列（legacy 欄位） */
+        boundWhole: boolean;
       }> = [];
+      const emitted = new Set<string>();
+      for (const table of boundTables) {
+        emitted.add(table.id);
+        out.push({
+          tableId: table.id,
+          tableName: table.name,
+          fields: table.fields as DataField[],
+          rows: boundRowsByTable.get(table.id) ?? [],
+          agentAccess: (table.agentAccess as "none" | "read" | "write") ?? "write",
+          boundWhole: true,
+        });
+      }
       for (const { table } of relevant) {
+        // 已整張綁定的表不重複列一次——綁定涵蓋範圍更大
+        if (emitted.has(table.id)) continue;
         const matched = rowsByTable.get(table.id) ?? [];
         if (matched.length) {
           out.push({
@@ -300,6 +343,7 @@ export const databasesRouter = router({
             fields: table.fields as DataField[],
             rows: matched,
             agentAccess: (table.agentAccess as "none" | "read" | "write") ?? "write",
+            boundWhole: false,
           });
         }
       }
