@@ -113,6 +113,10 @@ shots = call("GET", admin, "scenes.listByProject", {"projectId": pid})
 ok("所有鏡都歸屬到場", all(s["storySceneId"] in board["storySceneIds"] for s in shots))
 with_anjie = [s for s in shots if s["characterIds"] and anjie["id"] in s["characterIds"]]
 ok("鏡引用角色（Reference 不是 Copy）", len(with_anjie) >= 1)
+# §14／§15：故事寫了造型、解析也建了 Look，轉分鏡就該把它鎖上——
+# 否則造型只是躺在資料庫裡的卡，使用者得逐鏡手動勾（＝把整理工作丟回給人）
+auto_look = [s for s in with_anjie if s.get("lookIds")]
+ok("出場角色的唯一造型自動鎖上（不必逐鏡手動勾）", len(auto_look) >= 1)
 ok("鏡繼承場的地點卡", any(s["scenePresetIds"] and locs[0]["id"] in s["scenePresetIds"] for s in shots))
 
 # ── 6. 鏡頭語言／表演（Shot Override 層）──

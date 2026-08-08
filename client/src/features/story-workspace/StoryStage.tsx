@@ -180,10 +180,21 @@ export function StoryStage({
   const parse = trpc.story.parse.useMutation({
     onSuccess: (r) => {
       const s = r.stats;
+      const truncated = s.truncation ? `（故事過長，已解析前 ${s.truncation.sentChars.toLocaleString()} 字）` : "";
+      /*
+       * 「解析完成」但一個角色/場景/道具都沒認出來，是真的會發生的結果
+       * （故事太短、太抽象，或模型這次回得很稀疏）。舊版只把 0 印出來——
+       * 使用者看到「解析完成」卻什麼都沒變，會以為是壞掉了。這裡明說發生什麼、
+       * 下一步能做什麼（§59 空狀態要被設計過、§60 不做會誤導的 UI）。
+       */
+      const foundNothing =
+        s.characters.created + s.characters.linked + s.locations.created + s.props.created === 0;
       setParseNotice(
         r.skipped
           ? "內容沒變，沿用上次解析結果"
-          : `解析完成：角色 建${s.characters.created}／連${s.characters.linked}、場景 建${s.locations.created}、道具 建${s.props.created}${s.looks.created ? `、造型 ${s.looks.created}` : ""}；規劃 ${s.scenes} 場 ${s.shots} 鏡${s.truncation ? `（故事過長，已解析前 ${s.truncation.sentChars.toLocaleString()} 字）` : ""}`,
+          : foundNothing
+            ? `解析完成，但這段故事裡沒有辨識出角色、場景或道具${s.scenes ? `（已規劃 ${s.scenes} 場 ${s.shots} 鏡，可以直接產生分鏡）` : ""}。想指定的話，在故事裡用「角色：」「場景：」「道具：」開頭的行點名，再解析一次。${truncated}`
+            : `解析完成：角色 建${s.characters.created}／連${s.characters.linked}、場景 建${s.locations.created}、道具 建${s.props.created}${s.looks.created ? `、造型 ${s.looks.created}` : ""}；規劃 ${s.scenes} 場 ${s.shots} 鏡${truncated}`,
       );
       utils.story.get.invalidate({ projectId });
       utils.characters.list.invalidate({ projectId });
