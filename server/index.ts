@@ -62,6 +62,7 @@ import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
+import { sanitizeAssistantPageContext } from "../shared/assistantPageContext";
 import {
   backgroundTaskCount,
   beginShutdown,
@@ -2016,6 +2017,10 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       && ((t as { role?: unknown }).role === "user" || (t as { role?: unknown }).role === "assistant")
       && typeof (t as { text?: unknown }).text === "string")
     .map((t: { role: "user" | "assistant"; text: string }) => ({ role: t.role, text: t.text.slice(0, 2000) }));
+  // 頁面感知上下文：這條路徑是手解析，不像 tRPC 有 zod——沒有顯式讀就會被靜默丟棄。
+  // sanitizeAssistantPageContext 逐欄夾制（壞欄位丟棄而非整包拒絕：上下文是錦上添花，
+  // 不該讓一個壞欄位害使用者問不到問題）。同樣只是提示，授權仍由 runGlobalAsk 內部重驗。
+  const pageContext = sanitizeAssistantPageContext(req.body?.pageContext) ?? undefined;
   if (!UUID_RE.test(groupId) || !message || message.length > 500) {
     return res.status(400).json({ error: "參數不正確（需 groupId 與 1–500 字的問題）" });
   }
@@ -2049,6 +2054,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         message,
         history: history.length ? history : undefined,
         projectId,
+        pageContext,
         signal: clientAbort.signal,
       },
       (e) => sse("step", e),

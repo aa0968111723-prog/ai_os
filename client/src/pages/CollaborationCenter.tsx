@@ -10,7 +10,8 @@
  * 資料來源全部是既有系統：notifications／messages／project_tasks／realtime 房間。
  * 沒有第二套留言系統，也沒有第二套通知系統。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { registerAssistantFocus, registerAssistantPage } from "../lib/assistantContext";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -28,6 +29,9 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export function CollaborationCenter({ groupId }: { groupId: string | null }) {
   const [tab, setTab] = useState<TabKey>("attention");
+  // 助手頁面感知：協作中心以任務為主體，分頁一起報（快捷因此是任務型）
+  useEffect(() => registerAssistantPage({ pageType: "tasks" }), []);
+  useEffect(() => registerAssistantFocus({ entityType: "task", activeTab: tab }), [tab]);
   const q = trpc.collaboration.summary.useQuery(
     { groupId: groupId ?? undefined },
     { enabled: Boolean(groupId), refetchInterval: 30_000 },

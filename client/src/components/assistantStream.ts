@@ -1,5 +1,6 @@
 import type { AgentPlannerMode } from "@shared/agentPlanner";
 import type { AssistantActivityEvent } from "./AssistantTrace";
+import type { AssistantWirePageContext } from "@shared/assistantPageContext";
 
 export type AssistantStreamDone = {
   answer: string;
@@ -208,6 +209,7 @@ export async function requestSiteAssistantStream({
   message,
   history,
   projectId,
+  pageContext,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -217,6 +219,8 @@ export async function requestSiteAssistantStream({
   history?: Array<{ role: "user" | "assistant"; text: string }>;
   /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
   projectId?: string;
+  /** 頁面感知上下文（在哪一頁／看哪一個／選了哪幾個）——同樣只是提示，後端逐欄夾制 */
+  pageContext?: AssistantWirePageContext;
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -253,6 +257,7 @@ export async function requestSiteAssistantStream({
         message,
         history: history?.length ? history : undefined,
         projectId,
+        pageContext,
       }),
       signal,
     });

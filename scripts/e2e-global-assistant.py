@@ -62,6 +62,30 @@ ok("ASK：mock 回覆", a1.get("mock") is True and "測試模式" in a1.get("ans
 ok("ASK：無動作意圖時不提議", a1.get("siteActions") == [] and a1.get("dispatches") == [])
 ok("ASK：帶回 traceSessionId", bool(a1.get("traceSessionId")))
 
+# ── 頁面感知上下文：合法的收下、壞的逐欄丟棄、絕不當授權 ──
+ctx_ok = call("POST", admin, "globalAssistant.ask", {
+    "groupId": gid, "message": "這一鏡怎麼改？",
+    "pageContext": {"pageType": "storyboard", "entityType": "shot",
+                    "entityId": "aaaaaaaa-1111-4111-8111-111111111111",
+                    "entityLabel": "第 3 鏡", "activeTab": "pro"},
+})
+ok("頁面感知：合法 pageContext 被接受", "__error__" not in ctx_ok and ctx_ok.get("mock") is True)
+ctx_bad = call("POST", admin, "globalAssistant.ask", {
+    "groupId": gid, "message": "壞欄位測試",
+    "pageContext": {"pageType": "storyboard", "entityId": "'; DROP TABLE scenes; --"},
+})
+ok("🔒 頁面感知：非 uuid 的 entityId 被 zod 擋（不進提示詞）", "__error__" in ctx_bad)
+ctx_unknown = call("POST", admin, "globalAssistant.ask", {
+    "groupId": gid, "message": "未知頁型", "pageContext": {"pageType": "hacker_page"},
+})
+ok("🔒 頁面感知：未知 pageType 被擋", "__error__" in ctx_unknown)
+# pageContext 不是授權：帶別組專案的 entityId 也不會讓人看到別組資料（ask 本身仍以 groupId 授權）
+ctx_cross = call("POST", mem, "globalAssistant.ask", {
+    "groupId": other["id"], "message": "借道",
+    "pageContext": {"pageType": "storyboard", "entityId": "aaaaaaaa-1111-4111-8111-111111111111"},
+})
+ok("🔒 頁面感知：帶了 context 也不能借道進別組", "__error__" in ctx_cross)
+
 # ── ASK→提議→確認→ACT 全鏈路（mock 確定性提議走同一條 resolveSiteActions 驗證）──
 a2 = call("POST", admin, "globalAssistant.ask", {"groupId": gid, "message": "幫我開一個中秋活動宣傳專案"})
 props = a2.get("siteActions") or []

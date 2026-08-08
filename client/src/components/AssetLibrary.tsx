@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { registerAssistantFocus } from "../lib/assistantContext";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ExportJobButton } from "./ExportJobButton";
@@ -112,6 +113,9 @@ export function AssetLibrary({
 
   // 工具列狀態：種類篩選 / 搜尋 / 排序 / 只看可當來源 / 展開的格子選單 / 行內改名 / 大圖遮罩
   const [kindFilter, setKindFilter] = useState("all");
+  /* 素材庫是全站唯一原生就有多選的地方——直接把它報給 AI 助手，
+     「這幾張哪張最適合第三幕？」才有辦法知道「這幾張」是哪幾張。
+     只送 id 與篩選條件（指標），素材內容仍由助手用既有唯讀工具查。 */
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "name">("recent");
   const [onlySourceable, setOnlySourceable] = useState(false);
@@ -130,6 +134,16 @@ export function AssetLibrary({
       else next.add(id);
       return next;
     });
+  /* 把勾選與篩選報給 AI 助手：不重造 state，讀既有的那一份 */
+  const selectedAssetIds = useMemo(() => [...selected], [selected]);
+  useEffect(
+    () => registerAssistantFocus({
+      entityType: "asset",
+      selectedEntityIds: selectedAssetIds,
+      activeTab: kindFilter === "all" ? undefined : kindFilter,
+    }),
+    [selectedAssetIds, kindFilter],
+  );
 
   // DESK-01：桌面橋接可用才顯示「用外部軟體開啟／在資料夾顯示」；Web 只給下載路徑與提示，不承諾自動回傳
   const desktopAvailable = hasDesktopBridge();
