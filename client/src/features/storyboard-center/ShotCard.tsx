@@ -17,6 +17,7 @@ import {
   type ShotCamera,
   type ShotPerformance,
 } from "@shared/story";
+import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
 import type { BoardMode } from "./boardPrefs";
 
 export interface ShotRow {
@@ -29,6 +30,8 @@ export interface ShotRow {
   action: string | null;
   dialogue: string | null;
   voiceover: string | null;
+  /** 現用畫面素材 id——完成度看的是它（assetUrl 只是顯示用，簽名網址會變） */
+  assetId: string | null;
   assetUrl: string | null;
   assetKind: string | null;
   characterIds: string[] | null;
@@ -39,6 +42,12 @@ export interface ShotRow {
   performance: ShotPerformance | null;
   lookIds: string[] | null;
   pendingGenStatus: "queued" | "running" | "awaiting_approval" | null;
+  /** 完成度五軌所需（其餘欄位上面都有）；後端 listByProject 已回傳 */
+  narrationUrl?: string | null;
+  ambienceUrl?: string | null;
+  pendingNarrationStatus?: string | null;
+  pendingAmbienceStatus?: string | null;
+  reviewStatus?: ShotCompletionInput["reviewStatus"];
 }
 
 export interface LookRow {
@@ -98,6 +107,8 @@ export function ShotCard({
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
+  // 與成片頁、前後鏡導航同一支純函式——不會出現「這裡說缺、那裡說有」
+  const completion = computeShotCompletion(shot);
 
   /**
    * §13 相關素材：只在專業模式查（簡單模式不顯示，就不必打這支）。
@@ -147,6 +158,30 @@ export function ShotCard({
         {generating && <Pill status="running">生成中</Pill>}
         {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
         {outdatedReason && <Pill status="failed">畫面過時</Pill>}
+        {shot.reviewStatus === "approved" && <Pill status="done">已通過</Pill>}
+        {shot.reviewStatus === "changes" && <Pill status="failed">需要修改</Pill>}
+      </div>
+
+      {/* §17：已通過的鏡，重新生成不會自動換掉現用畫面——不講的話使用者會以為生成壞了 */}
+      {shot.reviewStatus === "approved" && (
+        <Meta as="p" className="shot-card__approved-note">
+          <Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+          這一鏡已通過審核：之後重新生成只會存成新版本，不會自動換掉現在這張。要換請到單格工作室選版本。
+        </Meta>
+      )}
+
+      {/* §15 完成度：五個點就講完「這一鏡還缺什麼」，比五行文字省版面也好掃 */}
+      <div className="shot-card__completion" role="group" aria-label={`完成度 ${completion.percent}%`}>
+        {COMPLETION_TRACKS.map((t) => (
+          <span
+            key={t}
+            className={`shot-card__dot shot-card__dot--${completion.tracks[t]}`}
+            title={`${TRACK_LABEL[t]}：${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "尚未完成"}`}
+          >
+            {TRACK_LABEL[t]}
+          </span>
+        ))}
+        <Meta as="span">{completion.percent}%</Meta>
       </div>
 
       {/* §23：卡片改過、這張圖還是舊的。不自動重畫——講清楚原因，讓使用者決定要不要花點數重生成 */}

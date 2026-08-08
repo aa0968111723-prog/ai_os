@@ -8128,3 +8128,41 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   .story-parse-bar__actions { width: 100%; }
   .story-parse-bar__actions .btn { flex: 1 1 auto; }
 }
+
+/* ④ 成片・交付室第一屏（§12／§13）：完成度＋缺漏清單。
+   刻意不用大圖卡——這一屏的工作是「掃一眼知道還缺什麼」，資訊密度比視覺重要。 */
+.delivery-room__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.delivery-room__percent { font-size: var(--fs-24); color: var(--primary-ink); line-height: 1; }
+.delivery-room__tracks {
+  display: grid; gap: 8px; margin-top: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+}
+.delivery-room__track {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-8);
+  background: var(--card2);
+}
+.delivery-room__issues { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.delivery-room__issues > li > button { width: 100%; justify-content: flex-start; gap: 8px; text-align: left; }
+.delivery-room__issue-shot { font-weight: 700; color: var(--primary-ink); flex: 0 0 auto; }
+/* 長中文鏡名在窄幅要讓位給「缺什麼」——那才是使用者要掃的資訊 */
+.delivery-room__issue-title {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--fg-secondary);
+}
+.delivery-room__issue-label { flex: 0 0 auto; color: var(--danger-ink); font-size: var(--fs-12); }
+
+/* §15 分鏡卡完成度五點：文字標籤而非純色點——純色點要靠圖例才看得懂，
+   中文兩個字本身就是圖例，掃描成本更低。 */
+.shot-card__completion { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.shot-card__dot {
+  font-size: var(--fs-11); line-height: 1; padding: 3px 6px; border-radius: var(--r-8);
+  border: 1px solid var(--border-soft); color: var(--fg-muted); background: var(--card2);
+}
+.shot-card__dot--done { color: var(--primary-ink); border-color: var(--primary); background: var(--primary-tint); }
+.shot-card__dot--running { color: var(--fg-secondary); border-style: dashed; }
+/* §17 已通過的鏡：說明為什麼重新生成不會換畫面（不說的話會被當成壞掉） */
+.shot-card__approved-note {
+  margin: 0; font-size: var(--fs-11); line-height: 1.5; color: var(--fg-secondary);
+  border-left: 2px solid var(--primary); padding-left: var(--sp-6);
+}

@@ -51,10 +51,10 @@ export interface ShotCompletionInput {
   assetId: string | null;
   /** 現用畫面是圖片還是影片——影片同時滿足「有畫面」與「有動態」 */
   assetKind: string | null;
-  /** 已生成且未軟刪的旁白音檔網址 */
-  narrationUrl: string | null;
-  /** 已生成且未軟刪的環境音網址 */
-  ambienceUrl: string | null;
+  /** 已生成且未軟刪的旁白音檔網址；undefined 與 null 同義（都是「沒有」） */
+  narrationUrl?: string | null;
+  /** 已生成且未軟刪的環境音網址；undefined 與 null 同義 */
+  ambienceUrl?: string | null;
   /** 該格進行中的畫面生成（queued/running） */
   pendingGenStatus?: string | null;
   pendingNarrationStatus?: string | null;
