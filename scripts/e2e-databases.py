@@ -362,6 +362,30 @@ agent_db = call("POST", azhe, "databases.create", {
     "scope": "group", "groupId": edit_group["id"], "name": "代理成果紀錄", "agentAccess": "write",
     "fields": [{"key": "note", "label": "紀錄", "type": "text"}]})
 agent_proj = call("POST", azhe, "projects.create", {"groupId": edit_group["id"], "title": "代理資料庫測試", "kind": "witness", "platform": "shorts"})
+
+# 專案 AI 助手必須以登入者 ACL 主動讀到 personal 資料列，不可再依賴模型
+# 猜中 query_database 工具，也不可把 agentAccess=none 的列混進來源。
+assistant_read = call("POST", azhe, "assistant.ask", {
+    "projectId": agent_proj["id"],
+    "message": "請問剪好開場片的完成狀態？",
+    "nonce": "e2e-assistant-db-readable",
+})
+assistant_sources = ((assistant_read.get("sources") or {}).get("items") or []) if isinstance(assistant_read, dict) else []
+ok("AI 助手主動讀到 personal 資料庫列",
+   "剪好開場片" in assistant_read.get("answer", "")
+   and any(s.get("kind") == "database" and s.get("title") == personal["name"] for s in assistant_sources))
+
+call("POST", azhe, "databases.addRow", {"tableId": none_db["id"], "data": {"secret": "黑曜石密碼-不可外洩"}})
+assistant_hidden = call("POST", azhe, "assistant.ask", {
+    "projectId": agent_proj["id"],
+    "message": "黑曜石密碼是什麼？",
+    "nonce": "e2e-assistant-db-hidden",
+})
+hidden_sources = ((assistant_hidden.get("sources") or {}).get("items") or []) if isinstance(assistant_hidden, dict) else []
+ok("🔒 AI 助手不讀 agentAccess=none 資料庫列",
+   "黑曜石密碼-不可外洩" not in assistant_hidden.get("answer", "")
+   and not any(s.get("title") == none_db["name"] for s in hidden_sources))
+
 plan = call("POST", azhe, "agents.plan", {"projectId": agent_proj["id"], "goal": "測試把成果記進資料庫"})
 has_record_step = any(s.get("kind") == "record_to_database" and s.get("tableId") == agent_db["id"] for s in plan["steps"])
 ok("代理計畫含 record_to_database 步驟", has_record_step)

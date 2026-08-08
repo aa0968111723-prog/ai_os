@@ -27,14 +27,20 @@ export function startIntelligenceRunner(): void {
 
 async function tick(): Promise<void> {
   // Old resources are enrolled in tiny slices; migrations never block on a full backfill.
-  const enrolled = await enrollLegacyIntelligence(9);
-  const processed = await claimAndProcessIntelligenceJob();
+  const requestedBurst = Number(process.env.INTELLIGENCE_JOBS_PER_TICK ?? 8);
+  const burst = Number.isFinite(requestedBurst) ? Math.min(32, Math.max(1, Math.floor(requestedBurst))) : 8;
+  const enrolled = await enrollLegacyIntelligence(Math.max(12, burst * 3));
+  let processed = 0;
+  for (let index = 0; index < burst; index += 1) {
+    if (!await claimAndProcessIntelligenceJob()) break;
+    processed += 1;
+  }
   const [depth] = await db.select({ count: sql<number>`count(*)::int` })
     .from(schema.intelligenceProcessingJobs)
     .where(eq(schema.intelligenceProcessingJobs.status, "queued"));
   reportRunnerTick("intelligence", {
     queueDepth: Number(depth?.count ?? 0),
-    inflight: processed ? 1 : 0,
-    lastWork: { enrolled, processed: processed ? 1 : 0 },
+    inflight: processed,
+    lastWork: { enrolled, processed },
   });
 }

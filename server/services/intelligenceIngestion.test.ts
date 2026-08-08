@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INGESTION_STAGES, nextIngestionStage } from "./intelligenceLibrary";
+import { completedAnalysisStatus, INGESTION_STAGES, nextIngestionStage } from "./intelligenceLibrary";
 import { chunkText, contentHash } from "./intelligenceCore";
 
 describe("Intelligence Library ingestion pipeline", () => {
@@ -20,5 +20,11 @@ describe("Intelligence Library ingestion pipeline", () => {
     const chunks = chunkText(text, 180, 20);
     expect(chunks.length).toBeGreaterThan(2);
     expect(chunks.map(contentHash)).toEqual(chunkText(text, 180, 20).map(contentHash));
+  });
+
+  it("keeps uncertain analysis in the human review queue after the final stage", () => {
+    expect(completedAnalysisStatus("needs_review", 0)).toBe("needs_review");
+    expect(completedAnalysisStatus("processing", 0)).toBe("ready");
+    expect(completedAnalysisStatus("needs_review", 1)).toBe("partial");
   });
 });

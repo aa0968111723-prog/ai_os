@@ -58,6 +58,7 @@ export function canonicalTypeOf(input: { mime?: string | null; name?: string | n
   if (input.legacyKind === "video") return "VIDEO";
   if (input.legacyKind === "audio") return "AUDIO";
   if (input.legacyKind === "doc") return "DOCUMENT";
+  if (input.legacyKind === "spreadsheet" || input.legacyKind === "table") return "SPREADSHEET";
   return "OTHER";
 }
 

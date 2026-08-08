@@ -35,7 +35,7 @@ async function visibleIntelligenceResource(
     .where(eq(schema.assetIntelligence.id, intelligenceId));
   if (!intelligence) throw new TRPCError({ code: "NOT_FOUND", message: "找不到資料" });
   requireGroup(auth, intelligence.groupId);
-  const visible = await listDataHubResources(auth, { kinds: [intelligence.resourceKind as "asset" | "knowledge" | "document"], perKindLimit: 200 });
+  const visible = await listDataHubResources(auth, { kinds: [intelligence.resourceKind as "asset" | "knowledge" | "document" | "table"], perKindLimit: 200 });
   const resource = visible.resources.find((candidate) => candidate.kind === intelligence.resourceKind && candidate.rawId === intelligence.resourceId);
   if (!resource) throw new TRPCError({ code: "NOT_FOUND", message: "找不到資料" });
   return { intelligence, resource };
@@ -250,7 +250,7 @@ export const intelligenceRouter = router({
 
   reprocess: authedProcedure
     .input(z.object({
-      resourceKind: z.enum(["asset", "knowledge", "document"]),
+      resourceKind: z.enum(["asset", "knowledge", "document", "table"]),
       resourceId: z.string().uuid(),
     }))
     .mutation(async ({ ctx, input }) => {

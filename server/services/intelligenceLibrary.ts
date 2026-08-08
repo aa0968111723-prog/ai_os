@@ -18,6 +18,7 @@ import {
   lexicalOverlap,
   routeConfidence,
   type IntelligenceAnalysisProvider,
+  type IntelligenceAnalysis,
   type IntelligenceExtractionStage,
 } from "./intelligenceCore";
 import { resolveIntelligenceProvider } from "./intelligenceProvider";
@@ -54,7 +55,7 @@ export type IngestionStage = typeof INGESTION_STAGES[number];
 type IntelligenceRow = typeof schema.assetIntelligence.$inferSelect;
 
 export interface RegisterIntelligenceInput {
-  resourceKind: "asset" | "knowledge" | "document";
+  resourceKind: "asset" | "knowledge" | "document" | "table";
   resourceId: string;
   groupId: string;
   projectId?: string | null;
@@ -140,6 +141,43 @@ interface ResourceSnapshot {
   sourceType: string;
   mediaUrl: string | null;
   metadata: Record<string, unknown>;
+}
+
+const TABLE_INDEX_MAX_CHARS = 600_000;
+
+export function serializeTableForIntelligence(input: {
+  id: string;
+  name: string;
+  description?: string | null;
+  fields: Array<{ key: string; label: string; type: string }>;
+  rows: Array<{ id: string; data: unknown }>;
+  maxChars?: number;
+}): { text: string; indexedRows: number; truncated: boolean } {
+  const maxChars = Math.min(2_000_000, Math.max(10_000, input.maxChars ?? TABLE_INDEX_MAX_CHARS));
+  const header = [
+    `資料表：${input.name}`,
+    input.description ? `說明：${input.description}` : "",
+    `欄位：${input.fields.map((field) => `${field.label}(${field.key}:${field.type})`).join("、")}`,
+  ].filter(Boolean).join("\n");
+  const lines = [header];
+  let length = header.length;
+  let indexedRows = 0;
+  for (const row of input.rows) {
+    const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+      ? row.data as Record<string, unknown> : {};
+    const values = input.fields.flatMap((field) => {
+      const value = data[field.key];
+      if (value === null || value === undefined || value === "") return [];
+      const rendered = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return [`${field.label}: ${rendered.slice(0, 2_000)}`];
+    });
+    const line = `[row:${row.id}] ${values.join(" | ") || "（空白資料列）"}`;
+    if (length + line.length + 1 > maxChars) break;
+    lines.push(line);
+    length += line.length + 1;
+    indexedRows += 1;
+  }
+  return { text: lines.join("\n"), indexedRows, truncated: indexedRows < input.rows.length };
 }
 
 async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSnapshot | null> {
@@ -232,6 +270,42 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
         sourceUrl: file.sourceUrl,
         sourceExternalId: file.sourceExternalId,
         createdAt: file.createdAt.toISOString(),
+      },
+    };
+  }
+  if (intel.resourceKind === "table") {
+    const [table] = await db.select().from(schema.dataTables)
+      .where(and(eq(schema.dataTables.id, intel.resourceId), isNull(schema.dataTables.deletedAt)));
+    if (!table || !table.groupId) return null;
+    const rows = await db.select({ id: schema.dataRows.id, data: schema.dataRows.data })
+      .from(schema.dataRows)
+      .where(eq(schema.dataRows.tableId, table.id))
+      .orderBy(asc(schema.dataRows.createdAt));
+    const serialized = serializeTableForIntelligence({
+      id: table.id,
+      name: table.name,
+      description: table.description,
+      fields: table.fields as Array<{ key: string; label: string; type: string }>,
+      rows,
+    });
+    return {
+      intelligence: intel,
+      title: table.name,
+      text: serialized.text,
+      mime: "application/vnd.aios.database+json",
+      legacyKind: "table",
+      checksum: contentHash(serialized.text),
+      sourceType: "manual",
+      mediaUrl: null,
+      metadata: {
+        ...intel.metadata,
+        tableId: table.id,
+        scope: table.scope,
+        rowCount: rows.length,
+        indexedRowCount: serialized.indexedRows,
+        indexTruncated: serialized.truncated,
+        fieldCount: Array.isArray(table.fields) ? table.fields.length : 0,
+        updatedAt: table.updatedAt.toISOString(),
       },
     };
   }
@@ -418,7 +492,15 @@ async function ensureReviewItem(input: {
       eq(schema.aiReviewItems.kind, input.kind),
       eq(schema.aiReviewItems.status, "pending"),
     )).limit(1);
-  if (existing) return;
+  if (existing) {
+    await db.update(schema.aiReviewItems).set({
+      prompt: input.prompt,
+      prediction: input.prediction,
+      confidence: input.confidence,
+      priority: Math.round((1 - input.confidence) * 100),
+    }).where(eq(schema.aiReviewItems.id, existing.id));
+    return;
+  }
   await db.insert(schema.aiReviewItems).values({
     groupId: input.intelligence.groupId,
     projectId: input.intelligence.projectId,
@@ -436,7 +518,21 @@ async function processClassification(
   provider: IntelligenceAnalysisProvider,
 ): Promise<void> {
   const canonicalType = canonicalTypeOf({ mime: snapshot.mime, name: snapshot.title, legacyKind: snapshot.legacyKind });
-  const providerResult = await provider.analyze({
+  const providerResult: IntelligenceAnalysis = snapshot.intelligence.resourceKind === "table" ? {
+    category: "Structured Database",
+    summary: `${snapshot.title}，共 ${Number(snapshot.metadata.rowCount ?? 0)} 列結構化資料`,
+    description: snapshot.text.slice(0, 2_000),
+    tags: [
+      "type:spreadsheet",
+      "source:database",
+      "structure:table",
+    ],
+    categoryConfidence: 1,
+    tagConfidence: 1,
+    language: null,
+    modelVersion: "aios-structured-database-v1",
+    rationale: "資料表型態、欄位結構與列數來自資料庫 schema，不需模型猜測",
+  } : await provider.analyze({
     intelligenceId: snapshot.intelligence.id,
     groupId: snapshot.intelligence.groupId,
     title: snapshot.title,
@@ -574,6 +670,19 @@ async function processClassification(
       prediction: { category: result.category, tags: result.tags, title: snapshot.title },
       confidence: result.categoryConfidence,
     });
+  } else {
+    // A model upgrade or richer extraction can turn an earlier uncertain
+    // suggestion into a deterministic/high-confidence result. Do not leave a
+    // stale pending card that describes the superseded prediction.
+    await db.update(schema.aiReviewItems).set({
+      status: "resolved",
+      resolution: { autoResolved: true, category: result.category, tags: result.tags },
+      resolvedAt: new Date(),
+    }).where(and(
+      eq(schema.aiReviewItems.intelligenceId, snapshot.intelligence.id),
+      eq(schema.aiReviewItems.kind, "category"),
+      eq(schema.aiReviewItems.status, "pending"),
+    ));
   }
 }
 
@@ -835,6 +944,43 @@ async function processRelationships(snapshot: ResourceSnapshot): Promise<void> {
   if (projectId) {
     await upsertRelationship({ relationType: "BELONGS_TO", toType: "project", toId: projectId, confidence: 1, source: "system", status: "confirmed" });
   }
+  if (snapshot.intelligence.resourceKind === "table") {
+    const [[table], bindings, rows] = await Promise.all([
+      db.select({ fields: schema.dataTables.fields }).from(schema.dataTables)
+        .where(eq(schema.dataTables.id, snapshot.intelligence.resourceId)),
+      db.select({ projectId: schema.projectDataBindings.projectId }).from(schema.projectDataBindings)
+        .where(and(
+          eq(schema.projectDataBindings.resourceKind, "table"),
+          eq(schema.projectDataBindings.resourceId, snapshot.intelligence.resourceId),
+        )),
+      db.select({ data: schema.dataRows.data }).from(schema.dataRows)
+        .where(eq(schema.dataRows.tableId, snapshot.intelligence.resourceId)),
+    ]);
+    const projectKeys = Array.isArray(table?.fields)
+      ? (table.fields as Array<{ key?: unknown; type?: unknown }>)
+        .filter((field) => field.type === "project" && typeof field.key === "string")
+        .map((field) => field.key as string)
+      : [];
+    const linkedProjectIds = new Set(bindings.map((binding) => binding.projectId));
+    for (const row of rows) {
+      const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+        ? row.data as Record<string, unknown> : {};
+      for (const key of projectKeys) {
+        const value = data[key];
+        if (typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)) linkedProjectIds.add(value);
+      }
+    }
+    for (const linkedProjectId of linkedProjectIds) {
+      await upsertRelationship({
+        relationType: "BELONGS_TO",
+        toType: "project",
+        toId: linkedProjectId,
+        confidence: 1,
+        source: "system",
+        status: "confirmed",
+      });
+    }
+  }
 
   const [latest] = await db.select().from(schema.assetIntelligence)
     .where(eq(schema.assetIntelligence.id, snapshot.intelligence.id));
@@ -968,6 +1114,11 @@ export function nextIngestionStage(stage: IngestionStage): IngestionStage | null
   return NEXT_STAGE.get(stage) ?? null;
 }
 
+export function completedAnalysisStatus(currentStatus: string | null | undefined, failedJobs: number): "ready" | "needs_review" | "partial" {
+  if (failedJobs > 0) return "partial";
+  return currentStatus === "needs_review" ? "needs_review" : "ready";
+}
+
 export async function processIntelligenceJob(
   job: typeof schema.intelligenceProcessingJobs.$inferSelect,
   provider: IntelligenceAnalysisProvider = resolveIntelligenceProvider(),
@@ -1021,14 +1172,20 @@ export async function claimAndProcessIntelligenceJob(
     if (next) {
       await enqueueStage(claimed.intelligenceId, next, { batchId: claimed.batchId, runKey: jobRunKey(claimed.idempotencyKey) });
     } else {
-      const [failed] = await db.select({ count: sql<number>`count(*)::int` })
-        .from(schema.intelligenceProcessingJobs)
-        .where(and(
-          eq(schema.intelligenceProcessingJobs.intelligenceId, claimed.intelligenceId),
-          eq(schema.intelligenceProcessingJobs.status, "failed"),
-        ));
+      const [[failed], [latest]] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` })
+          .from(schema.intelligenceProcessingJobs)
+          .where(and(
+            eq(schema.intelligenceProcessingJobs.intelligenceId, claimed.intelligenceId),
+            eq(schema.intelligenceProcessingJobs.status, "failed"),
+          )),
+        db.select({ analysisStatus: schema.assetIntelligence.analysisStatus })
+          .from(schema.assetIntelligence)
+          .where(eq(schema.assetIntelligence.id, claimed.intelligenceId)),
+      ]);
+      const analysisStatus = completedAnalysisStatus(latest?.analysisStatus, Number(failed?.count ?? 0));
       await db.update(schema.assetIntelligence).set({
-        analysisStatus: Number(failed?.count ?? 0) > 0 ? "partial" : "ready",
+        analysisStatus,
         updatedAt: new Date(),
       }).where(eq(schema.assetIntelligence.id, claimed.intelligenceId));
     }
@@ -1082,8 +1239,8 @@ async function refreshProcessingBatch(batchId: string): Promise<void> {
 
 /** Enrols old rows in small slices; no production-blocking migration backfill. */
 export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
-  const perKind = Math.max(1, Math.floor(limit / 3));
-  const [assets, knowledge, documents] = await Promise.all([
+  const perKind = Math.max(1, Math.floor(limit / 4));
+  const [assets, knowledge, documents, tables] = await Promise.all([
     db.select({
       id: schema.assets.id, groupId: schema.assets.groupId, projectId: schema.assets.projectId,
       createdBy: schema.assets.uploadedBy, isAiGenerated: schema.assets.isAiGenerated,
@@ -1115,6 +1272,30 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
       ))
       .where(and(isNull(schema.dataTables.deletedAt), isNull(schema.assetIntelligence.id)))
       .limit(perKind),
+    db.select({
+      id: schema.dataTables.id,
+      groupId: schema.dataTables.groupId,
+      createdBy: schema.dataTables.createdBy,
+      intelligenceId: schema.assetIntelligence.id,
+      analysisStatus: schema.assetIntelligence.analysisStatus,
+    }).from(schema.dataTables)
+      .leftJoin(schema.assetIntelligence, and(
+        eq(schema.assetIntelligence.resourceKind, "table"),
+        eq(schema.assetIntelligence.resourceId, schema.dataTables.id),
+      ))
+      .where(and(
+        isNull(schema.dataTables.deletedAt),
+        isNotNull(schema.dataTables.groupId),
+        or(
+          isNull(schema.assetIntelligence.id),
+          and(
+            sql`${schema.assetIntelligence.analysisStatus} not in ('pending', 'processing')`,
+            sql`${schema.dataTables.updatedAt} > coalesce(${schema.assetIntelligence.lastAnalyzedAt}, timestamp 'epoch')`,
+          ),
+        ),
+      ))
+      .orderBy(asc(schema.dataTables.updatedAt))
+      .limit(perKind),
   ]);
   for (const row of assets) await registerIntelligenceResource({
     resourceKind: "asset", resourceId: row.id, groupId: row.groupId, projectId: row.projectId,
@@ -1131,7 +1312,19 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
       sourceType: row.source ?? "upload", createdBy: row.createdBy,
     });
   }
-  return assets.length + knowledge.length + documents.length;
+  for (const row of tables) {
+    if (!row.groupId) continue;
+    await registerIntelligenceResource({
+      resourceKind: "table",
+      resourceId: row.id,
+      groupId: row.groupId,
+      projectId: null,
+      sourceType: "manual",
+      createdBy: row.createdBy,
+      force: Boolean(row.intelligenceId),
+    });
+  }
+  return assets.length + knowledge.length + documents.length + tables.length;
 }
 
 export type IntelligenceBackfillMode = "pending" | "model_changed" | "all";
@@ -1203,13 +1396,24 @@ export function filterVisibleIntelligenceRows<T extends { resourceKind: string; 
   return rows.filter((row) => allowed.has(`${row.resourceKind}:${row.resourceId}`));
 }
 
+export function filterAiReadableResources<T extends Pick<DataHubResource, "ai">>(resources: readonly T[]): T[] {
+  return resources.filter((resource) => resource.ai.access !== "none");
+}
+
 export async function hybridSearchIntelligence(
   auth: AuthState,
   input: { q: string; projectId?: string; limit?: number },
 ): Promise<{ results: HybridSearchResult[]; retrievalDebug: Record<string, unknown>; retrievalRunId: string | null }> {
   const started = Date.now();
   const parsed = parseLibraryQuery(input.q);
-  const visible = await listDataHubResources(auth, { projectId: input.projectId, perKindLimit: 200 });
+  const listed = await listDataHubResources(auth, { projectId: input.projectId, perKindLimit: 200 });
+  // Human-visible is not the same as AI-readable. In particular, database
+  // owners can keep a table visible in the UI while agentAccess=none. Apply
+  // that boundary before loading any chunks or embeddings.
+  const visible = {
+    ...listed,
+    resources: filterAiReadableResources(listed.resources),
+  };
   const ids = [...new Set(visible.resources.map((resource) => resource.rawId))];
   const allRows = ids.length ? await db.select().from(schema.assetIntelligence)
     .where(inArray(schema.assetIntelligence.resourceId, ids)) : [];
@@ -1246,8 +1450,11 @@ export async function hybridSearchIntelligence(
     inArray(schema.intelligenceEmbeddings.intelligenceId, intelligenceIds),
     eq(schema.intelligenceEmbeddings.embeddingStatus, "ready"),
   )) : [];
-  const vectors = new Map<string, number[]>();
-  for (const item of embeddings) if (!vectors.has(item.intelligenceId) && Array.isArray(item.vector)) vectors.set(item.intelligenceId, item.vector);
+  const vectors = new Map<string, number[][]>();
+  for (const item of embeddings) {
+    if (!Array.isArray(item.vector)) continue;
+    vectors.set(item.intelligenceId, [...(vectors.get(item.intelligenceId) ?? []), item.vector]);
+  }
   const entityRows = intelligenceIds.length ? await db.select({
     intelligenceId: schema.assetIntelligenceEntities.intelligenceId,
     name: schema.intelligenceEntities.name,
@@ -1289,7 +1496,9 @@ export async function hybridSearchIntelligence(
       lexicalOverlap(parsed.positive, candidate),
       Math.min(1, (databaseTextRanks.get(intelligence?.id ?? "") ?? 0) * 4),
     );
-    const semantic = intelligence ? Math.max(0, cosineSimilarity(queryVector, vectors.get(intelligence.id) ?? [])) : 0;
+    const semantic = intelligence
+      ? Math.max(0, ...(vectors.get(intelligence.id) ?? []).map((vector) => cosineSimilarity(queryVector, vector)))
+      : 0;
     const entity = lexicalOverlap(parsed.positive, entities.join(" "));
     const relationship = Math.min(1, (input.projectId && resource.projectId === input.projectId ? 0.7 : 0)
       + Math.min(0.3, (relationshipCounts.get(intelligence?.id ?? "") ?? 0) * 0.05));

@@ -62,6 +62,11 @@ import { resolveModel } from "../services/modelResolve";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
 import { retrieveIntelligenceContext } from "../services/intelligenceLibrary";
 import {
+  formatAssistantDatabaseEvidence,
+  retrieveAssistantDatabaseEvidence,
+  type AssistantReadableDatabase,
+} from "../services/assistantDatabaseEvidence";
+import {
   createAiTraceSession,
   recordAiTraceEventSafely,
   updateAiTraceSession,
@@ -335,21 +340,18 @@ async function runMcpReadTool(
 
 /* ── 資料庫接線（連結全專案×資料庫）：AI 可讀的自訂資料庫 ── */
 
-/** 對話中可引用的資料庫（代號→真實表）：只列此人「AI 可讀」的可見庫（遵守每庫 agentAccess），上限 8 個 */
-interface ReadableDb { ref: string; id: string; name: string; fields: DataField[]; rowCount: number; canWrite: boolean }
+/** 對話中可引用的資料庫（代號→真實表）：只列此人「AI 可讀」的可見庫（含本人 personal 庫），上限 32 個。 */
+type ReadableDb = AssistantReadableDatabase;
 
 async function listAssistantReadableDbs(auth: AuthState): Promise<ReadableDb[]> {
   const tables = await listVisibleTables(auth);
   return tables
-    // 排除個人庫：專案助手是「專案內共用」的對話（同專案成員都問得到），
-    // 個人庫是使用者自己的空間——名稱與欄位不該出現在共用對話的提示詞裡。
-    // 團隊助手早就這樣做（teamAssistant.ts 的 dbConds 只收 group/team/global），
-    // 這裡用的 listVisibleTables 卻含 personal，兩邊口徑不一致。
-    // 要讓 AI 讀個人庫，把它改成組層庫即可。
-    .filter((t) => t.scope !== "personal")
+    // The answer is generated per requesting session, not persisted as shared
+    // project context. Therefore the assistant may use this user's personal
+    // database while another project member still cannot see it.
     .map((t) => ({ t, access: resolveAgentAccess(auth, t) }))
     .filter((x) => x.access.canRead)
-    .slice(0, 8)
+    .slice(0, 32)
     .map((x, i) => ({
       ref: `db${i + 1}`,
       id: x.t.id,
@@ -912,6 +914,14 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           budgetChars: 10_000,
         }).catch(() => ({ context: "", sources: [], retrievalRunId: null, retrievalDebug: {} })),
       ]);
+      // Retrieve matching rows before the first model call. Tool calling remains
+      // available for follow-up queries, but the first answer no longer depends
+      // on the model guessing that a database contains relevant evidence.
+      const databaseEvidence = await retrieveAssistantDatabaseEvidence(readableDbs, input.message, {
+        limit: 16,
+        candidateLimit: 120,
+        budgetChars: 12_000,
+      }).catch(() => []);
       emit("thinking", `已平行查詢 ${resourceResolution.results.length} 個資料來源`);
       for (const source of resourceResolution.results) {
         emit("step", `${source.label}：${source.outcome}${source.outcome === "OK" ? `（${source.itemCount} 筆）` : ""}`);
@@ -946,6 +956,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       // P5：改用 WithMeta——上下文的組法完全沒變，只是把原本丟掉的「誰進了、進了多少、
       // 有沒有被截斷」留下來回報給使用者。預算與優先序一個字都沒動。
       const knowledgeCtx = knowledgeMeta.text;
+      const databaseEvidenceChars = databaseEvidence.reduce((sum, source) => sum + source.text.length, 0);
       const sourcesReport: AskCoreResult["sources"] = {
         items: [
           ...(knowledgeMeta.items ?? []).map((i) => ({
@@ -978,11 +989,20 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
             includedChars: source.text.length,
             retrieval: "live" as const,
           })),
+          ...databaseEvidence.map((source) => ({
+            id: `database-row:${source.rowId}`,
+            title: source.tableName,
+            kind: "database",
+            status: "full" as const,
+            chars: source.text.length,
+            includedChars: source.text.length,
+            retrieval: "live" as const,
+          })),
         ],
         truncated: knowledgeMeta.truncated,
-        budgetChars: knowledgeMeta.budgetChars ?? KNOWLEDGE_BUDGET,
-        includedChars: knowledgeMeta.includedChars,
-        totalContentChars: knowledgeMeta.totalContentChars,
+        budgetChars: (knowledgeMeta.budgetChars ?? KNOWLEDGE_BUDGET) + 12_000,
+        includedChars: knowledgeMeta.includedChars + databaseEvidenceChars,
+        totalContentChars: knowledgeMeta.totalContentChars + databaseEvidenceChars,
       };
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const chipGuide = worldviewChipGuidanceForAi(wv);
@@ -1085,7 +1105,10 @@ ${sceneLines}
         const mockActions: ResolvedAction[] = goal.length >= 5
           ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` }]
           : [];
-        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
+        const evidenceSummary = databaseEvidence.length
+          ? `；資料庫實際命中 ${databaseEvidence.length} 列：${databaseEvidence.slice(0, 2).map((row) => `${row.tableName}／${row.text}`).join("；")}`
+          : "";
+        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個${evidenceSummary}。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: "mock", model: "mock" }).catch(() => undefined);
         return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false, traceSessionId, sources: sourcesReport };
@@ -1160,6 +1183,7 @@ ${intelligence.text}
 </專案運作情報>
 ${pageContextBlock ? `${pageContextBlock}\n` : ""}${historyBlock}${resourceResolution.promptBlock}
 ${libraryRetrieval.context ? `<intelligence_library>\n${libraryRetrieval.context}\n</intelligence_library>\n` : ""}
+${databaseEvidence.length ? `<database_evidence>\n${formatAssistantDatabaseEvidence(databaseEvidence)}\n</database_evidence>\n` : ""}
 <相關能力目錄>
 ${capabilityBlock}
 </相關能力目錄>
