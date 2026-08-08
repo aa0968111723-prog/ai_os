@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GroupCampaignPanel } from "./GroupCampaignPanel";
+import { GroupCampaignPanel, formatEventTime } from "./GroupCampaignPanel";
 import type { GroupCampaignStep, GroupCommandLevel } from "../../../../shared/groupAgent";
 
 const planMutate = vi.fn();
@@ -12,6 +12,7 @@ const resumeMutate = vi.fn();
 
 let level: GroupCommandLevel = "command";
 let runs: unknown[] = [];
+let campaignEvents: Array<Record<string, unknown>> = [];
 
 // vi.mock 的工廠會被拉到檔頭，所以工廠**執行當下**不能碰到頂層變數。
 // 每個 useMutation 都寫成箭頭函式，spy 要到元件 render 時才被讀取，那時已經初始化完了。
@@ -21,6 +22,11 @@ vi.mock("../../api", () => ({
     teamAssistant: {
       commandLevel: { useQuery: () => ({ data: level, isSuccess: true, isLoading: false, error: null }) },
       campaigns: { useQuery: () => ({ data: runs, isLoading: false, error: null }) },
+      // 動作紀錄：展開才查，收合時 enabled=false（tRPC 會回 data: undefined）
+      campaign: {
+        useQuery: (_input: { runId: string }, opts?: { enabled?: boolean }) =>
+          ({ data: opts?.enabled ? { events: campaignEvents } : undefined, isLoading: false, error: null }),
+      },
       planCampaign: { useMutation: () => ({ mutate: planMutate, isPending: false, error: null }) },
       approveCampaign: { useMutation: () => ({ mutate: approveMutate, isPending: false, error: null }) },
       discardCampaign: { useMutation: () => ({ mutate: discardMutate, isPending: false, error: null }) },
@@ -51,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   level = "command";
   runs = [];
+  campaignEvents = [];
 });
 
 /**
@@ -182,5 +189,70 @@ describe("GroupCampaignPanel", () => {
     runs = [campaign({ status: "running", budgetPoints: 200, spentPoints: 45, steps: [step({ status: "done" }), step({ id: "s2" })] })];
     render(<GroupCampaignPanel groupId="g1" />);
     expect(screen.getByText(/進度 1\/2 步・已自動花 45\/200 點/)).toBeVisible();
+  });
+
+  /**
+   * ── 「它到底做了什麼」──
+   * 實機回報：畫面上只有四顆狀態徽章，看不出這份計畫實際做了哪些事、有沒有真的做。
+   * 規劃器寫的 note 與執行器寫回的 result 一直都在 steps 裡，只是沒有渲染。
+   */
+  it("核准之前就看得到每一步要做什麼——只有一行標題等於叫人對看不見內容的事按核准", () => {
+    runs = [campaign({
+      steps: [step({ kind: "dispatch", title: "製作回顧影片", note: "交給挑戰營專案的 AI：整理素材、產出 8 鏡、配旁白" })],
+    })];
+    render(<GroupCampaignPanel groupId="g1" />);
+    expect(screen.getByText(/整理素材、產出 8 鏡、配旁白/)).toBeVisible();
+  });
+
+  it("跑完的步驟秀出實際結果與失敗原因——「完成」兩個字不是證據", () => {
+    runs = [campaign({
+      status: "running",
+      steps: [
+        step({ id: "s0", kind: "dispatch", title: "製作回顧影片", status: "done", result: "已產出 8 鏡分鏡與旁白稿" }),
+        step({ id: "s1", kind: "watch", title: "盯進度", status: "failed", error: "子計畫連兩次規劃失敗" }),
+      ],
+    })];
+    render(<GroupCampaignPanel groupId="g1" />);
+    expect(screen.getByText("已產出 8 鏡分鏡與旁白稿")).toBeVisible();
+    expect(screen.getByText("子計畫連兩次規劃失敗")).toBeVisible();
+  });
+
+  it("派工做完後點得進成果所在的專案——「已完成」如果點不進去，成果等於沒交付", () => {
+    runs = [campaign({
+      status: "running",
+      steps: [step({ kind: "dispatch", title: "製作回顧影片", status: "done", projectId: "p-9", projectTitle: "挑戰營回顧影片" })],
+    })];
+    render(<GroupCampaignPanel groupId="g1" />);
+    expect(screen.getByRole("button", { name: /看這步的成果（挑戰營回顧影片）/ })).toBeVisible();
+  });
+
+  it("動作紀錄收合時不查詢，展開後才把「誰在什麼時候做了什麼」讀出來", async () => {
+    const user = userEvent.setup();
+    runs = [campaign({ status: "running" })];
+    campaignEvents = [
+      { id: "e1", actorType: "ai", summary: "核准子計畫「製作回顧影片」（估 24 點，在授權額度內）", createdAt: new Date("2026-08-08T13:15:00Z") },
+      { id: "e2", actorType: "human", summary: "核准這份計畫開跑", createdAt: new Date("2026-08-08T13:10:00Z") },
+    ];
+    render(<GroupCampaignPanel groupId="g1" />);
+    expect(screen.queryByText(/核准這份計畫開跑/)).toBeNull();
+
+    await user.click(screen.getByText(/做了什麼・動作紀錄/));
+    expect(screen.getByText(/核准子計畫「製作回顧影片」/)).toBeVisible();
+    // AI 自己按的與人親手按的要分得出來：同一句話、責任歸屬完全不同
+    expect(screen.getByText("AI")).toBeVisible();
+    expect(screen.getByText("人")).toBeVisible();
+  });
+});
+
+describe("formatEventTime", () => {
+  // 日期一律用本地時間建構：CI 跑在 UTC、開發機多半在 +08，寫死時區的字面值兩邊會得到不同的時
+  it("同一天只給時間，跨天才補日期——紀錄看的是先後順序，年份是噪音", () => {
+    const now = new Date(2026, 7, 8, 20, 0);
+    expect(formatEventTime(new Date(2026, 7, 8, 13, 5), now)).toBe("13:05");
+    expect(formatEventTime(new Date(2026, 7, 6, 13, 5), now)).toMatch(/8\/6 13:05/);
+  });
+
+  it("壞掉的時間值回空字串，不讓 Invalid Date 出現在使用者眼前", () => {
+    expect(formatEventTime("not-a-date")).toBe("");
   });
 });

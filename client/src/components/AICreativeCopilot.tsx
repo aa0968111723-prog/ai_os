@@ -7,6 +7,7 @@ import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
 import { AssistantTrace, LiveAssistantTrace, type AssistantActivityEvent } from "./AssistantTrace";
 import { AgentRunCard } from "./AgentRunCard";
+import { AssistantCapabilityGuide } from "./AssistantCapabilityGuide";
 import { useAssistantContext } from "../lib/assistantContext";
 import { formatContextBreadcrumb, getAssistantQuickActions, toWirePageContext } from "../lib/assistantQuickActions";
 import {
@@ -471,6 +472,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── WATCH：還沒開口之前，先把需要注意的事遞過來（對話開始後讓位給對話） ── */}
         {messages.length === 0 && groupId && <WatchDigest groupId={groupId} onNavigate={onNavigate} />}
+
+        {/* ── 能力說明（收合一列；開口之後讓位給對話）──
+            快捷鍵只有三顆而且隨頁面換，它們回答不了「這東西到底能幹嘛」。
+            說明書放在快捷鍵上面：先知道做得到什麼，那三顆才看得懂。 */}
+        {messages.length === 0 && (
+          <AssistantCapabilityGuide
+            ctx={pageCtx}
+            onPick={(prompt) => void handleSend(prompt)}
+            disabled={pending || !groupId}
+          />
+        )}
 
         {/* ── 靈感快捷按鈕 ── */}
         {/* 快捷動作隨頁面／選取改變（getAssistantQuickActions）：在分鏡頁盯著第 3 鏡時，

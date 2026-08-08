@@ -7179,6 +7179,87 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   cursor: not-allowed;
 }
 
+/* ── 能力說明（AssistantCapabilityGuide）──
+   收合時與快捷提示同語彙（一顆玻璃膠囊），展開後是四組「後果 → 能做的事 → 例句」。
+   展開內容給一個 max-height ＋ 內捲：它有二十幾行，在手機 sheet 裡不設限會把
+   輸入框整個推到視窗外——sheet 本身的捲動要留給對話。 */
+.assistant-guide { min-width: 0; }
+.assistant-guide__summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.8));
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid var(--ai-glass-edge, rgba(255, 255, 255, 0.55));
+  font-size: 13px;
+  cursor: pointer; user-select: none; list-style: none;
+}
+.assistant-guide__summary::-webkit-details-marker { display: none; }
+.assistant-guide__summary > svg:first-child { color: var(--primary-ink); flex: none; }
+.assistant-guide__summary strong { flex: none; }
+/* 說明句先被壓縮截斷，不擠掉 chevron */
+.assistant-guide__summary > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--fg-secondary);
+}
+.assistant-guide__chevron { flex: none; margin-left: auto; color: var(--fg-secondary); transition: transform var(--dur-fast) var(--ease-out); }
+.assistant-guide[open] .assistant-guide__chevron { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .assistant-guide__chevron { transition: none; } }
+.assistant-guide[open] .assistant-guide__summary { margin-bottom: 8px; }
+.assistant-guide__body {
+  max-height: 46vh;
+  overflow-y: auto;
+  /* 捲到底之後不要把捲動傳給整張 sheet（傳出去會被判成「下滑關閉」） */
+  overscroll-behavior: contain;
+}
+.assistant-guide__how { margin: 0 2px 10px; font-size: var(--fs-12); color: var(--fg-secondary); }
+.assistant-guide__group { margin: 0 0 12px; }
+/* 捲到第 8 行時還要知道自己在看哪一組（「這組不會動到資料」還是「這組會花點」）——
+   組標題釘在捲動容器上緣，是這張清單能一路捲下去而不迷路的關鍵。 */
+.assistant-guide__group-title {
+  position: sticky; top: 0; z-index: 1;
+  margin: 0; padding: 2px 0;
+  font-size: var(--fs-13); font-weight: 600;
+  background: var(--card);
+}
+.assistant-guide__group-note { margin: 2px 0 6px; font-size: var(--fs-12); color: var(--fg-secondary); }
+/* 會花點數那一組挑出來標色：它是唯一一組按下去會扣東西的 */
+.assistant-guide__group.is-cost .assistant-guide__group-title { color: var(--primary-ink); }
+.assistant-guide__list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.assistant-guide__item {
+  display: flex; flex-direction: column; gap: 1px;
+  width: 100%; min-width: 0;
+  padding: 7px 10px;
+  text-align: start;
+  border-radius: var(--r-12);
+  border: 1px solid transparent;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.8));
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.assistant-guide__item:hover:not(:disabled) { border-color: var(--primary-border); }
+.assistant-guide__item:disabled { opacity: 0.5; cursor: not-allowed; }
+.assistant-guide__item-label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-13); }
+/* 後果標籤：只出現在建議區（那裡混著四種後果，沒有組標題可靠） */
+.assistant-guide__tag {
+  flex: none;
+  padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  font-size: var(--fs-11, 11px); line-height: 1.7; color: var(--fg-secondary);
+}
+.assistant-guide__tag.is-cost { border-color: var(--primary-border); background: var(--primary-tint); color: var(--primary-ink); }
+/* 例句是「怎麼講」的答案，兩行以內完整顯示，不截斷——截掉的那半句正是使用者要學的 */
+.assistant-guide__item-example { font-size: var(--fs-12); color: var(--fg-secondary); overflow-wrap: anywhere; }
+/* 「看全部能力／收起」：做成文字鍵，它是清單的出口，不該長得比清單本身重 */
+.assistant-guide__more {
+  margin-top: 6px; padding: 4px 0;
+  background: none; border: 0; cursor: pointer;
+  font-size: var(--fs-12); color: var(--primary-ink);
+}
+.assistant-guide__more:hover { text-decoration: underline; }
+
 /* ── 全站助手視野 chip（sheet 頂部；只在專案頁出現）──
    注意：chip 在 .ai-copilot-shell **外面**（sheet 直屬子層），拿不到 shell 上宣告的
    --ai-glass 系列變數——var() 一律帶字面 fallback（值同 .ai-copilot-shell:6951-6953），
@@ -8070,11 +8151,76 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .campaign-card__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 /* 目標可能很長：min-width 0 讓它在 flex 容器裡真的換行，而不是把卡片撐爆 390px */
 .campaign-card__goal { min-width: 0; overflow-wrap: anywhere; }
-.campaign-card__steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.campaign-card__step { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.campaign-card__steps { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+/* 一步現在是「標題列 ＋ 說明 ＋ 結果」三行，所以外層改直排；原本的橫排搬到 __step-head */
+.campaign-card__step { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); }
+.campaign-card__step-head { display: flex; align-items: center; gap: 6px; }
+.campaign-card__step-head > svg:first-child { flex: none; }
 .campaign-card__step-title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 說明與結果縮排對齊標題（圖示 13px ＋ gap 6px），視覺上明顯屬於上面那一步 */
+.campaign-card__step-note,
+.campaign-card__step-result,
+.campaign-card__step-error {
+  margin: 0 0 0 19px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-12);
+}
+/* 結果與錯誤是「它真的做了什麼」的證據，用顏色與圖示和計畫說明分開——
+   同樣的小灰字會讓人分不出哪一行是承諾、哪一行是已發生的事實 */
+.campaign-card__step-result,
+.campaign-card__step-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.campaign-card__step-result > svg,
+.campaign-card__step-error > svg { flex: none; margin-top: 2px; }
+.campaign-card__step-result { color: var(--success-ink, var(--fg-secondary)); }
+.campaign-card__step-error { color: var(--danger-ink); }
+/* 步驟自己的成果落點：做成文字鍵而不是 Button——它跟在說明後面，
+   一顆實心鈕會比整份計畫的主要動作還搶眼 */
+.campaign-card__step-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 19px; padding: 2px 0;
+  background: none; border: 0; cursor: pointer;
+  font-size: var(--fs-12); color: var(--primary-ink);
+}
+.campaign-card__step-link:hover { text-decoration: underline; }
 .campaign-card__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .campaign-card__addbudget { display: flex; flex-direction: column; gap: 4px; flex: 1 0 100%; }
+
+/* ── 動作紀錄（誰、何時、做了什麼）──
+   收合成一列，展開才查詢；每列是「施為者徽章｜事件｜時間」。 */
+.campaign-evidence { margin-top: 2px; }
+.campaign-evidence__summary {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 0;
+  font-size: var(--fs-12); color: var(--fg-secondary);
+  cursor: pointer; user-select: none; list-style: none;
+}
+.campaign-evidence__summary::-webkit-details-marker { display: none; }
+.campaign-evidence__summary:hover { color: var(--fg); }
+.campaign-evidence__list {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 4px 0 0; padding: 0 0 0 2px; list-style: none;
+}
+.campaign-evidence__row {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: var(--fs-12);
+}
+.campaign-evidence__text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.campaign-evidence__actor {
+  flex: none;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  font-size: var(--fs-11, 11px); line-height: 1.6;
+  color: var(--fg-secondary);
+}
+/* AI 自己動的手要一眼看得出來——這是整條紀錄裡唯一需要另眼相待的一種 */
+.campaign-evidence__actor.is-ai {
+  border-color: var(--primary-border); background: var(--primary-tint); color: var(--primary-ink);
+}
 
 /* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
 .agent-hud {

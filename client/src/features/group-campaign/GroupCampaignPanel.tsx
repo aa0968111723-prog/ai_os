@@ -260,14 +260,47 @@ function CampaignCard({
       <ol className="campaign-card__steps">
         {steps.map((s) => (
           <li key={s.id} className="campaign-card__step">
-            {/* 圖示不是唯一資訊：種類名一起寫出來，讀屏與色弱使用者才知道這步是「開專案」還是「派工」 */}
-            <Icon name={STEP_KIND_ICON[s.kind] ?? "FileText"} size={13} aria-hidden />
-            <span className="campaign-card__step-title">
-              <Meta as="span">{GROUP_STEP_KIND_LABEL[s.kind] ?? s.kind}</Meta>
-              {" "}{s.title}
-              {s.projectTitle ? <Meta as="span">・{s.projectTitle}</Meta> : null}
-            </span>
-            <Pill status={STEP_STATUS_PILL[s.status]}>{STEP_STATUS_LABEL[s.status]}</Pill>
+            <div className="campaign-card__step-head">
+              {/* 圖示不是唯一資訊：種類名一起寫出來，讀屏與色弱使用者才知道這步是「開專案」還是「派工」 */}
+              <Icon name={STEP_KIND_ICON[s.kind] ?? "FileText"} size={13} aria-hidden />
+              <span className="campaign-card__step-title">
+                <Meta as="span">{GROUP_STEP_KIND_LABEL[s.kind] ?? s.kind}</Meta>
+                {" "}{s.title}
+                {s.projectTitle ? <Meta as="span">・{s.projectTitle}</Meta> : null}
+              </span>
+              <Pill status={STEP_STATUS_PILL[s.status]}>{STEP_STATUS_LABEL[s.status]}</Pill>
+            </div>
+            {/* 規劃時寫下的「這步要做什麼」。核准畫面上只有一行標題（「派工 製作回顧影片」）
+                的話，人是在對一件自己看不見內容的事按核准——note 是規劃器本來就產出的欄位，
+                以前只是沒渲染出來。 */}
+            {s.note ? <Meta as="p" className="campaign-card__step-note">{s.note}</Meta> : null}
+            {/* 執行完的實際結果。這是「它到底做了什麼」唯一的直接證據：
+                沒有它，一份跑完的計畫在畫面上就只是四個「完成」字樣。 */}
+            {s.result ? (
+              <p className="campaign-card__step-result">
+                <Icon name="Check" size={12} aria-hidden />
+                {s.result}
+              </p>
+            ) : null}
+            {s.error ? (
+              <p className="campaign-card__step-error">
+                <Icon name="TriangleAlert" size={12} aria-hidden />
+                {s.error}
+              </p>
+            ) : null}
+            {/* 派工／盯進度這類步驟做完之後，成果在專案裡——一行文字說「做完了」而點不進去，
+                使用者仍然看不到東西本身。create_project 的落點在下方動作列（那是整份計畫的成果），
+                這裡補的是每一步各自的落點。 */}
+            {s.kind !== "create_project" && s.projectId && (s.status === "done" || s.status === "running") ? (
+              <button
+                type="button"
+                className="campaign-card__step-link"
+                onClick={() => navigate(`/p/${s.projectId}`)}
+              >
+                <Icon name="ArrowRight" size={12} aria-hidden />
+                看這步的成果{s.projectTitle ? `（${s.projectTitle}）` : ""}
+              </button>
+            ) : null}
           </li>
         ))}
       </ol>
@@ -353,6 +386,64 @@ function CampaignCard({
           ))}
       </div>
       {error ? <Hint role="alert">{error.message}</Hint> : null}
+
+      {/* 動作紀錄放在最後：它是事後查證，不該擋在「這一刻該按哪顆」前面 */}
+      <CampaignEvidence runId={run.id} />
     </Card>
   );
+}
+
+/**
+ * 一份計畫的動作紀錄（誰、什麼時候、做了什麼）。
+ *
+ * 為什麼要單獨露出來：`group_agent_events` 從一開始就完整寫著每一道令的施為者與時間
+ * （這整套裡最該被追溯的一件事），但在此之前 client **一個呼叫端都沒有**——
+ * 寫得進去、讀不出來。使用者看到的只有幾顆狀態徽章，於是完全合理地問「憑什麼說它做了事」。
+ *
+ * 預設收合且**收合時不發查詢**（enabled 綁 open）：這是事後查證用的東西，
+ * 不該讓每張卡片一渲染就多打一次 API——助手 sheet 一開可能同時有好幾張卡。
+ */
+function CampaignEvidence({ runId }: { runId: string }) {
+  const [open, setOpen] = useState(false);
+  const detail = trpc.teamAssistant.campaign.useQuery({ runId }, { enabled: open });
+  const events = detail.data?.events ?? [];
+
+  return (
+    <details className="campaign-evidence" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="campaign-evidence__summary">
+        <Icon name="Clock" size={13} />
+        做了什麼・動作紀錄
+      </summary>
+      {detail.isLoading ? <Meta as="p">讀取紀錄中…</Meta> : null}
+      {detail.error ? <Hint role="alert">{detail.error.message}</Hint> : null}
+      {open && !detail.isLoading && !detail.error && events.length === 0 ? (
+        <Meta as="p">還沒有動作紀錄——這份計畫還沒開始執行。</Meta>
+      ) : null}
+      <ol className="campaign-evidence__list">
+        {events.map((ev) => (
+          <li key={ev.id} className="campaign-evidence__row">
+            {/* 施為者要分清楚：同樣一句「核准了子計畫」，是 AI 在授權額度內自己按的，
+                還是某個人親手按的，責任歸屬完全不同。 */}
+            <span className={`campaign-evidence__actor is-${ev.actorType}`}>
+              {ACTOR_LABEL[ev.actorType] ?? ev.actorType}
+            </span>
+            <span className="campaign-evidence__text">{ev.summary}</span>
+            <Meta as="span">{formatEventTime(ev.createdAt)}</Meta>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+const ACTOR_LABEL: Record<string, string> = { ai: "AI", human: "人", system: "系統" };
+
+/** 同一天只顯示時間，跨天補上日期——動作紀錄看的是先後順序，年份是噪音 */
+export function formatEventTime(at: Date | string, now: Date = new Date()): string {
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toDateString() === now.toDateString()
+    ? time
+    : `${d.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })} ${time}`;
 }
