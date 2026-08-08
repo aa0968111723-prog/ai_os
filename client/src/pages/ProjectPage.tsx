@@ -2595,6 +2595,7 @@ export function ProjectPage({ id }: { id: string }) {
               點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
           <DeliveryRoom
             projectId={id}
+            canEdit={canEdit}
             onOpenShot={(shotId) => {
               scrollToSelector(`#board-shot-${shotId}`);
             }}

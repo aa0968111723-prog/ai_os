@@ -8310,3 +8310,51 @@ body.story-immersive { overflow: hidden; }
 .shot-nav__meta { flex: 0 0 auto; }
 /* §8 連戲承接：一列，結果訊息接在按鈕後面（不另開一塊佔版面） */
 .shot-card__continuity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* §13 交付室縮圖列：一眼掃完整部片，而不是讀一串文字。
+   橫向捲＋卡片固定寬，鏡多也不會把這一屏撐成無限長 */
+.delivery-room__filters { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.delivery-room__filters button {
+  min-height: 36px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border-soft); background: var(--card2);
+  color: var(--fg-secondary); font-size: var(--fs-12); cursor: pointer;
+}
+.delivery-room__filters button.active { background: var(--primary-tint); border-color: var(--primary); color: var(--primary-ink); font-weight: 650; }
+.delivery-room__batch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.delivery-strip {
+  list-style: none; margin: 10px 0 0; padding: 0 0 4px;
+  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin;
+}
+.delivery-strip__item { position: relative; flex: 0 0 auto; }
+.delivery-strip__card {
+  width: 132px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-12);
+  background: var(--card2); cursor: pointer; text-align: left;
+}
+.delivery-strip__item.is-picked .delivery-strip__card { border-color: var(--primary); background: var(--primary-tint); }
+.delivery-strip__thumb {
+  width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-8); overflow: hidden;
+  background: var(--field); display: grid; place-items: center; color: var(--fg-muted);
+}
+.delivery-strip__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.delivery-strip__num { font-weight: 700; color: var(--primary-ink); font-size: var(--fs-12); }
+/* 缺什麼要看得完；長字串在 132px 卡片內換行而非被裁掉 */
+.delivery-strip__meta { font-size: var(--fs-11); line-height: 1.4; overflow-wrap: anywhere; }
+.delivery-strip__pick { position: absolute; top: 6px; right: 6px; }
+.delivery-strip__pick input { width: 20px; height: 20px; }
+
+/* §14 快速補件 sheet：手機貼底、桌機置中；只補單軌，真編輯送工作室 */
+.delivery-sheet-root { position: fixed; inset: 0; z-index: 60; display: grid; place-items: end center; }
+.delivery-sheet__backdrop { position: absolute; inset: 0; background: var(--scrim); border: 0; }
+.delivery-sheet {
+  position: relative; width: min(560px, 100%);
+  background: var(--popover); border: 1px solid var(--border);
+  border-radius: var(--r-16) var(--r-16) 0 0;
+  padding: 14px max(14px, var(--safe-right)) calc(14px + max(10px, var(--safe-bottom))) max(14px, var(--safe-left));
+  box-shadow: var(--e3); max-height: 80vh; overflow-y: auto;
+}
+@media (min-width: 641px) { .delivery-sheet-root { place-items: center; } .delivery-sheet { border-radius: var(--r-16); } }
+.delivery-sheet__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.delivery-sheet__tracks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.delivery-sheet__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
