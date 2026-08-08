@@ -407,6 +407,13 @@
       "when": 1788300000000,
       "tag": "0057_intelligence_library",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0058_intelligence_full_text_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -236,6 +236,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "intelligence.resolveFaceCluster": "確認或拆分人物群組",
   "intelligence.mergePeople": "合併人物知識實體",
   "intelligence.resolveDuplicate": "處理重複素材群組",
+  "intelligence.scheduleBackfill": "排程智慧資料重新分析",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",

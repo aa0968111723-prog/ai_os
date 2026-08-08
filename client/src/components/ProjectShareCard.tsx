@@ -40,7 +40,7 @@ export function ProjectShareCard({ projectId, canEdit }: { projectId: string; ca
   const create = trpc.share.create.useMutation({
     onSuccess: (result, variables) => {
       posthog.capture("project_share_link_created", {
-        expires_in_days: variables.expiresInDays ?? null,
+        expires_in_days: variables?.expiresInDays ?? null,
       });
       setFresh(fullUrl(result.url));
       setCopied(false);

@@ -22,6 +22,7 @@ import {
 } from "../features/intelligence-library/SmartCategories";
 import { ReviewSummary, type IntelligenceSummaryView } from "../features/intelligence-library/ReviewSummary";
 import { ProcessingPanel } from "../features/intelligence-library/ProcessingPanel";
+import { LibraryOperations } from "../features/intelligence-library/LibraryOperations";
 import { ReviewQueue } from "../features/intelligence-library/ReviewQueue";
 import { AssetInspector } from "../features/intelligence-library/AssetInspector";
 import { DuplicateReview } from "../features/intelligence-library/DuplicateReview";
@@ -119,7 +120,8 @@ function ResourceList({ resources, title, searchScores, onInspect }: {
   );
 }
 
-export function DataHubOverview({ projectId, projectTitle, onAddData }: {
+export function DataHubOverview({ groupId, projectId, projectTitle, onAddData }: {
+  groupId?: string | null;
   projectId?: string | null;
   projectTitle?: string | null;
   onAddData: () => void;
@@ -209,6 +211,7 @@ export function DataHubOverview({ projectId, projectTitle, onAddData }: {
 
       <SmartCategories value={category} onChange={(value) => { setCategory(value); setReviewOpen(false); }} />
       <ProcessingPanel data={processing.data} />
+      {groupId && <LibraryOperations groupId={groupId} projectId={projectId} />}
 
       {reviewOpen ? <ReviewQueue projectId={projectId} onClose={() => setReviewOpen(false)} />
         : duplicateOpen ? <DuplicateReview projectId={projectId} onClose={() => setDuplicateOpen(false)} />

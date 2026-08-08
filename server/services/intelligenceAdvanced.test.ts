@@ -3,6 +3,7 @@ import {
   applyCategoryFeedback,
   clusterFaceObservations,
   extractEntityCandidates,
+  feedbackRerankBoost,
   normalizeEntityName,
   parseLibraryQuery,
   semanticDuplicateThreshold,
@@ -54,5 +55,14 @@ describe("Intelligence Library advanced understanding", () => {
     );
     expect(result.category).toBe("Script");
     expect(result.categoryConfidence).toBeGreaterThanOrEqual(0.96);
+  });
+
+  it("uses personal and team feedback only as a bounded reranking signal", () => {
+    const events = [
+      { action: "confirm", prediction: { category: "Script", tags: ["weather:rain"] }, correction: null, createdBy: "me" },
+      { action: "confirm", prediction: { category: "Script", tags: ["weather:rain"] }, correction: null, createdBy: "team-member" },
+    ];
+    expect(feedbackRerankBoost({ query: "雨天 Script", category: "Script", tags: ["weather:rain"], events, userId: "me" })).toBe(1);
+    expect(feedbackRerankBoost({ query: "雨天 Script", category: "Report", tags: [], events, userId: "me" })).toBeLessThanOrEqual(0);
   });
 });

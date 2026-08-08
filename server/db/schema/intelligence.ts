@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const assetIntelligence = pgTable("asset_intelligence", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -51,6 +52,10 @@ export const assetIntelligence = pgTable("asset_intelligence", {
   statusIdx: index("asset_intelligence_status_idx").on(t.groupId, t.analysisStatus),
   categoryIdx: index("asset_intelligence_category_idx").on(t.groupId, t.category),
   checksumIdx: index("asset_intelligence_checksum_idx").on(t.groupId, t.checksum),
+  textSearchIdx: index("asset_intelligence_text_search_idx").using(
+    "gin",
+    sql`to_tsvector('simple', coalesce(${t.summary}, '') || ' ' || coalesce(${t.description}, '') || ' ' || coalesce(${t.category}, ''))`,
+  ),
 }));
 
 export const intelligenceTags = pgTable("intelligence_tags", {
@@ -90,6 +95,10 @@ export const intelligenceChunks = pgTable("intelligence_chunks", {
 }, (t) => ({
   ordinalUq: uniqueIndex("intelligence_chunks_ordinal_uq").on(t.intelligenceId, t.ordinal),
   intelligenceIdx: index("intelligence_chunks_intelligence_idx").on(t.intelligenceId),
+  textSearchIdx: index("intelligence_chunks_text_search_idx").using(
+    "gin",
+    sql`to_tsvector('simple', ${t.text})`,
+  ),
 }));
 
 export const intelligenceEmbeddings = pgTable("intelligence_embeddings", {

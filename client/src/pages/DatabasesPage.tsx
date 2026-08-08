@@ -270,6 +270,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         下面的兩欄版面是「結構化資料表」這一區的完整編輯器，Data Hub 不重寫它。
       */}
       <DataHubOverview
+        groupId={groupId}
         projectId={contextProjectId}
         projectTitle={contextProject.data?.title ?? null}
         onAddData={() => setAddOpen(true)}

@@ -163,3 +163,54 @@ export function applyCategoryFeedback<T extends { category: string; categoryConf
   };
   return result;
 }
+
+export interface RetrievalFeedbackEvent {
+  action: string;
+  prediction: unknown;
+  correction: unknown;
+  createdBy?: string | null;
+}
+
+function feedbackValues(event: RetrievalFeedbackEvent): { categories: string[]; tags: string[]; polarity: number } {
+  const prediction = event.prediction && typeof event.prediction === "object" ? event.prediction as Record<string, unknown> : {};
+  const correction = event.correction && typeof event.correction === "object" ? event.correction as Record<string, unknown> : {};
+  const category = typeof correction.category === "string" ? correction.category
+    : typeof prediction.category === "string" ? prediction.category : null;
+  const rawTags = Array.isArray(correction.tags) ? correction.tags : Array.isArray(prediction.tags) ? prediction.tags : [];
+  const tags = rawTags.filter((tag): tag is string => typeof tag === "string");
+  const polarity = ["reject", "remove", "ignore"].includes(event.action) ? -1 : 1;
+  return { categories: category ? [category] : [], tags, polarity };
+}
+
+/** Small bounded boost only; feedback can refine a result but never bypass retrieval or ACL. */
+export function feedbackRerankBoost(input: {
+  query: string;
+  category?: string | null;
+  tags?: readonly string[];
+  events: readonly RetrievalFeedbackEvent[];
+  userId?: string;
+}): number {
+  const query = input.query.normalize("NFKC").toLocaleLowerCase("zh-TW");
+  const category = input.category?.normalize("NFKC").toLocaleLowerCase("zh-TW") ?? "";
+  const tags = new Set((input.tags ?? []).map((tag) => tag.normalize("NFKC").toLocaleLowerCase("zh-TW")));
+  let weighted = 0; let possible = 0;
+  for (const event of input.events) {
+    const values = feedbackValues(event);
+    const weight = event.createdBy && event.createdBy === input.userId ? 2 : 1;
+    for (const value of values.categories) {
+      const normalized = value.normalize("NFKC").toLocaleLowerCase("zh-TW");
+      if (!query.includes(normalized) && normalized !== category) continue;
+      possible += weight;
+      if (normalized === category) weighted += weight * values.polarity;
+    }
+    for (const value of values.tags) {
+      const normalized = value.normalize("NFKC").toLocaleLowerCase("zh-TW");
+      const label = normalized.includes(":") ? normalized.split(":").slice(1).join(":").replace(/-/g, " ") : normalized;
+      if (!query.includes(label) && !tags.has(normalized)) continue;
+      possible += weight;
+      if (tags.has(normalized)) weighted += weight * values.polarity;
+    }
+  }
+  if (!possible) return 0;
+  return Math.max(-1, Math.min(1, weighted / possible));
+}
