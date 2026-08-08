@@ -11,6 +11,7 @@ import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { LOOK_COSTUME_MAX, LOOK_NAME_MAX, MAX_PROJECT_LOOKS } from "../../shared/story";
+import { applyWithRevision } from "../services/revisionGuard";
 
 export const characterLooksRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -78,6 +79,10 @@ export const characterLooksRouter = router({
         costume: z.string().trim().max(LOOK_COSTUME_MAX).nullable().optional(),
         notes: z.string().trim().max(500).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
+        /** 樂觀併發（shared/revision.ts）：載入時的 rev；不給＝維持舊行為 */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 載入時這些欄位的原值——rev 撞了但欄位沒撞時據此自動合併 */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -94,8 +99,21 @@ export const characterLooksRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const [updated] = await db.update(schema.characterLooks).set(patch).where(eq(schema.characterLooks.id, input.id)).returning();
-      return updated;
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "characterLook",
+        table: schema.characterLooks,
+        idColumn: schema.characterLooks.id,
+        revColumn: schema.characterLooks.rev,
+        row,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.characterLooks).where(eq(schema.characterLooks.id, input.id));
+          return fresh;
+        },
+      });
+      return { ...updated, merged };
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

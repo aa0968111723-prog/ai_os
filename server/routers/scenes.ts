@@ -44,6 +44,8 @@ import {
   type SceneVersionGenerationRow,
 } from "../../shared/sceneVersions";
 import { lockSceneOrder } from "../services/locks";
+import { applyWithRevision } from "../services/revisionGuard";
+import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { MAX_PROMPT_CHARS } from "./prompts";
 import {
@@ -500,6 +502,8 @@ export const scenesRouter = router({
     return {
       sceneId: scene.id,
       projectId: scene.projectId,
+      /** 樂觀併發版本（shared/revision.ts）：單格工作室的每一支存檔都要把它原樣送回 */
+      rev: scene.rev,
       title: scene.title,
       prompt: scene.prompt,
       voiceover: scene.voiceover,
@@ -903,6 +907,16 @@ export const scenesRouter = router({
         performance: shotPerformanceSchema.nullable().optional(),
         /** 這一鏡採用的造型（character_looks.id）；空陣列＝清空 */
         lookIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+        /**
+         * 樂觀併發（shared/revision.ts）：我載入這一格時看到的 rev。
+         * 不給＝維持舊行為（背景 runner／代理／匯入路徑）；編輯框一律要帶。
+         */
+        expectedRev: z.number().int().min(0).optional(),
+        /**
+         * 我載入時，我要改的那些欄位長什麼樣。rev 撞了但欄位沒撞時（A 改提示詞、
+         * B 改旁白）據此自動合併，不拿一個根本沒衝突的衝突去煩使用者。
+         */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -954,8 +968,29 @@ export const scenesRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "修剪的結束點必須晚於開始點" });
       }
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
-      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
-      return updated;
+      // 條件寫入：rev 撞了就先試逐欄合併，真的撞同一欄才丟結構化 CONFLICT（見 revisionGuard）。
+      // 不帶 expectedRev 的呼叫端行為與過去相同，只是 rev 仍會遞增。
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: scene,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db
+            .select()
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
+      // 合併過就順手叫醒同房的人：他們畫面上那一格剛被兩個人各改了一半，值得立刻重取。
+      if (merged) publishToProject(scene.projectId, { kind: "scene", id: scene.id }, "合併了修改");
+      return { ...updated, merged };
     }),
 
   /**

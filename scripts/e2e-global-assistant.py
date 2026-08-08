@@ -59,8 +59,21 @@ ok("組員就位", acc["user"]["name"] == "全站助手組員")
 # ── ASK（mock 短路）＋trace 落庫 ──
 a1 = call("POST", admin, "globalAssistant.ask", {"groupId": gid, "message": "目前全組進度如何？"})
 ok("ASK：mock 回覆", a1.get("mock") is True and "測試模式" in a1.get("answer", ""))
-ok("ASK：不在 mock 提議任何動作", a1.get("siteActions") == [] and a1.get("dispatches") == [])
+ok("ASK：無動作意圖時不提議", a1.get("siteActions") == [] and a1.get("dispatches") == [])
 ok("ASK：帶回 traceSessionId", bool(a1.get("traceSessionId")))
+
+# ── ASK→提議→確認→ACT 全鏈路（mock 確定性提議走同一條 resolveSiteActions 驗證）──
+a2 = call("POST", admin, "globalAssistant.ask", {"groupId": gid, "message": "幫我開一個中秋活動宣傳專案"})
+props = a2.get("siteActions") or []
+ok("提議：mock 產 create_project 確認卡", len(props) == 1 and props[0]["type"] == "create_project" and "label" in props[0])
+card = props[0]
+done = call("POST", admin, "globalAssistant.runSiteAction", {
+    "type": "create_project", "groupId": card["groupId"],
+    "title": card["title"], "kind": card["kind"], "platform": card["platform"],
+})
+ok("提議→確認→真寫入：專案建立", bool(done.get("projectId")))
+plist0 = call("GET", admin, "projects.list", {"groupId": gid})
+ok("提議鏈路：專案出現在列表", any(x["id"] == done["projectId"] for x in plist0))
 
 traces = call("GET", admin, "globalAssistant.traces", {"groupId": gid})
 ok("trace 落庫（分表）", any(t["id"] == a1["traceSessionId"] for t in traces))
@@ -92,6 +105,17 @@ ok("ACT：任務出現在專案任務清單", any(x["id"] == t["taskId"] for x i
 
 d = call("POST", admin, "globalAssistant.runSiteAction", {"type": "send_dm", "peerId": acc["user"]["id"], "body": "明早十點對稿，帶腳本"})
 ok("ACT：私訊", d.get("type") == "send_dm" and bool(d.get("messageId")))
+
+# ── 第二批寫入：資料列（雙重閘——agentAccess=write 才可寫；唯讀庫要被擋）──
+db_w = call("POST", admin, "databases.create", {"scope": "group", "groupId": gid, "name": "器材清單",
+    "fields": [{"key": "name", "label": "名稱", "type": "text"}, {"key": "qty", "label": "數量", "type": "text"}],
+    "agentAccess": "write"})
+db_r = call("POST", admin, "databases.create", {"scope": "group", "groupId": gid, "name": "唯讀名單",
+    "fields": [{"key": "name", "label": "名稱", "type": "text"}], "agentAccess": "read"})
+row = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_database_row", "tableId": db_w["id"], "data": {"name": "三腳架", "qty": "2"}})
+ok("ACT：資料列（真寫入）", row.get("type") == "add_database_row" and bool(row.get("rowId")))
+blocked = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_database_row", "tableId": db_r["id"], "data": {"name": "偷寫"}})
+ok("🔒 AI 唯讀庫確認卡路徑也被擋", "__error__" in blocked and "AI" in blocked["__error__"])
 
 # 時間格式負例：壞 startsAt 要被擋（不是寫進去一筆壞資料）
 bad = call("POST", admin, "globalAssistant.runSiteAction", {"type": "add_schedule_item", "groupId": gid, "title": "壞時間", "startsAt": "明天早上"})

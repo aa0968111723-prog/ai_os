@@ -11,6 +11,7 @@ import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
 import { AssetAudio, AssetImg, AssetVideo } from "./MediaFallback";
 import { relSeen } from "../push";
 import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
+import { ConflictNotice, conflictFromError } from "./ConflictNotice";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -266,6 +267,76 @@ export function SceneStudio({
   });
   const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
+  /**
+   * 存檔載荷的併發欄位（shared/revision.ts）。
+   *
+   * `expectedRev` 是我載入這一格時的版本，`baseline` 是我要改的那一欄當時的值。
+   * 伺服器靠這兩樣分得出「我們改了同一欄」（要問人）與「我們各改各的」（直接合併），
+   * 不會拿一個根本沒衝突的衝突來煩人，也不會讓誰的字靜默消失。
+   */
+  const revArgs = (field: string) => ({
+    expectedRev: data?.rev,
+    baseline: { [field]: (data as Record<string, unknown> | undefined)?.[field] ?? null },
+  });
+
+  /** 目前撞到的欄位（哪一支存檔撞的）——衝突卡要知道「重新套用」該重送什麼 */
+  const conflictField =
+    (update.error && "prompt") ||
+    (saveVoice.error && "voiceover") ||
+    (saveAction.error && "action") ||
+    (saveDialogue.error && "dialogue") ||
+    (saveAmbience.error && "ambience") ||
+    (saveMusic.error && "music") ||
+    null;
+  const conflict = conflictFromError(actionError);
+
+  /**
+   * 「重新套用我的修改」：以**對方那一版的 rev** 重送我的值。
+   *
+   * 刻意仍然走一次併發檢查，而不是無條件寫回去——無條件寫回只是把靜默覆蓋
+   * 換了個按鈕名字。若在我看衝突卡的期間又有第三個人改了，這一發會再撞一次，
+   * 而那正是應該的。
+   */
+  const reapply = () => {
+    if (!conflict || !conflictField) return;
+    const value =
+      conflictField === "prompt" ? prompt
+      : conflictField === "voiceover" ? voiceover
+      : conflictField === "action" ? action
+      : conflictField === "dialogue" ? dialogue
+      : conflictField === "ambience" ? ambience
+      : music;
+    const args = {
+      sceneId,
+      [conflictField]: value,
+      expectedRev: conflict.currentRev,
+      baseline: { [conflictField]: (conflict.currentData as Record<string, unknown>)[conflictField] ?? null },
+    } as Parameters<typeof update.mutate>[0];
+    const runner =
+      conflictField === "prompt" ? update
+      : conflictField === "voiceover" ? saveVoice
+      : conflictField === "action" ? saveAction
+      : conflictField === "dialogue" ? saveDialogue
+      : conflictField === "ambience" ? saveAmbience
+      : saveMusic;
+    runner.mutate(args);
+  };
+
+  /** 「查看新版」：把我的草稿換成對方的版本（我的字進了輸入框歷程，仍可用復原鍵拿回） */
+  const viewLatest = () => {
+    if (!conflict || !conflictField) return;
+    const next = String((conflict.currentData as Record<string, unknown>)[conflictField] ?? "");
+    const setter =
+      conflictField === "prompt" ? setPromptDraft
+      : conflictField === "voiceover" ? setVoiceDraft
+      : conflictField === "action" ? setActionDraft
+      : conflictField === "dialogue" ? setDialogueDraft
+      : conflictField === "ambience" ? setAmbienceDraft
+      : setMusicDraft;
+    setter(next);
+    refresh();
+  };
+
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
   const voiceover = voiceDraft ?? data?.voiceover ?? "";
@@ -381,7 +452,18 @@ export function SceneStudio({
             <Button variant="ghost" size="sm" onClick={() => versions.refetch()}>再試一次</Button>
           </p>
         )}
-        {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
+        {/* 併發衝突走專屬的卡片：它要說出「誰改了什麼」並給出路，
+            而不是把使用者丟在一句「操作失敗」前面重打一次然後再撞一次。 */}
+        {conflict ? (
+          <ConflictNotice
+            conflict={conflict}
+            onReapply={reapply}
+            onViewLatest={viewLatest}
+            reapplying={update.isPending || saveVoice.isPending || saveAction.isPending || saveDialogue.isPending || saveAmbience.isPending || saveMusic.isPending}
+          />
+        ) : actionError ? (
+          <p className="error" role="alert">操作失敗：{actionError.message}</p>
+        ) : null}
 
         <div className="scene-studio__body">
           {/* ── 舞台：這一格現在長什麼樣（或正在看的那一版） ───────────────── */}
@@ -501,7 +583,7 @@ export function SceneStudio({
               />
               {canEdit && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Button size="sm" disabled={!promptDirty || update.isPending} onClick={() => update.mutate({ sceneId, prompt })}>
+                  <Button size="sm" disabled={!promptDirty || update.isPending} onClick={() => update.mutate({ sceneId, prompt, ...revArgs("prompt") })}>
                     {update.isPending ? "儲存中…" : "儲存提示詞"}
                   </Button>
                   {promptDirty ? <Meta>尚未儲存</Meta> : update.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
@@ -526,7 +608,7 @@ export function SceneStudio({
               />
               {canEdit && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Button size="sm" disabled={!actionDirty || saveAction.isPending} onClick={() => saveAction.mutate({ sceneId, action })}>
+                  <Button size="sm" disabled={!actionDirty || saveAction.isPending} onClick={() => saveAction.mutate({ sceneId, action, ...revArgs("action") })}>
                     {saveAction.isPending ? "儲存中…" : "儲存走位"}
                   </Button>
                   {actionDirty ? <Meta>尚未儲存</Meta> : saveAction.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
@@ -745,7 +827,7 @@ export function SceneStudio({
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <Button size="sm" disabled={!voiceDirty || saveVoice.isPending} onClick={() => saveVoice.mutate({ sceneId, voiceover })}>
+                      <Button size="sm" disabled={!voiceDirty || saveVoice.isPending} onClick={() => saveVoice.mutate({ sceneId, voiceover, ...revArgs("voiceover") })}>
                         {saveVoice.isPending ? "儲存中…" : "儲存配音詞"}
                       </Button>
                       {voiceDirty ? <Meta>尚未儲存</Meta> : saveVoice.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
@@ -765,7 +847,7 @@ export function SceneStudio({
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <Button size="sm" disabled={!dialogueDirty || saveDialogue.isPending} onClick={() => saveDialogue.mutate({ sceneId, dialogue })}>
+                      <Button size="sm" disabled={!dialogueDirty || saveDialogue.isPending} onClick={() => saveDialogue.mutate({ sceneId, dialogue, ...revArgs("dialogue") })}>
                         {saveDialogue.isPending ? "儲存中…" : "儲存對白"}
                       </Button>
                       {dialogueDirty ? <Meta>尚未儲存</Meta> : saveDialogue.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
@@ -853,7 +935,7 @@ export function SceneStudio({
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <Button size="sm" disabled={!ambienceDirty || saveAmbience.isPending} onClick={() => saveAmbience.mutate({ sceneId, ambience })}>
+                      <Button size="sm" disabled={!ambienceDirty || saveAmbience.isPending} onClick={() => saveAmbience.mutate({ sceneId, ambience, ...revArgs("ambience") })}>
                         {saveAmbience.isPending ? "儲存中…" : "儲存描述"}
                       </Button>
                       {ambienceDirty ? <Meta>尚未儲存</Meta> : saveAmbience.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
@@ -906,7 +988,7 @@ export function SceneStudio({
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <Button size="sm" disabled={!musicDirty || saveMusic.isPending} onClick={() => saveMusic.mutate({ sceneId, music })}>
+                      <Button size="sm" disabled={!musicDirty || saveMusic.isPending} onClick={() => saveMusic.mutate({ sceneId, music, ...revArgs("music") })}>
                         {saveMusic.isPending ? "儲存中…" : "儲存配樂標記"}
                       </Button>
                       {musicDirty ? <Meta>尚未儲存</Meta> : saveMusic.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}

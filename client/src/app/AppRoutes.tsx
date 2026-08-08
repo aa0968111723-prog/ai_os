@@ -22,6 +22,7 @@ const McpPage = lazyWithRetry(() => import("../pages/McpPage").then((m) => ({ de
 const IntegrationsPage = lazyWithRetry(() => import("../pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
 const DownloadsPage = lazyWithRetry(() => import("../pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
 const PlannerPage = lazyWithRetry(() => import("../pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
+const CollaborationCenter = lazyWithRetry(() => import("../pages/CollaborationCenter").then((m) => ({ default: m.CollaborationCenter })));
 const DatabasesPage = lazyWithRetry(() => import("../pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
 const ChatPage = lazyWithRetry(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const Launchpad = lazyWithRetry(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
@@ -121,6 +122,8 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/chat"><ChatPage /></Route>
       {/* Web Share Target（Android 安裝版）：SW 收下分享的 POST 後 303 到這裡認領 */}
       <Route path="/share-target"><ShareTargetPage groupId={activeGroupId} /></Route>
+      {/* 協作中心：找我／討論／任務／動態——全部建立在既有 notifications/messages/tasks 之上 */}
+      <Route path="/collab"><CollaborationCenter groupId={activeGroupId} /></Route>
       <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
       <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
       {/* 動畫創作室：/studio 先挑專案，/studio/:id 直接進那一案的白板與分鏡表。

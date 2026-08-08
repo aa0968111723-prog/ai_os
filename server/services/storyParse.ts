@@ -20,6 +20,8 @@ import {
   nameKey,
   storyParseModelSchema,
   environmentStateSchema,
+  isStoryNoteLine,
+  stripStoryNotes,
   CONFIDENCE_AUTO,
   LOOK_NAME_MAX,
   MAX_PROJECT_LOOKS,
@@ -32,7 +34,7 @@ import {
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { nimComplete, NimServiceError } from "./nvidia-nim";
+import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL } from "./nvidia-nim";
 import { loadProjectCardAliases, type ProjectCardAliases } from "./sceneCards";
 import { lockSceneOrder } from "./locks";
 import {
@@ -96,6 +98,9 @@ export function mockStoryExtract(content: string): StoryParsePlan {
   };
 
   for (const line of lines) {
+    // 作者備註不是故事內容（runStoryParse 已先剔除；這裡再擋一次，
+    // 讓「備註不會變成分鏡」這條契約在不碰 DB 的情況下就測得到）
+    if (isStoryNoteLine(line)) continue;
     const t = line.trim();
     const mChar = t.match(/^角色[:：]\s*(.+)$/);
     const mLoc = t.match(/^場景[:：]\s*(.+)$/);
@@ -301,8 +306,11 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
   const cardAliases = await loadProjectCardAliases(project.id);
   const existing = await loadExistingEntities(project.id);
 
-  const truncated = content.length > STORY_PARSE_BUDGET;
-  const sentStory = content.slice(0, STORY_PARSE_BUDGET);
+  // 作者備註（「註：」／「//」）留在故事全文裡，但不送進模型：
+  // 「註：這裡待補一場追車」會被解析成一場真的追車戲，然後長出使用者沒寫過的分鏡。
+  const parseSource = stripStoryNotes(content);
+  const truncated = parseSource.length > STORY_PARSE_BUDGET;
+  const sentStory = parseSource.slice(0, STORY_PARSE_BUDGET);
 
   const trace = await createAiTraceSession({
     groupId: project.groupId,
@@ -329,12 +337,29 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       await recordAiTraceEventSafely({
         sessionId: trace.id,
         eventType: "prepared",
-        summary: "組裝解析提示詞",
-        payload: { promptChars: sys.length, storyChars: content.length, sentChars: sentStory.length },
+        summary: `組裝解析提示詞（${NIM_REASONING_MODEL}）`,
+        payload: {
+          promptChars: sys.length,
+          storyChars: content.length,
+          sentChars: sentStory.length,
+          model: NIM_REASONING_MODEL,
+        },
       });
     }
     try {
-      const output = await nimComplete(sys, { timeoutMs: 90_000 });
+      // 劇本解析走高階模型：一次要同時做代名詞歸併、既有卡比對、分場分鏡與信心評分，
+      // 這是整條製作鏈的源頭——這裡漏一個角色，後面每一顆鏡都少一個錨點。
+      // 逾時放寬到 150 秒：旗艦模型比日常主力慢，用 90 秒會把成功的解析判成逾時。
+      const completion = await nimCompleteWithFallback(sys, { model: NIM_REASONING_MODEL, timeoutMs: 150_000 });
+      if (completion.downgraded && trace) {
+        await recordAiTraceEventSafely({
+          sessionId: trace.id,
+          eventType: "provider_response",
+          summary: `高階模型無法使用，已降級為 ${completion.model}`,
+          payload: { requested: NIM_REASONING_MODEL, used: completion.model },
+        });
+      }
+      const output = completion.output;
       const match = output.match(/\{[\s\S]*\}/);
       let parsed: ReturnType<typeof storyParseModelSchema.safeParse> | null = null;
       try {
@@ -354,7 +379,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       if (err instanceof TRPCError) throw err;
       if (trace) await updateAiTraceSession(trace.id, { status: "failed", summary: "provider 失敗" }).catch(() => undefined);
       if (isProviderTimeout(err)) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 模型回應逾時（90 秒）——上游服務忙碌，稍後重試即可" });
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 模型回應逾時（150 秒）——上游服務忙碌，稍後重試即可" });
       }
       if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
       const cause = err instanceof Error ? err.message.replace(/\s+/g, " ").slice(0, 100) : "";
@@ -372,7 +397,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     looks: { created: 0 },
     scenes: plan.scenes.length,
     shots: plan.scenes.reduce((n, s) => n + s.shots.length, 0),
-    truncation: truncated ? { totalChars: content.length, sentChars: sentStory.length, droppedChars: content.length - sentStory.length } : null,
+    truncation: truncated ? { totalChars: parseSource.length, sentChars: sentStory.length, droppedChars: parseSource.length - sentStory.length } : null,
     mock,
   };
 

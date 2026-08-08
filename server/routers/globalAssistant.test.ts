@@ -23,6 +23,10 @@ const refs = (over?: Partial<SiteActionRefs>): SiteActionRefs => ({
     { value: "instagram", format: "9:16" },
   ],
   kinds: ["宣傳", "回顧"],
+  databases: new Map([
+    ["db1", { id: "table-1", name: "器材清單", writable: true, fields: [{ key: "name", label: "名稱" }, { key: "qty", label: "數量" }] }],
+    ["db2", { id: "table-2", name: "唯讀名單", writable: false, fields: [{ key: "name", label: "名稱" }] }],
+  ]),
   ...over,
 });
 
@@ -104,6 +108,23 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0].label).toContain("2026-08-09 10:00");
     // dueAt 台北時間仍是 8/12（UTC 是 8/12 15:30）；顯示日期不得因時區換算跳日
     expect(out[1].label).toContain("2026-08-12");
+  });
+
+  it("add_database_row：標籤→key 映射、幻覺欄位丟棄、唯讀庫（agentAccess≠write）連提議都不給", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "add_database_row", dbRef: "db1", values: { "名稱": "三腳架", qty: "2", "不存在的欄": "x" } },
+      { type: "add_database_row", dbRef: "db2", values: { "名稱": "唯讀庫不可寫" } },
+      { type: "add_database_row", dbRef: "db9", values: { "名稱": "幻覺代號" } },
+      { type: "add_database_row", dbRef: "db1", values: { "全是幻覺欄": "x" } },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_database_row",
+      tableId: "table-1",
+      data: { name: "三腳架", qty: "2" },
+    });
+    expect((out[0] as { preview: string }).preview).toContain("名稱：三腳架");
+    expect(out[0].label).toContain("器材清單");
   });
 
   it("上限 4 筆＋重複提議去重（同一件事講兩次只算一次）", () => {

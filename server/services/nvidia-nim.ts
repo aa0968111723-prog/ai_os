@@ -35,6 +35,39 @@ export type NvidiaModel = (typeof NVIDIA_MODELS)[keyof typeof NVIDIA_MODELS];
  */
 export const NIM_DEFAULT_MODEL = process.env.NVIDIA_NIM_MODEL?.trim() || NVIDIA_MODELS.llama3_70b;
 
+/**
+ * 高階（旗艦）模型：留給「一次做完、錯了整條下游都歪掉」的深度分析——
+ * 目前是劇本解析（storyParse）：它要一次讀完整份劇本，同時做代名詞歸併、
+ * 既有卡比對、分場分鏡與信心評分。這種長上下文＋多重推理正是 70B 會漏掉東西、
+ * 405B 明顯較穩的地方；而且它一份劇本只跑一次，成本差距換得起品質。
+ *
+ * 逐鏡生成、助手閒聊那種高頻短任務**不要**用這顆：貴又慢，品質差距也吃不到。
+ * 設 NVIDIA_NIM_REASONING_MODEL 可整站換掉（例如換成 deepseek-r1 這類推理模型）。
+ */
+export const NIM_REASONING_MODEL =
+  process.env.NVIDIA_NIM_REASONING_MODEL?.trim() || NVIDIA_MODELS.llama3_405b;
+
+/**
+ * 旗艦模型不是保證存在的：帳號沒開通、供應商下架某個檔位、或這顆正好塞車，
+ * 都會回 4xx／5xx。這時候「解析整個失敗」比「用 70B 解析」糟得多——
+ * 使用者要的是把劇本變成分鏡，不是特定一顆模型。所以降級一次到日常主力模型，
+ * 並把實際用了哪一顆回報給呼叫端（要寫進 AI 軌跡，不能讓人以為跑的是旗艦）。
+ */
+export async function nimCompleteWithFallback(
+  prompt: string,
+  opts: { model: string; fallbackModel?: string; temperature?: number; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal },
+): Promise<{ output: string; model: string; downgraded: boolean }> {
+  const fallback = opts.fallbackModel ?? NIM_DEFAULT_MODEL;
+  try {
+    return { output: await nimComplete(prompt, opts), model: opts.model, downgraded: false };
+  } catch (err) {
+    // 金鑰無效／點數用完（NimServiceError）換模型也救不了；用戶端中止要尊重
+    if (err instanceof NimServiceError || opts.signal?.aborted || opts.model === fallback) throw err;
+    console.warn(`[nim] 旗艦模型 ${opts.model} 失敗，降級為 ${fallback}：`, err);
+    return { output: await nimComplete(prompt, { ...opts, model: fallback }), model: fallback, downgraded: true };
+  }
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;

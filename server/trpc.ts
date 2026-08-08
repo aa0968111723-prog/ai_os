@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { SEED_ADMIN_EMAIL } from "./services/seed";
 import { sessionGate } from "./services/sessionPolicy";
 import { touchPresence } from "./services/presence";
+import { isRevisionConflictError } from "./services/revisionGuard";
 
 export interface Context {
   auth: AuthState | null;
@@ -53,6 +54,13 @@ const t = initTRPC.context<Context>().create({
     // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
     if (error.cause instanceof ZodError) {
       return strip({ ...shape, message: error.cause.issues[0]?.message ?? shape.message });
+    }
+    // 樂觀併發衝突：把結構化 payload 掛進 data.conflict，讓前端畫得出
+    // 「韋澔剛剛更新了這一鏡 ／ 查看新版 ／ 重新套用我的修改」而不是一句「儲存失敗」。
+    // 只帶實體 id、版本號、現值與撞到的欄位——都是呼叫者本來就有權讀的那一筆資料。
+    if (isRevisionConflictError(error.cause)) {
+      const stripped = strip(shape);
+      return { ...stripped, data: { ...stripped.data, conflict: error.cause.conflict } } as typeof shape;
     }
     return strip(shape);
   },

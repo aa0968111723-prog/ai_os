@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
@@ -54,6 +54,10 @@ import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav
 import { StoryStage } from "../features/story-workspace/StoryStage";
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
+import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
+import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
+import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
+import type { ViewState } from "@shared/viewState";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
@@ -508,6 +512,73 @@ export function ProjectPage({ id }: { id: string }) {
   }, [followUserId, collab.peers]);
   useCollabMirrorFollow(collabMode, followUserId, collab.cursorsLiveRef, collab.focusZones, collab.containerRef);
   const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
+
+  /* ── Presenter / 語意跟隨（Phase 2）─────────────────────────
+     與上面的像素鏡像**並存而非取代**：鏡像在同尺寸桌機上更細膩，
+     語意跟隨則是唯一能跨手機／桌機把人帶到同一個內容物件的方式。 */
+
+  /**
+   * 廣播「我正在看什麼」。
+   *
+   * 直接沿用既有的 focus zone（COLLAB_ZONES）當來源，不另外算一套「我在哪個區塊」——
+   * zone 已經在跑而且準確，多一套只會多一個對不上的地方。
+   * sendView 內部會比對內容，沒變就不送：viewState 是離散事件，當成輪詢送
+   * 會讓整房每秒收到一堆一模一樣的封包。
+   */
+  const sendViewRef = useRef(collab.sendView);
+  sendViewRef.current = collab.sendView;
+  const selfZoneRef = useRef(collab.selfZone);
+  selfZoneRef.current = collab.selfZone;
+  useEffect(() => {
+    const report = () =>
+      sendViewRef.current(buildViewState({ zone: selfZoneRef.current, visibleSection: detectVisibleSection() }));
+    report();
+    // 捲動也要回報：專案頁是一條長捲軸，使用者純瀏覽時 zone 不會變，
+    // 只看 zone 的話跟隨者會停在原地而畫面上看不出哪裡不對。
+    // rAF 併批＋sendView 內部的內容比對，讓這條路徑不會變成每幀一個封包。
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        report();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [collab.selfZone, collab.connected]);
+
+  /**
+   * 被帶到主講者的位置。列表是非同步載入的、手機收合中的列 rect 為空，
+   * 第一次找不到目標很正常——所以重試幾次再放棄，而不是安靜地什麼都沒發生。
+   */
+  const navigateToPresenterView = useCallback((view: ViewState) => {
+    if (navigateToView(view)) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (navigateToView(view) || tries >= 20) window.clearInterval(timer);
+    }, 200);
+  }, []);
+
+  const presenterFollow = usePresenterFollow({
+    presenters: collab.presenters,
+    peerViews: collab.peerViews,
+    peers: collab.peers,
+    presentEnded: collab.presentEnded,
+    onNavigate: navigateToPresenterView,
+  });
+  /** 邀請被本地拒絕過就不再顯示（「不用了」＝這一場我不參加，不是暫時關掉） */
+  const [dismissedPresenters, setDismissedPresenters] = useState<string[]>([]);
+  const invitation =
+    presenterFollow.invitation && !dismissedPresenters.includes(presenterFollow.invitation.connId)
+      ? presenterFollow.invitation
+      : null;
+  /** 有幾個人跟著我（用房內 viewState 與我的位置比對太脆弱，直接數在場人數上限即可保守顯示） */
+  const followerCount = collab.selfPresenting ? Math.max(0, collab.peers.length - 1) : 0;
   /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
   const [presenceExpanded, setPresenceExpanded] = useState(false);
@@ -1389,6 +1460,11 @@ export function ProjectPage({ id }: { id: string }) {
                   </span>
                 );
               })}
+              {/* 「帶大家看」：按下去只會讓房裡其他人看到一張邀請卡，
+                  **不會切走任何人的畫面**。跟不跟由他們自己決定。 */}
+              {collab.connected && !collab.selfPresenting && (
+                <PresentButton peerCount={collab.peers.length - 1} onStart={() => collab.setPresenting(true)} />
+              )}
               <CollabModeBar
                 connected={collab.connected}
                 mode={collabMode}
@@ -1417,6 +1493,31 @@ export function ProjectPage({ id }: { id: string }) {
             極限精準鏡像：錨點＋螢幕比例鎖定，巢狀捲動雙次校正（非螢幕串流）。
             可點「退出鏡像」或再點對方名字取消。
           </Hint>
+        )}
+        {/* Presenter 的三張面孔。手機與桌機共用同一組（flexBasis:100% 讓它們自成一列，
+            不跟頂部 chip 擠在一起）——協作狀態在手機上尤其不能靠 hover 才看得到。 */}
+        {collab.selfPresenting && (
+          <div style={{ flexBasis: "100%", margin: "6px 0 0" }}>
+            <PresenterBadge followerCount={followerCount} onStop={() => collab.setPresenting(false)} />
+          </div>
+        )}
+        {invitation && (
+          <div style={{ flexBasis: "100%", margin: "6px 0 0" }}>
+            <PresenterInvite
+              presenter={invitation}
+              onJoin={() => presenterFollow.join(invitation)}
+              onDismiss={() => setDismissedPresenters((prev) => [...prev, invitation.connId])}
+            />
+          </div>
+        )}
+        {presenterFollow.state.status !== "off" && (
+          <div style={{ flexBasis: "100%", margin: "6px 0 0" }}>
+            <FollowStatusBar
+              state={presenterFollow.state}
+              onResume={presenterFollow.resume}
+              onLeave={presenterFollow.leave}
+            />
+          </div>
         )}
         <Button
           size="sm"

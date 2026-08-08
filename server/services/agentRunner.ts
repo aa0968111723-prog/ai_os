@@ -763,6 +763,45 @@ async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string
   }
 }
 
+/** 冪等寫入步驟的暫時性失敗重試上限（每 4 秒一輪＝最多多等約 12 秒才收攏 failed） */
+const IDEMPOTENT_WRITE_RETRY_CAP = 3;
+
+/**
+ * 冪等寫入步驟（筆記／行程／任務／資料列——effectId 先持久化、以 effectId 為主鍵或
+ * once-core 收據）的失敗收攏：**暫時性錯誤不再一擊斃命**。
+ *
+ * 此前任何一次 DB 連線抖動、SERVICE_UNAVAILABLE，都會把整份多步計畫收成 failed——
+ * 使用者只能整份 retry_run 重新規劃（再花一次規劃點數），而這些步驟本來就設計成
+ * 重跑安全（effectId 重放會撞到既有列而不是重複寫入）。
+ *
+ * 分流規則：可辨識的權限／驗證錯誤（TRPCError 的 FORBIDDEN／BAD_REQUEST／NOT_FOUND 等）
+ * 重試不會變合法，照舊立即 failRun；其餘（含非 TRPCError 的連線層錯誤）留在 running
+ * 讓下一 tick 重試，cap 次後收攏 failed——與 split_script 的有限重試同一哲學。
+ */
+async function failOrRetryIdempotentWrite(
+  run: RunRow,
+  steps: AgentStep[],
+  idx: number,
+  err: unknown,
+): Promise<void> {
+  const msg = err instanceof Error ? err.message : String(err);
+  const terminal =
+    err instanceof TRPCError
+    && err.code !== "SERVICE_UNAVAILABLE"
+    && err.code !== "INTERNAL_SERVER_ERROR"
+    && err.code !== "TIMEOUT";
+  if (!terminal) {
+    const step = steps[idx];
+    step.retries = (step.retries ?? 0) + 1;
+    if (step.retries < IDEMPOTENT_WRITE_RETRY_CAP) {
+      step.detail = `${msg}（自動重試 ${step.retries}/${IDEMPOTENT_WRITE_RETRY_CAP}）`;
+      await saveRun(run.id, { steps });
+      return;
+    }
+  }
+  return failRun(run, steps, idx, msg);
+}
+
 /** 同 sceneNo 是否已有 in-flight 生成（防並行寫入同一鏡互相覆蓋） */
 function hasInFlightSameScene(steps: AgentStep[], idx: number, sceneNo: number | null | undefined): boolean {
   if (sceneNo == null) return false;
@@ -1073,7 +1112,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = `已建立筆記「${row.title.slice(0, 30)}」`;
       auditAgentStep(run, step, idx, true);
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;
@@ -1103,7 +1142,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = result.replayed ? "已確認筆記先前完成追加" : `已追加至「${result.row.title.slice(0, 30)}」`;
       auditAgentStep(run, step, idx, true);
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;
@@ -1149,7 +1188,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = `已建立行程「${row.title.slice(0, 30)}」`;
       auditAgentStep(run, step, idx, true);
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;
@@ -1182,7 +1221,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = result.replayed ? "已確認行程先前完成更新" : `已更新行程「${result.row.title.slice(0, 30)}」`;
       auditAgentStep(run, step, idx, true);
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;
@@ -1228,7 +1267,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = task.assigneeId ? "已建立並指派人類任務" : "已建立待認領的人類任務";
       auditAgentStep(run, step, idx, true);
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;
@@ -1589,7 +1628,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       auditAgentStep(run, step, idx, true);
       void row;
     } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
     await saveDagProgress(run, steps);
     return;

@@ -5,7 +5,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { mockStoryExtract, sha256Hex } from "./storyParse";
-import { storyParseModelSchema } from "../../shared/story";
+import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
+import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
 
 const SAMPLE = [
   "角色：安倢（黑髮、柔和五官）、師父（灰袍長者）",
@@ -66,6 +67,37 @@ describe("mockStoryExtract", () => {
 
   it("同輸入同輸出（確定性；e2e 斷言的前提）", () => {
     expect(JSON.stringify(mockStoryExtract(SAMPLE))).toBe(JSON.stringify(mockStoryExtract(SAMPLE)));
+  });
+});
+
+describe("作者備註行不進解析", () => {
+  const WITH_NOTES = [
+    "註：這一場待補一段追車，先別動",
+    "角色：安倢（黑髮）",
+    "// TODO 跟導演確認結局",
+    "",
+    "安倢走進門。",
+  ].join("\n");
+
+  it("stripStoryNotes 整行拿掉、不留空行（留空行＝把一場戲切成兩場）", () => {
+    expect(stripStoryNotes(WITH_NOTES)).toBe(["角色：安倢（黑髮）", "", "安倢走進門。"].join("\n"));
+    expect(isStoryNoteLine("註: 半形冒號也算")).toBe(true);
+    expect(isStoryNoteLine("註冊流程")).toBe(false); // 「註」開頭但沒有冒號＝正文
+  });
+
+  it("備註不會長出角色、場景或分鏡（否則使用者會收到自己沒寫過的戲）", () => {
+    const plan = mockStoryExtract(WITH_NOTES);
+    expect(plan.characters.map((c) => c.name)).toEqual(["安倢"]);
+    const text = JSON.stringify(plan);
+    expect(text).not.toContain("追車");
+    expect(text).not.toContain("TODO");
+  });
+});
+
+describe("解析模型檔位", () => {
+  it("劇本解析用高階（旗艦）模型，不是日常主力", () => {
+    expect(NIM_REASONING_MODEL).toBe(NVIDIA_MODELS.llama3_405b);
+    expect(NIM_REASONING_MODEL).not.toBe(NIM_DEFAULT_MODEL);
   });
 });
 
