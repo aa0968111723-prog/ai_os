@@ -6,6 +6,7 @@ import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useFocusTrap, useRovingRadio } from "../components/interactions";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
+import posthog from "../posthog";
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
@@ -295,6 +296,12 @@ function ReportForm({
         targetRect: target?.targetRect,
         screenshotPath,
         groupId,
+      });
+      posthog.capture("feedback_submitted", {
+        feedback_category: category,
+        includes_screenshot: Boolean(screenshotPath),
+        has_target: Boolean(target),
+        selected_page_count: pages.size,
       });
       setJustSent(true);
     } catch {

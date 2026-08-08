@@ -310,6 +310,10 @@ describe("toSiteActionInput（label 等顯示欄位不上送）", () => {
       .toEqual({ type: "create_task", groupId: "g", projectId: "p", title: "t", description: undefined, assigneeId: "u", dueAt: undefined, priority: undefined });
     expect(toSiteActionInput({ type: "send_dm", peerId: "u", peerName: "N", body: "b", label: "L" }))
       .toEqual({ type: "send_dm", peerId: "u", body: "b" });
+    expect(toSiteActionInput({ type: "save_decision", groupId: "g", projectId: "p", projectTitle: "PT", title: "角色穿米白外套", label: "L" }))
+      .toEqual({ type: "save_decision", groupId: "g", projectId: "p", title: "角色穿米白外套" });
+    expect(toSiteActionInput({ type: "create_watch", groupId: "g", projectId: "p", projectTitle: "PT", kind: "generation_failed", watchLabel: "失敗提醒", label: "L" }))
+      .toEqual({ type: "create_watch", groupId: "g", projectId: "p", kind: "generation_failed", label: "失敗提醒" });
   });
 });
 
@@ -320,5 +324,7 @@ describe("siteActionDoneLink", () => {
     expect(siteActionDoneLink({ type: "add_note", groupId: "g", title: "t", content: "c", label: "L" }, { type: "add_note" })?.href).toBe("/planner");
     expect(siteActionDoneLink({ type: "create_task", groupId: "g", projectId: "pp", projectTitle: "PT", title: "t", label: "L" }, { type: "create_task" })?.href).toBe("/p/pp");
     expect(siteActionDoneLink({ type: "send_dm", peerId: "u", peerName: "N", body: "b", label: "L" }, { type: "send_dm" })?.href).toBe("/chat");
+    expect(siteActionDoneLink({ type: "save_decision", groupId: "g", projectId: "pp", projectTitle: "PT", title: "定案", label: "L" }, { type: "save_decision" })?.href).toBe("/p/pp");
+    expect(siteActionDoneLink({ type: "create_watch", groupId: "g", projectId: "pp", projectTitle: "PT", kind: "overdue_task", label: "L" }, { type: "create_watch" })?.href).toBe("/p/pp");
   });
 });

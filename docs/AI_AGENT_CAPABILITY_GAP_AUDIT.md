@@ -1,6 +1,6 @@
 # Aios Agent Capability Gap Audit
 
-> Audit baseline: branch `agent/assistant-agent-execution-rebuild`, commit `ff92ee6` (the current Assistant / Agent UX rebuild). This document treats that work as the current implementation. No legacy reset or replacement architecture is proposed.
+> Audit baseline: branch `agent/assistant-agent-execution-rebuild`, commit `f117896` (the merged Assistant / Agent UX rebuild plus its capability-gap implementation). This document treats that work and the current unpushed worktree as the current implementation. No legacy reset or replacement architecture is proposed.
 
 ## Executive finding
 
@@ -65,7 +65,7 @@ Legend: `Y` complete, `P` partial, `N` absent, `—` not applicable. Reliability
 
 ## Current retrieval reality
 
-There is no production semantic/vector retrieval to assume.
+There is no production vector index to assume. This iteration adds bounded hybrid ranking (keyword + metadata) and an optional semantic adapter. Until an adapter is configured, provenance explicitly reports `semanticApplied=false`; the UI never calls keyword-only evidence semantic.
 
 | Surface | Current technique | Semantic/vector? | Audit result |
 |---|---|---:|---|
@@ -211,40 +211,51 @@ This section is updated as implementation lands.
 Implemented and verified in this iteration:
 
 - Resource Resolver routes by intent/page, performs independent MCP reads in parallel, retries a safe transient read once, and retains `OK / EMPTY / TIMEOUT / AUTH_DENIED / NOT_AVAILABLE / TOOL_ERROR` per source.
+- Resolver coverage now includes Project Status, Knowledge, Decision Log, Notes, Tasks, Schedule, Storyboard, Assets, Generation History, AgentRuns, persistent Watches, Collaboration, and project-bound Databases. One unavailable source does not kill surviving evidence.
 - Project Assistant sends bounded conversation history and sanitized page/entity/selection context through both SSE and tRPC fallback.
 - Existing scene/intelligence/knowledge/database context preparation now starts together; optional intelligence, knowledge, and database-list failures degrade instead of killing the answer.
-- Source provenance is merged into the existing expandable UI. The first layer says `參考 N 個來源`; details show retrieval mode, duration, retry, empty, timeout, ACL, unavailable, and tool-error outcomes.
+- Source provenance is merged into the existing expandable UI. The first layer says `參考 N 個來源`; details show retrieval mode, whether semantic ranking really ran, duration, retry, empty, timeout, ACL, unavailable, and tool-error outcomes.
 - Compound action requests route to PLAN while one bounded write remains on the ACT fast path.
 - Site actions and direct script splitting re-read the created entity/entities. The UI distinguishes verified completion from `操作已送出，但驗證未通過`.
 - Failed AgentRuns can resume the existing durable plan from unfinished steps. Completed effects remain intact; ambiguous in-flight split-provider calls are not replayed.
-- A bounded capability-registry projection filters the existing MCP catalog by intent, page, and write permission. It is architecture-ready; not every Assistant prompt has migrated to it yet.
+- A bounded capability-registry projection filters the existing MCP catalog by intent, page, entity and write permission, and is injected into the Project Assistant prompt instead of exposing the complete catalog.
+- Decision Memory uses the existing `decisions` store: Assistant/MCP can list or save a confirmed project decision, verify it by reading it back, and undo by revoking it. No second memory database was created.
+- Persistent WATCH uses the existing Agent/Notification architecture plus `assistant_watches`: seven actionable watch kinds are evaluated from Tasks, Generation, Storyboard, Approvals and AgentRuns; identical evidence is rate-limited within a six-hour window.
+- Resource health records process-local read/empty/failure/timeout/latency signals. Unhealthy routed sources are retained in AiTrace so future routing can prefer a healthy fallback without inventing an answer.
+- Hybrid retrieval is a progressive adapter: keyword + metadata ranking is live for Knowledge, Notes, Assets and Databases; a bounded semantic adapter contract is tested but no vector infrastructure or false semantic claim was introduced.
+- The previous CI safe-path failure is fixed: repeatedly encoded protocol-relative paths, encoded backslashes, control characters and malformed encodings are rejected before client navigation.
+- Migration `0056_assistant_watches` is idempotent, registered in the migration revision ledger, and covered by the legacy-adoption guard.
 
 Automated evidence:
 
-- Focused server/shared suite: 142/142 passed, including read-back verification and no-hallucinated-success coverage.
-- Focused Assistant client suite: 51/51 passed after compatibility updates; AskSources outcome coverage is included.
-- Full server suite: 2,356 passed, 77 skipped, 1 unrelated pre-existing Windows path-separator assertion failed (`userAvatar.test.ts`).
-- Full client suite: 1,657 passed, 9 unrelated failures across StoryboardScript timing/state, a FAB CSS source contract, safe-path encoding, and Planner source-order contract. None of the failing files were modified in this iteration.
+- Focused Agent/Resolver/Memory/Router server+shared suite: 45/45 passed.
+- Migration ledger and WATCH suite: 27/27 passed.
+- Focused affected Assistant client suite: 44/44 passed, including source disclosure, direct decision/watch action cards, and encoded safe-path rejection.
+- Full server run after the migration fix: 2,344 passed and 98 skipped; one unrelated pre-existing Windows path-separator assertion failed (`userAvatar.test.ts`). The storage persistence suite's setup hook also timed out on this Windows workspace and therefore skipped its 21 tests; it does not import any changed file.
+- Full client run before updating the new provenance label: 1,657 passed with 9 failures. The only touched failure (`AskSources`) was fixed and then passed in the 44/44 focused run. The remaining eight failures are in pre-existing `StoryboardScript`, FAB CSS-contract and Planner source-order tests; none imports a file changed by this iteration.
 - TypeScript `tsc --noEmit`: passed.
 - Production build: passed (Vite 618 modules plus bundled server).
+- Import-boundary, UI-primitive and hooks-after-return checks: passed.
+- GitHub CI after the MCP catalog correction: both build, test, migration, container, lint-gates, and E2E jobs passed. The two E2E jobs completed in 6m41s and 6m45s with all 77 registered MCP tools represented in the exact catalog assertion.
+- Agent planner canary could not run because this workspace has no `FAL_KEY`; no provider result is claimed.
 
 Latency evidence:
 
 - Before: project context preparation awaited scenes/intelligence, then knowledge, then readable database discovery. Its critical path was `max(scene, intelligence) + knowledge + database` before the model could start.
 - After: all five preparations, including routed retrieval, start in one `Promise.all`; the critical path is their maximum. The resolver parallelism test starts four independent 100 ms readers together (`peak=4`) and completes within the test's <200 ms bound, versus ~400 ms if serialized.
+- Every routed source now records duration/attempts/outcome, and the process-local health tracker records average latency, zero results, timeouts and consecutive failures.
 - Production p50/p95 before/after was not measured in this workspace and is not claimed. Per-source and resolver duration is now retained in AiTrace/UI so deployment telemetry can establish it.
 
 Real UI acceptance result:
 
-- Production build was served locally and opened through Playwright. The public page and `/login` rendered with correct titles and accessible controls.
-- The ten authenticated Assistant scenarios were **not executed**: this workspace has no `DATABASE_URL` and no test account/session. The server correctly reported that product APIs would fail without PostgreSQL. Therefore this audit does not claim real authenticated UI acceptance.
+- The production build was served locally and opened in Chrome. The landing page rendered its product loop, safety/cost language, navigation, and accessible headings/links; `/login` rendered labeled Email/Password fields, password visibility control, sign-in button, invite notice and install controls.
+- The PR preview deployed successfully, but it redirects to Vercel team authentication. The available production project route rendered the Aios offline screen. Aios credentials supplied for acceptance were not sent to Vercel, persisted, or committed.
+- The ten authenticated Assistant scenarios were **not executed** because neither reachable environment exposed an Aios login/project session. Therefore this audit does not claim real authenticated UI acceptance or a live provider call.
 - Focused component/UI automation covers project switching, SSE behavior, direct action cards, source disclosure, and Assistant interaction, but it is not counted as the requested authenticated real-world run.
 
 Still incomplete / deliberately not overstated:
 
-- Persistent WATCH registration and long-lived health-aware routing remain partial; the existing activity/watch surfaces are retained.
-- Decision Memory promotion (for example, converting a confirmed wardrobe rule into a typed durable decision) is designed but not implemented.
-- Attention Engine notification deduplication/rate limiting is not added; existing project intelligence and watch digest remain the source.
-- The capability registry exists, but remaining large legacy prompts have not all migrated from static tool descriptions.
-- No vector/embedding infrastructure was introduced. Retrieval is honestly labeled structured/keyword/metadata/hybrid orchestration; semantic retrieval remains a future adapter.
-- Authenticated real UI acceptance, deployed p50/p95 latency comparison, and a live resource-timeout drill require a database-backed test environment.
+- Authenticated real UI acceptance, deployed p50/p95 latency comparison, and a live resource-timeout drill still require a reachable database-backed Aios environment; the supplied Aios identity is available for that run once the preview protection or production outage is resolved.
+- No vector/embedding infrastructure was introduced. The semantic adapter contract exists, but production evidence remains keyword + metadata until a real adapter is configured.
+- Global/team Assistant keeps its narrower hand-authored action schema because those actions are not the same as the Project MCP catalog; the Project Assistant is the migrated registry-backed surface.
+- Existing unrelated red tests remain visible above; this change does not silently rewrite those product areas or their tests.

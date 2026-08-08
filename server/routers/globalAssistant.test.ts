@@ -106,6 +106,18 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0]).toMatchObject({ type: "send_dm", peerId: "user-2", peerName: "阿明" });
   });
 
+  it("resolves decision memory and persistent WATCH only against real projects", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "save_decision", projectRef: "p1", title: "角色都穿米白外套" },
+      { type: "create_watch", projectRef: "p2", kind: "generation_failed", label: "生成失敗提醒" },
+      { type: "save_decision", projectRef: "missing", title: "不能寫入" },
+      { type: "create_watch", projectRef: "missing", kind: "overdue_task" },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ type: "save_decision", projectId: "proj-1", title: "角色都穿米白外套" });
+    expect(out[1]).toMatchObject({ type: "create_watch", projectId: "proj-2", kind: "generation_failed" });
+  });
+
   it("空白標題（trim 後為空）整筆丟：不給按下去必吃 BAD_REQUEST 的確認卡", () => {
     const out = resolveSiteActions(refs(), [
       { type: "add_note", projectRef: "p1", title: "   ", content: "內容" },

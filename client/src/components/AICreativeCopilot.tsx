@@ -48,6 +48,10 @@ export function toSiteActionInput(a: SiteAction) {
       return { type: a.type, groupId: a.groupId, title: a.title, kind: a.kind, platform: a.platform } as const;
     case "add_note":
       return { type: a.type, groupId: a.groupId, projectId: a.projectId, title: a.title, content: a.content } as const;
+    case "save_decision":
+      return { type: a.type, groupId: a.groupId, projectId: a.projectId, title: a.title } as const;
+    case "create_watch":
+      return { type: a.type, groupId: a.groupId, projectId: a.projectId, kind: a.kind, label: a.watchLabel } as const;
     case "add_schedule_item":
       return { type: a.type, groupId: a.groupId, projectId: a.projectId, title: a.title, startsAt: a.startsAt, endsAt: a.endsAt, note: a.note } as const;
     case "create_task":
@@ -63,6 +67,8 @@ export function toSiteActionInput(a: SiteAction) {
 export function siteActionDoneLink(a: SiteAction, result: { type: string; projectId?: string }): { href: string; label: string } | null {
   if (a.type === "create_project" && result.projectId) return { href: `/p/${result.projectId}`, label: "前往專案" };
   if (a.type === "add_schedule_item" || a.type === "add_note") return { href: "/planner", label: "查看筆記排程" };
+  if (a.type === "save_decision") return { href: `/p/${a.projectId}`, label: "查看專案決策" };
+  if (a.type === "create_watch") return { href: `/p/${a.projectId}`, label: "查看專案" };
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
   if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
@@ -120,6 +126,8 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
 
 function undoSiteActionInput(item: ExecutedSiteAction) {
   if (item.result.type === "add_note") return { type: "add_note", id: item.result.noteId } as const;
+  if (item.result.type === "save_decision") return { type: "save_decision", id: item.result.decisionId } as const;
+  if (item.result.type === "create_watch") return { type: "create_watch", id: item.result.watchId } as const;
   if (item.result.type === "add_schedule_item") return { type: "add_schedule_item", id: item.result.scheduleItemId } as const;
   if (item.result.type === "create_task") return { type: "create_task", id: item.result.taskId } as const;
   return null;

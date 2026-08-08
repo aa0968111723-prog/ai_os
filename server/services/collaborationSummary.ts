@@ -36,6 +36,7 @@ const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const ATTENTION_WEIGHT: Record<string, number> = {
   approval: 100,       // 等我核准——我不動，別人就動不了
   agent_confirm: 95,   // AI 等我確認才能繼續
+  assistant_attention: 90,
   annotation: 80,      // 有人指出問題，還沒解決
   mention: 60,
   reply: 50,
@@ -353,6 +354,7 @@ function attentionKindOf(notificationKind: string): AttentionKind {
   if (notificationKind in ATTENTION_WEIGHT) return notificationKind as AttentionKind;
   if (notificationKind === "generation_pending_approval") return "approval";
   if (notificationKind === "annotation_resolved") return "other";
+  if (notificationKind === "assistant_attention") return "assistant_attention";
   return "other";
 }
 

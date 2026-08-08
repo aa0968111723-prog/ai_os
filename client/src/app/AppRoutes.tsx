@@ -1,9 +1,8 @@
 import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
 import { GroupQuotaSettings } from "../components/GroupQuotaSettings";
+import { NoGroupGuide } from "../components/NoGroupGuide";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { EmptyState, Hint } from "../components/ui";
-import { Icon } from "../components/Icon";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
@@ -146,7 +145,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
 }
 
 /** 已登入但尚未加入組別：保留帳號層級與求助用功能，避免等待分組時完全無法操作。 */
-export function UngroupedRoutes() {
+export function UngroupedRoutes({ onRefresh }: { onRefresh?: () => void }) {
   return (
     <Switch>
       <Route path="/settings"><SettingsPage /></Route>
@@ -161,7 +160,7 @@ export function UngroupedRoutes() {
       {/* 分享收件：未分組只能「傳給夥伴」（頁內已依 groupId 空值收斂選項） */}
       <Route path="/share-target"><ShareTargetPage groupId="" /></Route>
       <Route>
-        <EmptyState icon={<Icon name="Clock" />} title={<>你已成功加入 ✓ 還差一步</>} description={<>帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。</>} action={<><Hint>等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</Hint></>} style={{ marginTop: "var(--sp-32)" }} />
+        <NoGroupGuide onRefresh={onRefresh} />
       </Route>
     </Switch>
   );

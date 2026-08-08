@@ -311,11 +311,15 @@ describe("legacy migration adoption bridge", () => {
     //   共 4 句——逐句確認過純新增、無資料搬移、無既有欄位改動，重跑必為 no-op；
     //   0055 是 Story 共編快照：collab_documents 一句 CREATE TABLE IF NOT EXISTS、
     //   一句 CREATE UNIQUE INDEX IF NOT EXISTS、一句 CREATE INDEX IF NOT EXISTS，
-    //   共 3 句——純新增新表、不動任何既有表或資料，重跑必為 no-op。）
+    //   共 3 句——純新增新表、不動任何既有表或資料，重跑必為 no-op；
+    //   0056 是 Assistant 持續監看：assistant_watches 一句 CREATE TABLE IF NOT EXISTS、
+    //   一句 CREATE UNIQUE INDEX IF NOT EXISTS、兩句 CREATE INDEX IF NOT EXISTS，
+    //   共 4 句——同樣只新增表與索引，不修改既有資料，重跑必為 no-op。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3);
+    // 0057 Intelligence Library adds 25 tables plus 55 guarded indexes only.
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Meta } from "./ui";
+import posthog from "../posthog";
 
 /** 打包 job 的 localStorage key 前綴（逐專案）——重整／關頁回來要接回同一個 job。 */
 const EXPORT_JOB_LS_PREFIX = "aios.exportJob.";
@@ -49,7 +50,15 @@ export function ExportJobButton({
       /* 存不了只影響「重整後能不能接回進度」，不影響本次打包 */
     }
   };
-  const create = trpc.exportJobs.create.useMutation({ onSuccess: (d) => setJobId(d.job.id) });
+  const create = trpc.exportJobs.create.useMutation({
+    onSuccess: (d) => {
+      posthog.capture("export_requested", {
+        export_scope: assetIds?.length ? "selected_assets" : "project",
+        selected_asset_count: assetIds?.length ?? 0,
+      });
+      setJobId(d.job.id);
+    },
+  });
   const job = trpc.exportJobs.get.useQuery(
     { id: jobId ?? "" },
     {

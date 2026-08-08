@@ -31,6 +31,15 @@ describe("assistant resource resolver", () => {
     expect(routed).not.toContain("database");
   });
 
+  it("routes remembered decisions and persistent monitoring to their real sources", () => {
+    expect(routeAssistantResources("之前討論過角色衣服嗎？")).toEqual(expect.arrayContaining([
+      "decisions", "knowledge", "notes",
+    ]));
+    expect(routeAssistantResources("持續監看生成失敗並提醒我")).toEqual(expect.arrayContaining([
+      "watches", "generations",
+    ]));
+  });
+
   it("distinguishes EMPTY from an error and preserves fallback evidence", async () => {
     const results = await executeResourceReads([
       reader("knowledge", async () => []),
