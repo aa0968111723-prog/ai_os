@@ -33,6 +33,7 @@ export const collaborationRouter = router({
           pendingApprovals: 0,
           attention: [],
           threads: [],
+          recentDecisions: [],
           recentActivity: [],
           activeProjects: [],
         };

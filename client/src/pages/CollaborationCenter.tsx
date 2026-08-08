@@ -21,6 +21,7 @@ const TABS = [
   { key: "attention", label: "找我" },
   { key: "threads", label: "討論" },
   { key: "tasks", label: "任務" },
+  { key: "decisions", label: "決策" },
   { key: "activity", label: "動態" },
 ] as const;
 
@@ -152,6 +153,34 @@ export function CollaborationCenter({ groupId }: { groupId: string | null }) {
             s.attention
               .filter((a) => a.kind === "task" || a.kind === "approval")
               .map((item) => <AttentionRow key={item.id} item={item} />)
+          )}
+        </Card>
+      )}
+
+      {s && tab === "decisions" && (
+        <Card as="section" aria-label="決策">
+          <Meta as="p" style={{ margin: "0 0 6px" }}>
+            真正定案的內容。撤銷是劃線不是消失——「曾經定過又推翻」本身就是紀錄。
+          </Meta>
+          {s.recentDecisions.length === 0 ? (
+            <EmptyState title="還沒有定案" description="在留言上按「轉決策」，把討論的結論保存下來。" />
+          ) : (
+            s.recentDecisions.map((d) => (
+              <div key={d.id} data-testid="decision-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                <p style={{ margin: 0, fontSize: "var(--fs-13)", textDecoration: d.revokedAt ? "line-through" : undefined, opacity: d.revokedAt ? 0.6 : 1 }}>
+                  ✓ {d.title}
+                </p>
+                <Meta as="p" style={{ margin: "2px 0 0", fontSize: "var(--fs-11)" }}>
+                  {[d.decidedByName, d.projectTitle].filter(Boolean).join(" · ")} · {relTime(d.at)}
+                  {d.revokedAt ? " ·（已撤銷）" : ""}
+                </Meta>
+                {d.sourceMessageId && (
+                  <Link href={`/p/${d.projectId}?focus=messages&mid=${d.sourceMessageId}`}>
+                    <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>看原討論 →</Meta>
+                  </Link>
+                )}
+              </div>
+            ))
           )}
         </Card>
       )}

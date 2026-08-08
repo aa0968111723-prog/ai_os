@@ -50,6 +50,13 @@ export const messages = pgTable("messages", {
    */
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: uuid("resolved_by"),
+  /**
+   * 協作語意（shared/collabIntent.ts：comment/question/suggestion/change_request/
+   * decision/blocker）。可空、純 text、無 CHECK（同 kind 慣例）。
+   * **預設不填**：UI 不強迫使用者先分類，intent 由 thread action 或建議 chip 事後補上——
+   * 要求每則留言先選類型的系統，最後每則都會是「一般」。
+   */
+  intent: text("intent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectIdx: index("messages_project_idx").on(t.projectId, t.createdAt),
@@ -145,4 +152,33 @@ export const messageReads = pgTable("message_reads", {
 }, (t) => ({
   userProjectIdx: index("message_reads_user_project_idx").on(t.userId, t.projectId),
   userProjectUq: uniqueIndex("message_reads_user_project_uq").on(t.userId, t.projectId),
+}));
+
+/**
+ * 決策（Decision Log）：真正定案的內容——「用暖色版本 B」「Shot 03 改 6 秒」。
+ *
+ * 獨立成表而不是 messages 的一種 kind，因為兩者生命週期不同：message 是時間軸上的
+ * 一句話，會被往後的訊息淹沒；decision 是會被反覆引用的定案，要能被列表、被 AI 當
+ * 上下文讀、被撤銷而不消失。硬塞進 message 會讓「已解決」與「已定案」永遠分不開。
+ *
+ * source_message_id＝provenance（由哪則留言／標注定案，可跳回原討論串）；
+ * ref_type/ref_id 指向 scene/asset/generation（邏輯關聯、不加 FK，與全庫一致）。
+ * 撤銷用 revoked_at 標記而非刪列——「曾經定過又推翻」本身就是要留下的紀錄。
+ */
+export const decisions = pgTable("decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  /** 定案本文（一句話；上限見 shared/collabIntent.DECISION_TITLE_MAX） */
+  title: text("title").notNull(),
+  refType: text("ref_type"),
+  refId: uuid("ref_id"),
+  sourceMessageId: uuid("source_message_id"),
+  decidedBy: uuid("decided_by").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: uuid("revoked_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  projectCreatedIdx: index("decisions_project_created_idx").on(t.projectId, t.createdAt),
+  groupCreatedIdx: index("decisions_group_created_idx").on(t.groupId, t.createdAt),
 }));

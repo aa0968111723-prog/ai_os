@@ -21,6 +21,8 @@ vi.mock("../api", () => {
     trpc: {
       useUtils: () => ({
         messages: { list: { invalidate: vi.fn() } },
+        tasks: { listByProject: { invalidate: vi.fn() } },
+        decisions: { list: { invalidate: vi.fn() } },
         client: { messages: { list: { query: (...a: unknown[]) => olderPageQuery(...a) } } },
       }),
       auth: { me: { useQuery: () => ({ data: { user: { id: "me", name: "我" } }, isLoading: false }) } },
@@ -33,6 +35,8 @@ vi.mock("../api", () => {
         setPinned: { useMutation: noopMutation },
       },
       notes: { add: { useMutation: noopMutation }, list: { useQuery: () => ({ data: [] }) } },
+      tasks: { create: { useMutation: noopMutation } },
+      decisions: { create: { useMutation: noopMutation } },
       schedule: { add: { useMutation: noopMutation }, list: { useQuery: () => ({ data: { items: [] } }) } },
       projects: {
         listMemberRoles: {

@@ -292,11 +292,14 @@ describe("legacy migration adoption bridge", () => {
     //   0051 是樂觀併發的 rev 欄：七張高衝突表各一句
     //   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS "rev" integer DEFAULT 0 NOT NULL`——
     //   逐句確認過皆為 IF NOT EXISTS 的純新增欄位，既有列一律以 DEFAULT 0 補齊，
-    //   沒有改動任何既有欄位型別，也沒有資料搬移，重跑必為 no-op。）
+    //   沒有改動任何既有欄位型別，也沒有資料搬移，重跑必為 no-op；
+    //   0052 是協作決策：messages 一句 ADD COLUMN IF NOT EXISTS "intent"（可空、無預設值
+    //   改寫）、decisions 一句 CREATE TABLE IF NOT EXISTS、兩句 CREATE INDEX IF NOT EXISTS，
+    //   共 4 句——逐句確認過純新增、無資料搬移、無既有欄位改動，重跑必為 no-op。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 4);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

@@ -80,6 +80,19 @@ export interface CollaborationSummary {
     openAnnotations: number;
     lastAt: string;
   }>;
+  /** 最近的定案（Decision Log；含已撤銷——劃線顯示，不是消失） */
+  recentDecisions: Array<{
+    id: string;
+    title: string;
+    projectId: string;
+    projectTitle: string | null;
+    decidedByName: string | null;
+    refType: string | null;
+    refId: string | null;
+    sourceMessageId: string | null;
+    revokedAt: string | null;
+    at: string;
+  }>;
   recentActivity: Array<{
     id: string;
     kind: string;
@@ -124,12 +137,13 @@ export async function collaborationSummary(userId: string, groupId: string): Pro
       pendingApprovals: 0,
       attention: [],
       threads: [],
+      recentDecisions: [],
       recentActivity: [],
       activeProjects: [],
     };
   }
 
-  const [notifRows, annotationCounts, taskRows, threadRows, activityRows] = await Promise.all([
+  const [notifRows, annotationCounts, taskRows, threadRows, activityRows, decisionRows] = await Promise.all([
     // 未讀收件匣：一支查完，之後在記憶體分類，不對同一張表打五支 count
     db
       .select()
@@ -192,12 +206,22 @@ export async function collaborationSummary(userId: string, groupId: string): Pro
       .where(and(inArray(schema.messages.projectId, projectIds), gte(schema.messages.createdAt, since)))
       .orderBy(desc(schema.messages.createdAt))
       .limit(MAX_ACTIVITY),
+
+    // 決策：AI Coordinator 與協作中心「決策」分頁共用的同一份清單。
+    // 不設時間窗——定案的价值正是在於它不會被時間軸淹沒。
+    db
+      .select()
+      .from(schema.decisions)
+      .where(inArray(schema.decisions.projectId, projectIds))
+      .orderBy(desc(schema.decisions.createdAt))
+      .limit(20),
   ]);
 
   const actorIds = [
     ...notifRows.map((n) => n.actorId).filter((v): v is string => Boolean(v)),
     ...activityRows.map((a) => a.userId),
     ...taskRows.map((t) => t.assigneeId).filter((v): v is string => Boolean(v)),
+    ...decisionRows.map((d) => d.decidedBy),
   ];
   const names = await namesFor(actorIds);
 
@@ -284,6 +308,18 @@ export async function collaborationSummary(userId: string, groupId: string): Pro
       count: t.n,
       openAnnotations: t.openN,
       lastAt: t.lastAt instanceof Date ? t.lastAt.toISOString() : String(t.lastAt),
+    })),
+    recentDecisions: decisionRows.map((d) => ({
+      id: d.id,
+      title: d.title,
+      projectId: d.projectId,
+      projectTitle: titleOf.get(d.projectId) ?? null,
+      decidedByName: names.get(d.decidedBy) ?? null,
+      refType: d.refType,
+      refId: d.refId,
+      sourceMessageId: d.sourceMessageId,
+      revokedAt: d.revokedAt ? d.revokedAt.toISOString() : null,
+      at: d.createdAt.toISOString(),
     })),
     recentActivity: activityRows.map((a) => ({
       id: a.id,
