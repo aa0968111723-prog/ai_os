@@ -24,6 +24,7 @@ import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../
 import { findProjectLinkedRows } from "../services/databaseProjectLinks";
 import { listProjectBoundTableIds } from "../services/projectDataBindings";
 import { dataHubProviderFromImportKind } from "../../shared/dataHub";
+import { purgeTableIntelligence } from "../services/intelligencePrivacy";
 import {
   buildBoundTableFields,
   getProjectDataTemplate,
@@ -185,6 +186,9 @@ export const databasesRouter = router({
         })
         .where(eq(schema.dataTables.id, table.id))
         .returning();
+      if (input.agentAccess === "none" && table.agentAccess !== "none") {
+        await purgeTableIntelligence(table.id);
+      }
       return updated;
     }),
 
