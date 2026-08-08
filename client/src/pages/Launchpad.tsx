@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
+import { registerAssistantPage } from "../lib/assistantContext";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
@@ -86,6 +87,8 @@ function readRecent(): string[] {
 
 /** 首頁作業台：搜尋/篩選/排序的專案卡格 ＋ 頂部精簡建立列 */
 export function Launchpad({ groupId }: { groupId: string }) {
+  // 助手頁面感知：首頁＝全站視角（快捷變成「安排今天／繼續上次／哪裡卡住」）
+  useEffect(() => registerAssistantPage({ pageType: "home" }), []);
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();

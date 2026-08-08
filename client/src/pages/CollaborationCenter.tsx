@@ -10,7 +10,8 @@
  * 資料來源全部是既有系統：notifications／messages／project_tasks／realtime 房間。
  * 沒有第二套留言系統，也沒有第二套通知系統。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { registerAssistantFocus, registerAssistantPage } from "../lib/assistantContext";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -21,6 +22,7 @@ const TABS = [
   { key: "attention", label: "找我" },
   { key: "threads", label: "討論" },
   { key: "tasks", label: "任務" },
+  { key: "decisions", label: "決策" },
   { key: "activity", label: "動態" },
 ] as const;
 
@@ -28,6 +30,9 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export function CollaborationCenter({ groupId }: { groupId: string | null }) {
   const [tab, setTab] = useState<TabKey>("attention");
+  // 助手頁面感知：協作中心以任務為主體，分頁一起報（快捷因此是任務型）
+  useEffect(() => registerAssistantPage({ pageType: "tasks" }), []);
+  useEffect(() => registerAssistantFocus({ entityType: "task", activeTab: tab }), [tab]);
   const q = trpc.collaboration.summary.useQuery(
     { groupId: groupId ?? undefined },
     { enabled: Boolean(groupId), refetchInterval: 30_000 },
@@ -152,6 +157,34 @@ export function CollaborationCenter({ groupId }: { groupId: string | null }) {
             s.attention
               .filter((a) => a.kind === "task" || a.kind === "approval")
               .map((item) => <AttentionRow key={item.id} item={item} />)
+          )}
+        </Card>
+      )}
+
+      {s && tab === "decisions" && (
+        <Card as="section" aria-label="決策">
+          <Meta as="p" style={{ margin: "0 0 6px" }}>
+            真正定案的內容。撤銷是劃線不是消失——「曾經定過又推翻」本身就是紀錄。
+          </Meta>
+          {s.recentDecisions.length === 0 ? (
+            <EmptyState title="還沒有定案" description="在留言上按「轉決策」，把討論的結論保存下來。" />
+          ) : (
+            s.recentDecisions.map((d) => (
+              <div key={d.id} data-testid="decision-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                <p style={{ margin: 0, fontSize: "var(--fs-13)", textDecoration: d.revokedAt ? "line-through" : undefined, opacity: d.revokedAt ? 0.6 : 1 }}>
+                  ✓ {d.title}
+                </p>
+                <Meta as="p" style={{ margin: "2px 0 0", fontSize: "var(--fs-11)" }}>
+                  {[d.decidedByName, d.projectTitle].filter(Boolean).join(" · ")} · {relTime(d.at)}
+                  {d.revokedAt ? " ·（已撤銷）" : ""}
+                </Meta>
+                {d.sourceMessageId && (
+                  <Link href={`/p/${d.projectId}?focus=messages&mid=${d.sourceMessageId}`}>
+                    <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>看原討論 →</Meta>
+                  </Link>
+                )}
+              </div>
+            ))
           )}
         </Card>
       )}

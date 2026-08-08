@@ -38,6 +38,10 @@ function summary(over: Record<string, unknown> = {}) {
       { projectId: "p-1", projectTitle: "挑戰營回顧影片", refType: "scene", refId: "s-8", label: "分鏡", count: 5, openAnnotations: 1, lastAt: "2026-08-07T00:00:00.000Z" },
       { projectId: "p-1", projectTitle: "挑戰營回顧影片", refType: null, refId: null, label: "專案討論", count: 3, openAnnotations: 0, lastAt: "2026-08-06T00:00:00.000Z" },
     ],
+    recentDecisions: [
+      { id: "d-1", title: "使用暖色版本 B", projectId: "p-1", projectTitle: "挑戰營回顧影片", decidedByName: "Bruce", refType: "scene", refId: "s-8", sourceMessageId: "m-9", revokedAt: null, at: "2026-08-07T00:00:00.000Z" },
+      { id: "d-2", title: "結尾用 A 版", projectId: "p-1", projectTitle: "挑戰營回顧影片", decidedByName: "Bruce", refType: null, refId: null, sourceMessageId: null, revokedAt: "2026-08-07T01:00:00.000Z", at: "2026-08-06T00:00:00.000Z" },
+    ],
     recentActivity: [
       { id: "a-1", kind: "annotation", actorName: "敏豐", projectId: "p-1", projectTitle: "挑戰營回顧影片", summary: "標注：這裡人物眼神不自然", at: "2026-08-07T00:00:00.000Z" },
     ],
@@ -110,6 +114,27 @@ describe("CollaborationCenter", () => {
     summaryQuery.mockReturnValue({ data: undefined, isLoading: false });
     render(<CollaborationCenter groupId={null} />);
     expect(screen.getByText("還沒有團隊")).toBeInTheDocument();
+  });
+});
+
+describe("CollaborationCenter 決策分頁", () => {
+  it("列出定案；已撤銷的劃線顯示而不是消失——「曾經定過又推翻」本身就是紀錄", async () => {
+    const user = userEvent.setup();
+    render(<CollaborationCenter groupId="g-1" />);
+    await user.click(screen.getByRole("tab", { name: /決策/ }));
+    const rows = screen.getAllByTestId("decision-row");
+    expect(rows[0]).toHaveTextContent("使用暖色版本 B");
+    expect(rows[0]).toHaveTextContent("Bruce");
+    // 已撤銷的仍在清單裡，標記（已撤銷）
+    expect(rows[1]).toHaveTextContent("結尾用 A 版");
+    expect(rows[1]).toHaveTextContent("已撤銷");
+  });
+
+  it("有來源留言的定案給「看原討論」深連結——provenance 是雙向的", async () => {
+    const user = userEvent.setup();
+    render(<CollaborationCenter groupId="g-1" />);
+    await user.click(screen.getByRole("tab", { name: /決策/ }));
+    expect(screen.getByText("看原討論 →")).toBeInTheDocument();
   });
 });
 

@@ -15,6 +15,7 @@ import { AgentActivityHud } from "./components/AgentActivityHud";
 import { RouteFallback } from "../components/RouteFallback";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
+import { safeInternalPath } from "../lib/safePath";
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 
@@ -166,15 +167,10 @@ export function AppShell() {
     if (!("serviceWorker" in navigator)) return;
     const onMsg = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | undefined;
-      // #274：擋協議相對路徑 //evil.com（startsWith("/") 仍為 true）
-      if (
-        data?.type === "aios:navigate" &&
-        typeof data.url === "string" &&
-        data.url.startsWith("/") &&
-        !data.url.startsWith("//")
-      ) {
-        navigate(data.url);
-      }
+      // #274：只接受同源站內路徑——擋 //evil.com（startsWith("/") 仍為 true）、反斜線與控制字元
+      if (data?.type !== "aios:navigate" || typeof data.url !== "string") return;
+      const path = safeInternalPath(data.url);
+      if (path) navigate(path);
     };
     navigator.serviceWorker.addEventListener("message", onMsg);
     return () => navigator.serviceWorker.removeEventListener("message", onMsg);

@@ -17,6 +17,8 @@ const voiceMutate = vi.fn();
 const ambienceMutate = vi.fn();
 const setCurrentMutate = vi.fn();
 const invalidate = vi.fn();
+/** 標注清單（預設空；tMs 情境會覆寫） */
+const annotationsQuery = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
 
 vi.mock("../api", () => ({
   trpc: {
@@ -35,7 +37,7 @@ vi.mock("../api", () => ({
     },
     // 圖上標注：本檔專注在版本與生成的狀態機，標注另有專屬情境；這裡回空清單
     messages: {
-      listByRef: { useQuery: () => ({ data: [], isLoading: false }) },
+      listByRef: { useQuery: () => annotationsQuery() },
       postAnnotation: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
       resolveAnnotation: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
@@ -106,6 +108,7 @@ function mountStudio(over: { canEdit?: boolean } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   versionsQuery.mockReturnValue({ data: serverData(), isLoading: false, isError: false, refetch: vi.fn() });
+  annotationsQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
 describe("SceneStudio", () => {
@@ -569,5 +572,83 @@ describe("影片修正：把這一鏡的動作走位填成修正指示", () => {
     mountStudio();
     await user.selectOptions(screen.getByRole("combobox", { name: /用哪個模型修/ }), videoModel());
     expect(screen.queryByRole("button", { name: /用它當修正指示/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("影片時間碼留言（tMs；驗收 J）", () => {
+  /** 影片版本＋一則帶時間碼的標注（釘在舞台上的那一版） */
+  function mountWithVideoAnnotation() {
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z", assetKind: "video", assetUrl: "https://example.test/g1.mp4" })],
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    annotationsQuery.mockReturnValue({
+      data: [{
+        id: "m-1", userId: "u-wei", userName: "韋澔", kind: "annotation",
+        body: "這裡人物切太快", anchorAssetId: "asset-g1", ax: 0.5, ay: 0.5,
+        tMs: 18_000, resolvedAt: null, resolvedBy: null, mentions: null,
+        createdAt: new Date("2026-08-07T00:00:00.000Z"),
+      }],
+      isLoading: false,
+    });
+    return mountStudio();
+  }
+
+  it("留言顯示「00:18」時間碼；點了就把舞台影片 seek 到那一刻並暫停", async () => {
+    const user = userEvent.setup();
+    const { container } = mountWithVideoAnnotation();
+    await user.click(screen.getByRole("tab", { name: /標注/ }));
+    const seek = screen.getByTestId("tms-seek");
+    expect(seek).toHaveTextContent("00:18");
+    const video = container.querySelector("video")!;
+    expect(video).toBeTruthy();
+    const pause = vi.fn();
+    Object.defineProperty(video, "pause", { value: pause, configurable: true });
+    await user.click(seek);
+    // 「這裡人物切太快」的「這裡」終於指得回去：秒級 seek＋暫停停在那格畫面
+    expect(video.currentTime).toBe(18);
+    expect(pause).toHaveBeenCalled();
+  });
+
+  it("標注在別的版本上時 seek 鎖住——先「看那一版」，否則會跳錯影片", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [
+          genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z", assetKind: "video", assetUrl: "https://example.test/g1.mp4" }),
+          genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z", assetKind: "video", assetUrl: "https://example.test/g2.mp4" }),
+        ],
+        currentAssetId: "asset-g2",
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    annotationsQuery.mockReturnValue({
+      data: [{
+        id: "m-1", userId: "u-wei", userName: "韋澔", kind: "annotation",
+        body: "舊版的問題", anchorAssetId: "asset-g1", ax: 0.5, ay: 0.5,
+        tMs: 18_000, resolvedAt: null, resolvedBy: null, mentions: null,
+        createdAt: new Date("2026-08-07T00:00:00.000Z"),
+      }],
+      isLoading: false,
+    });
+    mountStudio();
+    const user2 = user;
+    await user2.click(screen.getByRole("tab", { name: /標注/ }));
+    expect(screen.getByTestId("tms-seek")).toBeDisabled();
+    expect(screen.getByText("在別的版本上")).toBeInTheDocument();
+  });
+
+  it("每一版都有「討論這一版」——thread 綁 assetId，不是綁整格", async () => {
+    const user = userEvent.setup();
+    mountWithVideoAnnotation();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const discuss = screen.getAllByTestId("discuss-version");
+    expect(discuss.length).toBeGreaterThan(0);
   });
 });

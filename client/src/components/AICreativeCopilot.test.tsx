@@ -2,6 +2,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AICreativeCopilot, siteActionDoneLink, toSiteActionInput } from "./AICreativeCopilot";
+import {
+  registerAssistantFocus,
+  registerAssistantPage,
+  resetAssistantContextForTest,
+} from "../lib/assistantContext";
+
+const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const SHOT_ID = "22222222-2222-4222-8222-222222222222";
+const SHOT_ID_2 = "33333333-3333-4333-8333-333333333333";
+const SHOT_ID_3 = "44444444-4444-4444-8444-444444444444";
 
 /** runSiteAction 的可觀察替身：行為測試斷言「按確認卡才 mutate、payload 正確」 */
 const runSiteActionMutate = vi.fn();
@@ -60,6 +70,7 @@ const DONE = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetAssistantContextForTest();
   watchInsights = undefined;
   watchOverview = undefined;
   streamMock.mockImplementation(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
@@ -74,14 +85,64 @@ async function sendMessage(user: ReturnType<typeof userEvent.setup>, text: strin
 }
 
 describe("AICreativeCopilot", () => {
-  it("renders quick prompt pills（面板上只剩能按的東西：說明文字已全部移除）", () => {
+  it("快捷鍵隨頁面改變：沒有頁面上下文時是全站型（不再是寫死的四顆）", () => {
     render(<AICreativeCopilot groupId="grp-123" />);
     expect(screen.queryByText("AI 創作助理")).not.toBeInTheDocument();
     expect(screen.getByLabelText("向 AI 助手提問")).toBeInTheDocument();
-    expect(screen.getByText("爆款短片主題")).toBeInTheDocument();
-    expect(screen.getByText("分鏡腳本規劃")).toBeInTheDocument();
-    expect(screen.getByText("全組專案進度")).toBeInTheDocument();
-    expect(screen.getByText("開場鉤子技巧")).toBeInTheDocument();
+    expect(screen.getByText("安排今天")).toBeInTheDocument();
+    expect(screen.getByText("繼續上次")).toBeInTheDocument();
+    expect(screen.getByText("哪裡卡住")).toBeInTheDocument();
+    // 舊的寫死快捷鍵不得復活——它們在任何頁面都一樣，正是這一輪要解決的問題
+    expect(screen.queryByText("爆款短片主題")).not.toBeInTheDocument();
+    expect(screen.queryByText("開場鉤子技巧")).not.toBeInTheDocument();
+  });
+
+  it("在分鏡頁盯著第 3 鏡：快捷鍵換成分鏡型、麵包屑寫得出「專案 · 分鏡 · 第 3 鏡」", () => {
+    registerAssistantPage({ pageType: "storyboard", projectId: PROJECT_ID, projectTitle: "挑戰營回顧影片" });
+    registerAssistantFocus({ entityType: "shot", entityId: SHOT_ID, entityLabel: "第 3 鏡" });
+    render(<AICreativeCopilot groupId="grp-123" />);
+    expect(screen.getByText("改善這鏡")).toBeInTheDocument();
+    expect(screen.getByText("建立下一鏡")).toBeInTheDocument();
+    expect(screen.getByText("挑戰營回顧影片 · 分鏡 · 第 3 鏡")).toBeInTheDocument();
+    // 麵包屑不得出現任何 uuid
+    expect(screen.queryByText(new RegExp(PROJECT_ID))).not.toBeInTheDocument();
+  });
+
+  it("勾了三鏡：快捷鍵變批次型，麵包屑說「已選 3 個分鏡」", () => {
+    registerAssistantPage({ pageType: "storyboard", projectId: PROJECT_ID, projectTitle: "招生短片" });
+    registerAssistantFocus({
+      entityType: "shot", entityId: SHOT_ID, entityLabel: "第 3 鏡",
+      selectedEntityIds: [SHOT_ID, SHOT_ID_2, SHOT_ID_3],
+    });
+    render(<AICreativeCopilot groupId="grp-123" />);
+    expect(screen.getByText("批次改善")).toBeInTheDocument();
+    expect(screen.getByText("招生短片 · 分鏡 · 已選 3 個分鏡")).toBeInTheDocument();
+  });
+
+  it("送出時把頁面上下文一起送出（entityId／選取／模式），且不夾帶 route 或專案名", async () => {
+    registerAssistantPage({ pageType: "storyboard", projectId: PROJECT_ID, projectTitle: "招生短片" });
+    registerAssistantFocus({
+      entityType: "shot", entityId: SHOT_ID, entityLabel: "第 3 鏡",
+      selectedEntityIds: [SHOT_ID, SHOT_ID_2], activeTab: "pro",
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "這段太平了");
+    expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      pageContext: {
+        pageType: "storyboard",
+        entityType: "shot",
+        entityId: SHOT_ID,
+        entityLabel: "第 3 鏡",
+        selectedEntityIds: [SHOT_ID, SHOT_ID_2],
+        activeTab: "pro",
+        recentAction: undefined,
+      },
+    }));
+    const sent = streamMock.mock.calls[0][0].pageContext;
+    expect(sent).not.toHaveProperty("route");
+    expect(sent).not.toHaveProperty("projectTitle");
   });
 
   it("updates input field when typed", async () => {

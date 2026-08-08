@@ -52,11 +52,14 @@ import {
 } from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { StoryStage } from "../features/story-workspace/StoryStage";
+import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
+import { PeerBadge, latestViewForUser, sceneLabelOf } from "../features/collaboration/PeerBadge";
 import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
-import type { ViewState } from "@shared/viewState";
+import type { ViewSection, ViewState } from "@shared/viewState";
+import { registerAssistantPage } from "../lib/assistantContext";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
@@ -528,9 +531,20 @@ export function ProjectPage({ id }: { id: string }) {
   sendViewRef.current = collab.sendView;
   const selfZoneRef = useRef(collab.selfZone);
   selfZoneRef.current = collab.selfZone;
+  /**
+   * 助手的頁面感知搭同一班車。
+   *
+   * 專案頁是一條長捲軸（① 故事 → ② 分鏡 → ③ 製作 → ④ 成片），「我在哪一段」的真相
+   * 就是捲動位置——而這件事上面這個 effect 已經在算了（detectVisibleSection，rAF 併批）。
+   * 助手再掛第二個 IntersectionObserver 只會多一套會對不上的答案，所以直接共用這一份。
+   */
+  const reportAssistantSectionRef = useRef<(section: ViewSection | undefined) => void>(() => {});
   useEffect(() => {
-    const report = () =>
-      sendViewRef.current(buildViewState({ zone: selfZoneRef.current, visibleSection: detectVisibleSection() }));
+    const report = () => {
+      const visibleSection = detectVisibleSection();
+      reportAssistantSectionRef.current(visibleSection);
+      sendViewRef.current(buildViewState({ zone: selfZoneRef.current, visibleSection }));
+    };
     report();
     // 捲動也要回報：專案頁是一條長捲軸，使用者純瀏覽時 zone 不會變，
     // 只看 zone 的話跟隨者會停在原地而畫面上看不出哪裡不對。
@@ -549,6 +563,26 @@ export function ProjectPage({ id }: { id: string }) {
       window.removeEventListener("scroll", onScroll, true);
     };
   }, [collab.selfZone, collab.connected]);
+
+  /**
+   * 助手頁面感知：把「哪個專案、捲到哪一段」報給助手。
+   *
+   * section 走上面那個 effect 算好的 detectVisibleSection（透過 ref 回傳），
+   * 專案名讓助手的麵包屑寫得出「挑戰營回顧影片 · 分鏡」而不是一串 uuid。
+   * 註冊本身是提示不是授權——後端一律以 requireGroup 重新驗證。
+   */
+  const [assistantSection, setAssistantSection] = useState<ViewSection | undefined>(undefined);
+  reportAssistantSectionRef.current = setAssistantSection;
+  const projectTitle = project.data?.title;
+  useEffect(
+    () => registerAssistantPage({
+      // 捲到哪一段就是哪一段；還沒捲過任何標頭（頁首）時退回泛用的「專案」
+      pageType: assistantSection ?? "project",
+      projectId: id,
+      projectTitle,
+    }),
+    [assistantSection, id, projectTitle],
+  );
 
   /**
    * 被帶到主講者的位置。列表是非同步載入的、手機收合中的列 rect 為空，
@@ -1409,24 +1443,22 @@ export function ProjectPage({ id }: { id: string }) {
               {collab.connected && collab.peers.length === 0 && (
                 <Meta style={{ fontSize: 12 }}>即時同步已連線</Meta>
               )}
+              {/* Phase 3：名字 chip 點開小卡——「韋澔 · 在線 · 正在：分鏡 · Shot 08
+                  [跟隨畫面] [傳訊息]」。「正在哪」來自語意視圖（peerViews），
+                  與 Presenter 跟隨同一個真相來源，兩邊顯示的位置永遠一致。 */}
               {collab.peers.map((peer) => {
                 const isMe = peer.userId === collab.self?.userId;
                 const following = collabMode === "mirror" && followUserId === peer.userId;
+                const view = latestViewForUser(collab.peerViews, peer.userId);
                 return (
-                  <span
+                  <PeerBadge
                     key={peer.userId}
-                    className={!isMe ? "m-touch" : undefined}
-                    role={!isMe ? "button" : undefined}
-                    tabIndex={!isMe ? 0 : undefined}
-                    title={
-                      isMe
-                        ? "你在這個專案裡"
-                        : following
-                          ? `正在鏡像跟隨 ${peer.name}（再點可取消）`
-                          : `點一下以鏡像跟隨 ${peer.name}`
-                    }
-                    onClick={() => {
-                      if (isMe) return;
+                    peer={peer}
+                    isMe={isMe}
+                    view={view}
+                    sceneLabel={sceneLabelOf(scenes.data, view)}
+                    following={following}
+                    onToggleFollow={() => {
                       if (following) {
                         setCollabMode("live");
                         setFollowUserId(null);
@@ -1435,28 +1467,7 @@ export function ProjectPage({ id }: { id: string }) {
                         setFollowUserId(peer.userId);
                       }
                     }}
-                    onKeyDown={(e) => {
-                      if (isMe) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).click();
-                      }
-                    }}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 5,
-                      fontSize: 12, padding: "2px 10px", borderRadius: 999,
-                      border: `1px solid ${peer.color}`, color: peer.color,
-                      textShadow: "0 1px 2px var(--scrim)",
-                      opacity: isMe ? 0.55 : 1,
-                      cursor: isMe ? "default" : "pointer",
-                      outline: following ? `2px solid ${peer.color}` : undefined,
-                      outlineOffset: 2,
-                    }}
-                  >
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
-                    {isMe ? "你" : peer.name}
-                    {following ? " · 跟隨中" : ""}
-                  </span>
+                  />
                 );
               })}
               {/* 「帶大家看」：按下去只會讓房裡其他人看到一張邀請卡，
@@ -2589,6 +2600,15 @@ export function ProjectPage({ id }: { id: string }) {
             desc="粗剪・配音・打包交付"
             accent="group-3"
             hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
+          />
+          {/* §12 交付室第一屏：完成度＋缺漏清單。補件本身仍在 ② 分鏡的單格工作室，
+              點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
+          <DeliveryRoom
+            projectId={id}
+            canEdit={canEdit}
+            onOpenShot={(shotId) => {
+              scrollToSelector(`#board-shot-${shotId}`);
+            }}
           />
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (

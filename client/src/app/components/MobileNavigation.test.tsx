@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileNavigation } from "./MobileNavigation";
-import { DESTINATIONS } from "../navigation/navigationItems";
+import { DESTINATIONS, topbarNavItems } from "../navigation/navigationItems";
 
 /** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例）。
  *
@@ -68,19 +68,34 @@ describe("MobileNavigation", () => {
     await user.click(screen.getByRole("button", { name: "更多" }));
 
     // 面板收日常會用到的頁面，名稱一律取自 DESTINATIONS（同一頁不得有第二個名字）
-    for (const key of ["studio", "community", "chat", "help", "models", "downloads"] as const) {
+    for (const key of ["databases", "studio", "community", "chat", "help", "models", "downloads"] as const) {
       const d = DESTINATIONS[key];
       expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
     }
-    // 資料庫／外部資料／MCP 刻意不在這裡：三者已改為情境化入口
-    //（資料在專案頁就地加，進階設定走 /settings 的「進階與相關功能」）。
+    // 外部資料／MCP 刻意不在這裡：兩者是一次性的進階設定，已改為情境化入口
+    //（走 /settings 的「進階與相關功能」或桌機的使用者選單）。
     // 路由與深連結仍然有效，只是不再出現在手機的頁面總表裡。
-    for (const key of ["databases", "mcp", "integrations"] as const) {
+    for (const key of ["mcp", "integrations"] as const) {
       expect(screen.queryByRole("link", { name: new RegExp(DESTINATIONS[key].label) })).not.toBeInTheDocument();
     }
     // 舊的第二套名字不得復活
     expect(screen.queryByText("使用說明")).not.toBeInTheDocument();
     expect(screen.queryByText("外部資料")).not.toBeInTheDocument();
+  });
+
+  it("★ 頂欄有的去處，手機一定走得到（資料中心曾經三個選單都沒有入口）", async () => {
+    // 桌機的高頻入口常駐頂欄，但 `.topbar .topbar-nav-link` 在 ≤820px 整條隱藏，
+    // 而使用者選單在同一個斷點只留一句指路（AccountMenu 的 compact 分支）。
+    // 也就是說：頂欄的某一項若沒有同時出現在分頁列或「更多」面板，手機上它就
+    // 完全沒有入口——資料中心正是這樣消失的。這裡把它鎖成跨檔案契約。
+    const user = userEvent.setup();
+    render(<MobileNavigation />);
+    await user.click(screen.getByRole("button", { name: "更多" }));
+
+    for (const item of topbarNavItems) {
+      const link = screen.getByRole("link", { name: new RegExp(item.label) });
+      expect(link).toHaveAttribute("href", item.href);
+    }
   });
 
   it("highlights exactly one dashboard tab per hash（今日／專案互斥）", () => {

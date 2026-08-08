@@ -7,6 +7,7 @@ import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AppRoutes, UngroupedRoutes } from "./AppRoutes";
 import { Button, Meta } from "../components/ui";
+import { safeInternalPath } from "../lib/safePath";
 
 export type SessionMe = {
   user: { isSuperAdmin: boolean; mustChangePassword: boolean };
@@ -14,11 +15,7 @@ export type SessionMe = {
   adminTeamIds: string[];
 } | null | undefined;
 
-/** 只接受同源站內路徑（/ 開頭且非 //），防 open-redirect */
-function safeNextPath(raw: string | null): string | null {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
-  return raw;
-}
+/** 只接受同源站內路徑：safeInternalPath（/ 開頭、非 //、無反斜線、無控制字元），防 open-redirect */
 
 /**
  * 未登入被踢到 /login 時把「原本要去哪」帶上（returnTo）：
@@ -29,7 +26,7 @@ function RedirectToLogin() {
   const current = typeof window === "undefined"
     ? "/"
     : window.location.pathname + window.location.search + window.location.hash;
-  const next = safeNextPath(current);
+  const next = safeInternalPath(current);
   const carry = next && next !== "/" && !next.startsWith("/login") ? `?next=${encodeURIComponent(next)}` : "";
   return <Redirect to={`/login${carry}`} replace />;
 }
@@ -38,7 +35,7 @@ function RedirectToLogin() {
 function RedirectFromLogin() {
   const next = typeof window === "undefined"
     ? null
-    : safeNextPath(new URLSearchParams(window.location.search).get("next"));
+    : safeInternalPath(new URLSearchParams(window.location.search).get("next"));
   return <Redirect to={next ?? "/dashboard"} replace />;
 }
 

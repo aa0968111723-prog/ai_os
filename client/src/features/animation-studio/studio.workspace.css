@@ -653,6 +653,17 @@ body.studio-workspace { overflow: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 五軌完成度：Timeline 的一格只有 116px，五個標籤塞不下——只留點。
+   語意由 aria-label 給（span[role=img]），不是靠這五個色塊自己說明。 */
+.studio-tlshot__tracks { display: flex; gap: 3px; padding-top: 1px; }
+.studio-tlshot__dot {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ws-line-strong);
+}
+.studio-tlshot__dot.is-done { background: var(--success-ink, #2e7d32); }
+.studio-tlshot__dot.is-running { background: var(--primary-solid); }
 .studio-tlshot__ops { display: flex; border-top: 1px solid var(--ws-line); }
 .studio-tlshot__ops button {
   position: relative;

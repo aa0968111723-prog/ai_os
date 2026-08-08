@@ -52,6 +52,7 @@ import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { normalizeRequestId, withRequestContext } from "./services/requestContext";
 import { sessionGate } from "./services/sessionPolicy";
 import { attachRealtime } from "./services/realtime";
+import { attachCollabDoc } from "./services/collabDoc";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
@@ -62,6 +63,7 @@ import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
+import { sanitizeAssistantPageContext } from "../shared/assistantPageContext";
 import {
   backgroundTaskCount,
   beginShutdown,
@@ -2016,6 +2018,10 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       && ((t as { role?: unknown }).role === "user" || (t as { role?: unknown }).role === "assistant")
       && typeof (t as { text?: unknown }).text === "string")
     .map((t: { role: "user" | "assistant"; text: string }) => ({ role: t.role, text: t.text.slice(0, 2000) }));
+  // 頁面感知上下文：這條路徑是手解析，不像 tRPC 有 zod——沒有顯式讀就會被靜默丟棄。
+  // sanitizeAssistantPageContext 逐欄夾制（壞欄位丟棄而非整包拒絕：上下文是錦上添花，
+  // 不該讓一個壞欄位害使用者問不到問題）。同樣只是提示，授權仍由 runGlobalAsk 內部重驗。
+  const pageContext = sanitizeAssistantPageContext(req.body?.pageContext) ?? undefined;
   if (!UUID_RE.test(groupId) || !message || message.length > 500) {
     return res.status(400).json({ error: "參數不正確（需 groupId 與 1–500 字的問題）" });
   }
@@ -2049,6 +2055,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         message,
         history: history.length ? history : undefined,
         projectId,
+        pageContext,
         signal: clientAbort.signal,
       },
       (e) => sse("step", e),
@@ -2358,6 +2365,8 @@ const httpServer = app.listen(port, () => {
 
 // 即時協作（presence/游標/編輯指示/變更同步）：WS 升級掛在同一個 http server 上
 attachRealtime(httpServer);
+// Story 共編（Yjs）走獨立的 /ws-doc——文件更新不與游標封包搶同一條連線
+attachCollabDoc(httpServer);
 
 const SHUTDOWN_DEADLINE_MS = 25_000;
 const handleShutdownSignal = (signal: NodeJS.Signals): void => {

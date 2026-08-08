@@ -275,4 +275,17 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0052_data_hub_bindings_and_lineage": [
     "9470bdb94136c2987dcecf293a84c9214161d71a98fca0445093ed224464be9f",
   ],
+  "0053_shot_review": [
+    "e948ec2a6f2cfbd211473db8130cb010c8fff4748dfec5d88b386f402ff173d8",
+  ],
+  // 這兩支原本編為 0052／0053，先後與併入的 0052_data_hub_bindings_and_lineage
+  // 及 0053_shot_review 撞號，各往後挪到 0054／0055。都還沒被任何資料庫套用過
+  //（PR 未合併），且檔案內容一個位元組都沒動——hash 算的是內容不是檔名，
+  // 所以改號前後相同。
+  "0054_collab_decisions": [
+    "1569cd121bab50de68363a59d7a98d069ed2df5d6e36b9989530906bf56b4bbc",
+  ],
+  "0055_collab_documents": [
+    "2d3b3da900c87a29c95a3db7e59ede738a861f289dabf4069e2d676e52657da9",
+  ],
 };

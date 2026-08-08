@@ -65,6 +65,7 @@ export function ScriptEditor({
   placeholder,
   saveLabel,
   footer,
+  textareaRef,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -76,6 +77,8 @@ export function ScriptEditor({
   saveLabel?: ReactNode;
   /** 解析摘要與主 CTA：全螢幕時要跟著進來，否則得退出全螢幕才能按「產生分鏡」 */
   footer?: ReactNode;
+  /** 共編用：讓外層（StoryStage）拿得到 textarea——遠端改動要保住游標、caret 疊層要量測 */
+  textareaRef?: (el: HTMLTextAreaElement | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -85,6 +88,9 @@ export function ScriptEditor({
   const [showFind, setShowFind] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  /** 稿子聚焦中＝手機鍵盤在畫面上。沉浸容器是定高的，鍵盤吃掉半個畫面後
+      統計列與解析列得讓位（CSS 讀 .is-typing），不然稿子會被自己的工具擠成一條縫 */
+  const [typing, setTyping] = useState(false);
   const [fontScale, setFontScale] = useState(1);
   const [query, setQuery] = useState("");
   const [replacement, setReplacement] = useState("");
@@ -186,7 +192,7 @@ export function ScriptEditor({
   return (
     <div
       ref={hostRef}
-      className={`script-editor${immersive ? " is-immersive" : ""}${focusMode ? " is-focus" : ""}`}
+      className={`script-editor${immersive ? " is-immersive" : ""}${focusMode ? " is-focus" : ""}${typing ? " is-typing" : ""}`}
       /* 字級走 CSS 變數而非直接寫 font-size：手機的 ≥16px 防自動放大守則要留在樣式表裡，
          內聯 font-size 會蓋掉它，使用者一聚焦 iOS 就整頁縮放、打斷編輯 */
       style={{ "--script-font-scale": fontScale } as React.CSSProperties}
@@ -342,7 +348,10 @@ export function ScriptEditor({
           </nav>
         )}
         <textarea
-          ref={areaRef}
+          ref={(el) => {
+            areaRef.current = el;
+            textareaRef?.(el);
+          }}
           id="story-editor"
           className="story-editor"
           aria-label="故事內容"
@@ -354,7 +363,11 @@ export function ScriptEditor({
             setNotice(null); // 使用者已經在打字＝上一則「已取代 N 處」看過了
             onChange(e.target.value);
           }}
-          onBlur={onBlur}
+          onFocus={() => setTyping(true)}
+          onBlur={() => {
+            setTyping(false);
+            onBlur?.();
+          }}
         />
       </div>
 
@@ -384,7 +397,8 @@ export function ScriptEditor({
           {notice}
         </Meta>
       )}
-      {footer}
+      {/* 包一層才有 class 可讓（手機全螢幕打字時整段解析列要讓開鍵盤上方的稿子） */}
+      {footer !== undefined && <div className="script-editor__footer">{footer}</div>}
     </div>
   );
 }

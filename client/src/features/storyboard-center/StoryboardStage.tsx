@@ -4,7 +4,7 @@
  * 生成一律從 Shot 出發（單格工作室），素材天然知道自己屬於哪一幕哪一鏡哪個版本。
  * 交付面（粗剪、配音管線、打包）仍在「④ 成片」的 SceneList——這裡專注創作。
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { SceneStudio } from "../../components/SceneStudio";
@@ -13,6 +13,8 @@ import { scrollToSelector } from "../creation-workbench/workbenchNav";
 import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from "./boardPrefs";
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
+import { ShotNavigator } from "./ShotNavigator";
+import { registerAssistantFocus } from "../../lib/assistantContext";
 
 export function StoryboardStage({
   projectId,
@@ -65,6 +67,54 @@ export function StoryboardStage({
   const studioShot = studioSceneId ? shotRows.find((s) => s.id === studioSceneId) : null;
 
   const isEmpty = !shots.isLoading && shotRows.length === 0;
+
+  /**
+   * 分鏡多選：全站第一個。只有一個用途——把「這幾鏡」交給 AI 助手。
+   * 不做批次編輯 UI（那是另一件事，也會需要另一套確認與復原）。
+   */
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePick = useCallback((shotId: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(shotId)) next.delete(shotId);
+      else next.add(shotId);
+      return next;
+    });
+  }, []);
+  // 鏡被刪掉時把它從選取裡剔除——否則助手會收到一個已經不存在的 id
+  const liveShotIds = useMemo(() => new Set(shotRows.map((s) => s.id)), [shotRows]);
+  useEffect(() => {
+    setPicked((prev) => {
+      const kept = [...prev].filter((id) => liveShotIds.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [liveShotIds]);
+
+  /**
+   * 回報給 AI 助手：正在看哪一鏡、勾了哪幾鏡。
+   *
+   * 「正在看」的定義刻意是**單格工作室打開的那一鏡**——在這個產品裡，打開工作室
+   * 就是「我要處理這一鏡」的明確表態；純捲動經過不算，否則助手會一直改口。
+   * 勾選優先於打開中的那一鏡（使用者明確圈出的對象最優先）。
+   */
+  const pickedIds = useMemo(() => [...picked], [picked]);
+  const focusShot = studioShot ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined);
+  const focusShotNo = focusShot ? shotNumber.get(focusShot.id) : undefined;
+  // **沒東西可講就不註冊**：焦點層只有一格，而專案頁同時掛著分鏡中心與素材庫等多個面。
+  // 每個面都無條件註冊的話，最後掛載的那個（即使它什麼都沒選）會把別人剛設好的焦點洗掉。
+  // 語意是「最近一次真的做了選擇的人勝出」——這也正是使用者的直覺。
+  const hasShotFocus = !!focusShot || pickedIds.length > 0;
+  useEffect(() => {
+    if (!hasShotFocus) return;
+    return registerAssistantFocus({
+      pageType: "storyboard",
+      entityType: "shot",
+      entityId: focusShot?.id,
+      entityLabel: focusShotNo ? `第 ${focusShotNo} 鏡` : undefined,
+      selectedEntityIds: pickedIds,
+      activeTab: mode,
+    });
+  }, [hasShotFocus, focusShot?.id, focusShotNo, pickedIds, mode]);
 
   return (
     <div className="board-stage stack" id="storyboard-center" data-fb="分鏡中心">
@@ -159,6 +209,8 @@ export function StoryboardStage({
                             characterNames={characterNames}
                             outdatedReason={outdatedByShot.get(shot.id)}
                             onOpenStudio={setStudioSceneId}
+                            picked={picked.has(shot.id)}
+                            onTogglePick={togglePick}
                           />
                         ))}
                       </div>
@@ -179,6 +231,13 @@ export function StoryboardStage({
           charIds={charIds}
           sceneIds={sceneIds}
           propIds={propIds}
+          nav={
+            <ShotNavigator
+              shots={shotRows}
+              currentId={studioShot.id}
+              onGo={(nextId) => setStudioSceneId(nextId)}
+            />
+          }
           onClose={() => setStudioSceneId(null)}
           onChanged={() => {
             utils.scenes.listByProject.invalidate({ projectId });

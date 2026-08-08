@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aliasedTable, and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -15,6 +15,8 @@ import {
   type SceneCardKind,
 } from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import { REVIEW_STATES } from "../../shared/shotCompletion";
+import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
@@ -255,6 +257,8 @@ export const scenesRouter = router({
          * 沒有這一欄，Inspector 只能走「後寫的蓋掉先寫的」，夥伴同時編輯時會靜默吃字。
          */
         rev: schema.scenes.rev,
+        // 完成度五軌裡唯一的真欄位（其餘四軌由指標欄推導；見 shared/shotCompletion.ts）
+        reviewStatus: schema.scenes.reviewStatus,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
         // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用
@@ -742,6 +746,148 @@ export const scenesRouter = router({
   }),
 
   /** 就地編輯分鏡欄位（標題／秒數／旁白／提示詞）：只更新有帶的欄位 */
+  /**
+   * 送審／通過／要求修改（§17）。
+   *
+   * 為什麼獨立成一支而不是塞進 update：審核是「人對這一鏡的判斷」，
+   * 與內容編輯是兩件事——混在同一個 mutation 會讓「改個秒數」意外把審核狀態帶掉，
+   * 也讓活動紀錄看不出「誰在什麼時候通過了什麼」。
+   */
+  review: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), status: z.enum(REVIEW_STATES) }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
+      await getProjectChecked(ctx, scene.projectId, true);
+      const [row] = await db
+        .update(schema.scenes)
+        .set({ reviewStatus: input.status })
+        .where(eq(schema.scenes.id, scene.id))
+        .returning({ id: schema.scenes.id, reviewStatus: schema.scenes.reviewStatus });
+      return row;
+    }),
+
+  /**
+   * 從上一鏡承接（§8 連戲）。
+   *
+   * 「上一鏡」＝同專案、未軟刪、orderIndex 比我小的那一個最大值——
+   * 用 orderIndex 而非建立時間：使用者搬動過順序之後，連戲要跟著畫面順序走，
+   * 不是跟著「誰先被建出來」。
+   */
+  inheritFromPrevious: authedProcedure
+    .input(
+      z.object({
+        sceneId: z.string().uuid(),
+        aspects: z.array(z.enum(CONTINUITY_ASPECTS)).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [cur] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!cur) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
+      await getProjectChecked(ctx, cur.projectId, true);
+
+      const [prev] = await db
+        .select()
+        .from(schema.scenes)
+        .where(
+          and(
+            eq(schema.scenes.projectId, cur.projectId),
+            isNull(schema.scenes.deletedAt),
+            lt(schema.scenes.orderIndex, cur.orderIndex),
+          ),
+        )
+        .orderBy(desc(schema.scenes.orderIndex))
+        .limit(1);
+      if (!prev) throw new TRPCError({ code: "BAD_REQUEST", message: "這是第一鏡，前面沒有可以承接的鏡" });
+
+      const { patch, changes } = buildContinuityPatch(prev, cur, input.aspects);
+      if (!changes.length) return { ok: true as const, changed: false, changes: [] as string[] };
+      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, cur.id));
+      return { ok: true as const, changed: true, changes };
+    }),
+
+  /**
+   * 批次製作（§11）：把「幫我把剩下的鏡都生出來」變成一個既有的 AI 代理計畫。
+   *
+   * 刻意**不自己寫一套佇列**：§11 要的進度／可取消／可重試／單鏡失敗不影響其他鏡／
+   * 刷新不失去狀態，agent_runs＋agentRunner 全都已經有了（狀態機、逐步 status、
+   * 停止、點數守門、事件軌跡）。再寫一套只會多一個要維護、要對帳的執行器。
+   *
+   * 產出的 run 停在 awaiting_approval：批次會扣點，估點要先讓人看到再決定。
+   */
+  batchGenerate: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        modelId: z.string(),
+        /** 指定要做哪幾鏡；不給＝所有「還沒有畫面」的鏡（§11 的「完成所有缺畫面的鏡頭」） */
+        sceneIds: z.array(z.string().uuid()).max(50).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      assertProjectNotArchived(project);
+      const model = getModel(input.modelId);
+      const rejection = regenRejection(model);
+      if (rejection || !model) throw new TRPCError({ code: "BAD_REQUEST", message: rejection ?? "找不到這個模型" });
+
+      // 全片依序——sceneNo 是「第幾鏡」，必須跟畫面順序一致（agentRunner 用它找回目標鏡）
+      const all = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const wanted = input.sceneIds?.length
+        ? new Set(input.sceneIds)
+        : new Set(all.filter((s) => !s.assetId).map((s) => s.id));
+
+      const steps: Array<Record<string, unknown>> = [];
+      for (const [i, scene] of all.entries()) {
+        if (!wanted.has(scene.id)) continue;
+        // 已通過審核的鏡不進批次：§17 說它的畫面不該被自動換掉，
+        // 那也代表它不該被「一鍵補完」掃到——否則使用者會以為批次壞了。
+        if (scene.reviewStatus === "approved") continue;
+        const prompt = await buildShotContextPrompt(scene, model);
+        if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
+        const cards = resolveSceneCards(scene, null);
+        steps.push({
+          kind: "generate",
+          note: `第 ${i + 1} 鏡「${scene.title}」生成畫面`,
+          status: "pending",
+          actorType: "ai",
+          sceneNo: i + 1,
+          modelId: model.id,
+          prompt,
+          characterIds: cards.characterIds,
+          scenePresetIds: cards.scenePresetIds,
+          propIds: cards.propIds,
+        });
+      }
+      if (!steps.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可以批次生成的鏡（都已有畫面、已通過審核，或還沒寫畫面描述）" });
+      }
+
+      const [run] = await db
+        .insert(schema.agentRuns)
+        .values({
+          projectId: project.id,
+          groupId: project.groupId,
+          userId: ctx.auth.user.id,
+          goal: `批次生成 ${steps.length} 鏡的畫面`,
+          summary: `依分鏡順序逐鏡生成畫面，共 ${steps.length} 鏡。單鏡失敗不影響其他鏡，可隨時停止。`,
+          steps,
+          estPoints: (model.points ?? 0) * steps.length,
+        })
+        .returning({ id: schema.agentRuns.id, estPoints: schema.agentRuns.estPoints });
+      return { runId: run.id, shots: steps.length, estPoints: run.estPoints };
+    }),
+
   update: authedProcedure
     .input(
       z.object({

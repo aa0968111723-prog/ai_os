@@ -11,6 +11,12 @@ import { useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { AssetImg } from "../../components/MediaFallback";
 import { Button, Meta } from "../../components/ui";
+import {
+  COMPLETION_TRACKS,
+  TRACK_LABEL,
+  computeShotCompletion,
+  type ShotCompletionInput,
+} from "@shared/shotCompletion";
 import type { StudioShot } from "./ShotStrip";
 import { NewShotMenu, type NewShotKind } from "./NewShotMenu";
 
@@ -90,6 +96,7 @@ export function StoryboardTimeline({
             const active = shot.id === activeId;
             const size = shotSizeOf(shot);
             const draggable = canEdit;
+            const completion = computeShotCompletion(shot as unknown as ShotCompletionInput);
             return (
               <li
                 key={shot.id}
@@ -128,6 +135,22 @@ export function StoryboardTimeline({
                     {size && <span className="studio-tlshot__size">{size}</span>}
                   </span>
                   <span className="studio-tlshot__title">{shot.title}</span>
+                  {/* 五軌完成度（shared/shotCompletion）：與專案頁的分鏡卡同一套推導，
+                      同一個 shot 在兩個地方不該講出不一樣的狀態。這裡只留點、不留字——
+                      Timeline 的一格只有 116px，五個標籤塞不下也不需要 */}
+                  <span
+                    className="studio-tlshot__tracks"
+                    role="img"
+                    aria-label={`完成度 ${completion.percent}%：${COMPLETION_TRACKS.map((t) => `${TRACK_LABEL[t]}${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "未完成"}`).join("、")}`}
+                  >
+                    {COMPLETION_TRACKS.map((t) => (
+                      <i
+                        key={t}
+                        className={`studio-tlshot__dot is-${completion.tracks[t]}`}
+                        title={`${TRACK_LABEL[t]}：${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "尚未完成"}`}
+                      />
+                    ))}
+                  </span>
                 </button>
 
                 {canEdit && (

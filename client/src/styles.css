@@ -1745,6 +1745,9 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-host.is-immersive {
   position: fixed;
   inset: 0;
+  /* 搜尋框一聚焦，iOS 的版面視窗不縮（見 lib/keyboardInset.ts），畫布下半整片沉到
+     鍵盤底下；底緣顯式抬過 --kb-inset，節點才會重排到看得見的地方 */
+  bottom: var(--kb-inset, 0px);
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -7185,6 +7188,22 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   margin-top: 8px;
 }
 
+/* 助手麵包屑：一行「我知道你在哪」。單行截斷——手機上絕不換行擠掉輸入框 */
+.ai-copilot-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  min-width: 0;
+}
+.ai-copilot-crumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── WATCH「需要你注意」：零狀態的主動摘要（全部健康時整塊不渲染） ── */
 .ai-copilot-watch {
   display: flex;
@@ -8095,6 +8114,10 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
    iOS（不支援元素 requestFullscreen）會看到頁面其餘內容從旁邊露出來。 */
 .script-editor.is-immersive {
   position: fixed; inset: 0; z-index: 60; min-height: 0;
+  /* iOS 鍵盤不縮版面視窗（見 lib/keyboardInset.ts）：定高容器的底緣要顯式抬過
+     --kb-inset，不然稿子下半、統計列、解析列全沉在鍵盤底下，打字看不到游標。
+     Android 因 interactive-widget=resizes-content 算出 0，不會重複位移。 */
+  bottom: var(--kb-inset, 0px);
   padding: 0 16px calc(10px + var(--safe-bottom, 0px));
   padding-top: var(--safe-top, 0px); background: var(--bg); overflow: hidden;
 }
@@ -8159,6 +8182,10 @@ body.story-immersive { overflow: hidden; }
 .shot-card { display: flex; flex-direction: column; gap: 8px; }
 .shot-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shot-card__num { font-weight: 700; color: var(--primary-ink); font-size: var(--fs-13); }
+/* 分鏡多選勾選：命中區 ≥24px（手機拇指），未選時低調、選中才亮 */
+.shot-card__pick { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; cursor: pointer; }
+.shot-card__pick input { width: 16px; height: 16px; accent-color: var(--primary-ink); cursor: pointer; }
+.shot-card[data-picked] { box-shadow: 0 0 0 2px rgba(246, 119, 30, 0.45); }
 .shot-card__title {
   flex: 1 1 120px; min-width: 100px; border: 1px solid transparent; background: transparent;
   font-weight: 600; padding: 2px 6px; border-radius: 6px;
@@ -8222,6 +8249,26 @@ body.story-immersive { overflow: hidden; }
   .script-editor__body { flex-direction: column; }
   .script-outline { flex: none; width: 100%; max-height: 200px; }
   .script-editor.is-immersive { padding-inline: 12px; }
+  /* 手機全螢幕：鍵盤吃掉半個畫面後，稿子才是主角，工具得讓。
+     十四顆工具鈕都吃全站 44px 觸控下限（styles.css:152-166），照原本的 flex-wrap
+     會排成三四排、佔掉沉浸容器一半高度。改成「每一群自己單列橫捲」——
+     群與群之間仍可換行，「離開全螢幕」才不會被捲出畫面外變成出不去。 */
+  .script-editor.is-immersive .script-editor__group {
+    flex-wrap: nowrap; overflow-x: auto; max-width: 100%;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .script-editor.is-immersive .script-editor__group::-webkit-scrollbar { display: none; }
+  /* 打字中（.is-typing＝稿子聚焦）統計、快捷鍵、解析列整段讓開：
+     它們留著的話，鍵盤上方只剩一條縫給稿子，游標打在看不見的地方。
+     失焦（收鍵盤／按別處）就回來，「產生分鏡」不會消失，只是不跟鍵盤搶高度。 */
+  .script-editor.is-immersive.is-typing .script-editor__status,
+  .script-editor.is-immersive.is-typing .script-editor__keys,
+  .script-editor.is-immersive.is-typing .script-editor__notice,
+  .script-editor.is-immersive.is-typing .script-editor__footer { display: none; }
+  /* 大綱開著時也不能把稿子擠光：打字中收成一小截（仍可捲、仍可點著跳場） */
+  .script-editor.is-immersive.is-typing .script-outline { max-height: 120px; }
+  /* 稿子的最後防線：工具再多也保底約四行，寧可讓容器底部裁掉也不讓編輯區歸零 */
+  .script-editor.is-immersive .script-editor__body { min-height: 96px; }
 }
 
 /* ── ＋加入資料（AddDataSheet，資料中心 P2）──────────────────────────
@@ -8528,3 +8575,111 @@ body.story-immersive { overflow: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* §13 交付室縮圖列：一眼掃完整部片，而不是讀一串文字。
+   橫向捲＋卡片固定寬，鏡多也不會把這一屏撐成無限長 */
+.delivery-room__filters { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.delivery-room__filters button {
+  min-height: 36px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border-soft); background: var(--card2);
+  color: var(--fg-secondary); font-size: var(--fs-12); cursor: pointer;
+}
+.delivery-room__filters button.active { background: var(--primary-tint); border-color: var(--primary); color: var(--primary-ink); font-weight: 650; }
+.delivery-room__batch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.delivery-strip {
+  list-style: none; margin: 10px 0 0; padding: 0 0 4px;
+  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin;
+}
+.delivery-strip__item { position: relative; flex: 0 0 auto; }
+.delivery-strip__card {
+  width: 132px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-12);
+  background: var(--card2); cursor: pointer; text-align: left;
+}
+.delivery-strip__item.is-picked .delivery-strip__card { border-color: var(--primary); background: var(--primary-tint); }
+.delivery-strip__thumb {
+  width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-8); overflow: hidden;
+  background: var(--field); display: grid; place-items: center; color: var(--fg-muted);
+}
+.delivery-strip__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.delivery-strip__num { font-weight: 700; color: var(--primary-ink); font-size: var(--fs-12); }
+/* 缺什麼要看得完；長字串在 132px 卡片內換行而非被裁掉 */
+.delivery-strip__meta { font-size: var(--fs-11); line-height: 1.4; overflow-wrap: anywhere; }
+.delivery-strip__pick { position: absolute; top: 6px; right: 6px; }
+.delivery-strip__pick input { width: 20px; height: 20px; }
+
+/* §14 快速補件 sheet：手機貼底、桌機置中；只補單軌，真編輯送工作室 */
+.delivery-sheet-root { position: fixed; inset: 0; z-index: 60; display: grid; place-items: end center; }
+.delivery-sheet__backdrop { position: absolute; inset: 0; background: var(--scrim); border: 0; }
+.delivery-sheet {
+  position: relative; width: min(560px, 100%);
+  background: var(--popover); border: 1px solid var(--border);
+  border-radius: var(--r-16) var(--r-16) 0 0;
+  padding: 14px max(14px, var(--safe-right)) calc(14px + max(10px, var(--safe-bottom))) max(14px, var(--safe-left));
+  box-shadow: var(--e3); max-height: 80vh; overflow-y: auto;
+}
+@media (min-width: 641px) { .delivery-sheet-root { place-items: center; } .delivery-sheet { border-radius: var(--r-16); } }
+.delivery-sheet__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.delivery-sheet__tracks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.delivery-sheet__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* §4 前後鏡導航：工作室頂端一條，讓「連續做下去」不必回分鏡表 */
+.shot-nav {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 0; border-bottom: 1px solid var(--border-soft); margin-bottom: 8px;
+}
+
+/* §15 分鏡卡完成度五點：文字標籤而非純色點——純色點要靠圖例才看得懂，
+   中文兩個字本身就是圖例，掃描成本更低。 */
+.shot-card__completion { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.shot-card__dot {
+  font-size: var(--fs-11); line-height: 1; padding: 3px 6px; border-radius: var(--r-8);
+  border: 1px solid var(--border-soft); color: var(--fg-muted); background: var(--card2);
+}
+.shot-card__dot--done { color: var(--primary-ink); border-color: var(--primary); background: var(--primary-tint); }
+.shot-card__dot--running { color: var(--fg-secondary); border-style: dashed; }
+
+/* §8 連戲承接：一列，結果訊息接在按鈕後面（不另開一塊佔版面） */
+.shot-card__continuity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* §17 已通過的鏡：說明為什麼重新生成不會換畫面（不說的話會被當成壞掉） */
+.shot-card__approved-note {
+  margin: 0; font-size: var(--fs-11); line-height: 1.5; color: var(--fg-secondary);
+  border-left: 2px solid var(--primary); padding-left: var(--sp-6);
+}
+
+/* ④ 成片・交付室第一屏（§12／§13）：完成度＋缺漏清單。
+   刻意不用大圖卡——這一屏的工作是「掃一眼知道還缺什麼」，資訊密度比視覺重要。 */
+.delivery-room__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.delivery-room__percent { font-size: var(--fs-24); color: var(--primary-ink); line-height: 1; }
+.delivery-room__tracks {
+  display: grid; gap: 8px; margin-top: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+}
+.delivery-room__track {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-8);
+  background: var(--card2);
+}
+.delivery-room__issues { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.delivery-room__issues > li > button { width: 100%; justify-content: flex-start; gap: 8px; text-align: left; }
+.delivery-room__issue-shot { font-weight: 700; color: var(--primary-ink); flex: 0 0 auto; }
+.shot-nav__strip {
+  display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0;
+  overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+}
+.shot-nav__strip::-webkit-scrollbar { display: none; }
+.shot-nav__dot {
+  flex: 0 0 auto; min-width: 28px; min-height: 28px; padding: 0 6px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8);
+  background: var(--card2); color: var(--fg-muted);
+  font-size: var(--fs-12); line-height: 1; cursor: pointer;
+}
+.shot-nav__dot--done { color: var(--primary-ink); border-color: var(--primary); }
+.shot-nav__dot--blocked { color: var(--danger-ink); border-color: var(--danger-ink); }
+.shot-nav__dot--running { border-style: dashed; }
+.shot-nav__dot.is-current {
+  background: var(--primary); color: var(--on-primary, #fff); border-color: var(--primary); font-weight: 700;
+}
+.shot-nav__meta { flex: 0 0 auto; }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc, type AppRouter } from "../api";
 import { setOrbState } from "../lib/orbState";
@@ -6,6 +6,8 @@ import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
 import { LiveAssistantTrace, type AssistantActivityEvent } from "./AssistantTrace";
+import { useAssistantContext } from "../lib/assistantContext";
+import { formatContextBreadcrumb, getAssistantQuickActions, toWirePageContext } from "../lib/assistantQuickActions";
 
 type GlobalAskOutput = inferRouterOutputs<AppRouter>["globalAssistant"]["ask"];
 type SiteAction = GlobalAskOutput["siteActions"][number];
@@ -24,32 +26,6 @@ interface ChatMessage {
   /** 監督指令提議（核准／停止／重排／改派） */
   commands?: CommandProposal[];
 }
-
-/** 圖示名稱標成 IconName：寫錯的名字在編譯期就擋下來。
- *  不標的話推論成 string，Icon 收到未知名稱只會畫出一個空的 svg——
- *  沒有任何錯誤，只有畫面上一塊看不見的空白。 */
-const QUICK_PROMPTS: ReadonlyArray<{ icon: IconName; label: string; prompt: string }> = [
-  {
-    icon: "Sparkles",
-    label: "爆款短片主題",
-    prompt: "請幫我想 3 個適合發布在 Reels/TikTok 的生活短影音企劃主題與吸睛鉤子 (Hook)。",
-  },
-  {
-    icon: "Zap",
-    label: "分鏡腳本規劃",
-    prompt: "請為一個 30 秒的產品開箱影片規劃 5 鏡詳細的分鏡腳本與畫面描述。",
-  },
-  {
-    icon: "Search",
-    label: "全組專案進度",
-    prompt: "請盤點我們組內目前的專案進度，並提供下一步最優先建議。",
-  },
-  {
-    icon: "Check",
-    label: "開場鉤子技巧",
-    prompt: "如何在前 3 秒抓住觀眾眼球？請提供 3 種經過驗證的短影片開頭話術公式。",
-  },
-];
 
 /** 已解析動作 → runSiteAction 輸入（逐型別挑欄位；label 等顯示欄位不上送） */
 export function toSiteActionInput(a: SiteAction) {
@@ -239,13 +215,19 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // SSE 即時軌跡：這一題進行中的活動事件（thinking／lookup／step），答完清空
   const [liveEvents, setLiveEvents] = useState<AssistantActivityEvent[]>([]);
-  const [liveOpen, setLiveOpen] = useState(true);
+  // 軌跡預設收合：進行中的那一行摘要（正在查什麼）已經在氣泡上，
+  // 展開的完整事件流是「想知道細節才點」的東西——預設展開會把回答推到看不見。
+  const [liveOpen, setLiveOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
+  /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
+  const pageCtx = useAssistantContext();
+  const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
+  const breadcrumb = formatContextBreadcrumb(pageCtx);
   const pending = streaming || ask.isPending;
 
   // 卸載（關 sheet／切 scope）時中止在途串流：後端收到 abort 會提早收工不白燒額度
@@ -299,7 +281,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         groupId,
         message: text,
         history: newHistory,
-        projectId,
+        projectId: pageCtx.projectId ?? projectId,
+        pageContext: toWirePageContext(pageCtx),
         signal: controller.signal,
         handlers: {
           onStep: (e) => setLiveEvents((prev) => [...prev, e]),
@@ -313,7 +296,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         // 串流沒開始：走一次性 tRPC（同一個核心；只是看不到即時軌跡）
         await new Promise<void>((resolve) => {
           ask.mutate(
-            { groupId, message: text, history: newHistory, projectId },
+            {
+              groupId, message: text, history: newHistory,
+              projectId: pageCtx.projectId ?? projectId,
+              pageContext: toWirePageContext(pageCtx),
+            },
             {
               onSuccess: (data) => { applyDone(data); resolve(); },
               onError: (err) => { applyError(err.message); resolve(); },
@@ -365,20 +352,31 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           </div>
         )}
 
+        {/* 麵包屑：一行說清楚「我現在知道你在哪」。不顯示任何技術 id——
+            使用者看不懂 uuid，而看得懂的那個名字（專案名、第 3 鏡）本來就都有。 */}
+        {breadcrumb && (
+          <div className="ai-copilot-crumb" data-fb="助手上下文">
+            <Icon name="Compass" size={12} />
+            <span>{breadcrumb}</span>
+          </div>
+        )}
+
         {/* ── WATCH：還沒開口之前，先把需要注意的事遞過來（對話開始後讓位給對話） ── */}
         {messages.length === 0 && groupId && <WatchDigest groupId={groupId} onNavigate={onNavigate} />}
 
         {/* ── 靈感快捷按鈕 ── */}
+        {/* 快捷動作隨頁面／選取改變（getAssistantQuickActions）：在分鏡頁盯著第 3 鏡時，
+            「爆款短片主題」是最不相關的一件事。最多 3 顆，手機一行放得下。 */}
         <div className="ai-copilot-prompts">
-          {QUICK_PROMPTS.map((item, idx) => (
+          {quickActions.map((item) => (
             <button
-              key={idx}
+              key={item.id}
               type="button"
               className="ai-copilot-prompt-pill"
               onClick={() => void handleSend(item.prompt)}
               disabled={pending || !groupId}
+              title={item.prompt}
             >
-              <Icon name={item.icon} size={13} />
               <span>{item.label}</span>
             </button>
           ))}
