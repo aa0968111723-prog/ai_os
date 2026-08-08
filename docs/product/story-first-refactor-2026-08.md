@@ -40,24 +40,27 @@
 ## 刻意不做（PDF「第一輪不要做」＋現況暫緩）
 
 - 完整剪輯 Timeline、大量專業 Camera 參數（僅留 §10 清單內欄位）、多 Agent 編排、全自動剪輯發布、企業級 DAM、一次接完所有模型。
-- **已於 2026-08-08 補上（原第 1、4 項）**：
-  - 助手逐鏡上下文動作 `direct_shot`（§12）＋單鏡粒度的 before→after 變更預覽（§14）。
-  - 造型（Look）提到 generationCore 錨點層（§14 Identity/Look）：與角色身份併成同一句
-    「外觀鎖定 安倢：黑色長髮，造型鎖定：米白外套」，並凍進一致性快照供重試沿用；
-    同時移除 `buildShotContextPrompt` 的 prompt 層注入（同一件衣服不講兩遍）。
-  - 順帶補上 §23 雙向影響（改卡前先知道牽動幾鏡、幾張畫面會過時）。
+- **2026-08-08 已補完原 P1–P3 缺口表全部五項**：
+  1. 助手逐鏡上下文動作 `direct_shot`（§12）＋單鏡 before→after 變更預覽（§14）。
+  2. 造型（Look）提到 generationCore 錨點層（§14 Identity/Look）：與角色身份併成同一句
+     「外觀鎖定 安倢：黑色長髮，造型鎖定：米白外套」，凍進一致性快照供重試沿用；
+     同時移除 `buildShotContextPrompt` 的 prompt 層注入（同一件衣服不講兩遍）。
+  3. §23 雙向影響＋**畫面過時偵測**（兼 P3 Continuity Checker 第一版）：
+     `detectContinuityDrift` 比對凍結快照與現在的卡片，`story.continuityCheck` 回報，
+     分鏡卡標「畫面過時」並說明原因。**不加欄位、不做 migration**；唯讀不自動重生成。
+  4. 轉分鏡**逐場 diff 套用**（§22／§33）：`diffStoryboardPlan` 分 create／fill／reuse，
+     預覽與實際套用共用同一支純函式；已有鏡的場一律不動。
+  5. Shot 相關素材推薦（§13／§26）：`suggestAssetsForShot` 做**名稱／標籤比對**並回報命中的詞。
+     刻意不做語意向量檢索、也不寫「AI 已分析」——沒有那個能力就不假裝（§60）。
 
-- **後續 P1–P3 缺口**（開工前先讀本表）：
-  1. AI **批次**修改的彙總 Change Preview（「新增 3 鏡／修改 4 鏡／影響角色 1」一次看完再套用）。
-     目前粒度：單鏡 `direct_shot` 差異行、轉分鏡前 `storyboardPreview`、解析 `story.undoRun` 撤銷。
-  2. 素材自動推薦掛入 Shot（§13 向量檢索；受 RAG roadmap 門檻約束）。
-  3. Continuity Checker（§P3）。
-  4. 轉分鏡的逐場 diff 套用（目前：同 run 冪等＋附加式 append＋預覽警示）。
-  5. `entityImpact` 目前只回「影響幾鏡」，尚未把既有生成標記成 outdated／needs-regeneration
-     （§23 完整版；需要 generations 上的狀態欄位與重生成入口）。
+- **仍未做（下一輪）**：
+  - 助手一次提議多個動作時的**彙總** Change Preview（目前每個動作各自確認，粒度已足夠安全，
+    但「一次看完 5 個動作的總影響」還沒有）。
+  - 素材推薦升級為語意向量檢索（受 RAG roadmap 門檻約束；介面已預留 `matched` 形狀）。
+  - Continuity Checker 的自動修復（目前只回報，不代按重生成——這是刻意的）。
 
 ## 資料相容
 
-- 純新增 migration（0049），舊專案零影響；既有分鏡（無 storySceneId）在分鏡中心顯示為「未分場」。
+- 純新增 migration（0049，17 句皆 IF NOT EXISTS），舊專案零影響；既有分鏡（無 storySceneId）在分鏡中心顯示為「未分場」。
 - 舊「定調」資料（worldview/角色/場景/道具/知識/素材）原樣沿用，只是入口移到專案設定二層。
 - 舊深連結 `#stage-context` → `#stage-story` 別名；`?focus=` 全部保留。

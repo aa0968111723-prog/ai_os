@@ -199,9 +199,11 @@ export function StoryStage({
       utils.scenes.listByProject.invalidate({ projectId });
       utils.story.scenesList.invalidate({ projectId });
       utils.story.get.invalidate({ projectId });
+      utils.story.storyboardPreview.invalidate({ projectId });
       requestAnimationFrame(() => scrollToSelector("#stage-board"));
     },
   });
+
 
   const undoRun = trpc.story.undoRun.useMutation({
     onSuccess: (r) => {
@@ -235,6 +237,28 @@ export function StoryStage({
   const isDirty = Boolean(data?.story?.isDirty) || (content !== null && remote !== null && content !== remote);
   const hasParsed = Boolean(data?.story?.lastParsedAt);
   const lastRun = data?.lastRun;
+
+  /**
+   * §33 變更預覽：專案已經有分鏡時，「產生分鏡」是會動到既有內容的批次操作，
+   * 按下前要先講清楚會做什麼。全新專案沒有東西會被動到，就不要多一層確認擋路。
+   */
+  const boardPreview = trpc.story.storyboardPreview.useQuery(
+    { projectId },
+    { enabled: Boolean(lastRun && lastRun.status === "done") },
+  );
+  const boardPlan = boardPreview.data?.ready ? boardPreview.data : null;
+  const boardSummary = boardPlan?.summary;
+  const needsBoardConfirm = Boolean(boardSummary && (boardSummary.reuseScenes > 0 || boardSummary.fillScenes > 0));
+  const boardPlanText = boardSummary
+    ? [
+        boardSummary.createScenes > 0 ? `新增 ${boardSummary.createScenes} 場` : "",
+        boardSummary.fillScenes > 0 ? `補鏡 ${boardSummary.fillScenes} 場` : "",
+        boardSummary.reuseScenes > 0 ? `沿用 ${boardSummary.reuseScenes} 場（不會動）` : "",
+        boardSummary.newShots > 0 ? `共 ${boardSummary.newShots} 鏡` : "沒有新的鏡要加",
+      ]
+        .filter(Boolean)
+        .join("・")
+    : "";
   const rows = Math.min(mobileCompact ? 16 : 22, Math.max(mobileCompact ? 8 : 12, (content ?? "").split("\n").length + 2));
 
   return (
@@ -334,14 +358,27 @@ export function StoryStage({
               >
                 {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
               </Button>
-              <Button
-                variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                disabled={board.isPending || !lastRun || lastRun.status !== "done"}
-                onClick={() => board.mutate({ projectId })}
-                title="把解析出的場與鏡建成可編輯的分鏡卡"
-              >
-                {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
-              </Button>
+              {needsBoardConfirm ? (
+                // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
+                <ConfirmButton
+                  triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
+                  message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
+                  confirmLabel="套用"
+                  disabled={board.isPending}
+                  onConfirm={() => board.mutate({ projectId })}
+                >
+                  {board.isPending ? "建立中…" : "產生分鏡"}
+                </ConfirmButton>
+              ) : (
+                <Button
+                  variant={hasParsed && !isDirty ? "primary" : "ghost"}
+                  disabled={board.isPending || !lastRun || lastRun.status !== "done"}
+                  onClick={() => board.mutate({ projectId })}
+                  title="把解析出的場與鏡建成可編輯的分鏡卡"
+                >
+                  {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
+                </Button>
+              )}
             </div>
           )}
         </div>

@@ -55,6 +55,7 @@ export function ShotCard({
   mode,
   looks,
   characterNames,
+  outdatedReason,
   onOpenStudio,
 }: {
   projectId: string;
@@ -66,6 +67,8 @@ export function ShotCard({
   /** 專案全部造型（依 characterId 過濾出本鏡可選的） */
   looks: LookRow[];
   characterNames: Map<string, string>;
+  /** 這一鏡的畫面已經跟卡片對不上的原因（§23）；空＝沒過時 */
+  outdatedReason?: string;
   onOpenStudio: (sceneId: string) => void;
 }) {
   const utils = trpc.useUtils();
@@ -95,6 +98,17 @@ export function ShotCard({
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
+
+  /**
+   * §13 相關素材：只在專業模式查（簡單模式不顯示，就不必打這支）。
+   * 這不是語意檢索——是拿這一鏡綁定的角色／場景／道具名字比對素材標題與標籤，
+   * 所以文案寫「名稱或標籤對得上」，不寫「AI 已為你分析」。
+   */
+  const assetSuggest = trpc.story.shotAssetSuggestions.useQuery(
+    { sceneId: shot.id },
+    { enabled: mode === "pro", staleTime: 60_000 },
+  );
+  const assetHints = assetSuggest.data?.items ?? [];
 
   return (
     <Card as="article" className="shot-card" id={`board-shot-${shot.id}`} data-fb="分鏡卡">
@@ -132,7 +146,16 @@ export function ShotCard({
         </label>
         {generating && <Pill status="running">生成中</Pill>}
         {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
+        {outdatedReason && <Pill status="failed">畫面過時</Pill>}
       </div>
+
+      {/* §23：卡片改過、這張圖還是舊的。不自動重畫——講清楚原因，讓使用者決定要不要花點數重生成 */}
+      {outdatedReason && (
+        <Meta as="p" role="status" className="shot-card__outdated">
+          <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+          這張圖是舊設定畫的（{outdatedReason} 後來改過）——要更新請打開單格工作室重畫。
+        </Meta>
+      )}
 
       <button
         type="button"
@@ -191,6 +214,21 @@ export function ShotCard({
           </span>
         )}
       </div>
+
+      {/* §13 相關素材：專業模式才出現，避免第一層被塞滿（漸進揭露） */}
+      {mode === "pro" && assetHints.length > 0 && (
+        <div className="shot-card__assets">
+          <Meta as="span">
+            <Icon name="Paperclip" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+            專案素材裡名稱或標籤對得上的：
+          </Meta>
+          {assetHints.map((a) => (
+            <Chip key={a.id} title={`符合：${a.matched.join("、")}（點擊在素材庫開啟）`}>
+              {a.title.slice(0, 14)}
+            </Chip>
+          ))}
+        </div>
+      )}
 
       {/* Direction＋Performance：簡單模式只留鏡別；專業模式全開 */}
       <div className="shot-card__direction" role="group" aria-label="鏡頭語言">

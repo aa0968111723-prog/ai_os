@@ -38,6 +38,15 @@ describe("mockStoryExtract", () => {
     expect(plan.characters.find((c) => c.name === "師父")?.costume).toBeUndefined();
   });
 
+  it("出場道具掛 propRefs（假模式要與真模式同一份契約，否則 e2e 是假綠燈）", () => {
+    const plan = mockStoryExtract(SAMPLE);
+    const withUmbrella = plan.scenes.flatMap((s) => s.shots).filter((sh) => (sh.propRefs ?? []).includes("紅傘"));
+    expect(withUmbrella.length).toBeGreaterThan(0);
+    // 沒提到道具的鏡不該被硬掛（錨點會被灌進不相干的畫面）
+    const sceneryOnly = plan.scenes.flatMap((s) => s.shots).find((sh) => sh.prompt.includes("下著雨") && !sh.prompt.includes("紅傘"));
+    expect(sceneryOnly?.propRefs ?? []).not.toContain("紅傘");
+  });
+
   it("段落 → 場；句子 → 鏡；環境（雨/清晨）寫進 environment；出場角色掛 characterRefs", () => {
     const plan = mockStoryExtract(SAMPLE);
     expect(plan.scenes).toHaveLength(2);

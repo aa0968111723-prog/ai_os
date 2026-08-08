@@ -16,6 +16,8 @@ export interface EntityImpact {
   shotsWithVisual: number;
   generations: number;
   sampleTitles: string[];
+  /** 已經與卡片對不上的畫面數（§23：這是「已經造成落差」，不只是「可能受影響」） */
+  outdatedShots?: number;
 }
 
 /**
@@ -29,6 +31,10 @@ export function impactSentence(data: EntityImpact | undefined | null): string | 
   if (data.shotsWithVisual > 0) parts.push(`，其中 ${data.shotsWithVisual} 鏡已經有畫面`);
   parts.push("。");
   if (sample.length) parts.push(`（例如：${sample.join("、")}${data.shots > sample.length ? "…" : ""}）`);
+  // 已經對不上的畫面要講得比「可能受影響」重：那不是風險，是現況
+  if (data.outdatedShots && data.outdatedShots > 0) {
+    parts.push(` 其中 ${data.outdatedShots} 鏡的畫面已經跟現在的卡片對不上了。`);
+  }
   if (data.shotsWithVisual > 0) parts.push(" 改完不會自動重畫，要更新畫面請到分鏡逐鏡重新生成。");
   return parts.join("");
 }
