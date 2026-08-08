@@ -251,6 +251,12 @@ export const scenesRouter = router({
         camera: schema.scenes.camera,
         performance: schema.scenes.performance,
         lookIds: schema.scenes.lookIds,
+        /**
+         * 樂觀併發的版本（shared/revision.ts）。創作室的 Shot Inspector 直接編輯這一列，
+         * 存檔要帶 expectedRev 才分得出「我們改了同一欄」與「各改各的」——
+         * 沒有這一欄，Inspector 只能走「後寫的蓋掉先寫的」，夥伴同時編輯時會靜默吃字。
+         */
+        rev: schema.scenes.rev,
         // 完成度五軌裡唯一的真欄位（其餘四軌由指標欄推導；見 shared/shotCompletion.ts）
         reviewStatus: schema.scenes.reviewStatus,
         assetUrl: schema.assets.url,

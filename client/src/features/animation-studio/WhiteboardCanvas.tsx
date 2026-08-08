@@ -15,6 +15,7 @@ import { nextStrokeId, type BoardDoc, type Stroke } from "./boardDoc";
 import { renderBoard, renderStroke, withAlpha } from "./boardRender";
 import type { SketchPreview } from "./sketchReplay";
 import { clampZoom, fitBoardToBox, type StudioLayout } from "./studioLayout";
+import { SAFE_AREA, type GuideState } from "./studioTools";
 
 export interface BoardView {
   scale: number;
@@ -42,6 +43,16 @@ export interface WhiteboardCanvasProps {
   stabilizer?: number;
   /** 筆壓曲線校正（只影響觸控筆），見 brushes.applyPressureCurve */
   pressureCurve?: PressureCurve;
+  /**
+   * 畫面輔助線（安全區／三分法／中心線／格線）。分鏡是給拍片用的，
+   * 「字幕會不會被切掉」「主體在不在交點上」要在畫的當下就看得到。
+   *
+   * 疊在紙面上、canvas 之下，與 `paperStyle` 共用同一組座標——輔助線因此
+   * 自動跟著縮放平移走，不必在外層重算一次同樣的數學（重算＝遲早對不齊）。
+   * 純 CSS 繪製（gradient＋border），不佔第三張 canvas 的重繪成本。
+   * 省略＝全部關閉，既有呼叫端行為不變。
+   */
+  guides?: GuideState;
 }
 
 /**
@@ -72,6 +83,7 @@ export function WhiteboardCanvas({
   aiPreview,
   stabilizer = 0,
   pressureCurve = "normal",
+  guides,
 }: WhiteboardCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
@@ -506,6 +518,27 @@ export function WhiteboardCanvas({
     >
       {/* 紙面：白板的邊界要看得見，否則畫出去的部分不會被匯出這件事沒人知道 */}
       <div className="studio-board__paper" style={paperStyle} aria-hidden="true" />
+      {/* 輔助線：與紙面共用 paperStyle，縮放平移自動跟上。pointer-events 交由 CSS 關掉 */}
+      {guides && (guides.safe || guides.thirds || guides.center || guides.grid) && (
+        <div className="studio-guides" style={paperStyle} aria-hidden="true">
+          {guides.grid && <span className="studio-guides__grid" />}
+          {guides.thirds && <span className="studio-guides__thirds" />}
+          {guides.center && <span className="studio-guides__center" />}
+          {guides.safe && (
+            <>
+              {/* action-safe 在外、title-safe 在內：兩框的意義不同，只畫一框會誤導 */}
+              <span
+                className="studio-guides__safe studio-guides__safe--action"
+                style={{ inset: `${((1 - SAFE_AREA.action) / 2) * 100}%` }}
+              />
+              <span
+                className="studio-guides__safe studio-guides__safe--title"
+                style={{ inset: `${((1 - SAFE_AREA.title) / 2) * 100}%` }}
+              />
+            </>
+          )}
+        </div>
+      )}
       {referenceUrl && (
         <img
           className="studio-board__reference"
