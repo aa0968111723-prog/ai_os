@@ -7992,7 +7992,7 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .story-stage__savestate { font-size: var(--fs-12); }
 .story-editor {
   width: 100%; margin-top: 10px; padding: 12px 14px;
-  font-size: var(--fs-15); line-height: 1.75; resize: vertical;
+  font-size: calc(var(--fs-15) * var(--script-font-scale, 1)); line-height: 1.75; resize: vertical;
   border-radius: var(--r-md, 10px); border: 1px solid var(--border);
   background: var(--field); min-height: 200px;
 }
@@ -8001,6 +8001,95 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
 }
+
+/* ── 劇本編輯器：全螢幕寫作＋標注＋專業工具 ──
+   非沉浸時就是原本的卡片內排版（工具列 → 稿子 → 統計 → 解析列）；
+   沉浸時整個殼變成 100dvh 的三段式（頂工具列固定、稿子吃滿、底列固定）。 */
+.script-editor { display: flex; flex-direction: column; min-width: 0; }
+.script-editor__toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft);
+}
+.script-editor__group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.script-editor__spacer { flex: 1 1 auto; }
+.script-editor__save { font-size: var(--fs-12); opacity: .85; white-space: nowrap; }
+/* 標注鈕刻意做小：它們有九顆，用一般按鈕尺寸會把工具列撐成兩排搶走稿子的空間 */
+.script-mark-btn {
+  border: 1px solid var(--border); background: var(--field); color: inherit;
+  border-radius: 999px; padding: 3px 10px; font-size: var(--fs-12); cursor: pointer;
+  min-height: var(--touch-min, 32px);
+}
+.script-mark-btn:hover { border-color: var(--primary-solid); color: var(--primary-ink); }
+.script-editor__font { display: inline-flex; align-items: center; gap: 2px; }
+.script-editor__font button {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  padding: 4px; min-height: var(--touch-min, 32px); min-width: var(--touch-min, 32px);
+}
+.script-find {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px solid var(--border-soft);
+}
+.script-find input { flex: 1 1 140px; min-width: 100px; font-size: var(--fs-13); padding: 4px 8px; }
+.script-editor__body { display: flex; gap: 10px; min-height: 0; min-width: 0; }
+.script-editor__body .story-editor { flex: 1 1 auto; }
+.script-outline {
+  flex: 0 0 220px; min-width: 0; max-height: 420px; overflow-y: auto; overscroll-behavior: contain;
+  margin-top: 10px; padding: 8px; border: 1px solid var(--border); border-radius: var(--r-md, 10px);
+  background: var(--surface-sunken, var(--card2));
+}
+.script-outline__head { margin: 0 0 6px; font-weight: 600; }
+.script-outline__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.script-outline__list button {
+  display: flex; align-items: center; gap: 4px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  padding: 5px 6px; border-radius: 6px; font-size: var(--fs-12); line-height: 1.4;
+}
+.script-outline__list button:hover { background: var(--primary-tint); color: var(--primary-ink); }
+.script-editor__status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 8px; font-size: var(--fs-12);
+}
+.script-editor__keys {
+  list-style: none; margin: 6px 0 0; padding: 8px; display: grid; gap: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-md, 10px);
+  background: var(--surface-sunken, var(--card2)); font-size: var(--fs-12);
+}
+.script-editor__keys kbd {
+  display: inline-block; min-width: 8em; font-family: inherit; font-weight: 600; color: var(--primary-ink);
+}
+.script-editor__notice { margin: 6px 0 0; }
+
+/* 專注模式：收起工具列與統計，只留一欄好讀寬度的稿子（重讀時最需要的版面） */
+.script-editor.is-focus .script-editor__toolbar > .script-editor__group:first-child,
+.script-editor.is-focus .script-editor__status,
+.script-editor.is-focus .script-editor__keys { display: none; }
+.script-editor.is-focus .story-editor { max-width: 68ch; margin-inline: auto; }
+
+/* 沉浸：吃滿視窗，稿子拿走所有剩餘高度；工具列與解析列黏在上下兩端。
+   position: fixed + inset: 0 + z-index 是站內既有約定（見 .studio.is-immersive、
+   .map-host.is-immersive）——只靠 100dvh 的話它仍待在卡片的版面流裡，
+   iOS（不支援元素 requestFullscreen）會看到頁面其餘內容從旁邊露出來。 */
+.script-editor.is-immersive {
+  position: fixed; inset: 0; z-index: 60; min-height: 0;
+  padding: 0 16px calc(10px + var(--safe-bottom, 0px));
+  padding-top: var(--safe-top, 0px); background: var(--bg); overflow: hidden;
+}
+.script-editor.is-immersive .script-editor__body { flex: 1 1 auto; }
+.script-editor.is-immersive .story-editor {
+  height: 100%; min-height: 0; resize: none; margin-top: 10px;
+}
+.script-editor.is-immersive .script-outline { max-height: none; margin-bottom: 0; }
+.script-editor.is-immersive .script-editor__toolbar,
+.script-editor.is-immersive .script-editor__status { flex: none; }
+
+/* 沉浸時讓開全站浮動殼層（與動畫創作室／知識族譜同一套約定） */
+body.story-immersive .topbar,
+body.story-immersive .mobile-nav,
+body.story-immersive .dm-bubble-root,
+body.story-immersive .fb-fab-root,
+body.story-immersive .app-update-banner,
+body.story-immersive .share-rescue-banner { display: none !important; }
+body.story-immersive { overflow: hidden; }
 .story-parse-bar__chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; }
 .story-parse-bar__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .story-chip-dirty { border-style: dashed; color: var(--warn, #b45309); border-color: currentColor; }
@@ -8101,8 +8190,12 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   .psettings-sheet { width: 100vw; }
   /* 手機直向可完成（Mobile First guardrail）：分鏡卡單欄、觸控目標保 44px */
   .board-shots { grid-template-columns: 1fr; }
-  /* iOS 聚焦自動放大會打斷編輯：故事編輯器字級 ≥16px */
-  .story-editor { font-size: 16px; }
+  /* iOS 聚焦自動放大會打斷編輯：故事編輯器字級 ≥16px（使用者調大可以，調小不行） */
+  .story-editor { font-size: max(16px, calc(var(--fs-15) * var(--script-font-scale, 1))); }
   .story-parse-bar__actions { width: 100%; }
   .story-parse-bar__actions .btn { flex: 1 1 auto; }
+  /* 手機沒有空間放側欄：大綱改成排在稿子上方的一段可捲清單 */
+  .script-editor__body { flex-direction: column; }
+  .script-outline { flex: none; width: 100%; max-height: 200px; }
+  .script-editor.is-immersive { padding-inline: 12px; }
 }
