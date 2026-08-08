@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
+import { completeText, LlmServiceError } from "../services/llmProvider";
 import { runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
@@ -79,8 +80,9 @@ import {
 const ASK_COST_POINTS = 0;
 /** 上下文最多列幾個專案：夠組長看全貌，又不會把提示詞灌爆（超過的在上下文註明「另有 N 案未列」） */
 const PROJECT_LIMIT = 15;
-/** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
-const MAX_TOOL_ROUNDS = 3;
+/** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢）。
+ *  從 3 提升到 6：讓團隊助手能深度鑽研多個專案與資料庫後再回答，顯著改善回答品質。 */
+const MAX_TOOL_ROUNDS = 6;
 /** 可下令對象一次列幾筆（子計畫／人員任務／成員各自）：夠指到真正該處理的那幾件，又不灌爆提示詞 */
 const COMMAND_REF_LIMIT = 12;
 
@@ -1091,6 +1093,8 @@ export const teamAssistantRouter = router({
       message: z.string().min(1).max(500),
       // 追問脈絡：前端帶回近幾輪對話（伺服器無狀態、不落表）；限 8 輪×2000 字防提示詞灌爆，注入時再收緊到 6 輪×400 字
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(2000) })).max(8).optional(),
+      /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
+      mode: agentPlannerModeSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
@@ -1179,7 +1183,10 @@ ${historyBlock}使用者的問題：${input.message}`;
         const outcome = await runToolLoop<z.infer<typeof teamToolSchema>, TeamReply>({
           maxToolRounds: MAX_TOOL_ROUNDS,
           buildPrompt,
-          llm: (prompt) => nimComplete(prompt, { timeoutMs: 60_000 }),
+          llm: (prompt) => {
+            const quality = input.mode ?? "nim";
+            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000 }).then(r => r.text);
+          },
           tryToolCall: (json) => {
             const parsed = teamToolSchema.safeParse(json);
             return parsed.success ? parsed.data : null;
