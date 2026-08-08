@@ -66,6 +66,8 @@ export function ShotCard({
   characterNames,
   outdatedReason,
   onOpenStudio,
+  picked,
+  onTogglePick,
 }: {
   projectId: string;
   shot: ShotRow;
@@ -79,6 +81,9 @@ export function ShotCard({
   /** 這一鏡的畫面已經跟卡片對不上的原因（§23）；空＝沒過時 */
   outdatedReason?: string;
   onOpenStudio: (sceneId: string) => void;
+  /** 是否被勾選（多選交給 AI 助手一起處理）；未提供 onTogglePick 時整個勾選欄不渲染 */
+  picked?: boolean;
+  onTogglePick?: (sceneId: string) => void;
 }) {
   const utils = trpc.useUtils();
   const update = trpc.scenes.update.useMutation({
@@ -126,8 +131,22 @@ export function ShotCard({
   const assetHints = assetSuggest.data?.items ?? [];
 
   return (
-    <Card as="article" className="shot-card" id={`board-shot-${shot.id}`} data-fb="分鏡卡">
+    <Card as="article" className="shot-card" id={`board-shot-${shot.id}`} data-fb="分鏡卡" data-picked={picked ? "1" : undefined}>
       <div className="shot-card__head">
+        {/* 勾選＝「我要對這幾鏡一起做事」。這是全站第一個分鏡多選，刻意只做最小的一件事：
+            把選中的鏡號交給 AI 助手（「把這三鏡變得更有張力」），不做批次編輯 UI。
+            用 checkbox 而不是點卡片切換——卡片本身早就是「打開單格工作室」，
+            兩種意圖搶同一個點擊區只會讓兩邊都不準。 */}
+        {onTogglePick && (
+          <label className="shot-card__pick" title={`選取第 ${shotNumber} 鏡（可多選，交給 AI 助手一起處理）`}>
+            <input
+              type="checkbox"
+              checked={!!picked}
+              aria-label={`選取第 ${shotNumber} 鏡`}
+              onChange={() => onTogglePick(shot.id)}
+            />
+          </label>
+        )}
         <span className="shot-card__num">#{shotNumber}</span>
         <input
           key={`title-${shot.id}-${shot.title}`}

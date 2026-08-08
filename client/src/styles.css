@@ -7188,6 +7188,22 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   margin-top: 8px;
 }
 
+/* 助手麵包屑：一行「我知道你在哪」。單行截斷——手機上絕不換行擠掉輸入框 */
+.ai-copilot-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  min-width: 0;
+}
+.ai-copilot-crumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── WATCH「需要你注意」：零狀態的主動摘要（全部健康時整塊不渲染） ── */
 .ai-copilot-watch {
   display: flex;
@@ -8166,6 +8182,10 @@ body.story-immersive { overflow: hidden; }
 .shot-card { display: flex; flex-direction: column; gap: 8px; }
 .shot-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shot-card__num { font-weight: 700; color: var(--primary-ink); font-size: var(--fs-13); }
+/* 分鏡多選勾選：命中區 ≥24px（手機拇指），未選時低調、選中才亮 */
+.shot-card__pick { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; cursor: pointer; }
+.shot-card__pick input { width: 16px; height: 16px; accent-color: var(--primary-ink); cursor: pointer; }
+.shot-card[data-picked] { box-shadow: 0 0 0 2px rgba(246, 119, 30, 0.45); }
 .shot-card__title {
   flex: 1 1 120px; min-width: 100px; border: 1px solid transparent; background: transparent;
   font-weight: 600; padding: 2px 6px; border-radius: 6px;

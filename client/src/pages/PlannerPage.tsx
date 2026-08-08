@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { registerAssistantFocus, registerAssistantPage } from "../lib/assistantContext";
 import { useImmersive } from "../lib/useImmersive";
 import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
 import { Icon } from "../components/Icon";
@@ -138,6 +139,9 @@ export function PlannerPage({ groupId }: { groupId: string }) {
     return null;
   });
   const initialSections = plannerInitialSections(focusTarget);
+  // 助手頁面感知：這一頁同時有行程與筆記，預設報行程；
+  // 使用者打開某則筆記時，NotesCard 會把焦點翻成筆記（見下方 registerAssistantFocus）。
+  useEffect(() => registerAssistantPage({ pageType: focusTarget?.startsWith("note-") ? "notes" : "schedule" }), [focusTarget]);
   // 由留言／私訊的排程/筆記引用卡跳來：目標 id 就緒後輪詢直到該列渲染再高亮
   useEffect(() => {
     if (!focusTarget) return;
@@ -871,6 +875,11 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
   // 表單（新增／編輯共用）：editingId 有值＝編輯模式，全文以 notes.get 載入後才可改
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 正在編輯的那則筆記＝使用者當下指涉的對象（「這則幫我轉成任務」）
+  useEffect(
+    () => (editingId ? registerAssistantFocus({ pageType: "notes", entityType: "note", entityId: editingId }) : undefined),
+    [editingId],
+  );
   // 標題/內容改用本地草稿（比照知識庫 useLocalDraft）：開會逐字稿可打到 4 萬字，
   // 切組（key 重掛）、誤點返回、手機切背景被回收、當機重整——沒有草稿就是整篇無聲消失。
   // 新增模式以組為 key、編輯模式以該筆為 key；儲存成功才清草稿。

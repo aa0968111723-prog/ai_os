@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../../api";
+import { registerAssistantFocus, registerAssistantPage } from "../../lib/assistantContext";
 import { Icon } from "../../components/Icon";
 import { Button, Meta } from "../../components/ui";
 import { BrushShelf } from "./BrushShelf";
@@ -52,6 +53,28 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const { board, activeShotId, draftIds, storageFull, switchTo, pushStroke, undo, redo, clear, markSaved } =
     useBoardSession(projectId, boardSize, layout);
   const shot = shots.find((s) => s.id === activeShotId) ?? null;
+
+  /* 助手頁面感知：創作室＝專案 scope，白板上正在畫的那一鏡就是「這一鏡」。
+     鏡號與分鏡中心同一套算法（orderIndex 排序後 index+1），兩邊講的「第 3 鏡」是同一鏡。 */
+  const studioShotNo = useMemo(() => {
+    if (!activeShotId) return undefined;
+    const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
+    const i = sorted.findIndex((s) => s.id === activeShotId);
+    return i >= 0 ? i + 1 : undefined;
+  }, [shots, activeShotId]);
+  useEffect(
+    () => registerAssistantPage({ pageType: "studio", projectId, projectTitle }),
+    [projectId, projectTitle],
+  );
+  useEffect(
+    () => registerAssistantFocus({
+      pageType: "studio",
+      entityType: "shot",
+      entityId: activeShotId ?? undefined,
+      entityLabel: studioShotNo ? `第 ${studioShotNo} 鏡` : undefined,
+    }),
+    [activeShotId, studioShotNo],
+  );
 
   // ── 筆刷櫃 ───────────────────────────────────────────────
   const [saved, setSaved] = useState<BrushSpec[]>(() => readSavedBrushes());

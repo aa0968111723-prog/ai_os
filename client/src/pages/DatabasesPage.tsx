@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
+import { registerAssistantFocus, registerAssistantPage } from "../lib/assistantContext";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { AddDataSheet, pendingAddDataMethod } from "../components/AddDataSheet";
@@ -129,6 +130,11 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 助手頁面感知：選中的資料庫＝「這個資料庫」；contextProjectId 讓它知道是從哪個專案過來的
+  useEffect(() => {
+    if (!selectedId) return;
+    return registerAssistantFocus({ entityType: "database", entityId: selectedId });
+  }, [selectedId]);
   const [creating, setCreating] = useState(false);
   const [databaseQuery, setDatabaseQuery] = useState("");
   // 外部授權是整頁重導：回來時網址上還帶著「進行到哪一步」，直接把面板接回去（Golden Path 1／5）
@@ -151,6 +157,13 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const contextProject = trpc.projects.get.useQuery(
     { id: contextProjectId! },
     { enabled: !!contextProjectId },
+  );
+
+  // 助手頁面感知：資料庫頁；?projectId= 帶進來的專案是脈絡提示（授權仍由後端驗）
+  const dbProjectTitle = contextProject.data?.title;
+  useEffect(
+    () => registerAssistantPage({ pageType: "database", projectId: contextProjectId ?? undefined, projectTitle: dbProjectTitle }),
+    [contextProjectId, dbProjectTitle],
   );
 
   const tables = (list.data ?? []) as TableSummary[];
