@@ -304,9 +304,12 @@ describe("legacy migration adoption bridge", () => {
     //   不是 post-bridge 建立的表，所以不適用 0025／0049 那條「新欄要一併寫回
     //   原建表語句」的規則——drift 不會為它們產出 CREATE TABLE。）
     //
+    //   0053 是 scenes 的 review_status：一句 ADD COLUMN IF NOT EXISTS
+    //   （帶 DEFAULT 'draft'，舊列自動補值、不改既有欄位型別）＋一句
+    //   CREATE INDEX IF NOT EXISTS，共 2 句，重跑無害。
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

@@ -275,4 +275,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0052_data_hub_bindings_and_lineage": [
     "9470bdb94136c2987dcecf293a84c9214161d71a98fca0445093ed224464be9f",
   ],
+  "0053_shot_review": [
+    "e948ec2a6f2cfbd211473db8130cb010c8fff4748dfec5d88b386f402ff173d8",
+  ],
 };

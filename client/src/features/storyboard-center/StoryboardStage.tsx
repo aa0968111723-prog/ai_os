@@ -13,6 +13,7 @@ import { scrollToSelector } from "../creation-workbench/workbenchNav";
 import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from "./boardPrefs";
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
+import { ShotNavigator } from "./ShotNavigator";
 
 export function StoryboardStage({
   projectId,
@@ -179,6 +180,13 @@ export function StoryboardStage({
           charIds={charIds}
           sceneIds={sceneIds}
           propIds={propIds}
+          nav={
+            <ShotNavigator
+              shots={shotRows}
+              currentId={studioShot.id}
+              onGo={(nextId) => setStudioSceneId(nextId)}
+            />
+          }
           onClose={() => setStudioSceneId(null)}
           onChanged={() => {
             utils.scenes.listByProject.invalidate({ projectId });
