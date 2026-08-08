@@ -90,4 +90,16 @@ describe("AskSources", () => {
     const { container } = render(<AskSources sources={sources()} />);
     expect(container.querySelector("details")).not.toHaveAttribute("open");
   });
+
+  it("展開後分辨 EMPTY、TIMEOUT 與 retrieval timing", () => {
+    render(<AskSources sources={sources({
+      items: [
+        { id: "r1", title: "知識", kind: "resource", status: "skipped", chars: 0, includedChars: 0, outcome: "EMPTY", retrieval: "hybrid", durationMs: 12, attempts: 1 },
+        { id: "r2", title: "資料庫", kind: "resource", status: "skipped", chars: 0, includedChars: 0, outcome: "TIMEOUT", retrieval: "hybrid", durationMs: 4000, attempts: 1 },
+      ],
+    })} />);
+    expect(screen.getByText("沒有符合資料")).toBeInTheDocument();
+    expect(screen.getByText("逾時，已略過")).toBeInTheDocument();
+    expect(screen.getByText("hybrid・12 ms")).toBeInTheDocument();
+  });
 });

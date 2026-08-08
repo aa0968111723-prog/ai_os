@@ -33,6 +33,10 @@ export type AssistantStreamDone = {
       status: "full" | "partial" | "skipped";
       chars: number;
       includedChars: number;
+      outcome?: "OK" | "EMPTY" | "TIMEOUT" | "AUTH_DENIED" | "NOT_AVAILABLE" | "TOOL_ERROR";
+      retrieval?: "structured" | "keyword" | "metadata" | "hybrid";
+      durationMs?: number;
+      attempts?: number;
     }>;
     truncated: boolean;
     budgetChars: number;
@@ -344,6 +348,8 @@ export async function requestAssistantStream({
   mode,
   knowledgeIds,
   onlyKnowledgeIds,
+  history,
+  pageContext,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -357,6 +363,8 @@ export async function requestAssistantStream({
   knowledgeIds?: string[];
   /** 本次「只用這幾份依據」（P5）；空陣列視同未指定 */
   onlyKnowledgeIds?: string[];
+  history?: Array<{ role: "user" | "assistant"; text: string }>;
+  pageContext?: AssistantWirePageContext;
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -375,6 +383,8 @@ export async function requestAssistantStream({
         mode,
         knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
         onlyKnowledgeIds: onlyKnowledgeIds?.length ? onlyKnowledgeIds : undefined,
+        history: history?.length ? history : undefined,
+        pageContext,
       }),
       signal,
     });

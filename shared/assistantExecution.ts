@@ -81,6 +81,8 @@ const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|�
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
+const COMPOUND_RE = /(?:然後|接著|再把|並(?:且|逐|再|重新)|同時|之後|逐鏡|每一鏡|每個|批次|全部.*(?:生成|建立|修改))/i;
+const ACTION_VERB_RE = /(?:建立|新增|修改|更新|拆|生成|產生|指派|綁定|移動|排序|審核|核准|準備)/gi;
 
 function compactTitle(message: string): string {
   const title = message.replace(/\s+/g, " ").trim();
@@ -92,6 +94,7 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   const title = compactTitle(text) || "處理這項請求";
   const asksQuestion = QUESTION_RE.test(text);
   const asksAction = ACTION_RE.test(text);
+  const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
 
   if (WATCH_RE.test(text)) {
     return {
@@ -107,6 +110,14 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
       confidence: asksAction ? "high" : "medium",
       title,
       steps: ["讀取目前上下文", "拆解目標與依賴", "提出可核准的執行計畫"],
+    };
+  }
+  if (asksAction && (COMPOUND_RE.test(text) || actionVerbCount >= 2)) {
+    return {
+      intent: "PLAN",
+      confidence: "high",
+      title,
+      steps: ["讀取目前上下文", "拆解多步驟目標與依賴", "建立可續跑且可核准的執行計畫"],
     };
   }
   // 「如何建立任務」是詢問；「幫我建立任務」才是執行。這道差異直接決定是否允許寫入。

@@ -1008,6 +1008,98 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
   return updated[0];
 }
 
+/**
+ * Restore the minimum unfinished suffix of a failed durable plan. Completed steps and
+ * their output/effect references are preserved. The caller is an explicit human command;
+ * costful failed generation steps may be submitted again, but an ambiguous split-provider
+ * call is never replayed automatically.
+ */
+export function prepareAgentStepsForResume(steps: AgentStep[]): { steps: AgentStep[]; currentStep: number; remainingPoints: number } {
+  if (steps.some((step) => step.status === "running" || step.status === "waiting")) {
+    throw new TRPCError({ code: "CONFLICT", message: "仍有步驟正在收尾，請稍後再繼續" });
+  }
+  if (!steps.some((step) => step.status === "failed")) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫沒有可續跑的失敗步驟" });
+  }
+  const next = steps.map((step) => {
+    if (step.status === "done") return { ...step };
+    if (step.kind === "split_script" && step.status === "failed" && step.splitProviderStartedAt && !step.splitPreparedScenes?.length) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "拆分鏡供應商結果不明，為避免重複呼叫，請先人工確認現有分鏡後再重新規劃",
+      });
+    }
+    const resumed: AgentStep = { ...step, status: "pending" };
+    delete resumed.detail;
+    delete resumed.retries;
+    // Known failed provider jobs need a fresh explicit submission. This function is only
+    // reached after the user presses the resume command; it is never a silent retry.
+    if ((resumed.kind === "generate" || resumed.kind === "voiceover") && step.status === "failed") {
+      delete resumed.generationId;
+    }
+    return resumed;
+  });
+  const currentStep = Math.max(0, next.findIndex((step) => step.status !== "done"));
+  const remainingPoints = next
+    .filter((step) => step.status !== "done")
+    .reduce((sum, step) => sum + Math.max(0, step.points ?? 0), 0);
+  return { steps: next, currentStep, remainingPoints };
+}
+
+export async function resumeFailedAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
+  assertUuid(input.runId, "代理計畫編號");
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
+  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份代理計畫" });
+  const role = requireGroup(input.auth, run.groupId);
+  if (run.userId !== input.auth.user.id && role === "member") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以繼續執行" });
+  }
+  if (run.status !== "failed") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有失敗的計畫可以從中斷處繼續" });
+  }
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(input.auth, project);
+  assertProjectNotArchived(project);
+  const prepared = prepareAgentStepsForResume(run.steps as AgentStep[]);
+  if (prepared.remainingPoints > 0) {
+    const quotaError = await checkQuota(run.userId, run.groupId, prepared.remainingPoints);
+    if (quotaError) throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `剩餘步驟預估 ${prepared.remainingPoints} 點，${quotaError}`,
+    });
+  }
+  const updated = await db.transaction(async (tx) => {
+    await lockAgentApprove(tx, run.projectId, run.userId);
+    const [active] = await tx.select({ id: schema.agentRuns.id }).from(schema.agentRuns).where(and(
+      eq(schema.agentRuns.projectId, run.projectId),
+      eq(schema.agentRuns.userId, run.userId),
+      inArray(schema.agentRuns.status, ["running", "waiting"]),
+    )).limit(1);
+    if (active) throw new TRPCError({ code: "CONFLICT", message: "已有一個代理在跑，請等它完成後再繼續" });
+    return tx.update(schema.agentRuns).set({
+      status: "running",
+      steps: prepared.steps,
+      currentStep: prepared.currentStep,
+      error: null,
+      updatedAt: new Date(),
+    }).where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "failed"))).returning();
+  });
+  if (!updated[0]) throw new TRPCError({ code: "CONFLICT", message: "計畫狀態已改變，請重新整理" });
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: `run:human-resumed:${Date.now()}`,
+    eventType: "human_resumed",
+    actorType: "human",
+    actorId: input.auth.user.id,
+    summary: "使用者從失敗步驟繼續既有計畫",
+    data: { currentStep: prepared.currentStep, remainingPoints: prepared.remainingPoints },
+  });
+  return updated[0];
+}
+
 /** 放棄一份還沒核准的計畫（不花錢，純標記） */
 export async function discardAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
   const { auth } = input;

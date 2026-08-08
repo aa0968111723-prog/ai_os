@@ -7,6 +7,7 @@ import {
   approveAgentCore,
   discardAgentCore,
   planAgentCore,
+  resumeFailedAgentCore,
   stopAgentCore,
 } from "./agentCore";
 import { updateProjectTaskCore } from "./taskCore";
@@ -298,6 +299,27 @@ export async function runGroupCommand(input: {
       if (run.status !== "failed" && run.status !== "stopped") {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有失敗或被停止的計畫可以重新規劃" });
       }
+      if (run.status === "failed") {
+        const resumed = await resumeFailedAgentCore({ auth, runId: run.id });
+        const title = await projectTitleOf(run.projectId);
+        const steps = resumed.steps as Array<{ status?: string; points?: number }>;
+        const remaining = steps.filter((step) => step.status !== "done");
+        await record({
+          eventKey: `cmd:resume:${run.id}:${Date.now()}`,
+          eventType: "command",
+          projectId: run.projectId,
+          childRunId: run.id,
+          summary: `從失敗步驟繼續「${title}」的既有計畫`,
+          data: { origin, remainingSteps: remaining.length },
+        });
+        return {
+          kind: "retry_run",
+          message: `已從中斷處繼續「${title}」（保留已完成步驟，剩 ${remaining.length} 步）`,
+          projectId: run.projectId,
+          runId: run.id,
+          estPoints: remaining.reduce((sum, step) => sum + Math.max(0, step.points ?? 0), 0),
+        };
+      }
       const fresh = await planAgentCore({
         auth,
         projectId: run.projectId,
@@ -311,7 +333,7 @@ export async function runGroupCommand(input: {
         eventType: "command",
         projectId: run.projectId,
         childRunId: fresh.id,
-        summary: `以同一目標為「${title}」重新規劃（原計畫${run.status === "failed" ? "失敗" : "被停止"}）`,
+        summary: `以同一目標為「${title}」重新規劃（原計畫被停止）`,
         data: { origin, originRunId: run.id, originStatus: run.status, estPoints: fresh.estPoints },
       });
       return {

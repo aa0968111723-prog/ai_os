@@ -12,8 +12,10 @@ import {
   plannerKnowledgeBudget,
   plannerOutputTokenCeiling,
   plannerPlaybookDirective,
+  prepareAgentStepsForResume,
   toEphemeralPlanSource,
 } from "./agentCore";
+import type { AgentStep } from "./agentRunner";
 import { FAL_AGENT_PROFILES } from "./llmProvider";
 import { estimatePlannerPoints } from "../../shared/llmPricing";
 
@@ -36,6 +38,30 @@ describe("assertUuid（MCP / core 入口）", () => {
   it("空字串與非 UUID 也擋", () => {
     expect(() => assertUuid("", "專案編號")).toThrow(TRPCError);
     expect(() => assertUuid("not-a-uuid", "專案編號")).toThrow(TRPCError);
+  });
+});
+
+describe("failed AgentRun minimum-step resume", () => {
+  it("preserves completed effects and resets only unfinished steps", () => {
+    const steps: AgentStep[] = [
+      { id: "s1", kind: "create_note", note: "筆記", status: "done", effectId: "effect-1", points: 0 },
+      { id: "s2", kind: "create_task", note: "任務", status: "failed", effectId: "effect-2", detail: "timeout", retries: 3, points: 0 },
+      { id: "s3", kind: "generate", note: "生成", status: "stopped", modelId: "m", prompt: "p", points: 12 },
+    ];
+    const resumed = prepareAgentStepsForResume(steps);
+    expect(resumed.currentStep).toBe(1);
+    expect(resumed.remainingPoints).toBe(12);
+    expect(resumed.steps[0]).toMatchObject({ status: "done", effectId: "effect-1" });
+    expect(resumed.steps[1]).toMatchObject({ status: "pending", effectId: "effect-2" });
+    expect(resumed.steps[1]?.detail).toBeUndefined();
+    expect(resumed.steps[2]?.status).toBe("pending");
+  });
+
+  it("does not replay an ambiguous costful split provider call", () => {
+    const steps: AgentStep[] = [{
+      id: "s1", kind: "split_script", note: "拆分鏡", status: "failed", splitProviderStartedAt: new Date().toISOString(),
+    }];
+    expect(() => prepareAgentStepsForResume(steps)).toThrow(/避免重複呼叫/);
   });
 });
 

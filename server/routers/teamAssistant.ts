@@ -43,6 +43,10 @@ import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
 import {
+  buildAssistantHistoryBlock,
+  type AssistantChatTurn,
+} from "../../shared/assistantConversation";
+import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
   RATE_LIMIT_SCOPES,
@@ -288,17 +292,10 @@ export function formatAgentRunLine(r: AgentRunBrief): string {
 }
 
 /** ask 的追問脈絡（前端帶回近幾輪；伺服器無狀態不落表） */
-export type ChatTurn = { role: "user" | "assistant"; text: string };
+export type ChatTurn = AssistantChatTurn;
 /** 近幾輪對話 → 提示詞區塊。只取最後 6 輪、每則壓縮空白並截到 400 字；沒有可用內容回空字串（提示詞一字不多佔）。 */
 export function buildHistoryBlock(history: ChatTurn[] | undefined): string {
-  if (!history?.length) return "";
-  const lines = history
-    .slice(-6)
-    .map((t) => ({ who: t.role === "user" ? "使用者" : "助手", text: t.text.trim().replace(/\s+/g, " ").slice(0, 400) }))
-    .filter((t) => t.text.length > 0)
-    .map((t) => `${t.who}：${t.text}`);
-  if (!lines.length) return "";
-  return `<先前對話>\n${lines.join("\n")}\n</先前對話>\n`;
+  return buildAssistantHistoryBlock(history);
 }
 
 /**
