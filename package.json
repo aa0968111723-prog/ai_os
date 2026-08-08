@@ -46,7 +46,13 @@
     "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "desktop:dev": "npx --yes @tauri-apps/cli@2 dev",
     "desktop:build": "npx --yes @tauri-apps/cli@2 build",
-    "icons:add": "node scripts/add-icon.mjs"
+    "icons:add": "node scripts/add-icon.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+    "*.{js,mjs,cjs}": ["prettier --write"],
+    "*.{json,md,css}": ["prettier --write"]
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
@@ -114,7 +120,9 @@
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
+    "lint-staged": "^16.0.0",
     "lucide-static": "^1.28.0",
     "playwright": "^1.62.1",
     "prettier": "^3.6.2",
