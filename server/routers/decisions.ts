@@ -10,48 +10,15 @@
  * ACL 與全站同一條慣例：載專案 → requireGroup → 寫入再 assertProjectEditable。
  */
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup } from "../trpc";
-import { db, schema } from "../db";
-import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
-import { publishToProject } from "../services/realtime";
+import { router, authedProcedure } from "../trpc";
 import { DECISION_TITLE_MAX, MESSAGE_INTENTS } from "../../shared/collabIntent";
-
-async function loadProjectChecked(auth: Parameters<typeof requireGroup>[0], projectId: string, forEdit: boolean) {
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
-  if (!project) throw new TRPCError({ code: "NOT_FOUND" });
-  requireGroup(auth, project.groupId);
-  if (forEdit) {
-    await assertProjectEditable(auth, project);
-    assertProjectNotArchived(project);
-  }
-  return project;
-}
+import { createProjectDecisionCore, listProjectDecisions, revokeProjectDecisionCore } from "../services/decisionCore";
 
 export const decisionsRouter = router({
   /** 專案決策清單（含已撤銷——劃線顯示，不是消失）。帶 decidedBy 的名字，一支查完。 */
   list: authedProcedure
     .input(z.object({ projectId: z.string().uuid() }))
-    .query(async ({ ctx, input }) => {
-      await loadProjectChecked(ctx.auth, input.projectId, false);
-      const rows = await db
-        .select()
-        .from(schema.decisions)
-        .where(eq(schema.decisions.projectId, input.projectId))
-        .orderBy(desc(schema.decisions.createdAt))
-        .limit(100);
-      const ids = [...new Set(rows.flatMap((r) => [r.decidedBy, r.revokedBy]).filter((v): v is string => Boolean(v)))];
-      const users = ids.length
-        ? await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, ids))
-        : [];
-      const nameOf = new Map(users.map((u) => [u.id, u.name]));
-      return rows.map((r) => ({
-        ...r,
-        decidedByName: nameOf.get(r.decidedBy) ?? null,
-        revokedByName: r.revokedBy ? nameOf.get(r.revokedBy) ?? null : null,
-      }));
-    }),
+    .query(({ ctx, input }) => listProjectDecisions(ctx.auth, input.projectId)),
 
   /**
    * 定案。可從留言轉（sourceMessageId：驗同專案並回寫 intent='decision'——
@@ -66,60 +33,12 @@ export const decisionsRouter = router({
       refId: z.string().uuid().optional(),
       sourceMessageId: z.string().uuid().optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      const project = await loadProjectChecked(ctx.auth, input.projectId, true);
-      // ref 兩欄同進同出：只給一半的指標指不到任何東西，之後每個讀取端都要多一個 if
-      if ((input.refType == null) !== (input.refId == null)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "refType 與 refId 要一起給或都不給" });
-      }
-      if (input.sourceMessageId) {
-        const [src] = await db
-          .select({ id: schema.messages.id, projectId: schema.messages.projectId })
-          .from(schema.messages)
-          .where(eq(schema.messages.id, input.sourceMessageId));
-        if (!src || src.projectId !== project.id) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不在本專案" });
-        }
-      }
-      const [row] = await db
-        .insert(schema.decisions)
-        .values({
-          groupId: project.groupId,
-          projectId: project.id,
-          title: input.title,
-          refType: input.refType ?? null,
-          refId: input.refId ?? null,
-          sourceMessageId: input.sourceMessageId ?? null,
-          decidedBy: ctx.auth.user.id,
-        })
-        .returning();
-      // 回寫來源留言的 intent：討論串上看得出「這句已成定案」
-      if (input.sourceMessageId) {
-        await db
-          .update(schema.messages)
-          .set({ intent: "decision" })
-          .where(eq(schema.messages.id, input.sourceMessageId));
-      }
-      publishToProject(project.id, { kind: "annotation", id: input.refId ?? null }, "定了一個案");
-      return row;
-    }),
+    .mutation(({ ctx, input }) => createProjectDecisionCore({ auth: ctx.auth, ...input })),
 
   /** 撤銷（標記，不刪列）。已撤銷再撤銷是 no-op，不報錯——重複點擊不該炸。 */
   revoke: authedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      const [row] = await db.select().from(schema.decisions).where(eq(schema.decisions.id, input.id));
-      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-      await loadProjectChecked(ctx.auth, row.projectId, true);
-      if (row.revokedAt) return row;
-      const [updated] = await db
-        .update(schema.decisions)
-        .set({ revokedAt: new Date(), revokedBy: ctx.auth.user.id })
-        // 條件寫入吸收雙擊競態：兩個人同時撤銷只有一個會中，另一個拿回 no-op
-        .where(and(eq(schema.decisions.id, input.id)))
-        .returning();
-      return updated ?? row;
-    }),
+    .mutation(({ ctx, input }) => revokeProjectDecisionCore(ctx.auth, input.id)),
 });
 
 /**

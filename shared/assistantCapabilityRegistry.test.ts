@@ -22,6 +22,6 @@ describe("assistant capability registry", () => {
       allowWrite: true,
     });
     expect(tools.some((tool) => tool.access === "write" && /note|knowledge/.test(tool.name))).toBe(true);
-    expect(tools.every((tool) => tool.name.includes("note") || tool.name.includes("knowledge"))).toBe(true);
+    expect(tools.every((tool) => tool.name.includes("note") || tool.name.includes("knowledge") || tool.name.includes("decision"))).toBe(true);
   });
 });

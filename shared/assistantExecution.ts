@@ -46,7 +46,7 @@ export interface AssistantLatencyMetrics {
 export interface AssistantCapability {
   id: string;
   label: string;
-  domain: "PROJECT" | "TASK" | "NOTE" | "STORYBOARD" | "SCRIPT" | "ASSET" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "GENERATION";
+  domain: "PROJECT" | "TASK" | "NOTE" | "MEMORY" | "STORYBOARD" | "SCRIPT" | "ASSET" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "GENERATION";
   access: "READ" | "WRITE";
   risk: AssistantActionRisk;
   direct: boolean;
@@ -60,6 +60,8 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] = [
   { id: "create_task", domain: "TASK", access: "WRITE", label: "建立未指派專案任務", risk: "SAFE_WRITE", direct: true },
   { id: "read_notes", domain: "NOTE", access: "READ", label: "讀取筆記", risk: "READ", direct: true },
   { id: "add_note", domain: "NOTE", access: "WRITE", label: "建立內部筆記", risk: "SAFE_WRITE", direct: true },
+  { id: "save_decision", domain: "MEMORY", access: "WRITE", label: "保存已確認的專案決策", risk: "SAFE_WRITE", direct: true },
+  { id: "create_watch", domain: "COLLABORATION", access: "WRITE", label: "建立持久專案監看", risk: "SAFE_WRITE", direct: false },
   { id: "read_storyboard", domain: "STORYBOARD", access: "READ", label: "讀取分鏡", risk: "READ", direct: true },
   { id: "split_script", domain: "STORYBOARD", access: "WRITE", label: "將目前腳本拆成持久化分鏡", risk: "SAFE_WRITE", direct: true },
   { id: "read_script", domain: "SCRIPT", access: "READ", label: "讀取目前腳本", risk: "READ", direct: true },

@@ -2,6 +2,8 @@ import { TRPCError } from "@trpc/server";
 import type { AssistantWirePageContext } from "../../shared/assistantPageContext";
 import type { AuthState } from "./auth";
 import { callTool } from "./mcp";
+import { assistantResourceHealthSnapshot, recordAssistantResourceHealth } from "./assistantResourceHealth";
+import { rankHybridItems } from "./hybridRetrieval";
 
 export const RESOURCE_OUTCOMES = [
   "OK",
@@ -16,6 +18,7 @@ export type ResourceOutcome = (typeof RESOURCE_OUTCOMES)[number];
 export const ASSISTANT_RESOURCE_KEYS = [
   "project_status",
   "knowledge",
+  "decisions",
   "notes",
   "tasks",
   "schedule",
@@ -23,6 +26,7 @@ export const ASSISTANT_RESOURCE_KEYS = [
   "assets",
   "generations",
   "agent_runs",
+  "watches",
   "collaboration",
   "database",
 ] as const;
@@ -40,6 +44,7 @@ export interface ResourceReadResult {
   retrieval: RetrievalMode;
   text: string;
   errorCode?: string;
+  semanticApplied?: boolean;
 }
 
 export interface ResourceResolution {
@@ -53,6 +58,7 @@ export interface ResourceResolution {
     emptyCount: number;
     failedCount: number;
     fallbackUsed: boolean;
+    unhealthySources: AssistantResourceKey[];
   };
 }
 
@@ -61,11 +67,13 @@ export interface ResourceReader {
   label: string;
   retrieval: RetrievalMode;
   read: () => Promise<unknown>;
+  prepare?: (value: unknown) => Promise<{ value: unknown; semanticApplied: boolean }>;
 }
 
 const SOURCE_LABELS: Record<AssistantResourceKey, string> = {
   project_status: "專案全貌",
   knowledge: "專案知識",
+  decisions: "專案決策",
   notes: "筆記與決策",
   tasks: "任務",
   schedule: "行程",
@@ -73,6 +81,7 @@ const SOURCE_LABELS: Record<AssistantResourceKey, string> = {
   assets: "素材",
   generations: "生成紀錄",
   agent_runs: "AI 計畫",
+  watches: "持久監看",
   collaboration: "協作與阻塞",
   database: "專案資料庫",
 };
@@ -104,6 +113,7 @@ export function routeAssistantResources(
     wanted.add("collaboration");
   }
   if (DECISION_QUERY_RE.test(text)) {
+    wanted.add("decisions");
     wanted.add("knowledge");
     wanted.add("notes");
   }
@@ -118,10 +128,12 @@ export function routeAssistantResources(
     wanted.add("schedule");
     wanted.add("collaboration");
   }
+  if (/(?:監看|監控|追蹤|提醒)/i.test(text)) wanted.add("watches");
   if (DATABASE_QUERY_RE.test(text)) wanted.add("database");
 
   switch (pageContext?.pageType) {
     case "story":
+      wanted.add("decisions");
       wanted.add("knowledge");
       break;
     case "storyboard":
@@ -150,6 +162,7 @@ export function routeAssistantResources(
     case "agent_run":
     case "collab":
       wanted.add("agent_runs");
+      wanted.add("watches");
       wanted.add("collaboration");
       break;
   }
@@ -229,7 +242,13 @@ export async function executeResourceReads(
     for (;;) {
       attempts += 1;
       try {
-        const value = await withTimeout(reader.read(), timeoutMs);
+        const prepared = await withTimeout((async () => {
+          const rawValue = await reader.read();
+          return reader.prepare
+            ? reader.prepare(rawValue)
+            : { value: rawValue, semanticApplied: false };
+        })(), timeoutMs);
+        const value = prepared.value;
         const itemCount = resultCount(value);
         return {
           source: reader.source,
@@ -240,6 +259,7 @@ export async function executeResourceReads(
           itemCount,
           retrieval: reader.retrieval,
           text: itemCount > 0 ? safeJson(value) : "",
+          semanticApplied: prepared.semanticApplied,
         } satisfies ResourceReadResult;
       } catch (error) {
         const isTimeout = typeof error === "object" && error !== null && "code" in error
@@ -265,7 +285,8 @@ export async function executeResourceReads(
 
 function buildPromptBlock(results: ResourceReadResult[]): string {
   const lines = results.map((result) => {
-    const header = `[${result.label}] outcome=${result.outcome} retrieval=${result.retrieval} durationMs=${result.durationMs}`;
+    const semantic = result.retrieval === "hybrid" ? ` semanticApplied=${result.semanticApplied === true ? "yes" : "no"}` : "";
+    const header = `[${result.label}] outcome=${result.outcome} retrieval=${result.retrieval}${semantic} durationMs=${result.durationMs}`;
     return result.outcome === "OK" ? `${header}\n${result.text}` : header;
   });
   return [
@@ -289,6 +310,7 @@ export async function resolveProjectResources(input: {
   const toolBySource: Record<AssistantResourceKey, { name: string; args?: Record<string, unknown>; retrieval: RetrievalMode }> = {
     project_status: { name: "get_project_status", retrieval: "structured" },
     knowledge: { name: "list_knowledge", args: { limit: 30 }, retrieval: "hybrid" },
+    decisions: { name: "list_decisions", retrieval: "structured" },
     notes: { name: "list_notes", retrieval: "hybrid" },
     tasks: { name: "list_tasks", retrieval: "structured" },
     schedule: { name: "list_schedule", retrieval: "structured" },
@@ -296,6 +318,7 @@ export async function resolveProjectResources(input: {
     assets: { name: "list_assets", args: { limit: 50 }, retrieval: "hybrid" },
     generations: { name: "list_generations", args: { limit: 50 }, retrieval: "structured" },
     agent_runs: { name: "list_agent_runs", retrieval: "structured" },
+    watches: { name: "list_watches", retrieval: "structured" },
     collaboration: { name: "get_agent_insights", retrieval: "structured" },
     database: { name: "list_databases", args: { linkedOnly: true }, retrieval: "hybrid" },
   };
@@ -306,9 +329,23 @@ export async function resolveProjectResources(input: {
       label: SOURCE_LABELS[source],
       retrieval: tool.retrieval,
       read: () => callTool(input.auth, { readOnly: true }, tool.name, { ...args, ...tool.args }),
+      prepare: tool.retrieval === "hybrid"
+        ? async (value) => {
+            if (Array.isArray(value)) {
+              const ranked = await rankHybridItems(value, input.message, undefined, 30);
+              return { value: ranked.items, semanticApplied: ranked.semanticApplied };
+            }
+            if (value && typeof value === "object" && Array.isArray((value as { items?: unknown[] }).items)) {
+              const ranked = await rankHybridItems((value as { items: unknown[] }).items, input.message, undefined, 30);
+              return { value: { ...(value as Record<string, unknown>), items: ranked.items }, semanticApplied: ranked.semanticApplied };
+            }
+            return { value, semanticApplied: false };
+          }
+        : undefined,
     };
   });
   const results = await executeResourceReads(readers, { timeoutMs: input.timeoutMs, retryTransientReads: 1 });
+  recordAssistantResourceHealth(results);
   const okCount = results.filter((result) => result.outcome === "OK").length;
   const emptyCount = results.filter((result) => result.outcome === "EMPTY").length;
   const failedCount = results.length - okCount - emptyCount;
@@ -324,7 +361,9 @@ export async function resolveProjectResources(input: {
       failedCount,
       fallbackUsed: results.some((result, index) => index > 0 && result.outcome === "OK")
         && results.some((result) => result.outcome !== "OK"),
+      unhealthySources: assistantResourceHealthSnapshot()
+        .filter((health) => health.unhealthy && requestedSources.includes(health.source))
+        .map((health) => health.source),
     },
   };
 }
-

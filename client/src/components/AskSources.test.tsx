@@ -100,6 +100,6 @@ describe("AskSources", () => {
     })} />);
     expect(screen.getByText("沒有符合資料")).toBeInTheDocument();
     expect(screen.getByText("逾時，已略過")).toBeInTheDocument();
-    expect(screen.getByText("hybrid・12 ms")).toBeInTheDocument();
+    expect(screen.getByText("hybrid（關鍵字＋中繼資料）・12 ms")).toBeInTheDocument();
   });
 });

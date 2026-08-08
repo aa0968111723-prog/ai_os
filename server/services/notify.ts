@@ -27,7 +27,8 @@ export type NotificationKind =
   | "task_assigned"
   | "task_completed"
   | "approval"
-  | "decision";
+  | "decision"
+  | "assistant_attention";
 
 export interface NotifyInput {
   /** 收件人（會自動去重、去空值；呼叫端不必先過濾） */
