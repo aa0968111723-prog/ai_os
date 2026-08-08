@@ -17,6 +17,7 @@ export function toWirePageContext(ctx: AssistantPageContext): AssistantWirePageC
     entityId: uuid(ctx.entityId),
     entityLabel: ctx.entityLabel,
     selectedEntityIds: ids.length ? ids : undefined,
+    selectedEntityLabels: ctx.selectedEntityLabels?.length ? ctx.selectedEntityLabels.slice(0, 8) : undefined,
     activeTab: ctx.activeTab,
     recentAction: ctx.recentAction,
   };

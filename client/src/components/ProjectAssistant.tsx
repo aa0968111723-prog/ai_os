@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
+import { useAssistantContext } from "../lib/assistantContext";
+import { toWirePageContext } from "../lib/assistantQuickActions";
 import type { CreationAction } from "../features/creation-workbench/creationActions";
 import { SuggestionActions } from "../features/creation-workbench/SuggestionActions";
 import { Icon } from "./Icon";
@@ -227,6 +229,9 @@ export function ProjectAssistant({
   // tRPC 一次性問答：串流不可用時的退路。每次呼叫使用帶 request epoch 的局部 callback，
   // mutation 本身不能取消時也能丟棄過期答案。
   const ask = trpc.assistant.ask.useMutation();
+  /* 頁面感知：專案頁預設就是走這個助手，所以「打開了第 3 鏡／勾了哪幾鏡」
+     必須在這裡也送得出去——只接全站助手的話，旗艦情境（在分鏡頁問「這一鏡」）反而收不到。 */
+  const assistantPageCtx = useAssistantContext();
   const preview = trpc.assistant.preview?.useMutation?.() ?? {
     data: undefined,
     error: null,
@@ -251,6 +256,7 @@ export function ProjectAssistant({
       // 使用者為「回答模型」選的檔位；預設 nim＝免費，選 fal 檔位平台才付費
       mode: answerMode,
       knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+      pageContext: toWirePageContext(assistantPageCtx),
       signal,
       handlers: {
         onStep: (event) => {
@@ -321,6 +327,7 @@ export function ProjectAssistant({
           nonce,
           mode: answerMode,
           knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+          pageContext: toWirePageContext(assistantPageCtx),
         },
         {
           onSuccess: (result) => {

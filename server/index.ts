@@ -1943,6 +1943,8 @@ app.post("/api/assistant/ask", async (req, res) => {
   const knowledgeIds = rawKids
     .filter((x: unknown): x is string => typeof x === "string" && UUID_RE.test(x))
     .slice(0, 20);
+  // 頁面感知：手解析路徑沒有 zod，不顯式讀就會被靜默丟棄（與 site-ask 同一道）
+  const askPageContext = sanitizeAssistantPageContext(req.body?.pageContext) ?? undefined;
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -1980,6 +1982,7 @@ app.post("/api/assistant/ask", async (req, res) => {
         dedupeKey: nonce,
         mode,
         knowledgeIds: knowledgeIds.length ? knowledgeIds : undefined,
+        pageContext: askPageContext,
       },
       (e) => sse("step", e),
     );

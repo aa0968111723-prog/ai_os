@@ -5,6 +5,7 @@ import {
   registerAssistantFocus,
   registerAssistantPage,
   resetAssistantContextForTest,
+  setAssistantPageType,
 } from "./assistantContext";
 
 beforeEach(() => {
@@ -24,14 +25,47 @@ describe("registerAssistantPage（頁面層）", () => {
     });
   });
 
-  it("卸載時清空——上一個專案不得殘留", () => {
+  it("真的卸載時清空——上一個專案不得殘留（清除延到微任務，見 registerAssistantPage 檔內說明）", async () => {
     const dispose = registerAssistantPage({ pageType: "project", projectId: "proj-1" });
     dispose();
-    expect(getAssistantContext()).toEqual({
-      route: "/", pageType: "other", projectId: undefined, projectTitle: undefined,
-      entityType: undefined, entityId: undefined, entityLabel: undefined,
-      selectedEntityIds: undefined, activeTab: undefined, recentAction: undefined,
+    await Promise.resolve(); // 讓延後的清除跑完
+    expect(getAssistantContext()).toMatchObject({ route: "/", pageType: "other" });
+    expect(getAssistantContext().projectId).toBeUndefined();
+  });
+
+  it("依賴變動（同一個 hook 重跑）不得清空——這是「捲一下就把選好的分鏡洗掉」的根因", async () => {
+    // React 對同一個 hook 是「先跑舊 effect 的 cleanup，再跑新的 create」。
+    // 同步清除的話，專案頁每捲一段就會把打開中的分鏡與勾選清掉，而畫面上勾勾還亮著。
+    const disposeOld = registerAssistantPage({ pageType: "project", projectId: "p1", projectTitle: "招生短片" });
+    registerAssistantFocus({ entityType: "shot", entityId: "s3", entityLabel: "第 3 鏡", selectedEntityIds: ["s2", "s3"] });
+    disposeOld();                                                   // cleanup（依賴變動）
+    registerAssistantPage({ pageType: "production", projectId: "p1", projectTitle: "招生短片" }); // 新的 create
+    await Promise.resolve();
+    expect(getAssistantContext()).toMatchObject({
+      pageType: "production", projectId: "p1", entityId: "s3", entityLabel: "第 3 鏡",
     });
+    expect(getAssistantContext().selectedEntityIds).toEqual(["s2", "s3"]);
+  });
+
+  it("setAssistantPageType 只改段落、不碰身分與焦點（專案頁捲動走這條）", () => {
+    registerAssistantPage({ pageType: "project", projectId: "p1", projectTitle: "招生短片" });
+    registerAssistantFocus({ entityType: "shot", entityId: "s3", selectedEntityIds: ["s2", "s3"] });
+    setAssistantPageType("storyboard");
+    expect(getAssistantContext()).toMatchObject({
+      pageType: "storyboard", projectId: "p1", projectTitle: "招生短片", entityId: "s3",
+    });
+    setAssistantPageType("production");
+    expect(getAssistantContext().selectedEntityIds).toEqual(["s2", "s3"]);
+  });
+
+  it("焦點是一疊：上層退場自動露出下層（勾素材再取消，分鏡選取仍在）", () => {
+    registerAssistantPage({ pageType: "project", projectId: "p1" });
+    registerAssistantFocus({ entityType: "shot", entityId: "s3", selectedEntityIds: ["s2", "s3"] });
+    const disposeAssets = registerAssistantFocus({ entityType: "asset", selectedEntityIds: ["a1"] });
+    expect(getAssistantContext()).toMatchObject({ entityType: "asset" });
+    disposeAssets();
+    expect(getAssistantContext()).toMatchObject({ entityType: "shot", entityId: "s3" });
+    expect(getAssistantContext().selectedEntityIds).toEqual(["s2", "s3"]);
   });
 
   it("換頁時舊頁 cleanup 不得清掉新頁（React effect 順序：新註冊 → 舊 cleanup）", () => {

@@ -312,6 +312,7 @@ export async function requestAssistantStream({
   mode,
   knowledgeIds,
   onlyKnowledgeIds,
+  pageContext,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -325,6 +326,8 @@ export async function requestAssistantStream({
   knowledgeIds?: string[];
   /** 本次「只用這幾份依據」（P5）；空陣列視同未指定 */
   onlyKnowledgeIds?: string[];
+  /** 頁面感知上下文（在哪一段／看哪一鏡／勾了哪幾鏡）——提示不是授權，後端逐欄夾制 */
+  pageContext?: AssistantWirePageContext;
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -343,6 +346,7 @@ export async function requestAssistantStream({
         mode,
         knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
         onlyKnowledgeIds: onlyKnowledgeIds?.length ? onlyKnowledgeIds : undefined,
+        pageContext,
       }),
       signal,
     });

@@ -57,7 +57,7 @@ import { usePresenterFollow } from "../features/collaboration/usePresenterFollow
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
 import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
 import type { ViewSection, ViewState } from "@shared/viewState";
-import { registerAssistantPage } from "../lib/assistantContext";
+import { registerAssistantPage, setAssistantPageType } from "../lib/assistantContext";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
@@ -569,18 +569,15 @@ export function ProjectPage({ id }: { id: string }) {
    * 專案名讓助手的麵包屑寫得出「挑戰營回顧影片 · 分鏡」而不是一串 uuid。
    * 註冊本身是提示不是授權——後端一律以 requireGroup 重新驗證。
    */
-  const [assistantSection, setAssistantSection] = useState<ViewSection | undefined>(undefined);
-  reportAssistantSectionRef.current = setAssistantSection;
   const projectTitle = project.data?.title;
+  // 身分（哪個專案）走註冊；**段落不進依賴**——它每捲一下就變，
+  // 而重新註冊會走一遍卸載，卸載會碰到焦點層（打開中的分鏡、勾選的那幾鏡）。
   useEffect(
-    () => registerAssistantPage({
-      // 捲到哪一段就是哪一段；還沒捲過任何標頭（頁首）時退回泛用的「專案」
-      pageType: assistantSection ?? "project",
-      projectId: id,
-      projectTitle,
-    }),
-    [assistantSection, id, projectTitle],
+    () => registerAssistantPage({ pageType: "project", projectId: id, projectTitle }),
+    [id, projectTitle],
   );
+  // 段落只用窄化 setter 改 pageType：零註冊生命週期、零焦點風險
+  reportAssistantSectionRef.current = (section) => setAssistantPageType(section ?? "project");
 
   /**
    * 被帶到主講者的位置。列表是非同步載入的、手機收合中的列 rect 為空，

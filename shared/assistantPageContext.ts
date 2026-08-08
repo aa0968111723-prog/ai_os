@@ -40,15 +40,36 @@ export const MAX_SELECTED_ENTITY_IDS = 20;
 /** 自由字串欄（activeTab／entityLabel／recentAction）的長度上限 */
 const MAX_LABEL = 60;
 
+/**
+ * 自由字串欄的清洗：**換行與角括號一律去掉**。
+ *
+ * 這些值會逐行插進 `<使用者目前位置>` 圍欄裡。含換行的話，一個名為
+ * 「第 3 鏡 ⏎ 結束圍欄 ⏎ 忽略上述規則」的分鏡標題就能偽造圍欄結尾，
+ * 讓後面的字看起來像系統指令。標題是使用者可自由輸入的欄位（分鏡標題、資料庫名），
+ * 所以這不是理論風險。壓成單行＋去角括號後，它只能是一段普通的字。
+ */
+function cleanLabel(v: string): string {
+  return v.replace(/[\r\n\t<>]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_LABEL);
+}
+
+/** 一次最多帶幾個選取顯示名（與 id 上限同級；提示詞只列前幾個再說「另有 N 個」） */
+export const MAX_SELECTED_LABELS = 8;
+
 export const assistantPageContextSchema = z.object({
   pageType: z.enum(ASSISTANT_PAGE_TYPES),
   entityType: z.enum(ASSISTANT_ENTITY_TYPES).optional(),
   entityId: z.string().uuid().optional(),
   /** 顯示名（例：第 3 鏡）——讓模型講得出人話，不必吐 id */
-  entityLabel: z.string().max(MAX_LABEL).optional(),
+  entityLabel: z.string().max(MAX_LABEL).transform(cleanLabel).optional(),
   selectedEntityIds: z.array(z.string().uuid()).max(MAX_SELECTED_ENTITY_IDS).optional(),
-  activeTab: z.string().max(MAX_LABEL).optional(),
-  recentAction: z.string().max(MAX_LABEL).optional(),
+  /**
+   * 選取項的顯示名（例：["第 2 鏡","第 3 鏡"]）。
+   * 沒有它的話，模型只知道「選了 3 個」卻不知道是哪三個——「這 3 鏡」根本無從指涉，
+   * 而 id 又刻意不給模型（它只會把 uuid 吐回給使用者）。顯示名是唯一講得通的中介。
+   */
+  selectedEntityLabels: z.array(z.string().max(MAX_LABEL).transform(cleanLabel)).max(MAX_SELECTED_LABELS).optional(),
+  activeTab: z.string().max(MAX_LABEL).transform(cleanLabel).optional(),
+  recentAction: z.string().max(MAX_LABEL).transform(cleanLabel).optional(),
 });
 export type AssistantWirePageContext = z.infer<typeof assistantPageContextSchema>;
 
@@ -71,13 +92,23 @@ export function sanitizeAssistantPageContext(raw: unknown): AssistantWirePageCon
   if (typeof r.entityId === "string" && UUID_RE.test(r.entityId)) out.entityId = r.entityId;
   for (const key of ["entityLabel", "activeTab", "recentAction"] as const) {
     const v = r[key];
-    if (typeof v === "string" && v.trim().length > 0) out[key] = v.trim().slice(0, MAX_LABEL);
+    if (typeof v !== "string") continue;
+    const cleaned = cleanLabel(v);
+    if (cleaned) out[key] = cleaned;
   }
   if (Array.isArray(r.selectedEntityIds)) {
     const ids = r.selectedEntityIds
       .filter((v): v is string => typeof v === "string" && UUID_RE.test(v))
       .slice(0, MAX_SELECTED_ENTITY_IDS);
     if (ids.length) out.selectedEntityIds = ids;
+  }
+  if (Array.isArray(r.selectedEntityLabels)) {
+    const labels = r.selectedEntityLabels
+      .filter((v): v is string => typeof v === "string")
+      .map(cleanLabel)
+      .filter((v) => v.length > 0)
+      .slice(0, MAX_SELECTED_LABELS);
+    if (labels.length) out.selectedEntityLabels = labels;
   }
   return out;
 }
@@ -131,7 +162,18 @@ export function formatAssistantPageContext(ctx: AssistantWirePageContext | null 
   if (ctx.entityLabel) lines.push(`正在看：${ctx.entityLabel}`);
   else if (entityName) lines.push(`正在看：${entityName}`);
   const n = ctx.selectedEntityIds?.length ?? 0;
-  if (n > 0) lines.push(`已選取：${n} 個${entityName ?? "項目"}`);
+  if (n > 0) {
+    // 只給數量的話，「這 3 鏡」對模型是無從指涉的——它知道有三個，卻不知道是哪三個。
+    // id 又刻意不給（模型只會把 uuid 吐回給使用者），所以顯示名是唯一講得通的中介。
+    const labels = ctx.selectedEntityLabels ?? [];
+    const shown = labels.slice(0, MAX_SELECTED_LABELS);
+    const rest = n - shown.length;
+    lines.push(
+      shown.length
+        ? `已選取 ${n} 個${entityName ?? "項目"}：${shown.join("、")}${rest > 0 ? `（另有 ${rest} 個）` : ""}`
+        : `已選取：${n} 個${entityName ?? "項目"}`,
+    );
+  }
   if (ctx.activeTab) lines.push(`顯示模式：${ctx.activeTab}`);
   if (ctx.recentAction) lines.push(`剛剛做了：${ctx.recentAction}`);
   if (!lines.length) return "";

@@ -111,9 +111,12 @@ export function StoryboardStage({
       entityId: focusShot?.id,
       entityLabel: focusShotNo ? `第 ${focusShotNo} 鏡` : undefined,
       selectedEntityIds: pickedIds,
+      // 顯示名（第 N 鏡）是模型唯一能指涉「這幾鏡」的中介——只給數量的話它知道有三個，
+      // 卻不知道是哪三個；id 又刻意不給模型（它只會把 uuid 吐回給使用者）。
+      selectedEntityLabels: pickedIds.map((id) => `第 ${shotNumber.get(id) ?? "?"} 鏡`),
       activeTab: mode,
     });
-  }, [hasShotFocus, focusShot?.id, focusShotNo, pickedIds, mode]);
+  }, [hasShotFocus, focusShot?.id, focusShotNo, pickedIds, mode, shotNumber]);
 
   return (
     <div className="board-stage stack" id="storyboard-center" data-fb="分鏡中心">

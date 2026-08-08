@@ -5,6 +5,7 @@
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
 import { trpc } from "../../api";
+import { noteAssistantAction } from "../../lib/assistantContext";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
 import { SceneCardBinding } from "../../components/SceneCardBinding";
@@ -84,7 +85,11 @@ export function ShotCard({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
 
-  const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const saveField = (patch: Parameters<typeof update.mutate>[0]) => {
+    // 讓助手聽得懂「剛剛那個改回去」：只記最近一次、只記人看得懂的一句話
+    noteAssistantAction(`編輯了第 ${shotNumber} 鏡`);
+    update.mutate(patch);
+  };
   const saveCamera = (field: keyof ShotCamera, value: string) => {
     const next: ShotCamera = { ...(shot.camera ?? {}), [field]: value.trim() || undefined };
     update.mutate({ sceneId: shot.id, camera: next });

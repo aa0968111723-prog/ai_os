@@ -163,7 +163,10 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const dbProjectTitle = contextProject.data?.title;
   useEffect(
     () => registerAssistantPage({ pageType: "database", projectId: contextProjectId ?? undefined, projectTitle: dbProjectTitle }),
-    [contextProjectId, dbProjectTitle],
+    // dbProjectTitle 是查詢回來的，會在載入完成時變一次——但那不是「換了地方」，
+    // 而重新註冊會走一遍卸載。身分只認 contextProjectId；標題晚到就下一次註冊時補上。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [contextProjectId],
   );
 
   const tables = (list.data ?? []) as TableSummary[];

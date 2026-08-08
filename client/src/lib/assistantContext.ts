@@ -81,6 +81,8 @@ export interface AssistantFocusLayer {
   entityLabel?: string;
   /** 使用者明確勾選的多個實體 */
   selectedEntityIds?: string[];
+  /** 選取項的顯示名（例：["第 2 鏡","第 3 鏡"]）——模型只拿得到這個，拿不到 id */
+  selectedEntityLabels?: string[];
   /** 頁內分頁／模式（例：分鏡的 simple/pro、資料庫的 rows/files） */
   activeTab?: string;
   /** 覆寫頁面層的 pageType（長捲軸頁捲到哪一段時用） */
@@ -98,15 +100,30 @@ export interface AssistantPageContext extends AssistantPageLayer, AssistantFocus
 const EMPTY_PAGE: AssistantPageLayer = { pageType: "other" };
 
 let pageLayer: AssistantPageLayer = EMPTY_PAGE;
-let focusLayer: AssistantFocusLayer = {};
 let recentAction: string | undefined;
 let snapshot: AssistantPageContext = { route: "/", pageType: "other" };
-/** 各層目前有效的註冊 token：後註冊者接管，舊 token 的 cleanup 不得清掉新的 */
+/** 頁面層目前有效的註冊 token：後註冊者接管，舊 token 的 cleanup 不得清掉新的 */
 let pageToken = 0;
-let focusToken = 0;
 const listeners = new Set<() => void>();
 
+/**
+ * 焦點層是一疊而不是一格。
+ *
+ * 為什麼：專案頁同時掛著分鏡中心與素材庫（素材庫在專案設定浮層裡）。單格的話，
+ * 「勾素材 → 取消勾選」之後焦點會變成空的，而分鏡那邊其實還選著三鏡——
+ * 使用者沒有取消分鏡選取，畫面上也還亮著，助手卻忘了。改成疊之後，
+ * 上面那層退場就自動露出下面那層，語意是「最上面那個還活著的選擇」。
+ */
+interface FocusEntry { id: number; layer: AssistantFocusLayer }
+let focusStack: FocusEntry[] = [];
+let focusSeq = 0;
+
+function topFocus(): AssistantFocusLayer {
+  return focusStack.length ? focusStack[focusStack.length - 1].layer : {};
+}
+
 function compose(): AssistantPageContext {
+  const focusLayer = topFocus();
   const sel = focusLayer.selectedEntityIds?.length ? focusLayer.selectedEntityIds : undefined;
   return {
     route: typeof window === "undefined" ? "/" : window.location.pathname,
@@ -156,32 +173,53 @@ export function registerAssistantPage(layer: AssistantPageLayer): () => void {
   const movedElsewhere = pageLayer.projectId !== layer.projectId;
   pageLayer = layer;
   if (movedElsewhere) {
-    focusLayer = {};
+    focusStack = [];
     recentAction = undefined;
   }
   recompute();
   return () => {
     if (pageToken !== mine) return; // 已被後來的頁面接管，不是我該清的
-    pageLayer = EMPTY_PAGE;
-    focusLayer = {};
-    recentAction = undefined;
-    recompute();
+    // **延到微任務再清**：React 對同一個 hook 是「先跑舊 effect 的 cleanup，再跑新的 create」，
+    // 所以依賴變動（專案頁捲動改 pageType）也會走到這裡。同步清掉的話，
+    // 使用者一滑動就把選好的分鏡洗掉——而 create 裡的 movedElsewhere 守衛救不了，
+    // 因為那時 pageLayer 已經被 cleanup 設成 EMPTY 了。
+    // 微任務時再檢查一次 token：是依賴變動的話，新的 create 已經跑過、token 已前進 → 什麼都不做。
+    queueMicrotask(() => {
+      if (pageToken !== mine) return;
+      pageLayer = EMPTY_PAGE;
+      focusStack = [];
+      recentAction = undefined;
+      recompute();
+    });
   };
 }
 
 /**
  * 持有 selection 的小工具回報「正在看／選了什麼」。
  * 與頁面層獨立：頁面捲動不會清掉打開中的分鏡，分鏡關掉也不會清掉頁面身分。
+ * 疊在最上面的贏；自己退場時只移除自己那一層，下面的（例如還選著的分鏡）自動露出來。
  */
 export function registerAssistantFocus(layer: AssistantFocusLayer): () => void {
-  const mine = ++focusToken;
-  focusLayer = layer;
+  const id = ++focusSeq;
+  focusStack = [...focusStack, { id, layer }];
   recompute();
   return () => {
-    if (focusToken !== mine) return;
-    focusLayer = {};
+    focusStack = focusStack.filter((e) => e.id !== id);
     recompute();
   };
+}
+
+/**
+ * 只改 pageType，不動頁面身分。
+ *
+ * 專案頁是一條長捲軸，「捲到哪一段」每滑一下就會變——若拿它當 registerAssistantPage
+ * 的依賴，每次捲動都會走一遍「卸載舊註冊 → 建立新註冊」，而卸載那一步會碰到焦點層。
+ * 段落不是身分的一部分，所以用這支窄化的 setter 改就好：零註冊生命週期、零焦點風險。
+ */
+export function setAssistantPageType(pageType: AssistantPageType): void {
+  if (pageLayer.pageType === pageType) return;
+  pageLayer = { ...pageLayer, pageType };
+  recompute();
 }
 
 /** 記一筆「剛剛做了什麼」（只保留最近一次；不是事件流，不做 replay） */
@@ -213,10 +251,10 @@ export function useAssistantContext(): AssistantPageContext {
 /** 測試用：把 store 歸零（正式碼不呼叫——真實的清除來自註冊者的 cleanup） */
 export function resetAssistantContextForTest(): void {
   pageLayer = EMPTY_PAGE;
-  focusLayer = {};
+  focusStack = [];
   recentAction = undefined;
   pageToken = 0;
-  focusToken = 0;
+  focusSeq = 0;
   snapshot = { route: "/", pageType: "other" };
   for (const l of listeners) l();
 }

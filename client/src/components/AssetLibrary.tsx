@@ -136,6 +136,11 @@ export function AssetLibrary({
     });
   /* 把勾選與篩選報給 AI 助手：不重造 state，讀既有的那一份 */
   const selectedAssetIds = useMemo(() => [...selected], [selected]);
+  /* 顯示名（素材標題）：模型拿不到 id，只有名字能讓「這幾張」指得出來 */
+  const selectedAssetTitles = useMemo(
+    () => (assets.data ?? []).filter((a) => selected.has(a.id)).map((a) => a.title).slice(0, 8),
+    [assets.data, selected],
+  );
   // 沒勾任何素材就不註冊——素材庫與分鏡中心同頁並存，無條件註冊會把分鏡焦點洗掉
   useEffect(() => {
     if (!selectedAssetIds.length) return;
@@ -143,9 +148,10 @@ export function AssetLibrary({
       pageType: "assets",
       entityType: "asset",
       selectedEntityIds: selectedAssetIds,
+      selectedEntityLabels: selectedAssetTitles,
       activeTab: kindFilter === "all" ? undefined : kindFilter,
     });
-  }, [selectedAssetIds, kindFilter]);
+  }, [selectedAssetIds, selectedAssetTitles, kindFilter]);
 
   // DESK-01：桌面橋接可用才顯示「用外部軟體開啟／在資料夾顯示」；Web 只給下載路徑與提示，不承諾自動回傳
   const desktopAvailable = hasDesktopBridge();
