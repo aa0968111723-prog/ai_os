@@ -64,6 +64,35 @@ describe("右下 FAB 軌道與底部分頁列", () => {
     expect(rightRule).toContain("!important");
   });
 
+  /**
+   * MOB-FAB-04（2026-08-08 實機截圖「回饋系統有點故障」）：面板開著時浮鈕掉到畫面左下角。
+   *
+   * 根框只有 right 定位、寬度隨內容——收合時＝一顆鈕（貼右邊沒事），一展開就撐成面板寬
+   * （選單 240px、表單 92vw）。<button> 是 inline-block，在 block 排版下靠左緣，
+   * 於是鈕被拋到 92vw 的另一端，跟自己的面板分家還壓住頁面內容。
+   */
+  it("根框靠右對齊，展開後浮鈕不會被拋到面板的另一端", () => {
+    const styles = read("client/src/styles.css");
+    const at = styles.indexOf(".fb-fab-root {");
+    expect(at).toBeGreaterThan(-1);
+    const block = styles.slice(at, styles.indexOf("}", at));
+    expect(block, "根框仍是 block 排版：面板一展開，inline-block 的浮鈕就靠到左緣去了")
+      .toMatch(/display:\s*flex/);
+    expect(block, "缺少靠右對齊——鈕與面板要釘在同一條右軌上").toMatch(/align-items:\s*flex-end/);
+  });
+
+  it("根框的空白處不吃點擊（展開時它是一塊 92vw 的隱形板子）", () => {
+    const styles = read("client/src/styles.css");
+    const at = styles.indexOf(".fb-fab-root {");
+    const block = styles.slice(at, styles.indexOf("}", at));
+    expect(block, "根框沒有底色但照收點擊，展開時會把底下按鈕整片封住").toMatch(/pointer-events:\s*none/);
+    // 讓路之後，鈕與面板自己要把事件收回來，否則整個 widget 點不動
+    const child = styles.slice(styles.indexOf(".fb-fab-root > *"));
+    expect(child.slice(0, child.indexOf("}")), "讓路後沒把事件還給鈕與面板").toMatch(
+      /pointer-events:\s*auto/,
+    );
+  });
+
   it("styles.css 的同名避讓值與軌道基準一致（有人只改一邊時不會靜默分岔）", () => {
     const styles = read("client/src/styles.css");
     const at = styles.indexOf(".fb-fab-root { bottom:");
