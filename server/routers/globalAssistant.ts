@@ -39,6 +39,7 @@ import {
 } from "../services/aiSiteTrace";
 import { recordAiTraceEventSafely } from "../services/aiTrace";
 import { taskPrioritySchema, type GroupCommandLevel } from "../../shared/groupAgent";
+import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import {
   assistantPageContextSchema,
   formatAssistantPageContext,
@@ -79,8 +80,10 @@ import {
 /** 問答 0 點（NIM 免費額度）——與兩個既有助手同價。注意：reserveQuota(0) 是 no-op（審計核實），
  *  濫用防護靠上面的 consumeRateLimit，不靠它。佈線保留供未來調價。 */
 const ASK_COST_POINTS = 0;
-/** 每次提問最多幾輪工具查詢（與 teamAssistant 同值；由 assistantCore 迴圈強制收尾） */
-const MAX_TOOL_ROUNDS = 3;
+/** 每次提問最多幾輪工具查詢（與 teamAssistant 同值；由 assistantCore 迴圈強制收尾）。
+ *  從 3 提升到 6：讓助手能深度鑽研多個專案與資料庫後再回答，顯著改善回答品質。
+ *  每輪仍是唯讀查詢（0 點），只有 LLM 呼叫本身會花點（NIM 免費 / fal 依 token 計費）。 */
+const MAX_TOOL_ROUNDS = 6;
 /** 可私訊／可指派的成員代號一次列幾位 */
 const MEMBER_REF_LIMIT = 12;
 /** 一次回覆最多幾筆站級動作提議（與派工同上限：再多就是選項牆） */
@@ -401,6 +404,9 @@ export interface GlobalAskInput {
    * 真正要讀內容時，模型仍必須呼叫既有的唯讀工具（那些工具自帶 ACL）。
    */
   pageContext?: AssistantWirePageContext;
+  /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質。
+   *  與代理規劃共用 AgentPlannerMode schema；非 nim 模式會扣站內點數（見 llmPricing）。 */
+  mode?: AgentPlannerMode;
   signal?: AbortSignal;
 }
 
@@ -676,7 +682,9 @@ ${historyBlock}使用者的問題：${input.message}`;
             payload: { prompt, forceFinal },
           });
         }
-        const completion = await completeText({ prompt, mode: "nim", timeoutMs: 60_000, signal: input.signal });
+        const qualityMode = input.mode ?? "nim";
+        const isPaidMode = qualityMode !== "nim";
+        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: input.signal });
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;
@@ -1105,6 +1113,8 @@ export const globalAssistantRouter = router({
       projectId: z.string().uuid().optional(),
       /** 頁面感知上下文（逐欄夾制過的白名單；同樣只是提示） */
       pageContext: assistantPageContextSchema.optional(),
+      /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
+      mode: agentPlannerModeSchema.optional(),
     }))
     .mutation(({ ctx, input }) => runGlobalAsk({
       auth: ctx.auth,
@@ -1113,6 +1123,7 @@ export const globalAssistantRouter = router({
       history: input.history,
       projectId: input.projectId,
       pageContext: input.pageContext,
+      mode: input.mode,
     })),
 
   /** 使用者按下確認卡後執行單一站級動作（經 authedProcedure 落審計；ACL/policy 在被呼叫端） */

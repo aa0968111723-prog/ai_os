@@ -115,8 +115,10 @@ function previewMediaKind(kind: string | null | undefined): PreviewMediaKind {
 /** 問答 0 點（NVIDIA NIM 免費額度——LLM 文字呼叫不收費；動作另計於執行時，走既有守門）。
  *  reserveQuota/refund 對 0 點直接放行，保留呼叫佈線讓未來調價只改這個常數。 */
 const ASK_COST_POINTS = 0;
-/** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
-const MAX_TOOL_ROUNDS = 3;
+/** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢）。
+ *  從 3 提升到 6：讓助手能深度鑽研素材、分鏡、資料庫後再回答，顯著改善回答品質。
+ *  每輪仍是唯讀查詢（0 點），只有 LLM 呼叫本身會花點（NIM 免費 / fal 依 token 計費）。 */
+const MAX_TOOL_ROUNDS = 6;
 /**
  * 助手注入專案知識庫的字數預算（6.1）：比導演預設 8000 寬——助手要回答「這個專案在講什麼」
  * 層級的問題，知識庫（逐字稿/見證/腳本）就是答案來源；NIM llama 70B 窗口夠大，此上限純為成本收斂。
@@ -683,7 +685,8 @@ async function callLlm(
   signal?: AbortSignal,
   mode: AgentPlannerMode = "nim",
 ): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
-  const result = await completeText({ prompt, mode, timeoutMs: 60_000, signal });
+  const isPaidMode = mode !== "nim";
+  const result = await completeText({ prompt, mode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal });
   return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
 }
 
