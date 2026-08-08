@@ -10,6 +10,7 @@ import { ConfirmButton, HelpTip } from "../../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
+import { ScriptEditor } from "./ScriptEditor";
 import {
   shouldAdoptRemote,
   summaryChips,
@@ -269,9 +270,7 @@ export function StoryStage({
             你的故事
             <HelpTip text="貼上或直接寫。AI 會在背景把人物、場景、道具、鏡頭整理成可製作的結構——你只管說故事。" />
           </h2>
-          <Meta as="span" aria-live="polite" className="story-stage__savestate">
-            {save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
-          </Meta>
+          {/* 存檔狀態改由編輯器工具列顯示（全螢幕時也看得到），這裡不再重複一份 */}
           <span style={{ flex: "1 1 auto" }} />
           <Button size="sm" variant="ghost" onClick={() => setShowVersions((v) => !v)} aria-expanded={showVersions}>
             版本
@@ -319,15 +318,13 @@ export function StoryStage({
             }
           />
         ) : null}
-        <textarea
-          id="story-editor"
-          className="story-editor"
-          aria-label="故事內容"
-          placeholder={"把故事貼在這裡，或直接開始寫…\n\n小訣竅：一段＝一場戲。也可以用「角色：」「場景：」「道具：」開頭的行直接聲明設定。"}
+        <ScriptEditor
           value={content ?? ""}
+          canEdit={canEdit}
           rows={rows}
-          readOnly={!canEdit}
-          onChange={(e) => setContent(e.target.value)}
+          placeholder={"把故事貼在這裡，或直接開始寫…\n\n小訣竅：一段＝一場戲。也可以用上面的標注鈕，把名字一鍵宣告成「角色：」「場景：」「道具：」。"}
+          saveLabel={save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
+          onChange={setContent}
           onBlur={() => {
             // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）
             if (content !== null && remote !== null && content !== remote && !save.isPending) {
@@ -336,71 +333,75 @@ export function StoryStage({
               saveRef.current({ projectId, content });
             }
           }}
-        />
-        {save.error && <p className="error">{save.error.message}</p>}
-
-        {/* 解析摘要＋主 CTA 列 */}
-        <div className="story-parse-bar">
-          <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
-            {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
-            {summary && summary.flagged > 0 && (
-              <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
-            )}
-            {isDirty && hasParsed && <Chip className="story-chip-dirty">內容已改，建議重新解析</Chip>}
-          </div>
-          {canEdit && (
-            <div className="story-parse-bar__actions">
-              <Button
-                variant={hasParsed && !isDirty ? "ghost" : "primary"}
-                disabled={parse.isPending || isBlank}
-                onClick={() => parse.mutate({ projectId })}
-                title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
-              >
-                {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
-              </Button>
-              {needsBoardConfirm ? (
-                // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
-                <ConfirmButton
-                  triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
-                  message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
-                  confirmLabel="套用"
-                  disabled={board.isPending}
-                  onConfirm={() => board.mutate({ projectId })}
-                >
-                  {board.isPending ? "建立中…" : "產生分鏡"}
-                </ConfirmButton>
-              ) : (
-                <Button
-                  variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                  disabled={board.isPending || !lastRun || lastRun.status !== "done"}
-                  onClick={() => board.mutate({ projectId })}
-                  title="把解析出的場與鏡建成可編輯的分鏡卡"
-                >
-                  {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
-                </Button>
+          /* 解析摘要、主 CTA 與解析結果一起進全螢幕：
+             不然「產生分鏡」與「解析完成了嗎」都要退出全螢幕才看得到，寫作流被切斷 */
+          footer={
+            <>
+              <div className="story-parse-bar">
+                <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
+                  {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
+                  {summary && summary.flagged > 0 && (
+                    <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
+                  )}
+                  {isDirty && hasParsed && <Chip className="story-chip-dirty">內容已改，建議重新解析</Chip>}
+                </div>
+                {canEdit && (
+                  <div className="story-parse-bar__actions">
+                    <Button
+                      variant={hasParsed && !isDirty ? "ghost" : "primary"}
+                      disabled={parse.isPending || isBlank}
+                      onClick={() => parse.mutate({ projectId })}
+                      title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
+                    >
+                      {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
+                    </Button>
+                    {needsBoardConfirm ? (
+                      // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
+                      <ConfirmButton
+                        triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
+                        message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
+                        confirmLabel="套用"
+                        disabled={board.isPending}
+                        onConfirm={() => board.mutate({ projectId })}
+                      >
+                        {board.isPending ? "建立中…" : "產生分鏡"}
+                      </ConfirmButton>
+                    ) : (
+                      <Button
+                        variant={hasParsed && !isDirty ? "primary" : "ghost"}
+                        disabled={board.isPending || !lastRun || lastRun.status !== "done"}
+                        onClick={() => board.mutate({ projectId })}
+                        title="把解析出的場與鏡建成可編輯的分鏡卡"
+                      >
+                        {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {save.error && <p className="error">{save.error.message}</p>}
+              {parse.error && <p className="error">{parse.error.message}</p>}
+              {board.error && <p className="error">{board.error.message}</p>}
+              {undoRun.error && <p className="error">{undoRun.error.message}</p>}
+              {parseNotice && (
+                <Hint role="status" style={{ marginTop: 6 }}>
+                  {parseNotice}
+                  {lastRun && lastRun.status === "done" && canEdit && (
+                    <ConfirmButton
+                      triggerClassName="btn-sm btn-ghost"
+                      message="撤銷這次解析？會移除它建立的角色／場景／道具與分鏡（分鏡進回收桶、已被其他鏡引用的卡片會保留）。"
+                      confirmLabel="撤銷"
+                      disabled={undoRun.isPending}
+                      onConfirm={() => undoRun.mutate({ runId: lastRun.id })}
+                    >
+                      撤銷這次解析
+                    </ConfirmButton>
+                  )}
+                </Hint>
               )}
-            </div>
-          )}
-        </div>
-        {parse.error && <p className="error">{parse.error.message}</p>}
-        {board.error && <p className="error">{board.error.message}</p>}
-        {undoRun.error && <p className="error">{undoRun.error.message}</p>}
-        {parseNotice && (
-          <Hint role="status" style={{ marginTop: 6 }}>
-            {parseNotice}
-            {lastRun && lastRun.status === "done" && canEdit && (
-              <ConfirmButton
-                triggerClassName="btn-sm btn-ghost"
-                message="撤銷這次解析？會移除它建立的角色／場景／道具與分鏡（分鏡進回收桶、已被其他鏡引用的卡片會保留）。"
-                confirmLabel="撤銷"
-                disabled={undoRun.isPending}
-                onConfirm={() => undoRun.mutate({ runId: lastRun.id })}
-              >
-                撤銷這次解析
-              </ConfirmButton>
-            )}
-          </Hint>
-        )}
+            </>
+          }
+        />
 
         {/* 需要確認：只顯示 AI 真正不確定的項目（<70%），其他一律背景處理 */}
         {pending.length > 0 && (
