@@ -168,6 +168,8 @@ export async function buildKnowledgeContextWithMeta(
   const assembled = assembleKnowledgeContext(injectRows, cardBlock, labelOf, {
     budgetChars: opts.budgetChars ?? INJECT_BUDGET,
     preferIds: opts.preferIds,
+    // P5：使用者本次限定的來源（非空時只有這些進得了上下文；預算完全不變）
+    onlyIds: opts.onlyIds,
     includeCards: opts.includeCards,
     mode: opts.mode ?? "balanced",
   });

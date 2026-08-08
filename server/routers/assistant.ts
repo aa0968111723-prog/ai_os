@@ -37,7 +37,7 @@ import { submitGenerationCore } from "../services/generationCore";
 import { assertProjectEditable } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
-import { buildKnowledgeContext } from "./knowledge";
+import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { planAgentCore } from "../services/agentCore";
 import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
@@ -734,14 +734,43 @@ export interface AskCoreInput {
   mode?: AgentPlannerMode;
   /** 工作台勾選的知識篇：注入時 preferIds 優先（與代理 extraSourceIds 同語意） */
   knowledgeIds?: string[];
+  /**
+   * 「本次只用這幾份依據」（P5）：非空時只有這些進得了上下文。
+   * 與 knowledgeIds 的差別是限制而非排序——使用者說「只用這三份」時，
+   * 第四份不該因為預算還有剩就混進去。預算上限完全不變。
+   */
+  onlyKnowledgeIds?: string[];
   traceSessionId?: string;
 }
+/** 「本次依據」的一筆（P5）：使用者要看得出 AI 這次到底讀了什麼 */
+export interface AskSourceReport {
+  id: string;
+  title: string;
+  kind: string;
+  /** full＝整篇進了上下文、partial＝只進了一部分、skipped＝預算用完完全沒進 */
+  status: "full" | "partial" | "skipped";
+  chars: number;
+  includedChars: number;
+}
+
 export interface AskCoreResult {
   answer: string;
   actions: ResolvedAction[];
   steps: string[];
   mock: boolean;
   fallback: boolean;
+  /**
+   * 本次依據（P5）：這次問答實際讀進上下文的知識篇目與各自的完整度。
+   * ★ truncated 為真時 UI 必須說出來——靜默截斷會讓使用者以為 AI 看過全部，
+   *   然後把一個「只看了一半」的回答當成完整判斷（§30）。
+   */
+  sources?: {
+    items: AskSourceReport[];
+    truncated: boolean;
+    budgetChars: number;
+    includedChars: number;
+    totalContentChars: number;
+  };
   /** 這次實際由誰回答（auto 可能中途轉備援）；供 UI 誠實顯示，不讓付費行為隱形 */
   provider?: LlmProvider;
   model?: string;
@@ -824,11 +853,29 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」 畫面${s.assetId ? "有" : "無"} 旁白${s.narrationAssetId ? "有" : "無"}`).join("\n")
         : "（尚無分鏡）";
       // 6.1 全專案上下文：把知識庫（逐字稿/見證/腳本/筆記）注入助手——與導演共用同一組裝器與軟刪除守門
-      const knowledgeCtx = await buildKnowledgeContext(project.id, {
+      // P5：改用 WithMeta——上下文的組法完全沒變，只是把原本丟掉的「誰進了、進了多少、
+      // 有沒有被截斷」留下來回報給使用者。預算與優先序一個字都沒動。
+      const knowledgeMeta = await buildKnowledgeContextWithMeta(project.id, {
         budgetChars: KNOWLEDGE_BUDGET,
         mode: "balanced",
         preferIds: input.knowledgeIds?.slice(0, 20),
+        onlyIds: input.onlyKnowledgeIds?.slice(0, 20),
       });
+      const knowledgeCtx = knowledgeMeta.text;
+      const sourcesReport: AskCoreResult["sources"] = {
+        items: (knowledgeMeta.items ?? []).map((i) => ({
+          id: i.id,
+          title: i.title,
+          kind: i.kind,
+          status: i.status,
+          chars: i.chars,
+          includedChars: i.includedChars,
+        })),
+        truncated: knowledgeMeta.truncated,
+        budgetChars: knowledgeMeta.budgetChars ?? KNOWLEDGE_BUDGET,
+        includedChars: knowledgeMeta.includedChars,
+        totalContentChars: knowledgeMeta.totalContentChars,
+      };
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const readableDbs = await listAssistantReadableDbs(input.auth);
       const chipGuide = worldviewChipGuidanceForAi(wv);
@@ -1003,7 +1050,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         for (let round = 0; ; round++) {
           // 用戶端已斷線（SSE close）：不再發起下一次 LLM 呼叫，提早收工不白燒免費額度。
           // 回傳值不會被寫回（sse 對已關閉連線是 no-op），僅用來乾淨結束迴圈。
-          if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId };
+          if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport };
           emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…");
           const forceFinal = round >= MAX_TOOL_ROUNDS;
           const providerPrompt = buildPrompt(toolBlocks, forceFinal);
@@ -1061,7 +1108,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             const actions = resolve(parsed.data.actions ?? []);
             await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "回答與建議動作已整理完成", payload: { answer: parsed.data.answer, actions, steps } });
             await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
-            return { answer: parsed.data.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId };
+            return { answer: parsed.data.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId, sources: sourcesReport };
           }
           // LLM 常把「提議動作」誤用唯讀工具格式（如 {"tool":"split_script",…}）——救回成正規動作提議，
           // 不讓它掉進下方 fallback 把原始 JSON 洩漏給使用者（C2 self-healing）
@@ -1070,7 +1117,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             const actions = resolve(coerced.actions ?? []);
             await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "已修正模型格式並完成回答", payload: { answer: coerced.answer, actions, steps } });
             await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
-            return { answer: coerced.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId };
+            return { answer: coerced.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId, sources: sourcesReport };
           }
           // 真的解析失敗：把回答裡所有 JSON 區塊一律移除（絕不把原始 JSON／工具呼叫洩漏給使用者），
           // 剩純文字才用，否則給具體引導語。LLM 已計費不退點，但前端不會拿到壞資料。
@@ -1145,6 +1192,8 @@ export const assistantRouter = router({
       mode: agentPlannerModeSchema.optional(),
       /** 本次問答優先注入的知識 id（工作台勾選） */
       knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
+      /** 本次「只用這幾份依據」（P5 來源選擇）；空陣列視同未指定 */
+      onlyKnowledgeIds: z.array(z.string().uuid()).max(20).optional(),
     }))
     .mutation(({ ctx, input }) =>
       runAssistantAsk({
@@ -1154,6 +1203,7 @@ export const assistantRouter = router({
         dedupeKey: input.nonce,
         mode: input.mode,
         knowledgeIds: input.knowledgeIds,
+        onlyKnowledgeIds: input.onlyKnowledgeIds,
       }),
     ),
 

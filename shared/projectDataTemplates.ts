@@ -201,11 +201,20 @@ export function projectDataAiHint(input: {
    * 省略時退回 linkedRowCount（舊呼叫相容，但新 UI 應傳入）。
    */
   linkedAiReadableRowCount?: number;
+  /**
+   * 整張表被提供給本專案（P4 綁定）且 AI 讀得到的表數。
+   *
+   * 為什麼一定要有這個：綁定的表可能一列 project 欄位都沒有（關聯列數＝0），
+   * 但 AI 讀得到整張表。只看關聯列數的話，畫面會說「還沒有可給 AI 的依據」，
+   * 而 AI 其實正在讀那張表——狀態文案一旦說謊，使用者就不會再相信任何一句。
+   */
+  boundAiReadableTableCount?: number;
 }): { tone: "ok" | "partial" | "empty"; label: string; detail: string } {
   const { knowledgeCount, assetCount, linkedRowCount } = input;
   const aiRows = input.linkedAiReadableRowCount ?? linkedRowCount;
+  const boundTables = input.boundAiReadableTableCount ?? 0;
   const hasText = knowledgeCount > 0;
-  const hasStruct = aiRows > 0;
+  const hasStruct = aiRows > 0 || boundTables > 0;
   const hasMedia = assetCount > 0;
   const hiddenLinked = Math.max(0, linkedRowCount - aiRows);
 
@@ -215,7 +224,8 @@ export function projectDataAiHint(input: {
       label: "AI 已可引用本專案部分資料",
       detail: [
         hasText ? `文字 ${knowledgeCount} 筆` : null,
-        hasStruct ? `資料表 AI 可讀 ${aiRows} 列` : null,
+        boundTables > 0 ? `整張提供的資料表 ${boundTables} 張` : null,
+        aiRows > 0 ? `資料表 AI 可讀 ${aiRows} 列` : null,
         hasMedia ? `素材 ${assetCount} 件` : null,
         hiddenLinked > 0 ? `另有 ${hiddenLinked} 列不提供 AI` : null,
       ]
