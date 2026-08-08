@@ -142,7 +142,7 @@ app.use(
     },
     // 自家 /api/assets 圖片需被 SPA（開發時跨埠、正式時同源）載入，用 same-site 才不被 CORP 擋
     crossOriginResourcePolicy: { policy: "same-site" },
-    hsts: { includeSubDomains: true },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
     referrerPolicy: { policy: "no-referrer" },
     // X-Frame-Options: DENY（與 CSP frame-ancestors 'none' 一致；對不吃 CSP 的舊瀏覽器的縱深防禦，#74）
     frameguard: { action: "deny" },
@@ -177,9 +177,11 @@ app.use(express.json({ limit: "2mb" }));
 // 建置追溯（QA 版本漂移）：部署時由建置流程注入（Dockerfile ARG→ENV），
 // /api/health 露出非敏感的 build 資訊，讓正式環境可對應到唯一 Git commit。
 // #268：Zeabur 可能注入 ZEABUR_GIT_COMMIT 而非 BUILD_SHA——程式側 fallback 避免 health 全 null
+// #security: 不對外暴露 branch 名稱（如 claude/healing-migration-ai-os-erewp2），
+// 避免攻擊者從 feature branch 命名推測開發慣例或進行針對性攻擊。
+// sha 是公開 repo 的 commit hash，非敏感資訊；builtAt 是建置時間戳，無資安風險。
 const BUILD_INFO = {
   sha: process.env.BUILD_SHA || process.env.ZEABUR_GIT_COMMIT || process.env.COMMIT_SHA || null,
-  branch: process.env.BUILD_BRANCH || process.env.ZEABUR_GIT_BRANCH || null,
   builtAt: process.env.BUILD_TIME || process.env.ZEABUR_BUILD_TIME || null,
 };
 
