@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./trpc";
@@ -64,6 +65,7 @@ import { db, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
 import { sanitizeAssistantPageContext } from "../shared/assistantPageContext";
+import { classifyAssistantRequest, type AssistantLatencyMetrics } from "../shared/assistantExecution";
 import {
   backgroundTaskCount,
   beginShutdown,
@@ -1927,10 +1929,41 @@ app.get("/api/selftest", async (req, res) => {
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
+function createAssistantLatencyTracker(startedAt: number) {
+  let contextReadyMs: number | null = null;
+  let modelStartedMs: number | null = null;
+  let firstToolCallMs: number | null = null;
+  let toolFinishedMs: number | null = null;
+  const elapsed = () => Math.max(0, Date.now() - startedAt);
+  return {
+    observe(event: { phase?: string; text?: string }) {
+      if (contextReadyMs == null && event.text?.startsWith("已取得")) contextReadyMs = elapsed();
+      if (modelStartedMs == null && event.phase === "thinking" && event.text?.includes("思考")) modelStartedMs = elapsed();
+      if (firstToolCallMs == null && event.phase === "lookup") firstToolCallMs = elapsed();
+      if (event.phase === "step") toolFinishedMs = elapsed();
+    },
+    finish(): AssistantLatencyMetrics {
+      const totalMs = elapsed();
+      return {
+        requestReceivedMs: 0,
+        contextReadyMs,
+        modelStartedMs,
+        // completeText 目前是整段回傳，不捏造 token 級時間；未來換真串流時再填。
+        firstTokenMs: null,
+        firstToolCallMs,
+        toolFinishedMs,
+        finalAnswerMs: totalMs,
+        totalMs,
+      };
+    },
+  };
+}
+
 // AI 專案助手「思考過程」串流（SSE）：與 tRPC assistant.ask 共用 runAssistantAsk 核心，
 // 差別是逐步把「思考中／正在查什麼／查到什麼」推給前端即時呈現，最後 done 帶最終回答＋可執行動作。
 // 前端串流失敗會自動退回 tRPC ask（見 ProjectAssistant），故此路由是加分體驗、非關鍵路徑。
 app.post("/api/assistant/ask", async (req, res) => {
+  const requestStartedAt = Date.now();
   const auth = await resolveSession(req);
   if (!requireUsableSession(auth, res)) return;
   const projectId = String(req.body?.projectId ?? "");
@@ -1969,7 +2002,13 @@ app.post("/api/assistant/ask", async (req, res) => {
   // 心跳：相鄰事件間最壞可達一次 LLM 呼叫（~60s）全靜默，每 15 秒送一則 SSE 註解行（前端天然忽略）撐過代理 idle 逾時
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
-  sse("open", { ok: true }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
+  const latency = createAssistantLatencyTracker(requestStartedAt);
+  sse("open", {
+    ok: true,
+    runId: nonce || randomUUID(),
+    receivedAt: new Date(requestStartedAt).toISOString(),
+    plan: classifyAssistantRequest(message),
+  }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
@@ -1982,9 +2021,9 @@ app.post("/api/assistant/ask", async (req, res) => {
         mode,
         knowledgeIds: knowledgeIds.length ? knowledgeIds : undefined,
       },
-      (e) => sse("step", e),
+      (e) => { latency.observe(e); sse("step", e); },
     );
-    sse("done", result);
+    sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
     // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）。
     // 用戶端已斷線就別再記一筆噪音錯誤。
@@ -2004,6 +2043,7 @@ app.post("/api/assistant/ask", async (req, res) => {
  * 前端用同一個 AssistantSseDecoder 解碼，不需要新解析器。
  */
 app.post("/api/assistant/site-ask", async (req, res) => {
+  const requestStartedAt = Date.now();
   const auth = await resolveSession(req);
   if (!requireUsableSession(auth, res)) return;
   const groupId = String(req.body?.groupId ?? "");
@@ -2042,7 +2082,13 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   };
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
-  sse("open", { ok: true });
+  const latency = createAssistantLatencyTracker(requestStartedAt);
+  sse("open", {
+    ok: true,
+    runId: randomUUID(),
+    receivedAt: new Date(requestStartedAt).toISOString(),
+    plan: classifyAssistantRequest(message),
+  });
   // 與 tRPC 雙生路徑同一份審計口徑：走 SSE 問的也要在操作紀錄裡看得到（成功與失敗都記）。
   // tRPC 端由 authedProcedure 中介層記；這裡是 Express 路由，得自己補一筆同名 action。
   const { recordAudit } = await import("./services/audit");
@@ -2058,10 +2104,10 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         pageContext,
         signal: clientAbort.signal,
       },
-      (e) => sse("step", e),
+      (e) => { latency.observe(e); sse("step", e); },
     );
     recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, { ok: true });
-    sse("done", result);
+    sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
     recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, {
       ok: false,

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
   requestAssistantStream: vi.fn(),
   runMutateAsync: vi.fn(),
+  undoMutateAsync: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
@@ -31,6 +32,9 @@ vi.mock("../api", () => ({
       },
       runAction: {
         useMutation: () => ({ mutateAsync: mocks.runMutateAsync }),
+      },
+      undoCreatedScenes: {
+        useMutation: () => ({ mutateAsync: mocks.undoMutateAsync, mutate: vi.fn(), isPending: false, isSuccess: false, error: null }),
       },
     },
   },
@@ -229,6 +233,36 @@ describe("ProjectAssistant project-scoped async results", () => {
     });
 
     expect(screen.queryByText(/STALE_ACTION_RESULT/)).not.toBeInTheDocument();
+  });
+
+  it("明確要求拆目前腳本時直接持久化分鏡，不再退回確認卡", async () => {
+    mocks.runMutateAsync.mockResolvedValue({
+      kind: "split_script",
+      createdScenes: 8,
+      sceneIds: ["11111111-1111-4111-8111-111111111111"],
+      message: "已拆出 8 個分鏡，可逐鏡生成畫面",
+    });
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onDone({
+        answer: "我會把目前腳本拆成真正分鏡。",
+        actions: [{ type: "split_script", label: "把目前專案腳本拆成分鏡（AI 導演，免費）" }],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      return true;
+    });
+
+    render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("幫我把目前腳本拆成分鏡");
+
+    await waitFor(() => expect(mocks.runMutateAsync).toHaveBeenCalledWith({
+      projectId: "project-a",
+      action: { type: "split_script", script: undefined },
+    }));
+    expect(await screen.findByText("已拆出 8 個分鏡，可逐鏡生成畫面")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /把目前專案腳本拆成分鏡/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /復原/ })).toBeInTheDocument();
   });
 });
 

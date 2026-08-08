@@ -1074,6 +1074,64 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   font-size: var(--fs-11);
 }
 
+/* 即時 Agent Run：送出當下就出現，顯示可公開的意圖、步驟與實測延遲。 */
+.agent-run-card {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border-soft));
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--card2) 90%, transparent);
+  font-size: var(--fs-12);
+}
+.agent-run-card__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.agent-run-card__header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-run-card__badge {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 13%, transparent);
+  color: var(--primary-ink);
+  font-size: var(--fs-11);
+  font-weight: 700;
+}
+.agent-run-card__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+.agent-run-card__steps {
+  display: grid;
+  gap: 4px;
+  color: var(--fg-secondary);
+}
+.agent-run-card__steps span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.agent-run-card__steps span[data-status="done"] { color: var(--success-ink, var(--primary-ink)); }
+.agent-run-card__latency {
+  padding-top: 5px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--fg-secondary);
+  font-size: var(--fs-11);
+}
+
 .section-heading-row {
   display: flex;
   align-items: center;

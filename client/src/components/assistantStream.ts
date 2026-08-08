@@ -1,6 +1,11 @@
 import type { AgentPlannerMode } from "@shared/agentPlanner";
 import type { AssistantActivityEvent } from "./AssistantTrace";
 import type { AssistantWirePageContext } from "@shared/assistantPageContext";
+import type {
+  AssistantExecutionPlan,
+  AssistantLatencyMetrics,
+  AssistantRunOpen,
+} from "@shared/assistantExecution";
 
 export type AssistantStreamDone = {
   answer: string;
@@ -14,6 +19,7 @@ export type AssistantStreamDone = {
   provider?: string;
   model?: string;
   traceSessionId?: string;
+  latency?: AssistantLatencyMetrics;
   /**
    * 本次依據（P5）：這次回答實際讀進上下文的知識篇目與各自的完整度。
    * ★ truncated 為真時畫面必須說出來——使用者若以為 AI 看過全部，會把一個
@@ -36,10 +42,24 @@ export type AssistantStreamDone = {
 };
 
 export type AssistantStreamHandlers = {
+  onOpen?: (run: AssistantRunOpen) => void;
   onStep: (event: AssistantActivityEvent) => void;
   onDone: (result: AssistantStreamDone) => void;
   onError: (message: string) => void;
 };
+
+function isOpenEvent(value: unknown): value is AssistantRunOpen {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  const plan = candidate.plan as Record<string, unknown> | undefined;
+  return candidate.ok === true
+    && typeof candidate.runId === "string"
+    && typeof candidate.receivedAt === "string"
+    && !!plan
+    && (plan.intent === "ASK" || plan.intent === "ACT" || plan.intent === "PLAN" || plan.intent === "WATCH")
+    && typeof plan.title === "string"
+    && Array.isArray(plan.steps);
+}
 
 export type ParsedAssistantSseEvent = {
   event: string;
@@ -135,6 +155,10 @@ function dispatchAssistantEvent(
   parsed: ParsedAssistantSseEvent,
   handlers: AssistantStreamHandlers,
 ): boolean {
+  if (parsed.event === "open" && isOpenEvent(parsed.data)) {
+    handlers.onOpen?.(parsed.data);
+    return false;
+  }
   if (parsed.event === "step" && isActivityEvent(parsed.data)) {
     handlers.onStep(parsed.data);
     return false;
@@ -177,6 +201,9 @@ export type SiteAssistantStreamDone = {
   rationale?: string;
   degraded?: boolean;
   traceSessionId?: string;
+  executionPlan?: AssistantExecutionPlan;
+  executedSiteActions?: unknown[];
+  latency?: AssistantLatencyMetrics;
 };
 
 function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
@@ -194,6 +221,7 @@ function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
 }
 
 export type SiteAssistantStreamHandlers = {
+  onOpen?: (run: AssistantRunOpen) => void;
   onStep: (event: AssistantActivityEvent) => void;
   onDone: (result: SiteAssistantStreamDone) => void;
   onError: (message: string) => void;
@@ -228,6 +256,10 @@ export async function requestSiteAssistantStream({
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let sawPayload = false;
   const dispatchSite = (parsed: ParsedAssistantSseEvent): boolean => {
+    if (parsed.event === "open" && isOpenEvent(parsed.data)) {
+      handlers.onOpen?.(parsed.data);
+      return false;
+    }
     if (parsed.event === "step" && isActivityEvent(parsed.data)) {
       handlers.onStep(parsed.data);
       return false;
@@ -269,7 +301,7 @@ export async function requestSiteAssistantStream({
       const result = await reader.read();
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
-        if (event.event === "step" || event.event === "done" || event.event === "error") {
+        if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
           sawPayload = true;
         }
         if (dispatchSite(event)) return true;
@@ -354,7 +386,7 @@ export async function requestAssistantStream({
       const result = await reader.read();
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
-        if (event.event === "step" || event.event === "done" || event.event === "error") {
+        if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
           sawPayload = true;
         }
         if (dispatchAssistantEvent(event, handlers)) return true;

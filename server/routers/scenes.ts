@@ -47,6 +47,7 @@ import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import { softDeleteScenesCore } from "../services/sceneWriteCore";
 import { MAX_PROMPT_CHARS } from "./prompts";
 import {
   formatEnvironmentState,
@@ -708,13 +709,9 @@ export const scenesRouter = router({
 
   /** 刪除分鏡＝軟刪除（回收桶）：保留使用者手打的 prompt／voiceover，可從回收桶還原 */
   remove: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const [scene] = await db
-      .select()
-      .from(schema.scenes)
-      .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+    const [scene] = await db.select({ projectId: schema.scenes.projectId }).from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格已經不在分鏡列上了——夥伴剛刪過（可到回收桶還原）" });
-    await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能刪分鏡
-    await db.update(schema.scenes).set({ deletedAt: new Date() }).where(eq(schema.scenes.id, input.sceneId));
+    await softDeleteScenesCore(ctx.auth, scene.projectId, [input.sceneId]);
     return { ok: true };
   }),
 

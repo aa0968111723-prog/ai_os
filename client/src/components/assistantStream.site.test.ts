@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { requestSiteAssistantStream, type SiteAssistantStreamDone } from "./assistantStream";
 import type { AssistantActivityEvent } from "./AssistantTrace";
+import type { AssistantRunOpen } from "@shared/assistantExecution";
 
 /** 把 SSE 文字包成可讀串流的 Response（模擬 /api/assistant/site-ask） */
 function sseResponse(text: string, ok = true): Response {
@@ -21,9 +22,11 @@ function collect() {
   const steps: AssistantActivityEvent[] = [];
   const dones: SiteAssistantStreamDone[] = [];
   const errors: string[] = [];
+  const opens: AssistantRunOpen[] = [];
   return {
-    steps, dones, errors,
+    steps, dones, errors, opens,
     handlers: {
+      onOpen: (run: AssistantRunOpen) => opens.push(run),
       onStep: (e: AssistantActivityEvent) => steps.push(e),
       onDone: (d: SiteAssistantStreamDone) => dones.push(d),
       onError: (m: string) => errors.push(m),
@@ -35,7 +38,7 @@ describe("requestSiteAssistantStream", () => {
   it("open→step→done：派發活動事件與終局結果，回 true（不得再退 tRPC）", async () => {
     const c = collect();
     const sse = [
-      'event: open\ndata: {"ok":true}\n\n',
+      'event: open\ndata: {"ok":true,"runId":"run-1","receivedAt":"2026-08-08T00:00:00.000Z","plan":{"intent":"ASK","confidence":"high","title":"進度？","steps":["讀取目前上下文"]}}\n\n',
       'event: step\ndata: {"phase":"lookup","text":"正在查組阻塞…","tool":"group_blockers"}\n\n',
       `event: done\ndata: ${JSON.stringify(DONE)}\n\n`,
     ].join("");
@@ -44,6 +47,8 @@ describe("requestSiteAssistantStream", () => {
       handlers: c.handlers, fetchImpl: async () => sseResponse(sse),
     });
     expect(handled).toBe(true);
+    expect(c.opens).toHaveLength(1);
+    expect(c.opens[0].plan.intent).toBe("ASK");
     expect(c.steps).toEqual([{ phase: "lookup", text: "正在查組阻塞…", tool: "group_blockers" }]);
     expect(c.dones).toHaveLength(1);
     expect(c.dones[0].answer).toBe("答案");

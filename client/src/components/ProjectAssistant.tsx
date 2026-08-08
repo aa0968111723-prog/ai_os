@@ -28,6 +28,12 @@ import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
 import { batchSummaryText } from "./assistantBatch";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 import { ProactiveModelConverter } from "../features/creation-workbench/ProactiveModelConverter";
+import { AgentRunCard } from "./AgentRunCard";
+import {
+  classifyAssistantRequest,
+  type AssistantExecutionPlan,
+  type AssistantLatencyMetrics,
+} from "@shared/assistantExecution";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -44,7 +50,7 @@ type Action =
       performance?: Record<string, string | undefined>;
       changes?: string[];
     }
-  | { type: "split_script"; label: string; script: string }
+  | { type: "split_script"; label: string; script?: string }
   // plan_agent：把目標交給 AI 創作助手排計畫；plannerMode 由使用者在確認前選擇
   | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
   // 套用世界觀 chips（確認後寫入專案基調）
@@ -71,7 +77,50 @@ type Turn = {
   paidModel?: string;
   /** 本次依據（P5）：這則回答實際讀了哪些知識、各自完整度、有無被上限截斷 */
   sources?: AskSourcesData;
+  executionPlan?: AssistantExecutionPlan;
+  runStatus?: "completed" | "failed" | "stopped";
+  latency?: AssistantLatencyMetrics;
+  retryText?: string;
+  directResults?: ProjectDirectResult[];
 };
+
+type ProjectDirectResult = {
+  kind: string;
+  message: string;
+  createdScenes?: number;
+  sceneIds?: string[];
+};
+
+function ProjectDirectResultCard({ projectId, result }: { projectId: string; result: ProjectDirectResult }) {
+  const utils = trpc.useUtils();
+  const undo = trpc.assistant.undoCreatedScenes.useMutation();
+  const canUndo = result.kind === "split_script" && Boolean(result.sceneIds?.length);
+  return (
+    <div className="ai-copilot-action-card is-done" data-fb="專案動作結果卡" style={{ marginTop: 8 }}>
+      <Icon name={undo.isSuccess ? "Undo2" : "Check"} size={14} />
+      <span className="ai-copilot-action-card__label">
+        {undo.isSuccess ? "已復原這次建立的分鏡" : result.message}
+      </span>
+      {!undo.isSuccess && result.kind === "split_script" ? (
+        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = "sec-scenes"; }}>查看分鏡</Button>
+      ) : null}
+      {!undo.isSuccess && canUndo ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={undo.isPending}
+          onClick={() => undo.mutate(
+            { projectId, sceneIds: result.sceneIds! },
+            { onSuccess: () => { void utils.scenes.invalidate(); } },
+          )}
+        >
+          <Icon name="Undo2" size={12} /> {undo.isPending ? "復原中…" : "復原"}
+        </Button>
+      ) : null}
+      {undo.error ? <span className="ai-copilot-action-card__error">{undo.error.message}</span> : null}
+    </div>
+  );
+}
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
 type GenModel = {
@@ -122,7 +171,7 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
 
 /**
  * AI 專案助手（進階版）：問專案進度/生成/分鏡，並可「提議」動作。
- * 安全：任何花點數或改資料的動作都用 ConfirmButton，使用者按確認才真的執行。
+ * 安全：明確 ACT 的免費可逆拆分可直接執行＋Undo；付費、外部與其餘寫入仍用 ConfirmButton。
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
  *
@@ -180,6 +229,7 @@ export function ProjectAssistant({
   // 思考過程串流狀態：active＝正在問答中，events＝已收到的思考步驟（逐筆追加即時顯示）
   const [thinking, setThinking] = useState<{ active: boolean; events: ThinkEvent[] }>({ active: false, events: [] });
   const [fallbackPending, setFallbackPending] = useState(false);
+  const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   // 已執行的提議動作鍵（turnIndex:actionIndex）＋正在執行中的鍵——停用「已執行」的按鈕，避免重複點擊
   const [executed, setExecuted] = useState<Set<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -224,6 +274,7 @@ export function ProjectAssistant({
   const sceneGroups = useMemo(() => buildGroups(allModels.filter(sceneFillable)), [allModels]);
 
   const run = trpc.assistant.runAction.useMutation();
+  const undoCreatedScenes = trpc.assistant.undoCreatedScenes.useMutation();
 
   // tRPC 一次性問答：串流不可用時的退路。每次呼叫使用帶 request epoch 的局部 callback，
   // mutation 本身不能取消時也能丟棄過期答案。
@@ -235,7 +286,51 @@ export function ProjectAssistant({
     mutate: (_input: unknown) => undefined,
   };
 
-  const busy = thinking.active || fallbackPending;
+  const busy = thinking.active || fallbackPending || pendingKey?.startsWith("auto:") === true;
+
+  const runDirectProjectActions = async (
+    actions: Action[],
+    plan: AssistantExecutionPlan,
+    requestProjectId: string,
+    epoch: number,
+    signal: AbortSignal,
+  ) => {
+    const direct = plan.intent === "ACT" && plan.confidence === "high"
+      ? actions.filter((action) => action.type === "split_script")
+      : [];
+    if (!direct.length) return new Set<Action>();
+    const directSet = new Set(direct);
+    setPendingKey(`auto:${epoch}`);
+    for (const action of direct) {
+      if (signal.aborted || !requestIsCurrent(requestProjectId, epoch)) break;
+      try {
+        const result = await run.mutateAsync({ projectId: requestProjectId, action: toPayload(action) });
+        // Stop 可能在目前工具已送出後發生；若是可逆的拆分鏡，立即補做 Undo，不留下半套結果。
+        if (signal.aborted || !requestIsCurrent(requestProjectId, epoch)) {
+          if (result.kind === "split_script" && result.sceneIds.length) {
+            await undoCreatedScenes.mutateAsync({ projectId: requestProjectId, sceneIds: result.sceneIds });
+            void utils.scenes.invalidate();
+          }
+          break;
+        }
+        void utils.scenes.invalidate();
+        void utils.quota.invalidate();
+        push({ role: "ai", text: "已完成專案操作。", directResults: [result] });
+        onRunActionSuccess?.({ actionType: action.type, kind: result.kind, message: result.message });
+      } catch (error) {
+        if (requestIsCurrent(requestProjectId, epoch)) {
+          // 失敗不謊報成功；把原動作留成確認卡，使用者可在看過錯誤後重試。
+          push({
+            role: "ai",
+            text: `動作沒成功：${error instanceof Error ? error.message : "未知錯誤"}`,
+            actions: [action],
+          });
+        }
+      }
+    }
+    if (requestIsCurrent(requestProjectId, epoch)) setPendingKey(null);
+    return directSet;
+  };
 
   /** 串流問答：讀 SSE 逐筆更新思考過程，done 補上 AI 回覆。回傳 true＝已處理（含 error／主動中止），false＝請退回 tRPC。 */
   async function askViaStream(
@@ -254,6 +349,9 @@ export function ProjectAssistant({
       knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
       signal,
       handlers: {
+        onOpen: (opened) => {
+          if (requestIsCurrent(requestProjectId, epoch)) setActivePlan(opened.plan);
+        },
         onStep: (event) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
           traceRef.current = [...traceRef.current, event];
@@ -263,10 +361,15 @@ export function ProjectAssistant({
         onDone: (result) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
           setTraceSessionId(result.traceSessionId ?? null);
+          const plan = activePlan ?? classifyAssistantRequest(message);
+          const actions = result.actions as Action[];
+          const directlyRunnable = plan.intent === "ACT" && plan.confidence === "high"
+            ? new Set(actions.filter((action) => action.type === "split_script"))
+            : new Set<Action>();
           push({
             role: "ai",
             text: result.answer,
-            actions: result.actions as Action[],
+            actions: actions.filter((action) => !directlyRunnable.has(action)),
             steps: result.steps,
             activity: [...traceRef.current],
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
@@ -274,15 +377,23 @@ export function ProjectAssistant({
             paid: result.fellBackToPaid === true,
             paidModel: result.model,
             sources: result.sources,
+            executionPlan: plan,
+            latency: result.latency,
           });
+          if (directlyRunnable.size) {
+            void runDirectProjectActions(actions, plan, requestProjectId, epoch, signal);
+          }
         },
-        onError: (message) => {
+        onError: (errorMessage) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
           push({
             role: "ai",
-            text: message,
+            text: errorMessage,
             activity: [...traceRef.current],
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+            executionPlan: activePlan ?? classifyAssistantRequest(message),
+            runStatus: "failed",
+            retryText: message,
           });
         },
       },
@@ -304,6 +415,7 @@ export function ProjectAssistant({
     traceRef.current = [];
     requestStartedAtRef.current = Date.now();
     setLiveTraceOpen(true);
+    setActivePlan(classifyAssistantRequest(m));
     // 串流與退回 tRPC 共用的請求關聯鍵；伺服器仍會對每個外部呼叫各自計次。
     const nonce = (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()));
     push({ role: "you", text: m });
@@ -312,6 +424,7 @@ export function ProjectAssistant({
     const handled = await askViaStream(m, nonce, ctrl.signal, requestProjectId, epoch);
     if (!requestIsCurrent(requestProjectId, epoch)) return;
     setThinking({ active: false, events: [] });
+    setActivePlan(null);
     // 主動中止不退回；串流沒完成才用一次性問答補上（帶同一 nonce 方便追蹤）。
     if (!handled && !ctrl.signal.aborted) {
       setFallbackPending(true);
@@ -339,6 +452,7 @@ export function ProjectAssistant({
               paid: result.fellBackToPaid === true,
               paidModel: result.model,
               sources: result.sources,
+              executionPlan: classifyAssistantRequest(m),
             });
           },
           onError: (error) => {
@@ -349,6 +463,8 @@ export function ProjectAssistant({
               activity: [...traceRef.current],
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
+              executionPlan: classifyAssistantRequest(m),
+              retryText: m,
             });
           },
           onSettled: () => {
@@ -360,16 +476,20 @@ export function ProjectAssistant({
   };
 
   const cancelCurrent = () => {
-    if (!thinking.active) return;
+    if (!thinking.active && !pendingKey?.startsWith("auto:")) return;
     abortRef.current?.abort();
     requestEpochRef.current += 1;
     setThinking({ active: false, events: [] });
     setFallbackPending(false);
+    setActivePlan(null);
+    setPendingKey(null);
     push({
       role: "ai",
-      text: "已取消這次查詢；尚未執行任何需確認或扣點的動作。",
+      text: "已停止；未開始的步驟不再執行。若拆分鏡已送出，完成後會自動移回回收桶。",
       activity: [...traceRef.current],
       elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+      executionPlan: activePlan ?? undefined,
+      runStatus: "stopped",
     });
   };
 
@@ -389,6 +509,7 @@ export function ProjectAssistant({
     setTurns([]);
     setThinking({ active: false, events: [] });
     setFallbackPending(false);
+    setActivePlan(null);
     setExecuted(new Set());
     setModelOverride({});
     setPlannerModeOverride({});
@@ -479,7 +600,7 @@ export function ProjectAssistant({
 
       <div id="sec-assistant-body" hidden={collapsed}>
         <Hint style={{ marginTop: 4 }}>
-          一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身預設由 NVIDIA NIM 免費額度驅動、不扣點（交給代理排計畫則走高品質模型，依實際 token 扣點）。
+          一個對話統包：<b>問</b>（進度、分鏡、素材與資料庫）、<b>發想</b>、<b>拆分鏡</b>與<b>下目標</b>。明確要求拆分目前腳本時會直接建立真正分鏡並提供復原；付費生成、對外或較高風險動作仍會先確認。提問本身預設用 NVIDIA NIM 免費額度、不扣點。
         </Hint>
 
         <ProactiveModelConverter intent={input} onCreationAction={onCreationAction} />
@@ -539,6 +660,18 @@ export function ProjectAssistant({
                 </div>
                 {/* 回答完成後保留安全的活動軌跡，預設收合以免長對話把工作台撐爆。 */}
                 {t.role === "ai" && (
+                  t.executionPlan ? (
+                    <AgentRunCard
+                      plan={t.executionPlan}
+                      active={false}
+                      outcome={t.runStatus}
+                      eventCount={activity.length}
+                      hasToolActivity={activity.some((event) => event.phase === "lookup" || event.phase === "step")}
+                      latency={t.latency}
+                    />
+                  ) : null
+                )}
+                {t.role === "ai" && (
                   <AssistantTrace
                     events={activity}
                     elapsedMs={t.elapsedMs}
@@ -562,6 +695,14 @@ export function ProjectAssistant({
                 >
                   {t.text}
                 </div>
+                {t.directResults?.map((result, resultIndex) => (
+                  <ProjectDirectResultCard key={`${result.kind}:${resultIndex}`} projectId={projectId} result={result} />
+                ))}
+                {t.retryText ? (
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => void send(t.retryText)}>
+                    <Icon name="Play" size={12} /> 繼續
+                  </Button>
+                ) : null}
                 {/* §33 批次總帳：一次提議多個動作時，先讓人看懂全貌與費用，再逐顆確認 */}
                 {t.actions && batchSummaryText(t.actions) && (
                   <Hint as="p" role="status" style={{ margin: "8px 0 0" }}>
@@ -827,6 +968,14 @@ export function ProjectAssistant({
             {thinking.active && (
               <div style={{ alignSelf: "flex-start", maxWidth: "90%" }} role="status">
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2 }}>助手</div>
+                {activePlan ? (
+                  <AgentRunCard
+                    plan={activePlan}
+                    active
+                    eventCount={thinking.events.length}
+                    hasToolActivity={thinking.events.some((event) => event.phase === "lookup" || event.phase === "step")}
+                  />
+                ) : null}
                 <LiveAssistantTrace
                   events={thinking.events}
                   open={liveTraceOpen}
@@ -846,11 +995,11 @@ export function ProjectAssistant({
             onFocus={(e) => focusAndReveal(e.currentTarget)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void send(); } }}
             placeholder="問進度、要 idea、貼腳本、下目標…例：把腳本拆成分鏡並逐鏡出圖"
-            disabled={busy}
+            disabled={false}
             style={{ flex: 1 }}
           />
-          <Button variant="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
-            {busy ? "思考中…" : "問"}
+          <Button variant="primary" onClick={busy ? cancelCurrent : () => void send()} disabled={!busy && !input.trim()}>
+            {busy ? <><Icon name="Square" size={12} /> 停止</> : "問"}
           </Button>
         </div>
 

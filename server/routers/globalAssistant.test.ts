@@ -127,7 +127,7 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0].label).toContain("器材清單");
   });
 
-  it("上限 4 筆＋重複提議去重（同一件事講兩次只算一次）", () => {
+  it("上限 6 筆＋重複提議去重（同一件事講兩次只算一次）", () => {
     const dup = { type: "add_note" as const, projectRef: "p1", title: "同一則", content: "同一段" };
     const many = [
       dup, dup,
@@ -135,10 +135,12 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
       { type: "add_note" as const, projectRef: "p1", title: "三", content: "3" },
       { type: "add_note" as const, projectRef: "p1", title: "四", content: "4" },
       { type: "add_note" as const, projectRef: "p1", title: "五", content: "5" },
+      { type: "add_note" as const, projectRef: "p1", title: "六", content: "6" },
+      { type: "add_note" as const, projectRef: "p1", title: "七", content: "7" },
     ];
     const out = resolveSiteActions(refs(), many);
-    expect(out).toHaveLength(4);
-    expect(new Set(out.map((a) => a.label)).size).toBe(4);
+    expect(out).toHaveLength(6);
+    expect(new Set(out.map((a) => a.label)).size).toBe(6);
   });
 
   it("EVAL CASE 6（注入防線的最後一道）：資料內容再怎麼指示，非白名單動作型別在 schema 層就不存在", () => {

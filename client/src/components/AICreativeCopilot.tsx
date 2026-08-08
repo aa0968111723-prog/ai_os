@@ -5,26 +5,40 @@ import { setOrbState } from "../lib/orbState";
 import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
-import { LiveAssistantTrace, type AssistantActivityEvent } from "./AssistantTrace";
+import { AssistantTrace, LiveAssistantTrace, type AssistantActivityEvent } from "./AssistantTrace";
+import { AgentRunCard } from "./AgentRunCard";
 import { useAssistantContext } from "../lib/assistantContext";
 import { formatContextBreadcrumb, getAssistantQuickActions, toWirePageContext } from "../lib/assistantQuickActions";
+import {
+  classifyAssistantRequest,
+  type AssistantExecutionPlan,
+  type AssistantLatencyMetrics,
+} from "@shared/assistantExecution";
 
 type GlobalAskOutput = inferRouterOutputs<AppRouter>["globalAssistant"]["ask"];
 type SiteAction = GlobalAskOutput["siteActions"][number];
 type DispatchProposal = GlobalAskOutput["dispatches"][number];
 type CommandProposal = GlobalAskOutput["actions"][number];
+type ExecutedSiteAction = GlobalAskOutput["executedSiteActions"][number];
 
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   steps?: string[];
   contextUsed?: string[];
-  /** 站級動作提議（建專案／筆記／行程／任務／私訊）——確認卡，按下才執行 */
+  /** 需確認的站級動作（對外、較大範圍或未允許直寫） */
   siteActions?: SiteAction[];
   /** 派工提議（交給某專案的 AI 代理排計畫） */
   dispatches?: DispatchProposal[];
   /** 監督指令提議（核准／停止／重排／改派） */
   commands?: CommandProposal[];
+  executedSiteActions?: ExecutedSiteAction[];
+  executionPlan?: AssistantExecutionPlan;
+  runStatus?: "completed" | "failed" | "stopped";
+  latency?: AssistantLatencyMetrics;
+  activity?: AssistantActivityEvent[];
+  retryText?: string;
+  suggestedActions?: Array<{ label: string; prompt: string }>;
 }
 
 /** 已解析動作 → runSiteAction 輸入（逐型別挑欄位；label 等顯示欄位不上送） */
@@ -100,6 +114,37 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
           略過
         </Button>
       </div>
+    </div>
+  );
+}
+
+function undoSiteActionInput(item: ExecutedSiteAction) {
+  if (item.result.type === "add_note") return { type: "add_note", id: item.result.noteId } as const;
+  if (item.result.type === "add_schedule_item") return { type: "add_schedule_item", id: item.result.scheduleItemId } as const;
+  if (item.result.type === "create_task") return { type: "create_task", id: item.result.taskId } as const;
+  return null;
+}
+
+/** 模型明確 ACT 後已由後端完成的結果卡；Undo 仍重走原 core 權限守門。 */
+function DirectActionResultCard({ item, onNavigate }: { item: ExecutedSiteAction; onNavigate?: (href: string) => void }) {
+  const undo = trpc.globalAssistant.undoSiteAction.useMutation();
+  const undoInput = undoSiteActionInput(item);
+  const link = siteActionDoneLink(item.action, item.result);
+  return (
+    <div className="ai-copilot-action-card is-done" data-fb="直接執行結果卡">
+      <Icon name={undo.isSuccess ? "Undo2" : "Check"} size={14} />
+      <span className="ai-copilot-action-card__label">
+        {undo.isSuccess ? `已撤銷：${item.action.label}` : `已完成：${item.action.label}`}
+      </span>
+      {undo.error ? <span className="ai-copilot-action-card__error">{undo.error.message}</span> : null}
+      {!undo.isSuccess && link && onNavigate ? (
+        <Button variant="ghost" size="sm" onClick={() => onNavigate(link.href)}>{link.label}</Button>
+      ) : null}
+      {!undo.isSuccess && undoInput ? (
+        <Button variant="ghost" size="sm" disabled={undo.isPending} onClick={() => undo.mutate(undoInput)}>
+          <Icon name="Undo2" size={12} /> {undo.isPending ? "撤銷中…" : "復原"}
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -219,7 +264,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   // 展開的完整事件流是「想知道細節才點」的東西——預設展開會把回答推到看不見。
   const [liveOpen, setLiveOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const liveEventsRef = useRef<AssistantActivityEvent[]>([]);
+  const stopRecordedRef = useRef(false);
+  const activeGoalRef = useRef("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
@@ -241,6 +290,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setLiveEvents([]);
+    liveEventsRef.current = [];
+    stopRecordedRef.current = false;
+    activeGoalRef.current = text;
+    const localPlan = classifyAssistantRequest(text);
+    setActivePlan(localPlan);
     // 底部導覽那顆球與這張卡是同一個助手的兩個身體：卡片在思考時球也要跟著脈動，
     // 否則使用者把 sheet 滑下去之後，畫面上就沒有任何「它還在想」的線索。
     setOrbState("thinking");
@@ -252,6 +306,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       siteActions: SiteAction[];
       dispatches: DispatchProposal[];
       actions: CommandProposal[];
+      executedSiteActions?: ExecutedSiteAction[];
+      executionPlan?: AssistantExecutionPlan;
+      latency?: AssistantLatencyMetrics;
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
@@ -265,12 +322,30 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           siteActions: data.siteActions.length ? data.siteActions : undefined,
           dispatches: data.dispatches.length ? data.dispatches : undefined,
           commands: data.actions.length ? data.actions : undefined,
+          executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
+          executionPlan: data.executionPlan ?? localPlan,
+          runStatus: "completed",
+          latency: data.latency,
+          activity: [...liveEventsRef.current],
+          suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
+            ? [
+                { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
+                { label: "查看目前資料", prompt: `請查看目前專案與「${text}」相關的資料。` },
+              ]
+            : undefined,
         },
       ]);
     };
     const applyError = (message: string) => {
       setOrbState("error");
-      setMessages((prev) => [...prev, { role: "assistant", text: `⚠️ 抱歉，生成回答時發生錯誤：${message}` }]);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        text: `⚠️ 執行中斷：${message}`,
+        executionPlan: localPlan,
+        runStatus: "failed",
+        activity: [...liveEventsRef.current],
+        retryText: text,
+      }]);
     };
 
     const controller = new AbortController();
@@ -285,7 +360,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         pageContext: toWirePageContext(pageCtx),
         signal: controller.signal,
         handlers: {
-          onStep: (e) => setLiveEvents((prev) => [...prev, e]),
+          onOpen: (run) => setActivePlan(run.plan),
+          onStep: (e) => {
+            liveEventsRef.current = [...liveEventsRef.current, e];
+            setLiveEvents([...liveEventsRef.current]);
+          },
           // SSE payload 是 GlobalAskResult 的純 JSON（無 superjson）；guard 只驗協定形狀，
           // 欄位型別由 tRPC 推導型別收窄（同一個 router 的回傳值）
           onDone: (d) => applyDone(d as unknown as AskData),
@@ -311,7 +390,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     } finally {
       setStreaming(false);
       setLiveEvents([]);
+      setActivePlan(null);
     }
+  };
+
+  const stopCurrent = () => {
+    if (!pending || stopRecordedRef.current) return;
+    stopRecordedRef.current = true;
+    abortRef.current?.abort();
+    setOrbState("idle");
+    setMessages((prev) => [...prev, {
+      role: "assistant",
+      text: "已停止；未開始的步驟不會再執行。你可以按「繼續」用同一個目標重試。",
+      executionPlan: activePlan ?? undefined,
+      runStatus: "stopped",
+      activity: [...liveEventsRef.current],
+      retryText: activeGoalRef.current || undefined,
+    }]);
   };
 
   useEffect(() => {
@@ -395,6 +490,19 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   )}
                 </div>
                 <div className="ai-copilot-bubble__content">
+                  {msg.role === "assistant" && msg.executionPlan ? (
+                    <AgentRunCard
+                      plan={msg.executionPlan}
+                      active={false}
+                      outcome={msg.runStatus}
+                      eventCount={msg.steps?.length ?? 0}
+                      hasToolActivity={(msg.steps?.length ?? 0) > 0}
+                      latency={msg.latency}
+                    />
+                  ) : null}
+                  {msg.role === "assistant" && msg.activity?.length ? (
+                    <AssistantTrace events={msg.activity} elapsedMs={msg.latency?.totalMs} />
+                  ) : null}
                   {msg.steps && msg.steps.length > 0 && (
                     <div className="ai-copilot-bubble__steps">
                       <Icon name="Search" size={11} />
@@ -403,17 +511,36 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   )}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
 
-                  {/* 動作提議：全部是「確認卡」，按下才以本人身分執行；AI 沒有代按的路 */}
-                  {(msg.siteActions?.length || msg.dispatches?.length || msg.commands?.length) ? (
+                  {/* 安全直寫顯示結果卡；對外、付費與較大影響動作仍是確認卡。 */}
+                  {(msg.siteActions?.length || msg.executedSiteActions?.length || msg.dispatches?.length || msg.commands?.length) ? (
                     <div className="ai-copilot-bubble__cards">
                       {msg.siteActions?.map((a, i) => (
                         <SiteActionCard key={`s${i}`} action={a} onNavigate={onNavigate} />
+                      ))}
+                      {msg.executedSiteActions?.map((item, i) => (
+                        <DirectActionResultCard key={`x${i}`} item={item} onNavigate={onNavigate} />
                       ))}
                       {groupId && msg.dispatches?.map((d, i) => (
                         <DispatchCard key={`d${i}`} groupId={groupId} dispatch={d} onNavigate={onNavigate} />
                       ))}
                       {groupId && msg.commands?.map((c, i) => (
                         <CommandCard key={`c${i}`} groupId={groupId} command={c} />
+                      ))}
+                    </div>
+                  ) : null}
+                  {msg.retryText ? (
+                    <div className="ai-copilot-bubble__actions">
+                      <Button variant="ghost" size="sm" disabled={pending} onClick={() => void handleSend(msg.retryText)}>
+                        <Icon name="Play" size={12} /> 繼續
+                      </Button>
+                    </div>
+                  ) : null}
+                  {msg.suggestedActions?.length ? (
+                    <div className="ai-copilot-bubble__actions">
+                      {msg.suggestedActions.map((suggestion) => (
+                        <Button key={suggestion.label} variant="tonal" size="sm" disabled={pending} onClick={() => void handleSend(suggestion.prompt)}>
+                          {suggestion.label}
+                        </Button>
                       ))}
                     </div>
                   ) : null}
@@ -446,6 +573,14 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   <Icon name="Sparkles" size={15} />
                 </div>
                 <div className="ai-copilot-bubble__content">
+                  {activePlan ? (
+                    <AgentRunCard
+                      plan={activePlan}
+                      active
+                      eventCount={liveEvents.length}
+                      hasToolActivity={liveEvents.some((event) => event.phase === "lookup" || event.phase === "step")}
+                    />
+                  ) : null}
                   {/* 旋轉的 Loader 圖示換成三顆呼吸的光點：轉圈是「系統卡住」的語彙，
                       光點才是「正在想」。文字本身也跑一道光掃過去。 */}
                   <div className="ai-copilot-bubble__text ai-copilot-loading">
@@ -465,10 +600,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       events={liveEvents}
                       open={liveOpen}
                       onToggle={() => setLiveOpen((v) => !v)}
-                      onCancel={() => {
-                        abortRef.current?.abort();
-                        setOrbState("idle");
-                      }}
+                      onCancel={stopCurrent}
                     />
                   )}
                 </div>
@@ -500,7 +632,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             }
             rows={1}
             maxLength={500}
-            disabled={pending || !groupId}
+            disabled={!groupId}
             /* 可見標題全部拿掉之後，這是唯一的輸入口——placeholder 不是標籤
                （一打字就消失），讀屏需要一個穩定的名字。 */
             aria-label="向 AI 助手提問"
@@ -509,12 +641,18 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           <button
             type="button"
             className="ai-copilot-send-btn"
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || pending || !groupId}
-            title="發送 (Enter)"
+            onClick={() => {
+              if (pending) {
+                stopCurrent();
+              } else {
+                void handleSend();
+              }
+            }}
+            disabled={(!pending && !input.trim()) || !groupId}
+            title={pending ? "停止" : "發送 (Enter)"}
           >
             {pending ? (
-              <Icon name="Loader" size={16} className="spin" />
+              <Icon name="Square" size={15} />
             ) : (
               <Icon name="Send" size={16} />
             )}

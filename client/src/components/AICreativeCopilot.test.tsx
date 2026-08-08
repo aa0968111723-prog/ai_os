@@ -15,6 +15,7 @@ const SHOT_ID_3 = "44444444-4444-4444-8444-444444444444";
 
 /** runSiteAction 的可觀察替身：行為測試斷言「按確認卡才 mutate、payload 正確」 */
 const runSiteActionMutate = vi.fn();
+const undoSiteActionMutate = vi.fn();
 const dispatchMutate = vi.fn();
 const commandMutate = vi.fn();
 let watchInsights: unknown;
@@ -35,6 +36,7 @@ vi.mock("../api", () => {
         // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主
         ask: { useMutation: mutation() },
         runSiteAction: { useMutation: () => ({ mutate: runSiteActionMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
+        undoSiteAction: { useMutation: () => ({ mutate: undoSiteActionMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
       },
       teamAssistant: {
         dispatch: { useMutation: () => ({ mutate: dispatchMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
@@ -115,7 +117,8 @@ describe("AICreativeCopilot", () => {
       selectedEntityIds: [SHOT_ID, SHOT_ID_2, SHOT_ID_3],
     });
     render(<AICreativeCopilot groupId="grp-123" />);
-    expect(screen.getByText("批次改善")).toBeInTheDocument();
+    expect(screen.getByText("直接優化")).toBeInTheDocument();
+    expect(screen.getByText("3 個方向")).toBeInTheDocument();
     expect(screen.getByText("招生短片 · 分鏡 · 已選 3 個分鏡")).toBeInTheDocument();
   });
 
@@ -168,6 +171,59 @@ describe("AICreativeCopilot", () => {
     expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ groupId: "grp-123", projectId: "proj-9", message: "進度如何？" }));
     // 串流已接手：一次性 tRPC 不得重跑（此處以 runSiteAction 未被叫代表沒有誤觸發任何 mutation）
     expect(runSiteActionMutate).not.toHaveBeenCalled();
+  });
+
+  it("短而不足的意圖不回操作長文，提供一個建立動作與查看資料入口", async () => {
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "社評");
+    expect(await screen.findByRole("button", { name: "建立社評準備" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看目前資料" })).toBeInTheDocument();
+  });
+
+  it("明確 ACT 回傳已完成結果卡，直接顯示成果並可復原", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        siteActions: [], dispatches: [], actions: [],
+        executionPlan: { intent: "ACT", confidence: "high", title: "幫我建立會議筆記", steps: ["理解明確指令", "檢查權限與風險", "執行可安全落地的動作"] },
+        executedSiteActions: [{
+          action: { type: "add_note", groupId: "g", title: "會議筆記", content: "決議", label: "新增筆記「會議筆記」（組層級）" },
+          result: { type: "add_note", noteId: "11111111-1111-4111-8111-111111111111", title: "會議筆記" },
+          canUndo: true,
+        }],
+        latency: { requestReceivedMs: 0, contextReadyMs: 20, modelStartedMs: 25, firstTokenMs: null, firstToolCallMs: null, toolFinishedMs: null, finalAnswerMs: 80, totalMs: 80 },
+      });
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "幫我建立會議筆記");
+
+    expect(await screen.findByText(/已完成：新增筆記/)).toBeInTheDocument();
+    expect(screen.getByText(/總耗時 0.1 秒/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /復原/ }));
+    expect(undoSiteActionMutate).toHaveBeenCalledWith({
+      type: "add_note",
+      id: "11111111-1111-4111-8111-111111111111",
+    });
+  });
+
+  it("執行中送出鍵會變成停止，按下立即中止同一條串流", async () => {
+    let sentSignal: AbortSignal | undefined;
+    streamMock.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+      sentSignal = signal;
+      return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(true), { once: true }));
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await user.type(screen.getByLabelText("向 AI 助手提問"), "幫我建立任務");
+    await user.click(screen.getByTitle("發送 (Enter)"));
+
+    expect(await screen.findByText("執行中")).toBeInTheDocument();
+    await user.click(screen.getByTitle("停止"));
+    expect(sentSignal?.aborted).toBe(true);
+    await waitFor(() => expect(screen.queryByTitle("停止")).not.toBeInTheDocument());
   });
 
   it("站級動作卡：按「確認執行」才 mutate，payload 只帶執行欄位不帶 label", async () => {
