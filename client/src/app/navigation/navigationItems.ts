@@ -69,8 +69,10 @@ export const DESTINATIONS: Record<DestinationKey, Destination> = {
   },
   databases: {
     key: "databases",
-    label: "資料庫",
-    description: "清單、文件與批次匯入",
+    // 站內以前同時叫過「資料庫」「知識與資料」「資料中心」三個名字（見本表開頭的註解）。
+    // 統一為「資料中心」——route 與 internal key 維持 databases，深連結不受影響。
+    label: "資料中心",
+    description: "所有文件、素材與團隊資料",
     href: "/databases",
     icon: "Database",
   },
@@ -118,8 +120,10 @@ export const DESTINATIONS: Record<DestinationKey, Destination> = {
   },
   integrations: {
     key: "integrations",
-    label: "連接的資料來源",
-    description: "Google、Notion 與外部 API",
+    // 這一頁不只放資料來源（還有 Adobe、BYOK 等服務），所以定位是「連接與服務」；
+    // 日常加入資料不必來這裡——主要工作在資料中心與專案內的「＋加入資料」。
+    label: "連接與服務",
+    description: "Google、Notion、外部 API 與創作服務",
     href: "/integrations",
     icon: "Waypoints",
   },

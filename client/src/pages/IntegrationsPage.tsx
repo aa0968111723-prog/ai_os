@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { sanitizeReturnTo, withReturnTo } from "@shared/returnTo";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { AdobeConnectButton } from "../components/settings/AdobeConnectButton";
 import { AdobeConnectionStatus } from "../components/settings/AdobeConnectionStatus";
 import { useAdobeConnection } from "../hooks/useAdobeConnection";
@@ -14,7 +14,7 @@ import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
- * 連上後在「知識與資料」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁與資料庫、
+ * 連上後在「資料中心」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁與資料庫、
  * 自家系統的 API 都抓得到。憑證加密存放、永不回顯；權限只及本人，隨時可移除。
  */
 export function IntegrationsPage() {
@@ -22,13 +22,24 @@ export function IntegrationsPage() {
   const list = trpc.integrations.list.useQuery();
   const remove = trpc.integrations.remove.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
+  /**
+   * 使用者可能是從某個「加入資料」流程被帶來這裡的（?return=<站內路徑>）。
+   * 連接完成後要送他回去，而不是留在設定頁自己找路。掛載時讀一次即可——
+   * 之後的操作交回使用者。
+   */
+  const returnTo = useMemo(
+    () => sanitizeReturnTo(new URLSearchParams(window.location.search).get("return")),
+    [],
+  );
+  const driveStartHref = withReturnTo("/api/integrations/google-drive/start", returnTo);
+
   // Google OAuth 回跳的一次性訊息（?gdrive=...）：顯示後清掉網址參數，重新整理不再重播
   const [flash, setFlash] = useState<string | null>(null);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get("gdrive");
     if (!q) return;
     setFlash(
-      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「知識與資料」匯入你的私人文件"
+      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「資料中心」匯入你的私人文件"
       : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
       : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 雲端」"
       : "連結失敗，請稍後再試",
@@ -37,42 +48,20 @@ export function IntegrationsPage() {
   }, []);
 
   const d = list.data;
-  const connectedSourceCount = d
-    ? Number(d.googleDrive.connected) + Number(d.notion.connected) + d.apis.length
-    : 0;
-  const hasConnectedSource = connectedSourceCount > 0;
-  const integrationJourney: VisualJourneyStep[] = [
-    {
-      id: "connect",
-      label: "連接來源",
-      detail: hasConnectedSource ? `已有 ${connectedSourceCount} 個來源可使用` : "選擇一種來源開始",
-      icon: "Lock",
-      state: hasConnectedSource ? "done" : "current",
-    },
-    {
-      id: "import",
-      label: "挑選內容",
-      detail: "只匯入這次需要的資料",
-      icon: "Download",
-      state: hasConnectedSource ? "current" : "upcoming",
-    },
-    {
-      id: "use",
-      label: "交給專案與 AI",
-      detail: "綁定後才能引用與分析",
-      icon: "Sparkles",
-      state: "upcoming",
-    },
-  ];
 
   return (
     <div className="page-shell secondary-page integrations-page">
+      {/*
+        §24 重新定位：這一頁不只放資料來源（還有 Adobe、個人 AI 金鑰等服務），
+        所以名稱與導覽一致改成「連接與服務」。日常加入資料不必來這裡——
+        Google／Notion 的連接已經內建在「＋加入資料」的流程裡。
+      */}
       <SecondaryPageHeader
-        eyebrow="外部資料"
-        title="連接資料來源"
+        eyebrow="進階設定"
+        title="連接與服務"
         icon="ArrowRight"
         badge="連接不等於自動匯入"
-        description={<>把 Google 雲端、Notion 或自有 API 接進來；之後仍由你挑選哪些內容能提供給專案與 AI。</>}
+        description={<>管理已連接的帳號與服務。日常要加資料不用來這裡——在專案或資料中心按「＋加入資料」就好。</>}
       />
       {flash && <Meta as="p" style={{ color: "var(--success-ink)" }}>{flash}</Meta>}
       {list.error && (
@@ -111,19 +100,22 @@ export function IntegrationsPage() {
         </a>
       </section>
 
-      <Card as="section" className="integration-flow-card" data-fb="資料來源使用方式">
-        <div className="integration-flow-card__head">
-          <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
-          <Link href="/databases" className="btn-tonal btn-sm">前往知識與資料 <Icon name="ArrowRight" size={13} /></Link>
-        </div>
-        <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
-      </Card>
+      {/*
+        §64：不要用 UI 教使用者架構。這裡原本是「連接 → 挑選 → 交給 AI」三步驟圖——
+        那張圖的存在本身就是在說「這個流程需要解釋」。操作本身就該是教學：
+        連接內建在「＋加入資料」裡，所以這裡只留一句話與一個回去的入口。
+      */}
+      <Hint>
+        連接只是讓你可以去自己的帳號挑東西；AI 只讀得到你選中並加入站內的內容。
+        {" "}
+        <Link href="/databases">回資料中心加入資料 →</Link>
+      </Hint>
 
       {/* ── Google 雲端硬碟 ── */}
       <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
-          連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
+          連結後，到「資料中心」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
         </Hint>
         {/* 權限範圍是「按下連結鍵之前必須看到」的資訊：不知道我們拿到什麼權限就交出雲端帳號，不行。 */}
         <Hint style={{ marginTop: 4 }}>
@@ -134,7 +126,7 @@ export function IntegrationsPage() {
         ) : !d.googleDrive.configured ? (
           <Hint>站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</Hint>
         ) : !d.googleDrive.connected ? (
-          <a className="btn-sm primary" href="/api/integrations/google-drive/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <a className="btn-sm primary" href={driveStartHref} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Plus" size={14} /> 連結 Google 雲端
           </a>
         ) : (
@@ -144,11 +136,11 @@ export function IntegrationsPage() {
                 <Meta style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={d.googleDrive.lastError ?? undefined}>
                   授權已失效{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}
                 </Meta>
-                <a className="btn-sm" href="/api/integrations/google-drive/start">重新連結</a>
+                <a className="btn-sm" href={driveStartHref}>重新連結</a>
               </>
             ) : (
               <Meta style={{ margin: 0 }}>
-                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」選檔或貼連結匯入私人檔案
+                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「資料中心」選檔或貼連結匯入私人檔案
               </Meta>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
@@ -157,7 +149,7 @@ export function IntegrationsPage() {
       </Card>
 
       {/* ── Notion ── */}
-      <NotionCard data={d?.notion ?? null} />
+      <NotionCard data={d?.notion ?? null} returnTo={returnTo} />
 
       {/* ── 個人 AI 金鑰（BYOK fal.ai）── */}
       <PersonalAiKeyCard />
@@ -168,7 +160,7 @@ export function IntegrationsPage() {
       {/* ── 外部資料來源/API ── */}
       <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
-      <p style={{ marginTop: 24 }}><Link href="/databases">前往知識與資料 →</Link>　<Link href="/dashboard">回今日工作台</Link></p>
+      <p style={{ marginTop: 24 }}><Link href="/databases">前往資料中心 →</Link>　<Link href="/dashboard">回今日工作台</Link></p>
     </div>
   );
 }
@@ -219,12 +211,24 @@ function AdobeCard() {
   );
 }
 
-function NotionCard({ data }: { data: { connected: boolean; workspace: string | null; last4: string | null; status: string | null; lastError: string | null; siteTokenAvailable: boolean } | null }) {
+function NotionCard({ data, returnTo }: {
+  data: { connected: boolean; workspace: string | null; last4: string | null; status: string | null; lastError: string | null; siteTokenAvailable: boolean } | null;
+  /** 使用者是從哪個「加入資料」流程來的（?return=）——設定完成後送他回去 */
+  returnTo: string | null;
+}) {
   const utils = trpc.useUtils();
+  const [, navigate] = useLocation();
   const [token, setToken] = useState("");
   const [editing, setEditing] = useState(false);
   const setNotion = trpc.integrations.setNotion.useMutation({
-    onSuccess: () => { utils.integrations.list.invalidate(); setToken(""); setEditing(false); },
+    onSuccess: () => {
+      utils.integrations.list.invalidate();
+      setToken("");
+      setEditing(false);
+      // Notion 是貼 token（沒有 OAuth 重導），所以「回到原本流程」得由前端做。
+      // 目的地已過 shared/returnTo 白名單，與 Google callback 同一條規則。
+      if (returnTo) navigate(returnTo);
+    },
   });
   const removeNotion = trpc.integrations.removeNotion.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
@@ -235,7 +239,7 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面或資料庫「連結」給該整合（右上 ⋯ → Connections；
         資料庫要在資料庫本身那一頁操作，不是在單一列的頁面）。
-        完成後到「知識與資料」用「從 Notion 選頁／資料庫」搜尋並多選匯入（也可照舊貼連結）。
+        完成後到「資料中心」用「從 Notion 選頁／資料庫」搜尋並多選匯入（也可照舊貼連結）。
         AI 只會讀「你選中並匯入」的內容——連接整合不等於把整個 workspace 交給 AI。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </Hint>
@@ -324,7 +328,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
       <Hint style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
-        真正要使用哪些內容，仍到「知識與資料」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
+        真正要使用哪些內容，仍到「資料中心」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
       </Hint>
 
       {apis.length === 0 && !adding && <Hint>還沒有外部資料來源——按下面「新增連接」開始。</Hint>}

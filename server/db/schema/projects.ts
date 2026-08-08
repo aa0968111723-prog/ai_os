@@ -50,6 +50,20 @@ export const knowledge = pgTable("knowledge", {
    * null＝尚未產生（舊列或空內容）。
    */
   summary: text("summary"),
+  /* ── 來源譜系（P6）：全部 nullable，舊列維持 null＝「站內建立」──
+   * 在此之前知識庫完全沒有來源欄位：從 Google 雲端轉存進來的腳本，跟手動貼上的筆記
+   * 在資料庫裡長得一模一樣。資料中心因此只能誠實顯示「站內建立」，等於丟掉了使用者
+   * 真正需要的資訊（「這份是不是我從雲端拉的那份？對方改過了嗎？」）。 */
+  /** 來源供應商：google-drive／notion／url／upload（與 shared/dataHub 的 DataHubSource 同字） */
+  sourceProvider: text("source_provider"),
+  /** 原始來源網址（供回溯；貼上文字為 null） */
+  sourceUrl: text("source_url"),
+  /** 對方系統裡的穩定 id（Google fileId／Notion page id） */
+  sourceExternalId: text("source_external_id"),
+  /** 來源端的最後修改時刻（抓取當下由對方 API 給） */
+  sourceModifiedAt: timestamp("source_modified_at"),
+  /** 本站最後一次真的去抓的時刻——站內沒有背景同步，這是「上次匯入」不是「上次自動更新」 */
+  lastSyncedAt: timestamp("last_synced_at"),
   createdBy: uuid("created_by").notNull(),
   /** 軟刪除（回收桶）：非 null＝已丟進回收桶（保留逐字稿／見證，可還原）。
    *  ★ buildKnowledgeContext 必以 isNull(deletedAt) 過濾——已刪的逐字稿絕不可再注入 AI 導演 LLM。 */

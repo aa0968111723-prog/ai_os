@@ -18,6 +18,7 @@ import {
   type DbAccess,
 } from "./databaseAcl";
 import { findProjectLinkedRows } from "./databaseProjectLinks";
+import { listProjectBoundTableIds } from "./projectDataBindings";
 import {
   escapeLikeLiteral,
   normalizeDatabaseSearchKeyword,
@@ -126,12 +127,24 @@ export type McpDatabaseListItem = {
   /** 若呼叫帶 projectId：此表是否有列關聯該專案 */
   linkedToProject?: boolean;
   linkedRowCount?: number;
+  /**
+   * 整張表被提供給這個專案（P4 綁定）。與 linkedRowCount 是**兩件事**：
+   * 綁定的表可能一列 project 欄位都沒有（linkedRowCount=0），但整張都屬於這個專案。
+   * 刻意不把它灌進 linkedRowCount——那個數字的語意是「有幾列指向本專案」，
+   * 外部代理與 e2e 都照這個語意在讀。
+   */
+  boundToProject?: boolean;
 };
 
 /**
  * 列出 AI 可讀庫；可選 projectId：
- * - 標註 linkedToProject / linkedRowCount
- * - linkedOnly=true 時只回有關聯列的表（專案燃料視角）
+ * - 標註 linkedToProject / linkedRowCount / boundToProject
+ * - linkedOnly=true 時只回「屬於這個專案」的表（專案燃料視角）
+ *
+ * ★ DUAL READ（P4）：「屬於這個專案」有兩條路——某幾列的 project 欄位指向它（legacy），
+ *   或整張表被綁定給它（新）。兩條都算，否則工具說明承諾的「專案燃料視角」會漏掉
+ *   綁定但沒有 project 欄位的表，外部代理靜默看不到專案資料。
+ * ★ 綁定不放寬可見性：readable 已經過 resolveAgentAccess，這裡只在其中挑。
  */
 export async function listMcpDatabases(
   auth: AuthState,
@@ -143,8 +156,11 @@ export async function listMcpDatabases(
     .filter((x) => x.access.canRead);
 
   let linkedCountByTable = new Map<string, number>();
+  let boundTableIds = new Set<string>();
   const projectId = opts.projectId && UUID_RE.test(opts.projectId) ? opts.projectId : undefined;
   if (projectId) {
+    // 綁定查詢與關聯列查詢互不相依，並行省一趟往返
+    boundTableIds = await listProjectBoundTableIds(projectId);
     const targets = readable
       .map(({ t }) => ({
         tableId: t.id,
@@ -164,7 +180,9 @@ export async function listMcpDatabases(
   for (const { t, access } of readable) {
     const linkedRowCount = projectId ? (linkedCountByTable.get(t.id) ?? 0) : undefined;
     const linkedToProject = projectId ? linkedRowCount! > 0 : undefined;
-    if (opts.linkedOnly && projectId && !linkedToProject) continue;
+    const boundToProject = projectId ? boundTableIds.has(t.id) : undefined;
+    // 兩條路任一命中就算「屬於這個專案」
+    if (opts.linkedOnly && projectId && !linkedToProject && !boundToProject) continue;
     out.push({
       tableId: t.id,
       name: t.name,
@@ -176,7 +194,11 @@ export async function listMcpDatabases(
       agentAccess: (t.agentAccess as "none" | "read" | "write") ?? "write",
       hasProjectLink: hasProjectLinkField(t.fields),
       ...(projectId
-        ? { linkedToProject: !!linkedToProject, linkedRowCount: linkedRowCount ?? 0 }
+        ? {
+          linkedToProject: !!linkedToProject,
+          linkedRowCount: linkedRowCount ?? 0,
+          boundToProject: !!boundToProject,
+        }
         : {}),
     });
   }

@@ -9,6 +9,7 @@ import {
   LiveAssistantTrace,
   type AssistantActivityEvent,
 } from "./AssistantTrace";
+import { AskSources, type AskSourcesData } from "./AskSources";
 import { requestAssistantStream } from "./assistantStream";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import {
@@ -68,6 +69,8 @@ type Turn = {
    *  「花到基金會的錢」這件事在畫面上就與免費回答毫無差別。 */
   paid?: boolean;
   paidModel?: string;
+  /** 本次依據（P5）：這則回答實際讀了哪些知識、各自完整度、有無被上限截斷 */
+  sources?: AskSourcesData;
 };
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
@@ -270,6 +273,7 @@ export function ProjectAssistant({
             fallback: result.fallback,
             paid: result.fellBackToPaid === true,
             paidModel: result.model,
+            sources: result.sources,
           });
         },
         onError: (message) => {
@@ -334,6 +338,7 @@ export function ProjectAssistant({
               fallback: true,
               paid: result.fellBackToPaid === true,
               paidModel: result.model,
+              sources: result.sources,
             });
           },
           onError: (error) => {
@@ -540,6 +545,8 @@ export function ProjectAssistant({
                     fallback={t.fallback}
                   />
                 )}
+                {/* 本次依據（P5）：這則回答讀了什麼、有沒有因為上限沒讀完 */}
+                {t.role === "ai" && <AskSources sources={t.sources} />}
                 <div
                   style={{
                     background: t.role === "you" ? "var(--primary-tint)" : "var(--card2)",

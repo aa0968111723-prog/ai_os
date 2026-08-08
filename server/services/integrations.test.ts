@@ -6,6 +6,7 @@ import {
   escapeDriveQueryTerm,
   notionPageTitle,
   resolveApiUrl,
+  sanitizeIntegrationReturnTo,
   signIntegrationState,
   signIntegrationStateAt,
   validateApiConnectionInput,
@@ -53,6 +54,68 @@ describe("OAuth state（HMAC 簽章）", () => {
     // 對照：尚未到期的可通過
     const valid = signIntegrationStateAt("user-123", Date.now() + 60_000);
     expect(verifyIntegrationState(valid)?.userId).toBe("user-123");
+  });
+});
+
+/**
+ * 授權完成後回到原本的「加入資料」流程（資料中心 P2 / Golden Path 1）。
+ * 這條路徑同時是 open redirect 的風險面——回跳目的地必須被簽章綁住且限制在站內。
+ */
+describe("OAuth returnTo（回到原本的加入資料流程）", () => {
+  it("簽進 state 的站內路徑可以原樣驗回", () => {
+    const state = signIntegrationState("user-123", "/p/abc?add=google-drive");
+    expect(verifyIntegrationState(state)).toEqual({
+      userId: "user-123",
+      returnTo: "/p/abc?add=google-drive",
+    });
+  });
+
+  it("沒帶 returnTo 時為 null（不是空字串）", () => {
+    expect(verifyIntegrationState(signIntegrationState("user-123"))?.returnTo).toBeNull();
+  });
+
+  it("★ 擋下 open redirect：外站網址、協定相對網址、反斜線變形一律丟掉", () => {
+    for (const evil of [
+      "https://evil.com",
+      "//evil.com",
+      "/\\evil.com",
+      "\\\\evil.com",
+      "javascript:alert(1)",
+      "evil.com",
+      "",
+    ]) {
+      expect(sanitizeIntegrationReturnTo(evil)).toBeNull();
+      // 就算硬塞進簽發，驗回來也拿不到——兩端都過白名單
+      expect(verifyIntegrationState(signIntegrationState("user-123", evil))?.returnTo).toBeNull();
+    }
+  });
+
+  it("★ 控制字元與空白一律丟掉（瀏覽器會先剝掉再解析，剝完可能變成 //evil.com）", () => {
+    expect(sanitizeIntegrationReturnTo("/\u0000/evil")).toBeNull();
+    expect(sanitizeIntegrationReturnTo("/\n/evil")).toBeNull();
+    expect(sanitizeIntegrationReturnTo("/ /evil")).toBeNull();
+  });
+
+  it("過長路徑丟掉（state 不當成夾帶通道）", () => {
+    expect(sanitizeIntegrationReturnTo(`/${"a".repeat(600)}`)).toBeNull();
+  });
+
+  it("★ returnTo 被竄改後整個 state 驗不過（不是只忽略那一段）", () => {
+    const state = signIntegrationState("user-123", "/databases");
+    const [payload, sig] = state.split(".");
+    const decoded = Buffer.from(payload, "base64url").toString("utf8");
+    const tampered = Buffer.from(decoded.replace("%2Fdatabases", "%2F%2Fevil.com")).toString("base64url");
+    expect(verifyIntegrationState(`${tampered}.${sig}`)).toBeNull();
+  });
+
+  it("舊格式 state（沒有第三段）仍驗得過——升版不會讓授權中的使用者卡住", () => {
+    const legacy = signIntegrationStateAt("user-123", Date.now() + 60_000);
+    expect(verifyIntegrationState(legacy)).toEqual({ userId: "user-123", returnTo: null });
+  });
+
+  it("合法的站內路徑（含 hash 與查詢字串）保留", () => {
+    expect(sanitizeIntegrationReturnTo("/p/abc#sec-knowledge")).toBe("/p/abc#sec-knowledge");
+    expect(sanitizeIntegrationReturnTo("/databases?open=x&add=1")).toBe("/databases?open=x&add=1");
   });
 });
 

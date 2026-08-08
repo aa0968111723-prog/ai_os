@@ -57,8 +57,8 @@ describe("projectDataAiHint", () => {
       linkedAiReadableRowCount: 2,
     });
     expect(h.tone).toBe("ok");
-    expect(h.detail).toMatch(/AI 可讀表列 2/);
-    expect(h.detail).toMatch(/另有 3 列 AI 不可見/);
+    expect(h.detail).toMatch(/資料表 AI 可讀 2 列/);
+    expect(h.detail).toMatch(/另有 3 列不提供 AI/);
   });
 });
 
@@ -84,5 +84,40 @@ describe("templates multi-role coverage (user lens)", () => {
     const { fields } = buildBoundTableFields("media");
     const type = fields.find((f) => f.label === "類型");
     expect(type?.options).toEqual(expect.arrayContaining(["影片", "圖片", "音訊", "動畫"]));
+  });
+
+  /**
+   * P4 綁定：整張表提供給專案時，可能一列 project 欄位都沒有。
+   * 只看關聯列數的話畫面會說「還沒有依據」，而 AI 其實讀得到整張表——
+   * 狀態文案一旦說謊，使用者就不會再相信任何一句。
+   */
+  it("★ 綁定的表沒有任何關聯列時，仍要說 AI 有依據可用", () => {
+    const h = projectDataAiHint({
+      knowledgeCount: 0,
+      assetCount: 0,
+      linkedRowCount: 0,
+      linkedAiReadableRowCount: 0,
+      boundAiReadableTableCount: 1,
+    });
+    expect(h.tone).toBe("ok");
+    expect(h.detail).toMatch(/整張提供的資料表 1 張/);
+  });
+
+  it("完全沒有任何依據時仍是 empty（綁定數為 0 不該把狀態拉成 ok）", () => {
+    const h = projectDataAiHint({
+      knowledgeCount: 0,
+      assetCount: 0,
+      linkedRowCount: 0,
+      linkedAiReadableRowCount: 0,
+      boundAiReadableTableCount: 0,
+    });
+    expect(h.tone).toBe("empty");
+  });
+
+  it("沒傳 boundAiReadableTableCount 的舊呼叫端行為不變", () => {
+    const before = projectDataAiHint({ knowledgeCount: 2, assetCount: 0, linkedRowCount: 0 });
+    expect(before.tone).toBe("ok");
+    expect(before.detail).toMatch(/文字 2 筆/);
+    expect(before.detail).not.toMatch(/整張提供/);
   });
 });
