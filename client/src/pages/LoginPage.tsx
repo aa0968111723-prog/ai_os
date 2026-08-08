@@ -10,10 +10,31 @@ import { Card, Hint } from "../components/ui";
 import { collectDeviceHint } from "../deviceHint";
 
 /**
+ * 後端服務層故障（502/503/閘道逾時）或網路中斷時，tRPC 客戶端回傳的是技術性字串
+ * （非 tRPC 形狀的 HTTP 回應、TypeError "Failed to fetch"、"load failed"…），
+ * 例如 2026-08-08 502 事件實測看到「按鈕按了沒反應／看不懂的英文錯誤」。
+ * 這些不是使用者輸入的問題——登入頁要說人話並給重試指引，而不是丟一串技術字串。
+ */
+const SERVER_DOWN_PATTERNS = [
+  /502|503|504|bad gateway|service unavailable|gateway timeout/i,
+  /failed to fetch|fetch failed|network request failed|network error|networkerror|load failed/i,
+  /unexpected token|not valid json|unexpected end of json/i,
+];
+
+export function isServerDownMessage(message: string): boolean {
+  return SERVER_DOWN_PATTERNS.some((re) => re.test(message));
+}
+
+/** 伺服器暫時不可用的統一提示：講清楚「不是你的輸入錯」＋「稍後再試」＋「持續發生找管理員」。 */
+export const SERVER_DOWN_MESSAGE = "無法連線到伺服器——網站可能正在維護或暫時故障。請稍後再試；若持續發生請通知管理員。";
+
+/**
  * zod 驗證失敗時 tRPC 預設把整包 issues JSON 塞進 error.message（伺服器端 errorFormatter
  * 不在本次可改範圍）——這裡取第一則訊息轉成一句人話，讓「email 格式/密碼長度」看得懂。
+ * 伺服器層故障／網路中斷的技術性訊息（502、fetch 失敗等）優先換成人話。
  */
 export function friendlyAuthError(message: string): string {
+  if (isServerDownMessage(message)) return SERVER_DOWN_MESSAGE;
   try {
     const issues = JSON.parse(message) as Array<{ message?: string }>;
     if (Array.isArray(issues) && issues[0]?.message) {
