@@ -266,3 +266,78 @@ props_now = call("GET", admin, "props.list", {"projectId": pid})
 ok("使用者確認建立的道具保留", [p["name"] for p in props_now] == ["帆布包"])
 looks_now = call("GET", admin, "characterLooks.list", {"projectId": pid})
 ok("手動造型保留、AI 造型撤掉", [l["name"] for l in looks_now] == ["短髮時期"])
+
+# ── 14. 舊專案相容（§63 CURRENT PROJECTS MUST SURVIVE）──
+# 「舊方式」的專案＝重構前就長這樣：有世界觀／角色／場景／道具／分鏡，
+# 但沒有 story、沒有 story_scenes、鏡上沒有 storySceneId／camera／lookIds。
+# 這種專案打開新的四段 IA 不能空白、不能報錯、資料一項都不能少。
+legacy = call("POST", admin, "projects.create",
+              {"groupId": gid, "title": "重構前的舊專案", "kind": "healing", "platform": "shorts"})
+lpid = legacy["id"]
+call("POST", admin, "projects.updateWorldview",
+     {"projectId": lpid, "worldview": {"themes": ["禪修日常"], "tones": ["溫暖"], "styles": ["寫實攝影"]}})
+lc = call("POST", admin, "characters.add", {"projectId": lpid, "name": "舊角色", "appearance": "灰袍、白眉"})
+ls = call("POST", admin, "scenePresets.add", {"projectId": lpid, "name": "舊場景", "palette": "低飽和暖灰"})
+lp = call("POST", admin, "props.add", {"projectId": lpid, "name": "舊道具", "appearance": "木魚"})
+lshot = call("POST", admin, "scenes.addDraft", {"projectId": lpid, "title": "舊分鏡", "prompt": "舊的畫面描述", "durationSec": 5})
+ok("舊專案的卡片與分鏡建立成功",
+   all("__error__" not in x for x in (lc, ls, lp, lshot)))
+
+lstory = call("GET", admin, "story.get", {"projectId": lpid})
+ok("舊專案打開故事頁不報錯、故事為空", "__error__" not in lstory and lstory["story"] is None)
+ok("舊專案的既有資料在摘要裡看得到",
+   lstory["summary"]["characters"] == 1 and lstory["summary"]["locations"] == 1
+   and lstory["summary"]["props"] == 1 and lstory["summary"]["shots"] == 1)
+ok("舊專案沒有場（story_scenes 為空）", lstory["summary"]["storyScenes"] == 0)
+
+lscenes = call("GET", admin, "story.scenesList", {"projectId": lpid})
+ok("場清單為空但不報錯", lscenes == [])
+lshots = call("GET", admin, "scenes.listByProject", {"projectId": lpid})
+ok("舊分鏡讀得到，且為「未分場」（storySceneId 為空）",
+   len(lshots) == 1 and lshots[0]["storySceneId"] is None)
+ok("舊分鏡的新欄位為空而非壞值",
+   lshots[0]["camera"] is None and lshots[0]["performance"] is None and lshots[0]["lookIds"] is None)
+
+ok("舊專案的連戲檢查不誤報（沒有生成過就沒有過時）",
+   call("GET", admin, "story.continuityCheck", {"projectId": lpid})["total"] == 0)
+limp = call("GET", admin, "story.entityImpact", {"projectId": lpid, "kind": "character", "entityId": lc["id"]})
+ok("舊專案的影響查詢可用（沒有鏡引用就回 0，不炸）", limp["shots"] == 0 and limp["outdatedShots"] == 0)
+ok("舊專案的素材推薦可用（沒綁卡的鏡回空詞）",
+   call("GET", admin, "story.shotAssetSuggestions", {"sceneId": lshots[0]["id"]})["terms"] == [])
+lprev = call("GET", admin, "story.storyboardPreview", {"projectId": lpid})
+ok("舊專案還沒解析過：預覽回未就緒而不是壞掉", lprev["ready"] is False and lprev["existingShots"] == 1)
+lgen = call("POST", admin, "scenes.generateInto",
+            {"sceneId": lshots[0]["id"], "modelId": "fal-ai/flux/schnell", "prompt": "舊分鏡照樣能生成"})
+ok("舊分鏡照樣能就地生成（沒有場也不擋）", "generationId" in lgen)
+
+# ── 15. 唯讀權限（§56-F）：檢視者讀得到、改不了 ──
+viewer = client()
+inv = call("POST", admin, "admin.invite",
+           {"email": "storyviewer@example.com", "teamId": north["id"], "teamRole": "member",
+            "groupId": gid, "groupRole": "member"})
+call("POST", viewer, "auth.acceptInvite",
+     {"token": inv["inviteUrl"].split("/")[-1], "name": "故事檢視者", "password": "story-viewer-88"})
+vid = call("GET", viewer, "auth.me")["user"]["id"]
+call("POST", admin, "projects.setProjectRole", {"projectId": lpid, "userId": vid, "role": "viewer"})
+
+ok("檢視者讀得到故事頁", "__error__" not in call("GET", viewer, "story.get", {"projectId": lpid}))
+ok("檢視者讀得到連戲檢查", "__error__" not in call("GET", viewer, "story.continuityCheck", {"projectId": lpid}))
+ok("檢視者讀得到影響查詢",
+   "__error__" not in call("GET", viewer, "story.entityImpact",
+                           {"projectId": lpid, "kind": "character", "entityId": lc["id"]}))
+for label, path, payload in [
+    ("存故事", "story.save", {"projectId": lpid, "content": "檢視者不該能寫"}),
+    ("解析故事", "story.parse", {"projectId": lpid}),
+    ("產生分鏡", "story.generateStoryboard", {"projectId": lpid}),
+]:
+    r = call("POST", viewer, path, payload)
+    # 要求「就是唯讀擋下的那句」——只斷言「有錯」的話，500 或參數錯也會讓這條變綠燈
+    ok(f"🔒 檢視者不能{label}", "檢視者" in r.get("__error__", ""))
+ok("🔒 檢視者不能新增造型",
+   "檢視者" in call("POST", viewer, "characterLooks.add",
+                    {"characterId": lc["id"], "name": "偷改", "costume": "不該成功"}).get("__error__", ""))
+ok("🔒 檢視者不能就地生成",
+   "檢視者" in call("POST", viewer, "scenes.generateInto",
+                    {"sceneId": lshots[0]["id"], "modelId": "fal-ai/flux/schnell"}).get("__error__", ""))
+ok("檢視者的越權沒有真的改到資料",
+   call("GET", admin, "story.get", {"projectId": lpid})["story"] is None)
