@@ -176,10 +176,24 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
     }
   }, [open]);
 
-  // 進行到哪一步寫進網址——外部授權整頁重導回來時才接得回原本那一步
+  // 剛連接成功的提示只播一次：把一次性的 ?gdrive= 從網址清掉，重新整理不再重播
   useEffect(() => {
-    if (open) syncMethodToUrl(method);
-  }, [open, method]);
+    if (!justConnected) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("gdrive");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [justConnected]);
+
+  /**
+   * 切換加入方式時**同步**更新網址，不能放進 useEffect。
+   * 選檔器的「連接」連結是在 render 當下用 window.location 組出來的——
+   * 若網址等到 effect 才更新，第一次 render 出來的連結就少了「進行到哪一步」，
+   * 使用者授權完會回到一個關著的面板（Golden Path 1 實際上就斷在這裡）。
+   */
+  const openMethod = (next: AddDataMethodId | null) => {
+    syncMethodToUrl(next);
+    setMethod(next);
+  };
 
   if (!open) return null;
 
@@ -266,7 +280,7 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
                         onClose();
                         return;
                       }
-                      setMethod(m.id);
+                      openMethod(m.id);
                     }}
                     title={unavailable ? "站方尚未設定這個服務" : m.hint}
                   >
@@ -294,7 +308,7 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
               variant="ghost"
               size="sm"
               className="add-data-back"
-              onClick={() => setMethod(null)}
+              onClick={() => openMethod(null)}
             >
               <Icon name="Undo2" size={14} /> 換一種方式
             </Button>
@@ -305,7 +319,7 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
                 onDone={() => {
                   onAdded?.();
                 }}
-                onBack={() => setMethod(null)}
+                onBack={() => openMethod(null)}
               />
             )}
           </>

@@ -51,8 +51,10 @@ vi.mock("../api", () => ({
 
 // 兩個選檔器各有自己的測試；這支關心的是「加入資料」這一層的流程與文案
 vi.mock("./GoogleDrivePicker", () => ({
+  // 替身刻意在 render 當下讀 window.location（真的選檔器就是這樣組「連接」連結的）——
+  // 這樣才驗得到「切換加入方式時網址已經同步更新」，而不是等 effect 才更新
   GoogleDrivePicker: ({ projectId }: { projectId?: string }) => (
-    <div data-testid="drive-picker" data-project={projectId} />
+    <div data-testid="drive-picker" data-project={projectId} data-href={window.location.search} />
   ),
 }));
 vi.mock("./NotionPagePicker", () => ({
@@ -221,6 +223,16 @@ describe("AddDataSheet", () => {
       render(<AddDataSheet open destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />);
       await user.click(screen.getByRole("button", { name: /Google 雲端/ }));
       expect(pendingAddDataMethod()).toBe("google-drive");
+    });
+
+    it("★ 網址在選檔器 render 的那一刻就已經更新（不是等 effect）", async () => {
+      // 「連接 Google」的連結是選檔器 render 當下用 window.location 組出來的。
+      // 網址若晚一拍才更新，那個連結就少了 ?add=google-drive——
+      // 使用者授權完會回到一個關著的面板，等於整條路徑白走。
+      const user = userEvent.setup();
+      render(<AddDataSheet open destination={{ kind: "project", projectId: "p1" }} onClose={() => {}} />);
+      await user.click(screen.getByRole("button", { name: /Google 雲端/ }));
+      expect(screen.getByTestId("drive-picker").getAttribute("data-href")).toContain("add=google-drive");
     });
 
     it("★ 帶著進行中的步驟回到頁面時，直接接回那一步", () => {
