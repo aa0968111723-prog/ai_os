@@ -52,6 +52,7 @@ import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { normalizeRequestId, withRequestContext } from "./services/requestContext";
 import { sessionGate } from "./services/sessionPolicy";
 import { attachRealtime } from "./services/realtime";
+import { attachCollabDoc } from "./services/collabDoc";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
@@ -2350,6 +2351,8 @@ const httpServer = app.listen(port, () => {
 
 // 即時協作（presence/游標/編輯指示/變更同步）：WS 升級掛在同一個 http server 上
 attachRealtime(httpServer);
+// Story 共編（Yjs）走獨立的 /ws-doc——文件更新不與游標封包搶同一條連線
+attachCollabDoc(httpServer);
 
 const SHUTDOWN_DEADLINE_MS = 25_000;
 const handleShutdownSignal = (signal: NodeJS.Signals): void => {

@@ -182,3 +182,25 @@ export const decisions = pgTable("decisions", {
   projectCreatedIdx: index("decisions_project_created_idx").on(t.projectId, t.createdAt),
   groupCreatedIdx: index("decisions_group_created_idx").on(t.groupId, t.createdAt),
 }));
+
+/**
+ * Story 共編（Yjs）的持久化快照。只存**完整快照**（base64 的 Y update），
+ * 不存 update log——每次防抖落盤寫入的就是壓實後的最新狀態：快照即壓實，
+ * 沒有「無限 append 需要 compaction」的問題。歷史版本沿用既有 text_versions。
+ * stories.content 由 collabDoc 服務定期 materialize——Story-first 管線全部不動。
+ */
+export const collabDocuments = pgTable("collab_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  /** 目前只有 'story'（shared/textSync.COLLAB_DOC_KINDS） */
+  kind: text("kind").notNull(),
+  /** story → projectId（一專案一份故事） */
+  refId: uuid("ref_id").notNull(),
+  /** Y.encodeStateAsUpdate 的 base64 */
+  snapshot: text("snapshot").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  kindRefUq: uniqueIndex("collab_documents_kind_ref_uq").on(t.kind, t.refId),
+  projectIdx: index("collab_documents_project_idx").on(t.projectId),
+}));

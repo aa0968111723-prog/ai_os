@@ -13,6 +13,8 @@ import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
+import { useStoryYDoc } from "./useStoryYDoc";
+import { RemoteCarets } from "./RemoteCarets";
 import {
   shouldAdoptRemote,
   summaryChips,
@@ -149,6 +151,50 @@ export function StoryStage({
   const baselineRef = useRef<string | undefined>(undefined);
   const [conflict, setConflict] = useState<RevisionConflict | null>(null);
 
+  /* ── Story 共編（Yjs；/ws-doc）───────────────────────────
+     連上＝真共編（字元級合併、雙 caret；autosave 停用，落盤由伺服器 materialize）。
+     連不上＝自動退回下面既有的 autosave＋revision 衝突卡路徑——共編是升級，
+     不是把唯一的儲存路徑換掉。 */
+  const editorElRef = useRef<HTMLTextAreaElement | null>(null);
+  const ydoc = useStoryYDoc({
+    projectId,
+    enabled: canEdit,
+    onRemote: (next, transform) => {
+      // 先用**舊**的游標算新位置，再換內容，最後把游標放回去——
+      // 少了這一步，夥伴每打一個字，我的游標就跳到文末。
+      const el = editorElRef.current;
+      const hadFocus = el && document.activeElement === el;
+      const selStart = el ? transform(el.selectionStart) : 0;
+      const selEnd = el ? transform(el.selectionEnd) : 0;
+      setContent(next);
+      baselineRef.current = next; // Y 是新的基準；退回 autosave 時不會誤判夥伴的字是「我的修改」
+      if (hadFocus) {
+        requestAnimationFrame(() => {
+          const now = editorElRef.current;
+          if (now && document.activeElement === now) now.setSelectionRange(selStart, selEnd);
+        });
+      }
+    },
+  });
+  /** guard 用（autosave／收養 effect 讀 ref，不進依賴陣列） */
+  const yActiveRef = useRef(false);
+  yActiveRef.current = ydoc.active;
+  // 共編中回報 caret（節流在 hook 內）——夥伴的編輯器上才畫得出我的游標
+  useEffect(() => {
+    if (!ydoc.active) return;
+    const el = editorElRef.current;
+    if (!el) return;
+    const report = () => ydoc.sendCaret(el.selectionStart, el.selectionEnd);
+    el.addEventListener("keyup", report);
+    el.addEventListener("click", report);
+    el.addEventListener("select", report);
+    return () => {
+      el.removeEventListener("keyup", report);
+      el.removeEventListener("click", report);
+      el.removeEventListener("select", report);
+    };
+  }, [ydoc.active, ydoc.sendCaret, ydoc]);
+
   const save = trpc.story.save.useMutation({
     onSuccess: (r) => {
       setSaveState("saved");
@@ -187,6 +233,9 @@ export function StoryStage({
   }, [rawRev]);
   useEffect(() => {
     if (remote === null) return;
+    // 共編連線中：內容真相是 Y 文件（onRemote 直接餵），查詢回來的 stories.content
+    // 是 materialize 的落後快照——拿它收養會把畫面倒退到 1.5 秒前。
+    if (yActiveRef.current) return;
     setContent((local) => {
       if (shouldAdoptRemote(saveStateRef.current, local, remote)) {
         // 收養＝我的草稿從此以這份內容為基準
@@ -202,6 +251,10 @@ export function StoryStage({
   // autosave：去抖 800ms；卸載時 flush（未存的內容不可默默丟掉）
   useEffect(() => {
     if (content === null || remote === null || content === remote) return;
+    // 共編連線中：儲存由伺服器 materialize（快照落盤時寫回 stories.content），
+    // 這裡的 autosave 必須停用——兩條寫入路徑同時跑，autosave 的整份全文
+    // 會反覆蓋掉夥伴剛打進 Y 文件的字。
+    if (yActiveRef.current) return;
     // 已經撞上衝突就停掉 autosave：再自動重送只會每 800 毫秒撞一次同一面牆，
     // 而使用者需要的是先看到「發生什麼事」並做決定。
     if (saveStateRef.current === "conflict") return;
@@ -397,11 +450,19 @@ export function StoryStage({
           value={content ?? ""}
           canEdit={canEdit}
           rows={rows}
+          textareaRef={(el) => { editorElRef.current = el; }}
           placeholder={"把故事貼在這裡，或直接開始寫…\n\n小訣竅：一段＝一場戲。也可以用上面的標注鈕，把名字一鍵宣告成「角色：」「場景：」「道具：」。"}
-          saveLabel={save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
-          onChange={setContent}
+          saveLabel={ydoc.active ? "共編中 · 即時同步 ✓" : save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
+          onChange={(next) => {
+            setContent(next);
+            // 共編中：差量進 Y.Text（applyLocal 回 true）；未連上：僅本地 state，
+            // 由下面既有的 autosave 去存——同一顆 onChange，兩條路徑自動切換。
+            ydoc.applyLocal(next);
+          }}
           onBlur={() => {
-            // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）
+            // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）。
+            // 共編中不 flush：儲存由伺服器 materialize，這裡的整份寫回會蓋掉夥伴的字。
+            if (yActiveRef.current) return;
             if (content !== null && remote !== null && content !== remote && !save.isPending) {
               if (debounceRef.current) clearTimeout(debounceRef.current);
               setSaveState("saving");
@@ -477,6 +538,10 @@ export function StoryStage({
             </>
           }
         />
+        {/* 夥伴的 caret（不同顏色＋名牌）：awareness 的名字與色票與 /ws 同一套 */}
+        {ydoc.active && ydoc.peers.size > 0 && (
+          <RemoteCarets textareaRef={editorElRef} peers={ydoc.peers} value={content ?? ""} />
+        )}
 
         {/* 需要確認：只顯示 AI 真正不確定的項目（<70%），其他一律背景處理 */}
         {pending.length > 0 && (

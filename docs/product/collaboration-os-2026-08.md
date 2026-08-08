@@ -184,50 +184,91 @@ viewState 先把人帶到正確的物件，鏡像再對齊細部。
 
 ---
 
-## 五、尚未完成（誠實標記）
+## 五、第二批交付（Phase 3 收尾 → Yjs 共編）
 
-| 項目 | 狀態 | 說明 |
-| --- | --- | --- |
-| Phase 3　Project Header / Shot 卡協作狀態 | **PARTIAL** | Shot 卡的 anchorPeers、`⚑ N` 未解決標注、討論數皆已存在且沿用；Header 的「點某人 → 看到他正在 Shot 08 → 跟隨畫面」尚未接上新的 `describeViewState`（目前仍是舊的鏡像跟隨入口）。 |
-| Phase 4　Universal contextual comments、影片 tMs 留言、Generation 版本審查 | **NOT STARTED** | `messages.tMs` 與 `anchorAssetId` 欄位已存在且標注已釘版；但「點留言 seek 到 00:18」「播放頭接近時高亮」「thread 綁 generationId」尚未實作。 |
-| Phase 5　Yjs Story 共編（`/ws-doc`、CRDT、inline comment、RelativePosition、snapshot compaction、materialize 回 `stories.content`） | **NOT STARTED** | 見下方「為什麼沒做 Yjs」。 |
-| Phase 6　AI Collaboration Coordinator | **NOT STARTED** | 既有 `@助手` 保留未動。`collaboration.summary` 已經是它未來要讀的那份結構化上下文（messages / annotations / tasks / approvals / activity），但「整理討論、找 blocker、把 change request 轉 task、整理 decision」尚未實作。 |
-| Decision 概念（新 `decisions` 表 vs reuse） | **NOT STARTED** | 已評估：應為**獨立新表**（decision 的生命週期與 message 不同——message 是時間軸上的一句話，decision 是會被反覆引用的定案；硬塞進 message 會讓「已解決」與「已定案」永遠分不開）。尚未建表。 |
-| 留言 `intent`（comment / question / suggestion / change_request / decision / blocker） | **NOT STARTED** | |
-| 留言完整生命週期的 provenance 資料鏈 | **PARTIAL** | `project_tasks.sourceMessageId` 已存在（留言→任務那一段接得起來）；「任務→generation→新版本→通知原提議者→審核→解決→Decision Log」尚未串完。 |
+第一批（Phase 0–2）合併之後（PR #553），同一分支重啟接續完成以下五項。
 
-### 為什麼沒做 Yjs
+### Phase 3 收尾　Header 點人 → 「正在 Shot 08」→ 跟隨（**DONE**）
 
-計畫本身寫明的前置條件是「P0 revision safety、P1 Collaboration Hub、P2 Presenter
-都穩定之後才正式導入 CRDT」。本次把這三項做完並實機驗證通過，但 Yjs 是一個獨立且
-大得多的工程（新 `/ws-doc` 傳輸層、`collab_documents` 持久化與 snapshot compaction、
-awareness 與現有 Presence 的顏色／名稱共用、RelativePosition 的 inline comment、
-以及最關鍵的「materialize 回 `stories.content` 讓 story parser / AI / export /
-version history / search 全部繼續工作」）。
+`PeerBadge`（`client/src/features/collaboration/PeerBadge.tsx`）：Header 的夥伴
+chip 點開變成小卡——「韋澔 · 在線 · 正在：分鏡 · Shot 08 [跟隨畫面] [傳訊息]」。
+`latestViewForUser` 取該使用者多分頁中**語意最具體**的那個 view；場景一律顯示
+標題（`sceneLabelOf`），絕不露 UUID。
 
-把它塞進同一批交付，只會得到一個沒有實機驗證過的半成品混進 production path——
-而那正是計畫第三十條明列的禁止事項。
+### Phase 4　影片 tMs 留言 ＋ 版本討論串（**DONE**）
 
-**目前的故事編輯仍然不是 Google Docs 式共編**，文件不假裝它是：
-它是 local draft → debounce save → remote adoption，
-差別只在於**現在它至少不會靜默吃掉別人的內容**（撞到會出衝突卡讓人決定）。
+- `shared/timecode.ts`：`formatTMs`（mm:ss）與 `dotVisibleAt`（播放頭 ±1.5s 窗口；
+  `tMs=null` 或量不到播放頭時**一律顯示**——標注絕不無聲消失）。
+- 影片標注落點自動帶 `tMs`（`SceneAnnotationLayer` 的 `media.currentTime`）；
+  留言的時間碼 chip 一按就 seek 到該秒並暫停（`SceneStudio.seekStageTo`）；
+  標注釘在別的版本時 chip 停用（不會 seek 到錯的影片）。
+- 版本列的「討論這一版」以 `refType:"asset"` 開該版本的討論串（`discussInMessages`）。
+
+### Decision Log ＋ 留言 intent ＋ provenance 鏈（**DONE**）
+
+- **獨立 `decisions` 表**（migration `0052`；評估結論照第一批文件——message 是
+  時間軸上的一句話，decision 是會被反覆引用的定案，硬塞進 message 會讓「已解決」
+  與「已定案」永遠分不開）。revoke 是標記不是刪除（`revoked_at/by`），
+  協作中心「決策」分頁對已撤銷者畫刪除線並保留「看原討論」深連結。
+- `messages.intent`（comment/question/suggestion/change_request/decision/blocker）
+  **不在發文時強迫選**：事後可標（`messages.setIntent`），並有保守的
+  `suggestIntent` 建議（問號→question、擋住/卡住→blocker……建議永遠可拒絕）。
+- 留言的「轉任務／轉決策」動作把 `sourceMessageId` 寫進去，任務完成時通知原提議者
+  並深連結回原留言——「留言→任務→完成→通知→決策」整條鏈以
+  `server/services/collabProvenance.pg.test.ts` 打真 PostgreSQL 驗證。
+
+### AI Collaboration Coordinator（**DONE**）
+
+`@助手` 升級（`server/services/collabCoordinator.ts`）：把未撤銷決策、未解決標注、
+開著的任務組成〈協作狀態〉注入 system prompt，讓「最近大家說了什麼？」得到
+**已決定／尚未決定／待處理／等待你** 的結構化回答。純函式 `formatCollaborationContext`
+單測覆蓋；空區塊直接省略不佔 token。**高風險動作仍需人類確認**——轉任務／轉決策
+是人按按鈕，AI 只建議不代按（安全邊界與第一批 §24 相同，未放寬）。
+
+### Phase 5　Yjs Story 共編（**DONE**，inline comment 除外）
+
+- **傳輸**：獨立 `/ws-doc`（`server/services/collabDoc.ts`），沿用同一個 session
+  cookie 與 `authorizeRealtimeConn` ACL——**沒有第二套認證**。訊息是 JSON+base64 的
+  sync/update/awareness；awareness 的 userId/name/顏色由**伺服器端蓋章**，與 `/ws`
+  presence 同一個 8 色雜湊。
+- **持久化**：`collab_documents`（migration `0053`）存完整快照（snapshot 即
+  compaction，不留 update log）；1.5s 防抖落盤，最後一人離開時 flush。
+- **materialize**：每次落盤把 Y.Text 寫回 `stories.content`——parser／AI／export／
+  search 全部照常工作；走 `applyWithRevision` 所以 `rev` 會遞增，還在舊 autosave
+  路徑的 client 撞上時會得到衝突卡而不是互相覆蓋。內容沒變就不 bump rev。
+- **client**：`useStoryYDoc`（差量進 Y.Text、遠端來的全文帶 caret 轉換器落地）＋
+  `RemoteCarets`（鏡像 div 量測，textarea 上畫出夥伴的名牌與 caret）。
+  連不上／斷線＝自動退回既有 autosave 路徑——**共編是升級，不是把唯一的儲存路徑換掉**。
+- **NOT STARTED**：RelativePosition 的 inline comment（把留言釘在故事的某個字上）。
+  這需要另一輪標注 UI 的工程，不假裝做了。
+
+### 實機驗證抓到的第四個缺陷
+
+單元測試全綠、node 探針證明伺服器 relay 正確，但真瀏覽器裡「畫面顯示共編中、
+字卻一個都送不出去」：React StrictMode 掛載→卸載→再掛載開了兩條 socket，
+第一條被中止的 socket 其 `onclose` 是**非同步**才到的，把共用的 `wsRef` 清掉——
+活著的第二條連線從此拿不到參照，而 `active=true` 又把舊 autosave 也擋住，
+**哪一條儲存路徑都不會接手**。修法：事件處理器全掛在各自連線的 `const sock` 上，
+遲到的 `onclose` 先驗 `wsRef.current === sock` 才准清狀態。已加回歸測試
+（`useStoryYDoc.test.tsx` 的 StrictMode 雙掛載案例）。
 
 ---
 
-## 六、驗證結果
+## 六、驗證結果（第二批，含全部重跑）
 
 | 項目 | 結果 |
 | --- | --- |
 | `npm run typecheck` | ✅ 0 錯誤 |
-| `npm test`（含 `RUN_PG_INTEGRATION=1` 打真 PostgreSQL） | 2174 passed / 2 failed / 6 skipped |
-| `npm run test:client` | ✅ 1395 passed（165 檔） |
-| `npm run check:boundaries` | ✅ OK（763 檔，11 條既有例外，未新增） |
+| `npm test`（含 `RUN_PG_INTEGRATION=1` 打真 PostgreSQL） | 2247 passed / 2 failed / 6 skipped |
+| `npm run test:client` | ✅ 1474 passed（171 檔） |
+| `npm run check:boundaries` | ✅ OK（783 檔，11 條既有例外，未新增） |
 | `npm run check:ui-primitives` | ✅ 裸 class 0（基準線 0，未退化） |
 | `npm run check:hooks` | ✅ OK |
 | `npm run build` | ✅ 成功 |
-| `npm run db:check` | ✅ schema drift: none |
-| `npm run db:migrate:dry-run` | ✅ 無 DDL／ledger 寫入 |
-| 實機雙瀏覽器 Presenter 驗證 | ✅ 12/12 |
+| `npm run db:check` | ✅ migration history 與 live schema 一致 |
+| `npm run db:migrate:dry-run` | ✅ schema drift: none |
+| 實機雙瀏覽器 Presenter 驗證（`verify-presenter.mjs`） | ✅ 12/12 |
+| 實機雙瀏覽器 Story 共編驗證（`verify-story-coedit.mjs`） | ✅ 8/8（同時輸入收斂、caret 名牌、重新整理後持久） |
 
 **2 個失敗是既有問題，與本次修改無關**：`server/services/deviceTrust.pg.test.ts`
 的裝置標籤分隔符斷言（`Windows・Chrome` vs `Windows · Chrome`）。
@@ -248,3 +289,9 @@ version history / search 全部繼續工作」）。
 4. **多實例下的 `groupPresence` 只看本機房間**。跨 replica 的在場名單走 Redis 名冊
    （presence 廣播正確），但首頁聚合目前只投影本機——設了 `REDIS_URL` 的多實例部署下
    首頁人數可能少算。單一行程部署（現況）不受影響。
+5. **`/ws-doc` 的房間狀態在單機記憶體裡**。多實例部署下，兩個人若被路由到不同
+   replica 會各自開房、互相看不到即時更新（落盤仍走同一個 DB，最後寫的快照贏）。
+   要上多實例前必須先加 sticky routing 或跨實例 relay。單一行程部署（現況）不受影響。
+6. **共編與舊 autosave 並行期**：共編啟用中 materialize 會推進 `rev`，所以尚未升級的
+   client 撞上時會看到衝突卡（不會靜默覆蓋）——但那張卡的「重新套用我的修改」是
+   整份全文層級，對共編中的細粒度變更偏粗。等 client 全面升級後這條路徑自然消失。

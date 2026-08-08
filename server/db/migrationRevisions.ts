@@ -272,4 +272,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0052_collab_decisions": [
     "1569cd121bab50de68363a59d7a98d069ed2df5d6e36b9989530906bf56b4bbc",
   ],
+  "0053_collab_documents": [
+    "2d3b3da900c87a29c95a3db7e59ede738a861f289dabf4069e2d676e52657da9",
+  ],
 };
