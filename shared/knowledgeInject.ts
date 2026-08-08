@@ -54,6 +54,16 @@ export type KnowledgeInjectOptions = {
   budgetChars?: number;
   /** 指定 id 永遠排最前（順序保留） */
   preferIds?: string[];
+  /**
+   * 「本次只用這幾份」（P5 來源選擇）：非空時**只有**這些 id 進得了上下文。
+   *
+   * 與 preferIds 的差別是真正的限制而不只是排序——使用者說「只用這三份」時，
+   * 第四份不該因為預算還有剩就偷偷混進去。
+   *
+   * ★ 這不會放寬預算：選中的只是優先與唯一，總字數上限完全不變（§30）。
+   * ★ 空陣列視同未指定（避免呼叫端不小心傳空陣列就把 AI 的依據全部清空）。
+   */
+  onlyIds?: string[];
   /** 是否前置角色／場景卡片段落（字數計入 budget） */
   includeCards?: boolean;
   mode?: KnowledgeInjectMode;
@@ -311,8 +321,19 @@ export function assembleKnowledgeContext(
     working = rows.filter((r) => normalizeKnowledgeKind(r.kind) === "script");
     if (working.length === 0) working = rows; // 無腳本時退回全部
   }
+  // 本次只用這幾份（P5）：真正的限制，不是排序。空陣列視同未指定。
+  // 篩完若一份都不剩（傳了全是不存在的 id），維持空集合——使用者說「只用這幾份」，
+  // 系統不該自作主張退回全部，那等於偷偷用了他沒選的資料。
+  const onlyIds = options.onlyIds ?? [];
+  const restricted = onlyIds.length > 0;
+  if (restricted) {
+    const allow = new Set(onlyIds);
+    working = working.filter((r) => allow.has(r.id));
+  }
 
-  const totalContentChars = rows.reduce((sum, r) => sum + r.content.length, 0);
+  // totalContentChars 一律以「本次可用的集合」為分母：使用者限定三份時，
+  // 「有沒有被截斷」講的就是那三份，拿全部知識當分母會讓截斷率永遠看起來很嚴重。
+  const totalContentChars = (restricted ? working : rows).reduce((sum, r) => sum + r.content.length, 0);
   const byId = new Map(working.map((r) => [r.id, r]));
   const preferred: KnowledgeRowForInject[] = [];
   const preferSeen = new Set<string>();

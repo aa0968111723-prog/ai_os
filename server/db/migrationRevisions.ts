@@ -269,10 +269,19 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0051_collab_revisions": [
     "505ad8d3b8b50821069d0985008879112e31a9905d2178cc0dc3b98e1e48c210",
   ],
-  "0052_collab_decisions": [
+  // 原本編為 0051，與 base branch 併入的 0051_collab_revisions 撞號後改編 0052。
+  // 這支還沒有被任何資料庫套用過（PR 尚未合併），重新編號不會讓任何 ledger 對不上；
+  // 檔案內容一個位元組都沒動，所以 hash 與改號前相同。
+  "0052_data_hub_bindings_and_lineage": [
+    "9470bdb94136c2987dcecf293a84c9214161d71a98fca0445093ed224464be9f",
+  ],
+  // 這兩支原本編為 0052／0053，與先合併的 0052_data_hub_bindings_and_lineage
+  // 撞號後各往後挪一號。同樣未被任何資料庫套用過，且檔案內容未動——
+  // hash 算的是內容不是檔名，所以改號前後相同。
+  "0053_collab_decisions": [
     "1569cd121bab50de68363a59d7a98d069ed2df5d6e36b9989530906bf56b4bbc",
   ],
-  "0053_collab_documents": [
+  "0054_collab_documents": [
     "2d3b3da900c87a29c95a3db7e59ede738a861f289dabf4069e2d676e52657da9",
   ],
 };

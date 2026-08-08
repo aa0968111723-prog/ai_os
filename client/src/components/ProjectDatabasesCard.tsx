@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { AddDataSheet, pendingAddDataMethod } from "./AddDataSheet";
 import type { DataField, DataRowData, DataRowValue } from "@shared/databaseFields";
 import {
   PROJECT_DATA_TEMPLATES,
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
+import { dataHubAiAccessLabel } from "@shared/dataHub";
 import { Button, Card, EmptyState, Hint, Meta, Pill } from "./ui";
 /**
  * 專案資料卡：
@@ -26,10 +28,14 @@ function scrollTo(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/**
+ * AI 使用方式的人話（單一真相在 shared/dataHub）。
+ * 底層仍是同一個 agentAccess 欄位，權限沒有任何變化——只是不再用工程術語當主要文案。
+ */
 function agentAccessLabel(access: "none" | "read" | "write" | undefined): string {
-  if (access === "none") return "AI 不可見";
-  if (access === "read") return "AI 可讀";
-  return "AI 可讀寫";
+  if (access === "none") return dataHubAiAccessLabel("none");
+  if (access === "read") return dataHubAiAccessLabel("readable");
+  return dataHubAiAccessLabel("writable");
 }
 
 const TONE_STYLE: Record<"ok" | "partial" | "empty", { border: string; bg: string }> = {
@@ -83,6 +89,25 @@ export function ProjectDatabasesCard({
   const [quickDraft, setQuickDraft] = useState<Record<string, string>>({});
   const [quickError, setQuickError] = useState<Record<string, string>>({});
   const [quickOk, setQuickOk] = useState<Record<string, string>>({});
+  // 全站唯一的「＋加入資料」：就地開，不跳頁、不先問使用者這份資料屬於哪個系統。
+  // 外部授權是整頁重導，回來時網址還帶著「進行到哪一步」——直接接回去（Golden Path 1／5）。
+  const [addOpen, setAddOpen] = useState(() => pendingAddDataMethod() !== null);
+  // Golden Path 3：資料已經在站內了，要給這個專案用不該叫使用者「再從 Google 匯入一次」
+  const [attachOpen, setAttachOpen] = useState(false);
+  const project = trpc.projects.get.useQuery({ id: projectId });
+  const bindable = trpc.dataHub.bindableResources.useQuery({ projectId }, { enabled: attachOpen });
+  const bindResource = trpc.dataHub.bindResource.useMutation({
+    onSuccess: () => {
+      void utils.dataHub.bindableResources.invalidate({ projectId });
+      void utils.databases.linkedToProject.invalidate({ projectId });
+    },
+  });
+  const unbindResource = trpc.dataHub.unbindResource.useMutation({
+    onSuccess: () => {
+      void utils.dataHub.bindableResources.invalidate({ projectId });
+      void utils.databases.linkedToProject.invalidate({ projectId });
+    },
+  });
 
   const createBound = trpc.databases.createBoundToProject.useMutation({
     onSuccess: (res) => {
@@ -119,6 +144,12 @@ export function ProjectDatabasesCard({
       }, 0),
     [groups],
   );
+  // P4：整張提供給本專案、且 AI 讀得到的表數。綁定的表可能一列 project 欄位都沒有，
+  // 只算關聯列會讓狀態文案說「還沒有依據」而 AI 其實讀得到整張表。
+  const boundAiReadableTables = useMemo(
+    () => groups.filter((g) => g.boundWhole && g.agentAccess !== "none").length,
+    [groups],
+  );
   const knowledgeCount = knowledge.data?.length ?? 0;
   const assetCount = assets.data?.length ?? 0;
   const countsReady = !knowledge.isLoading && !assets.isLoading && !linked.isLoading;
@@ -127,6 +158,7 @@ export function ProjectDatabasesCard({
     assetCount: countsReady ? assetCount : 0,
     linkedRowCount: countsReady ? linkedRows : 0,
     linkedAiReadableRowCount: countsReady ? linkedAiReadableRows : 0,
+    boundAiReadableTableCount: countsReady ? boundAiReadableTables : 0,
   });
   const showStatus = countsReady;
   const toneStyle = TONE_STYLE[aiHint.tone];
@@ -155,6 +187,21 @@ export function ProjectDatabasesCard({
   const open = controlled ? openProp : uncontrolledOpen;
 
   return (
+    <>
+      {/*
+        面板刻意放在 <details> 外面：手機的專案資料卡預設收合，收合的 details
+        內容不會被算繪。授權往返回來時面板若在裡面，使用者會回到一張「什麼都沒發生」
+        的收合卡——等於還是得自己重來一次。
+      */}
+      <AddDataSheet
+        open={addOpen}
+        destination={{ kind: "project", projectId, projectTitle: project.data?.title ?? null }}
+        onClose={() => setAddOpen(false)}
+        onAdded={() => {
+          void utils.knowledge.list.invalidate({ projectId });
+          void utils.projects.assets.invalidate({ projectId });
+        }}
+      />
     <Card as="details" variant="quiet"
       data-fb="專案資料"
       id="sec-databases"
@@ -183,10 +230,10 @@ export function ProjectDatabasesCard({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              scrollTo("sec-knowledge");
+              setAddOpen(true);
             }}
           >
-            <Icon name="Plus" size={13} /> 加資料
+            <Icon name="Plus" size={13} /> 加入資料
           </Button>
         )}
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -224,23 +271,86 @@ export function ProjectDatabasesCard({
           <Meta as="p" style={{ margin: 0 }}>正在判斷專案資料狀態…</Meta>
         )}
 
-        {/* 簡單路徑放前面：多數人「貼文字＋上傳檔案」就夠 AI 用，資料表與外部連結收進下方進階區 */}
-        <div>
-          <Hint style={{ margin: "0 0 8px" }}>
-            給 AI 依據最簡單的方式：貼文字或上傳檔案，AI 就會自動讀取——不用建資料表、也不用連 Notion。
-          </Hint>
-          <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-            <Button size="sm" variant="primary" onClick={() => scrollTo("sec-knowledge")}>
-              <Icon name="FileText" size={13} /> 貼上文字
+        {/*
+          一個畫面一個主要動作（§63）：以前這裡是「貼上文字／上傳圖片／問 AI」三顆並排，
+          等於要使用者先自己判斷「我這份資料算哪一種」。現在只留一顆「＋加入資料」——
+          從哪裡加入由 AddDataSheet 問，且就地完成，不跳到別的區塊或別的頁。
+        */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {canEdit && (
+            <Button size="sm" variant="primary" onClick={() => setAddOpen(true)}>
+              <Icon name="Plus" size={13} /> 加入資料
             </Button>
-            <Button size="sm" onClick={() => scrollTo("sec-assets")}>
-              <Icon name="Image" size={13} /> 上傳圖片、影片
+          )}
+          {canEdit && (
+            <Button size="sm" onClick={() => setAttachOpen((v) => !v)} aria-expanded={attachOpen} aria-controls="project-attach-existing">
+              <Icon name="Layers" size={13} /> 加入既有資料
             </Button>
-            <Button size="sm" onClick={() => scrollTo("sec-ai-hub")}>
-              <Icon name="Sparkles" size={13} /> 問 AI 助手
-            </Button>
-          </div>
+          )}
+          <Link
+            href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}
+            className="btn-sm"
+            style={{ textDecoration: "none" }}
+          >
+            <Icon name="Database" size={13} /> 管理資料
+          </Link>
+          <Button size="sm" variant="ghost" onClick={() => scrollTo("sec-ai-hub")}>
+            <Icon name="Sparkles" size={13} /> 問 AI 助手
+          </Button>
         </div>
+
+        {attachOpen && canEdit && (
+          <Card as="section" variant="quiet" id="project-attach-existing" data-testid="attach-existing">
+            <p style={{ margin: 0, fontWeight: 600 }}>把已經有的資料表提供給這個專案</p>
+            <Hint style={{ margin: "4px 0 8px" }}>
+              資料已經在站內就不必重新匯入一次。提供之後整張表都算這個專案的依據；
+              個人資料表不會出現在這裡——它只有你看得到。
+            </Hint>
+            {bindable.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取可提供的資料…</Meta>}
+            {bindable.error && <p className="error" role="alert" style={{ margin: 0 }}>{bindable.error.message}</p>}
+            {bindable.data?.length === 0 && !bindable.isLoading && (
+              <Meta as="p" style={{ margin: 0 }}>
+                目前沒有可以提供的資料表——組共用、團隊或全站範圍的表才能提供給專案。
+              </Meta>
+            )}
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+              {(bindable.data ?? []).map((r) => (
+                <li key={r.resourceId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+                    <strong style={{ fontSize: 14 }}>{r.title}</strong>
+                    <Meta as="span" style={{ marginLeft: 6 }}>
+                      {r.rowCount} 列・{agentAccessLabel(r.agentAccess)}
+                    </Meta>
+                  </span>
+                  {r.alreadyBound ? (
+                    <Button
+                      size="sm"
+                      disabled={unbindResource.isPending}
+                      title="只移除「提供給這個專案」，資料本身完全不動"
+                      onClick={() => unbindResource.mutate({ projectId, resourceKind: "table", resourceId: r.resourceId })}
+                    >
+                      已提供・取消
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={bindResource.isPending}
+                      onClick={() => bindResource.mutate({ projectId, resourceKind: "table", resourceId: r.resourceId })}
+                    >
+                      提供給本專案
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {(bindResource.error || unbindResource.error) && (
+              <p className="error" role="alert" style={{ margin: "6px 0 0" }}>
+                {bindResource.error?.message ?? unbindResource.error?.message}
+              </p>
+            )}
+          </Card>
+        )}
 
         {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (
@@ -263,10 +373,15 @@ export function ProjectDatabasesCard({
                     >
                       {group.tableName}
                     </Link>
-                    <span>（{group.rows.length} 列）</span>
+                    <span>（{group.boundWhole ? `整張表・預覽 ${group.rows.length} 列` : `${group.rows.length} 列`}）</span>
                     <Pill title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
                       {agentAccessLabel(access)}
                     </Pill>
+                    {group.boundWhole && (
+                      <Pill title="整張表都提供給這個專案（不只指向本專案的那幾列）" style={{ fontWeight: 500, fontSize: 12 }}>
+                        整張提供
+                      </Pill>
+                    )}
                   </p>
                   <div style={{ overflowX: "auto" }}>
                     <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -310,7 +425,17 @@ export function ProjectDatabasesCard({
                       </tbody>
                     </table>
                   </div>
-                  {canEdit && primary && (
+                  {/* 綁定但沒有「關聯專案」欄的表：就地加列無法把新列指向本專案
+                      （buildQuickRowData 會直接報錯），所以不顯示那顆按鈕，改帶去完整編輯器。
+                      顯示一顆按了必定失敗的按鈕比少一顆更糟。 */}
+                  {canEdit && group.boundWhole && !fields.some((f) => f.type === "project") && (
+                    <Hint style={{ margin: "6px 0 0" }}>
+                      整張表已提供給本專案。要新增或修改內容，請
+                      <Link href={`/databases?open=${encodeURIComponent(group.tableId)}&projectId=${encodeURIComponent(projectId)}&from=project`}>開啟資料表</Link>
+                      。
+                    </Hint>
+                  )}
+                  {canEdit && primary && fields.some((f) => f.type === "project") && (
                     <div
                       data-testid={`quick-add-${group.tableId}`}
                       style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}
@@ -348,7 +473,7 @@ export function ProjectDatabasesCard({
             })}
             <Hint style={{ margin: 0 }}>
               要改欄位或大量編輯，請到
-              <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
+              <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>資料中心</Link>
               。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
             </Hint>
           </div>
@@ -410,7 +535,7 @@ export function ProjectDatabasesCard({
 
             {!linked.isLoading && !linked.error && groups.length === 0 && (
               <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
-                    ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
+                    ? "用上方一鍵範本最快；或到資料中心匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
                     : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
             )}
 
@@ -430,5 +555,6 @@ export function ProjectDatabasesCard({
         </details>
       </div>
     </Card>
+    </>
   );
 }

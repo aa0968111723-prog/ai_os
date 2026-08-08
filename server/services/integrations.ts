@@ -22,6 +22,7 @@ import { db, schema } from "../db";
 import { proxyFetch } from "./http";
 import { STORAGE_ROOT, storageBackend } from "./storage";
 import { assertPublicHostOrError, MAX_IMPORT_BYTES, readBodyCapped, ssrfGuardError } from "./databaseFiles";
+import { sanitizeReturnTo } from "../../shared/returnTo";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -132,26 +133,55 @@ function stateSig(payload: string): string {
   return createHmac("sha256", stateKey()).update(payload).digest("hex");
 }
 
+/**
+ * 授權完成後要回到哪一頁（資料中心 P2）。
+ *
+ * 為什麼要有這個：使用者是從「專案 → ＋加入資料 → Google」出發的，
+ * 授權完卻被丟到 /integrations 這個跟他意圖無關的設定頁，得自己走回去——
+ * 這正是 Golden Path 1 斷掉的地方。
+ *
+ * ★ 安全：returnTo 只允許**同站相對路徑**，而且它是被 **HMAC 簽進 state 一起簽的**，
+ *   不是 callback 上的自由參數——外人無法偽造一個把使用者導去別處的授權連結
+ *   （open redirect）。任何不合格的值一律丟掉，退回預設頁，絕不「盡量照做」。
+ */
+export function sanitizeIntegrationReturnTo(raw: string | null | undefined): string | null {
+  // 白名單本體在 shared/returnTo——前端組連結時用的是同一支，兩邊不會漂移
+  return sanitizeReturnTo(raw);
+}
+
 /** 以明確到期時刻簽發 state（可測接縫：讓測試造出「簽章正確但已過期」的樣本驗 TTL） */
-export function signIntegrationStateAt(userId: string, expiresAtMs: number): string {
-  const payload = Buffer.from(`${userId}|${expiresAtMs}`).toString("base64url");
+export function signIntegrationStateAt(userId: string, expiresAtMs: number, returnTo?: string | null): string {
+  // payload 第三段為可選的回跳路徑。舊 state（只有兩段）仍能驗過——升版不會讓
+  // 正在授權中的使用者的 state 突然失效。
+  const safe = sanitizeIntegrationReturnTo(returnTo);
+  const base = `${userId}|${expiresAtMs}`;
+  const payload = Buffer.from(safe ? `${base}|${encodeURIComponent(safe)}` : base).toString("base64url");
   return `${payload}.${stateSig(payload)}`;
 }
 
-export function signIntegrationState(userId: string): string {
-  return signIntegrationStateAt(userId, Date.now() + 10 * 60_000);
+export function signIntegrationState(userId: string, returnTo?: string | null): string {
+  return signIntegrationStateAt(userId, Date.now() + 10 * 60_000, returnTo);
 }
 
-export function verifyIntegrationState(state: string): { userId: string } | null {
+export function verifyIntegrationState(state: string): { userId: string; returnTo: string | null } | null {
   const [payload, sig] = state.split(".");
   if (!payload || !sig) return null;
   const expect = stateSig(payload);
   const a = Buffer.from(sig, "utf8");
   const b = Buffer.from(expect, "utf8");
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  const [userId, expStr] = Buffer.from(payload, "base64url").toString("utf8").split("|");
+  const [userId, expStr, returnRaw] = Buffer.from(payload, "base64url").toString("utf8").split("|");
   if (!userId || !expStr || Number(expStr) < Date.now()) return null;
-  return { userId };
+  let returnTo: string | null = null;
+  if (returnRaw) {
+    try {
+      // 簽章已保證這段沒被竄改，但仍再過一次白名單——沒有「因為簽過就放行」的路徑
+      returnTo = sanitizeIntegrationReturnTo(decodeURIComponent(returnRaw));
+    } catch {
+      returnTo = null;
+    }
+  }
+  return { userId, returnTo };
 }
 
 /* ────────────────────────── Google 雲端硬碟（OAuth drive.readonly） ────────────────────────── */
@@ -167,7 +197,7 @@ export function driveRedirectUri(): string {
   return `${base}/api/integrations/google-drive/callback`;
 }
 
-export function buildDriveAuthUrl(userId: string): string {
+export function buildDriveAuthUrl(userId: string, returnTo?: string | null): string {
   const q = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: driveRedirectUri(),
@@ -175,7 +205,8 @@ export function buildDriveAuthUrl(userId: string): string {
     scope: DRIVE_SCOPES,
     access_type: "offline",
     prompt: "consent", // 重複授權時 Google 預設不再發 refresh token——強制 consent 確保拿得到
-    state: signIntegrationState(userId),
+    // returnTo 簽進 state：授權完成後回到使用者原本的流程，而不是一律掉到 /integrations
+    state: signIntegrationState(userId, returnTo),
   });
   return `${OAUTH_AUTH_URL}?${q}`;
 }
@@ -555,7 +586,15 @@ export async function listDriveFiles(
 }
 
 export type DrivePickedResult =
-  | { ok: true; buf: Buffer; mime: string; name: string; sourceUrl: string }
+  | {
+    ok: true;
+    buf: Buffer;
+    mime: string;
+    name: string;
+    sourceUrl: string;
+    /** Google 端的最後修改時刻（RFC3339）；對方沒給就是 null——不編造（P6 來源譜系） */
+    modifiedTime: string | null;
+  }
   | { ok: false; reason: "not-connected" | "no-access" | "error"; message: string };
 
 /**
@@ -569,9 +608,11 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
   const unavailable = inactiveDriveResult(row);
   if (unavailable && !unavailable.ok) return unavailable;
   if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
-  let meta: { name?: string; mimeType?: string };
+  let meta: { name?: string; mimeType?: string; modifiedTime?: string };
   try {
-    const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size&supportsAllDrives=true`, 15_000);
+    // modifiedTime：來源譜系用（P6）——匯入當下記下對方的最後修改時刻，
+    // 之後才有辦法誠實回答「來源有沒有更新」。多要這個欄位不增加額外請求。
+    const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size,modifiedTime&supportsAllDrives=true`, 15_000);
     if (metaRes.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
     if (metaRes.status === 404 || metaRes.status === 403) {
       return { ok: false, reason: "no-access", message: driveNoAccessMessage(row) };
@@ -579,7 +620,7 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
     if (metaRes.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
     if (metaRes.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
     if (!metaRes.ok) throw new Error(`Google Drive 中繼資料查詢失敗（HTTP ${metaRes.status}）`);
-    meta = (await metaRes.json()) as { name?: string; mimeType?: string };
+    meta = (await metaRes.json()) as { name?: string; mimeType?: string; modifiedTime?: string };
   } catch (err) {
     return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Google Drive 讀取失敗" };
   }
@@ -596,6 +637,7 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
     // 匯出路徑（Google 文件系）fetchDriveFile 不帶名稱——用中繼資料的真實檔名
     name: fetched.name ?? meta.name ?? "匯入文件",
     sourceUrl: shape.sourceUrl,
+    modifiedTime: meta.modifiedTime ?? null,
   };
 }
 

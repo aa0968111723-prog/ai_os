@@ -451,9 +451,15 @@ mcp_list_proj = mcp_call("list_databases", {"projectId": bound_proj["id"]})
 ok("MCP list_databases 帶 projectId 標註關聯",
    any(d.get("tableId") == media_bound["tableId"] and d.get("linkedToProject") for d in mcp_list_proj))
 mcp_list_only = mcp_call("list_databases", {"projectId": bound_proj["id"], "linkedOnly": True})
-ok("MCP list linkedOnly 不含 none 綁定表",
-   all(d.get("linkedToProject") for d in mcp_list_only)
+# linkedOnly 的語意是「屬於這個專案」，而屬於有兩條路（P4 dual read）：
+# 有列的 project 欄指向它（linkedToProject），或整張表被提供給它（boundToProject）。
+# 這個專案沒有建立任何 P4 綁定，所以實際上只會走前者；判斷式仍寫成兩條的聯集，
+# 免得之後有人加了綁定就撞上一個其實已經不成立的假設。
+ok("MCP list linkedOnly 只回屬於本專案的表",
+   all(d.get("linkedToProject") or d.get("boundToProject") for d in mcp_list_only)
    and not any(d["tableId"] == bound["tableId"] for d in mcp_list_only))
+ok("MCP list 帶 projectId 時附上整張提供旗標",
+   all("boundToProject" in d for d in mcp_list_proj))
 # 預填 project 加列
 mcp_add = mcp_call("add_database_row", {
     "tableId": media_bound["tableId"],
