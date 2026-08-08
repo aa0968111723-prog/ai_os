@@ -1,4 +1,4 @@
-import { and, desc, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { DataField } from "../../shared/databaseFields";
 import { lexicalOverlap } from "./intelligenceCore";
@@ -79,15 +79,28 @@ export async function retrieveAssistantDatabaseEvidence(
   if (!databases.length || !terms.length) return [];
   const tableById = new Map(databases.map((table) => [table.id, table]));
   const patterns = terms.map((term) => `%${escapeLikeLiteral(term)}%`);
-  const rows = await db.select({
-    id: schema.dataRows.id,
-    tableId: schema.dataRows.tableId,
-    data: schema.dataRows.data,
-    updatedAt: schema.dataRows.updatedAt,
-  }).from(schema.dataRows).where(and(
-    inArray(schema.dataRows.tableId, [...tableById.keys()]),
-    or(...patterns.map((pattern) => sql`${schema.dataRows.data}::text ilike ${pattern} escape ${"\\"}`)),
-  )).orderBy(desc(schema.dataRows.updatedAt)).limit(Math.min(300, Math.max(20, options.candidateLimit ?? 120)));
+  const candidateLimit = Math.min(300, Math.max(20, options.candidateLimit ?? 120));
+  // Keep a bounded, relevance-ranked slice from every authorized table. A
+  // single busy table must not fill a global updatedAt-first cap and hide an
+  // older exact match in another table (or even in the same table).
+  const perTableCandidateLimit = Math.min(40, Math.max(
+    5,
+    Math.ceil(candidateLimit / Math.min(8, databases.length)),
+  ));
+  const rows = (await Promise.all(databases.map(async (table) => {
+    const relevance = sql<number>`(${sql.join(terms.map((term, index) => (
+      sql`case when ${schema.dataRows.data}::text ilike ${patterns[index]!} escape ${"\\"} then ${Math.min(40, term.length)} else 0 end`
+    )), sql` + `)})`;
+    return db.select({
+      id: schema.dataRows.id,
+      tableId: schema.dataRows.tableId,
+      data: schema.dataRows.data,
+      updatedAt: schema.dataRows.updatedAt,
+    }).from(schema.dataRows).where(and(
+      eq(schema.dataRows.tableId, table.id),
+      or(...patterns.map((pattern) => sql`${schema.dataRows.data}::text ilike ${pattern} escape ${"\\"}`)),
+    )).orderBy(desc(relevance), desc(schema.dataRows.updatedAt)).limit(perTableCandidateLimit);
+  }))).flat();
 
   const candidates = rows.flatMap((row) => {
     const table = tableById.get(row.tableId);

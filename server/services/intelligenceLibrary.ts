@@ -66,7 +66,33 @@ export interface RegisterIntelligenceInput {
   force?: boolean;
 }
 
+async function resourceAllowsAiAnalysis(input: Pick<RegisterIntelligenceInput, "resourceKind" | "resourceId">): Promise<boolean> {
+  if (input.resourceKind === "table") {
+    const [table] = await db.select({ id: schema.dataTables.id }).from(schema.dataTables)
+      .where(and(
+        eq(schema.dataTables.id, input.resourceId),
+        isNull(schema.dataTables.deletedAt),
+        ne(schema.dataTables.agentAccess, "none"),
+      )).limit(1);
+    return Boolean(table);
+  }
+  if (input.resourceKind === "document") {
+    const [file] = await db.select({ id: schema.dataFiles.id }).from(schema.dataFiles)
+      .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
+      .where(and(
+        eq(schema.dataFiles.id, input.resourceId),
+        isNull(schema.dataTables.deletedAt),
+        ne(schema.dataTables.agentAccess, "none"),
+      )).limit(1);
+    return Boolean(file);
+  }
+  return true;
+}
+
 export async function registerIntelligenceResource(input: RegisterIntelligenceInput): Promise<IntelligenceRow> {
+  if (!await resourceAllowsAiAnalysis(input)) {
+    throw new Error("Resource is not enabled for AI analysis");
+  }
   const now = new Date();
   const [row] = await db
     .insert(schema.assetIntelligence)
@@ -251,7 +277,11 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       createdAt: schema.dataFiles.createdAt,
     }).from(schema.dataFiles)
       .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
-      .where(and(eq(schema.dataFiles.id, intel.resourceId), isNull(schema.dataTables.deletedAt)));
+      .where(and(
+        eq(schema.dataFiles.id, intel.resourceId),
+        isNull(schema.dataTables.deletedAt),
+        ne(schema.dataTables.agentAccess, "none"),
+      ));
     if (!file) return null;
     return {
       intelligence: intel,
@@ -275,7 +305,11 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
   }
   if (intel.resourceKind === "table") {
     const [table] = await db.select().from(schema.dataTables)
-      .where(and(eq(schema.dataTables.id, intel.resourceId), isNull(schema.dataTables.deletedAt)));
+      .where(and(
+        eq(schema.dataTables.id, intel.resourceId),
+        isNull(schema.dataTables.deletedAt),
+        ne(schema.dataTables.agentAccess, "none"),
+      ));
     if (!table || !table.groupId) return null;
     const rows = await db.select({ id: schema.dataRows.id, data: schema.dataRows.data })
       .from(schema.dataRows)
@@ -1270,7 +1304,11 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
         eq(schema.assetIntelligence.resourceKind, "document"),
         eq(schema.assetIntelligence.resourceId, schema.dataFiles.id),
       ))
-      .where(and(isNull(schema.dataTables.deletedAt), isNull(schema.assetIntelligence.id)))
+      .where(and(
+        isNull(schema.dataTables.deletedAt),
+        ne(schema.dataTables.agentAccess, "none"),
+        isNull(schema.assetIntelligence.id),
+      ))
       .limit(perKind),
     db.select({
       id: schema.dataTables.id,
@@ -1286,6 +1324,7 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
       .where(and(
         isNull(schema.dataTables.deletedAt),
         isNotNull(schema.dataTables.groupId),
+        ne(schema.dataTables.agentAccess, "none"),
         or(
           isNull(schema.assetIntelligence.id),
           and(
