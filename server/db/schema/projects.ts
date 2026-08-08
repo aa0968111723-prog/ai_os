@@ -258,6 +258,14 @@ export const scenes = pgTable("scenes", {
   /** 這一鏡採用的造型 → character_looks.id[]；null＝未指定（沿用角色 Identity） */
   lookIds: jsonb("look_ids").$type<string[]>(),
   /**
+   * 審核狀態（§17）：完成度五軌裡唯一存不出來的一軌——「人有沒有看過並通過」。
+   * approved 的素材不會被 AI 自動覆蓋（要重生成得另建版本），見 scenes.review。
+   */
+  reviewStatus: text("review_status")
+    .$type<import("../../../shared/shotCompletion").ReviewState>()
+    .notNull()
+    .default("draft"),
+  /**
    * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
    * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
    * 而不是靜悄悄地讓後寫的人贏。
@@ -268,6 +276,8 @@ export const scenes = pgTable("scenes", {
 }, (t) => ({
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
   storySceneIdx: index("scenes_story_scene_idx").on(t.storySceneId),
+  // 成片頁按「待審／需修改」撈整個專案的鏡（§12 缺漏清單）
+  projectReviewIdx: index("scenes_project_review_idx").on(t.projectId, t.reviewStatus),
 }));
 
 /**

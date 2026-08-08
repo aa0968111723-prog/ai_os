@@ -52,6 +52,7 @@ import {
 } from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { StoryStage } from "../features/story-workspace/StoryStage";
+import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
@@ -2567,6 +2568,15 @@ export function ProjectPage({ id }: { id: string }) {
             desc="粗剪・配音・打包交付"
             accent="group-3"
             hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
+          />
+          {/* §12 交付室第一屏：完成度＋缺漏清單。補件本身仍在 ② 分鏡的單格工作室，
+              點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
+          <DeliveryRoom
+            projectId={id}
+            canEdit={canEdit}
+            onOpenShot={(shotId) => {
+              scrollToSelector(`#board-shot-${shotId}`);
+            }}
           />
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
