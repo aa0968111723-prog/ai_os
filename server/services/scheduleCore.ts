@@ -272,6 +272,19 @@ export async function updateScheduleItemCore(input: {
   return updated;
 }
 
+/** tRPC 與 Agent Undo 共用的排程刪除核心；權限／專案狀態守門只有這一份。 */
+export async function removeScheduleItemCore(auth: AuthState, id: string): Promise<{ ok: true }> {
+  const row = await getScheduleItemChecked(auth, id);
+  const role = requireGroup(auth, row.groupId);
+  if (scheduleWriteDenied(row.createdBy, auth.user.id, role)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以刪除行程" });
+  }
+  if (row.projectId) await assertProjectScheduleWritable(auth, row.groupId, row.projectId);
+  await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
+  queueGroupSync(row.groupId);
+  return { ok: true };
+}
+
 /** 代理專用 exactly-once 更新：行程變更與效果憑證同一交易提交。 */
 export async function updateScheduleItemOnceCore(input: {
   auth: AuthState;

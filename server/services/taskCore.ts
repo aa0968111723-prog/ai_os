@@ -694,6 +694,35 @@ export function completeProjectTaskCore(auth: AuthState, id: string): Promise<Pr
   return settleTask({ auth, id, decision: "complete" });
 }
 
+/**
+ * 撤銷剛建立的人類任務。使用 cancelled 而不是實體刪除，保留來源與稽核鏈。
+ * 權限與調整任務相同：建立者、負責人或組長以上，且封存專案不可寫。
+ */
+export async function cancelProjectTaskCore(auth: AuthState, id: string): Promise<ProjectTaskRow> {
+  const task = await getProjectTaskChecked(auth, id);
+  const role = requireGroup(auth, task.groupId);
+  if (auth.user.id !== task.assigneeId && auth.user.id !== task.createdBy && role === "member") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有負責人、建立者或組長以上可以取消任務" });
+  }
+  if (task.status === "done" || task.status === "cancelled") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束" });
+  }
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, task.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(auth, project);
+  assertProjectNotArchived(project);
+  const [cancelled] = await db
+    .update(schema.projectTasks)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(
+      eq(schema.projectTasks.id, task.id),
+      notInArray(schema.projectTasks.status, ["done", "cancelled"]),
+    ))
+    .returning();
+  if (!cancelled) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束" });
+  return cancelled;
+}
+
 export function decideProjectApprovalCore(
   auth: AuthState,
   id: string,

@@ -1,17 +1,13 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup } from "../trpc";
-import { db, schema } from "../db";
+import { router, authedProcedure } from "../trpc";
 import {
   getScheduleItemChecked,
   listScheduleForGroup,
-  scheduleWriteDenied,
   updateScheduleItemCore,
+  removeScheduleItemCore,
 } from "../services/scheduleCore";
 import { executeScheduleCommand } from "../services/scheduleCommand";
 import { importIcsEvents } from "../services/scheduleImport";
-import { queueGroupSync } from "../services/googleCalendar";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
@@ -139,23 +135,7 @@ export const scheduleRouter = router({
 
   /** 刪除：建立者本人或組長以上；專案綁定行程另擋檢視者／封存 */
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const row = await getScheduleItemChecked(ctx.auth, input.id);
-    const role = requireGroup(ctx.auth, row.groupId);
-    if (scheduleWriteDenied(row.createdBy, ctx.auth.user.id, role)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以刪除行程" });
-    }
-    if (row.projectId) {
-      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
-      if (!project || project.groupId !== row.groupId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
-      }
-      const { assertProjectEditable, assertProjectNotArchived } = await import("../services/projectAcl");
-      assertProjectNotArchived(project);
-      await assertProjectEditable(ctx.auth, project);
-    }
-    await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
-    queueGroupSync(row.groupId);
-    return { ok: true };
+    return removeScheduleItemCore(ctx.auth, input.id);
   }),
 });
 

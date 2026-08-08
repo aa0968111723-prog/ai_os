@@ -57,9 +57,9 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
   if (multi) {
     if (ctx.entityType === "shot" || ctx.pageType === "storyboard") {
       return [
-        { id: "shots.batch-improve", label: "批次改善", prompt: `${many(sel.length, "鏡")}節奏偏平，請逐鏡給具體的改善建議（景別、動作、鏡頭運動）。` },
+        { id: "shots.batch-improve", label: "直接優化", prompt: `請直接優化${many(sel.length, "鏡")}的景別、動作與鏡頭運動，沒有選到的鏡頭不要更動。` },
+        { id: "shots.directions", label: "3 個方向", prompt: `針對${many(sel.length, "鏡")}節奏偏平的問題，給我 3 個彼此不同的改善方向。` },
         { id: "shots.unify-style", label: "統一風格", prompt: `請檢查${many(sel.length, "鏡")}的畫面風格是否一致，並指出要調整哪幾鏡。` },
-        { id: "shots.batch-prompt", label: "批次提示詞", prompt: `請為${many(sel.length, "鏡")}各寫一段可直接生成的畫面提示詞。` },
       ];
     }
     if (ctx.entityType === "asset" || ctx.pageType === "assets") {

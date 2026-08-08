@@ -54,7 +54,7 @@ describe("getAssistantQuickActions", () => {
       pageType: "storyboard", entityType: "shot", entityId: "s3", entityLabel: "第 3 鏡",
       selectedEntityIds: ["s3", "s4", "s5"],
     }));
-    expect(out.map((a) => a.id)).toEqual(["shots.batch-improve", "shots.unify-style", "shots.batch-prompt"]);
+    expect(out.map((a) => a.id)).toEqual(["shots.batch-improve", "shots.directions", "shots.unify-style"]);
     expect(out[0].prompt).toContain("3");
   });
 

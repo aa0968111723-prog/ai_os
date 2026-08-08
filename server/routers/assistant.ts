@@ -38,6 +38,7 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
+import { softDeleteScenesCore } from "../services/sceneWriteCore";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { planAgentCore } from "../services/agentCore";
 import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
@@ -83,8 +84,8 @@ function previewMediaKind(kind: string | null | undefined): PreviewMediaKind {
  * 專案 AI 代理系統（統一入口）：一個對話統包「問答、發想、拆分鏡、排計畫執行、查資料庫」——
  * 讀專案上下文回答，並可「提議」動作（生成／新增分鏡（可帶提示詞＝發想落地）／改分鏡／
  * 跑工作流／拆分鏡／把目標交給 AI 代理排多步計畫 plan_agent）。
- * 安全設計：助手只「提議」，一切花點數或改資料的動作都由前端讓使用者按確認後、
- * 再走 runAction 以「登入者本人」身分執行（非自動、非開發者）——AI 不會擅自動手。
+ * 安全設計：模型只輸出結構化動作意圖；執行仍走 runAction 並以登入者本人身分重驗。
+ * 明確 ACT 的可逆免費動作可由 Agent UX 直接送出並提供 Undo；付費／外部／破壞性動作仍需確認。
  * plan_agent 是雙重守門：確認後也只「排出計畫」（站內 0 點；Fal 依 token 計費），執行還要在代理執行區核准估點。
  * LLM 輸出一律只帶「代號」（sceneNo／modelId／presetId／dbRef），落地前全部過白名單／範圍校驗，防幻覺 id。
  *
@@ -167,8 +168,8 @@ const proposalSchema = z.discriminatedUnion("type", [
     camera: shotCameraSchema.optional(),
     performance: shotPerformanceSchema.optional(),
   }),
-  // split_script 的 script＝腳本全文（要求 LLM 從使用者訊息原樣抄錄）；下限 20 擋「拆一句話」的誤提議，上限 8000 收斂成本
-  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
+  // script 省略＝由 splitScriptCore 讀目前專案的腳本知識；使用者貼全文時才原樣帶入。
+  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000).optional() }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
   z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),
   // 套用世界觀 chips（主軸／調性／風格）：陣列第一個＝主要；落地時硬截到軟上限；使用者確認後才寫入
@@ -228,7 +229,7 @@ type ResolvedAction =
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   // direct_shot：changes＝已算好的 before→after 差異行（§14 變更預覽，前端直接顯示不必重算）
   | { type: "direct_shot"; label: string; sceneId: string; camera?: ShotCamera; performance?: ShotPerformance; changes: string[] }
-  | { type: "split_script"; label: string; script: string }
+  | { type: "split_script"; label: string; script?: string }
   | { type: "plan_agent"; label: string; goal: string }
   | {
       type: "apply_worldview_chips";
@@ -251,7 +252,7 @@ const actionInputSchema = z.discriminatedUnion("type", [
     camera: shotCameraSchema.optional(),
     performance: shotPerformanceSchema.optional(),
   }),
-  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
+  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000).optional() }),
   z.object({
     type: z.literal("plan_agent"),
     goal: z.string().min(5).max(1000),
@@ -787,7 +788,7 @@ const LOOKUP_LABEL: Record<string, string> = {
 /**
  * 專案助手問答核心（tRPC ask 與 SSE 串流路由共用）：讀專案上下文 → 多步唯讀工具迴圈 → 最終回答＋可執行動作。
  * onEvent 逐步回報「思考過程」（讀取現況／正在查什麼／查到什麼／整理回答），讓前端可即時串流呈現全過程；
- * 不帶 onEvent 時行為與原本 ask 完全一致（只在結束回 steps 摘要）。所有花點數/改資料仍只在 runAction，經使用者確認。
+ * 不帶 onEvent 時行為與原本 ask 完全一致（只在結束回 steps 摘要）。所有寫入仍只走 runAction 的 ACL／政策守門。
  */
 export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
   let traceSessionId = input.traceSessionId;
@@ -846,6 +847,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           .orderBy(schema.scenes.orderIndex),
         buildProjectIntelligence(project.id),
       ]);
+      emit("thinking", "已取得專案、分鏡與生成現況");
       const genDone = intelligence.generations.done;
       const genRunning = intelligence.generations.active;
       const genFailed = intelligence.generations.failed;
@@ -953,7 +955,13 @@ ${sceneLines}
             out.push({ type: "run_workflow", presetId: preset.id, prompt: a.prompt, label: `執行工作流「${preset.label}」（約 ${preset.points} 點）` });
           } else if (a.type === "split_script") {
             // label 註明會叫 AI 導演與扣點，使用者按下前就知道這顆會花錢
-            out.push({ type: "split_script", script: a.script, label: `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，免費）` });
+            out.push({
+              type: "split_script",
+              script: a.script,
+              label: a.script
+                ? `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，免費）`
+                : "把目前專案腳本拆成分鏡（AI 導演，免費）",
+            });
           } else {
             const scene = scenes[a.sceneNo - 1];
             if (!scene) continue;
@@ -996,20 +1004,20 @@ ${forceFinal
 能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
 分鏡、生成統計與知識庫已經在 <專案現況> 裡，不要用工具重查；工具是用來看「人的事」（任務／行程／筆記）與明細（單一分鏡全文、素材清單、資料庫列）。
 例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
-你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script","script":"…"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。可提議的動作：
+你也可以輸出結構化動作意圖。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。後端會依風險決定直接執行或顯示確認。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
 - direct_shot：只調某一鏡的**鏡頭語言與表演**（sceneNo＋camera／performance，兩者皆可選但至少給一個）。camera 可填 shotSize（${SHOT_SIZE_OPTIONS.join("/")}）、angle（${SHOT_ANGLE_OPTIONS.join("/")}）、movement（${SHOT_MOVEMENT_OPTIONS.join("/")}）、focalLength、lighting、composition；performance 可填 emotion、gaze。**只填你要改的欄位**——沒填的欄位會原樣保留，填空字串 "" 才是清掉。使用者說「這一鏡再靠近一點／換低角度／眼神看遠一點／光再柔一點」時用這個，不要用 update_scene（那支只改標題／旁白／秒數）。
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60、prompt 建議畫面提示詞 2000 字內）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
-- split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
+- split_script：把腳本拆成一幕幕的分鏡草稿。使用者貼了完整腳本時，script 原樣抄錄（至少 20 字）；只說「把目前腳本拆成分鏡」時省略 script，由執行核心讀目前專案腳本；免費。
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→逐鏡配音」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
-一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
+一次回覆最多輸出 6 個動作；不要假設前一步已完成。安全且可逆的明確 ACT 可由後端直接執行，其餘會要求使用者確認。
 <視覺風格速查>
 ${styleFamilyCheatsheet()}
 </視覺風格速查>
@@ -1191,7 +1199,7 @@ export const assistantRouter = router({
       };
     }),
 
-  /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
+  /** 問答：讀專案現況回答並輸出結構化動作意圖；核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure
     // nonce 僅關聯串流與 fallback；每次外部呼叫仍各自計入限流。
     .input(z.object({
@@ -1401,7 +1409,13 @@ export const assistantRouter = router({
         const truncNote = result.truncation
           ? `。⚠ 腳本共 ${result.truncation.totalChars.toLocaleString()} 字，AI 只讀了前 ${result.truncation.sentChars.toLocaleString()} 字（後面 ${result.truncation.droppedChars.toLocaleString()} 字未拆入）——建議把長腳本分段、多次拆分`
           : "";
-        return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}` };
+        return {
+          ok: true,
+          kind: "split_script" as const,
+          createdScenes: result.count,
+          sceneIds: result.scenes.map((scene) => scene.id),
+          message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}`,
+        };
       }
 
       if (a.type === "apply_worldview_chips") {
@@ -1430,4 +1444,12 @@ export const assistantRouter = router({
 
       throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });
     }),
+
+  /** 拆分鏡直接執行結果的 Undo：只把該次回傳的分鏡移入回收桶。 */
+  undoCreatedScenes: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      sceneIds: z.array(z.string().uuid()).min(1).max(12),
+    }))
+    .mutation(({ ctx, input }) => softDeleteScenesCore(ctx.auth, input.projectId, input.sceneIds)),
 });
