@@ -8376,3 +8376,38 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   /* iOS 聚焦自動放大：搜尋框 ≥16px */
   .hub-search input { font-size: 16px; }
 }
+
+/* ── 本次依據（AskSources，P5）──────────────────────────────
+   AI 這次讀了什麼。誠實優先於好看：被截斷、沒讀到的都列出來。 */
+.ask-sources { margin-top: 6px; }
+.ask-sources > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: var(--fs-13);
+}
+.ask-sources__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ask-sources__list > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* 長標題省略而不撐破對話氣泡 */
+.ask-sources__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

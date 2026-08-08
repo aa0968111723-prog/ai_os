@@ -13,6 +13,25 @@ export type AssistantStreamDone = {
   provider?: string;
   model?: string;
   traceSessionId?: string;
+  /**
+   * 本次依據（P5）：這次回答實際讀進上下文的知識篇目與各自的完整度。
+   * ★ truncated 為真時畫面必須說出來——使用者若以為 AI 看過全部，會把一個
+   *   「只看了一半」的回答當成完整判斷。
+   */
+  sources?: {
+    items: Array<{
+      id: string;
+      title: string;
+      kind: string;
+      status: "full" | "partial" | "skipped";
+      chars: number;
+      includedChars: number;
+    }>;
+    truncated: boolean;
+    budgetChars: number;
+    includedChars: number;
+    totalContentChars: number;
+  };
 };
 
 export type AssistantStreamHandlers = {
@@ -152,6 +171,7 @@ export async function requestAssistantStream({
   nonce,
   mode,
   knowledgeIds,
+  onlyKnowledgeIds,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -163,6 +183,8 @@ export async function requestAssistantStream({
   mode?: AgentPlannerMode;
   /** 本次問答優先注入的知識 id */
   knowledgeIds?: string[];
+  /** 本次「只用這幾份依據」（P5）；空陣列視同未指定 */
+  onlyKnowledgeIds?: string[];
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -180,6 +202,7 @@ export async function requestAssistantStream({
         nonce,
         mode,
         knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+        onlyKnowledgeIds: onlyKnowledgeIds?.length ? onlyKnowledgeIds : undefined,
       }),
       signal,
     });

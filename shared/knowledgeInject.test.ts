@@ -132,3 +132,60 @@ describe("assembleKnowledgeContext", () => {
     expect(r.text).toContain("側記摘要重點");
   });
 });
+
+/**
+ * P5「本次只用這幾份依據」。
+ *
+ * 最重要的一條：這是**限制**不是排序。使用者說「只用這三份」時，第四份不該因為
+ * 預算還有剩就偷偷混進去——那等於系統用了他沒選的資料，還讓他以為沒有。
+ */
+describe("onlyIds（本次只用這幾份）", () => {
+  const rows = [
+    row({ id: "a", kind: "script", title: "腳本", content: "AAAA" }),
+    row({ id: "b", kind: "note", title: "筆記", content: "BBBB" }),
+    row({ id: "c", kind: "transcript", title: "開示", content: "CCCC" }),
+  ];
+
+  it("★ 只有選中的進得了上下文——沒選的即使預算還有剩也不進", () => {
+    const r = assembleKnowledgeContext(rows, "", labelOf, { onlyIds: ["a"], budgetChars: 10_000 });
+    expect(r.text).toContain("腳本");
+    expect(r.text).not.toContain("筆記");
+    expect(r.text).not.toContain("開示");
+    expect(r.items.map((i) => i.id)).toEqual(["a"]);
+  });
+
+  it("空陣列視同未指定（呼叫端不小心傳空陣列不該把依據全部清空）", () => {
+    const r = assembleKnowledgeContext(rows, "", labelOf, { onlyIds: [], budgetChars: 10_000 });
+    expect(r.items.map((i) => i.id).sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("★ 選的 id 全都不存在時維持空集合——不可以自作主張退回全部", () => {
+    // script_only 在沒有腳本時會退回全部；這裡刻意不那樣做：
+    // 使用者明確說「只用這幾份」，退回全部等於偷偷用了他沒選的資料。
+    const r = assembleKnowledgeContext(rows, "", labelOf, { onlyIds: ["nope"], budgetChars: 10_000 });
+    expect(r.items).toEqual([]);
+    expect(r.text).not.toContain("腳本");
+    expect(r.text).not.toContain("筆記");
+  });
+
+  it("★ 限制不會放寬預算——選中的一樣會被上限截斷並誠實回報", () => {
+    const long = [row({ id: "a", kind: "script", title: "長腳本", content: "x".repeat(500) })];
+    const r = assembleKnowledgeContext(long, "", labelOf, { onlyIds: ["a"], budgetChars: 100 });
+    expect(r.includedChars).toBeLessThanOrEqual(100);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("totalContentChars 以「本次可用的集合」為分母，截斷率才有意義", () => {
+    const r = assembleKnowledgeContext(rows, "", labelOf, { onlyIds: ["a"], budgetChars: 10_000 });
+    expect(r.totalContentChars).toBe(4); // 只有 a 的 "AAAA"
+  });
+
+  it("與 preferIds 併用：仍只在選中的集合內排序", () => {
+    const r = assembleKnowledgeContext(rows, "", labelOf, {
+      onlyIds: ["a", "b"],
+      preferIds: ["b"],
+      budgetChars: 10_000,
+    });
+    expect(r.items.map((i) => i.id)).toEqual(["b", "a"]);
+  });
+});
