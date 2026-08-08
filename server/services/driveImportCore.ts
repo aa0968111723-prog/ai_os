@@ -30,6 +30,11 @@ export async function importDrivePickedFileToTable(
     const inserted = await insertDataFileUnderQuota(auth.user.id, sizeBytes, {
       tableId, name, mime: "text/plain", sizeBytes,
       sourceUrl: picked.sourceUrl, textContent: text, uploadedBy: auth.user.id,
+      // 來源譜系（P6）：從選檔器來的一定是 Google 雲端；modifiedTime 對方沒給就留 null，不編
+      sourceProvider: "google-drive",
+      sourceExternalId: input.fileId,
+      sourceModifiedAt: picked.modifiedTime ? new Date(picked.modifiedTime) : null,
+      lastSyncedAt: new Date(),
     });
     if (!inserted.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
     return { id: inserted.row.id, name, readableChars: text.length };
@@ -44,6 +49,10 @@ export async function importDrivePickedFileToTable(
     const inserted = await insertDataFileUnderQuota(auth.user.id, saved.sizeBytes, {
       tableId, name, mime: picked.mime, sizeBytes: saved.sizeBytes,
       storagePath: saved.storagePath, sourceUrl: picked.sourceUrl, textContent: text, uploadedBy: auth.user.id,
+      sourceProvider: "google-drive",
+      sourceExternalId: input.fileId,
+      sourceModifiedAt: picked.modifiedTime ? new Date(picked.modifiedTime) : null,
+      lastSyncedAt: new Date(),
     });
     if (!inserted.ok) {
       await removeStoredFile(saved.storagePath);

@@ -19,9 +19,11 @@ import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
 import {
+  dataHubResolveSource,
   dataHubResourceId,
-  dataHubSourceFromUrl,
+  dataHubSourceHasUpdate,
   dataHubStatusOf,
+  formatDataHubSyncedAt,
   formatDataHubBytes,
   formatDataHubChars,
   formatDataHubRows,
@@ -152,6 +154,9 @@ function tableSlice(auth: AuthState, query: DataHubQuery, tables: Awaited<Return
       updatedAt: iso(t.updatedAt),
       href: `/databases?open=${encodeURIComponent(t.id)}`,
       sizeLabel: formatDataHubRows(t.rowCount),
+      // 表本身是站內建立的結構，沒有外部來源可談
+      syncedLabel: null,
+      sourceHasUpdate: false,
     };
   });
   return { resources, truncated: matched.length > resources.length };
@@ -179,6 +184,9 @@ async function documentSlice(
       mime: schema.dataFiles.mime,
       sizeBytes: schema.dataFiles.sizeBytes,
       sourceUrl: schema.dataFiles.sourceUrl,
+      sourceProvider: schema.dataFiles.sourceProvider,
+      sourceModifiedAt: schema.dataFiles.sourceModifiedAt,
+      lastSyncedAt: schema.dataFiles.lastSyncedAt,
       aiDescription: schema.dataFiles.aiDescription,
       readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
       createdAt: schema.dataFiles.createdAt,
@@ -206,7 +214,13 @@ async function documentSlice(
       rawId: f.id,
       title: f.name,
       scope: table.scope as DataHubScope,
-      source: dataHubSourceFromUrl(f.sourceUrl),
+      // 已記錄的供應商優先；沒記錄（舊列）才從網址猜——猜出來的不該蓋掉匯入當下的事實。
+      // 兩者都沒有＝這份檔案是直接上傳的（文件一定是「進來過」的，不像知識庫可以站內打字建立）。
+      source: dataHubResolveSource({
+        sourceProvider: f.sourceProvider,
+        sourceUrl: f.sourceUrl,
+        fallback: "upload",
+      }),
       projectId: null,
       projectTitle: null,
       groupId: table.groupId,
@@ -216,6 +230,11 @@ async function documentSlice(
       updatedAt: iso(f.createdAt),
       href: `/databases?open=${encodeURIComponent(f.tableId)}`,
       sizeLabel: readableChars > 0 ? formatDataHubChars(readableChars) : formatDataHubBytes(f.sizeBytes),
+      syncedLabel: f.lastSyncedAt ? formatDataHubSyncedAt(iso(f.lastSyncedAt)) : null,
+      sourceHasUpdate: dataHubSourceHasUpdate({
+        sourceModifiedAt: f.sourceModifiedAt ? iso(f.sourceModifiedAt) : null,
+        lastSyncedAt: f.lastSyncedAt ? iso(f.lastSyncedAt) : null,
+      }),
     };
   });
   return { resources, truncated: rows.length > page.length };
@@ -247,6 +266,10 @@ async function knowledgeSlice(auth: AuthState, query: DataHubQuery): Promise<Dom
       groupId: schema.knowledge.groupId,
       title: schema.knowledge.title,
       sourceAssetId: schema.knowledge.sourceAssetId,
+      sourceProvider: schema.knowledge.sourceProvider,
+      sourceUrl: schema.knowledge.sourceUrl,
+      sourceModifiedAt: schema.knowledge.sourceModifiedAt,
+      lastSyncedAt: schema.knowledge.lastSyncedAt,
       chars: sql<number>`length(${schema.knowledge.content})`,
       createdAt: schema.knowledge.createdAt,
     })
@@ -264,9 +287,13 @@ async function knowledgeSlice(auth: AuthState, query: DataHubQuery): Promise<Dom
       rawId: k.id,
       title: k.title,
       scope: "project",
-      // 知識庫沒有 lineage 欄位——由站內素材轉來的看得出是 upload，其餘一律誠實標「站內建立」，
-      // 不從標題猜來源（假 lineage 比沒有 lineage 更糟）。
-      source: k.sourceAssetId ? "upload" : "manual",
+      // 有記錄就用記錄（P6 之後匯入的都有）；沒有記錄的舊列，由站內素材轉來的算 upload，
+      // 其餘一律誠實標「站內建立」——不從標題猜來源（假 lineage 比沒有 lineage 更糟）。
+      source: dataHubResolveSource({
+        sourceProvider: k.sourceProvider,
+        sourceUrl: k.sourceUrl,
+        fallback: k.sourceAssetId ? "upload" : "manual",
+      }),
       projectId: k.projectId,
       projectTitle: null,
       groupId: k.groupId,
@@ -276,6 +303,11 @@ async function knowledgeSlice(auth: AuthState, query: DataHubQuery): Promise<Dom
       updatedAt: iso(k.createdAt),
       href: `/p/${encodeURIComponent(k.projectId)}#sec-knowledge`,
       sizeLabel: formatDataHubChars(Number(k.chars ?? 0)),
+      syncedLabel: k.lastSyncedAt ? formatDataHubSyncedAt(iso(k.lastSyncedAt)) : null,
+      sourceHasUpdate: dataHubSourceHasUpdate({
+        sourceModifiedAt: k.sourceModifiedAt ? iso(k.sourceModifiedAt) : null,
+        lastSyncedAt: k.lastSyncedAt ? iso(k.lastSyncedAt) : null,
+      }),
     };
   });
   return { resources, truncated: rows.length > page.length };
@@ -333,6 +365,9 @@ async function assetSlice(auth: AuthState, query: DataHubQuery): Promise<DomainS
       updatedAt: iso(a.createdAt),
       href: `/p/${encodeURIComponent(a.projectId)}#sec-assets`,
       sizeLabel: a.sizeBytes ? formatDataHubBytes(a.sizeBytes) : null,
+      // 素材是站內上傳或生成的，沒有外部來源可同步
+      syncedLabel: null,
+      sourceHasUpdate: false,
     };
   });
   return { resources, truncated: rows.length > page.length };

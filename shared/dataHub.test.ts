@@ -6,8 +6,12 @@ import {
   dataHubAiAccessLabel,
   dataHubConnectionLabel,
   dataHubConnectionState,
+  dataHubProviderFromImportKind,
+  dataHubResolveSource,
   dataHubResourceId,
   dataHubSourceFromUrl,
+  dataHubSourceHasUpdate,
+  formatDataHubSyncedAt,
   dataHubStatusOf,
   dataHubSummarySentence,
   formatDataHubBytes,
@@ -39,6 +43,8 @@ function resource(over: Partial<DataHubResource> = {}): DataHubResource {
     updatedAt: "2026-08-01T00:00:00.000Z",
     href: "/p/p1#sec-knowledge",
     sizeLabel: "1,200 字",
+    syncedLabel: null,
+    sourceHasUpdate: false,
     ...over,
   };
 }
@@ -291,5 +297,98 @@ describe("連線狀態（永遠只講「能不能去挑」，不是 AI 讀得到
   it("未連接", () => {
     expect(dataHubConnectionState({ connected: false })).toBe("not-connected");
     expect(dataHubConnectionLabel("not-connected")).toBe("尚未連接");
+  });
+});
+
+/* ────────── 來源譜系（P6）────────── */
+
+describe("dataHubProviderFromImportKind（匯入當下就記下來，不事後猜）", () => {
+  it("Google 系的四種 kind 都算 Google 雲端", () => {
+    for (const k of ["google-doc", "google-sheet", "google-slides", "google-drive"] as const) {
+      expect(dataHubProviderFromImportKind(k)).toBe("google-drive");
+    }
+  });
+
+  it("notion 與一般網址各自對應", () => {
+    expect(dataHubProviderFromImportKind("notion")).toBe("notion");
+    expect(dataHubProviderFromImportKind("web")).toBe("url");
+  });
+});
+
+describe("dataHubResolveSource（記錄優先於猜測）", () => {
+  it("★ 有記錄就用記錄——猜出來的不該蓋掉匯入當下知道的事實", () => {
+    // 網址看起來像一般網頁，但匯入當下記的是 Notion（例如自訂網域的 Notion 站）
+    expect(dataHubResolveSource({
+      sourceProvider: "notion",
+      sourceUrl: "https://example.com/page",
+    })).toBe("notion");
+  });
+
+  it("沒有記錄（舊列）才從網址猜", () => {
+    expect(dataHubResolveSource({
+      sourceProvider: null,
+      sourceUrl: "https://docs.google.com/document/d/x/edit",
+    })).toBe("google-drive");
+  });
+
+  it("兩者都沒有時用呼叫端給的 fallback", () => {
+    expect(dataHubResolveSource({ fallback: "upload" })).toBe("upload");
+    expect(dataHubResolveSource({})).toBe("manual");
+  });
+
+  it("★ 記錄的值不在白名單內就當作沒記錄（不把髒資料直接當來源顯示）", () => {
+    expect(dataHubResolveSource({
+      sourceProvider: "<script>",
+      sourceUrl: "https://www.notion.so/abc",
+    })).toBe("notion");
+    expect(dataHubResolveSource({ sourceProvider: "  " })).toBe("manual");
+  });
+});
+
+describe("formatDataHubSyncedAt（措辭是「讀取」不是「同步」）", () => {
+  const now = Date.parse("2026-08-08T12:00:00.000Z");
+
+  it("★ 不講「同步」——站內沒有背景同步，講同步會讓人以為系統會自動跟上來源", () => {
+    const label = formatDataHubSyncedAt("2026-08-08T11:00:00.000Z", now);
+    expect(label).toBe("1 小時前讀取");
+    expect(label).not.toContain("同步");
+  });
+
+  it("各時間刻度", () => {
+    expect(formatDataHubSyncedAt("2026-08-08T11:59:40.000Z", now)).toBe("剛剛讀取");
+    expect(formatDataHubSyncedAt("2026-08-08T11:55:00.000Z", now)).toBe("5 分鐘前讀取");
+    expect(formatDataHubSyncedAt("2026-08-05T12:00:00.000Z", now)).toBe("3 天前讀取");
+  });
+
+  it("沒有記錄就是 null（UI 留白，不編）", () => {
+    expect(formatDataHubSyncedAt(null)).toBeNull();
+    expect(formatDataHubSyncedAt(undefined)).toBeNull();
+    expect(formatDataHubSyncedAt("not a date")).toBeNull();
+  });
+});
+
+describe("dataHubSourceHasUpdate（不知道絕不顯示成「有更新」）", () => {
+  it("來源端比站內新 → 有更新", () => {
+    expect(dataHubSourceHasUpdate({
+      sourceModifiedAt: "2026-08-08T12:00:00.000Z",
+      lastSyncedAt: "2026-08-08T10:00:00.000Z",
+    })).toBe(true);
+  });
+
+  it("站內比來源新（或同時）→ 沒有更新", () => {
+    expect(dataHubSourceHasUpdate({
+      sourceModifiedAt: "2026-08-08T10:00:00.000Z",
+      lastSyncedAt: "2026-08-08T12:00:00.000Z",
+    })).toBe(false);
+  });
+
+  it("★ 任一時間缺席就是 false——判斷不出來不可以說「有更新」", () => {
+    expect(dataHubSourceHasUpdate({ sourceModifiedAt: "2026-08-08T12:00:00.000Z" })).toBe(false);
+    expect(dataHubSourceHasUpdate({ lastSyncedAt: "2026-08-08T12:00:00.000Z" })).toBe(false);
+    expect(dataHubSourceHasUpdate({})).toBe(false);
+  });
+
+  it("時間格式壞掉也是 false", () => {
+    expect(dataHubSourceHasUpdate({ sourceModifiedAt: "x", lastSyncedAt: "y" })).toBe(false);
   });
 });

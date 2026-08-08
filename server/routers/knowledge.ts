@@ -27,6 +27,7 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "../services/rateLimit";
+import { dataHubProviderFromImportKind } from "../../shared/dataHub";
 import {
   assembleKnowledgeContext,
   extractKnowledgeSummary,
@@ -591,6 +592,12 @@ export const knowledgeRouter = router({
           title: picked.name.slice(0, 120),
           content,
           summary: extractKnowledgeSummary(content) || null,
+          // 來源譜系（P6）：從選檔器來的一定是 Google 雲端，fileId 是對方的穩定 id。
+          // sourceModifiedAt 只有在 Drive 中繼資料真的給了才寫——沒有就留 null，不編。
+          sourceProvider: "google-drive",
+          sourceExternalId: input.fileId,
+          sourceModifiedAt: picked.modifiedTime ? new Date(picked.modifiedTime) : null,
+          lastSyncedAt: new Date(),
           createdBy: ctx.auth.user.id,
         })
         .returning();
@@ -686,6 +693,11 @@ export const knowledgeRouter = router({
           message: "這個網址抓不到可讀文字（可能是純前端渲染的頁面或圖影檔）——試試該平台的匯出功能後上傳",
         });
       }
+      // 來源譜系（P6）：匯入當下就知道是哪個供應商、對方的穩定 id 是什麼——記下來，
+      // 之後資料中心不必從網址猜（猜錯比留白更糟）。lastSyncedAt = 這次真的去抓的時刻。
+      const externalId = normalized.kind === "notion"
+        ? notionPageIdFromUrl(input.url)
+        : normalized.fileId ?? null;
       const [row] = await db
         .insert(schema.knowledge)
         .values({
@@ -695,6 +707,10 @@ export const knowledgeRouter = router({
           title: (input.title?.trim() || fallbackName).slice(0, 120),
           content,
           summary: extractKnowledgeSummary(content) || null,
+          sourceProvider: dataHubProviderFromImportKind(normalized.kind),
+          sourceUrl: input.url,
+          sourceExternalId: externalId,
+          lastSyncedAt: new Date(),
           createdBy: ctx.auth.user.id,
         })
         .returning();

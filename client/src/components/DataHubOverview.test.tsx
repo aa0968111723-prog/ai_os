@@ -62,6 +62,8 @@ function resource(over: Record<string, unknown> = {}) {
     updatedAt: new Date().toISOString(),
     href: "/p/p1#sec-knowledge",
     sizeLabel: "1,200 字",
+    syncedLabel: null,
+    sourceHasUpdate: false,
     ...over,
   };
 }
@@ -168,5 +170,48 @@ describe("DataHubOverview", () => {
     const details = container.querySelector("details.hub-sources");
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute("open");
+  });
+
+  /* ── 來源譜系（P6）：只講記錄得到的事，其餘留白 ── */
+
+  it("有讀取時刻就顯示「幾分鐘前讀取」——措辭不是「同步」", () => {
+    state.list = {
+      resources: [resource({ syncedLabel: "5 分鐘前讀取" })],
+      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
+      truncated: false,
+    };
+    render(<DataHubOverview onAddData={() => {}} />);
+    expect(screen.getByText(/5 分鐘前讀取/)).toBeInTheDocument();
+  });
+
+  it("★ 沒有來源記錄時完全不提同步／讀取——留白而不是編一個時間", () => {
+    state.list = {
+      resources: [resource({ source: "manual", syncedLabel: null })],
+      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
+      truncated: false,
+    };
+    const { container } = render(<DataHubOverview onAddData={() => {}} />);
+    // 只看那一行中繼資料（AI 權限徽章本來就叫「AI 只能讀取」，不能拿它當反例）
+    const meta = container.querySelector(".hub-item__copy small")!;
+    expect(meta.textContent).not.toMatch(/讀取/);
+    expect(meta.textContent).not.toMatch(/同步/);
+  });
+
+  it("★ 來源有更新才標記；判斷不出來時不得出現這個標記", () => {
+    state.list = {
+      resources: [resource({ sourceHasUpdate: true })],
+      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
+      truncated: false,
+    };
+    const { rerender } = render(<DataHubOverview onAddData={() => {}} />);
+    expect(screen.getByText("來源有更新")).toBeInTheDocument();
+
+    state.list = {
+      resources: [resource({ sourceHasUpdate: false })],
+      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
+      truncated: false,
+    };
+    rerender(<DataHubOverview onAddData={() => {}} />);
+    expect(screen.queryByText("來源有更新")).toBeNull();
   });
 });

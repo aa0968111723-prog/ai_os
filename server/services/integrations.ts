@@ -586,7 +586,15 @@ export async function listDriveFiles(
 }
 
 export type DrivePickedResult =
-  | { ok: true; buf: Buffer; mime: string; name: string; sourceUrl: string }
+  | {
+    ok: true;
+    buf: Buffer;
+    mime: string;
+    name: string;
+    sourceUrl: string;
+    /** Google 端的最後修改時刻（RFC3339）；對方沒給就是 null——不編造（P6 來源譜系） */
+    modifiedTime: string | null;
+  }
   | { ok: false; reason: "not-connected" | "no-access" | "error"; message: string };
 
 /**
@@ -600,9 +608,11 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
   const unavailable = inactiveDriveResult(row);
   if (unavailable && !unavailable.ok) return unavailable;
   if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
-  let meta: { name?: string; mimeType?: string };
+  let meta: { name?: string; mimeType?: string; modifiedTime?: string };
   try {
-    const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size&supportsAllDrives=true`, 15_000);
+    // modifiedTime：來源譜系用（P6）——匯入當下記下對方的最後修改時刻，
+    // 之後才有辦法誠實回答「來源有沒有更新」。多要這個欄位不增加額外請求。
+    const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size,modifiedTime&supportsAllDrives=true`, 15_000);
     if (metaRes.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
     if (metaRes.status === 404 || metaRes.status === 403) {
       return { ok: false, reason: "no-access", message: driveNoAccessMessage(row) };
@@ -610,7 +620,7 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
     if (metaRes.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
     if (metaRes.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
     if (!metaRes.ok) throw new Error(`Google Drive 中繼資料查詢失敗（HTTP ${metaRes.status}）`);
-    meta = (await metaRes.json()) as { name?: string; mimeType?: string };
+    meta = (await metaRes.json()) as { name?: string; mimeType?: string; modifiedTime?: string };
   } catch (err) {
     return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Google Drive 讀取失敗" };
   }
@@ -627,6 +637,7 @@ export async function fetchDrivePickedFile(userId: string, fileId: string): Prom
     // 匯出路徑（Google 文件系）fetchDriveFile 不帶名稱——用中繼資料的真實檔名
     name: fetched.name ?? meta.name ?? "匯入文件",
     sourceUrl: shape.sourceUrl,
+    modifiedTime: meta.modifiedTime ?? null,
   };
 }
 

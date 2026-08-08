@@ -22,6 +22,9 @@ const schemaMock = vi.hoisted(() => {
       mime: c("data_files.mime"),
       sizeBytes: c("data_files.size_bytes"),
       sourceUrl: c("data_files.source_url"),
+      sourceProvider: c("data_files.source_provider"),
+      sourceModifiedAt: c("data_files.source_modified_at"),
+      lastSyncedAt: c("data_files.last_synced_at"),
       aiDescription: c("data_files.ai_description"),
       textContent: c("data_files.text_content"),
       createdAt: c("data_files.created_at"),
@@ -35,6 +38,10 @@ const schemaMock = vi.hoisted(() => {
       content: c("knowledge.content"),
       summary: c("knowledge.summary"),
       sourceAssetId: c("knowledge.source_asset_id"),
+      sourceProvider: c("knowledge.source_provider"),
+      sourceUrl: c("knowledge.source_url"),
+      sourceModifiedAt: c("knowledge.source_modified_at"),
+      lastSyncedAt: c("knowledge.last_synced_at"),
       deletedAt: c("knowledge.deleted_at"),
       createdAt: c("knowledge.created_at"),
     },
@@ -300,15 +307,32 @@ describe("resource 外形", () => {
     expect(result.resources[0].ai.access).toBe("readable");
   });
 
-  it("文件的來源由 sourceUrl 推斷（Google／Notion／網址）", async () => {
+  it("文件的來源：有記錄用記錄，沒記錄（舊列）才由 sourceUrl 推斷", async () => {
     listVisibleTables.mockResolvedValue([visibleTable()]);
     rowsByTable.dataFiles = [
-      { id: "f1", tableId: "table-1", name: "腳本", mime: "text/plain", sizeBytes: 10, sourceUrl: "https://docs.google.com/document/d/x/edit", aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-04T00:00:00.000Z") },
-      { id: "f2", tableId: "table-1", name: "頁面", mime: "text/plain", sizeBytes: 10, sourceUrl: "https://www.notion.so/abc", aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-03T00:00:00.000Z") },
-      { id: "f3", tableId: "table-1", name: "上傳檔", mime: "text/plain", sizeBytes: 10, sourceUrl: null, aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-02T00:00:00.000Z") },
+      // 新列：匯入當下記了供應商——即使網址看不出來，也以記錄為準
+      { id: "f1", tableId: "table-1", name: "腳本", mime: "text/plain", sizeBytes: 10, sourceUrl: "https://example.com/x", sourceProvider: "google-drive", sourceModifiedAt: null, lastSyncedAt: null, aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-04T00:00:00.000Z") },
+      // 舊列：沒有記錄，才從網址推斷
+      { id: "f2", tableId: "table-1", name: "頁面", mime: "text/plain", sizeBytes: 10, sourceUrl: "https://www.notion.so/abc", sourceProvider: null, sourceModifiedAt: null, lastSyncedAt: null, aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-03T00:00:00.000Z") },
+      { id: "f3", tableId: "table-1", name: "上傳檔", mime: "text/plain", sizeBytes: 10, sourceUrl: null, sourceProvider: null, sourceModifiedAt: null, lastSyncedAt: null, aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-02T00:00:00.000Z") },
     ];
     const result = await listDataHubResources(auth(), { kinds: ["document"] });
     expect(result.resources.map((r) => r.source)).toEqual(["google-drive", "notion", "upload"]);
+  });
+
+  it("★ 文件的「幾分鐘前讀取」與「來源有更新」都只在有記錄時才出現", async () => {
+    listVisibleTables.mockResolvedValue([visibleTable()]);
+    rowsByTable.dataFiles = [
+      // 來源端比上次讀取新 → 有更新
+      { id: "f1", tableId: "table-1", name: "會議紀錄", mime: "text/plain", sizeBytes: 10, sourceUrl: null, sourceProvider: "google-drive", sourceModifiedAt: new Date("2026-08-06T00:00:00.000Z"), lastSyncedAt: new Date("2026-08-05T00:00:00.000Z"), aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-05T00:00:00.000Z") },
+      // 完全沒有譜系記錄（舊列）→ 兩者都不顯示
+      { id: "f2", tableId: "table-1", name: "舊檔", mime: "text/plain", sizeBytes: 10, sourceUrl: null, sourceProvider: null, sourceModifiedAt: null, lastSyncedAt: null, aiDescription: null, readableChars: 100, createdAt: new Date("2026-08-04T00:00:00.000Z") },
+    ];
+    const result = await listDataHubResources(auth(), { kinds: ["document"] });
+    expect(result.resources[0].sourceHasUpdate).toBe(true);
+    expect(result.resources[0].syncedLabel).toContain("讀取");
+    expect(result.resources[1].sourceHasUpdate).toBe(false);
+    expect(result.resources[1].syncedLabel).toBeNull();
   });
 
   it("素材：landState=pending → 正在準備；failed → 錯誤", async () => {

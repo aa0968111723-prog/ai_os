@@ -174,11 +174,18 @@ export function DataHubOverview({ projectId, projectTitle, onAddData }: {
                       ・{r.projectTitle ?? dataHubScopeLabel(r.scope)}
                       ・{dataHubSourceLabel(r.source)}
                       {r.sizeLabel ? `・${r.sizeLabel}` : ""}
+                      {/* 來源譜系（P6）：只在真的有記錄時顯示，沒有就留白，不編 */}
+                      {r.syncedLabel ? `・${r.syncedLabel}` : ""}
                     </small>
                   </span>
                   <span className="hub-item__state">
                     <Badge title={r.ai.reason}>{dataHubAiAccessLabel(r.ai.access)}</Badge>
                     {r.status !== "ready" && <Badge>{r.statusLabel}</Badge>}
+                    {/* 只有「來源端修改時刻」與「本站讀取時刻」都有記錄時才敢這樣說；
+                        站內沒有背景同步，所以這是提醒使用者自己去按重新整理，不是自動更新 */}
+                    {r.sourceHasUpdate && (
+                      <Badge title="來源那邊在你上次讀取之後改過了——開啟後可重新讀取">來源有更新</Badge>
+                    )}
                     <Meta>{relativeTime(r.updatedAt)}</Meta>
                   </span>
                 </Link>

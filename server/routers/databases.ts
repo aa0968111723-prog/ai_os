@@ -23,6 +23,7 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import { findProjectLinkedRows } from "../services/databaseProjectLinks";
 import { listProjectBoundTableIds } from "../services/projectDataBindings";
+import { dataHubProviderFromImportKind } from "../../shared/dataHub";
 import {
   buildBoundTableFields,
   getProjectDataTemplate,
@@ -604,6 +605,10 @@ export const databasesRouter = router({
           sourceUrl: input.url,
           textContent: text,
           uploadedBy: ctx.auth.user.id,
+          // 來源譜系（P6）：匯入當下就知道供應商與對方的穩定 id，記下來不必事後從網址猜
+          sourceProvider: "notion",
+          sourceExternalId: pageId,
+          lastSyncedAt: new Date(),
         });
         if (!inserted.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
         return { id: inserted.row.id, readableChars: text.length };
@@ -666,6 +671,9 @@ export const databasesRouter = router({
         const inserted = await insertDataFileUnderQuota(ctx.auth.user.id, sizeBytes, {
           tableId: table.id, name, mime: "text/plain", sizeBytes,
           sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
+          sourceProvider: dataHubProviderFromImportKind(normalized.kind),
+          sourceExternalId: normalized.fileId ?? null,
+          lastSyncedAt: new Date(),
         });
         if (!inserted.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
         return { id: inserted.row.id, readableChars: text.length };
@@ -680,6 +688,9 @@ export const databasesRouter = router({
         const inserted = await insertDataFileUnderQuota(ctx.auth.user.id, saved.sizeBytes, {
           tableId: table.id, name, mime: fetched.mime, sizeBytes: saved.sizeBytes,
           storagePath: saved.storagePath, sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
+          sourceProvider: dataHubProviderFromImportKind(normalized.kind),
+          sourceExternalId: normalized.fileId ?? null,
+          lastSyncedAt: new Date(),
         });
         if (!inserted.ok) {
           await removeStoredFile(saved.storagePath);
@@ -776,6 +787,8 @@ export const databasesRouter = router({
       const updated = await updateDataFileSizeUnderQuota(ctx.auth.user.id, file.id, file.sizeBytes, {
         textContent: text,
         sizeBytes,
+        // 重新整理＝真的又去對方那裡抓了一次，所以「最後讀取」時刻要跟著更新（P6）
+        lastSyncedAt: new Date(),
         ...(newStoragePath !== undefined ? { storagePath: newStoragePath } : {}),
       });
       if (!updated.ok) {

@@ -177,6 +177,16 @@ export interface DataHubResource {
   href: string;
   /** 「12 列」「3,400 字」「2.1 MB」之類的人話規模；沒有就 null */
   sizeLabel: string | null;
+  /**
+   * 「5 分鐘前讀取」——本站最後一次真的去來源抓的時刻（P6）。
+   * 沒有記錄（站內建立、或舊列）就是 null，UI 據此留白，不編。
+   */
+  syncedLabel: string | null;
+  /**
+   * 來源端比站內版本新。**兩個時間都有記錄才會是 true**——
+   * 判斷不出來一律 false，「不知道」絕不可以顯示成「有更新」。
+   */
+  sourceHasUpdate: boolean;
 }
 
 export function dataHubResourceId(kind: DataHubKind, rawId: string): string {
@@ -263,8 +273,24 @@ const GOOGLE_HOST_RE = /(^|\.)(google\.com|googleusercontent\.com|goo\.gl)$/i;
 const NOTION_HOST_RE = /(^|\.)notion\.(so|site)$/i;
 
 /**
+ * 匯入管線的 kind（services/databaseFiles.normalizeImportUrl）→ 來源供應商。
+ *
+ * 匯入當下就知道答案，所以寫進 source_provider 欄位；之後顯示不必再從網址猜。
+ * 這支是「記錄時」用的，dataHubSourceFromUrl 是「沒有記錄時」的退路。
+ */
+export function dataHubProviderFromImportKind(
+  kind: "google-doc" | "google-sheet" | "google-slides" | "google-drive" | "notion" | "web",
+): DataHubSource {
+  if (kind === "notion") return "notion";
+  if (kind === "web") return "url";
+  return "google-drive";
+}
+
+/**
  * 由 `source_url` 推斷來源。解析失敗一律當成 `url`——寧可少講一點，
  * 也不要把不確定的東西標成「Google 雲端」誤導使用者。
+ *
+ * ★ 只在沒有 source_provider 記錄時才用（舊列）。有記錄一律以記錄為準。
  */
 export function dataHubSourceFromUrl(sourceUrl: string | null | undefined): DataHubSource {
   if (!sourceUrl) return "upload";
@@ -280,6 +306,58 @@ export function dataHubSourceFromUrl(sourceUrl: string | null | undefined): Data
 }
 
 /* ────────────────────────── 規模文案 ────────────────────────── */
+
+/**
+ * 已記錄的來源優先，沒記錄才從網址猜（舊列）。
+ * 這條優先序是 P6 的重點：猜出來的東西不該蓋掉匯入當下真正知道的事實。
+ */
+export function dataHubResolveSource(input: {
+  sourceProvider?: string | null;
+  sourceUrl?: string | null;
+  fallback?: DataHubSource;
+}): DataHubSource {
+  const recorded = input.sourceProvider?.trim();
+  if (recorded && (DATA_HUB_SOURCES as readonly string[]).includes(recorded)) {
+    return recorded as DataHubSource;
+  }
+  if (input.sourceUrl) return dataHubSourceFromUrl(input.sourceUrl);
+  return input.fallback ?? "manual";
+}
+
+/**
+ * 「最後同步」的人話。
+ *
+ * ★ 措辭刻意是「最後讀取」而不是「最後同步」：站內沒有背景同步，這個時間是
+ *   「上次真的去對方那裡抓的時刻」（匯入或手動重新整理）。講成「同步」會讓人
+ *   以為系統會自動跟上來源的變更——那是假的（§32：不要為了畫面做假同步）。
+ */
+export function formatDataHubSyncedAt(lastSyncedAt: string | null | undefined, now = Date.now()): string | null {
+  if (!lastSyncedAt) return null;
+  const then = new Date(lastSyncedAt).getTime();
+  if (!Number.isFinite(then)) return null;
+  const min = Math.floor((now - then) / 60_000);
+  if (min < 1) return "剛剛讀取";
+  if (min < 60) return `${min} 分鐘前讀取`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小時前讀取`;
+  const day = Math.floor(hr / 24);
+  return `${day} 天前讀取`;
+}
+
+/**
+ * 來源端是否比站內版本新（兩個時間都有記錄才判斷）。
+ * 判斷不出來就回 false——「不知道」絕不可以顯示成「有更新」。
+ */
+export function dataHubSourceHasUpdate(input: {
+  sourceModifiedAt?: string | null;
+  lastSyncedAt?: string | null;
+}): boolean {
+  if (!input.sourceModifiedAt || !input.lastSyncedAt) return false;
+  const modified = new Date(input.sourceModifiedAt).getTime();
+  const synced = new Date(input.lastSyncedAt).getTime();
+  if (!Number.isFinite(modified) || !Number.isFinite(synced)) return false;
+  return modified > synced;
+}
 
 export function formatDataHubBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
