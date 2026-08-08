@@ -87,6 +87,10 @@ export function ShotCard({
   const removeShot = trpc.scenes.remove.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
+  /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
+  const inherit = trpc.scenes.inheritFromPrevious.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
 
   const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
   const saveCamera = (field: keyof ShotCamera, value: string) => {
@@ -242,13 +246,40 @@ export function ShotCard({
                   onClick={canEdit ? () => toggleLook(l.id) : undefined}
                   title={`${owner ? `${owner}的` : ""}造型：勾選後生成鎖定此造型`}
                 >
-                  {l.name}
+                  {/* 一定要冠角色名：實機上五個角色各有一套「白襯衫、黑褲」，
+                      只印造型名會出現三個一模一樣的 chip，完全分不出誰是誰 */}
+                  {owner ? `${owner}·${l.name}` : l.name}
                 </Chip>
               );
             })}
           </span>
         )}
       </div>
+
+      {/* §8 連戲承接：第一鏡沒有可承接的對象，就不要給一顆註定失敗的按鈕 */}
+      {canEdit && shotNumber > 1 && (
+        <div className="shot-card__continuity">
+          <ConfirmButton
+            triggerClassName="btn-sm btn-ghost"
+            triggerAriaLabel={`第 ${shotNumber} 鏡：從上一鏡承接連戲設定`}
+            message={`把上一鏡的角色、造型、場景與攝影風格（光線／構圖／焦段）接到第 ${shotNumber} 鏡？鏡別與運鏡不會動——那是每一鏡該不一樣的地方。`}
+            confirmLabel="承接"
+            disabled={inherit.isPending}
+            onConfirm={() =>
+              inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
+            }
+          >
+            <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+            {inherit.isPending ? "承接中…" : "從上一鏡承接"}
+          </ConfirmButton>
+          {inherit.data && (
+            <Meta as="span" role="status">
+              {inherit.data.changed ? `已承接：${inherit.data.changes.join("、")}` : "跟上一鏡已經一致"}
+            </Meta>
+          )}
+          {inherit.error && <span className="error">{inherit.error.message}</span>}
+        </div>
+      )}
 
       {/* §13 相關素材：專業模式才出現，避免第一層被塞滿（漸進揭露） */}
       {mode === "pro" && assetHints.length > 0 && (

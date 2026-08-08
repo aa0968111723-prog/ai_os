@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aliasedTable, and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -16,6 +16,7 @@ import {
 } from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
+import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
@@ -757,6 +758,48 @@ export const scenesRouter = router({
         .where(eq(schema.scenes.id, scene.id))
         .returning({ id: schema.scenes.id, reviewStatus: schema.scenes.reviewStatus });
       return row;
+    }),
+
+  /**
+   * 從上一鏡承接（§8 連戲）。
+   *
+   * 「上一鏡」＝同專案、未軟刪、orderIndex 比我小的那一個最大值——
+   * 用 orderIndex 而非建立時間：使用者搬動過順序之後，連戲要跟著畫面順序走，
+   * 不是跟著「誰先被建出來」。
+   */
+  inheritFromPrevious: authedProcedure
+    .input(
+      z.object({
+        sceneId: z.string().uuid(),
+        aspects: z.array(z.enum(CONTINUITY_ASPECTS)).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [cur] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!cur) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
+      await getProjectChecked(ctx, cur.projectId, true);
+
+      const [prev] = await db
+        .select()
+        .from(schema.scenes)
+        .where(
+          and(
+            eq(schema.scenes.projectId, cur.projectId),
+            isNull(schema.scenes.deletedAt),
+            lt(schema.scenes.orderIndex, cur.orderIndex),
+          ),
+        )
+        .orderBy(desc(schema.scenes.orderIndex))
+        .limit(1);
+      if (!prev) throw new TRPCError({ code: "BAD_REQUEST", message: "這是第一鏡，前面沒有可以承接的鏡" });
+
+      const { patch, changes } = buildContinuityPatch(prev, cur, input.aspects);
+      if (!changes.length) return { ok: true as const, changed: false, changes: [] as string[] };
+      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, cur.id));
+      return { ok: true as const, changed: true, changes };
     }),
 
   update: authedProcedure

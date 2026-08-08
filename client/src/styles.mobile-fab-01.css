@@ -80,3 +80,36 @@
     --chrome-bottom: 160px;
   }
 }
+
+/* ═══ MOB-FAB-02：右下浮鈕改成「單一軌道」，不再各自貼底 ═══
+ *
+ * 問題（2026-08-08 實機截圖）：專案頁手機版右下角同時疊了三顆——
+ * 專案「留言」膠囊（z42）、回饋 FAB（z45）、全站私訊泡泡，
+ * 三者都寫 `right:14px; bottom:14~16px`，於是互相蓋住，還蓋掉底下的「角度」欄位。
+ *
+ * 修法分兩層，而不是逐顆微調位置（那只會在下一顆 FAB 出現時再壞一次）：
+ *
+ * 1) 同一條軌道、依槽位往上疊：新增 FAB 只要指定槽位，不必再猜別人佔了哪。
+ * 2) 專案頁隱藏全站私訊泡泡：專案頁的「聊天」語意已經由專案留言承擔，
+ *    再放一顆長得一模一樣的私訊泡泡正是驗收條件 16 說的「兩個以上功能重複的留言按鈕」。
+ *    私訊仍可從頂欄與底部導航進入，沒有失去入口。
+ */
+:root {
+  /* 一格＝FAB 高度 48 + 間距 10 */
+  --fab-slot: 58px;
+  --fab-rail-base: max(14px, var(--safe-bottom));
+}
+
+/* 槽 0：回饋（全站工具，放最下面——它最少用到） */
+.fb-fab-root {
+  bottom: calc(var(--fab-rail-base) + var(--kb-inset, 0px)) !important;
+}
+/* 槽 1：專案留言（本頁主要協作入口，放在拇指更好按的位置） */
+.project-page--mobile-compact .project-messages-fab {
+  bottom: calc(var(--fab-rail-base) + var(--fab-slot) + var(--kb-inset, 0px)) !important;
+}
+
+/* 專案頁不再出現第二顆聊天泡泡（見上方 2） */
+body:has(.project-page) .dm-bubble-root {
+  display: none;
+}

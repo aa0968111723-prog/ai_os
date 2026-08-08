@@ -8191,3 +8191,5 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   background: var(--primary); color: var(--on-primary, #fff); border-color: var(--primary); font-weight: 700;
 }
 .shot-nav__meta { flex: 0 0 auto; }
+/* §8 連戲承接：一列，結果訊息接在按鈕後面（不另開一塊佔版面） */
+.shot-card__continuity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
