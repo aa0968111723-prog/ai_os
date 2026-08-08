@@ -194,6 +194,8 @@ export const dataHubRouter = router({
   /**
    * 不再提供給這個專案。
    * ★ 只移除「提供」這件事，資料本身完全不動——與「中斷來源不刪已匯入內容」同一條原則。
+   * ★ 刻意**不**檢查專案是否已封存（bindResource 有檢查）：撤回存取權不該因為專案封存
+   *   就被擋住——那會讓「封存的專案還在讀某張表」變成無法收回的狀態。
    */
   unbindResource: authedProcedure
     .input(z.object({
