@@ -108,12 +108,15 @@ export function SceneStudio({
   propIds,
   onClose,
   onChanged,
+  nav,
 }: {
   sceneId: string;
   projectId: string;
   /** 第幾鏡（1 起算），只用於標題與無障礙標籤 */
   sceneNumber: number;
   canEdit: boolean;
+  /** 前後鏡導航（§4）：由呼叫端傳入，工作室本身不需要知道整片有幾鏡 */
+  nav?: import("react").ReactNode;
   /** 生成台勾選的角色／場景卡：工作室的重生與修正也注入同一套錨點，畫風不分岔 */
   charIds?: string[];
   sceneIds?: string[];
@@ -368,6 +371,9 @@ export function SceneStudio({
             <Icon name="X" size={18} />
           </Button>
         </div>
+
+        {/* §4 前後鏡導航：不必關掉工作室、回分鏡表、再點下一鏡——那三步會把連續製作切碎 */}
+        {nav}
 
         {versions.isError && (
           <p className="error" role="alert">
