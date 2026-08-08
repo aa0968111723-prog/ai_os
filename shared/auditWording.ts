@@ -77,6 +77,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.setVisualFromAsset": "切換分鏡版本",
   "scenes.refine": "以底圖修正分鏡畫面",
   "scenes.update": "更新分鏡",
+  "scenes.review": "變更分鏡審核狀態",
+  "scenes.inheritFromPrevious": "從上一鏡承接連戲設定",
+  "scenes.batchGenerate": "批次生成分鏡畫面",
   "scenes.setCards": "設定分鏡要用的設定卡",
   "scenes.applyScript": "用文字腳本寫回分鏡",
   "scenes.insertAfter": "插入／複製分鏡",
@@ -117,6 +120,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.step.adobe_photo_edit": "AI 代理：Adobe 修圖",
   "agents.step.adobe_export_timeline": "AI 代理：匯出時間軸（FCP／Premiere／EDL）",
   "agents.step.adobe_timeline_render": "AI 代理：Adobe 時間軸算圖",
+  "tasks.create": "建立人類任務（可由留言轉出）",
   "tasks.complete": "人類任務：標記完成",
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
@@ -253,6 +257,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "messages.postAnnotation": "在畫面上標注要改的地方",
   "messages.resolveAnnotation": "標記標注已改好",
+  "messages.setIntent": "標記留言的協作語意",
+  "decisions.create": "定案進決策紀錄",
+  "decisions.revoke": "撤銷決策（保留紀錄）",
   "notifications.markRead": "標記通知已讀",
   "notifications.markAllRead": "全部通知標為已讀",
   "push.subscribe": "連結通知裝置",
@@ -348,7 +355,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "decisions", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   // dataHub 歸在資料：資料中心是「資料庫／知識／素材」的統一視圖，

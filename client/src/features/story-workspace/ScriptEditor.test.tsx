@@ -3,7 +3,7 @@
  * 「按鈕／快捷鍵真的接到那些規則」與「唯讀身分不會被給編輯工具」——
  * 接線斷掉時規則測試照樣全綠，只有使用者會發現按了沒反應。
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
@@ -72,6 +72,35 @@ describe("ScriptEditor", () => {
     expect(document.body.classList.contains("story-immersive")).toBe(true);
     await user.click(screen.getByRole("button", { name: /離開全螢幕/ }));
     expect(document.body.classList.contains("story-immersive")).toBe(false);
+  });
+
+  it("稿子聚焦＝手機鍵盤在畫面上：掛 is-typing 讓底部工具讓位，失焦收回", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Harness />);
+    const host = () => container.querySelector(".script-editor")!;
+    expect(host().classList.contains("is-typing")).toBe(false);
+    await user.click(editor());
+    expect(host().classList.contains("is-typing")).toBe(true);
+    fireEvent.blur(editor());
+    expect(host().classList.contains("is-typing")).toBe(false);
+  });
+
+  it("接了 onBlur 的呼叫端照樣收得到失焦（讓位邏輯不能吃掉存檔 flush）", async () => {
+    const user = userEvent.setup();
+    let blurs = 0;
+    render(
+      <ScriptEditor
+        value="安倢走了。"
+        onChange={() => {}}
+        onBlur={() => { blurs += 1; }}
+        canEdit
+        rows={8}
+        placeholder="寫故事…"
+      />,
+    );
+    await user.click(editor());
+    fireEvent.blur(editor());
+    expect(blurs).toBe(1);
   });
 
   it("Esc 離開全螢幕（系統手勢之外的第二條退路）", async () => {

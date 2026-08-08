@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -1012,10 +1012,25 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
               : gen.sceneRole === "ambience"
                 ? { ambienceAssetId: asset.id }
                 : { assetId: asset.id };
+          /*
+           * §17：已通過審核（approved）的鏡不自動換掉現用版本。
+           * 生成本身照做、也照樣落成一個新版本（generations 那一列就是版本），
+           * 只是不動指標欄——要換成新版得由人在單格工作室按「設為正式版本」。
+           * 否則「已通過」等於沒有意義：任何一次重生成都會靜默蓋掉團隊審過的畫面。
+           *
+           * 用 where 條件擋而不是先查再判：這裡在交易內且與 CAS 同一段，
+           * 多條件 update 天然原子，先查再判會有 TOCTOU 空隙。
+           */
           await tx
             .update(schema.scenes)
             .set(patch)
-            .where(and(eq(schema.scenes.id, gen.sceneId), isNull(schema.scenes.deletedAt)));
+            .where(
+              and(
+                eq(schema.scenes.id, gen.sceneId),
+                isNull(schema.scenes.deletedAt),
+                ne(schema.scenes.reviewStatus, "approved"),
+              ),
+            );
         }
       }
       return { updated: rows[0], assetId };

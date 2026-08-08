@@ -17,6 +17,7 @@ import {
   type ShotCamera,
   type ShotPerformance,
 } from "@shared/story";
+import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
 import type { BoardMode } from "./boardPrefs";
 
 export interface ShotRow {
@@ -29,6 +30,8 @@ export interface ShotRow {
   action: string | null;
   dialogue: string | null;
   voiceover: string | null;
+  /** 現用畫面素材 id——完成度看的是它（assetUrl 只是顯示用，簽名網址會變） */
+  assetId: string | null;
   assetUrl: string | null;
   assetKind: string | null;
   characterIds: string[] | null;
@@ -39,6 +42,12 @@ export interface ShotRow {
   performance: ShotPerformance | null;
   lookIds: string[] | null;
   pendingGenStatus: "queued" | "running" | "awaiting_approval" | null;
+  /** 完成度五軌所需（其餘欄位上面都有）；後端 listByProject 已回傳 */
+  narrationUrl?: string | null;
+  ambienceUrl?: string | null;
+  pendingNarrationStatus?: string | null;
+  pendingAmbienceStatus?: string | null;
+  reviewStatus?: ShotCompletionInput["reviewStatus"];
 }
 
 export interface LookRow {
@@ -83,6 +92,10 @@ export function ShotCard({
   const removeShot = trpc.scenes.remove.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
+  /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
+  const inherit = trpc.scenes.inheritFromPrevious.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
 
   const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
   const saveCamera = (field: keyof ShotCamera, value: string) => {
@@ -103,6 +116,8 @@ export function ShotCard({
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
+  // 與成片頁、前後鏡導航同一支純函式——不會出現「這裡說缺、那裡說有」
+  const completion = computeShotCompletion(shot);
 
   /**
    * §13 相關素材：只在專業模式查（簡單模式不顯示，就不必打這支）。
@@ -166,13 +181,37 @@ export function ShotCard({
         {generating && <Pill status="running">生成中</Pill>}
         {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
         {outdatedReason && <Pill status="failed">畫面過時</Pill>}
+        {shot.reviewStatus === "approved" && <Pill status="done">已通過</Pill>}
+        {shot.reviewStatus === "changes" && <Pill status="failed">需要修改</Pill>}
+      </div>
+
+      {/* §17：已通過的鏡，重新生成不會自動換掉現用畫面——不講的話使用者會以為生成壞了 */}
+      {shot.reviewStatus === "approved" && (
+        <Meta as="p" className="shot-card__approved-note">
+          <Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+          這一鏡已通過審核：之後重新生成只會存成新版本，不會自動換掉現在這張。要換請到單格工作室選版本。
+        </Meta>
+      )}
+
+      {/* §15 完成度：五個點就講完「這一鏡還缺什麼」，比五行文字省版面也好掃 */}
+      <div className="shot-card__completion" role="group" aria-label={`完成度 ${completion.percent}%`}>
+        {COMPLETION_TRACKS.map((t) => (
+          <span
+            key={t}
+            className={`shot-card__dot shot-card__dot--${completion.tracks[t]}`}
+            title={`${TRACK_LABEL[t]}：${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "尚未完成"}`}
+          >
+            {TRACK_LABEL[t]}
+          </span>
+        ))}
+        <Meta as="span">{completion.percent}%</Meta>
       </div>
 
       {/* §23：卡片改過、這張圖還是舊的。不自動重畫——講清楚原因，讓使用者決定要不要花點數重生成 */}
       {outdatedReason && (
         <Meta as="p" role="status" className="shot-card__outdated">
           <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-          這張圖是舊設定畫的（{outdatedReason} 後來改過）——要更新請打開單格工作室重畫。
+          這張圖是舊設定畫的（{outdatedReason}後來改過）——要更新請打開單格工作室重畫。
         </Meta>
       )}
 
@@ -226,13 +265,40 @@ export function ShotCard({
                   onClick={canEdit ? () => toggleLook(l.id) : undefined}
                   title={`${owner ? `${owner}的` : ""}造型：勾選後生成鎖定此造型`}
                 >
-                  {l.name}
+                  {/* 一定要冠角色名：實機上五個角色各有一套「白襯衫、黑褲」，
+                      只印造型名會出現三個一模一樣的 chip，完全分不出誰是誰 */}
+                  {owner ? `${owner}·${l.name}` : l.name}
                 </Chip>
               );
             })}
           </span>
         )}
       </div>
+
+      {/* §8 連戲承接：第一鏡沒有可承接的對象，就不要給一顆註定失敗的按鈕 */}
+      {canEdit && shotNumber > 1 && (
+        <div className="shot-card__continuity">
+          <ConfirmButton
+            triggerClassName="btn-sm btn-ghost"
+            triggerAriaLabel={`第 ${shotNumber} 鏡：從上一鏡承接連戲設定`}
+            message={`把上一鏡的角色、造型、場景與攝影風格（光線／構圖／焦段）接到第 ${shotNumber} 鏡？鏡別與運鏡不會動——那是每一鏡該不一樣的地方。`}
+            confirmLabel="承接"
+            disabled={inherit.isPending}
+            onConfirm={() =>
+              inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
+            }
+          >
+            <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+            {inherit.isPending ? "承接中…" : "從上一鏡承接"}
+          </ConfirmButton>
+          {inherit.data && (
+            <Meta as="span" role="status">
+              {inherit.data.changed ? `已承接：${inherit.data.changes.join("、")}` : "跟上一鏡已經一致"}
+            </Meta>
+          )}
+          {inherit.error && <span className="error">{inherit.error.message}</span>}
+        </div>
+      )}
 
       {/* §13 相關素材：專業模式才出現，避免第一層被塞滿（漸進揭露） */}
       {mode === "pro" && assetHints.length > 0 && (
@@ -371,6 +437,8 @@ export function ShotCard({
         {canEdit && (
           <ConfirmButton
             triggerClassName="btn-sm btn-ghost"
+            // 只有垃圾桶圖示，沒有可讀名稱＝讀螢幕軟體只會唸「按鈕」（實測抓到）
+            triggerAriaLabel={`刪除第 ${shotNumber} 鏡`}
             message={`刪除第 ${shotNumber} 鏡？會移到回收桶，可還原。`}
             confirmLabel="刪除"
             disabled={removeShot.isPending}

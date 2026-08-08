@@ -372,7 +372,7 @@ configureRealtimeBus({
  * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（或純 groupId 成員）。
  * 任一步不合法回 null（呼叫端直接 socket.destroy()，不進 WS 握手）。
  */
-async function authorize(
+export async function authorizeRealtimeConn(
   req: IncomingMessage,
   projectId: string | null,
   groupId: string | null,
@@ -698,8 +698,10 @@ export function attachRealtime(server: Server): void {
       return;
     }
     if (url.pathname !== "/ws") {
-      // 本服務只有 /ws 一種 upgrade；其他路徑不接、也不能放著不管（會吊死連線）
-      socket.destroy();
+      // /ws-doc（Yjs 文件傳輸，見 services/collabDoc.ts）有自己的 upgrade handler——
+      // 這裡**必須放行**而不是 destroy，否則兩個 listener 誰先跑誰就把對方的連線砍了。
+      // 其他未知路徑仍要 destroy，不能放著不管（會吊死連線）。
+      if (url.pathname !== "/ws-doc") socket.destroy();
       return;
     }
     // #20 Origin 白名單：非白名單來源（跨站 WebSocket 劫持）握手前即斷，不進 DB 查詢
@@ -707,7 +709,7 @@ export function attachRealtime(server: Server): void {
       socket.destroy();
       return;
     }
-    authorize(req, url.searchParams.get("projectId"), url.searchParams.get("groupId"))
+    authorizeRealtimeConn(req, url.searchParams.get("projectId"), url.searchParams.get("groupId"))
       .then((ctx) => {
         if (!ctx || isShuttingDown()) {
           socket.destroy();

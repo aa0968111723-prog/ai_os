@@ -8,6 +8,7 @@ import { resolveMentions } from "../services/mentions";
 import { notify } from "../services/notify";
 import { dmSnippet } from "../services/dmCore";
 import { publishToProject } from "../services/realtime";
+import { MESSAGE_INTENTS } from "../../shared/collabIntent";
 
 /**
  * 站內留言（協作強化版）。隔離：以專案的 group 為準；檢視者(viewer)也能留言——
@@ -125,6 +126,7 @@ export const messagesRouter = router({
       refId: schema.messages.refId,
       mentions: schema.messages.mentions,
       voiceStatus: schema.messages.voiceStatus,
+      intent: schema.messages.intent,
       createdAt: schema.messages.createdAt,
     };
 
@@ -518,6 +520,27 @@ export const messagesRouter = router({
         publishToProject(msg.projectId, { kind: "annotation", id: msg.refId }, input.resolved ? "標記已改好" : "重新開啟標注");
       }
       return { ok: true as const };
+    }),
+
+  /**
+   * 標記留言的協作語意（shared/collabIntent.ts）。thread action 用：
+   * 「標成修改要求」「標成阻塞」——**不強迫發文時先選**，語意是事後長出來的。
+   * null＝取消標記。轉決策時由 decisions.create 自動回寫，不必走這支。
+   */
+  setIntent: authedProcedure
+    .input(z.object({
+      messageId: z.string().uuid(),
+      intent: z.enum(MESSAGE_INTENTS).nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const msg = await loadMessage(input.messageId);
+      requireGroup(ctx.auth, msg.groupId);
+      const [updated] = await db
+        .update(schema.messages)
+        .set({ intent: input.intent })
+        .where(eq(schema.messages.id, input.messageId))
+        .returning();
+      return updated;
     }),
 
   setPinned: authedProcedure

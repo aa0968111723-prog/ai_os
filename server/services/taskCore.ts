@@ -6,6 +6,7 @@ import type { AuthState } from "./auth";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
 import { pushToUsers } from "./webPush";
+import { notify } from "./notify";
 import {
   dagStepId,
   evaluateAgentDag,
@@ -210,6 +211,25 @@ export async function addProjectTaskCore(input: {
       mentions: mentions ?? null,
     })
     .returning();
+  // Provenance 鏈的第一環：被指派的人要**知道**自己被指派了。
+  // 走 services/notify（先落列再推播）——收件匣才是真相，推播只是加速通道。
+  // 指派給自己不通知（自己開給自己的待辦，通知只是噪音）。
+  if (task.assigneeId && task.assigneeId !== input.auth.user.id) {
+    void notify({
+      userIds: [task.assigneeId],
+      groupId: task.groupId,
+      projectId: task.projectId,
+      kind: "task_assigned",
+      actorId: input.auth.user.id,
+      refType: "task",
+      refId: task.id,
+      messageId: task.sourceMessageId,
+      title: `${input.auth.user.name} 指派了任務給你`,
+      body: task.title,
+      url: `/p/${task.projectId}?focus=task&taskId=${task.id}`,
+      eventKey: `task_assigned:${task.id}`,
+    });
+  }
   return task;
 }
 
@@ -558,6 +578,35 @@ async function settleTask(input: {
     }).catch((error) =>
       console.warn("[agent] 人類任務終局推播失敗：", error instanceof Error ? error.message : error),
     );
+  }
+  // Provenance 鏈的回程：任務終局時通知**原提議者**（建立任務的人）。
+  // 「Bruce 把留言轉成任務指派韋澔 → 韋澔完成」——Bruce 若不知道完成了，
+  // 就不會回去按「✓ 解決」，整條生命週期在倒數第二步斷掉。
+  // 自己完成自己建的任務不通知（那是待辦清單，不是協作）。
+  if (
+    (settled.status === "done" || settled.status === "cancelled")
+    && settled.createdBy !== input.auth.user.id
+  ) {
+    const rejected = settled.status === "cancelled";
+    void notify({
+      userIds: [settled.createdBy],
+      groupId: settled.groupId,
+      projectId: settled.projectId,
+      kind: settled.taskType === "approval" ? "approval" : "task_completed",
+      actorId: input.auth.user.id,
+      refType: "task",
+      refId: settled.id,
+      messageId: settled.sourceMessageId,
+      title: settled.taskType === "approval"
+        ? `${input.auth.user.name} ${rejected ? "退回了" : "核准了"}「${settled.title}」`
+        : `${input.auth.user.name} 完成了「${settled.title}」`,
+      body: settled.sourceMessageId ? "由你的留言建立的任務有了結果——回去看看要不要標成已解決" : settled.title,
+      // 深連結：有來源留言就跳回那則討論串（原提議者要回去按「✓ 解決」），沒有就到任務
+      url: settled.sourceMessageId
+        ? `/p/${settled.projectId}?focus=messages&mid=${settled.sourceMessageId}`
+        : `/p/${settled.projectId}?focus=task&taskId=${settled.id}`,
+      eventKey: `task_settled:${settled.id}`,
+    });
   }
   return settled;
 }

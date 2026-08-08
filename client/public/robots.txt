@@ -1,0 +1,10 @@
+# Aios 公開網站
+# 公開頁（Landing）可索引；登入與 API 路徑不該被搜尋引擎收錄
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /s/
+
+Sitemap: https://ai-os-app.zeabur.app/sitemap.xml

@@ -764,6 +764,26 @@ export async function materializeStoryboard(input: {
   const resolveLocRef = (ref: string | undefined): string | null =>
     ref ? resolveExistingRef(aliases, "location", ref) ?? matchByName(existing.locations, ref)?.id ?? null : null;
 
+  /*
+   * 角色 → 這一鏡要鎖哪一套造型（§14／§15 Identity/Look）。
+   *
+   * 故事寫了「安倢穿著米白色外套」、解析也把它建成 Look，但如果轉分鏡時不把它掛上，
+   * 造型就只是躺在資料庫裡的一張卡——使用者得逐鏡手動勾，那就是「把整理工作丟回給人」。
+   *
+   * 只在**不含糊**時自動掛：這個角色名下就只有一套造型。有兩套以上代表故事裡換過裝，
+   * 哪一鏡穿哪一套不是規則層猜得準的，留給使用者在分鏡卡上點（誤鎖比沒鎖難發現）。
+   */
+  const looksByCharacter = new Map<string, string[]>();
+  for (const l of existing.looks) {
+    const arr = looksByCharacter.get(l.characterId) ?? [];
+    arr.push(l.id);
+    looksByCharacter.set(l.characterId, arr);
+  }
+  const soleLookOf = (characterId: string): string | null => {
+    const arr = looksByCharacter.get(characterId);
+    return arr && arr.length === 1 ? arr[0] : null;
+  };
+
   return db.transaction(async (tx) => {
     await lockSceneOrder(tx, project.id);
     const [{ maxOrder }] = await tx
@@ -852,6 +872,13 @@ export async function materializeStoryboard(input: {
               characterIds: characterIds.length ? [...new Set(characterIds)] : null,
               scenePresetIds: locationPresetIds.length ? locationPresetIds : null,
               propIds: propIds.length ? [...new Set(propIds)] : null,
+              // 出場角色若只有一套造型，直接鎖上（見上方 soleLookOf 的取捨）
+              lookIds: (() => {
+                const ids = [...new Set(characterIds)]
+                  .map(soleLookOf)
+                  .filter((id): id is string => Boolean(id));
+                return ids.length ? ids : null;
+              })(),
             };
           }),
         )
