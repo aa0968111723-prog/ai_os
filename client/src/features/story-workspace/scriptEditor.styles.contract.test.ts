@@ -35,6 +35,35 @@ describe("全螢幕寫作", () => {
   it("安全區域有讓（瀏海機的底部手勢條不能吃掉解析列）", () => {
     expect(ruleFor(".script-editor.is-immersive")).toContain("--safe-bottom");
   });
+
+  it("底緣讓開鍵盤——iOS 的 dvh 不隨鍵盤縮，不顯式扣 --kb-inset 就打在看不見的地方", () => {
+    // 站內既有契約（.modal-scrim、.dm-layout、專案訊息 sheet 都這樣扣）
+    expect(ruleFor(".script-editor.is-immersive")).toMatch(/bottom:\s*var\(--kb-inset, 0px\)/);
+  });
+});
+
+describe("手機全螢幕打字", () => {
+  const mobile = declarations.slice(declarations.indexOf("@media (max-width: 820px)"));
+
+  it("工具列單列橫捲：換行成兩三排會把定高容器裡的稿子壓成一條縫", () => {
+    expect(mobile).toMatch(
+      /\.script-editor\.is-immersive \.script-editor__group\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/,
+    );
+  });
+
+  it("打字中統計列與解析列讓開，鍵盤上方的高度全給稿子", () => {
+    for (const part of ["__status", "__keys", "__notice", "__footer"]) {
+      expect(mobile, `打字中未讓開 ${part}`).toContain(`.script-editor.is-immersive.is-typing .script-editor${part}`);
+    }
+  });
+
+  it("工具列只有「群內」橫捲：整條捲的話「離開全螢幕」會被推出畫面，使用者出不去", () => {
+    expect(mobile).not.toMatch(/\.script-editor\.is-immersive \.script-editor__toolbar\s*\{[^}]*overflow-x:\s*auto/);
+  });
+
+  it("稿子有高度保底（工具再多也留得下約四行）", () => {
+    expect(mobile).toMatch(/\.script-editor\.is-immersive \.script-editor__body\s*\{[^}]*min-height/);
+  });
 });
 
 describe("字級偏好", () => {

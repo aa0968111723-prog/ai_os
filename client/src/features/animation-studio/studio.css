@@ -590,6 +590,10 @@ button.studio-sheet__scrim:hover { background: rgba(22, 34, 59, 0.32); }
 .studio.is-immersive {
   position: fixed;
   inset: 0;
+  /* 提示詞／旁白／環境音三個 textarea 都在這層裡：iOS 鍵盤不縮版面視窗
+     （見 client/src/lib/keyboardInset.ts），不顯式抬底緣的話側欄下半在鍵盤底下，
+     打字看不到自己打了什麼。Android 因 interactive-widget 算出 0，不重複位移。 */
+  bottom: var(--kb-inset, 0px);
   z-index: 60;
   min-height: 0;
   margin: 0;
@@ -601,8 +605,9 @@ button.studio-sheet__scrim:hover { background: rgba(22, 34, 59, 0.32); }
 .studio.is-immersive .studio__side { max-height: none; }
 .studio.is-immersive .studio-board { min-height: 0; }
 .studio.is-immersive .studio__rail { padding-top: 6px; }
-/* 沉浸時 dock 貼視窗底（沒有分頁列要讓） */
-.studio.is-immersive[data-mode="lite"] { height: 100dvh; }
+/* 沉浸時 dock 貼視窗底（沒有分頁列要讓）。顯式高度會蓋掉上面的 bottom 讓位，
+   所以這裡也要扣掉鍵盤高度，不然精簡模式打字時 dock 又沉回鍵盤底下 */
+.studio.is-immersive[data-mode="lite"] { height: calc(100dvh - var(--kb-inset, 0px)); }
 
 /* 全站浮動殼層讓開：沉浸時畫面上只該有創作室 */
 body.studio-immersive .topbar,

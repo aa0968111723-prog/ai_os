@@ -1745,6 +1745,9 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-host.is-immersive {
   position: fixed;
   inset: 0;
+  /* 搜尋框一聚焦，iOS 的版面視窗不縮（見 lib/keyboardInset.ts），畫布下半整片沉到
+     鍵盤底下；底緣顯式抬過 --kb-inset，節點才會重排到看得見的地方 */
+  bottom: var(--kb-inset, 0px);
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -8095,6 +8098,10 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
    iOS（不支援元素 requestFullscreen）會看到頁面其餘內容從旁邊露出來。 */
 .script-editor.is-immersive {
   position: fixed; inset: 0; z-index: 60; min-height: 0;
+  /* iOS 鍵盤不縮版面視窗（見 lib/keyboardInset.ts）：定高容器的底緣要顯式抬過
+     --kb-inset，不然稿子下半、統計列、解析列全沉在鍵盤底下，打字看不到游標。
+     Android 因 interactive-widget=resizes-content 算出 0，不會重複位移。 */
+  bottom: var(--kb-inset, 0px);
   padding: 0 16px calc(10px + var(--safe-bottom, 0px));
   padding-top: var(--safe-top, 0px); background: var(--bg); overflow: hidden;
 }
@@ -8222,6 +8229,26 @@ body.story-immersive { overflow: hidden; }
   .script-editor__body { flex-direction: column; }
   .script-outline { flex: none; width: 100%; max-height: 200px; }
   .script-editor.is-immersive { padding-inline: 12px; }
+  /* 手機全螢幕：鍵盤吃掉半個畫面後，稿子才是主角，工具得讓。
+     十四顆工具鈕都吃全站 44px 觸控下限（styles.css:152-166），照原本的 flex-wrap
+     會排成三四排、佔掉沉浸容器一半高度。改成「每一群自己單列橫捲」——
+     群與群之間仍可換行，「離開全螢幕」才不會被捲出畫面外變成出不去。 */
+  .script-editor.is-immersive .script-editor__group {
+    flex-wrap: nowrap; overflow-x: auto; max-width: 100%;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .script-editor.is-immersive .script-editor__group::-webkit-scrollbar { display: none; }
+  /* 打字中（.is-typing＝稿子聚焦）統計、快捷鍵、解析列整段讓開：
+     它們留著的話，鍵盤上方只剩一條縫給稿子，游標打在看不見的地方。
+     失焦（收鍵盤／按別處）就回來，「產生分鏡」不會消失，只是不跟鍵盤搶高度。 */
+  .script-editor.is-immersive.is-typing .script-editor__status,
+  .script-editor.is-immersive.is-typing .script-editor__keys,
+  .script-editor.is-immersive.is-typing .script-editor__notice,
+  .script-editor.is-immersive.is-typing .script-editor__footer { display: none; }
+  /* 大綱開著時也不能把稿子擠光：打字中收成一小截（仍可捲、仍可點著跳場） */
+  .script-editor.is-immersive.is-typing .script-outline { max-height: 120px; }
+  /* 稿子的最後防線：工具再多也保底約四行，寧可讓容器底部裁掉也不讓編輯區歸零 */
+  .script-editor.is-immersive .script-editor__body { min-height: 96px; }
 }
 
 /* ── ＋加入資料（AddDataSheet，資料中心 P2）──────────────────────────

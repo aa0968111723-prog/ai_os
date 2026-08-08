@@ -64,8 +64,16 @@ describe("全螢幕專注模式", () => {
     }
   });
 
-  it("沉浸時輕量版佔滿整個視窗（沒有分頁列與頂欄要讓）", () => {
-    expect(declarations).toMatch(/\.studio\.is-immersive\[data-mode="lite"\] \{ height: 100dvh/);
+  it("沉浸時輕量版佔滿整個視窗（沒有分頁列與頂欄要讓），但把鍵盤那一截讓出來", () => {
+    // iOS 鍵盤不縮 dvh：顯式高度若寫死 100dvh，會蓋掉 .studio.is-immersive 的
+    // bottom 讓位，精簡模式打字時 dock 與側欄又沉回鍵盤底下（見 lib/keyboardInset.ts）
+    expect(declarations).toMatch(
+      /\.studio\.is-immersive\[data-mode="lite"\] \{ height: calc\(100dvh - var\(--kb-inset, 0px\)\)/,
+    );
+  });
+
+  it("沉浸殼層底緣讓開鍵盤——裡面有提示詞／旁白／環境音三個 textarea", () => {
+    expect(ruleFor(".studio.is-immersive")).toMatch(/bottom:\s*var\(--kb-inset, 0px\)/);
   });
 });
 
