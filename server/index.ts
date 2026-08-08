@@ -1977,6 +1977,19 @@ app.post("/api/assistant/ask", async (req, res) => {
   const knowledgeIds = rawKids
     .filter((x: unknown): x is string => typeof x === "string" && UUID_RE.test(x))
     .slice(0, 20);
+  const rawOnlyKids = Array.isArray(req.body?.onlyKnowledgeIds) ? req.body.onlyKnowledgeIds : [];
+  const onlyKnowledgeIds = rawOnlyKids
+    .filter((x: unknown): x is string => typeof x === "string" && UUID_RE.test(x))
+    .slice(0, 20);
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history.slice(0, 8) : [];
+  const history = rawHistory
+    .filter((turn: unknown): turn is { role: "user" | "assistant"; text: string } => {
+      if (!turn || typeof turn !== "object") return false;
+      const row = turn as Record<string, unknown>;
+      return (row.role === "user" || row.role === "assistant") && typeof row.text === "string";
+    })
+    .map((turn: { role: "user" | "assistant"; text: string }) => ({ role: turn.role, text: turn.text.slice(0, 1000) }));
+  const pageContext = sanitizeAssistantPageContext(req.body?.pageContext) ?? undefined;
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -2020,6 +2033,9 @@ app.post("/api/assistant/ask", async (req, res) => {
         dedupeKey: nonce,
         mode,
         knowledgeIds: knowledgeIds.length ? knowledgeIds : undefined,
+        onlyKnowledgeIds: onlyKnowledgeIds.length ? onlyKnowledgeIds : undefined,
+        history: history.length ? history : undefined,
+        pageContext,
       },
       (e) => { latency.observe(e); sse("step", e); },
     );

@@ -130,11 +130,16 @@ function DirectActionResultCard({ item, onNavigate }: { item: ExecutedSiteAction
   const undo = trpc.globalAssistant.undoSiteAction.useMutation();
   const undoInput = undoSiteActionInput(item);
   const link = siteActionDoneLink(item.action, item.result);
+  const verified = item.result.verification?.status !== "unverified";
   return (
     <div className="ai-copilot-action-card is-done" data-fb="直接執行結果卡">
-      <Icon name={undo.isSuccess ? "Undo2" : "Check"} size={14} />
+      <Icon name={undo.isSuccess ? "Undo2" : verified ? "Check" : "TriangleAlert"} size={14} />
       <span className="ai-copilot-action-card__label">
-        {undo.isSuccess ? `已撤銷：${item.action.label}` : `已完成：${item.action.label}`}
+        {undo.isSuccess
+          ? `已撤銷：${item.action.label}`
+          : verified
+            ? `已完成：${item.action.label}（已驗證）`
+            : `操作已送出，但驗證未通過：${item.action.label}`}
       </span>
       {undo.error ? <span className="ai-copilot-action-card__error">{undo.error.message}</span> : null}
       {!undo.isSuccess && link && onNavigate ? (

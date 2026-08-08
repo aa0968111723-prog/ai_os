@@ -50,9 +50,9 @@ import {
   classifyAssistantRequest,
   type AssistantExecutionPlan,
 } from "../../shared/assistantExecution";
-import { removeNoteCore } from "../services/notesCore";
-import { removeScheduleItemCore } from "../services/scheduleCore";
-import { cancelProjectTaskCore } from "../services/taskCore";
+import { getNoteChecked, removeNoteCore } from "../services/notesCore";
+import { getScheduleItemChecked, removeScheduleItemCore } from "../services/scheduleCore";
+import { cancelProjectTaskCore, getProjectTaskChecked } from "../services/taskCore";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -378,7 +378,7 @@ export interface GlobalAskResult {
 
 export interface ExecutedSiteAction {
   action: ResolvedSiteAction;
-  result: SiteActionResult;
+  result: VerifiedSiteActionResult;
   canUndo: true;
 }
 
@@ -798,6 +798,10 @@ export type SiteActionResult =
   | { type: "send_dm"; messageId: string }
   | { type: "add_database_row"; rowId: string; tableName: string };
 
+export type VerifiedSiteActionResult = SiteActionResult & {
+  verification: { status: "verified" | "unverified"; message: string };
+};
+
 function resolvedSiteActionInput(action: ResolvedSiteAction): SiteActionInput {
   switch (action.type) {
     case "create_project":
@@ -835,7 +839,12 @@ async function executeDirectSiteActions(
   for (const action of eligible) {
     try {
       const result = await runSiteActionCore(auth, resolvedSiteActionInput(action));
-      onEvent?.(`已完成：${action.label}`, action.type);
+      onEvent?.(
+        result.verification.status === "verified"
+          ? `已完成並驗證：${action.label}`
+          : `操作已送出，但驗證未通過：${action.label}`,
+        action.type,
+      );
       executed.push({ action, result, canUndo: true });
     } catch (error) {
       onEvent?.(`未能直接完成「${action.label}」：${error instanceof Error ? error.message : "執行失敗"}`, action.type);
@@ -849,7 +858,17 @@ async function executeDirectSiteActions(
  * 授權全部在被呼叫端內部：requireGroup／assertProjectAllows／getProjectRole／assertPolicy／assertDmPeer。
  * 本層零權限判斷、零直接 DB 寫入。
  */
-export async function runSiteActionCore(auth: AuthState, input: SiteActionInput): Promise<SiteActionResult> {
+export async function readBackVerification(read: () => Promise<boolean>): Promise<VerifiedSiteActionResult["verification"]> {
+  try {
+    return await read()
+      ? { status: "verified", message: "已重新讀取並確認存在" }
+      : { status: "unverified", message: "操作已送出，但重新讀取的內容不一致" };
+  } catch {
+    return { status: "unverified", message: "操作已送出，但驗證未通過" };
+  }
+}
+
+export async function runSiteActionCore(auth: AuthState, input: SiteActionInput): Promise<VerifiedSiteActionResult> {
   switch (input.type) {
     case "create_project": {
       const project = await createProjectCore({
@@ -859,7 +878,13 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         kind: input.kind,
         platform: input.platform,
       });
-      return { type: "create_project", projectId: project.id, title: project.title };
+      const verification = await readBackVerification(async () => {
+        const [found] = await db.select({ id: schema.projects.id, title: schema.projects.title, groupId: schema.projects.groupId })
+          .from(schema.projects).where(eq(schema.projects.id, project.id));
+        return !!found && found.groupId === input.groupId && found.title === project.title
+          && auth.groups.some((group) => group.groupId === found.groupId);
+      });
+      return { type: "create_project", projectId: project.id, title: project.title, verification };
     }
     case "add_note": {
       const note = await executeNoteCommand({
@@ -871,7 +896,11 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         title: input.title,
         content: input.content,
       });
-      return { type: "add_note", noteId: note.id, title: note.title };
+      const verification = await readBackVerification(async () => {
+        const found = await getNoteChecked(auth, note.id);
+        return found.title === note.title;
+      });
+      return { type: "add_note", noteId: note.id, title: note.title, verification };
     }
     case "add_schedule_item": {
       if (Number.isNaN(Date.parse(input.startsAt))) {
@@ -890,7 +919,11 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         endsAt: input.endsAt ?? null,
         note: input.note ?? null,
       });
-      return { type: "add_schedule_item", scheduleItemId: item.id, title: item.title };
+      const verification = await readBackVerification(async () => {
+        const found = await getScheduleItemChecked(auth, item.id);
+        return found.title === item.title;
+      });
+      return { type: "add_schedule_item", scheduleItemId: item.id, title: item.title, verification };
     }
     case "create_task": {
       if (input.dueAt && Number.isNaN(Date.parse(input.dueAt))) {
@@ -907,11 +940,20 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         dueAt: input.dueAt ?? null,
         priority: input.priority,
       });
-      return { type: "create_task", taskId: task.id, title: task.title };
+      const verification = await readBackVerification(async () => {
+        const found = await getProjectTaskChecked(auth, task.id);
+        return found.title === task.title;
+      });
+      return { type: "create_task", taskId: task.id, title: task.title, verification };
     }
     case "send_dm": {
       const { message } = await sendDm(auth, input.peerId, input.body);
-      return { type: "send_dm", messageId: message.id };
+      const verification = await readBackVerification(async () => {
+        const [found] = await db.select({ id: schema.dmMessages.id, senderId: schema.dmMessages.senderId })
+          .from(schema.dmMessages).where(eq(schema.dmMessages.id, message.id));
+        return !!found && found.senderId === auth.user.id;
+      });
+      return { type: "send_dm", messageId: message.id, verification };
     }
     case "add_database_row": {
       const keys = Object.keys(input.data);
@@ -933,7 +975,12 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         tableId: input.tableId,
         data: input.data,
       });
-      return { type: "add_database_row", rowId: row.id, tableName: hit.table.name };
+      const verification = await readBackVerification(async () => {
+        const [found] = await db.select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId })
+          .from(schema.dataRows).where(eq(schema.dataRows.id, row.id));
+        return !!found && found.tableId === input.tableId;
+      });
+      return { type: "add_database_row", rowId: row.id, tableName: hit.table.name, verification };
     }
   }
 }

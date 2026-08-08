@@ -34,6 +34,8 @@ import {
   type AssistantExecutionPlan,
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
+import { useAssistantContext } from "../lib/assistantContext";
+import { toWirePageContext } from "../lib/assistantQuickActions";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -89,6 +91,7 @@ type ProjectDirectResult = {
   message: string;
   createdScenes?: number;
   sceneIds?: string[];
+  verification?: { status: "verified" | "unverified"; message: string };
 };
 
 function ProjectDirectResultCard({ projectId, result }: { projectId: string; result: ProjectDirectResult }) {
@@ -97,7 +100,7 @@ function ProjectDirectResultCard({ projectId, result }: { projectId: string; res
   const canUndo = result.kind === "split_script" && Boolean(result.sceneIds?.length);
   return (
     <div className="ai-copilot-action-card is-done" data-fb="專案動作結果卡" style={{ marginTop: 8 }}>
-      <Icon name={undo.isSuccess ? "Undo2" : "Check"} size={14} />
+      <Icon name={undo.isSuccess ? "Undo2" : result.verification?.status === "unverified" ? "TriangleAlert" : "Check"} size={14} />
       <span className="ai-copilot-action-card__label">
         {undo.isSuccess ? "已復原這次建立的分鏡" : result.message}
       </span>
@@ -222,6 +225,7 @@ export function ProjectAssistant({
   }) => void;
 }) {
   const utils = trpc.useUtils();
+  const pageContext = useAssistantContext();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [collapsed, setCollapsed] = useState(false);
@@ -340,6 +344,10 @@ export function ProjectAssistant({
     requestProjectId: string,
     epoch: number,
   ): Promise<boolean> {
+    const history = turns.slice(-8).map((turn) => ({
+      role: turn.role === "you" ? "user" as const : "assistant" as const,
+      text: turn.text,
+    }));
     return requestAssistantStream({
       projectId: requestProjectId,
       message,
@@ -347,6 +355,8 @@ export function ProjectAssistant({
       // 使用者為「回答模型」選的檔位；預設 nim＝免費，選 fal 檔位平台才付費
       mode: answerMode,
       knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+      history: history.length ? history : undefined,
+      pageContext: toWirePageContext(pageContext),
       signal,
       handlers: {
         onOpen: (opened) => {
@@ -435,6 +445,11 @@ export function ProjectAssistant({
           nonce,
           mode: answerMode,
           knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+          history: turns.slice(-8).map((turn) => ({
+            role: turn.role === "you" ? "user" as const : "assistant" as const,
+            text: turn.text,
+          })),
+          pageContext: toWirePageContext(pageContext),
         },
         {
           onSuccess: (result) => {

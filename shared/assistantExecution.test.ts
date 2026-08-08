@@ -14,6 +14,12 @@ describe("assistant execution fast path", () => {
     expect(classifyAssistantRequest(message).intent).toBe(expected);
   });
 
+  it("routes compound work to PLAN but keeps one bounded write on ACT", () => {
+    expect(classifyAssistantRequest("幫我把腳本拆成分鏡，然後逐鏡生成畫面").intent).toBe("PLAN");
+    expect(classifyAssistantRequest("把這三鏡改善並重新生成素材").intent).toBe("PLAN");
+    expect(classifyAssistantRequest("幫我建立 5 個待辦").intent).toBe("ACT");
+  });
+
   it("only directly runs allow-listed reversible writes for explicit ACT", () => {
     const act = classifyAssistantRequest("幫我建立一則筆記");
     expect(canDirectlyExecuteCapability(act, "add_note")).toBe(true);

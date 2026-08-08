@@ -3,9 +3,25 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   formatMemberRefs,
+  readBackVerification,
   resolveSiteActions,
   type SiteActionRefs,
 } from "./globalAssistant";
+
+describe("ACT -> VERIFY -> COMPLETE", () => {
+  it("only reports verified after a successful matching read-back", async () => {
+    await expect(readBackVerification(async () => true)).resolves.toMatchObject({ status: "verified" });
+    await expect(readBackVerification(async () => false)).resolves.toEqual({
+      status: "unverified",
+      message: "操作已送出，但重新讀取的內容不一致",
+    });
+  });
+
+  it("does not hallucinate success when the verification read fails", async () => {
+    const result = await readBackVerification(async () => { throw new Error("db timeout"); });
+    expect(result).toEqual({ status: "unverified", message: "操作已送出，但驗證未通過" });
+  });
+});
 
 const refs = (over?: Partial<SiteActionRefs>): SiteActionRefs => ({
   groupId: "group-1",
