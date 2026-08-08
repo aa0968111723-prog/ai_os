@@ -1212,7 +1212,9 @@ app.get("/api/integrations/google-drive/start", async (req, res) => {
     if (!requireUsableSession(auth, res)) return;
     const { isGoogleDriveConfigured, buildDriveAuthUrl } = await import("./services/integrations");
     if (!isGoogleDriveConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 整合（GOOGLE_CLIENT_ID/SECRET）" });
-    res.redirect(buildDriveAuthUrl(auth.user.id));
+    // ?return=<站內相對路徑>：授權完成後回到使用者原本的「加入資料」流程（資料中心 P2）。
+    // 值被簽進 state（HMAC）並在兩端各過一次白名單——不是可被外人偽造的自由重導參數。
+    res.redirect(buildDriveAuthUrl(auth.user.id, typeof req.query.return === "string" ? req.query.return : null));
   } catch (err) {
     console.error("[integrations:gdrive:start]", err);
     recordError("integrations:gdrive:start", err);
@@ -1227,15 +1229,21 @@ app.get("/api/integrations/google-drive/callback", async (req, res) => {
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
     const state = verifyIntegrationState(String(req.query.state ?? ""));
     if (!state || state.userId !== auth.user.id) return res.redirect("/integrations?gdrive=state_mismatch");
-    if (req.query.error) return res.redirect("/integrations?gdrive=denied"); // 使用者在 Google 畫面按了取消
+    // 回跳目的地：state 裡簽過的站內路徑（使用者原本的「加入資料」流程），沒有就退回設定頁。
+    // 授權被拒／失敗也回同一個地方——半路把人丟到別頁，他就得自己找回來。
+    const back = (flag: string) => {
+      const target = state.returnTo ?? "/integrations";
+      return `${target}${target.includes("?") ? "&" : "?"}gdrive=${flag}`;
+    };
+    if (req.query.error) return res.redirect(back("denied")); // 使用者在 Google 畫面按了取消
     const code = String(req.query.code ?? "");
-    if (!code) return res.redirect("/integrations?gdrive=denied");
+    if (!code) return res.redirect(back("denied"));
     const { refreshToken, email } = await exchangeDriveCode(code);
     await saveGoogleDrive(auth.user.id, refreshToken, email);
     // Express callback 繞過 tRPC 審計中介層——比照 MCP/上傳端點手動補記（fire-and-forget）
     const { recordAudit } = await import("./services/audit");
     recordAudit(auth, "integrations.googleDriveConnect", { email }, { ok: true });
-    res.redirect("/integrations?gdrive=connected");
+    res.redirect(back("connected"));
   } catch (err) {
     console.error("[integrations:gdrive:callback]", err);
     recordError("integrations:gdrive:callback", err);

@@ -269,4 +269,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0051_collab_revisions": [
     "505ad8d3b8b50821069d0985008879112e31a9905d2178cc0dc3b98e1e48c210",
   ],
+  // 原本編為 0051，與 base branch 併入的 0051_collab_revisions 撞號後改編 0052。
+  // 這支還沒有被任何資料庫套用過（PR 尚未合併），重新編號不會讓任何 ledger 對不上；
+  // 檔案內容一個位元組都沒動，所以 hash 與改號前相同。
+  "0052_data_hub_bindings_and_lineage": [
+    "9470bdb94136c2987dcecf293a84c9214161d71a98fca0445093ed224464be9f",
+  ],
 };

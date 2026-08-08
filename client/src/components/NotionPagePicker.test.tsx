@@ -8,22 +8,42 @@ const { queryState } = vi.hoisted(() => ({ queryState: { data: null as unknown }
 
 vi.mock("../api", () => ({
   trpc: {
-    useUtils: () => ({ databases: { listFiles: { invalidate: () => {} } } }),
+    useUtils: () => ({
+      databases: { listFiles: { invalidate: () => {} } },
+      knowledge: { list: { invalidate: () => {} } },
+    }),
     integrations: {
       listNotionPages: { useQuery: () => ({ data: queryState.data, error: null, isFetching: false }) },
     },
     databases: {
       importUrl: { useMutation: () => ({ mutateAsync: async () => ({}), isPending: false, error: null }) },
     },
+    knowledge: {
+      importUrl: { useMutation: () => ({ mutateAsync: async () => ({}), isPending: false, error: null }) },
+    },
   },
 }));
 
 describe("NotionPagePicker", () => {
-  it("未設定：顯示「分享給整合」範圍文案與前往設定 CTA", () => {
+  // 資料中心 P2 契約變更：Notion 沒有 OAuth 重導，但設定頁一樣要能把人送回原本的流程，
+  // 所以 CTA 帶 ?return=<目前畫面>（IntegrationsPage 存好 token 後導回）。
+  it("未設定：顯示「分享給整合」範圍文案，CTA 帶回跳目的地", () => {
     queryState.data = { ok: false, reason: "not-connected", message: "尚未設定 Notion token" };
     render(<NotionPagePicker tableId="t1" onImported={() => {}} onClose={() => {}} />);
     expect(screen.getByText(/只有「分享給整合」的頁面／資料庫會出現/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /前往設定 Notion/ })).toHaveAttribute("href", "/integrations");
+    const cta = screen.getByRole("link", { name: /連接 Notion/ });
+    expect(cta.getAttribute("href")).toContain("/integrations");
+    expect(cta.getAttribute("href")).toContain("return=");
+  });
+
+  it("專案目的地：主按鈕改成「加入這個專案」", () => {
+    queryState.data = {
+      ok: true,
+      workspace: "弘法工作區",
+      pages: [{ id: "p1", title: "劇本初稿", lastEdited: null, type: "page" }],
+    };
+    render(<NotionPagePicker projectId="proj-1" onImported={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: /加入這個專案/ })).toBeInTheDocument();
   });
 
   it("已連接：顯示 workspace 名稱與頁面列", () => {
