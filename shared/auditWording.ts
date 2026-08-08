@@ -77,6 +77,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.setVisualFromAsset": "切換分鏡版本",
   "scenes.refine": "以底圖修正分鏡畫面",
   "scenes.update": "更新分鏡",
+  "scenes.review": "變更分鏡審核狀態",
   "scenes.setCards": "設定分鏡要用的設定卡",
   "scenes.applyScript": "用文字腳本寫回分鏡",
   "scenes.insertAfter": "插入／複製分鏡",
