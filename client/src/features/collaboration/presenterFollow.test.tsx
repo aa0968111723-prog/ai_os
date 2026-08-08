@@ -15,7 +15,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ViewState } from "@shared/viewState";
 import { usePresenterFollow } from "./usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite } from "./PresenterBar";
-import type { CollabPeer, CollabPresenter, PeerView } from "../../realtime";
+import { buildViewState, detectVisibleSection } from "./viewStateBridge";
+import type { CollabPeer, CollabPresenter, PeerView, PresentEnded } from "../../realtime";
 
 const bruce: CollabPresenter = { userId: "u-bruce", connId: "c-bruce-1", name: "Bruce", color: "#c2613f", view: { section: "storyboard" } };
 const peers = (...ids: string[]): CollabPeer[] => ids.map((userId) => ({ userId, name: userId, color: "#000" }));
@@ -172,19 +173,57 @@ describe("usePresenterFollow", () => {
     expect(onNavigate).toHaveBeenCalledWith(tabB);
   });
 
-  it("主講者結束主講（不是離線）→ 乾淨地離開跟隨，不留在死掉的位置上", () => {
+  it("主講者按「結束主講」（reason=stopped）→ 乾淨地離開跟隨", () => {
     const { rerender, result } = renderHook(
-      (props: { presenters: CollabPresenter[] }) =>
+      (props: { presenters: CollabPresenter[]; ended?: PresentEnded | null }) =>
         usePresenterFollow({
           presenters: props.presenters,
           peerViews: views([["c-bruce-1", "u-bruce", { section: "storyboard" }]]),
           peers: peers("u-bruce"),
+          presentEnded: props.ended,
         }),
-      { initialProps: { presenters: [bruce] } },
+      { initialProps: { presenters: [bruce] as CollabPresenter[], ended: null as PresentEnded | null } },
     );
     act(() => result.current.join(bruce));
-    rerender({ presenters: [] });
+    rerender({ presenters: [], ended: { connId: "c-bruce-1", reason: "stopped", at: 1 } });
     expect(result.current.state.status).toBe("off");
+  });
+
+  it("G2. 主講者斷線（reason=disconnected）→ presenter_gone，即使在場名單還沒更新", () => {
+    // 實機雙瀏覽器抓到的回歸：斷線時 `present` 與 `presence` 是兩則獨立訊息，
+    // 抵達順序不保證。舊版靠「他還在不在在場名單」去推，讀到還沒更新的名單，
+    // 把斷線誤判成「他自己結束的」——狀態列直接消失，跟隨者只看到畫面
+    // 突然不動而沒有任何解釋。所以這裡故意讓 peers **仍然包含** Bruce。
+    const { rerender, result } = renderHook(
+      (props: { presenters: CollabPresenter[]; ended?: PresentEnded | null }) =>
+        usePresenterFollow({
+          presenters: props.presenters,
+          peerViews: views([["c-bruce-1", "u-bruce", { section: "storyboard" }]]),
+          peers: peers("u-bruce"), // 名單尚未更新，Bruce 還在裡面
+          presentEnded: props.ended,
+        }),
+      { initialProps: { presenters: [bruce] as CollabPresenter[], ended: null as PresentEnded | null } },
+    );
+    act(() => result.current.join(bruce));
+    rerender({ presenters: [], ended: { connId: "c-bruce-1", reason: "disconnected", at: 1 } });
+    expect(result.current.state.status).toBe("presenter_gone");
+    expect(result.current.state.presenterName).toBe("Bruce");
+  });
+
+  it("別人的主講結束不影響我正在跟的那一場（比對 connId）", () => {
+    const { rerender, result } = renderHook(
+      (props: { ended?: PresentEnded | null }) =>
+        usePresenterFollow({
+          presenters: [bruce],
+          peerViews: views([["c-bruce-1", "u-bruce", { section: "storyboard" }]]),
+          peers: peers("u-bruce"),
+          presentEnded: props.ended,
+        }),
+      { initialProps: { ended: null as PresentEnded | null } },
+    );
+    act(() => result.current.join(bruce));
+    rerender({ ended: { connId: "c-someone-else", reason: "disconnected", at: 1 } });
+    expect(result.current.state.status).toBe("following");
   });
 
   it("已經在跟隨時不再重複邀請（那只會變成洗版）", () => {
@@ -304,5 +343,57 @@ describe("PresenterBar UI", () => {
     const bar = screen.getByTestId("follow-status");
     expect(bar).toHaveAttribute("role", "status");
     expect(bar).toHaveAttribute("aria-live", "polite");
+  });
+});
+
+describe("viewStateBridge（語意視圖 ↔ DOM）", () => {
+  it("zone 對應得出區塊時以 zone 優先（他真的在那裡編輯）", () => {
+    expect(buildViewState({ zone: "scenes", visibleSection: "story" })).toEqual({ section: "storyboard" });
+  });
+
+  it("沒有 zone 時退回捲動位置——使用者純瀏覽時 viewState 仍要跟著動", () => {
+    // 只看 zone 的舊版在這裡回 null，跟隨者於是停在原地而畫面上看不出哪裡不對
+    // （實機雙瀏覽器抓到的）。
+    expect(buildViewState({ zone: null, visibleSection: "storyboard" })).toEqual({ section: "storyboard" });
+  });
+
+  it("越具體的欄位一併帶上（哪一鏡、哪一版）", () => {
+    const sceneId = "11111111-1111-1111-1111-111111111111";
+    const assetId = "22222222-2222-2222-2222-222222222222";
+    expect(buildViewState({ zone: "scenes", sceneId, assetId, tab: "visual" })).toEqual({
+      section: "storyboard",
+      sceneId,
+      assetId,
+      tab: "visual",
+    });
+  });
+
+  it("什麼都沒有就回 null——不送空封包", () => {
+    expect(buildViewState({ zone: null })).toBeNull();
+  });
+
+  it("detectVisibleSection：捲過哪個階段標頭就算在看哪一段", () => {
+    document.body.innerHTML = `<div id="stage-story"></div><div id="stage-board"></div>`;
+    const story = document.getElementById("stage-story")!;
+    const board = document.getElementById("stage-board")!;
+    // ① 已捲過、② 還在下面 → 在看 ①
+    story.getBoundingClientRect = () => ({ top: -100, width: 10, height: 10 }) as DOMRect;
+    board.getBoundingClientRect = () => ({ top: 5000, width: 10, height: 10 }) as DOMRect;
+    expect(detectVisibleSection()).toBe("story");
+    // 兩個都捲過了 → 取後面那個（與人的直覺一致）
+    board.getBoundingClientRect = () => ({ top: -20, width: 10, height: 10 }) as DOMRect;
+    expect(detectVisibleSection()).toBe("storyboard");
+    document.body.innerHTML = "";
+  });
+
+  it("detectVisibleSection：隱藏中的區塊 rect 全 0，不可被誤判成「在看它」", () => {
+    document.body.innerHTML = `<div id="stage-story"></div><div id="stage-board"></div>`;
+    document.getElementById("stage-story")!.getBoundingClientRect = () =>
+      ({ top: -100, width: 10, height: 10 }) as DOMRect;
+    // 隱藏的 ②：rect 全 0，top=0 <= probe 會誤判——必須被寬高守衛擋掉
+    document.getElementById("stage-board")!.getBoundingClientRect = () =>
+      ({ top: 0, width: 0, height: 0 }) as DOMRect;
+    expect(detectVisibleSection()).toBe("story");
+    document.body.innerHTML = "";
   });
 });

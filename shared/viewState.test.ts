@@ -129,6 +129,21 @@ describe("followReducer（三條不可違反的規則）", () => {
     expect(followReducer(s, { type: "resume" }).status).toBe("following");
   });
 
+  it("主講結束的兩種原因必須分得開（實機雙瀏覽器抓到的回歸）", () => {
+    // stopped：他自己按了結束，人還在房裡 → 乾淨退出
+    expect(followReducer(joined(), { type: "leave" }).status).toBe("off");
+    // disconnected：他斷線 → 明說「Bruce 暫時離線」，而且說得出是誰
+    const gone = followReducer(joined(), { type: "presenter_offline" });
+    expect(gone.status).toBe("presenter_gone");
+    expect(gone.presenterName).toBe("Bruce");
+    // 為什麼不能用「他還在不在在場名單」去推：斷線時 present 與 presence 是兩則
+    // 獨立訊息、抵達順序不保證，推出來的答案會是還沒更新的那一份名單。
+  });
+
+  it("沒在跟任何人時，presenter_offline 不產生任何狀態", () => {
+    expect(followReducer(initialFollowState(), { type: "presenter_offline" }).status).toBe("off");
+  });
+
   it("leave 回到乾淨狀態", () => {
     expect(followReducer(joined(), { type: "leave" })).toEqual(initialFollowState());
   });

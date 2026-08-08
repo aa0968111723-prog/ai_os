@@ -20,7 +20,7 @@ import {
   type FollowState,
   type ViewState,
 } from "../../../../shared/viewState";
-import type { CollabPeer, CollabPresenter, PeerView } from "../../realtime";
+import type { CollabPeer, CollabPresenter, PeerView, PresentEnded } from "../../realtime";
 
 /**
  * 跟隨者自己操作 → 暫停。用 capture 掛在 window 上，才會在任何元件處理之前就收到。
@@ -49,12 +49,15 @@ export function usePresenterFollow({
   presenters,
   peerViews,
   peers,
+  /** 最近一次「主講結束」及其原因（stopped vs disconnected） */
+  presentEnded,
   /** 跟隨者被帶到新位置時要做什麼（呼叫端把 viewState 套用到自己的畫面上） */
   onNavigate,
 }: {
   presenters: CollabPresenter[];
   peerViews: Map<string, PeerView>;
   peers: CollabPeer[];
+  presentEnded?: PresentEnded | null;
   onNavigate?: (view: ViewState) => void;
 }): PresenterFollow {
   const [state, dispatch] = useReducer(followReducer, undefined, initialFollowState);
@@ -79,13 +82,22 @@ export function usePresenterFollow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlineSig]);
 
-  // 主講者主動結束主講（present active=false）→ 也要離開跟隨，不能留在一個
-  // 永遠不會再更新的位置上假裝還在跟。
-  const presenterStillPresenting = state.connId ? presenters.some((p) => p.connId === state.connId) : false;
+  /**
+   * 主講結束有**兩種完全不同的原因**，而畫面上必須分得出來：
+   *   stopped      他按了「結束主講」 → 乾淨地離開跟隨
+   *   disconnected 他斷線／關掉分頁   → 明確顯示「Bruce 暫時離線」
+   *
+   * 原因直接由伺服器在訊息裡標明（PresentEnded.reason），**不從在場名單去推**。
+   * 實機雙瀏覽器驗證抓到：斷線時 `present` 與 `presence` 是兩則獨立訊息，
+   * 抵達順序不保證——靠名單推的版本會讀到還沒更新的名單，把斷線誤判成
+   * 「他自己結束的」，於是狀態列直接消失，跟隨者只看到畫面突然不動而沒有任何解釋。
+   */
   useEffect(() => {
-    if (state.status === "off") return;
-    if (!presenterStillPresenting && state.status !== "presenter_gone") dispatch({ type: "leave" });
-  }, [presenterStillPresenting, state.status]);
+    if (!presentEnded || state.status === "off") return;
+    if (presentEnded.connId !== state.connId) return;
+    dispatch(presentEnded.reason === "disconnected" ? { type: "presenter_offline" } : { type: "leave" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentEnded?.connId, presentEnded?.reason, presentEnded?.at, state.connId, state.status]);
 
   // 跟隨者自己動手 → 暫停
   const followingRef = useRef(false);

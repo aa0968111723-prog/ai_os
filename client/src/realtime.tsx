@@ -594,6 +594,8 @@ export function useCollab(
   selfConnId: string | null;
   /** 自己目前的編輯區塊（COLLAB_ZONES 的鍵）；null＝不在任何已標記的區塊 */
   selfZone: string | null;
+  /** 最近一次「主講結束」及其原因；null＝還沒發生過 */
+  presentEnded: PresentEnded | null;
 } {
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
@@ -631,6 +633,8 @@ export function useCollab(
    */
   const [peerViews, setPeerViews] = useState<Map<string, PeerView>>(() => new Map());
   const [presenters, setPresenters] = useState<Map<string, CollabPresenter>>(() => new Map());
+  /** 最近一次「主講結束」及其原因（跟隨端據此決定要顯示「離線」還是乾淨退出） */
+  const [presentEnded, setPresentEnded] = useState<PresentEnded | null>(null);
   /** 上一次送出去的 viewState：內容沒變就不重送，不讓離散事件變成輪詢 */
   const lastViewRef = useRef<string>("");
   /** 自己目前的編輯區塊（sendFocus 維護）——語意視圖狀態的來源 */
@@ -711,6 +715,12 @@ export function useCollab(
         } else if (msg.type === "present") {
           // **收到這則不會改變任何人的畫面。** 它只是讓對方的 UI 長出一張
           // 「Bruce 正在帶大家看 [加入]」的邀請卡；跟不跟由接收端自己決定。
+          //
+          // 主講結束時記下**為什麼**結束：「他自己結束的」與「他斷線了」對跟隨者
+          // 是完全不同的兩件事。不能靠在場名單去推——那是另一則訊息，抵達順序不保證。
+          if (!msg.active && msg.connId) {
+            setPresentEnded({ connId: msg.connId, reason: msg.reason === "disconnected" ? "disconnected" : "stopped", at: Date.now() });
+          }
           setPresenters((prev) => {
             const next = new Map(prev);
             if (msg.active && msg.connId) {
@@ -1090,7 +1100,7 @@ export function useCollab(
     containerRef, onPointerMove, connected, lastChange,
     // Presenter / 語意視圖（Phase 2）
     peerViews, presenters: otherPresenters, selfPresenting, sendView, setPresenting,
-    selfConnId: selfConnIdRef.current, selfZone,
+    selfConnId: selfConnIdRef.current, selfZone, presentEnded,
   };
 }
 
@@ -1100,6 +1110,19 @@ export interface PeerView {
   connId: string;
   name: string;
   view: ViewState;
+}
+
+/**
+ * 一場主講結束了，以及**為什麼**。
+ *
+ * `stopped`＝主講者自己按了結束（人還在房裡）→ 跟隨者乾淨退出即可。
+ * `disconnected`＝他斷線／關掉分頁 → 跟隨者要看到「Bruce 暫時離線」。
+ * 兩者不能靠在場名單去推：那是另一則訊息，抵達順序不保證，靠它會把斷線誤判成自己結束。
+ */
+export interface PresentEnded {
+  connId: string;
+  reason: "stopped" | "disconnected";
+  at: number;
 }
 
 /** 一場「帶大家看」。存在只代表有邀請，**不代表任何人被跟隨了**。 */

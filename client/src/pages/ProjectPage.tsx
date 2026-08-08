@@ -55,7 +55,7 @@ import { StoryStage } from "../features/story-workspace/StoryStage";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
-import { buildViewState, navigateToView } from "../features/collaboration/viewStateBridge";
+import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
 import type { ViewState } from "@shared/viewState";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -524,9 +524,31 @@ export function ProjectPage({ id }: { id: string }) {
    * sendView 內部會比對內容，沒變就不送：viewState 是離散事件，當成輪詢送
    * 會讓整房每秒收到一堆一模一樣的封包。
    */
+  const sendViewRef = useRef(collab.sendView);
+  sendViewRef.current = collab.sendView;
+  const selfZoneRef = useRef(collab.selfZone);
+  selfZoneRef.current = collab.selfZone;
   useEffect(() => {
-    collab.sendView(buildViewState({ zone: collab.selfZone }));
-  }, [collab.selfZone, collab.sendView, collab]);
+    const report = () =>
+      sendViewRef.current(buildViewState({ zone: selfZoneRef.current, visibleSection: detectVisibleSection() }));
+    report();
+    // 捲動也要回報：專案頁是一條長捲軸，使用者純瀏覽時 zone 不會變，
+    // 只看 zone 的話跟隨者會停在原地而畫面上看不出哪裡不對。
+    // rAF 併批＋sendView 內部的內容比對，讓這條路徑不會變成每幀一個封包。
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        report();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [collab.selfZone, collab.connected]);
 
   /**
    * 被帶到主講者的位置。列表是非同步載入的、手機收合中的列 rect 為空，
@@ -545,6 +567,7 @@ export function ProjectPage({ id }: { id: string }) {
     presenters: collab.presenters,
     peerViews: collab.peerViews,
     peers: collab.peers,
+    presentEnded: collab.presentEnded,
     onNavigate: navigateToPresenterView,
   });
   /** 邀請被本地拒絕過就不再顯示（「不用了」＝這一場我不參加，不是暫時關掉） */

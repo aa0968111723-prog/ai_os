@@ -157,8 +157,13 @@ export type FollowEvent =
   | { type: "interact"; reason: PauseReason }
   /** 按「回到 Bruce」 */
   | { type: "resume" }
-  /** 自己按停止，或主講者結束主講 */
+  /** 自己按停止，或主講者「自己」結束主講（他人還在房裡） */
   | { type: "leave" }
+  /**
+   * 主講者斷線／關掉分頁。與 leave 分開是必要的：
+   * 前者要顯示「Bruce 暫時離線」，後者是乾淨退出——兩者的畫面完全不同。
+   */
+  | { type: "presenter_offline" }
   /** 在場名單更新（用來偵測主講者是否還在） */
   | { type: "peers"; onlineIds: string[] };
 
@@ -186,6 +191,11 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowSta
 
     case "leave":
       return initialFollowState();
+
+    case "presenter_offline":
+      if (state.status === "off" || !state.presenterId) return state;
+      // presenterId/Name 刻意保留：畫面上要說得出是「誰」離線了
+      return { ...state, status: "presenter_gone", connId: null };
 
     case "peers": {
       if (state.status === "off" || !state.presenterId) return state;

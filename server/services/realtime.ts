@@ -557,6 +557,9 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
       const active = msg.active === true;
       if (client.presenting === active) return; // 重複宣告無意義，不轟炸整房
       client.presenting = active;
+      // **含發送者自己**（不傳 except）：主講者要看得到「主講中 · N 人跟著」的徽章。
+      // 少了這一份回音，按下「帶大家看」的人畫面上什麼都不會變——看起來就是按鈕壞了。
+      // 讓伺服器回音而不是前端樂觀更新，是為了讓「誰在主講」只有一個真相來源。
       broadcast(roomKey, theRoom, {
         type: "present",
         userId: client.userId,
@@ -564,9 +567,12 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
         name: client.name,
         color: client.color,
         active,
+        // 「他自己結束的」與「他斷線了」對跟隨者是完全不同的兩件事，畫面上也該不同。
+        // 訊息裡直接講明，接收端就不必去猜（而猜的依據——在場名單——不保證比這則先到）。
+        reason: "stopped",
         // 邀請卡上要說得出「他現在在哪」，人才知道值不值得加入
         view: client.view,
-      }, client);
+      });
     } else if (msg.type === "invalidate") {
       // scope／label 是 optional：沒帶就是舊行為（全域失效）。新舊客戶端可混跑。
       // 一律逐欄驗證後才轉發——不信任 client，與 cursor 同一條原則。
@@ -618,6 +624,15 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
         name: client.name,
         color: client.color,
         active: false,
+        /**
+         * **這則一定要標明是斷線。**
+         *
+         * 它與隨後的 presence 更新是兩則獨立的 WebSocket 訊息，抵達順序不保證。
+         * 接收端若靠「他還在不在在場名單裡」來分辨是「自己結束」還是「斷線」，
+         * 就會讀到還沒更新的名單，把斷線誤判成自己結束——跟隨狀態列直接消失，
+         * 跟隨者只看到畫面突然不動了而沒有任何解釋。（實機雙瀏覽器驗證抓到的。）
+         */
+        reason: "disconnected",
         view: null,
       });
     }

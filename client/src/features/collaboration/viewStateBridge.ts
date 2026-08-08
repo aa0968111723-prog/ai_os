@@ -33,6 +33,8 @@ export function sectionFromZone(zone: string | null | undefined): ViewSection | 
 /** 目前這個人在看什麼（送出去給房裡其他人） */
 export function buildViewState(input: {
   zone: string | null;
+  /** 目前捲到哪一段（detectVisibleSection）；zone 對應得出區塊時以 zone 優先 */
+  visibleSection?: ViewSection;
   /** 打開中的單格工作室（scenes.id）；null＝沒開 */
   sceneId?: string | null;
   /** 舞台上正在看的那一版（assets.id）——「V2 的眼神不對」與「Shot 08 有問題」不同 */
@@ -41,7 +43,8 @@ export function buildViewState(input: {
   drawer?: string | null;
 }): ViewState | null {
   const out: ViewState = {};
-  const section = sectionFromZone(input.zone);
+  // zone 優先（他真的在某個區塊裡編輯），沒有才退回捲動位置（他只是在瀏覽）
+  const section = sectionFromZone(input.zone) ?? input.visibleSection;
   if (section) out.section = section;
   if (input.sceneId) out.sceneId = input.sceneId;
   if (input.assetId) out.assetId = input.assetId;
@@ -58,6 +61,34 @@ const SECTION_ANCHOR: Record<ViewSection, string> = {
   final: "#onboard-delivery",
   settings: "#onboard-worldview",
 };
+
+/** 判定順序＝頁面上的先後順序，讓「最後一個已經捲過去的」勝出 */
+const SECTION_ORDER: ViewSection[] = ["story", "storyboard", "production", "final"];
+
+/**
+ * 目前視野裡是哪一個階段。
+ *
+ * 專案頁是一條長捲軸（① 故事 → ② 分鏡 → ③ 製作 → ④ 成片 堆疊在同一頁），
+ * 所以「我在看哪一段」的真相是捲動位置，不是點過什麼。
+ * 只靠 focus zone 的話，使用者純捲動瀏覽時 viewState 永遠不會變——
+ * 跟隨者於是停在原地，而畫面上完全看不出哪裡不對。
+ *
+ * 判準是「標頭已經捲到視窗上緣以上（或剛好在視野內）的最後一個」——
+ * 與人的直覺一致：我捲過了②的標頭，我就是在看②。
+ */
+export function detectVisibleSection(): ViewSection | undefined {
+  if (typeof document === "undefined") return undefined;
+  const probe = window.innerHeight * 0.4;
+  let current: ViewSection | undefined;
+  for (const section of SECTION_ORDER) {
+    const el = document.querySelector(SECTION_ANCHOR[section]);
+    if (!el) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) continue; // 隱藏中的區塊 rect 全 0
+    if (rect.top <= probe) current = section;
+  }
+  return current;
+}
 
 /**
  * 把跟隨者帶到主講者所在的內容物件。
