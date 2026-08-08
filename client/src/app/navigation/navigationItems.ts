@@ -195,20 +195,27 @@ export const topbarNavItems: NavigationItem[] = [
  * 手機上這裡就是全站頁面的入口總表——底部分頁列（今日／專案／AI 工作／筆記排程）
  * 放不下的都收在這裡，因此使用者選單在手機上不再重複列一次（見 AccountMenu）。
  *
- * 手機「更多」不再列 databases／integrations／mcp（三者路由與深連結全部保留）：
- * 這三頁是以「系統」為單位組織的（這是資料庫、這是連結、這是 MCP），但使用者的
- * 需求發生在「專案的某一刻」——實測回報是「不知道該如何使用在專案上，很複雜」。
- * 改成情境化入口：需要資料時在專案頁就地長出來（ProjectDatabasesCard），
- * 需要進階設定時從桌機的使用者選單進入（accountMenuItems 仍保留這三項）。
- * MCP 尤其如此——該頁自己就寫明「這一步要在電腦上做，手機沒有地方貼設定」，
- * 放在手機選單本來就沒有落點。
+ * 手機「更多」不列 integrations／mcp（兩者路由與深連結全部保留）：這兩頁是以
+ * 「系統」為單位組織的（這是連結、這是 MCP），但使用者的需求發生在「專案的某一刻」
+ * ——實測回報是「不知道該如何使用在專案上，很複雜」。改成情境化入口：需要進階設定
+ * 時從桌機的使用者選單進入（accountMenuItems 仍保留這兩項）。MCP 尤其如此——該頁
+ * 自己就寫明「這一步要在電腦上做，手機沒有地方貼設定」，放在手機選單沒有落點。
  *
  * 同一條規則的前例見下方 accountMenuItems 的「選項」註記：路由留著，
  * 入口改到真正需要它的地方。
+ *
+ * ★ databases（資料中心）曾一起被拿掉，那是過頭了——它跟 integrations／mcp 不同，
+ * 是天天要進去的去處，不是一次性設定。桌機它常駐頂欄，但 `.topbar .topbar-nav-link`
+ * 在 ≤820px 整條隱藏，而使用者選單在同一個斷點只留一句指路（見 AccountMenu），
+ * 於是手機／直立平板上「資料中心」三個選單一個入口都沒有——使用者回報的
+ * 「資料中心，選單都沒有入口」就是這個。專案頁的 ProjectDatabasesCard 只涵蓋
+ * 「在某個專案裡」的情境，跨專案的總覽仍然需要一個固定入口，所以它回到這裡。
+ * 對應的迴歸鎖在 MobileNavigation.test.tsx：頂欄有的去處，手機必須也走得到。
  */
 export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
 
 export const mobileMoreGroups: MobileMoreGroup[] = [
+  { label: "資料", keys: ["databases"] },
   { label: "工作", keys: ["studio", "community", "chat"] },
   { label: "說明", keys: ["help", "models"] },
   { label: "下載", keys: ["downloads"] },
