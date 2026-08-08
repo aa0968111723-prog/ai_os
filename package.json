@@ -19,6 +19,7 @@
     "db:migrate:dry-run": "tsx scripts/db/migrate.ts --dry-run",
     "db:adopt": "tsx scripts/db/adopt.ts",
     "db:adopt:dry-run": "tsx scripts/db/adopt.ts --dry-run",
+    "rescue:login": "tsx scripts/db/rescue-login.ts",
     "report:orphans": "tsx scripts/report-schema-orphans.ts",
     "community:reclassify": "tsx scripts/reclassify-community.ts",
     "assets:verify": "tsx scripts/verify-asset-integrity.ts",

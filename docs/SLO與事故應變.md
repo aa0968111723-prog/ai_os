@@ -53,6 +53,33 @@
 5. **溝通**：只發布已確認的影響、暫時措施與下次更新時間，不猜根因。
 6. **事後檢討**：5 個工作日內完成時間線、根因、為何既有防線沒攔住、永久修復、負責人與期限。
 
+## 管理員被鎖在門外（帳號登不進去）
+
+登入頁只給一句「忘記密碼請找管理員重設」，但**最上層的開發者帳號上面沒有管理員**，而
+`services/seed.ts` 對既有帳號絕不覆寫 `passwordHash`（設 `SEED_ADMIN_PASSWORD` 再重啟也救不回來）。
+唯一出口是握有資料庫的人執行離線救援工具——請在**與 API 相同的環境**（同一組
+`DATABASE_URL` 與 `RATE_LIMIT_SECRET`）執行：
+
+```bash
+# 1) 先診斷，不改任何資料：帳號是否存在／是否被停用／限流還要等幾分鐘
+npm run rescue:login -- --email=you@example.com
+
+# 2) 解除「嘗試太多次，請約 N 分鐘後再試」
+npm run rescue:login -- --email=you@example.com --unlock
+
+# 3) 密碼真的忘了：重設並取得一組一次性密碼
+npm run rescue:login -- --email=you@example.com --unlock --reset-password
+```
+
+判讀重點：
+
+- **限流**（`auth:email` 5 次／15 分）不會因為重試而延長，等滿視窗自然解除；
+  「等了還是進不去」代表問題不在限流，看診斷的 `status` 與密碼。
+- `status=disabled` → 加 `--activate`。
+- 拿不到 `RATE_LIMIT_SECRET` 時限流診斷會失準（工具會先印警告），
+  此時用 `--unlock-all-auth` 清掉全站登入限流桶——它同時抹掉暴力嘗試的痕跡，僅限一次性救援。
+- 工具會把新密碼印在終端機，請勿貼進工單、聊天室或任何會被收集的 log。
+
 ## 備份還原演練
 
 至少每季一次，且每次破壞性 migration 前額外執行：
