@@ -46,6 +46,17 @@ export function FeedbackWidget() {
   // 離開頁面/卸載時務必收掉還開著的選取 overlay，免得殘留一層攔滑鼠的透明層
   useEffect(() => () => stopRef.current?.(), []);
 
+  // 面板是 fixed 的，蓋不住底部分頁列——使用者常在填寫途中換頁。換了頁還留著上一頁的
+  // 標定，targetRect 那組 viewport 座標會在新頁上框到一塊毫不相干的地方（送出去的截圖
+  // 就多一個誤導人的紅框）。換頁就把標定收掉；截圖由 ReportForm 依 location 重拍。
+  // 使用者打的字在本層 state，不受影響。
+  const seenLocationRef = useRef(location);
+  useEffect(() => {
+    if (seenLocationRef.current === location) return;
+    seenLocationRef.current = location;
+    setTarget(null);
+  }, [location]);
+
   if (!me.data) return null; // 登入後才顯示
 
   // groupId 以「使用者真的屬於的組」為準，不直接信 localStorage——否則無組/已被移出的使用者
@@ -243,7 +254,9 @@ function ReportForm({
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [target, captureAttempt, noShot]);
+    // location 也是依賴：填寫途中換頁時（面板蓋不住底部分頁列，這很常發生）
+    // 預覽會一直停在開面板那一刻的舊頁——文字在講這一頁、附上的證據卻是上一頁。
+  }, [target, captureAttempt, noShot, location]);
 
   // 送出成功短暫顯示感謝後自動關閉
   useEffect(() => {

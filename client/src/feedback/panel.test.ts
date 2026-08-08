@@ -67,7 +67,22 @@ describe("回饋表單的截圖行為", () => {
     const src = widget();
     const effect = src.slice(src.indexOf("表單一開就先擷取"), src.indexOf("送出成功短暫顯示感謝"));
     expect(effect).toContain("if (noShot)");
-    expect(effect).toMatch(/\[target, captureAttempt, noShot\]/);
+    expect(effect).toMatch(/\[target, captureAttempt, noShot, location\]/);
+  });
+
+  /**
+   * 面板是 fixed 的，蓋不住底部分頁列——填寫途中換頁很常見（實機截圖裡預覽圖就是
+   * 另一頁：文字在講這一頁，附上的證據卻是上一頁）。換頁要重拍，並收掉上一頁的標定
+   * （targetRect 是 viewport 座標，留著會在新頁上框到一塊毫不相干的地方）。
+   */
+  it("填寫途中換頁：重拍截圖，並收掉上一頁的標定", () => {
+    const src = widget();
+    const effect = src.slice(src.indexOf("表單一開就先擷取"), src.indexOf("送出成功短暫顯示感謝"));
+    expect(effect, "截圖沒有跟著換頁重拍，預覽與送出的圖會停在舊頁").toContain("location");
+
+    const clear = src.slice(src.indexOf("seenLocationRef"), src.indexOf("if (!me.data)"));
+    expect(clear, "換頁沒有收掉舊頁標定").toContain("setTarget(null)");
+    expect(clear).toMatch(/\}, \[location\]\)/);
   });
 
   it("截圖沒附成功時，送出後老實告知（預覽圖還在畫面上，不講會以為附了）", () => {
