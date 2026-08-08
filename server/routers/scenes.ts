@@ -15,6 +15,7 @@ import {
   type SceneCardKind,
 } from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import { REVIEW_STATES } from "../../shared/shotCompletion";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
@@ -247,6 +248,8 @@ export const scenesRouter = router({
         camera: schema.scenes.camera,
         performance: schema.scenes.performance,
         lookIds: schema.scenes.lookIds,
+        // 完成度五軌裡唯一的真欄位（其餘四軌由指標欄推導；見 shared/shotCompletion.ts）
+        reviewStatus: schema.scenes.reviewStatus,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
         // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用
@@ -732,6 +735,30 @@ export const scenesRouter = router({
   }),
 
   /** 就地編輯分鏡欄位（標題／秒數／旁白／提示詞）：只更新有帶的欄位 */
+  /**
+   * 送審／通過／要求修改（§17）。
+   *
+   * 為什麼獨立成一支而不是塞進 update：審核是「人對這一鏡的判斷」，
+   * 與內容編輯是兩件事——混在同一個 mutation 會讓「改個秒數」意外把審核狀態帶掉，
+   * 也讓活動紀錄看不出「誰在什麼時候通過了什麼」。
+   */
+  review: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), status: z.enum(REVIEW_STATES) }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
+      await getProjectChecked(ctx, scene.projectId, true);
+      const [row] = await db
+        .update(schema.scenes)
+        .set({ reviewStatus: input.status })
+        .where(eq(schema.scenes.id, scene.id))
+        .returning({ id: schema.scenes.id, reviewStatus: schema.scenes.reviewStatus });
+      return row;
+    }),
+
   update: authedProcedure
     .input(
       z.object({

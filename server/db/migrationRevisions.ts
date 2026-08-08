@@ -261,4 +261,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0050_ai_site_trace": [
     "0be767b4aa33373ede24590a6949651a1b87e8e9c5db95eee4e7b52d675d3f9c",
   ],
+  "0051_shot_review": [
+    "e948ec2a6f2cfbd211473db8130cb010c8fff4748dfec5d88b386f402ff173d8",
+  ],
 };
