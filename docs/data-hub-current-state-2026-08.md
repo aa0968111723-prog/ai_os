@@ -255,15 +255,77 @@ AI 讀得到不代表能寫。寫入必須同時滿足
 
 ## 17. 本次（P0–P3）交付範圍
 
-| Phase | 內容 |
+| Phase | 內容 | 狀態 |
+| --- | --- | --- |
+| P0 | 本文件 + 四條不變量 | 完成 |
+| P1 | `/databases` 收斂為「資料中心」；導覽命名統一；KPI 人話化 | 完成 |
+| P2 | 全站統一「＋加入資料」（AddDataSheet）；OAuth 回到原本 flow | 完成 |
+| P3 | `dataHub` facade（summary / list / search / sources）＋統一搜尋 | 完成 |
+| P4 | `project_data_bindings`：整份資源提供給專案（additive migration + dual read） | 完成 |
+| P5 | AI source awareness：本次依據 + 「只用這幾份」限制 | 完成 |
+| P6 | 來源譜系（provider / external id / modified / last synced）與誠實顯示 | 完成 |
+
+## 18. P4–P6 補充契約（2026-08 第二批）
+
+### 18.1 migration 0051（唯一一支）
+
+`drizzle/0051_data_hub_bindings_and_lineage.sql`：純新增，12 句全部 `IF NOT EXISTS`。
+新表 `project_data_bindings` 的欄位全部寫在 `CREATE TABLE` 裡（legacy bridge 比對整表 DDL）；
+`data_files` 四個、`knowledge` 五個 nullable 來源欄位。
+
+同步更新的三處（少一處就會紅）：
+`drizzle/meta/_journal.json`（idx 51、when 嚴格遞增）、
+`server/db/migrationRevisions.ts`（檔案 sha256）、
+`server/db/migrationState.test.ts` 的 `alreadyPresent` 計數（逐句複核後 +12）。
+**未動** `LEGACY_ADOPTION_PENDING_TAGS`（前綴檢查，尾端新增不影響）。
+
+已在真實 PostgreSQL 跑過完整 `scripts/ci-migration-test.sh`，且 `db:check` 回報
+`schema drift: none`——手寫 SQL 與 Drizzle 定義完全一致。
+
+**警告：`npm run db:generate` 在此 repo 不可用。** snapshot 只到 0016，
+它會把 0017 之後全部重新產生一支巨大 migration。所有 migration 都是手寫的。
+
+### 18.2 綁定的第五條規則（延伸 §14）
+
+> **Project Bound ≠ Visible**
+
+綁定只回答「這份資源算不算這個專案的」。「這個人看不看得到」永遠仍由 `databaseAcl`
+逐表重新解析。任何讀取端都必須先 `listVisibleTables(auth)` 再與綁定取交集——
+**絕不可** `SELECT ... WHERE tableId IN (bound)`，那會同時繞過 ACL 與軟刪除過濾。
+
+且 **personal 範圍的表永遠不可綁**（`services/projectDataBindings.bindableDenyReason`）。
+`resolveTableAccess(auth, personalTable).canRead` 對擁有者是 true，所以單純的
+「可讀就可綁」會讓個人私有清單經專案助手外洩給整組人。那個 `case "personal"`
+不可以被「簡化」掉，`projectDataBindings.test.ts` 已釘死。
+
+### 18.3 dual read 清單（新增讀取端必須全部照顧）
+
+| 位置 | 作用 |
 | --- | --- |
-| P0 | 本文件 + 四條不變量 |
-| P1 | `/databases` 收斂為「資料中心」；導覽命名統一；KPI 人話化 |
-| P2 | 全站統一「＋加入資料」（AddDataSheet）；OAuth 回到原本 flow |
-| P3 | `dataHub` facade（summary / list / search / sources）＋統一搜尋 |
+| `server/routers/databases.ts` `linkedToProject` | 專案卡；綁定表標 `boundWhole`，預覽列一次批次查 |
+| `server/services/dataHub.ts` `projectLinkedTableIds` | 資料中心的專案過濾 |
+| `server/services/databaseMcp.ts` `listMcpDatabases` | MCP `linkedOnly`；附 `boundToProject`，不灌進 `linkedRowCount` |
+| `client/.../ProjectDatabasesCard.tsx` | AI 狀態文案要計入 `boundAiReadableTableCount` |
 
-未做（留給後續，理由見第 15 節）：
+### 18.4 來源譜系的誠實規則（P6）
 
-- P4 `project_data_bindings`（需要 additive migration + dual read，本次不動 schema）
-- P5 AI source selector（需先確認 knowledge budget 的互動語意）
-- P6 source lineage / sync / smart organization
+- 有記錄用記錄，沒記錄（舊列）才從網址推斷；推斷值不得蓋掉匯入當下的事實。
+- 措辭是「最後讀取」不是「最後同步」——站內**沒有背景同步**，這一版也不做。
+- 「來源有更新」只在來源修改時刻與本站讀取時刻**都有記錄**時才顯示。判斷不出來一律不顯示。
+- `source_provider` 不在白名單內視同沒記錄（髒資料不當來源顯示）。
+
+### 18.5 AI source awareness 的邊界（P5）
+
+- `onlyIds` 是**限制**不是排序：沒選的即使預算還有剩也不進。
+- 刻意**不**學 `script_only` 在找不到時退回全部——使用者說「只用這幾份」，
+  退回全部等於偷偷用了他沒選的資料。
+- 限制**不放寬預算**：選中的一樣會被 hard limit 截斷，且 `truncated` 誠實回報到 UI。
+
+## 19. 仍未做（下一階段）
+
+- **背景同步**：目前只有「使用者按重新整理」。自動同步必須先解決
+  source of truth／本地修改／衝突／同步方向四件事（§32），不可為了畫面做假同步。
+- **AI 智慧整理**（原 P6 的 smart organization）：分類建議需要真的分析，
+  目前不做——寧可沒有，也不 hardcode 假的分析結果（§31）。
+- **綁定其他資源種類**：`resource_kind` 欄位已留 text，目前只寫入 `table`
+  （knowledge／asset 本來就有 `project_id`，document 權限跟隨所屬表）。
