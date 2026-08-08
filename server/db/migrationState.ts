@@ -245,6 +245,10 @@ export function canonicalMigrationStatement(statement: string): string {
     .replace(/^(CREATE TABLE) IF NOT EXISTS /i, "$1 ")
     .replace(/^(ALTER TABLE "[^"]+" ADD COLUMN) IF NOT EXISTS /i, "$1 ")
     .replace(/\s+/g, " ")
+    // PostgreSQL's omitted index method is btree. Drizzle emits it explicitly
+    // during drift inspection while checked-in migrations commonly omit it.
+    // Normalize only btree; GIN/GiST/hash semantics remain distinct.
+    .replace(/^(CREATE (?:UNIQUE )?INDEX "[^"]+" ON "[^"]+") USING btree /i, "$1 ")
     // 逗號後的空白也一併正規化。drizzle-kit 產生的欄位清單沒有空白（`("a","b")`），
     // 手寫的 migration 幾乎一定會為了可讀性加上（`("a", "b")`）——只收斂空白「run」的話，
     // 兩者永遠對不上，於是一句完全等價的 CREATE INDEX 會同時被判成「非預期 drift」與「缺漏」。
