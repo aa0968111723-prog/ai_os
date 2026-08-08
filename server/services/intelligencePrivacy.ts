@@ -41,7 +41,7 @@ export async function purgeTableIntelligence(tableId: string): Promise<number> {
     inArray(schema.intelligenceVersionLinks.childIntelligenceId, ids),
   ));
   await db.delete(schema.entityRelationships).where(and(
-    eq(schema.entityRelationships.fromType, "asset"),
+    eq(schema.entityRelationships.fromType, "asset_intelligence"),
     inArray(schema.entityRelationships.fromId, ids),
   ));
   await db.delete(schema.assetIntelligence).where(inArray(schema.assetIntelligence.id, ids));

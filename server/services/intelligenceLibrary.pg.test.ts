@@ -25,6 +25,11 @@ describe.skipIf(!RUN_PG).sequential("Intelligence Library ingestion (real Postgr
       await db.delete(schema.assetIntelligence).where(eq(schema.assetIntelligence.id, row.id));
     }
     for (const id of tableIntelligenceIds) {
+      await db.delete(schema.assetIntelligenceEntities).where(eq(schema.assetIntelligenceEntities.intelligenceId, id));
+      await db.delete(schema.entityRelationships).where(and(
+        eq(schema.entityRelationships.fromType, "asset_intelligence"),
+        eq(schema.entityRelationships.fromId, id),
+      ));
       await db.delete(schema.intelligenceEmbeddings).where(eq(schema.intelligenceEmbeddings.intelligenceId, id));
       await db.delete(schema.intelligenceChunks).where(eq(schema.intelligenceChunks.intelligenceId, id));
       await db.delete(schema.intelligenceDataSources).where(eq(schema.intelligenceDataSources.intelligenceId, id));
@@ -61,6 +66,7 @@ describe.skipIf(!RUN_PG).sequential("Intelligence Library ingestion (real Postgr
       fields: [
         { key: "name", label: "姓名", type: "text", required: true },
         { key: "note", label: "備註", type: "text" },
+        { key: "project", label: "專案", type: "project" },
       ],
       agentAccess: "read",
       createdBy: creatorId,
@@ -69,7 +75,11 @@ describe.skipIf(!RUN_PG).sequential("Intelligence Library ingestion (real Postgr
     await db.insert(schema.dataRows).values({
       id: rowId,
       tableId,
-      data: { name: "安倢", note: "淡水雨天撐傘，電話 0912-345-678" },
+      data: {
+        name: "安倢",
+        note: "淡水雨天撐傘，電話 0912-345-678",
+        project: "aaaaaaaa-----------------------aaa",
+      },
       createdBy: creatorId,
     });
     const intelligence = await registerIntelligenceResource({
@@ -82,7 +92,7 @@ describe.skipIf(!RUN_PG).sequential("Intelligence Library ingestion (real Postgr
     tableIntelligenceIds.push(intelligence.id);
 
     for (let step = 0; step < 20; step += 1) {
-      if (!await claimAndProcessIntelligenceJob()) break;
+      if (await claimAndProcessIntelligenceJob() === "idle") break;
     }
 
     const [analyzed] = await db.select().from(schema.assetIntelligence)
@@ -102,6 +112,7 @@ describe.skipIf(!RUN_PG).sequential("Intelligence Library ingestion (real Postgr
       fields: [
         { key: "name", label: "姓名", type: "text", required: true },
         { key: "note", label: "備註", type: "text" },
+        { key: "project", label: "專案", type: "project" },
       ],
       rowCount: 1,
       canWrite: false,

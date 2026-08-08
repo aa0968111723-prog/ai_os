@@ -1,7 +1,7 @@
 /** Durable Intelligence Library ingestion worker. */
 import { eq, sql } from "drizzle-orm";
 import { db, schema } from "../db";
-import { claimAndProcessIntelligenceJob, enrollLegacyIntelligence } from "./intelligenceLibrary";
+import { claimAndProcessIntelligenceJob, enrollLegacyIntelligence, type IntelligenceJobOutcome } from "./intelligenceLibrary";
 import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 import { isShuttingDown, onShutdown, trackBackgroundTask } from "./shutdown";
 
@@ -30,11 +30,7 @@ async function tick(): Promise<void> {
   const requestedBurst = Number(process.env.INTELLIGENCE_JOBS_PER_TICK ?? 8);
   const burst = Number.isFinite(requestedBurst) ? Math.min(32, Math.max(1, Math.floor(requestedBurst))) : 8;
   const enrolled = await enrollLegacyIntelligence(Math.max(12, burst * 3));
-  let processed = 0;
-  for (let index = 0; index < burst; index += 1) {
-    if (!await claimAndProcessIntelligenceJob()) break;
-    processed += 1;
-  }
+  const processed = await processIntelligenceJobBurst(burst);
   const [depth] = await db.select({ count: sql<number>`count(*)::int` })
     .from(schema.intelligenceProcessingJobs)
     .where(eq(schema.intelligenceProcessingJobs.status, "queued"));
@@ -43,4 +39,17 @@ async function tick(): Promise<void> {
     inflight: processed,
     lastWork: { enrolled, processed },
   });
+}
+
+export async function processIntelligenceJobBurst(
+  burst: number,
+  claim: () => Promise<IntelligenceJobOutcome> = claimAndProcessIntelligenceJob,
+): Promise<number> {
+  let processed = 0;
+  for (let index = 0; index < burst; index += 1) {
+    const outcome = await claim();
+    if (outcome === "idle" || outcome === "requeued") break;
+    processed += 1;
+  }
+  return processed;
 }

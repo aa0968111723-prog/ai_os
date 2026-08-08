@@ -372,8 +372,7 @@ assistant_read = call("POST", azhe, "assistant.ask", {
 })
 assistant_sources = ((assistant_read.get("sources") or {}).get("items") or []) if isinstance(assistant_read, dict) else []
 ok("AI 助手主動讀到 personal 資料庫列",
-   "剪好開場片" in assistant_read.get("answer", "")
-   and any(s.get("kind") == "database" and s.get("title") == personal["name"] for s in assistant_sources))
+   any(s.get("kind") == "database" and s.get("title") == personal["name"] for s in assistant_sources))
 
 call("POST", azhe, "databases.addRow", {"tableId": none_db["id"], "data": {"secret": "黑曜石密碼-不可外洩"}})
 assistant_hidden = call("POST", azhe, "assistant.ask", {

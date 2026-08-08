@@ -170,6 +170,7 @@ interface ResourceSnapshot {
 }
 
 const TABLE_INDEX_MAX_CHARS = 600_000;
+const TABLE_INDEX_MAX_ROWS = 10_000;
 
 export function serializeTableForIntelligence(input: {
   id: string;
@@ -177,6 +178,7 @@ export function serializeTableForIntelligence(input: {
   description?: string | null;
   fields: Array<{ key: string; label: string; type: string }>;
   rows: Array<{ id: string; data: unknown }>;
+  totalRows?: number;
   maxChars?: number;
 }): { text: string; indexedRows: number; truncated: boolean } {
   const maxChars = Math.min(2_000_000, Math.max(10_000, input.maxChars ?? TABLE_INDEX_MAX_CHARS));
@@ -203,7 +205,10 @@ export function serializeTableForIntelligence(input: {
     length += line.length + 1;
     indexedRows += 1;
   }
-  return { text: lines.join("\n"), indexedRows, truncated: indexedRows < input.rows.length };
+  const totalRows = Math.max(input.rows.length, input.totalRows ?? input.rows.length);
+  const truncated = indexedRows < input.rows.length || totalRows > input.rows.length;
+  if (truncated) lines.push(`[索引已截斷：已納入 ${indexedRows}/${totalRows} 列，完整資料仍保留於原資料表]`);
+  return { text: lines.join("\n"), indexedRows, truncated };
 }
 
 async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSnapshot | null> {
@@ -311,16 +316,26 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
         ne(schema.dataTables.agentAccess, "none"),
       ));
     if (!table || !table.groupId) return null;
-    const rows = await db.select({ id: schema.dataRows.id, data: schema.dataRows.data })
-      .from(schema.dataRows)
-      .where(eq(schema.dataRows.tableId, table.id))
-      .orderBy(asc(schema.dataRows.createdAt));
+    const [rows, [rowTotal]] = await Promise.all([
+      db.select({ id: schema.dataRows.id, data: schema.dataRows.data })
+        .from(schema.dataRows)
+        .where(eq(schema.dataRows.tableId, table.id))
+        .orderBy(asc(schema.dataRows.createdAt))
+        .limit(TABLE_INDEX_MAX_ROWS),
+      db.select({ count: sql<number>`count(*)::int` }).from(schema.dataRows)
+        .where(eq(schema.dataRows.tableId, table.id)),
+    ]);
+    const tableFields = Array.isArray(table.fields)
+      ? table.fields as Array<{ key: string; label: string; type: string }>
+      : [];
+    const rowCount = Number(rowTotal?.count ?? rows.length);
     const serialized = serializeTableForIntelligence({
       id: table.id,
       name: table.name,
       description: table.description,
-      fields: table.fields as Array<{ key: string; label: string; type: string }>,
+      fields: tableFields,
       rows,
+      totalRows: rowCount,
     });
     return {
       intelligence: intel,
@@ -335,10 +350,10 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
         ...intel.metadata,
         tableId: table.id,
         scope: table.scope,
-        rowCount: rows.length,
+        rowCount,
         indexedRowCount: serialized.indexedRows,
         indexTruncated: serialized.truncated,
-        fieldCount: Array.isArray(table.fields) ? table.fields.length : 0,
+        fieldCount: tableFields.length,
         updatedAt: table.updatedAt.toISOString(),
       },
     };
@@ -979,7 +994,7 @@ async function processRelationships(snapshot: ResourceSnapshot): Promise<void> {
     await upsertRelationship({ relationType: "BELONGS_TO", toType: "project", toId: projectId, confidence: 1, source: "system", status: "confirmed" });
   }
   if (snapshot.intelligence.resourceKind === "table") {
-    const [[table], bindings, rows] = await Promise.all([
+    const [[table], bindings] = await Promise.all([
       db.select({ fields: schema.dataTables.fields }).from(schema.dataTables)
         .where(eq(schema.dataTables.id, snapshot.intelligence.resourceId)),
       db.select({ projectId: schema.projectDataBindings.projectId }).from(schema.projectDataBindings)
@@ -987,28 +1002,37 @@ async function processRelationships(snapshot: ResourceSnapshot): Promise<void> {
           eq(schema.projectDataBindings.resourceKind, "table"),
           eq(schema.projectDataBindings.resourceId, snapshot.intelligence.resourceId),
         )),
-      db.select({ data: schema.dataRows.data }).from(schema.dataRows)
-        .where(eq(schema.dataRows.tableId, snapshot.intelligence.resourceId)),
     ]);
     const projectKeys = Array.isArray(table?.fields)
       ? (table.fields as Array<{ key?: unknown; type?: unknown }>)
         .filter((field) => field.type === "project" && typeof field.key === "string")
         .map((field) => field.key as string)
       : [];
-    const linkedProjectIds = new Set(bindings.map((binding) => binding.projectId));
+    const rows = projectKeys.length ? await db.select({ data: schema.dataRows.data }).from(schema.dataRows)
+      .where(eq(schema.dataRows.tableId, snapshot.intelligence.resourceId))
+      .orderBy(asc(schema.dataRows.createdAt))
+      .limit(TABLE_INDEX_MAX_ROWS) : [];
+    const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const candidateProjectIds = new Set(bindings.map((binding) => binding.projectId));
     for (const row of rows) {
       const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
         ? row.data as Record<string, unknown> : {};
       for (const key of projectKeys) {
         const value = data[key];
-        if (typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)) linkedProjectIds.add(value);
+        if (typeof value === "string" && canonicalUuid.test(value)) candidateProjectIds.add(value);
       }
     }
-    for (const linkedProjectId of linkedProjectIds) {
+    const projectCandidates = [...candidateProjectIds].filter((id) => canonicalUuid.test(id));
+    const linkedProjects = projectCandidates.length ? await db.select({ id: schema.projects.id }).from(schema.projects)
+      .where(and(
+        eq(schema.projects.groupId, snapshot.intelligence.groupId),
+        inArray(schema.projects.id, projectCandidates),
+      )) : [];
+    for (const linkedProject of linkedProjects) {
       await upsertRelationship({
         relationType: "BELONGS_TO",
         toType: "project",
-        toId: linkedProjectId,
+        toId: linkedProject.id,
         confidence: 1,
         source: "system",
         status: "confirmed",
@@ -1177,13 +1201,15 @@ export async function processIntelligenceJob(
   }
 }
 
+export type IntelligenceJobOutcome = "completed" | "requeued" | "idle";
+
 export async function claimAndProcessIntelligenceJob(
   provider: IntelligenceAnalysisProvider = resolveIntelligenceProvider(),
-): Promise<boolean> {
+): Promise<IntelligenceJobOutcome> {
   const [candidate] = await db.select().from(schema.intelligenceProcessingJobs)
     .where(eq(schema.intelligenceProcessingJobs.status, "queued"))
     .orderBy(asc(schema.intelligenceProcessingJobs.createdAt)).limit(1);
-  if (!candidate) return false;
+  if (!candidate) return "idle";
   const [claimed] = await db.update(schema.intelligenceProcessingJobs).set({
     status: "running",
     progress: 5,
@@ -1195,7 +1221,7 @@ export async function claimAndProcessIntelligenceJob(
     eq(schema.intelligenceProcessingJobs.id, candidate.id),
     eq(schema.intelligenceProcessingJobs.status, "queued"),
   )).returning();
-  if (!claimed) return false;
+  if (!claimed) return "idle";
 
   const next = nextIngestionStage(claimed.stage as IngestionStage);
   try {
@@ -1238,9 +1264,11 @@ export async function claimAndProcessIntelligenceJob(
       // A failed capability must not block independent downstream capabilities.
       if (next) await enqueueStage(claimed.intelligenceId, next, { batchId: claimed.batchId, runKey: jobRunKey(claimed.idempotencyKey) });
     }
+    if (claimed.batchId) await refreshProcessingBatch(claimed.batchId);
+    return terminal ? "completed" : "requeued";
   }
   if (claimed.batchId) await refreshProcessingBatch(claimed.batchId);
-  return true;
+  return "completed";
 }
 
 function jobRunKey(idempotencyKey: string): string {
@@ -1330,6 +1358,10 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
           and(
             sql`${schema.assetIntelligence.analysisStatus} not in ('pending', 'processing')`,
             sql`${schema.dataTables.updatedAt} > coalesce(${schema.assetIntelligence.lastAnalyzedAt}, timestamp 'epoch')`,
+            or(
+              ne(schema.assetIntelligence.analysisStatus, "partial"),
+              sql`${schema.assetIntelligence.updatedAt} < now() - interval '1 hour'`,
+            ),
           ),
         ),
       ))
@@ -1492,7 +1524,9 @@ export async function hybridSearchIntelligence(
   const vectors = new Map<string, number[][]>();
   for (const item of embeddings) {
     if (!Array.isArray(item.vector)) continue;
-    vectors.set(item.intelligenceId, [...(vectors.get(item.intelligenceId) ?? []), item.vector]);
+    const grouped = vectors.get(item.intelligenceId);
+    if (grouped) grouped.push(item.vector);
+    else vectors.set(item.intelligenceId, [item.vector]);
   }
   const entityRows = intelligenceIds.length ? await db.select({
     intelligenceId: schema.assetIntelligenceEntities.intelligenceId,

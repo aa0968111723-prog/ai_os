@@ -88,7 +88,7 @@ describe.skipIf(!RUN_PG).sequential("Intelligence database privacy (real Postgre
     });
     await db.insert(schema.entityRelationships).values({
       groupId,
-      fromType: "asset",
+      fromType: "asset_intelligence",
       fromId: intelligenceId,
       relationType: "MENTIONS",
       toType: "topic",

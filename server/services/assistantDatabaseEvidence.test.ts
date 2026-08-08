@@ -9,6 +9,7 @@ describe("assistant database evidence", () => {
     expect(terms).toContain("淡水");
     expect(terms).toContain("電話");
     expect(terms).not.toContain("資料庫");
+    expect(terms).not.toContain("的電");
   });
 
   it("formats a stable source trace with table ref and row id", () => {
@@ -54,5 +55,19 @@ describe("structured database ingestion", () => {
     });
     expect(snapshot.indexedRows).toBeLessThan(20);
     expect(snapshot.truncated).toBe(true);
+    expect(snapshot.text).toContain("索引已截斷");
+  });
+
+  it("reports rows omitted by the database row cap even when the character budget remains", () => {
+    const snapshot = serializeTableForIntelligence({
+      id: "table-1",
+      name: "大型資料",
+      fields: [{ key: "value", label: "內容", type: "text" }],
+      rows: [{ id: "row-1", data: { value: "indexed" } }],
+      totalRows: 25_000,
+    });
+    expect(snapshot.indexedRows).toBe(1);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.text).toContain("1/25000");
   });
 });

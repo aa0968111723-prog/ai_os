@@ -22,6 +22,8 @@ export interface AssistantDatabaseEvidenceRow {
   score: number;
 }
 
+export const ASSISTANT_DATABASE_EVIDENCE_BUDGET = 12_000;
+
 const QUERY_STOP_WORDS = new Set([
   "ai", "資料", "資料庫", "資料表", "表格", "內容", "目前", "所有", "一下", "請問",
   "幫我", "幫忙", "查詢", "搜尋", "找到", "找出", "告訴", "顯示", "裡面", "其中",
@@ -49,7 +51,7 @@ export function assistantDatabaseQueryTerms(query: string, maxTerms = 8): string
     if (cleaned.length <= 4) push(cleaned);
     for (let index = 0; index < cleaned.length - 1; index += 1) {
       const pair = cleaned.slice(index, index + 2);
-      if (/^[的了是在有與和及請問]$/.test(pair)) continue;
+      if (/[的了是在有與和及請問]/.test(pair)) continue;
       push(pair);
     }
   }
@@ -121,7 +123,7 @@ export async function retrieveAssistantDatabaseEvidence(
 
   const selected: AssistantDatabaseEvidenceRow[] = [];
   const perTable = new Map<string, number>();
-  const budget = Math.min(30_000, Math.max(1_000, options.budgetChars ?? 12_000));
+  const budget = Math.min(30_000, Math.max(1_000, options.budgetChars ?? ASSISTANT_DATABASE_EVIDENCE_BUDGET));
   let used = 0;
   for (const candidate of candidates) {
     if (selected.length >= Math.min(40, Math.max(1, options.limit ?? 16))) break;
