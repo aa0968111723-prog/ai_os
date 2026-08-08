@@ -131,7 +131,10 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // 助手頁面感知：選中的資料庫＝「這個資料庫」；contextProjectId 讓它知道是從哪個專案過來的
-  useEffect(() => registerAssistantFocus({ entityType: "database", entityId: selectedId ?? undefined }), [selectedId]);
+  useEffect(() => {
+    if (!selectedId) return;
+    return registerAssistantFocus({ entityType: "database", entityId: selectedId });
+  }, [selectedId]);
   const [creating, setCreating] = useState(false);
   const [databaseQuery, setDatabaseQuery] = useState("");
   // 外部授權是整頁重導：回來時網址上還帶著「進行到哪一步」，直接把面板接回去（Golden Path 1／5）

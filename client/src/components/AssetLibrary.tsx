@@ -136,14 +136,16 @@ export function AssetLibrary({
     });
   /* 把勾選與篩選報給 AI 助手：不重造 state，讀既有的那一份 */
   const selectedAssetIds = useMemo(() => [...selected], [selected]);
-  useEffect(
-    () => registerAssistantFocus({
+  // 沒勾任何素材就不註冊——素材庫與分鏡中心同頁並存，無條件註冊會把分鏡焦點洗掉
+  useEffect(() => {
+    if (!selectedAssetIds.length) return;
+    return registerAssistantFocus({
+      pageType: "assets",
       entityType: "asset",
       selectedEntityIds: selectedAssetIds,
       activeTab: kindFilter === "all" ? undefined : kindFilter,
-    }),
-    [selectedAssetIds, kindFilter],
-  );
+    });
+  }, [selectedAssetIds, kindFilter]);
 
   // DESK-01：桌面橋接可用才顯示「用外部軟體開啟／在資料夾顯示」；Web 只給下載路徑與提示，不承諾自動回傳
   const desktopAvailable = hasDesktopBridge();

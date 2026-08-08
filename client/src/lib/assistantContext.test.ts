@@ -87,6 +87,19 @@ describe("registerAssistantFocus（焦點層）", () => {
     expect(getAssistantContext()).toMatchObject({ entityType: "asset", entityId: "a9" });
   });
 
+  it("同頁多個面並存時，只有真的有選取的那個註冊——空手的面不得洗掉別人的焦點", () => {
+    // 專案頁同時掛著分鏡中心與素材庫：兩者都無條件註冊的話，後掛載的（即使什麼都沒選）
+    // 會把前者剛設好的焦點清成空白。約定是「沒東西可講就不註冊」（見各註冊點的 early return）。
+    registerAssistantPage({ pageType: "storyboard", projectId: "p1" });
+    registerAssistantFocus({ entityType: "shot", entityId: "s3", entityLabel: "第 3 鏡" });
+    // 素材庫沒勾任何東西 → 不呼叫 registerAssistantFocus（模擬 early return）
+    expect(getAssistantContext()).toMatchObject({ entityType: "shot", entityId: "s3" });
+    // 使用者真的去勾了素材 → 這時才註冊，且理應接管（最近一次真實選擇勝出）
+    registerAssistantFocus({ entityType: "asset", selectedEntityIds: ["a1", "a2"] });
+    expect(getAssistantContext()).toMatchObject({ entityType: "asset", selectedEntityIds: ["a1", "a2"] });
+    expect(getAssistantContext().entityId).toBeUndefined();
+  });
+
   it("空的 selectedEntityIds 收成 undefined；有值就照收", () => {
     registerAssistantPage({ pageType: "assets" });
     registerAssistantFocus({ entityType: "asset", selectedEntityIds: [] });

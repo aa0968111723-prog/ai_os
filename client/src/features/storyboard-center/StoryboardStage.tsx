@@ -99,17 +99,21 @@ export function StoryboardStage({
   const pickedIds = useMemo(() => [...picked], [picked]);
   const focusShot = studioShot ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined);
   const focusShotNo = focusShot ? shotNumber.get(focusShot.id) : undefined;
-  useEffect(
-    () => registerAssistantFocus({
+  // **沒東西可講就不註冊**：焦點層只有一格，而專案頁同時掛著分鏡中心與素材庫等多個面。
+  // 每個面都無條件註冊的話，最後掛載的那個（即使它什麼都沒選）會把別人剛設好的焦點洗掉。
+  // 語意是「最近一次真的做了選擇的人勝出」——這也正是使用者的直覺。
+  const hasShotFocus = !!focusShot || pickedIds.length > 0;
+  useEffect(() => {
+    if (!hasShotFocus) return;
+    return registerAssistantFocus({
       pageType: "storyboard",
       entityType: "shot",
       entityId: focusShot?.id,
       entityLabel: focusShotNo ? `第 ${focusShotNo} 鏡` : undefined,
       selectedEntityIds: pickedIds,
       activeTab: mode,
-    }),
-    [focusShot?.id, focusShotNo, pickedIds, mode],
-  );
+    });
+  }, [hasShotFocus, focusShot?.id, focusShotNo, pickedIds, mode]);
 
   return (
     <div className="board-stage stack" id="storyboard-center" data-fb="分鏡中心">
