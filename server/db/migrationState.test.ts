@@ -302,14 +302,20 @@ describe("legacy migration adoption bridge", () => {
     //   沒有資料搬移，舊列一律留 null，重跑必為 no-op。
     //   data_files 與 knowledge 兩張表都建在 0000 baseline（bridge 前綴）裡，
     //   不是 post-bridge 建立的表，所以不適用 0025／0049 那條「新欄要一併寫回
-    //   原建表語句」的規則——drift 不會為它們產出 CREATE TABLE。）
-    //
+    //   原建表語句」的規則——drift 不會為它們產出 CREATE TABLE；
     //   0053 是 scenes 的 review_status：一句 ADD COLUMN IF NOT EXISTS
     //   （帶 DEFAULT 'draft'，舊列自動補值、不改既有欄位型別）＋一句
-    //   CREATE INDEX IF NOT EXISTS，共 2 句，重跑無害。
+    //   CREATE INDEX IF NOT EXISTS，共 2 句，重跑無害；
+    //   0054 是協作決策：messages 一句 ADD COLUMN IF NOT EXISTS "intent"（可空、無預設值
+    //   改寫）、decisions 一句 CREATE TABLE IF NOT EXISTS、兩句 CREATE INDEX IF NOT EXISTS，
+    //   共 4 句——逐句確認過純新增、無資料搬移、無既有欄位改動，重跑必為 no-op；
+    //   0055 是 Story 共編快照：collab_documents 一句 CREATE TABLE IF NOT EXISTS、
+    //   一句 CREATE UNIQUE INDEX IF NOT EXISTS、一句 CREATE INDEX IF NOT EXISTS，
+    //   共 3 句——純新增新表、不動任何既有表或資料，重跑必為 no-op。）
+    //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

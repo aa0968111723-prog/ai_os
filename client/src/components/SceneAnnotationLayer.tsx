@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { containedBox, mediaPointFromEvent, type MediaBox } from "@shared/mediaPoint";
+import { dotVisibleAt } from "@shared/timecode";
 
 /** 一則畫在圖上的標注（只取畫圓點需要的欄位） */
 export interface SceneAnnotationDot {
@@ -9,6 +10,8 @@ export interface SceneAnnotationDot {
   resolvedAt: Date | string | null;
   /** 顯示用編號（1,2,3…）——阿拉伯數字在小螢幕上才看得清 */
   index: number;
+  /** 影片時間碼（毫秒）；null＝靜態圖標注。圓點只在播放頭接近它時顯示（shared/timecode）。 */
+  tMs?: number | null;
 }
 
 /**
@@ -46,7 +49,8 @@ export function SceneAnnotationLayer({
   annotations: SceneAnnotationDot[];
   /** 標注模式：游標變十字、點一下就收一個座標 */
   annotating: boolean;
-  onPick: (point: { ax: number; ay: number }) => void;
+  /** 媒體是影片時，point 會帶上點擊當下的播放頭（tMs 毫秒）——影片時間碼留言的來源 */
+  onPick: (point: { ax: number; ay: number; tMs?: number }) => void;
   onSelect?: (id: string) => void;
   selectedId?: string | null;
 }) {
@@ -55,6 +59,12 @@ export function SceneAnnotationLayer({
   const [inner, setInner] = useState<MediaBox | null>(null);
   /** 觸控起點：用來分辨「點一下」與「捲動」 */
   const downAt = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * 影片播放頭（毫秒）；null＝媒體不是影片。
+   * 帶時間碼的圓點只在播放頭接近它時顯示（schema 註解從第一天就這樣承諾，這裡才真的做到）。
+   * timeupdate 約 4Hz——夠讓圓點在正確的一兩秒內出現，又不會把整層拖進逐幀重繪。
+   */
+  const [playheadMs, setPlayheadMs] = useState<number | null>(null);
 
   const measure = useCallback(() => {
     const wrap = wrapRef.current;
@@ -89,10 +99,24 @@ export function SceneAnnotationLayer({
     media?.addEventListener("load", measure);
     media?.addEventListener("loadedmetadata", measure);
     window.addEventListener("resize", measure);
+    // 影片才追播放頭；seeked 也要接——點留言跳到 00:18 時，不等下一次 timeupdate 圓點就要出現
+    const isVideo = media instanceof HTMLVideoElement;
+    const onTime = isVideo ? () => setPlayheadMs(Math.round(media.currentTime * 1000)) : null;
+    if (isVideo && onTime) {
+      setPlayheadMs(Math.round(media.currentTime * 1000));
+      media.addEventListener("timeupdate", onTime);
+      media.addEventListener("seeked", onTime);
+    } else {
+      setPlayheadMs(null);
+    }
     return () => {
       ro?.disconnect();
       media?.removeEventListener("load", measure);
       media?.removeEventListener("loadedmetadata", measure);
+      if (isVideo && onTime) {
+        media.removeEventListener("timeupdate", onTime);
+        media.removeEventListener("seeked", onTime);
+      }
       window.removeEventListener("resize", measure);
     };
   }, [measure, children]);
@@ -113,7 +137,14 @@ export function SceneAnnotationLayer({
     // 點在 letterbox 留白上、或素材還沒載入，一律回 null——這時什麼都不做，
     // 而不是 clamp 成邊緣座標（那會讓圓點莫名跑到畫面邊上）
     const point = mediaPointFromEvent(rect, intrinsic, ev);
-    if (point) onPick(point);
+    if (!point) return;
+    // 影片：一併記下點擊當下的播放頭。「這裡人物切太快」指的是**這一刻的**畫面，
+    // 座標與時間碼缺一則標注就指不回原處。
+    if (media instanceof HTMLVideoElement) {
+      onPick({ ...point, tMs: Math.round(media.currentTime * 1000) });
+    } else {
+      onPick(point);
+    }
   };
 
   return (
@@ -125,6 +156,9 @@ export function SceneAnnotationLayer({
     >
       {children}
       {inner && annotations.map((a) => {
+        // 帶時間碼的圓點只在播放頭接近時顯示（±1.5s，見 shared/timecode）。
+        // 隱藏用 return null 而不是 CSS：看不到的圓點也不該擋到影片的播放控制列。
+        if (!dotVisibleAt(a.tMs, playheadMs)) return null;
         const resolved = !!a.resolvedAt;
         return (
           <button

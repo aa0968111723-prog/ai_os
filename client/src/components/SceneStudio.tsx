@@ -12,6 +12,8 @@ import { AssetAudio, AssetImg, AssetVideo } from "./MediaFallback";
 import { relSeen } from "../push";
 import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 import { ConflictNotice, conflictFromError } from "./ConflictNotice";
+import { formatTMs } from "@shared/timecode";
+import { discussInMessages } from "../discuss";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -148,8 +150,17 @@ export function SceneStudio({
    * 手機上沒有 hover 也沒有修飾鍵，隱式模式在觸控裝置上根本用不了。
    */
   const [annotating, setAnnotating] = useState(false);
+  /** 舞台容器：時間碼留言的「點留言 → seek 到 00:18」要找得到舞台上的 video */
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  /** 把舞台影片跳到某個時間碼並暫停——暫停是刻意的：跳過去是要「看那一格畫面」，不是繼續播 */
+  const seekStageTo = (tMs: number) => {
+    const video = stageRef.current?.querySelector("video");
+    if (!video) return;
+    video.currentTime = tMs / 1000;
+    video.pause();
+  };
   /** 剛點下、還沒送出的座標；null＝沒有待輸入的標注 */
-  const [pendingPoint, setPendingPoint] = useState<{ ax: number; ay: number } | null>(null);
+  const [pendingPoint, setPendingPoint] = useState<{ ax: number; ay: number; tMs?: number } | null>(null);
   const [annotationDraft, setAnnotationDraft] = useState("");
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [regenModelId, setRegenModelId] = useState(() =>
@@ -394,7 +405,7 @@ export function SceneStudio({
     () =>
       annotations
         .filter((a) => a.anchorAssetId && a.anchorAssetId === stageAssetId && a.ax != null && a.ay != null)
-        .map((a, i) => ({ id: a.id, ax: a.ax!, ay: a.ay!, resolvedAt: a.resolvedAt, index: i + 1 })),
+        .map((a, i) => ({ id: a.id, ax: a.ax!, ay: a.ay!, resolvedAt: a.resolvedAt, index: i + 1, tMs: a.tMs })),
     [annotations, stageAssetId],
   );
   /** 不在這一版、且還沒改好的標注數——換版之後「還有東西沒處理」不能就這樣消失在畫面外 */
@@ -467,7 +478,7 @@ export function SceneStudio({
 
         <div className="scene-studio__body">
           {/* ── 舞台：這一格現在長什麼樣（或正在看的那一版） ───────────────── */}
-          <div className="scene-studio__stage">
+          <div className="scene-studio__stage" ref={stageRef}>
             {versions.isLoading ? (
               <Skeleton style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: "var(--r-12)" }} />
             ) : stageVersion?.assetUrl ? (
@@ -1102,6 +1113,26 @@ export function SceneStudio({
                                         <Icon name="Copy" size={13} /> 用這版提示詞
                                       </Button>
                                     )}
+                                    {/* 討論綁「這一版」（refType=asset），不是綁整格——
+                                        「V2 的人物眼神不對」與「Shot 08 有問題」不是同一件事。
+                                        走既有的 discussInMessages 匯流排：引用卡、跳回原處、
+                                        手機 sheet 交棒全部沿用，不開第二套留言。 */}
+                                    {v.assetId && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        data-testid="discuss-version"
+                                        onClick={() =>
+                                          discussInMessages({
+                                            refType: "asset",
+                                            refId: v.assetId!,
+                                            title: `第 ${sceneNumber} 鏡・${section.label}第 ${v.index} 版`,
+                                          })
+                                        }
+                                      >
+                                        <Icon name="MessageCircle" size={13} /> 討論這一版
+                                      </Button>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1152,6 +1183,8 @@ export function SceneStudio({
                             anchorAssetId: stageVersion!.assetId!,
                             ax: pendingPoint.ax,
                             ay: pendingPoint.ay,
+                            // 影片標注帶時間碼（點擊當下的播放頭）；靜態圖為 undefined
+                            tMs: pendingPoint.tMs,
                             body: annotationDraft.trim(),
                           })
                         }
@@ -1188,6 +1221,25 @@ export function SceneStudio({
                             <b style={{ fontSize: "var(--fs-13)" }}>
                               {dotIndex ? `第 ${dotIndex} 則・` : ""}{a.userName}
                             </b>
+                            {/* 影片時間碼：「00:18 · 韋澔」。點了就把舞台影片跳到那一刻——
+                                「這裡人物切太快」的「這裡」終於指得回去。標注在別的版本時
+                                先不給 seek（要先「看那一版」，否則會跳錯影片）。 */}
+                            {a.tMs != null && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                data-testid="tms-seek"
+                                disabled={!onStage}
+                                title={onStage ? `跳到 ${formatTMs(a.tMs)}` : "標注在別的版本上——先「看那一版」"}
+                                style={{ padding: "2px 8px", fontSize: "var(--fs-11)", fontVariantNumeric: "tabular-nums" }}
+                                onClick={() => {
+                                  seekStageTo(a.tMs!);
+                                  setSelectedAnnotationId(a.id);
+                                }}
+                              >
+                                <Icon name="Play" size={10} /> {formatTMs(a.tMs)}
+                              </Button>
+                            )}
                             {a.resolvedAt && <Pill status="done">已改好</Pill>}
                             {!onStage && <Meta>在別的版本上</Meta>}
                           </div>

@@ -65,6 +65,7 @@ export function ScriptEditor({
   placeholder,
   saveLabel,
   footer,
+  textareaRef,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -76,6 +77,8 @@ export function ScriptEditor({
   saveLabel?: ReactNode;
   /** 解析摘要與主 CTA：全螢幕時要跟著進來，否則得退出全螢幕才能按「產生分鏡」 */
   footer?: ReactNode;
+  /** 共編用：讓外層（StoryStage）拿得到 textarea——遠端改動要保住游標、caret 疊層要量測 */
+  textareaRef?: (el: HTMLTextAreaElement | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -345,7 +348,10 @@ export function ScriptEditor({
           </nav>
         )}
         <textarea
-          ref={areaRef}
+          ref={(el) => {
+            areaRef.current = el;
+            textareaRef?.(el);
+          }}
           id="story-editor"
           className="story-editor"
           aria-label="故事內容"

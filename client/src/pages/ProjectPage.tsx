@@ -56,6 +56,7 @@ import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
+import { PeerBadge, latestViewForUser, sceneLabelOf } from "../features/collaboration/PeerBadge";
 import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
 import type { ViewState } from "@shared/viewState";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
@@ -1410,24 +1411,22 @@ export function ProjectPage({ id }: { id: string }) {
               {collab.connected && collab.peers.length === 0 && (
                 <Meta style={{ fontSize: 12 }}>即時同步已連線</Meta>
               )}
+              {/* Phase 3：名字 chip 點開小卡——「韋澔 · 在線 · 正在：分鏡 · Shot 08
+                  [跟隨畫面] [傳訊息]」。「正在哪」來自語意視圖（peerViews），
+                  與 Presenter 跟隨同一個真相來源，兩邊顯示的位置永遠一致。 */}
               {collab.peers.map((peer) => {
                 const isMe = peer.userId === collab.self?.userId;
                 const following = collabMode === "mirror" && followUserId === peer.userId;
+                const view = latestViewForUser(collab.peerViews, peer.userId);
                 return (
-                  <span
+                  <PeerBadge
                     key={peer.userId}
-                    className={!isMe ? "m-touch" : undefined}
-                    role={!isMe ? "button" : undefined}
-                    tabIndex={!isMe ? 0 : undefined}
-                    title={
-                      isMe
-                        ? "你在這個專案裡"
-                        : following
-                          ? `正在鏡像跟隨 ${peer.name}（再點可取消）`
-                          : `點一下以鏡像跟隨 ${peer.name}`
-                    }
-                    onClick={() => {
-                      if (isMe) return;
+                    peer={peer}
+                    isMe={isMe}
+                    view={view}
+                    sceneLabel={sceneLabelOf(scenes.data, view)}
+                    following={following}
+                    onToggleFollow={() => {
                       if (following) {
                         setCollabMode("live");
                         setFollowUserId(null);
@@ -1436,28 +1435,7 @@ export function ProjectPage({ id }: { id: string }) {
                         setFollowUserId(peer.userId);
                       }
                     }}
-                    onKeyDown={(e) => {
-                      if (isMe) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).click();
-                      }
-                    }}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 5,
-                      fontSize: 12, padding: "2px 10px", borderRadius: 999,
-                      border: `1px solid ${peer.color}`, color: peer.color,
-                      textShadow: "0 1px 2px var(--scrim)",
-                      opacity: isMe ? 0.55 : 1,
-                      cursor: isMe ? "default" : "pointer",
-                      outline: following ? `2px solid ${peer.color}` : undefined,
-                      outlineOffset: 2,
-                    }}
-                  >
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
-                    {isMe ? "你" : peer.name}
-                    {following ? " · 跟隨中" : ""}
-                  </span>
+                  />
                 );
               })}
               {/* 「帶大家看」：按下去只會讓房裡其他人看到一張邀請卡，

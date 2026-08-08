@@ -6,6 +6,7 @@ import type { AppRouter } from "../../../server/routers";
 import { Icon } from "./Icon";
 import { DISCUSS_EVENT, flashAnchor, jumpToRef, setPlannerFocus, takePendingDiscussRef, type DiscussRef } from "../discuss";
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
+import { INTENT_LABEL, suggestIntent, type MessageIntent } from "@shared/collabIntent";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 import { useLocalDraft } from "../useLocalDraft";
 
@@ -41,6 +42,65 @@ function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
         disabled={!title.trim() || !date || pending}
         onClick={() => onSubmit(title.trim(), new Date(date).toISOString())}>
         建立待辦
+      </Button>
+      <Button size="sm" onClick={onCancel}>取消</Button>
+      {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * 轉任務行內表單（場景 4 的第一步）：標題預填留言、選負責人 → tasks.create。
+ * 與「轉待辦」（schedule，個人行程）不同：這是**正式人類任務**（project_tasks），
+ * 有負責人、完成時會通知原提議者——留言 → 任務 → 完成 → 回頭解決的 provenance 鏈由它起頭。
+ */
+function TaskForm({ defaultTitle, members, pending, error, onCancel, onSubmit }: {
+  defaultTitle: string;
+  members: Array<{ userId: string; name: string }>;
+  pending: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSubmit: (title: string, assigneeId: string | null) => void;
+}) {
+  const [title, setTitle] = useState(defaultTitle);
+  const [assigneeId, setAssigneeId] = useState("");
+  return (
+    <div className="todo-form" data-testid="task-form">
+      <input aria-label="任務標題" value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="任務標題" />
+      <select aria-label="指派給" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+        <option value="">（先不指派）</option>
+        {members.map((m) => (
+          <option key={m.userId} value={m.userId}>{m.name}</option>
+        ))}
+      </select>
+      <Button size="sm" variant="primary"
+        disabled={!title.trim() || pending}
+        onClick={() => onSubmit(title.trim(), assigneeId || null)}>
+        建立任務
+      </Button>
+      <Button size="sm" onClick={onCancel}>取消</Button>
+      {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * 轉決策行內表單：一句定案 → decisions.create（sourceMessageId 記 provenance，
+ * 原留言會標上「決策」）。定案是一句話，不是一篇文章——所以只有一個輸入框。
+ */
+function DecisionForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
+  defaultTitle: string;
+  pending: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSubmit: (title: string) => void;
+}) {
+  const [title, setTitle] = useState(defaultTitle);
+  return (
+    <div className="todo-form" data-testid="decision-form">
+      <input aria-label="定案內容" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="定案內容（例：使用暖色版本 B）" />
+      <Button size="sm" variant="primary" disabled={!title.trim() || pending} onClick={() => onSubmit(title.trim())}>
+        ✓ 定案
       </Button>
       <Button size="sm" onClick={onCancel}>取消</Button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
@@ -138,6 +198,17 @@ const MessageRow = memo(function MessageRow({
   emojiOpen,
   todoOpen,
   noteOpen,
+  taskOpen,
+  decisionOpen,
+  members,
+  addTaskPending,
+  addTaskError,
+  addDecisionPending,
+  addDecisionError,
+  onToggleTask,
+  onToggleDecision,
+  onSubmitTask,
+  onSubmitDecision,
   reactPending,
   setPinnedPending,
   addSchedulePending,
@@ -164,6 +235,17 @@ const MessageRow = memo(function MessageRow({
   emojiOpen: boolean;
   todoOpen: boolean;
   noteOpen: boolean;
+  taskOpen: boolean;
+  decisionOpen: boolean;
+  members: Array<{ userId: string; name: string }>;
+  addTaskPending: boolean;
+  addTaskError?: string;
+  addDecisionPending: boolean;
+  addDecisionError?: string;
+  onToggleTask: (messageId: string) => void;
+  onToggleDecision: (messageId: string) => void;
+  onSubmitTask: (messageId: string, title: string, assigneeId: string | null) => void;
+  onSubmitDecision: (messageId: string, title: string) => void;
   reactPending: boolean;
   setPinnedPending: boolean;
   addSchedulePending: boolean;
@@ -228,6 +310,24 @@ const MessageRow = memo(function MessageRow({
             )
           ) : (
             <span>{renderBody(m.body, mentionNames)}</span>
+          )}
+          {/* 協作語意：已標記就顯示（「修改要求」「決策」「阻塞」）；沒標記但啟發式
+              認得出「看起來是修改要求」時給一個提示捷徑——按不按仍然是人的決定。 */}
+          {m.intent && m.intent !== "comment" && (
+            <Chip style={{ margin: "4px 0 0", fontSize: "var(--fs-11)" }} data-testid="intent-chip">
+              {INTENT_LABEL[m.intent as MessageIntent] ?? m.intent}
+            </Chip>
+          )}
+          {!m.intent && suggestIntent(m.body) === "change_request" && (
+            <button
+              type="button"
+              className="msg-action"
+              data-testid="intent-suggest"
+              title="看起來是一個修改要求——轉成任務就能指派並追蹤"
+              onClick={() => onToggleTask(m.id)}
+            >
+              <Icon name="Lightbulb" size={12} /> 看起來是修改要求 → 轉成任務
+            </button>
           )}
           {/* 🔗 引用作品卡:縮圖+標題,點「查看」跳回原件 */}
           {m.refType && m.refId && (
@@ -333,6 +433,24 @@ const MessageRow = memo(function MessageRow({
         >
           <Icon name="FileText" size={12} /> 轉筆記
         </button>
+        {/* 轉任務＝正式人類任務（有負責人、完成時通知原提議者）；轉決策＝進 Decision Log。
+            兩者與「轉待辦」（個人行程）並列——口頭承諾的三種歸宿。 */}
+        <button
+          type="button"
+          className="msg-action"
+          title="轉成正式任務（可指派負責人；完成時會通知你）"
+          onClick={() => onToggleTask(m.id)}
+        >
+          <Icon name="Check" size={12} /> 轉任務
+        </button>
+        <button
+          type="button"
+          className="msg-action"
+          title="把這句定案進決策紀錄（可撤銷，但不會消失）"
+          onClick={() => onToggleDecision(m.id)}
+        >
+          <Icon name="Star" size={12} /> 轉決策
+        </button>
       </div>
       {/* 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */}
       {todoOpen && (
@@ -342,6 +460,25 @@ const MessageRow = memo(function MessageRow({
           error={addScheduleError}
           onCancel={onCancelTodo}
           onSubmit={(title, startsAt) => onSubmitTodo(m.id, title, startsAt)}
+        />
+      )}
+      {taskOpen && (
+        <TaskForm
+          defaultTitle={m.body.slice(0, 160)}
+          members={members}
+          pending={addTaskPending}
+          error={addTaskError}
+          onCancel={() => onToggleTask(m.id)}
+          onSubmit={(title, assigneeId) => onSubmitTask(m.id, title, assigneeId)}
+        />
+      )}
+      {decisionOpen && (
+        <DecisionForm
+          defaultTitle={m.body.slice(0, 200)}
+          pending={addDecisionPending}
+          error={addDecisionError}
+          onCancel={() => onToggleDecision(m.id)}
+          onSubmit={(title) => onSubmitDecision(m.id, title)}
         />
       )}
       {/* 轉筆記行內表單:標題預填留言前段、內容預填全文 → notes.add */}
@@ -422,6 +559,16 @@ export function MessagePanel({
   const notesQ = trpc.notes.list.useQuery({ groupId }, { enabled: refPickerOpen });
   const scheduleQ = trpc.schedule.list.useQuery({ groupId }, { enabled: refPickerOpen });
   const addNote = trpc.notes.add.useMutation({ onSuccess: () => { setNoteFor(null); utils.notes.list.invalidate({ groupId }); } });
+  // 轉任務／轉決策（場景 4 的 provenance 鏈起點）：sourceMessageId 記「由哪則留言建立」
+  const addTask = trpc.tasks.create.useMutation({ onSuccess: () => { setTaskFor(null); utils.tasks.listByProject.invalidate({ projectId }); } });
+  const addDecision = trpc.decisions.create.useMutation({
+    onSuccess: () => {
+      setDecisionFor(null);
+      utils.decisions.list.invalidate({ projectId });
+      // 原留言的 intent 被回寫成「決策」——列表要重抓才看得到 chip
+      utils.messages.list.invalidate({ projectId });
+    },
+  });
   const react = trpc.messages.react.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const setPinned = trpc.messages.setPinned.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const markRead = trpc.messages.markRead.useMutation({
@@ -439,6 +586,8 @@ export function MessagePanel({
   const [emojiPickFor, setEmojiPickFor] = useState<string | null>(null);
   // todo/note 行內表單只需記「開在哪一則」的 id;預填內容直接讀該列的 m.body,不必另存
   const [todoFor, setTodoFor] = useState<string | null>(null);
+  const [taskFor, setTaskFor] = useState<string | null>(null);
+  const [decisionFor, setDecisionFor] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
@@ -462,6 +611,8 @@ export function MessagePanel({
     [roles.data, myId],
   );
   const nameById = useMemo(() => new Map((roles.data?.members ?? []).map((m) => [m.userId, m.name])), [roles.data]);
+  /** 任務可指派對象＝全組成員（含自己——自己認領也是常態） */
+  const assignableMembers = useMemo(() => roles.data?.members ?? [], [roles.data]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -733,6 +884,14 @@ export function MessagePanel({
     setTodoFor(null);
     setNoteFor((prev) => (prev === messageId ? null : messageId));
   }, []);
+  const onToggleTask = useCallback((messageId: string) => {
+    setTodoFor(null); setNoteFor(null); setDecisionFor(null);
+    setTaskFor((prev) => (prev === messageId ? null : messageId));
+  }, []);
+  const onToggleDecision = useCallback((messageId: string) => {
+    setTodoFor(null); setNoteFor(null); setTaskFor(null);
+    setDecisionFor((prev) => (prev === messageId ? null : messageId));
+  }, []);
   const onCancelTodo = useCallback(() => setTodoFor(null), []);
   const onCancelNote = useCallback(() => setNoteFor(null), []);
   const onSubmitTodo = useCallback(
@@ -744,6 +903,18 @@ export function MessagePanel({
     (messageId: string, title: string, content: string) =>
       addNoteMutate({ groupId, projectId, title, content, sourceMessageId: messageId }),
     [addNoteMutate, groupId, projectId],
+  );
+  const addTaskMutate = addTask.mutate;
+  const onSubmitTask = useCallback(
+    (messageId: string, title: string, assigneeId: string | null) =>
+      addTaskMutate({ groupId, projectId, title, assigneeId: assigneeId ?? undefined, sourceMessageId: messageId }),
+    [addTaskMutate, groupId, projectId],
+  );
+  const addDecisionMutate = addDecision.mutate;
+  const onSubmitDecision = useCallback(
+    (messageId: string, title: string) =>
+      addDecisionMutate({ projectId, title, sourceMessageId: messageId }),
+    [addDecisionMutate, projectId],
   );
   const onJumpRef = useCallback(
     (refType: DiscussRef["refType"], refId: string) => {
@@ -828,6 +999,17 @@ export function MessagePanel({
             emojiOpen={emojiPickFor === m.id}
             todoOpen={todoFor === m.id}
             noteOpen={noteFor === m.id}
+            taskOpen={taskFor === m.id}
+            decisionOpen={decisionFor === m.id}
+            members={assignableMembers}
+            addTaskPending={addTask.isPending}
+            addTaskError={addTask.error?.message}
+            addDecisionPending={addDecision.isPending}
+            addDecisionError={addDecision.error?.message}
+            onToggleTask={onToggleTask}
+            onToggleDecision={onToggleDecision}
+            onSubmitTask={onSubmitTask}
+            onSubmitDecision={onSubmitDecision}
             reactPending={react.isPending}
             setPinnedPending={setPinned.isPending}
             addSchedulePending={addSchedule.isPending}

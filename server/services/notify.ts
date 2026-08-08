@@ -22,7 +22,12 @@ export type NotificationKind =
   | "reply"
   | "generation_done"
   | "generation_pending_approval"
-  | "schedule_mention";
+  | "schedule_mention"
+  // 協作生命週期（留言→任務→完成→回頭解決；見 taskCore 的 provenance 鏈）
+  | "task_assigned"
+  | "task_completed"
+  | "approval"
+  | "decision";
 
 export interface NotifyInput {
   /** 收件人（會自動去重、去空值；呼叫端不必先過濾） */
