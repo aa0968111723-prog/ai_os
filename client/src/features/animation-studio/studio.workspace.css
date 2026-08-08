@@ -421,13 +421,16 @@ body.studio-workspace { overflow: hidden; }
   scrollbar-width: none;
 }
 .studio-inspector__tabs::-webkit-scrollbar { display: none; }
-/* 分頁用底線指示，不是膠囊——膠囊在六個並排時會糊成一片色塊 */
+/* 分頁用底線指示，不是膠囊——膠囊在六個並排時會糊成一片色塊。
+ * border-radius 明寫 0：styles.css 給全站 `button` 設了 999px，不覆寫的話
+ * 底線指示會被切成一段圓弧（實測就是六顆膠囊擠在一起）。 */
 .studio-inspector__tab {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 8px 8px 7px;
   border: 0;
+  border-radius: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--ws-ink-2);

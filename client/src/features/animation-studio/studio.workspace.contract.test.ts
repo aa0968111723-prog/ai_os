@@ -116,6 +116,17 @@ describe("面板降級（1280 也要能用）", () => {
     expect(declarations).toMatch(/\.studio\.is-workspace\[data-ai="sheet"\] \{[^}]*--ws-inspector:/);
   });
 
+  /**
+   * 回歸守衛：styles.css 給全站 `button` 設了 `border-radius: 999px`。
+   * Inspector 分頁靠底線指示辨識選取態，不覆寫的話六顆分頁會變成擠在一起的膠囊
+   *（實測抓到過）——那正是這次重構要降低的「SaaS 膠囊感」。
+   */
+  it("Inspector 分頁明寫 border-radius:0，壓過全站 button 的 999px 膠囊", () => {
+    const rule = ruleFor(".studio-inspector__tab");
+    expect(rule).toContain("border-radius: 0");
+    expect(rule).toContain("border-bottom: 2px solid transparent");
+  });
+
   it("Inspector 可收合，收合後只剩一條展開鈕", () => {
     expect(ruleFor(".studio-inspector.is-collapsed")).toContain("width: 40px");
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
