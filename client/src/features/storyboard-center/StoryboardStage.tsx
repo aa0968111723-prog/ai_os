@@ -34,6 +34,8 @@ export function StoryboardStage({
   const characters = trpc.characters.list.useQuery({ projectId });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const looks = trpc.characterLooks.list.useQuery({ projectId });
+  // §23／P3：哪些鏡的畫面已經跟卡片對不上（唯讀；不自動重生成）
+  const continuity = trpc.story.continuityCheck.useQuery({ projectId });
   const [mode, setMode] = useState<BoardMode>(() => loadBoardMode(projectId));
   const [studioSceneId, setStudioSceneId] = useState<string | null>(null);
   const switchMode = (m: BoardMode) => {
@@ -50,6 +52,10 @@ export function StoryboardStage({
   const characterNames = useMemo(
     () => new Map((characters.data ?? []).map((c: { id: string; name: string }) => [c.id, c.name])),
     [characters.data],
+  );
+  const outdatedByShot = useMemo(
+    () => new Map((continuity.data?.outdated ?? []).map((o: { shotId: string; reason: string }) => [o.shotId, o.reason])),
+    [continuity.data],
   );
   /** 全片鏡號（跨場連續；與 ④ 成片、交付包同一套序號） */
   const shotNumber = useMemo(() => {
@@ -109,6 +115,14 @@ export function StoryboardStage({
             <Hint style={{ margin: "4px 0 10px" }}>
               點分鏡卡的畫面或「生成」進單格工作室——圖、影、配音、環境音、版本都在那裡，生成結果自動綁回這一鏡。
             </Hint>
+            {/* §23：卡片改過但畫面還是舊的。放在最上面，不必捲完整頁才知道有落差 */}
+            {outdatedByShot.size > 0 && (
+              <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
+                <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                有 {outdatedByShot.size} 鏡的畫面是用舊設定畫的（角色、場景或道具卡後來改過）。
+                系統不會自動重畫——需要更新的鏡，打開單格工作室重新生成即可。
+              </Hint>
+            )}
             <div className="board-groups stack">
               {groups.map((group, gi) => {
                 const scene = group.storySceneId ? sceneRows.find((s) => s.id === group.storySceneId) : null;
@@ -143,6 +157,7 @@ export function StoryboardStage({
                             mode={mode}
                             looks={looks.data ?? []}
                             characterNames={characterNames}
+                            outdatedReason={outdatedByShot.get(shot.id)}
                             onOpenStudio={setStudioSceneId}
                           />
                         ))}

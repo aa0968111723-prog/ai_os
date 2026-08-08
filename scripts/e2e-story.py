@@ -140,6 +140,78 @@ upd = call("POST", admin, "scenes.update", {"sceneId": shot0["id"], "lookIds": [
 ok("鏡採用造型（lookIds）", upd["lookIds"] == [lk["id"]])
 ok("Identity 未被造型污染", call("GET", admin, "characters.list", {"projectId": pid})[0]["appearance"] != "俐落短髮、深色大衣")
 
+# ── 8.5 連戲檢查（§23 雙向影響 / P3 Continuity Checker）：改了卡片，既有畫面要被標成過時 ──
+# 要挑「真的引用紅傘」的那一鏡：純寫景的鏡（「清晨的克難坡下著雨」）本來就沒有角色與道具錨點，
+# 拿它來測會測不到東西——這正是第一版斷言挑錯鏡踩到的坑。
+import time as _time
+umbrella = next(p for p in call("GET", admin, "props.list", {"projectId": pid}) if p["name"] == "紅傘")
+shot_umbrella = next((s for s in shots if umbrella["id"] in (s.get("propIds") or [])), None)
+ok("有鏡引用紅傘（錨點鏈的起點）", shot_umbrella is not None)
+
+if shot_umbrella:
+    g2 = call("POST", admin, "scenes.generateInto", {"sceneId": shot_umbrella["id"], "modelId": "fal-ai/flux/schnell"})
+    landed = None
+    for _ in range(40):
+        _rows = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+        _s = next((r for r in _rows if r["id"] == shot_umbrella["id"]), None)
+        if _s and _s.get("assetId"):
+            landed = _s
+            break
+        _time.sleep(1)
+    ok("生成落地回填分鏡畫面", landed is not None)
+
+    grow2 = next(g for g in call("GET", admin, "generation.listByProject", {"projectId": pid}) if g["id"] == g2["generationId"])
+    ok("生成凍結了道具卡（錨點可回溯）", umbrella["id"] in (grow2.get("propIds") or []))
+
+    fresh = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("卡片沒動時不誤報過時", fresh["total"] == 0)
+
+    # 紅傘 → 黃傘：正是 PDF §23 的例子
+    call("POST", admin, "props.update", {"id": umbrella["id"], "appearance": "鮮黃色油紙傘、竹骨"})
+    stale = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("改道具外觀後畫面標成過時", stale["total"] >= 1)
+    ok("過時原因指名是哪張卡的哪個欄位", any("紅傘" in o["reason"] and "外觀" in o["reason"] for o in stale["outdated"]))
+
+    impact = call("GET", admin, "story.entityImpact", {"projectId": pid, "kind": "prop", "entityId": umbrella["id"]})
+    ok("影響查詢回報過時鏡數", impact["outdatedShots"] >= 1 and impact["shots"] >= 1)
+
+    # 只改備註不影響畫面——誤報會讓提示變雜訊，這條守住「不亂叫」
+    char0 = call("GET", admin, "characters.list", {"projectId": pid})[0]
+    call("POST", admin, "characters.update", {"id": char0["id"], "notes": "備註改一下，不該影響畫面"})
+    after_notes = call("GET", admin, "story.continuityCheck", {"projectId": pid})
+    ok("只改備註不新增過時項", after_notes["total"] == stale["total"])
+
+# ── 8.8 Shot 相關素材（§13）：名稱／標籤對得上才推薦，且要說得出理由 ──
+def upload_asset(opener, project_id, filename):
+    """multipart 上傳一張小圖（與 e2e-messages 同一套手組 boundary 寫法）"""
+    boundary = "----e2estoryboundary"
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082")
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"projectId\"\r\n\r\n{project_id}\r\n".encode(),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode(),
+        png,
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    req = urllib.request.Request(f"{HOST}/api/upload", data=b"".join(parts), method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    if opener.cookie: req.add_header("Cookie", opener.cookie)
+    try:
+        with opener.open(req) as r: return json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"__error__": e.read().decode()[:200]}
+
+if shot_umbrella:
+    empty = call("GET", admin, "story.shotAssetSuggestions", {"sceneId": shot_umbrella["id"]})
+    ok("素材庫沒對得上的東西時不硬推", empty["items"] == [] and len(empty["terms"]) >= 1)
+    up1 = upload_asset(admin, pid, "克難坡實景參考.png")
+    up2 = upload_asset(admin, pid, "完全無關的東西.png")
+    ok("素材上傳成功（推薦的前提）", "__error__" not in up1 and "__error__" not in up2)
+    sug = call("GET", admin, "story.shotAssetSuggestions", {"sceneId": shot_umbrella["id"]})
+    titles = [i["title"] for i in sug["items"]]
+    ok("名稱對得上的素材被推薦", any("克難坡" in t for t in titles))
+    ok("對不上的不推薦（不要讓人自己過濾雜訊）", not any("完全無關" in t for t in titles))
+    ok("推薦說得出理由（命中哪些詞）", all(i["matched"] for i in sug["items"]))
+
 # ── 9. 修改故事 → 差異訊號（不整部重算） ──
 saved = call("POST", admin, "story.save", {"projectId": pid, "content": STORY + "\n\n三年後，她剪了短髮回到克難坡。"})
 st = call("GET", admin, "story.get", {"projectId": pid})
@@ -148,6 +220,20 @@ re3 = call("POST", admin, "story.parse", {"projectId": pid})
 ok("增量重解不重複建卡", re3["stats"]["characters"]["created"] == 0)
 shots_after = call("GET", admin, "scenes.listByProject", {"projectId": pid})
 ok("既有分鏡不被重解洗掉", len(shots_after) == len(shots))
+
+# ── 9.5 逐場套用（§22）：重解之後再產生分鏡，同名的場不重建、也不覆蓋 ──
+scenes_before = call("GET", admin, "story.scenesList", {"projectId": pid})
+prev = call("GET", admin, "story.storyboardPreview", {"projectId": pid})
+ok("預覽有逐場計畫", "summary" in prev and prev["summary"]["reuseScenes"] >= 1)
+ok("已有鏡的場計畫為沿用", any(d["action"] == "reuse" for d in prev["diff"]))
+call("POST", admin, "story.generateStoryboard", {"projectId": pid})
+scenes_after2 = call("GET", admin, "story.scenesList", {"projectId": pid})
+ok("同名場不重建（不會出現兩個「第 1 場」）",
+   len([s for s in scenes_after2 if s["title"] == scenes_before[0]["title"]]) == 1)
+shot_titles_before = {s["id"]: s["title"] for s in shots_after}
+shots_after2 = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+ok("沿用的場底下的鏡原封不動",
+   all(s["title"] == shot_titles_before[s["id"]] for s in shots_after2 if s["id"] in shot_titles_before))
 
 # ── 10. Undo：撤銷最新一次解析（無新建→無移除；run 標記 undone） ──
 undo = call("POST", admin, "story.undoRun", {"runId": re3["runId"]})
