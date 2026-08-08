@@ -5,6 +5,7 @@ import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 import { collectDeviceHint } from "../deviceHint";
+import posthog from "../posthog";
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
 
@@ -19,7 +20,12 @@ export function AcceptInvitePage({ token }: { token: string }) {
   const [, navigate] = useLocation();
   // 邀請頁在 App 的登入檢查之外也會渲染——這裡自己查目前登入狀態，提醒「換帳號」的情況
   const me = trpc.auth.me.useQuery();
-  const logout = trpc.auth.logout.useMutation({ onSuccess: () => refreshSession(utils) });
+  const logout = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      posthog.reset();
+      refreshSession(utils);
+    },
+  });
   const preview = trpc.auth.invitePreview.useQuery({ token });
   const accept = trpc.auth.acceptInvite.useMutation({
     onSuccess: () => {

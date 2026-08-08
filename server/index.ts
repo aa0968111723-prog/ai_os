@@ -129,8 +129,9 @@ app.use(
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         mediaSrc: ["'self'", "data:", "blob:", "https:"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://*.posthog.com"],
         connectSrc: ["'self'", "https:", "wss:"],
+        workerSrc: ["'self'", "blob:"],
         frameAncestors: ["'none'"],
         objectSrc: ["'none'"],
         // 移除 helmet 預設的 upgrade-insecure-requests：本地/CI 走 http localhost 時它會

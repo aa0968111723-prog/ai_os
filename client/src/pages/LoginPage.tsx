@@ -8,6 +8,7 @@ import { PasswordInput } from "../components/PasswordInput";
 import { Icon } from "../components/Icon";
 import { Card, Hint } from "../components/ui";
 import { collectDeviceHint } from "../deviceHint";
+import posthog from "../posthog";
 
 /**
  * 後端服務層故障（502/503/閘道逾時）或網路中斷時，tRPC 客戶端回傳的是技術性字串
@@ -82,6 +83,7 @@ export function LoginPage() {
         return;
       }
       // 必須清 sessionBoot：否則 bootstrap 快取 me:null（staleTime 60s）讓閘門以為還沒登入
+      posthog.capture("auth_login_succeeded");
       refreshSession(utils);
     },
     // 失敗後選取整段密碼並聚焦：使用者直接重打即可，不用先手動清空
@@ -143,7 +145,10 @@ export function LoginPage() {
           setPassword("");
           login.reset();
         }}
-        onVerified={() => refreshSession(utils)}
+        onVerified={() => {
+          posthog.capture("auth_login_succeeded");
+          refreshSession(utils);
+        }}
       />
     );
   }

@@ -30,6 +30,7 @@ import { GenerationSourcePicker } from "../GenerationSourcePicker";
 import type { CreativePromptOverride } from "@shared/aiTrace";
 import { AiUnderstandingPanel } from "../AiUnderstandingPanel";
 import { RecentGenerationsStrip } from "../RecentGenerationsStrip";
+import posthog from "../../../posthog";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -185,6 +186,13 @@ export function DirectGenerateMode({
           propIds: vars.propIds ?? [],
         });
       }
+      posthog.capture("generation_requested", {
+        model_id: vars.modelId,
+        output_format: projectFormat,
+        requires_approval: data.status === "awaiting_approval",
+        has_source_asset: Boolean(vars.sourceAssetId || vars.sourceUrl),
+        has_continuity_lock: Boolean(vars.continuityMode),
+      });
       setPrompt("");
       setPromptOverride({});
       setConfirming(false);
