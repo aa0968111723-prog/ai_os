@@ -8,8 +8,10 @@
  * 在場名冊同步到其他 replica（否則同一專案的協作者被分流到不同實例就會互相看不見）。
  * 沒有 Redis 時 bus 全是 no-op，行為與單機時完全相同。
  */
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Request } from "express";
+import { sanitizeViewState, type ViewState } from "../../shared/viewState";
 import { WebSocketServer, WebSocket } from "ws";
 import { and, eq, gt } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -47,6 +49,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MIN_CURSOR_MS = 24;
 const MIN_FOCUS_MS = 150;
 const MIN_INVALIDATE_MS = 400;
+/**
+ * viewState 是離散事件（換了一鏡、切了一個分頁），頻率遠低於游標，
+ * 但使用者快速連點時仍可能連發——120ms 足以擋掉抖動又不會讓跟隨者慢半拍。
+ * 與 focus 同樣的處理：**內容真的變了就一律放行**，只有重複的同一份才受節流，
+ * 否則跟隨者會卡在上一個位置，而畫面上完全看不出來。
+ */
+const MIN_VIEW_MS = 120;
 
 /** #7 連線數上限：同一 user 單房最多 4 條、單房最多 60 條、全域最多 500 條——超出即握手後 close(4429)，
  *  防單點多開放大 fanout／吃滿記憶體（DoS 面）。數字保守，正常協作遠低於此。 */
@@ -59,6 +68,17 @@ interface Client {
   userId: string;
   name: string;
   color: string;
+  /**
+   * 每條連線的識別碼。**同一個人可能同時開兩個分頁**（Tab A 故事、Tab B 分鏡），
+   * presence 以 userId 去重是對的（畫面上他只是一個人），但 Presenter／跟隨不能——
+   * 只鎖 userId 的話，跟隨者會在兩個分頁各自的 viewState 之間每秒來回彈跳。
+   * 跟隨鎖定的是 userId + connId。
+   */
+  connId: string;
+  /** 這條連線目前在看什麼（語意視圖狀態，見 shared/viewState.ts）；null＝還沒回報 */
+  view: ViewState | null;
+  /** 這條連線是否正在「帶大家看」 */
+  presenting: boolean;
   /** join 當下的 session 雜湊與專案所屬組：心跳重驗用（登出/被移出組後最慢約 60 秒斷線） */
   tokenHash: string;
   groupId: string;
@@ -70,6 +90,7 @@ interface Client {
   lastCursorAt: number;
   lastFocusAt: number;
   lastInvalidateAt: number;
+  lastViewAt: number;
   /**
    * 被節流擋下的最後一則 invalidate，等節流窗過了補送。
    *
@@ -161,6 +182,29 @@ function localFocus(room: Set<Client>): Array<{ userId: string; zone: string }> 
     if (c.zone) byUser.set(c.userId, c.zone);
   }
   return [...byUser].map(([userId, zone]) => ({ userId, zone }));
+}
+
+/**
+ * 房內每條連線目前在看什麼（hello 用）。以 connId 為鍵而不是 userId：
+ * 同一個人的兩個分頁是兩個不同的位置，合併只會讓跟隨者在兩者之間彈跳。
+ */
+function localViews(room: Set<Client>, except?: Client): Array<{ userId: string; connId: string; name: string; view: ViewState }> {
+  const out: Array<{ userId: string; connId: string; name: string; view: ViewState }> = [];
+  for (const c of room) {
+    if (c === except || !c.view) continue;
+    out.push({ userId: c.userId, connId: c.connId, name: c.name, view: c.view });
+  }
+  return out;
+}
+
+/** 房內正在主講的連線（hello 用）——中途加入的人也要看得到邀請 */
+function localPresenters(room: Set<Client>, except?: Client): Array<{ userId: string; connId: string; name: string; color: string; view: ViewState | null }> {
+  const out: Array<{ userId: string; connId: string; name: string; color: string; view: ViewState | null }> = [];
+  for (const c of room) {
+    if (c === except || !c.presenting) continue;
+    out.push({ userId: c.userId, connId: c.connId, name: c.name, color: c.color, view: c.view });
+  }
+  return out;
 }
 
 /** 對外的在場名單＝本機 ∪ 其他實例回報的名冊（單機模式下就等於本機名單） */
@@ -418,11 +462,15 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
     color: colorFor(ctx.userId),
     tokenHash: ctx.tokenHash,
     groupId: ctx.groupId,
+    connId: randomUUID(),
+    view: null,
+    presenting: false,
     zone: null,
     missedPongs: 0,
     lastCursorAt: 0,
     lastFocusAt: 0,
     lastInvalidateAt: 0,
+    lastViewAt: 0,
     pendingInvalidate: null,
   };
   room.add(client);
@@ -440,7 +488,7 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   });
 
   ws.on("message", (raw) => {
-    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown; anchor?: unknown; ax?: unknown; ay?: unknown; vy?: unknown; vx?: unknown; ci?: unknown; scope?: unknown; label?: unknown };
+    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown; anchor?: unknown; ax?: unknown; ay?: unknown; vy?: unknown; vx?: unknown; ci?: unknown; scope?: unknown; label?: unknown; view?: unknown; active?: unknown };
     try {
       const text = String(raw);
       if (text.length > 2048) return; // 協定內全是小訊息，超長一律視為異常丟棄
@@ -479,6 +527,46 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
       broadcast(roomKey, theRoom, { type: "focus", userId: client.userId, zone: msg.zone }, client);
       // zone 也是名冊的一部分（新加入者的 hello 要帶得出既有聚焦），變更時同步給其他實例
       announceRoster(roomKey, theRoom);
+    } else if (msg.type === "view") {
+      // 語意視圖狀態：「我正在看 ② 分鏡 → 第三場 → Shot 08 → Visual」。
+      // 一律逐欄夾制後才轉發（接收端會拿它去查表、拼 query key、進 CSS 選擇器）
+      // ——與 cursor 的 anchor、invalidate 的 scope 同一條原則：不信任 client。
+      const view = sanitizeViewState(msg.view);
+      // 內容真的變了就一律放行，只有重複的同一份才受節流：跟 focus 同樣的理由，
+      // 被節流吃掉的那一則不會有下一幀補上，跟隨者會永遠停在上一個位置。
+      const changed = JSON.stringify(view) !== JSON.stringify(client.view);
+      if (!changed && now - client.lastViewAt < MIN_VIEW_MS) return;
+      client.lastViewAt = now;
+      client.view = view; // 一律更新：新加入者的 hello 要帶得出既有位置
+      if (!changed) return;
+      broadcast(roomKey, theRoom, {
+        type: "view",
+        userId: client.userId,
+        connId: client.connId,
+        name: client.name,
+        view,
+      }, client);
+    } else if (msg.type === "present") {
+      /**
+       * 「帶大家看」。伺服器只做一件事：把「誰正在主講」廣播出去。
+       *
+       * **它不會把任何人的畫面切走。** 收到這則訊息的客戶端只會顯示一張
+       * 「Bruce 正在帶大家看 [加入]」的邀請卡；跟隨完全由接收端自己決定要不要開始。
+       * 強制跟隨是最快讓人關掉這個功能的方式，所以協定層就不給那個能力。
+       */
+      const active = msg.active === true;
+      if (client.presenting === active) return; // 重複宣告無意義，不轟炸整房
+      client.presenting = active;
+      broadcast(roomKey, theRoom, {
+        type: "present",
+        userId: client.userId,
+        connId: client.connId,
+        name: client.name,
+        color: client.color,
+        active,
+        // 邀請卡上要說得出「他現在在哪」，人才知道值不值得加入
+        view: client.view,
+      }, client);
     } else if (msg.type === "invalidate") {
       // scope／label 是 optional：沒帶就是舊行為（全域失效）。新舊客戶端可混跑。
       // 一律逐欄驗證後才轉發——不信任 client，與 cursor 同一條原則。
@@ -518,6 +606,21 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   ws.on("close", () => {
     theRoom.delete(client);
     totalConnections -= 1;
+    // 主講者斷線：明確廣播「主講結束」，讓跟隨者收到 presenter_gone 而不是
+    // 卡在一個永遠不會再更新的位置上。**絕不讓跟隨者自動改跟另一個人**——
+    // 原本跟 Bruce，Bruce 掉線就說 Bruce 掉線，那是使用者唯一預期的行為。
+    if (client.presenting) {
+      client.presenting = false;
+      broadcast(roomKey, theRoom, {
+        type: "present",
+        userId: client.userId,
+        connId: client.connId,
+        name: client.name,
+        color: client.color,
+        active: false,
+        view: null,
+      });
+    }
     // 尚未補送的 invalidate：連線都沒了，那則刷新沒有意義。
     // 定時器內雖已擋 readyState !== OPEN，但那是最後一道防線——留著它會讓已斷線的 Client
     // 物件被 timer 多活 400ms，而斷線風暴時這種殘留會一路累積。
@@ -548,9 +651,13 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   ws.send(
     JSON.stringify({
       type: "hello",
-      self: { userId: client.userId, name: client.name, color: client.color },
+      self: { userId: client.userId, name: client.name, color: client.color, connId: client.connId },
       users: dedupeUsers(roomKey, theRoom),
       focus: focusList(roomKey, theRoom),
+      // 中途加入的人也要看得到「誰正在主講」與「大家在看哪」——
+      // 只靠事件的話，晚一步進房的人永遠收不到已經發生過的那一則 present。
+      views: localViews(theRoom, client),
+      presenters: localPresenters(theRoom, client),
     }),
   );
   broadcastPresence(roomKey, theRoom, client);
