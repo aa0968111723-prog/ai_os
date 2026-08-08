@@ -27,6 +27,7 @@ import { EmptyState } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { buildCrashReport, isChunkLoadError, type CrashReport } from "./lib/crashReport";
 import "./posthog";
+import "./sentry";
 
 // 先安裝桌面橋接，讓第一個 React render 就能辨識「Aios 桌面版」與已安裝剪輯軟體。
 bootstrapTauriDesktop();
