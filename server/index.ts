@@ -61,6 +61,7 @@ import { startAssistantWatchRunner } from "./services/assistantWatch";
 import { startGroupCampaignRunner, recoverInterruptedCampaigns, sweepStaleCampaigns } from "./services/groupCampaignRunner";
 import { startExportRunner } from "./services/exportRunner";
 import { startAssetMaintenanceRunner } from "./services/assetMaintenanceRunner";
+import { startIntelligenceRunner } from "./services/intelligenceRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -640,6 +641,19 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
           console.warn("[upload] asset_revisions insert skipped:", revErr);
         }
       }
+      // Intelligence Library is a sidecar: upload success never depends on AI.
+      // Registration is idempotent and the durable worker performs each stage independently.
+      void import("./services/intelligenceLibrary")
+        .then(({ registerIntelligenceResource }) => registerIntelligenceResource({
+          resourceKind: "asset",
+          resourceId: updated.id,
+          groupId: updated.groupId,
+          projectId: updated.projectId,
+          sourceType: "upload",
+          sourceMetadata: { filename: originalName, mime, sizeBytes },
+          createdBy: auth.user.id,
+        }))
+        .catch((error) => console.warn("[upload] intelligence enqueue skipped:", error instanceof Error ? error.message : error));
       res.json({ ok: true, asset: updated });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");
@@ -2404,6 +2418,7 @@ const httpServer = app.listen(port, () => {
           );
           startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
           startAssetMaintenanceRunner(); // 素材維護：落地強化／sha256／縮圖（有佇列才忙；BG_ASSET_MAINT=0 可關）
+          startIntelligenceRunner(); // Intelligence Library：分類、embedding、去重與關聯，失敗 stage 可獨立重試
           scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
           startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
           const { startGoogleCalendarSweep } = await import("./services/googleCalendar");

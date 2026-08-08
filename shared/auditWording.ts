@@ -230,6 +230,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "knowledge.importUrl": "從網址或 Notion 頁面加入專案資料",
   "dataHub.bindResource": "把既有資料提供給專案",
   "dataHub.unbindResource": "不再把資料提供給專案（資料本身保留）",
+  "intelligence.resolveReview": "確認或修正 AI 資料判斷",
+  "intelligence.reprocess": "重新分析智慧資料",
+  "intelligence.createPerson": "建立人物知識實體",
+  "intelligence.resolveFaceCluster": "確認或拆分人物群組",
+  "intelligence.mergePeople": "合併人物知識實體",
+  "intelligence.resolveDuplicate": "處理重複素材群組",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",
@@ -362,7 +368,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   // dataHub 歸在資料：資料中心是「資料庫／知識／素材」的統一視圖，
   // 查「這份資料何時被提供給哪個專案」時，會跟資料表的異動一起看
-  { key: "database", label: "資料中心與資料表", prefixes: ["databases", "dataHub"] },
+  { key: "database", label: "資料中心與資料表", prefixes: ["databases", "dataHub", "intelligence"] },
   { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations", "adobe", "userAiKeys"] },
   { key: "system", label: "系統與儲存", prefixes: ["system"] },
 ];

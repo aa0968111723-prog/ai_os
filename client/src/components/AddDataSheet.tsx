@@ -34,8 +34,12 @@ import {
 
 const METHOD_ICON: Record<AddDataMethodId, IconName> = {
   upload: "Upload",
+  "upload-folder": "FolderGit2",
+  "photo-library": "Image",
   paste: "FileText",
   "google-drive": "HardDrive",
+  "google-docs": "FileText",
+  "google-sheets": "Database",
   notion: "FileText",
   url: "Share2",
   tabular: "Database",
@@ -56,7 +60,7 @@ export type AddDataDestination =
 /** 網址參數：正在進行中的加入方式。外部授權往返時，靠它把使用者送回原本那一步。 */
 const ADD_PARAM = "add";
 
-const VALID_METHODS = new Set<string>(["upload", "paste", "google-drive", "notion", "url", "tabular", "api"]);
+const VALID_METHODS = new Set<string>(["upload", "upload-folder", "photo-library", "paste", "google-drive", "google-docs", "google-sheets", "notion", "url", "tabular", "api"]);
 
 /**
  * 目前網址上「正在進行中的加入方式」（`?add=google-drive`）。
@@ -299,7 +303,7 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
             )}
             {/* ★ 不變量 I1：這句話不可以被寫成「連接後 AI 就能讀你的雲端」 */}
             <Hint style={{ margin: 0 }}>
-              連接 Google 或 Notion 只是讓你可以去挑檔案；AI 只讀得到你真正選中並加入的內容。
+              ✨ 匯入後 AI 會自動理解、分類、建立標籤與語意索引；AI 只讀得到你真正選中並加入的內容。
             </Hint>
           </>
         ) : (
@@ -337,7 +341,7 @@ function MethodPanel({ method, projectId, onDone, onBack }: {
   onDone: () => void;
   onBack: () => void;
 }) {
-  if (method === "google-drive") {
+  if (method === "google-drive" || method === "google-docs" || method === "google-sheets") {
     return <GoogleDrivePicker projectId={projectId} onImported={onDone} onClose={onBack} />;
   }
   if (method === "notion") {
@@ -345,7 +349,9 @@ function MethodPanel({ method, projectId, onDone, onBack }: {
   }
   if (method === "paste") return <PastePanel projectId={projectId} onDone={onDone} />;
   if (method === "url") return <UrlPanel projectId={projectId} onDone={onDone} />;
-  if (method === "upload") return <UploadPanel projectId={projectId} onDone={onDone} />;
+  if (method === "upload" || method === "upload-folder" || method === "photo-library") {
+    return <UploadPanel projectId={projectId} onDone={onDone} mode={method} />;
+  }
   return null;
 }
 
@@ -448,13 +454,29 @@ function UrlPanel({ projectId, onDone }: { projectId: string; onDone: () => void
   );
 }
 
-function UploadPanel({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+function UploadPanel({ projectId, onDone, mode }: {
+  projectId: string;
+  onDone: () => void;
+  mode: "upload" | "upload-folder" | "photo-library";
+}) {
   const utils = trpc.useUtils();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState("");
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    if (mode === "upload-folder") {
+      input.setAttribute("webkitdirectory", "");
+      input.setAttribute("directory", "");
+    } else {
+      input.removeAttribute("webkitdirectory");
+      input.removeAttribute("directory");
+    }
+  }, [mode]);
 
   /**
    * 走既有的 /api/upload（與素材庫同一條路徑，含 MIME 白名單、配額與落地）——
@@ -495,13 +517,15 @@ function UploadPanel({ projectId, onDone }: { projectId: string; onDone: () => v
 
   return (
     <div className="add-data-panel">
-      <label htmlFor="add-data-upload" style={{ fontWeight: 600 }}>選擇檔案</label>
+      <label htmlFor="add-data-upload" style={{ fontWeight: 600 }}>
+        {mode === "upload-folder" ? "選擇資料夾" : mode === "photo-library" ? "選擇相片或影片" : "選擇檔案"}
+      </label>
       <input
         id="add-data-upload"
         ref={inputRef}
         type="file"
         multiple
-        accept={UPLOAD_ACCEPT}
+        accept={mode === "photo-library" ? "image/*,video/*" : UPLOAD_ACCEPT}
         disabled={busy}
         onChange={(e) => { void doUpload(e.target.files); }}
       />
@@ -509,7 +533,7 @@ function UploadPanel({ projectId, onDone }: { projectId: string; onDone: () => v
       {ok && <Meta as="p" style={{ color: "var(--success-ink)" }}>{ok}</Meta>}
       {error && <p className="error" role="alert">{error}</p>}
       <Hint style={{ margin: 0 }}>
-        文件、圖片與影音都可以。圖影會進專案素材庫；要讓 AI 讀懂圖片內容，可以在素材庫請 AI 產生描述。
+        ✨ 上傳完成後會在背景自動辨識類型、分類、標籤、去重並建立語意索引；離開此畫面也會繼續。
       </Hint>
     </div>
   );

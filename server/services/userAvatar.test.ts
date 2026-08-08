@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 import {
   avatarRelPath,
   avatarAbsPath,
@@ -28,7 +29,7 @@ describe("userAvatar service", () => {
     it("resolves safe path inside avatars dir", () => {
       const rel = `avatars/${validUuid}.jpg`;
       const abs = avatarAbsPath(rel);
-      expect(abs).toContain(rel);
+      expect(abs).toContain(path.normalize(rel));
     });
 
     it("rejects path traversal", () => {

@@ -202,10 +202,10 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       <CursorOverlay cursors={collab.cursors} />
       <header className="page-intro database-intro">
         <div>
-          <p className="eyebrow">所有資料</p>
+          <p className="eyebrow">Aios Intelligence Library</p>
           <h1>資料中心</h1>
           <p className="page-lede">
-            所有專案、文件與團隊資料都在這裡。加進來之後，你決定哪個專案和 AI 可以使用。
+            AI 智慧資料中心會理解、整理並連結所有專案、人物、場景、文件與素材。
           </p>
         </div>
         {/*
@@ -230,6 +230,8 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         onAdded={() => {
           void utils.dataHub.list.invalidate();
           void utils.dataHub.summary.invalidate();
+          void utils.intelligence.summary.invalidate();
+          void utils.intelligence.processing.invalidate();
         }}
         // 結構化資料表／外部 API 走既有的建表與匯入流程（就在這一頁下方）
         onOpenTableFlow={() => { setCreating(true); setSelectedId(null); }}

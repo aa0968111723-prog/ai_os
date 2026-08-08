@@ -19,7 +19,6 @@ export function safeInternalPath(raw: string | null | undefined): string | null 
   if (!raw) return null;
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
   if (hasControlChar(raw)) return null;
-
   // Validate the decoded form as well. Browsers and intermediaries may decode a
   // redirect target after this guard, so `/%2f%2fevil.example` must be treated
   // exactly like `//evil.example`. Repeat a small, fixed number of times to

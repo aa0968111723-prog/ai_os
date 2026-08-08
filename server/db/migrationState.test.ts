@@ -318,7 +318,8 @@ describe("legacy migration adoption bridge", () => {
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4);
+    // 0057 Intelligence Library adds 25 tables plus 55 guarded indexes only.
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

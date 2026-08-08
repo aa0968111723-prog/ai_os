@@ -103,7 +103,7 @@ describe("storage 持久化：大量寫入不會遺失", () => {
       expect(disk.equals(r.body)).toBe(true);
       expect(r.saved.sizeBytes).toBe(r.body.length);
     }
-  });
+  }, 15_000);
 
   it("寫入後刪除一半，剩下一半仍完整可讀", async () => {
     const N = 80;

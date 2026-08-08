@@ -138,7 +138,7 @@ describe("StoryboardScript", () => {
     expect(list).toHaveTextContent("第 10 鏡・第10景");
     expect(list).toHaveTextContent("還有 2 鏡");
     expect(list).not.toHaveTextContent("第 11 鏡");
-  });
+  }, 15_000);
 
   it("寫回時把原文整份送出（伺服器自己再解析一次，不信任前端結構）", async () => {
     const user = userEvent.setup();

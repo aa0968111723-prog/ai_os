@@ -2,7 +2,8 @@
  * 資料中心（Unified Data Hub）Facade。
  *
  * ★ 這是 **facade，不是新的資料真相表**（見 docs/data-hub-current-state-2026-08.md §14）。
- *   - 沒有新表、沒有 migration：全部 SELECT 既有的 data_tables / data_files / knowledge / assets。
+ *   - 清單真相仍 SELECT 既有的 data_tables / data_files / knowledge / assets；AI 欄位來自
+ *     可移除、可漸進補齊的 intelligence sidecar，不改寫舊資料與舊 URL。
  *   - 沒有第二套 ACL：資料表一律走 services/databaseAcl，知識與素材一律走「組隔離」
  *     （auth.groups 的 groupId 集合，與 trpc.requireGroup 同一組真相）。
  *   - 沒有第二套匯入邏輯：這裡完全不寫入，只讀。
@@ -414,6 +415,36 @@ export async function listDataHubResources(auth: AuthState, query: DataHubQuery 
     : { resources: [], truncated: false };
 
   const resources = [...tSlice.resources, ...docSlice.resources, ...kSlice.resources, ...aSlice.resources];
+
+  // Intelligence is an additive sidecar. Batch-load it after every domain has
+  // already applied its original ACL; never query intelligence first and then
+  // try to reconstruct permissions from its metadata.
+  const resourceIds = [...new Set(resources.map((resource) => resource.rawId))];
+  const intelligenceTable = schema.assetIntelligence as
+    | typeof schema.assetIntelligence
+    | undefined;
+  if (resourceIds.length > 0 && intelligenceTable) {
+    const intelligenceRows = await db.select().from(intelligenceTable)
+      .where(inArray(intelligenceTable.resourceId, resourceIds));
+    const allowed = new Set(resources.map((resource) => `${resource.kind}:${resource.rawId}`));
+    const intelligenceByResource = new Map(
+      intelligenceRows
+        .filter((row) => allowed.has(`${row.resourceKind}:${row.resourceId}`))
+        .map((row) => [`${row.resourceKind}:${row.resourceId}`, row]),
+    );
+    for (const resource of resources) {
+      const intelligence = intelligenceByResource.get(`${resource.kind}:${resource.rawId}`);
+      resource.intelligence = intelligence ? {
+        id: intelligence.id,
+        canonicalType: intelligence.canonicalType,
+        category: intelligence.category,
+        summary: intelligence.summary,
+        tags: intelligence.dynamicTags,
+        confidence: intelligence.categoryConfidence,
+        analysisStatus: intelligence.analysisStatus,
+      } : null;
+    }
+  }
 
   // 專案標題一次批次補齊（§27：絕不逐 resource 查專案）
   const titles = await loadProjectTitles(resources.map((r) => r.projectId ?? "").filter(Boolean));

@@ -291,4 +291,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0056_assistant_watches": [
     "3819842169d7e7d9f8ccf83a943faa929ed97b867d6bde76b2d6d8f58d990b72",
   ],
+  "0057_intelligence_library": [
+    "33466ca1f91687a868073814a1a94378ab72fdeafd0437895b49e22e6242e866",
+  ],
 };

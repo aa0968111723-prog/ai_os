@@ -60,6 +60,7 @@ import {
 import { callTool } from "../services/mcp";
 import { resolveModel } from "../services/modelResolve";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
+import { retrieveIntelligenceContext } from "../services/intelligenceLibrary";
 import {
   createAiTraceSession,
   recordAiTraceEventSafely,
@@ -866,7 +867,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
-      const [scenes, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole] = await Promise.all([
+      const [scenes, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, libraryRetrieval] = await Promise.all([
         db
           .select()
           .from(schema.scenes)
@@ -901,6 +902,12 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           pageContext: input.pageContext,
         }),
         getProjectRole(input.auth, project),
+        retrieveIntelligenceContext(input.auth, {
+          q: input.message,
+          projectId: project.id,
+          limit: 10,
+          budgetChars: 10_000,
+        }).catch(() => ({ context: "", sources: [], retrievalRunId: null, retrievalDebug: {} })),
       ]);
       emit("thinking", `已平行查詢 ${resourceResolution.results.length} 個資料來源`);
       for (const source of resourceResolution.results) {
@@ -958,6 +965,15 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
             durationMs: source.durationMs,
             attempts: source.attempts,
             semanticApplied: source.semanticApplied,
+          })),
+          ...libraryRetrieval.sources.map((source) => ({
+            id: `intelligence:${source.intelligenceId}:${source.chunkId ?? "summary"}`,
+            title: source.title,
+            kind: source.resourceKind,
+            status: "full" as const,
+            chars: source.text.length,
+            includedChars: source.text.length,
+            retrieval: "live" as const,
           })),
         ],
         truncated: knowledgeMeta.truncated,
@@ -1140,6 +1156,7 @@ ${context}
 ${intelligence.text}
 </專案運作情報>
 ${pageContextBlock ? `${pageContextBlock}\n` : ""}${historyBlock}${resourceResolution.promptBlock}
+${libraryRetrieval.context ? `<intelligence_library>\n${libraryRetrieval.context}\n</intelligence_library>\n` : ""}
 <相關能力目錄>
 ${capabilityBlock}
 </相關能力目錄>
