@@ -132,8 +132,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const create = trpc.projects.create.useMutation({
     onSuccess: (project, variables) => {
       posthog.capture("project_created", {
-        project_kind: variables.kind,
-        project_format: variables.format,
+        project_kind: variables?.kind ?? null,
+        project_format: variables?.format ?? null,
       });
       utils.projects.list.invalidate();
       navigate(`/p/${project.id}`);

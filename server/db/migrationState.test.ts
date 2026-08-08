@@ -111,6 +111,19 @@ describe("migration manifest validation", () => {
     ).toBe('CREATE UNIQUE INDEX "reads_uq" ON "reads" ("user_id")');
   });
 
+  it("treats PostgreSQL's implicit btree as the explicit Drizzle drift form", () => {
+    const implicit = canonicalMigrationStatement(
+      'CREATE INDEX IF NOT EXISTS "items_group_idx" ON "items" ("group_id");',
+    );
+    const explicit = canonicalMigrationStatement(
+      'CREATE INDEX "items_group_idx" ON "items" USING btree ("group_id");',
+    );
+    expect(explicit).toBe(implicit);
+    expect(canonicalMigrationStatement(
+      'CREATE INDEX "items_search_idx" ON "items" USING gin ("tokens");',
+    )).toContain("USING gin");
+  });
+
   it("hashes SQL and rejects a non-monotonic journal", () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "aios-migrations-"));
     temporaryDirectories.push(directory);

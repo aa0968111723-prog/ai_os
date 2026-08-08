@@ -62,11 +62,29 @@ export function canonicalTypeOf(input: { mime?: string | null; name?: string | n
 }
 
 export interface IntelligenceAnalysisInput {
+  intelligenceId?: string;
+  groupId?: string;
   title: string;
   canonicalType: CanonicalAssetType;
   mime?: string | null;
   text?: string | null;
+  /** Short-lived signed URL used only by explicitly enabled media providers. */
+  mediaUrl?: string | null;
   metadata?: Record<string, unknown>;
+}
+
+export type IntelligenceExtractionStage =
+  | "ocr" | "transcription" | "image_analysis" | "video_analysis"
+  | "audio_analysis" | "face_detection" | "face_embedding";
+
+export interface IntelligenceExtraction {
+  text?: string;
+  segments?: IntelligenceAnalysis["segments"];
+  faces?: IntelligenceAnalysis["faces"];
+  metadata?: Record<string, unknown>;
+  /** A provider may finish classification during media understanding and reuse it later. */
+  analysis?: IntelligenceAnalysis;
+  modelVersion: string;
 }
 
 export interface IntelligenceAnalysis {
@@ -104,6 +122,7 @@ export interface IntelligenceAnalysis {
 export interface IntelligenceAnalysisProvider {
   readonly modelVersion: string;
   analyze(input: IntelligenceAnalysisInput): Promise<IntelligenceAnalysis>;
+  extract?(stage: IntelligenceExtractionStage, input: IntelligenceAnalysisInput): Promise<IntelligenceExtraction | null>;
 }
 
 interface CategoryRule {
