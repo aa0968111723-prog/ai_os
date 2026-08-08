@@ -150,7 +150,7 @@ export function SessionGate({
         ) : me.groups.length === 0 && !me.user.isSuperAdmin && !isAdmin ? (
           // 團隊管理員不擋（!isAdmin）：他本人就能去「團隊管理」建組，擋住反而是自相矛盾的死路。
           // /help 保持可達——等待被加入組的空檔正是最需要說明的時候
-          <UngroupedRoutes />
+          <UngroupedRoutes onRefresh={onRetry} />
         ) : (
           <Switch>
             <Route path="/login"><RedirectFromLogin /></Route>
