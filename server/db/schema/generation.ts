@@ -191,7 +191,9 @@ export const workflowRuns = pgTable("workflow_runs", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectStatusCreatedIdx: index("workflow_runs_project_status_created_idx").on(t.projectId, t.status, t.createdAt),
+}));
 
 /**
  * 交付包匯出 job（QA-005）：同步 ZIP 下載改為「建 job → 背景打包到 Volume → 輪詢進度 → 完成後下載」。
