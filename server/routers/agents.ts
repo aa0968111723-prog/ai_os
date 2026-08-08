@@ -9,6 +9,7 @@ import {
   discardAgentCore,
   stopAgentCore,
   listAgentRunsForProject,
+  executePlanAgentCore,
 } from "../services/agentCore";
 import {
   getProjectAgentInsights,
@@ -130,6 +131,75 @@ export const agentsRouter = router({
         traceSessionId: trace.id,
       });
       return { ...run, traceSessionId: trace.id };
+    }),
+
+  /** 導演代理：只規劃不落 run（純查詢）。輸入目標→回傳執行計畫草稿，讓使用者先看計畫再決定要不要一鍵執行。 */
+  planDraft: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      plannerMode: agentPlannerModeSchema.optional(),
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      driveFileIds: z.array(z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確")).max(5).optional(),
+      playbookId: z.string().max(80).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      const draft = await planAgentCore({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        goal: input.goal,
+        plannerMode: input.plannerMode,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        playbookId: input.playbookId,
+        persist: false,
+      });
+      return draft;
+    }),
+
+  /** 導演代理：一鍵執行（plan → 標記導演自動修正 → auto-approve → 開始逐步執行）。 */
+  executePlan: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      plannerMode: agentPlannerModeSchema.optional(),
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      driveFileIds: z.array(z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確")).max(5).optional(),
+      playbookId: z.string().max(80).optional(),
+      /** 導演模式：generate 卡關時自動改寫提示詞重試（有上限）；不傳＝不開啟自動修正 */
+      director: z.object({
+        maxRetries: z.number().int().min(0).max(5).optional(),
+        autoApprove: z.boolean().optional(),
+      }).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      const trace = await createAiTraceSession({
+        groupId: project.groupId,
+        projectId: project.id,
+        userId: ctx.auth.user.id,
+        mode: "agent_plan",
+        title: `導演執行：${input.goal.trim().slice(0, 80)}`,
+      });
+      const result = await executePlanAgentCore({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        goal: input.goal,
+        plannerMode: input.plannerMode,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        playbookId: input.playbookId,
+        traceSessionId: trace.id,
+        director: input.director,
+      });
+      return { ...result, traceSessionId: trace.id };
     }),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */

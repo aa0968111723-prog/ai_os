@@ -59,6 +59,24 @@ import {
 export type AgentRunRow = typeof schema.agentRuns.$inferSelect;
 
 /**
+ * 導演代理：只規劃、不落 run 的執行計畫草稿。
+ * 與 agent_runs 的差別是「沒有 run id、沒有狀態、沒有後續執行」——純預覽用
+ * （執行端走 executePlan 一鍵落 run＋自動核准）。規劃仍照常結算 LLM 點數（真實花費）。
+ */
+export interface AgentPlanDraft {
+  mode: "agent_plan_draft";
+  goal: string;
+  /** 與 agent_runs.summary 同語意的摘要文字（核准畫面顯示） */
+  summary: string;
+  planSummary: CompletePlanSummary;
+  steps: AgentStep[];
+  estPoints: number;
+  telemetry: AgentPlannerTelemetry;
+  pointsReserved: number;
+  pointsActual: number;
+}
+
+/**
  * MCP 入口無 router zod：非法 UUID 進 DB 會變 500。core 入口先擋成 BAD_REQUEST（中文）。
  * 與 agents router 的 z.string().uuid() 同精神；export 供單元測試。
  */
@@ -560,8 +578,8 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
   };
 }
 
-/** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
-export async function planAgentCore(input: {
+/** 導演代理的 planAgentCore 輸入（persist 只在 planDraft 用） */
+export interface PlanAgentCoreInput {
   auth: AuthState;
   projectId: string;
   goal: string;
@@ -573,7 +591,16 @@ export async function planAgentCore(input: {
   /** D5/M4：明確指定 playbook（如 playbook.creation.short.v1 創作短版）——與工作台入口同一語意 */
   playbookId?: string;
   traceSessionId?: string;
-}): Promise<AgentRunRow> {
+  /** false＝只回傳執行計畫草稿、不建立 agent_runs（導演代理 planDraft）；預設 true＝既有行為 */
+  persist?: boolean;
+}
+
+/** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
+/** 導演代理：persist:false → 只回傳執行計畫草稿、不建立 run（planDraft 純預覽） */
+export async function planAgentCore(input: PlanAgentCoreInput & { persist: false }): Promise<AgentPlanDraft>;
+/** 既有行為：建立 awaiting_approval 的 run（mutation 端） */
+export async function planAgentCore(input: PlanAgentCoreInput): Promise<AgentRunRow>;
+export async function planAgentCore(input: PlanAgentCoreInput): Promise<AgentRunRow | AgentPlanDraft> {
   const { auth } = input;
   // 沒指定就用高品質檔（DEFAULT_AGENT_PLANNER_MODE）：規劃品質決定後面執行要燒多少點，
   // 這一步省錢往往是最貴的省法。花費逐次進帳本，額度不足會在下面被擋。
@@ -621,6 +648,20 @@ export async function planAgentCore(input: {
       pointsReserved: 0, // 假模式不呼叫供應商，也就沒有規劃點數可收
       pointsActual: 0,
     };
+    // 導演代理 planDraft：只回傳執行計畫草稿，不建立 run
+    if (input.persist === false) {
+      return {
+        mode: "agent_plan_draft",
+        goal,
+        summary: plan.summary,
+        planSummary: plan.planSummary,
+        steps: plan.steps,
+        estPoints: plan.estPoints,
+        telemetry: plannerTelemetry,
+        pointsReserved: 0,
+        pointsActual: 0,
+      };
+    }
     const [run] = await db
       .insert(schema.agentRuns)
       .values({
@@ -883,6 +924,27 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     if (picked.labels.length) {
       plan.summary.contextUsed = [...new Set([...(plan.summary.contextUsed ?? []), ...picked.labels])].slice(0, 30);
     }
+    // 導演代理 planDraft：只回傳執行計畫草稿，不建立 run（規劃點數照常結算）
+    if (input.persist === false) {
+      return {
+        mode: "agent_plan_draft",
+        goal,
+        summary: plan.summaryText,
+        planSummary: plan.summary,
+        steps: plan.steps,
+        estPoints: plan.estPoints,
+        telemetry: {
+          ...generated.telemetry,
+          knowledgeIncludedChars,
+          knowledgeTotalChars,
+          knowledgeTruncated,
+          pointsReserved: reservedPoints,
+          pointsActual: actualPoints,
+        },
+        pointsReserved: reservedPoints,
+        pointsActual: actualPoints,
+      };
+    }
     const [run] = await db
       .insert(schema.agentRuns)
       .values({
@@ -1006,6 +1068,52 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
     data: { estPoints: run.estPoints },
   });
   return updated[0];
+}
+
+/** 導演代理的一鍵執行：plan →（選配）導演模式標記 generate 步驟自動改寫重試 → auto-approve 開始執行。 */
+export interface ExecutePlanDirectorConfig {
+  /** generate 卡關時最多自動改寫提示詞重試次數（0～5，預設 2）；不傳＝不開啟導演自動修正 */
+  maxRetries?: number;
+  /** 是否自動核准開始執行（預設 true）＝一鍵跑完整份計畫；false＝只建立計畫等使用者核准 */
+  autoApprove?: boolean;
+}
+
+export async function executePlanAgentCore(input: PlanAgentCoreInput & { director?: ExecutePlanDirectorConfig }): Promise<{
+  run: AgentRunRow;
+  steps: AgentStep[];
+  status: AgentRunRow["status"];
+  note: string;
+}> {
+  const run = await planAgentCore(input);
+  const director = input.director;
+  let steps = run.steps as AgentStep[];
+  if (director?.maxRetries && director.maxRetries > 0) {
+    // 導演模式：把「卡關自動改寫重試」額度標在每個 generate 步驟上（執行器 settleGeneration 遇 failed 時用）
+    steps = steps.map((step) =>
+      step.kind === "generate"
+        ? { ...step, directorMaxRetries: director.maxRetries, directorRetries: 0 }
+        : step,
+    );
+    await db
+      .update(schema.agentRuns)
+      .set({ steps, updatedAt: new Date() })
+      .where(eq(schema.agentRuns.id, run.id));
+  }
+  if (director?.autoApprove === false) {
+    return {
+      run,
+      steps,
+      status: run.status,
+      note: "已建立執行計畫，等待核准（未自動核准）",
+    };
+  }
+  const approved = await approveAgentCore({ auth: input.auth, runId: run.id });
+  return {
+    run: approved,
+    steps: approved.steps as AgentStep[],
+    status: approved.status,
+    note: "已建立執行計畫並自動核准，開始逐步執行",
+  };
 }
 
 /**

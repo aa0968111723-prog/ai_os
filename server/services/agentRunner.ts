@@ -54,6 +54,7 @@ import {
 import { recordAgentEventSafely } from "./agentEventCore";
 import { resolveModel } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";
+import { chatCompletion } from "./nvidia-nim";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -169,6 +170,10 @@ export interface AgentStep {
   /** 執行期：split_script 的失敗重試計數（防 LLM 回壞 JSON 時無限重打 NIM 燒免費額度） */
   retries?: number;
   detail?: string;
+  /** 導演模式（executePlan）：generate 卡關時允許自動改寫提示詞重試的次數上限；未設定＝不自動重試 */
+  directorMaxRetries?: number;
+  /** 導演模式：此步驟已自動改寫重試的次數 */
+  directorRetries?: number;
 }
 
 const TICK_MS = 4000;
@@ -1769,6 +1774,15 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
   }
   if (gen.status === "failed" || gen.status === "rejected") {
     const msg = gen.status === "rejected" ? "組長駁回了這筆超額生成" : gen.error ?? "未知錯誤";
+    // 導演模式（executePlan）：generate 卡關時自動改寫提示詞重試，而不是一步失敗就整份收攏 failed。
+    // 組長駁回（rejected）是人為裁決、不是技術卡關，絕不自動繞過。
+    if (gen.status === "failed" && run.status === "running") {
+      const retried = await directorAutoRevise(run, steps, idx, step, msg);
+      if (retried) {
+        await saveRun(run.id, { steps });
+        return;
+      }
+    }
     step.status = "failed";
     step.detail = msg;
     auditAgentStep(run, step, idx, false, msg);
@@ -1811,4 +1825,78 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
     return;
   }
   // queued/running：這輪不動，下輪再看
+}
+
+/**
+ * 導演模式（executePlan）：generate 步驟卡關時，自動改寫提示詞重試（有上限）。
+ * 只處理技術性失敗（gen.status === "failed"）；組長駁回（rejected）是人為裁決，一律不自動繞過。
+ * 回傳 true＝已改寫並把步驟重置回 pending（呼叫端 saveRun 後同一 tick 的 DAG 會重送）；
+ * false＝不滿足條件或改寫失敗（呼叫端照原路收攏 failed）。
+ */
+async function directorAutoRevise(
+  run: RunRow,
+  steps: AgentStep[],
+  idx: number,
+  step: AgentStep,
+  errorMsg: string,
+): Promise<boolean> {
+  if (step.kind !== "generate") return false;
+  if (!step.directorMaxRetries || step.directorMaxRetries <= 0) return false;
+  const used = step.directorRetries ?? 0;
+  if (used >= step.directorMaxRetries) return false;
+  const originalPrompt = step.prompt ?? "";
+  if (!originalPrompt.trim()) return false;
+
+  let revised: string | null = null;
+  try {
+    const response = await chatCompletion({
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是創作者導演 AI 代理的提示詞修復器。使用者原本的生成提示詞執行失敗，你要基於錯誤原因改寫一份能避開該失敗的提示詞。只輸出一個 JSON 物件 {\"prompt\":\"改寫後的完整提示詞\"}，不要輸出說明、markdown 或 chain-of-thought。保持原本的創意意圖與風格，只修正導致失敗的部分。",
+        },
+        {
+          role: "user",
+          content: `<原始提示詞>\n${originalPrompt.slice(0, 6000)}\n</原始提示詞>\n\n<失敗原因>\n${errorMsg.slice(0, 2000)}\n</失敗原因>\n\n請輸出改寫後的提示詞 JSON。`,
+        },
+      ],
+      temperature: 0.4,
+      maxTokens: 1_500,
+      timeoutMs: 60_000,
+    });
+    const text = response.choices[0]?.message?.content ?? "";
+    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "null") as { prompt?: unknown } | null;
+    if (parsed && typeof parsed.prompt === "string" && parsed.prompt.trim()) {
+      revised = parsed.prompt.trim();
+    }
+  } catch (err) {
+    console.warn("[agent] 導演模式自動改寫提示詞失敗，按原路收攏：", err instanceof Error ? err.message : err);
+    return false;
+  }
+  if (!revised) return false;
+
+  // 改寫成功：換提示詞、加計一次重試、重置步驟回 pending、清掉 generationId 讓 DAG 重送。
+  // targetSceneId 已解析則保留（重送仍寫同一格，避免排序變更打到別鏡）。
+  step.prompt = revised;
+  step.directorRetries = used + 1;
+  step.status = "pending";
+  step.detail = `卡關自動修正（第 ${used + 1}/${step.directorMaxRetries} 次）：${errorMsg.slice(0, 120)}`;
+  step.generationId = undefined;
+  delete step.generationId;
+
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    stepId: stableStepId(step, idx),
+    stepIndex: idx,
+    eventKey: `step:${stableStepId(step, idx)}:auto_retry:${used + 1}`,
+    eventType: "observation",
+    actorType: "ai",
+    actorId: run.userId,
+    summary: `導演模式自動改寫提示詞重試（第 ${used + 1}/${step.directorMaxRetries} 次）`,
+    data: { kind: step.kind, error: errorMsg.slice(0, 200), promptRevised: true },
+  });
+  return true;
 }
