@@ -236,6 +236,7 @@ Automated evidence:
 - TypeScript `tsc --noEmit`: passed.
 - Production build: passed (Vite 618 modules plus bundled server).
 - Import-boundary, UI-primitive and hooks-after-return checks: passed.
+- GitHub CI after the MCP catalog correction: both build, test, migration, container, lint-gates, and E2E jobs passed. The two E2E jobs completed in 6m41s and 6m45s with all 77 registered MCP tools represented in the exact catalog assertion.
 - Agent planner canary could not run because this workspace has no `FAL_KEY`; no provider result is claimed.
 
 Latency evidence:
@@ -248,13 +249,13 @@ Latency evidence:
 Real UI acceptance result:
 
 - The production build was served locally and opened in Chrome. The landing page rendered its product loop, safety/cost language, navigation, and accessible headings/links; `/login` rendered labeled Email/Password fields, password visibility control, sign-in button, invite notice and install controls.
-- The prior Vercel preview URL was not reachable from the in-app browser, and Chrome had no existing authenticated Aios tab/session.
-- The ten authenticated Assistant scenarios were **not executed**: this workspace has no `DATABASE_URL`, `FAL_KEY`, or test account/session. Therefore this audit does not claim real authenticated UI acceptance or a live provider call.
+- The PR preview deployed successfully, but it redirects to Vercel team authentication. The available production project route rendered the Aios offline screen. Aios credentials supplied for acceptance were not sent to Vercel, persisted, or committed.
+- The ten authenticated Assistant scenarios were **not executed** because neither reachable environment exposed an Aios login/project session. Therefore this audit does not claim real authenticated UI acceptance or a live provider call.
 - Focused component/UI automation covers project switching, SSE behavior, direct action cards, source disclosure, and Assistant interaction, but it is not counted as the requested authenticated real-world run.
 
 Still incomplete / deliberately not overstated:
 
-- Authenticated real UI acceptance, deployed p50/p95 latency comparison, and a live resource-timeout drill still require a database-backed test environment and test identity.
+- Authenticated real UI acceptance, deployed p50/p95 latency comparison, and a live resource-timeout drill still require a reachable database-backed Aios environment; the supplied Aios identity is available for that run once the preview protection or production outage is resolved.
 - No vector/embedding infrastructure was introduced. The semantic adapter contract exists, but production evidence remains keyword + metadata until a real adapter is configured.
 - Global/team Assistant keeps its narrower hand-authored action schema because those actions are not the same as the Project MCP catalog; the Project Assistant is the migrated registry-backed surface.
 - Existing unrelated red tests remain visible above; this change does not silently rewrite those product areas or their tests.
