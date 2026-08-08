@@ -7185,6 +7185,30 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   margin-top: 8px;
 }
 
+/* ── WATCH「需要你注意」：零狀態的主動摘要（全部健康時整塊不渲染） ── */
+.ai-copilot-watch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.8));
+  border: 1px solid var(--ai-glass-edge, rgba(255, 255, 255, 0.75));
+}
+.ai-copilot-watch__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.ai-copilot-watch__row {
+  font-size: 13px;
+  color: var(--fg-secondary);
+}
+
 /* feed 也不再是一個框：它先前的 card2 底＋邊框，是「卡中卡」——去掉白底之後
    若留著，畫面上就會出現一塊唯一還是實色的方塊，比原本更突兀。
    padding 只留橫向 2px 讓氣泡陰影不貼邊；捲動與限高照舊。 */
