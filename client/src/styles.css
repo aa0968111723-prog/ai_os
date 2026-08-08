@@ -5700,7 +5700,9 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 內容與浮動元素讓出分頁列高度：見本區塊開頭的 --chrome-bottom: 100px。
      這裡原本另外寫死 padding-bottom: calc(88px + safe-bottom)，特異性 (0,2,0) 高於
      .app 的 (0,1,0)，把 ≤560 想升到 140px 的留白整個蓋掉——契約統一走變數後不可復活。 */
-  /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列；鍵盤彈出時再往上讓 */
+  /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列；鍵盤彈出時再往上讓。
+     注意：實際生效的是 styles.mobile-fab-01.css 的 FAB 軌道（載入在後且帶 !important），
+     這條只是同值的後備。要調整避讓高度請改那邊的 --fab-rail-base，改這裡不會有反應。 */
   .fb-fab-root { bottom: calc(72px + var(--safe-bottom) + var(--kb-inset, 0px)); }
 
   /* 更多面板：貼底 bottom sheet（scrim 蓋住分頁列，面板含拖曳把手與 safe-area 內距） */
