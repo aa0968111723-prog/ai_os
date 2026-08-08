@@ -39,6 +39,7 @@ describe("runnerMetrics", () => {
       "export",
       "groupCampaign",
       "assetMaintenance",
+      "intelligence",
     ]);
     expect(list.find((r) => r.name === "agent")?.started).toBe(true);
     expect(list.find((r) => r.name === "generation")?.started).toBe(false);

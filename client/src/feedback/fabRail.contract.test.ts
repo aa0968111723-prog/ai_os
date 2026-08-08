@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
  * jsdom 不做版面計算（量不出重疊），照本專案慣例改為讀原始碼斷言版面契約。
  */
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
-const read = (rel: string) => readFileSync(path.join(repoRoot, rel), "utf8");
+const read = (rel: string) => readFileSync(path.join(repoRoot, rel), "utf8").replace(/\r\n/g, "\n");
 
 /** .mobile-nav 的內容高（見 styles.css ≤820px：padding 6 + min-height 50 + padding-bottom 8） */
 const NAV_HEIGHT = 64;

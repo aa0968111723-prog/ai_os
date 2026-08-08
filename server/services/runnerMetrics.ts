@@ -11,7 +11,8 @@ export type RunnerName =
   | "workflow"
   | "export"
   | "groupCampaign"
-  | "assetMaintenance";
+  | "assetMaintenance"
+  | "intelligence";
 
 export interface RunnerSnapshot {
   name: RunnerName;
@@ -76,6 +77,7 @@ export function listRunnerSnapshots(): RunnerSnapshot[] {
     "export",
     "groupCampaign",
     "assetMaintenance",
+    "intelligence",
   ];
   return order.map((name) => getRunnerSnapshot(name));
 }

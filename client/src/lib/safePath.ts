@@ -19,5 +19,12 @@ export function safeInternalPath(raw: string | null | undefined): string | null 
   if (!raw) return null;
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
   if (hasControlChar(raw)) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  if (decoded.startsWith("//") || decoded.includes("\\") || hasControlChar(decoded)) return null;
   return raw;
 }

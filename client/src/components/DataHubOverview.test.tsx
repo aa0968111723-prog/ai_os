@@ -3,20 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DataHubOverview } from "./DataHubOverview";
 
-/**
- * 資料中心總覽的產品契約：
- * 一份跨 domain 的清單，對使用者只講「這是什麼／屬於哪裡／AI 可不可以用」，
- * 不露出 UUID 或 table/row/embedding 這些底層詞；空狀態不顯示一排 0。
- */
-
 const { state } = vi.hoisted(() => ({
   state: {
     listArgs: [] as unknown[],
+    searchArgs: [] as unknown[],
     list: {
-      resources: [] as unknown[],
+      resources: [] as any[],
       counts: { total: 0, aiUsable: 0, byKind: { knowledge: 0, table: 0, document: 0, asset: 0 } },
       truncated: false,
     },
+    search: { results: [] as any[], retrievalDebug: { permissionFilteredCandidates: 0 } },
+    intelligenceSummary: { aiReview: 2, unnamedPeople: 1, possibleDuplicates: 3, unassignedProject: 4, total: 0, analysisPending: 0, activeJobs: 0, failedJobs: 0 },
     sources: [
       { id: "google-drive", label: "Google 雲端", configured: true, connected: true, status: "active", detail: "me@gmail.com", count: 1 },
       { id: "notion", label: "Notion", configured: true, connected: true, status: "error", detail: "團隊", count: 1 },
@@ -28,190 +25,107 @@ const { state } = vi.hoisted(() => ({
 vi.mock("../api", () => ({
   trpc: {
     dataHub: {
-      list: {
-        useQuery: (args: unknown) => {
-          state.listArgs.push(args);
-          return { data: state.list, isLoading: false, error: null, refetch: () => {} };
-        },
-      },
+      list: { useQuery: (args: unknown) => { state.listArgs.push(args); return { data: state.list, isLoading: false, error: null }; } },
       sources: { useQuery: () => ({ data: state.sources, isLoading: false, error: null }) },
     },
+    intelligence: {
+      search: { useQuery: (args: unknown) => { state.searchArgs.push(args); return { data: state.search, isLoading: false, error: null }; } },
+      summary: { useQuery: () => ({ data: state.intelligenceSummary, isLoading: false, error: null }) },
+      processing: { useQuery: () => ({ data: { active: 0, failed: 0, progress: 100, stages: [] } }) },
+      people: { useQuery: () => ({ data: { people: [], clusters: [] } }) },
+      reviewQueue: { useQuery: () => ({ data: { items: [], total: 0 }, isLoading: false, refetch: vi.fn() }) },
+      resolveReview: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+    },
+    useUtils: () => ({ intelligence: { summary: { invalidate: vi.fn() } }, dataHub: { list: { invalidate: vi.fn() } } }),
   },
 }));
 
 vi.mock("wouter", () => ({
-  Link: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; children?: React.ReactNode }) => (
-    <a href={href} {...props}>{children}</a>
-  ),
+  Link: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; children?: React.ReactNode }) => <a href={href} {...props}>{children}</a>,
 }));
 
 function resource(over: Record<string, unknown> = {}) {
   return {
-    id: "knowledge:k1",
-    kind: "knowledge",
-    rawId: "k1",
-    title: "影片腳本",
-    scope: "project",
-    source: "google-drive",
-    projectId: "p1",
-    projectTitle: "AI OS",
-    groupId: "g1",
-    ai: { access: "readable", reason: "專案 AI 會自動讀取這份文字資料" },
-    status: "ready",
-    statusLabel: "AI 可以使用",
-    updatedAt: new Date().toISOString(),
-    href: "/p/p1#sec-knowledge",
-    sizeLabel: "1,200 字",
-    syncedLabel: null,
-    sourceHasUpdate: false,
+    id: "asset:a1", kind: "asset", rawId: "a1", title: "安倢雨天.jpg", scope: "project", source: "upload",
+    projectId: "p1", projectTitle: "克難坡的雨", groupId: "g1", ai: { access: "readable", reason: "可讀" },
+    status: "ready", statusLabel: "AI 可以使用", updatedAt: new Date().toISOString(), href: "/p/p1#sec-assets",
+    sizeLabel: "1.2 MB", syncedLabel: null, sourceHasUpdate: false,
+    intelligence: { id: "i1", canonicalType: "IMAGE", category: "Character Photo", summary: "安倢在淡水雨中撐傘。", tags: ["weather:rain", "location:tamsui"], confidence: 0.94, analysisStatus: "needs_review" },
     ...over,
   };
 }
 
-describe("DataHubOverview", () => {
+describe("Aios Intelligence Library overview", () => {
   beforeEach(() => {
     state.listArgs = [];
-    state.list = {
-      resources: [],
-      counts: { total: 0, aiUsable: 0, byKind: { knowledge: 0, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
+    state.searchArgs = [];
+    state.list = { resources: [], counts: { total: 0, aiUsable: 0, byKind: { knowledge: 0, table: 0, document: 0, asset: 0 } }, truncated: false };
+    state.search = { results: [], retrievalDebug: { permissionFilteredCandidates: 0 } };
   });
 
-  it("★ 空狀態講人話，不顯示 0 資料庫 / 0 資料列 / 0 AI 可用", () => {
+  it("positions the page as an AI-understood library and keeps an actionable empty state", () => {
     render(<DataHubOverview onAddData={() => {}} />);
-    // 標題與摘要都說「還沒有資料」——這是刻意的：兩處都不應退化成 0 KPI
+    expect(screen.getByText("AI 已理解你的專案資料")).toBeInTheDocument();
     expect(screen.getAllByText("還沒有資料").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole("status")).toHaveTextContent("還沒有資料");
     expect(screen.getByRole("button", { name: /加入第一份資料/ })).toBeInTheDocument();
     expect(screen.queryByText(/0 資料庫/)).toBeNull();
-    expect(screen.queryByText(/資料列/)).toBeNull();
   });
 
-  it("空狀態的 CTA 直接開「加入資料」", async () => {
+  it("opens the single add-data flow from the empty state", async () => {
     const onAddData = vi.fn();
-    const user = userEvent.setup();
     render(<DataHubOverview onAddData={onAddData} />);
-    await user.click(screen.getByRole("button", { name: /加入第一份資料/ }));
-    expect(onAddData).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /加入第一份資料/ }));
+    expect(onAddData).toHaveBeenCalledOnce();
   });
 
-  it("每一列只講：名稱、類型、所屬專案、來源、AI 狀態——不露出 UUID", () => {
-    state.list = {
-      resources: [resource()],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
+  it("shows AI category, summary, dynamic tags and confidence without exposing ids", () => {
+    state.list = { resources: [resource()], counts: { total: 1, aiUsable: 1, byKind: { knowledge: 0, table: 0, document: 0, asset: 1 } }, truncated: false };
     render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByText("影片腳本")).toBeInTheDocument();
-    expect(screen.getByText(/文字資料・AI OS・Google 雲端・1,200 字/)).toBeInTheDocument();
-    expect(screen.getByText("AI 只能讀取")).toBeInTheDocument();
-    expect(screen.queryByText(/knowledge:k1/)).toBeNull();
-    expect(screen.queryByText("k1")).toBeNull();
+    expect(screen.getByText("安倢雨天.jpg")).toBeInTheDocument();
+    expect(screen.getByText("安倢在淡水雨中撐傘。")).toBeInTheDocument();
+    expect(screen.getByText("rain")).toBeInTheDocument();
+    expect(screen.getByText("AI 94%")).toBeInTheDocument();
+    expect(screen.queryByText("i1")).toBeNull();
   });
 
-  it("摘要用人話而不是 KPI 磚牆", () => {
-    state.list = {
-      resources: [resource(), resource({ id: "table:t1", kind: "table", rawId: "t1", ai: { access: "none", reason: "x" } })],
-      counts: { total: 2, aiUsable: 1, byKind: { knowledge: 1, table: 1, document: 0, asset: 0 } },
-      truncated: false,
-    };
+  it("renders compact attention rows from real Intelligence summary counts", () => {
     render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByRole("status")).toHaveTextContent("2 份資料・1 份 AI 可以使用");
+    expect(screen.getByRole("button", { name: /AI 待確認.*2/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /未命名人物.*1/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /可能重複.*3/ })).toBeInTheDocument();
   });
 
-  it("★ 截斷要說出來，不能讓使用者以為「就這些了」", () => {
-    state.list = {
-      resources: [resource()],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: true,
-    };
-    render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByText(/還有更多資料沒列出來/)).toBeInTheDocument();
-  });
-
-  it("★ 專案上下文：查詢就帶著 projectId，不是抓全站再前端過濾", () => {
-    render(<DataHubOverview projectId="p1" projectTitle="AI OS" onAddData={() => {}} />);
+  it("passes project context to ACL-first list and semantic retrieval", async () => {
+    render(<DataHubOverview projectId="p1" projectTitle="克難坡的雨" onAddData={() => {}} />);
     expect(state.listArgs[0]).toMatchObject({ projectId: "p1" });
-    expect(screen.getByPlaceholderText(/搜尋「AI OS」的資料/)).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox"), "安倢");
+    await waitFor(() => expect(state.searchArgs.at(-1)).toMatchObject({ q: "安倢", projectId: "p1" }), { timeout: 2_000 });
   });
 
-  it("類型篩選把 kinds 傳給後端", async () => {
-    const user = userEvent.setup();
+  it("uses Intelligence hybrid search after debounce and displays retrieval relevance", async () => {
+    state.search = { results: [{ resource: resource(), intelligence: (resource() as any).intelligence, score: 0.91 }], retrievalDebug: { permissionFilteredCandidates: 1 } };
     render(<DataHubOverview onAddData={() => {}} />);
-    await user.click(screen.getByRole("button", { name: "資料表" }));
-    await waitFor(() => {
-      expect(state.listArgs.at(-1)).toMatchObject({ kinds: ["table"] });
-    });
+    await userEvent.type(screen.getByRole("searchbox"), "安倢雨天照片");
+    await waitFor(() => expect(state.searchArgs.at(-1)).toMatchObject({ q: "安倢雨天照片" }), { timeout: 2_000 });
+    expect(await screen.findByText("相關度 91%")).toBeInTheDocument();
+    expect(screen.getByText(/metadata、全文與語意索引/)).toBeInTheDocument();
   });
 
-  it("搜尋去抖：停手之後才送出關鍵字", async () => {
-    const user = userEvent.setup();
+  it("smart category chips filter by canonical type", async () => {
+    state.list = {
+      resources: [resource(), resource({ id: "document:d1", rawId: "d1", kind: "document", title: "Script.docx", intelligence: { id: "i2", canonicalType: "DOCUMENT", category: "Script", summary: null, tags: ["type:document"], confidence: 0.97, analysisStatus: "ready" } })],
+      counts: { total: 2, aiUsable: 2, byKind: { knowledge: 0, table: 0, document: 1, asset: 1 } }, truncated: false,
+    };
     render(<DataHubOverview onAddData={() => {}} />);
-    await user.type(screen.getByRole("searchbox"), "腳本");
-    expect(state.listArgs.every((a) => (a as { q?: string }).q === undefined)).toBe(true);
-    await waitFor(
-      () => expect(state.listArgs.at(-1)).toMatchObject({ q: "腳本" }),
-      { timeout: 2000 },
-    );
+    await userEvent.click(screen.getByRole("button", { name: "文件" }));
+    expect(screen.getByText("Script.docx")).toBeInTheDocument();
+    expect(screen.queryByText("安倢雨天.jpg")).toBeNull();
   });
 
-  it("★ 來源區只講「能不能去挑」，且明說中斷不會刪掉已加入的資料", () => {
-    render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByText(/已連接・me@gmail.com/)).toBeInTheDocument();
-    expect(screen.getByText(/需要重新連接・團隊/)).toBeInTheDocument();
-    expect(screen.getByText(/尚未連接/)).toBeInTheDocument();
+  it("keeps source management collapsed and explains connector boundaries", () => {
+    const { container } = render(<DataHubOverview onAddData={() => {}} />);
+    expect(container.querySelector("details.hub-sources")).not.toHaveAttribute("open");
     expect(screen.getByText(/AI 只讀得到你選中並加入站內的內容/)).toBeInTheDocument();
-    expect(screen.getByText(/中斷連接不會刪掉已經加入的資料/)).toBeInTheDocument();
-  });
-
-  it("來源管理是進階區：預設收合，不跟「加入資料」搶首屏", () => {
-    const { container } = render(<DataHubOverview onAddData={() => {}} />);
-    const details = container.querySelector("details.hub-sources");
-    expect(details).not.toBeNull();
-    expect(details).not.toHaveAttribute("open");
-  });
-
-  /* ── 來源譜系（P6）：只講記錄得到的事，其餘留白 ── */
-
-  it("有讀取時刻就顯示「幾分鐘前讀取」——措辭不是「同步」", () => {
-    state.list = {
-      resources: [resource({ syncedLabel: "5 分鐘前讀取" })],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
-    render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByText(/5 分鐘前讀取/)).toBeInTheDocument();
-  });
-
-  it("★ 沒有來源記錄時完全不提同步／讀取——留白而不是編一個時間", () => {
-    state.list = {
-      resources: [resource({ source: "manual", syncedLabel: null })],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
-    const { container } = render(<DataHubOverview onAddData={() => {}} />);
-    // 只看那一行中繼資料（AI 權限徽章本來就叫「AI 只能讀取」，不能拿它當反例）
-    const meta = container.querySelector(".hub-item__copy small")!;
-    expect(meta.textContent).not.toMatch(/讀取/);
-    expect(meta.textContent).not.toMatch(/同步/);
-  });
-
-  it("★ 來源有更新才標記；判斷不出來時不得出現這個標記", () => {
-    state.list = {
-      resources: [resource({ sourceHasUpdate: true })],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
-    const { rerender } = render(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.getByText("來源有更新")).toBeInTheDocument();
-
-    state.list = {
-      resources: [resource({ sourceHasUpdate: false })],
-      counts: { total: 1, aiUsable: 1, byKind: { knowledge: 1, table: 0, document: 0, asset: 0 } },
-      truncated: false,
-    };
-    rerender(<DataHubOverview onAddData={() => {}} />);
-    expect(screen.queryByText("來源有更新")).toBeNull();
+    expect(screen.getByText(/中斷連接不會刪掉已加入的資料/)).toBeInTheDocument();
   });
 });

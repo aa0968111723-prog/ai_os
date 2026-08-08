@@ -187,6 +187,16 @@ export interface DataHubResource {
    * 判斷不出來一律 false，「不知道」絕不可以顯示成「有更新」。
    */
   sourceHasUpdate: boolean;
+  /** Intelligence Library sidecar. Missing means the background enrolment has not reached this legacy row yet. */
+  intelligence?: {
+    id: string;
+    canonicalType: string;
+    category: string | null;
+    summary: string | null;
+    tags: string[];
+    confidence: number | null;
+    analysisStatus: string;
+  } | null;
 }
 
 export function dataHubResourceId(kind: DataHubKind, rawId: string): string {
@@ -418,8 +428,12 @@ export function dataHubSummarySentence(counts: DataHubSummaryCounts): string {
  */
 export type AddDataMethodId =
   | "upload"
+  | "upload-folder"
+  | "photo-library"
   | "paste"
   | "google-drive"
+  | "google-docs"
+  | "google-sheets"
   | "notion"
   | "url"
   | "tabular"
@@ -445,6 +459,20 @@ export const ADD_DATA_METHODS: readonly AddDataMethod[] = [
     advanced: false,
   },
   {
+    id: "upload-folder",
+    label: "上傳資料夾",
+    hint: "保留整批檔案，一次交給 AI 整理",
+    requiresConnection: null,
+    advanced: false,
+  },
+  {
+    id: "photo-library",
+    label: "相簿",
+    hint: "從手機相簿選圖片或影片",
+    requiresConnection: null,
+    advanced: false,
+  },
+  {
     id: "paste",
     label: "貼上文字",
     hint: "腳本、筆記、會議紀錄",
@@ -455,6 +483,20 @@ export const ADD_DATA_METHODS: readonly AddDataMethod[] = [
     id: "google-drive",
     label: "Google 雲端",
     hint: "從你的雲端挑檔案加入",
+    requiresConnection: "google-drive",
+    advanced: false,
+  },
+  {
+    id: "google-docs",
+    label: "Google Docs",
+    hint: "挑選文件並解析成可搜尋文字",
+    requiresConnection: "google-drive",
+    advanced: false,
+  },
+  {
+    id: "google-sheets",
+    label: "Google Sheets",
+    hint: "挑選試算表加入專案資料",
     requiresConnection: "google-drive",
     advanced: false,
   },

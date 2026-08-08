@@ -14,8 +14,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dayLabel } from "./PlannerPage";
 
-const planner = readFileSync(resolve(process.cwd(), "client/src/pages/PlannerPage.tsx"), "utf8");
-const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
+const readSource = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+const planner = readSource(resolve(process.cwd(), "client/src/pages/PlannerPage.tsx"));
+const styles = readSource(resolve(process.cwd(), "client/src/styles.css"));
 const declarations = styles.replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("dayLabel", () => {

@@ -19,3 +19,4 @@ export * from "./storage";
 export * from "./aiTrace";
 export * from "./aiSiteTrace";
 export * from "./community";
+export * from "./intelligence";
