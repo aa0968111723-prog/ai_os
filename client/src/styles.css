@@ -2157,6 +2157,22 @@ html.collab-mirroring .gen-row { content-visibility: visible; }
   right: max(14px, var(--safe-right));
   bottom: calc(max(14px, var(--safe-bottom)) + var(--kb-inset, 0px));
   z-index: 45;
+  /* MOB-FAB-04（實機截圖：面板開著、浮鈕卻掉到畫面左下角）
+     根框只有 right 定位、寬度隨內容長——收合時＝一顆鈕（48px，貼右邊沒事），
+     一展開就撐成面板寬（選單 240px、表單 92vw）。而 <button> 是 inline-block，
+     在 block 排版下靠的是左緣，於是鈕整顆被拋到 92vw 的另一端：
+     鈕與它自己的面板分家，還壓在頁面內容上，看起來就是「回饋壞了」。
+     改 flex 直排＋靠右對齊：不論展開與否，鈕與面板永遠釘在同一條右軌上。 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  /* 根框沒有底色，卻仍照收點擊——展開時它是一塊 92vw × 面板高的隱形板子，
+     把底下的按鈕整片封起來（與 MOB-FAB-03「回饋系統直接擋住選項」同一種傷）。
+     事件只發給真的看得見的鈕與面板，其餘一律讓路。 */
+  pointer-events: none;
+}
+.fb-fab-root > * {
+  pointer-events: auto;
 }
 @media (max-width: 560px) {
   .fb-fab-root {

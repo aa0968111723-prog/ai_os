@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { listDataHubResources } from "./dataHub";
@@ -9,7 +9,6 @@ import {
   LOCAL_EMBEDDING_DIMENSIONS,
   LOCAL_EMBEDDING_MODEL,
   LOCAL_EMBEDDING_VERSION,
-  LocalIntelligenceProvider,
   canonicalTypeOf,
   chunkText,
   confidenceThresholds,
@@ -19,12 +18,16 @@ import {
   lexicalOverlap,
   routeConfidence,
   type IntelligenceAnalysisProvider,
+  type IntelligenceExtractionStage,
 } from "./intelligenceCore";
+import { resolveIntelligenceProvider } from "./intelligenceProvider";
+import { signAssetUrl, signDbFileUrl } from "./storage";
 import {
   FACE_CLUSTER_MODEL,
   applyCategoryFeedback,
   clusterFaceObservations,
   extractEntityCandidates,
+  feedbackRerankBoost,
   normalizeEntityName,
   parseLibraryQuery,
   semanticDuplicateThreshold,
@@ -106,7 +109,9 @@ async function enqueueStage(
     intelligenceId,
     stage,
     idempotencyKey: `${intelligenceId}:${stage}:${INTELLIGENCE_ANALYSIS_VERSION}:${runKey}`,
-    modelVersion: stage === "embedding" ? LOCAL_EMBEDDING_MODEL : LOCAL_CLASSIFIER_MODEL,
+    modelVersion: stage === "embedding"
+      ? LOCAL_EMBEDDING_MODEL
+      : resolveIntelligenceProvider().modelVersion,
   }).onConflictDoNothing();
 }
 
@@ -133,6 +138,7 @@ interface ResourceSnapshot {
   legacyKind: string | null;
   checksum: string | null;
   sourceType: string;
+  mediaUrl: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -157,7 +163,9 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       legacyKind: asset.kind,
       checksum: asset.sha256,
       sourceType: asset.isAiGenerated ? "ai_generated" : "upload",
+      mediaUrl: asset.storagePath ? signAssetUrl(asset.id, 900) : (/^https?:\/\//i.test(asset.url) ? asset.url : null),
       metadata: {
+        ...intel.metadata,
         filename: asset.title,
         sizeBytes: asset.sizeBytes,
         mime: asset.mime,
@@ -180,7 +188,9 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       legacyKind: knowledge.kind,
       checksum: contentHash(knowledge.content),
       sourceType: knowledge.sourceProvider ?? (knowledge.sourceAssetId ? "upload" : "manual"),
+      mediaUrl: null,
       metadata: {
+        ...intel.metadata,
         knowledgeKind: knowledge.kind,
         sourceUrl: knowledge.sourceUrl,
         sourceExternalId: knowledge.sourceExternalId,
@@ -199,6 +209,7 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       sourceProvider: schema.dataFiles.sourceProvider,
       sourceUrl: schema.dataFiles.sourceUrl,
       sourceExternalId: schema.dataFiles.sourceExternalId,
+      storagePath: schema.dataFiles.storagePath,
       createdAt: schema.dataFiles.createdAt,
     }).from(schema.dataFiles)
       .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
@@ -212,7 +223,9 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       legacyKind: "document",
       checksum: file.textContent ? contentHash(file.textContent) : null,
       sourceType: file.sourceProvider ?? (file.sourceUrl ? "url" : "upload"),
+      mediaUrl: file.storagePath ? signDbFileUrl(file.id, 900) : (/^https?:\/\//i.test(file.sourceUrl ?? "") ? file.sourceUrl : null),
       metadata: {
+        ...intel.metadata,
         filename: file.name,
         sizeBytes: file.sizeBytes,
         mime: file.mime,
@@ -265,7 +278,11 @@ function nestedString(record: Record<string, unknown>, keys: string[]): string |
   return null;
 }
 
-async function processOptionalExtraction(snapshot: ResourceSnapshot, stage: "ocr" | "transcription" | "image_analysis" | "video_analysis" | "audio_analysis" | "face_detection" | "face_embedding"): Promise<void> {
+async function processOptionalExtraction(
+  snapshot: ResourceSnapshot,
+  stage: IntelligenceExtractionStage,
+  provider: IntelligenceAnalysisProvider,
+): Promise<void> {
   const [latest] = await db.select().from(schema.assetIntelligence).where(eq(schema.assetIntelligence.id, snapshot.intelligence.id));
   if (!latest) return;
   const pipeline = latest.metadata.pipeline && typeof latest.metadata.pipeline === "object"
@@ -282,24 +299,80 @@ async function processOptionalExtraction(snapshot: ResourceSnapshot, stage: "ocr
       .where(eq(schema.assetIntelligence.id, latest.id));
     return;
   }
-  const extractedText = stage === "ocr"
+  const legacyText = stage === "ocr"
     ? nestedString(snapshot.metadata, ["ocrText", "ocr", "extractedText"])
     : stage === "transcription" ? nestedString(snapshot.metadata, ["transcript", "transcription", "speechText"]) : null;
+  const providerResult = !legacyText && provider.extract ? await provider.extract(stage, {
+    intelligenceId: latest.id,
+    groupId: latest.groupId,
+    title: snapshot.title,
+    canonicalType: latest.canonicalType as Parameters<IntelligenceAnalysisProvider["analyze"]>[0]["canonicalType"],
+    mime: snapshot.mime,
+    text: snapshot.text,
+    mediaUrl: snapshot.mediaUrl,
+    metadata: snapshot.metadata,
+  }) : null;
+  const extractedText = legacyText ?? providerResult?.text ?? null;
   if (extractedText) {
     await db.insert(schema.intelligenceSegments).values({
       intelligenceId: latest.id,
       segmentKind: stage === "ocr" ? "document_page" : "speech",
       ordinal: 0,
       text: extractedText,
-      confidence: 1,
-      metadata: { importedFromLegacyMetadata: true },
+      confidence: legacyText ? 1 : 0.9,
+      metadata: legacyText ? { importedFromLegacyMetadata: true } : { provider: providerResult?.modelVersion },
     }).onConflictDoUpdate({
       target: [schema.intelligenceSegments.intelligenceId, schema.intelligenceSegments.segmentKind, schema.intelligenceSegments.ordinal],
       set: { text: extractedText, confidence: 1 },
     });
   }
+  for (const segment of providerResult?.segments ?? []) {
+    await db.insert(schema.intelligenceSegments).values({
+      intelligenceId: latest.id,
+      segmentKind: segment.kind,
+      ordinal: segment.ordinal,
+      startMs: segment.startMs ?? null,
+      endMs: segment.endMs ?? null,
+      text: segment.text ?? null,
+      speaker: segment.speaker ?? null,
+      confidence: segment.confidence ?? null,
+      metadata: segment.metadata ?? {},
+    }).onConflictDoUpdate({
+      target: [schema.intelligenceSegments.intelligenceId, schema.intelligenceSegments.segmentKind, schema.intelligenceSegments.ordinal],
+      set: {
+        startMs: segment.startMs ?? null, endMs: segment.endMs ?? null, text: segment.text ?? null,
+        speaker: segment.speaker ?? null, confidence: segment.confidence ?? null, metadata: segment.metadata ?? {},
+      },
+    });
+  }
+  if (stage === "face_detection" && providerResult?.faces) {
+    await db.delete(schema.faceClusterMembers).where(eq(schema.faceClusterMembers.intelligenceId, latest.id));
+    await db.delete(schema.detectedFaces).where(eq(schema.detectedFaces.intelligenceId, latest.id));
+    if (providerResult.faces.length) await db.insert(schema.detectedFaces).values(providerResult.faces.map((face) => ({
+      intelligenceId: latest.id,
+      faceIndex: face.faceIndex,
+      boundingBox: face.boundingBox,
+      embedding: face.embedding,
+      embeddingModel: face.embeddingModel ?? providerResult.modelVersion,
+      quality: face.quality ?? null,
+      status: face.embedding?.length ? "unclustered" : "detected",
+    })));
+  }
+  let capabilityReady = Boolean(extractedText || providerResult);
+  if (stage === "face_embedding" && !capabilityReady) {
+    const [embedded] = await db.select({ id: schema.detectedFaces.id }).from(schema.detectedFaces)
+      .where(and(eq(schema.detectedFaces.intelligenceId, latest.id), isNotNull(schema.detectedFaces.embedding))).limit(1);
+    capabilityReady = Boolean(embedded);
+  }
+  const providerMetadata = providerResult?.metadata ?? {};
   await db.update(schema.assetIntelligence).set({
-    metadata: { ...latest.metadata, pipeline: { ...pipeline, [stage]: extractedText ? "extracted" : "provider_pending" } },
+    metadata: {
+      ...latest.metadata,
+      ...providerMetadata,
+      ...(providerResult?.analysis ? { providerAnalysis: providerResult.analysis } : {}),
+      pipeline: { ...pipeline, [stage]: legacyText ? "extracted" : capabilityReady ? "provider_complete" : "provider_pending" },
+      ...(providerResult ? { providerModels: { ...(latest.metadata.providerModels as Record<string, unknown> | undefined), [stage]: providerResult.modelVersion } } : {}),
+    },
     updatedAt: new Date(),
   }).where(eq(schema.assetIntelligence.id, latest.id));
 }
@@ -364,10 +437,13 @@ async function processClassification(
 ): Promise<void> {
   const canonicalType = canonicalTypeOf({ mime: snapshot.mime, name: snapshot.title, legacyKind: snapshot.legacyKind });
   const providerResult = await provider.analyze({
+    intelligenceId: snapshot.intelligence.id,
+    groupId: snapshot.intelligence.groupId,
     title: snapshot.title,
     canonicalType,
     mime: snapshot.mime,
     text: snapshot.text,
+    mediaUrl: snapshot.mediaUrl,
     metadata: snapshot.metadata,
   });
   const feedback = await db.select({
@@ -403,9 +479,12 @@ async function processClassification(
     updatedAt: new Date(),
   }).where(eq(schema.assetIntelligence.id, snapshot.intelligence.id));
 
-  await db.delete(schema.intelligenceSegments)
-    .where(eq(schema.intelligenceSegments.intelligenceId, snapshot.intelligence.id));
   if (result.segments?.length) {
+    const segmentKinds = [...new Set(result.segments.map((segment) => segment.kind))];
+    await db.delete(schema.intelligenceSegments).where(and(
+      eq(schema.intelligenceSegments.intelligenceId, snapshot.intelligence.id),
+      inArray(schema.intelligenceSegments.segmentKind, segmentKinds),
+    ));
     for (const segment of result.segments) {
       await db.insert(schema.intelligenceSegments).values({
         intelligenceId: snapshot.intelligence.id,
@@ -891,20 +970,20 @@ export function nextIngestionStage(stage: IngestionStage): IngestionStage | null
 
 export async function processIntelligenceJob(
   job: typeof schema.intelligenceProcessingJobs.$inferSelect,
-  provider: IntelligenceAnalysisProvider = new LocalIntelligenceProvider(),
+  provider: IntelligenceAnalysisProvider = resolveIntelligenceProvider(),
 ): Promise<void> {
   const snapshot = await loadResourceSnapshot(job.intelligenceId);
   if (!snapshot) throw new Error("來源資料已不存在或已移入回收桶");
   switch (job.stage as IngestionStage) {
     case "extract_metadata": await processMetadata(snapshot); break;
-    case "ocr": await processOptionalExtraction(snapshot, "ocr"); break;
-    case "transcription": await processOptionalExtraction(snapshot, "transcription"); break;
-    case "image_analysis": await processOptionalExtraction(snapshot, "image_analysis"); break;
-    case "video_analysis": await processOptionalExtraction(snapshot, "video_analysis"); break;
-    case "audio_analysis": await processOptionalExtraction(snapshot, "audio_analysis"); break;
+    case "ocr": await processOptionalExtraction(snapshot, "ocr", provider); break;
+    case "transcription": await processOptionalExtraction(snapshot, "transcription", provider); break;
+    case "image_analysis": await processOptionalExtraction(snapshot, "image_analysis", provider); break;
+    case "video_analysis": await processOptionalExtraction(snapshot, "video_analysis", provider); break;
+    case "audio_analysis": await processOptionalExtraction(snapshot, "audio_analysis", provider); break;
     case "classification": await processClassification(snapshot, provider); break;
-    case "face_detection": await processOptionalExtraction(snapshot, "face_detection"); break;
-    case "face_embedding": await processOptionalExtraction(snapshot, "face_embedding"); break;
+    case "face_detection": await processOptionalExtraction(snapshot, "face_detection", provider); break;
+    case "face_embedding": await processOptionalExtraction(snapshot, "face_embedding", provider); break;
     case "face_clustering": await processFaceClustering(snapshot); break;
     case "embedding": await processEmbedding(snapshot); break;
     case "dedupe": await processDeduplication(snapshot); break;
@@ -914,7 +993,7 @@ export async function processIntelligenceJob(
 }
 
 export async function claimAndProcessIntelligenceJob(
-  provider: IntelligenceAnalysisProvider = new LocalIntelligenceProvider(),
+  provider: IntelligenceAnalysisProvider = resolveIntelligenceProvider(),
 ): Promise<boolean> {
   const [candidate] = await db.select().from(schema.intelligenceProcessingJobs)
     .where(eq(schema.intelligenceProcessingJobs.status, "queued"))
@@ -978,19 +1057,25 @@ function jobRunKey(idempotencyKey: string): string {
 }
 
 async function refreshProcessingBatch(batchId: string): Promise<void> {
-  const [stats] = await db.select({
-    total: sql<number>`count(*)::int`,
-    done: sql<number>`count(*) filter (where ${schema.intelligenceProcessingJobs.status} = 'done')::int`,
-    failed: sql<number>`count(*) filter (where ${schema.intelligenceProcessingJobs.status} = 'failed')::int`,
-    active: sql<number>`count(*) filter (where ${schema.intelligenceProcessingJobs.status} in ('queued','running'))::int`,
-  }).from(schema.intelligenceProcessingJobs)
-    .where(eq(schema.intelligenceProcessingJobs.batchId, batchId));
-  const active = Number(stats?.active ?? 0);
+  const jobs = await db.select({
+    intelligenceId: schema.intelligenceProcessingJobs.intelligenceId,
+    status: schema.intelligenceProcessingJobs.status,
+  }).from(schema.intelligenceProcessingJobs).where(eq(schema.intelligenceProcessingJobs.batchId, batchId));
+  const perAsset = new Map<string, string[]>();
+  for (const job of jobs) perAsset.set(job.intelligenceId, [...(perAsset.get(job.intelligenceId) ?? []), job.status]);
+  let completedItems = 0; let failedItems = 0; let activeItems = 0;
+  for (const statuses of perAsset.values()) {
+    if (statuses.some((status) => status === "queued" || status === "running")) activeItems += 1;
+    else {
+      completedItems += 1;
+      if (statuses.some((status) => status === "failed")) failedItems += 1;
+    }
+  }
   await db.update(schema.intelligenceProcessingBatches).set({
-    completedItems: Number(stats?.done ?? 0),
-    failedItems: Number(stats?.failed ?? 0),
-    status: active > 0 ? "processing" : "done",
-    completedAt: active > 0 ? null : new Date(),
+    completedItems,
+    failedItems,
+    status: activeItems > 0 ? "processing" : "done",
+    completedAt: activeItems > 0 ? null : new Date(),
     updatedAt: new Date(),
   }).where(eq(schema.intelligenceProcessingBatches.id, batchId));
 }
@@ -1049,10 +1134,55 @@ export async function enrollLegacyIntelligence(limit = 12): Promise<number> {
   return assets.length + knowledge.length + documents.length;
 }
 
+export type IntelligenceBackfillMode = "pending" | "model_changed" | "all";
+
+export function isIntelligenceBackfillEligible(
+  row: Pick<IntelligenceRow, "analysisStatus" | "analysisVersion" | "modelVersion">,
+  mode: IntelligenceBackfillMode,
+  targetModelVersion: string,
+): boolean {
+  if (mode === "all") return true;
+  if (mode === "pending") return ["pending", "partial", "failed"].includes(row.analysisStatus);
+  return row.analysisVersion !== INTELLIGENCE_ANALYSIS_VERSION || row.modelVersion !== targetModelVersion;
+}
+
+/** Schedules a bounded, resumable re-analysis. It never performs provider work in the request. */
+export async function scheduleIntelligenceBackfill(input: {
+  groupId: string;
+  projectId?: string | null;
+  mode: IntelligenceBackfillMode;
+  limit: number;
+  createdBy: string;
+  dryRun?: boolean;
+  targetModelVersion?: string;
+}): Promise<{ batchId: string | null; scheduled: number; eligible: number }> {
+  const targetModelVersion = input.targetModelVersion ?? resolveIntelligenceProvider().modelVersion;
+  const boundedLimit = Math.min(500, Math.max(1, input.limit));
+  const rows = await db.select().from(schema.assetIntelligence).where(and(
+    eq(schema.assetIntelligence.groupId, input.groupId),
+    ...(input.projectId ? [eq(schema.assetIntelligence.projectId, input.projectId)] : []),
+  )).orderBy(asc(schema.assetIntelligence.updatedAt)).limit(Math.min(2_000, boundedLimit * 4));
+  const eligibleRows = rows.filter((row) => isIntelligenceBackfillEligible(row, input.mode, targetModelVersion));
+  const selected = eligibleRows.slice(0, boundedLimit);
+  if (input.dryRun || !selected.length) return { batchId: null, scheduled: 0, eligible: eligibleRows.length };
+  const batchId = await createProcessingBatch({
+    groupId: input.groupId,
+    projectId: input.projectId,
+    sourceType: `backfill:${input.mode}`,
+    totalItems: selected.length,
+    createdBy: input.createdBy,
+  });
+  const runKey = `backfill-${INTELLIGENCE_ANALYSIS_VERSION}-${targetModelVersion}-${Date.now()}`;
+  await db.update(schema.assetIntelligence).set({ analysisStatus: "pending", updatedAt: new Date() })
+    .where(inArray(schema.assetIntelligence.id, selected.map((row) => row.id)));
+  for (const row of selected) await enqueueStage(row.id, "extract_metadata", { batchId, runKey });
+  return { batchId, scheduled: selected.length, eligible: eligibleRows.length };
+}
+
 export interface HybridSearchResult {
   resource: DataHubResource;
   score: number;
-  scoreBreakdown: { metadata: number; fullText: number; semantic: number; relationship: number; entity: number };
+  scoreBreakdown: { metadata: number; fullText: number; semantic: number; relationship: number; entity: number; feedback: number };
   intelligence: null | {
     id: string;
     canonicalType: string;
@@ -1086,6 +1216,29 @@ export async function hybridSearchIntelligence(
   const rows = filterVisibleIntelligenceRows(visible.resources, allRows);
   const byResource = new Map(rows.map((row) => [`${row.resourceKind}:${row.resourceId}`, row]));
   const intelligenceIds = rows.map((row) => row.id);
+  const searchQuery = sql`websearch_to_tsquery('simple', ${parsed.positive})`;
+  const intelligenceDocument = sql`to_tsvector('simple', coalesce(${schema.assetIntelligence.summary}, '') || ' ' || coalesce(${schema.assetIntelligence.description}, '') || ' ' || coalesce(${schema.assetIntelligence.category}, ''))`;
+  const chunkDocument = sql`to_tsvector('simple', ${schema.intelligenceChunks.text})`;
+  const [intelligenceTextRows, chunkTextRows] = intelligenceIds.length ? await Promise.all([
+    db.select({
+      intelligenceId: schema.assetIntelligence.id,
+      rank: sql<number>`ts_rank_cd(${intelligenceDocument}, ${searchQuery})::real`,
+    }).from(schema.assetIntelligence).where(and(
+      inArray(schema.assetIntelligence.id, intelligenceIds),
+      sql`${intelligenceDocument} @@ ${searchQuery}`,
+    )),
+    db.select({
+      intelligenceId: schema.intelligenceChunks.intelligenceId,
+      rank: sql<number>`max(ts_rank_cd(${chunkDocument}, ${searchQuery}))::real`,
+    }).from(schema.intelligenceChunks).where(and(
+      inArray(schema.intelligenceChunks.intelligenceId, intelligenceIds),
+      sql`${chunkDocument} @@ ${searchQuery}`,
+    )).groupBy(schema.intelligenceChunks.intelligenceId),
+  ]) : [[], []];
+  const databaseTextRanks = new Map<string, number>();
+  for (const item of [...intelligenceTextRows, ...chunkTextRows]) {
+    databaseTextRanks.set(item.intelligenceId, Math.max(databaseTextRanks.get(item.intelligenceId) ?? 0, Number(item.rank)));
+  }
   const embeddings = intelligenceIds.length ? await db.select({
     intelligenceId: schema.intelligenceEmbeddings.intelligenceId,
     vector: schema.intelligenceEmbeddings.vector,
@@ -1111,6 +1264,16 @@ export async function hybridSearchIntelligence(
     inArray(schema.entityRelationships.fromId, intelligenceIds),
   )).groupBy(schema.entityRelationships.fromId) : [];
   const relationshipCounts = new Map(relationshipRows.map((row) => [row.intelligenceId, Number(row.count)]));
+  const groupIds = [...new Set(auth.groups.map((group) => group.groupId))];
+  const feedbackEvents = groupIds.length ? await db.select({
+    action: schema.aiFeedbackEvents.action,
+    prediction: schema.aiFeedbackEvents.prediction,
+    correction: schema.aiFeedbackEvents.userCorrection,
+    createdBy: schema.aiFeedbackEvents.createdBy,
+  }).from(schema.aiFeedbackEvents).where(and(
+    inArray(schema.aiFeedbackEvents.groupId, groupIds),
+    ...(input.projectId ? [or(eq(schema.aiFeedbackEvents.projectId, input.projectId), isNull(schema.aiFeedbackEvents.projectId))!] : []),
+  )).orderBy(desc(schema.aiFeedbackEvents.createdAt)).limit(300) : [];
   const queryVector = featureHashEmbedding(parsed.positive);
   const normalizedQuery = parsed.positive.normalize("NFKC").toLocaleLowerCase("zh-TW");
 
@@ -1122,16 +1285,26 @@ export async function hybridSearchIntelligence(
       .filter(Boolean).join(" ");
     const normalizedCandidate = candidate.normalize("NFKC").toLocaleLowerCase("zh-TW");
     const metadata = normalizedCandidate.includes(normalizedQuery) ? 1 : lexicalOverlap(parsed.positive, [resource.title, intelligence?.category, ...tags].filter(Boolean).join(" "));
-    const fullText = lexicalOverlap(parsed.positive, candidate);
+    const fullText = Math.max(
+      lexicalOverlap(parsed.positive, candidate),
+      Math.min(1, (databaseTextRanks.get(intelligence?.id ?? "") ?? 0) * 4),
+    );
     const semantic = intelligence ? Math.max(0, cosineSimilarity(queryVector, vectors.get(intelligence.id) ?? [])) : 0;
     const entity = lexicalOverlap(parsed.positive, entities.join(" "));
     const relationship = Math.min(1, (input.projectId && resource.projectId === input.projectId ? 0.7 : 0)
       + Math.min(0.3, (relationshipCounts.get(intelligence?.id ?? "") ?? 0) * 0.05));
-    const score = metadata * 0.27 + fullText * 0.21 + semantic * 0.31 + relationship * 0.06 + entity * 0.15;
+    const feedback = feedbackRerankBoost({
+      query: parsed.positive,
+      category: intelligence?.category,
+      tags,
+      events: feedbackEvents,
+      userId: auth.user.id,
+    });
+    const score = Math.max(0, metadata * 0.26 + fullText * 0.20 + semantic * 0.30 + relationship * 0.06 + entity * 0.13 + feedback * 0.05);
     return {
       resource,
       score: Number(score.toFixed(4)),
-      scoreBreakdown: { metadata, fullText, semantic, relationship, entity },
+      scoreBreakdown: { metadata, fullText, semantic, relationship, entity, feedback },
       intelligence: intelligence ? {
         id: intelligence.id,
         canonicalType: intelligence.canonicalType,
@@ -1147,6 +1320,7 @@ export async function hybridSearchIntelligence(
         { kind: "semantic", label: "語意", score: semantic },
         { kind: "entity", label: "實體", score: entity },
         { kind: "relationship", label: "關係圖", score: relationship },
+        { kind: "feedback", label: "使用者修正", score: Math.max(0, feedback) },
       ].filter((item) => item.score > 0),
     };
   }).filter((item) => {
@@ -1166,6 +1340,8 @@ export async function hybridSearchIntelligence(
     intelligenceCandidates: rows.length,
     returned: scored.length,
     embeddingModel: LOCAL_EMBEDDING_MODEL,
+    feedbackEventsConsidered: feedbackEvents.length,
+    fullTextIndexMatches: databaseTextRanks.size,
     intent: parsed.intent,
     excludedTerms: parsed.excludedTerms,
     elapsedMs: Date.now() - started,
@@ -1242,11 +1418,22 @@ export async function retrieveIntelligenceContext(
   const budget = Math.min(40_000, Math.max(1_000, input.budgetChars ?? 12_000));
   let used = 0;
   const selected: typeof candidates = [];
+  const perAsset = new Map<string, number>();
+  const deferred: typeof candidates = [];
   for (const candidate of candidates) {
     if (selected.length >= (input.limit ?? 12)) break;
+    if ((perAsset.get(candidate.intelligenceId) ?? 0) >= 2) { deferred.push(candidate); continue; }
     const remaining = budget - used;
     if (remaining <= 0) break;
     const text = candidate.text.slice(0, remaining);
+    if (!text) continue;
+    selected.push({ ...candidate, text });
+    perAsset.set(candidate.intelligenceId, (perAsset.get(candidate.intelligenceId) ?? 0) + 1);
+    used += text.length;
+  }
+  for (const candidate of deferred) {
+    if (selected.length >= (input.limit ?? 12) || used >= budget) break;
+    const text = candidate.text.slice(0, budget - used);
     if (!text) continue;
     selected.push({ ...candidate, text });
     used += text.length;
@@ -1258,7 +1445,7 @@ export async function retrieveIntelligenceContext(
     context,
     sources: selected,
     retrievalRunId: search.retrievalRunId,
-    retrievalDebug: { ...search.retrievalDebug, rerankedChunks: candidates.length, includedChars: used, budgetChars: budget },
+    retrievalDebug: { ...search.retrievalDebug, rerankedChunks: candidates.length, includedChars: used, budgetChars: budget, diversityCapPerAsset: 2 },
   };
 }
 

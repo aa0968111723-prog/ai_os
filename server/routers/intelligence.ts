@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { authedProcedure, requireGroup, router } from "../trpc";
+import { authedProcedure, requireGroup, requireLeader, router } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { listDataHubResources } from "../services/dataHub";
@@ -10,8 +10,10 @@ import {
   intelligenceSummary,
   registerIntelligenceResource,
   retrieveIntelligenceContext,
+  scheduleIntelligenceBackfill,
 } from "../services/intelligenceLibrary";
 import { resolveReviewDecision } from "../services/intelligenceCore";
+import { intelligenceProviderConfig, resolveIntelligenceProvider } from "../services/intelligenceProvider";
 
 async function visibleProject(auth: Parameters<typeof requireGroup>[0], projectId?: string) {
   if (!projectId) return null;
@@ -40,6 +42,30 @@ async function visibleIntelligenceResource(
 }
 
 export const intelligenceRouter = router({
+  providerStatus: authedProcedure.query(() => {
+    const config = intelligenceProviderConfig();
+    return {
+      ...config,
+      activeModelVersion: resolveIntelligenceProvider().modelVersion,
+      externalActive: config.externalEnabled && config.mode !== "local" && (config.falConfigured || config.nimConfigured || config.faceEndpointConfigured || config.videoEndpointConfigured),
+    };
+  }),
+
+  scheduleBackfill: authedProcedure
+    .input(z.object({
+      groupId: z.string().uuid(),
+      projectId: z.string().uuid().optional(),
+      mode: z.enum(["pending", "model_changed", "all"]).default("model_changed"),
+      limit: z.number().int().min(1).max(500).default(100),
+      dryRun: z.boolean().default(false),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      requireLeader(ctx.auth, input.groupId);
+      const project = await visibleProject(ctx.auth, input.projectId);
+      if (project && project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案與團隊不一致" });
+      return scheduleIntelligenceBackfill({ ...input, createdBy: ctx.auth.user.id });
+    }),
+
   summary: authedProcedure
     .input(z.object({ projectId: z.string().uuid().optional() }).optional())
     .query(async ({ ctx, input }) => {
