@@ -171,6 +171,8 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0025_project_props": [
     "d93eaefc4613d71f61a3b31a8cb7620ad4080d4c495c103047486a1cc2d4a01a",
     "6a0c632b7752aa41da7ce17f679043241b84c280033f87ea15ebfc39dff569a4",
+    // 0051：props 的 CREATE TABLE 補上 rev 欄（bridge 比對整表 DDL；見該檔案首註解）
+    "abc20c1c49b92fef8497b0eefb5a41156ed23b9e911fb503bd8b0fdec11cde32",
   ],
   "0026_ai_trace": [
     "e0c72e1b44bc9b68bb39bc2e7b84c279d98d620ca32e7a8f3c1a2ee57b7a58b7",
@@ -257,11 +259,20 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   ],
   "0049_story_first": [
     "c8e73ea7acd2d9f17a81823b0b3f7d8c35d279a4a192d1aeacf03bbbc0370071",
+    // 0051：stories / story_scenes / character_looks 的 CREATE TABLE 各補上 rev 欄
+    // （bridge 比對整表 DDL；見該檔案首註解）
+    "0830f062bcb115c0dfa347ee1c9c5c4e6abbc315c3027392c1af7eaee7153c0f",
   ],
   "0050_ai_site_trace": [
     "0be767b4aa33373ede24590a6949651a1b87e8e9c5db95eee4e7b52d675d3f9c",
   ],
-  "0051_data_hub_bindings_and_lineage": [
+  "0051_collab_revisions": [
+    "505ad8d3b8b50821069d0985008879112e31a9905d2178cc0dc3b98e1e48c210",
+  ],
+  // 原本編為 0051，與 base branch 併入的 0051_collab_revisions 撞號後改編 0052。
+  // 這支還沒有被任何資料庫套用過（PR 尚未合併），重新編號不會讓任何 ledger 對不上；
+  // 檔案內容一個位元組都沒動，所以 hash 與改號前相同。
+  "0052_data_hub_bindings_and_lineage": [
     "9470bdb94136c2987dcecf293a84c9214161d71a98fca0445093ed224464be9f",
   ],
 };

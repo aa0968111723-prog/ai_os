@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "./api";
 import { highlightAnchor } from "./discuss";
 import { Button, Hint } from "./components/ui";
+import { sanitizeViewState, type ViewState } from "../../shared/viewState";
 
 export interface CollabPeer {
   userId: string;
@@ -580,6 +581,21 @@ export function useCollab(
   connected: boolean;
   /** 最近一次帶說明的協作改動（「小明改了第 5 鏡」）；null＝還沒有 */
   lastChange: { name: string; label: string; at: number } | null;
+  /** 房內每條連線在看什麼（connId → 位置）。同一人多分頁是多筆。 */
+  peerViews: Map<string, PeerView>;
+  /** 別人開的「帶大家看」場次。**只是邀請，不會切走畫面。** */
+  presenters: CollabPresenter[];
+  /** 我自己這條連線是不是正在主講 */
+  selfPresenting: boolean;
+  /** 回報「我正在看什麼」（內容沒變不送） */
+  sendView: (view: ViewState | null) => void;
+  /** 開始／結束「帶大家看」 */
+  setPresenting: (active: boolean) => void;
+  selfConnId: string | null;
+  /** 自己目前的編輯區塊（COLLAB_ZONES 的鍵）；null＝不在任何已標記的區塊 */
+  selfZone: string | null;
+  /** 最近一次「主講結束」及其原因；null＝還沒發生過 */
+  presentEnded: PresentEnded | null;
 } {
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
@@ -611,9 +627,23 @@ export function useCollab(
     setAnchorEpoch((n) => n + 1);
   }, []);
 
+  /**
+   * 房內每條連線在看什麼 / 誰正在主講。以 connId 為鍵——
+   * 同一人的兩個分頁（Tab A 故事、Tab B 分鏡）是兩個不同的位置。
+   */
+  const [peerViews, setPeerViews] = useState<Map<string, PeerView>>(() => new Map());
+  const [presenters, setPresenters] = useState<Map<string, CollabPresenter>>(() => new Map());
+  /** 最近一次「主講結束」及其原因（跟隨端據此決定要顯示「離線」還是乾淨退出） */
+  const [presentEnded, setPresentEnded] = useState<PresentEnded | null>(null);
+  /** 上一次送出去的 viewState：內容沒變就不重送，不讓離散事件變成輪詢 */
+  const lastViewRef = useRef<string>("");
+  /** 自己目前的編輯區塊（sendFocus 維護）——語意視圖狀態的來源 */
+  const [selfZone, setSelfZone] = useState<string | null>(null);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const selfIdRef = useRef<string | null>(null);
+  const selfConnIdRef = useRef<string | null>(null);
   const lastCursorAtRef = useRef(0);
   const lastZoneRef = useRef<string | null>(null);
   const utilsRef = useRef(utils);
@@ -645,14 +675,64 @@ export function useCollab(
         }
         if (msg.type === "hello") {
           selfIdRef.current = msg.self?.userId ?? null;
+          selfConnIdRef.current = msg.self?.connId ?? null;
           setSelf(msg.self ?? null);
           setPeers(msg.users ?? []);
           setConnected(true);
           const zones: Record<string, string> = {};
           for (const f of msg.focus ?? []) if (f?.zone) zones[f.userId] = f.zone;
           setZoneByUser(zones);
+          // 中途加入的人也要看得到「大家在看哪」與「誰正在主講」——
+          // 只靠事件的話，晚一步進房的人永遠收不到已經發生過的那一則 present。
+          const views = new Map<string, PeerView>();
+          for (const v of msg.views ?? []) {
+            const view = sanitizeViewState(v?.view);
+            if (v?.connId && view) views.set(v.connId, { userId: v.userId, connId: v.connId, name: v.name, view });
+          }
+          setPeerViews(views);
+          const presenters = new Map<string, CollabPresenter>();
+          for (const p of msg.presenters ?? []) {
+            if (p?.connId) {
+              presenters.set(p.connId, {
+                userId: p.userId, connId: p.connId, name: p.name, color: p.color,
+                view: sanitizeViewState(p.view),
+              });
+            }
+          }
+          setPresenters(presenters);
         } else if (msg.type === "presence") {
           setPeers(msg.users ?? []);
+        } else if (msg.type === "view") {
+          // 以 connId 為鍵：同一人的兩個分頁是兩個位置，合併會讓跟隨者在兩者間彈跳
+          if (msg.userId === selfIdRef.current && msg.connId === selfConnIdRef.current) return;
+          const view = sanitizeViewState(msg.view);
+          setPeerViews((prev) => {
+            const next = new Map(prev);
+            if (view) next.set(msg.connId, { userId: msg.userId, connId: msg.connId, name: msg.name, view });
+            else next.delete(msg.connId);
+            return next;
+          });
+        } else if (msg.type === "present") {
+          // **收到這則不會改變任何人的畫面。** 它只是讓對方的 UI 長出一張
+          // 「Bruce 正在帶大家看 [加入]」的邀請卡；跟不跟由接收端自己決定。
+          //
+          // 主講結束時記下**為什麼**結束：「他自己結束的」與「他斷線了」對跟隨者
+          // 是完全不同的兩件事。不能靠在場名單去推——那是另一則訊息，抵達順序不保證。
+          if (!msg.active && msg.connId) {
+            setPresentEnded({ connId: msg.connId, reason: msg.reason === "disconnected" ? "disconnected" : "stopped", at: Date.now() });
+          }
+          setPresenters((prev) => {
+            const next = new Map(prev);
+            if (msg.active && msg.connId) {
+              next.set(msg.connId, {
+                userId: msg.userId, connId: msg.connId, name: msg.name, color: msg.color,
+                view: sanitizeViewState(msg.view),
+              });
+            } else if (msg.connId) {
+              next.delete(msg.connId);
+            }
+            return next;
+          });
         } else if (msg.type === "cursor") {
           if (msg.userId === selfIdRef.current) return;
           const entry: CollabCursor = {
@@ -959,9 +1039,43 @@ export function useCollab(
   const sendFocus = useCallback((zone: string | null) => {
     if (lastZoneRef.current === zone) return;
     lastZoneRef.current = zone;
+    // 自己的 zone 也留一份 state：語意視圖狀態直接沿用它當來源，
+    // 不讓呼叫端再算一套「我在哪個區塊」（多一套只會多一個對不上的地方）。
+    setSelfZone(zone);
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "focus", zone }));
   }, []);
+
+  /**
+   * 回報「我正在看什麼」。內容沒變就不送——viewState 是離散事件，
+   * 把它當輪詢送只會讓整房每秒收到一堆一模一樣的封包。
+   */
+  const sendView = useCallback((view: ViewState | null) => {
+    const clean = view ? sanitizeViewState(view) : null;
+    const sig = JSON.stringify(clean);
+    if (sig === lastViewRef.current) return;
+    lastViewRef.current = sig;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "view", view: clean }));
+  }, []);
+
+  /** 開始／結束「帶大家看」。伺服器只負責廣播，不會切走任何人的畫面。 */
+  const setPresenting = useCallback((active: boolean) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "present", active }));
+  }, []);
+
+  /** 我自己是不是正在主講（用自己的 connId 對照，多分頁時只有主講的那一個分頁算） */
+  const selfPresenting = useMemo(
+    () => Boolean(selfConnIdRef.current && presenters.has(selfConnIdRef.current)),
+    [presenters],
+  );
+
+  /** 別人開的主講場次（自己那條不算——不會邀請自己加入自己） */
+  const otherPresenters = useMemo(
+    () => [...presenters.values()].filter((p) => p.userId !== selfIdRef.current),
+    [presenters],
+  );
 
   const focusZones = useMemo(() => {
     const out: Record<string, CollabPeer[]> = {};
@@ -981,7 +1095,43 @@ export function useCollab(
     [peers, anchorEpoch],
   );
 
-  return { peers, cursors, cursorsLiveRef, focusZones, anchorPeers, self, sendFocus, containerRef, onPointerMove, connected, lastChange };
+  return {
+    peers, cursors, cursorsLiveRef, focusZones, anchorPeers, self, sendFocus,
+    containerRef, onPointerMove, connected, lastChange,
+    // Presenter / 語意視圖（Phase 2）
+    peerViews, presenters: otherPresenters, selfPresenting, sendView, setPresenting,
+    selfConnId: selfConnIdRef.current, selfZone, presentEnded,
+  };
+}
+
+/** 一條連線目前在看什麼 */
+export interface PeerView {
+  userId: string;
+  connId: string;
+  name: string;
+  view: ViewState;
+}
+
+/**
+ * 一場主講結束了，以及**為什麼**。
+ *
+ * `stopped`＝主講者自己按了結束（人還在房裡）→ 跟隨者乾淨退出即可。
+ * `disconnected`＝他斷線／關掉分頁 → 跟隨者要看到「Bruce 暫時離線」。
+ * 兩者不能靠在場名單去推：那是另一則訊息，抵達順序不保證，靠它會把斷線誤判成自己結束。
+ */
+export interface PresentEnded {
+  connId: string;
+  reason: "stopped" | "disconnected";
+  at: number;
+}
+
+/** 一場「帶大家看」。存在只代表有邀請，**不代表任何人被跟隨了**。 */
+export interface CollabPresenter {
+  userId: string;
+  connId: string;
+  name: string;
+  color: string;
+  view: ViewState | null;
 }
 
 export type CollabViewMode = "live" | "mirror";

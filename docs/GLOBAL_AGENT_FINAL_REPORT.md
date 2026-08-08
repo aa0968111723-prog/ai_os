@@ -102,14 +102,34 @@ buildTeamAskContext（組級視野）、runTeamTool（9 唯讀工具）、resolv
 
 tsc ✓；build ✓；boundaries（0 違規）/ui-primitives/hooks ✓；server vitest 2032 passed（僅 D-007 既有本地紅＋一次偶發 hook timeout 單跑即綠）；client 受影響 5 檔全綠；migrationState＋auditWording 守門 48/48；e2e-global-assistant 22/22；瀏覽器實測（桌機＋390px）全流程走通。check:agent-planner canary 需真 FAL_KEY（本機無金鑰，既有限制）。
 
-## KNOWN LIMITATIONS
+## PHASE 3 續作（2026-08-08 第二輪，同分支）
 
-1. 全站模式前端仍是一次性 mutation（steps 事後摘要）；SSE 端點已就緒、前端接 AssistantSseDecoder 列下一輪。
-2. teamAssistant.ask／assistant.ts 迴圈本體尚未遷入 assistantCore（已共用上下文與 schema；遷移屬機械工程，Phase 3）。
-3. mock 模式不產 siteActions 提議（LLM 不在場）；提議→確認的 UI 全鏈路要靠真模型環境驗。
-4. 站級動作第一批五種；資料庫寫入、request_upload_grant 等第二批未開。
-5. WATCH 僅止於既有 event-driven 基礎（pendingSummary／group_blockers 進 ask 工具面）；主動通知/推薦引擎未做。
+原 KNOWN LIMITATIONS 1／2／3／5 已完成：
 
-## REMAINING WORK（依優先序）
+1. ✅ **全站模式前端 SSE**：`requestSiteAssistantStream`（site done 形狀專屬 guard——與專案助手的 done 差 fallback/siteActions 欄位，共用 guard 會永不派發）＋LiveAssistantTrace 即時軌跡＋取消鍵；串流沒開始才退一次性 tRPC，吐過事件絕不重跑（防重複扣額度）。
+2. ✅ **雙迴圈遷入 assistantCore**：teamAssistant.ask 與 assistant.ts（專案助手）的內嵌迴圈全數改走 runToolLoop——JSON 工具迴圈自此**單一實作、三個消費者**；C2 self-healing 與三種回覆來源的 trace 摘要語義保留（assistant 114＋coerce 8＋team 66 測試綠）。
+3. ✅ **mock 確定性提議**：訊息含「專案」→create_project、含「筆記」→add_note，走同一條 resolveSiteActions 驗證——「ASK→提議→確認卡→runSiteAction→真寫入」在 E2E_MOCK 全鏈路可驗（e2e 25/25；瀏覽器實測確認卡按下後 DB 真的建案）。
+4. ✅ **WATCH foundation**：sheet 零狀態「需要你注意」（重用 groupInsights＋agentOverview，零新後端；待核准／近期失敗／人類關卡／逾期／critical 阻塞；全健康時整塊不渲染）。
 
-Phase 3：全站模式前端 SSE 軌跡；兩個舊迴圈遷入 assistantCore；桌機浮窗形態檢討；單專案視角工具 context 感知加掛；第二批寫入動作；agent runner 缺口（failed-run resume、非 generation 步驟 retry）；WATCH 主動化；NIM 原生 tool calling spike。
+期間主幹併入 story-first 大改（PR #546/#547）：另一 session 已把主幹 merge 進本分支並把 0049_ai_site_trace 重編號為 0050（story-first 佔 0049）；合併後全新 DB migrate 至 0050 ✓、173 相關測試 ✓、e2e 25/25 ✓、story-first 新版專案頁上 sheet／chip／ProjectAssistant 嵌入實測正常。
+
+## 第三輪（2026-08-08，REMAINING WORK 清算）
+
+1. ✅ **generate 對齊 executeGenerationCommand**（§4.4 例外 1 收掉）：專案助手 runAction 的 generate 原直呼 submitGenerationCore（無狀態機／viewer 檢查／policyEngine）——最後一個生成旁路已對齊 Command layer。
+2. ✅ **context 感知加掛**（§4.2 Phase 3）：全站模式在專案頁（chip 切到「整個組」）時，提示詞注入「使用者目前正停在專案 pN」——「這個專案」不再被反問；只當提示不當授權，pN 對不到就整句不注入。
+3. ✅ **第二批寫入動作：add_database_row**：提議面只開放 agentAccess="write" 的庫（唯讀庫連提議都不給——「AI 提議＋人代按」不得繞過管理者的 AI 唯讀設定）；確認卡顯示每一欄值全文；執行端雙重閘（getAgentReadableTable.canWriteRows＋executeDatabaseWriteCommand 的人 ACL＋狀態機＋policy database.write）。request_upload_grant 不做（token 簽發不適合對話確認卡流）。
+4. ✅ **agent runner：冪等寫入步驟暫時性 retry**：筆記／追加筆記／行程／改行程／任務／資料列六種步驟（全部 effectId 先持久化、重放安全）遇 DB 抖動或 SERVICE_UNAVAILABLE 不再一擊斃命整份計畫，留在 running 下一 tick 重試（cap 3）；權限／驗證錯誤照舊立即 failed。wait 節點 arming 因狀態轉移複雜刻意不動。
+5. ✅ **NIM 原生 tool calling spike**：docs/NIM_TOOL_CALLING_SPIKE.md——協定支援確認（OpenAI 相容 tools/tool_choice，vLLM 引擎、逐模型而異）＋上線前三項實測清單（需真金鑰）＋落地方案（assistantCore 可選 nativeToolStrategy、兩路共存 per-model 白名單、forceFinal 改 tool_choice:"none"）。
+6. ✅ **桌機浮窗形態（§7-2）收案**：維持現行「頂欄 AssistantLauncher＋同一張 forceSheet」——sheet 檔頭已記載理由（助手的外觀語言是感知光＋浮輸入框，錨定下拉會變成兩種產品）；FloatingDmBubble 式浮窗不另做。
+7. **messageAssistant／dmAssistant 吸收（§Phase 3 評估項）**：暫不吸收——兩者是無工具、無動作的嚴格子集，遷入 assistantCore 收益只有一致性、風險是動到留言區既有行為；列為機會性重構（動到該檔時順手做）。
+8. **WATCH 推播化**：關鍵事件的推播**既有已覆蓋**（生成待核准→推組長；代理計畫終局→推發起人；私訊→推收件人；均 event-driven）。缺的是時間觸發類（deadline 將至、專案停滯）——需要排程器，違反「不每分鐘掃全站」約束的最小方案是掛在既有 sweep 節奏上，列為獨立提案不硬做。
+
+## KNOWN LIMITATIONS（最終）
+
+1. 正式模型環境的 LLM 提議品質（非 mock）尚待實戰調校（提示詞已含平台/資料庫白名單與代號制防幻覺）。
+2. NIM 原生 tool calling 需真金鑰做三項實測後才解封（spike 文件）。
+3. WATCH 時間觸發類（deadline 將至）未做（見上第 8 點）。
+
+## REMAINING WORK
+
+NIM spike 三項實測（需金鑰）；WATCH 時間觸發提案；messageAssistant 機會性遷移。

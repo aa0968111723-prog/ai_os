@@ -267,16 +267,24 @@ AI 讀得到不代表能寫。寫入必須同時滿足
 
 ## 18. P4–P6 補充契約（2026-08 第二批）
 
-### 18.1 migration 0051（唯一一支）
+### 18.1 migration 0052（唯一一支）
 
-`drizzle/0051_data_hub_bindings_and_lineage.sql`：純新增，12 句全部 `IF NOT EXISTS`。
+`drizzle/0052_data_hub_bindings_and_lineage.sql`：純新增，12 句全部 `IF NOT EXISTS`。
 新表 `project_data_bindings` 的欄位全部寫在 `CREATE TABLE` 裡（legacy bridge 比對整表 DDL）；
 `data_files` 四個、`knowledge` 五個 nullable 來源欄位。
 
+> 這支原本編為 0051，與 base branch 併入的 `0051_collab_revisions` 撞號後改編 0052。
+> 改的是**自己這支尚未合併、還沒被任何資料庫套用過**的 migration，不是別人已發布的那一支
+> ——後者無論如何都不能動。檔案內容一個位元組都沒改，所以 sha256 與改號前相同。
+
 同步更新的三處（少一處就會紅）：
-`drizzle/meta/_journal.json`（idx 51、when 嚴格遞增）、
+`drizzle/meta/_journal.json`（idx 52、when 嚴格遞增）、
 `server/db/migrationRevisions.ts`（檔案 sha256）、
-`server/db/migrationState.test.ts` 的 `alreadyPresent` 計數（逐句複核後 +12）。
+`server/db/migrationState.test.ts` 的 `alreadyPresent` 計數（逐句複核後 +12，
+與 base 的 0051 各佔一項：`8 + 33 + 17 + 3 + 7 + 12`）。
+
+`data_files` 與 `knowledge` 都建在 `0000` baseline（bridge 前綴）裡，不是 post-bridge
+建立的表，所以不適用 0025／0049 那條「新欄要一併補寫回原 `CREATE TABLE`」的規則。
 **未動** `LEGACY_ADOPTION_PENDING_TAGS`（前綴檢查，尾端新增不影響）。
 
 已在真實 PostgreSQL 跑過完整 `scripts/ci-migration-test.sh`，且 `db:check` 回報

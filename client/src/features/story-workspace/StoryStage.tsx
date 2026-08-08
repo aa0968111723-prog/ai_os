@@ -8,8 +8,11 @@ import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton, HelpTip } from "../../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui";
+import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
+import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
+import { ScriptEditor } from "./ScriptEditor";
 import {
   shouldAdoptRemote,
   summaryChips,
@@ -23,6 +26,8 @@ const SAVE_LABEL: Record<StorySaveState, string> = {
   saving: "儲存中…",
   saved: "已儲存 ✓",
   error: "儲存失敗，稍後會再試",
+  // 衝突不是失敗——你的字還在，只是需要你決定要哪一版。詳細說明在下面的衝突卡。
+  conflict: "夥伴也改了這份故事",
 };
 
 /** 確認卡（PE 計畫 §06）：只讓使用者處理 AI 真正不確定的 1–2 件事，不是 20 個核取方塊 */
@@ -132,12 +137,37 @@ export function StoryStage({
   const contentRef = useRef<string | null>(null);
   contentRef.current = content;
 
+  /**
+   * 樂觀併發（shared/revision.ts）。故事是**整份全文覆寫**、autosave 每 800ms 送一次，
+   * 是全站最容易吃掉別人整段內容的地方——沒有這兩個欄位，兩個人同時打字時
+   * 其中一人的整段文字每 800ms 就被覆蓋一次，而畫面上什麼都不會發生。
+   *
+   * baseline 記的是「我這份草稿是從哪一份內容長出來的」（最後一次收養／存成功的遠端內容），
+   * 伺服器據此判斷夥伴到底有沒有真的動過內文。
+   */
+  const revRef = useRef<number | undefined>(undefined);
+  const baselineRef = useRef<string | undefined>(undefined);
+  const [conflict, setConflict] = useState<RevisionConflict | null>(null);
+
   const save = trpc.story.save.useMutation({
-    onSuccess: () => {
+    onSuccess: (r) => {
       setSaveState("saved");
+      setConflict(null);
+      // 存成功＝我這份就是新的基準；下一次編輯以它為 baseline，rev 也往前
+      if (typeof r?.rev === "number") revRef.current = r.rev;
+      baselineRef.current = contentRef.current ?? baselineRef.current;
       utils.story.get.invalidate({ projectId });
     },
-    onError: () => setSaveState("error"),
+    onError: (err) => {
+      const c = conflictFromError(err);
+      if (c) {
+        // 夥伴也改了。**不覆蓋、不自動選邊**——把兩份都留著交給人決定。
+        setConflict(c);
+        setSaveState("conflict");
+        return;
+      }
+      setSaveState("error");
+    },
   });
   const saveRef = useRef(save.mutate);
   saveRef.current = save.mutate;
@@ -149,10 +179,20 @@ export function StoryStage({
   // typeof 守衛：測試環境以泛用 stub 餵 query，content 可能不是字串
   const rawRemote = storyQ.data?.story?.content;
   const remote = typeof rawRemote === "string" ? rawRemote : storyQ.data ? "" : null;
+  // rev 一律跟著查詢走（連衝突期間也是）：使用者按「重新套用我的修改」時，
+  // 要送的是**對方那一版**的 rev，否則必然再撞一次，而且是撞在同一個地方。
+  const rawRev = storyQ.data?.story?.rev;
+  useEffect(() => {
+    if (typeof rawRev === "number") revRef.current = rawRev;
+  }, [rawRev]);
   useEffect(() => {
     if (remote === null) return;
     setContent((local) => {
-      if (shouldAdoptRemote(saveStateRef.current, local, remote)) return remote;
+      if (shouldAdoptRemote(saveStateRef.current, local, remote)) {
+        // 收養＝我的草稿從此以這份內容為基準
+        baselineRef.current = remote;
+        return remote;
+      }
       return local;
     });
     // saveState 透過 ref 讀，避免它變動時重收養
@@ -162,11 +202,19 @@ export function StoryStage({
   // autosave：去抖 800ms；卸載時 flush（未存的內容不可默默丟掉）
   useEffect(() => {
     if (content === null || remote === null || content === remote) return;
+    // 已經撞上衝突就停掉 autosave：再自動重送只會每 800 毫秒撞一次同一面牆，
+    // 而使用者需要的是先看到「發生什麼事」並做決定。
+    if (saveStateRef.current === "conflict") return;
     setSaveState("dirty");
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setSaveState("saving");
-      saveRef.current({ projectId, content });
+      saveRef.current({
+        projectId,
+        content,
+        expectedRev: revRef.current,
+        baseline: baselineRef.current,
+      });
     }, STORY_AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -269,9 +317,7 @@ export function StoryStage({
             你的故事
             <HelpTip text="貼上或直接寫。AI 會在背景把人物、場景、道具、鏡頭整理成可製作的結構——你只管說故事。" />
           </h2>
-          <Meta as="span" aria-live="polite" className="story-stage__savestate">
-            {save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
-          </Meta>
+          {/* 存檔狀態改由編輯器工具列顯示（全螢幕時也看得到），這裡不再重複一份 */}
           <span style={{ flex: "1 1 auto" }} />
           <Button size="sm" variant="ghost" onClick={() => setShowVersions((v) => !v)} aria-expanded={showVersions}>
             版本
@@ -281,6 +327,34 @@ export function StoryStage({
           </Button>
         </div>
         {!canEdit && <Hint style={{ margin: "4px 0 8px" }}>檢視者唯讀——故事可以看，不能改。</Hint>}
+        {/* 併發衝突：兩份內容都還在，由使用者決定要哪一版。
+            autosave 已在 conflict 狀態下停住，不會一邊問一邊繼續覆蓋。 */}
+        {conflict && (
+          <ConflictNotice
+            conflict={conflict}
+            reapplying={save.isPending}
+            onViewLatest={() => {
+              // 採用夥伴那一版：草稿換成他的內容，基準也跟著換，autosave 隨即恢復正常
+              const theirs = String((conflict.currentData as { content?: unknown }).content ?? "");
+              setContent(theirs);
+              baselineRef.current = theirs;
+              revRef.current = conflict.currentRev;
+              setConflict(null);
+              setSaveState("saved");
+            }}
+            onReapply={() => {
+              // 我這一版勝出：以**對方那一版的 rev** 重送，仍然過一次併發檢查——
+              // 若這期間又有第三個人改了，會再撞一次，而那是對的。
+              const mine = contentRef.current;
+              if (mine === null) return;
+              revRef.current = conflict.currentRev;
+              baselineRef.current = String((conflict.currentData as { content?: unknown }).content ?? "");
+              setConflict(null);
+              setSaveState("saving");
+              save.mutate({ projectId, content: mine, expectedRev: conflict.currentRev, baseline: baselineRef.current });
+            }}
+          />
+        )}
         {showVersions && (
           <Card variant="quiet" style={{ margin: "8px 0" }}>
             <Meta as="p" style={{ margin: "0 0 6px" }}>故事版本（自動快照；還原前會先保存現況）</Meta>
@@ -319,15 +393,13 @@ export function StoryStage({
             }
           />
         ) : null}
-        <textarea
-          id="story-editor"
-          className="story-editor"
-          aria-label="故事內容"
-          placeholder={"把故事貼在這裡，或直接開始寫…\n\n小訣竅：一段＝一場戲。也可以用「角色：」「場景：」「道具：」開頭的行直接聲明設定。"}
+        <ScriptEditor
           value={content ?? ""}
+          canEdit={canEdit}
           rows={rows}
-          readOnly={!canEdit}
-          onChange={(e) => setContent(e.target.value)}
+          placeholder={"把故事貼在這裡，或直接開始寫…\n\n小訣竅：一段＝一場戲。也可以用上面的標注鈕，把名字一鍵宣告成「角色：」「場景：」「道具：」。"}
+          saveLabel={save.isPending ? SAVE_LABEL.saving : SAVE_LABEL[saveState]}
+          onChange={setContent}
           onBlur={() => {
             // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）
             if (content !== null && remote !== null && content !== remote && !save.isPending) {
@@ -336,71 +408,75 @@ export function StoryStage({
               saveRef.current({ projectId, content });
             }
           }}
-        />
-        {save.error && <p className="error">{save.error.message}</p>}
-
-        {/* 解析摘要＋主 CTA 列 */}
-        <div className="story-parse-bar">
-          <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
-            {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
-            {summary && summary.flagged > 0 && (
-              <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
-            )}
-            {isDirty && hasParsed && <Chip className="story-chip-dirty">內容已改，建議重新解析</Chip>}
-          </div>
-          {canEdit && (
-            <div className="story-parse-bar__actions">
-              <Button
-                variant={hasParsed && !isDirty ? "ghost" : "primary"}
-                disabled={parse.isPending || isBlank}
-                onClick={() => parse.mutate({ projectId })}
-                title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
-              >
-                {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
-              </Button>
-              {needsBoardConfirm ? (
-                // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
-                <ConfirmButton
-                  triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
-                  message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
-                  confirmLabel="套用"
-                  disabled={board.isPending}
-                  onConfirm={() => board.mutate({ projectId })}
-                >
-                  {board.isPending ? "建立中…" : "產生分鏡"}
-                </ConfirmButton>
-              ) : (
-                <Button
-                  variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                  disabled={board.isPending || !lastRun || lastRun.status !== "done"}
-                  onClick={() => board.mutate({ projectId })}
-                  title="把解析出的場與鏡建成可編輯的分鏡卡"
-                >
-                  {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
-                </Button>
+          /* 解析摘要、主 CTA 與解析結果一起進全螢幕：
+             不然「產生分鏡」與「解析完成了嗎」都要退出全螢幕才看得到，寫作流被切斷 */
+          footer={
+            <>
+              <div className="story-parse-bar">
+                <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
+                  {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
+                  {summary && summary.flagged > 0 && (
+                    <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
+                  )}
+                  {isDirty && hasParsed && <Chip className="story-chip-dirty">內容已改，建議重新解析</Chip>}
+                </div>
+                {canEdit && (
+                  <div className="story-parse-bar__actions">
+                    <Button
+                      variant={hasParsed && !isDirty ? "ghost" : "primary"}
+                      disabled={parse.isPending || isBlank}
+                      onClick={() => parse.mutate({ projectId })}
+                      title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
+                    >
+                      {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
+                    </Button>
+                    {needsBoardConfirm ? (
+                      // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
+                      <ConfirmButton
+                        triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
+                        message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
+                        confirmLabel="套用"
+                        disabled={board.isPending}
+                        onConfirm={() => board.mutate({ projectId })}
+                      >
+                        {board.isPending ? "建立中…" : "產生分鏡"}
+                      </ConfirmButton>
+                    ) : (
+                      <Button
+                        variant={hasParsed && !isDirty ? "primary" : "ghost"}
+                        disabled={board.isPending || !lastRun || lastRun.status !== "done"}
+                        onClick={() => board.mutate({ projectId })}
+                        title="把解析出的場與鏡建成可編輯的分鏡卡"
+                      >
+                        {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {save.error && <p className="error">{save.error.message}</p>}
+              {parse.error && <p className="error">{parse.error.message}</p>}
+              {board.error && <p className="error">{board.error.message}</p>}
+              {undoRun.error && <p className="error">{undoRun.error.message}</p>}
+              {parseNotice && (
+                <Hint role="status" style={{ marginTop: 6 }}>
+                  {parseNotice}
+                  {lastRun && lastRun.status === "done" && canEdit && (
+                    <ConfirmButton
+                      triggerClassName="btn-sm btn-ghost"
+                      message="撤銷這次解析？會移除它建立的角色／場景／道具與分鏡（分鏡進回收桶、已被其他鏡引用的卡片會保留）。"
+                      confirmLabel="撤銷"
+                      disabled={undoRun.isPending}
+                      onConfirm={() => undoRun.mutate({ runId: lastRun.id })}
+                    >
+                      撤銷這次解析
+                    </ConfirmButton>
+                  )}
+                </Hint>
               )}
-            </div>
-          )}
-        </div>
-        {parse.error && <p className="error">{parse.error.message}</p>}
-        {board.error && <p className="error">{board.error.message}</p>}
-        {undoRun.error && <p className="error">{undoRun.error.message}</p>}
-        {parseNotice && (
-          <Hint role="status" style={{ marginTop: 6 }}>
-            {parseNotice}
-            {lastRun && lastRun.status === "done" && canEdit && (
-              <ConfirmButton
-                triggerClassName="btn-sm btn-ghost"
-                message="撤銷這次解析？會移除它建立的角色／場景／道具與分鏡（分鏡進回收桶、已被其他鏡引用的卡片會保留）。"
-                confirmLabel="撤銷"
-                disabled={undoRun.isPending}
-                onConfirm={() => undoRun.mutate({ runId: lastRun.id })}
-              >
-                撤銷這次解析
-              </ConfirmButton>
-            )}
-          </Hint>
-        )}
+            </>
+          }
+        />
 
         {/* 需要確認：只顯示 AI 真正不確定的項目（<70%），其他一律背景處理 */}
         {pending.length > 0 && (

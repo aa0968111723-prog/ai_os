@@ -47,6 +47,7 @@ import { communityRouter } from "./community";
 import { shareRouter } from "./share";
 import { attachmentsRouter } from "./attachments";
 import { notificationsRouter } from "./notifications";
+import { collaborationRouter } from "./collaboration";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -98,6 +99,7 @@ export const appRouter = router({
   share: shareRouter,
   attachments: attachmentsRouter,
   notifications: notificationsRouter,
+  collaboration: collaborationRouter,
 });
 
 export type AppRouter = typeof appRouter;

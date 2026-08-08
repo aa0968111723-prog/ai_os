@@ -158,6 +158,141 @@ function dispatchAssistantEvent(
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /**
+ * 全站助手串流的 done 形狀（/api/assistant/site-ask）。
+ *
+ * 與專案助手的 AssistantStreamDone 是**不同形狀**：多了 siteActions／dispatches、
+ * 沒有 fallback 欄位——共用 isDoneEvent 會因缺 fallback 而整包判失敗、done 永遠不派發。
+ * 陣列元素刻意寬鬆（unknown[]）：實際型別由呼叫端以 tRPC 推導型別收窄，
+ * 這裡只驗「串流協定有沒有走完」。
+ */
+export type SiteAssistantStreamDone = {
+  answer: string;
+  siteActions: unknown[];
+  dispatches: unknown[];
+  actions: unknown[];
+  steps: string[];
+  mock: boolean;
+  contextUsed?: string[];
+  rationale?: string;
+  degraded?: boolean;
+  traceSessionId?: string;
+};
+
+function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.answer === "string"
+    && Array.isArray(candidate.siteActions)
+    && Array.isArray(candidate.dispatches)
+    && Array.isArray(candidate.actions)
+    && Array.isArray(candidate.steps)
+    && candidate.steps.every((step) => typeof step === "string")
+    && typeof candidate.mock === "boolean"
+  );
+}
+
+export type SiteAssistantStreamHandlers = {
+  onStep: (event: AssistantActivityEvent) => void;
+  onDone: (result: SiteAssistantStreamDone) => void;
+  onError: (message: string) => void;
+};
+
+/**
+ * 全站助手 SSE（/api/assistant/site-ask）。回傳語義與 requestAssistantStream 相同：
+ * true＝已到終局事件／已收過 payload／主動中止——呼叫端**不得**再退回 tRPC 重跑
+ * （會重複吃限流與 LLM 額度）；false＝串流根本沒開始，可安全走一次性 fallback。
+ */
+export async function requestSiteAssistantStream({
+  groupId,
+  message,
+  history,
+  projectId,
+  signal,
+  handlers,
+  fetchImpl = fetch,
+}: {
+  groupId: string;
+  message: string;
+  history?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
+  projectId?: string;
+  signal: AbortSignal;
+  handlers: SiteAssistantStreamHandlers;
+  fetchImpl?: FetchLike;
+}): Promise<boolean> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let sawPayload = false;
+  const dispatchSite = (parsed: ParsedAssistantSseEvent): boolean => {
+    if (parsed.event === "step" && isActivityEvent(parsed.data)) {
+      handlers.onStep(parsed.data);
+      return false;
+    }
+    if (parsed.event === "done" && isSiteDoneEvent(parsed.data)) {
+      handlers.onDone(parsed.data);
+      return true;
+    }
+    if (parsed.event === "error") {
+      const message =
+        parsed.data
+        && typeof parsed.data === "object"
+        && typeof (parsed.data as { message?: unknown }).message === "string"
+          ? (parsed.data as { message: string }).message
+          : "AI 助手暫時沒回應，請稍後再試";
+      handlers.onError(message);
+      return true;
+    }
+    return false;
+  };
+  try {
+    const response = await fetchImpl("/api/assistant/site-ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groupId,
+        message,
+        history: history?.length ? history : undefined,
+        projectId,
+      }),
+      signal,
+    });
+    if (!response.ok || !response.body) return false;
+
+    reader = response.body.getReader();
+    const decoder = new AssistantSseDecoder();
+    for (;;) {
+      const result = await reader.read();
+      const events = result.done ? decoder.finish() : decoder.push(result.value);
+      for (const event of events) {
+        if (event.event === "step" || event.event === "done" || event.event === "error") {
+          sawPayload = true;
+        }
+        if (dispatchSite(event)) return true;
+      }
+      if (result.done) break;
+    }
+    if (sawPayload) {
+      handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");
+      return true;
+    }
+    return false;
+  } catch (error) {
+    if (isAbortError(error)) return true;
+    if (sawPayload) {
+      handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");
+      return true;
+    }
+    return false;
+  } finally {
+    try {
+      await reader?.cancel();
+    } catch {
+      // The transport can already be closed. Releasing it is best effort.
+    }
+  }
+}
+
+/**
  * Request and consume the assistant SSE stream.
  *
  * true means the request reached a terminal SSE event, was deliberately

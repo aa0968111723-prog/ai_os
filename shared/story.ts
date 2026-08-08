@@ -21,6 +21,30 @@ export const LOOK_COSTUME_MAX = 500;
 /** 每專案 Look 上限（與其他卡片同一守門思路） */
 export const MAX_PROJECT_LOOKS = 100;
 
+/* ── 作者備註行（劇本標注工具的「註記」）─────────────────────────
+ * 編劇在稿子裡寫給自己或夥伴的話（「這裡待補」「跟導演確認」），
+ * 不是故事內容。它必須存在故事全文裡（不然版本、協作、複製貼上都會掉），
+ * 但**不可以**被解析成角色／場景／鏡頭——否則備註會長出假的分鏡。
+ * 所以前綴定義放共用層：編輯器插入它、解析引擎剔除它，兩邊吃同一份真相。 */
+export const STORY_NOTE_PREFIX = "註：";
+/** 也接受的等價寫法（半形冒號、程式碼慣例的 //） */
+const STORY_NOTE_PATTERN = /^\s*(?:註[:：]|\/\/)/;
+
+export function isStoryNoteLine(line: string): boolean {
+  return STORY_NOTE_PATTERN.test(line);
+}
+
+/**
+ * 送進解析前剔除備註行。整行拿掉、不留空行——留空行等於在段落中間插一個分段，
+ * 而「空行＝換一場戲」是解析的分場依據，會把一場戲硬生生切成兩場。
+ */
+export function stripStoryNotes(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !isStoryNoteLine(line))
+    .join("\n");
+}
+
 /* ── 信心分級（PE 計畫 §06）────────────────────────────────
  *  ≥ AUTO：自動套用（活動紀錄可查）
  *  ≥ FLAG：先套用但標記「可能需要確認」

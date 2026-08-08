@@ -27,6 +27,29 @@
 | §14 變更預覽/版本/增量 | Change Preview、Incremental Parsing、Undo | 故事 hash 差異訊號（isDirty）＋重解不重複建卡；`storyboardPreview`（轉分鏡前規模預覽）；`story.undoRun`（撤銷解析含分鏡：Shot 進回收桶、使用者確認的實體保留、只回復「現值仍是我們寫的」欄位）；故事版本快照/還原 | ✅（MVP 範圍） |
 | §19 驗收 | Golden Path 必過測試 | `scripts/e2e-story.py`（13 段斷言：貼故事→解析→確認卡→冪等→轉分鏡→環境繼承→Shot 綁定生成→Look 分層→改故事差異→Undo→版本→守門）；已入 CI e2e 迴圈與 run-e2e-local.sh | ✅ |
 
+## 2026-08-08 追加：劇本編寫環境（全螢幕＋標注＋專業工具）＋解析改用高階模型
+
+原本的 ① 故事只有一個 textarea。寫「故事」夠，寫「劇本」不夠——所以在不改資料模型的前提下
+把它升級成編寫環境（`features/story-workspace/ScriptEditor.tsx`；規則在 `scriptTools.ts`）：
+
+| 能力 | 落地 | 為什麼這樣做 |
+|---|---|---|
+| 全螢幕寫作 | 沿用 `lib/useImmersive`（body class `story-immersive`） | 與動畫創作室／知識族譜同一套：原生 Fullscreen API＋CSS 沉浸兩層，iOS 不支援元素 requestFullscreen 時按鈕仍然有反應。解析摘要與「產生分鏡」一起進全螢幕，寫作流不必為了按鈕退出來 |
+| 標注（9 種） | 角色／場景／道具／造型＝插入宣告行；對白／旁白／動作／轉場／註記＝行前綴可 toggle | **標注寫進故事全文本身**，不另存中繼格式：故事是唯一來源，版本、協作、AI 解析讀的都是同一份文字。插進去的前綴就是解析引擎既有的那一套（`角色：`／`場景：`／`道具：`／`造型：角色＝描述`） |
+| 註記不進解析 | `shared/story.ts` 的 `isStoryNoteLine`／`stripStoryNotes`，`runStoryParse` 送模型前剔除 | 「註：這裡待補一場追車」會被解析成一場真的追車戲。整行拿掉而不是留空行——空行是分場依據，留著會把一場切成兩場 |
+| 大綱導覽 | `scriptOutline`：明寫分場（`場景：`／`# 標題`／`第 N 場`／`轉場：`）優先，沒有時退回空行分段 | 退回規則刻意與解析引擎的「一段＝一場戲」對齊，否則使用者照大綱數的場數跟解析結果對不起來 |
+| 尋找／取代 | `findMatches`／`replaceAll`（不重疊；**備註行不動**） | 改主角名字是長稿必備。備註常寫著「主角原本叫小美，先別改」，一起改掉那句話就自相矛盾 |
+| 統計 | 字數（不含空白與備註）、段數、預估片長（句數 × 5 秒／鏡） | 每鏡秒數取 `storyParse` 的 `durationSec` 預設值，估算才不會跟實際分鏡打架 |
+| 字級／專注模式／快捷鍵 | 字級走 CSS 變數（localStorage 綁裝置）；Alt+1～9 標注、⌘F 尋找、⌘⇧F 全螢幕、⌘⇧O 大綱 | 字級不用內聯 `font-size`：手機 ≥16px 防 iOS 自動放大的守則要留在樣式表裡（`max(16px, …)`），內聯會蓋掉它。快捷鍵一律要修飾鍵——焦點就在 textarea 裡，裸鍵會讓打字誤觸插前綴 |
+
+**解析改用高階模型**（`NIM_REASONING_MODEL`，預設 `meta/llama-3.1-405b-instruct`，
+可用 `NVIDIA_NIM_REASONING_MODEL` 換掉）：劇本解析要一次讀完整份稿子，同時做代名詞歸併、
+既有卡比對、分場分鏡與信心評分——這是整條製作鏈的源頭，這裡漏一個角色，後面每一顆鏡都少一個錨點。
+它一份劇本只跑一次，成本差距換得起品質；逐鏡生成、助手閒聊那種高頻短任務不動（貴又慢、品質差距吃不到）。
+旗艦模型失敗時 `nimCompleteWithFallback` 降級一次到日常主力模型並寫進 AI 軌跡——
+「解析整個失敗」比「用 70B 解析」糟得多；但金鑰無效／點數用完／流量上限不降級（換模型救不了）。
+逾時同步放寬到 150 秒（旗艦模型較慢，90 秒會把成功的解析判成逾時）。
+
 ## 工程 Guardrails（§18）對應
 
 - **Idempotency**：同文 hash 短路；強制重解全走 RESOLVE 連結（e2e 斷言零新建）；轉分鏡同 run 冪等（applied.storyboard）。
@@ -36,6 +59,7 @@
 - **Prompt Snapshot**：生成走既有 `generations.params`＋aiTrace prepared 事件。
 - **Mobile First**：分鏡卡單欄、故事編輯器 16px 防 iOS 縮放、設定 sheet 全螢幕、主 CTA 沿用 --chrome-bottom 契約。
 - **Cost Control**：解析預算 12k 字（截斷透明回報）；解析/轉分鏡 0 點（NIM 免費檔）；限流 `story:parse` 6/min。
+  高階模型只用在「一份劇本跑一次」的解析上，且失敗會自動降級——不讓模型檔位變成單點故障。
 
 ## 刻意不做（PDF「第一輪不要做」＋現況暫緩）
 

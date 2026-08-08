@@ -12,6 +12,7 @@ import { FormatPicker } from "../components/FormatPicker";
 import { Button, Card, Chip, EmptyState, Hint, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { useCollab, CursorOverlay } from "../realtime";
+import { CollabPanel } from "../features/collaboration/CollabPanel";
 import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
@@ -309,36 +310,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <p className="sub">
             {activeGroup ? `這裡整理「${activeGroup.groupName}」需要你處理的事、AI 進度與最近專案。` : "需要你處理的事與 AI 進度都在這裡。"}
           </p>
-          {collab.connected && collab.peers.length > 0 && (
-            <div
-              aria-label="組內在線"
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 6,
-                marginTop: 10,
-                alignItems: "center",
-              }}
-            >
-              <Hint as="span" style={{ margin: 0, fontSize: 12 }}>
-                組內在線
-              </Hint>
-              {collab.peers.map((p) => (
-                <Chip
-                  key={p.userId}
-                  style={{
-                    margin: 0,
-                    background: p.color,
-                    color: "#fff",
-                    borderColor: p.color,
-                  }}
-                  title={p.userId === collab.self?.userId ? "你" : p.name}
-                >
-                  {p.userId === collab.self?.userId ? "你" : p.name}
-                </Chip>
-              ))}
-            </div>
-          )}
+          {/*
+            原本這裡只有一排名字 chip（「組內在線 Bruce 韋澔」）。它回答不了任何一個
+            使用者真正會問的問題——誰在忙什麼、有什麼找我、哪裡卡住了。
+            換成 CollabPanel：同一份即時在場資料，加上一支伺服器聚合，
+            讓首頁真的能回答「我的下一步是什麼」。
+          */}
+          <CollabPanel groupId={groupId || null} livePeerCount={collab.connected ? collab.peers.length : undefined} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button

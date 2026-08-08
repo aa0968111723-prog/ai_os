@@ -234,7 +234,15 @@ describe("SceneStudio", () => {
     mountStudio();
     await user.type(screen.getByRole("textbox", { name: /這一格的提示詞/ }), "，逆光");
     await user.click(screen.getByRole("button", { name: /儲存提示詞/ }));
-    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", prompt: "黃昏的海邊，逆光" });
+    // 併發契約（shared/revision.ts）：每一支存檔都要帶「我載入時的版本」與「該欄原值」，
+    // 伺服器才分得出「我們改了同一欄」與「我們各改各的」。少了它就會回到靜默覆蓋。
+    expect(updateMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      prompt: "黃昏的海邊，逆光",
+      expectedRev: undefined,
+      // baseline 是「我載入時這一欄長什麼樣」——伺服器靠它判斷夥伴有沒有真的動過這欄
+      baseline: { prompt: "黃昏的海邊" },
+    });
   });
 
   it("版本頁列出每一版，現用的那版不給「設為現用」，舊版可以切回", async () => {
@@ -330,7 +338,12 @@ describe("SceneStudio", () => {
     expect(screen.getByRole("button", { name: /儲存配音詞/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /^生成配音/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /儲存配音詞/ }));
-    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", voiceover: "各位同學大家好" });
+    expect(updateMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      voiceover: "各位同學大家好",
+      expectedRev: undefined,
+      baseline: { voiceover: null },
+    });
   });
 
   it("配音詞已儲存：生成配音帶冪等鍵送出（重試不重複扣點）", async () => {
@@ -381,7 +394,12 @@ describe("SceneStudio", () => {
     mountStudio();
     await user.type(screen.getByRole("textbox", { name: /這一鏡的動作走位/ }), "從門口走到窗邊");
     await user.click(screen.getByRole("button", { name: /儲存走位/ }));
-    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", action: "從門口走到窗邊" });
+    expect(updateMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      action: "從門口走到窗邊",
+      expectedRev: undefined,
+      baseline: { action: null },
+    });
   });
 
   it("走位欄位明講「只送影片模型」——使用者才知道重畫靜圖時它不會生效", async () => {
@@ -398,7 +416,12 @@ describe("SceneStudio", () => {
     await user.type(screen.getByRole("textbox", { name: /這一鏡聽得到什麼/ }), "遠處鐘聲");
     expect(screen.getByRole("button", { name: /^生成環境音/ })).toBeDisabled(); // 未儲存＝後端讀不到
     await user.click(screen.getByRole("button", { name: /儲存描述/ }));
-    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", ambience: "遠處鐘聲" });
+    expect(updateMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      ambience: "遠處鐘聲",
+      expectedRev: undefined,
+      baseline: { ambience: null },
+    });
   });
 
   it("描述已儲存：生成環境音帶冪等鍵，且送的是環境音而非配音", async () => {
