@@ -87,6 +87,7 @@ import { StyleVisualGallery } from "../components/StyleVisualGallery";
 import { ToneVisualPalette } from "../components/ToneVisualPalette";
 import { ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
+import { SectionErrorBoundary } from "../components/SectionErrorBoundary";
 import {
   useCollab,
   CursorOverlay,
@@ -1666,15 +1667,17 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-1"
             hint={storyReady ? "已有故事" : "從這裡開始"}
           />
-          <StoryStage
-            projectId={id}
-            canEdit={canEdit}
-            mobileCompact={mobileCompact}
-            onOpenSettings={() => {
-              setSettingsOpen(true);
-              setToneTab("story");
-            }}
-          />
+          <SectionErrorBoundary title="故事">
+            <StoryStage
+              projectId={id}
+              canEdit={canEdit}
+              mobileCompact={mobileCompact}
+              onOpenSettings={() => {
+                setSettingsOpen(true);
+                setToneTab("story");
+              }}
+            />
+          </SectionErrorBoundary>
           <StageLink text="AI 解析後角色、場景、道具自動就位；「產生分鏡」把故事變成分鏡卡" />
 
           {/* ② 分鏡（Storyboard Center）：分鏡卡＝製作中心——所有生成從 Shot 出發、可追溯 */}
@@ -1686,13 +1689,15 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-2"
             hint={sceneCount > 0 ? `${sceneCount} 鏡` : "待產生"}
           />
-          <StoryboardStage
-            projectId={id}
-            canEdit={canEdit}
-            charIds={charIds}
-            sceneIds={sceneIds}
-            propIds={propIds}
-          />
+          <SectionErrorBoundary title="分鏡">
+            <StoryboardStage
+              projectId={id}
+              canEdit={canEdit}
+              charIds={charIds}
+              sceneIds={sceneIds}
+              propIds={propIds}
+            />
+          </SectionErrorBoundary>
           <StageLink text="逐鏡出圖在卡上完成；要自由發想、跑範本、多步開拍就到 ③ 製作" />
 
           {/* 專案設定（二層；PE 計畫 §03）：舊「定調」的資料面全數收納於此——
@@ -2565,30 +2570,32 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          <CreationWorkbench
-            projectId={id}
-            canEdit={canEdit}
-            isLeader={isLeader}
-            groupId={p.groupId}
-            myRole={myRole}
-            projectFormat={p.format}
-            worldview={{
-              logline: wv.logline,
-              message: wv.message,
-              tones: wv.tones,
-              styles: wv.styles,
-              taboos: wv.taboos,
-            }}
-            wvReady={wvReady}
-            characterIds={charIds}
-            scenePresetIds={sceneIds}
-            propIds={propIds}
-            carriedPropIds={carriedPropIds}
-            generateApplyRequest={generateApply}
-            onReuseGenerate={applyPrompt}
-            onGenerateSourceChange={setSourceHighlightId}
-            studioCollab={zoneProps(COLLAB_ZONES.studio)}
-          />
+          <SectionErrorBoundary title="製作">
+            <CreationWorkbench
+              projectId={id}
+              canEdit={canEdit}
+              isLeader={isLeader}
+              groupId={p.groupId}
+              myRole={myRole}
+              projectFormat={p.format}
+              worldview={{
+                logline: wv.logline,
+                message: wv.message,
+                tones: wv.tones,
+                styles: wv.styles,
+                taboos: wv.taboos,
+              }}
+              wvReady={wvReady}
+              characterIds={charIds}
+              scenePresetIds={sceneIds}
+              propIds={propIds}
+              carriedPropIds={carriedPropIds}
+              generateApplyRequest={generateApply}
+              onReuseGenerate={applyPrompt}
+              onGenerateSourceChange={setSourceHighlightId}
+              studioCollab={zoneProps(COLLAB_ZONES.studio)}
+            />
+          </SectionErrorBoundary>
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
@@ -2603,13 +2610,15 @@ export function ProjectPage({ id }: { id: string }) {
           />
           {/* §12 交付室第一屏：完成度＋缺漏清單。補件本身仍在 ② 分鏡的單格工作室，
               點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
-          <DeliveryRoom
-            projectId={id}
-            canEdit={canEdit}
-            onOpenShot={(shotId) => {
-              scrollToSelector(`#board-shot-${shotId}`);
-            }}
-          />
+          <SectionErrorBoundary title="成片">
+            <DeliveryRoom
+              projectId={id}
+              canEdit={canEdit}
+              onOpenShot={(shotId) => {
+                scrollToSelector(`#board-shot-${shotId}`);
+              }}
+            />
+          </SectionErrorBoundary>
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
             <p
