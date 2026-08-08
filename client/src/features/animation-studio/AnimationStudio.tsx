@@ -1,24 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Meta } from "../../components/ui";
 import { BrushShelf } from "./BrushShelf";
 import { ShotStrip, type StudioShot } from "./ShotStrip";
 import { StudioAiPanel } from "./StudioAiPanel";
+import { StudioHeader } from "./StudioHeader";
+import { StudioStage } from "./StudioStage";
+import { StoryboardTimeline } from "./StoryboardTimeline";
+import { ShotInspector, type InspectorShot, type InspectorTab } from "./ShotInspector";
+import { ToolRail } from "./ToolRail";
 import { WhiteboardCanvas, type BoardView } from "./WhiteboardCanvas";
 import { collectBrush, updateSavedBrush, workingCopy } from "./brushCollection";
 import { BRUSH_LIMITS, DEFAULT_BRUSH_ID, findBrush, type BrushSpec } from "./brushes";
 import { boardSizeForFormat, isBoardEmpty } from "./boardDoc";
-import { exportBoardPng } from "./boardExport";
+import { boardFileName, exportBoardPng } from "./boardExport";
 import { allBrushes, readSavedBrushes, readStudioPrefs, writeSavedBrushes, writeStudioPrefs } from "./studioStorage";
 import { summarizeBoard } from "./boardSummary";
 import { clampZoom, fitBoardToBox } from "./studioLayout";
 import { resolveShortcut, SHORTCUT_HINTS } from "./studioShortcuts";
+import {
+  DEFAULT_GUIDES,
+  DEFAULT_PANELS,
+  brushIdFor,
+  optionsKindFor,
+  panModeFor,
+  toggleGuide,
+  toolForBrushId,
+  type GuideKey,
+  type StudioTool,
+} from "./studioTools";
+import type { NewShotKind } from "./NewShotMenu";
 import type { SketchPreview } from "./sketchReplay";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
 import "./studio.css";
+import "./studio.workspace.css";
 
 export interface AnimationStudioProps {
   projectId: string;
@@ -32,10 +51,22 @@ export interface AnimationStudioProps {
 type LiteSheet = "none" | "shots" | "ai" | "brushes";
 
 /**
- * 動畫創作室：左手畫、右手把它變成分鏡。
+ * 進入創作室時掛在 <body>：全站導航（今日／私訊／資料中心／靈感頻道…）讓開。
  *
- * 三個區塊固定不變，只有排法隨裝置換（見 studioLayout）：
- *   **手繪大白板**（中央）｜**順序分鏡表**（桌機底部軌道／手機貼底 sheet）｜**AI 協作欄**（桌機右欄／手機 sheet）
+ * 與 `studio-immersive`（全螢幕按鈕）平行而不是同一個：**沉浸是版面，全螢幕是視窗**。
+ * 進站即工作台模式——創作時畫面上該有的是這支片，不是「換一件事做」的入口；
+ * 回全站的路留在 Top Bar 最左的麵包屑，不是藏起來。
+ * 只有桌機掛：手機拿掉底部分頁列會讓人出不去（那是它唯一的返回路徑）。
+ */
+export const WORKSPACE_BODY_CLASS = "studio-workspace";
+
+/**
+ * Aios Storyboard Studio：左手畫、右手把它變成分鏡。
+ *
+ * 桌機是四區工作台（Figma／Resolve 那一類的專業版面）：
+ *   **ToolRail**（左，窄）｜**Stage**（中，畫布優先）｜**Shot Inspector**（右）｜**Storyboard Timeline**（底）
+ * 手機維持既有的輕量版（白板＋筆刷 dock＋貼底 sheet）——四區工作台在 390px 上不成立，
+ * 硬塞只會讓白板小到不能畫。版面由 `studioLayout` 決定後掛成 `data-mode`，CSS 只吃屬性。
  *
  * 白板草稿存在本機（每一鏡一份，見 studioStorage），只有按下「存成這一鏡的畫面」
  * 才會上傳成專案素材。這條界線是刻意的：塗鴉階段不該打擾團隊的素材庫，
@@ -43,15 +74,19 @@ type LiteSheet = "none" | "shots" | "ai" | "brushes";
  */
 export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdit }: AnimationStudioProps) {
   const layout = useStudioLayout();
+  const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const scenes = trpc.scenes.listByProject.useQuery({ projectId });
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
+  // 場（story_scenes）：Top Bar 的麵包屑要顯示「這一鏡屬於哪一場」
+  const storyScenes = trpc.story.scenesList.useQuery({ projectId });
 
   const boardSize = useMemo(() => boardSizeForFormat(projectFormat), [projectFormat]);
   // 白板本體、切鏡與存檔都在 useBoardSession（會弄丟畫作的邏輯集中在那裡，並有測試盯著）
   const { board, activeShotId, draftIds, storageFull, switchTo, pushStroke, undo, redo, clear, markSaved } =
     useBoardSession(projectId, boardSize, layout);
   const shot = shots.find((s) => s.id === activeShotId) ?? null;
+  const shotIndex = shot ? shots.findIndex((s) => s.id === shot.id) : -1;
 
   // ── 筆刷櫃 ───────────────────────────────────────────────
   const [saved, setSaved] = useState<BrushSpec[]>(() => readSavedBrushes());
@@ -59,11 +94,14 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const [activeBrushId, setActiveBrushId] = useState<string>(DEFAULT_BRUSH_ID);
   const [brush, setBrush] = useState<BrushSpec>(() => workingCopy(findBrush(allBrushes(readSavedBrushes()), DEFAULT_BRUSH_ID)));
   const [brushNotice, setBrushNotice] = useState("");
+  /** 上一支「畫圖用」的筆：從橡皮擦切回畫筆要回到它，而不是固定的預設筆 */
+  const lastDrawBrushRef = useRef<string>(DEFAULT_BRUSH_ID);
 
   const selectBrush = (id: string) => {
     setActiveBrushId(id);
     setBrush(workingCopy(findBrush(brushes, id)));
     setBrushNotice("");
+    if (id !== "builtin.eraser") lastDrawBrushRef.current = id;
   };
 
   /** 穩定器與筆壓曲線：跨筆刷的工作習慣（這台裝置＋這雙手），存進裝置偏好 */
@@ -104,12 +142,28 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     if (activeBrushId === id) selectBrush(DEFAULT_BRUSH_ID);
   };
 
+  // ── 工具（桌機的左欄；lite 沿用舊的「筆刷＋平移鈕」）────────
+  const [tool, setTool] = useState<StudioTool>("draw");
+  const [showReference, setShowReference] = useState(true);
+  const [guides, setGuides] = useState(DEFAULT_GUIDES);
+  const [panels, setPanels] = useState(DEFAULT_PANELS);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("frame");
+  /** Top Bar 的「⋯」選單（匯出、分享、清空） */
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const pickTool = (next: StudioTool) => {
+    setTool(next);
+    const brushId = brushIdFor(next, lastDrawBrushRef.current);
+    if (brushId) selectBrush(brushId);
+    if (next === "ai") setInspectorTab("ai");
+    if (next === "reference") setShowReference(true);
+  };
+
   // ── 白板檢視（縮放、平移、描圖底稿）──────────────────────
   const [view, setView] = useState<BoardView>({ scale: 1, offsetX: 0, offsetY: 0 });
-  /** AI 正在畫的那一筆（逐點預覽）：由 StudioAiPanel 的重播驅動，畫在白板 live 層 */
+  /** AI 正在畫的那一筆（逐點預覽）：由 AI 動作的重播驅動，畫在白板 live 層 */
   const [aiPreview, setAiPreview] = useState<SketchPreview | null>(null);
   const [panMode, setPanMode] = useState(false);
-  const [showReference, setShowReference] = useState(true);
   const boardRef = useRef(board);
   boardRef.current = board;
 
@@ -135,6 +189,17 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setView({ scale: fit.scale, offsetX: fit.offsetX + 16, offsetY: fit.offsetY + 16 });
   };
 
+  /** 回到 100%：以可視區中心為錨（與 zoomBy 同一套數學，換算不會跳） */
+  const actualSize = () => {
+    const el = boardBox();
+    const cx = (el?.clientWidth ?? 0) / 2;
+    const cy = (el?.clientHeight ?? 0) / 2;
+    setView((v) => {
+      const ratio = 1 / v.scale;
+      return { scale: 1, offsetX: cx - (cx - v.offsetX) * ratio, offsetY: cy - (cy - v.offsetY) * ratio };
+    });
+  };
+
   /** 快捷鍵要呼叫的東西每次 render 都是新函式；用 ref 轉一手，
    *  keydown 監聽器才不必每次重掛（重掛本身沒錯，但按鍵在重掛的空檔會漏接）。 */
   const zoomByRef = useRef(zoomBy);
@@ -143,6 +208,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   fitToScreenRef.current = fitToScreen;
   const selectBrushRef = useRef(selectBrush);
   selectBrushRef.current = selectBrush;
+  const pickToolRef = useRef(pickTool);
+  pickToolRef.current = pickTool;
 
   // ── 分鏡表操作 ────────────────────────────────────────────
   const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
@@ -154,13 +221,42 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   });
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidateScenes });
   const reorder = trpc.scenes.reorder.useMutation({ onSuccess: invalidateScenes });
+  const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
+    onSuccess: (created) => {
+      invalidateScenes();
+      if (created?.id) switchTo(created.id);
+    },
+  });
+  const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
+
+  /**
+   * 「＋ 新增鏡」的四條路（見 NewShotMenu）。每一條都對到既有的後端動作，
+   * 不新開 API：blank／continue 走 addDraft／insertAfter，AI 兩條走 director。
+   */
+  const createShot = (kind: NewShotKind) => {
+    if (kind === "blank") {
+      addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      return;
+    }
+    if (kind === "continue") {
+      // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白
+      if (shot) insertAfter.mutate({ sceneId: shot.id });
+      else addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      return;
+    }
+    // AI 兩條：切到 Inspector 的 AI 分頁，動作本身在那裡（帶著這一鏡的上下文）
+    setInspectorTab("ai");
+    setTool("ai");
+    setPanels((p) => ({ ...p, inspector: false }));
+  };
 
   // ── 收成 sheet 的面板（手機全部、窄桌機只有 AI 欄）────────────
   const [sheet, setSheet] = useState<LiteSheet>("none");
   const lite = layout.mode === "lite";
   const shotsAsSheet = layout.shotStrip === "sheet";
   const aiAsSheet = layout.aiPanel === "sheet";
-  const panelsAsSheet = shotsAsSheet || aiAsSheet;
+  const panelsAsSheet = lite && (shotsAsSheet || aiAsSheet);
   // 版面切換（轉向、拉視窗、進出全螢幕）時把開著的 sheet 收掉，
   // 否則常駐欄與 sheet 會同時出現同一塊內容
   useEffect(() => {
@@ -169,6 +265,16 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
 
   // ── 全螢幕專注模式 ────────────────────────────────────────
   const { immersive, exit: exitImmersive, toggle: toggleImmersive } = useImmersive(hostRef);
+
+  /**
+   * 工作台模式：桌機進站就讓全站導航收起（見 WORKSPACE_BODY_CLASS）。
+   * 手機不掛——底部分頁列是它唯一的返回路徑，拿掉會讓人出不去。
+   */
+  useEffect(() => {
+    if (lite) return;
+    document.body.classList.add(WORKSPACE_BODY_CLASS);
+    return () => document.body.classList.remove(WORKSPACE_BODY_CLASS);
+  }, [lite]);
 
   const exportBoard = useCallback(() => exportBoardPng(boardRef.current.doc, layout.exportMaxEdge), [layout.exportMaxEdge]);
 
@@ -190,8 +296,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         case "exitImmersive": exitImmersive(); break;
         case "brushBigger": setBrush((b) => ({ ...b, size: Math.min(BRUSH_LIMITS.size.max, b.size + 1) })); break;
         case "brushSmaller": setBrush((b) => ({ ...b, size: Math.max(BRUSH_LIMITS.size.min, b.size - 1) })); break;
-        case "eraser": selectBrushRef.current("builtin.eraser"); break;
-        case "brush": selectBrushRef.current(DEFAULT_BRUSH_ID); break;
+        case "eraser": pickToolRef.current("eraser"); break;
+        case "brush": pickToolRef.current("draw"); break;
         case "pan": setPanMode((v) => !v); break;
         case "fit": fitToScreenRef.current(); break;
         case "zoomIn": zoomByRef.current(1.2); break;
@@ -202,8 +308,52 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo, toggleImmersive, exitImmersive, immersive]);
 
-  const referenceUrl = showReference && shot?.assetUrl && shot.assetKind !== "audio" ? shot.assetUrl : null;
+  /** 快捷鍵直接換筆（B／E）時，左欄的工具高亮要跟著走 */
+  useEffect(() => {
+    setTool((cur) => (cur === "draw" || cur === "eraser" ? toolForBrushId(activeBrushId) : cur));
+  }, [activeBrushId]);
+
+  // ── 把白板存成這一鏡的畫面（原本在 StudioAiPanel，抽上來讓兩種版面共用）──
+  const [saveState, setSaveState] = useState<"idle" | "uploading" | "done">("idle");
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => { setSaveState("idle"); setSaveError(""); }, [shot?.id]);
+  const setVisual = trpc.scenes.setVisualFromAsset.useMutation({ onSuccess: invalidateScenes });
   const boardEmpty = isBoardEmpty(board.doc);
+
+  const saveBoardToShot = useCallback(async () => {
+    if (!shot || isBoardEmpty(boardRef.current.doc)) return;
+    setSaveState("uploading");
+    setSaveError("");
+    try {
+      const exported = await exportBoard();
+      if (!exported) throw new Error("白板匯出失敗");
+      const form = new FormData();
+      form.append("projectId", projectId);
+      form.append("file", new File([exported.blob], boardFileName(shot.title), { type: "image/png" }));
+      const res = await fetch("/api/upload", { method: "POST", body: form, credentials: "same-origin" });
+      const data = (await res.json()) as { ok?: boolean; error?: string; asset?: { id: string } };
+      if (!res.ok || !data.ok || !data.asset) throw new Error(data.error ?? `上傳失敗（${res.status}）`);
+      await setVisual.mutateAsync({ sceneId: shot.id, assetId: data.asset.id });
+      void utils.projects.assets.invalidate({ projectId });
+      setSaveState("done");
+      markSaved(shot.id);
+    } catch (err) {
+      setSaveState("idle");
+      setSaveError(err instanceof Error ? err.message : "存成畫面失敗——請檢查網路後重試");
+    }
+  }, [exportBoard, markSaved, projectId, setVisual, shot, utils]);
+
+  const referenceUrl = showReference && shot?.assetUrl && shot.assetKind !== "audio" ? shot.assetUrl : null;
+
+  const sketchBridge = {
+    pushStroke,
+    preview: setAiPreview,
+    summarize: () => summarizeBoard(boardRef.current.doc),
+    boardW: boardSize.w,
+    boardH: boardSize.h,
+    maxStrokes: layout.maxStrokes,
+    strokeCount: board.doc.strokes.length,
+  };
 
   const shotStrip = (
     <ShotStrip
@@ -228,20 +378,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       canEdit={canEdit}
       boardEmpty={boardEmpty}
       exportBoard={exportBoard}
-      // 存進素材庫之後這份手稿不再是「未存的草稿」；本機那份留著可繼續改
       onBoardSaved={markSaved}
-      // AI 畫草圖：筆一筆重播進白板（走同一個 pushStroke，上限與尺寸都跟手繪同一套）；
-      // preview 讓「正在畫的那一筆」逐點出現在白板上（live 層，不進文件）；
-      // summarize 給 AI 白板現況（純數字摘要）——它才知道哪裡已有東西、該畫進哪裡
-      sketch={{
-        pushStroke,
-        preview: setAiPreview,
-        summarize: () => summarizeBoard(boardRef.current.doc),
-        boardW: boardSize.w,
-        boardH: boardSize.h,
-        maxStrokes: layout.maxStrokes,
-        strokeCount: board.doc.strokes.length,
-      }}
+      sketch={sketchBridge}
     />
   );
 
@@ -263,7 +401,188 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     />
   );
 
-  const tool = (
+  const canvasProps = {
+    doc: board.doc,
+    brush,
+    layout,
+    panMode: panMode || (!lite && panModeFor(tool)),
+    view,
+    onViewChange: setView,
+    onStrokeEnd: pushStroke,
+    referenceUrl,
+    readOnly: !canEdit,
+    aiPreview,
+    stabilizer: prefs.stabilizer,
+    pressureCurve: prefs.pressureCurve,
+  };
+
+  /* ══ 桌機：四區工作台 ═══════════════════════════════════ */
+  if (!lite) {
+    const inspectorShot = (shot as InspectorShot | null) ?? null;
+    const scene = inspectorShot?.storySceneId
+      ? storyScenes.data?.find((s: { id: string }) => s.id === inspectorShot.storySceneId)
+      : null;
+    const optionsKind = optionsKindFor(tool);
+
+    return (
+      <div
+        className={`studio is-workspace${immersive ? " is-immersive" : ""}`}
+        data-mode={layout.mode}
+        data-ai={layout.aiPanel}
+        data-tool={tool}
+        ref={hostRef}
+      >
+        <StudioHeader
+          projectId={projectId}
+          projectTitle={projectTitle}
+          sceneName={scene?.title || null}
+          shotNumber={shotIndex >= 0 ? shotIndex + 1 : null}
+          shotTitle={shot?.title ?? null}
+          canUndo={board.doc.strokes.length > 0}
+          canRedo={board.redo.length > 0}
+          onUndo={undo}
+          onRedo={redo}
+          saveLabel={
+            storageFull ? "本機空間已滿" : boardEmpty ? "" : draftIds.has(activeShotId ?? "") || activeShotId === null ? "手稿已存本機 ✓" : "已自動儲存 ✓"
+          }
+          immersive={immersive}
+          onToggleImmersive={toggleImmersive}
+          onPreview={() => navigate(`/p/${projectId}#stage-deliver`)}
+          onMore={() => setMoreOpen((v) => !v)}
+          moreOpen={moreOpen}
+        />
+
+        {moreOpen && (
+          <>
+            <button type="button" className="studio-menu__scrim" aria-label="關閉選單" onClick={() => setMoreOpen(false)} />
+            <div className="studio-menu studio-menu--more" role="menu">
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); void exportBoard().then((r) => {
+                if (!r) return;
+                const url = URL.createObjectURL(r.blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = boardFileName(shot?.title ?? "白板");
+                a.click();
+                URL.revokeObjectURL(url);
+              }); }}>
+                <Icon name="Download" size={13} /> 匯出白板 PNG
+              </button>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); navigate(`/p/${projectId}`); }}>
+                <Icon name="Share2" size={13} /> 到專案頁分享
+              </button>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); clear(); }} disabled={boardEmpty}>
+                <Icon name="Trash2" size={13} /> 清空白板（可復原）
+              </button>
+            </div>
+          </>
+        )}
+
+        {storageFull && (
+          <p className="error studio__alert" role="alert">
+            本機草稿空間已滿，這張白板沒有存起來——請先把手稿「存成這一鏡的畫面」，或清掉其他鏡的草稿。
+          </p>
+        )}
+
+        <div className="studio-workarea">
+          <ToolRail
+            active={tool}
+            onSelect={pickTool}
+            disabled={!canEdit}
+            optionsLabel={optionsKind === "brush" ? "筆刷" : optionsKind === "reference" ? "描圖底稿" : "AI"}
+            options={
+              optionsKind === "brush" ? brushShelf
+              : optionsKind === "reference" ? (
+                <div className="studio-refopts">
+                  {shot?.assetUrl && shot.assetKind !== "audio" ? (
+                    <>
+                      <label className="studio-field is-inline">
+                        <input type="checkbox" checked={showReference} onChange={(e) => setShowReference(e.target.checked)} />
+                        <span>顯示這一鏡的畫面當底稿</span>
+                      </label>
+                      <Meta as="p">底稿畫在筆畫之下，不會被匯出，也擦不掉。</Meta>
+                    </>
+                  ) : (
+                    <Meta as="p">這一鏡還沒有畫面可以當底稿。先生成或存一張，再回來描。</Meta>
+                  )}
+                </div>
+              )
+              : optionsKind === "ai" ? (
+                <Meta as="p">AI 的動作在右邊的 Inspector「AI」分頁——那裡看得到它掌握了哪些上下文。</Meta>
+              )
+              : null
+            }
+          />
+
+          <StudioStage
+            canvas={canvasProps}
+            view={view}
+            guides={guides}
+            onToggleGuide={(key: GuideKey) => setGuides((g) => toggleGuide(g, key))}
+            onZoomIn={() => zoomBy(1.2)}
+            onZoomOut={() => zoomBy(1 / 1.2)}
+            onFit={fitToScreen}
+            onActualSize={actualSize}
+            hud={{
+              shotNumber: shotIndex >= 0 ? shotIndex + 1 : null,
+              durationSec: shot?.durationSec ?? null,
+              aspect: projectFormat ?? "16:9",
+              lens: (shot as InspectorShot | null)?.camera?.focalLength ?? null,
+              shotSize: (shot as InspectorShot | null)?.camera?.shotSize ?? null,
+            }}
+            strokeCount={board.doc.strokes.length}
+            maxStrokes={layout.maxStrokes}
+          />
+
+          <ShotInspector
+            projectId={projectId}
+            projectFormat={projectFormat}
+            shot={(shot as InspectorShot | null) ?? null}
+            shotNumber={shotIndex >= 0 ? shotIndex + 1 : null}
+            canEdit={canEdit}
+            tab={inspectorTab}
+            onTabChange={setInspectorTab}
+            collapsed={panels.inspector}
+            onToggleCollapsed={() => setPanels((p) => ({ ...p, inspector: !p.inspector }))}
+            ai={{
+              projectId,
+              shot,
+              canEdit,
+              boardEmpty,
+              onBoardSaved: markSaved,
+              saveBoardToShot,
+              saveState,
+              saveError,
+              sketch: sketchBridge,
+              onApplyPrompt: (text: string) => {
+                if (!shot) return;
+                updateShot.mutate({ sceneId: shot.id, prompt: text });
+                setInspectorTab("frame");
+              },
+            }}
+          />
+        </div>
+
+        <StoryboardTimeline
+          shots={shots}
+          activeId={activeShotId}
+          draftIds={draftIds}
+          canEdit={canEdit}
+          busy={move.isPending || reorder.isPending}
+          shotSizeOf={(s) => (s as InspectorShot).camera?.shotSize ?? null}
+          onSelect={switchTo}
+          onMove={(id, direction) => move.mutate({ sceneId: id, direction })}
+          onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
+          onNewShot={createShot}
+          onDuplicate={(id) => insertAfter.mutate({ sceneId: id, duplicate: true })}
+          onDelete={(id) => removeShot.mutate({ sceneId: id })}
+          newShotBusy={addShot.isPending || insertAfter.isPending}
+        />
+      </div>
+    );
+  }
+
+  /* ══ 手機輕量版：維持既有版面（四區工作台在 390px 上不成立）══ */
+  const tool2 = (
     action: string,
     label: string,
     icon: Parameters<typeof Icon>[0]["name"],
@@ -294,39 +613,35 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         <div className="studio__bar-group studio__identity">
           <strong className="studio__title" title={projectTitle}>{projectTitle}</strong>
           <Meta as="span" className="studio__where">
-            {shot ? `第 ${shots.findIndex((s) => s.id === shot.id) + 1} 鏡・${shot.title}` : "自由塗鴉（未選分鏡）"}
+            {shot ? `第 ${shotIndex + 1} 鏡・${shot.title}` : "自由塗鴉（未選分鏡）"}
           </Meta>
         </div>
 
         <div className="studio__bar-group studio__tools" role="toolbar" aria-label="白板工具">
-          {tool("undo", "復原", "Undo2", undo, { disabled: board.doc.strokes.length === 0 })}
-          {tool("redo", "重做", "RotateCw", redo, { disabled: board.redo.length === 0 })}
-          {tool("clear", "清空白板（可逐筆復原）", "Trash2", clear, { disabled: boardEmpty })}
+          {tool2("undo", "復原", "Undo2", undo, { disabled: board.doc.strokes.length === 0 })}
+          {tool2("redo", "重做", "RotateCw", redo, { disabled: board.redo.length === 0 })}
+          {tool2("clear", "清空白板（可逐筆復原）", "Trash2", clear, { disabled: boardEmpty })}
           <span className="studio__divider" aria-hidden="true" />
-          {tool("zoomOut", "縮小", "ZoomOut", () => zoomBy(1 / 1.2))}
-          {tool("fit", "整張放進畫面", "Scan", fitToScreen)}
-          {tool("zoomIn", "放大", "ZoomIn", () => zoomBy(1.2))}
-          {tool("pan", "移動畫布（兩指拖曳也可以）", "Hand", () => setPanMode((v) => !v), { on: panMode })}
+          {tool2("zoomOut", "縮小", "ZoomOut", () => zoomBy(1 / 1.2))}
+          {tool2("fit", "整張放進畫面", "Scan", fitToScreen)}
+          {tool2("zoomIn", "放大", "ZoomIn", () => zoomBy(1.2))}
+          {tool2("pan", "移動畫布（兩指拖曳也可以）", "Hand", () => setPanMode((v) => !v), { on: panMode })}
           {shot?.assetUrl && shot.assetKind !== "audio" &&
-            tool("reference", "描圖底稿", "Layers", () => setShowReference((v) => !v), { on: showReference })}
+            tool2("reference", "描圖底稿", "Layers", () => setShowReference((v) => !v), { on: showReference })}
           <span className="studio__divider" aria-hidden="true" />
-          {tool("toggleImmersive", immersive ? "離開全螢幕" : "全螢幕專注模式", immersive ? "Shrink" : "Expand", toggleImmersive, { on: immersive })}
+          {tool2("toggleImmersive", immersive ? "離開全螢幕" : "全螢幕專注模式", immersive ? "Shrink" : "Expand", toggleImmersive, { on: immersive })}
         </div>
 
-        {/* 分鏡／AI 的入口：手機一律 sheet，窄桌機也走 sheet（先前是直接藏起來，
-            821–1180px 的使用者連叫都叫不出來） */}
-        {panelsAsSheet && (
-          <div className="studio__bar-group studio__panel-tabs">
-            <Button size="sm" variant={sheet === "shots" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "shots" ? "none" : "shots"))}>
-              <Icon name="Film" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-              分鏡{shots.length ? `（${shots.length}）` : ""}
-            </Button>
-            <Button size="sm" variant={sheet === "ai" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "ai" ? "none" : "ai"))}>
-              <Icon name="Sparkles" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-              AI
-            </Button>
-          </div>
-        )}
+        <div className="studio__bar-group studio__panel-tabs">
+          <Button size="sm" variant={sheet === "shots" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "shots" ? "none" : "shots"))}>
+            <Icon name="Film" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            分鏡{shots.length ? `（${shots.length}）` : ""}
+          </Button>
+          <Button size="sm" variant={sheet === "ai" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "ai" ? "none" : "ai"))}>
+            <Icon name="Sparkles" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            AI
+          </Button>
+        </div>
       </header>
 
       {storageFull && (
@@ -336,38 +651,17 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       )}
 
       <div className="studio__stage">
-        {!lite && <aside className="studio__shelf">{brushShelf}</aside>}
-
         <div className="studio__canvas-wrap">
-          <WhiteboardCanvas
-            doc={board.doc}
-            brush={brush}
-            layout={layout}
-            panMode={panMode}
-            view={view}
-            onViewChange={setView}
-            onStrokeEnd={pushStroke}
-            referenceUrl={referenceUrl}
-            readOnly={!canEdit}
-            aiPreview={aiPreview}
-            stabilizer={prefs.stabilizer}
-            pressureCurve={prefs.pressureCurve}
-          />
-          {/* 狀態晶片：浮在畫布角落而不是佔一整列——這是給人「瞄一眼」的資訊，
-              不該跟工具搶版面（先前那行「0／400 筆・9%・輕量版」看起來像除錯輸出） */}
+          <WhiteboardCanvas {...canvasProps} />
           <div className="studio__status" aria-hidden="true">
             <span>{Math.round(view.scale * 100)}%</span>
             <span className="studio__status-sep" />
             <span>{board.doc.strokes.length}/{layout.maxStrokes}</span>
           </div>
         </div>
-
-        {!lite && layout.aiPanel === "column" && <aside className="studio__side">{aiPanel}</aside>}
       </div>
 
-      {!lite && <div className="studio__rail">{shotStrip}</div>}
-
-      {lite && <div className="studio__dock">{brushShelf}</div>}
+      <div className="studio__dock">{brushShelf}</div>
 
       {panelsAsSheet && sheet !== "none" && (
         <>

@@ -249,6 +249,12 @@ export const scenesRouter = router({
         camera: schema.scenes.camera,
         performance: schema.scenes.performance,
         lookIds: schema.scenes.lookIds,
+        /**
+         * 樂觀併發的版本（shared/revision.ts）。創作室的 Shot Inspector 直接編輯這一列，
+         * 存檔要帶 expectedRev 才分得出「我們改了同一欄」與「各改各的」——
+         * 沒有這一欄，Inspector 只能走「後寫的蓋掉先寫的」，夥伴同時編輯時會靜默吃字。
+         */
+        rev: schema.scenes.rev,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
         // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用

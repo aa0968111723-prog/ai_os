@@ -1,0 +1,735 @@
+/* ═══ Aios Storyboard Studio — 桌機四區工作台 ═══
+ *
+ * 這一份只管 `.studio.is-workspace`（桌機）。手機輕量版的規則全部留在 studio.css，
+ * 兩者刻意不共用選擇器——輕量版是「白板＋dock」的單欄，四區工作台在 390px 上不成立，
+ * 混在一起只會讓兩邊互相踩（先前 media query 與 JS 判斷打架就是這樣來的）。
+ *
+ * ── 版面的真相只有一份 ──────────────────────────────────
+ * 沿用既有契約：版面不用 media query 決定，一律看 `.studio[data-mode]`。
+ * 這裡只用 `[data-mode="desktop"]` 與 `.is-workspace`，沒有任何寬度斷點。
+ * 唯一的 media query 是動效偏好（與版面無關）。
+ *
+ * ── 為什麼要一組新的 token ──────────────────────────────
+ * 全站的暖白（--bg #f3f0e8 / --card #fffefa）是「文件」的顏色。分鏡工作台需要
+ * 「檯面」——畫面是白的，檯面要壓深，兩者的邊界才立得起來（先前整片白，
+ * 於是使用者不知道自己畫到框外會被裁掉）。深度用既有的 --m-navy 混出來，
+ * 不自創第二套色相，暖調維持一致。
+ */
+
+.studio.is-workspace {
+  /* 檯面色階：由淺到深＝面板 → 工作區 → 邊框。全部由品牌深藍混暖白調出，不是中性灰 */
+  --ws-panel: color-mix(in srgb, var(--m-navy, #16223b) 4%, var(--card));
+  --ws-panel-2: color-mix(in srgb, var(--m-navy, #16223b) 7%, var(--card));
+  --ws-desk: color-mix(in srgb, var(--m-navy, #16223b) 13%, var(--bg));
+  --ws-desk-line: color-mix(in srgb, var(--m-navy, #16223b) 8%, transparent);
+  --ws-line: color-mix(in srgb, var(--m-navy, #16223b) 12%, transparent);
+  --ws-line-strong: color-mix(in srgb, var(--m-navy, #16223b) 20%, transparent);
+  --ws-ink: var(--fg);
+  --ws-ink-2: var(--fg-secondary);
+
+  /* 面板尺寸。左欄比舊版的 200px 窄一截——工具軌只放圖示，設定才展開 */
+  --ws-rail: 52px;
+  --ws-tool-options: 216px;
+  --ws-inspector: 320px;
+  --ws-timeline: 148px;
+  --ws-header: 48px;
+
+  /* 進站即工作台：固定滿版，全站殼層由 body.studio-workspace 讓開 */
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-rows: var(--ws-header) minmax(0, 1fr) var(--ws-timeline);
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  min-height: 0;
+  background: var(--ws-desk);
+  overflow: hidden;
+}
+
+/* 全站浮動殼層讓開：工作時畫面上只該有這支片
+ * （與 body.studio-immersive 同一條契約，差別是這個進站就套用） */
+body.studio-workspace .topbar,
+body.studio-workspace .mobile-nav,
+body.studio-workspace .dm-bubble-root,
+body.studio-workspace .fb-fab-root,
+body.studio-workspace .app-update-banner,
+body.studio-workspace .share-rescue-banner { display: none !important; }
+body.studio-workspace { overflow: hidden; }
+
+/* ── Top Workspace Bar ──────────────────────────────── */
+.studio-topbar {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: 0 var(--sp-12);
+  background: var(--ws-panel);
+  border-bottom: 1px solid var(--ws-line);
+  min-width: 0;
+}
+.studio-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.studio-crumbs__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--ws-ink-2);
+  text-decoration: none;
+  font-size: var(--fs-13);
+  white-space: nowrap;
+}
+.studio-crumbs__back:hover { background: var(--ws-line); color: var(--ws-ink); }
+.studio-crumbs__sep { color: var(--ws-ink-2); opacity: 0.4; font-size: var(--fs-12); }
+/* 字級層級：專案 → 場 → 鏡，三層各自不同重量。全部一樣大就等於沒有層級 */
+.studio-crumbs__project {
+  font-size: var(--fs-13);
+  color: var(--ws-ink-2);
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-crumbs__scene {
+  font-size: var(--fs-13);
+  color: var(--ws-ink-2);
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-crumbs__shot {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-14);
+  font-weight: 650;
+  color: var(--ws-ink);
+  white-space: nowrap;
+}
+.studio-crumbs__shot-title {
+  font-size: var(--fs-12);
+  font-weight: 400;
+  color: var(--ws-ink-2);
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-topbar__center {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: auto;
+}
+.studio-topbar__save {
+  font-size: var(--fs-11);
+  color: var(--ws-ink-2);
+  margin-left: 8px;
+  min-width: 88px;
+  white-space: nowrap;
+}
+.studio-topbar__right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.studio-topbar__peers {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-line);
+  font-size: var(--fs-12);
+  color: var(--ws-ink-2);
+}
+
+/* ── 觸控目標：視覺收斂，命中圈不縮 ─────────────────────
+ *
+ * styles.css:152-166 給全站 button 加了 `min-width/min-height: var(--touch-min)`（44px），
+ * 而 `min-width` 的優先權高過 `width`——工作台的窄工具軌（40px）與 Timeline 的小操作鈕
+ * 會被硬撐成 44px，左欄擠不進 52px、分鏡卡的底列爆開。
+ *（同一個坑讓 studio.css:68 那句 `width: 34px` 從來沒生效過，桌機工具鈕一直是 44×44。）
+ *
+ * 解法沿用 studio.css 既有的手法而不是拿掉下限：**視覺尺寸縮小，命中圈用透明 ::after
+ * 外擴回 44px**。無障礙契約（WCAG 2.5.8）看的是可點區域，不是邊框大小。 */
+.studio.is-workspace :is(.studio-iconbtn, .studio-tool, .studio-chipbtn, .studio-inspector__tab, .studio-tlshot__ops button, .studio-stage__zoom-value) {
+  min-width: 0;
+  min-height: 0;
+}
+.studio.is-workspace :is(.studio-iconbtn, .studio-tool, .studio-chipbtn, .studio-tlshot__ops button)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--touch-min, 44px);
+  height: var(--touch-min, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* 通用圖示鈕：整個工作台只有這一種 icon button（不再每個區塊各長一顆） */
+.studio-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ws-ink-2);
+  cursor: pointer;
+  position: relative;
+}
+.studio-iconbtn:hover:not(:disabled) { background: var(--ws-line); color: var(--ws-ink); }
+.studio-iconbtn:active:not(:disabled) { background: var(--ws-line-strong); }
+.studio-iconbtn:disabled { opacity: 0.3; cursor: default; }
+.studio-iconbtn[aria-pressed="true"] { background: var(--primary-tint); color: var(--primary-ink); }
+
+/* ── 工作區：工具軌｜設定｜舞台｜Inspector ────────────── */
+.studio-workarea {
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ── 左：工具軌 + Contextual Options ──────────────────── */
+.studio-tools {
+  display: flex;
+  min-height: 0;
+  border-right: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+}
+.studio-tools__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: var(--ws-rail);
+  padding: 8px 0;
+  flex: 0 0 auto;
+}
+.studio-tools__gap { flex: 1 1 auto; }
+.studio-tool {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ws-ink-2);
+  cursor: pointer;
+}
+.studio-tool:hover:not(:disabled) { background: var(--ws-line); color: var(--ws-ink); }
+.studio-tool.is-active { background: var(--primary-tint); color: var(--primary-ink); }
+.studio-tool.is-active::before {
+  /* 選中的工具左邊一條實心指示：純靠底色在窄軌上不夠明確 */
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--primary-solid);
+}
+.studio-tool__key {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.studio-tool:disabled { opacity: 0.35; cursor: default; }
+.studio-tools__planned { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--ws-line); }
+.studio-tool.is-planned { width: 40px; height: 32px; opacity: 0.28; }
+
+.studio-tools__options {
+  width: var(--ws-tool-options);
+  flex: 0 0 auto;
+  border-left: 1px solid var(--ws-line);
+  background: var(--ws-panel-2);
+  overflow-y: auto;
+  padding: 10px;
+  min-height: 0;
+}
+.studio-tools__options-title {
+  display: block;
+  font-size: var(--fs-11);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ws-ink-2);
+  margin: 0 0 8px;
+}
+.studio-refopts { display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-12); }
+
+/* ── 中：舞台 ────────────────────────────────────────── */
+.studio-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ws-desk);
+}
+/* 工作台裡的白板不要圓角與外框：它就是檯面本身，框線會讓人以為那是紙的邊界 */
+.studio.is-workspace .studio-board {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(var(--ws-desk-line) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, var(--ws-desk-line) 1px, transparent 1px) 0 0 / 32px 32px,
+    var(--ws-desk);
+}
+/* 紙張的存在感：工作台上的影子要比舊版更沉，白紙才「浮」在深檯面上 */
+.studio.is-workspace .studio-board__paper {
+  box-shadow: 0 2px 6px rgba(22, 34, 59, 0.18), 0 24px 60px -24px rgba(22, 34, 59, 0.55);
+}
+
+/* 畫面輔助線：與紙面共用座標，全部 pointer-events:none（不擋筆） */
+.studio-guides { position: absolute; pointer-events: none; }
+.studio-guides > span { position: absolute; inset: 0; pointer-events: none; }
+.studio-guides__safe { border: 1px dashed rgba(224, 90, 16, 0.55); }
+.studio-guides__safe--action { border-color: rgba(22, 34, 59, 0.28); }
+.studio-guides__thirds {
+  background:
+    linear-gradient(to right, transparent calc(33.333% - 0.5px), rgba(22, 34, 59, 0.3) calc(33.333% - 0.5px), rgba(22, 34, 59, 0.3) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px)),
+    linear-gradient(to right, transparent calc(66.666% - 0.5px), rgba(22, 34, 59, 0.3) calc(66.666% - 0.5px), rgba(22, 34, 59, 0.3) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.333% - 0.5px), rgba(22, 34, 59, 0.3) calc(33.333% - 0.5px), rgba(22, 34, 59, 0.3) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(66.666% - 0.5px), rgba(22, 34, 59, 0.3) calc(66.666% - 0.5px), rgba(22, 34, 59, 0.3) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px));
+}
+.studio-guides__center {
+  background:
+    linear-gradient(to right, transparent calc(50% - 0.5px), rgba(224, 90, 16, 0.4) calc(50% - 0.5px), rgba(224, 90, 16, 0.4) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(50% - 0.5px), rgba(224, 90, 16, 0.4) calc(50% - 0.5px), rgba(224, 90, 16, 0.4) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+}
+.studio-guides__grid {
+  background:
+    linear-gradient(rgba(22, 34, 59, 0.13) 1px, transparent 1px) 0 0 / 10% 10%,
+    linear-gradient(90deg, rgba(22, 34, 59, 0.13) 1px, transparent 1px) 0 0 / 10% 10%;
+}
+
+/* 舞台上的浮層控制：貼邊、半透明、不搶畫布 */
+.studio-stage__guides,
+.studio-stage__zoom,
+.studio-stage__hud {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--ws-line);
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.studio-stage__guides { top: 10px; left: 10px; }
+.studio-stage__guides-label { display: inline-flex; color: var(--ws-ink-2); margin-right: 2px; }
+.studio-stage__zoom { right: 10px; bottom: 10px; }
+.studio-stage__zoom-value {
+  min-width: 46px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--ws-ink);
+  cursor: pointer;
+}
+.studio-stage__zoom-value:hover { background: var(--ws-line); }
+.studio-stage__hud {
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  gap: 10px;
+  font-size: var(--fs-11);
+  color: var(--ws-ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.studio-stage__hud-shot { color: var(--ws-ink); font-weight: 650; }
+.studio-stage__hud-shot--free { font-weight: 500; opacity: 0.7; }
+.studio-stage__hud-sep { width: 1px; height: 11px; background: var(--ws-line-strong); }
+.studio-stage__hud .is-warn { color: var(--gold-ink, #b45309); font-weight: 600; }
+.studio-stage__hud-guides { color: var(--primary-ink); }
+
+/* 小型切換 chip（輔助線）：比 Chip primitive 更緊湊，浮層上要壓低視覺重量 */
+.studio-chipbtn {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: var(--fs-11);
+  color: var(--ws-ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.studio-chipbtn:hover { background: var(--ws-line); color: var(--ws-ink); }
+.studio-chipbtn.is-on { background: var(--primary-tint); color: var(--primary-ink); font-weight: 600; }
+
+/* ── 右：Shot Inspector ──────────────────────────────── */
+.studio-inspector {
+  width: var(--ws-inspector);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+}
+.studio-inspector.is-collapsed { width: 40px; align-items: center; padding-top: 8px; }
+.studio-inspector__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.studio-inspector__title { font-size: var(--fs-14); font-weight: 700; color: var(--ws-ink); }
+.studio-inspector__subtitle {
+  font-size: var(--fs-12);
+  color: var(--ws-ink-2);
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-inspector__tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--ws-line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.studio-inspector__tabs::-webkit-scrollbar { display: none; }
+/* 分頁用底線指示，不是膠囊——膠囊在六個並排時會糊成一片色塊 */
+.studio-inspector__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-2);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.studio-inspector__tab:hover { color: var(--ws-ink); }
+.studio-inspector__tab.is-active {
+  color: var(--primary-ink);
+  border-bottom-color: var(--primary-solid);
+  font-weight: 600;
+}
+.studio-inspector__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 20px;
+}
+
+/* Property Label / Value 的字級層級 */
+.studio-fields { display: flex; flex-direction: column; gap: 12px; }
+.studio-fields__row { display: flex; gap: 8px; }
+.studio-fields__row .studio-field { flex: 1 1 0; min-width: 0; }
+.studio-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.studio-field.is-inline { flex-direction: row; align-items: center; gap: 6px; }
+.studio-field__label {
+  font-size: var(--fs-11);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  color: var(--ws-ink-2);
+}
+.studio-field__hint { font-size: var(--fs-11); line-height: 1.5; opacity: 0.85; }
+.studio-field input,
+.studio-field select,
+.studio-field textarea {
+  width: 100%;
+  font-size: var(--fs-13);
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--ws-line-strong);
+  background: var(--card);
+  color: var(--ws-ink);
+}
+.studio-field textarea { line-height: 1.6; resize: vertical; }
+.studio-field input:focus,
+.studio-field select:focus,
+.studio-field textarea:focus { border-color: var(--primary-border); outline: 2px solid var(--primary-tint); outline-offset: 0; }
+.studio-fields__readonly {
+  font-size: var(--fs-13);
+  padding: 6px 0;
+  color: var(--ws-ink);
+}
+.studio-fields__readonly--muted { color: var(--ws-ink-2); font-size: var(--fs-12); }
+.studio-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* ── AI Copilot 動作 ─────────────────────────────────── */
+.studio-copilot { display: flex; flex-direction: column; gap: 10px; }
+.studio-copilot__context {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--primary-tint);
+  color: var(--primary-ink);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+.studio-copilot__card { padding: 10px; }
+.studio-copilot__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-12);
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--ws-ink);
+}
+.studio-copilot__input {
+  width: 100%;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--ws-line-strong);
+  background: var(--card);
+  resize: vertical;
+}
+.studio-copilot__row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.studio-copilot__suggestions { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.studio-copilot__suggestions li { border: 1px solid var(--ws-line); border-radius: 8px; padding: 8px; }
+.studio-copilot__suggestions b { font-size: var(--fs-12); }
+.studio-copilot__suggestions p { font-size: var(--fs-12); margin: 4px 0 6px; color: var(--ws-ink-2); line-height: 1.55; }
+.studio-copilot__suggestion-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* 動作卡：一個動詞、一句說明、一顆按鈕 */
+.studio-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--ws-line);
+  background: var(--card);
+}
+.studio-action.is-primary { border-color: var(--primary-border); background: var(--primary-tint); }
+.studio-action__icon { display: inline-flex; color: var(--primary-ink); flex: 0 0 auto; }
+.studio-action__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.studio-action__text b { font-size: var(--fs-12); font-weight: 650; }
+.studio-action__text small { font-size: var(--fs-11); color: var(--ws-ink-2); line-height: 1.45; }
+
+/* ── 底：Storyboard Timeline ─────────────────────────── */
+.studio-timeline {
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+  padding: 6px 10px 8px;
+}
+.studio-timeline__head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding-bottom: 5px; }
+.studio-timeline__title { font-size: var(--fs-12); font-weight: 700; color: var(--ws-ink); }
+.studio-timeline__count { font-size: var(--fs-11); }
+.studio-timeline__empty { font-size: var(--fs-12); color: var(--ws-ink-2); margin: 6px 0 0; }
+.studio-timeline__tip { font-size: 10px; margin: 2px 0 0; opacity: 0.7; }
+.studio-timeline__list {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  list-style: none;
+  margin: 0;
+  padding: 2px 2px 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  scroll-snap-type: x proximity;
+}
+.studio-tlshot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 116px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+  background: var(--card);
+  scroll-snap-align: start;
+  overflow: visible;
+}
+.studio-tlshot.is-active {
+  border-color: var(--primary-solid);
+  box-shadow: 0 0 0 1px var(--primary-solid);
+}
+.studio-tlshot.is-over { border-style: dashed; border-color: var(--primary-solid); }
+.studio-tlshot__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 5px 5px 4px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.studio-tlshot__thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+.studio-tlshot__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.studio-tlshot__thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ws-ink-2);
+  opacity: 0.5;
+}
+.studio-tlshot__draft {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--primary-solid);
+  color: #fff;
+}
+.studio-tlshot__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ws-ink-2);
+}
+.studio-tlshot__no { font-size: var(--fs-11); font-weight: 700; color: var(--ws-ink); }
+.studio-tlshot__size {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--ws-line);
+  color: var(--ws-ink-2);
+}
+.studio-tlshot__title {
+  font-size: var(--fs-11);
+  color: var(--ws-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-tlshot__ops { display: flex; border-top: 1px solid var(--ws-line); }
+.studio-tlshot__ops button {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ws-ink-2);
+  cursor: pointer;
+}
+.studio-tlshot__ops button + button { border-left: 1px solid var(--ws-line); }
+.studio-tlshot__ops button:hover:not(:disabled) { background: var(--ws-line); color: var(--ws-ink); }
+.studio-tlshot__ops button:disabled { opacity: 0.3; cursor: default; }
+
+/* ── 選單（New Shot／Shot 更多／Top Bar 更多）──────────── */
+.studio-newshot { position: relative; }
+.studio-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+.studio-menu {
+  position: absolute;
+  z-index: 51;
+  min-width: 220px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--ws-line-strong);
+  background: var(--card);
+  box-shadow: 0 12px 32px -12px rgba(22, 34, 59, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.studio-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  font-size: var(--fs-13);
+  color: var(--ws-ink);
+  cursor: pointer;
+}
+.studio-menu button:hover:not(:disabled) { background: var(--primary-tint); color: var(--primary-ink); }
+.studio-menu button:disabled { opacity: 0.4; cursor: default; }
+.studio-menu button.is-danger:hover { background: color-mix(in srgb, var(--danger, #b42318) 10%, transparent); color: var(--danger-ink, #b42318); }
+.studio-menu__text { display: flex; flex-direction: column; min-width: 0; }
+.studio-menu__text b { font-size: var(--fs-13); font-weight: 600; }
+.studio-menu__text small { font-size: var(--fs-11); color: var(--ws-ink-2); line-height: 1.4; }
+/* New Shot 的選單往上開（它在 Timeline 頂端，往下會超出視窗） */
+.studio-menu--newshot { bottom: calc(100% + 5px); right: 0; }
+.studio-menu--shot { bottom: calc(100% + 4px); left: 0; min-width: 190px; }
+.studio-menu--more { top: calc(var(--ws-header) - 2px); right: 10px; }
+
+.studio__alert { margin: 6px 10px; }
+
+/* ── 沉浸（原生全螢幕）：工作台已經是滿版，只需要吃掉 safe-area ── */
+.studio.is-workspace.is-immersive { padding-bottom: var(--safe-bottom, 0px); }
+
+/* ── 空間不足時的降級（1280 也要能用）───────────────────
+ * 這裡用容器寬度而不是視窗寬度會更精準，但 container query 在本專案還沒有
+ * 其他用例，先沿用既有的「版面由 JS 決定、CSS 只吃屬性」原則：
+ * 窄桌機由 studioLayout 判成 data-ai="sheet"，Inspector 自動讓位。 */
+.studio.is-workspace[data-ai="sheet"] { --ws-inspector: 264px; --ws-tool-options: 184px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .studio-menu { animation: studio-menu-in 120ms var(--m-ease, cubic-bezier(0.2, 0.8, 0.3, 1)); }
+  @keyframes studio-menu-in {
+    from { transform: translateY(4px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+}
