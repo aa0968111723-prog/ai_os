@@ -11,6 +11,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
+import { applyWithRevision } from "../services/revisionGuard";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
@@ -111,6 +112,10 @@ export const charactersRouter = router({
         appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX).optional(),
         notes: z.string().trim().max(CHAR_NOTES_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
+        /** 樂觀併發（shared/revision.ts）：載入時的 rev；不給＝維持舊行為 */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 載入時這些欄位的原值——rev 撞了但欄位沒撞時據此自動合併 */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -134,12 +139,23 @@ export const charactersRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const [updated] = await db
-        .update(schema.characters)
-        .set(patch)
-        .where(eq(schema.characters.id, input.id))
-        .returning();
-      return updated;
+      // 條件寫入（見 services/revisionGuard）：partial patch 已避免「整份寫回」，
+      // 但兩人同時改**同一欄**仍會靜默覆蓋——rev 這一關才擋得住那一種。
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "character",
+        table: schema.characters,
+        idColumn: schema.characters.id,
+        revColumn: schema.characters.rev,
+        row,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.id));
+          return fresh;
+        },
+      });
+      return { ...updated, merged };
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

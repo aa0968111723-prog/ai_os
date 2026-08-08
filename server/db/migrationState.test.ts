@@ -288,11 +288,15 @@ describe("legacy migration adoption bridge", () => {
     //   （皆 ADD COLUMN IF NOT EXISTS）＋一個 scenes 索引，共 17 句——
     //   逐句確認過純新增、無資料搬移、無既有欄位改動，重跑必為 no-op；
     //   0050 是 ai_site_trace_sessions 的建表與兩個索引，三句皆 IF NOT EXISTS——
-    //   純新增全站助手軌跡分表，不動任何既有表、欄位或資料，重跑是 no-op。）
+    //   純新增全站助手軌跡分表，不動任何既有表、欄位或資料，重跑是 no-op；
+    //   0051 是樂觀併發的 rev 欄：七張高衝突表各一句
+    //   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS "rev" integer DEFAULT 0 NOT NULL`——
+    //   逐句確認過皆為 IF NOT EXISTS 的純新增欄位，既有列一律以 DEFAULT 0 補齊，
+    //   沒有改動任何既有欄位型別，也沒有資料搬移，重跑必為 no-op。）
     //
     // 這個數字刻意寫死、不動態算：新增一支 migration 就要有人回來改這一行，
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

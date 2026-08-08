@@ -111,6 +111,12 @@ export const characters = pgTable("characters", {
   notes: text("notes"),
   /** 定裝參考圖（可選；之後圖生圖可用作底） */
   referenceAssetId: uuid("reference_asset_id"),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -130,6 +136,12 @@ export const scenePresets = pgTable("scene_presets", {
   lighting: text("lighting"),
   /** 場景參考圖（可選；上傳或從素材庫綁定，供比對與之後圖生圖用） */
   referenceAssetId: uuid("reference_asset_id"),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -160,6 +172,12 @@ export const props = pgTable("props", {
   ownerKind: text("owner_kind", { enum: ["character", "scene"] }),
   /** 主人的卡片 id（characters.id 或 scene_presets.id；與 ownerKind 同進同出） */
   ownerId: uuid("owner_id"),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
@@ -225,6 +243,12 @@ export const scenes = pgTable("scenes", {
   performance: jsonb("performance").$type<import("../../../shared/story").ShotPerformance>(),
   /** 這一鏡採用的造型 → character_looks.id[]；null＝未指定（沿用角色 Identity） */
   lookIds: jsonb("look_ids").$type<string[]>(),
+  /**
+   * 樂觀併發版本號（見 shared/revision.ts）：每次更新 +1。
+   * 讀取回它、mutation 收 expectedRev，`WHERE rev = expectedRev` 讓併發覆蓋撞得出來，
+   * 而不是靜悄悄地讓後寫的人贏。
+   */
+  rev: integer("rev").notNull().default(0),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({

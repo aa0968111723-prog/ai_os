@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import { applyWithRevision } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
   materializeStoryboard,
@@ -120,6 +121,8 @@ export const storyRouter = router({
         ? {
             id: story.id,
             content,
+            /** 樂觀併發版本（shared/revision.ts）：編輯器把它原樣回傳給 story.save */
+            rev: story.rev,
             updatedAt: story.updatedAt,
             lastParsedAt: story.lastParsedAt,
             /** 內容改過但還沒重新解析（差異更新的觸發訊號） */
@@ -153,6 +156,14 @@ export const storyRouter = router({
       z.object({
         projectId: z.string().uuid(),
         content: z.string().max(STORY_MAX_CHARS, `故事過長（上限 ${STORY_MAX_CHARS.toLocaleString()} 字）`),
+        /**
+         * 樂觀併發（shared/revision.ts）。故事是整份全文覆寫、autosave 每 800ms 送一次，
+         * 是全站最容易靜默吃掉別人整段內容的地方——**編輯器一定要帶這個**。
+         * 不給＝維持舊行為（匯入、解析回填等單寫路徑）。
+         */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 我開始編輯時的內文（用來判定「別人到底有沒有動過」）。 */
+        baseline: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -168,22 +179,37 @@ export const storyRouter = router({
             updatedBy: ctx.auth.user.id,
           })
           .returning();
-        return { id: row.id, updatedAt: row.updatedAt, versioned: false };
+        return { id: row.id, rev: row.rev, updatedAt: row.updatedAt, versioned: false, merged: false };
       }
       if (existing.content === input.content) {
-        return { id: existing.id, updatedAt: existing.updatedAt, versioned: false };
+        return { id: existing.id, rev: existing.rev, updatedAt: existing.updatedAt, versioned: false, merged: false };
       }
       // 快照門檻：內容變動 ≥ 200 字元差（或首次超過門檻）才寫版本——autosave 每 800ms 一發，
       // 逐字快照會把版本表灌爆；200 字約一小段，回溯粒度足夠。
       const delta = Math.abs(existing.content.length - input.content.length);
       const versioned = delta >= 200 || (existing.content.trim().length > 0 && input.content.trim().length === 0);
       if (versioned) await snapshotStory(existing, ctx.auth.user.id);
-      const [row] = await db
-        .update(schema.stories)
-        .set({ content: input.content, updatedBy: ctx.auth.user.id, updatedAt: new Date() })
-        .where(eq(schema.stories.id, existing.id))
-        .returning();
-      return { id: row.id, updatedAt: row.updatedAt, versioned };
+      // 條件寫入。故事只有 content 一欄會撞，所以「可合併」在這裡等同於
+      // 「別人根本沒動過內文」——真的兩人同時打字時一律走衝突路徑交給人決定，
+      // 不做文字層的自動三方合併（那是 Yjs 的工作，猜錯會把兩段話絞在一起）。
+      const { row, merged } = await applyWithRevision({
+        entity: "story",
+        table: schema.stories,
+        idColumn: schema.stories.id,
+        revColumn: schema.stories.rev,
+        row: existing,
+        patch: { content: input.content },
+        bookkeeping: { updatedBy: ctx.auth.user.id, updatedAt: new Date() },
+        expectedRev: input.expectedRev,
+        baseline: input.baseline === undefined ? null : { content: input.baseline },
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, existing.id));
+          return fresh;
+        },
+        updatedByField: "updatedBy",
+        updatedAtField: "updatedAt",
+      });
+      return { id: row.id, rev: row.rev, updatedAt: row.updatedAt, versioned, merged };
     }),
 
   /** 版本清單（story 版）：由新到舊，只回摘要不回全文（比照 knowledge.listVersions） */
@@ -598,6 +624,10 @@ export const storyRouter = router({
         summary: z.string().trim().max(300).nullable().optional(),
         locationId: z.string().uuid().nullable().optional(),
         environment: environmentStateSchema.nullable().optional(),
+        /** 樂觀併發（shared/revision.ts）：載入時的 rev；不給＝維持舊行為 */
+        expectedRev: z.number().int().min(0).optional(),
+        /** 載入時這些欄位的原值——rev 撞了但欄位沒撞時據此自動合併 */
+        baseline: z.record(z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -616,9 +646,24 @@ export const storyRouter = router({
         patch.environment = input.environment && Object.values(input.environment).some((v) => v?.trim()) ? input.environment : null;
       }
       if (Object.keys(patch).length === 0) return row;
-      patch.updatedAt = new Date();
-      const [updated] = await db.update(schema.storyScenes).set(patch).where(eq(schema.storyScenes.id, input.id)).returning();
-      return updated;
+      // updatedAt 走 bookkeeping 而不是 patch：它每次都變，混進逐欄比對會讓
+      // 這一列在第一次被改過之後，往後每一次儲存都跳假衝突。
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "storyScene",
+        table: schema.storyScenes,
+        idColumn: schema.storyScenes.id,
+        revColumn: schema.storyScenes.rev,
+        row,
+        patch,
+        bookkeeping: { updatedAt: new Date() },
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, input.id));
+          return fresh;
+        },
+      });
+      return { ...updated, merged };
     }),
 
   /** 刪一場：底下的鏡解除歸屬（變「未分場」），不刪鏡（刪內容走各鏡自己的回收桶） */

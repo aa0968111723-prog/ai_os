@@ -4,7 +4,13 @@
  * 這條規則錯了會默默蓋掉夥伴剛打的字（比 UI 壞掉更難發現）。
  */
 
-export type StorySaveState = "idle" | "dirty" | "saving" | "saved" | "error";
+/**
+ * `conflict`＝伺服器擋下了這次儲存，因為夥伴在同一段期間也改了故事。
+ * 它與 `error` 分開是有必要的：`error` 是「再試一次可能就好」，`conflict` 是
+ * 「有另一份合法的內容存在，需要人決定」——兩者的出路完全不同，混成一個狀態
+ * 就只能顯示同一句沒有用的話。
+ */
+export type StorySaveState = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 
 /** autosave 去抖延遲（毫秒）：邊打字邊存但不轟炸伺服器 */
 export const STORY_AUTOSAVE_DEBOUNCE_MS = 800;
@@ -13,6 +19,9 @@ export const STORY_AUTOSAVE_DEBOUNCE_MS = 800;
  * 遠端內容變了，本地要不要跟？
  * 只有「本地沒有未存修改」（idle/saved）時才收養遠端——正在打字（dirty/saving/error）時
  * 收養等於把使用者手上的字直接換掉。錯誤態也不收養：使用者要先看得到自己沒存成功的內容。
+ *
+ * `conflict` 尤其不能收養：那個狀態的定義就是「遠端有一份不一樣的內容」，
+ * 一收養就等於自動選了對方那一版，而使用者正被問的就是要選哪一版。
  */
 export function shouldAdoptRemote(state: StorySaveState, local: string | null, remote: string): boolean {
   if (local === null) return true; // 尚未種初值：一律採用伺服器內容
