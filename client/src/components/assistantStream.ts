@@ -37,6 +37,7 @@ export type AssistantStreamDone = {
       retrieval?: "structured" | "keyword" | "metadata" | "hybrid";
       durationMs?: number;
       attempts?: number;
+      semanticApplied?: boolean;
     }>;
     truncated: boolean;
     budgetChars: number;

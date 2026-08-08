@@ -288,4 +288,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0055_collab_documents": [
     "2d3b3da900c87a29c95a3db7e59ede738a861f289dabf4069e2d676e52657da9",
   ],
+  "0056_assistant_watches": [
+    "3819842169d7e7d9f8ccf83a943faa929ed97b867d6bde76b2d6d8f58d990b72",
+  ],
 };

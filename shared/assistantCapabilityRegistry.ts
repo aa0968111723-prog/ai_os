@@ -10,14 +10,14 @@ export interface AssistantCapabilitySelection {
 }
 
 const PAGE_TERMS: Partial<Record<AssistantWirePageContext["pageType"], string[]>> = {
-  project: ["project", "status", "knowledge", "note", "task"],
+  project: ["project", "status", "knowledge", "decision", "note", "task"],
   story: ["knowledge", "worldview", "scene"],
   storyboard: ["scene", "asset", "generation", "character", "prop"],
   production: ["generation", "asset", "scene", "model"],
   final: ["generation", "asset", "project"],
   assets: ["asset", "generation", "upload", "adobe"],
   tasks: ["task", "agent", "approval"],
-  notes: ["note", "knowledge"],
+  notes: ["note", "knowledge", "decision"],
   schedule: ["schedule"],
   database: ["database", "file"],
   agent_run: ["agent", "approval", "task"],
@@ -50,4 +50,3 @@ export function selectAssistantCapabilities(input: AssistantCapabilitySelection)
   const readFirst = relevant.sort((a, b) => Number(a.access === "write") - Number(b.access === "write"));
   return readFirst.slice(0, maxTools);
 }
-

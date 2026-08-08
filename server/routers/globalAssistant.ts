@@ -53,6 +53,8 @@ import {
 import { getNoteChecked, removeNoteCore } from "../services/notesCore";
 import { getScheduleItemChecked, removeScheduleItemCore } from "../services/scheduleCore";
 import { cancelProjectTaskCore, getProjectTaskChecked } from "../services/taskCore";
+import { createProjectDecisionCore, getProjectDecisionChecked, revokeProjectDecisionCore } from "../services/decisionCore";
+import { ASSISTANT_WATCH_KINDS, cancelAssistantWatchCore, createAssistantWatchCore, getAssistantWatchChecked } from "../services/assistantWatch";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -109,6 +111,17 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
     content: z.string().min(1).max(4000),
   }),
   z.object({
+    type: z.literal("save_decision"),
+    projectRef: z.string().max(8),
+    title: z.string().min(1).max(120),
+  }),
+  z.object({
+    type: z.literal("create_watch"),
+    projectRef: z.string().max(8),
+    kind: z.enum(ASSISTANT_WATCH_KINDS),
+    label: z.string().min(1).max(160).optional(),
+  }),
+  z.object({
     type: z.literal("add_schedule_item"),
     projectRef: z.string().max(8).optional(),
     title: z.string().min(1).max(120),
@@ -148,6 +161,8 @@ const globalReplySchema = teamReplySchema.extend({
 export type ResolvedSiteAction =
   | { type: "create_project"; groupId: string; title: string; kind: string; platform: string; label: string }
   | { type: "add_note"; groupId: string; projectId?: string; projectTitle?: string; title: string; content: string; label: string }
+  | { type: "save_decision"; groupId: string; projectId: string; projectTitle: string; title: string; label: string }
+  | { type: "create_watch"; groupId: string; projectId: string; projectTitle: string; kind: typeof ASSISTANT_WATCH_KINDS[number]; watchLabel?: string; label: string }
   | { type: "add_schedule_item"; groupId: string; projectId?: string; projectTitle?: string; title: string; startsAt: string; endsAt?: string; note?: string; label: string }
   | { type: "create_task"; groupId: string; projectId: string; projectTitle: string; title: string; description?: string; assigneeId?: string; assigneeName?: string; dueAt?: string; priority?: z.infer<typeof taskPrioritySchema>; label: string }
   | { type: "send_dm"; peerId: string; peerName: string; body: string; label: string }
@@ -285,6 +300,36 @@ export function resolveSiteActions(
         dueAt,
         priority: p.priority,
         label: `建立任務「${p.title.trim().slice(0, 24)}」→ ${assignee ? assignee.name : "待認領"}（「${project.title}」${dueAt ? `，${fmtDay(dueAt)} 到期` : ""}）`,
+      });
+      continue;
+    }
+
+    if (p.type === "save_decision") {
+      const project = refs.projects.get(p.projectRef.trim());
+      const title = p.title.trim();
+      if (!project || !title) continue;
+      out.push({
+        type: "save_decision",
+        groupId: refs.groupId,
+        projectId: project.id,
+        projectTitle: project.title,
+        title,
+        label: `保存專案決策「${title.slice(0, 30)}」到「${project.title}」`,
+      });
+      continue;
+    }
+
+    if (p.type === "create_watch") {
+      const project = refs.projects.get(p.projectRef.trim());
+      if (!project) continue;
+      out.push({
+        type: "create_watch",
+        groupId: refs.groupId,
+        projectId: project.id,
+        projectTitle: project.title,
+        kind: p.kind,
+        watchLabel: p.label?.trim() || undefined,
+        label: `持續監看「${project.title}」：${p.label?.trim() || p.kind}`,
       });
       continue;
     }
@@ -551,6 +596,8 @@ export async function runGlobalAsk(
   const siteActionBlock = `你還可以輸出「站級動作意圖」（siteActions 陣列；你只負責正確組裝，後端會依 ASK/ACT 與風險決定直接執行或顯示確認卡）：
 - {"type":"create_project","title":"專案名（80字內）","kind":"內容類型","platform":"發布平台"}——只有使用者明確想開新專案才提議。platform 只能從這份清單挑：${platformList}；kind 參考：${kindList}。
 - {"type":"add_note","projectRef":"p2","title":"標題","content":"內容"}——記錄結論／會議紀錄；projectRef 可省略＝組層級筆記。
+- {"type":"save_decision","projectRef":"p2","title":"角色之後都穿米白外套"}——只有使用者已明確確認長期規則或定案時使用；寫入專案 Decision Log。
+- {"type":"create_watch","projectRef":"p2","kind":"deadline_approaching|overdue_task|generation_failed|missing_asset|approval_waiting|agent_blocked|storyboard_incomplete","label":"可選顯示名稱"}——使用者明確要求持續監看／有變化就提醒時使用；這會建立持久監看，不是回一份即時摘要。
 - {"type":"add_schedule_item","projectRef":"p2","title":"標題","startsAt":"含時區 ISO 8601，如 2026-08-09T10:00:00+08:00","endsAt":"可省略","note":"可省略"}——安排行程／死線；projectRef 可省略＝組層級。
 - {"type":"create_task","projectRef":"p2","title":"任務標題","assigneeRef":"m1","dueAt":"可省略","priority":"low|normal|high|urgent 可省略"}——建立人員任務（projectRef 必填）。
 - {"type":"send_dm","memberRef":"m2","body":"訊息內容"}——私訊同組夥伴（不能私訊自己）。
@@ -758,6 +805,19 @@ const siteActionInputSchema = z.discriminatedUnion("type", [
     content: z.string().min(1).max(80_000),
   }),
   z.object({
+    type: z.literal("save_decision"),
+    groupId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    title: z.string().trim().min(1).max(120),
+  }),
+  z.object({
+    type: z.literal("create_watch"),
+    groupId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    kind: z.enum(ASSISTANT_WATCH_KINDS),
+    label: z.string().trim().min(1).max(160).optional(),
+  }),
+  z.object({
     type: z.literal("add_schedule_item"),
     groupId: z.string().uuid(),
     projectId: z.string().uuid().optional(),
@@ -793,6 +853,8 @@ export type SiteActionInput = z.infer<typeof siteActionInputSchema>;
 export type SiteActionResult =
   | { type: "create_project"; projectId: string; title: string }
   | { type: "add_note"; noteId: string; title: string }
+  | { type: "save_decision"; decisionId: string; title: string }
+  | { type: "create_watch"; watchId: string; title: string }
   | { type: "add_schedule_item"; scheduleItemId: string; title: string }
   | { type: "create_task"; taskId: string; title: string }
   | { type: "send_dm"; messageId: string }
@@ -808,6 +870,10 @@ function resolvedSiteActionInput(action: ResolvedSiteAction): SiteActionInput {
       return { type: action.type, groupId: action.groupId, title: action.title, kind: action.kind, platform: action.platform };
     case "add_note":
       return { type: action.type, groupId: action.groupId, projectId: action.projectId, title: action.title, content: action.content };
+    case "save_decision":
+      return { type: action.type, groupId: action.groupId, projectId: action.projectId, title: action.title };
+    case "create_watch":
+      return { type: action.type, groupId: action.groupId, projectId: action.projectId, kind: action.kind, label: action.watchLabel };
     case "add_schedule_item":
       return { type: action.type, groupId: action.groupId, projectId: action.projectId, title: action.title, startsAt: action.startsAt, endsAt: action.endsAt, note: action.note };
     case "create_task":
@@ -902,6 +968,22 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
       });
       return { type: "add_note", noteId: note.id, title: note.title, verification };
     }
+    case "save_decision": {
+      const decision = await createProjectDecisionCore({ auth, projectId: input.projectId, title: input.title });
+      const verification = await readBackVerification(async () => {
+        const found = await getProjectDecisionChecked(auth, decision.id);
+        return found.title === decision.title && !found.revokedAt;
+      });
+      return { type: "save_decision", decisionId: decision.id, title: decision.title, verification };
+    }
+    case "create_watch": {
+      const watch = await createAssistantWatchCore({ auth, projectId: input.projectId, kind: input.kind, label: input.label });
+      const verification = await readBackVerification(async () => {
+        const found = await getAssistantWatchChecked(auth, watch.id);
+        return found.active && found.kind === watch.kind;
+      });
+      return { type: "create_watch", watchId: watch.id, title: watch.label, verification };
+    }
     case "add_schedule_item": {
       if (Number.isNaN(Date.parse(input.startsAt))) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "開始時間不是可解析的時間格式（需 ISO 8601）" });
@@ -987,6 +1069,8 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
 
 const undoSiteActionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_note"), id: z.string().uuid() }),
+  z.object({ type: z.literal("save_decision"), id: z.string().uuid() }),
+  z.object({ type: z.literal("create_watch"), id: z.string().uuid() }),
   z.object({ type: z.literal("add_schedule_item"), id: z.string().uuid() }),
   z.object({ type: z.literal("create_task"), id: z.string().uuid() }),
 ]);
@@ -994,6 +1078,14 @@ export type UndoSiteActionInput = z.infer<typeof undoSiteActionInputSchema>;
 
 export async function undoSiteActionCore(auth: AuthState, input: UndoSiteActionInput): Promise<{ ok: true }> {
   if (input.type === "add_note") return removeNoteCore(auth, input.id);
+  if (input.type === "save_decision") {
+    await revokeProjectDecisionCore(auth, input.id);
+    return { ok: true };
+  }
+  if (input.type === "create_watch") {
+    await cancelAssistantWatchCore(auth, input.id);
+    return { ok: true };
+  }
   if (input.type === "add_schedule_item") return removeScheduleItemCore(auth, input.id);
   await cancelProjectTaskCore(auth, input.id);
   return { ok: true };

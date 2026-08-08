@@ -66,6 +66,8 @@ import {
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
 import { addNoteCore, appendNoteCore } from "./notesCore";
+import { createProjectDecisionCore, listProjectDecisions } from "./decisionCore";
+import { ASSISTANT_WATCH_KINDS, cancelAssistantWatchCore, createAssistantWatchCore, listAssistantWatches, type AssistantWatchKind } from "./assistantWatch";
 import { listIntegrations } from "./integrations";
 import { importDrivePickedFileToTable } from "./driveImportCore";
 import {
@@ -453,6 +455,49 @@ export const TOOLS = [
       },
       required: ["taskId"],
     },
+  },
+  {
+    name: "list_decisions",
+    description: "列出專案 Decision Log。包含仍有效與已撤銷的正式決策、建立者、來源留言與內容指標；用於回答先前是否已定案。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  {
+    name: "create_decision",
+    description: "把使用者明確確認的專案規則或決定存入 Decision Log。這是長期 Project Decision Memory，不是一般聊天訊息。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string", description: "一句明確、可長期引用的決策" },
+        refType: { type: "string", enum: ["scene", "asset", "generation", "note", "schedule"] },
+        refId: { type: "string" },
+        sourceMessageId: { type: "string" },
+      },
+      required: ["projectId", "title"],
+    },
+  },
+  {
+    name: "list_watches",
+    description: "列出本人在此專案建立的持久監看及最近檢查／觸發狀態。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  {
+    name: "create_watch",
+    description: "建立持久 WATCH。系統會週期檢查既有任務、生成、分鏡、核准與 AgentRun，只在可行動狀態改變時通知。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        kind: { type: "string", enum: [...ASSISTANT_WATCH_KINDS] },
+        label: { type: "string" },
+      },
+      required: ["projectId", "kind"],
+    },
+  },
+  {
+    name: "cancel_watch",
+    description: "停止本人建立的持久 WATCH；既有通知與稽核紀錄保留。",
+    inputSchema: { type: "object", properties: { watchId: { type: "string" } }, required: ["watchId"] },
   },
   // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
   {
@@ -1073,6 +1118,49 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       status: task.status,
       note: task.wakeRunId ? "等待這件任務的代理已恢復執行——用 get_agent_run 追進度。" : undefined,
     };
+  }
+
+  if (name === "list_decisions") {
+    const rows = await listProjectDecisions(auth, String(args.projectId ?? ""));
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      active: !row.revokedAt,
+      decidedBy: row.decidedByName,
+      refType: row.refType,
+      refId: row.refId,
+      sourceMessageId: row.sourceMessageId,
+      createdAt: row.createdAt,
+      revokedAt: row.revokedAt,
+    }));
+  }
+
+  if (name === "create_decision") {
+    const row = await createProjectDecisionCore({
+      auth,
+      projectId: String(args.projectId ?? ""),
+      title: String(args.title ?? ""),
+      refType: args.refType === undefined ? undefined : String(args.refType) as "scene" | "asset" | "generation" | "note" | "schedule",
+      refId: args.refId === undefined ? undefined : String(args.refId),
+      sourceMessageId: args.sourceMessageId === undefined ? undefined : String(args.sourceMessageId),
+    });
+    return { id: row.id, projectId: row.projectId, title: row.title, createdAt: row.createdAt };
+  }
+
+  if (name === "list_watches") {
+    return listAssistantWatches(auth, String(args.projectId ?? ""));
+  }
+
+  if (name === "create_watch") {
+    const kind = String(args.kind ?? "") as AssistantWatchKind;
+    if (!ASSISTANT_WATCH_KINDS.includes(kind)) throw new Error("不支援的 WATCH 類型");
+    const watch = await createAssistantWatchCore({ auth, projectId: String(args.projectId ?? ""), kind, label: args.label === undefined ? undefined : String(args.label) });
+    return { id: watch.id, projectId: watch.projectId, kind: watch.kind, label: watch.label, active: watch.active };
+  }
+
+  if (name === "cancel_watch") {
+    const watch = await cancelAssistantWatchCore(auth, String(args.watchId ?? ""));
+    return { id: watch.id, active: watch.active };
   }
 
   // ── M1 寫入（D2）：重用 notesCore／scheduleCore——與網頁端同一套守衛（作者/組長、封存、版本快照）──

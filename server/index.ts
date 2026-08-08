@@ -57,6 +57,7 @@ import { attachCollabDoc } from "./services/collabDoc";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
+import { startAssistantWatchRunner } from "./services/assistantWatch";
 import { startGroupCampaignRunner, recoverInterruptedCampaigns, sweepStaleCampaigns } from "./services/groupCampaignRunner";
 import { startExportRunner } from "./services/exportRunner";
 import { startAssetMaintenanceRunner } from "./services/assetMaintenanceRunner";
@@ -2391,6 +2392,7 @@ const httpServer = app.listen(port, () => {
           startWorkflowRunner();
           startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
           startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+          startAssistantWatchRunner(); // Assistant WATCH：持久監看既有專案資料，只在可行動狀態改變時通知
           startGroupCampaignRunner(); // 組代理總指揮：跨專案調度計畫（派工／盯進度／授權內補救）
           // 走 trackBackgroundTask 與同區塊其他背景工作一致：關機時會被等完，不會在掃到一半被切斷。
           // 修復要排在陳屍掃描之前——先把中斷的步驟接回去，剩下的才是真的沒有進展。

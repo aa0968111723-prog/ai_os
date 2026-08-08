@@ -1,7 +1,7 @@
 /**
  * Agent domain schema（AI 代理執行、事件、副作用、人類任務）
  */
-import { pgTable, uuid, text, integer, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import type { AgentPlannerTelemetry } from "../../../shared/agentPlanner";
 
@@ -43,6 +43,29 @@ export const agentRuns = pgTable("agent_runs", {
   // group_id 前綴索引 → 每次打開作業台都全表掃描 agent_runs。加上 updated_at 後綴讓清單的
   // 「近期優先」排序也能靠索引取前幾筆。
   groupUpdatedIdx: index("agent_runs_group_updated_idx").on(t.groupId, t.updatedAt),
+}));
+
+/** Persistent Assistant WATCH registrations. Evaluation reuses existing project data and notifications. */
+export const assistantWatches = pgTable("assistant_watches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  kind: text("kind", { enum: [
+    "deadline_approaching", "overdue_task", "generation_failed", "missing_asset",
+    "approval_waiting", "agent_blocked", "storyboard_incomplete",
+  ] }).notNull(),
+  label: text("label").notNull(),
+  active: boolean("active").notNull().default(true),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+  lastFingerprint: text("last_fingerprint"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  userProjectKindUq: uniqueIndex("assistant_watches_user_project_kind_uq").on(t.userId, t.projectId, t.kind),
+  activeCheckedIdx: index("assistant_watches_active_checked_idx").on(t.active, t.lastCheckedAt),
+  projectIdx: index("assistant_watches_project_idx").on(t.projectId),
 }));
 
 /**

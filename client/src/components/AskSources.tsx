@@ -59,7 +59,11 @@ export function AskSources({ sources }: { sources: AskSourcesData | undefined })
               {item.outcome ? OUTCOME_LABEL[item.outcome] : STATUS_LABEL[item.status]}
             </Badge>
             {item.durationMs != null ? (
-              <Meta>{item.retrieval ?? "structured"}・{item.durationMs} ms{(item.attempts ?? 1) > 1 ? `・重試 ${item.attempts! - 1} 次` : ""}</Meta>
+              <Meta>
+                {item.retrieval ?? "structured"}
+                {item.retrieval === "hybrid" ? (item.semanticApplied ? "（含語意排序）" : "（關鍵字＋中繼資料）") : ""}
+                ・{item.durationMs} ms{(item.attempts ?? 1) > 1 ? `・重試 ${item.attempts! - 1} 次` : ""}
+              </Meta>
             ) : null}
           </li>
         ))}

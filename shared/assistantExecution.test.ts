@@ -24,6 +24,8 @@ describe("assistant execution fast path", () => {
     const act = classifyAssistantRequest("幫我建立一則筆記");
     expect(canDirectlyExecuteCapability(act, "add_note")).toBe(true);
     expect(canDirectlyExecuteCapability(act, "create_task")).toBe(true);
+    expect(canDirectlyExecuteCapability(act, "save_decision")).toBe(true);
+    expect(canDirectlyExecuteCapability(act, "create_watch")).toBe(false);
     expect(canDirectlyExecuteCapability(act, "add_schedule_item")).toBe(false);
     expect(canDirectlyExecuteCapability(act, "send_dm")).toBe(false);
     expect(canDirectlyExecuteCapability(act, "create_project")).toBe(false);
@@ -35,7 +37,7 @@ describe("assistant execution fast path", () => {
   it("maps every required AIOS capability domain to real read/write policy", () => {
     const domains = new Set(ASSISTANT_CAPABILITIES.map((item) => item.domain));
     expect(domains).toEqual(new Set([
-      "PROJECT", "TASK", "NOTE", "STORYBOARD", "SCRIPT", "ASSET",
+      "PROJECT", "TASK", "NOTE", "MEMORY", "STORYBOARD", "SCRIPT", "ASSET",
       "DATABASE", "SCHEDULE", "MEMBER", "COLLABORATION", "GENERATION",
     ]));
     expect(ASSISTANT_CAPABILITIES.filter((item) => item.access === "WRITE").every((item) => item.risk !== "READ")).toBe(true);
