@@ -300,4 +300,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0059_library_folder_import_and_context": [
     "0d527bd2d0651c386949144eb880137eb2b6b9eb16930fa21df46359376d130e",
   ],
+  "0060_agent_human_in_the_loop": [
+    "303d15cc90bef8383cb68928aeae2615db44f6afb8ceaf8082a45978236afa00",
+  ],
 };

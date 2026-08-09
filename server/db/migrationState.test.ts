@@ -337,7 +337,7 @@ describe("legacy migration adoption bridge", () => {
     // (all CREATE TABLE IF NOT EXISTS) plus 16 guarded indexes — 22 statements.
     // Verified statement by statement: no ALTER of an existing column, no UPDATE,
     // no DELETE, no data movement, so a re-run is a no-op.
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {
