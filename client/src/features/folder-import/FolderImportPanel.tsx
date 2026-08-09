@@ -33,7 +33,7 @@ type Phase = "idle" | "scanned" | "importing" | "done";
 export function FolderImportPanel({ projectId, groupId, onDone }: {
   projectId: string;
   groupId: string;
-  onDone?: () => void;
+  onDone?: (result?: { sessionId: string; count: number }) => void;
 }) {
   const utils = trpc.useUtils();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -116,9 +116,13 @@ export function FolderImportPanel({ projectId, groupId, onDone }: {
       });
       setSessionId(session.sessionId);
       setQueueTotal(session.uploadQueue.length);
-      if (!session.uploadQueue.length) { setPhase("done"); onDone?.(); return; }
+      if (!session.uploadQueue.length) {
+        setPhase("done");
+        onDone?.({ sessionId: session.sessionId, count: 0 });
+        return;
+      }
 
-      await runUploadQueue({
+      const results = await runUploadQueue({
         tasks: session.uploadQueue.map((entry) => ({ key: entry.relativePath, item: entry })),
         concurrency: FOLDER_UPLOAD_CONCURRENCY_DEFAULT,
         signal: controller.signal,
@@ -139,22 +143,25 @@ export function FolderImportPanel({ projectId, groupId, onDone }: {
           if (result.status === "uploaded") setUploaded((value) => value + 1);
           else if (result.status === "failed") setFailed((value) => value + 1);
         },
-      }).then(async (results) => {
-        // 失敗只有瀏覽器知道；不回報的話 session 會永遠停在「還在上傳」
-        for (const result of results) {
-          if (result.status === "uploaded") continue;
-          await reportFailure.mutateAsync({
-            sessionId: session.sessionId,
-            relativePath: result.key,
-            status: result.status === "cancelled" ? "skipped" : "failed",
-            error: result.error ?? undefined,
-          }).catch(() => undefined);
-        }
       });
+      // Browser-only failures still need to be reported so the durable session
+      // never remains stuck in uploading.
+      for (const result of results) {
+        if (result.status === "uploaded") continue;
+        await reportFailure.mutateAsync({
+          sessionId: session.sessionId,
+          relativePath: result.key,
+          status: result.status === "cancelled" ? "skipped" : "failed",
+          error: result.error ?? undefined,
+        }).catch(() => undefined);
+      }
       setPhase("done");
       void utils.projects.assets.invalidate({ projectId });
       void utils.dataHub.list.invalidate();
-      onDone?.();
+      onDone?.({
+        sessionId: session.sessionId,
+        count: results.filter((result) => result.status === "uploaded").length,
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "資料夾匯入失敗");
       setPhase("scanned");

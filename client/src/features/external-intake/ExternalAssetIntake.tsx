@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../../api";
 import { GoogleDrivePicker } from "../../components/GoogleDrivePicker";
 import { Icon } from "../../components/Icon";
@@ -6,6 +6,7 @@ import { useFocusTrap } from "../../components/interactions";
 import { Button, Card, Hint, Meta } from "../../components/ui";
 import { readLocalMediaMetadata } from "./mediaMetadata";
 import { ExternalImportInbox } from "./ExternalImportInbox";
+import { FolderImportPanel } from "../folder-import/FolderImportPanel";
 
 type ImportMethod = "file-picker" | "drag-drop" | "clipboard";
 type ExistingAsset = { id: string; title: string; url: string };
@@ -15,24 +16,46 @@ type DuplicateCandidate = {
   existing: ExistingAsset;
   retry: () => Promise<boolean>;
 };
+type UploadedReference = { assetId: string; resourceId?: string; intelligenceId?: string };
+
+export interface ExternalImportNotice {
+  source: "file" | "url" | "google-drive" | "folder";
+  projectId: string;
+  assetIds: string[];
+  resourceIds: string[];
+  intelligenceIds: string[];
+  count: number;
+  folderImportSessionId?: string;
+}
+
+export interface ExternalIntakeOpenRequest {
+  id: string;
+  mode: "files" | "url" | "drive" | "folder";
+  url?: string;
+}
 
 export function ExternalAssetIntake({
   projectId,
+  groupId,
   sceneId,
   sceneLabel,
   triggerLabel = "＋ 帶入成果",
   triggerVariant = "primary",
+  openRequest,
   onImported,
 }: {
   projectId: string;
+  groupId?: string;
   sceneId?: string;
   sceneLabel?: string;
   triggerLabel?: string;
   triggerVariant?: "primary" | "ghost" | "tonal";
-  onImported?: () => void;
+  /** Lets the command center open the existing mini workspace from natural language. */
+  openRequest?: ExternalIntakeOpenRequest;
+  onImported?: (notice?: ExternalImportNotice) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"files" | "url" | "drive">("files");
+  const [mode, setMode] = useState<"files" | "url" | "drive" | "folder">("files");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -52,20 +75,27 @@ export function ExternalAssetIntake({
   const urlImport = trpc.externalIntake.importUrl.useMutation();
   const driveImport = trpc.externalIntake.importDriveFile.useMutation();
 
+  useEffect(() => {
+    if (!openRequest) return;
+    setMode(openRequest.mode);
+    if (openRequest.mode === "url" && openRequest.url) setUrl(openRequest.url);
+    setOpen(true);
+  }, [openRequest]);
+
   const addDuplicate = (candidate: DuplicateCandidate) => {
     setDuplicates((current) => current.some((item) => item.key === candidate.key)
       ? current
       : [...current, candidate]);
   };
 
-  const refresh = () => {
+  const refresh = (notice?: ExternalImportNotice) => {
     void utils.externalIntake.inbox.invalidate({ projectId });
     void utils.externalIntake.activeSessions.invalidate();
     void utils.projects.assets.invalidate({ projectId });
-    onImported?.();
+    onImported?.(notice);
   };
 
-  const uploadOne = async (file: File, method: ImportMethod, forceDuplicate = false) => {
+  const uploadOne = async (file: File, method: ImportMethod, forceDuplicate = false): Promise<UploadedReference | null> => {
     const mediaMetadata = await readLocalMediaMetadata(file);
     const form = new FormData();
     form.append("projectId", projectId);
@@ -85,18 +115,25 @@ export function ExternalAssetIntake({
       ok?: boolean;
       error?: string;
       duplicate?: { id: string; title: string; url: string };
+      asset?: { id: string };
+      intelligenceId?: string | null;
+      libraryResourceId?: string | null;
     };
     if (response.status === 409 && data.duplicate) {
       addDuplicate({
         key: `file:${file.name}:${file.size}:${file.lastModified}`,
         label: file.name,
         existing: data.duplicate,
-        retry: () => uploadOne(file, method, true),
+        retry: async () => !!(await uploadOne(file, method, true)),
       });
-      return false;
+      return null;
     }
     if (!response.ok || !data.ok) throw new Error(data.error ?? `帶入失敗（${response.status}）`);
-    return true;
+    return data.asset?.id ? {
+      assetId: data.asset.id,
+      resourceId: data.libraryResourceId ?? undefined,
+      intelligenceId: data.intelligenceId ?? undefined,
+    } : null;
   };
 
   const uploadFiles = async (files: FileList | File[], method: ImportMethod) => {
@@ -106,13 +143,24 @@ export function ExternalAssetIntake({
     setError("");
     setDuplicates([]);
     let done = 0;
+    const assetIds: string[] = [];
+    const resourceIds: string[] = [];
+    const intelligenceIds: string[] = [];
     const failures: string[] = [];
     for (const [index, file] of list.entries()) {
       setProgress(`正在安全保存 ${index + 1}/${list.length}：${file.name}`);
-      try { if (await uploadOne(file, method)) done += 1; }
+      try {
+        const uploaded = await uploadOne(file, method);
+        if (uploaded) {
+          done += 1;
+          assetIds.push(uploaded.assetId);
+          if (uploaded.resourceId) resourceIds.push(uploaded.resourceId);
+          if (uploaded.intelligenceId) intelligenceIds.push(uploaded.intelligenceId);
+        }
+      }
       catch (caught) { failures.push(`${file.name}：${caught instanceof Error ? caught.message : "帶入失敗"}`); }
     }
-    if (done) refresh();
+    if (done) refresh({ source: "file", projectId, assetIds, resourceIds, intelligenceIds, count: done });
     if (failures.length) setError(`${done} 個成功、${failures.length} 個失敗——${failures.join("；")}`);
     setProgress(done ? `✓ ${done} 個成果已安全保存，AI 正在背景整理` : "");
     setBusy(false);
@@ -155,7 +203,11 @@ export function ExternalAssetIntake({
       } else {
         setUrl("");
         setProgress("✓ 成果已安全保存，AI 正在背景整理");
-        refresh();
+        refresh({
+          source: "url", projectId, assetIds: [result.asset.id],
+          resourceIds: result.libraryResourceId ? [result.libraryResourceId] : [],
+          intelligenceIds: result.intelligenceId ? [result.intelligenceId] : [], count: 1,
+        });
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "網址匯入失敗");
@@ -167,6 +219,9 @@ export function ExternalAssetIntake({
     setBusy(true); setError("");
     const failures: string[] = [];
     let done = 0;
+    const assetIds: string[] = [];
+    const resourceIds: string[] = [];
+    const intelligenceIds: string[] = [];
     for (const [index, file] of files.entries()) {
       setProgress(`從 Google Drive 帶入 ${index + 1}/${files.length}：${file.name}`);
       try {
@@ -176,7 +231,12 @@ export function ExternalAssetIntake({
           context,
           externalSessionId: activeSession?.id,
         });
-        if (result.ok) done += 1;
+        if (result.ok) {
+          done += 1;
+          assetIds.push(result.asset.id);
+          if (result.libraryResourceId) resourceIds.push(result.libraryResourceId);
+          if (result.intelligenceId) intelligenceIds.push(result.intelligenceId);
+        }
         else {
           failures.push(`${file.name}：似乎已存在，可在下方選擇仍然匯入`);
           addDuplicate({
@@ -194,7 +254,7 @@ export function ExternalAssetIntake({
         }
       } catch (caught) { failures.push(`${file.name}：${caught instanceof Error ? caught.message : "帶入失敗"}`); }
     }
-    if (done) refresh();
+    if (done) refresh({ source: "google-drive", projectId, assetIds, resourceIds, intelligenceIds, count: done });
     setProgress(done ? `✓ ${done} 個 Drive 檔案已安全保存` : "");
     if (failures.length) setError(failures.join("；"));
     setBusy(false);
@@ -224,6 +284,9 @@ export function ExternalAssetIntake({
             <div className="external-intake__tabs" role="tablist" aria-label="帶入方式">
               <Button id="external-intake-files-tab" role="tab" aria-selected={mode === "files"} aria-controls="external-intake-files-panel" size="sm" variant={mode === "files" ? "primary" : "ghost"} onClick={() => setMode("files")}>從電腦</Button>
               <Button id="external-intake-drive-tab" role="tab" aria-selected={mode === "drive"} aria-controls="external-intake-drive-panel" size="sm" variant={mode === "drive" ? "primary" : "ghost"} onClick={() => setMode("drive")}>Google Drive</Button>
+              {groupId ? (
+                <Button id="external-intake-folder-tab" role="tab" aria-selected={mode === "folder"} aria-controls="external-intake-folder-panel" size="sm" variant={mode === "folder" ? "primary" : "ghost"} onClick={() => setMode("folder")}>資料夾</Button>
+              ) : null}
               <Button id="external-intake-url-tab" role="tab" aria-selected={mode === "url"} aria-controls="external-intake-url-panel" size="sm" variant={mode === "url" ? "primary" : "ghost"} onClick={() => setMode("url")}>貼上連結</Button>
             </div>
             {mode === "files" && (
@@ -257,6 +320,26 @@ export function ExternalAssetIntake({
                 <GoogleDrivePicker onClose={() => setMode("files")} onPick={(files) => { void importDriveFiles(files); }} pickLabel="帶入選取成果" />
               </div>
             )}
+            {mode === "folder" && groupId ? (
+              <div id="external-intake-folder-panel" role="tabpanel" aria-labelledby="external-intake-folder-tab">
+                <FolderImportPanel
+                  projectId={projectId}
+                  groupId={groupId}
+                  onDone={(result) => {
+                    if (!result) return;
+                    refresh({
+                      source: "folder",
+                      projectId,
+                      assetIds: [],
+                      resourceIds: [],
+                      intelligenceIds: [],
+                      count: result.count,
+                      folderImportSessionId: result.sessionId,
+                    });
+                  }}
+                />
+              </div>
+            ) : null}
             {progress && <p className="success" role="status">{progress}</p>}
             {error && <p className="error" role="alert">{error}</p>}
             {duplicates.map((duplicate) => (

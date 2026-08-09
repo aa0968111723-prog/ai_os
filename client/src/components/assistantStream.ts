@@ -2,6 +2,7 @@ import type { AgentPlannerMode } from "@shared/agentPlanner";
 import type { AssistantActivityEvent } from "./AssistantTrace";
 import type { AssistantWirePageContext } from "@shared/assistantPageContext";
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
+import type { AssistantActionResult } from "@shared/assistantActions";
 import type {
   AssistantExecutionPlan,
   AssistantLatencyMetrics,
@@ -263,6 +264,7 @@ export async function requestSiteAssistantStream({
   history,
   projectId,
   pageContext,
+  recentActionResults,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -274,6 +276,7 @@ export async function requestSiteAssistantStream({
   projectId?: string;
   /** 頁面感知上下文（在哪一頁／看哪一個／選了哪幾個）——同樣只是提示，後端逐欄夾制 */
   pageContext?: AssistantWirePageContext;
+  recentActionResults?: AssistantActionResult[];
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -315,6 +318,7 @@ export async function requestSiteAssistantStream({
         history: history?.length ? history : undefined,
         projectId,
         pageContext,
+        recentActionResults,
       }),
       signal,
     });

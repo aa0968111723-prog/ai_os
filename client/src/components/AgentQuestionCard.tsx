@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   AgentQuestionAnswer,
   AgentQuestionContext,
@@ -28,15 +28,50 @@ export function AgentQuestionCard({
   question,
   submitting = false,
   error,
+  projectId,
   onAnswer,
 }: {
   question: AgentQuestionCardQuestion;
   submitting?: boolean;
   error?: string | null;
+  projectId?: string;
   onAnswer: (answer: AgentQuestionAnswer) => void | Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>(() => question.defaultOption ? [question.defaultOption] : []);
   const [text, setText] = useState("");
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const uploadQuestionFiles = async (files: FileList | null) => {
+    if (!files?.length || !projectId || fileBusy) return;
+    setFileBusy(true);
+    setFileError(null);
+    try {
+      const assetIds: string[] = [];
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append("projectId", projectId);
+        form.append("intake", "1");
+        form.append("source", "upload");
+        form.append("importMethod", "file-picker");
+        form.append("context", JSON.stringify({ currentProjectId: projectId }));
+        form.append("file", file);
+        const response = await fetch("/api/upload", { method: "POST", body: form, credentials: "same-origin" });
+        const result = await response.json() as { ok?: boolean; error?: string; asset?: { id: string } };
+        if (!response.ok || !result.ok || !result.asset?.id) throw new Error(result.error ?? `檔案帶入失敗（${response.status}）`);
+        assetIds.push(result.asset.id);
+      }
+      // Only durable Asset ids enter the answer contract. File bytes never go
+      // through the LLM or the question answer mutation.
+      await onAnswer(assetIds);
+    } catch (caught) {
+      setFileError(caught instanceof Error ? caught.message : "檔案帶入失敗");
+    } finally {
+      setFileBusy(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
 
   const toggle = (id: string) => {
     setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
@@ -130,10 +165,27 @@ export function AgentQuestionCard({
           <Button type="submit" variant="primary" disabled={submitting || (question.required && !text.trim())}>繼續</Button>
         </form>
       ) : null}
-      {(question.questionType === "text" || question.questionType === "file") ? textInput("text") : null}
+      {question.questionType === "text" ? textInput("text") : null}
+      {question.questionType === "file" ? (
+        <div className="agent-question__actions">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            disabled={submitting || fileBusy || !projectId}
+            onChange={(event) => void uploadQuestionFiles(event.target.files)}
+          />
+          <Button type="button" variant="primary" disabled={submitting || fileBusy || !projectId} onClick={() => fileInput.current?.click()}>
+            {fileBusy ? "安全保存中…" : "選擇檔案"}
+          </Button>
+          {!projectId ? <Meta>這個問題還沒有可寫入的專案脈絡。</Meta> : null}
+        </div>
+      ) : null}
       {question.questionType === "number" ? textInput("number") : null}
       {question.questionType === "date" ? textInput("date") : null}
       {error ? <div className="agent-question__error" role="alert">{error}</div> : null}
+      {fileError ? <div className="agent-question__error" role="alert">{fileError}</div> : null}
     </section>
   );
 }

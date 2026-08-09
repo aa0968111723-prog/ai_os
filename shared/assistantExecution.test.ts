@@ -28,7 +28,8 @@ describe("assistant execution fast path", () => {
     expect(canDirectlyExecuteCapability(act, "create_watch")).toBe(false);
     expect(canDirectlyExecuteCapability(act, "add_schedule_item")).toBe(false);
     expect(canDirectlyExecuteCapability(act, "send_dm")).toBe(false);
-    expect(canDirectlyExecuteCapability(act, "create_project")).toBe(false);
+    expect(canDirectlyExecuteCapability(act, "create_project")).toBe(true);
+    expect(canDirectlyExecuteCapability(classifyAssistantRequest("把這個網址加入專案"), "import_url")).toBe(true);
 
     const ask = classifyAssistantRequest("如何建立一則筆記？");
     expect(canDirectlyExecuteCapability(ask, "add_note")).toBe(false);
@@ -37,9 +38,14 @@ describe("assistant execution fast path", () => {
   it("maps every required AIOS capability domain to real read/write policy", () => {
     const domains = new Set(ASSISTANT_CAPABILITIES.map((item) => item.domain));
     expect(domains).toEqual(new Set([
-      "PROJECT", "TASK", "NOTE", "MEMORY", "STORYBOARD", "SCRIPT", "ASSET",
+      "PROJECT", "TASK", "NOTE", "MEMORY", "STORYBOARD", "SCRIPT", "ASSET", "INTAKE",
       "DATABASE", "SCHEDULE", "MEMBER", "COLLABORATION", "GENERATION",
     ]));
     expect(ASSISTANT_CAPABILITIES.filter((item) => item.access === "WRITE").every((item) => item.risk !== "READ")).toBe(true);
+    expect(ASSISTANT_CAPABILITIES.every((item) => item.executionMode && item.handler && item.verificationStrategy && item.resultType)).toBe(true);
+    expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "orchestrate_group_campaign")?.executionMode).toBe("GROUP_CAMPAIGN");
+    expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "prepare_external_generation")).toMatchObject({
+      risk: "EXTERNAL", direct: false, executionMode: "DIRECT_TOOL", verificationStrategy: "external_confirmation",
+    });
   });
 });

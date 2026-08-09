@@ -34,6 +34,7 @@
     "test:client": "vitest run --config vitest.client.config.ts",
     "test:client:coverage": "vitest run --config vitest.client.config.ts --coverage",
     "test:ui:routes": "node scripts/e2e-ui/audit-routes.mjs",
+    "test:e2e:command-center": "node scripts/e2e-ui/verify-command-center.mjs",
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",
     "check:agent-planner": "tsx scripts/check-agent-planner.ts",

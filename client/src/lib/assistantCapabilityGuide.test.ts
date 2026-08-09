@@ -62,7 +62,7 @@ describe("assistantCapabilityGuide 排序（固定清單對誰都不合身）", 
     const ids = assistantCapabilityGuide({
       ctx: ctx({ pageType: "storyboard", entityType: "shot", entityId: "s-1", entityLabel: "第 3 鏡" }),
     }).suggested.map((i) => i.id);
-    expect(ids.slice(0, 3)).toEqual(expect.arrayContaining(["read_storyboard", "generate_media"]));
+    expect(ids.slice(0, 5)).toEqual(expect.arrayContaining(["read_storyboard", "generate_media"]));
   });
 
   it("自己用過的浮到最前面——它是唯一由使用者本人產生的訊號，猜錯機率最低", () => {

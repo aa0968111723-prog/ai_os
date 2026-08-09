@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   abortAssistantRun,
+  captureAssistantReturnContext,
   clearAssistantConversation,
   endAssistantRun,
   getAssistantConversation,
   registerAssistantRunController,
+  recordAssistantActionResults,
+  returnToAssistantConversation,
   resetAssistantRunStoreForTest,
   setAssistantConversation,
   subscribeAssistantRun,
@@ -89,5 +92,24 @@ describe("assistantRunStore", () => {
     subscribeAssistantRun(listener);
     setAssistantConversation<Message>("g1", (previous) => previous);
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("route change 後保留同一 conversation return context", () => {
+    const first = captureAssistantReturnContext({ groupId: "g1", projectId: "p1", originRoute: "/dashboard" });
+    const next = captureAssistantReturnContext({ groupId: "g1", projectId: "p1", runId: "run-1", originRoute: "/p/p1" });
+    expect(next.conversationId).toBe(first.conversationId);
+    expect(returnToAssistantConversation("g1", "run-1")?.originRoute).toBe("/p/p1");
+    expect(getAssistantConversation<Message>("g1").messages).toEqual([]);
+  });
+
+  it("recent import results are bounded and survive component unmount semantics", () => {
+    recordAssistantActionResults("g1", Array.from({ length: 7 }, (_, index) => ({
+      type: "import" as const,
+      source: "url" as const,
+      resourceIds: [`r${index}`], assetIds: [`a${index}`], intelligenceIds: [],
+      count: 1, duplicateCount: 0, needsReviewCount: 1, backgroundProcessing: true,
+      verification: { status: "verified" as const, message: "ok" },
+    })));
+    expect(getAssistantConversation<Message>("g1").recentActionResults).toHaveLength(5);
   });
 });
