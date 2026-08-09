@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS "agent_questions" (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "agent_questions_pending_run_uq"
-  ON "agent_questions" USING btree ("run_id") WHERE "status" = 'pending';
+  ON "agent_questions" USING btree ("run_id") WHERE "agent_questions"."status" = 'pending';
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "agent_questions_project_status_created_idx"
   ON "agent_questions" USING btree ("project_id", "status", "created_at");
