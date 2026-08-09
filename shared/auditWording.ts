@@ -103,6 +103,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
   "director.sketchBoard": "AI 畫白板草圖",
+  "director.generateWhiteboardImage": "AI 繪畫白板正式成品",
   "director.splitScript": "AI 拆分鏡",
   "assistant.ask": "詢問專案 AI 助手",
   "assistant.preview": "預覽專案 AI 助手上下文",
@@ -114,6 +115,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.approve": "核准 AI 代理計畫",
   "agents.discard": "放棄 AI 代理計畫",
   "agents.stop": "停止 AI 代理",
+  "agents.answerAgentQuestion": "回答 AI 代理的澄清問題",
   // 代理背景執行的每一步（背景執行器補記，繞過 tRPC 中介層——代理實際做了什麼的追溯來源）
   "agents.step.generate": "AI 代理：生成素材",
   "agents.step.voiceover": "AI 代理：生成旁白配音",

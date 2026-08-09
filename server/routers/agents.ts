@@ -19,6 +19,17 @@ import { listAiProjectRoles } from "../../shared/aiProjectRoles";
 import { listPlaybooks } from "../../shared/rolePlaybooks";
 import { assertProjectEditable } from "../services/projectAcl";
 import { createAiTraceSession, sanitizeAiTracePayload } from "../services/aiTrace";
+import {
+  answerAgentQuestion,
+  listPendingAgentQuestionsForProject,
+} from "../services/agentQuestionCore";
+
+const agentQuestionAnswerSchema = z.union([
+  z.string().max(20_000),
+  z.number().finite(),
+  z.boolean(),
+  z.array(z.string().max(500)).max(100),
+]);
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -146,6 +157,20 @@ export const agentsRouter = router({
   stop: authedProcedure
     .input(z.object({ runId: z.string().uuid() }))
     .mutation(({ ctx, input }) => stopAgentCore({ auth: ctx.auth, runId: input.runId })),
+
+  /** Validate a durable Human-in-the-loop answer and resume the same run. */
+  answerAgentQuestion: authedProcedure
+    .input(z.object({
+      runId: z.string().uuid(),
+      questionId: z.string().uuid(),
+      answer: agentQuestionAnswerSchema,
+      resumeToken: z.string().uuid().optional(),
+    }))
+    .mutation(({ ctx, input }) => answerAgentQuestion({ auth: ctx.auth, ...input })),
+
+  pendingQuestions: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(({ ctx, input }) => listPendingAgentQuestionsForProject(ctx.auth, input.projectId)),
 
   /** 待核准＋執行中全列＋最近 5 筆終局 */
   listByProject: authedProcedure

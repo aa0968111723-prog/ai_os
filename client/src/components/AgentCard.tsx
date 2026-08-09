@@ -22,6 +22,7 @@ import { getPlaybook } from "../../../shared/rolePlaybooks";
 import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
+import { AgentQuestionCard } from "./AgentQuestionCard";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -92,6 +93,11 @@ const RUN_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   awaiting_approval: { label: "待你過目", cls: "queued" },
   running: { label: "開拍中", cls: "running" },
   waiting: { label: "等你回覆", cls: "queued" },
+  waiting_user_input: { label: "需要你選擇", cls: "queued" },
+  waiting_confirmation: { label: "等待確認", cls: "queued" },
+  waiting_permission: { label: "等待你接手", cls: "queued" },
+  user_controlled: { label: "由你操作中", cls: "queued" },
+  paused: { label: "已暫停", cls: "queued" },
   done: { label: "已完成", cls: "done" },
   failed: { label: "需要重來", cls: "failed" },
   stopped: { label: "已暫停", cls: "queued" },
@@ -101,6 +107,8 @@ const EVENT_LABEL: Record<string, string> = {
   approved: "人工核准",
   step_started: "開始步驟",
   step_waiting: "進入等待",
+  waiting_user_input: "等待你的選擇",
+  question_answered: "已收到回答",
   step_completed: "完成步驟",
   step_failed: "步驟失敗",
   human_resumed: "人員完成並恢復",
@@ -120,6 +128,10 @@ function isActive(r: { status: string; steps: unknown }): boolean {
   return (
     r.status === "running" ||
     r.status === "waiting" ||
+    r.status === "waiting_user_input" ||
+    r.status === "waiting_confirmation" ||
+    r.status === "waiting_permission" ||
+    r.status === "user_controlled" ||
     r.status === "awaiting_approval" ||
     (r.status === "stopped" && steps.some((s) => s.status === "running" || s.status === "pending")) ||
     // 一支失敗後 run=failed，但並行支線可能仍 running——繼續輪詢直到 runner settle 完
@@ -288,6 +300,10 @@ export function AgentCard({
   );
   const tasks = trpc.tasks.listByProject.useQuery({ projectId });
   const shouldPollAgent = (runs.data ?? []).some(isActive);
+  const questions = trpc.agents.pendingQuestions?.useQuery?.(
+    { projectId },
+    { refetchInterval: shouldPollAgent ? 4000 : false, refetchIntervalInBackground: true },
+  ) ?? { data: undefined, error: null };
   const events = trpc.agents.eventsByProject.useQuery(
     { projectId },
     { refetchInterval: shouldPollAgent ? 8000 : false, refetchIntervalInBackground: true },
@@ -298,6 +314,7 @@ export function AgentCard({
   );
   const invalidateAll = () => {
     utils.agents.listByProject.invalidate({ projectId });
+    utils.agents.pendingQuestions?.invalidate?.({ projectId });
     utils.quota.my.invalidate();
     utils.tasks.listByProject.invalidate({ projectId });
     utils.agents.eventsByProject.invalidate({ projectId });
@@ -331,6 +348,11 @@ export function AgentCard({
   const approve = trpc.agents.approve.useMutation({ onSuccess: invalidateAll });
   const discard = trpc.agents.discard.useMutation({ onSuccess: invalidateAll });
   const stop = trpc.agents.stop.useMutation({ onSuccess: invalidateAll });
+  const answerQuestion = trpc.agents.answerAgentQuestion?.useMutation?.({ onSuccess: invalidateAll }) ?? {
+    mutate: (_input: unknown) => undefined,
+    isPending: false,
+    error: null,
+  };
   const completeTask = trpc.tasks.complete.useMutation({ onSuccess: invalidateAll });
   const decideApproval = trpc.tasks.decideApproval.useMutation({ onSuccess: invalidateAll });
 
@@ -344,7 +366,7 @@ export function AgentCard({
   /** 列表排序：待核准 → 執行中 → 等待 → 其他 */
   const sortedRuns = [...runList].sort((a, b) => {
     const rank = (s: string) =>
-      s === "awaiting_approval" ? 0 : s === "running" ? 1 : s === "waiting" ? 2 : 3;
+      s === "awaiting_approval" ? 0 : s === "running" ? 1 : s.startsWith("waiting") || s === "user_controlled" ? 2 : 3;
     return rank(a.status) - rank(b.status);
   });
 
@@ -384,8 +406,8 @@ export function AgentCard({
     }
   }, [runs.data]);
 
-  const actionError = runs.error ?? tasks.error ?? events.error ?? insights.error ?? approve.error ?? discard.error ?? stop.error ?? completeTask.error ?? decideApproval.error;
-  const busy = approve.isPending || discard.isPending || stop.isPending || completeTask.isPending || decideApproval.isPending;
+  const actionError = runs.error ?? questions.error ?? tasks.error ?? events.error ?? insights.error ?? approve.error ?? discard.error ?? stop.error ?? answerQuestion.error ?? completeTask.error ?? decideApproval.error;
+  const busy = approve.isPending || discard.isPending || stop.isPending || answerQuestion.isPending || completeTask.isPending || decideApproval.isPending;
   const plannerOption = getAgentPlannerOption(plannerMode);
 
   // embedded：外殼由 CreationWorkbench / PlanMode（或 legacy AiHub 測試）提供，這裡只出內容
@@ -743,11 +765,16 @@ export function AgentCard({
         const defaultOpen =
           r.status === "running" ||
           r.status === "waiting" ||
+          r.status === "waiting_user_input" ||
+          r.status === "waiting_confirmation" ||
+          r.status === "waiting_permission" ||
+          r.status === "user_controlled" ||
           r.status === "awaiting_approval" ||
           r.status === "failed";
         const runOpen = expandedRuns[r.id] ?? defaultOpen;
         const doneSteps = steps.filter((s) => s.status === "done").length;
         const runTasks = (tasks.data ?? []).filter((task) => task.planRunId === r.id);
+        const runQuestion = (questions.data ?? []).find((question) => question.runId === r.id);
         const runEvents = (events.data?.items ?? []).filter((event) => event.runId === r.id);
         const planSummary = r.planSummary as CompletePlanSummary | null;
         const plannerTelemetry = r.plannerTelemetry as AgentPlannerTelemetry | null;
@@ -776,12 +803,25 @@ export function AgentCard({
             </summary>
             <div className="agent-run__body">
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              {(r.status === "running" || r.status === "waiting") && canControl && (
+              {(r.status === "running" || r.status === "waiting" || r.status.startsWith("waiting_") || r.status === "user_controlled") && canControl && (
                 <Button size="sm" disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
                   {stop.isPending ? "停止中…" : "停止後續步驟"}
                 </Button>
               )}
               </div>
+            {runQuestion && runQuestion.userId === meId ? (
+              <AgentQuestionCard
+                question={runQuestion}
+                submitting={answerQuestion.isPending}
+                error={answerQuestion.error?.message}
+                onAnswer={(answer) => answerQuestion.mutate({
+                  runId: r.id,
+                  questionId: runQuestion.id,
+                  resumeToken: runQuestion.resumeToken,
+                  answer,
+                })}
+              />
+            ) : null}
             {r.summary && <Meta as="p" style={{ margin: "4px 0" }}>{r.summary}</Meta>}
             {plannerTelemetry && plannerTelemetry.provider !== "mock" && (
               <div className="meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

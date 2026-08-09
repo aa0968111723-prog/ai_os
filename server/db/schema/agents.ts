@@ -1,9 +1,17 @@
 /**
  * Agent domain schema（AI 代理執行、事件、副作用、人類任務）
  */
+import { sql } from "drizzle-orm";
 import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import type { AgentPlannerTelemetry } from "../../../shared/agentPlanner";
+import type {
+  AgentContextSlots,
+  AgentQuestionAnswer,
+  AgentQuestionContext,
+  AgentQuestionOption,
+  AgentQuestionType,
+} from "../../../shared/agentQuestions";
 
 /**
  * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
@@ -24,10 +32,18 @@ export const agentRuns = pgTable("agent_runs", {
   /** 規劃供應商／模型／實際 token 與費用；不保存提示詞、原始輸出或 chain-of-thought。 */
   plannerTelemetry: jsonb("planner_telemetry").$type<AgentPlannerTelemetry>(),
   traceSessionId: uuid("trace_session_id"),
-  status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
+  status: text("status", { enum: [
+    "awaiting_approval", "running", "waiting", "waiting_user_input",
+    "waiting_confirmation", "waiting_permission", "paused", "user_controlled",
+    "done", "failed", "stopped", "discarded",
+  ] })
     .notNull()
     .default("awaiting_approval"),
   currentStep: integer("current_step").notNull().default(0),
+  /** Durable values resolved from URL/context or a validated human answer. */
+  contextSlots: jsonb("context_slots").$type<AgentContextSlots>().notNull().default({}),
+  /** The single pending clarification/confirmation currently suspending this run. */
+  activeQuestionId: uuid("active_question_id"),
   /** 每步：見 services/agentRunner 的 AgentStep（kind/note/status/估點/執行期 generationId 等） */
   steps: jsonb("steps").notNull(),
   /** 核准畫面顯示的估點總額；實際扣點仍由各步驟既有守門逐筆進行 */
@@ -150,6 +166,8 @@ export const agentEvents = pgTable("agent_events", {
       "approved",
       "step_started",
       "step_waiting",
+      "waiting_user_input",
+      "question_answered",
       "step_completed",
       "step_failed",
       "human_resumed",
@@ -170,6 +188,39 @@ export const agentEvents = pgTable("agent_events", {
   runEventUq: uniqueIndex("agent_events_run_event_uq").on(t.runId, t.eventKey),
   runCreatedIdx: index("agent_events_run_created_idx").on(t.runId, t.createdAt),
   projectCreatedIdx: index("agent_events_project_created_idx").on(t.projectId, t.createdAt),
+}));
+
+/**
+ * Formal, durable Human-in-the-loop question. Options are resolved by the
+ * backend and frozen here so the answer API never trusts a client-supplied
+ * entity id. A run has at most one pending question.
+ */
+export const agentQuestions = pgTable("agent_questions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  stepId: text("step_id"),
+  questionType: text("question_type").$type<AgentQuestionType>().notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  required: boolean("required").notNull().default(true),
+  options: jsonb("options").$type<AgentQuestionOption[]>().notNull().default([]),
+  allowCustom: boolean("allow_custom").notNull().default(false),
+  defaultOption: text("default_option"),
+  context: jsonb("context").$type<AgentQuestionContext>().notNull(),
+  resumeToken: uuid("resume_token").notNull().defaultRandom(),
+  status: text("status", { enum: ["pending", "answered", "cancelled"] }).notNull().default("pending"),
+  answer: jsonb("answer").$type<AgentQuestionAnswer>(),
+  answeredBy: uuid("answered_by"),
+  answeredAt: timestamp("answered_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  pendingRunUq: uniqueIndex("agent_questions_pending_run_uq").on(t.runId).where(sql`${t.status} = 'pending'`),
+  projectStatusCreatedIdx: index("agent_questions_project_status_created_idx").on(t.projectId, t.status, t.createdAt),
+  userStatusCreatedIdx: index("agent_questions_user_status_created_idx").on(t.userId, t.status, t.createdAt),
 }));
 
 /**

@@ -58,6 +58,16 @@ import {
 
 export type AgentRunRow = typeof schema.agentRuns.$inferSelect;
 
+const HUMAN_WAITING_RUN_STATUSES = [
+  "waiting",
+  "waiting_user_input",
+  "waiting_confirmation",
+  "waiting_permission",
+  "user_controlled",
+] as const;
+
+const ACTIVE_AGENT_RUN_STATUSES = ["running", ...HUMAN_WAITING_RUN_STATUSES] as const;
+
 /**
  * MCP 入口無 router zod：非法 UUID 進 DB 會變 500。core 入口先擋成 BAD_REQUEST（中文）。
  * 與 agents router 的 z.string().uuid() 同精神；export 供單元測試。
@@ -979,7 +989,7 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
       .where(and(
         eq(schema.agentRuns.projectId, run.projectId),
         eq(schema.agentRuns.userId, run.userId),
-        inArray(schema.agentRuns.status, ["running", "waiting"]),
+        inArray(schema.agentRuns.status, [...ACTIVE_AGENT_RUN_STATUSES]),
       ))
       .limit(1);
     // 用 CONFLICT 而非 BAD_REQUEST：這不是輸入錯誤，是「現在不行、等一下就行」的暫時狀態。
@@ -1074,7 +1084,7 @@ export async function resumeFailedAgentCore(input: { auth: AuthState; runId: str
     const [active] = await tx.select({ id: schema.agentRuns.id }).from(schema.agentRuns).where(and(
       eq(schema.agentRuns.projectId, run.projectId),
       eq(schema.agentRuns.userId, run.userId),
-      inArray(schema.agentRuns.status, ["running", "waiting"]),
+      inArray(schema.agentRuns.status, [...ACTIVE_AGENT_RUN_STATUSES]),
     )).limit(1);
     if (active) throw new TRPCError({ code: "CONFLICT", message: "已有一個代理在跑，請等它完成後再繼續" });
     return tx.update(schema.agentRuns).set({
@@ -1139,17 +1149,23 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以停止" });
   }
-  if (run.status !== "running" && run.status !== "waiting") {
+  if (run.status !== "running" && !HUMAN_WAITING_RUN_STATUSES.includes(run.status as (typeof HUMAN_WAITING_RUN_STATUSES)[number])) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
   }
-  if (run.status === "waiting") {
+  if (HUMAN_WAITING_RUN_STATUSES.includes(run.status as (typeof HUMAN_WAITING_RUN_STATUSES)[number])) {
     const steps = run.steps as AgentStep[];
     stopPendingDagSteps(steps);
-    const [stopped] = await db
-      .update(schema.agentRuns)
-      .set({ status: "stopped", steps, updatedAt: new Date() })
-      .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "waiting")))
-      .returning();
+    const [stopped] = await db.transaction(async (tx) => {
+      if (run.activeQuestionId) {
+        await tx.update(schema.agentQuestions).set({ status: "cancelled", updatedAt: new Date() })
+          .where(and(eq(schema.agentQuestions.id, run.activeQuestionId), eq(schema.agentQuestions.status, "pending")));
+      }
+      return tx
+        .update(schema.agentRuns)
+        .set({ status: "stopped", steps, activeQuestionId: null, updatedAt: new Date() })
+        .where(and(eq(schema.agentRuns.id, run.id), inArray(schema.agentRuns.status, [...HUMAN_WAITING_RUN_STATUSES])))
+        .returning();
+    });
     if (stopped) {
       await recordAgentEventSafely({
         runId: run.id,
@@ -1196,13 +1212,13 @@ export async function listAgentRunsForProject(auth: AuthState, projectId: string
   const active = await db
     .select()
     .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting"])))
+    .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES])))
     .orderBy(desc(schema.agentRuns.createdAt))
     .limit(100);
   const finished = await db
     .select()
     .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), notInArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting", "discarded"])))
+    .where(and(eq(schema.agentRuns.projectId, projectId), notInArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES, "discarded"])))
     .orderBy(desc(schema.agentRuns.createdAt))
     .limit(5);
   return [...active, ...finished];

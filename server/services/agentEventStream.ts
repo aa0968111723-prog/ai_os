@@ -67,6 +67,7 @@ export interface AgentEventInput {
   resultSummary?: AgentResultSummary;
   error?: string;
   metadata?: Record<string, string | number | boolean>;
+  question?: AgentEvent["question"];
 }
 
 /** 預設狀態：`*.started`／`*.searching`／`*.reading` 是進行中，`waiting.*` 是等待，其餘算完成 */
@@ -121,6 +122,7 @@ export class AgentEventStream {
       ...(input.resultSummary?.length ? { resultSummary: input.resultSummary } : {}),
       ...(input.error ? { error: input.error } : {}),
       ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.question ? { question: input.question } : {}),
       // 舊協定投影（見檔頭）
       phase: LEGACY_PHASE[input.type],
       text: input.title,

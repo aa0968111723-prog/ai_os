@@ -1430,6 +1430,64 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   padding: 4px 10px 10px;
   border-top: 1px solid var(--border-soft);
 }
+.agent-question {
+  margin: 10px 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--border-soft));
+  border-radius: var(--r-12, 12px);
+  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+  box-shadow: 0 10px 28px rgb(0 0 0 / .08);
+}
+.agent-question__eyebrow {
+  color: var(--primary-ink);
+  font-size: var(--fs-11);
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.agent-question h3 { margin: 4px 0; font-size: var(--fs-16); }
+.agent-question > p { margin: 4px 0 8px; }
+.agent-question__reason { margin: 0 0 10px; }
+.agent-question__options { display: grid; gap: 8px; margin: 8px 0 10px; }
+.agent-question__option {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-8);
+  background: var(--card);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-question__option:hover,
+.agent-question__option.is-selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--card));
+}
+.agent-question__option img { width: 64px; height: 48px; object-fit: cover; border-radius: 6px; }
+.agent-question__option-copy { display: grid; gap: 3px; min-width: 0; }
+.agent-question__option-title { display: flex; align-items: center; gap: 7px; font-weight: 700; }
+.agent-question__actions,
+.agent-question__form { display: flex; gap: 8px; align-items: center; }
+.agent-question__form input,
+.agent-question__form textarea {
+  min-width: 0;
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-8);
+  background: var(--card);
+  color: var(--fg);
+}
+.agent-question__form.is-stacked { align-items: stretch; flex-direction: column; }
+.agent-question__form textarea { min-height: 96px; resize: vertical; }
+.agent-question__error { margin-top: 8px; color: var(--danger-ink); font-size: var(--fs-12); }
+@media (max-width: 640px) {
+  .agent-question { margin-inline: -4px; padding: 12px; border-radius: 14px; }
+  .agent-question__form { align-items: stretch; flex-direction: column; }
+}
 .generation-filter-panel {
   margin-bottom: 10px;
   border: 1px solid var(--border-soft);
