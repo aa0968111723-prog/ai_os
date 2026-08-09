@@ -25,7 +25,13 @@ function ok(content: string): Response {
 }
 
 describe("chatCompletion 總時限（A2/T3 迴歸）", () => {
-  beforeEach(() => fetchMock.mockReset());
+  beforeEach(() => {
+    // 注意：必須用 block body。`fetchMock.mockReset()` 會把 mock 本身回傳，
+    // 若讓 beforeEach 直接回傳它，vitest 會把它當成 hook 的 cleanup function
+    //（getBeforeHookCleanupCallback 只看回傳值是不是 function），
+    // 在每個測試結束後再 call 一次 fetchMock()，對「永遠 reject」的 mock 就是一次 unhandled rejection。
+    fetchMock.mockReset();
+  });
 
   it("慢回應：整段呼叫以總時限收束，單次 attempt 逾時即 NimServiceError、不重試翻倍", async () => {
     // 模擬真 NIM「每次都超過總時限才回應」：mock proxyFetch 尊重傳入的 timeoutMs、
