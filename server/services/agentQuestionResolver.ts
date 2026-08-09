@@ -1,0 +1,192 @@
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { db, schema } from "../db";
+import { requireGroup } from "../trpc";
+import type { AuthState } from "./auth";
+import {
+  resolveOrAskAgentQuestion,
+  type AgentQuestionDefinition,
+  type AgentQuestionOption,
+  type AgentQuestionResolution,
+} from "../../shared/agentQuestions";
+import { listResolvableModels } from "./modelResolve";
+import { modelIsOperationallyReady } from "./aiModelPolicy";
+
+function entityQuestion(
+  title: string,
+  description: string,
+  reason: string,
+  slot: AgentQuestionDefinition["context"]["slot"],
+  entityType: AgentQuestionDefinition["context"]["entityType"],
+  questionType: AgentQuestionDefinition["questionType"] = "entity_picker",
+): AgentQuestionDefinition {
+  return {
+    questionType,
+    title,
+    description,
+    required: true,
+    options: [],
+    allowCustom: false,
+    context: { reason, slot, entityType },
+  };
+}
+
+/**
+ * Trusted entity resolver for Human-in-the-loop questions. The model may say
+ * which slot it needs; only this class is allowed to populate entity options.
+ */
+export class AgentQuestionResolver {
+  static async resolveProjectQuestion(input: {
+    auth: AuthState;
+    groupId: string;
+    currentProjectId?: string | null;
+  }): Promise<AgentQuestionResolution> {
+    requireGroup(input.auth, input.groupId);
+    const rows = await db
+      .select({
+        id: schema.projects.id,
+        title: schema.projects.title,
+        kind: schema.projects.kind,
+        platform: schema.projects.platform,
+        updatedAt: schema.projects.updatedAt,
+      })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.status, "active")))
+      .orderBy(desc(schema.projects.updatedAt))
+      .limit(100);
+    const options: AgentQuestionOption[] = rows.map((row) => ({
+      id: row.id,
+      label: row.title,
+      description: `${row.kind}・${row.platform}`,
+      recommended: row.id === input.currentProjectId,
+      metadata: { updatedAt: row.updatedAt.toISOString() },
+    }));
+    return resolveOrAskAgentQuestion({
+      currentValue: rows.some((row) => row.id === input.currentProjectId) ? input.currentProjectId : undefined,
+      candidates: options,
+      question: entityQuestion(
+        "選擇專案",
+        options.length ? `我找到 ${options.length} 個可用專案，請選擇這次要在哪一個專案執行。` : "目前沒有可用專案，請先建立專案。",
+        options.length > 1 ? "找到多個候選專案，缺少 projectId。" : "缺少 projectId。",
+        "projectId",
+        "project",
+      ),
+    });
+  }
+
+  static async resolveSceneQuestion(input: {
+    auth: AuthState;
+    projectId: string;
+    currentSceneId?: string | null;
+  }): Promise<AgentQuestionResolution> {
+    const project = await this.checkedProject(input.auth, input.projectId);
+    const rows = await db
+      .select({ id: schema.scenes.id, title: schema.scenes.title, orderIndex: schema.scenes.orderIndex, durationSec: schema.scenes.durationSec })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex));
+    const options = rows.map((row) => ({
+      id: row.id,
+      label: row.title || `第 ${row.orderIndex} 鏡`,
+      description: `第 ${row.orderIndex} 鏡・${row.durationSec} 秒`,
+      recommended: row.id === input.currentSceneId,
+      metadata: { orderIndex: row.orderIndex, durationSec: row.durationSec },
+    }));
+    return resolveOrAskAgentQuestion({
+      currentValue: rows.some((row) => row.id === input.currentSceneId) ? input.currentSceneId : undefined,
+      candidates: options,
+      question: entityQuestion("選擇分鏡", `找到 ${options.length} 個可用分鏡。`, "缺少 sceneId。", "sceneId", "scene", "scene_picker"),
+    });
+  }
+
+  static async resolvePersonQuestion(input: {
+    auth: AuthState;
+    projectId: string;
+    currentPersonId?: string | null;
+  }): Promise<AgentQuestionResolution> {
+    const project = await this.checkedProject(input.auth, input.projectId);
+    const rows = await db
+      .select({ id: schema.people.id, name: schema.people.name, projectId: schema.people.projectId })
+      .from(schema.people)
+      .where(and(
+        eq(schema.people.groupId, project.groupId),
+        eq(schema.people.status, "active"),
+        or(eq(schema.people.projectId, project.id), isNull(schema.people.projectId)),
+      ))
+      .orderBy(asc(schema.people.name))
+      .limit(100);
+    const options = rows.map((row) => ({
+      id: row.id,
+      label: row.name,
+      description: row.projectId === project.id ? "此專案人物" : "組織人物庫",
+      recommended: row.id === input.currentPersonId,
+    }));
+    return resolveOrAskAgentQuestion({
+      currentValue: rows.some((row) => row.id === input.currentPersonId) ? input.currentPersonId : undefined,
+      candidates: options,
+      question: entityQuestion("選擇人物", `找到 ${options.length} 個可用人物。`, "缺少 personId。", "personId", "person", "person_picker"),
+    });
+  }
+
+  static async resolveAssetQuestion(input: {
+    auth: AuthState;
+    projectId: string;
+    currentAssetIds?: string[];
+  }): Promise<AgentQuestionResolution> {
+    const project = await this.checkedProject(input.auth, input.projectId);
+    const rows = await db
+      .select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind, mime: schema.assets.mime })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.projectId, project.id), eq(schema.assets.groupId, project.groupId), isNull(schema.assets.deletedAt)))
+      .orderBy(desc(schema.assets.createdAt))
+      .limit(100);
+    const validCurrent = (input.currentAssetIds ?? []).filter((id) => rows.some((row) => row.id === id));
+    const options = rows.map((row) => ({
+      id: row.id,
+      label: row.title,
+      description: [row.kind, row.mime].filter(Boolean).join("・"),
+      recommended: validCurrent.includes(row.id),
+    }));
+    return resolveOrAskAgentQuestion({
+      currentValue: validCurrent.length ? validCurrent : undefined,
+      candidates: options,
+      requiresHumanJudgment: rows.length > 1,
+      question: {
+        ...entityQuestion("選擇素材", `找到 ${options.length} 個可用素材。`, "缺少 assetIds。", "assetIds", "asset", "asset_picker"),
+        questionType: "multi_select",
+      },
+    });
+  }
+
+  static resolveModelQuestion(input: {
+    auth: AuthState;
+    groupId: string;
+    currentModelId?: string | null;
+    category?: string;
+  }): AgentQuestionResolution {
+    requireGroup(input.auth, input.groupId);
+    const rows = listResolvableModels({ category: input.category })
+      .filter(modelIsOperationallyReady)
+      .slice(0, 60);
+    const options: AgentQuestionOption[] = rows.map((model) => ({
+      id: model.id,
+      label: model.label,
+      description: `${model.category}・約 ${model.points} 點`,
+      recommended: model.id === input.currentModelId || (!input.currentModelId && !!model.recommended),
+      metadata: { category: model.category, points: model.points, kind: model.kind },
+    }));
+    return resolveOrAskAgentQuestion({
+      currentValue: rows.some((model) => model.id === input.currentModelId) ? input.currentModelId : undefined,
+      candidates: options,
+      requiresHumanJudgment: options.length > 1,
+      question: entityQuestion("選擇生成模型", `找到 ${options.length} 個可用模型。`, "缺少 modelId。", "modelId", "model", "model_choice"),
+    });
+  }
+
+  private static async checkedProject(auth: AuthState, projectId: string) {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+    requireGroup(auth, project.groupId);
+    return project;
+  }
+}

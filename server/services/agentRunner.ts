@@ -54,6 +54,8 @@ import {
 import { recordAgentEventSafely } from "./agentEventCore";
 import { resolveModel } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";
+import { ensureAgentStepContext } from "./agentQuestionCore";
+import type { AgentContextSlotName } from "../../shared/agentQuestions";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -94,6 +96,8 @@ export interface AgentStep {
   milestoneId?: string;
   estimatedMinutes?: number;
   sourceRefs?: Array<{ type: string; id: string; label?: string }>;
+  /** Context required before the tool can execute. */
+  requiredSlots?: AgentContextSlotName[];
   executionMode?: "dag";
   /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
   tableId?: string;
@@ -841,6 +845,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     if (budget <= 0) break;
     const step = steps[idx]!;
     if (step.kind !== "generate") continue;
+    if (step.requiredSlots?.length) continue;
     if (step.generationId) continue;
     // 同 sceneNo 已有 in-flight：跳過本支，留給 settle 完成後再送，避免並行覆寫同一鏡
     if (hasInFlightSameScene(steps, idx, step.sceneNo)) continue;
@@ -1053,6 +1058,19 @@ async function advanceRun(run: RunRow): Promise<void> {
   {
     const authzError = await checkRunAuthority(run);
     if (authzError) return failRun(run, steps, idx, authzError);
+  }
+
+  if (step.requiredSlots?.length) {
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法解析執行上下文");
+    const context = await ensureAgentStepContext({
+      auth,
+      run,
+      steps,
+      step,
+      stepId: stableStepId(step, idx),
+    });
+    if (context.suspended) return;
   }
 
   await recordAgentEventSafely({

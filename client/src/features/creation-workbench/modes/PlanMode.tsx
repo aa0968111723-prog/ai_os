@@ -52,7 +52,7 @@ export function PlanMode({
   const focusRun =
     list.find(
       (r) =>
-        r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting",
+        r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting" || r.status.startsWith("waiting_") || r.status === "user_controlled",
     ) ?? list[0];
   const planSummary = (focusRun?.planSummary ?? null) as PlanSummaryLite | null;
   const steps = (focusRun?.steps ?? []) as StepLite[];
