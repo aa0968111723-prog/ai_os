@@ -58,6 +58,25 @@ describe("AI model policy", () => {
     expect(quality.model.tier).toBe("flagship");
   });
 
+  it("supports source-bound flagship image editing without falling back to text-only models", () => {
+    const decision = selectAiGenerationModel({
+      category: "image-to-image",
+      sourceKind: "image",
+      preference: "quality",
+      minimumTier: "flagship",
+      requireHealthy: true,
+      allowedModelIds: new Set([
+        "fal-ai/nano-banana-2/edit",
+        "fal-ai/flux-2/pro/edit",
+        "fal-ai/bytedance/seedream/v4.5/edit",
+      ]),
+    });
+
+    expect(decision.model.category).toBe("image-to-image");
+    expect(decision.model.needs).toBe("image");
+    expect(decision.model.tier).toBe("flagship");
+  });
+
   it("exposes verified models first in search and the prompt cheatsheet", () => {
     const matches = searchAiModels("", "text-to-image");
     const firstUnverified = matches.findIndex((model) => !model.verified);

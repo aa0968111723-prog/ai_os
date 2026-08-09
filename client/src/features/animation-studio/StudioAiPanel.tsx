@@ -11,6 +11,7 @@ import type { BoardSummary } from "./boardSummary";
 import { replaySketch, type ReplayHandle, type SketchPreview } from "./sketchReplay";
 import type { StudioShot } from "./ShotStrip";
 import type { StudioLayout } from "./studioLayout";
+import { WHITEBOARD_IMAGE_MODES, type WhiteboardImageMode } from "@shared/whiteboardImage";
 
 export interface StudioAiPanelProps {
   layout: StudioLayout;
@@ -41,8 +42,9 @@ export interface StudioAiPanelProps {
 /**
  * AI 協作欄：把白板上的手稿接回分鏡，並讓 AI 幫忙把畫面變成文字（提示詞、旁白、整份腳本）。
  *
- * 四件事都用站內既有的能力，不另開後端：
+ * 這些操作都用站內既有的能力，不另開後端：
  * - 存成畫面 → `/api/upload` 進素材庫 → `scenes.setVisualFromAsset` 綁到這一鏡
+ * - 白板正式成品 → `director.generateWhiteboardImage` 走既有 generation / asset pipeline
  * - 就地編輯 → `scenes.update`
  * - 想不到怎麼描述 → `director.suggest`（AI 導演建議，可直接套用或另存成新鏡）
  * - 已經有腳本 → `director.splitScript`（一次拆成整份分鏡）
@@ -83,6 +85,9 @@ export function StudioAiPanel({
     setDurationSec(shot?.durationSec ?? 5);
     setSaveState("idle");
     setSaveError("");
+    setImageGenerationId(null);
+    setImageError("");
+    setReferenceName(shot?.title ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shot?.id]);
 
@@ -91,6 +96,13 @@ export function StudioAiPanel({
   const update = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
   const addDraft = trpc.scenes.addDraft.useMutation({ onSuccess: invalidateScenes });
   const setVisual = trpc.scenes.setVisualFromAsset.useMutation({ onSuccess: invalidateScenes });
+  const setVisualFromGeneration = trpc.scenes.setVisualFromGeneration.useMutation({ onSuccess: invalidateScenes });
+  const addCharacterReference = trpc.characters.add.useMutation({
+    onSuccess: () => void utils.characters.list.invalidate({ projectId }),
+  });
+  const addSceneReference = trpc.scenePresets.add.useMutation({
+    onSuccess: () => void utils.scenePresets.list.invalidate({ projectId }),
+  });
   const suggest = trpc.director.suggest.useMutation();
 
   // ── AI 畫草圖 ────────────────────────────────────────────
@@ -100,6 +112,10 @@ export function StudioAiPanel({
   const [replaying, setReplaying] = useState(false);
   /** 因白板空間不足被裁掉的筆數（>0 必須告知，不准默默少畫） */
   const [clippedByBoard, setClippedByBoard] = useState(0);
+  const [whiteboardMode, setWhiteboardMode] = useState<WhiteboardImageMode>("quality");
+  const [imageGenerationId, setImageGenerationId] = useState<string | null>(null);
+  const [imageError, setImageError] = useState("");
+  const [referenceName, setReferenceName] = useState("");
   const replayRef = useRef<ReplayHandle | null>(null);
   /** 卸載後才回來的 onSuccess 不准開新重播（react-query 的 mutation 不隨卸載中止） */
   const mountedRef = useRef(true);
@@ -128,6 +144,19 @@ export function StudioAiPanel({
       });
     },
   });
+  const whiteboardImagePlan = trpc.director.whiteboardImagePlan.useQuery(
+    { projectId, mode: whiteboardMode },
+    { enabled: Boolean(shot && !boardEmpty && canEdit) },
+  );
+  const generateWhiteboardImage = trpc.director.generateWhiteboardImage.useMutation();
+  const imageStatus = trpc.generation.status.useQuery(
+    { id: imageGenerationId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(imageGenerationId), refetchInterval: imageGenerationId ? 3_000 : false },
+  );
+  const generatedAsset = trpc.generation.assetFor.useQuery(
+    { generationId: imageGenerationId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(imageGenerationId && imageStatus.data?.status === "done") },
+  );
   // 離開創作室時停掉還在畫的重播；已落的筆畫留著（本機草稿，可 undo 可清空）
   useEffect(() => () => {
     mountedRef.current = false;
@@ -176,6 +205,40 @@ export function StudioAiPanel({
     }
   };
 
+  const generateFinishedWhiteboardImage = async () => {
+    if (!shot || boardEmpty || !canEdit) return;
+    setImageError("");
+    try {
+      const exported = await exportBoard();
+      if (!exported) throw new Error("白板匯出失敗");
+      const form = new FormData();
+      form.append("projectId", projectId);
+      form.append("file", new File([exported.blob], boardFileName(`${shot.title}-構圖參考`), { type: "image/png" }));
+      const uploadResponse = await fetch("/api/upload", { method: "POST", body: form, credentials: "same-origin" });
+      const upload = (await uploadResponse.json()) as { ok?: boolean; error?: string; asset?: { id: string } };
+      if (!uploadResponse.ok || !upload.ok || !upload.asset) throw new Error(upload.error ?? "構圖參考上傳失敗");
+      void utils.projects.assets.invalidate({ projectId });
+      const result = await generateWhiteboardImage.mutateAsync({
+        projectId,
+        prompt: (sketchPrompt.trim() || shot.prompt || "完成這個分鏡畫面").slice(0, 8_000),
+        mode: whiteboardMode,
+        sourceAssetId: upload.asset.id,
+        characterIds: undefined,
+        scenePresetIds: undefined,
+        propIds: undefined,
+        continuityMode: true,
+      });
+      setImageGenerationId(result.generationId);
+      setReferenceName(shot.title);
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : "白板 AI 繪畫失敗");
+    }
+  };
+
+  const generatedImageUrl = imageStatus.data?.resultUrl ?? null;
+  const generatedImageDone = imageStatus.data?.status === "done" && Boolean(generatedImageUrl);
+  const generatedAssetId = generatedAsset.data?.id;
+
   const dirty =
     !!shot &&
     (title !== shot.title ||
@@ -186,6 +249,51 @@ export function StudioAiPanel({
 
   return (
     <div className="studio-ai" data-mode={layout.mode}>
+      <Card as="section" variant="quiet" data-fb="whiteboard-ai-image">
+        <h3 className="studio-ai__title">
+          <Icon name="Image" size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          AI 繪畫成品
+        </h3>
+        <Hint>白板會以構圖、主體位置、鏡位與畫面安排作為參考，生成正式、高細節的分鏡畫面，不會把草圖當成普通塗鴉。</Hint>
+        <div className="studio-ai__actions" role="radiogroup" aria-label="AI 繪畫品質模式">
+          {WHITEBOARD_IMAGE_MODES.map((mode) => (
+            <Button key={mode.id} size="sm" variant={whiteboardMode === mode.id ? "primary" : "tonal"} disabled={!canEdit || generateWhiteboardImage.isPending} onClick={() => setWhiteboardMode(mode.id)} aria-pressed={whiteboardMode === mode.id}>
+              {mode.label}
+            </Button>
+          ))}
+        </div>
+        <Meta as="p" style={{ margin: "6px 0", fontSize: "var(--fs-11)" }}>
+          {WHITEBOARD_IMAGE_MODES.find((mode) => mode.id === whiteboardMode)?.description}
+        </Meta>
+        {whiteboardImagePlan.data && (
+          <Meta as="p" role="status" style={{ margin: "6px 0" }}>
+            將使用 {whiteboardImagePlan.data.model.label}（{whiteboardImagePlan.data.model.tier}，健康：{whiteboardImagePlan.data.model.health}）・預估 {whiteboardImagePlan.data.estimatedPoints} 點（NT${whiteboardImagePlan.data.estimatedTwd}）。{whiteboardImagePlan.data.noSilentDowngrade ? " 最精緻模式不會自動降級。" : ""}
+          </Meta>
+        )}
+        {whiteboardImagePlan.error && <p className="error" role="alert">{whiteboardImagePlan.error.message}</p>}
+        <div className="studio-ai__actions">
+          <Button size="sm" variant="primary" disabled={!canEdit || !shot || boardEmpty || generateWhiteboardImage.isPending || Boolean(whiteboardImagePlan.error)} onClick={() => { void generateFinishedWhiteboardImage(); }}>
+            {generateWhiteboardImage.isPending ? "生成中…" : "生成正式畫面"}
+          </Button>
+          {boardEmpty && <Hint>先在白板畫出構圖，AI 才能保留你的畫面安排。</Hint>}
+        </div>
+        {generateWhiteboardImage.data && !generateWhiteboardImage.isPending && <Meta as="p" role="status" style={{ margin: "6px 0" }}>已送出 {generateWhiteboardImage.data.model.label}；完成後會自動進入素材庫。</Meta>}
+        {imageGenerationId && imageStatus.data?.status !== "done" && <Meta as="p" role="status" style={{ margin: "6px 0" }}>生成狀態：{imageStatus.data?.status ?? "queued"}…</Meta>}
+        {imageStatus.data?.status === "failed" && <p className="error" role="alert">{imageStatus.data.error ?? "生成失敗"}</p>}
+        {imageError && <p className="error" role="alert">{imageError}</p>}
+        {generatedImageDone && generatedImageUrl && (
+          <div style={{ marginTop: 10 }}>
+            <img src={generatedImageUrl} alt="白板 AI 繪畫成品" style={{ width: "100%", borderRadius: 8, display: "block" }} />
+            <input aria-label="參考卡名稱" value={referenceName} onChange={(event) => setReferenceName(event.target.value)} placeholder="參考卡名稱" disabled={!canEdit} style={{ marginTop: 8 }} />
+            <div className="studio-ai__actions" style={{ marginTop: 8 }}>
+              <Button size="sm" variant="primary" disabled={!canEdit || !shot || setVisualFromGeneration.isPending} onClick={() => shot && imageGenerationId && setVisualFromGeneration.mutate({ sceneId: shot.id, generationId: imageGenerationId })}>存成該鏡畫面</Button>
+              <Button size="sm" variant="tonal" disabled={!canEdit || !generatedAssetId || addCharacterReference.isPending} onClick={() => generatedAssetId && addCharacterReference.mutate({ projectId, name: `${referenceName.trim() || shot?.title || "未命名"} 角色參考`, appearance: `以白板構圖生成的正式角色參考。${sketchPrompt.trim() || shot?.prompt || ""}`, referenceAssetId: generatedAssetId, clientRequestId: crypto.randomUUID() })}>作為角色參考</Button>
+              <Button size="sm" variant="tonal" disabled={!canEdit || !generatedAssetId || addSceneReference.isPending} onClick={() => generatedAssetId && addSceneReference.mutate({ projectId, name: `${referenceName.trim() || shot?.title || "未命名"} 場景參考`, palette: "依生成畫面", lighting: "依生成畫面", referenceAssetId: generatedAssetId, clientRequestId: crypto.randomUUID() })}>作為場景參考</Button>
+            </div>
+            <Meta as="p" style={{ margin: "6px 0 0", fontSize: "var(--fs-11)" }}>成品已保存到素材庫；可直接套用到本鏡，或建立角色／場景參考卡。</Meta>
+          </div>
+        )}
+      </Card>
       <Card as="section" variant="quiet" data-fb="創作室・這一鏡">
         <h3 className="studio-ai__title">
           <Icon name="Clapperboard" size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />

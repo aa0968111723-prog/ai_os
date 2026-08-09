@@ -7,6 +7,12 @@ import { loadProjectCardAliases, resolveSceneCardRefs, sceneCardColumns } from "
 import { worldviewSchema, formatWorldviewForAi, formatActsOutline, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
+import { executeGenerationCommand } from "../services/generationCommand";
+import {
+  selectWhiteboardImageModel,
+  WHITEBOARD_COMPOSITION_GUIDANCE,
+} from "../services/whiteboardImage";
+import type { WhiteboardImageMode } from "../../shared/whiteboardImage";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
@@ -432,6 +438,106 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
  * 假模式回確定性建議；真模式走 NVIDIA NIM（LLM 文字統一走 NIM，媒體生成維持 fal）。
  */
 export const directorRouter = router({
+  whiteboardImagePlan: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      mode: z.enum(["fast", "quality", "ultra"]),
+    }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      assertProjectNotArchived(project);
+      try {
+        const decision = selectWhiteboardImageModel(input.mode);
+        return {
+          mode: decision.mode,
+          model: {
+            id: decision.model.id,
+            label: decision.model.label,
+            tier: decision.model.tier,
+            verified: decision.model.verified,
+            recommended: Boolean(decision.model.recommended),
+            health: decision.health,
+          },
+          estimatedPoints: decision.estimatedPoints,
+          estimatedTwd: decision.estimatedTwd,
+          reason: decision.selection.reason,
+          noSilentDowngrade: decision.noSilentDowngrade,
+        };
+      } catch (error) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: input.mode === "ultra"
+            ? "目前沒有健康且可用的旗艦級圖像模型；為避免偷偷降級，最精緻模式暫時不會送出。"
+            : error instanceof Error ? error.message : "目前沒有可用的圖像模型",
+        });
+      }
+    }),
+
+  generateWhiteboardImage: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      prompt: z.string().trim().min(4).max(8_000),
+      mode: z.enum(["fast", "quality", "ultra"]),
+      sourceAssetId: z.string().uuid(),
+      sceneId: z.string().uuid().optional(),
+      characterIds: z.array(z.string().uuid()).max(12).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(12).optional(),
+      propIds: z.array(z.string().uuid()).max(12).optional(),
+      continuityMode: z.boolean().optional(),
+      clientRequestId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      let decision;
+      try {
+        decision = selectWhiteboardImageModel(input.mode);
+      } catch (error) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: input.mode === "ultra"
+            ? "目前沒有健康且可用的旗艦級圖像模型；為避免偷偷降級，最精緻模式暫時不會送出。"
+            : error instanceof Error ? error.message : "目前沒有可用的圖像模型",
+        });
+      }
+      const prompt = [
+        WHITEBOARD_COMPOSITION_GUIDANCE,
+        `Quality mode: ${input.mode}. Produce a finished image suitable for a professional storyboard or project frame.`,
+        "User brief:",
+        input.prompt.trim(),
+      ].join("\n\n");
+      const generation = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id: input.clientRequestId,
+        projectId: input.projectId,
+        modelId: decision.model.id,
+        prompt,
+        sourceAssetId: input.sourceAssetId,
+        sceneId: input.sceneId,
+        sceneRole: "visual",
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
+        continuityMode: input.continuityMode,
+        reasonPrefix: `白板 AI 繪畫（${input.mode}）`,
+      });
+      return {
+        generationId: generation.id,
+        mode: input.mode as WhiteboardImageMode,
+        model: {
+          id: decision.model.id,
+          label: decision.model.label,
+          tier: decision.model.tier,
+          health: decision.health,
+        },
+        estimatedPoints: decision.estimatedPoints,
+        estimatedTwd: decision.estimatedTwd,
+        noSilentDowngrade: decision.noSilentDowngrade,
+        status: generation.status,
+      };
+    }),
+
   suggest: authedProcedure.input(z.object({
     projectId: z.string().uuid(),
     /** 正在看哪一場（story_scenes）／哪一鏡（scenes）——有給就走 Shot → Scene → Project 的脈絡繼承 */

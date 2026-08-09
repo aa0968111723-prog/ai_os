@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, getTableColumns, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, inArray, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -537,6 +537,24 @@ export const generationRouter = router({
     if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, gen.groupId); // 多組隔離
     return gen;
+  }),
+
+  /** Resolve the durable asset created by generationCore once a generation is done. */
+  assetFor: authedProcedure.input(z.object({ generationId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+    if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, gen.groupId);
+    const [asset] = await db
+      .select({ id: schema.assets.id, url: schema.assets.url, kind: schema.assets.kind, title: schema.assets.title })
+      .from(schema.assets)
+      .where(and(
+        eq(schema.assets.groupId, gen.groupId),
+        isNull(schema.assets.deletedAt),
+        sql`${schema.assets.meta}->>'generationId' = ${gen.id}`,
+      ))
+      .orderBy(desc(schema.assets.createdAt))
+      .limit(1);
+    return asset ?? null;
   }),
 
   listByProject: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
