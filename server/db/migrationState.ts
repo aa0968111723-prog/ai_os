@@ -710,11 +710,47 @@ export async function inspectSchemaDrift(database: Database): Promise<SchemaDrif
       && !/^\s*create\s+unique\s+index\s+"?feedback_user_group_uq"?\s+/i.test(statement),
     );
   }
+
+  // drizzle-kit 0.31 cannot round-trip PostgreSQL expression GIN indexes that
+  // use to_tsvector/coalesce.  In production it reports the two reviewed
+  // Intelligence Library indexes as DROP-only drift even though migration
+  // 0057 created the correct, valid indexes.  Prove both catalog definitions
+  // before suppressing only those named DROP statements; missing, invalid, or
+  // differently shaped indexes remain a real startup drift and fail closed.
+  if (await hasExpectedIntelligenceSearchIndexes(database)) {
+    statements = statements.filter((statement) =>
+      !/^\s*drop\s+index\s+(?:"?public"?\.)?"?(?:asset_intelligence_text_search_idx|intelligence_chunks_text_search_idx)"?\s*;?\s*$/i.test(statement),
+    );
+  }
   return {
     hasDataLoss: plan.hasDataLoss,
     statements,
     warnings: plan.warnings ?? [],
   };
+}
+
+async function hasExpectedIntelligenceSearchIndexes(database: Database): Promise<boolean> {
+  const result = await database.execute(sql`
+    select index_class.relname as name, pg_get_indexdef(index_class.oid) as definition
+    from pg_catalog.pg_class index_class
+    join pg_catalog.pg_index i on i.indexrelid = index_class.oid
+    join pg_catalog.pg_class table_class on table_class.oid = i.indrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = table_class.relnamespace
+    where namespace.nspname = 'public'
+      and index_class.relname in ('asset_intelligence_text_search_idx', 'intelligence_chunks_text_search_idx')
+      and i.indisvalid
+  `);
+  const rows = rowsOf<{ name: string; definition: string }>(result);
+  const asset = rows.find((row) => row.name === "asset_intelligence_text_search_idx")?.definition?.toLowerCase() ?? "";
+  const chunks = rows.find((row) => row.name === "intelligence_chunks_text_search_idx")?.definition?.toLowerCase() ?? "";
+  return asset.includes("using gin")
+    && asset.includes("to_tsvector")
+    && asset.includes("summary")
+    && asset.includes("description")
+    && asset.includes("category")
+    && chunks.includes("using gin")
+    && chunks.includes("to_tsvector")
+    && chunks.includes("text");
 }
 
 async function hasExpectedFeedbackExpressionIndex(database: Database): Promise<boolean> {
