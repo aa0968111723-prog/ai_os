@@ -17,12 +17,19 @@ import {
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import type { AssistantActionResult } from "@shared/assistantActions";
+import {
+  ExternalAssetIntake,
+  type ExternalIntakeOpenRequest,
+} from "../features/external-intake/ExternalAssetIntake";
 import {
   abortAssistantRun,
+  captureAssistantReturnContext,
   clearAssistantConversation,
   endAssistantRun,
   getAssistantConversation,
   registerAssistantRunController,
+  recordAssistantActionResults,
   setAssistantConversation,
   subscribeAssistantRun,
 } from "../lib/assistantRunStore";
@@ -32,6 +39,35 @@ type SiteAction = GlobalAskOutput["siteActions"][number];
 type DispatchProposal = GlobalAskOutput["dispatches"][number];
 type CommandProposal = GlobalAskOutput["actions"][number];
 type ExecutedSiteAction = GlobalAskOutput["executedSiteActions"][number];
+
+export function detectDirectIntakeRequest(text: string): ExternalIntakeOpenRequest["mode"] | null {
+  const wantsImport = /(匯入|帶進|帶入|加入|放進|上傳|import|attach|upload)/i.test(text);
+  if (!wantsImport) return null;
+  if (/(google\s*drive|雲端硬碟|雲端磁碟)/i.test(text)) return "drive";
+  if (/(資料夾|文件夾|\bfolder\b)/i.test(text)) return "folder";
+  if (/https?:\/\/[^\s]+/i.test(text)) return "url";
+  if (/(檔案|檔案|文件|影片|圖片|照片|\bpdf\b|\bfile\b)/i.test(text)) return "files";
+  return null;
+}
+
+export function assistantActionResultsFromExecuted(items: readonly ExecutedSiteAction[]): AssistantActionResult[] {
+  const results: AssistantActionResult[] = [];
+  for (const item of items) {
+    const result = item.result;
+    if (result.type === "import") results.push(result);
+    else if (result.type === "create_project") results.push(result);
+    else if (result.type === "create_task") {
+      results.push({
+        type: "create_task",
+        taskIds: [result.taskId],
+        count: 1,
+        projectId: item.action.type === "create_task" ? item.action.projectId : "",
+        verification: result.verification,
+      });
+    }
+  }
+  return results.filter((result) => result.type !== "create_task" || !!result.projectId);
+}
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -76,6 +112,8 @@ export function toSiteActionInput(a: SiteAction) {
       return { type: a.type, peerId: a.peerId, body: a.body } as const;
     case "add_database_row":
       return { type: a.type, tableId: a.tableId, data: a.data } as const;
+    case "import_url":
+      return { type: a.type, groupId: a.groupId, projectId: a.projectId, url: a.url } as const;
   }
 }
 
@@ -88,6 +126,7 @@ export function siteActionDoneLink(a: SiteAction, result: { type: string; projec
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
   if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
+  if (a.type === "import_url" && result.projectId) return { href: `/p/${result.projectId}#sec-assets`, label: "查看資料" };
   return null;
 }
 
@@ -193,6 +232,8 @@ function DirectActionResultCard({ item, onNavigate }: { item: ExecutedSiteAction
       <span className="ai-copilot-action-card__label">
         {undo.isSuccess
           ? `已撤銷：${item.action.label}`
+          : item.result.type === "import" && verified
+            ? `已加入 ${item.result.count || item.result.duplicateCount} 項資料；AI 正在背景整理`
           : verified
             ? `已完成：${item.action.label}（已驗證）`
             : `操作已送出，但驗證未通過：${item.action.label}`}
@@ -201,7 +242,7 @@ function DirectActionResultCard({ item, onNavigate }: { item: ExecutedSiteAction
       {!undo.isSuccess && link && onNavigate ? (
         <Button variant="ghost" size="sm" onClick={() => onNavigate(link.href)}>{link.label}</Button>
       ) : null}
-      {!undo.isSuccess && undoInput ? (
+      {!undo.isSuccess && item.canUndo && undoInput ? (
         <Button variant="ghost" size="sm" disabled={undo.isPending} onClick={() => undo.mutate(undoInput)}>
           <Icon name="Undo2" size={12} /> {undo.isPending ? "撤銷中…" : "復原"}
         </Button>
@@ -318,6 +359,7 @@ interface AICreativeCopilotProps {
 
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
+  const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
   /**
    * 對話與進行中的執行**不放在元件 state**：這張卡活在會被卸載的面板裡（關面板、
    * 切視野、換頁都會卸載），放 state 等於使用者一關面板就把剛剛的執行紀錄丟掉。
@@ -349,6 +391,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const ask = trpc.globalAssistant.ask.useMutation();
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
+  const activeProjectId = pageCtx.projectId ?? projectId;
   const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
   const breadcrumb = formatContextBreadcrumb(pageCtx);
   // 進行中的判定來自 store（跨卸載存活）與這一顆元件自己的 tRPC fallback
@@ -367,6 +410,39 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     const text = (textToSend ?? input).trim();
     if (!text || !groupId || pending) return;
 
+    const directIntakeMode = activeProjectId ? detectDirectIntakeRequest(text) : null;
+    // File/Drive selection is a mini workspace, not an LLM attachment. Opening
+    // it is safe and synchronous; persistence/ACL/dedupe still happen in the
+    // existing Universal Intake service after the user chooses a source.
+    if (activeProjectId && (directIntakeMode === "drive" || directIntakeMode === "files" || directIntakeMode === "folder")) {
+      setInput("");
+      captureAssistantReturnContext({
+        groupId,
+        projectId: activeProjectId,
+        originRoute: pageCtx.route,
+        originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+        focusAnchor: pageCtx.entityId,
+      });
+      setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+        ...previous,
+        messages: [
+          ...previous.messages,
+          { role: "user", text },
+          {
+            role: "assistant",
+            text: directIntakeMode === "drive"
+              ? "請在這裡選擇要帶入的 Google Drive 檔案；完成後我會在同一個對話繼續。"
+              : directIntakeMode === "folder"
+                ? "請選擇要匯入的資料夾。Aios 會沿用 Folder Import 2.0 建立 session，檔案安全保存後即可繼續對話。"
+              : "Aios 需要檔案才能繼續。選擇後會先安全保存，AI 分析會在背景執行。",
+            runStatus: "completed",
+          },
+        ],
+      }));
+      setIntakeOpenRequest({ id: `${Date.now()}`, mode: directIntakeMode });
+      return;
+    }
+
     const newHistory = messages.slice(-6).map((m) => ({ role: m.role, text: m.text }));
     const localPlan = classifyAssistantRequest(text);
     liveEventsRef.current = [];
@@ -374,8 +450,16 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     activeGoalRef.current = text;
     setInput("");
     setActivePlan(localPlan);
+    captureAssistantReturnContext({
+      groupId,
+      projectId: pageCtx.projectId ?? projectId,
+      originRoute: pageCtx.route,
+      originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+      focusAnchor: pageCtx.entityId,
+    });
     // 送出當下就把 run 開起來：它活在 store 裡，關掉面板再回來仍看得到目前進度。
     setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+      ...previous,
       messages: [...previous.messages, { role: "user", text }],
       run: { runId: "", events: [], sources: [], active: true, startedAt: Date.now() },
     }));
@@ -403,6 +487,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
       const events = data.events ?? liveEventsRef.current.filter(isAgentEvent);
       const sources = data.sources ?? [];
+      const actionResults = assistantActionResultsFromExecuted(data.executedSiteActions ?? []);
+      recordAssistantActionResults(groupId, actionResults);
       pushMessage({
         role: "assistant",
         text: data.answer,
@@ -453,10 +539,19 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         history: newHistory,
         projectId: pageCtx.projectId ?? projectId,
         pageContext: toWirePageContext(pageCtx),
+        recentActionResults: conversation.recentActionResults,
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
             setActivePlan(run.plan);
+            captureAssistantReturnContext({
+              groupId,
+              projectId: pageCtx.projectId ?? projectId,
+              runId: run.runId,
+              originRoute: pageCtx.route,
+              originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+              focusAnchor: pageCtx.entityId,
+            });
             setAssistantConversation<ChatMessage>(groupId, (previous) => ({
               ...previous,
               run: previous.run ? { ...previous.run, runId: run.runId } : previous.run,
@@ -487,6 +582,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               groupId, message: text, history: newHistory,
               projectId: pageCtx.projectId ?? projectId,
               pageContext: toWirePageContext(pageCtx),
+              recentActionResults: conversation.recentActionResults,
             },
             {
               onSuccess: (data) => { applyDone(data); resolve(); },
@@ -745,6 +841,39 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 輸入工具列 ── */}
         <div className="ai-copilot-input-box">
+          {activeProjectId ? (
+            <ExternalAssetIntake
+              projectId={activeProjectId}
+              groupId={groupId}
+              sceneId={pageCtx.entityType === "shot" ? pageCtx.entityId : undefined}
+              triggerLabel="＋"
+              triggerVariant="ghost"
+              openRequest={intakeOpenRequest}
+              onImported={(notice) => {
+                if (!notice || !groupId) return;
+                recordAssistantActionResults(groupId, [{
+                  type: "import",
+                  source: notice.source,
+                  resourceIds: notice.resourceIds,
+                  assetIds: notice.assetIds,
+                  intelligenceIds: notice.intelligenceIds,
+                  folderImportSessionId: notice.folderImportSessionId,
+                  projectId: notice.projectId,
+                  sceneId: pageCtx.entityType === "shot" ? pageCtx.entityId : undefined,
+                  count: notice.count,
+                  duplicateCount: 0,
+                  needsReviewCount: notice.count,
+                  backgroundProcessing: true,
+                  verification: { status: "verified", message: "檔案已安全保存並登記背景整理" },
+                }]);
+                pushMessage({
+                  role: "assistant",
+                  text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理，你可以繼續聊天。`,
+                  runStatus: "completed",
+                });
+              }}
+            />
+          ) : null}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}

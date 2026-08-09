@@ -1,4 +1,9 @@
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
+import {
+  boundAssistantActionResults,
+  type AssistantActionResult,
+  type AssistantReturnContext,
+} from "@shared/assistantActions";
 
 /**
  * 全站助手對話與執行軌跡的模組級存放區。
@@ -33,6 +38,10 @@ export interface AssistantConversationState<TMessage> {
   messages: TMessage[];
   /** 目前這一次執行；沒有在跑就是 null */
   run: AssistantRunSnapshot | null;
+  /** Conversation is Home: every worker action knows where to return. */
+  returnContext?: AssistantReturnContext;
+  /** Bounded typed references for "這些資料／剛建立的專案". */
+  recentActionResults?: AssistantActionResult[];
 }
 
 type Listener = () => void;
@@ -120,4 +129,55 @@ export function endAssistantRun(groupId: string): void {
   setAssistantConversation(groupId, (previous) =>
     previous.run?.active ? { ...previous, run: { ...previous.run, active: false } } : previous,
   );
+}
+
+function newConversationId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function captureAssistantReturnContext(input: {
+  groupId: string;
+  projectId?: string;
+  runId?: string;
+  originRoute: string;
+  originScrollY?: number;
+  focusAnchor?: string;
+}): AssistantReturnContext {
+  let captured!: AssistantReturnContext;
+  setAssistantConversation(input.groupId, (previous) => {
+    captured = {
+      assistantSurface: "global",
+      conversationId: previous.returnContext?.conversationId ?? newConversationId(),
+      runId: input.runId ?? previous.returnContext?.runId,
+      originRoute: input.originRoute,
+      originScrollY: input.originScrollY,
+      focusAnchor: input.focusAnchor,
+      projectId: input.projectId,
+      groupId: input.groupId,
+    };
+    return { ...previous, returnContext: captured };
+  });
+  return captured;
+}
+
+export function recordAssistantActionResults(groupId: string, results: readonly AssistantActionResult[]): void {
+  if (!results.length) return;
+  setAssistantConversation(groupId, (previous) => ({
+    ...previous,
+    recentActionResults: boundAssistantActionResults([
+      ...(previous.recentActionResults ?? []),
+      ...results,
+    ]),
+  }));
+}
+
+/** Unified return hook for pages/mini-workspaces; it restores state, never
+ * invents browser history. The shell may navigate only after an explicit click. */
+export function returnToAssistantConversation(groupId: string, runId?: string): AssistantReturnContext | null {
+  const state = getAssistantConversation(groupId);
+  const context = state.returnContext;
+  if (!context) return null;
+  if (runId && context.runId && context.runId !== runId) return null;
+  return context;
 }

@@ -1,6 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { open, stat, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -8,17 +5,9 @@ import { authedProcedure, requireGroup, router } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import {
-  downloadPublicUrlToTmp,
-  ingestTmpAsset,
-  type IntakeProvenance,
+  importDriveFileIntoProject,
+  importUrlIntoProject,
 } from "../services/universalIntake";
-import {
-  checkDiskSpace,
-  isAllowedUploadMime,
-  mimeFromPath,
-  resolveUploadMime,
-  tmpDir,
-} from "../services/storage";
 import { finalizeAiTraceSession, recordAiTraceEventSafely, updateAiTraceSession } from "../services/aiTrace";
 import {
   BUILT_IN_EXTERNAL_TOOLS,
@@ -411,51 +400,7 @@ export const externalIntakeRouter = router({
     mediaMetadata: deterministicMediaMetadataSchema.optional(),
     forceDuplicate: z.boolean().default(false),
   })).mutation(async ({ ctx, input }) => {
-    const project = await loadProjectForActor(ctx.auth, input.projectId, true);
-    let tmpPath: string | null = null;
-    try {
-      const downloaded = await downloadPublicUrlToTmp(input.url);
-      tmpPath = downloaded.tmpPath;
-      let mime = downloaded.mime;
-      if (!mime || mime === "application/octet-stream") mime = mimeFromPath(downloaded.filename);
-      const handle = await open(downloaded.tmpPath, "r");
-      const head = Buffer.alloc(16);
-      await handle.read(head, 0, 16, 0);
-      await handle.close();
-      const verdict = resolveUploadMime(mime, head);
-      if (!verdict || !isAllowedUploadMime(verdict.mime)) {
-        throw new TRPCError({ code: "UNSUPPORTED_MEDIA_TYPE", message: "連結內容不是支援的圖片、影片、音訊或文件" });
-      }
-      mime = verdict.mime;
-      const size = (await stat(downloaded.tmpPath)).size;
-      const diskError = await checkDiskSpace(size, true);
-      if (diskError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: diskError });
-      const provenance: IntakeProvenance = {
-        source: input.source,
-        sourceTool: input.sourceTool,
-        importMethod: "url",
-        originalUrl: downloaded.finalUrl,
-        externalSessionId: input.externalSessionId,
-      };
-      const result = await ingestTmpAsset({
-        auth: ctx.auth,
-        project,
-        tmpPath: downloaded.tmpPath,
-        originalName: downloaded.filename,
-        mime,
-        provenance,
-        context: input.context,
-        mediaMetadata: input.mediaMetadata,
-        forceDuplicate: input.forceDuplicate,
-      });
-      if (result.ok) tmpPath = null;
-      return result;
-    } catch (error) {
-      if (error instanceof TRPCError) throw error;
-      throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "網址匯入失敗" });
-    } finally {
-      if (tmpPath) await unlink(tmpPath).catch(() => undefined);
-    }
+    return importUrlIntoProject({ auth: ctx.auth, ...input });
   }),
 
   importDriveFile: authedProcedure.input(z.object({
@@ -465,44 +410,7 @@ export const externalIntakeRouter = router({
     context: intakePageContextSchema.optional(),
     forceDuplicate: z.boolean().default(false),
   })).mutation(async ({ ctx, input }) => {
-    const project = await loadProjectForActor(ctx.auth, input.projectId, true);
-    const { fetchDrivePickedFile } = await import("../services/integrations");
-    const fetched = await fetchDrivePickedFile(ctx.auth.user.id, input.fileId);
-    if (!fetched.ok) throw new TRPCError({ code: "BAD_REQUEST", message: fetched.message });
-    let mime = fetched.mime || mimeFromPath(fetched.name);
-    const verdict = resolveUploadMime(mime, fetched.buf.subarray(0, 16));
-    if (!verdict || !isAllowedUploadMime(verdict.mime)) {
-      throw new TRPCError({ code: "UNSUPPORTED_MEDIA_TYPE", message: "這個 Google Drive 檔案格式不支援帶入素材庫" });
-    }
-    mime = verdict.mime;
-    const diskError = await checkDiskSpace(fetched.buf.length, true);
-    if (diskError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: diskError });
-    const tmpPath = path.join(tmpDir(), `drive-intake-${randomUUID()}.tmp`);
-    await writeFile(tmpPath, fetched.buf);
-    let adopted = false;
-    try {
-      const result = await ingestTmpAsset({
-        auth: ctx.auth,
-        project,
-        tmpPath,
-        originalName: fetched.name,
-        mime,
-        provenance: {
-          source: "google-drive",
-          importMethod: "google-drive",
-          originalUrl: fetched.sourceUrl,
-          externalSessionId: input.externalSessionId,
-          sourceExternalId: input.fileId,
-        },
-        context: input.context,
-        forceDuplicate: input.forceDuplicate,
-        baseMeta: { sourceModifiedTime: fetched.modifiedTime },
-      });
-      adopted = result.ok;
-      return result;
-    } finally {
-      if (!adopted) await unlink(tmpPath).catch(() => undefined);
-    }
+    return importDriveFileIntoProject({ auth: ctx.auth, ...input });
   }),
 });
 

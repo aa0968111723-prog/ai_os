@@ -200,6 +200,16 @@ export function canonicalizeAgentQuestionAnswer(
     return { value: answer, selectedOptionIds: [], displayValue: answer ? "確認" : "取消" };
   }
 
+  if (question.questionType === "file") {
+    const values = (Array.isArray(answer) ? answer : typeof answer === "string" ? [answer] : [])
+      .map((value) => value.trim())
+      .filter((value, index, all) => all.indexOf(value) === index);
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (values.some((value) => !uuid.test(value))) throw new Error("檔案尚未安全保存，不能繼續執行");
+    if (question.required && values.length === 0) throw new Error("請選擇至少一個檔案");
+    return { value: values, selectedOptionIds: values, displayValue: `已選擇 ${values.length} 個檔案` };
+  }
+
   if (question.questionType === "number") {
     const value = typeof answer === "number" ? answer : Number(answer);
     if (!Number.isFinite(value)) throw new Error("請輸入有效數字");

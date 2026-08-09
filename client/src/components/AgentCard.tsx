@@ -812,6 +812,7 @@ export function AgentCard({
             {runQuestion && runQuestion.userId === meId ? (
               <AgentQuestionCard
                 question={runQuestion}
+                projectId={projectId}
                 submitting={answerQuestion.isPending}
                 error={answerQuestion.error?.message}
                 onAnswer={(answer) => answerQuestion.mutate({

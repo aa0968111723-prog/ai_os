@@ -799,6 +799,8 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
         asset,
         suggestion: result.suggestion,
         traceSessionId: result.traceSessionId,
+        intelligenceId: result.intelligenceId,
+        libraryResourceId: result.libraryResourceId,
         importEntry: folderImport?.relativePath ?? null,
       });
     } catch (dbErr) {
@@ -2288,7 +2290,8 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   // tRPC 端由 authedProcedure 中介層記；這裡是 Express 路由，得自己補一筆同名 action。
   const { recordAudit } = await import("./services/audit");
   try {
-    const { runGlobalAsk } = await import("./routers/globalAssistant");
+    const { runGlobalAsk, sanitizeRecentActionResults } = await import("./routers/globalAssistant");
+    const recentActionResults = sanitizeRecentActionResults(req.body?.recentActionResults);
     const result = await runGlobalAsk(
       {
         auth,
@@ -2297,6 +2300,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         history: history.length ? history : undefined,
         projectId,
         pageContext,
+        recentActionResults: recentActionResults.length ? recentActionResults : undefined,
         signal: clientAbort.signal,
         runId,
       },

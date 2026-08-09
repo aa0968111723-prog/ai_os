@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  answerWithVerifiedActions,
   formatMemberRefs,
   readBackVerification,
   resolveSiteActions,
@@ -20,6 +21,27 @@ describe("ACT -> VERIFY -> COMPLETE", () => {
   it("does not hallucinate success when the verification read fails", async () => {
     const result = await readBackVerification(async () => { throw new Error("db timeout"); });
     expect(result).toEqual({ status: "unverified", message: "操作已送出，但驗證未通過" });
+  });
+
+  it("uses server-owned verified results for the completion answer", () => {
+    const answer = answerWithVerifiedActions("我可以幫你處理。", [{
+      action: { label: "加入北藝資料" },
+      result: {
+        type: "import",
+        source: "url",
+        resourceIds: ["r1"],
+        assetIds: ["a1"],
+        intelligenceIds: ["i1"],
+        count: 1,
+        duplicateCount: 0,
+        needsReviewCount: 0,
+        backgroundProcessing: true,
+        verification: { status: "verified", message: "ok" },
+      },
+      canUndo: false,
+    } as never]);
+    expect(answer).toMatch(/^✓ 已加入 1 項資料/);
+    expect(answer).toContain("AI 正在背景整理");
   });
 });
 
@@ -67,6 +89,17 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0]).toMatchObject({ type: "add_note", projectId: "proj-2", projectTitle: "社課回顧" });
     expect(out[1]).toMatchObject({ type: "add_note", projectId: undefined });
     expect(out[1].label).toContain("組層級");
+  });
+
+  it("import_url only accepts a real project ref and http(s) URL", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "import_url", projectRef: "p2", url: "https://example.com/result.pdf" },
+      { type: "import_url", projectRef: "missing", url: "https://example.com/no.pdf" },
+    ]);
+    expect(out).toEqual([expect.objectContaining({
+      type: "import_url", projectId: "proj-2", projectTitle: "社課回顧",
+      url: "https://example.com/result.pdf",
+    })]);
   });
 
   it("add_schedule_item：startsAt 不可解析整筆丟；endsAt 不晚於 startsAt 只丟 endsAt", () => {

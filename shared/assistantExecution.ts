@@ -46,18 +46,36 @@ export interface AssistantLatencyMetrics {
 export interface AssistantCapability {
   id: string;
   label: string;
-  domain: "PROJECT" | "TASK" | "NOTE" | "MEMORY" | "STORYBOARD" | "SCRIPT" | "ASSET" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "GENERATION";
+  domain: "PROJECT" | "TASK" | "NOTE" | "MEMORY" | "STORYBOARD" | "SCRIPT" | "ASSET" | "INTAKE" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "GENERATION";
   access: "READ" | "WRITE";
   risk: AssistantActionRisk;
   direct: boolean;
+  requiredContextSlots: readonly ("projectId" | "sceneId" | "shotId" | "personId" | "assetIds" | "modelId" | "executionMode")[];
+  executionMode: "DIRECT_TOOL" | "PROJECT_AGENT" | "GROUP_CAMPAIGN" | "BROWSER_FALLBACK";
+  /** Stable backend command/service identifier; never a React component. */
+  handler: string;
+  resultType: "none" | "import" | "create_project" | "create_task" | "generation" | "schedule" | "generic";
+  verificationStrategy: "none" | "read_back" | "job_registered" | "external_confirmation";
 }
 
 /** 與目前已接好的 core／command 能力一一對應；不是產品願望清單。 */
-export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] = [
+const capability = (
+  value: Omit<AssistantCapability, "requiredContextSlots" | "executionMode" | "handler" | "resultType" | "verificationStrategy"> &
+    Partial<Pick<AssistantCapability, "requiredContextSlots" | "executionMode" | "handler" | "resultType" | "verificationStrategy">>,
+): AssistantCapability => ({
+  requiredContextSlots: [],
+  executionMode: value.direct ? "DIRECT_TOOL" : "PROJECT_AGENT",
+  handler: `assistant.${value.id}`,
+  resultType: "generic",
+  verificationStrategy: value.access === "WRITE" ? "read_back" : "none",
+  ...value,
+});
+
+const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "read_context", domain: "PROJECT", access: "READ", label: "讀取目前頁面與專案資料", risk: "READ", direct: true },
-  { id: "create_project", domain: "PROJECT", access: "WRITE", label: "建立專案", risk: "SAFE_WRITE", direct: false },
+  capability({ id: "create_project", domain: "PROJECT", access: "WRITE", label: "建立專案", risk: "SAFE_WRITE", direct: true, resultType: "create_project", verificationStrategy: "read_back" }),
   { id: "read_tasks", domain: "TASK", access: "READ", label: "讀取任務", risk: "READ", direct: true },
-  { id: "create_task", domain: "TASK", access: "WRITE", label: "建立未指派專案任務", risk: "SAFE_WRITE", direct: true },
+  capability({ id: "create_task", domain: "TASK", access: "WRITE", label: "建立未指派專案任務", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], resultType: "create_task", verificationStrategy: "read_back" }),
   { id: "read_notes", domain: "NOTE", access: "READ", label: "讀取筆記", risk: "READ", direct: true },
   { id: "add_note", domain: "NOTE", access: "WRITE", label: "建立內部筆記", risk: "SAFE_WRITE", direct: true },
   { id: "save_decision", domain: "MEMORY", access: "WRITE", label: "保存已確認的專案決策", risk: "SAFE_WRITE", direct: true },
@@ -66,6 +84,16 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] = [
   { id: "split_script", domain: "STORYBOARD", access: "WRITE", label: "將目前腳本拆成持久化分鏡", risk: "SAFE_WRITE", direct: true },
   { id: "read_script", domain: "SCRIPT", access: "READ", label: "讀取目前腳本", risk: "READ", direct: true },
   { id: "read_assets", domain: "ASSET", access: "READ", label: "讀取素材庫", risk: "READ", direct: true },
+  capability({ id: "import_local_file", domain: "INTAKE", access: "WRITE", label: "加入檔案", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "universalIntake.ingestTmpAsset", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "import_url", domain: "INTAKE", access: "WRITE", label: "加入網址", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "universalIntake.importUrlIntoProject", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "import_google_drive", domain: "INTAKE", access: "WRITE", label: "加入 Google Drive", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "universalIntake.importDriveFileIntoProject", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "import_folder", domain: "INTAKE", access: "WRITE", label: "加入資料夾", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "folderImport.createFolderImportSession", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "import_external_result", domain: "INTAKE", access: "WRITE", label: "帶回外部 AI 成果", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "universalIntake.ingestTmpAsset", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "attach_asset_to_project", domain: "ASSET", access: "WRITE", label: "把素材加入專案脈絡", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId", "assetIds"], handler: "contextBindings.createBinding", verificationStrategy: "read_back" }),
+  capability({ id: "attach_asset_to_scene", domain: "ASSET", access: "WRITE", label: "把素材加入場景", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId", "sceneId", "assetIds"], handler: "contextBindings.createBinding", verificationStrategy: "read_back" }),
+  capability({ id: "attach_asset_to_shot", domain: "ASSET", access: "WRITE", label: "把素材加入分鏡", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId", "shotId", "assetIds"], handler: "contextBindings.createBinding", verificationStrategy: "read_back" }),
+  capability({ id: "classify_asset", domain: "ASSET", access: "WRITE", label: "整理素材", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["assetIds"], handler: "intelligence.reprocess", verificationStrategy: "job_registered" }),
+  capability({ id: "add_project_context", domain: "PROJECT", access: "WRITE", label: "加入專案資料脈絡", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId", "assetIds"], handler: "contextBindings.createBinding", verificationStrategy: "read_back" }),
   { id: "read_database", domain: "DATABASE", access: "READ", label: "讀取 AI 可見資料庫", risk: "READ", direct: true },
   { id: "add_database_row", domain: "DATABASE", access: "WRITE", label: "寫入資料庫", risk: "SAFE_WRITE", direct: false },
   { id: "read_schedule", domain: "SCHEDULE", access: "READ", label: "讀取排程", risk: "READ", direct: true },
@@ -75,9 +103,14 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] = [
   { id: "read_collaboration", domain: "COLLABORATION", access: "READ", label: "讀取阻塞與代理狀態", risk: "READ", direct: true },
   { id: "send_dm", domain: "COLLABORATION", access: "WRITE", label: "傳送私訊", risk: "EXTERNAL", direct: false },
   { id: "dispatch_agent", domain: "COLLABORATION", access: "WRITE", label: "派工給專案代理", risk: "COSTFUL", direct: false },
+  capability({ id: "orchestrate_group_campaign", domain: "COLLABORATION", access: "WRITE", label: "規劃跨專案活動", risk: "COSTFUL", direct: false, executionMode: "GROUP_CAMPAIGN", handler: "groupAgent.planCampaign", resultType: "generic", verificationStrategy: "read_back" }),
   { id: "read_generations", domain: "GENERATION", access: "READ", label: "讀取生成紀錄與模型", risk: "READ", direct: true },
   { id: "generate_media", domain: "GENERATION", access: "WRITE", label: "生成圖片或影片", risk: "COSTFUL", direct: false },
+  capability({ id: "prepare_external_generation", domain: "GENERATION", access: "WRITE", label: "開啟外部 AI 生成", risk: "EXTERNAL", direct: false, requiredContextSlots: ["projectId", "shotId"], executionMode: "DIRECT_TOOL", handler: "externalIntake.prepareExternalGeneration", resultType: "generation", verificationStrategy: "external_confirmation" }),
 ] as const;
+
+export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
+  ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
 const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|哪些|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|\?|？)/i;
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;

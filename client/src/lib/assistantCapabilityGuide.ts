@@ -74,6 +74,16 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   read_storyboard: { base: "目前分鏡做到哪？哪幾鏡還沒有畫面或旁白？", focused: "{it}還缺什麼？節奏合理嗎？" },
   read_script: { base: "目前的腳本節奏如何？開場、轉折與收尾各有什麼問題？" },
   read_assets: { base: "對照目前分鏡，還缺哪些素材沒有備齊？", focused: "{it}適合用在哪幾鏡？" },
+  import_local_file: { base: "把這份檔案加入目前專案。" },
+  import_url: { base: "把這個連結加入目前專案：https://example.com/file.pdf" },
+  import_google_drive: { base: "從 Google Drive 選資料加入目前專案。" },
+  import_folder: { base: "把整個資料夾加入目前專案。" },
+  import_external_result: { base: "把剛才在外部 AI 做好的成果帶回目前專案。" },
+  attach_asset_to_project: { base: "把剛匯入的這些資料加入目前專案脈絡。" },
+  attach_asset_to_scene: { base: "把選取素材加入目前場景。", focused: "把選取素材加入{it}。" },
+  attach_asset_to_shot: { base: "把選取素材放進目前分鏡。", focused: "把選取素材放進{it}。" },
+  classify_asset: { base: "整理剛匯入的這些素材。" },
+  add_project_context: { base: "讓目前專案接下來都能使用剛匯入的資料。" },
   read_database: { base: "資料庫裡有哪些資料可以直接用在這個專案？" },
   read_schedule: { base: "這週有哪些交付死線？還來得及嗎？" },
   read_members: { base: "現在組內誰的工作最滿？誰還有餘裕？" },
@@ -92,7 +102,9 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   send_dm: { base: "幫我私訊小明，請他今天內回覆旁白稿。" },
 
   dispatch_agent: { base: "把這支片的分鏡整理交給專案 AI 去做。", focused: "把{it}的後續交給專案 AI 去做。" },
+  orchestrate_group_campaign: { base: "幫我規劃完整中秋宣傳活動：開專案、分工、做影片。" },
   generate_media: { base: "幫我生成第 3 鏡的畫面。", focused: "幫我生成{it}的畫面。" },
+  prepare_external_generation: { base: "把第 3 鏡拿去 Flow 生，成果再帶回這個對話。", focused: "把{it}拿去外部 AI 生成。" },
 };
 
 /**
@@ -113,6 +125,16 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   split_script: { pages: ["story", "storyboard"], entities: ["script", "scene"] },
   read_script: { pages: ["story"], entities: ["script"] },
   read_assets: { pages: ["assets", "storyboard", "production"], entities: ["asset"] },
+  import_local_file: { pages: ["assets", "project", "home"] },
+  import_url: { pages: ["assets", "project", "home"] },
+  import_google_drive: { pages: ["assets", "project", "home"] },
+  import_folder: { pages: ["assets", "project"] },
+  import_external_result: { pages: ["assets", "storyboard", "production"], entities: ["shot", "asset"] },
+  attach_asset_to_project: { pages: ["assets", "project"], entities: ["asset"] },
+  attach_asset_to_scene: { pages: ["story", "storyboard"], entities: ["scene", "asset"] },
+  attach_asset_to_shot: { pages: ["storyboard", "production"], entities: ["shot", "asset"] },
+  classify_asset: { pages: ["assets"], entities: ["asset"] },
+  add_project_context: { pages: ["assets", "project"], entities: ["asset"] },
   read_database: { pages: ["database"] },
   add_database_row: { pages: ["database"] },
   read_schedule: { pages: ["schedule", "home"] },
@@ -123,7 +145,9 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   create_project: { pages: ["home"] },
   create_watch: { pages: ["project", "agent_run"] },
   dispatch_agent: { pages: ["project", "agent_run", "home"] },
+  orchestrate_group_campaign: { pages: ["home", "collab", "agent_run"] },
   generate_media: { pages: ["storyboard", "production", "studio"], entities: ["shot", "asset"] },
+  prepare_external_generation: { pages: ["storyboard", "production", "studio"], entities: ["shot"] },
   read_generations: { pages: ["production", "final", "studio"] },
 };
 

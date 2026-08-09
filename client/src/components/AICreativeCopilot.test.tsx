@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { AICreativeCopilot, siteActionDoneLink, toSiteActionInput } from "./AICreativeCopilot";
+import {
+  AICreativeCopilot,
+  detectDirectIntakeRequest,
+  siteActionDoneLink,
+  toSiteActionInput,
+} from "./AICreativeCopilot";
 import {
   registerAssistantFocus,
   registerAssistantPage,
@@ -19,6 +24,7 @@ const runSiteActionMutate = vi.fn();
 const undoSiteActionMutate = vi.fn();
 const dispatchMutate = vi.fn();
 const commandMutate = vi.fn();
+const intakeRender = vi.hoisted(() => vi.fn());
 let watchInsights: unknown;
 let watchOverview: unknown;
 
@@ -48,6 +54,15 @@ vi.mock("../api", () => {
     },
   };
 });
+
+// ExternalAssetIntake owns its own tRPC/query integration tests.  Keep this
+// suite focused on the persistent conversation and command/result behaviour.
+vi.mock("../features/external-intake/ExternalAssetIntake", () => ({
+  ExternalAssetIntake: (props: unknown) => {
+    intakeRender(props);
+    return <button type="button" aria-label="加入資料">＋</button>;
+  },
+}));
 
 /** 串流替身：預設回一則帶三種提議卡的 done（handled=true＝不退 tRPC） */
 const streamMock = vi.fn();
@@ -180,6 +195,18 @@ describe("AICreativeCopilot", () => {
     expect(textarea).toHaveValue("企劃一個夏日飲品短片");
   });
 
+  it("restores the same conversation after the assistant surface unmounts on a route change", async () => {
+    const user = userEvent.setup();
+    const first = render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "幫我查看目前進度");
+    await screen.findByText("組內 2 個專案進行中");
+    first.unmount();
+
+    render(<AICreativeCopilot groupId="grp-123" />);
+    expect(screen.getAllByText("幫我查看目前進度").length).toBeGreaterThan(0);
+    expect(screen.getByText("組內 2 個專案進行中")).toBeInTheDocument();
+  });
+
   it("送出走 SSE 串流：答案＋檢索摘要＋三種確認卡一起長出來", async () => {
     const user = userEvent.setup();
     render(<AICreativeCopilot groupId="grp-123" projectId="proj-9" />);
@@ -224,10 +251,14 @@ describe("AICreativeCopilot", () => {
       return true;
     });
     const user = userEvent.setup();
-    render(<AICreativeCopilot groupId="grp-123" />);
+    const onNavigate = vi.fn();
+    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} />);
     await sendMessage(user, "幫我建立會議筆記");
 
     expect(await screen.findByText(/已完成：新增筆記/)).toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查看筆記排程" }));
+    expect(onNavigate).toHaveBeenCalledWith("/planner");
     // 抬頭卡的耗時來自實測 latency（80ms），不是把預測步驟排排站然後打勾
     expect(screen.getByText("80 毫秒")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /復原/ }));
@@ -342,6 +373,8 @@ describe("toSiteActionInput（label 等顯示欄位不上送）", () => {
       .toEqual({ type: "save_decision", groupId: "g", projectId: "p", title: "角色穿米白外套" });
     expect(toSiteActionInput({ type: "create_watch", groupId: "g", projectId: "p", projectTitle: "PT", kind: "generation_failed", watchLabel: "失敗提醒", label: "L" }))
       .toEqual({ type: "create_watch", groupId: "g", projectId: "p", kind: "generation_failed", label: "失敗提醒" });
+    expect(toSiteActionInput({ type: "import_url", groupId: "g", projectId: "p", projectTitle: "PT", url: "https://example.com/source", label: "L" }))
+      .toEqual({ type: "import_url", groupId: "g", projectId: "p", url: "https://example.com/source" });
   });
 });
 
@@ -354,5 +387,90 @@ describe("siteActionDoneLink", () => {
     expect(siteActionDoneLink({ type: "send_dm", peerId: "u", peerName: "N", body: "b", label: "L" }, { type: "send_dm" })?.href).toBe("/chat");
     expect(siteActionDoneLink({ type: "save_decision", groupId: "g", projectId: "pp", projectTitle: "PT", title: "定案", label: "L" }, { type: "save_decision" })?.href).toBe("/p/pp");
     expect(siteActionDoneLink({ type: "create_watch", groupId: "g", projectId: "pp", projectTitle: "PT", kind: "overdue_task", label: "L" }, { type: "create_watch" })?.href).toBe("/p/pp");
+    expect(siteActionDoneLink(
+      { type: "import_url", groupId: "g", projectId: "pp", projectTitle: "PT", url: "https://example.com/source", label: "L" },
+      { type: "import", projectId: "pp" },
+    )).toEqual({ href: "/p/pp#sec-assets", label: "查看資料" });
+  });
+
+  it("opens the existing Drive mini workspace from conversation without starting a campaign", async () => {
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" projectId={PROJECT_ID} />);
+    await sendMessage(user, "把 Google Drive 的活動資料帶進來");
+
+    expect(await screen.findByText(/Google Drive 檔案/)).toBeInTheDocument();
+    expect(streamMock).not.toHaveBeenCalled();
+    expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      openRequest: expect.objectContaining({ mode: "drive" }),
+    }));
+  });
+
+  it("does not navigate after create_project until the user clicks the result action", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        siteActions: [], dispatches: [], actions: [],
+        executedSiteActions: [{
+          action: { type: "create_project", groupId: "g", title: "百日夢島", kind: "動畫", platform: "youtube", label: "建立「百日夢島」" },
+          result: { type: "create_project", projectId: PROJECT_ID, title: "百日夢島", verification: { status: "verified", message: "ok" } },
+          canUndo: false,
+        }],
+      });
+      return true;
+    });
+    const onNavigate = vi.fn();
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} />);
+    await sendMessage(user, "幫我建立百日夢島動畫專案");
+    await screen.findByText(/已完成：建立「百日夢島」/);
+    expect(onNavigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "前往專案" }));
+    expect(onNavigate).toHaveBeenCalledWith(`/p/${PROJECT_ID}`);
+  });
+
+  it("sends the previous typed ImportResult on the next turn for 'these data' references", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        siteActions: [], dispatches: [], actions: [],
+        executedSiteActions: [{
+          action: {
+            type: "import_url", groupId: "g", projectId: PROJECT_ID, projectTitle: "北藝",
+            url: "https://example.com/source.pdf", label: "加入北藝資料",
+          },
+          result: {
+            type: "import", source: "url", resourceIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+            assetIds: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"], intelligenceIds: [],
+            projectId: PROJECT_ID, count: 1, duplicateCount: 0, needsReviewCount: 1,
+            backgroundProcessing: true, verification: { status: "verified", message: "ok" },
+          },
+          canUndo: false,
+        }],
+      });
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" projectId={PROJECT_ID} />);
+    await sendMessage(user, "把網址加入專案");
+    await screen.findByText(/AI 正在背景整理/);
+    await sendMessage(user, "那幫我用這些資料做下一步");
+
+    expect(streamMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      recentActionResults: [expect.objectContaining({
+        type: "import",
+        resourceIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+        projectId: PROJECT_ID,
+      })],
+    }));
+  });
+});
+
+describe("detectDirectIntakeRequest", () => {
+  it("routes explicit Drive and local-file requests to the existing intake mini workspace", () => {
+    expect(detectDirectIntakeRequest("把 Google Drive 的活動資料帶進來")).toBe("drive");
+    expect(detectDirectIntakeRequest("把整個北藝資料夾匯入")).toBe("folder");
+    expect(detectDirectIntakeRequest("把我的 PDF 檔案放進專案")).toBe("files");
+    expect(detectDirectIntakeRequest("什麼是 Google Drive？")).toBeNull();
   });
 });

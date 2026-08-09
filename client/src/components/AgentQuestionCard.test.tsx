@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentQuestionCard } from "./AgentQuestionCard";
@@ -43,5 +43,39 @@ describe("AgentQuestionCard", () => {
     }} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onAnswer).toHaveBeenCalledWith(false);
+  });
+
+  it("uploads file questions through Universal Intake and answers with durable asset ids only", async () => {
+    const assetId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const onAnswer = vi.fn();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      asset: { id: assetId },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const question = {
+      ...projectQuestion,
+      id: "question-file",
+      questionType: "file" as const,
+      title: "選擇影片檔案",
+      description: "Aios 需要檔案才能繼續目前步驟。",
+      options: [],
+    };
+    const { container } = render(
+      <AgentQuestionCard
+        question={question}
+        projectId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        onAnswer={onAnswer}
+      />,
+    );
+
+    const file = new File(["binary-content"], "private-video.mov", { type: "video/quicktime" });
+    await userEvent.upload(container.querySelector('input[type="file"]') as HTMLInputElement, file);
+
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith([assetId]));
+    const request = fetchMock.mock.calls[0][1];
+    expect(fetchMock).toHaveBeenCalledWith("/api/upload", expect.objectContaining({ method: "POST" }));
+    expect(request?.body).toBeInstanceOf(FormData);
+    expect(onAnswer).not.toHaveBeenCalledWith(expect.stringContaining("private-video.mov"));
+    fetchMock.mockRestore();
   });
 });

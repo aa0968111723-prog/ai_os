@@ -1,15 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, unlink } from "node:fs/promises";
+import { open, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
+import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import {
   MAX_FILE_BYTES,
   adoptTmpFile,
+  checkDiskSpace,
+  isAllowedUploadMime,
   kindFromMime,
+  mimeFromPath,
   removeStoredFile,
+  resolveUploadMime,
   tmpDir,
 } from "./storage";
 import { proxyFetch } from "./http";
@@ -17,6 +23,7 @@ import { assertPublicHostOrError, ssrfGuardError } from "./databaseFiles";
 import { registerIntelligenceResource } from "./intelligenceLibrary";
 import { recordLibraryUsage, registerLibraryResource } from "./libraryResources";
 import { createAiTraceSession, recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
+import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import {
   aspectRatioOf,
   deterministicMediaMetadataSchema,
@@ -71,8 +78,40 @@ export type IngestTmpAssetResult =
     duplicate: false;
     asset: typeof schema.assets.$inferSelect;
     traceSessionId: string | null;
+    intelligenceId: string | null;
+    libraryResourceId: string | null;
     suggestion: null | { bindingId: string; sceneId: string; score: number; reasons: string[] };
   };
+
+export interface ImportUrlIntoProjectInput {
+  auth: AuthState;
+  projectId: string;
+  url: string;
+  source?: IntakeSource;
+  sourceTool?: string;
+  externalSessionId?: string;
+  context?: IntakePageContext;
+  mediaMetadata?: DeterministicMediaMetadata;
+  forceDuplicate?: boolean;
+}
+
+export interface ImportDriveFileIntoProjectInput {
+  auth: AuthState;
+  projectId: string;
+  fileId: string;
+  externalSessionId?: string;
+  context?: IntakePageContext;
+  forceDuplicate?: boolean;
+}
+
+async function loadEditableIntakeProject(auth: AuthState, projectId: string) {
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  requireGroup(auth, project.groupId);
+  assertProjectNotArchived(project);
+  await assertProjectEditable(auth, project);
+  return project;
+}
 
 export async function sha256File(filePath: string): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -408,7 +447,15 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
         summary: suggestion ? "素材已保存並提出分鏡建議，等待使用者確認" : "素材已保存至待整理",
       }).catch(() => undefined);
     }
-    return { ok: true, duplicate: false, asset: updated!, traceSessionId: trace?.id ?? null, suggestion };
+    return {
+      ok: true,
+      duplicate: false,
+      asset: updated!,
+      traceSessionId: trace?.id ?? null,
+      intelligenceId: sidecars?.intelligenceId ?? null,
+      libraryResourceId: sidecars?.libraryResourceId ?? null,
+      suggestion,
+    };
   } catch (error) {
     // The Asset row and bytes are the durable boundary. Suggestions, sidecars, and
     // trace events must never turn an already-saved upload into a failed upload.
@@ -431,11 +478,113 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
         duplicate: false,
         asset: recovered ?? committedAsset,
         traceSessionId: null,
+        intelligenceId: null,
+        libraryResourceId: null,
         suggestion: null,
       };
     }
     await removeStoredFile(storagePath).catch(() => undefined);
     throw error;
+  }
+}
+
+/**
+ * Service-level URL intake used by both the Intake router and Agent tools.
+ * Keeping it here prevents the Command Center from reimplementing upload,
+ * deduplication, provenance, Intelligence registration or context binding.
+ */
+export async function importUrlIntoProject(
+  input: ImportUrlIntoProjectInput,
+): Promise<IngestTmpAssetResult> {
+  const project = await loadEditableIntakeProject(input.auth, input.projectId);
+  let downloadedPath: string | null = null;
+  try {
+    const downloaded = await downloadPublicUrlToTmp(input.url);
+    downloadedPath = downloaded.tmpPath;
+    let mime = downloaded.mime;
+    if (mime === "application/xhtml+xml") mime = "text/html";
+    if (!mime || mime === "application/octet-stream") mime = mimeFromPath(downloaded.filename);
+    const handle = await open(downloaded.tmpPath, "r");
+    const head = Buffer.alloc(16);
+    await handle.read(head, 0, 16, 0);
+    await handle.close();
+    const verdict = resolveUploadMime(mime, head);
+    if (!verdict || !isAllowedUploadMime(verdict.mime)) {
+      throw new TRPCError({ code: "UNSUPPORTED_MEDIA_TYPE", message: "連結內容不是支援的圖片、影片、音訊或文件" });
+    }
+    mime = verdict.mime;
+    const size = (await stat(downloaded.tmpPath)).size;
+    const diskError = await checkDiskSpace(size, true);
+    if (diskError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: diskError });
+    const result = await ingestTmpAsset({
+      auth: input.auth,
+      project,
+      tmpPath: downloaded.tmpPath,
+      originalName: downloaded.filename,
+      mime,
+      provenance: {
+        source: input.source ?? "url",
+        sourceTool: input.sourceTool,
+        importMethod: "url",
+        originalUrl: downloaded.finalUrl,
+        externalSessionId: input.externalSessionId,
+      },
+      context: input.context,
+      mediaMetadata: input.mediaMetadata,
+      forceDuplicate: input.forceDuplicate,
+    });
+    if (result.ok) downloadedPath = null;
+    return result;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "網址匯入失敗" });
+  } finally {
+    if (downloadedPath) await unlink(downloadedPath).catch(() => undefined);
+  }
+}
+
+/** Drive bytes are fetched by the existing connector and immediately handed to
+ * the same canonical finalisation path; they are never sent to the LLM. */
+export async function importDriveFileIntoProject(
+  input: ImportDriveFileIntoProjectInput,
+): Promise<IngestTmpAssetResult> {
+  const project = await loadEditableIntakeProject(input.auth, input.projectId);
+  const { fetchDrivePickedFile } = await import("./integrations");
+  const fetched = await fetchDrivePickedFile(input.auth.user.id, input.fileId);
+  if (!fetched.ok) throw new TRPCError({ code: "BAD_REQUEST", message: fetched.message });
+  let mime = fetched.mime || mimeFromPath(fetched.name);
+  const verdict = resolveUploadMime(mime, fetched.buf.subarray(0, 16));
+  if (!verdict || !isAllowedUploadMime(verdict.mime)) {
+    throw new TRPCError({ code: "UNSUPPORTED_MEDIA_TYPE", message: "這個 Google Drive 檔案格式不支援帶入素材庫" });
+  }
+  mime = verdict.mime;
+  const diskError = await checkDiskSpace(fetched.buf.length, true);
+  if (diskError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: diskError });
+  const temporaryPath = path.join(tmpDir(), `drive-intake-${randomUUID()}.tmp`);
+  await writeFile(temporaryPath, fetched.buf);
+  let adopted = false;
+  try {
+    const result = await ingestTmpAsset({
+      auth: input.auth,
+      project,
+      tmpPath: temporaryPath,
+      originalName: fetched.name,
+      mime,
+      provenance: {
+        source: "google-drive",
+        importMethod: "google-drive",
+        originalUrl: fetched.sourceUrl,
+        externalSessionId: input.externalSessionId,
+        sourceExternalId: input.fileId,
+      },
+      context: input.context,
+      forceDuplicate: input.forceDuplicate,
+      baseMeta: { sourceModifiedTime: fetched.modifiedTime },
+    });
+    adopted = result.ok;
+    return result;
+  } finally {
+    if (!adopted) await unlink(temporaryPath).catch(() => undefined);
   }
 }
 
@@ -473,9 +622,9 @@ export async function downloadPublicUrlToTmp(rawUrl: string): Promise<{
     const length = Number(response.headers.get("content-length") ?? 0);
     if (length > MAX_FILE_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）`);
     const mime = (response.headers.get("content-type") ?? "application/octet-stream").split(";", 1)[0]!.trim().toLowerCase();
-    if (mime === "text/html" || mime === "application/xhtml+xml") {
-      throw new Error("此連結不是可直接下載的成果；若需要外部登入，請先下載成果再匯入。");
-    }
+    // Public HTML pages are valid Intelligence documents. They are stored as
+    // attachment-served assets (storage enforces that policy) and indexed by
+    // the existing document pipeline. Login walls still fail above at 401/403.
     const disposition = response.headers.get("content-disposition") ?? "";
     const named = disposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i)?.[1];
     const safeDecode = (value: string) => {

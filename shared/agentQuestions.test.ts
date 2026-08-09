@@ -89,4 +89,14 @@ describe("answer validation", () => {
     expect(canonicalizeAgentQuestionAnswer(multi, ["project-a", "第一個", "project-b"]).value)
       .toEqual(["project-a", "project-b"]);
   });
+
+  it("file questions accept only durable asset ids, never file bytes or names", () => {
+    const file: AgentQuestionDefinition = {
+      questionType: "file", title: "選擇檔案", description: "請帶入素材", required: true,
+      options: [], allowCustom: false, context: { reason: "執行需要素材", slot: "assetIds", entityType: "asset" },
+    };
+    const id = "123e4567-e89b-42d3-a456-426614174000";
+    expect(canonicalizeAgentQuestionAnswer(file, [id, id]).value).toEqual([id]);
+    expect(() => canonicalizeAgentQuestionAnswer(file, ["movie.mp4"])).toThrow("尚未安全保存");
+  });
 });
