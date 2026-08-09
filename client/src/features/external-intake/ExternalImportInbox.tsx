@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "../../api";
 import { AssetAudio, AssetImg, AssetVideo } from "../../components/MediaFallback";
 import { Icon } from "../../components/Icon";
@@ -19,6 +19,7 @@ export function ExternalImportInbox({ projectId, compact = false, onChanged }: {
   compact?: boolean;
   onChanged?: () => void;
 }) {
+  const [bulkStatus, setBulkStatus] = useState<{ message: string; error: boolean } | null>(null);
   const utils = trpc.useUtils();
   const inbox = trpc.externalIntake.inbox.useQuery({ projectId, limit: compact ? 20 : 100 });
   const confirm = trpc.externalIntake.confirm.useMutation({
@@ -34,13 +35,24 @@ export function ExternalImportInbox({ projectId, compact = false, onChanged }: {
   });
   const pending = useMemo(() => (inbox.data?.items ?? []).filter((item) => item.status !== "ready"), [inbox.data]);
   const confirmAll = async () => {
+    setBulkStatus({ message: `正在確認 ${pending.length} 個成果…`, error: false });
+    let completed = 0;
+    const failures: string[] = [];
     for (const item of pending) {
-      await confirm.mutateAsync({
-        assetId: item.asset.id,
-        sceneId: item.suggestion?.scene?.id,
-        bindingId: item.suggestion?.bindingId ?? undefined,
-      }).catch(() => undefined);
+      try {
+        await confirm.mutateAsync({
+          assetId: item.asset.id,
+          sceneId: item.suggestion?.scene?.id,
+          bindingId: item.suggestion?.bindingId ?? undefined,
+        });
+        completed += 1;
+      } catch (caught) {
+        failures.push(`${item.asset.title}：${caught instanceof Error ? caught.message : "確認失敗"}`);
+      }
     }
+    setBulkStatus(failures.length
+      ? { message: `${completed} 個已確認、${failures.length} 個失敗——${failures.join("；")}`, error: true }
+      : { message: `✓ ${completed} 個成果已確認`, error: false });
   };
   if (inbox.isLoading) return <Meta as="p">正在讀取匯入收件匣…</Meta>;
   if (!pending.length) {
@@ -107,6 +119,7 @@ export function ExternalImportInbox({ projectId, compact = false, onChanged }: {
           );
         })}
       </div>
+      {bulkStatus && <p className={bulkStatus.error ? "error" : "success"} role={bulkStatus.error ? "alert" : "status"}>{bulkStatus.message}</p>}
       {confirm.error && <p className="error" role="alert">{confirm.error.message}</p>}
     </section>
   );

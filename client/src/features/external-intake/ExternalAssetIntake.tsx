@@ -8,7 +8,13 @@ import { readLocalMediaMetadata } from "./mediaMetadata";
 import { ExternalImportInbox } from "./ExternalImportInbox";
 
 type ImportMethod = "file-picker" | "drag-drop" | "clipboard";
-type DuplicateFile = { file: File; method: ImportMethod; existing: { id: string; title: string; url: string } };
+type ExistingAsset = { id: string; title: string; url: string };
+type DuplicateCandidate = {
+  key: string;
+  label: string;
+  existing: ExistingAsset;
+  retry: () => Promise<boolean>;
+};
 
 export function ExternalAssetIntake({
   projectId,
@@ -31,7 +37,7 @@ export function ExternalAssetIntake({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
-  const [duplicate, setDuplicate] = useState<DuplicateFile | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -45,6 +51,12 @@ export function ExternalAssetIntake({
   const context = { currentProjectId: projectId, ...(sceneId ? { currentSceneId: sceneId } : {}) };
   const urlImport = trpc.externalIntake.importUrl.useMutation();
   const driveImport = trpc.externalIntake.importDriveFile.useMutation();
+
+  const addDuplicate = (candidate: DuplicateCandidate) => {
+    setDuplicates((current) => current.some((item) => item.key === candidate.key)
+      ? current
+      : [...current, candidate]);
+  };
 
   const refresh = () => {
     void utils.externalIntake.inbox.invalidate({ projectId });
@@ -75,7 +87,12 @@ export function ExternalAssetIntake({
       duplicate?: { id: string; title: string; url: string };
     };
     if (response.status === 409 && data.duplicate) {
-      setDuplicate({ file, method, existing: data.duplicate });
+      addDuplicate({
+        key: `file:${file.name}:${file.size}:${file.lastModified}`,
+        label: file.name,
+        existing: data.duplicate,
+        retry: () => uploadOne(file, method, true),
+      });
       return false;
     }
     if (!response.ok || !data.ok) throw new Error(data.error ?? `帶入失敗（${response.status}）`);
@@ -87,7 +104,7 @@ export function ExternalAssetIntake({
     if (!list.length || busy) return;
     setBusy(true);
     setError("");
-    setDuplicate(null);
+    setDuplicates([]);
     let done = 0;
     const failures: string[] = [];
     for (const [index, file] of list.entries()) {
@@ -116,6 +133,25 @@ export function ExternalAssetIntake({
       });
       if (!result.ok) {
         setError(`這個素材似乎已存在：${result.asset.title}`);
+        const sourceUrl = url.trim();
+        addDuplicate({
+          key: `url:${sourceUrl}`,
+          label: sourceUrl,
+          existing: { id: result.asset.id, title: result.asset.title, url: result.asset.url },
+          retry: async () => {
+            const forced = await urlImport.mutateAsync({
+              projectId,
+              url: sourceUrl,
+              source: "url",
+              context,
+              externalSessionId: activeSession?.id,
+              sourceTool: activeSession?.externalTool,
+              forceDuplicate: true,
+            });
+            if (forced.ok) setUrl("");
+            return forced.ok;
+          },
+        });
       } else {
         setUrl("");
         setProgress("✓ 成果已安全保存，AI 正在背景整理");
@@ -141,7 +177,21 @@ export function ExternalAssetIntake({
           externalSessionId: activeSession?.id,
         });
         if (result.ok) done += 1;
-        else failures.push(`${file.name}：似乎已存在`);
+        else {
+          failures.push(`${file.name}：似乎已存在，可在下方選擇仍然匯入`);
+          addDuplicate({
+            key: `drive:${file.id}`,
+            label: file.name,
+            existing: { id: result.asset.id, title: result.asset.title, url: result.asset.url },
+            retry: async () => (await driveImport.mutateAsync({
+              projectId,
+              fileId: file.id,
+              context,
+              externalSessionId: activeSession?.id,
+              forceDuplicate: true,
+            })).ok,
+          });
+        }
       } catch (caught) { failures.push(`${file.name}：${caught instanceof Error ? caught.message : "帶入失敗"}`); }
     }
     if (done) refresh();
@@ -172,12 +222,12 @@ export function ExternalAssetIntake({
               </Hint>
             )}
             <div className="external-intake__tabs" role="tablist" aria-label="帶入方式">
-              <Button size="sm" variant={mode === "files" ? "primary" : "ghost"} onClick={() => setMode("files")}>從電腦</Button>
-              <Button size="sm" variant={mode === "drive" ? "primary" : "ghost"} onClick={() => setMode("drive")}>Google Drive</Button>
-              <Button size="sm" variant={mode === "url" ? "primary" : "ghost"} onClick={() => setMode("url")}>貼上連結</Button>
+              <Button id="external-intake-files-tab" role="tab" aria-selected={mode === "files"} aria-controls="external-intake-files-panel" size="sm" variant={mode === "files" ? "primary" : "ghost"} onClick={() => setMode("files")}>從電腦</Button>
+              <Button id="external-intake-drive-tab" role="tab" aria-selected={mode === "drive"} aria-controls="external-intake-drive-panel" size="sm" variant={mode === "drive" ? "primary" : "ghost"} onClick={() => setMode("drive")}>Google Drive</Button>
+              <Button id="external-intake-url-tab" role="tab" aria-selected={mode === "url"} aria-controls="external-intake-url-panel" size="sm" variant={mode === "url" ? "primary" : "ghost"} onClick={() => setMode("url")}>貼上連結</Button>
             </div>
             {mode === "files" && (
-              <>
+              <div id="external-intake-files-panel" role="tabpanel" aria-labelledby="external-intake-files-tab">
                 <div
                   className={`external-intake__drop${dragOver ? " is-dragging" : ""}`}
                   role="button"
@@ -193,34 +243,43 @@ export function ExternalAssetIntake({
                   <Meta as="span">可一次選很多檔案</Meta>
                 </div>
                 <input ref={fileInput} hidden type="file" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files, "file-picker"); }} />
-              </>
+              </div>
             )}
             {mode === "url" && (
-              <div className="external-intake__url">
+              <div id="external-intake-url-panel" role="tabpanel" aria-labelledby="external-intake-url-tab" className="external-intake__url">
                 <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="貼上公開圖片、影片、音訊或可下載檔案網址" aria-label="公開成果網址" />
                 <Button variant="primary" disabled={!url.trim() || busy} onClick={() => { void importFromUrl(); }}>帶入</Button>
                 <Meta as="p">需要登入的外部 AI 頁面不會被繞過；請先下載成果再帶入。</Meta>
               </div>
             )}
             {mode === "drive" && (
-              <GoogleDrivePicker onClose={() => setMode("files")} onPick={(files) => { void importDriveFiles(files); }} pickLabel="帶入選取成果" />
+              <div id="external-intake-drive-panel" role="tabpanel" aria-labelledby="external-intake-drive-tab">
+                <GoogleDrivePicker onClose={() => setMode("files")} onPick={(files) => { void importDriveFiles(files); }} pickLabel="帶入選取成果" />
+              </div>
             )}
             {progress && <p className="success" role="status">{progress}</p>}
             {error && <p className="error" role="alert">{error}</p>}
-            {duplicate && (
-              <Hint as="div" role="alert" className="external-intake__duplicate">
-                <strong>這個素材似乎已存在：{duplicate.existing.title}</strong>
+            {duplicates.map((duplicate) => (
+              <Hint key={duplicate.key} as="div" role="alert" className="external-intake__duplicate">
+                <span>
+                  <strong>這個素材似乎已存在：{duplicate.existing.title}</strong>
+                  <Meta as="small">來源：{duplicate.label}</Meta>
+                </span>
                 <div>
                   <a className="btn-ghost btn-sm" href={duplicate.existing.url} target="_blank" rel="noreferrer">查看原素材</a>
-                  <Button size="sm" onClick={async () => {
-                    setBusy(true); setDuplicate(null);
-                    try { await uploadOne(duplicate.file, duplicate.method, true); refresh(); setProgress("✓ 已依你的選擇另外保留一份"); }
-                    catch (caught) { setError(caught instanceof Error ? caught.message : "帶入失敗"); }
+                  <Button size="sm" disabled={busy} onClick={async () => {
+                    setBusy(true); setError("");
+                    try {
+                      if (!await duplicate.retry()) throw new Error("素材仍被判定為重複，請重新整理後再試");
+                      setDuplicates((current) => current.filter((item) => item.key !== duplicate.key));
+                      refresh();
+                      setProgress("✓ 已依你的選擇另外保留一份");
+                    } catch (caught) { setError(caught instanceof Error ? caught.message : "帶入失敗"); }
                     finally { setBusy(false); }
                   }}>仍然匯入</Button>
                 </div>
               </Hint>
-            )}
+            ))}
             <ExternalImportInbox projectId={projectId} compact onChanged={onImported} />
           </Card>
         </div>

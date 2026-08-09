@@ -20,7 +20,12 @@ import {
   tmpDir,
 } from "../services/storage";
 import { finalizeAiTraceSession, recordAiTraceEventSafely, updateAiTraceSession } from "../services/aiTrace";
-import { BUILT_IN_EXTERNAL_TOOLS, EXTERNAL_TOOL_CAPABILITIES } from "../../shared/externalTools";
+import {
+  BUILT_IN_EXTERNAL_TOOLS,
+  EXTERNAL_TOOL_CAPABILITIES,
+  externalToolForTarget,
+  type ExternalToolCapability,
+} from "../../shared/externalTools";
 import { INTAKE_SOURCES, deterministicMediaMetadataSchema, intakePageContextSchema } from "../../shared/universalIntake";
 
 const ACTIVE_SESSION_STATUSES = ["prepared", "opened_external", "waiting_result", "result_imported"] as const;
@@ -62,31 +67,19 @@ async function confirmImportedAsset(input: {
   if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
   const project = await loadProjectForActor(input.auth, asset.projectId, true);
   let scene: typeof schema.scenes.$inferSelect | null = null;
+  let scenePatch: { assetId: string } | { narrationAssetId: string } | null = null;
   if (input.sceneId) {
     [scene] = await db.select().from(schema.scenes)
       .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
     if (!scene || scene.projectId !== project.id) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "這個分鏡不屬於此專案" });
     }
-    const patch = asset.kind === "image" || asset.kind === "video"
+    scenePatch = asset.kind === "image" || asset.kind === "video"
       ? { assetId: asset.id }
       : asset.kind === "audio"
         ? { narrationAssetId: asset.id }
         : null;
-    if (!patch) throw new TRPCError({ code: "BAD_REQUEST", message: "文件可留在素材庫，但不能設為分鏡畫面" });
-    await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
-    if (input.bindingId) {
-      await db.update(schema.contextBindings).set({
-        source: "USER_CONFIRMED",
-        confirmedByUser: true,
-        priority: "PRIMARY",
-        updatedAt: new Date(),
-      }).where(and(
-        eq(schema.contextBindings.id, input.bindingId),
-        eq(schema.contextBindings.projectId, project.id),
-        eq(schema.contextBindings.resourceId, asset.id),
-      ));
-    }
+    if (!scenePatch) throw new TRPCError({ code: "BAD_REQUEST", message: "文件可留在素材庫，但不能設為分鏡畫面" });
   }
   const meta = asset.meta && typeof asset.meta === "object" ? asset.meta as Record<string, unknown> : {};
   const intake = intakeMetaOf(asset) ?? {};
@@ -100,20 +93,44 @@ async function confirmImportedAsset(input: {
       confirmedSceneId: scene?.id ?? null,
     },
   };
-  const [updated] = await db.update(schema.assets).set({ meta: nextMeta })
-    .where(eq(schema.assets.id, asset.id)).returning();
   const externalSessionId = ((intake.provenance as Record<string, unknown> | undefined)?.externalSessionId);
-  if (typeof externalSessionId === "string") {
-    await db.update(schema.externalGenerationSessions).set({
-      status: "completed",
-      importedAssetId: asset.id,
-      completedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(and(
-      eq(schema.externalGenerationSessions.id, externalSessionId),
-      eq(schema.externalGenerationSessions.userId, input.auth.user.id),
-    ));
-  }
+  const updated = await db.transaction(async (tx) => {
+    if (scene && scenePatch) {
+      await tx.update(schema.scenes).set(scenePatch).where(eq(schema.scenes.id, scene.id));
+    }
+    if (input.bindingId) {
+      const [confirmed] = await tx.update(schema.contextBindings).set({
+        source: "USER_CONFIRMED",
+        confirmedByUser: true,
+        priority: "PRIMARY",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(schema.contextBindings.id, input.bindingId),
+        eq(schema.contextBindings.projectId, project.id),
+        eq(schema.contextBindings.resourceId, asset.id),
+        ...(scene ? [eq(schema.contextBindings.scopeId, scene.id)] : []),
+      )).returning({ id: schema.contextBindings.id });
+      if (!confirmed) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡建議已失效，請重新整理後再確認" });
+      }
+    }
+    const [confirmedAsset] = await tx.update(schema.assets).set({ meta: nextMeta })
+      .where(eq(schema.assets.id, asset.id)).returning();
+    if (!confirmedAsset) throw new TRPCError({ code: "NOT_FOUND", message: "素材已不存在" });
+    if (typeof externalSessionId === "string") {
+      await tx.update(schema.externalGenerationSessions).set({
+        status: "completed",
+        importedAssetId: asset.id,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(schema.externalGenerationSessions.id, externalSessionId),
+        eq(schema.externalGenerationSessions.userId, input.auth.user.id),
+        eq(schema.externalGenerationSessions.projectId, project.id),
+      ));
+    }
+    return confirmedAsset;
+  });
   const traceSessionId = typeof intake.traceSessionId === "string" ? intake.traceSessionId : null;
   if (traceSessionId) {
     await recordAiTraceEventSafely({
@@ -177,7 +194,20 @@ export const externalIntakeRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個工具" });
       return row;
     }
-    const [row] = await db.insert(schema.userExternalTools).values(values).returning();
+    const [row] = await db.insert(schema.userExternalTools).values(values).onConflictDoUpdate({
+      target: [
+        schema.userExternalTools.userId,
+        schema.userExternalTools.groupId,
+        schema.userExternalTools.name,
+      ],
+      set: {
+        url: values.url,
+        capabilities: values.capabilities,
+        favorite: values.favorite,
+        instructions: values.instructions,
+        updatedAt: values.updatedAt,
+      },
+    }).returning();
     return row;
   }),
 
@@ -223,18 +253,12 @@ export const externalIntakeRouter = router({
       eq(schema.userExternalTools.groupId, project.groupId),
     ));
     const tool = builtin ?? (custom ? {
-      key: custom.id, name: custom.name, url: custom.url,
+      key: custom.id, name: custom.name, url: custom.url, capabilities: custom.capabilities,
     } : null);
     if (!tool) throw new TRPCError({ code: "NOT_FOUND", message: "找不到此外部工具" });
-    const trace = await createSessionTrace({
-      groupId: project.groupId,
-      projectId: project.id,
-      userId: ctx.auth.user.id,
-      sceneId: input.sceneId,
-      toolName: tool.name,
-      prompt: input.prompt,
-      referenceAssetIds: input.referenceAssetIds,
-    });
+    if (!externalToolForTarget(input.targetType, tool.capabilities as ExternalToolCapability[])) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `${tool.name} 不支援這次要生成的內容類型` });
+    }
     const [session] = await db.insert(schema.externalGenerationSessions).values({
       projectId: project.id,
       groupId: project.groupId,
@@ -247,10 +271,23 @@ export const externalIntakeRouter = router({
       prompt: input.prompt,
       negativePrompt: input.negativePrompt ?? null,
       referenceAssetIds: input.referenceAssetIds,
-      traceSessionId: trace?.id ?? null,
     }).returning();
-    if (trace) await updateAiTraceSession(trace.id, { sourceType: "external_generation_session", sourceId: session!.id }).catch(() => undefined);
-    return session;
+    const trace = await createSessionTrace({
+      groupId: project.groupId,
+      projectId: project.id,
+      userId: ctx.auth.user.id,
+      sceneId: input.sceneId,
+      toolName: tool.name,
+      prompt: input.prompt,
+      referenceAssetIds: input.referenceAssetIds,
+    });
+    if (!trace) return session;
+    await updateAiTraceSession(trace.id, { sourceType: "external_generation_session", sourceId: session!.id }).catch(() => undefined);
+    const [tracedSession] = await db.update(schema.externalGenerationSessions)
+      .set({ traceSessionId: trace.id, updatedAt: new Date() })
+      .where(eq(schema.externalGenerationSessions.id, session!.id))
+      .returning();
+    return tracedSession ?? session;
   }),
 
   markOpened: authedProcedure.input(z.object({ sessionId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
@@ -258,6 +295,10 @@ export const externalIntakeRouter = router({
       .where(eq(schema.externalGenerationSessions.id, input.sessionId));
     if (!session || session.userId !== ctx.auth.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "找不到工作階段" });
     await loadProjectForActor(ctx.auth, session.projectId, true);
+    if (session.status === "waiting_result") return session;
+    if (session.status !== "prepared" && session.status !== "opened_external") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "這個外部生成工作階段已結束，不能重新開啟" });
+    }
     const [updated] = await db.update(schema.externalGenerationSessions).set({
       status: "waiting_result",
       updatedAt: new Date(),
@@ -292,6 +333,11 @@ export const externalIntakeRouter = router({
     const [session] = await db.select().from(schema.externalGenerationSessions)
       .where(eq(schema.externalGenerationSessions.id, input.sessionId));
     if (!session || session.userId !== ctx.auth.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "找不到工作階段" });
+    await loadProjectForActor(ctx.auth, session.projectId, true);
+    if (session.status === "cancelled" || session.status === "completed") return { ok: true };
+    if (session.status === "result_imported") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "成果已帶入，請在匯入收件匣確認或保留" });
+    }
     await db.update(schema.externalGenerationSessions).set({ status: "cancelled", completedAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.externalGenerationSessions.id, session.id));
     if (session.traceSessionId) await finalizeAiTraceSession({ sessionId: session.traceSessionId, status: "stopped", summary: "使用者取消外部生成工作階段" }).catch(() => false);
@@ -350,6 +396,9 @@ export const externalIntakeRouter = router({
     assetId: z.string().uuid(),
     sceneId: z.string().uuid().optional(),
     bindingId: z.string().uuid().optional(),
+  }).refine((value) => !value.bindingId || !!value.sceneId, {
+    message: "確認分鏡建議時必須指定分鏡",
+    path: ["sceneId"],
   })).mutation(async ({ ctx, input }) => confirmImportedAsset({ auth: ctx.auth, ...input })),
 
   importUrl: authedProcedure.input(z.object({

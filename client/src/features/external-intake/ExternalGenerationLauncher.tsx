@@ -25,7 +25,9 @@ export function ExternalGenerationLauncher({
   const [showAdd, setShowAdd] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customUrl, setCustomUrl] = useState("");
+  const [copyFallback, setCopyFallback] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
+  const copyFallbackRef = useRef<HTMLTextAreaElement>(null);
   useFocusTrap(dialogRef, open, () => setOpen(false));
   const project = trpc.projects.get.useQuery({ id: projectId }, { enabled: open });
   const tools = trpc.externalIntake.tools.useQuery(
@@ -51,6 +53,12 @@ export function ExternalGenerationLauncher({
   const launch = async (toolKey: string) => {
     if (!prompt.trim()) { setStatus("請先填好這一鏡的畫面描述。"); return; }
     const blank = window.open("about:blank", "_blank");
+    if (!blank) {
+      setStatus("瀏覽器封鎖了新分頁。請允許此網站開啟彈出式視窗後再試一次。");
+      return;
+    }
+    try { blank.opener = null; } catch { /* Browser isolation is best-effort. */ }
+    setCopyFallback("");
     setStatus("正在準備 Prompt 與參考素材…");
     try {
       const session = await prepare.mutateAsync({
@@ -61,11 +69,19 @@ export function ExternalGenerationLauncher({
         prompt,
         referenceAssetIds,
       });
-      await navigator.clipboard?.writeText(prompt).catch(() => undefined);
-      if (blank) blank.location.href = session.externalUrl;
-      else window.open(session.externalUrl, "_blank", "noopener,noreferrer");
+      let copied = false;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("clipboard_unavailable");
+        await navigator.clipboard.writeText(prompt);
+        copied = true;
+      } catch {
+        setCopyFallback(prompt);
+      }
+      blank.location.href = session.externalUrl;
       await markOpened.mutateAsync({ sessionId: session.id });
-      setStatus(`✓ Prompt 已複製，${session.externalToolName} 已開啟。完成後回來按「帶入成果」。`);
+      setStatus(copied
+        ? `✓ Prompt 已複製，${session.externalToolName} 已開啟。完成後回來按「帶入成果」。`
+        : `✓ ${session.externalToolName} 已開啟；瀏覽器未允許自動複製，請從下方手動複製 Prompt。`);
     } catch (caught) {
       blank?.close();
       setStatus(caught instanceof Error ? caught.message : "無法開啟外部工具");
@@ -94,6 +110,38 @@ export function ExternalGenerationLauncher({
                 </button>
               ))}
             </div>
+            {copyFallback && (
+              <div className="external-launcher__copy-fallback">
+                <label htmlFor="external-launcher-prompt">待複製的 Prompt</label>
+                <textarea
+                  id="external-launcher-prompt"
+                  ref={copyFallbackRef}
+                  readOnly
+                  value={copyFallback}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button size="sm" variant="primary" onClick={async () => {
+                  let copied = false;
+                  try {
+                    if (!navigator.clipboard?.writeText) throw new Error("clipboard_unavailable");
+                    await navigator.clipboard.writeText(copyFallback);
+                    copied = true;
+                  } catch {
+                    copyFallbackRef.current?.focus();
+                    copyFallbackRef.current?.select();
+                    try { copied = document.execCommand("copy"); } catch { copied = false; }
+                  }
+                  if (copied) {
+                    setCopyFallback("");
+                    setStatus("✓ Prompt 已複製。完成生成後，回來按「帶入成果」。");
+                  } else {
+                    setStatus("無法自動複製；Prompt 已全選，請按 Ctrl+C 或使用系統的複製指令。");
+                  }
+                }}>
+                  <Icon name="Copy" size={12} /> 複製 Prompt
+                </Button>
+              </div>
+            )}
             <div className="external-launcher__custom">
               <Button size="sm" variant="ghost" onClick={() => setShowAdd((value) => !value)}>
                 <Icon name="Plus" size={12} /> 新增我的 AI

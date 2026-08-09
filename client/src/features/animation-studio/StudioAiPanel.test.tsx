@@ -16,16 +16,27 @@ vi.mock("../../api", () => {
       useUtils: () => ({
         scenes: { listByProject: { invalidate: vi.fn() } },
         projects: { assets: { invalidate: vi.fn() } },
+        characters: { list: { invalidate: vi.fn() } },
+        scenePresets: { list: { invalidate: vi.fn() } },
       }),
       scenes: {
         update: { useMutation: () => ({ ...mutation(), mutate: updateMutate }) },
         addDraft: { useMutation: mutation },
         setVisualFromAsset: { useMutation: mutation },
+        setVisualFromGeneration: { useMutation: mutation },
       },
+      characters: { add: { useMutation: mutation } },
+      scenePresets: { add: { useMutation: mutation } },
       director: {
         suggest: { useMutation: mutation },
         splitScript: { useMutation: mutation },
         sketchBoard: { useMutation: () => ({ ...mutation(), mutate: sketchMutate }) },
+        whiteboardImagePlan: { useQuery: () => ({ data: null, isLoading: false }) },
+        generateWhiteboardImage: { useMutation: mutation },
+      },
+      generation: {
+        status: { useQuery: () => ({ data: null, isLoading: false }) },
+        assetFor: { useQuery: () => ({ data: null, isLoading: false }) },
       },
     },
   };
