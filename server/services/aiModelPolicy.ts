@@ -5,6 +5,7 @@ import type {
   SourceKind,
 } from "../../shared/models";
 import { listResolvableModels, resolveModel } from "./modelResolve";
+import { getModelContract } from "./modelContractStore";
 
 export type AiModelPreference = "balanced" | "quality" | "budget" | "speed";
 
@@ -15,6 +16,12 @@ export interface AiModelRequest {
   sourceKind?: SourceKind;
   maxPoints?: number;
   requireVerified?: boolean;
+  /** Minimum model tier allowed for quality-sensitive user actions. */
+  minimumTier?: ModelTier;
+  /** Require a live healthy contract when one is available. */
+  requireHealthy?: boolean;
+  /** Optional product-purpose allowlist layered on top of the shared resolver. */
+  allowedModelIds?: ReadonlySet<string>;
 }
 
 export interface AiModelDecision {
@@ -27,6 +34,7 @@ export interface AiModelDecision {
 /** Categories the project assistant/agent can safely invoke without inventing a source asset. */
 export const AI_GENERATION_CATEGORIES: ReadonlySet<ModelCategory> = new Set([
   "text-to-image",
+  "image-to-image",
   "text-to-video",
   "text-to-audio",
   "text-to-speech",
@@ -38,9 +46,28 @@ export function modelIsOperationallyReady(model: ModelEntry): boolean {
   return model.verified || model.id.startsWith("nvidia-nim#");
 }
 
+const TIER_RANK: Record<ModelTier, number> = { budget: 0, economy: 1, flagship: 2 };
+
+/** A model is healthy when its live contract says so; verified static entries are the safe fallback. */
+export function modelIsHealthy(model: ModelEntry, sourceKind?: SourceKind): boolean {
+  const health = getModelContract(model.id)?.health;
+  // Contract probes intentionally report needs_source until a valid reference is sent.
+  // For image-to-image calls the source is present, so this is an actionable healthy state.
+  return health
+    ? health === "live_ok" || (health === "needs_source" && sourceKind === model.needs)
+    : modelIsOperationallyReady(model);
+}
+
+export function modelHealthStatus(model: ModelEntry, sourceKind?: SourceKind): string {
+  const health = getModelContract(model.id)?.health;
+  if (health === "needs_source" && sourceKind === model.needs) return "live_ok";
+  return health ?? (modelIsOperationallyReady(model) ? "live_ok" : "unknown");
+}
+
 function compatible(model: ModelEntry, request: AiModelRequest): boolean {
   const category = request.category ?? "text-to-image";
   if (model.category !== category) return false;
+  if (request.allowedModelIds && !request.allowedModelIds.has(model.id)) return false;
   if (!AI_GENERATION_CATEGORIES.has(model.category)) return false;
   if (request.sourceKind) {
     if (model.needs !== request.sourceKind) return false;
@@ -48,6 +75,8 @@ function compatible(model: ModelEntry, request: AiModelRequest): boolean {
     return false;
   }
   if (request.maxPoints !== undefined && model.points > request.maxPoints) return false;
+  if (request.minimumTier && TIER_RANK[model.tier] < TIER_RANK[request.minimumTier]) return false;
+  if (request.requireHealthy && !modelIsHealthy(model, request.sourceKind)) return false;
   return true;
 }
 
