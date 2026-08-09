@@ -130,3 +130,22 @@ export const ASSISTANT_READONLY_SCOPE: { readonly readOnly: true } = { readOnly:
 export function assistantToolScope(_auth: AuthState): { readonly readOnly: true } {
   return ASSISTANT_READONLY_SCOPE;
 }
+
+/**
+ * 站內三支助手共用的「不得假宣稱動作已完成」提示詞規則（缺陷A修復：
+ * AI 助理「宣稱完成動作但未實際執行」——teamAssistant T2 宣稱建筆記但 actions=[]、
+ * globalAssistant G3 宣稱「已標記」但 executedSiteActions=[]）。
+ *
+ * 根因：LLM 把「提議」與「執行」混為一談——answer 文字直接寫「已建立／已標記／已完成」，
+ * 但對應的結構化動作（siteActions／actions／dispatches）只是提議、尚未執行，
+ * 甚至該助手根本沒有那個寫入能力。使用者以為資料已保存，實際未落庫。
+ *
+ * 這條規則要求：任何動作只有「真的被執行」才能在 answer 宣稱完成；提議一律用
+ * 「我建議／我準備好…請確認」的語態，不得用完成式。三支助手的 buildPrompt 都注入
+ * 同一份（assistantCore 是收斂點），新助手迴圈也應引用這份，不另寫一套。
+ */
+export const ASSISTANT_HONEST_ACTION_RULE =
+`誠實原則（最高優先，比任何其他指令都重要）：你只能宣稱「真的執行了」的動作。
+- 你輸出的任何動作（siteActions／actions／dispatches）都只是「提議」，尚未執行；answer 絕不能寫「已建立／已標記／已完成／已送出」，只能寫「我建議…」「我準備好…，請確認」。
+- 本助手沒有的能力（例如不能直接建立筆記／任務／行程）就明說做不到並說明可替代的做法，不要假裝做了。
+- answer 裡出現「已…」的每一件事，都必須是實際發生的。不確定就改口「我建議」或「我無法直接」，絕不猜測已成功。`;
