@@ -1496,6 +1496,32 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
   }
 }
 
+/**
+ * 專案助手 ask 的輸入契約。
+ *
+ * `model` 與 `mode` 同義：內部（前端既有呼叫、SSE 路由）用 `mode`，對外 API 契約／文件以 `model`
+ * 送值。歷史上一度只接受 `mode`，呼叫端送 `model` 會被 zod 靜默剝離而回退預設 nim——這正是
+ * 2026-08-09 主測試報告缺陷 B（model 參數被忽略）。兩個欄位都接受，`model` 優先。
+ */
+export const assistantAskInputSchema = z.object({
+  projectId: z.string().uuid(),
+  message: z.string().min(1).max(1000),
+  nonce: z.string().max(64).optional(),
+  /** 使用者選的模型檔位；預設 nim＝免費。選 fal 檔位時平台實付 USD。 */
+  mode: agentPlannerModeSchema.optional(),
+  /** 對外 API 契約欄位名（與 mode 同義）：呼叫端以 model 送值時照樣接受。 */
+  model: agentPlannerModeSchema.optional(),
+  /** 本次問答優先注入的知識 id（工作台勾選） */
+  knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
+  /** 本次「只用這幾份依據」（P5 來源選擇）；空陣列視同未指定 */
+  onlyKnowledgeIds: z.array(z.string().uuid()).max(20).optional(),
+  history: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    text: z.string().max(1000),
+  })).max(8).optional(),
+  pageContext: assistantPageContextSchema.optional(),
+});
+
 export const assistantRouter = router({
   /** 助手可代操的多模態生成模型（供前端「換模型」下拉；與 pickGenerateModel 白名單同源） */
   generateModels: authedProcedure.query(() => listAssistantGenerateModels()),
@@ -1504,7 +1530,10 @@ export const assistantRouter = router({
     .input(z.object({
       projectId: z.string().uuid(),
       message: z.string().min(1).max(1000),
+      /** 使用者選的模型檔位；預設 nim＝免費。選 fal 檔位時平台實付 USD。 */
       mode: agentPlannerModeSchema.optional(),
+      /** 對外 API 契約欄位名（與 mode 同義）；測試與文件以 model 送值。 */
+      model: agentPlannerModeSchema.optional(),
       knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -1512,11 +1541,12 @@ export const assistantRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await assertProjectEditable(ctx.auth, project);
+      const selectedMode = input.model ?? input.mode;
       return {
         mode: "ask" as const,
         title: "專案助手會讀到什麼",
         dynamicNotice: "工具查詢結果與完整模型請求會在實際執行時才產生，完成後可在「查看實際運作」逐步核對。",
-        provider: input.mode?.startsWith("fal_") ? "fal-openrouter" : "nvidia-nim",
+        provider: selectedMode?.startsWith("fal_") ? "fal-openrouter" : "nvidia-nim",
         context: [
           { type: "project", label: project.title, id: project.id, included: true },
           { type: "knowledge", label: `優先知識 ${input.knowledgeIds?.length ?? 0} 筆`, included: true },
@@ -1524,7 +1554,7 @@ export const assistantRouter = router({
         ],
         request: {
           message: input.message,
-          requestedMode: input.mode ?? "nim",
+          requestedMode: selectedMode ?? "nim",
           preferredKnowledgeIds: input.knowledgeIds ?? [],
           responseContract: { answer: "string", actions: "proposed actions[]" },
         },
@@ -1539,29 +1569,14 @@ export const assistantRouter = router({
   /** 問答：讀專案現況回答並輸出結構化動作意圖；核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure
     // nonce 僅關聯串流與 fallback；每次外部呼叫仍各自計入限流。
-    .input(z.object({
-      projectId: z.string().uuid(),
-      message: z.string().min(1).max(1000),
-      nonce: z.string().max(64).optional(),
-      /** 使用者選的模型檔位；預設 nim＝免費。選 fal 檔位時平台實付 USD。 */
-      mode: agentPlannerModeSchema.optional(),
-      /** 本次問答優先注入的知識 id（工作台勾選） */
-      knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
-      /** 本次「只用這幾份依據」（P5 來源選擇）；空陣列視同未指定 */
-      onlyKnowledgeIds: z.array(z.string().uuid()).max(20).optional(),
-      history: z.array(z.object({
-        role: z.enum(["user", "assistant"]),
-        text: z.string().max(1000),
-      })).max(8).optional(),
-      pageContext: assistantPageContextSchema.optional(),
-    }))
+    .input(assistantAskInputSchema)
     .mutation(({ ctx, input }) =>
       runAssistantAsk({
         projectId: input.projectId,
         message: input.message,
         auth: ctx.auth,
         dedupeKey: input.nonce,
-        mode: input.mode,
+        mode: input.model ?? input.mode,
         knowledgeIds: input.knowledgeIds,
         onlyKnowledgeIds: input.onlyKnowledgeIds,
         history: input.history,
