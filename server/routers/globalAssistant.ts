@@ -692,6 +692,13 @@ ${historyBlock}使用者的問題：${input.message}`;
   // 迴圈外收集 steps：迴圈中途拋錯（第二輪 LLM 429 等）時，已執行的查證不該從回覆裡消失
   const collectedSteps: string[] = [];
 
+  // 上下文備齊、即將進入工具迴圈：trace 從 prepared 翻成 running。
+  // 否則 LLM 呼叫耗時（長上下文可達數十秒）期間 session 一直停在 prepared，
+  // 使用者查軌跡只看到「卡在準備階段」——實際上模型請求已在途。
+  if (traceSessionId) {
+    await updateSiteTraceSession(traceSessionId, { status: "running" }).catch(() => undefined);
+  }
+
   try {
     const outcome = await runToolLoop({
       maxToolRounds: MAX_TOOL_ROUNDS,
