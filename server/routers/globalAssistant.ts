@@ -838,6 +838,13 @@ ${historyBlock}使用者的問題：${input.message}`;
   /** 工具呼叫的計時：onToolCall 開步驟、onToolResult 收步驟（耗時是實測差值） */
   let pendingToolStep: string | undefined;
 
+  // 上下文備齊、即將進入工具迴圈：trace 從 prepared 翻成 running。
+  // 否則 LLM 呼叫耗時（長上下文可達數十秒）期間 session 一直停在 prepared，
+  // 使用者查軌跡只看到「卡在準備階段」——實際上模型請求已在途。
+  if (traceSessionId) {
+    await updateSiteTraceSession(traceSessionId, { status: "running" }).catch(() => undefined);
+  }
+
   try {
     const outcome = await runToolLoop({
       maxToolRounds: MAX_TOOL_ROUNDS,

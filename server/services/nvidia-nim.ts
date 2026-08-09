@@ -136,14 +136,25 @@ export function nimRetryable(err: unknown): boolean {
 }
 
 /** 呼叫 NVIDIA NIM Chat API(OpenAI 相容);金鑰未設或 HTTP 錯誤一律拋例外,由呼叫端退點。
- *  暫時性失敗（逾時/5xx/網路）會自動退避重試至多 NIM_MAX_ATTEMPTS 次（見 nimRetryable）。 */
+ *  暫時性失敗（逾時/5xx/網路）會自動退避重試至多 NIM_MAX_ATTEMPTS 次（見 nimRetryable）。
+ *
+ *  **總時限不變式**：`timeoutMs` 是**整段呼叫（含重試）**的上限，不是「每次重試各吃一個」。
+ *  舊版每次 attempt 各拿完整 timeoutMs，單次 ask 最壞卡到 3×60s=180s——長上下文（A2）與
+ *  工具動作（T3）逾時都栽在這裡：使用者等 60–100s 沒回應、trace 停在 prepared。重試只該
+ *  救「短暫」抖動（快速 5xx／網路 blip），救不了「模型真的慢」；真正的慢讓它在 deadline 內
+ *  結束並以明確人話逾時收束，不無聲地把等待時間翻三倍。 */
 export async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompletionResponse> {
   if (!NVIDIA_NIM_API_KEY) {
     throw new NimServiceError("AI 文字服務尚未設定金鑰——請管理員到 build.nvidia.com 申請（免費）並設定 NVIDIA_NIM_API_KEY");
   }
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  // 整個呼叫（含所有重試）的總時限。逾時以 NimServiceError 拋出＝不重試、呼叫端直接顯示人話原因。
+  const deadline = Date.now() + timeoutMs;
+  const timeoutError = () => new NimServiceError(`AI 文字服務回應逾時（超過 ${Math.round(timeoutMs / 1000)} 秒無回應）`);
   let lastErr: unknown;
   for (let attempt = 1; attempt <= NIM_MAX_ATTEMPTS; attempt++) {
     if (options.signal?.aborted) throw lastErr ?? new DOMException("已中止", "AbortError");
+    if (Date.now() >= deadline) throw timeoutError(); // 總時限已到：不再發起新的 attempt
     try {
       const res = await proxyFetch(`${NVIDIA_NIM_ENDPOINT}/chat/completions`, {
         method: "POST",
@@ -155,7 +166,8 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
           max_tokens: options.maxTokens ?? 2048,
           ...(options.logprobs ? { logprobs: true } : {}),
         }),
-        timeoutMs: options.timeoutMs ?? 60_000,
+        // 每次請求只吃「剩餘預算」：重試不會把總時間拖超過 deadline
+        timeoutMs: Math.max(1_000, deadline - Date.now()),
         signal: options.signal,
       });
       if (!res.ok) {
@@ -182,6 +194,8 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
       if (!nimRetryable(err)) throw err; // 上限/金鑰/4xx：重試無用，原樣拋
       lastErr = err;
       if (attempt >= NIM_MAX_ATTEMPTS) throw err; // 用完次數：拋最後一次錯誤（呼叫端照舊退點/顯示人話）
+      // 重試的價值只在救「短暫」抖動：剩餘預算不足一次完整的請求窗口，重啟只是把使用者等待加倍——直接逾時收束
+      if (deadline - Date.now() < timeoutMs / 2) throw timeoutError();
       await sleep(NIM_RETRY_BASE_MS * attempt); // 線性退避：400ms、800ms
     }
   }

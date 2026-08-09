@@ -1365,8 +1365,12 @@ ${historyBlock}使用者的問題：${input.message}`;
         };
       } catch (err) {
         await refund(ctx.auth.user.id, input.groupId, ASK_COST_POINTS, "團隊彙總助手失敗退回");
-        // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
-        const answer = err instanceof NimServiceError ? err.message : "AI 彙總助手暫時沒回應，請稍後再問一次。";
+        // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦。
+        // completeText 會把 NimServiceError 包成 LlmServiceError 拋出（見 llmProvider.sanitize），
+        // 逾時/上限兩者都要顯示人話原因，不能只認 NimServiceError。
+        const answer = err instanceof NimServiceError || err instanceof LlmServiceError
+          ? err.message
+          : "AI 彙總助手暫時沒回應，請稍後再問一次。";
         return {
           answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps,
           canDispatch, commandLevel, mock: false,

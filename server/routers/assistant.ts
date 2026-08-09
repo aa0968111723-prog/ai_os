@@ -1309,6 +1309,10 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       let usedProvider: LlmProvider = "nvidia-nim";
       let usedModel = "";
       let fellBackToPaid = false;
+      // 上下文備齊、即將進入工具迴圈：trace 從 prepared 翻成 running。
+      // 否則 LLM 呼叫耗時（長上下文可達數十秒）期間 session 一直停在 prepared，
+      // 使用者查軌跡只看到「卡在準備階段」——實際上模型請求已在途。
+      await updateAiTraceSession(traceSessionId, { status: "running" }).catch(() => undefined);
       try {
         /** 最終回覆的三種來源：正規 JSON、C2 self-healing 救回、純文字備援——trace 摘要與 fallback 旗標據此分流 */
         type ProjectAskReply = { source: "reply" | "coerced" | "fallback"; answer: string; rawActions: z.infer<typeof proposalSchema>[] };
