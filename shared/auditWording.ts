@@ -105,6 +105,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.approve": "核准 AI 代理計畫",
   "agents.discard": "放棄 AI 代理計畫",
   "agents.stop": "停止 AI 代理",
+  "agents.answerAgentQuestion": "回答 AI 代理的澄清問題",
   // 代理背景執行的每一步（背景執行器補記，繞過 tRPC 中介層——代理實際做了什麼的追溯來源）
   "agents.step.generate": "AI 代理：生成素材",
   "agents.step.voiceover": "AI 代理：生成旁白配音",

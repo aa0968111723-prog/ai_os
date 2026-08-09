@@ -126,6 +126,11 @@ export interface AgentEvent {
   error?: string;
   /** 詳細資訊層的補充欄位（不得放敏感資料，會直接送到前端） */
   metadata?: Record<string, string | number | boolean>;
+  /** Structured payload carried by waiting.user_input events. */
+  question?: import("./agentQuestions").AgentQuestionDefinition & {
+    questionId: string;
+    resumeToken: string;
+  };
 
   /* ── 舊協定相容欄位（伺服器一律填，前端可忽略） ── */
   phase: LegacyAgentPhase;

@@ -9,7 +9,7 @@ export function useAgentRunBadges(projectId: string) {
   const list = runs.data ?? [];
   const awaiting = list.filter((r) => r.status === "awaiting_approval").length;
   const running = list.filter((r) => r.status === "running").length;
-  const waiting = list.filter((r) => r.status === "waiting").length;
+  const waiting = list.filter((r) => r.status === "waiting" || r.status.startsWith("waiting_") || r.status === "user_controlled").length;
   const hasActiveRun = running > 0 || waiting > 0 || awaiting > 0;
   return { runs, awaiting, running, waiting, hasActiveRun };
 }
