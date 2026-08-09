@@ -294,4 +294,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0057_intelligence_library": [
     "33466ca1f91687a868073814a1a94378ab72fdeafd0437895b49e22e6242e866",
   ],
+  "0058_hot_path_indexes": [
+    "4ebd4d763d5e9381ac5c49c80ba69f0ad2ebfec713f8b36ca62da9892a76ed48",
+  ],
 };

@@ -23,7 +23,9 @@ export const projects = pgTable("projects", {
   status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  groupStatusUpdatedIdx: index("projects_group_status_updated_idx").on(t.groupId, t.status, t.updatedAt),
+}));
 
 /**
  * 專案知識庫（願景核心「真的懂我們素材」v1）：
@@ -108,7 +110,9 @@ export const prompts = pgTable("prompts", {
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectUsedIdx: index("prompts_project_used_idx").on(t.projectId, t.useCount, t.updatedAt),
+}));
 
 /**
  * 角色定裝卡（提案六大核心#3「角色·場景一致性」）：
@@ -133,7 +137,9 @@ export const characters = pgTable("characters", {
   rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectCreatedIdx: index("characters_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 /**
  * 場景設定卡（提案六大核心#3「角色·場景一致性」的「場景」面）：

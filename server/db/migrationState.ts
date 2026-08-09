@@ -109,6 +109,21 @@ function formatSchemaInspectFailure(error: unknown): string {
   return lines.join("\n");
 }
 
+function formatSchemaImportFailure(error: unknown): string {
+  const base =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "unknown error";
+  return [
+    "schema drift 檢查無法載入 drizzle-kit/api（drizzle-kit 動態 import 失敗），不是 pending migration 或 invalid ledger。",
+    "這通常是 build ／執行環境的問題：`Dynamic require of ... is not supported`、找不到模組或 tsx/ESM 互操作。",
+    base,
+    "診斷：確認正式映像內 drizzle-kit 是否在 dependencies（非 devDependencies），或改用 db:check 單獨執行 drift 檢查。",
+  ].join("\n");
+}
+
 export interface MigrationLedgerRow {
   id: number;
   hash: string;
@@ -662,7 +677,12 @@ export function classifyMigrationState(
  * instead of the generic "pending / invalid ledger" triad.
  */
 export async function inspectSchemaDrift(database: Database): Promise<SchemaDrift> {
-  const { pushSchema } = await import("drizzle-kit/api");
+  let pushSchema: (typeof import("drizzle-kit/api"))["pushSchema"];
+  try {
+    ({ pushSchema } = await import("drizzle-kit/api"));
+  } catch (error) {
+    throw new SchemaDriftInspectError(formatSchemaImportFailure(error), { cause: error });
+  }
   let plan: Awaited<ReturnType<typeof pushSchema>>;
   try {
     plan = await pushSchema(schema as unknown as Record<string, unknown>, database as never);
