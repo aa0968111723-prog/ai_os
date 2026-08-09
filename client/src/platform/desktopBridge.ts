@@ -48,6 +48,41 @@ export type DesktopBridgeResult =
       message: string;
     };
 
+/* ────────────────────────── 桌面資料夾匯入（Folder Import 2.0 / P4） ────────────────────────── */
+
+/**
+ * 桌面端選定的匯入來源。
+ *
+ * ★ 這裡**沒有** `path` 欄位，而且永遠不會有。本機絕對路徑只存在 Tauri 原生端的
+ *   rootId → PathBuf 對照表裡；renderer、server、AI context 一律只看得到
+ *   rootId、顯示名與相對路徑（§11）。
+ */
+export type DesktopFolderRoot = {
+  rootId: string;
+  displayName: string;
+};
+
+export type DesktopScannedEntry = {
+  relativePath: string;
+  filename: string;
+  parentPath: string;
+  size: number;
+  lastModified: number | null;
+  mime: string | null;
+};
+
+export type DesktopFolderScan = DesktopFolderRoot & {
+  entries: DesktopScannedEntry[];
+  skipped: Array<{ relativePath: string; reason: string }>;
+  totalBytes: number;
+  /** 掃描筆數達上限——UI 必須誠實說「還有更多」，不可假裝看完了 */
+  truncated: boolean;
+};
+
+export type DesktopFolderResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: string; message: string };
+
 export type AiosDesktopBridge = {
   version: 1;
   openAsset(request: DesktopAssetHandoffRequest): Promise<DesktopBridgeResult>;
@@ -56,6 +91,12 @@ export type AiosDesktopBridge = {
   detectEditors?(): Promise<DetectedDesktopEditor[]>;
   /** 停止監看與自動回傳；不刪已上傳的 revision。 */
   stopHandoff?(handoffId: string): Promise<DesktopBridgeResult>;
+  /** 開啟原生資料夾選擇視窗；只回 rootId 與顯示名。 */
+  pickImportFolder?(): Promise<DesktopFolderResult<DesktopFolderRoot>>;
+  /** 重新掃描已記住的來源根目錄，回相對路徑清單（重新同步的差異比對就靠它）。 */
+  scanImportFolder?(rootId: string): Promise<DesktopFolderResult<DesktopFolderScan>>;
+  /** 忘記這個來源。純本機操作——絕不刪除任何已經匯入 Aios 的資料。 */
+  forgetImportFolder?(rootId: string): Promise<DesktopFolderResult<boolean>>;
 };
 
 declare global {
@@ -237,6 +278,79 @@ export async function revealAssetInFolder(request: DesktopAssetRevealRequest): P
     };
   }
   return desktop.revealAsset(request);
+}
+
+/* ────────────────────────── 桌面資料夾：renderer 端守門 ────────────────────────── */
+
+const SAFE_ROOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Windows 磁碟機代號、UNC 或 POSIX 絕對路徑——原生端若回了這種東西一律丟掉。 */
+const ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
+
+/**
+ * 原生端回來的掃描結果也要驗。
+ *
+ * 為什麼連自己的原生端都不信：這是「本機絕對路徑不得外流」的最後一道閘門。
+ * 只要有一天原生端改壞了、或裝到舊版桌面殼，這裡就會把含絕對路徑的項目丟掉，
+ * 而不是把 `C:\Users\Bruce\…` 一路送到伺服器與 AI。
+ */
+export function sanitizeDesktopScan(scan: DesktopFolderScan): DesktopFolderScan {
+  const entries = scan.entries.filter((entry) => (
+    typeof entry.relativePath === "string"
+    && entry.relativePath.length > 0
+    && entry.relativePath.length <= 1_024
+    && !ABSOLUTE_PATH_RE.test(entry.relativePath)
+    && !entry.relativePath.split("/").includes("..")
+  ));
+  return {
+    ...scan,
+    entries,
+    // 被丟掉的項目要算進 skipped，不可靜默消失
+    skipped: [
+      ...scan.skipped,
+      ...(entries.length < scan.entries.length
+        ? [{ relativePath: "", reason: `dropped_unsafe_paths:${scan.entries.length - entries.length}` }]
+        : []),
+    ],
+  };
+}
+
+export function hasDesktopFolderImport(): boolean {
+  const desktop = bridge();
+  return typeof desktop?.pickImportFolder === "function" && typeof desktop?.scanImportFolder === "function";
+}
+
+/** 讓使用者選一個本機資料夾當匯入來源（只有 Aios 桌面版做得到）。 */
+export async function pickDesktopImportFolder(): Promise<DesktopFolderResult<DesktopFolderRoot>> {
+  const desktop = bridge();
+  if (!desktop?.pickImportFolder) {
+    return { ok: false, reason: "unsupported", message: "只有 Aios 桌面版可以直接選取本機資料夾；瀏覽器請用「上傳資料夾」。" };
+  }
+  return desktop.pickImportFolder();
+}
+
+/** 重新掃描已記住的來源根目錄。回相對路徑清單，交給既有的差異比對。 */
+export async function scanDesktopImportFolder(rootId: string): Promise<DesktopFolderResult<DesktopFolderScan>> {
+  if (!SAFE_ROOT_ID_RE.test(rootId)) {
+    return { ok: false, reason: "invalid-request", message: "來源識別碼格式不正確" };
+  }
+  const desktop = bridge();
+  if (!desktop?.scanImportFolder) {
+    return { ok: false, reason: "unsupported", message: "目前的桌面版不支援重新掃描資料夾" };
+  }
+  const result = await desktop.scanImportFolder(rootId);
+  return result.ok ? { ok: true, value: sanitizeDesktopScan(result.value) } : result;
+}
+
+export async function forgetDesktopImportFolder(rootId: string): Promise<DesktopFolderResult<boolean>> {
+  if (!SAFE_ROOT_ID_RE.test(rootId)) {
+    return { ok: false, reason: "invalid-request", message: "來源識別碼格式不正確" };
+  }
+  const desktop = bridge();
+  if (!desktop?.forgetImportFolder) {
+    return { ok: false, reason: "unsupported", message: "目前的桌面版不支援移除資料夾來源" };
+  }
+  return desktop.forgetImportFolder(rootId);
 }
 
 export async function stopDesktopHandoff(handoffId: string): Promise<DesktopBridgeResult> {

@@ -4,6 +4,9 @@ import {
   type DesktopAssetHandoffRequest,
   type DesktopAssetRevealRequest,
   type DesktopBridgeResult,
+  type DesktopFolderResult,
+  type DesktopFolderRoot,
+  type DesktopFolderScan,
   type DetectedDesktopEditor,
 } from "./desktopBridge";
 
@@ -96,6 +99,29 @@ function toBridgeResult(value: unknown): DesktopBridgeResult {
   return { ok: false, reason: "launch-failed", message: "桌面橋接回應格式不正確" };
 }
 
+/**
+ * Rust 端回的是 `{ ok: "true" | "false", ... }`（serde 的 tag 序列化）。
+ * 這裡把它正規化成前端的 discriminated union；形狀不符一律視為失敗，
+ * 不把未知結構往上丟給呼叫端猜。
+ */
+function toFolderResult<T>(value: unknown): DesktopFolderResult<T> {
+  if (!value || typeof value !== "object") {
+    return { ok: false, reason: "invalid-response", message: "桌面橋接回應格式不正確" };
+  }
+  const record = value as Record<string, unknown>;
+  const ok = record.ok === true || record.ok === "true";
+  if (!ok) {
+    return {
+      ok: false,
+      reason: typeof record.reason === "string" ? record.reason : "unknown",
+      message: typeof record.message === "string" ? record.message : "資料夾操作失敗",
+    };
+  }
+  // Rust 的 externally-tagged enum 會把成功值攤在同一層；沒有 payload 就回原物件本身。
+  const { ok: _ok, ...rest } = record;
+  return { ok: true, value: rest as T };
+}
+
 function navigateFromDeepLink(raw: string): void {
   const path = parseAiosDeepLink(raw);
   if (!path) return;
@@ -127,6 +153,15 @@ export function bootstrapTauriDesktop(): void {
     },
     async stopHandoff(handoffId: string): Promise<DesktopBridgeResult> {
       return toBridgeResult(await api.core.invoke("stop_handoff", { handoffId }));
+    },
+    async pickImportFolder(): Promise<DesktopFolderResult<DesktopFolderRoot>> {
+      return toFolderResult<DesktopFolderRoot>(await api.core.invoke("pick_import_folder"));
+    },
+    async scanImportFolder(rootId: string): Promise<DesktopFolderResult<DesktopFolderScan>> {
+      return toFolderResult<DesktopFolderScan>(await api.core.invoke("scan_import_folder", { request: { rootId } }));
+    },
+    async forgetImportFolder(rootId: string): Promise<DesktopFolderResult<boolean>> {
+      return toFolderResult<boolean>(await api.core.invoke("forget_import_folder", { request: { rootId } }));
     },
   };
 

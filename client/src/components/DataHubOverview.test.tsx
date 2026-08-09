@@ -36,6 +36,13 @@ vi.mock("../api", () => ({
       reviewQueue: { useQuery: () => ({ data: { items: [], total: 0 }, isLoading: false, refetch: vi.fn() }) },
       resolveReview: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     },
+    // 資料夾匯入區：這支測試不驗它的內容，但元件會呼叫——mock 要跟得上 router 形狀，
+    // 否則整個總覽在測試裡直接炸掉（真實環境反而是好的，因為 router 一定存在）
+    folderImport: {
+      list: { useQuery: () => ({ data: [], isLoading: false, error: null }) },
+      status: { useQuery: () => ({ data: undefined, isLoading: false, error: null }) },
+      tree: { useQuery: () => ({ data: undefined, isLoading: false, error: null }) },
+    },
     useUtils: () => ({ intelligence: { summary: { invalidate: vi.fn() } }, dataHub: { list: { invalidate: vi.fn() } } }),
   },
 }));

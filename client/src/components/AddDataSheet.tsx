@@ -4,6 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { NotionPagePicker } from "./NotionPagePicker";
 import { Badge, Button, Card, Hint, Meta } from "./ui";
+import { FolderImportPanel } from "../features/folder-import/FolderImportPanel";
 import {
   addDataMethodsFor,
   dataHubConnectionLabel,
@@ -111,8 +112,10 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
 
   const sources = trpc.dataHub.sources.useQuery(undefined, { enabled: open, staleTime: 30_000 });
   // 資料中心入口才需要選目的地；專案內已經知道要加到哪
+  // 資料夾匯入要建立 Import Session（需要組別），所以專案清單在兩種入口都讀——
+  // 一次 30 秒快取的清單查詢，換掉「使用者已經在專案裡卻查不到自己的組」這個缺口。
   const projects = trpc.projects.list.useQuery(undefined, {
-    enabled: open && destination.kind === "hub",
+    enabled: open,
     staleTime: 30_000,
   });
 
@@ -126,6 +129,8 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
   const projectTitle = destination.kind === "project"
     ? destination.projectTitle ?? null
     : writableProjects.find((p) => p.id === pickedProjectId)?.title ?? null;
+
+  const activeGroupId = (projects.data ?? []).find((p) => p.id === projectId)?.groupId ?? null;
 
   const methods = addDataMethodsFor(destination.kind === "project" ? "project" : "hub");
 
@@ -320,6 +325,7 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
               <MethodPanel
                 method={method}
                 projectId={projectId}
+                groupId={activeGroupId}
                 onDone={() => {
                   onAdded?.();
                 }}
@@ -335,9 +341,11 @@ export function AddDataSheet({ open, destination, onClose, onAdded, onOpenTableF
 
 /* ────────────────────────── 各加入方式的面板 ────────────────────────── */
 
-function MethodPanel({ method, projectId, onDone, onBack }: {
+function MethodPanel({ method, projectId, groupId, onDone, onBack }: {
   method: AddDataMethodId;
   projectId: string;
+  /** 資料夾匯入要建立 Import Session，所以需要組別；拿不到時退回舊的逐檔上傳 */
+  groupId: string | null;
   onDone: () => void;
   onBack: () => void;
 }) {
@@ -349,6 +357,11 @@ function MethodPanel({ method, projectId, onDone, onBack }: {
   }
   if (method === "paste") return <PastePanel projectId={projectId} onDone={onDone} />;
   if (method === "url") return <UrlPanel projectId={projectId} onDone={onDone} />;
+  // 資料夾走 Folder Import 2.0（manifest → session → 有界並行佇列）；
+  // 單檔與相簿仍走既有的逐檔上傳——那條路徑本來就沒有結構要保留。
+  if (method === "upload-folder" && groupId) {
+    return <FolderImportPanel projectId={projectId} groupId={groupId} onDone={onDone} />;
+  }
   if (method === "upload" || method === "upload-folder" || method === "photo-library") {
     return <UploadPanel projectId={projectId} onDone={onDone} mode={method} />;
   }

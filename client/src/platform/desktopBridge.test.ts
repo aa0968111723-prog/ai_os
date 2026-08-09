@@ -4,10 +4,14 @@ import {
   detectDesktopEditors,
   editorKindForAsset,
   hasDesktopBridge,
+  hasDesktopFolderImport,
   normalizeAiosInternalPath,
   openAssetInExternalEditor,
   parseAiosDeepLink,
+  pickDesktopImportFolder,
   revealAssetInFolder,
+  sanitizeDesktopScan,
+  scanDesktopImportFolder,
   stopDesktopHandoff,
   suggestedFileName,
 } from "./desktopBridge";
@@ -161,5 +165,44 @@ describe("desktop asset handoff", () => {
     expect(stopHandoff).not.toHaveBeenCalled();
     await expect(stopDesktopHandoff("12345678-89ab-cdef-0123-456789abcdef")).resolves.toMatchObject({ ok: true });
     expect(stopHandoff).toHaveBeenCalledWith("12345678-89ab-cdef-0123-456789abcdef");
+  });
+  /* ── 桌面資料夾匯入：本機絕對路徑不得外流（§11） ── */
+
+  it("★ 掃描結果裡的本機絕對路徑一律丟掉，且算進 skipped 而不是靜默消失", () => {
+    const sanitized = sanitizeDesktopScan({
+      rootId: "12345678-89ab-4def-8123-456789abcdef",
+      displayName: "北藝專案",
+      entries: [
+        { relativePath: "北藝專案/人物/IMG001.jpg", filename: "IMG001.jpg", parentPath: "北藝專案/人物", size: 10, lastModified: null, mime: null },
+        { relativePath: "C:\\Users\\Bruce\\IMG002.jpg", filename: "IMG002.jpg", parentPath: "", size: 10, lastModified: null, mime: null },
+        { relativePath: "/Users/bruce/IMG003.jpg", filename: "IMG003.jpg", parentPath: "", size: 10, lastModified: null, mime: null },
+        { relativePath: "北藝專案/../../etc/passwd", filename: "passwd", parentPath: "", size: 10, lastModified: null, mime: null },
+      ],
+      skipped: [],
+      totalBytes: 40,
+      truncated: false,
+    });
+    expect(sanitized.entries.map((entry) => entry.relativePath)).toEqual(["北藝專案/人物/IMG001.jpg"]);
+    expect(sanitized.skipped.some((item) => item.reason.startsWith("dropped_unsafe_paths"))).toBe(true);
+  });
+
+  it("沒有桌面版時，資料夾能力一律回 unsupported，不假裝可以", async () => {
+    delete window.__AIOS_DESKTOP__;
+    expect(hasDesktopFolderImport()).toBe(false);
+    await expect(pickDesktopImportFolder()).resolves.toMatchObject({ ok: false, reason: "unsupported" });
+    await expect(scanDesktopImportFolder("12345678-89ab-4def-8123-456789abcdef"))
+      .resolves.toMatchObject({ ok: false, reason: "unsupported" });
+  });
+
+  it("rootId 格式不對就不呼叫原生端", async () => {
+    const scanImportFolder = vi.fn();
+    window.__AIOS_DESKTOP__ = {
+      version: 1,
+      openAsset: vi.fn(),
+      revealAsset: vi.fn(),
+      scanImportFolder,
+    };
+    await expect(scanDesktopImportFolder("../../etc")).resolves.toMatchObject({ ok: false, reason: "invalid-request" });
+    expect(scanImportFolder).not.toHaveBeenCalled();
   });
 });

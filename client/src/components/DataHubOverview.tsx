@@ -27,6 +27,7 @@ import { ReviewQueue } from "../features/intelligence-library/ReviewQueue";
 import { AssetInspector } from "../features/intelligence-library/AssetInspector";
 import { DuplicateReview } from "../features/intelligence-library/DuplicateReview";
 import { PersonClusterReview, PersonDetailPanel } from "../features/intelligence-library/PersonDetailPanel";
+import { FolderImportsSection } from "../features/folder-import/FolderImportsSection";
 
 const KIND_ICON: Record<DataHubKind, IconName> = {
   knowledge: "FileText",
@@ -287,6 +288,9 @@ export function DataHubOverview({ groupId, projectId, projectTitle, onAddData }:
       )}
 
       {selectedIntelligenceId && <AssetInspector intelligenceId={selectedIntelligenceId} onClose={() => setSelectedIntelligenceId(null)} />}
+
+      {/* 原始資料夾檢視：與智慧分類共用同一批 resource，不是第二份資料 */}
+      <FolderImportsSection projectId={projectId} />
 
       <Card as="details" variant="quiet" className="hub-sources" data-fb="來源與同步">
         <summary>

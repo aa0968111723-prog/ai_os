@@ -40,7 +40,7 @@ export type ExecuteGenerationInput = Omit<SubmitCoreInput, "assertAccess" | "use
 export async function executeGenerationCommand(input: ExecuteGenerationInput): Promise<GenerationRow> {
   const { auth, source, backgroundResume, ...core } = input;
 
-  return submitGenerationCore({
+  const generation = await submitGenerationCore({
     ...core,
     userId: auth.user.id,
     assertAccess: async (project) => {
@@ -64,4 +64,39 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
       return role;
     },
   });
+
+  /**
+   * Context Source Trace（§28 / §30）：這一鏡生成時，實際可用的脈絡是哪幾份。
+   *
+   * 之後「這張圖為什麼長這樣？」要答得出來——人物參考、場景參考、Style、Scene Script、
+   * 前後鏡各是誰——靠的就是這一列 `context_resolution_runs`。
+   *
+   * ★ 刻意 fire-and-forget：追蹤是加法，任何失敗都不該讓一筆已經送出的生成失敗。
+   * ★ 刻意不改 prompt 組裝與 provider payload：那條路徑另有既有的錨點機制與測試。
+   */
+  if (generation.sceneId) {
+    void (async () => {
+      const { resolveContext, recordContextResolution } = await import("./contextResolver");
+      const context = await resolveContext({
+        auth,
+        projectId: generation.projectId,
+        shotId: generation.sceneId,
+        intent: generation.kind === "video" ? "video" : generation.kind === "audio" ? "audio" : "image",
+        query: generation.prompt,
+        budgetChars: 4_000,
+      });
+      await recordContextResolution({
+        context,
+        auth,
+        intent: generation.kind === "video" ? "video" : generation.kind === "audio" ? "audio" : "image",
+        shotId: generation.sceneId,
+        extraTrace: { generationId: generation.id, modelId: generation.modelId, prompt: generation.prompt.slice(0, 500) },
+      });
+    })().catch((error) => console.warn(
+      "[generation] context trace skipped:",
+      error instanceof Error ? error.message : error,
+    ));
+  }
+
+  return generation;
 }

@@ -237,6 +237,16 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "intelligence.mergePeople": "合併人物知識實體",
   "intelligence.resolveDuplicate": "處理重複素材群組",
   "intelligence.scheduleBackfill": "排程智慧資料重新分析",
+  // 資料夾匯入：措辭要說清楚「只是排隊上傳」與「取消不刪已進站的資料」
+  "folderImport.begin": "開始匯入資料夾",
+  "folderImport.reportFailure": "回報資料夾匯入單檔結果",
+  "folderImport.cancel": "停止資料夾匯入（已加入的資料保留）",
+  // 專案脈絡：加入／移除的是「引用」，原始資料完全不動
+  "projectContext.add": "把資料加入專案脈絡",
+  "projectContext.remove": "把資料移出專案脈絡（資料本身保留）",
+  "projectContext.setPrimary": "更換主要參考資料",
+  "projectContext.confirmSuggestion": "確認 AI 建議的專案資料",
+  "projectContext.acceptSuggestions": "批次加入 AI 建議的專案資料",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",
@@ -361,7 +371,9 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。
   { key: "storyboard", label: "故事與分鏡", prefixes: ["scenes", "story"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "workflows"] },
-  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props"] },
+  // projectContext 歸在知識：它回答的是「這個專案要用哪些資料、各自扮演什麼角色」，
+  // 查的人和查知識庫／角色設定的是同一批人、同一個問題
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "decisions", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
@@ -369,7 +381,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   // dataHub 歸在資料：資料中心是「資料庫／知識／素材」的統一視圖，
   // 查「這份資料何時被提供給哪個專案」時，會跟資料表的異動一起看
-  { key: "database", label: "資料中心與資料表", prefixes: ["databases", "dataHub", "intelligence"] },
+  { key: "database", label: "資料中心與資料表", prefixes: ["databases", "dataHub", "intelligence", "folderImport"] },
   { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations", "adobe", "userAiKeys"] },
   { key: "system", label: "系統與儲存", prefixes: ["system"] },
 ];

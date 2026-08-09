@@ -333,7 +333,11 @@ describe("legacy migration adoption bridge", () => {
     // 而改之前得先確認新語句真的是「重跑無害」——動態計算會讓非冪等的 DDL 悄悄溜過去。
     // 0057 Intelligence Library adds 25 tables plus 55 guarded indexes only.
     // 0058 Hot-path indexes adds 4 guarded CREATE INDEX IF NOT EXISTS only.
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4);
+    // 0059 Library resource layer / folder import / context bindings adds 6 tables
+    // (all CREATE TABLE IF NOT EXISTS) plus 16 guarded indexes — 22 statements.
+    // Verified statement by statement: no ALTER of an existing column, no UPDATE,
+    // no DELETE, no data movement, so a re-run is a no-op.
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

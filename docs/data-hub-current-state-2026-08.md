@@ -337,3 +337,103 @@ AI 讀得到不代表能寫。寫入必須同時滿足
   目前不做——寧可沒有，也不 hardcode 假的分析結果（§31）。
 - **綁定其他資源種類**：`resource_kind` 欄位已留 text，目前只寫入 `table`
   （knowledge／asset 本來就有 `project_id`，document 權限跟隨所屬表）。
+
+---
+
+## 20. Folder Import 2.0 / Library Resource / Context Engine（2026-08 第三批）
+
+> 本節記錄的是**在既有 Intelligence Library 1.0 之上**繼續完成的部分。
+> 沒有重做 classification / embedding / hybrid search / review queue / face cluster /
+> people / dedupe / entity graph / processing queue——全部延伸既有實作。
+
+### 20.1 migration 0059（唯一一支）
+
+`drizzle/0059_library_folder_import_and_context.sql`：純新增，22 句全部 `IF NOT EXISTS`
+（6 張新表 + 16 個索引）。沒有任何 `ALTER` 既有欄位、沒有 `UPDATE`／`DELETE`、沒有資料搬移。
+
+同步更新的三處（少一處就會紅）：`drizzle/meta/_journal.json`（idx 59）、
+`server/db/migrationRevisions.ts`（sha256）、`server/db/migrationState.test.ts` 的
+`alreadyPresent`（逐句複核後 +22）。已在真實 PostgreSQL 跑過 `scripts/ci-migration-test.sh`
+與 `db:check`（`schema drift: none`）。
+
+新表：
+
+| 表 | 回答的問題 |
+| --- | --- |
+| `library_resources` | 「這份原始資料在 Library 裡的 canonical 指標是哪一列」 |
+| `library_resource_usages` | 「哪些專案在**引用**它」（不複製 bytes） |
+| `folder_import_sessions` | 「這次資料夾匯入的狀態與進度」 |
+| `folder_import_entries` | 「每個檔案的相對路徑、差異狀態、上傳結果」 |
+| `context_bindings` | 「Project / Scene / Shot 各自要用哪些資料、扮演什麼角色」 |
+| `context_resolution_runs` | 「這次 AI 實際用了哪些 context」（Source Trace） |
+
+### 20.2 為什麼不改 `assets.project_id`
+
+`assets.project_id` 仍是 NOT NULL，本次**刻意不動**——全站對 assets 的既有語意
+（生成、版本、交付、回收桶）都建立在它上面。
+
+改採 canonical 指標層：`library_resources` 記住「哪一列**實體持有** bytes」
+（`home_project_id` + `resource_kind`/`resource_id`），其他專案透過
+`library_resource_usages` 與 `context_bindings` 引用同一份。因此：
+
+- binary bytes 不重複（只有一列 asset 持有 storage_path）
+- Intelligence Analysis 不重複（`asset_intelligence` 仍以 carrier 為唯一鍵）
+- Source Trace 不重複（`intelligence_data_sources` 掛在同一個 intelligence 上）
+
+### 20.3 第六條規則（延伸 §14 與 §18.2）
+
+> **Context Bound ≠ Visible**
+
+`context_bindings` 只回答「這份資料算不算這個 scope 的」。讀取端一律
+`listVisibleContextBindings()`——先解出這個人看得到什麼，再與 binding 取交集。
+**絕不可** `SELECT ... WHERE resourceId IN (bound)`。
+
+且 **personal 範圍的表永遠不可綁**（`services/contextBindings.contextTableDenyReason`），
+與 `projectDataBindings.bindableDenyReason` 同一條規則，兩邊的測試各自釘死。
+
+### 20.4 AI 建議永不自動升級
+
+`context_bindings.source = 'AI_SUGGESTED'` 的列**不會**因為被用過、被檢索到、
+或被繼承而變成 `USER_CONFIRMED`。唯一的升級路徑是使用者的明確動作
+（`projectContext.confirmSuggestion` / `acceptSuggestions`）。
+判準集中在 `shared/projectContext.isConfirmedContextSource()`。
+
+### 20.5 「只用這幾份」的邊界（修正一個既有缺口）
+
+`assistant.ask` 原本無條件呼叫 `retrieveIntelligenceContext` 檢索整個 Library——
+即使使用者已經用 `onlyKnowledgeIds` 說「只用這三份」。知識庫被限制住了，
+Intelligence 檢索卻沒有，等於偷偷用了他沒選的資料。
+
+現在助手改走 `resolveContext()`，並在 `onlyKnowledgeIds` 有值時
+`allowGlobalRetrieval: false`。`buildKnowledgeContextWithMeta` 的預算、`onlyIds` 嚴格
+限制與 `truncated` 回報完全不動。
+
+### 20.6 進度誠實（Folder Import）
+
+`shared/folderImport.folderImportProgress()` 刻意回**四段**（掃描／上傳／AI 已理解／
+需要確認），而且不提供任何「整體百分比」。「AI 已理解」的分母是**已上傳數**、
+資料來自 `asset_intelligence.analysis_status`，不是把上傳進度換個標籤。
+
+`MISSING`（來源檔案消失）只標記、只顯示，**永遠不自動刪除站內資料**——
+與「中斷來源連線不刪已匯入內容」同一條原則。
+
+### 20.7 本機路徑隱私
+
+三層防線，任何一層單獨失效都還擋得住：
+
+1. `shared/folderImport.normalizeRelativePath()` 拒收絕對路徑與 `..`
+2. `routers/folderImport` 與 `/api/upload` 各自再驗一次
+3. Tauri 原生端只回 `rootId` + 顯示名 + 相對路徑；絕對路徑存在
+   `FolderRootState`（rootId → PathBuf），永遠不進 WebView；
+   `client/src/platform/desktopBridge.sanitizeDesktopScan()` 是最後一道閘門
+
+### 20.8 仍未做
+
+- **桌面端 byte 上傳與 watcher**：原生已有 `pick_import_folder` / `scan_import_folder` /
+  `forget_import_folder`（可掃描、可重新比對、記得來源根目錄），但**尚未**由原生端上傳檔案內容，
+  也**沒有** watcher。目前桌面版仍以瀏覽器的資料夾選取上傳 bytes。
+- **generation prompt 注入**：生成端目前只落 Context Source Trace
+  （`context_resolution_runs`，含 generationId），**尚未**把 Primary Reference 寫進
+  prompt 組裝——那條路徑有既有的錨點機制與測試，另案處理。
+- **byte-range resumable upload**：目前是檔案層級續傳（已完成的檔案不重傳），
+  不是單檔斷點續傳。

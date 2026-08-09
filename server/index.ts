@@ -499,7 +499,120 @@ async function requireAuthBeforeUpload(req: express.Request, res: express.Respon
   }
 }
 
-/** 上傳素材（multipart: file + projectId [+ title + lineage]）→ 入素材庫、回傳 asset */
+/** 這次上傳屬於哪一個資料夾匯入 session（沒有就是一般單檔上傳）。 */
+type UploadFolderContext = { sessionId: string; relativePath: string; parentPath: string; rootName: string | null };
+
+/**
+ * 驗證 multipart 帶來的資料夾匯入欄位。
+ *
+ * ★ 隱私（§11）：只接受相對路徑。看起來像本機絕對路徑（`C:\...`、`/Users/...`）一律拒收——
+ *   伺服器不需要知道使用者電腦上的完整路徑，AI context 更不需要。
+ * ★ session 必須屬於同一個組與同一個專案，否則等於用 A 的匯入把檔案塞進 B。
+ */
+async function resolveUploadFolderContext(
+  body: Record<string, unknown> | undefined,
+  project: { id: string; groupId: string },
+): Promise<UploadFolderContext | null | { error: string }> {
+  const sessionId = String(body?.importSessionId ?? "").trim();
+  const rawPath = String(body?.relativePath ?? "").trim();
+  if (!sessionId && !rawPath) return null;
+  if (!sessionId || !looksLikeUuid(sessionId)) return { error: "匯入識別碼格式不正確" };
+  const { normalizeRelativePath, parentPathOf, folderRootName } = await import("../shared/folderImport");
+  const relativePath = normalizeRelativePath(rawPath);
+  if (!relativePath) return { error: "資料夾匯入只接受相對路徑——本機完整路徑不會送到伺服器" };
+  const [session] = await db.select().from(schema.folderImportSessions)
+    .where(eq(schema.folderImportSessions.id, sessionId));
+  if (!session) return { error: "找不到這次資料夾匯入" };
+  if (session.groupId !== project.groupId) return { error: "這次匯入不屬於你的組" };
+  if (session.projectId && session.projectId !== project.id) return { error: "這次匯入不屬於這個專案" };
+  if (session.status === "cancelled") return { error: "這次匯入已取消" };
+  return {
+    sessionId: session.id,
+    relativePath,
+    parentPath: parentPathOf(relativePath),
+    rootName: folderRootName(relativePath) ?? session.displayName,
+  };
+}
+
+/**
+ * 上傳成功後的三個 sidecar 登記：Intelligence（AI 分析）、Library Resource（canonical
+ * 指標）、Folder Import Entry（匯入進度）。三者都是加法，任何一個失敗都不影響上傳結果。
+ */
+async function registerUploadSidecars(input: {
+  asset: typeof schema.assets.$inferSelect;
+  auth: { user: { id: string } };
+  originalName: string;
+  mime: string;
+  sizeBytes: number;
+  folderImport: UploadFolderContext | null;
+}): Promise<void> {
+  const { asset, folderImport } = input;
+  const { registerIntelligenceResource } = await import("./services/intelligenceLibrary");
+  const intelligence = await registerIntelligenceResource({
+    resourceKind: "asset",
+    resourceId: asset.id,
+    groupId: asset.groupId,
+    projectId: asset.projectId,
+    sourceType: folderImport ? "folder_import" : "upload",
+    sourceMetadata: {
+      filename: input.originalName,
+      mime: input.mime,
+      sizeBytes: input.sizeBytes,
+      // 原始資料夾結構：保留完整層級，匯入後不會只剩檔名
+      ...(folderImport ? {
+        folderImportSessionId: folderImport.sessionId,
+        relativePath: folderImport.relativePath,
+        parentPath: folderImport.parentPath,
+        sourceRootName: folderImport.rootName,
+      } : {}),
+    },
+    createdBy: input.auth.user.id,
+  });
+
+  const { registerLibraryResource, recordLibraryUsage } = await import("./services/libraryResources");
+  const libraryResource = await registerLibraryResource({
+    groupId: asset.groupId,
+    resourceKind: "asset",
+    resourceId: asset.id,
+    intelligenceId: intelligence.id,
+    // bytes 實體掛在這個專案底下（assets.project_id 是 NOT NULL）——
+    // 這不代表只有它能用；其他專案透過 library_resource_usages 引用同一份。
+    homeProjectId: asset.projectId,
+    displayName: input.originalName || asset.title,
+    mime: input.mime,
+    sizeBytes: input.sizeBytes,
+    checksum: asset.sha256,
+    sourceRootName: folderImport?.rootName ?? null,
+    relativePath: folderImport?.relativePath ?? null,
+    parentPath: folderImport?.parentPath ?? null,
+    originType: folderImport ? "folder_import" : "upload",
+    folderImportSessionId: folderImport?.sessionId ?? null,
+    createdBy: input.auth.user.id,
+  });
+  await recordLibraryUsage({
+    libraryResourceId: libraryResource.id,
+    projectId: asset.projectId,
+    groupId: asset.groupId,
+    usage: "production",
+    actorId: input.auth.user.id,
+  });
+
+  if (folderImport) {
+    const { recordFolderImportEntryResult } = await import("./services/folderImport");
+    await recordFolderImportEntryResult({
+      sessionId: folderImport.sessionId,
+      relativePath: folderImport.relativePath,
+      status: "uploaded",
+      resourceKind: "asset",
+      resourceId: asset.id,
+      libraryResourceId: libraryResource.id,
+      intelligenceId: intelligence.id,
+      checksum: asset.sha256,
+    });
+  }
+}
+
+/** 上傳素材（multipart: file + projectId [+ title + lineage + 資料夾匯入]）→ 入素材庫、回傳 asset */
 app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
@@ -536,6 +649,14 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
         error: `檔案超過此上傳授權上限（${Math.round(grant.maxBytes / 1024 / 1024)}MB）`,
       });
     }
+
+    // 資料夾匯入的相對路徑（保留原始結構）；驗證失敗就擋在落地之前
+    const folderContext = await resolveUploadFolderContext(req.body as Record<string, unknown> | undefined, project);
+    if (folderContext && "error" in folderContext) {
+      await cleanup();
+      return res.status(400).json({ error: folderContext.error });
+    }
+    const folderImport: UploadFolderContext | null = folderContext;
 
     let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
     // 瀏覽器對 .md/.txt 等常送 application/octet-stream——改用副檔名後備判斷
@@ -643,18 +764,19 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
       }
       // Intelligence Library is a sidecar: upload success never depends on AI.
       // Registration is idempotent and the durable worker performs each stage independently.
-      void import("./services/intelligenceLibrary")
-        .then(({ registerIntelligenceResource }) => registerIntelligenceResource({
-          resourceKind: "asset",
-          resourceId: updated.id,
-          groupId: updated.groupId,
-          projectId: updated.projectId,
-          sourceType: "upload",
-          sourceMetadata: { filename: originalName, mime, sizeBytes },
-          createdBy: auth.user.id,
-        }))
-        .catch((error) => console.warn("[upload] intelligence enqueue skipped:", error instanceof Error ? error.message : error));
-      res.json({ ok: true, asset: updated });
+      //
+      // Folder Import 2.0: the original folder structure is Source Metadata and travels
+      // with the asset (relativePath / parentPath / root). AI category is a separate
+      // dimension produced later by the pipeline — the two never overwrite each other.
+      void registerUploadSidecars({
+        asset: updated,
+        auth,
+        originalName,
+        mime,
+        sizeBytes,
+        folderImport,
+      }).catch((error) => console.warn("[upload] sidecar registration skipped:", error instanceof Error ? error.message : error));
+      res.json({ ok: true, asset: updated, importEntry: folderImport?.relativePath ?? null });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");
       await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔

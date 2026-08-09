@@ -42,6 +42,7 @@ import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
+import { ProjectContextPanel } from "../features/project-context/ProjectContextPanel";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PropCards } from "../components/PropCards";
@@ -2480,6 +2481,13 @@ export function ProjectPage({ id }: { id: string }) {
               open={ctxGroupOpen.sources}
               onOpenChange={(o) => setCtxGroupSectionOpen("sources", o)}
             >
+            {/* 專案脈絡（Context Engine）：這個專案在用哪些資料、各自扮演什麼角色。
+                知識庫／素材庫／資料表繼續是資料的真相；這一區回答的是另一件事——
+                「AI 生成與問答時，優先該用誰」。加入的是引用，不複製任何原始檔案。 */}
+            <div id="sec-project-context" data-fb="專案資料">
+              <ProjectContextPanel projectId={id} canEdit={canEdit} />
+            </div>
+
             {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」）。
                 補 collab zone 的理由與素材庫同一條：這裡是 AI 引用的事實來源，
                 兩個人同時整理（一個刪、一個補）會互相蓋掉，而原本連「有人在這裡」都看不到。 */}
