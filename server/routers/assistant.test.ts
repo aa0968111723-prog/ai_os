@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, compactRowLine } from "./assistant";
+import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, compactRowLine, assistantAskInputSchema } from "./assistant";
 import { getModel } from "../../shared/models";
 
 /** 該類別已驗證的推薦日常主力（pickGenerateModel 找不到時的退回目標） */
@@ -124,6 +124,37 @@ describe("sceneFillRole（生成成品能填進分鏡的哪個格）", () => {
  * 誰卡住、什麼時候到期、討論記在哪。teamAssistant 早就有 list_tasks／group_blockers，
  * 專案助手卻沒有，所以它答得出「有幾個生成在跑」，答不出「這個專案卡在誰身上」。
  */
+describe("assistantAskInputSchema（缺陷B：model 參數不再被忽略）", () => {
+  const base = { projectId: "6a4dec59-b818-4b62-a6b4-d64e9d25e1c5", message: "一句話：專案進度" };
+
+  it("接受 model 欄位（對外契約名）並保留原值", () => {
+    const parsed = assistantAskInputSchema.parse({ ...base, model: "fal_economy" });
+    expect(parsed.model).toBe("fal_economy");
+  });
+
+  it("model 與 mode 任一送達都能解析（前端既有呼叫仍相容）", () => {
+    expect(assistantAskInputSchema.parse({ ...base, mode: "fal_quality" }).mode).toBe("fal_quality");
+    expect(assistantAskInputSchema.parse({ ...base, model: "fal_quality" }).model).toBe("fal_quality");
+  });
+
+  it("model 優先於 mode（兩者同時給時以 model 為準）", () => {
+    const parsed = assistantAskInputSchema.parse({ ...base, model: "fal_economy", mode: "fal_quality" });
+    expect(parsed.model).toBe("fal_economy");
+    expect(parsed.mode).toBe("fal_quality");
+  });
+
+  it("非法 model 值會被 schema 擋下（不再靜默剝離成 nim）", () => {
+    const result = assistantAskInputSchema.safeParse({ ...base, model: "__INVALID_MODEL_XYZ__" });
+    expect(result.success).toBe(false);
+  });
+
+  it("省略 model/mode 時兩者皆 undefined（預設 nim 由執行端決定）", () => {
+    const parsed = assistantAskInputSchema.parse(base);
+    expect(parsed.model).toBeUndefined();
+    expect(parsed.mode).toBeUndefined();
+  });
+});
+
 describe("compactRowLine（MCP 工具列 → 給 LLM 的一行）", () => {
   it("跳過 id 類欄位——模型拿 uuid 做不了任何事，只會拿去幻覺引用", () => {
     const line = compactRowLine({ id: "11111111-1111-4111-8111-111111111111", planRunId: "x", title: "確認六個議題" });

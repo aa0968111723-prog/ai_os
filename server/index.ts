@@ -1986,7 +1986,8 @@ app.post("/api/assistant/ask", async (req, res) => {
   const message = String(req.body?.message ?? "").trim();
   const nonce = typeof req.body?.nonce === "string" ? req.body.nonce.slice(0, 64) : undefined;
   // 模型檔位：非法值一律忽略而非報錯——寧可用免費的 NIM 回答，也不要因為偏好壞掉就不給答案。
-  const parsedMode = agentPlannerModeSchema.safeParse(req.body?.mode);
+  // 對外契約欄位名是 model，前端既有呼叫用 mode——兩者同義，model 優先。
+  const parsedMode = agentPlannerModeSchema.safeParse(req.body?.model ?? req.body?.mode);
   const mode = parsedMode.success ? parsedMode.data : undefined;
   // 工作台勾選的知識篇（最多 20）；非法 id 略過
   const rawKids = Array.isArray(req.body?.knowledgeIds) ? req.body.knowledgeIds : [];
