@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSISTANT_HONEST_ACTION_RULE,
   ASSISTANT_READONLY_SCOPE,
   extractJsonObject,
   runToolLoop,
@@ -163,5 +164,34 @@ describe("ASSISTANT_READONLY_SCOPE 不變式", () => {
     expect(ASSISTANT_READONLY_SCOPE.readOnly).toBe(true);
     // 型別上是 readonly true；執行期也鎖死——有人改成可變物件再翻寫也會被抓到
     expect(Object.isFrozen(ASSISTANT_READONLY_SCOPE) || ASSISTANT_READONLY_SCOPE.readOnly === true).toBe(true);
+  });
+});
+
+describe("ASSISTANT_HONEST_ACTION_RULE（缺陷A：不得假宣稱動作已完成）", () => {
+  it("明確禁止把「提議」講成「已完成」（teamAssistant T2 宣稱建筆記、globalAssistant G3 宣稱已標記的根因）", () => {
+    const rule = ASSISTANT_HONEST_ACTION_RULE;
+    // 三支助手都輸出結構化動作提議：actions／dispatches／siteActions——規則必須覆蓋這三種
+    expect(rule).toContain("siteActions");
+    expect(rule).toContain("actions");
+    expect(rule).toContain("dispatches");
+    // 完成式字眼全部被點名禁止
+    expect(rule).toContain("已建立");
+    expect(rule).toContain("已標記");
+    expect(rule).toContain("已完成");
+    // 只能改用「提議」語態
+    expect(rule).toContain("我建議");
+    expect(rule).toContain("請確認");
+  });
+
+  it("明確要求做不到就直說、不猜測成功（防「宣稱完成但未落庫」的誤導）", () => {
+    const rule = ASSISTANT_HONEST_ACTION_RULE;
+    expect(rule).toContain("明說做不到");
+    expect(rule).toContain("不要假裝做了");
+    expect(rule).toContain("不確定就改口");
+    expect(rule).toContain("我無法直接");
+  });
+
+  it("規則標為最高優先，壓過其他回覆指令（LLM 才不會為了討好使用者而假宣稱）", () => {
+    expect(ASSISTANT_HONEST_ACTION_RULE).toContain("最高優先");
   });
 });

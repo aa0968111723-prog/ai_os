@@ -6,7 +6,7 @@ import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { reserveQuota, refund } from "../services/points";
-import { runToolLoop } from "../services/assistantCore";
+import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import {
   buildTeamAskContext,
   buildHistoryBlock,
@@ -822,6 +822,7 @@ ${forceFinal
 ${dispatchBlock}
 ${commandBlock}
 ${siteActionBlock}
+${ASSISTANT_HONEST_ACTION_RULE}
 最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明結論依據","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]` : ""}${commandBlock ? `,"actions":[...]` : ""},"siteActions":[...]}。
 rationale 只寫結構化的結論依據，不要寫思考過程。contextUsed 只能從這份清單挑：${TEAM_CONTEXT_LABELS.join("、")}。
 <組現況>

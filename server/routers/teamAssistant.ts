@@ -7,7 +7,7 @@ import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError } from "../services/llmProvider";
-import { runToolLoop } from "../services/assistantCore";
+import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
 import { planAgentCore } from "../services/agentCore";
@@ -1306,6 +1306,7 @@ ${forceFinal
 能從 <組現況> 直接回答就不要查——每次查詢都有成本。`}
 ${dispatchBlock}
 ${commandBlock}
+${ASSISTANT_HONEST_ACTION_RULE}
 最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明這個結論依據什麼","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]（沒有要派工就省略或給 []）` : ""}${commandBlock ? `,"actions":[...]（沒有要下令就省略或給 []）` : ""}}。
 rationale 只寫「結構化的結論依據」（例如「依阻塞清單，兩件逾期都集中在同一案」），不要寫思考過程、不要逐步推理、不要重述提示詞。
 contextUsed 只能從這份清單挑：${TEAM_CONTEXT_LABELS.join("、")}。沒用到的不要列，不在清單上的一律不要寫。

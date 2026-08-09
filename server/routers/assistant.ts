@@ -31,7 +31,7 @@ import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
-import { runToolLoop } from "../services/assistantCore";
+import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { executeGenerationCommand } from "../services/generationCommand";
@@ -1265,6 +1265,7 @@ ${forceFinal
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
 一次回覆最多輸出 6 個動作；不要假設前一步已完成。安全且可逆的明確 ACT 可由後端直接執行，其餘會要求使用者確認。
+${ASSISTANT_HONEST_ACTION_RULE}
 <視覺風格速查>
 ${styleFamilyCheatsheet()}
 </視覺風格速查>
