@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc, type AppRouter } from "../api";
 import { setOrbState } from "../lib/orbState";
 import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
-import { AssistantTrace, LiveAssistantTrace, type AssistantActivityEvent } from "./AssistantTrace";
+import { type AssistantActivityEvent } from "./AssistantTrace";
 import { AgentRunCard } from "./AgentRunCard";
+import { AgentWorkPanel } from "./AgentWorkPanel";
 import { AssistantCapabilityGuide } from "./AssistantCapabilityGuide";
 import { useAssistantContext } from "../lib/assistantContext";
 import { formatContextBreadcrumb, getAssistantQuickActions, toWirePageContext } from "../lib/assistantQuickActions";
@@ -15,6 +16,16 @@ import {
   type AssistantExecutionPlan,
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
+import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import {
+  abortAssistantRun,
+  clearAssistantConversation,
+  endAssistantRun,
+  getAssistantConversation,
+  registerAssistantRunController,
+  setAssistantConversation,
+  subscribeAssistantRun,
+} from "../lib/assistantRunStore";
 
 type GlobalAskOutput = inferRouterOutputs<AppRouter>["globalAssistant"]["ask"];
 type SiteAction = GlobalAskOutput["siteActions"][number];
@@ -22,11 +33,15 @@ type DispatchProposal = GlobalAskOutput["dispatches"][number];
 type CommandProposal = GlobalAskOutput["actions"][number];
 type ExecutedSiteAction = GlobalAskOutput["executedSiteActions"][number];
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   steps?: string[];
   contextUsed?: string[];
+  /** 這一輪真的發生過的事件與真的讀過的來源（伺服器權威版本） */
+  events?: AgentEvent[];
+  sources?: AgentSourceRecord[];
+  runId?: string;
   /** 需確認的站級動作（對外、較大範圍或未允許直寫） */
   siteActions?: SiteAction[];
   /** 派工提議（交給某專案的 AI 代理排計畫） */
@@ -74,6 +89,38 @@ export function siteActionDoneLink(a: SiteAction, result: { type: string; projec
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
   if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
   return null;
+}
+
+/**
+ * 回答完成後的「接下來可以做什麼」——**只從真的讀過的來源長出來**。
+ *
+ * 回答結尾給一排按鈕很容易變成猜測（「打開分鏡」但這次根本沒讀分鏡）。
+ * 這裡的規則是：有讀到那個來源，才給那顆按鈕；而且按下去是導航到那份**真實**資料。
+ * 沒有來源就回空陣列，畫面上就不會出現這一排。
+ */
+export function followUpActionsFromSources(
+  sources: readonly AgentSourceRecord[],
+): Array<{ key: string; label: string; href: string }> {
+  const out: Array<{ key: string; label: string; href: string }> = [];
+  const seen = new Set<string>();
+  const LABEL: Partial<Record<AgentSourceRecord["type"], string>> = {
+    storyboard: "打開分鏡",
+    database: "打開資料庫",
+    task: "查看任務",
+    project: "打開專案",
+    asset: "查看素材",
+    agent_run: "查看 AI 計畫",
+    schedule: "查看行程",
+  };
+  for (const source of sources) {
+    if (source.status !== "ok" || !source.href) continue;
+    const label = LABEL[source.type];
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    out.push({ key: source.id, label, href: source.href });
+    if (out.length >= 3) break; // 手機一行放得下三顆；再多就是選項牆
+  }
+  return out;
 }
 
 /**
@@ -271,13 +318,18 @@ interface AICreativeCopilotProps {
 
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // SSE 即時軌跡：這一題進行中的活動事件（thinking／lookup／step），答完清空
-  const [liveEvents, setLiveEvents] = useState<AssistantActivityEvent[]>([]);
-  // 軌跡預設收合：進行中的那一行摘要（正在查什麼）已經在氣泡上，
-  // 展開的完整事件流是「想知道細節才點」的東西——預設展開會把回答推到看不見。
-  const [liveOpen, setLiveOpen] = useState(false);
-  const [streaming, setStreaming] = useState(false);
+  /**
+   * 對話與進行中的執行**不放在元件 state**：這張卡活在會被卸載的面板裡（關面板、
+   * 切視野、換頁都會卸載），放 state 等於使用者一關面板就把剛剛的執行紀錄丟掉。
+   * 改由模組級 store 持有（lib/assistantRunStore），元件只是它的檢視。
+   */
+  const conversation = useSyncExternalStore(
+    subscribeAssistantRun,
+    () => getAssistantConversation<ChatMessage>(groupId),
+    () => getAssistantConversation<ChatMessage>(groupId),
+  );
+  const messages = conversation.messages;
+  const liveRun = conversation.run;
   const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const liveEventsRef = useRef<AssistantActivityEvent[]>([]);
@@ -285,30 +337,48 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const activeGoalRef = useRef("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
+  const pushMessage = (message: ChatMessage) => {
+    if (!groupId) return;
+    setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+      ...previous,
+      messages: [...previous.messages, message],
+    }));
+  };
+
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
   const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
   const breadcrumb = formatContextBreadcrumb(pageCtx);
-  const pending = streaming || ask.isPending;
+  // 進行中的判定來自 store（跨卸載存活）與這一顆元件自己的 tRPC fallback
+  const pending = (liveRun?.active ?? false) || ask.isPending;
 
-  // 卸載（關 sheet／切 scope）時中止在途串流：後端收到 abort 會提早收工不白燒額度
-  useEffect(() => () => abortRef.current?.abort(), []);
+  /**
+   * 卸載時**不再**中止串流。
+   *
+   * 舊行為是「關掉面板＝abort」——但使用者關面板去看一眼專案再回來，是最自然的操作，
+   * 而那會把已經跑到一半（可能已經寫入資料）的執行砍掉，回來後什麼都不剩。
+   * 現在執行的擁有者是模組級 store，不是這個元件；要停止有明確的「停止」鍵。
+   * 分頁真的關閉時瀏覽器會斷連，伺服器端照舊收到 abort，不會白燒額度。
+   */
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend ?? input).trim();
     if (!text || !groupId || pending) return;
 
     const newHistory = messages.slice(-6).map((m) => ({ role: m.role, text: m.text }));
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setInput("");
-    setLiveEvents([]);
+    const localPlan = classifyAssistantRequest(text);
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
     activeGoalRef.current = text;
-    const localPlan = classifyAssistantRequest(text);
+    setInput("");
     setActivePlan(localPlan);
+    // 送出當下就把 run 開起來：它活在 store 裡，關掉面板再回來仍看得到目前進度。
+    setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+      messages: [...previous.messages, { role: "user", text }],
+      run: { runId: "", events: [], sources: [], active: true, startedAt: Date.now() },
+    }));
     // 底部導覽那顆球與這張卡是同一個助手的兩個身體：卡片在思考時球也要跟著脈動，
     // 否則使用者把 sheet 滑下去之後，畫面上就沒有任何「它還在想」的線索。
     setOrbState("thinking");
@@ -323,48 +393,59 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       executedSiteActions?: ExecutedSiteAction[];
       executionPlan?: AssistantExecutionPlan;
       latency?: AssistantLatencyMetrics;
+      runId?: string;
+      events?: AgentEvent[];
+      sources?: AgentSourceRecord[];
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: data.answer,
-          steps: data.steps,
-          contextUsed: data.contextUsed ?? undefined,
-          siteActions: data.siteActions.length ? data.siteActions : undefined,
-          dispatches: data.dispatches.length ? data.dispatches : undefined,
-          commands: data.actions.length ? data.actions : undefined,
-          executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
-          executionPlan: data.executionPlan ?? localPlan,
-          runStatus: "completed",
-          latency: data.latency,
-          activity: [...liveEventsRef.current],
-          suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
-            ? [
-                { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
-                { label: "查看目前資料", prompt: `請查看目前專案與「${text}」相關的資料。` },
-              ]
-            : undefined,
-        },
-      ]);
+      // 事件與來源一律以伺服器的最終版本為準；串流中途掉封包或整條退回 tRPC 時，
+      // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
+      const events = data.events ?? liveEventsRef.current.filter(isAgentEvent);
+      const sources = data.sources ?? [];
+      pushMessage({
+        role: "assistant",
+        text: data.answer,
+        steps: data.steps,
+        contextUsed: data.contextUsed ?? undefined,
+        siteActions: data.siteActions.length ? data.siteActions : undefined,
+        dispatches: data.dispatches.length ? data.dispatches : undefined,
+        commands: data.actions.length ? data.actions : undefined,
+        executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
+        executionPlan: data.executionPlan ?? localPlan,
+        runStatus: "completed",
+        latency: data.latency,
+        activity: [...liveEventsRef.current],
+        runId: data.runId,
+        events: events.length ? events : undefined,
+        sources: sources.length ? sources : undefined,
+        suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
+          ? [
+              { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
+              { label: "查看目前資料", prompt: `請查看目前專案與「${text}」相關的資料。` },
+            ]
+          : undefined,
+      });
     };
     const applyError = (message: string) => {
       setOrbState("error");
-      setMessages((prev) => [...prev, {
+      pushMessage({
         role: "assistant",
         text: `⚠️ 執行中斷：${message}`,
         executionPlan: localPlan,
         runStatus: "failed",
         activity: [...liveEventsRef.current],
+        // 失敗也要留下已經跑過的事件：使用者最需要知道的正是「卡在哪一步」
+        events: liveEventsRef.current.filter(isAgentEvent),
         retryText: text,
-      }]);
+      });
     };
 
     const controller = new AbortController();
     abortRef.current = controller;
-    setStreaming(true);
+    // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
+    // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。
+    registerAssistantRunController(groupId, controller);
     try {
       const handled = await requestSiteAssistantStream({
         groupId,
@@ -374,10 +455,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         pageContext: toWirePageContext(pageCtx),
         signal: controller.signal,
         handlers: {
-          onOpen: (run) => setActivePlan(run.plan),
+          onOpen: (run) => {
+            setActivePlan(run.plan);
+            setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+              ...previous,
+              run: previous.run ? { ...previous.run, runId: run.runId } : previous.run,
+            }));
+          },
           onStep: (e) => {
             liveEventsRef.current = [...liveEventsRef.current, e];
-            setLiveEvents([...liveEventsRef.current]);
+            // 只有真事件（帶 type/eventId 的統一 Agent 事件）才進進度面板。
+            // 舊伺服器的 {phase,text} 沒有結構化欄位，畫不出可驗證的進度，
+            // 由下方的一行摘要負責顯示——寧可少顯示，也不假裝有結構。
+            const structured = liveEventsRef.current.filter(isAgentEvent);
+            setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+              ...previous,
+              run: previous.run ? { ...previous.run, events: structured } : previous.run,
+            }));
           },
           // SSE payload 是 GlobalAskResult 的純 JSON（無 superjson）；guard 只驗協定形狀，
           // 欄位型別由 tRPC 推導型別收窄（同一個 router 的回傳值）
@@ -386,7 +480,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         },
       });
       if (!handled) {
-        // 串流沒開始：走一次性 tRPC（同一個核心；只是看不到即時軌跡）
+        // 串流沒開始：走一次性 tRPC（同一個核心；軌跡由 done 的 events/sources 補齊）
         await new Promise<void>((resolve) => {
           ask.mutate(
             {
@@ -402,25 +496,28 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         });
       }
     } finally {
-      setStreaming(false);
-      setLiveEvents([]);
+      endAssistantRun(groupId);
       setActivePlan(null);
     }
   };
 
   const stopCurrent = () => {
-    if (!pending || stopRecordedRef.current) return;
+    if (!pending || stopRecordedRef.current || !groupId) return;
     stopRecordedRef.current = true;
+    // store 的把手優先（跨卸載仍有效）；本地 ref 是同一顆 controller，重複 abort 無害
+    abortAssistantRun(groupId);
     abortRef.current?.abort();
     setOrbState("idle");
-    setMessages((prev) => [...prev, {
+    pushMessage({
       role: "assistant",
       text: "已停止；未開始的步驟不會再執行。你可以按「繼續」用同一個目標重試。",
       executionPlan: activePlan ?? undefined,
       runStatus: "stopped",
       activity: [...liveEventsRef.current],
+      events: liveEventsRef.current.filter(isAgentEvent),
       retryText: activeGoalRef.current || undefined,
-    }]);
+    });
+    endAssistantRun(groupId);
   };
 
   useEffect(() => {
@@ -450,7 +547,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               type="button"
               className="ai-copilot-clear"
               onClick={() => {
-                setMessages([]);
+                if (groupId) clearAssistantConversation(groupId);
                 ask.reset();
               }}
               title="清空對話紀錄"
@@ -520,21 +617,31 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       plan={msg.executionPlan}
                       active={false}
                       outcome={msg.runStatus}
-                      eventCount={msg.steps?.length ?? 0}
-                      hasToolActivity={(msg.steps?.length ?? 0) > 0}
+                      events={msg.events}
                       latency={msg.latency}
                     />
                   ) : null}
-                  {msg.role === "assistant" && msg.activity?.length ? (
-                    <AssistantTrace events={msg.activity} elapsedMs={msg.latency?.totalMs} />
+                  {/* 工作過程＋來源：兩者都只在真的有事件／來源時才渲染。
+                      「檢索了：…」那一行拿掉了——同樣的資訊在這裡是可展開、可查來源的版本。 */}
+                  {msg.role === "assistant" && (msg.events?.length || msg.sources?.length) ? (
+                    <AgentWorkPanel
+                      events={msg.events ?? []}
+                      sources={msg.sources ?? []}
+                      onNavigate={onNavigate}
+                    />
                   ) : null}
-                  {msg.steps && msg.steps.length > 0 && (
-                    <div className="ai-copilot-bubble__steps">
-                      <Icon name="Search" size={11} />
-                      <span>檢索了：{msg.steps.join("、")}</span>
-                    </div>
-                  )}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
+
+                  {/* 讀到什麼 → 能去哪。按鈕只從真實來源長出來（見 followUpActionsFromSources）。 */}
+                  {msg.role === "assistant" && onNavigate && msg.sources?.length ? (
+                    <div className="ai-copilot-bubble__actions">
+                      {followUpActionsFromSources(msg.sources).map((action) => (
+                        <Button key={action.key} variant="tonal" size="sm" onClick={() => onNavigate(action.href)}>
+                          {action.label}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {/* 安全直寫顯示結果卡；對外、付費與較大影響動作仍是確認卡。 */}
                   {(msg.siteActions?.length || msg.executedSiteActions?.length || msg.dispatches?.length || msg.commands?.length) ? (
@@ -599,15 +706,12 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                 </div>
                 <div className="ai-copilot-bubble__content">
                   {activePlan ? (
-                    <AgentRunCard
-                      plan={activePlan}
-                      active
-                      eventCount={liveEvents.length}
-                      hasToolActivity={liveEvents.some((event) => event.phase === "lookup" || event.phase === "step")}
-                    />
+                    <AgentRunCard plan={activePlan} active events={liveRun?.events ?? []} />
                   ) : null}
                   {/* 旋轉的 Loader 圖示換成三顆呼吸的光點：轉圈是「系統卡住」的語彙，
-                      光點才是「正在想」。文字本身也跑一道光掃過去。 */}
+                      光點才是「正在想」。文字本身也跑一道光掃過去。
+                      這一行的字來自**最後一則真實事件**——沒有事件時只說「連線中」，
+                      不假裝正在讀什麼東西。 */}
                   <div className="ai-copilot-bubble__text ai-copilot-loading">
                     <span className="ai-copilot-dots" aria-hidden="true">
                       <i />
@@ -615,19 +719,22 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       <i />
                     </span>
                     <span className="ai-copilot-loading__label">
-                      {liveEvents.length ? liveEvents[liveEvents.length - 1].text : "AI 正在構思企劃中…"}
+                      {liveRun?.events.length
+                        ? liveRun.events[liveRun.events.length - 1].title
+                        : "連線中…"}
                     </span>
                   </div>
-                  {/* SSE 即時軌跡：查了什麼、查到什麼，當下就看得到（與專案助手同一個元件）。
-                      只在串流路徑渲染——一次性 fallback 沒有事件流，畫空軌跡只是噪音。 */}
-                  {streaming && (
-                    <LiveAssistantTrace
-                      events={liveEvents}
-                      open={liveOpen}
-                      onToggle={() => setLiveOpen((v) => !v)}
+                  {/* 即時工作過程：每一列都對應一次真的發生的工具／來源讀取。
+                      收合狀態只顯示最後一列——手機上不會被工作紀錄淹沒。 */}
+                  {liveRun?.events.length ? (
+                    <AgentWorkPanel
+                      events={liveRun.events}
+                      sources={liveRun.sources}
+                      live
                       onCancel={stopCurrent}
+                      onNavigate={onNavigate}
                     />
-                  )}
+                  ) : null}
                 </div>
               </div>
             )}

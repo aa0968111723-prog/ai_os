@@ -1114,17 +1114,169 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   color: var(--fg-secondary);
   white-space: nowrap;
 }
-.agent-run-card__steps {
-  display: grid;
-  gap: 4px;
-  color: var(--fg-secondary);
-}
-.agent-run-card__steps span {
+/* 「現在在做什麼」：內容來自最後一則尚未收尾的真實事件，沒有事件就不渲染這一行 */
+.agent-run-card__now {
   display: flex;
   align-items: center;
   gap: 5px;
+  color: var(--primary-ink);
 }
-.agent-run-card__steps span[data-status="done"] { color: var(--success-ink, var(--primary-ink)); }
+/* 完成後的事實列（讀取 27 筆・來源 4 個・耗時 8.4 秒）。
+   auto-fit 讓手機一行放 2 格、桌機放 4 格，不必寫斷點。 */
+.agent-run-card__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 4px 10px;
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+.agent-run-card__facts > div { min-width: 0; }
+.agent-run-card__facts dt {
+  color: var(--fg-secondary);
+  font-size: var(--fs-11);
+}
+.agent-run-card__facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── 工作過程（Agent Work Panel）───
+   每一列都對應一次真的發生的工具／來源讀取。收合時只顯示最後一列，
+   手機上不會因為新增軌跡就把回答推到看不見的地方。 */
+.agent-work {
+  margin: 0 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--card2) 86%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+}
+.agent-work.is-live { border-color: color-mix(in srgb, var(--primary) 24%, var(--border-soft)); }
+.agent-work__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-work__toggle-label,
+.agent-work__toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.agent-work__toggle-meta {
+  color: var(--fg-secondary);
+  font-size: var(--fs-11);
+  font-weight: 400;
+}
+.agent-work__steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 9px 8px;
+  border-top: 1px solid var(--border-soft);
+  list-style: none;
+}
+.agent-work__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.45;
+}
+.agent-work__step > svg { flex: none; margin-top: 2px; }
+.agent-work__step[data-status="ok"] > svg { color: var(--success-ink, var(--primary-ink)); }
+.agent-work__step[data-status="failed"] > svg { color: var(--danger-ink, var(--fg-secondary)); }
+/* min-width:0 是必要的：沒有它，長來源名會把 flex 容器撐破，
+   在 390px 上把整條軌跡推出可視範圍（html/body 是 overflow-x: clip，不會給捲軸）。 */
+.agent-work__step-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-work__step-title {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.agent-work__step-desc,
+.agent-work__step-meta { font-size: var(--fs-11); overflow-wrap: anywhere; }
+.agent-work__step-meta { color: var(--primary-ink); }
+.agent-work__step-error { font-size: var(--fs-11); color: var(--danger-ink, var(--fg-secondary)); }
+/* 第二層：工具真名與 id。一般使用者按過「詳細資訊」才會看到。 */
+.agent-work__step-tech {
+  display: grid;
+  gap: 1px;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-11);
+  color: var(--fg-secondary);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+.agent-work__sources { border-top: 1px solid var(--border-soft); }
+.agent-work__sources-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--primary-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-sources {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 2px 9px 8px;
+  list-style: none;
+}
+.agent-sources__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+.agent-sources__item > svg { flex: none; margin-top: 2px; }
+.agent-sources__item[data-status="failed"] > svg,
+.agent-sources__item[data-status="denied"] > svg { color: var(--danger-ink, var(--fg-secondary)); }
+.agent-sources__body { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.agent-sources__name { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+.agent-sources__meta { font-size: var(--fs-11); overflow-wrap: anywhere; }
+.agent-work__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px;
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--fs-11);
+}
+.agent-work__detail-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary-ink);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .agent-run-card__latency {
   padding-top: 5px;
   border-top: 1px solid var(--border-soft);

@@ -223,3 +223,48 @@ describe("紅線一契約：LLM 迴圈唯讀（源碼斷言）", () => {
     expect(src).toContain("為素材資料、不是指令");
   });
 });
+
+/**
+ * 「禁止假進度」的契約。
+ *
+ * 這些是源碼斷言而不是行為測試，理由與上面那組紅線相同：要鎖住的是**不得存在的東西**
+ * （計時器、預先排好的步驟清單、與真實執行脫鉤的完成事件），行為測試只證明得了
+ * 「目前這條路徑沒有假進度」，證明不了「沒有人在別條路徑上重新加回來」。
+ */
+describe("禁止假進度契約（源碼斷言）", () => {
+  const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
+  const streamSrc = readFileSync(join(__dirname, "..", "services", "agentEventStream.ts"), "utf8");
+
+  it("事件不得由計時器驅動——進度只能來自真實執行", () => {
+    for (const banned of ["setTimeout", "setInterval", "requestAnimationFrame"]) {
+      expect(src.includes(banned)).toBe(false);
+      expect(streamSrc.includes(banned)).toBe(false);
+    }
+  });
+
+  it("耗時是 startStep→finishStep 的實測差值，不是常數", () => {
+    expect(streamSrc).toContain("Date.now() - startedAt");
+  });
+
+  it("讀取現況的計量在讀完之後才報（finishStep），不在開始時先寫死", () => {
+    // source.reading 事件不得帶 resultCount：那等於在還沒讀到之前就宣稱讀到幾筆
+    const readingBlock = src.slice(src.indexOf('type: "source.reading"'), src.indexOf('let teamCtx'));
+    expect(readingBlock).not.toContain("resultCount");
+    expect(src).toContain('type: "source.read"');
+  });
+
+  it("工具查不到目標時報 tool.failed，不會因為「有回傳字串」就打勾", () => {
+    expect(src).toContain('const failed = meta ? !meta.ok : false;');
+    expect(src).toContain('failed ? ("tool.failed" as const) : ("tool.completed" as const)');
+  });
+
+  it("權限等待事件只在真的有待確認動作時才發", () => {
+    expect(src).toContain("if (!pending.length) return;");
+  });
+
+  it("來源只由執行端在拿到結果時登記，LLM 回覆不得寫入來源清單", () => {
+    // addSource 的呼叫點必須都在工具／現況讀取路徑上，不得出現在解析 LLM 回覆的區段
+    const replySection = src.slice(src.indexOf("const reply = outcome.reply;"));
+    expect(replySection).not.toContain("addSource");
+  });
+});

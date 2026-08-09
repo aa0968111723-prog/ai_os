@@ -1,6 +1,7 @@
 import type { AgentPlannerMode } from "@shared/agentPlanner";
 import type { AssistantActivityEvent } from "./AssistantTrace";
 import type { AssistantWirePageContext } from "@shared/assistantPageContext";
+import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
 import type {
   AssistantExecutionPlan,
   AssistantLatencyMetrics,
@@ -20,6 +21,14 @@ export type AssistantStreamDone = {
   model?: string;
   traceSessionId?: string;
   latency?: AssistantLatencyMetrics;
+  /** 這一次執行的識別碼（與 open 事件同一顆） */
+  runId?: string;
+  /**
+   * 統一 Agent 事件流與真的讀過的站內來源（shared/agentEvents）。
+   * 與下方的 `sources`（知識篇目預算報告）是兩件事，見伺服器 AskCoreResult 的說明。
+   */
+  agentEvents?: AgentEvent[];
+  agentSources?: AgentSourceRecord[];
   /**
    * 本次依據（P5）：這次回答實際讀進上下文的知識篇目與各自的完整度。
    * ★ truncated 為真時畫面必須說出來——使用者若以為 AI 看過全部，會把一個
@@ -209,6 +218,17 @@ export type SiteAssistantStreamDone = {
   executionPlan?: AssistantExecutionPlan;
   executedSiteActions?: unknown[];
   latency?: AssistantLatencyMetrics;
+  /** 這一次執行的識別碼（跨頁續看與事件歸屬用） */
+  runId?: string;
+  /**
+   * 本次的完整事件流與**真的讀過**的來源。
+   *
+   * done 也帶一份的理由：串流中途斷線、或整條路徑退回一次性 tRPC 時，前端手上
+   * 的即時事件會不完整甚至為空。軌跡與來源是這次改動的主要承諾，不能因為傳輸
+   * 方式不同就消失——所以最終結果自帶權威版本，前端一律以它覆蓋累積的即時事件。
+   */
+  events?: AgentEvent[];
+  sources?: AgentSourceRecord[];
 };
 
 function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {

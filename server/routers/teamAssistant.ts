@@ -42,6 +42,7 @@ import {
 } from "../../shared/groupAgent";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
+import type { AgentSourceType } from "../../shared/agentEvents";
 import type { DataField } from "../../shared/databaseFields";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
@@ -445,6 +446,32 @@ export interface TeamDb {
   agentAccess?: "read" | "write";
 }
 
+/**
+ * 一次唯讀查詢的結果。
+ *
+ * `step`／`text` 是原本就有的（給使用者看的一行、回餵 LLM 的內容）；`meta` 是
+ * **同一次查詢順手留下的結構化事實**，給 Agent 事件流與來源面板用。
+ *
+ * 為什麼一定要同一次產出：使用者問「你讀到了什麼」時，答案必須就是模型讀到的那一份。
+ * 分開再查一次會出現「畫面說讀了 12 筆、模型手上其實是別的 12 筆」這種無法察覺的錯位
+ * （與 shared/toolResultPreview 的鐵則 2 同一條理由）。
+ */
+export interface TeamToolOutcome {
+  step: string;
+  text: string;
+  meta?: {
+    /** 目標是否真的存在並讀成功。代號對不到、無權限、工具不可用時為 false —— UI 據此顯示失敗而不是打勾。 */
+    ok: boolean;
+    resultCount?: number;
+    sourceType?: AgentSourceType;
+    sourceName?: string;
+    sourceId?: string;
+    href?: string;
+    detail?: string;
+    error?: string;
+  };
+}
+
 /** 執行一個唯讀查詢工具（範圍鎖死在 projByRef／dbByRef 列出的本組資源＋本組 groupId）；回給 LLM 的結果文字＋給使用者看的步驟摘要 */
 export async function runTeamTool(
   projByRef: Map<string, ProjRow>,
@@ -453,24 +480,25 @@ export async function runTeamTool(
   call: z.infer<typeof teamToolSchema>,
   // S5 的三支新工具需要 auth 才能走既有 core 的組隔離（不自己另寫一條查詢）
   auth?: AuthState,
-): Promise<{ step: string; text: string }> {
+): Promise<TeamToolOutcome> {
   // ── S5：組級阻塞（誰卡住了）──
   if (call.tool === "group_blockers") {
-    if (!auth) return { step: "查組阻塞(不可用)", text: "目前無法讀取組級阻塞資料" };
+    if (!auth) return { step: "查組阻塞(不可用)", text: "目前無法讀取組級阻塞資料", meta: { ok: false, error: "目前無法讀取組級阻塞資料" } };
     const insight = await getGroupAgentInsights(auth, groupId);
     return {
       step: `查了全組阻塞(${insight.blockers.length} 項)`,
       text: formatGroupBlockerDigest(insight),
+      meta: { ok: true, resultCount: insight.blockers.length, sourceType: "collaboration", sourceName: "全組阻塞與人員負荷", href: "/dashboard" },
     };
   }
 
   // ── S5：人類任務（ask 原本完全看不到人的事）──
   if (call.tool === "list_tasks") {
-    if (!auth) return { step: "查人員任務(不可用)", text: "目前無法讀取人員任務" };
+    if (!auth) return { step: "查人員任務(不可用)", text: "目前無法讀取人員任務", meta: { ok: false, error: "目前無法讀取人員任務" } };
     const ref = call.args?.ref?.trim();
     const refProject = ref ? projByRef.get(ref) : undefined;
     if (ref && !refProject) {
-      return { step: `查人員任務(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組` };
+      return { step: `查人員任務(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組`, meta: { ok: false, error: "指定的專案不在可讀清單內" } };
     }
     // 走既有 core（含 requireGroup 與封存專案過濾），只在本層依 ref 收斂
     const all = await listGroupTasks(auth, groupId, { openOnly: true, limit: 60 });
@@ -486,7 +514,18 @@ export async function runTeamTool(
       : refProject
         ? `「${refProject.title}」目前沒有未結的人員任務`
         : "本組目前沒有未結的人員任務";
-    return { step: refProject ? `查了「${refProject.title}」的人員任務(${tasks.length})` : `查了全組人員任務(${tasks.length})`, text };
+    return {
+      step: refProject ? `查了「${refProject.title}」的人員任務(${tasks.length})` : `查了全組人員任務(${tasks.length})`,
+      text,
+      meta: {
+        ok: true,
+        resultCount: tasks.length,
+        sourceType: "task",
+        sourceName: refProject ? `「${refProject.title}」的未結任務` : "全組未結任務",
+        sourceId: refProject?.id,
+        href: refProject ? `/p/${refProject.id}` : "/dashboard",
+      },
+    };
   }
 
   // ── S5：單一專案的營運快照（素材／生成成功率／排程／筆記）──
@@ -494,16 +533,24 @@ export async function runTeamTool(
     const ref = call.args?.ref?.trim() ?? "";
     const target = projByRef.get(ref);
     if (!target) {
-      return { step: `查專案快照(${ref || "未填"}不存在)`, text: `用現況清單的 p1…p${projByRef.size} 代號指定專案` };
+      return { step: `查專案快照(${ref || "未填"}不存在)`, text: `用現況清單的 p1…p${projByRef.size} 代號指定專案`, meta: { ok: false, error: "指定的專案不在可讀清單內" } };
     }
     // 專案必屬本組（projByRef 只裝本組專案），再讀既有的營運快照
     const snapshot = await buildProjectIntelligence(target.id);
-    return { step: `查了「${target.title}」的營運快照`, text: snapshot.text };
+    return {
+      step: `查了「${target.title}」的營運快照`,
+      text: snapshot.text,
+      meta: { ok: true, sourceType: "project", sourceName: target.title, sourceId: target.id, href: `/p/${target.id}`, detail: "營運快照" },
+    };
   }
 
   if (call.tool === "find_model") {
     const kw = call.args?.keyword?.trim();
-    return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
+    return {
+      step: `查了模型目錄(${kw || "全部"})`,
+      text: searchCatalogText(kw, call.args?.category?.trim()),
+      meta: { ok: true, sourceType: "model_catalog", sourceName: kw ? `模型目錄「${kw}」` : "模型目錄", href: "/models" },
+    };
   }
 
   if (call.tool === "query_database") {
@@ -517,6 +564,7 @@ export async function runTeamTool(
         text: dbByRef.size
           ? `沒有代號「${dbRef}」的資料庫——可用代號：${[...dbByRef.values()].map((d) => `${d.ref}(${d.name})`).join("、")}`
           : "這個組目前沒有 AI 可讀的資料庫",
+        meta: { ok: false, error: dbByRef.size ? "指定的資料庫不在可讀清單內" : "這個組目前沒有 AI 可讀的資料庫" },
       };
     }
     const { keyword: kw, rows: matched } = await searchAssistantDatabaseRows(target.id, call.args?.keyword);
@@ -525,7 +573,19 @@ export async function runTeamTool(
       : kw
         ? `「${target.name}」裡沒有含「${kw}」的列（全庫共 ${target.rowCount} 列）`
         : `「${target.name}」目前沒有資料列`;
-    return { step: `查了資料庫「${target.name}」(${matched.length} 筆)`, text };
+    return {
+      step: `查了資料庫「${target.name}」(${matched.length} 筆)`,
+      text,
+      meta: {
+        ok: true,
+        resultCount: matched.length,
+        sourceType: "database",
+        sourceName: target.name,
+        sourceId: target.id,
+        href: `/databases/${target.id}`,
+        detail: `全庫共 ${target.rowCount} 列${kw ? `・關鍵字「${kw}」` : ""}`,
+      },
+    };
   }
 
   if (call.tool === "list_agent_runs") {
@@ -533,7 +593,7 @@ export async function runTeamTool(
     const ref = call.args?.ref?.trim();
     const refProject = ref ? projByRef.get(ref) : undefined;
     if (ref && !refProject) {
-      return { step: `查代理動態(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組` };
+      return { step: `查代理動態(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組`, meta: { ok: false, error: "指定的專案不在可讀清單內" } };
     }
     const rows = await db
       .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
@@ -557,13 +617,24 @@ export async function runTeamTool(
       : refProject
         ? `「${refProject.title}」目前沒有任何 AI 代理計畫或執行紀錄`
         : "本組目前沒有任何 AI 代理計畫或執行紀錄";
-    return { step: refProject ? `查了「${refProject.title}」的代理動態(${rows.length})` : `查了全組代理動態(${rows.length})`, text };
+    return {
+      step: refProject ? `查了「${refProject.title}」的代理動態(${rows.length})` : `查了全組代理動態(${rows.length})`,
+      text,
+      meta: {
+        ok: true,
+        resultCount: rows.length,
+        sourceType: "agent_run",
+        sourceName: refProject ? `「${refProject.title}」的 AI 計畫` : "全組 AI 計畫",
+        sourceId: refProject?.id,
+        href: refProject ? `/p/${refProject.id}` : "/dashboard",
+      },
+    };
   }
 
   const ref = call.args?.ref?.trim();
   const project = ref ? projByRef.get(ref) : undefined;
   if (!project) {
-    return { step: `查專案(${ref || "?"}不存在)`, text: `找不到代號 ${ref || "(未給)"} 的專案——請用現況清單上的 p1…p${projByRef.size} 代號` };
+    return { step: `查專案(${ref || "?"}不存在)`, text: `找不到代號 ${ref || "(未給)"} 的專案——請用現況清單上的 p1…p${projByRef.size} 代號`, meta: { ok: false, error: "指定的專案不在可讀清單內" } };
   }
 
   if (call.tool === "project_detail") {
@@ -576,7 +647,20 @@ export async function runTeamTool(
       ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」｜畫面${s.assetId ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
       : "（尚無分鏡）";
     const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}`;
-    return { step: `讀了「${project.title}」的分鏡(${scenes.length})`, text };
+    const withVisual = scenes.filter((s) => s.assetId).length;
+    return {
+      step: `讀了「${project.title}」的分鏡(${scenes.length})`,
+      text,
+      meta: {
+        ok: true,
+        resultCount: scenes.length,
+        sourceType: "storyboard",
+        sourceName: `「${project.title}」分鏡`,
+        sourceId: project.id,
+        href: `/p/${project.id}`,
+        detail: scenes.length ? `${withVisual}/${scenes.length} 鏡已有畫面` : "尚無分鏡",
+      },
+    };
   }
 
   if (call.tool === "read_scene") {
@@ -589,7 +673,7 @@ export async function runTeamTool(
       .orderBy(asc(schema.scenes.orderIndex));
     const scene = scenes[no - 1];
     if (!scene) {
-      return { step: `讀分鏡(「${project.title}」第 ${no} 鏡不存在)`, text: `「${project.title}」第 ${no} 鏡不存在——該案目前共 ${scenes.length} 個分鏡` };
+      return { step: `讀分鏡(「${project.title}」第 ${no} 鏡不存在)`, text: `「${project.title}」第 ${no} 鏡不存在——該案目前共 ${scenes.length} 個分鏡`, meta: { ok: false, error: `該案目前共 ${scenes.length} 個分鏡，沒有第 ${no} 鏡` } };
     }
     const text = [
       `「${project.title}」第 ${no} 鏡「${scene.title}」｜${scene.durationSec} 秒`,
@@ -597,7 +681,19 @@ export async function runTeamTool(
       `建議提示詞:${scene.prompt || "（未填）"}`,
       `旁白/配音詞:${scene.voiceover || "（未填）"}`,
     ].join("\n");
-    return { step: `讀了「${project.title}」第 ${no} 鏡`, text };
+    return {
+      step: `讀了「${project.title}」第 ${no} 鏡`,
+      text,
+      meta: {
+        ok: true,
+        resultCount: 1,
+        sourceType: "storyboard",
+        sourceName: `「${project.title}」第 ${no} 鏡「${scene.title}」`,
+        sourceId: scene.id,
+        href: `/p/${project.id}`,
+        detail: `${scene.durationSec} 秒・畫面${scene.assetId ? "有" : "無"}・旁白${scene.narrationAssetId ? "有" : "無"}`,
+      },
+    };
   }
 
   // list_generations
@@ -610,7 +706,18 @@ export async function runTeamTool(
   const text = rows.length
     ? rows.map((g, i) => `${i + 1}. ${getModel(g.modelId)?.label ?? g.modelId}｜${GEN_STATUS_LABEL[g.status] ?? g.status}｜${g.pointsActual ?? g.pointsEst} 點｜「${g.prompt.slice(0, 40)}」`).join("\n")
     : "（還沒有任何生成紀錄）";
-  return { step: `查了「${project.title}」的生成紀錄(${rows.length})`, text };
+  return {
+    step: `查了「${project.title}」的生成紀錄(${rows.length})`,
+    text,
+    meta: {
+      ok: true,
+      resultCount: rows.length,
+      sourceType: "generation",
+      sourceName: `「${project.title}」生成紀錄`,
+      sourceId: project.id,
+      href: `/p/${project.id}`,
+    },
+  };
 }
 
 /** LLM 提議的派工：projectRef＝現況清單的專案代號（p1…），goal＝要交給該專案代理達成的目標 */
