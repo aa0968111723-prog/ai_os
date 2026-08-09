@@ -100,6 +100,7 @@ import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentSourceRecord, AgentSourceType } from "../../shared/agentEvents";
 import { classifyAssistantRequest } from "../../shared/assistantExecution";
 import { selectAssistantCapabilities } from "../../shared/assistantCapabilityRegistry";
+import { BUILT_IN_EXTERNAL_TOOLS } from "../../shared/externalTools";
 
 /** assets.kind 是自由文字欄位；只認識這四種，其餘一律當作可下載的文件。 */
 function previewMediaKind(kind: string | null | undefined): PreviewMediaKind {
@@ -200,6 +201,11 @@ const proposalSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000).optional() }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
   z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),
+  z.object({
+    type: z.literal("prepare_external_generation"),
+    sceneNo: z.number().int().positive(),
+    externalTool: z.string().trim().min(1).max(100).optional(),
+  }),
   // 套用世界觀 chips（主軸／調性／風格）：陣列第一個＝主要；落地時硬截到軟上限；使用者確認後才寫入
   z.object({
     type: z.literal("apply_worldview_chips"),
@@ -223,11 +229,13 @@ const ACTION_TYPE_NAMES = new Set([
   "direct_shot",
   "split_script",
   "plan_agent",
+  "prepare_external_generation",
   "apply_worldview_chips",
 ]);
 const COERCED_ACTION_ANSWER: Record<string, string> = {
   split_script: "好，我可以把腳本拆成一格格分鏡草稿——按下方動作就開始（AI 導演，免費）。",
   plan_agent: "這個目標要連續動好幾步，我把它交給 AI 代理排一份可背景執行的計畫——確認後估點再逐步執行。",
+  prepare_external_generation: "我已整理好這一鏡的 Prompt；確認後會建立外部生成工作階段、複製 Prompt 並開啟工具，不會扣 AI OS 點數。",
   generate: "我幫你準備了一個生成動作，確認下方就開始。",
   create_scene: "我幫你準備了新增分鏡，確認下方就加入。",
   run_workflow: "我幫你準備了一條工作流，確認下方就執行。",
@@ -259,6 +267,7 @@ type ResolvedAction =
   | { type: "direct_shot"; label: string; sceneId: string; camera?: ShotCamera; performance?: ShotPerformance; changes: string[] }
   | { type: "split_script"; label: string; script?: string }
   | { type: "plan_agent"; label: string; goal: string }
+  | { type: "prepare_external_generation"; label: string; sceneId: string; sceneNo: number; externalTool: string; prompt: string }
   | {
       type: "apply_worldview_chips";
       label: string;
@@ -285,6 +294,12 @@ const actionInputSchema = z.discriminatedUnion("type", [
     type: z.literal("plan_agent"),
     goal: z.string().min(5).max(1000),
     plannerMode: agentPlannerModeSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("prepare_external_generation"),
+    sceneId: z.string().uuid(),
+    externalTool: z.string().trim().min(1).max(100),
+    prompt: z.string().trim().min(1).max(20_000),
   }),
   z.object({
     type: z.literal("apply_worldview_chips"),
@@ -1176,6 +1191,25 @@ ${sceneLines}
             });
           } else if (a.type === "plan_agent") {
             out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` });
+          } else if (a.type === "prepare_external_generation") {
+            const scene = scenes[a.sceneNo - 1];
+            if (!scene) continue;
+            const toolKey = a.externalTool ?? "flow";
+            const tool = BUILT_IN_EXTERNAL_TOOLS.find((candidate) => candidate.key === toolKey);
+            if (!tool) continue;
+            const prompt = [scene.prompt, scene.action, scene.dialogue, scene.voiceover]
+              .filter((value): value is string => Boolean(value?.trim()))
+              .join("\n")
+              .trim();
+            if (!prompt) continue;
+            out.push({
+              type: "prepare_external_generation",
+              sceneId: scene.id,
+              sceneNo: a.sceneNo,
+              externalTool: tool.key,
+              prompt: prompt.slice(0, 20_000),
+              label: `帶第 ${a.sceneNo} 鏡「${scene.title}」去 ${tool.name} 生成（外部工具，不扣 AI OS 點數）`,
+            });
           } else if (a.type === "apply_worldview_chips") {
             // 落地前先正規化（截到建議上限）；至少要有一個欄位，否則略過空提議
             const patch = normalizeWorldviewChipsPatch({
@@ -1285,6 +1319,7 @@ ${forceFinal
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿。使用者貼了完整腳本時，script 原樣抄錄（至少 20 字）；只說「把目前腳本拆成分鏡」時省略 script，由執行核心讀目前專案腳本；免費。
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→逐鏡配音」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
+- prepare_external_generation：替某一鏡建立外部 AI 生成工作階段（sceneNo；externalTool 可用 flow/runway/kling/chatgpt/gemini/midjourney/elevenlabs/suno，未填預設 flow）。Prompt 必須從該分鏡的實際 prompt／動作／對白／旁白整理，不得自行假裝已生成；確認後複製 Prompt 並開啟外部工具，不扣 AI OS 點數。使用者說「幫我準備 Scene 8 去 Flow」或想用外部工具時用這個。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
@@ -1620,6 +1655,59 @@ export const assistantRouter = router({
       // 2.3 專案級權限：檢視者（viewer）在此專案唯讀，不能執行任何助手動作；唯讀問答 ask 不擋
       await assertProjectEditable(ctx.auth, project);
       const a = input.action;
+
+      if (a.type === "prepare_external_generation") {
+        const [scene] = await db.select().from(schema.scenes).where(and(
+          eq(schema.scenes.id, a.sceneId),
+          eq(schema.scenes.projectId, project.id),
+          isNull(schema.scenes.deletedAt),
+        ));
+        if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+        const tool = BUILT_IN_EXTERNAL_TOOLS.find((candidate) => candidate.key === a.externalTool);
+        if (!tool) throw new TRPCError({ code: "BAD_REQUEST", message: "找不到此外部 AI 工具，請重新請助理準備" });
+        const trace = await createAiTraceSession({
+          groupId: project.groupId,
+          projectId: project.id,
+          userId: ctx.auth.user.id,
+          mode: "intake",
+          title: `準備第 ${scene.orderIndex + 1} 鏡前往 ${tool.name}`,
+          summary: "已建立外部生成交接，等待成果帶回",
+        }).catch(() => null);
+        const [session] = await db.insert(schema.externalGenerationSessions).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          userId: ctx.auth.user.id,
+          sceneId: scene.id,
+          targetType: tool.capabilities.includes("video") ? "video" : tool.capabilities[0] ?? "image",
+          externalTool: tool.key,
+          externalToolName: tool.name,
+          externalUrl: tool.url,
+          prompt: a.prompt,
+          status: "waiting_result",
+          traceSessionId: trace?.id ?? null,
+        }).returning();
+        if (trace) {
+          await updateAiTraceSession(trace.id, {
+            status: "running",
+            sourceType: "external_generation_session",
+            sourceId: session!.id,
+          }).catch(() => undefined);
+          await recordAiTraceEventSafely({
+            sessionId: trace.id,
+            eventType: "tool_call",
+            summary: `準備開啟 ${tool.name}，等待使用者帶回成果`,
+            payload: { externalTool: tool.key, sceneId: scene.id, promptChars: a.prompt.length },
+          });
+        }
+        return {
+          ok: true,
+          kind: "prepare_external_generation" as const,
+          sessionId: session!.id,
+          externalUrl: tool.url,
+          prompt: a.prompt,
+          message: `已建立「${scene.title}」的 ${tool.name} 工作階段並複製 Prompt；完成後用「帶入成果」即可自動對回這一鏡`,
+        };
+      }
 
       if (a.type === "generate") {
         // 白名單在執行端再驗一次（payload 可由任何呼叫端組出，不能只信 ask 端 resolve 的結果）。

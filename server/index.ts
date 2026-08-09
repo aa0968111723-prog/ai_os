@@ -17,7 +17,7 @@ import { ensureSeed } from "./services/seed";
 import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
-import { resolveSession, type AuthState } from "./services/auth";
+import { resolveRequestAuth, type AuthState } from "./services/auth";
 import { resolveAvatarFile } from "./services/userAvatar";
 import { deviceTrustMisconfigured, resolveDeviceTrustMode } from "./services/deviceTrust";
 import {
@@ -81,6 +81,8 @@ import { httpSurfaceForRole } from "./bootstrap/httpSurface";
 import { evaluateRunnerReadiness } from "./bootstrap/runnerReadiness";
 import compression from "compression";
 import { agentPlannerModeSchema } from "../shared/agentPlanner";
+import { INTAKE_SOURCES, deterministicMediaMetadataSchema, intakePageContextSchema, type IntakeSource } from "../shared/universalIntake";
+import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntake";
 
 const app = express();
 
@@ -351,7 +353,7 @@ const exportsInFlight = new Set<string>();
 app.get("/api/export/:projectId", async (req, res) => {
   let flightKey: string | null = null;
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
@@ -392,7 +394,7 @@ app.get("/api/export/:projectId", async (req, res) => {
 // 匯出 job 成品下載（QA-005）：job 完成後由此取檔——登入＋組隔離，檔案從 Volume sendFile（支援 Range）
 app.get("/api/export/jobs/:jobId/download", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [job] = await db.select().from(schema.exportJobs).where(eq(schema.exportJobs.id, req.params.jobId));
     if (!job) return res.status(404).json({ error: "找不到這個匯出工作" });
@@ -416,7 +418,7 @@ app.get("/api/export/jobs/:jobId/download", async (req, res) => {
 // 單檔下載沒有隨附媒體檔，fcpxml/xmeml 產「骨架版」（gap/空軌佔位）；要「匯入即組好粗剪」請用交付包內的媒體連結版。
 app.get("/api/export/:projectId/timeline", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
@@ -456,7 +458,7 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
 // 解壓到剪映草稿目錄後打開剪映即見排好的時間軸。登入＋組隔離比照交付包路由。
 app.get("/api/export/:projectId/jianying", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
@@ -479,7 +481,7 @@ const upload = multer({
   // fileSize/files 之外再夾制 fields/parts/fieldSize：上傳路由只需 1 檔＋少數小文字欄（projectId/tableId/
   // title/name），不設上限時 multer 的 fields/parts 預設無界，攻擊者可用「數百萬個微小文字欄」的
   // multipart 請求在解析階段吃 CPU/記憶體（且發生在認證前）。給足正常用途又擋掉洪泛。
-  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 8, parts: 12, fieldSize: 100 * 1024 },
+  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 16, parts: 20, fieldSize: 100 * 1024 },
 });
 
 // ★安全：在 multer「把整個上傳主體寫進磁碟」之前先擋掉未登入請求。
@@ -711,38 +713,68 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
       }
     }
 
-    // adoptTmpFile 已把暫存檔「移到」Volume 正式位置——之後若 DB 寫入失敗，
-    // 要刪的是這個已落地的檔（storagePath），不是原暫存路徑（已不存在）；
-    // 否則會在 Volume 留下沒有 DB 列指向的孤兒檔案，長期累積吃滿磁碟。
-    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
     try {
       const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); // multer 檔名編碼修正
       const title = String(req.body?.title ?? "").trim() || originalName || "上傳素材";
-      const meta = buildUploadLineageMeta({
+      const baseMeta = buildUploadLineageMeta({
         originalName,
         sourceAssetId,
         desktopHandoffId,
         editorId,
       });
-      const [asset] = await db
-        .insert(schema.assets)
-        .values({
-          projectId: project.id,
-          groupId: project.groupId,
-          kind: kindFromMime(mime),
-          title: title.slice(0, 80),
-          url: "", // 先佔位，下一行以 id 回填服務網址
-          isAiGenerated: false,
-          storagePath, mime, sizeBytes,
-          uploadedBy: auth.user.id,
-          meta,
-        })
-        .returning();
-      const [updated] = await db
-        .update(schema.assets)
-        .set({ url: `/api/assets/${asset.id}/file` })
-        .where(eq(schema.assets.id, asset.id))
-        .returning();
+      const parseJsonField = (raw: unknown): unknown => {
+        if (typeof raw !== "string" || !raw.trim()) return undefined;
+        try { return JSON.parse(raw); } catch { return undefined; }
+      };
+      const rawSource = String(req.body?.source ?? "").trim();
+      const source: IntakeSource = (INTAKE_SOURCES as readonly string[]).includes(rawSource)
+        ? rawSource as IntakeSource
+        : String(req.body?.sourceTool ?? "").trim() || String(req.body?.externalSessionId ?? "").trim()
+          ? "external-ai"
+          : "upload";
+      const method = String(req.body?.importMethod ?? "").trim();
+      const importMethod: IntakeProvenance["importMethod"] = [
+        "file-picker", "drag-drop", "clipboard", "url", "google-drive", "desktop", "mobile-share", "internal",
+      ].includes(method) ? method as IntakeProvenance["importMethod"] : "file-picker";
+      const parsedContext = intakePageContextSchema.safeParse(parseJsonField(req.body?.context));
+      const parsedMedia = deterministicMediaMetadataSchema.safeParse(parseJsonField(req.body?.mediaMetadata));
+      const intakeMode = String(req.body?.intake ?? "") === "1";
+      const result = await ingestTmpAsset({
+        auth,
+        project,
+        tmpPath: req.file.path,
+        originalName,
+        mime,
+        title,
+        provenance: {
+          source,
+          sourceTool: String(req.body?.sourceTool ?? "").trim() || null,
+          importMethod,
+          externalSessionId: String(req.body?.externalSessionId ?? "").trim() || null,
+        },
+        context: parsedContext.success ? parsedContext.data : null,
+        mediaMetadata: parsedMedia.success ? parsedMedia.data : null,
+        // Legacy upload entry points keep their historical duplicate semantics.
+        // The new intake UI opts in to duplicate blocking and offers an explicit override.
+        forceDuplicate: !intakeMode || String(req.body?.forceDuplicate ?? "") === "1",
+        baseMeta,
+        folderImport,
+      });
+      if (!result.ok) {
+        await cleanup();
+        if (grantClaimed && grant) await releaseUploadGrant(grant.id).catch(() => {});
+        return res.status(409).json({
+          ok: false,
+          error: "這個素材似乎已存在",
+          duplicate: {
+            id: result.asset.id,
+            title: result.asset.title,
+            projectId: result.asset.projectId,
+            url: result.asset.url,
+          },
+        });
+      }
+      const asset = result.asset;
       // 正式版本表：與 meta 雙寫；失敗不擋上傳回應（meta 已可追溯）
       if (sourceAssetId) {
         try {
@@ -762,24 +794,14 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
           console.warn("[upload] asset_revisions insert skipped:", revErr);
         }
       }
-      // Intelligence Library is a sidecar: upload success never depends on AI.
-      // Registration is idempotent and the durable worker performs each stage independently.
-      //
-      // Folder Import 2.0: the original folder structure is Source Metadata and travels
-      // with the asset (relativePath / parentPath / root). AI category is a separate
-      // dimension produced later by the pipeline — the two never overwrite each other.
-      void registerUploadSidecars({
-        asset: updated,
-        auth,
-        originalName,
-        mime,
-        sizeBytes,
-        folderImport,
-      }).catch((error) => console.warn("[upload] sidecar registration skipped:", error instanceof Error ? error.message : error));
-      res.json({ ok: true, asset: updated, importEntry: folderImport?.relativePath ?? null });
+      res.json({
+        ok: true,
+        asset,
+        suggestion: result.suggestion,
+        traceSessionId: result.traceSessionId,
+        importEntry: folderImport?.relativePath ?? null,
+      });
     } catch (dbErr) {
-      const { removeStoredFile } = await import("./services/storage");
-      await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
       // 釋放 grant 允許同一 token 重試（並發第二請求已在 CAS 被擋）
       if (grantClaimed && grant) await releaseUploadGrant(grant.id).catch(() => {});
       throw dbErr;
@@ -887,7 +909,7 @@ app.get("/api/assets/:id/file", async (req, res) => {
 
     const signed = verifyAssetSig(asset.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
     if (!signed) {
-      const auth = await resolveSession(req);
+      const auth = await resolveRequestAuth(req);
       if (!requireUsableSession(auth, res)) return;
       if (!auth.groups.some((g) => g.groupId === asset.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     }
@@ -931,7 +953,7 @@ app.get("/api/assets/:id/file", async (req, res) => {
 app.post("/api/dm/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
@@ -996,7 +1018,7 @@ app.use("/api/dm/upload", (err: unknown, _req: express.Request, res: express.Res
 /** 私訊附件檔案服務：登入＋「本人是上傳者或所屬訊息的對方」才給——非組隔離，維持私訊「只有雙方看得到」 */
 app.get("/api/dm/attachments/:id/file", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [att] = await db.select().from(schema.dmAttachments).where(eq(schema.dmAttachments.id, req.params.id));
     if (!att) return res.status(404).json({ error: "找不到附件" });
@@ -1026,7 +1048,7 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
 app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
@@ -1119,7 +1141,7 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
     const { verifyDbFileSig } = await import("./services/storage");
     const signed = verifyDbFileSig(req.params.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
     if (!signed) {
-      const auth = await resolveSession(req);
+      const auth = await resolveRequestAuth(req);
       if (!requireUsableSession(auth, res)) return;
       const [fileRow] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
       if (!fileRow) return res.status(404).json({ error: "找不到這份文件" });
@@ -1156,7 +1178,7 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
 app.post("/api/attachments/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
@@ -1253,7 +1275,7 @@ app.use("/api/attachments/upload", (err: unknown, _req: express.Request, res: ex
 /** 附件下載／預覽：登入＋母體可讀（同組；知識庫附件另要該筆未進回收桶）；非影音一律 attachment */
 app.get("/api/attachments/:id/file", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { getAttachmentChecked } = await import("./services/attachmentsCore");
     let row;
@@ -1278,7 +1300,7 @@ app.get("/api/attachments/:id/file", async (req, res) => {
 // ── 資料下載區（需求 #11）：docs/README 白名單清單＋下載（登入即可，全站內部文件） ──
 app.get("/api/downloads", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { DOWNLOAD_CATEGORIES, listDownloads } = await import("./services/downloads");
     // 受限（內部工程/維運/安全/部署）文件只給組長以上：開發者、團隊管理員、或任一組的組長/管理員身分
@@ -1292,7 +1314,7 @@ app.get("/api/downloads", async (req, res) => {
 });
 app.get("/api/downloads/file", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { resolveDownload } = await import("./services/downloads");
     // 識別鍵必須整串等於白名單項（resolveDownload 內比對），不存在任何使用者輸入拼路徑的空間。
@@ -1315,7 +1337,7 @@ app.get("/api/downloads/file", async (req, res) => {
 // ── Google 日曆直連同步（OAuth 授權碼流程）──瀏覽器重導，走 Express；API 見 routers/googleCalendar ──
 app.get("/api/google/oauth/start", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { isGoogleCalendarConfigured, buildAuthUrl } = await import("./services/googleCalendar");
     if (!isGoogleCalendarConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 日曆整合（GOOGLE_CLIENT_ID/SECRET）" });
@@ -1328,7 +1350,7 @@ app.get("/api/google/oauth/start", async (req, res) => {
 });
 app.get("/api/google/oauth/callback", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { verifyState, exchangeCode, saveConnection } = await import("./services/googleCalendar");
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
@@ -1350,7 +1372,7 @@ app.get("/api/google/oauth/callback", async (req, res) => {
 // ── 個人整合連接：Google 雲端硬碟 OAuth（drive.readonly）──瀏覽器重導，走 Express；API 見 routers/integrations ──
 app.get("/api/integrations/google-drive/start", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { isGoogleDriveConfigured, buildDriveAuthUrl } = await import("./services/integrations");
     if (!isGoogleDriveConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 整合（GOOGLE_CLIENT_ID/SECRET）" });
@@ -1365,7 +1387,7 @@ app.get("/api/integrations/google-drive/start", async (req, res) => {
 });
 app.get("/api/integrations/google-drive/callback", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { verifyIntegrationState, exchangeDriveCode, saveGoogleDrive } = await import("./services/integrations");
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
@@ -1397,7 +1419,7 @@ app.get("/api/integrations/google-drive/callback", async (req, res) => {
 // mock 模式下 /start 直接導回自家 callback（不出網），讓連結／撤銷／狀態在沒有 Adobe 憑證時也能完整驗證。
 app.get("/api/integrations/adobe/start", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { isAdobeConfigured, buildAdobeAuthUrl } = await import("./services/adobe/oauth");
     if (!isAdobeConfigured()) return res.status(503).json({ error: "站方尚未設定 Adobe 整合（ADOBE_CLIENT_ID/SECRET）" });
@@ -1410,7 +1432,7 @@ app.get("/api/integrations/adobe/start", async (req, res) => {
 });
 app.get("/api/integrations/adobe/callback", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const { verifyAdobeState } = await import("./services/adobe/oauth");
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
@@ -1435,7 +1457,7 @@ app.get("/api/integrations/adobe/callback", async (req, res) => {
 // 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const groupId = req.params.groupId;
     if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
@@ -1486,7 +1508,7 @@ app.get("/api/avatars/:userId", async (req, res) => {
 // 帳號「刪除」仍需管理員操作——本端點只解決自助「攜出」。
 app.get("/api/me/export", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const uid = auth.user.id;
     const groupNameById = new Map(auth.groups.map((g) => [g.groupId, g.groupName]));
@@ -1930,7 +1952,7 @@ app.get("/api/admin/backup/assets.tar.gz", async (req, res) => {
 
 // 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
-  const auth = await resolveSession(req);
+  const auth = await resolveRequestAuth(req);
   if (!requireUsableSession(auth, res)) return;
   if (!auth.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
   const checks: Array<{ name: string; ok: boolean; note: string }> = [];
@@ -2114,7 +2136,7 @@ function createAssistantLatencyTracker(startedAt: number) {
 // 前端串流失敗會自動退回 tRPC ask（見 ProjectAssistant），故此路由是加分體驗、非關鍵路徑。
 app.post("/api/assistant/ask", async (req, res) => {
   const requestStartedAt = Date.now();
-  const auth = await resolveSession(req);
+  const auth = await resolveRequestAuth(req);
   if (!requireUsableSession(auth, res)) return;
   const projectId = String(req.body?.projectId ?? "");
   const message = String(req.body?.message ?? "").trim();
@@ -2214,7 +2236,7 @@ app.post("/api/assistant/ask", async (req, res) => {
  */
 app.post("/api/assistant/site-ask", async (req, res) => {
   const requestStartedAt = Date.now();
-  const auth = await resolveSession(req);
+  const auth = await resolveRequestAuth(req);
   if (!requireUsableSession(auth, res)) return;
   const groupId = String(req.body?.groupId ?? "");
   const message = String(req.body?.message ?? "").trim();
@@ -2301,7 +2323,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
 app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到截圖" });
     const declared = (req.file.mimetype.split(";")[0] || "").trim().toLowerCase();
@@ -2331,7 +2353,7 @@ app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("fil
 
 app.get("/api/feedback/:id/shot", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
+    const auth = await resolveRequestAuth(req);
     if (!requireUsableSession(auth, res)) return;
     const [report] = await db.select().from(schema.feedbackReports).where(eq(schema.feedbackReports.id, req.params.id));
     if (!report || !report.screenshotPath) return res.status(404).json({ error: "找不到截圖" });

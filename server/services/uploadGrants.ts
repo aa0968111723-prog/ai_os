@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import type { Request } from "express";
 import { db, schema } from "../db";
-import { loadAuthState, resolveSession, type AuthState, sha256 } from "./auth";
+import { loadAuthState, resolveRequestAuth, type AuthState, sha256 } from "./auth";
 
 export const UPLOAD_GRANT_TOKEN_PREFIX = "aidup_";
 /** 預設 24h */
@@ -208,7 +208,7 @@ export async function resolveUploadRequestAuth(
     if (!grant) return null;
     // Load auth as the grant owner (must be active user with group membership)
     // resolveSession only works with cookie — load user state via existing path:
-    const authFromCookie = await resolveSession(req);
+    const authFromCookie = await resolveRequestAuth(req);
     if (authFromCookie && authFromCookie.user.id === grant.userId) {
       return { auth: authFromCookie, grant };
     }
@@ -217,7 +217,7 @@ export async function resolveUploadRequestAuth(
     if (!auth) return null;
     return { auth, grant };
   }
-  const auth = await resolveSession(req);
+  const auth = await resolveRequestAuth(req);
   if (!auth) return null;
   return { auth, grant: null };
 }

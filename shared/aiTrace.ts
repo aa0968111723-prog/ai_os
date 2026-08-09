@@ -17,6 +17,7 @@ export const aiOperationModeSchema = z.enum([
   "agent_plan",
   "quality_review",
   "story_parse",
+  "intake",
 ]);
 export type AiOperationMode = z.infer<typeof aiOperationModeSchema>;
 

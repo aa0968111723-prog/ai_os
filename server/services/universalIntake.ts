@@ -1,0 +1,511 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { open, unlink } from "node:fs/promises";
+import path from "node:path";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { db, schema } from "../db";
+import type { AuthState } from "./auth";
+import {
+  MAX_FILE_BYTES,
+  adoptTmpFile,
+  kindFromMime,
+  removeStoredFile,
+  tmpDir,
+} from "./storage";
+import { proxyFetch } from "./http";
+import { assertPublicHostOrError, ssrfGuardError } from "./databaseFiles";
+import { registerIntelligenceResource } from "./intelligenceLibrary";
+import { recordLibraryUsage, registerLibraryResource } from "./libraryResources";
+import { createAiTraceSession, recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
+import {
+  aspectRatioOf,
+  deterministicMediaMetadataSchema,
+  intakePageContextSchema,
+  rankSceneMatches,
+  shouldBlockDuplicate,
+  type DeterministicMediaMetadata,
+  type IntakePageContext,
+  type IntakeSource,
+} from "../../shared/universalIntake";
+
+export interface IntakeFolderContext {
+  sessionId: string;
+  relativePath: string;
+  parentPath: string;
+  rootName: string | null;
+}
+
+export interface IntakeProvenance {
+  source: IntakeSource;
+  /** Only set from an explicit tool choice or an ExternalGenerationSession. */
+  sourceTool?: string | null;
+  importMethod: "file-picker" | "drag-drop" | "clipboard" | "url" | "google-drive" | "desktop" | "mobile-share" | "internal";
+  originalUrl?: string | null;
+  externalSessionId?: string | null;
+  sourceExternalId?: string | null;
+}
+
+export interface IngestTmpAssetInput {
+  auth: AuthState;
+  project: typeof schema.projects.$inferSelect;
+  tmpPath: string;
+  originalName: string;
+  mime: string;
+  title?: string | null;
+  provenance: IntakeProvenance;
+  context?: IntakePageContext | null;
+  mediaMetadata?: DeterministicMediaMetadata | null;
+  forceDuplicate?: boolean;
+  baseMeta?: Record<string, unknown>;
+  folderImport?: IntakeFolderContext | null;
+}
+
+export type IngestTmpAssetResult =
+  | {
+    ok: false;
+    duplicate: true;
+    asset: typeof schema.assets.$inferSelect;
+  }
+  | {
+    ok: true;
+    duplicate: false;
+    asset: typeof schema.assets.$inferSelect;
+    traceSessionId: string | null;
+    suggestion: null | { bindingId: string; sceneId: string; score: number; reasons: string[] };
+  };
+
+export async function sha256File(filePath: string): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+async function deterministicImageMetadata(tmpPath: string, mime: string): Promise<DeterministicMediaMetadata> {
+  if (!mime.startsWith("image/")) return {};
+  try {
+    const imported = await import("sharp");
+    const sharp = (imported.default ?? imported) as unknown as (input: string) => {
+      metadata: () => Promise<{ width?: number; height?: number }>;
+    };
+    const meta = await sharp(tmpPath).metadata();
+    return deterministicMediaMetadataSchema.parse({ width: meta.width, height: meta.height });
+  } catch {
+    // sharp is optional. Browser-probed dimensions remain available for direct uploads.
+    return {};
+  }
+}
+
+function normalizeMetadata(input: DeterministicMediaMetadata | null | undefined): DeterministicMediaMetadata {
+  const parsed = deterministicMediaMetadataSchema.safeParse(input ?? {});
+  return parsed.success ? parsed.data : {};
+}
+
+async function registerSidecars(input: {
+  asset: typeof schema.assets.$inferSelect;
+  userId: string;
+  originalName: string;
+  mime: string;
+  sizeBytes: number;
+  checksum: string;
+  provenance: IntakeProvenance;
+  folderImport?: IntakeFolderContext | null;
+}): Promise<{ intelligenceId: string; libraryResourceId: string }> {
+  const { asset, folderImport } = input;
+  const sourceType = folderImport
+    ? "folder_import"
+    : input.provenance.sourceTool || input.provenance.externalSessionId
+    ? "external-ai"
+    : input.provenance.source === "internal-generation"
+      ? "ai_generated"
+      : input.provenance.source;
+  const sourceMetadata = {
+    filename: input.originalName,
+    mime: input.mime,
+    sizeBytes: input.sizeBytes,
+    checksum: input.checksum,
+    sourceType,
+    sourceTool: input.provenance.sourceTool ?? null,
+    importMethod: input.provenance.importMethod,
+    originalUrl: input.provenance.originalUrl ?? null,
+    externalSessionId: input.provenance.externalSessionId ?? null,
+    sourceExternalId: input.provenance.sourceExternalId ?? null,
+    ...(folderImport ? {
+      folderImportSessionId: folderImport.sessionId,
+      relativePath: folderImport.relativePath,
+      parentPath: folderImport.parentPath,
+      sourceRootName: folderImport.rootName,
+    } : {}),
+  };
+  const intelligence = await registerIntelligenceResource({
+    resourceKind: "asset",
+    resourceId: asset.id,
+    groupId: asset.groupId,
+    projectId: asset.projectId,
+    sourceType,
+    sourceMetadata,
+    createdBy: input.userId,
+  });
+  const library = await registerLibraryResource({
+    groupId: asset.groupId,
+    resourceKind: "asset",
+    resourceId: asset.id,
+    intelligenceId: intelligence.id,
+    homeProjectId: asset.projectId,
+    displayName: input.originalName || asset.title,
+    mime: input.mime,
+    sizeBytes: input.sizeBytes,
+    checksum: input.checksum,
+    sourceRootName: folderImport?.rootName ?? null,
+    relativePath: folderImport?.relativePath ?? null,
+    parentPath: folderImport?.parentPath ?? null,
+    originType: sourceType,
+    folderImportSessionId: folderImport?.sessionId ?? null,
+    metadata: sourceMetadata,
+    createdBy: input.userId,
+  });
+  await recordLibraryUsage({
+    libraryResourceId: library.id,
+    projectId: asset.projectId,
+    groupId: asset.groupId,
+    usage: "production",
+    actorId: input.userId,
+  });
+  if (folderImport) {
+    const { recordFolderImportEntryResult } = await import("./folderImport");
+    await recordFolderImportEntryResult({
+      sessionId: folderImport.sessionId,
+      relativePath: folderImport.relativePath,
+      status: "uploaded",
+      resourceKind: "asset",
+      resourceId: asset.id,
+      libraryResourceId: library.id,
+      intelligenceId: intelligence.id,
+      checksum: input.checksum,
+    });
+  }
+  return { intelligenceId: intelligence.id, libraryResourceId: library.id };
+}
+
+async function loadExternalSession(input: IngestTmpAssetInput) {
+  const id = input.provenance.externalSessionId;
+  const contextSceneId = input.context?.currentSceneId;
+  const [session] = id
+    ? await db.select().from(schema.externalGenerationSessions)
+      .where(eq(schema.externalGenerationSessions.id, id))
+    : contextSceneId
+      ? await db.select().from(schema.externalGenerationSessions).where(and(
+        eq(schema.externalGenerationSessions.userId, input.auth.user.id),
+        eq(schema.externalGenerationSessions.projectId, input.project.id),
+        eq(schema.externalGenerationSessions.sceneId, contextSceneId),
+        sql`${schema.externalGenerationSessions.status} in ('prepared', 'opened_external', 'waiting_result')`,
+      )).orderBy(desc(schema.externalGenerationSessions.createdAt)).limit(1)
+      : [undefined];
+  if (!session || session.userId !== input.auth.user.id || session.projectId !== input.project.id) return null;
+  return session;
+}
+
+async function persistBestSuggestion(input: {
+  auth: AuthState;
+  project: typeof schema.projects.$inferSelect;
+  asset: typeof schema.assets.$inferSelect;
+  originalName: string;
+  context?: IntakePageContext | null;
+  sessionSceneId?: string | null;
+  intelligenceId: string | null;
+  libraryResourceId: string | null;
+}) {
+  const scenes = await db.select({
+    id: schema.scenes.id,
+    title: schema.scenes.title,
+    orderIndex: schema.scenes.orderIndex,
+    prompt: schema.scenes.prompt,
+    action: schema.scenes.action,
+    dialogue: schema.scenes.dialogue,
+    voiceover: schema.scenes.voiceover,
+  }).from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, input.project.id), isNull(schema.scenes.deletedAt)));
+  const [best] = rankSceneMatches({
+    scenes,
+    filename: input.originalName,
+    contextSceneId: input.context?.currentSceneId,
+    sessionSceneId: input.sessionSceneId ?? undefined,
+    limit: 1,
+  });
+  if (!best) return null;
+  const [binding] = await db.insert(schema.contextBindings).values({
+    groupId: input.project.groupId,
+    projectId: input.project.id,
+    scopeType: "shot",
+    scopeId: best.sceneId,
+    resourceKind: "asset",
+    resourceId: input.asset.id,
+    intelligenceId: input.intelligenceId,
+    libraryResourceId: input.libraryResourceId,
+    role: "PRODUCTION_ASSET",
+    priority: "PRIMARY",
+    source: "AI_SUGGESTED",
+    confidence: best.score,
+    confirmedByUser: false,
+    note: best.reasons.join("；").slice(0, 400),
+    createdBy: input.auth.user.id,
+  }).onConflictDoUpdate({
+    target: [
+      schema.contextBindings.scopeType,
+      schema.contextBindings.scopeId,
+      schema.contextBindings.resourceKind,
+      schema.contextBindings.resourceId,
+      schema.contextBindings.role,
+    ],
+    set: { confidence: best.score, note: best.reasons.join("；").slice(0, 400), updatedAt: new Date() },
+  }).returning({ id: schema.contextBindings.id });
+  return binding ? { bindingId: binding.id, ...best } : null;
+}
+
+/**
+ * The canonical file finalisation path used by uploads and URL imports.
+ * It never waits for AI analysis: bytes and Asset are committed first, then the
+ * existing Intelligence queue continues in the background.
+ */
+export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<IngestTmpAssetResult> {
+  const checksum = await sha256File(input.tmpPath);
+  const [duplicate] = await db.select().from(schema.assets).where(and(
+    eq(schema.assets.groupId, input.project.groupId),
+    eq(schema.assets.sha256, checksum),
+    isNull(schema.assets.deletedAt),
+  )).orderBy(desc(schema.assets.createdAt)).limit(1);
+  if (shouldBlockDuplicate({ duplicateAssetId: duplicate?.id, forceDuplicate: input.forceDuplicate })) {
+    return { ok: false, duplicate: true, asset: duplicate! };
+  }
+
+  const contextResult = intakePageContextSchema.safeParse(input.context ?? {});
+  const context = contextResult.success ? contextResult.data : {};
+  const serverMedia = await deterministicImageMetadata(input.tmpPath, input.mime);
+  const media = { ...normalizeMetadata(input.mediaMetadata), ...serverMedia };
+  const session = await loadExternalSession(input);
+  const sourceType = (input.provenance.sourceTool || session) ? "external-ai" : input.provenance.source;
+  const provenance = {
+    sourceType,
+    sourceTool: input.provenance.sourceTool ?? session?.externalTool ?? null,
+    importMethod: input.provenance.importMethod,
+    originalFilename: input.originalName,
+    originalUrl: input.provenance.originalUrl ?? null,
+    externalSessionId: session?.id ?? input.provenance.externalSessionId ?? null,
+    sourceExternalId: input.provenance.sourceExternalId ?? null,
+    importedAt: new Date().toISOString(),
+  };
+  const intakeMeta = {
+    status: "processing",
+    provenance,
+    pageContext: context,
+    media: {
+      ...media,
+      aspectRatio: aspectRatioOf(media.width, media.height),
+    },
+  };
+  const { storagePath, sizeBytes } = await adoptTmpFile(input.tmpPath, input.mime);
+  let committedAsset: typeof duplicate | undefined;
+  try {
+    const [created] = await db.insert(schema.assets).values({
+      projectId: input.project.id,
+      groupId: input.project.groupId,
+      kind: kindFromMime(input.mime),
+      title: (input.title?.trim() || input.originalName || "帶入成果").slice(0, 80),
+      url: "",
+      isAiGenerated: false,
+      storagePath,
+      mime: input.mime,
+      sizeBytes,
+      uploadedBy: input.auth.user.id,
+      sha256: checksum,
+      meta: { ...(input.baseMeta ?? {}), intake: intakeMeta },
+    }).returning();
+    const [asset] = await db.update(schema.assets).set({ url: `/api/assets/${created!.id}/file` })
+      .where(eq(schema.assets.id, created!.id)).returning();
+    committedAsset = asset;
+    const sidecars = await registerSidecars({
+      asset: asset!,
+      userId: input.auth.user.id,
+      originalName: input.originalName,
+      mime: input.mime,
+      sizeBytes,
+      checksum,
+      provenance: { ...input.provenance, sourceTool: provenance.sourceTool },
+      folderImport: input.folderImport,
+    }).catch((error) => {
+      console.warn("[intake] sidecar registration deferred:", error instanceof Error ? error.message : error);
+      return null;
+    });
+    const trace = await createAiTraceSession({
+      groupId: input.project.groupId,
+      projectId: input.project.id,
+      userId: input.auth.user.id,
+      mode: "intake",
+      title: `帶入成果：${asset!.title}`,
+      sourceType: "asset_intake",
+      sourceId: asset!.id,
+      summary: "素材已安全保存，正在整理可能的專案位置",
+    }).catch(() => null);
+    if (trace) {
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "prepared",
+        summary: "接收並保存素材",
+        payload: { assetId: asset!.id, mime: input.mime, sizeBytes, checksum },
+      });
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "validation",
+        summary: "檔案資訊已解析",
+        payload: { ...media, aspectRatio: aspectRatioOf(media.width, media.height) },
+      });
+    }
+    const suggestion = await persistBestSuggestion({
+      auth: input.auth,
+      project: input.project,
+      asset: asset!,
+      originalName: input.originalName,
+      context,
+      sessionSceneId: session?.sceneId,
+      intelligenceId: sidecars?.intelligenceId ?? null,
+      libraryResourceId: sidecars?.libraryResourceId ?? null,
+    });
+    const nextMeta = {
+      ...(asset!.meta as Record<string, unknown>),
+      intake: {
+        ...intakeMeta,
+        status: "needs_review",
+        traceSessionId: trace?.id ?? null,
+        suggestion: suggestion ? {
+          bindingId: suggestion.bindingId,
+          sceneId: suggestion.sceneId,
+          confidence: suggestion.score,
+          reasons: suggestion.reasons,
+        } : null,
+      },
+    };
+    const [updated] = await db.update(schema.assets).set({ meta: nextMeta })
+      .where(eq(schema.assets.id, asset!.id)).returning();
+    if (session) {
+      await db.update(schema.externalGenerationSessions).set({
+        status: "result_imported",
+        importedAssetId: asset!.id,
+        updatedAt: new Date(),
+      }).where(eq(schema.externalGenerationSessions.id, session.id));
+    }
+    if (trace) {
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "tool_result",
+        summary: suggestion ? "找到可能對應的分鏡" : "尚未找到可靠位置，已放入待整理",
+        payload: suggestion ?? { assetId: asset!.id, status: "needs_review" },
+      });
+      await updateAiTraceSession(trace.id, {
+        status: "running",
+        summary: suggestion ? "素材已保存並提出分鏡建議，等待使用者確認" : "素材已保存至待整理",
+      }).catch(() => undefined);
+    }
+    return { ok: true, duplicate: false, asset: updated!, traceSessionId: trace?.id ?? null, suggestion };
+  } catch (error) {
+    // The Asset row and bytes are the durable boundary. Suggestions, sidecars, and
+    // trace events must never turn an already-saved upload into a failed upload.
+    if (committedAsset) {
+      console.warn("[intake] post-save organization deferred:", error instanceof Error ? error.message : error);
+      const currentMeta = (committedAsset.meta as Record<string, unknown> | null) ?? {};
+      const currentIntake = (currentMeta.intake as Record<string, unknown> | null) ?? {};
+      const [recovered] = await db.update(schema.assets).set({
+        meta: {
+          ...currentMeta,
+          intake: {
+            ...currentIntake,
+            status: "needs_review",
+            organizationError: error instanceof Error ? error.message.slice(0, 300) : "organization_deferred",
+          },
+        },
+      }).where(eq(schema.assets.id, committedAsset.id)).returning().catch(() => []);
+      return {
+        ok: true,
+        duplicate: false,
+        asset: recovered ?? committedAsset,
+        traceSessionId: null,
+        suggestion: null,
+      };
+    }
+    await removeStoredFile(storagePath).catch(() => undefined);
+    throw error;
+  }
+}
+
+function redirectLocation(base: string, location: string): string {
+  return new URL(location, base).toString();
+}
+
+/** Streaming public URL download with SSRF checks repeated on every redirect. */
+export async function downloadPublicUrlToTmp(rawUrl: string): Promise<{
+  tmpPath: string;
+  mime: string;
+  finalUrl: string;
+  filename: string;
+}> {
+  const initialError = ssrfGuardError(rawUrl);
+  if (initialError) throw new Error(initialError);
+  let current = rawUrl;
+  for (let hop = 0; hop <= 5; hop += 1) {
+    const url = new URL(current);
+    const hostError = await assertPublicHostOrError(url.hostname);
+    if (hostError) throw new Error(hostError);
+    const response = await proxyFetch(current, { timeoutMs: 30_000, redirect: "manual" });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error("網址重新導向不完整");
+      current = redirectLocation(current, location);
+      const redirectError = ssrfGuardError(current);
+      if (redirectError) throw new Error(redirectError);
+      continue;
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("此連結需要外部登入，請先下載成果再匯入。");
+    }
+    if (!response.ok) throw new Error(`無法下載此連結（HTTP ${response.status}）`);
+    const length = Number(response.headers.get("content-length") ?? 0);
+    if (length > MAX_FILE_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）`);
+    const mime = (response.headers.get("content-type") ?? "application/octet-stream").split(";", 1)[0]!.trim().toLowerCase();
+    if (mime === "text/html" || mime === "application/xhtml+xml") {
+      throw new Error("此連結不是可直接下載的成果；若需要外部登入，請先下載成果再匯入。");
+    }
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const named = disposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i)?.[1];
+    const safeDecode = (value: string) => {
+      try { return decodeURIComponent(value); } catch { return value; }
+    };
+    const urlName = safeDecode(path.posix.basename(url.pathname) || "external-result");
+    const filename = named ? safeDecode(named.replace(/^"|"$/g, "")) : urlName;
+    const tmpPath = path.join(tmpDir(), `intake-${randomUUID()}.tmp`);
+    const handle = await open(tmpPath, "wx");
+    let total = 0;
+    try {
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("這個網址沒有可下載的內容");
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_FILE_BYTES) {
+          await reader.cancel();
+          throw new Error(`檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）`);
+        }
+        await handle.write(value);
+      }
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      await unlink(tmpPath).catch(() => undefined);
+      throw error;
+    }
+    await handle.close();
+    return { tmpPath, mime, finalUrl: current, filename };
+  }
+  throw new Error("網址重新導向次數過多");
+}

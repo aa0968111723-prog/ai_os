@@ -3,12 +3,9 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { Request, Response } from "express";
-import { resolveSession, loadAuthState, type AuthState } from "./services/auth";
+import { resolveRequestAuth, type AuthState } from "./services/auth";
 import { isBootReady } from "./services/boot";
 import { recordError } from "./services/errlog";
-import { db, schema } from "./db";
-import { eq } from "drizzle-orm";
-import { SEED_ADMIN_EMAIL } from "./services/seed";
 import { sessionGate } from "./services/sessionPolicy";
 import { touchPresence } from "./services/presence";
 import { isRevisionConflictError } from "./services/revisionGuard";
@@ -20,14 +17,8 @@ export interface Context {
 }
 
 export async function createContext({ req, res }: CreateExpressContextOptions): Promise<Context> {
-  // AUTH_MODE=dev：跳過登入、以種子開發者身分運作（開發測功能不卡登入）。
-  // 安全鎖：正式環境「絕不」允許此後門生效——否則單一環境變數即造成全站無認證、人人開發者。
-  if (process.env.AUTH_MODE === "dev" && process.env.NODE_ENV !== "production") {
-    const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
-    const auth = admin ? await loadAuthState(admin.id) : null;
-    return { auth, req, res };
-  }
-  const auth = await resolveSession(req);
+  // The same guarded resolver is used by REST uploads/downloads to avoid half-authenticated dev sessions.
+  const auth = await resolveRequestAuth(req);
   return { auth, req, res };
 }
 

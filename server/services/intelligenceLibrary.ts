@@ -224,6 +224,13 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       .from(schema.knowledge)
       .where(and(eq(schema.knowledge.sourceAssetId, asset.id), isNull(schema.knowledge.deletedAt)))
       .orderBy(desc(schema.knowledge.createdAt)).limit(1);
+    const assetMeta = asset.meta && typeof asset.meta === "object" && !Array.isArray(asset.meta)
+      ? asset.meta as Record<string, unknown> : {};
+    const intake = assetMeta.intake && typeof assetMeta.intake === "object" && !Array.isArray(assetMeta.intake)
+      ? assetMeta.intake as Record<string, unknown> : {};
+    const provenance = intake.provenance && typeof intake.provenance === "object" && !Array.isArray(intake.provenance)
+      ? intake.provenance as Record<string, unknown> : {};
+    const recordedSourceType = typeof provenance.sourceType === "string" ? provenance.sourceType : null;
     return {
       intelligence: intel,
       title: asset.title,
@@ -231,7 +238,7 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
       mime: asset.mime,
       legacyKind: asset.kind,
       checksum: asset.sha256,
-      sourceType: asset.isAiGenerated ? "ai_generated" : "upload",
+      sourceType: recordedSourceType ?? (asset.isAiGenerated ? "ai_generated" : "upload"),
       mediaUrl: asset.storagePath ? signAssetUrl(asset.id, 900) : (/^https?:\/\//i.test(asset.url) ? asset.url : null),
       metadata: {
         ...intel.metadata,
@@ -241,6 +248,7 @@ async function loadResourceSnapshot(intelligenceId: string): Promise<ResourceSna
         createdAt: asset.createdAt.toISOString(),
         locked: asset.locked,
         legacyMeta: asset.meta,
+        provenance,
       },
     };
   }

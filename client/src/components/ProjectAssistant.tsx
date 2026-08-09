@@ -57,6 +57,7 @@ type Action =
   | { type: "split_script"; label: string; script?: string }
   // plan_agent：把目標交給 AI 創作助手排計畫；plannerMode 由使用者在確認前選擇
   | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
+  | { type: "prepare_external_generation"; label: string; sceneId: string; sceneNo: number; externalTool: string; prompt: string }
   // 套用世界觀 chips（確認後寫入專案基調）
   | { type: "apply_worldview_chips"; label: string; themes?: string[]; tones?: string[]; styles?: string[] };
 
@@ -97,6 +98,8 @@ type ProjectDirectResult = {
   createdScenes?: number;
   sceneIds?: string[];
   verification?: { status: "verified" | "unverified"; message: string };
+  externalUrl?: string;
+  prompt?: string;
 };
 
 function ProjectDirectResultCard({ projectId, result }: { projectId: string; result: ProjectDirectResult }) {
@@ -150,6 +153,12 @@ function toPayload(a: Action) {
   if (a.type === "generate") return { type: "generate" as const, prompt: a.prompt, modelId: a.modelId, sceneId: a.sceneId };
   if (a.type === "update_scene") return { type: "update_scene" as const, sceneId: a.sceneId, field: a.field, value: a.value };
   if (a.type === "plan_agent") return { type: "plan_agent" as const, goal: a.goal, plannerMode: a.plannerMode };
+  if (a.type === "prepare_external_generation") return {
+    type: "prepare_external_generation" as const,
+    sceneId: a.sceneId,
+    externalTool: a.externalTool,
+    prompt: a.prompt,
+  };
   if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, prompt: a.prompt };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
@@ -882,12 +891,21 @@ export function ProjectAssistant({
                               const actionIsCurrent = () =>
                                 activeProjectIdRef.current === actionProjectId
                                 && projectGenerationRef.current === actionProjectGeneration;
+                              const externalWindow = payloadAct.type === "prepare_external_generation"
+                                ? window.open("about:blank", "_blank")
+                                : null;
+                              if (externalWindow) externalWindow.opener = null;
                               setPendingKey(actKey);
                               try {
                                 const result = await run.mutateAsync({
                                   projectId: actionProjectId,
                                   action: toPayload(payloadAct),
                                 });
+                                if (result.kind === "prepare_external_generation") {
+                                  await navigator.clipboard?.writeText(result.prompt).catch(() => undefined);
+                                  if (externalWindow) externalWindow.location.replace(result.externalUrl);
+                                  else window.open(result.externalUrl, "_blank", "noopener,noreferrer");
+                                }
                                 // 動作已在原專案執行；快取失效不依目前畫面，讓回到原專案時能取到新資料。
                                 utils.generation.invalidate();
                                 utils.scenes.invalidate();
@@ -907,6 +925,7 @@ export function ProjectAssistant({
                                   message: result.message,
                                 });
                               } catch (error) {
+                                externalWindow?.close();
                                 if (actionIsCurrent()) {
                                   push({
                                     role: "ai",
@@ -927,6 +946,7 @@ export function ProjectAssistant({
                                     : payloadAct.type === "run_workflow" ? "Play"
                                       : payloadAct.type === "split_script" ? "Clapperboard"
                                         : payloadAct.type === "plan_agent" ? "Film"
+                                          : payloadAct.type === "prepare_external_generation" ? "ArrowRight"
                                           : payloadAct.type === "apply_worldview_chips" ? "Palette"
                                             : payloadAct.type === "direct_shot" ? "Camera"
                                               : "Pencil"
