@@ -147,6 +147,108 @@
   --touch-min: 44px;
 }
 
+/* ── External results intake ───────────────────────────────────── */
+.external-intake {
+  width: min(760px, calc(100vw - 24px));
+  max-height: min(88vh, 820px);
+  overflow: auto;
+}
+.external-intake__head,
+.external-inbox__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.external-intake__head h2 { margin: 0 0 2px; }
+.external-intake__tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.external-intake__drop {
+  min-height: 150px;
+  border: 1.5px dashed var(--border-strong, #a8a29e);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 18px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface-soft, rgba(120, 113, 108, .04));
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.external-intake__drop.is-dragging {
+  border-color: var(--brand, #7c3aed);
+  background: color-mix(in srgb, var(--brand, #7c3aed) 10%, transparent);
+  transform: scale(1.005);
+}
+.external-intake__url { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.external-intake__url .meta { grid-column: 1 / -1; margin: 0; }
+.external-intake__duplicate { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.external-intake__duplicate > span { display: grid; gap: 2px; min-width: 0; }
+.external-intake__duplicate small { display: block; max-width: min(52ch, 70vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.external-intake__duplicate > div { display: flex; gap: 6px; }
+.external-inbox { margin: 12px 0; border-top: 1px solid var(--border-soft, #e7e5e4); padding-top: 10px; }
+.external-inbox__list { display: grid; gap: 8px; margin-top: 8px; }
+.external-inbox__item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-soft, #e7e5e4);
+  border-radius: 12px;
+  padding: 8px;
+}
+.external-inbox__thumb { width: 72px; height: 58px; border-radius: 8px; overflow: hidden; display: grid; place-items: center; background: var(--surface-soft, #f5f5f4); }
+.external-inbox__thumb img, .external-inbox__thumb video { width: 100%; height: 100%; object-fit: cover; }
+.external-inbox__body { min-width: 0; }
+.external-inbox__body > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.external-inbox__actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.external-launcher { width: min(620px, calc(100vw - 24px)); max-height: 86vh; overflow: auto; }
+.external-launcher__tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.external-launcher__tools > button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid var(--border-soft, #e7e5e4);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.external-launcher__tools > button:hover { border-color: var(--brand, #7c3aed); }
+.external-launcher__tools span { color: var(--text-muted, #78716c); font-size: 12px; }
+.external-launcher__tools small { position: absolute; top: 8px; right: 8px; color: var(--brand, #7c3aed); }
+.external-launcher__custom { margin-top: 10px; }
+.external-launcher__custom-form { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; margin-top: 6px; }
+.external-launcher__copy-fallback { display: grid; gap: 6px; margin-top: 10px; }
+.external-launcher__copy-fallback label { font-size: var(--fs-12); font-weight: 700; color: var(--fg-secondary); }
+.external-launcher__copy-fallback textarea { width: 100%; min-height: 112px; resize: vertical; }
+.external-launcher__copy-fallback .btn { justify-self: start; }
+.shot-card--importing { outline: 2px solid color-mix(in srgb, var(--brand, #7c3aed) 55%, transparent); }
+.shot-card__import-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 8px 0 0; }
+
+@media (max-width: 640px) {
+  .external-intake, .external-launcher {
+    width: 100vw;
+    max-width: none;
+    max-height: 92dvh;
+    margin: auto 0 0;
+    border-radius: 18px 18px 0 0;
+  }
+  .external-intake__drop { min-height: 128px; }
+  .external-inbox__item { grid-template-columns: 56px minmax(0, 1fr); }
+  .external-inbox__thumb { width: 56px; height: 52px; }
+  .external-inbox__actions { grid-column: 1 / -1; justify-content: stretch; }
+  .external-inbox__actions > * { flex: 1; text-align: center; }
+  .external-launcher__tools { grid-template-columns: 1fr; }
+  .external-launcher__custom-form { grid-template-columns: 1fr; }
+}
+
 /* 觸控目標：不分裝置一律 ≥44px。放在 :root 之後、各元件規則之前，
  * 讓元件自己的 padding 仍可加高，但不會低於下限。 */
 button,

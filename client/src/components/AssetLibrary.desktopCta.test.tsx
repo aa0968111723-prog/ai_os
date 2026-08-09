@@ -23,6 +23,10 @@ vi.mock("../api", () => ({
       },
       knowledge: { list: { invalidate: vi.fn() } },
       community: { invalidate: vi.fn() },
+      externalIntake: {
+        inbox: { invalidate: vi.fn() },
+        activeSessions: { invalidate: vi.fn() },
+      },
     }),
     auth: {
       me: { useQuery: (...args: unknown[]) => meQuery(...args) },
@@ -46,6 +50,17 @@ vi.mock("../api", () => ({
       publishFromSource: {
         useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
+    },
+    externalIntake: {
+      activeSessions: { useQuery: () => ({ data: [], isLoading: false }) },
+      inbox: { useQuery: () => ({
+        data: { items: [], counts: { total: 0, needsReview: 0, ready: 0, unmatched: 0 } },
+        isLoading: false,
+        refetch: vi.fn(),
+      }) },
+      confirm: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }) },
+      importUrl: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
+      importDriveFile: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
     },
   },
 }));

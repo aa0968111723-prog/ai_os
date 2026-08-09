@@ -8,11 +8,21 @@ import {
   SESSION_SLIDE_REMAINING_DAYS,
   SESSION_TOUCH_MIN_MS,
   hashSessionIp,
+  isDevAuthBypassEnabled,
   nextSessionExpiry,
   shouldRenewSession,
   shouldTouchLastSeen,
   truncateUserAgent,
 } from "./auth";
+
+describe("development authentication bypass", () => {
+  it("is enabled only outside production", () => {
+    expect(isDevAuthBypassEnabled({ AUTH_MODE: "dev", NODE_ENV: "development" })).toBe(true);
+    expect(isDevAuthBypassEnabled({ AUTH_MODE: "dev", NODE_ENV: "test" })).toBe(true);
+    expect(isDevAuthBypassEnabled({ AUTH_MODE: "dev", NODE_ENV: "production" })).toBe(false);
+    expect(isDevAuthBypassEnabled({ AUTH_MODE: "session", NODE_ENV: "development" })).toBe(false);
+  });
+});
 
 const authRouter = readFileSync(new URL("../routers/auth.ts", import.meta.url), "utf8");
 const authService = readFileSync(new URL("./auth.ts", import.meta.url), "utf8");

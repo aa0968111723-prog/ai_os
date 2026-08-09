@@ -346,6 +346,14 @@ export interface AuthState {
   adminTeamIds: string[];
 }
 
+/**
+ * Development-only authentication bypass shared by tRPC and ordinary HTTP routes.
+ * Production always ignores AUTH_MODE=dev, even when the variable was left behind.
+ */
+export function isDevAuthBypassEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AUTH_MODE === "dev" && env.NODE_ENV !== "production";
+}
+
 export async function loadAuthState(userId: string): Promise<AuthState | null> {
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
   if (!user || user.status !== "active") return null;
@@ -396,6 +404,16 @@ export async function resolveSession(req: Request): Promise<AuthState | null> {
     .where(and(eq(schema.sessions.tokenHash, sha256(token)), gt(schema.sessions.expiresAt, new Date())));
   if (!session) return null;
   return loadAuthState(session.userId);
+}
+
+/** Resolve one request identity consistently for tRPC, uploads, and file downloads. */
+export async function resolveRequestAuth(req: Request): Promise<AuthState | null> {
+  if (isDevAuthBypassEnabled()) {
+    const seedAdminEmail = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gmail.com";
+    const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, seedAdminEmail));
+    return admin ? loadAuthState(admin.id) : null;
+  }
+  return resolveSession(req);
 }
 
 /**

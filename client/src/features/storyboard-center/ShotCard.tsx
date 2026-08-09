@@ -4,12 +4,13 @@
  * Direction（鏡別…專業模式全開）｜Performance（表情/視線）｜Generation 入口（單格工作室）。
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
+import { useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
 import { SceneCardBinding } from "../../components/SceneCardBinding";
 import { AssetImg } from "../../components/MediaFallback";
-import { Button, Card, Chip, Meta, Pill } from "../../components/ui";
+import { Button, Card, Chip, Hint, Meta, Pill } from "../../components/ui";
 import {
   SHOT_ANGLE_OPTIONS,
   SHOT_MOVEMENT_OPTIONS,
@@ -19,6 +20,9 @@ import {
 } from "@shared/story";
 import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
 import type { BoardMode } from "./boardPrefs";
+import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
+import { ExternalGenerationLauncher } from "../external-intake/ExternalGenerationLauncher";
+import { readLocalMediaMetadata } from "../external-intake/mediaMetadata";
 
 export interface ShotRow {
   id: string;
@@ -96,6 +100,64 @@ export function ShotCard({
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
+  const confirmImported = trpc.externalIntake.confirm.useMutation({
+    onSuccess: () => {
+      void utils.scenes.listByProject.invalidate({ projectId });
+      void utils.externalIntake.inbox.invalidate({ projectId });
+      setDropResult(null);
+      setDropStatus("✓ 已套用到這一鏡");
+    },
+  });
+  const [dropBusy, setDropBusy] = useState(false);
+  const [dropStatus, setDropStatus] = useState("");
+  const [dropDuplicateUrl, setDropDuplicateUrl] = useState<string | null>(null);
+  const [dropResult, setDropResult] = useState<{ assetId: string; bindingId?: string } | null>(null);
+
+  const importDroppedFiles = async (files: FileList) => {
+    if (!canEdit || dropBusy || !files.length) return;
+    setDropBusy(true);
+    setDropStatus("");
+    setDropDuplicateUrl(null);
+    let imported = 0;
+    for (const [index, file] of Array.from(files).entries()) {
+      setDropStatus(`正在安全保存 ${index + 1}/${files.length}：${file.name}`);
+      try {
+        const mediaMetadata = await readLocalMediaMetadata(file);
+        const form = new FormData();
+        form.append("projectId", projectId);
+        form.append("intake", "1");
+        form.append("source", "external-ai");
+        form.append("importMethod", "drag-drop");
+        form.append("context", JSON.stringify({ currentProjectId: projectId, currentSceneId: shot.id }));
+        form.append("mediaMetadata", JSON.stringify(mediaMetadata));
+        form.append("file", file);
+        const response = await fetch("/api/upload", { method: "POST", body: form, credentials: "same-origin" });
+        const data = await response.json() as {
+          ok?: boolean;
+          error?: string;
+          asset?: { id: string };
+          suggestion?: { bindingId?: string } | null;
+          duplicate?: { url: string; title: string };
+        };
+        if (response.status === 409 && data.duplicate) {
+          setDropDuplicateUrl(data.duplicate.url);
+          setDropStatus(`這個素材似乎已存在：${data.duplicate.title}`);
+          continue;
+        }
+        if (!response.ok || !data.ok || !data.asset) throw new Error(data.error ?? "帶入失敗");
+        imported += 1;
+        setDropResult({ assetId: data.asset.id, bindingId: data.suggestion?.bindingId });
+      } catch (caught) {
+        setDropStatus(caught instanceof Error ? caught.message : "帶入失敗");
+      }
+    }
+    if (imported) {
+      setDropStatus(imported === 1 ? `成果已安全保存。要設為第 ${shotNumber} 鏡成果嗎？` : `${imported} 個成果已安全保存，請到匯入收件匣批次確認。`);
+      void utils.externalIntake.inbox.invalidate({ projectId });
+      void utils.projects.assets.invalidate({ projectId });
+    }
+    setDropBusy(false);
+  };
 
   const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
   const saveCamera = (field: keyof ShotCamera, value: string) => {
@@ -131,7 +193,15 @@ export function ShotCard({
   const assetHints = assetSuggest.data?.items ?? [];
 
   return (
-    <Card as="article" className="shot-card" id={`board-shot-${shot.id}`} data-fb="分鏡卡" data-picked={picked ? "1" : undefined}>
+    <Card
+      as="article"
+      className={`shot-card${dropBusy ? " shot-card--importing" : ""}`}
+      id={`board-shot-${shot.id}`}
+      data-fb="分鏡卡"
+      data-picked={picked ? "1" : undefined}
+      onDragOver={canEdit ? (event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); } : undefined}
+      onDrop={canEdit ? (event) => { event.preventDefault(); void importDroppedFiles(event.dataTransfer.files); } : undefined}
+    >
       <div className="shot-card__head">
         {/* 勾選＝「我要對這幾鏡一起做事」。這是全站第一個分鏡多選，刻意只做最小的一件事：
             把選中的鏡號交給 AI 助手（「把這三鏡變得更有張力」），不做批次編輯 UI。
@@ -433,6 +503,26 @@ export function ShotCard({
         <Button size="sm" variant="ghost" onClick={() => onOpenStudio(shot.id)} title="配音、環境音、版本都在單格工作室">
           <Icon name="Volume2" size={13} /> 聲音
         </Button>
+        {canEdit && (
+          <ExternalGenerationLauncher
+            projectId={projectId}
+            sceneId={shot.id}
+            sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
+            targetType="video"
+            prompt={[shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n")}
+            referenceAssetIds={shot.assetId ? [shot.assetId] : []}
+          />
+        )}
+        {canEdit && (
+          <ExternalAssetIntake
+            projectId={projectId}
+            sceneId={shot.id}
+            sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
+            triggerLabel="帶入成果"
+            triggerVariant="ghost"
+            onImported={() => { void utils.scenes.listByProject.invalidate({ projectId }); }}
+          />
+        )}
         <span style={{ flex: "1 1 auto" }} />
         {canEdit && (
           <ConfirmButton
@@ -448,6 +538,22 @@ export function ShotCard({
           </ConfirmButton>
         )}
       </div>
+      {dropStatus && (
+        <Hint as="div" role="status" className="shot-card__import-status">
+          {dropStatus}
+          {dropDuplicateUrl && <a className="btn-ghost btn-sm" href={dropDuplicateUrl} target="_blank" rel="noreferrer">查看原素材</a>}
+          {dropResult && (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={confirmImported.isPending}
+              onClick={() => confirmImported.mutate({ assetId: dropResult.assetId, sceneId: shot.id, bindingId: dropResult.bindingId })}
+            >
+              套用到第 {shotNumber} 鏡
+            </Button>
+          )}
+        </Hint>
+      )}
       {update.error && <p className="error">{update.error.message}</p>}
     </Card>
   );

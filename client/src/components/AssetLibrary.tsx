@@ -22,6 +22,8 @@ import {
   parseAssetLineageMeta,
 } from "@shared/assetLineage";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { ExternalAssetIntake } from "../features/external-intake/ExternalAssetIntake";
+import { ExternalImportInbox } from "../features/external-intake/ExternalImportInbox";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -352,7 +354,15 @@ export function AssetLibrary({
 
   return (
     <Card as="section">
-      <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>素材庫</h2>
+        <Meta as="span">外部成果、參考素材與生成成品都在同一處</Meta>
+        <span style={{ flex: "1 1 auto" }} />
+        <ExternalAssetIntake
+          projectId={projectId}
+          onImported={() => { void utils.projects.assets.invalidate({ projectId }); }}
+        />
+      </div>
       {/* DESK-01：桌面回傳 revision 時顯示於區塊層級（不綁特定卡片） */}
       {desktopStatus?.assetId === "" && desktopStatus.kind === "ok" && (
         <Meta as="p" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
@@ -396,6 +406,11 @@ export function AssetLibrary({
         <Icon name="Camera" size={13} /> 拍照上傳
       </Button>
       {uploadError && <p className="error">{uploadError}</p>}
+      <ExternalImportInbox
+        projectId={projectId}
+        compact
+        onChanged={() => { void utils.projects.assets.invalidate({ projectId }); }}
+      />
 
       {assets.isLoading ? (
         <div className="asset-grid">
