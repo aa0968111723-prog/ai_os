@@ -31,6 +31,8 @@ import { globalAssistantRouter } from "./globalAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
 import { dataHubRouter } from "./dataHub";
+import { folderImportRouter } from "./folderImport";
+import { projectContextRouter } from "./projectContext";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
@@ -85,6 +87,8 @@ export const appRouter = router({
   databases: databasesRouter,
   // 資料中心 facade（只查詢、不寫入；既有 databases/knowledge/integrations 一個都沒改名）
   dataHub: dataHubRouter,
+  folderImport: folderImportRouter,
+  projectContext: projectContextRouter,
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,

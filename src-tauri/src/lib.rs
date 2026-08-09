@@ -1,8 +1,10 @@
 mod editors;
+mod folder;
 mod handoff;
 mod menu;
 mod models;
 
+use folder::{forget_import_folder, pick_import_folder, scan_import_folder, FolderRootState};
 use handoff::{
     detect_editors, open_asset, resume_active_handoffs, reveal_asset, stop_handoff, HandoffState,
 };
@@ -41,13 +43,19 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(HandoffState::default())
+        // rootId → 本機絕對路徑；這張表只存在原生端，WebView 永遠只拿得到 rootId 與相對路徑
+        .manage(FolderRootState::default())
         .invoke_handler(tauri::generate_handler![
             detect_editors,
             open_asset,
             reveal_asset,
-            stop_handoff
+            stop_handoff,
+            pick_import_folder,
+            scan_import_folder,
+            forget_import_folder
         ])
         .setup(|app| {
             #[cfg(desktop)]

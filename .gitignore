@@ -14,3 +14,10 @@ coverage/
 # 路由巡覽截圖：單次 baseline 就 15MB，進 git 歷史會永久膨脹。
 # 截圖留在本機供前後對照；耐久產物是同目錄的 audit-manifest.json（已納入版控）。
 docs/uiux-audit/screenshots/**/*.png
+# Tauri 建置產物（cargo check/build 產生；不是原始碼）
+src-tauri/target/
+src-tauri/gen/
+# Cargo.lock 一直沒有納入版控（桌面版由 CI 各自解析相依）——維持現狀，
+# 只是把它寫明，免得任何人本機跑過 cargo 之後 git status 就髒掉。
+# 要改成「鎖定相依、可重現桌面建置」的話，是獨立的一個決定，不該夾在功能 PR 裡。
+src-tauri/Cargo.lock
