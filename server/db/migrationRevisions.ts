@@ -301,7 +301,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "0d527bd2d0651c386949144eb880137eb2b6b9eb16930fa21df46359376d130e",
   ],
   "0060_agent_human_in_the_loop": [
-    "303d15cc90bef8383cb68928aeae2615db44f6afb8ceaf8082a45978236afa00",
+    "e41fe9ccec21202a0c653b2fef3bb9a5425af2afd72cc93048c3e3e6ea337293",
   ],
   "0061_external_intake": [
     "fc9a21e42738d5303af2aca2860ccc12fc9e9fe51008b9915f54e9c65863b44a",

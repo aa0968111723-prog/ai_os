@@ -11,6 +11,7 @@ const sketchMutate = vi.fn();
 /** 站內既有做法（見 AICreativeCopilot.test.tsx）：整支 api 換成假的，只留這支面板用到的路徑 */
 vi.mock("../../api", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
+  const query = () => ({ data: undefined, isLoading: false, isFetching: false, error: null, refetch: vi.fn() });
   return {
     trpc: {
       useUtils: () => ({
@@ -31,12 +32,12 @@ vi.mock("../../api", () => {
         suggest: { useMutation: mutation },
         splitScript: { useMutation: mutation },
         sketchBoard: { useMutation: () => ({ ...mutation(), mutate: sketchMutate }) },
-        whiteboardImagePlan: { useQuery: () => ({ data: null, isLoading: false }) },
+        whiteboardImagePlan: { useQuery: query },
         generateWhiteboardImage: { useMutation: mutation },
       },
       generation: {
-        status: { useQuery: () => ({ data: null, isLoading: false }) },
-        assetFor: { useQuery: () => ({ data: null, isLoading: false }) },
+        status: { useQuery: query },
+        assetFor: { useQuery: query },
       },
     },
   };
