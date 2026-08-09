@@ -92,9 +92,12 @@ import {
 } from "../../shared/assistantConversation";
 import {
   resolveProjectResources,
+  type AssistantResourceKey,
   type ResourceOutcome,
   type RetrievalMode,
 } from "../services/assistantResourceResolver";
+import { AgentEventStream } from "../services/agentEventStream";
+import type { AgentEvent, AgentSourceRecord, AgentSourceType } from "../../shared/agentEvents";
 import { classifyAssistantRequest } from "../../shared/assistantExecution";
 import { selectAssistantCapabilities } from "../../shared/assistantCapabilityRegistry";
 
@@ -742,7 +745,7 @@ export type AskStreamEvent = {
   text: string;
   tool?: string;
   preview?: ToolResultPreview;
-};
+} & Partial<Omit<AgentEvent, "phase" | "text">>;
 export interface AskCoreInput {
   projectId: string;
   message: string;
@@ -770,6 +773,8 @@ export interface AskCoreInput {
   /** 目前頁面／實體／選取指標；只用於路由，所有內容仍由既有 ACL 工具重讀。 */
   pageContext?: AssistantWirePageContext;
   traceSessionId?: string;
+  /** SSE 端點在 open 事件已宣告的 runId；讓串流事件與最終結果指向同一次執行 */
+  runId?: string;
 }
 /** 「本次依據」的一筆（P5）：使用者要看得出 AI 這次到底讀了什麼 */
 export interface AskSourceReport {
@@ -811,10 +816,51 @@ export interface AskCoreResult {
   /** auto 模式下 NIM 失敗轉付費 fal 時為 true */
   fellBackToPaid?: boolean;
   traceSessionId?: string;
+  /** 這一次執行的識別碼（與串流 open 事件同一顆） */
+  runId?: string;
+  /**
+   * 統一 Agent 事件流與**真的讀過**的站內來源（shared/agentEvents）。
+   *
+   * 與上面的 `sources`（知識篇目預算報告）刻意分開命名：那一份講的是
+   * 「知識庫塞了多少字進提示詞」，這一份講的是「我實際查了哪些東西、各幾筆」。
+   * 兩件事在畫面上也是兩塊，合併只會讓兩邊都講不清楚。
+   */
+  agentEvents?: AgentEvent[];
+  agentSources?: AgentSourceRecord[];
 }
 /** 查詢工具 → 給使用者看的中文名（串流「正在查素材庫…」用） */
 const LOOKUP_LABEL: Record<string, string> = {
   list_assets: "素材庫", read_scene: "分鏡內容", list_generations: "生成紀錄", find_model: "模型目錄", query_database: "資料庫",
+};
+
+/** 查詢工具 → 來源大類（來源面板的圖示與分類用） */
+const TOOL_SOURCE_TYPE: Record<string, AgentSourceType> = {
+  list_assets: "asset", read_scene: "storyboard", list_generations: "generation", find_model: "model_catalog", query_database: "database",
+};
+
+/** 平行讀取的資源鍵 → 來源大類（與 assistantResourceResolver 的 ASSISTANT_RESOURCE_KEYS 一一對應） */
+const RESOURCE_SOURCE_TYPE: Record<AssistantResourceKey, AgentSourceType> = {
+  project_status: "project",
+  knowledge: "knowledge",
+  decisions: "decision",
+  notes: "note",
+  tasks: "task",
+  schedule: "schedule",
+  storyboard: "storyboard",
+  assets: "asset",
+  generations: "generation",
+  agent_runs: "agent_run",
+  watches: "collaboration",
+  collaboration: "collaboration",
+  database: "database",
+};
+
+/** 讀取失敗的人話原因。使用者需要知道的是「為什麼沒讀到」，不是一個英文代號。 */
+const RESOURCE_OUTCOME_REASON: Partial<Record<ResourceOutcome, string>> = {
+  TIMEOUT: "讀取逾時",
+  AUTH_DENIED: "沒有讀取權限",
+  NOT_AVAILABLE: "這個來源目前不可用",
+  TOOL_ERROR: "讀取時發生錯誤",
 };
 
 /**
@@ -824,6 +870,12 @@ const LOOKUP_LABEL: Record<string, string> = {
  */
 export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
   let traceSessionId = input.traceSessionId;
+  /**
+   * 統一 Agent 事件流。與全站助手同一個發射端與同一份不變式：
+   * **事件只在事情真的發生的那一刻發出**（services/agentEventStream 檔頭）。
+   * preview 這類專案助手特有的欄位仍走 emit 疊加，兩者共存不衝突。
+   */
+  const stream = new AgentEventStream(input.runId, (event) => onEvent?.(event));
   const emit = (
     phase: AskStreamEvent["phase"],
     text: string,
@@ -831,6 +883,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
   ) => {
     try { onEvent?.({ phase, text, ...extra }); } catch { /* 串流端斷線不影響問答本身 */ }
   };
+  stream.emit({ type: "agent.started", title: "開始處理你的請求" });
   try {
     if (await overLimit(input.auth.user.id, input.dedupeKey)) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
@@ -869,7 +922,15 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           historyTurns: input.history?.length ?? 0,
         },
       });
-      emit("thinking", "讀取專案現況與知識庫…");
+      const contextStep = stream.startStep({
+        type: "source.reading",
+        title: `讀取「${project.title}」現況`,
+        description: "分鏡、素材、任務、知識庫與相關資料庫（平行讀取）",
+        sourceType: "project",
+        sourceId: project.id,
+        sourceName: project.title,
+        toolName: "project_resources",
+      });
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
@@ -926,8 +987,53 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         console.warn("[assistant] 資料庫證據檢索失敗（不影響問答）：", error instanceof Error ? error.message : error);
         return [];
       });
-      emit("thinking", `已平行查詢 ${resourceResolution.results.length} 個資料來源`);
+      /**
+       * 平行讀取的結果逐一報出來。這是「讀取全組現況…」那一行字缺的東西：
+       * 讀了哪一個來源、成功還是失敗、幾筆、花多久、有沒有被權限擋。
+       * 每一筆的 outcome 都來自 resolveProjectResources 的實際執行結果。
+       */
+      const resourceItems = resourceResolution.results.reduce((sum, source) => sum + source.itemCount, 0);
+      stream.finishStep(contextStep, {
+        type: "source.read",
+        title: `已讀取「${project.title}」現況`,
+        description: `${resourceResolution.metrics.okCount}/${resourceResolution.metrics.sourceCount} 個來源可用`,
+        status: resourceResolution.metrics.okCount ? "ok" : "empty",
+        sourceType: "project",
+        sourceId: project.id,
+        sourceName: project.title,
+        toolName: "project_resources",
+        resultCount: resourceItems,
+        durationMs: resourceResolution.metrics.totalMs,
+        resultSummary: [
+          { label: "分鏡", value: scenes.length, unit: "鏡" },
+          { label: "來源", value: resourceResolution.metrics.okCount },
+        ],
+      });
       for (const source of resourceResolution.results) {
+        const ok = source.outcome === "OK";
+        stream.emit({
+          type: ok || source.outcome === "EMPTY" ? "source.read" : "source.failed",
+          title: ok ? `已讀取${source.label}` : source.outcome === "EMPTY" ? `${source.label}沒有資料` : `${source.label}讀取失敗`,
+          status: ok ? "ok" : source.outcome === "EMPTY" ? "empty" : "failed",
+          sourceType: RESOURCE_SOURCE_TYPE[source.source] ?? "project",
+          sourceName: source.label,
+          toolName: source.source,
+          resultCount: source.itemCount,
+          durationMs: source.durationMs,
+          error: ok || source.outcome === "EMPTY" ? undefined : RESOURCE_OUTCOME_REASON[source.outcome],
+        });
+        stream.addSource({
+          id: `resource:${source.source}`,
+          type: RESOURCE_SOURCE_TYPE[source.source] ?? "project",
+          name: source.label,
+          entityId: project.id,
+          href: `/p/${project.id}`,
+          itemCount: source.itemCount,
+          toolName: source.source,
+          durationMs: source.durationMs,
+          status: ok ? "ok" : source.outcome === "EMPTY" ? "empty" : source.outcome === "AUTH_DENIED" ? "denied" : "failed",
+          error: ok || source.outcome === "EMPTY" ? undefined : RESOURCE_OUTCOME_REASON[source.outcome],
+        });
         emit("step", `${source.label}：${source.outcome}${source.outcome === "OK" ? `（${source.itemCount} 筆）` : ""}`);
       }
       await recordAiTraceEventSafely({
@@ -1198,6 +1304,8 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       // NIM 免費額度：全程 0 點（ASK_COST_POINTS=0，reserveQuota/refund 皆直接放行）。
       // 若使用者選了 fal 檔位，站內點數仍是 0，但平台會實付 USD——故回傳實際供應商讓 UI 標示。
       const steps: string[] = [];
+      /** 工具呼叫的計時：onToolCall 開步驟、onToolResult 收步驟（耗時是實測差值） */
+      let pendingToolStep: string | undefined;
       let usedProvider: LlmProvider = "nvidia-nim";
       let usedModel = "";
       let fellBackToPaid = false;
@@ -1208,7 +1316,19 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           maxToolRounds: MAX_TOOL_ROUNDS,
           signal: input.signal,
           buildPrompt,
-          onRound: (round) => emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…"),
+          /** 「思考中…」換成可理解的工作摘要：列出**已經取得**的來源（真實資料，非模型自述） */
+          onRound: (round) => {
+            const acquired = stream.snapshotSources().filter((s) => s.status === "ok");
+            stream.emit({
+              type: "agent.thinking",
+              title: round === 0 ? "整理已取得的資料" : "比對查到的資料，繼續分析",
+              description: acquired.length
+                ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
+                : undefined,
+              resultCount: acquired.length,
+              metadata: { round: round + 1 },
+            });
+          },
           llm: async (prompt, round, forceFinal) => {
             const startedAt = Date.now();
             await recordAiTraceEventSafely({
@@ -1238,6 +1358,12 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           toolName: (call) => call.tool,
           onToolCall: async (call) => {
             await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${call.tool}`, payload: call });
+            pendingToolStep = stream.startStep({
+              type: "tool.started",
+              title: `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}`,
+              toolName: call.tool,
+              sourceType: TOOL_SOURCE_TYPE[call.tool],
+            });
             emit("lookup", `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}…`, { tool: call.tool });
           },
           execTool: (call) => runLookupTool(input.auth, project, scenes, readableDbs, call),
@@ -1251,6 +1377,30 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
               payload: { tool: call.tool, result: r.text, preview: r.preview },
             });
             steps.push(r.step);
+            // 「(0 筆)」「不存在」這類步驟不是成功——沿用步驟文字裡已有的事實判斷，
+            // 不讓一次沒查到東西的呼叫在畫面上變成一個綠色勾。
+            const emptyOrMissing = /\(0 筆\)|不存在|失敗/.test(r.step);
+            const finish = {
+              type: emptyOrMissing ? ("tool.failed" as const) : ("tool.completed" as const),
+              title: r.step,
+              status: emptyOrMissing ? ("empty" as const) : ("ok" as const),
+              toolName: call.tool,
+              sourceType: TOOL_SOURCE_TYPE[call.tool],
+            };
+            if (pendingToolStep) stream.finishStep(pendingToolStep, finish);
+            else stream.emit(finish);
+            pendingToolStep = undefined;
+            if (!emptyOrMissing && TOOL_SOURCE_TYPE[call.tool]) {
+              stream.addSource({
+                id: `tool:${call.tool}:${steps.length}`,
+                type: TOOL_SOURCE_TYPE[call.tool],
+                name: r.step,
+                entityId: project.id,
+                href: `/p/${project.id}`,
+                toolName: call.tool,
+                status: "ok",
+              });
+            }
             emit("step", r.step, { tool: call.tool, preview: r.preview });
           },
           tryReply: (json) => {
@@ -1274,7 +1424,11 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         });
         // 用戶端已斷線（SSE close）：提早收工不白燒免費額度。回傳值不會被寫回（sse 對已關閉連線是 no-op）。
         if (outcome.aborted || !outcome.reply) {
-          return { answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport };
+          stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
+          return {
+            answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport,
+            runId: stream.runId, agentEvents: stream.snapshotEvents(), agentSources: stream.snapshotSources(),
+          };
         }
         const reply = outcome.reply;
         const actions = resolve(reply.rawActions);
@@ -1284,10 +1438,21 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           : "以安全的純文字備援完成回答";
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary, payload: { answer: reply.answer, actions, steps } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
+        // 完成事件必須在快照之前發（快照＝回傳當下的事件流）
+        const okAgentSources = stream.snapshotSources().filter((s) => s.status === "ok");
+        stream.emit({
+          type: "agent.completed",
+          title: okAgentSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+          description: okAgentSources.length ? `依據 ${okAgentSources.length} 個來源` : undefined,
+          resultCount: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
+        });
         return {
           answer: reply.answer, actions, steps, mock: false,
           fallback: reply.source === "fallback",
           provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId,
+          runId: stream.runId,
+          agentEvents: stream.snapshotEvents(),
+          agentSources: stream.snapshotSources(),
           // P5「本次依據」：回報的是**進了上下文的東西**，與模型輸出好不好解析無關。
           // 所以三種 source（reply／coerced／fallback）都要帶——純文字備援時使用者更需要
           // 知道 AI 到底讀了哪幾份、有沒有被截斷。
@@ -1301,7 +1466,27 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           : "AI 助手暫時沒回應，請稍後再問一次。";
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "failed", summary: "專案助手呼叫失敗", payload: { error: err instanceof Error ? err.message : String(err) } });
         await updateAiTraceSession(traceSessionId, { status: "failed" }).catch(() => undefined);
-        return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport };
+        // 卡住的那一步要留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
+        if (pendingToolStep) {
+          stream.finishStep(pendingToolStep, {
+            type: "tool.failed",
+            title: "工具執行中斷",
+            status: "failed",
+            error: err instanceof Error ? err.message.slice(0, 200) : "執行失敗",
+          });
+          pendingToolStep = undefined;
+        }
+        stream.emit({
+          type: "agent.failed",
+          title: "執行未完成",
+          status: "failed",
+          error: err instanceof Error ? err.message.slice(0, 200) : "未知錯誤",
+          description: steps.length ? `中斷前已完成 ${steps.length} 次查詢` : undefined,
+        });
+        return {
+          answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport,
+          runId: stream.runId, agentEvents: stream.snapshotEvents(), agentSources: stream.snapshotSources(),
+        };
       }
   }
 }

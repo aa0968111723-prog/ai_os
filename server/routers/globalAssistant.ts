@@ -68,6 +68,8 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "../services/rateLimit";
+import { AgentEventStream } from "../services/agentEventStream";
+import type { AgentEvent, AgentResultSummary, AgentSourceRecord } from "../../shared/agentEvents";
 
 /**
  * 全站助手（GLOBAL_ASSISTANT_PLAN Phase 2）：組助手（teamAssistant.ask）的演進——
@@ -393,7 +395,13 @@ export function formatMemberRefs(members: SiteMemberRef[]): string {
 
 /* ── ask 核心（tRPC 與 SSE 端點共用） ── */
 
-export type GlobalAskStreamEvent = { phase: "thinking" | "lookup" | "step"; text: string; tool?: string };
+/**
+ * 串流事件＝統一 Agent 事件（shared/agentEvents）。
+ *
+ * 舊形狀 `{ phase, text, tool }` 是它的子集（AgentEvent 一律帶那三個欄位），
+ * 所以尚未升級的前端不需要任何改動就能繼續運作。
+ */
+export type GlobalAskStreamEvent = AgentEvent;
 
 export interface GlobalAskInput {
   auth: AuthState;
@@ -413,6 +421,8 @@ export interface GlobalAskInput {
    *  與代理規劃共用 AgentPlannerMode schema；非 nim 模式會扣站內點數（見 llmPricing）。 */
   mode?: AgentPlannerMode;
   signal?: AbortSignal;
+  /** SSE 端點在 open 事件已宣告的 runId；讓串流事件與最終結果指向同一次執行 */
+  runId?: string;
 }
 
 export interface GlobalAskResult {
@@ -430,6 +440,11 @@ export interface GlobalAskResult {
   traceSessionId?: string;
   executionPlan: AssistantExecutionPlan;
   executedSiteActions: ExecutedSiteAction[];
+  /** 本次執行的完整事件流（串流中斷或走 tRPC 一次性路徑時，前端仍拿得到完整軌跡） */
+  runId: string;
+  events: AgentEvent[];
+  /** 本次**真的讀過**的來源。空陣列代表沒讀任何站內資料——此時前端不得顯示來源區塊。 */
+  sources: AgentSourceRecord[];
 }
 
 export interface ExecutedSiteAction {
@@ -451,9 +466,17 @@ export async function runGlobalAsk(
 ): Promise<GlobalAskResult> {
   const { auth, groupId } = input;
   const executionPlan = classifyAssistantRequest(input.message);
-  const emit = (phase: GlobalAskStreamEvent["phase"], text: string, tool?: string) => {
-    try { onEvent?.({ phase, text, ...(tool ? { tool } : {}) }); } catch { /* 串流端斷線不影響問答本身 */ }
-  };
+  /**
+   * 事件流。**這是本次執行唯一的進度來源**——前端不再自己預測步驟。
+   * 每一則事件都在對應的工作真的發生時才發出（見 services/agentEventStream 檔頭）。
+   */
+  const stream = new AgentEventStream(input.runId, onEvent);
+  stream.emit({
+    type: "agent.started",
+    title: "開始處理你的請求",
+    description: executionPlan.title,
+    metadata: { intent: executionPlan.intent },
+  });
   try {
     if (await overLimit(auth.user.id)) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
@@ -465,9 +488,29 @@ export async function runGlobalAsk(
     throw error;
   }
 
-  emit("thinking", "讀取全組現況…");
-  // 組級視野（requireGroup 在內）＝teamAssistant.ask 同一份組裝，視野同源不分岔
-  const teamCtx: TeamAskContext = await buildTeamAskContext(auth, groupId);
+  // 組級視野（requireGroup 在內）＝teamAssistant.ask 同一份組裝，視野同源不分岔。
+  // 讀完之後才知道「讀到了什麼」——所以計數一律在 read 事件上報，不在 reading 事件上猜。
+  const overviewStep = stream.startStep({
+    type: "source.reading",
+    title: "讀取全組現況",
+    description: "專案、成員、可讀資料庫與阻塞狀況",
+    sourceType: "project",
+    toolName: "group_overview",
+  });
+  let teamCtx: TeamAskContext;
+  try {
+    teamCtx = await buildTeamAskContext(auth, groupId);
+  } catch (error) {
+    stream.finishStep(overviewStep, {
+      type: "source.failed",
+      title: "讀取全組現況失敗",
+      status: "failed",
+      sourceType: "project",
+      toolName: "group_overview",
+      error: error instanceof Error ? error.message : "無法讀取組現況",
+    });
+    throw error;
+  }
   const { commandLevel, canDispatch, canSupervise, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
   const currentProjectRef = input.projectId
     ? [...projByRef.entries()].find(([, p]) => p.id === input.projectId)?.[0]
@@ -516,19 +559,110 @@ export async function runGlobalAsk(
       writable: agentAccessById.get(t.id) === "write",
     }])),
   };
-  const retrieveDatabaseEvidence = () => retrieveAssistantDatabaseEvidence(
-    [...dbByRef.values()]
-      .filter((table) => {
-        const access = agentAccessById.get(table.id);
-        return access === "read" || access === "write";
-      })
-      .map((table) => ({ ...table, canWrite: false })),
-    input.message,
-    { limit: 16, candidateLimit: 120, budgetChars: ASSISTANT_DATABASE_EVIDENCE_BUDGET },
-  ).catch((error) => {
-    console.warn("[globalAssistant] 資料庫證據檢索失敗（不影響問答）：", error instanceof Error ? error.message : error);
-    return [];
+  // ── 現況讀完：把「真的讀到什麼」報出去（計數全部來自剛剛那幾條查詢的回傳值） ──
+  const overviewSummary: AgentResultSummary = [
+    { label: "專案", value: teamCtx.totalProjects },
+    { label: "成員", value: members.length, unit: "位" },
+    { label: "可讀資料庫", value: dbByRef.size },
+  ];
+  stream.finishStep(overviewStep, {
+    type: "source.read",
+    title: "已讀取全組現況",
+    description: degraded ? "組級阻塞這一段沒讀到，其餘照常" : undefined,
+    status: degraded ? "empty" : "ok",
+    sourceType: "project",
+    toolName: "group_overview",
+    resultCount: teamCtx.totalProjects,
+    resultSummary: overviewSummary,
   });
+  stream.addSource({
+    id: `group:${groupId}`,
+    type: "project",
+    name: "全組現況",
+    href: "/dashboard",
+    itemCount: teamCtx.totalProjects,
+    detail: `${teamCtx.totalProjects} 個專案・${members.length} 位成員・${dbByRef.size} 個可讀資料庫`,
+    toolName: "group_overview",
+    status: teamCtx.totalProjects ? "ok" : "empty",
+  });
+  for (const [ref, table] of dbByRef.entries()) {
+    stream.addSource({
+      id: `database:${table.id}`,
+      type: "database",
+      name: table.name,
+      entityId: table.id,
+      href: `/databases/${table.id}`,
+      itemCount: table.rowCount,
+      detail: `${table.fields.length} 個欄位・代號 ${ref}`,
+      toolName: "group_overview",
+      status: table.rowCount ? "ok" : "empty",
+    });
+  }
+
+  /**
+   * 資料庫證據檢索（RAG）。刻意**不 await**——它與 trace session 建立、額度保留之間
+   * 沒有任何依賴，序列等待只是白白把首字延遲加上一次 DB 搜尋的時間。
+   * 事件在真的開始搜／真的搜完時各發一則，所以畫面上的「正在搜尋」對應的是真的在跑的查詢。
+   */
+  const retrieveDatabaseEvidence = () => {
+    const readableTables = [...dbByRef.values()].filter((table) => {
+      const access = agentAccessById.get(table.id);
+      return access === "read" || access === "write";
+    });
+    if (!readableTables.length) return Promise.resolve([]);
+    const step = stream.startStep({
+      type: "source.searching",
+      title: "搜尋資料庫",
+      description: `在 ${readableTables.length} 個可讀資料庫中比對「${input.message.slice(0, 20)}」`,
+      sourceType: "database",
+      toolName: "database_evidence",
+    });
+    return retrieveAssistantDatabaseEvidence(
+      readableTables.map((table) => ({ ...table, canWrite: false })),
+      input.message,
+      { limit: 16, candidateLimit: 120, budgetChars: ASSISTANT_DATABASE_EVIDENCE_BUDGET },
+    ).then((rows) => {
+      const tableNames = [...new Set(rows.map((row) => row.tableName))];
+      stream.finishStep(step, {
+        type: "source.found",
+        title: rows.length ? "資料庫比對完成" : "資料庫沒有相符的內容",
+        description: rows.length ? `命中 ${tableNames.join("、")}` : `已搜尋 ${readableTables.length} 個資料庫，沒有相符的列`,
+        status: rows.length ? "ok" : "empty",
+        sourceType: "database",
+        toolName: "database_evidence",
+        resultCount: rows.length,
+      });
+      for (const name of tableNames) {
+        const hit = rows.filter((row) => row.tableName === name);
+        const table = readableTables.find((t) => t.name === name);
+        stream.addSource({
+          id: `database_evidence:${table?.id ?? name}`,
+          type: "database",
+          name,
+          entityId: table?.id,
+          href: table ? `/databases/${table.id}` : undefined,
+          itemCount: hit.length,
+          detail: `關鍵字命中 ${hit.length} 列`,
+          toolName: "database_evidence",
+          status: "ok",
+        });
+      }
+      return rows;
+    }).catch((error) => {
+      stream.finishStep(step, {
+        type: "source.failed",
+        title: "資料庫搜尋失敗",
+        status: "failed",
+        sourceType: "database",
+        toolName: "database_evidence",
+        error: error instanceof Error ? error.message : "檢索失敗",
+      });
+      console.warn("[globalAssistant] 資料庫證據檢索失敗（不影響問答）：", error instanceof Error ? error.message : error);
+      return [];
+    });
+  };
+  /** 與 trace 建立、額度保留並行；真正要用時才 await（見上方註解） */
+  const databaseEvidencePromise = retrieveDatabaseEvidence();
 
   // 全站問答落 trace（分表）：mock 也落——測試模式的軌跡同樣是「實際發生過的事」。
   // 透明化失敗不應讓合法問答失敗（aiTrace 同一原則）：session 建不起來就不落 trace，答案照給。
@@ -553,9 +687,14 @@ export async function runGlobalAsk(
   }
 
   const base = {
-    canDispatch, commandLevel, degraded, traceSessionId, executionPlan,
+    canDispatch, commandLevel, degraded, traceSessionId, executionPlan, runId: stream.runId,
   };
-  emit("thinking", "已取得可用的專案、成員與資料範圍");
+  /** 回傳前統一補上事件流與來源快照——四個 return 點都得帶，漏一個就是「軌跡憑空消失」 */
+  const withTrace = <T extends object>(result: T) => ({
+    ...result,
+    events: stream.snapshotEvents(),
+    sources: stream.snapshotSources(),
+  });
 
   // 假模式：不打 LLM，回確定性摘要（可測、不花錢）。
   // 站級提議也給**確定性**的一批——「提議→確認卡→runSiteAction→真寫入」這條 ACT 鏈路
@@ -563,7 +702,7 @@ export async function runGlobalAsk(
   // 訊息含「專案」→ create_project；含「筆記」→ add_note；提議一樣走 resolveSiteActions
   // 的同一條驗證（platform 白名單、去重、上限），mock 與正式只差「誰產生提議」。
   if (isMockMode()) {
-    const databaseEvidence = await retrieveDatabaseEvidence();
+    const databaseEvidence = await databaseEvidencePromise;
     const lines = teamCtx.projectLines;
     const preview = lines.slice(0, 3).join("\n");
     const evidenceSummary = databaseEvidence.length
@@ -583,33 +722,38 @@ export async function runGlobalAsk(
       mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
     }
     const proposedSiteActions = resolveSiteActions(siteRefs, mockProposals);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, (text, tool) => {
-      emit("step", text, tool);
-    });
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    emitWaitingForConfirmation(stream, siteActions);
+    stream.emit({
+      type: "agent.completed",
+      title: "已完成（測試模式）",
+      resultSummary: overviewSummary,
+    });
     if (traceSessionId) {
       await finalizeSiteTraceSession({
         sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成",
         payload: { answer, siteActions: siteActions.map((a) => a.label) },
       }).catch(() => undefined);
     }
-    return {
+    return withTrace({
       answer, dispatches: [], actions: [], siteActions, executedSiteActions: direct.executed,
       steps: direct.executed.map((item) => `已完成：${item.action.label}`),
       mock: true, rationale: undefined, contextUsed: [], ...base,
-    };
+    });
   }
 
   // 0 點問答：reserveQuota(0) 目前是 no-op（濫用防護在上面的限流）；佈線保留供未來調價
   const quotaError = await reserveQuota(auth.user.id, groupId, ASK_COST_POINTS, "全站助手");
   if (quotaError) {
+    stream.emit({ type: "agent.failed", title: "額度不足，沒有開始執行", status: "failed", error: quotaError });
     // 額度擋下也要收尾 trace——否則調價後每次超額都留一筆永遠 prepared 的懸掛 session
     if (traceSessionId) {
       await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "failed", summary: `額度不足：${quotaError.slice(0, 400)}` }).catch(() => undefined);
     }
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
   }
-  const databaseEvidence = await retrieveDatabaseEvidence();
+  const databaseEvidence = await databaseEvidencePromise;
 
   const dispatchBlock = canDispatch
     ? `你也可以「提議派工」：把某個專案的目標交給該專案的 AI 代理去規劃並（經核准後）執行。僅在使用者明確想「動手推進某個專案」時才提議，純詢問時不要提議。
@@ -691,6 +835,8 @@ ${historyBlock}使用者的問題：${input.message}`;
   let usedModel: string | undefined;
   // 迴圈外收集 steps：迴圈中途拋錯（第二輪 LLM 429 等）時，已執行的查證不該從回覆裡消失
   const collectedSteps: string[] = [];
+  /** 工具呼叫的計時：onToolCall 開步驟、onToolResult 收步驟（耗時是實測差值） */
+  let pendingToolStep: string | undefined;
 
   try {
     const outcome = await runToolLoop({
@@ -713,7 +859,22 @@ ${historyBlock}使用者的問題：${input.message}`;
         usedModel = completion.model;
         return completion.text;
       },
-      onRound: (round) => emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…"),
+      /**
+       * 「思考中…」不再是黑盒子：把**目前已經取得的東西**列出來，
+       * 那份清單來自 stream 已登記的來源（真實資料），不是模型自述。
+       */
+      onRound: (round) => {
+        const acquired = stream.snapshotSources().filter((s) => s.status === "ok");
+        stream.emit({
+          type: "agent.thinking",
+          title: round === 0 ? "整理已取得的資料" : "比對查到的資料，繼續分析",
+          description: acquired.length
+            ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
+            : undefined,
+          resultCount: acquired.length,
+          metadata: { round: round + 1 },
+        });
+      },
       onLlmResult: async (raw, round, latencyMs) => {
         if (traceSessionId) {
           await recordAiTraceEventSafely({
@@ -731,7 +892,12 @@ ${historyBlock}使用者的問題：${input.message}`;
       },
       toolName: (call) => call.tool,
       onToolCall: async (call) => {
-        emit("lookup", `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}…`, call.tool);
+        pendingToolStep = stream.startStep({
+          type: "tool.started",
+          title: `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}`,
+          description: describeToolTarget(call, projByRef, dbByRef),
+          toolName: call.tool,
+        });
         if (traceSessionId) {
           await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${call.tool}`, payload: call });
         }
@@ -740,7 +906,41 @@ ${historyBlock}使用者的問題：${input.message}`;
       execTool: (call) => runTeamTool(projByRef, dbByRef, groupId, call, auth),
       onToolResult: async (call, r) => {
         collectedSteps.push(r.step);
-        emit("step", r.step, call.tool);
+        const meta = r.meta;
+        const stepId = pendingToolStep;
+        pendingToolStep = undefined;
+        // 代號對不到、無權限、目標不存在＝這次查詢**沒有**取得資料：一律報 tool.failed，
+        // 不能因為「函式有回傳字串」就打勾——那正是使用者看到✓卻沒讀到東西的來源。
+        const failed = meta ? !meta.ok : false;
+        const finish = {
+          type: failed ? ("tool.failed" as const) : ("tool.completed" as const),
+          title: failed
+            ? `查${LOOKUP_LABEL[call.tool] ?? "資料"}沒有結果`
+            : `已${LOOKUP_LABEL[call.tool] ? `讀取${LOOKUP_LABEL[call.tool]}` : "取得資料"}`,
+          description: meta?.ok ? [meta.sourceName, meta.detail].filter(Boolean).join("・") || undefined : undefined,
+          status: failed ? ("failed" as const) : meta?.resultCount === 0 ? ("empty" as const) : ("ok" as const),
+          toolName: call.tool,
+          sourceType: meta?.sourceType,
+          sourceName: meta?.sourceName,
+          sourceId: meta?.sourceId,
+          resultCount: meta?.resultCount,
+          error: failed ? meta?.error : undefined,
+        };
+        if (stepId) stream.finishStep(stepId, finish);
+        else stream.emit(finish);
+        if (meta?.ok && meta.sourceType && meta.sourceName) {
+          stream.addSource({
+            id: `${call.tool}:${meta.sourceId ?? meta.sourceName}`,
+            type: meta.sourceType,
+            name: meta.sourceName,
+            entityId: meta.sourceId,
+            href: meta.href,
+            itemCount: meta.resultCount,
+            detail: meta.detail,
+            toolName: call.tool,
+            status: meta.resultCount === 0 ? "empty" : "ok",
+          });
+        }
         if (traceSessionId) {
           await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_result", summary: r.step, payload: { tool: call.tool, result: r.text } });
         }
@@ -755,29 +955,44 @@ ${historyBlock}使用者的問題：${input.message}`;
     });
 
     if (outcome.aborted || !outcome.reply) {
+      stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
       if (traceSessionId) {
         await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "stopped", summary: "用戶端中斷連線，提早收工" }).catch(() => undefined);
       }
-      return { answer: "", dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: outcome.steps, mock: false, rationale: undefined, contextUsed: [], ...base };
+      return withTrace({ answer: "", dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: outcome.steps, mock: false, rationale: undefined, contextUsed: [], ...base });
     }
 
     const reply = outcome.reply;
     const proposedSiteActions = outcome.usedFallback ? [] : resolveSiteActions(siteRefs, reply.siteActions ?? []);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, (text, tool) => {
-      emit("step", text, tool);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
+    const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    emitWaitingForConfirmation(stream, pendingConfirmation);
+    // 收尾事件必須在 withTrace 之前發：快照是「回傳當下的事件流」，
+    // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
+    const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
+    stream.emit({
+      type: "agent.completed",
+      title: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+      description: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
+      resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
+      resultSummary: [
+        { label: "來源", value: okSources.length },
+        { label: "查詢", value: outcome.steps.length, unit: "次" },
+        ...(direct.executed.length ? [{ label: "已完成動作", value: direct.executed.length, unit: "件" }] : []),
+      ],
     });
-    const result: GlobalAskResult = {
+    const result: GlobalAskResult = withTrace({
       answer: reply.answer,
       dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], canDispatch),
       actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
-      siteActions: proposedSiteActions.filter((action) => !direct.executedActions.has(action)),
+      siteActions: pendingConfirmation,
       executedSiteActions: direct.executed,
       steps: [...outcome.steps, ...direct.executed.map((item) => `已完成：${item.action.label}`)],
       mock: false,
       rationale: sanitizeRationale(reply.rationale),
       contextUsed: sanitizeContextUsed(reply.contextUsed),
       ...base,
-    };
+    });
     if (traceSessionId) {
       // 答案已經算好——trace 收尾失敗只記警告，不把成功的回答變成 500（透明化失敗不拖垮創作）
       await updateSiteTraceSession(traceSessionId, { provider: usedProvider ?? null, model: usedModel ?? null }).catch(() => undefined);
@@ -810,13 +1025,67 @@ ${historyBlock}使用者的問題：${input.message}`;
       }).catch(() => undefined);
     }
     if (aborted) {
-      return { answer: "", dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base };
+      stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
+      return withTrace({ answer: "", dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base });
     }
     // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功。
     // steps 用迴圈外收集的那份：中途炸掉不該讓「查過什麼」從回覆裡消失。
     const answer = err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
-    return { answer, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base };
+    // 卡住的那一步要在軌跡上留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
+    if (pendingToolStep) {
+      stream.finishStep(pendingToolStep, {
+        type: "tool.failed",
+        title: "工具執行中斷",
+        status: "failed",
+        error: err instanceof Error ? err.message.slice(0, 200) : "執行失敗",
+      });
+      pendingToolStep = undefined;
+    }
+    stream.emit({
+      type: "agent.failed",
+      title: "執行未完成",
+      status: "failed",
+      error: err instanceof Error ? err.message.slice(0, 200) : "未知錯誤",
+      description: collectedSteps.length ? `中斷前已完成 ${collectedSteps.length} 次查詢` : undefined,
+    });
+    return withTrace({ answer, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base });
   }
+}
+
+/**
+ * 需要使用者確認的動作 → `waiting.permission` 事件。
+ *
+ * 只有**真的有**待確認動作時才發：這條規則直接對應「不要讓『檢查權限與風險』
+ * 變成永遠顯示的假步驟」——沒有東西要確認時，畫面上就不該出現權限這一列。
+ */
+function emitWaitingForConfirmation(stream: AgentEventStream, pending: ResolvedSiteAction[]): void {
+  if (!pending.length) return;
+  stream.emit({
+    type: "waiting.permission",
+    title: `有 ${pending.length} 件動作需要你確認`,
+    description: pending.map((action) => action.label).join("；").slice(0, 400),
+    resultCount: pending.length,
+  });
+}
+
+/** 工具呼叫的對象（給使用者看的人話；代號 pN／dbN 不外露） */
+function describeToolTarget(
+  call: z.infer<typeof teamToolSchema>,
+  projByRef: Map<string, { title: string }>,
+  dbByRef: Map<string, { name: string }>,
+): string | undefined {
+  const ref = call.args?.ref?.trim();
+  const project = ref ? projByRef.get(ref) : undefined;
+  if (call.tool === "query_database") {
+    const table = call.args?.dbRef?.trim() ? dbByRef.get(call.args.dbRef.trim()) : undefined;
+    const keyword = call.args?.keyword?.trim();
+    if (table) return keyword ? `在「${table.name}」搜尋「${keyword}」` : `讀取「${table.name}」`;
+    return keyword ? `搜尋「${keyword}」` : undefined;
+  }
+  if (call.tool === "read_scene" && project) return `「${project.title}」第 ${call.args?.sceneNo ?? "?"} 鏡`;
+  if (project) return `「${project.title}」`;
+  if (call.tool === "find_model") return call.args?.keyword?.trim() ? `關鍵字「${call.args.keyword.trim()}」` : undefined;
+  return undefined;
 }
 
 /* ── runSiteAction：確認後的執行（本人身分；Command layer／core 內建 ACL＋policy） ── */
@@ -925,7 +1194,7 @@ async function executeDirectSiteActions(
   auth: AuthState,
   plan: AssistantExecutionPlan,
   actions: ResolvedSiteAction[],
-  onEvent?: (text: string, tool: string) => void,
+  stream: AgentEventStream,
 ): Promise<{ executed: ExecutedSiteAction[]; executedActions: Set<ResolvedSiteAction> }> {
   const eligible = actions.filter((action) => {
     if (!canDirectlyExecuteCapability(plan, action.type)) return false;
@@ -935,17 +1204,41 @@ async function executeDirectSiteActions(
   });
   const executed: ExecutedSiteAction[] = [];
   for (const action of eligible) {
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: `正在${action.label}`,
+      toolName: action.type,
+      target: action.label,
+    });
     try {
       const result = await runSiteActionCore(auth, resolvedSiteActionInput(action));
-      onEvent?.(
-        result.verification.status === "verified"
-          ? `已完成並驗證：${action.label}`
-          : `操作已送出，但驗證未通過：${action.label}`,
-        action.type,
-      );
+      // 驗證是真的重新讀一次（runSiteActionCore 內的 readBackVerification）——
+      // 這則事件描述的是那次讀回，不是「假裝檢查過」。
+      const verified = result.verification.status === "verified";
+      stream.emit({
+        type: "verification.completed",
+        title: verified ? "已重新讀取確認存在" : result.verification.message,
+        status: verified ? "ok" : "failed",
+        toolName: action.type,
+        target: action.label,
+      });
+      stream.finishStep(stepId, {
+        type: "action.completed",
+        title: verified ? `已完成：${action.label}` : `已送出但驗證未通過：${action.label}`,
+        status: verified ? "ok" : "failed",
+        toolName: action.type,
+        target: action.label,
+      });
       executed.push({ action, result, canUndo: true });
     } catch (error) {
-      onEvent?.(`未能直接完成「${action.label}」：${error instanceof Error ? error.message : "執行失敗"}`, action.type);
+      stream.finishStep(stepId, {
+        type: "action.failed",
+        title: `未能完成：${action.label}`,
+        status: "failed",
+        toolName: action.type,
+        target: action.label,
+        error: error instanceof Error ? error.message : "執行失敗",
+      });
     }
   }
   return { executed, executedActions: new Set(executed.map((item) => item.action)) };

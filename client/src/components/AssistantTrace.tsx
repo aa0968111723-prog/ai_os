@@ -2,12 +2,17 @@ import { Icon, type IconName } from "./Icon";
 import { Button } from "./ui";
 import { ToolResultPreview } from "../features/agent-trace/ToolResultPreview";
 import type { ToolResultPreview as Preview } from "@shared/toolResultPreview";
+import type { AgentEvent } from "@shared/agentEvents";
 
 /**
  * 可對使用者揭露的 AI 活動事件。
  *
  * 這些事件只描述資料來源、工具呼叫與完成狀態；不可放入模型的隱藏
  * chain-of-thought、原始系統提示或未遮罩的敏感資料。
+ *
+ * 形狀是**舊協定 ∪ 新協定**：`phase`／`text` 一定有（舊前端與舊伺服器都靠它），
+ * 統一 Agent 事件（shared/agentEvents）的結構化欄位則是選填擴充。這讓
+ * 新舊兩端可以各自獨立部署，不必為了一次 UI 改版做前後端同步上線。
  */
 export type AssistantActivityEvent = {
   phase: "thinking" | "lookup" | "step";
@@ -21,7 +26,7 @@ export type AssistantActivityEvent = {
    * 「實際運作紀錄」才看得到查到了什麼——而那正是他當下最想知道的事。
    */
   preview?: Preview;
-};
+} & Partial<Omit<AgentEvent, "phase" | "text">>;
 
 function activityIcon(phase: AssistantActivityEvent["phase"]): IconName {
   return phase === "step" ? "Check" : phase === "lookup" ? "Search" : "Loader";

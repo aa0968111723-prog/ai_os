@@ -7,6 +7,7 @@ import {
   registerAssistantPage,
   resetAssistantContextForTest,
 } from "../lib/assistantContext";
+import { resetAssistantRunStoreForTest } from "../lib/assistantRunStore";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const SHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -54,10 +55,31 @@ vi.mock("./assistantStream", () => ({
   requestSiteAssistantStream: (args: unknown) => streamMock(args),
 }));
 
+/** 一則真實事件的最小形狀（伺服器 AgentEventStream 產生的那一種） */
+const event = (over: Record<string, unknown>) => ({
+  eventId: `e${Math.random().toString(36).slice(2)}`,
+  runId: "run-1",
+  timestamp: "2026-08-09T00:00:00.000Z",
+  type: "tool.completed",
+  status: "ok",
+  title: "已讀取資料",
+  phase: "step",
+  text: "已讀取資料",
+  ...over,
+});
+
 const DONE = {
   answer: "組內 2 個專案進行中",
   steps: ["查了全組阻塞(0 項)"],
   contextUsed: ["專案現況"],
+  runId: "run-1",
+  events: [
+    event({ type: "source.read", title: "已讀取全組現況", resultCount: 2, durationMs: 120, toolName: "group_overview" }),
+    event({ type: "tool.completed", title: "已讀取組阻塞", resultCount: 0, toolName: "group_blockers", status: "empty" }),
+  ],
+  sources: [
+    { id: "group:g", type: "project", name: "全組現況", href: "/dashboard", itemCount: 2, toolName: "group_overview", status: "ok" },
+  ],
   siteActions: [
     { type: "send_dm", peerId: "u2", peerName: "阿明", body: "明早十點對稿，帶腳本", label: "私訊 阿明：「明早十點對稿，帶腳本」" },
   ],
@@ -73,6 +95,8 @@ const DONE = {
 beforeEach(() => {
   vi.clearAllMocks();
   resetAssistantContextForTest();
+  // 對話與執行軌跡刻意活在模組級 store（跨卸載存活），所以每個案例要自己歸零
+  resetAssistantRunStoreForTest();
   watchInsights = undefined;
   watchOverview = undefined;
   streamMock.mockImplementation(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
@@ -162,7 +186,10 @@ describe("AICreativeCopilot", () => {
     await sendMessage(user, "進度如何？");
 
     await screen.findByText("組內 2 個專案進行中");
-    expect(screen.getByText(/查了全組阻塞/)).toBeInTheDocument();
+    // 工作過程收合時只顯示最後一列（手機不被軌跡淹沒），展開才看得到全部
+    expect(screen.getByText("已讀取組阻塞")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /查看工作過程/ }));
+    expect(screen.getByText("已讀取全組現況")).toBeInTheDocument();
     // 三種確認卡都在；私訊卡顯示**全文**（以本人名義送出的內容必須看過才確認）
     expect(screen.getByText("明早十點對稿，帶腳本")).toBeInTheDocument();
     expect(screen.getByText(/發起代理計畫/)).toBeInTheDocument();
@@ -201,7 +228,8 @@ describe("AICreativeCopilot", () => {
     await sendMessage(user, "幫我建立會議筆記");
 
     expect(await screen.findByText(/已完成：新增筆記/)).toBeInTheDocument();
-    expect(screen.getByText(/總耗時 0.1 秒/)).toBeInTheDocument();
+    // 抬頭卡的耗時來自實測 latency（80ms），不是把預測步驟排排站然後打勾
+    expect(screen.getByText("80 毫秒")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /復原/ }));
     expect(undoSiteActionMutate).toHaveBeenCalledWith({
       type: "add_note",

@@ -29,6 +29,8 @@ import { batchSummaryText } from "./assistantBatch";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 import { ProactiveModelConverter } from "../features/creation-workbench/ProactiveModelConverter";
 import { AgentRunCard } from "./AgentRunCard";
+import { AgentWorkPanel } from "./AgentWorkPanel";
+import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
 import {
   classifyAssistantRequest,
   type AssistantExecutionPlan,
@@ -71,6 +73,9 @@ type Turn = {
   steps?: string[];
   /** 可驗證的工具／查詢活動軌跡；回答完成後保留，預設收合。 */
   activity?: ThinkEvent[];
+  /** 統一 Agent 事件流與真的讀過的來源（伺服器權威版本；串流不完整時以它為準） */
+  agentEvents?: AgentEvent[];
+  agentSources?: AgentSourceRecord[];
   elapsedMs?: number;
   fallback?: boolean;
   /** 這一則回答動用了付費備援（auto 模式 NIM 失敗）。不標出來，
@@ -234,6 +239,8 @@ export function ProjectAssistant({
   const [thinking, setThinking] = useState<{ active: boolean; events: ThinkEvent[] }>({ active: false, events: [] });
   const [fallbackPending, setFallbackPending] = useState(false);
   const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
+  /** 串流事件中結構化的那些（新協定）。舊伺服器只吐 {phase,text} 時是空陣列，畫面自動退回舊軌跡元件。 */
+  const liveAgentEvents = useMemo(() => thinking.events.filter(isAgentEvent), [thinking.events]);
   // 已執行的提議動作鍵（turnIndex:actionIndex）＋正在執行中的鍵——停用「已執行」的按鈕，避免重複點擊
   const [executed, setExecuted] = useState<Set<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -382,6 +389,9 @@ export function ProjectAssistant({
             actions: actions.filter((action) => !directlyRunnable.has(action)),
             steps: result.steps,
             activity: [...traceRef.current],
+            // 事件與來源以伺服器最終版本為準；串流掉封包時前端累積的那份會不完整
+            agentEvents: result.agentEvents ?? traceRef.current.filter(isAgentEvent),
+            agentSources: result.agentSources,
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
             paid: result.fellBackToPaid === true,
@@ -400,6 +410,8 @@ export function ProjectAssistant({
             role: "ai",
             text: errorMessage,
             activity: [...traceRef.current],
+            // 失敗也要留下已經跑過的事件：使用者最需要知道的正是「卡在哪一步」
+            agentEvents: traceRef.current.filter(isAgentEvent),
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             executionPlan: activePlan ?? classifyAssistantRequest(message),
             runStatus: "failed",
@@ -462,6 +474,8 @@ export function ProjectAssistant({
               actions: result.actions as Action[],
               steps: result.steps,
               activity: traceRef.current.length > 0 ? [...traceRef.current] : fallbackActivity,
+              agentEvents: result.agentEvents ?? traceRef.current.filter(isAgentEvent),
+              agentSources: result.agentSources,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
               paid: result.fellBackToPaid === true,
@@ -680,19 +694,22 @@ export function ProjectAssistant({
                       plan={t.executionPlan}
                       active={false}
                       outcome={t.runStatus}
-                      eventCount={activity.length}
-                      hasToolActivity={activity.some((event) => event.phase === "lookup" || event.phase === "step")}
+                      events={t.agentEvents}
                       latency={t.latency}
                     />
                   ) : null
                 )}
-                {t.role === "ai" && (
+                {/* 工作過程＋來源（新協定）。舊伺服器沒有結構化事件時退回原本的軌跡元件，
+                    這樣灰度部署期間兩種伺服器都有東西可看，而不是一片空白。 */}
+                {t.role === "ai" && (t.agentEvents?.length || t.agentSources?.length) ? (
+                  <AgentWorkPanel events={t.agentEvents ?? []} sources={t.agentSources ?? []} />
+                ) : t.role === "ai" ? (
                   <AssistantTrace
                     events={activity}
                     elapsedMs={t.elapsedMs}
                     fallback={t.fallback}
                   />
-                )}
+                ) : null}
                 {/* 本次依據（P5）：這則回答讀了什麼、有沒有因為上限沒讀完 */}
                 {t.role === "ai" && <AskSources sources={t.sources} />}
                 <div
@@ -984,19 +1001,18 @@ export function ProjectAssistant({
               <div style={{ alignSelf: "flex-start", maxWidth: "90%" }} role="status">
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2 }}>助手</div>
                 {activePlan ? (
-                  <AgentRunCard
-                    plan={activePlan}
-                    active
-                    eventCount={thinking.events.length}
-                    hasToolActivity={thinking.events.some((event) => event.phase === "lookup" || event.phase === "step")}
-                  />
+                  <AgentRunCard plan={activePlan} active events={liveAgentEvents} />
                 ) : null}
-                <LiveAssistantTrace
-                  events={thinking.events}
-                  open={liveTraceOpen}
-                  onToggle={() => setLiveTraceOpen((value) => !value)}
-                  onCancel={cancelCurrent}
-                />
+                {liveAgentEvents.length ? (
+                  <AgentWorkPanel events={liveAgentEvents} live onCancel={cancelCurrent} />
+                ) : (
+                  <LiveAssistantTrace
+                    events={thinking.events}
+                    open={liveTraceOpen}
+                    onToggle={() => setLiveTraceOpen((value) => !value)}
+                    onCancel={cancelCurrent}
+                  />
+                )}
               </div>
             )}
           </div>

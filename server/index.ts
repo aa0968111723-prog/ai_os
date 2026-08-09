@@ -1952,7 +1952,19 @@ function createAssistantLatencyTracker(startedAt: number) {
   let toolFinishedMs: number | null = null;
   const elapsed = () => Math.max(0, Date.now() - startedAt);
   return {
-    observe(event: { phase?: string; text?: string }) {
+    /**
+     * 統一 Agent 事件（帶 `type`）優先走型別判斷；舊事件才退回文字比對。
+     * 文字比對本來就脆——「已取得」四個字改一次就整組延遲數字歸零——
+     * 型別是穩定的契約，改文案不會再默默弄壞量測。
+     */
+    observe(event: { phase?: string; text?: string; type?: string }) {
+      if (event.type) {
+        if (contextReadyMs == null && (event.type === "source.read" || event.type === "source.found")) contextReadyMs = elapsed();
+        if (modelStartedMs == null && event.type === "agent.thinking") modelStartedMs = elapsed();
+        if (firstToolCallMs == null && event.type === "tool.started") firstToolCallMs = elapsed();
+        if (event.type === "tool.completed" || event.type === "tool.failed") toolFinishedMs = elapsed();
+        return;
+      }
       if (contextReadyMs == null && event.text?.startsWith("已取得")) contextReadyMs = elapsed();
       if (modelStartedMs == null && event.phase === "thinking" && event.text?.includes("思考")) modelStartedMs = elapsed();
       if (firstToolCallMs == null && event.phase === "lookup") firstToolCallMs = elapsed();
@@ -2032,9 +2044,11 @@ app.post("/api/assistant/ask", async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
   const latency = createAssistantLatencyTracker(requestStartedAt);
+  // runId 往下傳給核心：串流事件、最終結果與前端的跨頁續看都指向同一次執行
+  const runId = nonce || randomUUID();
   sse("open", {
     ok: true,
-    runId: nonce || randomUUID(),
+    runId,
     receivedAt: new Date(requestStartedAt).toISOString(),
     plan: classifyAssistantRequest(message),
   }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
@@ -2047,6 +2061,7 @@ app.post("/api/assistant/ask", async (req, res) => {
         auth,
         signal: clientAbort.signal,
         dedupeKey: nonce,
+        runId,
         mode,
         knowledgeIds: knowledgeIds.length ? knowledgeIds : undefined,
         onlyKnowledgeIds: onlyKnowledgeIds.length ? onlyKnowledgeIds : undefined,
@@ -2115,9 +2130,12 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
   const latency = createAssistantLatencyTracker(requestStartedAt);
+  // runId 在這裡就定下來並往下傳：串流事件、最終結果與（前端的）跨頁續看都指向同一次執行。
+  // 以前這顆 id 只活在 open 事件裡，事件本身沒有歸屬，換頁後就再也接不回來。
+  const runId = randomUUID();
   sse("open", {
     ok: true,
-    runId: randomUUID(),
+    runId,
     receivedAt: new Date(requestStartedAt).toISOString(),
     plan: classifyAssistantRequest(message),
   });
@@ -2135,6 +2153,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         projectId,
         pageContext,
         signal: clientAbort.signal,
+        runId,
       },
       (e) => { latency.observe(e); sse("step", e); },
     );
