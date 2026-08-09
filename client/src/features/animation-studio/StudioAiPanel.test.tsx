@@ -11,21 +11,33 @@ const sketchMutate = vi.fn();
 /** 站內既有做法（見 AICreativeCopilot.test.tsx）：整支 api 換成假的，只留這支面板用到的路徑 */
 vi.mock("../../api", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, reset: vi.fn(), error: null, data: undefined });
+  const query = () => ({ data: undefined, isLoading: false, isFetching: false, error: null, refetch: vi.fn() });
   return {
     trpc: {
       useUtils: () => ({
         scenes: { listByProject: { invalidate: vi.fn() } },
         projects: { assets: { invalidate: vi.fn() } },
+        characters: { list: { invalidate: vi.fn() } },
+        scenePresets: { list: { invalidate: vi.fn() } },
       }),
       scenes: {
         update: { useMutation: () => ({ ...mutation(), mutate: updateMutate }) },
         addDraft: { useMutation: mutation },
         setVisualFromAsset: { useMutation: mutation },
+        setVisualFromGeneration: { useMutation: mutation },
       },
+      characters: { add: { useMutation: mutation } },
+      scenePresets: { add: { useMutation: mutation } },
       director: {
         suggest: { useMutation: mutation },
         splitScript: { useMutation: mutation },
         sketchBoard: { useMutation: () => ({ ...mutation(), mutate: sketchMutate }) },
+        whiteboardImagePlan: { useQuery: query },
+        generateWhiteboardImage: { useMutation: mutation },
+      },
+      generation: {
+        status: { useQuery: query },
+        assetFor: { useQuery: query },
       },
     },
   };
