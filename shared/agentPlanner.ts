@@ -45,35 +45,40 @@ export const AGENT_PLANNER_OPTIONS: ReadonlyArray<{
     value: "fal_quality",
     label: "高品質（預設）",
     shortLabel: "高品質",
-    description: "使用 Claude Sonnet 4.5，適合複雜依賴、長資料與正式交付計畫。規劃依實際 token 扣點。",
+    description:
+      "使用 Claude Sonnet 4.5：正式多步計畫、複雜依賴與長脈絡首選。規劃品質直接影響後面執行點數，預設走此檔。",
     usageLabel: "輸出上限 8,000 tokens・依 token 計點",
   },
   {
     value: "fal_balanced",
     label: "均衡",
     shortLabel: "均衡",
-    description: "使用 GPT-5 Mini，在規劃品質、速度與點數之間取得平衡。",
+    description:
+      "使用 GPT-5.6 Luna：結構化輸出穩、速度與點數折衷。適合中等複雜度、要 JSON／步驟格式清楚的計畫。",
     usageLabel: "輸出上限 5,000 tokens・依 token 計點",
   },
   {
     value: "fal_economy",
-    label: "省點數",
-    shortLabel: "省點數",
-    description: "使用 Gemini 2.5 Flash Lite，適合日常、步驟較少的計畫。",
+    label: "快速省點",
+    shortLabel: "快速省點",
+    description:
+      "使用 DeepSeek V4 Flash：延遲低、成本低，適合日常短計畫、步驟少、要手感快的場合。覺得代理卡可先改此檔。",
     usageLabel: "輸出上限 3,000 tokens・依 token 計點",
   },
   {
     value: "auto",
     label: "免費優先（自動備援）",
     shortLabel: "免費優先",
-    description: "先用免費的 NVIDIA NIM；無回應或計畫格式不合格時，自動改由 fal.ai 均衡模型完成。",
+    description:
+      "先用免費 NVIDIA NIM；無回應或計畫格式不合格時，自動改由 fal 均衡檔（GPT-5.6 Luna）完成並計點。",
     usageLabel: "NIM 免費・備援才計點",
   },
   {
     value: "nim",
     label: "只用免費模型",
     shortLabel: "只用免費",
-    description: "只用 NVIDIA NIM 免費額度，站內 0 點；NIM 忙碌時會直接提示稍後再試。",
+    description:
+      "只用 NVIDIA NIM 免費額度，站內 0 點；適合試用與聊天。複雜代理計畫可能較鬆散，NIM 忙碌會請稍後再試。",
     usageLabel: "免費額度・0 點",
   },
 ];
