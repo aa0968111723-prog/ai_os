@@ -3,6 +3,7 @@ import {
   buildHistoryBlock,
   countDoneSteps,
   currentStepNote,
+  detectCrossGroupMention,
   dispatchAllowed,
   foldGroupStatusAggregate,
   formatGroupBlockerDigest,
@@ -661,5 +662,53 @@ describe("TEAM_ASSISTANT_DATA_BOUNDARY_RULE（組級助手資料範圍邊界）"
     expect(rule).toContain("推論");
     expect(rule).toContain("不代表不存在");
     expect(rule).toContain("不要猜測");
+  });
+
+  it("列出／統計本組專案時只能列 <組現況> 清單上的，不得把其他來源的專案名當本組專案", () => {
+    const rule = TEAM_ASSISTANT_DATA_BOUNDARY_RULE;
+    expect(rule).toContain("只能列 <組現況> 清單上出現的專案");
+    expect(rule).toContain("嚴禁把先前對話、資料庫搜尋或其他任何來源出現過的專案名當成本組專案");
+  });
+});
+
+describe("detectCrossGroupMention（資料層邊界強制：跨組請求短迴路）", () => {
+  // 模擬系統裡的組名（對應測試案例：剪輯組／文宣組／動畫組／卉庭組／短影音組）
+  const allGroups = [
+    { groupId: "g-editing", groupName: "剪輯組" },
+    { groupId: "g-copy", groupName: "文宣組" },
+    { groupId: "g-anim", groupName: "動畫組" },
+    { groupId: "g-huiting", groupName: "卉庭組" },
+    { groupId: "g-short", groupName: "短影音組" },
+  ];
+
+  it("盤點其他組專案：明確點名其他組 → 回該組名（複測準則一/二的根因案例）", () => {
+    expect(detectCrossGroupMention("請統計文宣組現在一共有幾個專案", "剪輯組", allGroups))
+      .toEqual({ targetGroupName: "文宣組" });
+    expect(detectCrossGroupMention("盤點動畫組的專案", "短影音組", allGroups))
+      .toEqual({ targetGroupName: "動畫組" });
+  });
+
+  it("比較／跨組請求也命中（只要訊息裡有非本組的組名就攔，不管怎麼問）", () => {
+    expect(detectCrossGroupMention("比較文宣組和剪輯組的專案量", "剪輯組", allGroups))
+      .toEqual({ targetGroupName: "文宣組" });
+  });
+
+  it("自查（訊息提到本組名）不算跨組 → 回 null，正常走 LLM", () => {
+    expect(detectCrossGroupMention("列出文宣組所有專案", "文宣組", allGroups)).toBeNull();
+    expect(detectCrossGroupMention("本組現在有幾個專案？", "文宣組", allGroups)).toBeNull();
+    expect(detectCrossGroupMention("我們組有哪些案子在跑", "剪輯組", allGroups)).toBeNull();
+  });
+
+  it("組名子字串遮蔽：本組「新文宣組」自問不會被「文宣組」誤判成跨組", () => {
+    const nested = [...allGroups, { groupId: "g-copy2", groupName: "新文宣組" }];
+    expect(detectCrossGroupMention("新文宣組現在有幾個專案", "新文宣組", nested)).toBeNull();
+    // 但真的問「文宣組」（另一組）仍要攔
+    expect(detectCrossGroupMention("文宣組現在有幾個專案", "新文宣組", nested))
+      .toEqual({ targetGroupName: "文宣組" });
+  });
+
+  it("訊息不含任何組名 → null；空白訊息 → null", () => {
+    expect(detectCrossGroupMention("幫我看看本組有哪些瓶頸", "剪輯組", allGroups)).toBeNull();
+    expect(detectCrossGroupMention("   ", "剪輯組", allGroups)).toBeNull();
   });
 });
