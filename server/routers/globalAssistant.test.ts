@@ -5,11 +5,12 @@ import {
   answerWithVerifiedActions,
   formatMemberRefs,
   readBackVerification,
+  resolveMentionedProjectRef,
   resolveSiteActions,
   type SiteActionRefs,
 } from "./globalAssistant";
 
-describe("ACT -> VERIFY -> COMPLETE", () => {
+describe("DIRECT -> VERIFY -> COMPLETE", () => {
   it("only reports verified after a successful matching read-back", async () => {
     await expect(readBackVerification(async () => true)).resolves.toMatchObject({ status: "verified" });
     await expect(readBackVerification(async () => false)).resolves.toEqual({
@@ -42,6 +43,22 @@ describe("ACT -> VERIFY -> COMPLETE", () => {
     } as never]);
     expect(answer).toMatch(/^✓ 已加入 1 項資料/);
     expect(answer).toContain("AI 正在背景整理");
+  });
+});
+
+describe("Goal -> Action routing helpers", () => {
+  it("resolves a uniquely named project from the user's own ACL-filtered project list", () => {
+    expect(resolveMentionedProjectRef(new Map([
+      ["p1", { title: "挑戰營" }],
+      ["p2", { title: "社課回顧" }],
+    ]), "把這個連結加入挑戰營專案")).toBe("p1");
+  });
+
+  it("does not guess when project names are ambiguous", () => {
+    expect(resolveMentionedProjectRef(new Map([
+      ["p1", { title: "挑戰營" }],
+      ["p2", { title: "挑戰營回顧" }],
+    ]), "加入挑戰營回顧")).toBeUndefined();
   });
 });
 

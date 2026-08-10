@@ -346,7 +346,7 @@ export function ProjectAssistant({
     epoch: number,
     signal: AbortSignal,
   ) => {
-    const direct = plan.intent === "ACT" && plan.confidence === "high"
+    const direct = plan.intent === "DIRECT" && plan.confidence === "high"
       ? actions.filter((action) => action.type === "split_script")
       : [];
     if (!direct.length) return new Set<Action>();
@@ -420,7 +420,7 @@ export function ProjectAssistant({
           setTraceSessionId(result.traceSessionId ?? null);
           const plan = activePlan ?? classifyAssistantRequest(message);
           const actions = result.actions as Action[];
-          const directlyRunnable = plan.intent === "ACT" && plan.confidence === "high"
+          const directlyRunnable = plan.intent === "DIRECT" && plan.confidence === "high"
             ? new Set(actions.filter((action) => action.type === "split_script"))
             : new Set<Action>();
           push({

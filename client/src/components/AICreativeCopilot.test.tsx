@@ -130,9 +130,10 @@ describe("AICreativeCopilot", () => {
     render(<AICreativeCopilot groupId="grp-123" />);
     expect(screen.queryByText("AI 創作助理")).not.toBeInTheDocument();
     expect(screen.getByLabelText("向 AI 助手提問")).toBeInTheDocument();
-    expect(screen.getByText("安排今天")).toBeInTheDocument();
-    expect(screen.getByText("繼續上次")).toBeInTheDocument();
-    expect(screen.getByText("哪裡卡住")).toBeInTheDocument();
+    expect(screen.getByText("加入資料")).toBeInTheDocument();
+    expect(screen.getByText("繼續目前工作")).toBeInTheDocument();
+    expect(screen.getByText("做影片")).toBeInTheDocument();
+    expect(screen.getByText("安排工作")).toBeInTheDocument();
     // 舊的寫死快捷鍵不得復活——它們在任何頁面都一樣，正是這一輪要解決的問題
     expect(screen.queryByText("爆款短片主題")).not.toBeInTheDocument();
     expect(screen.queryByText("開場鉤子技巧")).not.toBeInTheDocument();
@@ -235,12 +236,12 @@ describe("AICreativeCopilot", () => {
     expect(screen.getByRole("button", { name: "查看目前資料" })).toBeInTheDocument();
   });
 
-  it("明確 ACT 回傳已完成結果卡，直接顯示成果並可復原", async () => {
+  it("明確 DIRECT 回傳已完成結果卡，直接顯示成果並可復原", async () => {
     streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
       handlers.onDone({
         ...DONE,
         siteActions: [], dispatches: [], actions: [],
-        executionPlan: { intent: "ACT", confidence: "high", title: "幫我建立會議筆記", steps: ["理解明確指令", "檢查權限與風險", "執行可安全落地的動作"] },
+        executionPlan: { intent: "DIRECT", confidence: "high", title: "幫我建立會議筆記", steps: ["理解明確指令", "檢查權限與風險", "執行可安全落地的動作"] },
         executedSiteActions: [{
           action: { type: "add_note", groupId: "g", title: "會議筆記", content: "決議", label: "新增筆記「會議筆記」（組層級）" },
           result: { type: "add_note", noteId: "11111111-1111-4111-8111-111111111111", title: "會議筆記" },
@@ -259,13 +260,51 @@ describe("AICreativeCopilot", () => {
     expect(onNavigate).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "查看筆記排程" }));
     expect(onNavigate).toHaveBeenCalledWith("/planner");
-    // 抬頭卡的耗時來自實測 latency（80ms），不是把預測步驟排排站然後打勾
-    expect(screen.getByText("80 毫秒")).toBeInTheDocument();
+    // latency 仍保留在資料契約，但一般使用者第一層不顯示工程計量。
+    expect(screen.queryByText("80 毫秒")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /復原/ }));
     expect(undoSiteActionMutate).toHaveBeenCalledWith({
       type: "add_note",
       id: "11111111-1111-4111-8111-111111111111",
     });
+  });
+
+  it("Google Photos 分享頁顯示真實替代方式，不顯示假進度", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        answer: "這個 Google Photos 分享頁目前不能直接取得原始媒體。",
+        siteActions: [], dispatches: [], actions: [], events: [], sources: [],
+        intakeFallbacks: [{
+          type: "source_transfer_required",
+          provider: "google_photos",
+          projectId: PROJECT_ID,
+          projectTitle: "挑戰營",
+          url: "https://photos.app.goo.gl/demo",
+          message: "Google Photos 分享頁不是可直接下載的原始媒體網址。",
+          browserAvailable: false,
+          alternatives: ["files", "google-drive", "download-upload"],
+        }],
+      });
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "把 https://photos.app.goo.gl/demo 加入挑戰營");
+
+    expect(await screen.findByText("Google Photos 需要原始媒體")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "選擇檔案" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Google Drive" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下載後上傳" })).toBeInTheDocument();
+    expect(screen.queryByText(/正在取得內容/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Aios 已完成")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /瀏覽器/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Google Drive" }));
+    expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      openRequest: expect.objectContaining({ mode: "drive" }),
+    }));
   });
 
   it("執行中送出鍵會變成停止，按下立即中止同一條串流", async () => {

@@ -13,7 +13,7 @@ const ctx = (over: Partial<AssistantPageContext> = {}): AssistantPageContext => 
 });
 
 describe("getAssistantQuickActions", () => {
-  it("永遠最多 3 顆（再多就變選項牆）", () => {
+  it("首頁最多 4 顆、其他情境最多 3 顆（再多就變選項牆）", () => {
     const pages: AssistantPageContext["pageType"][] = [
       "home", "project", "story", "storyboard", "production", "final", "settings", "studio",
       "assets", "tasks", "notes", "schedule", "database", "agent_run", "collab", "chat", "community", "other",
@@ -21,7 +21,7 @@ describe("getAssistantQuickActions", () => {
     for (const pageType of pages) {
       const out = getAssistantQuickActions(ctx({ pageType }));
       expect(out.length).toBeGreaterThan(0);
-      expect(out.length).toBeLessThanOrEqual(3);
+      expect(out.length).toBeLessThanOrEqual(out[0].id.startsWith("home.") ? 4 : 3);
       for (const a of out) {
         expect(a.label.length).toBeLessThanOrEqual(6);
         expect(a.prompt.length).toBeGreaterThan(5);
@@ -29,9 +29,9 @@ describe("getAssistantQuickActions", () => {
     }
   });
 
-  it("首頁＝全站型（安排今天／繼續上次／哪裡卡住）", () => {
+  it("首頁＝Goal → Action 快捷（加入資料／繼續目前工作／做影片／安排工作）", () => {
     const ids = getAssistantQuickActions(ctx({ pageType: "home" })).map((a) => a.id);
-    expect(ids).toEqual(["home.today", "home.continue", "home.blocked"]);
+    expect(ids).toEqual(["home.add-data", "home.continue", "home.video", "home.schedule"]);
   });
 
   it("分鏡頁＝分鏡型；故事頁＝腳本型（頁面換、快捷就換）", () => {

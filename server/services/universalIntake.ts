@@ -28,6 +28,7 @@ import {
   aspectRatioOf,
   deterministicMediaMetadataSchema,
   intakePageContextSchema,
+  publicUrlIntakeCapability,
   rankSceneMatches,
   shouldBlockDuplicate,
   type DeterministicMediaMetadata,
@@ -639,6 +640,13 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
 export async function importUrlIntoProject(
   input: ImportUrlIntoProjectInput,
 ): Promise<IngestTmpAssetResult> {
+  const urlCapability = publicUrlIntakeCapability(input.url);
+  if (urlCapability.kind === "requires-transfer") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `${urlCapability.reason} 請改用選擇檔案、Google Drive，或先下載後上傳。`,
+    });
+  }
   const project = await loadEditableIntakeProject(input.auth, input.projectId);
   let downloadedPath: string | null = null;
   try {

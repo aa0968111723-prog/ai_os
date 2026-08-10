@@ -3,6 +3,7 @@ import {
   aspectRatioOf,
   intakePageContextSchema,
   intakeTokens,
+  publicUrlIntakeCapability,
   rankSceneMatches,
   shouldBlockDuplicate,
 } from "./universalIntake";
@@ -62,5 +63,15 @@ describe("universal intake deterministic helpers", () => {
   it("keeps aspect ratio calculation stable", () => {
     expect(aspectRatioOf(1920, 1080)).toBe(1.7778);
     expect(aspectRatioOf(undefined, 1080)).toBeUndefined();
+  });
+
+  it("does not mistake a Google Photos share page for an original media URL", () => {
+    expect(publicUrlIntakeCapability("https://photos.app.goo.gl/demo")).toEqual(expect.objectContaining({
+      kind: "requires-transfer",
+      provider: "google-photos",
+      alternatives: ["files", "google-drive", "download-upload"],
+    }));
+    expect(publicUrlIntakeCapability("https://photos.google.com/share/demo").kind).toBe("requires-transfer");
+    expect(publicUrlIntakeCapability("https://example.com/video.mp4")).toEqual({ kind: "direct", provider: "public-url" });
   });
 });

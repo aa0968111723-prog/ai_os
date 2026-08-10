@@ -7,6 +7,39 @@ export const INTAKE_SOURCES = [
 ] as const;
 export type IntakeSource = (typeof INTAKE_SOURCES)[number];
 
+export type PublicUrlIntakeCapability =
+  | { kind: "direct"; provider: "public-url" }
+  | {
+      kind: "requires-transfer";
+      provider: "google-photos";
+      reason: string;
+      alternatives: readonly ["files", "google-drive", "download-upload"];
+    };
+
+/**
+ * A share page is not the same thing as a downloadable media URL.  Google
+ * Photos share pages require browser/session interaction and must never be
+ * persisted as if the original photos had been imported.
+ */
+export function publicUrlIntakeCapability(rawUrl: string): PublicUrlIntakeCapability {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { kind: "direct", provider: "public-url" };
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "photos.app.goo.gl" || host === "photos.google.com") {
+    return {
+      kind: "requires-transfer",
+      provider: "google-photos",
+      reason: "Google Photos 分享頁不是原始媒體下載連結，目前的正式 Intake 無法直接取得其中的照片或影片。",
+      alternatives: ["files", "google-drive", "download-upload"],
+    };
+  }
+  return { kind: "direct", provider: "public-url" };
+}
+
 export const intakePageContextSchema = z.object({
   currentProjectId: z.string().uuid().optional(),
   currentStoryboardId: z.string().uuid().optional(),

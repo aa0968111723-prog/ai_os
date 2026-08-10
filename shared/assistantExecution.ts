@@ -5,7 +5,7 @@
  * 模型／工具工作仍由既有 Assistant Core 與 Runner 負責。這不是 chain-of-thought，
  * 只描述可公開稽核的意圖、能力與執行狀態。
  */
-export const ASSISTANT_INTENTS = ["ASK", "ACT", "PLAN", "WATCH"] as const;
+export const ASSISTANT_INTENTS = ["ASK", "DIRECT", "AGENT", "PLAN", "WATCH"] as const;
 export type AssistantIntent = typeof ASSISTANT_INTENTS[number];
 
 export const ASSISTANT_ACTION_RISKS = [
@@ -22,6 +22,9 @@ export interface AssistantExecutionPlan {
   confidence: "high" | "medium";
   title: string;
   steps: string[];
+  /** Capability-first routing result.  It is a stable registry id, never a UI component. */
+  capabilityId?: string;
+  executionMode?: AssistantCapability["executionMode"];
 }
 
 export interface AssistantRunOpen {
@@ -122,6 +125,27 @@ const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|�
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
 const COMPOUND_RE = /(?:然後|接著|再把|並(?:且|逐|再|重新)|同時|之後|逐鏡|每一鏡|每個|批次|全部.*(?:生成|建立|修改))/i;
 const ACTION_VERB_RE = /(?:建立|新增|修改|更新|拆|生成|產生|指派|綁定|移動|排序|審核|核准|準備)/gi;
+const CROSS_PROJECT_PLAN_RE = /(?:跨專案|多個專案|所有專案|整個團隊|活動專案.*(?:分工|交付|監控)|(?:開|建立).{0,20}專案.{0,30}(?:分工|派工|交付|持續監控)|(?:分工|派工).{0,30}(?:交付|監控))/i;
+const PROJECT_AGENT_RE = /(?:完整分鏡|腳本.{0,20}(?:整理|拆).{0,20}分鏡|逐鏡|每一鏡|人物與場景|整支影片|這支影片.{0,20}(?:完成|製作)|多步(?:驟)?)/i;
+
+const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> = [
+  { id: "import_url", pattern: /(?:https?:\/\/[^\s]+).*(?:加入|匯入|帶進|帶入|放進|存到|素材庫)|(?:加入|匯入|帶進|帶入|放進|存到).*(?:https?:\/\/[^\s]+)/i },
+  { id: "import_google_drive", pattern: /(?:google\s*drive|雲端硬碟|雲端磁碟).*(?:匯入|帶進|帶入|加入|放進)|(?:匯入|帶進|帶入|加入|放進).*(?:google\s*drive|雲端硬碟|雲端磁碟)/i },
+  { id: "import_folder", pattern: /(?:資料夾|文件夾|\bfolder\b).*(?:匯入|帶進|帶入|加入|放進)|(?:匯入|帶進|帶入|加入|放進).*(?:資料夾|文件夾|\bfolder\b)/i },
+  { id: "import_local_file", pattern: /(?:檔案|文件|照片|圖片|影片|\bpdf\b|\bfile\b).*(?:匯入|帶進|帶入|加入|放進|上傳)|(?:匯入|帶進|帶入|加入|放進|上傳).*(?:檔案|文件|照片|圖片|影片|\bpdf\b|\bfile\b)/i },
+  { id: "import_external_result", pattern: /(?:外部\s*AI|Flow|Runway|Kling).*(?:成果|結果).*(?:帶回|匯入|加入)|(?:帶回|匯入).*(?:外部\s*AI|Flow|Runway|Kling)/i },
+  { id: "add_note", pattern: /(?:新增|建立|記下|紀錄|記錄).{0,12}(?:筆記|note)|(?:筆記|note).{0,12}(?:新增|建立|記下|紀錄|記錄)/i },
+  { id: "create_task", pattern: /(?:新增|建立|創建).{0,12}(?:任務|待辦|task)|(?:任務|待辦|task).{0,12}(?:新增|建立|創建)/i },
+  { id: "create_project", pattern: /(?:新增|建立|創建|開).{0,16}(?:專案|project)/i },
+  { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
+  { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
+];
+
+/** Match a concrete, already-registered capability before considering planning. */
+export function capabilityForAssistantGoal(message: string): AssistantCapability | undefined {
+  const matched = CAPABILITY_GOAL_PATTERNS.find((entry) => entry.pattern.test(message));
+  return matched ? ASSISTANT_CAPABILITIES.find((item) => item.id === matched.id) : undefined;
+}
 
 function compactTitle(message: string): string {
   const title = message.replace(/\s+/g, " ").trim();
@@ -134,7 +158,26 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   const asksQuestion = QUESTION_RE.test(text);
   const asksAction = ACTION_RE.test(text);
   const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
+  const matchedCapability = capabilityForAssistantGoal(text);
 
+  if (asksQuestion && /(?:如何|怎麼|能不能|可不可以)/i.test(text)) {
+    return {
+      intent: "ASK",
+      confidence: "high",
+      title,
+      steps: ["讀取目前上下文", "查證需要的資料", "整理結論與下一步"],
+    };
+  }
+  if (CROSS_PROJECT_PLAN_RE.test(text) && (asksAction || PLAN_RE.test(text))) {
+    return {
+      intent: "PLAN",
+      confidence: "high",
+      title,
+      steps: ["確認跨專案範圍", "建立協作計畫", "持續驗證與回報"],
+      capabilityId: "orchestrate_group_campaign",
+      executionMode: "GROUP_CAMPAIGN",
+    };
+  }
   if (WATCH_RE.test(text)) {
     return {
       intent: "WATCH",
@@ -143,29 +186,36 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
       steps: ["確認監看範圍", "檢查既有事件與提醒能力", "回報監看狀態"],
     };
   }
-  if (PLAN_RE.test(text) && (asksAction || !asksQuestion)) {
+  // Capability-first: a bounded URL/file/note/task/project action never becomes
+  // a campaign merely because the sentence mentions a project or a folder. A
+  // genuinely cross-project/team delivery was already caught above.
+  if (matchedCapability && asksAction && !COMPOUND_RE.test(text) && actionVerbCount < 2) {
     return {
-      intent: "PLAN",
-      confidence: asksAction ? "high" : "medium",
-      title,
-      steps: ["讀取目前上下文", "拆解目標與依賴", "提出可核准的執行計畫"],
-    };
-  }
-  if (asksAction && (COMPOUND_RE.test(text) || actionVerbCount >= 2)) {
-    return {
-      intent: "PLAN",
+      intent: "DIRECT",
       confidence: "high",
       title,
-      steps: ["讀取目前上下文", "拆解多步驟目標與依賴", "建立可續跑且可核准的執行計畫"],
+      steps: ["確認必要資訊", "執行", "驗證結果"],
+      capabilityId: matchedCapability.id,
+      executionMode: matchedCapability.executionMode,
+    };
+  }
+  if ((PROJECT_AGENT_RE.test(text) || (asksAction && (COMPOUND_RE.test(text) || actionVerbCount >= 2)) || (PLAN_RE.test(text) && asksAction))) {
+    return {
+      intent: "AGENT",
+      confidence: "high",
+      title,
+      steps: ["確認專案上下文", "交給專案 Agent 執行", "驗證成果"],
+      executionMode: "PROJECT_AGENT",
     };
   }
   // 「如何建立任務」是詢問；「幫我建立任務」才是執行。這道差異直接決定是否允許寫入。
   if (asksAction && !(asksQuestion && /(?:如何|怎麼|能不能|可不可以)/i.test(text))) {
     return {
-      intent: "ACT",
+      intent: "DIRECT",
       confidence: "high",
       title,
-      steps: ["理解明確指令", "檢查權限與風險", "執行可安全落地的動作"],
+      steps: ["確認必要資訊", "執行", "驗證結果"],
+      executionMode: "DIRECT_TOOL",
     };
   }
   return {
@@ -176,12 +226,12 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   };
 }
 
-/** 只有明確 ACT 才能自動寫入；短詞、問句、規劃與監看都不會誤觸發。 */
+/** 只有明確 DIRECT 才能自動寫入；短詞、問句、Agent、規劃與監看都不會誤觸發。 */
 export function canDirectlyExecuteCapability(
   plan: AssistantExecutionPlan,
   capabilityId: string,
 ): boolean {
-  if (plan.intent !== "ACT" || plan.confidence !== "high") return false;
+  if (plan.intent !== "DIRECT" || plan.confidence !== "high") return false;
   const capability = ASSISTANT_CAPABILITIES.find((item) => item.id === capabilityId);
   return capability?.risk === "SAFE_WRITE" && capability.direct;
 }

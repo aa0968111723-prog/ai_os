@@ -29,7 +29,7 @@ export function toWirePageContext(ctx: AssistantPageContext): AssistantWirePageC
  * 在任何頁面都一樣——人在分鏡頁盯著第 3 鏡時，「爆款短片主題」是最不相關的一件事。
  * 快捷鍵的價值是「省下打字」，前提是它剛好就是你現在想做的；不是的話它只是佔位。
  *
- * 規則：**最多 3 顆**（再多就變選項牆，回到「不知道要拿它幹嘛」的老問題），
+ * 規則：首頁 4 顆、明確頁面情境最多 3 顆（再多就變選項牆），
  * 選取狀態優先於作用中實體，作用中實體優先於頁面，頁面優先於全站。
  */
 
@@ -42,7 +42,7 @@ export interface AssistantQuickAction {
   prompt: string;
 }
 
-const MAX = 3;
+const MAX = 4;
 
 /** 中文數量詞：selection 多筆時的「這幾鏡／這幾張」 */
 function many(n: number, unit: string): string {
@@ -165,10 +165,11 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
       ];
     default:
       return [
-        { id: "home.today", label: "安排今天", prompt: "依照目前的任務、行程與專案進度，幫我安排今天。" },
-        { id: "home.continue", label: "繼續上次", prompt: "我最近在做的專案進行到哪？接下來該做什麼？" },
-        { id: "home.blocked", label: "哪裡卡住", prompt: "目前所有專案裡，有哪些卡住了或需要我處理？" },
-      ];
+        { id: "home.add-data", label: "加入資料", prompt: "我要把資料加入專案，請依我接下來選的來源直接處理。" },
+        { id: "home.continue", label: "繼續目前工作", prompt: "我最近在做的專案進行到哪？請直接繼續最明確的下一步。" },
+        { id: "home.video", label: "做影片", prompt: "我想完成一支影片，先看現有資料並只問真正缺少的資訊。" },
+        { id: "home.schedule", label: "安排工作", prompt: "依照目前的任務、行程與專案進度，幫我安排接下來的工作。" },
+      ].slice(0, MAX);
   }
 }
 

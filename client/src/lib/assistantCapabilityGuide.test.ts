@@ -28,25 +28,23 @@ describe("assistantCapabilityGuide 完整性", () => {
     }
   });
 
-  it("唯讀能力不會被歸進任何「會寫入」的組——這組的承諾是按幾次都不會改到資料", () => {
-    const readIds = assistantCapabilityGuide().groups.find((g) => g.id === "read")!.items.map((i) => i.id);
-    expect(readIds.sort()).toEqual(ASSISTANT_CAPABILITIES.filter((c) => c.risk === "READ").map((c) => c.id).sort());
+  it("第一層使用產品語言，而不是 read / auto / confirm / cost", () => {
+    expect(assistantCapabilityGuide().groups.map((group) => group.id)).toEqual([
+      "data", "video", "project", "work", "collaboration", "generation",
+    ]);
   });
 
-  it("「它會直接做好」只收後端真的允許直寫的能力——多收一個就是對使用者說謊", () => {
-    const autoIds = assistantCapabilityGuide().groups.find((g) => g.id === "auto")!.items.map((i) => i.id);
-    const direct = ASSISTANT_CAPABILITIES.filter((c) => c.risk === "SAFE_WRITE" && c.direct).map((c) => c.id);
-    expect(autoIds.sort()).toEqual(direct.sort());
+  it("加入資料涵蓋既有 Intake / Asset / Database 能力", () => {
+    const dataIds = assistantCapabilityGuide().groups.find((g) => g.id === "data")!.items.map((i) => i.id);
+    const expected = ASSISTANT_CAPABILITIES
+      .filter((c) => ["INTAKE", "ASSET", "DATABASE"].includes(c.domain))
+      .map((c) => c.id);
+    expect(dataIds.sort()).toEqual(expected.sort());
   });
 
-  it("會花點數的能力自成一組——點數是使用者唯一花得掉的東西，不能混在一般寫入裡", () => {
-    const costIds = assistantCapabilityGuide().groups.find((g) => g.id === "cost")!.items.map((i) => i.id);
-    expect(costIds.sort()).toEqual(ASSISTANT_CAPABILITIES.filter((c) => c.risk === "COSTFUL").map((c) => c.id).sort());
-  });
-
-  it("每一行都帶著自己的後果組——被抽到建議區單獨顯示時，「按了會怎樣」不能掉在後面", () => {
+  it("每一行仍帶著自己的風險後果——產品分類不會削弱確認政策", () => {
     for (const item of assistantCapabilityGuide().suggested) {
-      expect(["read", "auto", "confirm", "cost"]).toContain(item.group);
+      expect(["read", "auto", "confirm", "cost"]).toContain(item.impact);
     }
   });
 });

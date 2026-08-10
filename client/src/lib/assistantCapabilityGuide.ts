@@ -29,8 +29,9 @@ import type { AssistantEntityType, AssistantPageContext, AssistantPageType } fro
  * 按下去就是一句對得上眼前東西的話，而不是一句要人自己代換名詞的樣板。
  */
 
-/** 一組能力的後果類別（順序即完整清單的顯示順序，由輕到重） */
-export type CapabilityGroupId = "read" | "auto" | "confirm" | "cost";
+/** 第一層使用產品語言分組；風險是每個項目的次要資訊。 */
+export type CapabilityGroupId = "data" | "video" | "project" | "work" | "collaboration" | "generation";
+export type CapabilityImpact = "read" | "auto" | "confirm" | "cost";
 
 export interface CapabilityGuideItem {
   /** 對應 ASSISTANT_CAPABILITIES 的 id（測試與使用紀錄用，不顯示） */
@@ -41,6 +42,8 @@ export interface CapabilityGuideItem {
   example: string;
   /** 所屬後果組：即使被抽出來單獨顯示，「按了會發生什麼」也要跟著走 */
   group: CapabilityGroupId;
+  /** 次要風險提示，不拿來當第一層導覽分類。 */
+  impact: CapabilityImpact;
 }
 
 export interface CapabilityGuideGroup {
@@ -159,8 +162,7 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   read_generations: { pages: ["production", "final", "studio"] },
 };
 
-/** 後果 → 組（唯一的分組規則；新的 risk 值會在測試裡以「沒被分到組」被抓出來） */
-function groupOf(capability: AssistantCapability): CapabilityGroupId {
+function impactOf(capability: AssistantCapability): CapabilityImpact {
   if (capability.risk === "READ") return "read";
   if (capability.risk === "COSTFUL") return "cost";
   // EXTERNAL（私訊、可能同步到 Google Calendar 的排程）與未開放直寫的 SAFE_WRITE
@@ -169,22 +171,40 @@ function groupOf(capability: AssistantCapability): CapabilityGroupId {
   return "confirm";
 }
 
+/** 使用者找的是工作，不是權限等級；風險仍由 impactOf 獨立保留。 */
+function groupOf(capability: AssistantCapability): CapabilityGroupId {
+  if (["INTAKE", "ASSET", "DATABASE"].includes(capability.domain)) return "data";
+  if (["STORYBOARD", "SCRIPT"].includes(capability.domain)) return "video";
+  if (["PROJECT", "NOTE", "MEMORY"].includes(capability.domain)) return "project";
+  if (["TASK", "SCHEDULE"].includes(capability.domain)) return "work";
+  if (["MEMBER", "COLLABORATION"].includes(capability.domain)) return "collaboration";
+  return "generation";
+}
+
 const GROUP_META: Record<CapabilityGroupId, { title: string; note: string }> = {
-  read: {
-    title: "問它（不會動到任何東西）",
-    note: "只是去查現有資料再回答你，按幾次都不會改到專案。",
+  data: {
+    title: "加入資料",
+    note: "從檔案、資料夾、網址或 Google Drive 把資料安全帶進 Aios。",
   },
-  auto: {
-    title: "叫它做（它會直接做好）",
-    note: "講清楚要做什麼它就直接寫進去，做完會給你一顆「還原」可以收回。",
+  video: {
+    title: "創作影片",
+    note: "閱讀腳本與分鏡、拆分內容，並把素材放到正確的場景或鏡頭。",
   },
-  confirm: {
-    title: "它先擬好，你按了才算數",
-    note: "會影響到別人或對外送出的事，它只會把內容整份亮給你看，你按「確認執行」才會真的送出。",
+  project: {
+    title: "整理專案",
+    note: "建立專案、保存筆記與決策，或整理目前工作還缺什麼。",
   },
-  cost: {
-    title: "會花點數的事（一定要你核准）",
-    note: "派工給專案 AI、生成圖片影片都會扣點。它會先講要做什麼、估多少點，你核准才開始。",
+  work: {
+    title: "任務與排程",
+    note: "建立任務、查看期限，並安排需要確認的行程。",
+  },
+  collaboration: {
+    title: "團隊協作",
+    note: "查看團隊狀況；只有真的跨人員與長時間工作才會升級成協作計畫。",
+  },
+  generation: {
+    title: "生成與外部工具",
+    note: "生成媒體或準備外部工具交接；涉及成本或對外操作時會先請你確認。",
   },
 };
 
@@ -238,6 +258,7 @@ export function assistantCapabilityGuide(options?: {
     label: c.label,
     example: capabilityExample(c.id, ctx),
     group: groupOf(c),
+    impact: impactOf(c),
   }));
 
   const ranked = all
@@ -248,7 +269,7 @@ export function assistantCapabilityGuide(options?: {
   // 完全沒有訊號（沒上下文、沒用過）時仍然給前幾個：空的建議區等於又回到「不知道能幹嘛」
   const suggested = ranked.slice(0, Math.max(0, limit)).map((r) => r.item);
 
-  const order: CapabilityGroupId[] = ["read", "auto", "confirm", "cost"];
+  const order: CapabilityGroupId[] = ["data", "video", "project", "work", "collaboration", "generation"];
   const groups = order.map((id) => ({
     id,
     ...GROUP_META[id],

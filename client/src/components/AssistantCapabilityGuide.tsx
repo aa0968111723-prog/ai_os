@@ -64,8 +64,8 @@ export function AssistantCapabilityGuide({
           {item.label}
           {/* 完整清單有組標題講後果，建議區沒有——那裡混著四種後果，
               不標的話「生成圖片或影片」看起來會跟「讀取分鏡」一樣無害。 */}
-          {withTag && item.group !== "read" ? (
-            <span className={`assistant-guide__tag is-${item.group}`}>{TAG[item.group]}</span>
+          {withTag && item.impact !== "read" ? (
+            <span className={`assistant-guide__tag is-${item.impact}`}>{TAG[item.impact]}</span>
           ) : null}
         </span>
         {/* 例句就是「怎麼講」的答案，所以它是這一行的主體而不是 tooltip：
@@ -80,7 +80,7 @@ export function AssistantCapabilityGuide({
       <summary className="assistant-guide__summary">
         <Icon name="HelpCircle" size={15} />
         <strong>能做什麼</strong>
-        <span>問進度、記筆記、開專案、派工給 AI——點一行就照著問</span>
+        <span>加入資料、做影片、整理專案與安排工作</span>
         <Icon name="ChevronDown" size={15} className="assistant-guide__chevron" />
       </summary>
 
@@ -100,7 +100,7 @@ export function AssistantCapabilityGuide({
             </h4>
             <ul className="assistant-guide__list">{guide.suggested.map((item) => row(item, true))}</ul>
             <button type="button" className="assistant-guide__more" onClick={() => setShowAll(true)}>
-              看全部能力（{guide.groups.reduce((n, g) => n + g.items.length, 0)} 項）
+              更多可以做什麼（{guide.groups.reduce((n, g) => n + g.items.length, 0)} 項）
             </button>
           </section>
         )}

@@ -37,7 +37,7 @@ describe("AgentRunCard", () => {
     }
   });
 
-  it("計量全部來自真實事件", () => {
+  it("第一層只顯示使用者目標，不顯示工程計量", () => {
     render(
       <AgentRunCard
         plan={PLAN}
@@ -53,10 +53,10 @@ describe("AgentRunCard", () => {
         }}
       />,
     );
-    expect(screen.getByText("27 筆資料")).toBeInTheDocument();
-    expect(screen.getByText("1 個")).toBeInTheDocument(); // 來源
-    expect(screen.getByText("1 次")).toBeInTheDocument(); // 查詢
-    expect(screen.getByText("8.4 秒")).toBeInTheDocument();
+    expect(screen.getByText("Aios 已完成")).toBeInTheDocument();
+    expect(screen.getByText(PLAN.title)).toBeInTheDocument();
+    expect(screen.queryByText("27 筆資料")).not.toBeInTheDocument();
+    expect(screen.queryByText("8.4 秒")).not.toBeInTheDocument();
   });
 
   it("執行中顯示「現在在做什麼」，內容是最後一則未收尾的真實事件", () => {
@@ -67,6 +67,7 @@ describe("AgentRunCard", () => {
         events={[makeEvent({ type: "tool.started", title: "正在查資料庫", status: "running" })]}
       />,
     );
+    expect(screen.getByText("Aios 正在處理")).toBeInTheDocument();
     expect(screen.getByText("執行中")).toBeInTheDocument();
     expect(screen.getByText("正在查資料庫")).toBeInTheDocument();
   });
@@ -82,7 +83,7 @@ describe("AgentRunCard", () => {
     expect(screen.getByText("等待確認")).toBeInTheDocument();
   });
 
-  it("失敗數會單獨列出：使用者要看得到有東西沒成功", () => {
+  it("失敗時第一層清楚標示未完成，技術計量留在工作過程", () => {
     render(
       <AgentRunCard
         plan={PLAN}
@@ -92,6 +93,6 @@ describe("AgentRunCard", () => {
       />,
     );
     expect(screen.getByText("未完成")).toBeInTheDocument();
-    expect(screen.getByText("1 項")).toBeInTheDocument();
+    expect(screen.queryByText("1 項")).not.toBeInTheDocument();
   });
 });
