@@ -218,6 +218,7 @@ export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
   "fal-ai/wan/v2.2-a14b/text-to-video/lora",
   "fal-ai/wan/v2.5/text-to-video",
   "fal-ai/wan/v2.6/text-to-video",
+  "fal-ai/wan/v2.7/text-to-video",
   "fal-ai/ltx-video",
   // 審計 R：初代 hunyuan-video OpenAPI **無** negative_prompt（僅 1.5 有）→ 勿送
   "fal-ai/hunyuan-video-v1.5/text-to-video",
@@ -232,6 +233,7 @@ export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
   // 影片 image-to-video
   "fal-ai/wan-i2v",
   "fal-ai/wan/v2.2-a14b/image-to-video",
+  "fal-ai/wan/v2.7/image-to-video",
   "fal-ai/ltx-video-v095/image-to-video",
   "fal-ai/hunyuan-video-image-to-video",
   "fal-ai/pixverse/v5/image-to-video",
@@ -277,6 +279,7 @@ export const SEED_SUPPORTED: ReadonlySet<string> = new Set<string>([
   "fal-ai/wan/v2.2-a14b/text-to-video",
   "fal-ai/wan/v2.5/text-to-video",
   "fal-ai/wan/v2.6/text-to-video", // 審計 #116：OpenAPI V26Input 有 seed
+  "fal-ai/wan/v2.7/text-to-video", // llms.txt 確認 V27Input 有 seed
 ]);
 
 /** 消融實測能不能固定隨機噪聲（見 SEED_SUPPORTED） */
@@ -1294,6 +1297,17 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
+    // 雷達 2026-08-10：Wan 2.7 上線（1080p／最長 15 秒／原生音訊、強 prompt 遵循）；llms.txt 確認端點存在。
+    // P0：官方 default resolution=1080p（$0.15/秒）→ 站內鎖 720p 對齊經濟估點（同 Wan 2.5 修法）
+    id: "fal-ai/wan/v2.7/text-to-video",
+    label: "Wan 2.7(開源)", category: "text-to-video", tier: "economy", kind: "video",
+    points: 16, cost: "$0.10/秒(720p)、$0.15/秒(1080p);站內鎖 720p;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Wan 最新世代;1080p/最長15秒/原生音訊、強 prompt 遵循",
+    bestFor: "開源價又要音畫一體與較長單鏡頭",
+    // OpenAPI aspect_ratio 僅 16:9|9:16|1:1|4:3|3:4 → 就近對應防 422
+    input: (p, f) => ({ prompt: p, aspect_ratio: nearestFormat(f, ["16:9", "9:16", "1:1", "4:3", "3:4"]), resolution: "720p" }),
+  },
+  {
     id: "fal-ai/hunyuan-video-v1.5/text-to-video", label: "Hunyuan Video 1.5(騰訊)", category: "text-to-video", tier: "economy", kind: "video",
     points: 12, cost: "$0.075/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Hunyuan 升級版;畫質與時序穩定度提升",
@@ -1471,6 +1485,24 @@ export const MODELS: ModelEntry[] = [
     needs: "image", points: 8, cost: "約$0.05/秒(Wan 2.5 級距參考);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "Wan 最新世代;HD、最長約15秒、原生音訊",
     bestFor: "較長單鏡頭又要開源可控成本",
+    sourceHint: "作為首格的圖(素材庫或網址)",
+    input: (p, _f, s) => ({ prompt: p, image_url: s }),
+  },
+  {
+    // 雷達 2026-08-10：Wan 2.7 圖生上線（1080p／最長 15 秒／原生音訊）；llms.txt 確認端點存在
+    id: "fal-ai/wan/v2.7/image-to-video", label: "Wan 2.7 圖生(開源)", category: "image-to-video", tier: "economy", kind: "video",
+    needs: "image", points: 16, cost: "$0.10/秒(720p)、$0.15/秒(1080p);站內鎖 720p;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Wan 最新世代;1080p/最長15秒/原生音訊、強 prompt 遵循",
+    bestFor: "開源價又要音畫一體與較長單鏡頭",
+    sourceHint: "作為首格的圖(素材庫或網址)",
+    input: (p, _f, s) => ({ prompt: p, image_url: s, resolution: "720p" }),
+  },
+  {
+    // 雷達 2026-08-10：FLUX.3 image-to-video draft 新上架——$0.06/秒 720p 草稿、draft cache 可升級全品質
+    id: "blackforestlabs/flux-3/image-to-video/draft", label: "FLUX.3 圖生草稿(BFL)", category: "image-to-video", tier: "economy", kind: "video",
+    needs: "image", points: 9, cost: "$0.06/秒(720p 草稿);按秒計費,點數為 5 秒基準", verified: false,
+    strengths: "FLUX 系首個圖生影片;草稿快又省、draft cache 可升級全品質",
+    bestFor: "分鏡圖快速試動態方向、確認後再升級成片",
     sourceHint: "作為首格的圖(素材庫或網址)",
     input: (p, _f, s) => ({ prompt: p, image_url: s }),
   },
