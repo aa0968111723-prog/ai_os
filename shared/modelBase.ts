@@ -144,6 +144,18 @@ const RULES: readonly BaseRule[] = [
     },
   },
   { match: /^fal-ai\/flux(\/|-lora|-pulid)/, spec: FLUX1_DEV },
+  {
+    // FLUX.3 走 blackforestlabs/ prefix（BFL 自家端點命名，非 fal-ai/），2026-08-10 上架 image-to-video draft
+    match: /^blackforestlabs\/flux-3/,
+    spec: {
+      key: "flux3",
+      baseModel: "FLUX.3（BFL 前沿音訊／視訊模型）",
+      developer: "Black Forest Labs",
+      arch: "官方未公開",
+      weights: "closed",
+      note: "BFL 首個圖生影片線：draft 檔 $0.06/秒（720p）快又省，draft cache 可再升級全品質；只走 API、沒有權重。",
+    },
+  },
 
   /* ───────── Qwen-Image（阿里） ───────── */
   {
