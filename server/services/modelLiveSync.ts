@@ -247,11 +247,11 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
   if (!canCallFal) {
     let certifiedFromHistory = 0;
     try {
-      const { certifyFalModelsFromHistory } = await import("./modelCertification");
-      const certification = await certifyFalModelsFromHistory({ reloadCache: false });
+      const { certifyModelsFromHistory } = await import("./modelCertification");
+      const certification = await certifyModelsFromHistory({ reloadCache: false });
       certifiedFromHistory = certification.newlyCertified;
     } catch (err) {
-      errors.push(`歷史 Fal 認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
+      errors.push(`歷史模型認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
     }
     await mirrorToModelCatalog();
     // 重新載入記憶體快取
@@ -390,11 +390,11 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
 
   let certifiedFromHistory = 0;
   try {
-    const { certifyFalModelsFromHistory } = await import("./modelCertification");
-    const certification = await certifyFalModelsFromHistory({ reloadCache: false });
+    const { certifyModelsFromHistory } = await import("./modelCertification");
+    const certification = await certifyModelsFromHistory({ reloadCache: false });
     certifiedFromHistory = certification.newlyCertified;
   } catch (err) {
-    errors.push(`歷史 Fal 認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
+    errors.push(`歷史模型認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
   }
 
   await mirrorToModelCatalog();

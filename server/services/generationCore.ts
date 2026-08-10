@@ -1046,17 +1046,17 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       publishToProject(gen.projectId, { kind: "scene", id: gen.sceneId }, "生成完成，畫面已更新");
     }
     if (
-      gen.modelId.startsWith("fal-ai/")
+      (gen.modelId.startsWith("fal-ai/") || gen.modelId.startsWith("openrouter/router#"))
       && !gen.requestId.startsWith("mock_")
       && !gen.requestId.startsWith("nim_")
     ) {
-      // A real, parseable Fal result is durable certification evidence. Keep
-      // generation completion successful even if catalog maintenance is
-      // temporarily unavailable.
-      const { certifySuccessfulFalModel } = await import("./modelCertification");
-      await certifySuccessfulFalModel(gen.modelId).catch((err) =>
+      // A real, parseable result (Fal queue / OpenRouter LLM) is durable
+      // certification evidence. Keep generation completion successful even if
+      // catalog maintenance is temporarily unavailable.
+      const { certifySuccessfulModel } = await import("./modelCertification");
+      await certifySuccessfulModel(gen.modelId).catch((err) =>
         console.warn(
-          "[generation] Fal 模型認證寫回失敗：",
+          "[generation] 模型認證寫回失敗：",
           err instanceof Error ? err.message : err,
         ),
       );
