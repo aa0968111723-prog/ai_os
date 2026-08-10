@@ -54,16 +54,19 @@ function liveToEntry(row: LiveRow): ModelEntry {
   const staticM = getStaticModel(row.id) ?? (row.endpoint !== row.id ? getStaticModel(row.endpoint) : undefined);
   if (staticM) {
     // live 計價單位與靜態種類不相容（Fal 佔位值／誤配）→ 保留靜態官方實價，不覆寫
-    const useLivePrice = row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind);
+    const livePrice =
+      row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind)
+        ? { points: row.points, cost: row.cost, priceUsd: row.costUsd, priceUnit: row.costUnit }
+        : null;
     return {
       ...staticM,
-      points: useLivePrice ? row.points : staticM.points,
-      cost: useLivePrice ? row.cost : staticM.cost,
+      points: livePrice ? livePrice.points : staticM.points,
+      cost: livePrice ? livePrice.cost : staticM.cost,
       verified: row.verified,
       recommended: row.recommended || staticM.recommended,
       label: row.label || staticM.label,
-      priceUsd: useLivePrice ? row.costUsd : undefined,
-      priceUnit: useLivePrice ? row.costUnit : undefined,
+      priceUsd: livePrice?.priceUsd,
+      priceUnit: livePrice?.priceUnit,
     };
   }
   const kind = row.kind as OutputKind;
