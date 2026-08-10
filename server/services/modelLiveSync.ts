@@ -21,7 +21,7 @@ import {
   type OutputKind,
   type SourceKind,
 } from "../../shared/models";
-import { pointsToTwd, usdUnitToPoints } from "../../shared/money";
+import { pointsToTwd, unitPlausibleForKind, usdUnitToPoints } from "../../shared/money";
 import { fetchFalModels, fetchFalPricing, type FalPricingUnit } from "./falPlatform";
 
 /** 影片估點秒數（與 audit-model-pricing 預設對齊） */
@@ -278,6 +278,12 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
       const ep = endpointOf(m);
       const p = pricing.get(ep) ?? pricing.get(m.id);
       if (!p) continue;
+      // Fal 回傳單位與模型輸出種類不相容（新端點的佔位值／解析誤配）→ 保留靜態官方實價，
+      // 不把 Wan 2.7 16 點、FLUX.3 draft 9 點 覆寫成 $0.03/image→1 點 或 $1/token→32180 點。
+      if (!unitPlausibleForKind(p.unit, m.kind)) {
+        driftWarnings.push(`${m.id}: Fal 計價單位 ${p.unit} 與 ${m.kind} 不相容（佔位值？），保留靜態官方價 ${m.points} 點`);
+        continue;
+      }
       const points = pricingToPoints(p, m.kind);
       // 漂移鬧鐘：實扣走即時價（本 updates 覆寫），但靜態 cost 字串若已偏差 ≥40% 且 ≥1 點，
       // 代表目錄記載價過期——顯示（無 key 環境）與文件會失真，提醒回頭修 cost 字串。

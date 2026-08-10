@@ -30,6 +30,27 @@ export function formatUsd(amount: number): string {
 export function moneyFxNote(): string {
   return `1 點 ≈ NT$${POINTS_TO_TWD}；US$1 = NT$${USD_TO_TWD}（目錄校準；真實帳單以當月結匯為準）`;
 }
+/** 各輸出種類可接受的計價單位（normalizePriceUnit 的輸出）；不在此列＝佔位值或解析誤配。 */
+const KIND_UNITS: Record<string, readonly string[]> = {
+  video: ["second", "sec", "s", "minute", "min", "video"],
+  image: ["image", "img", "megapixel", "mp", "pixel", "4megapixel", "8megapixel", "kilopixel"],
+  audio: ["second", "sec", "s", "minute", "min", "character", "1000characters"],
+};
+
+/**
+ * Fal 回傳的計價單位是否與模型輸出種類語意相容。
+ * 不相容（例：影片模型回傳 token／image）＝佔位值或把別的模型價格誤配過來，
+ * 估點與 live 同步都應退回靜態官方實價（realPricePoints 機械解析 cost 字串），
+ * 避免把官方實價蓋成 $1/token→32180 點、$0.03/image→1 點 這類佔位點數。
+ * text 等種類計價單位多樣（LLM token／STT 秒／vision 圖），不擋。
+ */
+export function unitPlausibleForKind(unit: string | null | undefined, kind?: string): boolean {
+  if (!kind) return true;
+  const allowed = KIND_UNITS[kind];
+  if (!allowed) return true;
+  return allowed.includes((unit ?? "").trim().toLowerCase());
+}
+
 export function usdUnitToPoints(
   priceUsd: number,
   unit: string,

@@ -16,7 +16,7 @@ import {
   type SourceKind,
   MODELS,
 } from "../../shared/models";
-import { usdUnitToPoints } from "../../shared/money";
+import { unitPlausibleForKind, usdUnitToPoints } from "../../shared/money";
 
 type LiveRow = typeof schema.modelLiveCatalog.$inferSelect;
 
@@ -53,15 +53,17 @@ function liveToEntry(row: LiveRow): ModelEntry {
   // 靜態目錄有完整 input()；live 只覆寫 points/cost 等計價欄
   const staticM = getStaticModel(row.id) ?? (row.endpoint !== row.id ? getStaticModel(row.endpoint) : undefined);
   if (staticM) {
+    // live 計價單位與靜態種類不相容（Fal 佔位值／誤配）→ 保留靜態官方實價，不覆寫
+    const useLivePrice = row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind);
     return {
       ...staticM,
-      points: row.points,
-      cost: row.cost,
+      points: useLivePrice ? row.points : staticM.points,
+      cost: useLivePrice ? row.cost : staticM.cost,
       verified: row.verified,
       recommended: row.recommended || staticM.recommended,
       label: row.label || staticM.label,
-      priceUsd: row.costUsd ?? undefined,
-      priceUnit: row.costUnit ?? undefined,
+      priceUsd: useLivePrice ? row.costUsd : undefined,
+      priceUnit: useLivePrice ? row.costUnit : undefined,
     };
   }
   const kind = row.kind as OutputKind;
@@ -141,7 +143,8 @@ export function listResolvableModels(filter?: {
 /** 估點：與 estimatePoints 相同，但 model 可為 live 覆寫後的 points */
 export function estimatePointsFor(model: ModelEntry, ctx?: EstimateContext): number {
   // 即時單價優先；character 單位會依本次朗讀字數換算，避免 TTS 又退回可能已過期的靜態價。
-  if (model.priceUsd != null && model.priceUnit) {
+  // 單位與輸出種類語意不相容（Fal 佔位值，如影片被標 token/image）→ 退回靜態官方實價。
+  if (model.priceUsd != null && model.priceUnit && unitPlausibleForKind(model.priceUnit, model.kind)) {
     return usdUnitToPoints(model.priceUsd, model.priceUnit, {
       kindHint: model.kind,
       promptChars: ctx?.promptChars,

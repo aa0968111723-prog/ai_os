@@ -136,6 +136,10 @@ describe("指標模型黃金釘（官方改價或 cost 被動到 → 這裡變�
     ["fal-ai/hunyuan-image/v3", 3], // $0.10/MP
     ["fal-ai/image-editing/expression-change", 1], // $0.04/張
     ["fal-ai/amt-interpolation", 3], // ≈$0.02/秒 × 5
+    // 2026-08-10 新上架影片端點（獨立回歸 FAIL：live 佔位價會蓋掉這些官方實價）
+    ["fal-ai/wan/v2.7/text-to-video", 16], // $0.10/秒(720p 站內鎖)× 5
+    ["fal-ai/wan/v2.7/image-to-video", 16],
+    ["blackforestlabs/flux-3/image-to-video/draft", 9], // $0.06/秒 × 5
     // 高價與日常主力抽樣
     ["fal-ai/veo3.1", 31], // $0.20/秒 × 5
     ["fal-ai/bria/video/eraser", 22], // $0.14/秒 × 5
