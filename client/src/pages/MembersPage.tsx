@@ -193,7 +193,7 @@ export function MembersPage() {
       <SecondaryPageHeader
         eyebrow="團隊協作"
         title="通訊錄"
-        icon="User"
+        icon="Users"
         badge={dir.isLoading ? "正在整理夥伴" : `${members.length} 位可見夥伴`}
         description={<>找人、看所屬團隊與最近活動，再直接開始私訊；可見範圍會依你的角色與組別自動隔離。</>}
       />

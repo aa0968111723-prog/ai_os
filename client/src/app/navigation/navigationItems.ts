@@ -239,14 +239,18 @@ export const accountMenuItems: NavigationItem[] = [
     label: "通訊錄",
     href: "/members",
     section: "manage",
-    icon: "User",
+    // 通訊錄是「一群人的目錄」——用 Users（多人群像）與帳號組的「個人設定」User 區隔，
+    // 避免同一個下拉選單裡兩個去處共用同一顆單人圖示（icon 一致性）。
+    icon: "Users",
     require: "org",
     // UI-only：Policy 無 directory.view；有 capability 資料時仍回退 require（team.view 組員也有，不能當閘）
     capability: "directory.view",
   },
   {
     key: "logs",
-    label: "監控與紀錄",
+    // 與該頁自己的標題「用量與活動紀錄」一致（一個地方一個名字）；
+    // 過去選單叫「監控與紀錄」、頁面叫「用量與活動紀錄」，同頁兩名。
+    label: "用量與活動紀錄",
     href: "/logs",
     section: "manage",
     icon: "FileText",
