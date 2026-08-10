@@ -61,15 +61,14 @@ describe("AssistantCapabilityGuide", () => {
     expect(screen.getByRole("button", { name: /^讀取分鏡/ }).textContent).not.toMatch(/會花點|要你確認|直接做/);
   });
 
-  it("「看全部能力」按得到，四種後果都講出來——縮短的是路徑，不是能力", async () => {
+  it("「更多可以做什麼」按得到，完整能力使用產品語言分組——縮短的是路徑，不是能力", async () => {
     const user = userEvent.setup();
     render(<AssistantCapabilityGuide onPick={vi.fn()} ctx={ctx({ pageType: "database" })} />);
     await user.click(screen.getByText("能做什麼"));
-    await user.click(screen.getByRole("button", { name: /看全部能力/ }));
-    expect(screen.getByText(/不會動到任何東西/)).toBeVisible();
-    expect(screen.getByText(/它會直接做好/)).toBeVisible();
-    expect(screen.getByText(/你按了才算數/)).toBeVisible();
-    expect(screen.getByText(/會花點數/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /更多可以做什麼/ }));
+    for (const title of ["加入資料", "創作影片", "整理專案", "任務與排程", "團隊協作", "生成與外部工具"]) {
+      expect(screen.getByText(title)).toBeVisible();
+    }
     expect(screen.getByRole("button", { name: /讀取組員與工作負荷/ })).toBeVisible();
   });
 

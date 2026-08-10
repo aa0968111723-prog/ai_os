@@ -7855,6 +7855,15 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   margin-top: 4px;
 }
 
+.ai-copilot-home {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 2px 2px;
+}
+.ai-copilot-home strong { font-size: var(--fs-18); }
+.ai-copilot-home span { color: var(--fg-secondary); font-size: var(--fs-13); }
+
 .ai-copilot-input-box {
   position: relative;
   display: flex;
@@ -7926,6 +7935,21 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   padding: 4px 0;
   font-family: inherit;
 }
+.ai-copilot-intake-trigger {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary-tint);
+  color: var(--primary-ink);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+.ai-copilot-intake-trigger:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai-copilot-send-btn {
   width: 38px;
   height: 38px;

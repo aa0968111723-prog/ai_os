@@ -71,7 +71,7 @@ function isOpenEvent(value: unknown): value is AssistantRunOpen {
     && typeof candidate.runId === "string"
     && typeof candidate.receivedAt === "string"
     && !!plan
-    && (plan.intent === "ASK" || plan.intent === "ACT" || plan.intent === "PLAN" || plan.intent === "WATCH")
+    && (plan.intent === "ASK" || plan.intent === "DIRECT" || plan.intent === "AGENT" || plan.intent === "PLAN" || plan.intent === "WATCH")
     && typeof plan.title === "string"
     && Array.isArray(plan.steps);
 }

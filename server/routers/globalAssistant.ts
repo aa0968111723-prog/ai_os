@@ -76,6 +76,7 @@ import {
   type ImportActionResult,
 } from "../../shared/assistantActions";
 import { importUrlIntoProject } from "../services/universalIntake";
+import { publicUrlIntakeCapability } from "../../shared/universalIntake";
 
 /**
  * 全站助手（GLOBAL_ASSISTANT_PLAN Phase 2）：組助手（teamAssistant.ask）的演進——
@@ -87,7 +88,7 @@ import { importUrlIntoProject } from "../services/universalIntake";
  *  3. **onEvent 串流**：與專案助手同款事件形狀，SSE 端點（/api/assistant/site-ask）重用同一前端解碼器。
  *
  * 安全不變式：LLM 工具迴圈只執行唯讀 teamTool；寫入意圖先以結構化提議離開 LLM。
- * 明確 ACT 中可撤銷的內部動作可由系統直接轉呼叫既有 Command/Core；其餘仍待使用者確認。
+ * 明確 DIRECT 中可撤銷的內部動作可由系統直接轉呼叫既有 Command/Core；其餘仍待使用者確認。
  */
 
 /** 問答 0 點（NIM 免費額度）——與兩個既有助手同價。注意：reserveQuota(0) 是 no-op（審計核實），
@@ -503,11 +504,23 @@ export interface GlobalAskResult {
   traceSessionId?: string;
   executionPlan: AssistantExecutionPlan;
   executedSiteActions: ExecutedSiteAction[];
+  intakeFallbacks: ResolvedIntakeFallback[];
   /** 本次執行的完整事件流（串流中斷或走 tRPC 一次性路徑時，前端仍拿得到完整軌跡） */
   runId: string;
   events: AgentEvent[];
   /** 本次**真的讀過**的來源。空陣列代表沒讀任何站內資料——此時前端不得顯示來源區塊。 */
   sources: AgentSourceRecord[];
+}
+
+export interface ResolvedIntakeFallback {
+  type: "source_transfer_required";
+  provider: "google_photos";
+  projectId: string;
+  projectTitle: string;
+  url: string;
+  message: string;
+  browserAvailable: false;
+  alternatives: Array<"files" | "google-drive" | "download-upload">;
 }
 
 export interface ExecutedSiteAction {
@@ -522,6 +535,23 @@ const LOOKUP_LABEL: Record<string, string> = {
   find_model: "模型目錄", query_database: "資料庫", list_agent_runs: "代理動態",
   group_blockers: "組阻塞", list_tasks: "人員任務", project_intelligence: "專案營運快照",
 };
+
+function normalizedProjectMention(value: string): string {
+  return value.toLocaleLowerCase().replace(/[\s\-_–—・,，。.!！?？「」『』()（）]/g, "");
+}
+
+/** Trusted title matching; ids still come exclusively from the ACL-filtered project map. */
+export function resolveMentionedProjectRef(
+  projects: ReadonlyMap<string, { title: string }>,
+  message: string,
+): string | undefined {
+  const text = normalizedProjectMention(message);
+  const matches = [...projects.entries()].filter(([, project]) => {
+    const title = normalizedProjectMention(project.title);
+    return title.length >= 2 && text.includes(title);
+  });
+  return matches.length === 1 ? matches[0][0] : undefined;
+}
 
 export async function runGlobalAsk(
   input: GlobalAskInput,
@@ -585,11 +615,27 @@ export async function runGlobalAsk(
     ? [...projByRef.entries()].find(([, project]) => project.id === lastCreatedProjectId)?.[0]
     : undefined;
   const referencesRecentProject = /(剛建立|剛才建立|上一個專案|這個專案|該專案)/i.test(input.message);
-  const deterministicProjectRef = currentProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined);
+  const mentionedProjectRef = resolveMentionedProjectRef(projByRef, input.message);
+  const deterministicProjectRef = currentProjectRef ?? mentionedProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined);
   const pastedUrl = input.message.match(/https?:\/\/[^\s<>{}\[\]"']+/i)?.[0];
+  const urlCapability = pastedUrl ? publicUrlIntakeCapability(pastedUrl) : undefined;
   const deterministicUrlProposal: SiteActionProposal[] =
-    pastedUrl && deterministicProjectRef && /(?:加入|匯入|帶進|帶入|放進|存到|放到)/i.test(input.message)
+    pastedUrl && deterministicProjectRef && urlCapability?.kind === "direct" && /(?:加入|匯入|帶進|帶入|放進|存到|放到)/i.test(input.message)
       ? [{ type: "import_url", projectRef: deterministicProjectRef, url: pastedUrl }]
+      : [];
+  const fallbackProject = deterministicProjectRef ? projByRef.get(deterministicProjectRef) : undefined;
+  const intakeFallbacks: ResolvedIntakeFallback[] =
+    pastedUrl && fallbackProject && urlCapability?.kind === "requires-transfer"
+      ? [{
+          type: "source_transfer_required",
+          provider: "google_photos",
+          projectId: fallbackProject.id,
+          projectTitle: fallbackProject.title,
+          url: pastedUrl,
+          message: urlCapability.reason,
+          browserAvailable: false,
+          alternatives: [...urlCapability.alternatives],
+        }]
       : [];
 
   // 站級動作的解析素材：成員（mN）＋該組啟用中的專案類型/平台＋可寫資料庫（dbN 的 agentAccess）
@@ -673,6 +719,42 @@ export async function runGlobalAsk(
       toolName: "group_overview",
       status: table.rowCount ? "ok" : "empty",
     });
+  }
+
+  // Known landing-page providers are a capability boundary, not a failed
+  // download.  Stop before LLM/planner/tool execution and offer only paths the
+  // product can actually complete today.  No action.started event is emitted,
+  // therefore the UI can never claim that media retrieval began.
+  if (intakeFallbacks.length) {
+    const fallback = intakeFallbacks[0];
+    stream.emit({
+      type: "waiting.user_input",
+      title: "需要選擇可取得原始媒體的方式",
+      description: fallback.message,
+      status: "waiting",
+      sourceType: "external",
+      sourceName: "Google Photos",
+    });
+    return {
+      answer: `${fallback.message}\n\n你可以改用選擇檔案、Google Drive，或先下載後上傳。`,
+      dispatches: [],
+      actions: [],
+      siteActions: [],
+      executedSiteActions: [],
+      intakeFallbacks,
+      steps: [],
+      canDispatch: false,
+      commandLevel,
+      mock: isMockMode(),
+      rationale: undefined,
+      contextUsed: [],
+      degraded,
+      traceSessionId: undefined,
+      executionPlan,
+      runId: stream.runId,
+      events: stream.snapshotEvents(),
+      sources: stream.snapshotSources(),
+    };
   }
 
   /**
@@ -762,8 +844,9 @@ export async function runGlobalAsk(
     });
   }
 
+  const routeAllowsDispatch = canDispatch && (executionPlan.intent === "AGENT" || executionPlan.intent === "PLAN");
   const base = {
-    canDispatch, commandLevel, degraded, traceSessionId, executionPlan, runId: stream.runId,
+    canDispatch: routeAllowsDispatch, commandLevel, degraded, traceSessionId, executionPlan, runId: stream.runId, intakeFallbacks,
   };
   /** 回傳前統一補上事件流與來源快照——四個 return 點都得帶，漏一個就是「軌跡憑空消失」 */
   const withTrace = <T extends object>(result: T) => ({
@@ -773,7 +856,7 @@ export async function runGlobalAsk(
   });
 
   // 假模式：不打 LLM，回確定性摘要（可測、不花錢）。
-  // 站級提議也給**確定性**的一批——「提議→確認卡→runSiteAction→真寫入」這條 ACT 鏈路
+  // 站級提議也給**確定性**的一批——「提議→確認卡→runSiteAction→真寫入」這條 DIRECT 鏈路
   // 是本功能的主線，不能只有正式模型環境才驗得到。規則刻意簡單可預測（e2e 據此斷言）：
   // 訊息含「專案」→ create_project；含「筆記」→ add_note；提議一樣走 resolveSiteActions
   // 的同一條驗證（platform 白名單、去重、上限），mock 與正式只差「誰產生提議」。
@@ -831,7 +914,7 @@ export async function runGlobalAsk(
   }
   const databaseEvidence = await databaseEvidencePromise;
 
-  const dispatchBlock = canDispatch
+  const dispatchBlock = routeAllowsDispatch
     ? `你也可以「提議派工」：把某個專案的目標交給該專案的 AI 代理去規劃並（經核准後）執行。僅在使用者明確想「動手推進某個專案」時才提議，純詢問時不要提議。
 派工格式：dispatches 陣列，每筆 {"projectRef":"p2","goal":"要達成的目標（5–1000字）"}。projectRef 只能用現況清單的代號 pN。一次最多 4 筆。派工只是「提議」——使用者按確認後，會在該專案建立一份待核准的代理計畫。`
     : `你沒有派工權，不要提議 dispatches。`;
@@ -842,7 +925,7 @@ export async function runGlobalAsk(
 
   const platformList = creationOptions.platforms.map((p) => p.value).join("、") || "（該組尚無啟用中的發布平台）";
   const kindList = creationOptions.kinds.join("、") || "（自由填寫）";
-  const siteActionBlock = `你還可以輸出「站級動作意圖」（siteActions 陣列；你只負責正確組裝，後端會依 ASK/ACT 與風險決定直接執行或顯示確認卡）：
+  const siteActionBlock = `你還可以輸出「站級動作意圖」（siteActions 陣列；你只負責正確組裝，後端會依 ASK/DIRECT 與風險決定直接執行或顯示確認卡）：
 - {"type":"create_project","title":"專案名（80字內）","kind":"內容類型","platform":"發布平台"}——只有使用者明確想開新專案才提議。platform 只能從這份清單挑：${platformList}；kind 參考：${kindList}。
 - {"type":"add_note","projectRef":"p2","title":"標題","content":"內容"}——記錄結論／會議紀錄；projectRef 可省略＝組層級筆記。
 - {"type":"save_decision","projectRef":"p2","title":"角色之後都穿米白外套"}——只有使用者已明確確認長期規則或定案時使用；寫入專案 Decision Log。
@@ -901,7 +984,7 @@ ${dispatchBlock}
 ${commandBlock}
 ${siteActionBlock}
 ${ASSISTANT_HONEST_ACTION_RULE}
-最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明結論依據","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]` : ""}${commandBlock ? `,"actions":[...]` : ""},"siteActions":[...]}。
+最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明結論依據","contextUsed":["用到的資料區塊標籤"]${routeAllowsDispatch ? `,"dispatches":[...]` : ""}${commandBlock ? `,"actions":[...]` : ""},"siteActions":[...]}。
 rationale 只寫結構化的結論依據，不要寫思考過程。contextUsed 只能從這份清單挑：${TEAM_CONTEXT_LABELS.join("、")}。
 <組現況>
 ${context}${formatMemberRefs(members)}${currentProjectBlock}${selectedSceneBlock}${pageContextBlock}
@@ -1072,7 +1155,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     });
     const result: GlobalAskResult = withTrace({
       answer: answerWithVerifiedActions(reply.answer, direct.executed),
-      dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], canDispatch),
+      dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], routeAllowsDispatch),
       actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
       siteActions: pendingConfirmation,
       executedSiteActions: direct.executed,
@@ -1304,7 +1387,7 @@ function resolvedSiteActionInput(action: ResolvedSiteAction): SiteActionInput {
 }
 
 /**
- * 明確 ACT 的可撤銷內部寫入直接執行。每一筆仍走既有 Command/Core 的 ACL 與 policy；
+ * 明確 DIRECT 的可撤銷內部寫入直接執行。每一筆仍走既有 Command/Core 的 ACL 與 policy；
  * WRITE 依序執行（不盲目平行），任一失敗只留下原確認卡，不拖垮整個回答。
  */
 async function executeDirectSiteActions(

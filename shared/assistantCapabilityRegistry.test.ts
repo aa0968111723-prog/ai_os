@@ -15,9 +15,9 @@ describe("assistant capability registry", () => {
     expect(tools.some((tool) => tool.name === "list_databases")).toBe(false);
   });
 
-  it("can expose relevant writes for an authorized ACT without bypassing catalog policy", () => {
+  it("can expose relevant writes for an authorized DIRECT request without bypassing catalog policy", () => {
     const tools = selectAssistantCapabilities({
-      intent: "ACT",
+      intent: "DIRECT",
       pageContext: { pageType: "notes" },
       allowWrite: true,
     });

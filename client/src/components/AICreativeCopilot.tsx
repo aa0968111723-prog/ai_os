@@ -42,6 +42,7 @@ type SiteAction = GlobalAskOutput["siteActions"][number];
 type DispatchProposal = GlobalAskOutput["dispatches"][number];
 type CommandProposal = GlobalAskOutput["actions"][number];
 type ExecutedSiteAction = GlobalAskOutput["executedSiteActions"][number];
+type IntakeFallback = GlobalAskOutput["intakeFallbacks"][number];
 
 export function detectDirectIntakeRequest(text: string): ExternalIntakeOpenRequest["mode"] | null {
   const wantsImport = /(匯入|帶進|帶入|加入|放進|上傳|import|attach|upload)/i.test(text);
@@ -96,6 +97,28 @@ export interface ChatMessage {
   suggestedActions?: Array<{ label: string; prompt: string }>;
   editingSessionId?: string;
   editingResult?: { sessionId: string; assetId: string };
+  intakeFallbacks?: IntakeFallback[];
+}
+
+function IntakeFallbackCard({
+  fallback,
+  onChoose,
+}: {
+  fallback: IntakeFallback;
+  onChoose: (projectId: string, mode: "files" | "drive") => void;
+}) {
+  return (
+    <div className="ai-copilot-action-card" data-fb="來源替代方式">
+      <span className="ai-copilot-action-card__label">Google Photos 需要原始媒體</span>
+      <span className="ai-copilot-action-card__detail">{fallback.message}</span>
+      <span className="ai-copilot-action-card__detail">目標專案：{fallback.projectTitle}</span>
+      <div className="ai-copilot-action-card__buttons">
+        <Button size="sm" onClick={() => onChoose(fallback.projectId, "files")}>選擇檔案</Button>
+        <Button variant="tonal" size="sm" onClick={() => onChoose(fallback.projectId, "drive")}>Google Drive</Button>
+        <Button variant="ghost" size="sm" onClick={() => onChoose(fallback.projectId, "files")}>下載後上傳</Button>
+      </div>
+    </div>
+  );
 }
 
 function AssistantEditingSessionCard({
@@ -242,7 +265,7 @@ function undoSiteActionInput(item: ExecutedSiteAction) {
   return null;
 }
 
-/** 模型明確 ACT 後已由後端完成的結果卡；Undo 仍重走原 core 權限守門。 */
+/** 模型明確 DIRECT 後已由後端完成的結果卡；Undo 仍重走原 core 權限守門。 */
 function DirectActionResultCard({ item, onNavigate }: { item: ExecutedSiteAction; onNavigate?: (href: string) => void }) {
   const undo = trpc.globalAssistant.undoSiteAction.useMutation();
   const undoInput = undoSiteActionInput(item);
@@ -382,6 +405,7 @@ interface AICreativeCopilotProps {
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
   const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
+  const [intakeTargetProjectId, setIntakeTargetProjectId] = useState<string>();
   const [editingSheetOpen, setEditingSheetOpen] = useState(false);
   /**
    * 對話與進行中的執行**不放在元件 state**：這張卡活在會被卸載的面板裡（關面板、
@@ -415,6 +439,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
   const activeProjectId = pageCtx.projectId ?? projectId;
+  const intakeProjectId = intakeTargetProjectId ?? activeProjectId;
   const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
   const breadcrumb = formatContextBreadcrumb(pageCtx);
   // 進行中的判定來自 store（跨卸載存活）與這一顆元件自己的 tRPC fallback
@@ -523,6 +548,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       runId?: string;
       events?: AgentEvent[];
       sources?: AgentSourceRecord[];
+      intakeFallbacks?: IntakeFallback[];
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
@@ -541,13 +567,16 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         dispatches: data.dispatches.length ? data.dispatches : undefined,
         commands: data.actions.length ? data.actions : undefined,
         executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
-        executionPlan: data.executionPlan ?? localPlan,
+        // Source-transfer fallbacks are waiting for a real user choice; do not
+        // render them as a completed execution card.
+        executionPlan: data.intakeFallbacks?.length ? undefined : (data.executionPlan ?? localPlan),
         runStatus: "completed",
         latency: data.latency,
         activity: [...liveEventsRef.current],
         runId: data.runId,
         events: events.length ? events : undefined,
         sources: sources.length ? sources : undefined,
+        intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
         suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
           ? [
               { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
@@ -709,6 +738,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         {/* ── WATCH：還沒開口之前，先把需要注意的事遞過來（對話開始後讓位給對話） ── */}
         {messages.length === 0 && groupId && <WatchDigest groupId={groupId} onNavigate={onNavigate} />}
 
+        {messages.length === 0 && (
+          <div className="ai-copilot-home" data-fb="Aios 首頁">
+            <strong>Aios</strong>
+            <span>告訴我你想完成什麼，我會直接幫你做。</span>
+          </div>
+        )}
+
         {/* ── 能力說明（收合一列；開口之後讓位給對話）──
             快捷鍵只有三顆而且隨頁面換，它們回答不了「這東西到底能幹嘛」。
             說明書放在快捷鍵上面：先知道做得到什麼，那三顆才看得懂。 */}
@@ -801,6 +837,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   ) : null}
                   {msg.editingResult ? <EditingResultCard assetId={msg.editingResult.assetId} sessionId={msg.editingResult.sessionId}
                     onReview={(assetId) => void handleSend(`幫我審查剛從 LumaFusion 帶回的成片（Asset ${assetId}），比較目前專案腳本與分鏡，並清楚標示可驗證的來源；如果無法取得精確 timecode，請直接說明。`)} /> : null}
+
+                  {msg.intakeFallbacks?.map((fallback) => (
+                    <IntakeFallbackCard
+                      key={`${fallback.provider}:${fallback.url}`}
+                      fallback={fallback}
+                      onChoose={(targetProjectId, mode) => {
+                        setIntakeTargetProjectId(targetProjectId);
+                        setIntakeOpenRequest({ id: `${Date.now()}`, mode });
+                      }}
+                    />
+                  ))}
 
                   {/* 讀到什麼 → 能去哪。按鈕只從真實來源長出來（見 followUpActionsFromSources）。 */}
                   {msg.role === "assistant" && onNavigate && msg.sources?.length ? (
@@ -915,15 +962,16 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 輸入工具列 ── */}
         <div className="ai-copilot-input-box">
-          {activeProjectId ? (
+          {intakeProjectId ? (
             <ExternalAssetIntake
-              projectId={activeProjectId}
+              projectId={intakeProjectId}
               groupId={groupId}
               sceneId={pageCtx.entityType === "shot" ? pageCtx.entityId : undefined}
               triggerLabel="＋"
               triggerVariant="ghost"
               openRequest={intakeOpenRequest}
               onImported={(notice) => {
+                setIntakeTargetProjectId(undefined);
                 if (!notice || !groupId) return;
                 recordAssistantActionResults(groupId, [{
                   type: "import",
@@ -947,7 +995,18 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                 });
               }}
             />
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              className="ai-copilot-intake-trigger"
+              aria-label="加入資料"
+              title="加入資料"
+              disabled={!groupId || pending}
+              onClick={() => void handleSend("我要加入資料，請先讓我選擇專案。")}
+            >
+              ＋
+            </button>
+          )}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -962,8 +1021,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                「Enter 送出」移到送出鍵的 title，那裡本來就寫著同一件事。 */
             placeholder={
               messages.length > 0
-                ? "接著追問…（Shift + Enter 換行）"
-                : "輸入任何想發想的主題或分鏡疑問…"
+                ? "接著告訴 Aios…（Shift + Enter 換行）"
+                : "告訴 Aios 你想完成什麼…"
             }
             rows={1}
             maxLength={500}

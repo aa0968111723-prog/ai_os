@@ -39,6 +39,8 @@ export function selectAssistantCapabilities(input: AssistantCapabilitySelection)
   const pageTerms = input.pageContext ? PAGE_TERMS[input.pageContext.pageType] ?? [] : [];
   const intentTerms: string[] = input.intent === "PLAN"
     ? ["agent", "project", "status", "task", "scene", "generation", "knowledge"]
+    : input.intent === "AGENT"
+      ? ["agent", "project", "scene", "generation", "knowledge"]
     : input.intent === "WATCH"
       ? ["status", "agent", "generation", "task", "schedule", "approval"]
       : [];

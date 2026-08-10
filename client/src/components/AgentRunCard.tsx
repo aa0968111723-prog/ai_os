@@ -1,13 +1,6 @@
 import type { AssistantExecutionPlan, AssistantLatencyMetrics } from "@shared/assistantExecution";
-import { summarizeAgentEvents, formatDuration, type AgentEvent } from "@shared/agentEvents";
+import { summarizeAgentEvents, type AgentEvent } from "@shared/agentEvents";
 import { Icon } from "./Icon";
-
-const INTENT_LABEL = {
-  ASK: "查詢",
-  ACT: "執行",
-  PLAN: "規劃",
-  WATCH: "監看",
-} as const;
 
 /**
  * 這次執行的抬頭卡：意圖、標題、狀態，以及**真的發生過**的計量。
@@ -27,7 +20,6 @@ export function AgentRunCard({
   active,
   outcome = "completed",
   events = [],
-  latency,
 }: {
   plan: AssistantExecutionPlan;
   active: boolean;
@@ -45,41 +37,21 @@ export function AgentRunCard({
         ? { icon: "Square" as const, label: "已停止", className: undefined }
         : { icon: "Check" as const, label: "已完成", className: undefined };
 
-  /** 只列出真的量到的數字。全部為 0 就整行不渲染——「讀取 0 筆」比不寫更誤導。 */
-  const facts = [
-    summary.itemsRead ? { label: "讀取", value: `${summary.itemsRead} 筆資料` } : null,
-    summary.sourcesRead ? { label: "來源", value: `${summary.sourcesRead} 個` } : null,
-    summary.toolCalls ? { label: "查詢", value: `${summary.toolCalls} 次` } : null,
-    summary.actionsCompleted ? { label: "已完成動作", value: `${summary.actionsCompleted} 件` } : null,
-    summary.failures ? { label: "失敗", value: `${summary.failures} 項` } : null,
-    !active && latency ? { label: "耗時", value: formatDuration(latency.totalMs) } : null,
-  ].filter((fact): fact is { label: string; value: string } => !!fact && !!fact.value);
-
   return (
     <section className="agent-run-card" aria-live="polite" data-intent={plan.intent}>
       <div className="agent-run-card__header">
-        <span className="agent-run-card__badge">{INTENT_LABEL[plan.intent]}</span>
-        <strong>{plan.title}</strong>
+        <strong>{active ? "Aios 正在處理" : state.label === "已完成" ? "Aios 已完成" : `Aios ${state.label}`}</strong>
         <span className="agent-run-card__state">
           <Icon name={state.icon} size={12} className={state.className} /> {state.label}
         </span>
       </div>
+      <div className="agent-run-card__now">{plan.title}</div>
       {/* 執行中：一行「現在在做什麼」，內容來自最後一則尚未收尾的真實事件 */}
       {active && summary.currentTitle ? (
         <div className="agent-run-card__now">
           <Icon name="CircleDot" size={11} /> {summary.currentTitle}
         </div>
       ) : null}
-      {facts.length > 0 && (
-        <dl className="agent-run-card__facts">
-          {facts.map((fact) => (
-            <div key={fact.label}>
-              <dt>{fact.label}</dt>
-              <dd>{fact.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
     </section>
   );
 }
