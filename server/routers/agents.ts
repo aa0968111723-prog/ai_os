@@ -21,8 +21,10 @@ import { assertProjectEditable } from "../services/projectAcl";
 import { createAiTraceSession, sanitizeAiTracePayload } from "../services/aiTrace";
 import {
   answerAgentQuestion,
+  getPendingAgentQuestionForRun,
   listPendingAgentQuestionsForProject,
 } from "../services/agentQuestionCore";
+import { resumeAssistantDirectRun } from "../services/assistantDirectRun";
 
 const agentQuestionAnswerSchema = z.union([
   z.string().max(20_000),
@@ -166,7 +168,17 @@ export const agentsRouter = router({
       answer: agentQuestionAnswerSchema,
       resumeToken: z.string().uuid().optional(),
     }))
-    .mutation(({ ctx, input }) => answerAgentQuestion({ auth: ctx.auth, ...input })),
+    .mutation(async ({ ctx, input }) => {
+      const answered = await answerAgentQuestion({ auth: ctx.auth, ...input });
+      const directStep = (answered.run.steps as Array<{ assistantAction?: unknown }>).some((step) => !!step.assistantAction);
+      if (!directStep || answered.run.status !== "user_controlled") return { ...answered, directResult: null };
+      const resumed = await resumeAssistantDirectRun({ auth: ctx.auth, runId: answered.run.id });
+      return { question: answered.question, run: resumed.run, directResult: resumed.result };
+    }),
+
+  pendingQuestionByRun: authedProcedure
+    .input(z.object({ runId: z.string().uuid() }))
+    .query(({ ctx, input }) => getPendingAgentQuestionForRun(ctx.auth, input.runId)),
 
   pendingQuestions: authedProcedure
     .input(z.object({ projectId: z.string().uuid() }))

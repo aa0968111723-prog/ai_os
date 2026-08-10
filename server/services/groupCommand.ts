@@ -241,11 +241,11 @@ export async function runGroupCommand(input: {
     case "approve_run": {
       const run = await loadRunInGroup(groupId, command.runId);
       const approved = await approveAgentCore({ auth, runId: run.id });
-      const title = await projectTitleOf(run.projectId);
+      const title = await projectTitleOf(run.projectId!);
       await record({
         eventKey: `cmd:approve:${run.id}`,
         eventType: "approved",
-        projectId: run.projectId,
+        projectId: run.projectId!,
         childRunId: run.id,
         summary: `核准「${title}」的計畫並開始執行（估 ${approved.estPoints} 點）`,
         data: { origin, estPoints: approved.estPoints },
@@ -253,7 +253,7 @@ export async function runGroupCommand(input: {
       return {
         kind: "approve_run",
         message: `已核准「${title}」的計畫，開始執行（估 ${approved.estPoints} 點）`,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         runId: run.id,
         estPoints: approved.estPoints,
       };
@@ -262,31 +262,31 @@ export async function runGroupCommand(input: {
     case "stop_run": {
       const run = await loadRunInGroup(groupId, command.runId);
       await stopAgentCore({ auth, runId: run.id });
-      const title = await projectTitleOf(run.projectId);
+      const title = await projectTitleOf(run.projectId!);
       await record({
         eventKey: `cmd:stop:${run.id}`,
         eventType: "stopped",
-        projectId: run.projectId,
+        projectId: run.projectId!,
         childRunId: run.id,
         summary: `停止「${title}」的計畫`,
         data: { origin },
       });
-      return { kind: "stop_run", message: `已停止「${title}」的計畫（正在生成的那一步會自然收尾）`, projectId: run.projectId, runId: run.id };
+      return { kind: "stop_run", message: `已停止「${title}」的計畫（正在生成的那一步會自然收尾）`, projectId: run.projectId!, runId: run.id };
     }
 
     case "discard_run": {
       const run = await loadRunInGroup(groupId, command.runId);
       await discardAgentCore({ auth, runId: run.id });
-      const title = await projectTitleOf(run.projectId);
+      const title = await projectTitleOf(run.projectId!);
       await record({
         eventKey: `cmd:discard:${run.id}`,
         eventType: "discarded",
-        projectId: run.projectId,
+        projectId: run.projectId!,
         childRunId: run.id,
         summary: `放棄「${title}」尚未核准的計畫`,
         data: { origin },
       });
-      return { kind: "discard_run", message: `已放棄「${title}」尚未核准的計畫（沒有花點）`, projectId: run.projectId, runId: run.id };
+      return { kind: "discard_run", message: `已放棄「${title}」尚未核准的計畫（沒有花點）`, projectId: run.projectId!, runId: run.id };
     }
 
     case "retry_run": {
@@ -301,13 +301,13 @@ export async function runGroupCommand(input: {
       }
       if (run.status === "failed") {
         const resumed = await resumeFailedAgentCore({ auth, runId: run.id });
-        const title = await projectTitleOf(run.projectId);
+        const title = await projectTitleOf(run.projectId!);
         const steps = resumed.steps as Array<{ status?: string; points?: number }>;
         const remaining = steps.filter((step) => step.status !== "done");
         await record({
           eventKey: `cmd:resume:${run.id}:${Date.now()}`,
           eventType: "command",
-          projectId: run.projectId,
+          projectId: run.projectId!,
           childRunId: run.id,
           summary: `從失敗步驟繼續「${title}」的既有計畫`,
           data: { origin, remainingSteps: remaining.length },
@@ -315,23 +315,23 @@ export async function runGroupCommand(input: {
         return {
           kind: "retry_run",
           message: `已從中斷處繼續「${title}」（保留已完成步驟，剩 ${remaining.length} 步）`,
-          projectId: run.projectId,
+          projectId: run.projectId!,
           runId: run.id,
           estPoints: remaining.reduce((sum, step) => sum + Math.max(0, step.points ?? 0), 0),
         };
       }
       const fresh = await planAgentCore({
         auth,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         goal: run.goal,
         plannerMode: command.plannerMode,
         playbookId: command.playbookId,
       });
-      const title = await projectTitleOf(run.projectId);
+      const title = await projectTitleOf(run.projectId!);
       await record({
         eventKey: `cmd:retry:${fresh.id}`,
         eventType: "command",
-        projectId: run.projectId,
+        projectId: run.projectId!,
         childRunId: fresh.id,
         summary: `以同一目標為「${title}」重新規劃（原計畫被停止）`,
         data: { origin, originRunId: run.id, originStatus: run.status, estPoints: fresh.estPoints },
@@ -339,7 +339,7 @@ export async function runGroupCommand(input: {
       return {
         kind: "retry_run",
         message: `已為「${title}」重新規劃一份待核准的計畫（估 ${fresh.estPoints} 點）`,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         runId: fresh.id,
         estPoints: fresh.estPoints,
       };

@@ -13,7 +13,7 @@ export type AgentEventType = typeof schema.agentEvents.$inferInsert["eventType"]
 export interface RecordAgentEventInput {
   runId: string;
   groupId: string;
-  projectId: string;
+  projectId: string | null;
   eventKey: string;
   eventType: AgentEventType;
   summary: string;
@@ -59,7 +59,7 @@ export async function recordAgentEventSafely(input: RecordAgentEventInput): Prom
   // 單一漏斗，掛一次就涵蓋全部轉換——代理進度從輪詢變即時，前端看得見 AI 正在動。
   // 事件寫入失敗也照樣推：推播喚醒的是「重新查詢」，查到的是資料庫的真相，不是這筆事件。
   try {
-    notifyAgentProgress(input.projectId, { runId: input.runId, stepId: input.stepId, eventKey: input.eventKey });
+    if (input.projectId) notifyAgentProgress(input.projectId, { runId: input.runId, stepId: input.stepId, eventKey: input.eventKey });
   } catch {
     // 推播失敗不影響代理主流程；輪詢兜底
   }
@@ -661,7 +661,7 @@ export async function getGroupAgentInsights(
   const runs = runsTruncated ? runRows.slice(0, AGENT_INSIGHT_LIMITS.runs) : runRows;
   const tasks = tasksTruncated ? taskRows.slice(0, AGENT_INSIGHT_LIMITS.tasks) : taskRows;
   const projectTitles = new Map<string, string>();
-  for (const row of runs) projectTitles.set(row.run.projectId, row.projectTitle);
+  for (const row of runs) projectTitles.set(row.run.projectId!, row.projectTitle);
   for (const task of tasks) projectTitles.set(task.projectId, task.projectTitle);
   return assembleGroupAgentInsights(
     runs.map((row) => toInsightRun(row.run)),
@@ -675,7 +675,7 @@ export async function getGroupAgentInsights(
 export function toInsightRun(run: typeof schema.agentRuns.$inferSelect): AgentInsightRun {
   return {
     id: run.id,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     goal: run.goal,
     status: run.status,
     error: run.error,

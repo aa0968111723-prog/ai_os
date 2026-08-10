@@ -294,7 +294,7 @@ export async function armTaskWaitCore(input: {
       .select()
       .from(schema.agentRuns)
       .where(eq(schema.agentRuns.id, input.runId));
-    if (!run || run.groupId !== task.groupId || run.projectId !== task.projectId) {
+    if (!run || run.groupId !== task.groupId || run.projectId! !== task.projectId) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "等待節點與任務不屬於同一個專案計畫" });
     }
     if (run.status !== "running" && run.status !== "waiting") {
@@ -492,7 +492,7 @@ async function settleTask(input: {
             .values({
               runId: run.id,
               groupId: run.groupId,
-              projectId: run.projectId,
+              projectId: run.projectId!,
               stepId: task.wakeStepId,
               eventKey: `step:${task.wakeStepId}:${rejected ? "approval-rejected" : "human-resumed"}`,
               eventType: rejected ? "approval_rejected" : "human_resumed",
@@ -516,7 +516,7 @@ async function settleTask(input: {
               .values({
                 runId: run.id,
                 groupId: run.groupId,
-                projectId: run.projectId,
+                projectId: run.projectId!,
                 eventKey: `run:${wake.status}`,
                 eventType: wake.status === "done" ? "run_completed" : "run_failed",
                 actorType: "system",
@@ -530,14 +530,14 @@ async function settleTask(input: {
             if (terminalEvent.length) {
               await tx.insert(schema.messages).values({
                 groupId: run.groupId,
-                projectId: run.projectId,
+                projectId: run.projectId!,
                 userId: run.userId,
                 kind: "system",
                 body,
               });
               terminalNotification = {
                 userId: run.userId,
-                projectId: run.projectId,
+                projectId: run.projectId!,
                 runId: run.id,
                 body,
                 status: wake.status,

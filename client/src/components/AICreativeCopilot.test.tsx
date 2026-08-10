@@ -24,6 +24,7 @@ const runSiteActionMutate = vi.fn();
 const undoSiteActionMutate = vi.fn();
 const dispatchMutate = vi.fn();
 const commandMutate = vi.fn();
+const answerQuestionMutateAsync = vi.fn();
 const intakeRender = vi.hoisted(() => vi.fn());
 let watchInsights: unknown;
 let watchOverview: unknown;
@@ -50,6 +51,9 @@ vi.mock("../api", () => {
         command: { useMutation: () => ({ mutate: commandMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
         groupInsights: { useQuery: () => ({ data: watchInsights, isLoading: false, isPending: false, error: null, refetch: vi.fn() }) },
         agentOverview: { useQuery: () => ({ data: watchOverview, isLoading: false, isPending: false, error: null, refetch: vi.fn() }) },
+      },
+      agents: {
+        answerAgentQuestion: { useMutation: () => ({ mutateAsync: answerQuestionMutateAsync, isPending: false, error: null }) },
       },
     },
   };
@@ -267,6 +271,54 @@ describe("AICreativeCopilot", () => {
       type: "add_note",
       id: "11111111-1111-4111-8111-111111111111",
     });
+  });
+
+  it("asks for a missing project with AgentQuestionCard and resumes the same run", async () => {
+    const runId = "55555555-5555-4555-8555-555555555555";
+    const questionId = "66666666-6666-4666-8666-666666666666";
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        answer: "要把這個連結加入哪一個專案？",
+        runId,
+        siteActions: [], dispatches: [], actions: [], executedSiteActions: [],
+        pendingQuestion: {
+          id: questionId,
+          runId,
+          resumeToken: "77777777-7777-4777-8777-777777777777",
+          questionType: "entity_picker",
+          title: "選擇專案",
+          description: "找到 2 個可用專案。",
+          required: true,
+          options: [{ id: PROJECT_ID, label: "百日夢島" }, { id: SHOT_ID, label: "挑戰營" }],
+          allowCustom: false,
+          defaultOption: null,
+          context: { reason: "缺少 projectId。", slot: "projectId", entityType: "project" },
+        },
+      });
+      return true;
+    });
+    answerQuestionMutateAsync.mockResolvedValueOnce({
+      question: { id: questionId },
+      run: { id: runId, status: "done" },
+      directResult: {
+        type: "import", source: "url", resourceIds: ["resource-1"], assetIds: ["asset-1"], intelligenceIds: ["intel-1"],
+        projectId: PROJECT_ID, count: 1, duplicateCount: 0, needsReviewCount: 1, backgroundProcessing: true,
+        verification: { status: "verified", message: "已重新讀取並確認素材存在" },
+      },
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "把 https://example.com/source.pdf 加入專案");
+    await user.click(await screen.findByRole("radio", { name: /百日夢島/ }));
+    await waitFor(() => expect(answerQuestionMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      runId,
+      questionId,
+      answer: PROJECT_ID,
+    })));
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("已加入 1 項資料")).toBeInTheDocument();
+    expect(screen.getByText("AI 正在背景整理，你可以繼續對話。")).toBeInTheDocument();
   });
 
   it("Google Photos 分享頁顯示真實替代方式，不顯示假進度", async () => {

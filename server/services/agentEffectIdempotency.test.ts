@@ -57,7 +57,9 @@ describe("agent crash-replay effect ids", () => {
 
   it("uses the persisted UUID as scene id and recognizes a committed replay", () => {
     expect(agentSource).toContain("eq(schema.scenes.id, effectId)");
-    expect(agentSource).toContain("eq(schema.scenes.projectId, run.projectId)");
+    // projectId is nullable only before the durable picker is answered; every
+    // executable Project Agent step explicitly narrows it at the tool boundary.
+    expect(agentSource).toContain("eq(schema.scenes.projectId, run.projectId!)");
     const lookupAt = agentSource.indexOf("eq(schema.scenes.id, effectId)");
     const insertAt = agentSource.indexOf("await tx.insert(schema.scenes).values({", lookupAt);
     expect(lookupAt).toBeGreaterThanOrEqual(0);

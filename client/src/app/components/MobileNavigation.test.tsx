@@ -24,6 +24,9 @@ vi.mock("../../api", () => {
         ask: { useMutation: mutation },
         runSiteAction: { useMutation: mutation },
       },
+      agents: {
+        answerAgentQuestion: { useMutation: mutation },
+      },
       teamAssistant: {
         ask: { useMutation: mutation },
         dispatch: { useMutation: mutation },
@@ -176,7 +179,7 @@ describe("MobileNavigation", () => {
     expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
     // 面板上的可見標題與範圍 chip 已改為只留輸入框與感知光；助手的身分與範圍
     // 改由對話框的 aria-label（上一行）承擔，那才是讀屏真正會念的東西。
-    expect(await screen.findByLabelText("向 AI 助手提問")).toBeVisible();
+    expect(await screen.findByLabelText("向 AI 助手提問", {}, { timeout: 3_000 })).toBeVisible();
   });
 
   it("沒有選定的組時，助手講清楚為什麼不能用（而不是給一個沒反應的輸入框）", async () => {

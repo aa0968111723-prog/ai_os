@@ -7,6 +7,7 @@ import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
 import { type AssistantActivityEvent } from "./AssistantTrace";
 import { AgentRunCard } from "./AgentRunCard";
+import { AgentQuestionCard, type AgentQuestionCardQuestion } from "./AgentQuestionCard";
 import { AgentWorkPanel } from "./AgentWorkPanel";
 import { AssistantCapabilityGuide } from "./AssistantCapabilityGuide";
 import { useAssistantContext } from "../lib/assistantContext";
@@ -18,6 +19,7 @@ import {
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActionResult } from "@shared/assistantActions";
+import type { AgentQuestionAnswer } from "@shared/agentQuestions";
 import {
   ExternalAssetIntake,
   type ExternalIntakeOpenRequest,
@@ -43,6 +45,7 @@ type DispatchProposal = GlobalAskOutput["dispatches"][number];
 type CommandProposal = GlobalAskOutput["actions"][number];
 type ExecutedSiteAction = GlobalAskOutput["executedSiteActions"][number];
 type IntakeFallback = GlobalAskOutput["intakeFallbacks"][number];
+type PendingQuestion = NonNullable<GlobalAskOutput["pendingQuestion"]>;
 
 export function detectDirectIntakeRequest(text: string): ExternalIntakeOpenRequest["mode"] | null {
   const wantsImport = /(匯入|帶進|帶入|加入|放進|上傳|import|attach|upload)/i.test(text);
@@ -98,6 +101,26 @@ export interface ChatMessage {
   editingSessionId?: string;
   editingResult?: { sessionId: string; assetId: string };
   intakeFallbacks?: IntakeFallback[];
+  pendingQuestion?: PendingQuestion;
+  directActionResult?: AssistantActionResult;
+}
+
+function ConversationActionResultCard({ result, onNavigate }: { result: AssistantActionResult; onNavigate?: (href: string) => void }) {
+  if (result.type !== "import") return null;
+  const count = result.count || result.duplicateCount;
+  const verified = result.verification.status === "verified";
+  return (
+    <div className="ai-copilot-action-card is-done" data-fb="對話動作結果卡">
+      <Icon name={verified ? "Check" : "TriangleAlert"} size={14} />
+      <span className="ai-copilot-action-card__label">
+        {verified ? `已加入 ${count} 項資料` : result.verification.message}
+      </span>
+      {verified && result.backgroundProcessing ? <span className="ai-copilot-action-card__detail">AI 正在背景整理，你可以繼續對話。</span> : null}
+      {result.projectId && onNavigate ? (
+        <Button variant="ghost" size="sm" onClick={() => onNavigate(`/p/${result.projectId}#sec-assets`)}>查看資料</Button>
+      ) : null}
+    </div>
+  );
 }
 
 function IntakeFallbackCard({
@@ -436,6 +459,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
+  const answerQuestion = trpc.agents.answerAgentQuestion.useMutation();
+  const [answeringQuestionId, setAnsweringQuestionId] = useState<string>();
+  const [questionErrors, setQuestionErrors] = useState<Record<string, string>>({});
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
   const activeProjectId = pageCtx.projectId ?? projectId;
@@ -549,6 +575,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events?: AgentEvent[];
       sources?: AgentSourceRecord[];
       intakeFallbacks?: IntakeFallback[];
+      pendingQuestion?: PendingQuestion;
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
@@ -577,6 +604,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         events: events.length ? events : undefined,
         sources: sources.length ? sources : undefined,
         intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
+        pendingQuestion: data.pendingQuestion,
         suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
           ? [
               { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
@@ -666,6 +694,44 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     } finally {
       endAssistantRun(groupId);
       setActivePlan(null);
+    }
+  };
+
+  const answerPendingQuestion = async (question: PendingQuestion, answer: AgentQuestionAnswer) => {
+    if (!groupId || answeringQuestionId) return;
+    setAnsweringQuestionId(question.id);
+    setQuestionErrors((current) => ({ ...current, [question.id]: "" }));
+    try {
+      const resumed = await answerQuestion.mutateAsync({
+        runId: question.runId,
+        questionId: question.id,
+        resumeToken: question.resumeToken,
+        answer,
+      });
+      if (resumed.directResult) recordAssistantActionResults(groupId, [resumed.directResult]);
+      setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+        ...previous,
+        messages: previous.messages.map((message) => message.pendingQuestion?.id === question.id
+          ? {
+              ...message,
+              text: resumed.run.status === "failed"
+                ? `未能完成：${resumed.run.error ?? "執行失敗"}`
+                : resumed.directResult
+                  ? "收到，已在同一個工作中繼續執行並完成驗證。"
+                  : "收到，正在同一個工作中繼續執行。",
+              pendingQuestion: undefined,
+              directActionResult: resumed.directResult ?? undefined,
+              runStatus: resumed.run.status === "done" ? "completed" : resumed.run.status === "failed" ? "failed" : message.runStatus,
+            }
+          : message),
+      }));
+    } catch (error) {
+      setQuestionErrors((current) => ({
+        ...current,
+        [question.id]: error instanceof Error ? error.message : "無法繼續執行，請再試一次。",
+      }));
+    } finally {
+      setAnsweringQuestionId(undefined);
     }
   };
 
@@ -806,6 +872,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                     />
                   ) : null}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
+                  {msg.pendingQuestion ? (
+                    <AgentQuestionCard
+                      question={msg.pendingQuestion as AgentQuestionCardQuestion}
+                      submitting={answeringQuestionId === msg.pendingQuestion.id}
+                      error={questionErrors[msg.pendingQuestion.id] || undefined}
+                      onAnswer={(answer) => answerPendingQuestion(msg.pendingQuestion!, answer)}
+                    />
+                  ) : null}
+                  {msg.directActionResult ? (
+                    <ConversationActionResultCard result={msg.directActionResult} onNavigate={onNavigate} />
+                  ) : null}
                   {msg.editingSessionId && activeProjectId ? (
                     <AssistantEditingSessionCard
                       projectId={activeProjectId}

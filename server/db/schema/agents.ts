@@ -20,7 +20,8 @@ import type {
  */
 export const agentRuns = pgTable("agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull(),
+  /** Null only while a group-scoped Assistant run is asking which project to use. */
+  projectId: uuid("project_id"),
   groupId: uuid("group_id").notNull(),
   userId: uuid("user_id").notNull(),
   /** 使用者的一句目標（例：把知識庫的腳本拆成分鏡並逐鏡出圖） */
@@ -156,7 +157,8 @@ export const agentEvents = pgTable("agent_events", {
   id: uuid("id").primaryKey().defaultRandom(),
   runId: uuid("run_id").notNull(),
   groupId: uuid("group_id").notNull(),
-  projectId: uuid("project_id").notNull(),
+  /** Pre-project clarification events intentionally belong to the conversation, not a fake project. */
+  projectId: uuid("project_id"),
   stepId: text("step_id"),
   stepIndex: integer("step_index"),
   eventKey: text("event_key").notNull(),
@@ -199,7 +201,8 @@ export const agentQuestions = pgTable("agent_questions", {
   id: uuid("id").primaryKey().defaultRandom(),
   runId: uuid("run_id").notNull(),
   groupId: uuid("group_id").notNull(),
-  projectId: uuid("project_id").notNull(),
+  /** Filled when a project-picker answer binds the owning run. */
+  projectId: uuid("project_id"),
   userId: uuid("user_id").notNull(),
   stepId: text("step_id"),
   questionType: text("question_type").$type<AgentQuestionType>().notNull(),

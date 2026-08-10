@@ -366,7 +366,7 @@ async function recordPlannedEvent(run: AgentRunRow): Promise<void> {
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: "run:planned",
     eventType: "planned",
     actorType: "ai",
@@ -965,7 +965,7 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以核准執行" });
   }
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId!));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await assertProjectEditable(auth, project);
   assertProjectNotArchived(project); // 專案封存後不得核准執行（否則對已停用專案持續扣點生成）
@@ -982,12 +982,12 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
     }
   }
   const updated = await db.transaction(async (tx) => {
-    await lockAgentApprove(tx, run.projectId, run.userId);
+    await lockAgentApprove(tx, run.projectId!, run.userId);
     const [active] = await tx
       .select({ id: schema.agentRuns.id })
       .from(schema.agentRuns)
       .where(and(
-        eq(schema.agentRuns.projectId, run.projectId),
+        eq(schema.agentRuns.projectId, run.projectId!),
         eq(schema.agentRuns.userId, run.userId),
         inArray(schema.agentRuns.status, [...ACTIVE_AGENT_RUN_STATUSES]),
       ))
@@ -1007,7 +1007,7 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: "run:approved",
     eventType: "approved",
     actorType: "human",
@@ -1067,7 +1067,7 @@ export async function resumeFailedAgentCore(input: { auth: AuthState; runId: str
   if (run.status !== "failed") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有失敗的計畫可以從中斷處繼續" });
   }
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId!));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await assertProjectEditable(input.auth, project);
   assertProjectNotArchived(project);
@@ -1080,9 +1080,9 @@ export async function resumeFailedAgentCore(input: { auth: AuthState; runId: str
     });
   }
   const updated = await db.transaction(async (tx) => {
-    await lockAgentApprove(tx, run.projectId, run.userId);
+    await lockAgentApprove(tx, run.projectId!, run.userId);
     const [active] = await tx.select({ id: schema.agentRuns.id }).from(schema.agentRuns).where(and(
-      eq(schema.agentRuns.projectId, run.projectId),
+      eq(schema.agentRuns.projectId, run.projectId!),
       eq(schema.agentRuns.userId, run.userId),
       inArray(schema.agentRuns.status, [...ACTIVE_AGENT_RUN_STATUSES]),
     )).limit(1);
@@ -1099,7 +1099,7 @@ export async function resumeFailedAgentCore(input: { auth: AuthState; runId: str
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: `run:human-resumed:${Date.now()}`,
     eventType: "human_resumed",
     actorType: "human",
@@ -1129,7 +1129,7 @@ export async function discardAgentCore(input: { auth: AuthState; runId: string }
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: "run:discarded",
     eventType: "discarded",
     actorType: "human",
@@ -1170,7 +1170,7 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
       await recordAgentEventSafely({
         runId: run.id,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         eventKey: "run:stopped",
         eventType: "stopped",
         actorType: "human",
@@ -1193,7 +1193,7 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: "run:stopped",
     eventType: "stopped",
     actorType: "human",

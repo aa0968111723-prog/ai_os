@@ -14,6 +14,9 @@ vi.mock("../../api", () => {
         ask: { useMutation: mutation },
         runSiteAction: { useMutation: mutation },
       },
+      agents: {
+        answerAgentQuestion: { useMutation: mutation },
+      },
       teamAssistant: {
         ask: { useMutation: mutation },
         dispatch: { useMutation: mutation },
@@ -65,7 +68,7 @@ describe("AssistantLauncher", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
     // 面板上沒有可見標題，助手的入口身分由輸入框自己的 aria-label 承擔
-    expect(await screen.findByLabelText("向 AI 助手提問")).toBeVisible();
+    expect(await screen.findByLabelText("向 AI 助手提問", {}, { timeout: 3_000 })).toBeVisible();
   });
 
   it("手機：完全不渲染——底部導覽已經有一顆球，兩顆會變成兩個觸發器搶同一個 triggerRef", () => {

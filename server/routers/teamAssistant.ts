@@ -1545,7 +1545,7 @@ ${historyBlock}使用者的問題：${input.message}`;
       ]);
       const runs = rows.map(({ run, projectTitle, userName }) => ({
         id: run.id,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         projectTitle,
         goal: run.goal,
         status: run.status,
@@ -1724,7 +1724,7 @@ ${historyBlock}使用者的問題：${input.message}`;
       await recordAgentEventSafely({
         runId: run.id,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         eventKey: "run:dispatched-from-team",
         eventType: "observation",
         actorType: "human",
@@ -1740,7 +1740,7 @@ ${historyBlock}使用者的問題：${input.message}`;
       });
       return {
         runId: run.id,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         summary: run.summary,
         planSummary: run.planSummary,
         estPoints: run.estPoints,

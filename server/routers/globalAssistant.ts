@@ -77,6 +77,8 @@ import {
 } from "../../shared/assistantActions";
 import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
+import { createAssistantDirectRun } from "../services/assistantDirectRun";
+import type { AgentQuestionContext, AgentQuestionOption, AgentQuestionType } from "../../shared/agentQuestions";
 
 /**
  * 全站助手（GLOBAL_ASSISTANT_PLAN Phase 2）：組助手（teamAssistant.ask）的演進——
@@ -505,6 +507,20 @@ export interface GlobalAskResult {
   executionPlan: AssistantExecutionPlan;
   executedSiteActions: ExecutedSiteAction[];
   intakeFallbacks: ResolvedIntakeFallback[];
+  /** Existing durable Human-in-the-loop contract for a run that has no project yet. */
+  pendingQuestion?: {
+    id: string;
+    runId: string;
+    resumeToken: string;
+    questionType: AgentQuestionType;
+    title: string;
+    description: string;
+    required: boolean;
+    options: AgentQuestionOption[];
+    allowCustom: boolean;
+    defaultOption: string | null;
+    context: AgentQuestionContext;
+  };
   /** 本次執行的完整事件流（串流中斷或走 tRPC 一次性路徑時，前端仍拿得到完整軌跡） */
   runId: string;
   events: AgentEvent[];
@@ -616,11 +632,13 @@ export async function runGlobalAsk(
     : undefined;
   const referencesRecentProject = /(剛建立|剛才建立|上一個專案|這個專案|該專案)/i.test(input.message);
   const mentionedProjectRef = resolveMentionedProjectRef(projByRef, input.message);
-  const deterministicProjectRef = currentProjectRef ?? mentionedProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined);
+  const soleProjectRef = projByRef.size === 1 ? [...projByRef.keys()][0] : undefined;
+  const deterministicProjectRef = currentProjectRef ?? mentionedProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined) ?? soleProjectRef;
   const pastedUrl = input.message.match(/https?:\/\/[^\s<>{}\[\]"']+/i)?.[0];
   const urlCapability = pastedUrl ? publicUrlIntakeCapability(pastedUrl) : undefined;
+  const wantsUrlImport = /(?:加入|匯入|帶進|帶入|放進|存到|放到|add|import|attach|save)/i.test(input.message);
   const deterministicUrlProposal: SiteActionProposal[] =
-    pastedUrl && deterministicProjectRef && urlCapability?.kind === "direct" && /(?:加入|匯入|帶進|帶入|放進|存到|放到)/i.test(input.message)
+    pastedUrl && deterministicProjectRef && urlCapability?.kind === "direct" && wantsUrlImport
       ? [{ type: "import_url", projectRef: deterministicProjectRef, url: pastedUrl }]
       : [];
   const fallbackProject = deterministicProjectRef ? projByRef.get(deterministicProjectRef) : undefined;
@@ -719,6 +737,50 @@ export async function runGlobalAsk(
       toolName: "group_overview",
       status: table.rowCount ? "ok" : "empty",
     });
+  }
+
+  // A clear DIRECT intent with several valid projects is not a Campaign and is
+  // not reduced to ordinary assistant text. Persist the original action first,
+  // suspend it with the existing durable project picker, and let the answer API
+  // resume this exact run id.
+  if (pastedUrl && wantsUrlImport && urlCapability?.kind === "direct" && !deterministicProjectRef && projByRef.size > 1) {
+    const pending = await createAssistantDirectRun({
+      auth,
+      runId: stream.runId,
+      groupId,
+      goal: input.message,
+      action: { type: "import_url", url: pastedUrl },
+    });
+    if (pending.question) {
+      stream.emit({
+        type: "waiting.user_input",
+        title: pending.question.title,
+        description: pending.question.description,
+        status: "waiting",
+        sourceType: "project",
+      });
+      return {
+        answer: "要把這個連結加入哪一個專案？選好後我會在同一個工作裡繼續匯入。",
+        dispatches: [],
+        actions: [],
+        siteActions: [],
+        executedSiteActions: [],
+        intakeFallbacks: [],
+        pendingQuestion: pending.question,
+        steps: [],
+        canDispatch: false,
+        commandLevel,
+        mock: isMockMode(),
+        rationale: undefined,
+        contextUsed: [],
+        degraded,
+        traceSessionId: undefined,
+        executionPlan,
+        runId: stream.runId,
+        events: stream.snapshotEvents(),
+        sources: stream.snapshotSources(),
+      };
+    }
   }
 
   // Known landing-page providers are a capability boundary, not a failed

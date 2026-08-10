@@ -56,6 +56,7 @@ import { resolveModel } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";
 import { ensureAgentStepContext } from "./agentQuestionCore";
 import type { AgentContextSlotName } from "../../shared/agentQuestions";
+import type { AssistantActionResult } from "../../shared/assistantActions";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -98,6 +99,9 @@ export interface AgentStep {
   sourceRefs?: Array<{ type: string; id: string; label?: string }>;
   /** Context required before the tool can execute. */
   requiredSlots?: AgentContextSlotName[];
+  /** Server-created Command Center continuation; never accepted from planner output. */
+  assistantAction?: { type: "import_url"; url: string };
+  assistantResult?: AssistantActionResult;
   executionMode?: "dag";
   /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
   tableId?: string;
@@ -294,7 +298,7 @@ async function sweepExpiredAgentPlans(): Promise<void> {
   await Promise.all(expired.map((run) => recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: "run:expired",
     eventType: "discarded",
     actorType: "system",
@@ -465,7 +469,7 @@ async function saveDagProgress(run: RunRow, steps: AgentStep[]): Promise<void> {
     await recordAgentEventSafely({
       runId: run.id,
       groupId: run.groupId,
-      projectId: run.projectId,
+      projectId: run.projectId!,
       stepId: blocked ? stableStepId(blocked, progress.nextIndex) : null,
       stepIndex: progress.nextIndex,
       eventKey: `run:dependency-failed:${progress.nextIndex}`,
@@ -577,7 +581,7 @@ async function sceneByNo(projectId: string, no: number) {
  */
 async function resolvePersistedSceneTarget(run: RunRow, steps: AgentStep[], step: AgentStep) {
   if (!step.targetSceneId) {
-    const scene = await sceneByNo(run.projectId, step.sceneNo ?? 0);
+    const scene = await sceneByNo(run.projectId!, step.sceneNo ?? 0);
     if (!scene) return null;
     step.targetSceneId = scene.id;
     await saveRun(run.id, { steps });
@@ -589,7 +593,7 @@ async function resolvePersistedSceneTarget(run: RunRow, steps: AgentStep[], step
     .where(
       and(
         eq(schema.scenes.id, step.targetSceneId),
-        eq(schema.scenes.projectId, run.projectId),
+        eq(schema.scenes.projectId, run.projectId!),
         isNull(schema.scenes.deletedAt),
       ),
     );
@@ -615,7 +619,7 @@ async function resolvePersistedSceneTarget(run: RunRow, steps: AgentStep[], step
  * 已送出的生成在 advanceRun 上方 settleGeneration 先結算，不因權限撤銷而擱置在途成品。
  */
 async function checkRunAuthority(run: RunRow): Promise<string | null> {
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId!));
   if (!project) return "專案不存在或已刪除";
   const auth = await loadAuthState(run.userId);
   if (!auth) return "發起人帳號已停用，代理無法繼續執行";
@@ -639,7 +643,7 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
   void trackBackgroundTask(recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     stepId: stableStepId(step, idx),
     stepIndex: idx,
     eventKey: `step:${stableStepId(step, idx)}:${ok ? "completed" : "failed"}`,
@@ -662,7 +666,7 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
         actorId: run.userId,
         action: `agents.step.${step.kind}`,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         input: sanitizeAuditInput({
           runId: run.id,
           stepIndex: idx,
@@ -726,7 +730,7 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     eventKey: `run:${status}`,
     eventType: status === "done" ? "run_completed" : "run_failed",
     actorType: "system",
@@ -735,7 +739,7 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
   });
   await db.insert(schema.messages).values({
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     userId: run.userId,
     kind: "system",
     body,
@@ -744,7 +748,7 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
   await pushToUsers([run.userId], {
     title: status === "done" ? "AI 代理完成" : "AI 代理中止",
     body,
-    url: `/p/${run.projectId}`,
+    url: `/p/${run.projectId!}`,
     tag: `agent-${runId}`,
   }).catch((err) => console.warn("[agent] 完成推播失敗：", err instanceof Error ? err.message : err));
 }
@@ -912,7 +916,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     await recordAgentEventSafely({
       runId: run.id,
       groupId: run.groupId,
-      projectId: run.projectId,
+      projectId: run.projectId!,
       stepId: stableStepId(step, idx),
       stepIndex: idx,
       eventKey: `step:${stableStepId(step, idx)}:started`,
@@ -924,7 +928,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     });
 
     try {
-      await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
+      await resolveBackgroundProjectRole(run.userId, run.projectId!, "代理");
       const auth = await loadAuthState(run.userId);
       if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
       await executeGenerationCommand({
@@ -932,7 +936,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         source: "agent",
         backgroundResume: true,
         id: step.generationId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         modelId: model.id,
         prompt: step.prompt,
         sceneId,
@@ -1076,7 +1080,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   await recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
-    projectId: run.projectId,
+    projectId: run.projectId!,
     stepId: stableStepId(step, idx),
     stepIndex: idx,
     eventKey: `step:${stableStepId(step, idx)}:started`,
@@ -1097,7 +1101,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     const content = (step.content ?? "").trim();
     if (!title) return failRun(run, steps, idx, "計畫沒有指定筆記標題");
     if (!content) return failRun(run, steps, idx, "計畫沒有提供筆記內容");
-    if (step.projectId && step.projectId !== run.projectId) {
+    if (step.projectId && step.projectId !== run.projectId!) {
       return failRun(run, steps, idx, "筆記步驟指向其他專案，已阻止跨專案寫入");
     }
     const auth = await loadAuthState(run.userId);
@@ -1109,7 +1113,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         auth,
         id: effectId,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         title,
         content,
         mentions: step.mentions,
@@ -1118,7 +1122,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       if (
         row.groupId !== run.groupId
-        || row.projectId !== run.projectId
+        || row.projectId !== run.projectId!
         || row.planRunId !== run.id
         || row.planStepId !== stableStepId(step, idx)
       ) {
@@ -1152,7 +1156,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         runId: run.id,
         stepId: stableStepId(step, idx),
       });
-      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId) {
+      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId!) {
         return failRun(run, steps, idx, "目標筆記不屬於目前計畫專案");
       }
       addOutputRef(step, "note", result.row.id, result.row.title);
@@ -1170,7 +1174,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     const title = (step.title ?? step.note ?? "").trim();
     if (!title) return failRun(run, steps, idx, "計畫沒有指定行程標題");
     if (!step.startsAt) return failRun(run, steps, idx, "計畫沒有指定行程開始時間");
-    if (step.projectId && step.projectId !== run.projectId) {
+    if (step.projectId && step.projectId !== run.projectId!) {
       return failRun(run, steps, idx, "排程步驟指向其他專案，已阻止跨專案寫入");
     }
     const auth = await loadAuthState(run.userId);
@@ -1182,7 +1186,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         auth,
         id: effectId,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         title,
         startsAt: step.startsAt,
         endsAt: step.endsAt,
@@ -1194,7 +1198,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       if (
         row.groupId !== run.groupId
-        || row.projectId !== run.projectId
+        || row.projectId !== run.projectId!
         || row.planRunId !== run.id
         || row.planStepId !== stableStepId(step, idx)
       ) {
@@ -1231,7 +1235,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         runId: run.id,
         stepId: stableStepId(step, idx),
       });
-      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId) {
+      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId!) {
         return failRun(run, steps, idx, "目標行程不屬於目前計畫專案");
       }
       addOutputRef(step, "schedule", result.row.id, result.row.title);
@@ -1248,7 +1252,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   if (step.kind === "create_task") {
     const title = (step.title ?? step.note ?? "").trim();
     if (!title) return failRun(run, steps, idx, "計畫沒有指定人類任務標題");
-    if (step.projectId && step.projectId !== run.projectId) {
+    if (step.projectId && step.projectId !== run.projectId!) {
       return failRun(run, steps, idx, "人類任務指向其他專案，已阻止跨專案寫入");
     }
     const auth = await loadAuthState(run.userId);
@@ -1260,7 +1264,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         auth,
         id: effectId,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         planRunId: run.id,
         planStepId: stableStepId(step, idx),
         title,
@@ -1273,7 +1277,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       if (
         task.groupId !== run.groupId
-        || task.projectId !== run.projectId
+        || task.projectId !== run.projectId!
         || task.planRunId !== run.id
         || task.planStepId !== stableStepId(step, idx)
       ) {
@@ -1306,7 +1310,7 @@ async function advanceRun(run: RunRow): Promise<void> {
           auth,
           id: effectId,
           groupId: run.groupId,
-          projectId: run.projectId,
+          projectId: run.projectId!,
           planRunId: run.id,
           planStepId: stableStepId(step, idx),
           taskType: step.kind === "request_approval" ? "approval" : "task",
@@ -1323,7 +1327,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         });
         taskId = task.id;
       }
-      if (task.groupId !== run.groupId || task.projectId !== run.projectId) {
+      if (task.groupId !== run.groupId || task.projectId !== run.projectId!) {
         return failRun(run, steps, idx, "等待節點引用了其他專案的人類任務");
       }
       if (step.kind === "request_approval" && task.taskType !== "approval") {
@@ -1368,7 +1372,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       await recordAgentEventSafely({
         runId: run.id,
         groupId: run.groupId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         stepId: stableStepId(step, idx),
         stepIndex: idx,
         eventKey: `step:${stableStepId(step, idx)}:waiting`,
@@ -1392,19 +1396,19 @@ async function advanceRun(run: RunRow): Promise<void> {
     // effectId is the scene primary key. A replay after COMMIT observes the
     // same project scene and does not append another scene.
     await db.transaction(async (tx) => {
-      await lockSceneOrder(tx, run.projectId);
+      await lockSceneOrder(tx, run.projectId!);
       const [existing] = await tx
         .select({ id: schema.scenes.id })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.id, effectId), eq(schema.scenes.projectId, run.projectId)));
+        .where(and(eq(schema.scenes.id, effectId), eq(schema.scenes.projectId, run.projectId!)));
       if (existing) return;
       const [{ maxOrder }] = await tx
         .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)));
+        .where(and(eq(schema.scenes.projectId, run.projectId!), isNull(schema.scenes.deletedAt)));
       await tx.insert(schema.scenes).values({
         id: effectId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         orderIndex: Number(maxOrder) + 1,
         title: title.slice(0, 60),
         durationSec: step.durationSec ? Math.max(1, Math.min(60, Math.round(step.durationSec))) : undefined,
@@ -1475,7 +1479,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       const rows = await db
         .select({ id: schema.scenes.id })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
+        .where(and(eq(schema.scenes.projectId, run.projectId!), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
       const ids: string[] = [];
       for (const no of nos) {
@@ -1490,11 +1494,11 @@ async function advanceRun(run: RunRow): Promise<void> {
     // 交易＋序號鎖，與 scenes.reorder 同一套物理：清單漏掉的分鏡依原相對順序補到尾端，
     // 不留與新序號重疊的舊 orderIndex
     await db.transaction(async (tx) => {
-      await lockSceneOrder(tx, run.projectId);
+      await lockSceneOrder(tx, run.projectId!);
       const rows = await tx
         .select({ id: schema.scenes.id })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
+        .where(and(eq(schema.scenes.projectId, run.projectId!), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
       const own = new Set(rows.map((r) => r.id));
       const listed = new Set(ordered);
@@ -1534,7 +1538,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       .select({ id: schema.scenes.id, projectId: schema.scenes.projectId })
       .from(schema.scenes)
       .where(inArray(schema.scenes.id, allSceneIds));
-    const recovery = decideSplitRecovery(step, existingScenes, run.projectId);
+    const recovery = decideSplitRecovery(step, existingScenes, run.projectId!);
 
     if (recovery === "committed") {
       const count = step.splitPreparedScenes!.length;
@@ -1572,7 +1576,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       const prepared = step.splitPreparedScenes;
       const result = await splitScriptCore({
         userId: run.userId,
-        projectId: run.projectId,
+        projectId: run.projectId!,
         scriptText: step.script,
         sceneIds: allSceneIds.slice(0, prepared?.length ?? allSceneIds.length),
         preparedScenes: prepared,
@@ -1736,7 +1740,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
   try {
     // TD-02：代理生成走 Command（成本門檻／狀態機／ACL 與直呼一致）
-    await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
+    await resolveBackgroundProjectRole(run.userId, run.projectId!, "代理");
     const auth = await loadAuthState(run.userId);
     if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
     await executeGenerationCommand({
@@ -1744,7 +1748,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       source: "agent",
       backgroundResume: true,
       id: step.generationId,
-      projectId: run.projectId,
+      projectId: run.projectId!,
       modelId,
       prompt,
       sceneId,

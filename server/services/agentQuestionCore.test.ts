@@ -57,6 +57,32 @@ describe("applyAgentQuestionAnswerToRun", () => {
     expect(result.steps[0]).toMatchObject({ status: "pending", targetSceneId: "shot-b" });
   });
 
+  it("keeps a pre-project direct action on the same user-controlled run after project selection", () => {
+    const result = applyAgentQuestionAnswerToRun({
+      run: {
+        currentStep: 0,
+        contextSlots: {},
+        steps: [{
+          id: "direct-action",
+          kind: "wait_for_human",
+          note: "匯入連結",
+          status: "waiting",
+          requiredSlots: ["projectId"],
+          assistantAction: { type: "import_url", url: "https://example.com/source.pdf" },
+        }],
+      },
+      question: {
+        stepId: "direct-action",
+        questionType: "entity_picker",
+        context: { reason: "缺少 projectId。", slot: "projectId", entityType: "project" },
+      },
+      canonicalAnswer: { value: "project-b", selectedOptionIds: ["project-b"], displayValue: "百日夢島" },
+    });
+    expect(result.status).toBe("user_controlled");
+    expect(result.contextSlots.projectId).toBe("project-b");
+    expect(result.steps[0]).toMatchObject({ status: "pending", projectId: "project-b" });
+  });
+
   it("separates a rejected high-risk confirmation from clarification and stops pending work", () => {
     const result = applyAgentQuestionAnswerToRun({
       run: {

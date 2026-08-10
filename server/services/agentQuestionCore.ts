@@ -72,7 +72,7 @@ export function applyAgentQuestionAnswerToRun(input: {
 }): {
   steps: AgentStep[];
   contextSlots: AgentContextSlots;
-  status: "running" | "stopped";
+  status: "running" | "user_controlled" | "stopped";
 } {
   const steps = (input.run.steps as AgentStep[]).map((step) => ({ ...step }));
   const contextSlots: AgentContextSlots = { ...(input.run.contextSlots ?? {}) };
@@ -90,7 +90,8 @@ export function applyAgentQuestionAnswerToRun(input: {
     }
   }
 
-  let status: "running" | "stopped" = "running";
+  let status: "running" | "user_controlled" | "stopped" = "running";
+  if (steps.some((step) => step.assistantAction)) status = "user_controlled";
   if (input.question.questionType === "confirm" && input.canonicalAnswer.value === false) {
     status = "stopped";
     stopPendingDagSteps(steps);
@@ -99,8 +100,8 @@ export function applyAgentQuestionAnswerToRun(input: {
     const index = steps.findIndex((step, stepIndex) => dagStepId(step, stepIndex) === input.question.stepId);
     const step = steps[index];
     if (step?.status === "waiting") {
-      step.status = status === "running" ? "pending" : "stopped";
-      step.detail = status === "running"
+      step.status = status !== "stopped" ? "pending" : "stopped";
+      step.detail = status !== "stopped"
         ? `已回答：${input.canonicalAnswer.displayValue}`
         : "使用者取消這項操作";
       bindSlotsToStep(step, contextSlots);
@@ -129,7 +130,7 @@ export async function suspendAgentRunForQuestion(input: {
       .where(and(eq(schema.agentQuestions.runId, run.id), eq(schema.agentQuestions.status, "pending")))
       .limit(1);
     if (existing) return { row: existing, inserted: false };
-    if (run.status !== "running" && run.status !== "waiting") {
+    if (run.status !== "running" && run.status !== "waiting" && run.status !== "user_controlled") {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "代理目前不能進入等待回答狀態" });
     }
 
@@ -164,7 +165,7 @@ export async function suspendAgentRunForQuestion(input: {
       updatedAt: new Date(),
     }).where(and(
       eq(schema.agentRuns.id, run.id),
-      inArray(schema.agentRuns.status, ["running", "waiting"]),
+      inArray(schema.agentRuns.status, ["running", "waiting", "user_controlled"]),
     )).returning({ id: schema.agentRuns.id });
     if (!suspended) {
       throw new TRPCError({ code: "CONFLICT", message: "代理狀態已改變，無法進入等待" });
@@ -184,7 +185,9 @@ export async function suspendAgentRunForQuestion(input: {
       summary: result.row.context.reason,
       data: { questionId: result.row.id, questionType: result.row.questionType, candidateCount: result.row.options.length },
     }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-    notifyAgentProgress(result.row.projectId, { runId: result.row.runId, stepId: result.row.stepId ?? undefined, eventKey: `question:${result.row.id}:waiting` });
+    if (result.row.projectId) {
+      notifyAgentProgress(result.row.projectId, { runId: result.row.runId, stepId: result.row.stepId ?? undefined, eventKey: `question:${result.row.id}:waiting` });
+    }
   }
   return result.row;
 }
@@ -225,6 +228,9 @@ export async function answerAgentQuestion(input: {
       throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "回答格式不正確" });
     }
     const wake = applyAgentQuestionAnswerToRun({ run, question, canonicalAnswer: canonical });
+    const answeredProjectId = question.context.slot === "projectId"
+      ? wake.contextSlots.projectId ?? null
+      : run.projectId;
     const now = new Date();
     const [answered] = await tx.update(schema.agentQuestions).set({
       status: "answered",
@@ -232,12 +238,14 @@ export async function answerAgentQuestion(input: {
       answeredBy: input.auth.user.id,
       answeredAt: now,
       updatedAt: now,
+      projectId: answeredProjectId,
     }).where(and(eq(schema.agentQuestions.id, question.id), eq(schema.agentQuestions.status, "pending"))).returning();
     if (!answered) throw new TRPCError({ code: "CONFLICT", message: "答案已由另一個操作送出" });
     const [updatedRun] = await tx.update(schema.agentRuns).set({
       status: wake.status,
       steps: wake.steps,
       contextSlots: wake.contextSlots,
+      projectId: answeredProjectId,
       activeQuestionId: null,
       updatedAt: now,
     }).where(and(
@@ -249,7 +257,7 @@ export async function answerAgentQuestion(input: {
     await tx.insert(schema.agentEvents).values({
       runId: run.id,
       groupId: run.groupId,
-      projectId: run.projectId,
+      projectId: answeredProjectId,
       stepId: question.stepId,
       eventKey: `question:${question.id}:answered`,
       eventType: "question_answered",
@@ -260,7 +268,9 @@ export async function answerAgentQuestion(input: {
     }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
     return { question: answered, run: updatedRun };
   });
-  notifyAgentProgress(result.run.projectId, { runId: result.run.id, stepId: result.question.stepId ?? undefined, eventKey: `question:${result.question.id}:answered` });
+  if (result.run.projectId) {
+    notifyAgentProgress(result.run.projectId, { runId: result.run.id, stepId: result.question.stepId ?? undefined, eventKey: `question:${result.question.id}:answered` });
+  }
   return result;
 }
 
@@ -275,6 +285,19 @@ export async function listPendingAgentQuestionsForProject(auth: AuthState, proje
   )).orderBy(desc(schema.agentQuestions.createdAt));
 }
 
+/** Conversation surfaces fetch by run id because a pre-project question has no project id yet. */
+export async function getPendingAgentQuestionForRun(auth: AuthState, runId: string): Promise<AgentQuestionRow | null> {
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到代理執行" });
+  requireGroup(auth, run.groupId);
+  if (run.userId !== auth.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "這不是你的代理執行" });
+  const [question] = await db.select().from(schema.agentQuestions).where(and(
+    eq(schema.agentQuestions.runId, run.id),
+    eq(schema.agentQuestions.status, "pending"),
+  )).limit(1);
+  return question ?? null;
+}
+
 /** Resolve and, only when truly ambiguous, suspend the current runner step. */
 export async function ensureAgentStepContext(input: {
   auth: AuthState;
@@ -287,7 +310,7 @@ export async function ensureAgentStepContext(input: {
   if (!required.length) return { suspended: false };
   const slots: AgentContextSlots = {
     ...(input.run.contextSlots ?? {}),
-    projectId: input.run.contextSlots?.projectId ?? input.run.projectId,
+    projectId: input.run.contextSlots?.projectId ?? input.run.projectId ?? undefined,
     ...(input.step.targetSceneId ? { sceneId: input.step.targetSceneId } : {}),
     ...(input.step.sourceAssetId ? { assetIds: [input.step.sourceAssetId] } : {}),
     ...(input.step.modelId ? { modelId: input.step.modelId } : {}),
@@ -297,11 +320,11 @@ export async function ensureAgentStepContext(input: {
     const resolution = slot === "projectId"
       ? await AgentQuestionResolver.resolveProjectQuestion({ auth: input.auth, groupId: input.run.groupId })
       : slot === "sceneId" || slot === "shotId"
-        ? await AgentQuestionResolver.resolveSceneQuestion({ auth: input.auth, projectId: input.run.projectId })
+        ? await AgentQuestionResolver.resolveSceneQuestion({ auth: input.auth, projectId: input.run.projectId! })
         : slot === "personId"
-          ? await AgentQuestionResolver.resolvePersonQuestion({ auth: input.auth, projectId: input.run.projectId })
+          ? await AgentQuestionResolver.resolvePersonQuestion({ auth: input.auth, projectId: input.run.projectId! })
           : slot === "assetIds"
-            ? await AgentQuestionResolver.resolveAssetQuestion({ auth: input.auth, projectId: input.run.projectId })
+            ? await AgentQuestionResolver.resolveAssetQuestion({ auth: input.auth, projectId: input.run.projectId! })
             : slot === "modelId"
               ? AgentQuestionResolver.resolveModelQuestion({ auth: input.auth, groupId: input.run.groupId })
             : { kind: "question" as const, question: {
@@ -328,7 +351,12 @@ export async function ensureAgentStepContext(input: {
     (slots as Record<string, unknown>)[slot] = resolution.value;
   }
   bindSlotsToStep(input.step, slots);
-  await db.update(schema.agentRuns).set({ contextSlots: slots, steps: input.steps, updatedAt: new Date() })
+  await db.update(schema.agentRuns).set({
+    contextSlots: slots,
+    steps: input.steps,
+    ...(slots.projectId && !input.run.projectId ? { projectId: slots.projectId } : {}),
+    updatedAt: new Date(),
+  })
     .where(and(eq(schema.agentRuns.id, input.run.id), eq(schema.agentRuns.status, "running")));
   return { suspended: false };
 }
