@@ -55,16 +55,17 @@ function liveToEntry(row: LiveRow): ModelEntry {
   const staticM = getStaticModel(row.id) ?? (row.endpoint !== row.id ? getStaticModel(row.endpoint) : undefined);
   if (staticM) {
     // live 計價單位與靜態種類不相容（Fal 佔位值／誤配）→ 保留靜態官方實價，不覆寫
-    const unitOk = row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind);
+    //（row.costUsd/row.costUnit 的 null check 直接寫在 ternary 條件裡讓 TS 收窄——不能先抽成 boolean，TS 不傳播）
     // 守門二：live 點數與官方實價（機械解析 cost 字串）偏差 ≥40% → 佔位／誤配價
     //（如 flux-3 draft 官方 $0.06/秒=9 點、live 卻 $0.2/秒→31 點），保留靜態官方實價。
     const official = realPricePoints(staticM);
-    const driftBlocked = unitOk && official != null && official > 0 && staticM.points > 0
+    const driftBlocked = official != null && official > 0 && staticM.points > 0
       && Math.abs(row.points - staticM.points) >= 1
       && (row.points >= staticM.points * 1.4 || row.points <= staticM.points / 1.4);
-    const livePrice = unitOk && !driftBlocked
-      ? { points: row.points, cost: row.cost, priceUsd: row.costUsd, priceUnit: row.costUnit }
-      : null;
+    const livePrice =
+      row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind) && !driftBlocked
+        ? { points: row.points, cost: row.cost, priceUsd: row.costUsd, priceUnit: row.costUnit }
+        : null;
     return {
       ...staticM,
       points: livePrice ? livePrice.points : staticM.points,
