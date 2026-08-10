@@ -122,6 +122,21 @@ export const TEAM_ASSISTANT_DATA_BOUNDARY_RULE =
  */
 export interface CrossGroupMention { targetGroupName: string }
 
+/**
+ * 自查釐清（PR #601 獨立回歸的根因修復）：把「本組的組名」寫給 LLM 看。
+ *
+ * 為什麼要有：buildPrompt 原本只說「你是這個創作組的彙總助手」，從未告知本組組名——
+ * 使用者用「本組組名」自問（「把文宣組所有專案列出來」）時，LLM 不知道文宣組正是自己所在的組，
+ * 套用 boundary rule 第一條「問到其他組直接回只能查本組」→ 誤拒。這支純函式把組名與
+ * 「提到本組名＝自查、要正常回答」寫明，讓含本組名的自查不被當成跨組。組名空白時回空字串
+ * （不佔提示詞），不會讓提示詞多一行意義不明的說明。
+ */
+export function buildSelfCheckClarification(currentGroupName: string): string {
+  const name = currentGroupName.trim();
+  if (!name) return "";
+  return `本組的組名是「${name}」。使用者提到「${name}」是在問本組自己（自查），屬正常範圍，必須正常回答；只有明確提到其他組才算跨組。`;
+}
+
 export function detectCrossGroupMention(
   message: string,
   currentGroupName: string,
@@ -1387,9 +1402,13 @@ export const teamAssistantRouter = router({
       const historyBlock = buildHistoryBlock(input.history);
 
       /** 組每輪的完整提示詞：基底任務＋工具說明＋派工說明＋現況＋(先前對話)＋(累積工具結果)＋問題 */
-      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `你是這個創作組的彙總助手，根據以下各專案現況資料，用繁體中文回答組長／組員關於進度、瓶頸、資源分配的問題。
+      // 開頭注入本組組名（currentGroupName 已在上方以 auth.groups 解析）：LLM 不知道自己是哪一組時，
+      // 使用者用「本組組名」自問會被 boundary rule 第一條誤判成「問其他組」→ 自查誤擋（PR #601 獨立回歸）。
+      const groupOpening = currentGroupName ? `你是「${currentGroupName}」這個創作組的彙總助手` : "你是這個創作組的彙總助手";
+      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `${groupOpening}，根據以下各專案現況資料，用繁體中文回答組長／組員關於進度、瓶頸、資源分配的問題。
 回答精簡務實：先講結論，必要時點名關鍵專案（用「」標題，不要吐代號 pN 給使用者看）；只依據資料回答，資料裡沒有的不編造，看不出來就直說。
 ${TEAM_ASSISTANT_DATA_BOUNDARY_RULE}
+${buildSelfCheckClarification(currentGroupName)}
 ${forceFinal
   ? "查詢額度已用完——這一輪你必須直接給最終回答，不得再呼叫工具。"
   : `回答前你可以先用「唯讀查詢工具」鑽進某個專案、資料庫或代理動態查證（本次提問最多 ${MAX_TOOL_ROUNDS} 次）。要用工具時，整個回覆只回一個 JSON 工具呼叫，拿到 <工具結果> 後再決定要不要再查或給最終回答：

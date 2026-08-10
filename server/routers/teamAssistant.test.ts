@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHistoryBlock,
+  buildSelfCheckClarification,
   countDoneSteps,
   currentStepNote,
   detectCrossGroupMention,
@@ -710,5 +711,26 @@ describe("detectCrossGroupMention（資料層邊界強制：跨組請求短迴�
   it("訊息不含任何組名 → null；空白訊息 → null", () => {
     expect(detectCrossGroupMention("幫我看看本組有哪些瓶頸", "剪輯組", allGroups)).toBeNull();
     expect(detectCrossGroupMention("   ", "剪輯組", allGroups)).toBeNull();
+  });
+});
+
+describe("buildSelfCheckClarification（自查釐清：本組組名寫給 LLM 看）", () => {
+  it("含本組組名與「提到本組名＝自查、要正常回答」的明確指示", () => {
+    const note = buildSelfCheckClarification("文宣組");
+    expect(note).toContain("文宣組");
+    expect(note).toContain("本組");
+    expect(note).toContain("自查");
+    expect(note).toContain("必須正常回答");
+  });
+
+  it("組名空白（auth 解析不到）回空字串——不佔提示詞、不多一行意義不明的說明", () => {
+    expect(buildSelfCheckClarification("")).toBe("");
+    expect(buildSelfCheckClarification("   ")).toBe("");
+  });
+
+  it("組名前後空白 trim 後才寫入（auth 解析的組名可能帶多餘空白）", () => {
+    const note = buildSelfCheckClarification("  剪輯組  ");
+    expect(note).toContain("「剪輯組」");
+    expect(note).not.toContain("「  剪輯組」");
   });
 });
