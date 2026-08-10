@@ -1,1 +1,106 @@
-/* placeholder - full content too large for single call; use push from local */
+/* EMERGENCY RESTORE of Aios design system (styles.css was emptied)
+ * Full restore still needed from commit 9b1f155aca347dfb5702728c458aae39a5dfb5a7
+ * This file restores tokens, link colors, body, and basic components so the UI is usable.
+ */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
+:root {
+  color-scheme: light;
+  --fg: #292524;
+  --fg-secondary: #67615b;
+  --muted-fg: #6b645d;
+  --soft: #a79d90;
+  --surface-sunken: #e9e4d9;
+  --bg: #f3f0e8;
+  --muted: #f4f1ea;
+  --field: #f7f5ee;
+  --card2: #f9f7f1;
+  --card: #fffefa;
+  --popover: #fffefa;
+  --border: #e4dfd3;
+  --border-soft: #ede9de;
+  --border-strong: #d2cbbc;
+  --primary: #e05a10;
+  --primary-rgb: 224 90 16;
+  --primary-solid: #c23a0c;
+  --primary-solid-hover: #ad3407;
+  --primary-solid-active: #992e06;
+  --primary-ink: #b23508;
+  --primary-fg: #fff6f0;
+  --primary-tint: #fdeee4;
+  --primary-tint-hover: #fbe2d2;
+  --primary-border: #f3c6ad;
+  --brand-red: #c5161b;
+  --brand-orange: #f6771e;
+  --brand-amber: #eba207;
+  --brand-lime: #8db12a;
+  --brand-green: #078f53;
+  --brand-teal: #0b9d95;
+  --brand-ribbon: linear-gradient(90deg, var(--brand-red) 0%, var(--brand-orange) 22%, var(--brand-amber) 40%, var(--brand-lime) 56%, var(--brand-green) 76%, var(--brand-teal) 100%);
+  --healing: #907cc6; --healing-ink: #63519e; --healing-soft: #eeeaf7;
+  --gold: #c8890a; --gold-ink: #8a6116; --gold-soft: #faf0d8;
+  --success: #12934f; --success-ink: #0e7a43; --success-soft: #e3f3e9;
+  --danger: #d2231f; --danger-ink: #b3231e; --danger-soft: #fdecea;
+  --collab: #0f918a; --collab-ink: #0b6e69; --collab-soft: #e0f2f1;
+  --e1: 0 1px 2px rgba(28,25,23,.06);
+  --e2: 0 1px 2px rgba(28,25,23,.06), 0 2px 6px -1px rgba(28,25,23,.09);
+  --e3: 0 2px 4px -1px rgba(28,25,23,.07), 0 8px 18px -6px rgba(28,25,23,.13);
+  --e4: 0 4px 8px -2px rgba(28,25,23,.10), 0 16px 36px -12px rgba(28,25,23,.20);
+  --shadow: var(--e2);
+  --sans: "Noto Sans TC Variable", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --serif: "Noto Serif TC Variable", "Noto Serif TC", Georgia, "Songti TC", "Microsoft JhengHei", serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --touch-min: 44px;
+  --chrome-bottom: 0px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.5;
+  min-height: 100dvh;
+}
+a {
+  color: var(--primary-ink);
+  text-decoration: none;
+}
+a:hover { color: var(--primary-solid); text-decoration: underline; }
+button, .btn, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+button, .btn {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 0.5rem 0.9rem;
+}
+.btn-primary, button.primary, .btn.primary {
+  background: var(--primary-solid);
+  color: var(--primary-fg);
+  border-color: transparent;
+}
+.btn-primary:hover, button.primary:hover { background: var(--primary-solid-hover); }
+.card, [class*="card"] {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--e1);
+}
+.hint, .meta, small { color: var(--fg-secondary); font-size: 0.875em; }
+.app, #root, .app-shell { min-height: 100dvh; background: var(--bg); color: var(--fg); }
+.topbar, header.topbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
