@@ -697,6 +697,10 @@ const RULES: readonly BaseRule[] = [
     match: /#nemotron/,
     spec: { key: "nemotron", baseModel: "Nemotron-4 340B", developer: "NVIDIA", arch: "自回歸 Transformer", weights: "open", note: "超大開放權重模型，主要用於合成資料與評測。" },
   },
+  {
+    match: /#kimi/,
+    spec: { key: "kimi", baseModel: "Kimi K3", developer: "月之暗面（Moonshot AI）", arch: "MoE 自回歸 Transformer（原生視覺）", weights: "open", note: "2.8T 開源旗艦；1M context、原生視覺與 agentic 能力。" },
+  },
 
   /* ───────── 訓練器：底層＝被訓練的基座 ───────── */
   {

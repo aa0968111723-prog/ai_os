@@ -326,6 +326,16 @@ const aspect = (f: ProjectFormat) => normalizeProjectFormat(f);
 const wideOrTall = (f: ProjectFormat) => nearestFormat(f, ["16:9", "9:16"]);
 /** LLM 系列共用(NVIDIA NIM 與舊 any-llm 皆為 {model, prompt} 形狀;NIM 端由 nimSubmit 轉 chat messages) */
 const llmInput = (model: string) => (prompt: string) => ({ model, prompt });
+/** OpenRouter 代理(付費閉源 LLM)輸入:{model, prompt, system_prompt, reasoning, temperature, max_tokens} 形狀,同 llmProvider.completeFal
+ *  (fal openrouter 部分模型強制 reasoning,設 false 會 400——與 FAL_OPENROUTER_REASONING 同口徑) */
+const llmOpenRouterInput = (model: string) => (prompt: string) => ({
+  model,
+  prompt,
+  system_prompt: "你是正式產品的中文 AI 助手。依使用者提供的內容作答，不要輸出 reasoning 或 chain-of-thought。",
+  reasoning: true,
+  temperature: 0.7,
+  max_tokens: 4096,
+});
 const llmVisionInput = (model: string) => (prompt: string, _f: ProjectFormat, sourceUrl?: string) => ({
   model,
   prompt: prompt || "請詳細描述這張圖片(繁體中文)",
@@ -1250,6 +1260,16 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
+    // 2026-08-10 fal 實抓:Seedance 2.5 文生影片,30s 原生單鏡、最高 720p(480p/720p、4-30s 或 auto、generate_audio 預設 true);
+    // 無 seed/negative_prompt 輸入欄(allowlist 不加)。定價=fal token 公式($0.0214/1000 tokens)720p 帶音 ~$0.473/秒、帶影片參考 ×0.6;
+    // 30s 一鏡≈344 點屬高單筆→verified=false 預覽+flagship tier,校準品質與成本後再全量;多輪延伸首波不開。
+    id: "bytedance/seedance-2.5/text-to-video", label: "Seedance 2.5(字節)", category: "text-to-video", tier: "flagship", kind: "video",
+    points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "字節最新世代;30s 一鏡到底、原生音訊、可控性再升級",
+    bestFor: "短影音 workflow 的結構性升級:30s 一鏡到位",
+    input: (p, f) => ({ prompt: p, resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
+  },
+  {
     // 點數以「無音」首價 $0.03×5s 計(realPricePoints);開音訊／更長秒實際費用較高
     // 審計 #112：OpenAPI aspect_ratio 僅 16:9|9:16（無 1:1）→ 1:1 映射 16:9 防 422；duration 預設 8s+generate_audio true 與扁平 5 點脫鉤見卡 P0
     id: "fal-ai/veo3.1/lite", label: "Veo 3.1 Lite(Google)", category: "text-to-video", tier: "economy", kind: "video",
@@ -1470,6 +1490,27 @@ export const MODELS: ModelEntry[] = [
     bestFor: "一張圖延展成有分鏡感的連貫段落",
     sourceHint: "作為首格的圖(素材庫或網址)",
     input: (p, _f, s) => ({ prompt: p, image_url: s }),
+  },
+  {
+    // 2026-08-10 fal 實抓:Seedance 2.5 圖生影片,480p/720p、4-30s 或 auto、generate_audio 預設 true;aspect_ratio 官方標「Always auto」。
+    // 定價同 t2v(fal token 公式 720p 帶音 ~$0.473/秒、帶影片參考 ×0.6);30s≈344 點高單筆→verified=false 預覽+flagship,校準後再全量。
+    id: "bytedance/seedance-2.5/image-to-video", label: "Seedance 2.5 圖生(字節)", category: "image-to-video", tier: "flagship", kind: "video",
+    needs: "image", points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Seedance 2.5 圖生;30s 一鏡、原生音訊",
+    bestFor: "一張圖延展成 30s 一鏡連貫片段",
+    sourceHint: "作為首格的圖(素材庫或網址)",
+    input: (p, f, s) => ({ prompt: p, image_url: s, resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
+  },
+  {
+    // 2026-08-10 fal 實抓:Seedance 2.5 參考生影片,最多 50 個多模態參考(30 圖＋10 影片＋10 音訊)、480p/720p、4-30s 或 auto、原生音訊;
+    // 定價=fal token 公式:帶影片參考 ×0.6 降為 ~$0.2838/秒、圖/音訊參考不計費。目錄無 reference-to-video 類別→掛 image-to-video(fal 官方標題即 "Reference to Video (Image to Video)")。
+    // 首波先單圖參考(image_urls[0])當 preview;多模態輸入前端適配另議(+0.25 人天上限)。
+    id: "bytedance/seedance-2.5/reference-to-video", label: "Seedance 2.5 參考生(字節)", category: "image-to-video", tier: "flagship", kind: "video",
+    needs: "image", points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Seedance 2.5 參考生;多模態參考鎖定角色/場景/風格、30s 一鏡",
+    bestFor: "要鎖定角色/風格/場景一致性的 30s 一鏡",
+    sourceHint: "作為參考的圖(素材庫或網址)",
+    input: (p, f, s) => ({ prompt: p, image_urls: s ? [s] : [], resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2/image-to-video", label: "Luma Ray-2(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
@@ -1938,6 +1979,59 @@ export const MODELS: ModelEntry[] = [
     strengths: "最低成本文字生成;速度極快",
     bestFor: "大量簡單任務(標籤、分類)",
     input: llmInput("meta/llama-3.1-8b-instruct"),
+  },
+
+  /* ── OpenRouter 代理(付費閉源 LLM;endpoint "openrouter/router" 走 fal openrouter 佇列,
+     關源模型 NIM 無法承接,改由此代理代付 USD)。NVIDIA NIM 仍是免費開源主力,
+     此區是付費旗艦/降本選項(verified=false 首跑校準後再升)。舊版退路見 LEGACY_MODELS(fal-ai/any-llm#...)。 ── */
+  {
+    id: "openrouter/router#kimi-k3", endpoint: "openrouter/router", label: "Kimi K3", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$3/$15 per M tokens(推廣 $2/$10 至 8/31)", verified: false,
+    strengths: "月之暗面旗艦;2.8T 開源、1M context、原生視覺、agentic;能力標竿僅次 Fable 5",
+    bestFor: "長文撰寫、複雜推理、需要超長上下文與視覺理解的高品質任務",
+    input: llmOpenRouterInput("moonshotai/kimi-k3"),
+  },
+  {
+    id: "openrouter/router#claude-opus-5", endpoint: "openrouter/router", label: "Claude Opus 5", category: "llm", tier: "flagship", kind: "text",
+    points: 2, cost: "$5/$25 per M tokens", verified: false,
+    strengths: "Anthropic 最強旗艦;長文與指令遵循、中文寫作穩定",
+    bestFor: "正式腳本/長文的高品質撰寫",
+    input: llmOpenRouterInput("anthropic/claude-opus-5"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-sol", endpoint: "openrouter/router", label: "GPT-5.6 Sol", category: "llm", tier: "flagship", kind: "text",
+    points: 2, cost: "$5/$30 per M tokens", verified: false,
+    strengths: "OpenAI 最新旗艦;通用能力與推理強",
+    bestFor: "複雜分析、正式文稿",
+    input: llmOpenRouterInput("openai/gpt-5.6-sol"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-terra", endpoint: "openrouter/router", label: "GPT-5.6 Terra", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$2/$12 per M tokens", verified: false,
+    strengths: "GPT-5.6 中價檔;能力與成本平衡",
+    bestFor: "日常文案、改寫潤飾",
+    input: llmOpenRouterInput("openai/gpt-5.6-terra"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-luna", endpoint: "openrouter/router", label: "GPT-5.6 Luna", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.20/$1.20 per M tokens", verified: false,
+    strengths: "GPT-5.6 最低價檔(官方 -80%);降本主力",
+    bestFor: "高量低成本任務",
+    input: llmOpenRouterInput("openai/gpt-5.6-luna"),
+  },
+  {
+    id: "openrouter/router#gemini-3.6-flash", endpoint: "openrouter/router", label: "Gemini 3.6 Flash", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$1.50/$7.50 per M tokens", verified: false,
+    strengths: "Google 最新工作馬;長上下文與多模態輸入是強項",
+    bestFor: "日常文字生成、翻譯、彙整",
+    input: llmOpenRouterInput("google/gemini-3.6-flash"),
+  },
+  {
+    id: "openrouter/router#gemini-3.5-flash-lite", endpoint: "openrouter/router", label: "Gemini 3.5 Flash-Lite", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.30/$2.50 per M tokens", verified: false,
+    strengths: "極致便宜高速;低成本備援",
+    bestFor: "大量簡單任務(標籤、分類)",
+    input: llmOpenRouterInput("google/gemini-3.5-flash-lite"),
   },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */

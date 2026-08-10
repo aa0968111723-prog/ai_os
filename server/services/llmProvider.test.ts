@@ -29,6 +29,7 @@ vi.mock("./fal", () => ({
 }));
 
 const { completeText, extractDisclosedReasoning, isFalMode, modeCostsMoney, FAL_AGENT_PROFILES, LlmServiceError } = await import("./llmProvider");
+const { AGENT_LLM_MODEL_IDS } = await import("../../shared/llmPricing");
 
 function nimOk(text = "來自 NIM 的回答") {
   chatCompletion.mockResolvedValue({
@@ -101,9 +102,9 @@ describe("nim 模式 — 免費路徑", () => {
 
 describe("fal 檔位 — 使用者明確選擇才付費", () => {
   it.each([
-    ["fal_economy", "google/gemini-2.5-flash-lite"],
-    ["fal_balanced", "openai/gpt-5-mini"],
-    ["fal_quality", "anthropic/claude-sonnet-4.5"],
+    ["fal_economy", AGENT_LLM_MODEL_IDS.fal_economy],
+    ["fal_balanced", AGENT_LLM_MODEL_IDS.fal_balanced],
+    ["fal_quality", AGENT_LLM_MODEL_IDS.fal_quality],
   ] as const)("%s 送出對應模型 %s", async (mode, model) => {
     falOk();
     const r = await completeText({ prompt: "你好", mode });
@@ -157,7 +158,7 @@ describe("auto 模式 — 免費優先，備援要留痕", () => {
     falOk();
     const r = await completeText({ prompt: "你好", mode: "auto" });
     expect(r.provider).toBe("fal-openrouter");
-    expect(r.model).toBe("openai/gpt-5-mini");
+    expect(r.model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced);
     expect(r.fellBack).toBe(true);
   });
 

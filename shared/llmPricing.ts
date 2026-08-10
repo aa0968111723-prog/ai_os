@@ -26,8 +26,8 @@ export interface LlmModelPrice {
  * 兩邊各留一份的話，換模型時「扣的點」與「跑的模型」必然對不上。
  */
 export const AGENT_LLM_MODEL_IDS = {
-  fal_economy: "google/gemini-2.5-flash-lite",
-  fal_balanced: "openai/gpt-5-mini",
+  fal_economy: "deepseek/deepseek-v4-flash",
+  fal_balanced: "openai/gpt-5.6-luna",
   fal_quality: "anthropic/claude-sonnet-4.5",
 } as const;
 
@@ -37,19 +37,36 @@ export const AGENT_LLM_MODEL_IDS = {
  */
 export const LLM_MODEL_PRICES: Readonly<Record<string, LlmModelPrice>> = {
   [AGENT_LLM_MODEL_IDS.fal_economy]: {
-    label: "Gemini 2.5 Flash Lite",
-    inputUsdPerMTok: 0.1,
-    outputUsdPerMTok: 0.4,
+    label: "DeepSeek V4 Flash",
+    inputUsdPerMTok: 0.14,
+    outputUsdPerMTok: 0.28,
   },
   [AGENT_LLM_MODEL_IDS.fal_balanced]: {
-    label: "GPT-5 Mini",
-    inputUsdPerMTok: 0.25,
-    outputUsdPerMTok: 2,
+    label: "GPT-5.6 Luna",
+    inputUsdPerMTok: 0.2,
+    outputUsdPerMTok: 1.2,
   },
   [AGENT_LLM_MODEL_IDS.fal_quality]: {
     label: "Claude Sonnet 4.5",
     inputUsdPerMTok: 3,
     outputUsdPerMTok: 15,
+  },
+  // Kimi K3（any-llm 目錄新收；推廣價 $2/$10 至 2026-08-31，期滿回 $3/$15）
+  "moonshotai/kimi-k3": {
+    label: "Kimi K3",
+    inputUsdPerMTok: 2,
+    outputUsdPerMTok: 10,
+  },
+  // 舊版退路：昇版後不再指派，仍保留價目讓在途/歷史生成正確計價，不當成免費。
+  "openai/gpt-5-mini": {
+    label: "GPT-5 Mini",
+    inputUsdPerMTok: 0.25,
+    outputUsdPerMTok: 2,
+  },
+  "google/gemini-2.5-flash-lite": {
+    label: "Gemini 2.5 Flash Lite",
+    inputUsdPerMTok: 0.1,
+    outputUsdPerMTok: 0.4,
   },
 };
 
