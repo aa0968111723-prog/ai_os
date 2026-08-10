@@ -1,8 +1,6 @@
 /**
- * ② 分鏡（Storyboard Center；PE 計畫 §10）：分鏡卡是整套系統的中心。
- * 場（story_scenes）分組 → 每場底下的分鏡卡（Shot）；簡單／專業模式切換顯示深度。
- * 生成一律從 Shot 出發（單格工作室），素材天然知道自己屬於哪一幕哪一鏡哪個版本。
- * 交付面（粗剪、配音管線、打包）仍在「④ 成片」的 SceneList——這裡專注創作。
+ * ② 分鏡（Storyboard Center；PE 計畫 §10）
+ * PR-4a：右側 ResourceDock 就近取用素材／定裝／知識。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "../../api";
@@ -15,6 +13,7 @@ import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from 
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
 import { ShotNavigator } from "./ShotNavigator";
+import { ResourceDock } from "./ResourceDock";
 import { registerAssistantFocus } from "../../lib/assistantContext";
 
 export function StoryboardStage({
@@ -26,7 +25,6 @@ export function StoryboardStage({
 }: {
   projectId: string;
   canEdit: boolean;
-  /** 生成台勾選（單格工作室的 fallback 錨點；本鏡有綁定就用本鏡的） */
   charIds: string[];
   sceneIds: string[];
   propIds: string[];
@@ -37,7 +35,6 @@ export function StoryboardStage({
   const characters = trpc.characters.list.useQuery({ projectId });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const looks = trpc.characterLooks.list.useQuery({ projectId });
-  // §23／P3：哪些鏡的畫面已經跟卡片對不上（唯讀；不自動重生成）
   const continuity = trpc.story.continuityCheck.useQuery({ projectId });
   const [mode, setMode] = useState<BoardMode>(() => loadBoardMode(projectId));
   const [studioSceneId, setStudioSceneId] = useState<string | null>(null);
@@ -60,19 +57,13 @@ export function StoryboardStage({
     () => new Map((continuity.data?.outdated ?? []).map((o: { shotId: string; reason: string }) => [o.shotId, o.reason])),
     [continuity.data],
   );
-  /** 全片鏡號（跨場連續；與 ④ 成片、交付包同一套序號） */
   const shotNumber = useMemo(() => {
     const sorted = [...shotRows].sort((a, b) => a.orderIndex - b.orderIndex);
     return new Map(sorted.map((s, i) => [s.id, i + 1]));
   }, [shotRows]);
   const studioShot = studioSceneId ? shotRows.find((s) => s.id === studioSceneId) : null;
-
   const isEmpty = !shots.isLoading && shotRows.length === 0;
 
-  /**
-   * 分鏡多選：全站第一個。只有一個用途——把「這幾鏡」交給 AI 助手。
-   * 不做批次編輯 UI（那是另一件事，也會需要另一套確認與復原）。
-   */
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const togglePick = useCallback((shotId: string) => {
     setPicked((prev) => {
@@ -82,7 +73,6 @@ export function StoryboardStage({
       return next;
     });
   }, []);
-  // 鏡被刪掉時把它從選取裡剔除——否則助手會收到一個已經不存在的 id
   const liveShotIds = useMemo(() => new Set(shotRows.map((s) => s.id)), [shotRows]);
   useEffect(() => {
     setPicked((prev) => {
@@ -91,19 +81,9 @@ export function StoryboardStage({
     });
   }, [liveShotIds]);
 
-  /**
-   * 回報給 AI 助手：正在看哪一鏡、勾了哪幾鏡。
-   *
-   * 「正在看」的定義刻意是**單格工作室打開的那一鏡**——在這個產品裡，打開工作室
-   * 就是「我要處理這一鏡」的明確表態；純捲動經過不算，否則助手會一直改口。
-   * 勾選優先於打開中的那一鏡（使用者明確圈出的對象最優先）。
-   */
   const pickedIds = useMemo(() => [...picked], [picked]);
   const focusShot = studioShot ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined);
   const focusShotNo = focusShot ? shotNumber.get(focusShot.id) : undefined;
-  // **沒東西可講就不註冊**：焦點層只有一格，而專案頁同時掛著分鏡中心與素材庫等多個面。
-  // 每個面都無條件註冊的話，最後掛載的那個（即使它什麼都沒選）會把別人剛設好的焦點洗掉。
-  // 語意是「最近一次真的做了選擇的人勝出」——這也正是使用者的直覺。
   const hasShotFocus = !!focusShot || pickedIds.length > 0;
   useEffect(() => {
     if (!hasShotFocus) return;
@@ -119,140 +99,77 @@ export function StoryboardStage({
 
   return (
     <div className="board-stage stack" id="storyboard-center" data-fb="分鏡中心">
-      <Card as="section">
-        <div className="board-stage__toolbar">
-          <h2 style={{ margin: 0 }}>分鏡卡</h2>
-          <Meta as="span">
-            {sceneRows.length > 0 ? `${sceneRows.length} 場・` : ""}
-            {shotRows.length} 鏡
-          </Meta>
-          <span style={{ flex: "1 1 auto" }} />
-          {/* 快速入口：素材運用三層路徑的上層捷徑（素材庫 → 定裝 → 知識庫） */}
-          <div className="board-stage__quick-links" role="navigation" aria-label="素材與定裝快速入口">
-            <Button
-              size="sm"
-              variant="ghost"
-              type="button"
-              title="打開專案素材庫——把參考圖／現成素材帶進分鏡"
-              onClick={() => revealProjectContext("assets", { projectId, returnTo: "scenes" })}
-            >
-              <Icon name="LayoutGrid" size={13} /> 素材庫
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              type="button"
-              title="打開角色／造型定裝——鎖定後生成才會一致"
-              onClick={() => revealProjectContext("characters", { projectId, returnTo: "scenes" })}
-            >
-              <Icon name="User" size={13} /> 定裝
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              type="button"
-              title="打開知識庫（腳本、參考文件）"
-              onClick={() => revealProjectContext("knowledge", { projectId, returnTo: "scenes" })}
-            >
-              <Icon name="FileText" size={13} /> 知識庫
-            </Button>
-          </div>
-          <div role="tablist" aria-label="顯示深度" className="board-mode-toggle">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "simple"}
-              className={mode === "simple" ? "active" : undefined}
-              onClick={() => switchMode("simple")}
-              title="畫面、角色、場景、動作、秒數——細節預設收合"
-            >
-              簡單
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "pro"}
-              className={mode === "pro" ? "active" : undefined}
-              onClick={() => switchMode("pro")}
-              title="加開焦段、角度、運鏡、光線、構圖、表情、視線——桌機預設展開細節"
-            >
-              專業
-            </button>
-          </div>
-        </div>
-        {isEmpty ? (
-          <EmptyState
-            icon={<Icon name="Clapperboard" size={20} />}
-            title="還沒有分鏡"
-            description="回到「① 故事」貼上故事、按「AI 解析」再「產生分鏡」——場、鏡、角色、地點會一次排好。也可以在下方「④ 成片」手動加鏡。"
-            action={
-              <Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>
-                去寫故事
+      <div className="board-stage__layout" style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <Card as="section" className="board-stage__main" style={{ flex: "1 1 280px", minWidth: 0 }}>
+          <div className="board-stage__toolbar">
+            <h2 style={{ margin: 0 }}>分鏡卡</h2>
+            <Meta as="span">{sceneRows.length > 0 ? `${sceneRows.length} 場・` : ""}{shotRows.length} 鏡</Meta>
+            <span style={{ flex: "1 1 auto" }} />
+            <div className="board-stage__quick-links" role="navigation" aria-label="素材與定裝快速入口">
+              <Button size="sm" variant="ghost" type="button" title="打開專案素材庫" onClick={() => revealProjectContext("assets", { projectId, returnTo: "scenes" })}>
+                <Icon name="LayoutGrid" size={13} /> 素材庫
               </Button>
-            }
-          />
-        ) : (
-          <>
-            <Hint style={{ margin: "4px 0 10px" }}>
-              點畫面或「單格工作室」細修；「從素材庫選用」或拖放檔案可直接套用現有素材。展開「素材與設定」可改世界引用與鏡頭語言。
-            </Hint>
-            {/* §23：卡片改過但畫面還是舊的。放在最上面，不必捲完整頁才知道有落差 */}
-            {outdatedByShot.size > 0 && (
-              <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
-                <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-                有 {outdatedByShot.size} 鏡的畫面是用舊設定畫的（角色、場景或道具卡後來改過）。
-                系統不會自動重畫——需要更新的鏡，打開單格工作室重新生成即可。
-              </Hint>
-            )}
-            <div className="board-groups stack">
-              {groups.map((group, gi) => {
-                const scene = group.storySceneId ? sceneRows.find((s) => s.id === group.storySceneId) : null;
-                return (
-                  <section key={group.storySceneId ?? "unsorted"} className="board-scene-group">
-                    {scene ? (
-                      <SceneGroupHeader
-                        projectId={projectId}
-                        scene={scene}
-                        index={gi}
-                        shotCount={group.shots.length}
-                        canEdit={canEdit}
-                        locations={(scenePresets.data ?? []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }))}
-                      />
-                    ) : (
-                      <header className="board-scene-head board-scene-head--unsorted">
-                        <span className="board-scene-head__num">未分場</span>
-                        <Meta as="span">{group.shots.length} 鏡・手動加入或重構前的分鏡</Meta>
-                      </header>
-                    )}
-                    {group.shots.length === 0 ? (
-                      <Meta as="p" style={{ margin: "6px 0 0 2px" }}>這一場還沒有鏡——可在單格工作室或 ④ 成片手動補</Meta>
-                    ) : (
-                      <div className="board-shots">
-                        {group.shots.map((shot) => (
-                          <ShotCard
-                            key={shot.id}
-                            projectId={projectId}
-                            shot={shot}
-                            shotNumber={shotNumber.get(shot.id) ?? 0}
-                            canEdit={canEdit}
-                            mode={mode}
-                            looks={looks.data ?? []}
-                            characterNames={characterNames}
-                            outdatedReason={outdatedByShot.get(shot.id)}
-                            onOpenStudio={setStudioSceneId}
-                            picked={picked.has(shot.id)}
-                            onTogglePick={togglePick}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
+              <Button size="sm" variant="ghost" type="button" title="打開角色／造型定裝" onClick={() => revealProjectContext("characters", { projectId, returnTo: "scenes" })}>
+                <Icon name="User" size={13} /> 定裝
+              </Button>
+              <Button size="sm" variant="ghost" type="button" title="打開知識庫" onClick={() => revealProjectContext("knowledge", { projectId, returnTo: "scenes" })}>
+                <Icon name="FileText" size={13} /> 知識庫
+              </Button>
             </div>
-          </>
-        )}
-      </Card>
+            <div role="tablist" aria-label="顯示深度" className="board-mode-toggle">
+              <button type="button" role="tab" aria-selected={mode === "simple"} className={mode === "simple" ? "active" : undefined} onClick={() => switchMode("simple")}>簡單</button>
+              <button type="button" role="tab" aria-selected={mode === "pro"} className={mode === "pro" ? "active" : undefined} onClick={() => switchMode("pro")}>專業</button>
+            </div>
+          </div>
+          {isEmpty ? (
+            <EmptyState
+              icon={<Icon name="Clapperboard" size={20} />}
+              title="還沒有分鏡"
+              description="回到「① 故事」貼上故事、按「AI 解析」再「產生分鏡」。"
+              action={<Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>去寫故事</Button>}
+            />
+          ) : (
+            <>
+              <Hint style={{ margin: "4px 0 10px" }}>
+                點畫面或「單格工作室」細修；右側「資源」可就近取用素材／定裝。勾選分鏡後可從資源面板一鍵套用。
+              </Hint>
+              {outdatedByShot.size > 0 && (
+                <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
+                  <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  有 {outdatedByShot.size} 鏡的畫面是用舊設定畫的。需要更新請打開單格工作室重新生成。
+                </Hint>
+              )}
+              <div className="board-groups stack">
+                {groups.map((group, gi) => {
+                  const scene = group.storySceneId ? sceneRows.find((s) => s.id === group.storySceneId) : null;
+                  return (
+                    <section key={group.storySceneId ?? "unsorted"} className="board-scene-group">
+                      {scene ? (
+                        <SceneGroupHeader projectId={projectId} scene={scene} index={gi} shotCount={group.shots.length} canEdit={canEdit} locations={(scenePresets.data ?? []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }))} />
+                      ) : (
+                        <header className="board-scene-head board-scene-head--unsorted">
+                          <span className="board-scene-head__num">未分場</span>
+                          <Meta as="span">{group.shots.length} 鏡・手動加入或重構前的分鏡</Meta>
+                        </header>
+                      )}
+                      {group.shots.length === 0 ? (
+                        <Meta as="p" style={{ margin: "6px 0 0 2px" }}>這一場還沒有鏡</Meta>
+                      ) : (
+                        <div className="board-shots">
+                          {group.shots.map((shot) => (
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} />
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </Card>
+        <ResourceDock projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} characterNames={characterNames} />
+      </div>
       {studioShot && (
         <SceneStudio
           sceneId={studioShot.id}
@@ -262,17 +179,9 @@ export function StoryboardStage({
           charIds={charIds}
           sceneIds={sceneIds}
           propIds={propIds}
-          nav={
-            <ShotNavigator
-              shots={shotRows}
-              currentId={studioShot.id}
-              onGo={(nextId) => setStudioSceneId(nextId)}
-            />
-          }
+          nav={<ShotNavigator shots={shotRows} currentId={studioShot.id} onGo={(nextId) => setStudioSceneId(nextId)} />}
           onClose={() => setStudioSceneId(null)}
-          onChanged={() => {
-            utils.scenes.listByProject.invalidate({ projectId });
-          }}
+          onChanged={() => { utils.scenes.listByProject.invalidate({ projectId }); }}
         />
       )}
     </div>
