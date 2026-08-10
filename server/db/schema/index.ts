@@ -22,3 +22,4 @@ export * from "./community";
 export * from "./intelligence";
 export * from "./library";
 export * from "./externalIntake";
+export * from "./externalEditing";

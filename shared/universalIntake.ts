@@ -3,6 +3,7 @@ import { z } from "zod";
 export const INTAKE_SOURCES = [
   "upload", "drag-drop", "clipboard", "url", "google-drive", "desktop-watch",
   "mobile-share", "browser-extension", "external-ai", "internal-generation",
+  "external-editor",
 ] as const;
 export type IntakeSource = (typeof INTAKE_SOURCES)[number];
 

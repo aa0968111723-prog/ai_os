@@ -1,10 +1,12 @@
 mod editors;
+mod editing;
 mod folder;
 mod handoff;
 mod menu;
 mod models;
 
 use folder::{forget_import_folder, pick_import_folder, scan_import_folder, FolderRootState};
+use editing::materialize_editing_package;
 use handoff::{
     detect_editors, open_asset, resume_active_handoffs, reveal_asset, stop_handoff, HandoffState,
 };
@@ -55,7 +57,8 @@ pub fn run() {
             stop_handoff,
             pick_import_folder,
             scan_import_folder,
-            forget_import_folder
+            forget_import_folder,
+            materialize_editing_package
         ])
         .setup(|app| {
             #[cfg(desktop)]

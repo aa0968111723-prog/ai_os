@@ -132,9 +132,14 @@ export function MenuSurface({
       const t = e.target as Node;
       if (surfaceRef.current?.contains(t)) return;
       if (triggerRef?.current?.contains(t)) return;
+      // A command inside the sheet may open a second, portal-based modal
+      // (editing handoff, file intake, picker). It is visually and logically a
+      // child even though it lives beside this portal in document.body.
+      if (t instanceof Element && t.closest(".modal-scrim")) return;
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof Element && e.target.closest(".modal-scrim")) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();

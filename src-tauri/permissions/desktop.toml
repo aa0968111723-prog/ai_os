@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-desktop-bridge"
-description = "Allows the trusted Aios production WebView to detect allowlisted editors, manage Aios-owned media handoffs, and scan a user-chosen import folder (relative paths only — the absolute path never leaves the native side)."
+description = "Allows the trusted Aios production WebView to detect allowlisted editors, manage Aios-owned media and editing-package handoffs, and scan a user-chosen import folder (relative paths only — the absolute path never leaves the native side)."
 commands.allow = [
   "detect_editors",
   "open_asset",
@@ -8,5 +8,6 @@ commands.allow = [
   "stop_handoff",
   "pick_import_folder",
   "scan_import_folder",
-  "forget_import_folder"
+  "forget_import_folder",
+  "materialize_editing_package"
 ]

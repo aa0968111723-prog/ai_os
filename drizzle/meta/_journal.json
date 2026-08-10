@@ -435,6 +435,13 @@
       "when": 1788700000000,
       "tag": "0061_external_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788800000000,
+      "tag": "0062_external_editing_bridge",
+      "breakpoints": true
     }
   ]
 }

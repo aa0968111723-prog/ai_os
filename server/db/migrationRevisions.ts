@@ -306,4 +306,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0061_external_intake": [
     "fc9a21e42738d5303af2aca2860ccc12fc9e9fe51008b9915f54e9c65863b44a",
   ],
+  "0062_external_editing_bridge": [
+    "e55299a7a6b9f61a2c603f32a988c3051b1dd1966bf3caaca65f4f12ba68d4f8",
+  ],
 };

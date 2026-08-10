@@ -39,6 +39,7 @@ export function ExternalAssetIntake({
   groupId,
   sceneId,
   sceneLabel,
+  editingSessionId,
   triggerLabel = "＋ 帶入成果",
   triggerVariant = "primary",
   openRequest,
@@ -48,6 +49,8 @@ export function ExternalAssetIntake({
   groupId?: string;
   sceneId?: string;
   sceneLabel?: string;
+  /** Exact ExternalEditingBridge return target; bypasses heuristic matching. */
+  editingSessionId?: string;
   triggerLabel?: string;
   triggerVariant?: "primary" | "ghost" | "tonal";
   /** Lets the command center open the existing mini workspace from natural language. */
@@ -68,7 +71,7 @@ export function ExternalAssetIntake({
   const utils = trpc.useUtils();
   const sessions = trpc.externalIntake.activeSessions.useQuery(
     { projectId, sceneId },
-    { enabled: open, staleTime: 10_000 },
+    { enabled: open && !editingSessionId, staleTime: 10_000 },
   );
   const activeSession = sessions.data?.[0];
   const context = { currentProjectId: projectId, ...(sceneId ? { currentSceneId: sceneId } : {}) };
@@ -92,6 +95,7 @@ export function ExternalAssetIntake({
     void utils.externalIntake.inbox.invalidate({ projectId });
     void utils.externalIntake.activeSessions.invalidate();
     void utils.projects.assets.invalidate({ projectId });
+    void utils.externalEditing.list.invalidate({ projectId });
     onImported?.(notice);
   };
 
@@ -100,13 +104,17 @@ export function ExternalAssetIntake({
     const form = new FormData();
     form.append("projectId", projectId);
     form.append("intake", "1");
-    form.append("source", "external-ai");
+    form.append("source", editingSessionId ? "external-editor" : "external-ai");
     form.append("importMethod", method);
     form.append("context", JSON.stringify(context));
     form.append("mediaMetadata", JSON.stringify(mediaMetadata));
     if (activeSession) {
       form.append("externalSessionId", activeSession.id);
       form.append("sourceTool", activeSession.externalTool);
+    }
+    if (editingSessionId) {
+      form.append("editingSessionId", editingSessionId);
+      form.append("sourceTool", "lumafusion");
     }
     if (forceDuplicate) form.append("forceDuplicate", "1");
     form.append("file", file);
@@ -177,6 +185,7 @@ export function ExternalAssetIntake({
         source: "url",
         context,
         externalSessionId: activeSession?.id,
+        editingSessionId,
         sourceTool: activeSession?.externalTool,
       });
       if (!result.ok) {
@@ -193,6 +202,7 @@ export function ExternalAssetIntake({
               source: "url",
               context,
               externalSessionId: activeSession?.id,
+              editingSessionId,
               sourceTool: activeSession?.externalTool,
               forceDuplicate: true,
             });
@@ -230,6 +240,7 @@ export function ExternalAssetIntake({
           fileId: file.id,
           context,
           externalSessionId: activeSession?.id,
+          editingSessionId,
         });
         if (result.ok) {
           done += 1;
@@ -248,6 +259,7 @@ export function ExternalAssetIntake({
               fileId: file.id,
               context,
               externalSessionId: activeSession?.id,
+              editingSessionId,
               forceDuplicate: true,
             })).ok,
           });
@@ -279,6 +291,11 @@ export function ExternalAssetIntake({
               <Hint role="status" style={{ margin: "8px 0" }}>
                 正在等待 {activeSession.externalToolName} 成果：{sceneLabel ?? (sceneId ? "目前分鏡" : "目前專案")}。
                 帶入後會優先詢問是否套用到這裡。
+              </Hint>
+            )}
+            {editingSessionId && (
+              <Hint role="status" style={{ margin: "8px 0" }}>
+                回傳到同一個 LumaFusion 剪輯工作階段；Aios 會保留來源版本與原本的專案位置。
               </Hint>
             )}
             <div className="external-intake__tabs" role="tablist" aria-label="帶入方式">

@@ -105,6 +105,10 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   orchestrate_group_campaign: { base: "幫我規劃完整中秋宣傳活動：開專案、分工、做影片。" },
   generate_media: { base: "幫我生成第 3 鏡的畫面。", focused: "幫我生成{it}的畫面。" },
   prepare_external_generation: { base: "把第 3 鏡拿去 Flow 生，成果再帶回這個對話。", focused: "把{it}拿去外部 AI 生成。" },
+  prepare_editing_handoff: { base: "把目前專案準備成 LumaFusion 剪輯交接。", focused: "把{it}準備成 LumaFusion 剪輯交接。" },
+  open_editing_session: { base: "打開剛建立的剪輯工作階段。" },
+  return_editing_result: { base: "把 LumaFusion 剪好的成果回傳到原工作階段。" },
+  review_editing_result: { base: "審核剛回傳的剪輯成果。", focused: "審核{it}的外部剪輯成果。" },
 };
 
 /**
@@ -148,6 +152,10 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   orchestrate_group_campaign: { pages: ["home", "collab", "agent_run"] },
   generate_media: { pages: ["storyboard", "production", "studio"], entities: ["shot", "asset"] },
   prepare_external_generation: { pages: ["storyboard", "production", "studio"], entities: ["shot"] },
+  prepare_editing_handoff: { pages: ["storyboard", "production", "final", "studio"], entities: ["shot", "scene"] },
+  open_editing_session: { pages: ["production", "final", "project"] },
+  return_editing_result: { pages: ["production", "final", "assets"], entities: ["shot"] },
+  review_editing_result: { pages: ["production", "final", "studio"], entities: ["shot", "asset"] },
   read_generations: { pages: ["production", "final", "studio"] },
 };
 

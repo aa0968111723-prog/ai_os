@@ -20,6 +20,8 @@ import { Icon } from "../../components/Icon";
 import { AssetImg } from "../../components/MediaFallback";
 import { ConfirmButton } from "../../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill } from "../../components/ui";
+import { EditingHandoffSheet } from "../external-editing/EditingHandoffSheet";
+import { EditingSessionCard } from "../external-editing/EditingSessionCard";
 import {
   COMPLETION_TRACKS,
   TRACK_LABEL,
@@ -64,6 +66,8 @@ export function DeliveryRoom({
   const [filter, setFilter] = useState<FilterKey>("all");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [sheetShotId, setSheetShotId] = useState<string | null>(null);
+  const [editingSheetOpen, setEditingSheetOpen] = useState(false);
+  const editingSessions = trpc.externalEditing.list.useQuery({ projectId });
 
   const invalidate = () => {
     utils.scenes.listByProject.invalidate({ projectId });
@@ -150,7 +154,24 @@ export function DeliveryRoom({
         <Meta as="span">
           {project.completeShots} / {project.shots} 鏡全部就緒
         </Meta>
+        {canEdit ? (
+          <Button size="sm" variant="tonal" onClick={() => setEditingSheetOpen(true)}>
+            <Icon name="Clapperboard" size={13} /> 交給 LumaFusion 剪輯
+          </Button>
+        ) : null}
       </div>
+
+      {(editingSessions.data?.length ?? 0) > 0 ? (
+        <section className="editing-session-list" aria-label="外部剪輯工作階段">
+          <div className="editing-session-list__head">
+            <strong>外部剪輯工作階段</strong>
+            <Meta>{editingSessions.data?.length} 個</Meta>
+          </div>
+          {editingSessions.data?.map((session) => (
+            <EditingSessionCard key={session.id} session={session} onChanged={() => void editingSessions.refetch()} />
+          ))}
+        </section>
+      ) : null}
 
       <div className="delivery-room__tracks">
         {COMPLETION_TRACKS.map((t) => (
@@ -338,6 +359,14 @@ export function DeliveryRoom({
         </div>,
         document.body,
       )}
+      <EditingHandoffSheet
+        open={editingSheetOpen}
+        projectId={projectId}
+        defaultShotIds={picked.size ? [...picked] : []}
+        originSurface="delivery"
+        onClose={() => setEditingSheetOpen(false)}
+        onPrepared={() => void editingSessions.refetch()}
+      />
     </Card>
   );
 }

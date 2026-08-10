@@ -34,6 +34,12 @@ export type DesktopAssetRevealRequest = {
   projectId?: string;
 };
 
+export type DesktopEditingPackageRequest = {
+  packageId: string;
+  editingSessionId: string;
+  fileName: string;
+};
+
 export type DesktopBridgeResult =
   | { ok: true; handoffId?: string; localName?: string }
   | {
@@ -91,6 +97,8 @@ export type AiosDesktopBridge = {
   detectEditors?(): Promise<DetectedDesktopEditor[]>;
   /** 停止監看與自動回傳；不刪已上傳的 revision。 */
   stopHandoff?(handoffId: string): Promise<DesktopBridgeResult>;
+  /** 將後端授權的交接 ZIP 存進 Aios 管理的本機資料夾並在檔案管理器顯示。 */
+  materializeEditingPackage?(request: DesktopEditingPackageRequest): Promise<DesktopBridgeResult>;
   /** 開啟原生資料夾選擇視窗；只回 rootId 與顯示名。 */
   pickImportFolder?(): Promise<DesktopFolderResult<DesktopFolderRoot>>;
   /** 重新掃描已記住的來源根目錄，回相對路徑清單（重新同步的差異比對就靠它）。 */
@@ -278,6 +286,17 @@ export async function revealAssetInFolder(request: DesktopAssetRevealRequest): P
     };
   }
   return desktop.revealAsset(request);
+}
+
+export async function materializeEditingPackage(request: DesktopEditingPackageRequest): Promise<DesktopBridgeResult> {
+  if (!SAFE_ID_RE.test(request.packageId) || !SAFE_ID_RE.test(request.editingSessionId) || !SAFE_NAME_RE.test(request.fileName) || !request.fileName.toLowerCase().endsWith(".zip")) {
+    return { ok: false, reason: "invalid-request", message: "交接包資料格式不正確" };
+  }
+  const desktop = bridge();
+  if (!desktop?.materializeEditingPackage) {
+    return { ok: false, reason: "unsupported", message: "目前的 Aios 桌面版尚未支援交接包資料夾；請使用分享／下載。" };
+  }
+  return desktop.materializeEditingPackage(request);
 }
 
 /* ────────────────────────── 桌面資料夾：renderer 端守門 ────────────────────────── */

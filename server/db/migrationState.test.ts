@@ -339,9 +339,11 @@ describe("legacy migration adoption bridge", () => {
     // 3 guarded indexes — 6 statements with no data movement.
     // 0061 External intake hand-off state adds 2 tables plus 5 guarded indexes —
     // 7 statements. Assets remain canonical; this migration performs no data move.
+    // 0062 External Editing Bridge adds 2 tables plus 5 guarded indexes —
+    // 7 statements. Packages and sessions are additive; existing assets are unchanged.
     // Verified statement by statement: no ALTER of an existing column, no UPDATE,
     // no DELETE, no data movement, so a re-run is a no-op.
-    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7);
+    expect(result.alreadyPresent).toBe(8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7);
   });
 
   it("bridge 之後的純新增 migration 不算「非 bridge 預期 drift」", () => {

@@ -7,6 +7,7 @@ import {
   type DesktopFolderResult,
   type DesktopFolderRoot,
   type DesktopFolderScan,
+  type DesktopEditingPackageRequest,
   type DetectedDesktopEditor,
 } from "./desktopBridge";
 
@@ -153,6 +154,9 @@ export function bootstrapTauriDesktop(): void {
     },
     async stopHandoff(handoffId: string): Promise<DesktopBridgeResult> {
       return toBridgeResult(await api.core.invoke("stop_handoff", { handoffId }));
+    },
+    async materializeEditingPackage(request: DesktopEditingPackageRequest): Promise<DesktopBridgeResult> {
+      return toBridgeResult(await api.core.invoke("materialize_editing_package", { request }));
     },
     async pickImportFolder(): Promise<DesktopFolderResult<DesktopFolderRoot>> {
       return toFolderResult<DesktopFolderRoot>(await api.core.invoke("pick_import_folder"));

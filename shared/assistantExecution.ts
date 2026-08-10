@@ -107,6 +107,10 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "read_generations", domain: "GENERATION", access: "READ", label: "讀取生成紀錄與模型", risk: "READ", direct: true },
   { id: "generate_media", domain: "GENERATION", access: "WRITE", label: "生成圖片或影片", risk: "COSTFUL", direct: false },
   capability({ id: "prepare_external_generation", domain: "GENERATION", access: "WRITE", label: "開啟外部 AI 生成", risk: "EXTERNAL", direct: false, requiredContextSlots: ["projectId", "shotId"], executionMode: "DIRECT_TOOL", handler: "externalIntake.prepareExternalGeneration", resultType: "generation", verificationStrategy: "external_confirmation" }),
+  capability({ id: "prepare_editing_handoff", domain: "ASSET", access: "WRITE", label: "準備外部剪輯交接", risk: "EXTERNAL", direct: false, requiredContextSlots: ["projectId"], executionMode: "DIRECT_TOOL", handler: "externalEditing.prepare", resultType: "generic", verificationStrategy: "read_back" }),
+  capability({ id: "open_editing_session", domain: "ASSET", access: "READ", label: "開啟剪輯工作階段", risk: "READ", direct: true, requiredContextSlots: ["projectId"], executionMode: "DIRECT_TOOL", handler: "externalEditing.list", resultType: "generic", verificationStrategy: "read_back" }),
+  capability({ id: "return_editing_result", domain: "INTAKE", access: "WRITE", label: "回傳外部剪輯成果", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], executionMode: "DIRECT_TOOL", handler: "universalIntake.ingestTmpAsset", resultType: "import", verificationStrategy: "job_registered" }),
+  capability({ id: "review_editing_result", domain: "ASSET", access: "READ", label: "AI 審查外部剪輯成果", risk: "READ", direct: true, requiredContextSlots: ["projectId", "assetIds"], executionMode: "DIRECT_TOOL", handler: "globalAssistant.siteAsk", resultType: "generic", verificationStrategy: "none" }),
 ] as const;
 
 export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
