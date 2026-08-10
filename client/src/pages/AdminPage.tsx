@@ -336,7 +336,7 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
         </span>
         <span>本週 {member.weekly.toLocaleString()} 點・累計 {member.total.toLocaleString()} 點{member.budget != null && `（個人預算 ${member.budget.toLocaleString()}）`}</span>
       </Meta>
-      {/* 第三列：就地可調的個人額度（比照組長「監控與紀錄」頁的點數分配卡同一套 quota mutation） */}
+      {/* 第三列：就地可調的個人額度（比照組長「用量與活動紀錄」頁的點數分配卡同一套 quota mutation） */}
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
         <MemberNumberField
           label="個人預算"
@@ -2241,7 +2241,7 @@ export function AdminPage() {
         {isSuperAdmin && <CreateTeamCard />}
         <Card data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
-          <Hint>空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「監控與紀錄」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
+          <Hint>空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「用量與活動紀錄」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
               三態：error（明講失敗＋重試）／data（表單）／載入中（骨架）——缺 error 分支時
               失敗會永遠停在骨架上，管理員以為還在載入而空等 */}

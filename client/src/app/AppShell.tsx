@@ -9,6 +9,7 @@ import { unsubscribeThisDevice } from "../push";
 import { SplashScreen } from "../components/SplashScreen";
 import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
+import { pageTitle } from "./pageTitle";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
 import { AgentActivityHud } from "./components/AgentActivityHud";
@@ -55,22 +56,6 @@ function shouldShowSplash(): boolean {
   } catch {
     return true;
   }
-}
-
-function pageTitle(pathname: string): string {
-  // #273：與 brand.ts BRAND_NAME 對齊（Aios）
-  if (pathname === "/") return "Aios｜把想法變成可執行的團隊計畫";
-  if (pathname === "/login") return "登入｜Aios";
-  if (pathname === "/dashboard") return "今日工作台｜Aios";
-  if (pathname.startsWith("/p/")) return "專案｜Aios";
-  // 分享連結的唯讀檢視：頁面自己會在拿到資料後改成專案名，這裡先給中性標題，
-  // 不要讓外部訪客的分頁標題直接掛上產品名以外的內部字樣
-  if (pathname.startsWith("/s/")) return "專案檢視｜Aios";
-  if (pathname.startsWith("/planner")) return "筆記排程｜Aios";
-  if (pathname.startsWith("/databases")) return "知識資料｜Aios";
-  if (pathname.startsWith("/studio")) return "動畫創作室｜Aios";
-  if (pathname.startsWith("/chat")) return "訊息｜Aios";
-  return "Aios";
 }
 
 /**

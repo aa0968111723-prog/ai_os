@@ -327,7 +327,7 @@ export function HelpPage() {
           <Spot icon="User" name="通訊錄" where="選單・管理">
             團隊 → 組別 → 成員一層層攤開，邀請新夥伴（連結用 LINE 傳）、看誰在哪一組。
           </Spot>
-          <Spot icon="FileText" name="監控與紀錄" where="選單・管理">
+          <Spot icon="FileText" name="用量與活動紀錄" where="選單・管理">
             點數消耗監控＋操作紀錄，看點花在哪、誰做了什麼；範圍自動收斂到你帶的組。
             組長的「成本審核門檻」與「點數分配」也在這一頁。
           </Spot>
