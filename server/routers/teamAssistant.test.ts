@@ -667,7 +667,7 @@ describe("TEAM_ASSISTANT_DATA_BOUNDARY_RULE（組級助手資料範圍邊界）"
   it("列出／統計本組專案時只能列 <組現況> 清單上的，不得把其他來源的專案名當本組專案", () => {
     const rule = TEAM_ASSISTANT_DATA_BOUNDARY_RULE;
     expect(rule).toContain("只能列 <組現況> 清單上出現的專案");
-    expect(rule).toContain("不得把先前對話、資料庫搜尋或其他任何來源出現過的專案名當成本組專案");
+    expect(rule).toContain("嚴禁把先前對話、資料庫搜尋或其他任何來源出現過的專案名當成本組專案");
   });
 });
 
