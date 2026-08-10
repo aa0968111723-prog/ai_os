@@ -10,6 +10,7 @@ import { Icon } from "../../components/Icon";
 import { SceneStudio } from "../../components/SceneStudio";
 import { Button, Card, EmptyState, Hint, Meta } from "../../components/ui";
 import { scrollToSelector } from "../creation-workbench/workbenchNav";
+import { revealProjectContext } from "../project-nav/projectContextNav";
 import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from "./boardPrefs";
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
@@ -126,6 +127,36 @@ export function StoryboardStage({
             {shotRows.length} 鏡
           </Meta>
           <span style={{ flex: "1 1 auto" }} />
+          {/* 快速入口：素材運用三層路徑的上層捷徑（素材庫 → 定裝 → 知識庫） */}
+          <div className="board-stage__quick-links" role="navigation" aria-label="素材與定裝快速入口">
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              title="打開專案素材庫——把參考圖／現成素材帶進分鏡"
+              onClick={() => revealProjectContext("assets", { projectId, returnTo: "scenes" })}
+            >
+              <Icon name="LayoutGrid" size={13} /> 素材庫
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              title="打開角色／造型定裝——鎖定後生成才會一致"
+              onClick={() => revealProjectContext("characters", { projectId, returnTo: "scenes" })}
+            >
+              <Icon name="User" size={13} /> 定裝
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              title="打開知識庫（腳本、參考文件）"
+              onClick={() => revealProjectContext("knowledge", { projectId, returnTo: "scenes" })}
+            >
+              <Icon name="FileText" size={13} /> 知識庫
+            </Button>
+          </div>
           <div role="tablist" aria-label="顯示深度" className="board-mode-toggle">
             <button
               type="button"
@@ -133,7 +164,7 @@ export function StoryboardStage({
               aria-selected={mode === "simple"}
               className={mode === "simple" ? "active" : undefined}
               onClick={() => switchMode("simple")}
-              title="畫面、角色、場景、動作、秒數"
+              title="畫面、角色、場景、動作、秒數——細節預設收合"
             >
               簡單
             </button>
@@ -143,7 +174,7 @@ export function StoryboardStage({
               aria-selected={mode === "pro"}
               className={mode === "pro" ? "active" : undefined}
               onClick={() => switchMode("pro")}
-              title="加開焦段、角度、運鏡、光線、構圖、表情、視線"
+              title="加開焦段、角度、運鏡、光線、構圖、表情、視線——桌機預設展開細節"
             >
               專業
             </button>
@@ -163,7 +194,7 @@ export function StoryboardStage({
         ) : (
           <>
             <Hint style={{ margin: "4px 0 10px" }}>
-              點分鏡卡的畫面或「生成」進單格工作室——圖、影、配音、環境音、版本都在那裡，生成結果自動綁回這一鏡。
+              點畫面或「單格工作室」細修；「從素材庫選用」或拖放檔案可直接套用現有素材。展開「素材與設定」可改世界引用與鏡頭語言。
             </Hint>
             {/* §23：卡片改過但畫面還是舊的。放在最上面，不必捲完整頁才知道有落差 */}
             {outdatedByShot.size > 0 && (

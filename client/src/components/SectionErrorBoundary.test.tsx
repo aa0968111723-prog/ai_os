@@ -88,4 +88,26 @@ describe("SectionErrorBoundary", () => {
     expect(screen.getByText("分鏡區塊暫時無法顯示")).toBeInTheDocument();
     expect(screen.getByText(/程式檔沒有載入完成/)).toBeInTheDocument();
   });
+
+  it("minified React error 不直接渲染 raw message（#185 等）", async () => {
+    const user = userEvent.setup();
+    const raw = "Minified React error #185; visit https://react.dev/errors/185 for the full message";
+    function BoomMinified(): ReactNode {
+      throw new Error(raw);
+    }
+    render(
+      <SectionErrorBoundary title="分鏡">
+        <BoomMinified />
+      </SectionErrorBoundary>,
+    );
+    // 可見區：友善標題／說明，沒有 raw Minified 字串
+    expect(screen.getByText("分鏡區塊暫時無法顯示")).toBeInTheDocument();
+    expect(screen.getByText(/其餘區塊不受影響/)).toBeInTheDocument();
+    expect(screen.queryByText(/Minified React error/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/react\.dev\/errors/i)).not.toBeInTheDocument();
+    // 展開詳情：只露簡短內部錯誤碼，仍不攤 raw message
+    await user.click(screen.getByText("錯誤詳情（回報時請附上）"));
+    expect(screen.getByText(/React 內部錯誤 #185/)).toBeInTheDocument();
+    expect(screen.queryByText(/Minified React error/i)).not.toBeInTheDocument();
+  });
 });

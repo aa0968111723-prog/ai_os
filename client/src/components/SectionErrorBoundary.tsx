@@ -3,7 +3,12 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Meta } from "./ui/Meta";
 import { Icon } from "./Icon";
-import { buildCrashReport, isChunkLoadError, type CrashReport } from "../lib/crashReport";
+import {
+  buildCrashReport,
+  displayCrashHeadline,
+  isChunkLoadError,
+  type CrashReport,
+} from "../lib/crashReport";
 
 /**
  * 區塊級錯誤邊界：把「整頁死亡」降級成「單區失能」。
@@ -15,6 +20,10 @@ import { buildCrashReport, isChunkLoadError, type CrashReport } from "../lib/cra
  *
  * 與全域版相同的精神：錯誤摘要一定要看得見（console 對手機 PWA 使用者形同不存在），
  * 但呈現方式收斂成一張卡片，而不是整頁空狀態。
+ *
+ * 正式包的 Minified React error #N **絕不**直接渲染 error.message——那串英文與
+ * react.dev 連結會破壞專業工具信任感；可見區只留友善標題／說明，技術細節收進
+ * 「錯誤詳情」可複製報告。
  */
 export class SectionErrorBoundary extends Component<
   {
@@ -66,6 +75,8 @@ export class SectionErrorBoundary extends Component<
     if (this.state.error) {
       const report = this.state.report;
       const chunk = isChunkLoadError(this.state.error);
+      // 可見摘要永遠走友善路徑；minified React 不露 raw message
+      const detailHeadline = displayCrashHeadline(this.state.error, report);
       return (
         <Card
           variant="quiet"
@@ -90,7 +101,7 @@ export class SectionErrorBoundary extends Component<
                   <details style={{ fontSize: 13 }}>
                     <summary style={{ cursor: "pointer" }}>錯誤詳情（回報時請附上）</summary>
                     <div style={{ marginTop: 8 }}>
-                      <p className="mono" style={{ wordBreak: "break-word", margin: "0 0 8px" }}>{report.headline}</p>
+                      <p className="mono" style={{ wordBreak: "break-word", margin: "0 0 8px" }}>{detailHeadline}</p>
                       <Button size="sm" variant="ghost" onClick={this.copy}>
                         {this.state.copied ? "已複製 ✓" : "複製錯誤詳情"}
                       </Button>
