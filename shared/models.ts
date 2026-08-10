@@ -1247,6 +1247,16 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
+    // 2026-08-10 fal 實抓:Seedance 2.5 文生影片,30s 原生單鏡、最高 720p(480p/720p、4-30s 或 auto、generate_audio 預設 true);
+    // 無 seed/negative_prompt 輸入欄(allowlist 不加)。定價=fal token 公式($0.0214/1000 tokens)720p 帶音 ~$0.473/秒、帶影片參考 ×0.6;
+    // 30s 一鏡≈344 點屬高單筆→verified=false 預覽+flagship tier,校準品質與成本後再全量;多輪延伸首波不開。
+    id: "bytedance/seedance-2.5/text-to-video", label: "Seedance 2.5(字節)", category: "text-to-video", tier: "flagship", kind: "video",
+    points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "字節最新世代;30s 一鏡到底、原生音訊、可控性再升級",
+    bestFor: "短影音 workflow 的結構性升級:30s 一鏡到位",
+    input: (p, f) => ({ prompt: p, resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
+  },
+  {
     // 點數以「無音」首價 $0.03×5s 計(realPricePoints);開音訊／更長秒實際費用較高
     // 審計 #112：OpenAPI aspect_ratio 僅 16:9|9:16（無 1:1）→ 1:1 映射 16:9 防 422；duration 預設 8s+generate_audio true 與扁平 5 點脫鉤見卡 P0
     id: "fal-ai/veo3.1/lite", label: "Veo 3.1 Lite(Google)", category: "text-to-video", tier: "economy", kind: "video",
@@ -1456,6 +1466,27 @@ export const MODELS: ModelEntry[] = [
     bestFor: "一張圖延展成有分鏡感的連貫段落",
     sourceHint: "作為首格的圖(素材庫或網址)",
     input: (p, _f, s) => ({ prompt: p, image_url: s }),
+  },
+  {
+    // 2026-08-10 fal 實抓:Seedance 2.5 圖生影片,480p/720p、4-30s 或 auto、generate_audio 預設 true;aspect_ratio 官方標「Always auto」。
+    // 定價同 t2v(fal token 公式 720p 帶音 ~$0.473/秒、帶影片參考 ×0.6);30s≈344 點高單筆→verified=false 預覽+flagship,校準後再全量。
+    id: "bytedance/seedance-2.5/image-to-video", label: "Seedance 2.5 圖生(字節)", category: "image-to-video", tier: "flagship", kind: "video",
+    needs: "image", points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Seedance 2.5 圖生;30s 一鏡、原生音訊",
+    bestFor: "一張圖延展成 30s 一鏡連貫片段",
+    sourceHint: "作為首格的圖(素材庫或網址)",
+    input: (p, _f, s) => ({ prompt: p, image_url: s, resolution: "720p", aspect_ratio: "auto", generate_audio: true }),
+  },
+  {
+    // 2026-08-10 fal 實抓:Seedance 2.5 參考生影片,最多 50 個多模態參考(30 圖＋10 影片＋10 音訊)、480p/720p、4-30s 或 auto、原生音訊;
+    // 定價=fal token 公式:帶影片參考 ×0.6 降為 ~$0.2838/秒、圖/音訊參考不計費。目錄無 reference-to-video 類別→掛 image-to-video(fal 官方標題即 "Reference to Video (Image to Video)")。
+    // 首波先單圖參考(image_urls[0])當 preview;多模態輸入前端適配另議(+0.25 人天上限)。
+    id: "bytedance/seedance-2.5/reference-to-video", label: "Seedance 2.5 參考生(字節)", category: "image-to-video", tier: "flagship", kind: "video",
+    needs: "image", points: 73, cost: "720p帶音 $0.473/秒(無影片參考)、帶影片參考 $0.2838/秒;480p $0.2205/秒;按秒計費,點數為 5 秒@720p 基準", verified: false,
+    strengths: "Seedance 2.5 參考生;多模態參考鎖定角色/場景/風格、30s 一鏡",
+    bestFor: "要鎖定角色/風格/場景一致性的 30s 一鏡",
+    sourceHint: "作為參考的圖(素材庫或網址)",
+    input: (p, _f, s) => ({ prompt: p, image_urls: s ? [s] : [], resolution: "720p", aspect_ratio: "auto", generate_audio: true }),
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2/image-to-video", label: "Luma Ray-2(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
