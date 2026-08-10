@@ -3,13 +3,13 @@ import { inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import {
-  certifyFalModelsFromHistory,
-  certifySuccessfulFalModel,
+  certifyModelsFromHistory,
+  certifySuccessfulModel,
 } from "./modelCertification";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 
-describe.skipIf(!RUN_PG).sequential("Fal model certification (real PostgreSQL)", () => {
+describe.skipIf(!RUN_PG).sequential("Model certification (real PostgreSQL)", () => {
   const modelIds: string[] = [];
   const generationIds: string[] = [];
 
@@ -58,14 +58,52 @@ describe.skipIf(!RUN_PG).sequential("Fal model certification (real PostgreSQL)",
     const modelId = `fal-ai/cert-${randomUUID()}`;
     await insertCatalog(modelId);
 
-    expect(await certifySuccessfulFalModel(modelId, { reloadCache: false })).toBe(1);
+    expect(await certifySuccessfulModel(modelId, { reloadCache: false })).toBe(1);
     const [live] = await db.select().from(schema.modelLiveCatalog)
       .where(inArray(schema.modelLiveCatalog.id, [modelId]));
     const [catalog] = await db.select().from(schema.modelCatalog)
       .where(inArray(schema.modelCatalog.id, [modelId]));
     expect(live.verified).toBe(true);
     expect(catalog.verified).toBe(true);
-    expect(await certifySuccessfulFalModel(modelId, { reloadCache: false })).toBe(0);
+    expect(await certifySuccessfulModel(modelId, { reloadCache: false })).toBe(0);
+  });
+
+  it("certifies an OpenRouter LLM id without bulk-certifying its shared router endpoint", async () => {
+    const modelId = `openrouter/router#llm-cert-${randomUUID()}`;
+    const sharedEndpoint = "openrouter/router";
+    modelIds.push(modelId);
+    await db.insert(schema.modelLiveCatalog).values({
+      id: modelId,
+      endpoint: sharedEndpoint,
+      label: modelId,
+      category: "llm",
+      tier: "budget",
+      kind: "text",
+      source: "static",
+      points: 1,
+      cost: "$0.14/$0.28 per M tokens",
+      estTwd: 1,
+      strengths: "test",
+      bestFor: "test",
+      verified: false,
+    });
+    await db.insert(schema.modelCatalog).values({
+      id: modelId,
+      endpoint: sharedEndpoint,
+      category: "llm",
+      tier: "budget",
+      kind: "text",
+      points: 1,
+      strengths: "test",
+      bestFor: "test",
+      cost: "$0.14/$0.28 per M tokens",
+      verified: false,
+    });
+
+    expect(await certifySuccessfulModel(modelId, { reloadCache: false })).toBe(1);
+    const rows = await db.select().from(schema.modelLiveCatalog)
+      .where(inArray(schema.modelLiveCatalog.id, [modelId]));
+    expect(rows[0].verified).toBe(true);
   });
 
   it("backfills real historical success but excludes E2E mock evidence", async () => {
@@ -100,7 +138,7 @@ describe.skipIf(!RUN_PG).sequential("Fal model certification (real PostgreSQL)",
       },
     ]);
 
-    const result = await certifyFalModelsFromHistory({ reloadCache: false });
+    const result = await certifyModelsFromHistory({ reloadCache: false });
     expect(result.newlyCertified).toBeGreaterThanOrEqual(1);
     const rows = await db.select().from(schema.modelLiveCatalog)
       .where(inArray(schema.modelLiveCatalog.id, [realModelId, mockModelId]));
