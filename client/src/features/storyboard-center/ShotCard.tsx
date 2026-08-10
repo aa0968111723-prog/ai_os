@@ -1,15 +1,18 @@
 /**
- * 分鏡卡（Shot Card；PE 計畫 §10）：創作、資料引用與生成行為在同一個上下文完成。
- * 區塊：Preview（現用畫面）｜Narrative（畫面/台詞/旁白）｜World Refs（角色/場景/道具/造型）｜
- * Direction（鏡別…專業模式全開）｜Performance（表情/視線）｜Generation 入口（單格工作室）。
+ * 分鏡卡（Shot Card；PE 計畫 §10 + Progressive Disclosure）：
+ *
+ * 預設緊湊面（face）：編號／標題／時長、完成度點、大預覽、已綁定摘要 chips、必要操作。
+ * 展開區（details）：世界引用、鏡頭語言、表演、素材操作（素材庫／拖放／外部成果）。
+ *
+ * 資料流與 mutation 不變：SceneCardBinding、cardAnchors、referenceAssetId、setVisualFromAsset 全沿用。
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
-import { useState } from "react";
+import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
 import { SceneCardBinding } from "../../components/SceneCardBinding";
-import { AssetImg } from "../../components/MediaFallback";
+import { AssetImg, AssetVideo } from "../../components/MediaFallback";
 import { Button, Card, Chip, Hint, Meta, Pill } from "../../components/ui";
 import {
   SHOT_ANGLE_OPTIONS,
@@ -19,6 +22,8 @@ import {
   type ShotPerformance,
 } from "@shared/story";
 import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
+import { hasSceneCardBinding } from "@shared/sceneCards";
+import { formatPropDisplayName } from "@shared/propOwnership";
 import type { BoardMode } from "./boardPrefs";
 import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 import { ExternalGenerationLauncher } from "../external-intake/ExternalGenerationLauncher";
@@ -60,6 +65,20 @@ export interface LookRow {
   name: string;
 }
 
+/** 手機／窄螢幕：預設更積極收合展開區，減少捲動距離 */
+function preferDetailsOpen(mode: BoardMode): boolean {
+  if (typeof window === "undefined") return mode === "pro";
+  try {
+    const mobile = window.matchMedia("(max-width: 820px)").matches;
+    // 專業模式桌機預設開；簡單模式與手機一律預設關
+    return mode === "pro" && !mobile;
+  } catch {
+    return mode === "pro";
+  }
+}
+
+const BOUND_CHIP_LIMIT = 4;
+
 export function ShotCard({
   projectId,
   shot,
@@ -100,6 +119,13 @@ export function ShotCard({
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
+  const setVisual = trpc.scenes.setVisualFromAsset.useMutation({
+    onSuccess: () => {
+      void utils.scenes.listByProject.invalidate({ projectId });
+      setLibraryOpen(false);
+      setDropStatus("✓ 已從素材庫套用到這一鏡");
+    },
+  });
   const confirmImported = trpc.externalIntake.confirm.useMutation({
     onSuccess: () => {
       void utils.scenes.listByProject.invalidate({ projectId });
@@ -112,12 +138,25 @@ export function ShotCard({
   const [dropStatus, setDropStatus] = useState("");
   const [dropDuplicateUrl, setDropDuplicateUrl] = useState<string | null>(null);
   const [dropResult, setDropResult] = useState<{ assetId: string; bindingId?: string } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(() => preferDetailsOpen(mode));
+
+  const libraryAssets = trpc.projects.assets.useQuery(
+    { projectId },
+    { enabled: libraryOpen && canEdit, staleTime: 30_000 },
+  );
+  const libraryVisuals = useMemo(
+    () => (libraryAssets.data ?? []).filter((a) => (a.kind === "image" || a.kind === "video") && a.url),
+    [libraryAssets.data],
+  );
 
   const importDroppedFiles = async (files: FileList) => {
     if (!canEdit || dropBusy || !files.length) return;
     setDropBusy(true);
     setDropStatus("");
     setDropDuplicateUrl(null);
+    setDragOver(false);
     let imported = 0;
     for (const [index, file] of Array.from(files).entries()) {
       setDropStatus(`正在安全保存 ${index + 1}/${files.length}：${file.name}`);
@@ -180,187 +219,224 @@ export function ShotCard({
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
   // 與成片頁、前後鏡導航同一支純函式——不會出現「這裡說缺、那裡說有」
   const completion = computeShotCompletion(shot);
+  const boundLocked = hasSceneCardBinding(shot) || (shot.lookIds ?? []).length > 0;
 
   /**
-   * §13 相關素材：只在專業模式查（簡單模式不顯示，就不必打這支）。
-   * 這不是語意檢索——是拿這一鏡綁定的角色／場景／道具名字比對素材標題與標籤，
-   * 所以文案寫「名稱或標籤對得上」，不寫「AI 已為你分析」。
+   * §13 相關素材：只在專業模式且展開時查（簡單模式／收合不打這支）。
+   * 這不是語意檢索——是拿這一鏡綁定的角色／場景／道具名字比對素材標題與標籤。
    */
   const assetSuggest = trpc.story.shotAssetSuggestions.useQuery(
     { sceneId: shot.id },
-    { enabled: mode === "pro", staleTime: 60_000 },
+    { enabled: mode === "pro" && detailsOpen, staleTime: 60_000 },
   );
   const assetHints = assetSuggest.data?.items ?? [];
+
+  const openLibrary = (e?: MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    if (!canEdit) return;
+    setLibraryOpen(true);
+    if (!detailsOpen) setDetailsOpen(true);
+  };
+
+  const applyLibraryAsset = (assetId: string) => {
+    if (!canEdit || setVisual.isPending) return;
+    setVisual.mutate({ sceneId: shot.id, assetId });
+  };
+
+  const onDragOverCard = (event: DragEvent) => {
+    if (!canEdit || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    setDragOver(true);
+  };
+  const onDragLeaveCard = (event: DragEvent) => {
+    // 只在真正離開卡片時清狀態（避免子元素 bubble 造成閃爍）
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setDragOver(false);
+  };
+  const onDropCard = (event: DragEvent) => {
+    if (!canEdit) return;
+    event.preventDefault();
+    setDragOver(false);
+    void importDroppedFiles(event.dataTransfer.files);
+  };
 
   return (
     <Card
       as="article"
-      className={`shot-card${dropBusy ? " shot-card--importing" : ""}`}
+      className={`shot-card${dropBusy ? " shot-card--importing" : ""}${dragOver ? " shot-card--drag-over" : ""}`}
       id={`board-shot-${shot.id}`}
       data-fb="分鏡卡"
       data-picked={picked ? "1" : undefined}
-      onDragOver={canEdit ? (event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); } : undefined}
-      onDrop={canEdit ? (event) => { event.preventDefault(); void importDroppedFiles(event.dataTransfer.files); } : undefined}
+      data-mode={mode}
+      onDragOver={canEdit ? onDragOverCard : undefined}
+      onDragLeave={canEdit ? onDragLeaveCard : undefined}
+      onDrop={canEdit ? onDropCard : undefined}
     >
-      <div className="shot-card__head">
-        {/* 勾選＝「我要對這幾鏡一起做事」。這是全站第一個分鏡多選，刻意只做最小的一件事：
-            把選中的鏡號交給 AI 助手（「把這三鏡變得更有張力」），不做批次編輯 UI。
-            用 checkbox 而不是點卡片切換——卡片本身早就是「打開單格工作室」，
-            兩種意圖搶同一個點擊區只會讓兩邊都不準。 */}
-        {onTogglePick && (
-          <label className="shot-card__pick" title={`選取第 ${shotNumber} 鏡（可多選，交給 AI 助手一起處理）`}>
-            <input
-              type="checkbox"
-              checked={!!picked}
-              aria-label={`選取第 ${shotNumber} 鏡`}
-              onChange={() => onTogglePick(shot.id)}
-            />
-          </label>
-        )}
-        <span className="shot-card__num">#{shotNumber}</span>
-        <input
-          key={`title-${shot.id}-${shot.title}`}
-          className="shot-card__title"
-          aria-label={`第 ${shotNumber} 鏡標題`}
-          defaultValue={shot.title}
-          readOnly={!canEdit}
-          maxLength={60}
-          onBlur={(e) => {
-            const v = e.target.value.trim();
-            if (canEdit && v && v !== shot.title) saveField({ sceneId: shot.id, title: v });
-          }}
-        />
-        <label className="shot-card__dur">
+      {/* ── 緊湊面：永遠可見 ── */}
+      <div className="shot-card__face">
+        <div className="shot-card__head">
+          {onTogglePick && (
+            <label className="shot-card__pick" title={`選取第 ${shotNumber} 鏡（可多選，交給 AI 助手一起處理）`}>
+              <input
+                type="checkbox"
+                checked={!!picked}
+                aria-label={`選取第 ${shotNumber} 鏡`}
+                onChange={() => onTogglePick(shot.id)}
+              />
+            </label>
+          )}
+          <span className="shot-card__num">#{shotNumber}</span>
           <input
-            key={`dur-${shot.id}-${shot.durationSec}`}
-            type="number"
-            min={1}
-            max={60}
-            defaultValue={shot.durationSec}
+            key={`title-${shot.id}-${shot.title}`}
+            className="shot-card__title"
+            aria-label={`第 ${shotNumber} 鏡標題`}
+            defaultValue={shot.title}
             readOnly={!canEdit}
-            aria-label="秒數"
+            maxLength={60}
             onBlur={(e) => {
-              const v = Number(e.target.value);
-              if (canEdit && Number.isInteger(v) && v >= 1 && v <= 60 && v !== shot.durationSec) {
-                saveField({ sceneId: shot.id, durationSec: v });
-              }
+              const v = e.target.value.trim();
+              if (canEdit && v && v !== shot.title) saveField({ sceneId: shot.id, title: v });
             }}
           />
-          秒
-        </label>
-        {generating && <Pill status="running">生成中</Pill>}
-        {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
-        {outdatedReason && <Pill status="failed">畫面過時</Pill>}
-        {shot.reviewStatus === "approved" && <Pill status="done">已通過</Pill>}
-        {shot.reviewStatus === "changes" && <Pill status="failed">需要修改</Pill>}
-      </div>
+          <label className="shot-card__dur">
+            <input
+              key={`dur-${shot.id}-${shot.durationSec}`}
+              type="number"
+              min={1}
+              max={60}
+              defaultValue={shot.durationSec}
+              readOnly={!canEdit}
+              aria-label="秒數"
+              onBlur={(e) => {
+                const v = Number(e.target.value);
+                if (canEdit && Number.isInteger(v) && v >= 1 && v <= 60 && v !== shot.durationSec) {
+                  saveField({ sceneId: shot.id, durationSec: v });
+                }
+              }}
+            />
+            秒
+          </label>
+          {generating && <Pill status="running">生成中</Pill>}
+          {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
+          {outdatedReason && <Pill status="failed">畫面過時</Pill>}
+          {shot.reviewStatus === "approved" && <Pill status="done">已通過</Pill>}
+          {shot.reviewStatus === "changes" && <Pill status="failed">需要修改</Pill>}
+        </div>
 
-      {/* §17：已通過的鏡，重新生成不會自動換掉現用畫面——不講的話使用者會以為生成壞了 */}
-      {shot.reviewStatus === "approved" && (
-        <Meta as="p" className="shot-card__approved-note">
-          <Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-          這一鏡已通過審核：之後重新生成只會存成新版本，不會自動換掉現在這張。要換請到單格工作室選版本。
-        </Meta>
-      )}
+        {/* §15 完成度：五個點就講完「這一鏡還缺什麼」 */}
+        <div className="shot-card__completion" role="group" aria-label={`完成度 ${completion.percent}%`}>
+          {COMPLETION_TRACKS.map((t) => (
+            <span
+              key={t}
+              className={`shot-card__dot shot-card__dot--${completion.tracks[t]}`}
+              title={`${TRACK_LABEL[t]}：${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "尚未完成"}`}
+            >
+              {TRACK_LABEL[t]}
+            </span>
+          ))}
+          <Meta as="span">{completion.percent}%</Meta>
+        </div>
 
-      {/* §15 完成度：五個點就講完「這一鏡還缺什麼」，比五行文字省版面也好掃 */}
-      <div className="shot-card__completion" role="group" aria-label={`完成度 ${completion.percent}%`}>
-        {COMPLETION_TRACKS.map((t) => (
-          <span
-            key={t}
-            className={`shot-card__dot shot-card__dot--${completion.tracks[t]}`}
-            title={`${TRACK_LABEL[t]}：${completion.tracks[t] === "done" ? "已完成" : completion.tracks[t] === "running" ? "進行中" : "尚未完成"}`}
-          >
-            {TRACK_LABEL[t]}
-          </span>
-        ))}
-        <Meta as="span">{completion.percent}%</Meta>
-      </div>
-
-      {/* §23：卡片改過、這張圖還是舊的。不自動重畫——講清楚原因，讓使用者決定要不要花點數重生成 */}
-      {outdatedReason && (
-        <Meta as="p" role="status" className="shot-card__outdated">
-          <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-          這張圖是舊設定畫的（{outdatedReason}後來改過）——要更新請打開單格工作室重畫。
-        </Meta>
-      )}
-
-      <button
-        type="button"
-        className="shot-card__preview"
-        onClick={() => onOpenStudio(shot.id)}
-        title={shot.assetUrl ? "打開單格工作室（重畫／修正／配音／版本）" : "還沒有畫面——打開單格工作室生成"}
-      >
-        {shot.assetUrl ? (
-          <AssetImg src={shot.assetUrl} alt={`第 ${shotNumber} 鏡畫面`} loading="lazy" fallbackLabel="畫面素材遺失" />
-        ) : (
-          <span className="shot-card__preview-empty">
-            <Icon name="Image" size={18} />
-            <Meta as="span">{canEdit ? "點擊生成畫面" : "尚無畫面"}</Meta>
-          </span>
+        {shot.reviewStatus === "approved" && (
+          <Meta as="p" className="shot-card__approved-note">
+            <Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+            已通過：重新生成只會存新版本，不會自動換掉現用畫面。
+          </Meta>
         )}
-      </button>
 
-      <textarea
-        key={`prompt-${shot.id}-${shot.prompt ?? ""}`}
-        className="shot-card__prompt"
-        aria-label="畫面描述"
-        placeholder="這一鏡的靜態畫面（構圖、光線、氣氛）…"
-        defaultValue={shot.prompt ?? ""}
-        readOnly={!canEdit}
-        rows={2}
-        onBlur={(e) => {
-          const v = e.target.value;
-          if (canEdit && v !== (shot.prompt ?? "")) saveField({ sceneId: shot.id, prompt: v });
-        }}
-      />
+        {outdatedReason && (
+          <Meta as="p" role="status" className="shot-card__outdated">
+            <Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+            這張圖是舊設定畫的（{outdatedReason}後來改過）——要更新請打開單格工作室重畫。
+          </Meta>
+        )}
 
-      {/* World Refs：引用共用資料（卡片綁定既有元件）＋造型 chips */}
-      <div className="shot-card__refs">
-        <SceneCardBinding
+        {/* 預覽區：有圖顯示圖；無圖＝拖放／素材庫／生成入口 */}
+        <div
+          className={`shot-card__preview-wrap${dragOver ? " is-drag-over" : ""}`}
+          data-has-asset={shot.assetUrl ? "1" : undefined}
+        >
+          <button
+            type="button"
+            className="shot-card__preview"
+            onClick={() => onOpenStudio(shot.id)}
+            title={shot.assetUrl ? "打開單格工作室（重畫／修正／配音／版本）" : "還沒有畫面——打開單格工作室生成，或拖入現有素材"}
+          >
+            {shot.assetUrl ? (
+              shot.assetKind === "video" ? (
+                <AssetVideo
+                  src={shot.assetUrl}
+                  muted
+                  preload="metadata"
+                  className="shot-card__preview-media"
+                  fallbackLabel="畫面素材遺失"
+                />
+              ) : (
+                <AssetImg
+                  src={shot.assetUrl}
+                  alt={`第 ${shotNumber} 鏡畫面`}
+                  loading="lazy"
+                  fallbackLabel="畫面素材遺失"
+                />
+              )
+            ) : (
+              <span className="shot-card__preview-empty">
+                <Icon name="Image" size={20} />
+                <Meta as="span">
+                  {canEdit
+                    ? dragOver
+                      ? "放開以帶入素材"
+                      : "拖入現有素材或點擊生成"
+                    : "尚無畫面"}
+                </Meta>
+              </span>
+            )}
+          </button>
+          {canEdit && (
+            <div className="shot-card__preview-actions">
+              <Button
+                size="sm"
+                variant="tonal"
+                type="button"
+                title="從專案素材庫選用圖片／影片，套用為這一鏡現用畫面"
+                onClick={openLibrary}
+              >
+                <Icon name="LayoutGrid" size={13} /> 從素材庫選用
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* 已綁定摘要 chips（最多 4，多出 +N）；有鎖定定裝時加視覺提示 */}
+        <BoundSummaryChips
           projectId={projectId}
-          scene={{ id: shot.id, characterIds: shot.characterIds, scenePresetIds: shot.scenePresetIds, propIds: shot.propIds }}
-          canEdit={canEdit}
-          onSaved={() => utils.scenes.listByProject.invalidate({ projectId })}
+          shot={shot}
+          characterNames={characterNames}
+          looks={looks}
+          locked={boundLocked}
         />
-        {availableLooks.length > 0 && (
-          <span className="shot-card__looks" role="group" aria-label="造型">
-            {availableLooks.map((l) => {
-              const onIt = (shot.lookIds ?? []).includes(l.id);
-              const owner = characterNames.get(l.characterId);
-              return (
-                <Chip
-                  key={l.id}
-                  selected={onIt}
-                  onClick={canEdit ? () => toggleLook(l.id) : undefined}
-                  title={`${owner ? `${owner}的` : ""}造型：勾選後生成鎖定此造型`}
-                >
-                  {/* 一定要冠角色名：實機上五個角色各有一套「白襯衫、黑褲」，
-                      只印造型名會出現三個一模一樣的 chip，完全分不出誰是誰 */}
-                  {owner ? `${owner}·${l.name}` : l.name}
-                </Chip>
-              );
-            })}
-          </span>
-        )}
-      </div>
 
-      {/* §8 連戲承接：第一鏡沒有可承接的對象，就不要給一顆註定失敗的按鈕 */}
-      {canEdit && shotNumber > 1 && (
-        <div className="shot-card__continuity">
-          <ConfirmButton
-            triggerClassName="btn-sm btn-ghost"
-            triggerAriaLabel={`第 ${shotNumber} 鏡：從上一鏡承接連戲設定`}
-            message={`把上一鏡的角色、造型、場景與攝影風格（光線／構圖／焦段）接到第 ${shotNumber} 鏡？鏡別與運鏡不會動——那是每一鏡該不一樣的地方。`}
-            confirmLabel="承接"
-            disabled={inherit.isPending}
-            onConfirm={() =>
-              inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
-            }
-          >
-            <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-            {inherit.isPending ? "承接中…" : "從上一鏡承接"}
-          </ConfirmButton>
+        {/* 必要操作（精簡） */}
+        <div className="shot-card__face-actions">
+          <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
+            <Icon name="SlidersHorizontal" size={13} /> 單格工作室
+          </Button>
+          {canEdit && shotNumber > 1 && (
+            <ConfirmButton
+              triggerClassName="btn-sm btn-ghost"
+              triggerAriaLabel={`第 ${shotNumber} 鏡：從上一鏡承接連戲設定`}
+              message={`把上一鏡的角色、造型、場景與攝影風格（光線／構圖／焦段）接到第 ${shotNumber} 鏡？鏡別與運鏡不會動——那是每一鏡該不一樣的地方。`}
+              confirmLabel="承接"
+              disabled={inherit.isPending}
+              onConfirm={() =>
+                inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
+              }
+            >
+              <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+              {inherit.isPending ? "承接中…" : "從上一鏡承接"}
+            </ConfirmButton>
+          )}
           {inherit.data && (
             <Meta as="span" role="status">
               {inherit.data.changed ? `已承接：${inherit.data.changes.join("、")}` : "跟上一鏡已經一致"}
@@ -368,92 +444,143 @@ export function ShotCard({
           )}
           {inherit.error && <span className="error">{inherit.error.message}</span>}
         </div>
-      )}
+      </div>
 
-      {/* §13 相關素材：專業模式才出現，避免第一層被塞滿（漸進揭露） */}
-      {mode === "pro" && assetHints.length > 0 && (
-        <div className="shot-card__assets">
-          <Meta as="span">
-            <Icon name="Paperclip" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-            專案素材裡名稱或標籤對得上的：
+      {/* ── 展開區：素材與設定 ── */}
+      <details
+        className="shot-card__details"
+        open={detailsOpen}
+        onToggle={(e) => setDetailsOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary className="shot-card__details-summary">
+          <Icon name="ChevronDown" size={14} className="shot-card__details-chevron" />
+          素材與設定
+          <Meta as="span" className="shot-card__details-hint">
+            世界引用・鏡頭語言・素材操作
           </Meta>
-          {assetHints.map((a) => (
-            <Chip key={a.id} title={`符合：${a.matched.join("、")}（點擊在素材庫開啟）`}>
-              {a.title.slice(0, 14)}
-            </Chip>
-          ))}
-        </div>
-      )}
+        </summary>
 
-      {/* Direction＋Performance：簡單模式只留鏡別；專業模式全開 */}
-      <div className="shot-card__direction" role="group" aria-label="鏡頭語言">
-        <label>
-          鏡別
-          <select
-            aria-label="鏡別"
-            value={shot.camera?.shotSize ?? ""}
-            disabled={!canEdit}
-            onChange={(e) => saveCamera("shotSize", e.target.value)}
-          >
-            <option value="">（未定）</option>
-            {SHOT_SIZE_OPTIONS.map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
-        </label>
-        {mode === "pro" && (
-          <>
+        <div className="shot-card__details-body">
+          <textarea
+            key={`prompt-${shot.id}-${shot.prompt ?? ""}`}
+            className="shot-card__prompt"
+            aria-label="畫面描述"
+            placeholder="這一鏡的靜態畫面（構圖、光線、氣氛）…"
+            defaultValue={shot.prompt ?? ""}
+            readOnly={!canEdit}
+            rows={2}
+            onBlur={(e) => {
+              const v = e.target.value;
+              if (canEdit && v !== (shot.prompt ?? "")) saveField({ sceneId: shot.id, prompt: v });
+            }}
+          />
+
+          {/* World Refs：完整綁定 + 造型 */}
+          <div className="shot-card__refs">
+            <Meta as="span" className="shot-card__section-label">世界引用</Meta>
+            <SceneCardBinding
+              projectId={projectId}
+              scene={{ id: shot.id, characterIds: shot.characterIds, scenePresetIds: shot.scenePresetIds, propIds: shot.propIds }}
+              canEdit={canEdit}
+              onSaved={() => utils.scenes.listByProject.invalidate({ projectId })}
+            />
+            {availableLooks.length > 0 && (
+              <span className="shot-card__looks" role="group" aria-label="造型">
+                {availableLooks.map((l) => {
+                  const onIt = (shot.lookIds ?? []).includes(l.id);
+                  const owner = characterNames.get(l.characterId);
+                  return (
+                    <Chip
+                      key={l.id}
+                      selected={onIt}
+                      onClick={canEdit ? () => toggleLook(l.id) : undefined}
+                      title={`${owner ? `${owner}的` : ""}造型：勾選後生成鎖定此造型`}
+                    >
+                      {owner ? `${owner}·${l.name}` : l.name}
+                    </Chip>
+                  );
+                })}
+              </span>
+            )}
+          </div>
+
+          {/* 鏡頭語言 */}
+          <div className="shot-card__direction" role="group" aria-label="鏡頭語言">
+            <Meta as="span" className="shot-card__section-label">鏡頭語言</Meta>
             <label>
-              角度
-              <select aria-label="角度" value={shot.camera?.angle ?? ""} disabled={!canEdit} onChange={(e) => saveCamera("angle", e.target.value)}>
+              鏡別
+              <select
+                aria-label="鏡別"
+                value={shot.camera?.shotSize ?? ""}
+                disabled={!canEdit}
+                onChange={(e) => saveCamera("shotSize", e.target.value)}
+              >
                 <option value="">（未定）</option>
-                {SHOT_ANGLE_OPTIONS.map((o) => (
+                {SHOT_SIZE_OPTIONS.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
             </label>
-            <label>
-              運鏡
-              <select aria-label="運鏡" value={shot.camera?.movement ?? ""} disabled={!canEdit} onChange={(e) => saveCamera("movement", e.target.value)}>
-                <option value="">（未定）</option>
-                {SHOT_MOVEMENT_OPTIONS.map((o) => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              焦段
-              <input
-                key={`focal-${shot.id}-${shot.camera?.focalLength ?? ""}`}
-                defaultValue={shot.camera?.focalLength ?? ""}
-                placeholder="50mm"
-                maxLength={20}
-                readOnly={!canEdit}
-                onBlur={(e) => saveCamera("focalLength", e.target.value)}
-              />
-            </label>
-            <label>
-              光線
-              <input
-                key={`light-${shot.id}-${shot.camera?.lighting ?? ""}`}
-                defaultValue={shot.camera?.lighting ?? ""}
-                placeholder="逆光、柔光…"
-                maxLength={60}
-                readOnly={!canEdit}
-                onBlur={(e) => saveCamera("lighting", e.target.value)}
-              />
-            </label>
-            <label>
-              構圖
-              <input
-                key={`comp-${shot.id}-${shot.camera?.composition ?? ""}`}
-                defaultValue={shot.camera?.composition ?? ""}
-                placeholder="三分法、留白…"
-                maxLength={60}
-                readOnly={!canEdit}
-                onBlur={(e) => saveCamera("composition", e.target.value)}
-              />
-            </label>
+            {mode === "pro" && (
+              <>
+                <label>
+                  角度
+                  <select aria-label="角度" value={shot.camera?.angle ?? ""} disabled={!canEdit} onChange={(e) => saveCamera("angle", e.target.value)}>
+                    <option value="">（未定）</option>
+                    {SHOT_ANGLE_OPTIONS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  運鏡
+                  <select aria-label="運鏡" value={shot.camera?.movement ?? ""} disabled={!canEdit} onChange={(e) => saveCamera("movement", e.target.value)}>
+                    <option value="">（未定）</option>
+                    {SHOT_MOVEMENT_OPTIONS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  焦段
+                  <input
+                    key={`focal-${shot.id}-${shot.camera?.focalLength ?? ""}`}
+                    defaultValue={shot.camera?.focalLength ?? ""}
+                    placeholder="50mm"
+                    maxLength={20}
+                    readOnly={!canEdit}
+                    onBlur={(e) => saveCamera("focalLength", e.target.value)}
+                  />
+                </label>
+                <label>
+                  光線
+                  <input
+                    key={`light-${shot.id}-${shot.camera?.lighting ?? ""}`}
+                    defaultValue={shot.camera?.lighting ?? ""}
+                    placeholder="逆光、柔光…"
+                    maxLength={60}
+                    readOnly={!canEdit}
+                    onBlur={(e) => saveCamera("lighting", e.target.value)}
+                  />
+                </label>
+                <label>
+                  構圖
+                  <input
+                    key={`comp-${shot.id}-${shot.camera?.composition ?? ""}`}
+                    defaultValue={shot.camera?.composition ?? ""}
+                    placeholder="三分法、留白…"
+                    maxLength={60}
+                    readOnly={!canEdit}
+                    onBlur={(e) => saveCamera("composition", e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+          </div>
+
+          {/* 表演：簡單模式也放表情（收在展開區不佔預設高度）；專業再加視線 */}
+          <div className="shot-card__performance" role="group" aria-label="表演">
+            <Meta as="span" className="shot-card__section-label">表演</Meta>
             <label>
               表情
               <input
@@ -465,79 +592,159 @@ export function ShotCard({
                 onBlur={(e) => savePerformance("emotion", e.target.value)}
               />
             </label>
-            <label>
-              視線
-              <input
-                key={`gaze-${shot.id}-${shot.performance?.gaze ?? ""}`}
-                defaultValue={shot.performance?.gaze ?? ""}
-                placeholder="看向遠方…"
-                maxLength={60}
-                readOnly={!canEdit}
-                onBlur={(e) => savePerformance("gaze", e.target.value)}
-              />
-            </label>
-          </>
-        )}
-      </div>
+            {mode === "pro" && (
+              <label>
+                視線
+                <input
+                  key={`gaze-${shot.id}-${shot.performance?.gaze ?? ""}`}
+                  defaultValue={shot.performance?.gaze ?? ""}
+                  placeholder="看向遠方…"
+                  maxLength={60}
+                  readOnly={!canEdit}
+                  onBlur={(e) => savePerformance("gaze", e.target.value)}
+                />
+              </label>
+            )}
+          </div>
 
-      {mode === "pro" && (
-        <textarea
-          key={`action-${shot.id}-${shot.action ?? ""}`}
-          className="shot-card__action"
-          aria-label="動作走位"
-          placeholder="動作走位：誰做了什麼、從哪到哪（只注入影片模型）"
-          defaultValue={shot.action ?? ""}
-          readOnly={!canEdit}
-          rows={1}
-          onBlur={(e) => {
-            const v = e.target.value;
-            if (canEdit && v !== (shot.action ?? "")) saveField({ sceneId: shot.id, action: v });
-          }}
-        />
-      )}
+          {mode === "pro" && (
+            <textarea
+              key={`action-${shot.id}-${shot.action ?? ""}`}
+              className="shot-card__action"
+              aria-label="動作走位"
+              placeholder="動作走位：誰做了什麼、從哪到哪（只注入影片模型）"
+              defaultValue={shot.action ?? ""}
+              readOnly={!canEdit}
+              rows={1}
+              onBlur={(e) => {
+                const v = e.target.value;
+                if (canEdit && v !== (shot.action ?? "")) saveField({ sceneId: shot.id, action: v });
+              }}
+            />
+          )}
 
-      <div className="shot-card__foot">
-        <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
-          <Icon name="Sparkles" size={13} /> {shot.assetUrl ? "重畫／修正" : "生成畫面"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => onOpenStudio(shot.id)} title="配音、環境音、版本都在單格工作室">
-          <Icon name="Volume2" size={13} /> 聲音
-        </Button>
-        {canEdit && (
-          <ExternalGenerationLauncher
-            projectId={projectId}
-            sceneId={shot.id}
-            sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
-            targetType="video"
-            prompt={[shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n")}
-            referenceAssetIds={shot.assetId ? [shot.assetId] : []}
-          />
-        )}
-        {canEdit && (
-          <ExternalAssetIntake
-            projectId={projectId}
-            sceneId={shot.id}
-            sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
-            triggerLabel="帶入成果"
-            triggerVariant="ghost"
-            onImported={() => { void utils.scenes.listByProject.invalidate({ projectId }); }}
-          />
-        )}
-        <span style={{ flex: "1 1 auto" }} />
-        {canEdit && (
-          <ConfirmButton
-            triggerClassName="btn-sm btn-ghost"
-            // 只有垃圾桶圖示，沒有可讀名稱＝讀螢幕軟體只會唸「按鈕」（實測抓到）
-            triggerAriaLabel={`刪除第 ${shotNumber} 鏡`}
-            message={`刪除第 ${shotNumber} 鏡？會移到回收桶，可還原。`}
-            confirmLabel="刪除"
-            disabled={removeShot.isPending}
-            onConfirm={() => removeShot.mutate({ sceneId: shot.id })}
-          >
-            <Icon name="Trash2" size={13} />
-          </ConfirmButton>
-        )}
-      </div>
+          {/* 素材操作：帶入我的素材 vs 外部 AI 成果 */}
+          <div className="shot-card__asset-ops" role="group" aria-label="素材操作">
+            <Meta as="span" className="shot-card__section-label">素材操作</Meta>
+            <Hint as="p" className="shot-card__asset-ops-lede">
+              {dragOver
+                ? "放開檔案即可帶入這一鏡"
+                : "可拖放檔案到卡片，或從素材庫選用現有圖／影。外部 AI 成果請用「帶入成果」。"}
+            </Hint>
+            <div className="shot-card__asset-ops-row">
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="tonal"
+                  type="button"
+                  title="帶入我的素材：從專案素材庫選用"
+                  onClick={() => setLibraryOpen((v) => !v)}
+                  aria-expanded={libraryOpen}
+                >
+                  <Icon name="LayoutGrid" size={13} /> {libraryOpen ? "收起素材庫" : "從素材庫選用"}
+                </Button>
+              )}
+              {canEdit && (
+                <ExternalAssetIntake
+                  projectId={projectId}
+                  sceneId={shot.id}
+                  sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
+                  triggerLabel="帶入外部成果"
+                  triggerVariant="ghost"
+                  onImported={() => { void utils.scenes.listByProject.invalidate({ projectId }); }}
+                />
+              )}
+              {canEdit && (
+                <ExternalGenerationLauncher
+                  projectId={projectId}
+                  sceneId={shot.id}
+                  sceneLabel={`第 ${shotNumber} 鏡「${shot.title}」`}
+                  targetType="video"
+                  prompt={[shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n")}
+                  referenceAssetIds={shot.assetId ? [shot.assetId] : []}
+                />
+              )}
+            </div>
+
+            {libraryOpen && canEdit && (
+              <div className="shot-card__library" role="listbox" aria-label="從素材庫選用畫面">
+                {libraryAssets.isLoading ? (
+                  <Meta as="p">
+                    <Icon name="Loader" className="spin" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                    載入素材庫…
+                  </Meta>
+                ) : libraryVisuals.length === 0 ? (
+                  <Hint as="p">素材庫還沒有圖片／影片——可拖檔案到這一卡，或到專案素材庫上傳。</Hint>
+                ) : (
+                  <div className="shot-card__library-grid">
+                    {libraryVisuals.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        role="option"
+                        aria-selected={a.id === shot.assetId}
+                        title={`${a.title}${a.id === shot.assetId ? "（目前使用）" : "—套用為這一鏡畫面"}`}
+                        disabled={setVisual.isPending}
+                        className={`shot-card__library-item${a.id === shot.assetId ? " is-current" : ""}`}
+                        onClick={() => applyLibraryAsset(a.id)}
+                      >
+                        {a.kind === "video" ? (
+                          <AssetVideo src={a.url!} muted preload="metadata" className="shot-card__library-thumb" fallbackLabel="影" />
+                        ) : (
+                          <AssetImg src={a.url!} alt={a.title} loading="lazy" className="shot-card__library-thumb" fallbackLabel="圖" />
+                        )}
+                        <span className="shot-card__library-label">{a.title.slice(0, 18)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {setVisual.error && <p className="error" role="alert">{setVisual.error.message}</p>}
+              </div>
+            )}
+
+            {mode === "pro" && assetHints.length > 0 && (
+              <div className="shot-card__assets">
+                <Meta as="span">
+                  <Icon name="Paperclip" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  專案素材裡名稱或標籤對得上的：
+                </Meta>
+                {assetHints.map((a) => (
+                  <Chip
+                    key={a.id}
+                    title={`符合：${a.matched.join("、")}（點擊套用為這一鏡畫面）`}
+                    onClick={canEdit ? () => applyLibraryAsset(a.id) : undefined}
+                  >
+                    {a.title.slice(0, 14)}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="shot-card__foot">
+            <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
+              <Icon name="Sparkles" size={13} /> {shot.assetUrl ? "重畫／修正" : "生成畫面"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onOpenStudio(shot.id)} title="配音、環境音、版本都在單格工作室">
+              <Icon name="Volume2" size={13} /> 聲音
+            </Button>
+            <span style={{ flex: "1 1 auto" }} />
+            {canEdit && (
+              <ConfirmButton
+                triggerClassName="btn-sm btn-ghost"
+                triggerAriaLabel={`刪除第 ${shotNumber} 鏡`}
+                message={`刪除第 ${shotNumber} 鏡？會移到回收桶，可還原。`}
+                confirmLabel="刪除"
+                disabled={removeShot.isPending}
+                onConfirm={() => removeShot.mutate({ sceneId: shot.id })}
+              >
+                <Icon name="Trash2" size={13} />
+              </ConfirmButton>
+            )}
+          </div>
+        </div>
+      </details>
+
       {dropStatus && (
         <Hint as="div" role="status" className="shot-card__import-status">
           {dropStatus}
@@ -556,5 +763,93 @@ export function ShotCard({
       )}
       {update.error && <p className="error">{update.error.message}</p>}
     </Card>
+  );
+}
+
+/**
+ * 緊湊面綁定摘要：角色／場景／道具／造型最多 4 顆 chip，其餘 +N。
+ * 與 SceneCardBinding 同快取鍵讀名字——面板收合時也能掃讀「這一鏡用誰」。
+ */
+function BoundSummaryChips({
+  projectId,
+  shot,
+  characterNames,
+  looks,
+  locked,
+}: {
+  projectId: string;
+  shot: ShotRow;
+  characterNames: Map<string, string>;
+  looks: LookRow[];
+  locked: boolean;
+}) {
+  const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
+  const props = trpc.props.list.useQuery({ projectId });
+
+  const chips = useMemo(() => {
+    const items: Array<{ key: string; label: string; kind: "char" | "scene" | "prop" | "look" }> = [];
+    for (const id of shot.characterIds ?? []) {
+      const name = characterNames.get(id);
+      items.push({ key: `c-${id}`, label: name ?? "角色", kind: "char" });
+    }
+    for (const id of shot.scenePresetIds ?? []) {
+      const name = scenePresets.data?.find((s) => s.id === id)?.name;
+      items.push({ key: `s-${id}`, label: name ?? "場景", kind: "scene" });
+    }
+    for (const id of shot.propIds ?? []) {
+      const row = props.data?.find((p) => p.id === id);
+      items.push({
+        key: `p-${id}`,
+        label: row ? formatPropDisplayName(row.name, row.ownerName) : "道具",
+        kind: "prop",
+      });
+    }
+    for (const id of shot.lookIds ?? []) {
+      const look = looks.find((l) => l.id === id);
+      if (!look) continue;
+      const owner = characterNames.get(look.characterId);
+      items.push({
+        key: `l-${id}`,
+        label: owner ? `${owner}·${look.name}` : look.name,
+        kind: "look",
+      });
+    }
+    return items;
+  }, [shot.characterIds, shot.scenePresetIds, shot.propIds, shot.lookIds, characterNames, scenePresets.data, props.data, looks]);
+
+  if (chips.length === 0) {
+    return (
+      <div className="shot-card__bound-summary shot-card__bound-summary--empty" aria-label="尚未鎖定定裝">
+        <Meta as="span">未鎖定定裝・沿用生成台勾選</Meta>
+      </div>
+    );
+  }
+
+  const shown = chips.slice(0, BOUND_CHIP_LIMIT);
+  const extra = chips.length - shown.length;
+
+  return (
+    <div
+      className={`shot-card__bound-summary${locked ? " shot-card__bound-summary--locked" : ""}`}
+      role="group"
+      aria-label={locked ? "已鎖定定裝" : "已綁定引用"}
+      title={locked ? "這一鏡已鎖定定裝：生成時只用這些卡片／造型" : undefined}
+    >
+      {locked && (
+        <span className="shot-card__lock-badge" title="已鎖定定裝">
+          <Icon name="Lock" size={11} />
+        </span>
+      )}
+      {shown.map((c) => (
+        <Chip key={c.key} className={`shot-card__bound-chip shot-card__bound-chip--${c.kind}`}>
+          {c.label}
+        </Chip>
+      ))}
+      {extra > 0 && (
+        <Chip className="shot-card__bound-chip shot-card__bound-chip--more" title={chips.slice(BOUND_CHIP_LIMIT).map((c) => c.label).join("、")}>
+          +{extra}
+        </Chip>
+      )}
+    </div>
   );
 }

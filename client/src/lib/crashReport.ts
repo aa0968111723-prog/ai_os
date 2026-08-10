@@ -20,6 +20,37 @@ export function isChunkLoadError(error: unknown): boolean {
   );
 }
 
+/**
+ * 正式包壓縮後的 React 內部錯誤（#185 等）。
+ * 訊息本身對使用者沒有意義，還會附一串 react.dev 說明連結——不該直接攤在 UI 上。
+ * 技術細節仍進 buildCrashReport.detail，回報時可複製。
+ */
+export function isMinifiedReactError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = safeStr(pick(error, "message")) || safeStr(error);
+  return /Minified React error #\d+/i.test(msg);
+}
+
+/** 從 minified 訊息抽出錯誤碼（沒有就回 null）。 */
+export function minifiedReactErrorCode(error: unknown): string | null {
+  const msg = safeStr(pick(error, "message")) || safeStr(error);
+  const m = msg.match(/Minified React error #(\d+)/i);
+  return m?.[1] ?? null;
+}
+
+/**
+ * 給 UI 顯示用的一行摘要。
+ * minified React 錯誤只露「React 內部錯誤 #N」，絕不把 error.message 原樣渲染。
+ * 其他錯誤仍用 report.headline（含真實訊息，方便截圖回報）。
+ */
+export function displayCrashHeadline(error: unknown, report: CrashReport | null): string {
+  if (isMinifiedReactError(error)) {
+    const code = minifiedReactErrorCode(error);
+    return code ? `React 內部錯誤 #${code}` : "React 內部錯誤";
+  }
+  return report?.headline ?? "（無法取得錯誤摘要）";
+}
+
 export type CrashReport = {
   /** 一行摘要，直接顯示在錯誤卡片上 */
   headline: string;

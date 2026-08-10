@@ -8711,6 +8711,10 @@ body.story-immersive { overflow: hidden; }
 
 /* ── ② 分鏡中心 ── */
 .board-stage__toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.board-stage__quick-links {
+  display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap;
+}
+.board-stage__quick-links .btn { font-size: var(--fs-12); }
 .board-mode-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .board-mode-toggle button {
   border: 0; background: transparent; padding: 4px 14px; cursor: pointer;
@@ -8735,9 +8739,16 @@ body.story-immersive { overflow: hidden; }
 .board-scene-env input { width: 90px; font-size: var(--fs-13); padding: 3px 8px; }
 .board-shots {
   display: grid; gap: 12px; margin-top: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
-.shot-card { display: flex; flex-direction: column; gap: 8px; }
+/* Progressive Disclosure：face 精簡 + details 收合 */
+.shot-card { display: flex; flex-direction: column; gap: 8px; transition: box-shadow .15s ease, outline-color .15s ease; }
+.shot-card--drag-over {
+  outline: 2px solid var(--primary, #f6771e);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary, #f6771e) 18%, transparent);
+}
+.shot-card__face { display: flex; flex-direction: column; gap: 6px; }
 .shot-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shot-card__num { font-weight: 700; color: var(--primary-ink); font-size: var(--fs-13); }
 /* 分鏡多選勾選：命中區 ≥24px（手機拇指），未選時低調、選中才亮 */
@@ -8751,15 +8762,114 @@ body.story-immersive { overflow: hidden; }
 .shot-card__title:hover, .shot-card__title:focus { border-color: var(--border); background: var(--field); }
 .shot-card__dur { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); white-space: nowrap; }
 .shot-card__dur input { width: 3.2em; text-align: right; padding: 2px 6px; }
+.shot-card__preview-wrap {
+  position: relative;
+  border-radius: var(--r-md, 10px);
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.shot-card__preview-wrap.is-drag-over .shot-card__preview,
+.shot-card__preview-wrap.is-drag-over {
+  border-color: var(--primary, #f6771e);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #f6771e) 35%, transparent);
+}
 .shot-card__preview {
   display: block; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
   border: 1px dashed var(--border); border-radius: var(--r-md, 10px);
   background: var(--surface-sunken, var(--card2)); cursor: pointer; padding: 0;
 }
-.shot-card__preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-card__preview img,
+.shot-card__preview video,
+.shot-card__preview-media {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
 .shot-card__preview-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 6px; height: 100%; color: var(--muted-ink, inherit); opacity: .75;
+  gap: 6px; height: 100%; min-height: 100%; color: var(--muted-ink, inherit); opacity: .85;
+  padding: 12px; text-align: center;
+}
+.shot-card__preview-actions {
+  display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; flex-wrap: wrap;
+}
+.shot-card__face-actions {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+/* 已綁定摘要 chips（緊湊面） */
+.shot-card__bound-summary {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  min-height: 22px;
+}
+.shot-card__bound-summary--empty { opacity: .7; }
+.shot-card__bound-summary--locked {
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-tint, #fde8d4) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary, #f6771e) 28%, transparent);
+}
+.shot-card__lock-badge {
+  display: inline-flex; align-items: center; color: var(--primary-ink);
+  margin-right: 2px;
+}
+.shot-card__bound-chip { font-size: var(--fs-11); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 展開區（素材與設定） */
+.shot-card__details {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 2px;
+  padding-top: 2px;
+}
+.shot-card__details-summary {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  cursor: pointer; list-style: none; font-size: var(--fs-13); font-weight: 600;
+  padding: 6px 2px; color: var(--primary-ink);
+  user-select: none;
+}
+.shot-card__details-summary::-webkit-details-marker { display: none; }
+.shot-card__details-chevron {
+  transition: transform .15s ease;
+  flex-shrink: 0;
+}
+.shot-card__details[open] > .shot-card__details-summary .shot-card__details-chevron {
+  transform: rotate(180deg);
+}
+.shot-card__details-hint { font-weight: 400; opacity: .75; }
+.shot-card__details-body {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 4px 0 2px;
+}
+.shot-card__section-label {
+  display: block; width: 100%; flex-basis: 100%;
+  font-size: var(--fs-11); font-weight: 600; opacity: .8; margin-bottom: 2px;
+}
+.shot-card__performance {
+  display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+.shot-card__performance label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-12); }
+.shot-card__performance input { font-size: var(--fs-13); padding: 4px 8px; width: 100%; }
+.shot-card__asset-ops { display: flex; flex-direction: column; gap: 6px; }
+.shot-card__asset-ops-lede { margin: 0; font-size: var(--fs-12); }
+.shot-card__asset-ops-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.shot-card__library {
+  border: 1px solid var(--border-soft); border-radius: var(--r-md, 10px);
+  padding: 8px; background: var(--surface-sunken, var(--card2));
+}
+.shot-card__library-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px;
+  max-height: 200px; overflow-y: auto;
+}
+.shot-card__library-item {
+  display: flex; flex-direction: column; gap: 2px; padding: 0;
+  border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden;
+  background: var(--bg, #fff); cursor: pointer; min-height: 44px;
+}
+.shot-card__library-item.is-current {
+  border-color: var(--primary, #f6771e);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary, #f6771e) 40%, transparent);
+}
+.shot-card__library-thumb {
+  width: 100%; height: 56px; object-fit: cover; display: block;
+}
+.shot-card__library-label {
+  font-size: 10px; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left; color: inherit;
 }
 /* §23 畫面過時：警示語氣但不搶戲——內容仍比 controls 重要，用細左邊條而非整塊底色 */
 .shot-card__outdated {
