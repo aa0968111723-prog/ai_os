@@ -15,6 +15,7 @@ import {
   MODELS,
   WORKFLOW_PRESETS,
   endpointOf,
+  realPricePoints,
   type ModelCategory,
   type ModelEntry,
   type ModelTier,
@@ -285,8 +286,19 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
         continue;
       }
       const points = pricingToPoints(p, m.kind);
+      // 守門二：官方實價可機械解析（realPricePoints）且 live 點數偏差 ≥40% → 疑似 fal 佔位／誤配價
+      //（如 flux-3 draft 官方 $0.06/秒=9 點，fal 卻回 $0.2/秒→31 點）——保留靜態官方價、記 drift 警告，
+      //  不覆寫。回歸旁證 `q=flash` 多支影片模型估 32 點＝此類系統性覆寫。
+      const officialPoints = realPricePoints(m);
+      if (officialPoints != null && officialPoints > 0 && m.points > 0
+          && Math.abs(points - m.points) >= 1
+          && (points >= m.points * 1.4 || points <= m.points / 1.4)) {
+        driftWarnings.push(`${m.id}: Fal 即時 ${points} 點（$${p.price}/${p.unit}）與官方實價 ${officialPoints} 點偏差 ≥40%（佔位/誤配價？），保留靜態官方價 ${m.points} 點`);
+        continue;
+      }
       // 漂移鬧鐘：實扣走即時價（本 updates 覆寫），但靜態 cost 字串若已偏差 ≥40% 且 ≥1 點，
       // 代表目錄記載價過期——顯示（無 key 環境）與文件會失真，提醒回頭修 cost 字串。
+      // （守門二已處理官方實價可解析者；此處涵蓋靜態無機械價的模型。）
       if (m.points > 0 && Math.abs(points - m.points) >= 1) {
         const ratio = points / m.points;
         if (ratio >= 1.4 || ratio <= 1 / 1.4) {
