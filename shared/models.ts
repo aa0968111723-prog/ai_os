@@ -1960,6 +1960,48 @@ export const MODELS: ModelEntry[] = [
     bestFor: "長文撰寫、複雜推理、需要超長上下文與視覺理解的高品質任務",
     input: llmOpenRouterInput("moonshotai/kimi-k3"),
   },
+  {
+    id: "openrouter/router#claude-opus-5", endpoint: "openrouter/router", label: "Claude Opus 5", category: "llm", tier: "flagship", kind: "text",
+    points: 2, cost: "$5/$25 per M tokens", verified: false,
+    strengths: "Anthropic 最強旗艦;長文與指令遵循、中文寫作穩定",
+    bestFor: "正式腳本/長文的高品質撰寫",
+    input: llmOpenRouterInput("anthropic/claude-opus-5"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-sol", endpoint: "openrouter/router", label: "GPT-5.6 Sol", category: "llm", tier: "flagship", kind: "text",
+    points: 2, cost: "$5/$30 per M tokens", verified: false,
+    strengths: "OpenAI 最新旗艦;通用能力與推理強",
+    bestFor: "複雜分析、正式文稿",
+    input: llmOpenRouterInput("openai/gpt-5.6-sol"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-terra", endpoint: "openrouter/router", label: "GPT-5.6 Terra", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$2/$12 per M tokens", verified: false,
+    strengths: "GPT-5.6 中價檔;能力與成本平衡",
+    bestFor: "日常文案、改寫潤飾",
+    input: llmOpenRouterInput("openai/gpt-5.6-terra"),
+  },
+  {
+    id: "openrouter/router#gpt-5.6-luna", endpoint: "openrouter/router", label: "GPT-5.6 Luna", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.20/$1.20 per M tokens", verified: false,
+    strengths: "GPT-5.6 最低價檔(官方 -80%);降本主力",
+    bestFor: "高量低成本任務",
+    input: llmOpenRouterInput("openai/gpt-5.6-luna"),
+  },
+  {
+    id: "openrouter/router#gemini-3.6-flash", endpoint: "openrouter/router", label: "Gemini 3.6 Flash", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$1.50/$7.50 per M tokens", verified: false,
+    strengths: "Google 最新工作馬;長上下文與多模態輸入是強項",
+    bestFor: "日常文字生成、翻譯、彙整",
+    input: llmOpenRouterInput("google/gemini-3.6-flash"),
+  },
+  {
+    id: "openrouter/router#gemini-3.5-flash-lite", endpoint: "openrouter/router", label: "Gemini 3.5 Flash-Lite", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.30/$2.50 per M tokens", verified: false,
+    strengths: "極致便宜高速;低成本備援",
+    bestFor: "大量簡單任務(標籤、分類)",
+    input: llmOpenRouterInput("google/gemini-3.5-flash-lite"),
+  },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */
   {
