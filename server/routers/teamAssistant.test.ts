@@ -8,6 +8,7 @@ import {
   formatGroupBlockerDigest,
   sanitizeContextUsed,
   sanitizeRationale,
+  TEAM_ASSISTANT_DATA_BOUNDARY_RULE,
   TEAM_CONTEXT_LABELS,
   formatAgentRunLine,
   groupSummaryFromCounts,
@@ -644,5 +645,21 @@ describe("formatCommandRefs（可下令對象的提示詞區塊）", () => {
 
   it("完全沒有可下令對象時回空字串（提示詞一字不多佔）", () => {
     expect(formatCommandRefs({ runs: [], tasks: [], members: [] }, "command")).toBe("");
+  });
+});
+
+describe("TEAM_ASSISTANT_DATA_BOUNDARY_RULE（組級助手資料範圍邊界）", () => {
+  it("明確宣告只能查本組、被問其他組要誠實說無法查詢（防「沒有動畫組的專案」誤導）", () => {
+    const rule = TEAM_ASSISTANT_DATA_BOUNDARY_RULE;
+    expect(rule).toContain("本組");
+    expect(rule).toContain("我只能查詢本組資料");
+    expect(rule).toContain("無法查詢其他組");
+  });
+
+  it("禁止把「看不到」推論成「該組沒有資料」（看不到 ≠ 不存在）", () => {
+    const rule = TEAM_ASSISTANT_DATA_BOUNDARY_RULE;
+    expect(rule).toContain("推論");
+    expect(rule).toContain("不代表不存在");
+    expect(rule).toContain("不要猜測");
   });
 });
