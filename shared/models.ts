@@ -1499,7 +1499,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "Seedance 2.5 圖生;30s 一鏡、原生音訊",
     bestFor: "一張圖延展成 30s 一鏡連貫片段",
     sourceHint: "作為首格的圖(素材庫或網址)",
-    input: (p, _f, s) => ({ prompt: p, image_url: s, resolution: "720p", aspect_ratio: "auto", generate_audio: true }),
+    input: (p, f, s) => ({ prompt: p, image_url: s, resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
   },
   {
     // 2026-08-10 fal 實抓:Seedance 2.5 參考生影片,最多 50 個多模態參考(30 圖＋10 影片＋10 音訊)、480p/720p、4-30s 或 auto、原生音訊;
@@ -1510,7 +1510,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "Seedance 2.5 參考生;多模態參考鎖定角色/場景/風格、30s 一鏡",
     bestFor: "要鎖定角色/風格/場景一致性的 30s 一鏡",
     sourceHint: "作為參考的圖(素材庫或網址)",
-    input: (p, _f, s) => ({ prompt: p, image_urls: s ? [s] : [], resolution: "720p", aspect_ratio: "auto", generate_audio: true }),
+    input: (p, f, s) => ({ prompt: p, image_urls: s ? [s] : [], resolution: "720p", aspect_ratio: nearestFormat(f, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]), generate_audio: true }),
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2/image-to-video", label: "Luma Ray-2(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
