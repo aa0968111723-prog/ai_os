@@ -24,6 +24,11 @@ import {
 import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
 import { hasSceneCardBinding } from "@shared/sceneCards";
 import { formatPropDisplayName } from "@shared/propOwnership";
+import {
+  CONTINUITY_ASPECTS,
+  ASPECT_LABEL,
+  type ContinuityAspect,
+} from "@shared/shotContinuity";
 import type { BoardMode } from "./boardPrefs";
 import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 import { ExternalGenerationLauncher } from "../external-intake/ExternalGenerationLauncher";
@@ -79,6 +84,9 @@ function preferDetailsOpen(mode: BoardMode): boolean {
 
 const BOUND_CHIP_LIMIT = 4;
 
+/** 承接預設：角色＋造型＋場景（最常用一致性項目）；攝影風格可選 */
+const DEFAULT_INHERIT_ASPECTS: ContinuityAspect[] = ["characters", "looks", "location"];
+
 export function ShotCard({
   projectId,
   shot,
@@ -115,9 +123,12 @@ export function ShotCard({
   const removeShot = trpc.scenes.remove.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
-  /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
+  /** §8 連戲：把上一鏡的指定面向接到這一鏡（一次性套用，不是隱形跟隨） */
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
-    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+    onSuccess: () => {
+      utils.scenes.listByProject.invalidate({ projectId });
+      setInheritOpen(false);
+    },
   });
   const setVisual = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => {
@@ -141,6 +152,8 @@ export function ShotCard({
   const [dragOver, setDragOver] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(() => preferDetailsOpen(mode));
+  const [inheritOpen, setInheritOpen] = useState(false);
+  const [inheritAspects, setInheritAspects] = useState<ContinuityAspect[]>(DEFAULT_INHERIT_ASPECTS);
 
   const libraryAssets = trpc.projects.assets.useQuery(
     { projectId },
@@ -150,6 +163,12 @@ export function ShotCard({
     () => (libraryAssets.data ?? []).filter((a) => (a.kind === "image" || a.kind === "video") && a.url),
     [libraryAssets.data],
   );
+
+  const toggleInheritAspect = (aspect: ContinuityAspect) => {
+    setInheritAspects((prev) =>
+      prev.includes(aspect) ? prev.filter((x) => x !== aspect) : [...prev, aspect],
+    );
+  };
 
   const importDroppedFiles = async (files: FileList) => {
     if (!canEdit || dropBusy || !files.length) return;
@@ -217,14 +236,9 @@ export function ShotCard({
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
-  // 與成片頁、前後鏡導航同一支純函式——不會出現「這裡說缺、那裡說有」
   const completion = computeShotCompletion(shot);
   const boundLocked = hasSceneCardBinding(shot) || (shot.lookIds ?? []).length > 0;
 
-  /**
-   * §13 相關素材：只在專業模式且展開時查（簡單模式／收合不打這支）。
-   * 這不是語意檢索——是拿這一鏡綁定的角色／場景／道具名字比對素材標題與標籤。
-   */
   const assetSuggest = trpc.story.shotAssetSuggestions.useQuery(
     { sceneId: shot.id },
     { enabled: mode === "pro" && detailsOpen, staleTime: 60_000 },
@@ -250,7 +264,6 @@ export function ShotCard({
     setDragOver(true);
   };
   const onDragLeaveCard = (event: DragEvent) => {
-    // 只在真正離開卡片時清狀態（避免子元素 bubble 造成閃爍）
     if (event.currentTarget.contains(event.relatedTarget as Node)) return;
     setDragOver(false);
   };
@@ -273,7 +286,6 @@ export function ShotCard({
       onDragLeave={canEdit ? onDragLeaveCard : undefined}
       onDrop={canEdit ? onDropCard : undefined}
     >
-      {/* ── 緊湊面：永遠可見 ── */}
       <div className="shot-card__face">
         <div className="shot-card__head">
           {onTogglePick && (
@@ -324,7 +336,6 @@ export function ShotCard({
           {shot.reviewStatus === "changes" && <Pill status="failed">需要修改</Pill>}
         </div>
 
-        {/* §15 完成度：五個點就講完「這一鏡還缺什麼」 */}
         <div className="shot-card__completion" role="group" aria-label={`完成度 ${completion.percent}%`}>
           {COMPLETION_TRACKS.map((t) => (
             <span
@@ -352,7 +363,6 @@ export function ShotCard({
           </Meta>
         )}
 
-        {/* 預覽區：有圖顯示圖；無圖＝拖放／素材庫／生成入口 */}
         <div
           className={`shot-card__preview-wrap${dragOver ? " is-drag-over" : ""}`}
           data-has-asset={shot.assetUrl ? "1" : undefined}
@@ -408,7 +418,6 @@ export function ShotCard({
           )}
         </div>
 
-        {/* 已綁定摘要 chips（最多 4，多出 +N）；有鎖定定裝時加視覺提示 */}
         <BoundSummaryChips
           projectId={projectId}
           shot={shot}
@@ -417,25 +426,67 @@ export function ShotCard({
           locked={boundLocked}
         />
 
-        {/* 必要操作（精簡） */}
         <div className="shot-card__face-actions">
           <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
             <Icon name="SlidersHorizontal" size={13} /> 單格工作室
           </Button>
           {canEdit && shotNumber > 1 && (
-            <ConfirmButton
-              triggerClassName="btn-sm btn-ghost"
-              triggerAriaLabel={`第 ${shotNumber} 鏡：從上一鏡承接連戲設定`}
-              message={`把上一鏡的角色、造型、場景與攝影風格（光線／構圖／焦段）接到第 ${shotNumber} 鏡？鏡別與運鏡不會動——那是每一鏡該不一樣的地方。`}
-              confirmLabel="承接"
-              disabled={inherit.isPending}
-              onConfirm={() =>
-                inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
-              }
-            >
-              <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-              {inherit.isPending ? "承接中…" : "從上一鏡承接"}
-            </ConfirmButton>
+            <div className="shot-card__inherit">
+              {!inheritOpen ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  type="button"
+                  title={`第 ${shotNumber} 鏡：選擇要從上一鏡承接的連戲面向`}
+                  disabled={inherit.isPending}
+                  onClick={() => setInheritOpen(true)}
+                >
+                  <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  {inherit.isPending ? "承接中…" : "從上一鏡承接"}
+                </Button>
+              ) : (
+                <div className="shot-card__inherit-panel" role="group" aria-label="選擇承接面向">
+                  <Meta as="span">把上一鏡的哪些設定接到這一鏡？</Meta>
+                  <div className="shot-card__inherit-aspects">
+                    {CONTINUITY_ASPECTS.map((a) => (
+                      <label key={a} className="shot-card__inherit-aspect">
+                        <input
+                          type="checkbox"
+                          checked={inheritAspects.includes(a)}
+                          onChange={() => toggleInheritAspect(a)}
+                        />
+                        {ASPECT_LABEL[a]}
+                      </label>
+                    ))}
+                  </div>
+                  <Hint as="p" style={{ margin: 0, fontSize: 12 }}>
+                    鏡別與運鏡不會被覆蓋——那是每一鏡該不一樣的地方。
+                  </Hint>
+                  <div className="shot-card__inherit-actions">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      type="button"
+                      disabled={inherit.isPending || inheritAspects.length === 0}
+                      onClick={() =>
+                        inherit.mutate({ sceneId: shot.id, aspects: inheritAspects })
+                      }
+                    >
+                      {inherit.isPending ? "承接中…" : "承接"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      disabled={inherit.isPending}
+                      onClick={() => setInheritOpen(false)}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {inherit.data && (
             <Meta as="span" role="status">
@@ -446,7 +497,6 @@ export function ShotCard({
         </div>
       </div>
 
-      {/* ── 展開區：素材與設定 ── */}
       <details
         className="shot-card__details"
         open={detailsOpen}
@@ -475,7 +525,6 @@ export function ShotCard({
             }}
           />
 
-          {/* World Refs：完整綁定 + 造型 */}
           <div className="shot-card__refs">
             <Meta as="span" className="shot-card__section-label">世界引用</Meta>
             <SceneCardBinding
@@ -504,7 +553,6 @@ export function ShotCard({
             )}
           </div>
 
-          {/* 鏡頭語言 */}
           <div className="shot-card__direction" role="group" aria-label="鏡頭語言">
             <Meta as="span" className="shot-card__section-label">鏡頭語言</Meta>
             <label>
@@ -578,7 +626,6 @@ export function ShotCard({
             )}
           </div>
 
-          {/* 表演：簡單模式也放表情（收在展開區不佔預設高度）；專業再加視線 */}
           <div className="shot-card__performance" role="group" aria-label="表演">
             <Meta as="span" className="shot-card__section-label">表演</Meta>
             <label>
@@ -623,7 +670,6 @@ export function ShotCard({
             />
           )}
 
-          {/* 素材操作：帶入我的素材 vs 外部 AI 成果 */}
           <div className="shot-card__asset-ops" role="group" aria-label="素材操作">
             <Meta as="span" className="shot-card__section-label">素材操作</Meta>
             <Hint as="p" className="shot-card__asset-ops-lede">
@@ -766,10 +812,6 @@ export function ShotCard({
   );
 }
 
-/**
- * 緊湊面綁定摘要：角色／場景／道具／造型最多 4 顆 chip，其餘 +N。
- * 與 SceneCardBinding 同快取鍵讀名字——面板收合時也能掃讀「這一鏡用誰」。
- */
 function BoundSummaryChips({
   projectId,
   shot,
