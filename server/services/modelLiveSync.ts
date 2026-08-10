@@ -348,8 +348,11 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
       for (const c of candidates) {
         const mapped = mapFalCategory(c.category, c.tags, c.endpointId);
         const p = priceMap.get(c.endpointId);
-        const points = p ? pricingToPoints(p, mapped.kind) : 2; // 無價時保守 2 點
-        const tier = p ? tierFromPoints(points) : mapped.tier;
+        // 守門：Fal 計價單位與輸出種類不相容（新影片/圖端點被標 token/image 等佔位價）→ 不採即時價，
+        // 等同「無價」保守 2 點，避免 $1/token→32180 點 這類佔位點數寫進目錄並在 UI 顯示。
+        const usableP = p != null && unitPlausibleForKind(p.unit, mapped.kind) ? p : null;
+        const points = usableP ? pricingToPoints(usableP, mapped.kind) : 2; // 無價或佔位價時保守 2 點
+        const tier = usableP ? tierFromPoints(points) : mapped.tier;
         discRows.push({
           id: c.endpointId,
           endpoint: c.endpointId,
@@ -361,9 +364,9 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
           source: "fal_discovered",
           points,
           pointsStatic: null,
-          cost: p ? costLabel(p) : "價格待 Fal 回傳（暫 2 點）",
-          costUsd: p?.price ?? null,
-          costUnit: p?.unit ?? null,
+          cost: usableP ? costLabel(usableP) : "Fal 計價單位異常（暫 2 點）",
+          costUsd: usableP?.price ?? null,
+          costUnit: usableP?.unit ?? null,
           estTwd: pointsToTwd(points),
           strengths: c.description?.slice(0, 240) || "Fal 平台新模型（自動上架，未人工驗證）",
           bestFor: "探索新能力；正式交付請優先用已驗證模型",

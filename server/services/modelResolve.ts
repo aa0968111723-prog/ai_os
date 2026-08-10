@@ -79,6 +79,11 @@ function liveToEntry(row: LiveRow): ModelEntry {
   }
   const kind = row.kind as OutputKind;
   const category = row.category as ModelCategory;
+  // 守門：live 計價單位與輸出種類不相容（Fal 佔位值，如影片被標 token/image）→ 不採 DB 點數，
+  // 退回 pointsStatic（靜態回填）或保守 2 點，避免新發現模型（無官方靜態價可退）在 UI 顯示 32180 點。
+  const pricePlausible =
+    row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, kind);
+  const safePoints = pricePlausible ? row.points : (row.pointsStatic ?? 2);
   return {
     id: row.id,
     endpoint: row.endpoint !== row.id ? row.endpoint : undefined,
@@ -87,12 +92,12 @@ function liveToEntry(row: LiveRow): ModelEntry {
     tier: row.tier as ModelTier,
     kind,
     needs: (row.needs as SourceKind | null) ?? undefined,
-    points: row.points,
+    points: safePoints,
     strengths: row.strengths || row.label,
     bestFor: row.bestFor || "",
-    cost: row.cost,
-    priceUsd: row.costUsd ?? undefined,
-    priceUnit: row.costUnit ?? undefined,
+    cost: pricePlausible ? row.cost : `Fal 計價單位異常（暫 ${safePoints} 點）`,
+    priceUsd: pricePlausible ? (row.costUsd ?? undefined) : undefined,
+    priceUnit: pricePlausible ? (row.costUnit ?? undefined) : undefined,
     verified: row.verified,
     recommended: row.recommended || undefined,
     input: genericInput(kind, category),
