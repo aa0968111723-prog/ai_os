@@ -1,14 +1,16 @@
 /**
- * 分鏡資源 Dock（PR-4a）：在 ② 分鏡就近取用全站／專案資源，不必開「專案設定」二層 sheet。
- *
- * 三 tab：
- * - 素材：專案 AssetLibrary 視覺縮圖 → 套用到選中鏡
- * - 定裝：角色／場景／道具摘要 + 開完整管理
- * - 知識：知識庫標題列表 + 開完整管理
+ * 分鏡資源 Dock（PR-4a + PR-4b）：
+ * - 4a：就近取用素材／定裝／知識
+ * - 4b：勾選多鏡後，點定裝 chip 批次 merge 進各鏡的 setCards
  *
  * 不取代專案設定；只負責「創作當下的就近取用」。
  */
 import { useMemo, useState, type DragEvent } from "react";
+import {
+  MAX_GENERATE_CHARACTERS,
+  MAX_GENERATE_PROPS,
+  MAX_GENERATE_SCENE_PRESETS,
+} from "@shared/cardLimits";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { AssetImg, AssetVideo } from "../../components/MediaFallback";
@@ -16,11 +18,18 @@ import { Button, Chip, Hint, Meta } from "../../components/ui";
 import { revealProjectContext } from "../project-nav/projectContextNav";
 
 type DockTab = "assets" | "costume" | "knowledge";
+type CardKind = "characterIds" | "scenePresetIds" | "propIds";
 
 const TAB_LABEL: Record<DockTab, string> = {
   assets: "素材",
   costume: "定裝",
   knowledge: "知識",
+};
+
+const CARD_MAX: Record<CardKind, number> = {
+  characterIds: MAX_GENERATE_CHARACTERS,
+  scenePresetIds: MAX_GENERATE_SCENE_PRESETS,
+  propIds: MAX_GENERATE_PROPS,
 };
 
 export function ResourceDock({
@@ -31,7 +40,7 @@ export function ResourceDock({
 }: {
   projectId: string;
   canEdit: boolean;
-  /** 分鏡多選：套用素材時的目標鏡 */
+  /** 分鏡多選：套用素材／定裝時的目標鏡 */
   pickedShotIds: string[];
   characterNames: Map<string, string>;
 }) {
@@ -60,6 +69,11 @@ export function ResourceDock({
     { projectId },
     { enabled: open && tab === "knowledge", staleTime: 60_000 },
   );
+  // 批次套用定裝需要各鏡現有綁定，才能 merge 而不是整排覆寫
+  const shots = trpc.scenes.listByProject.useQuery(
+    { projectId },
+    { enabled: open && tab === "costume" && pickedShotIds.length > 0, staleTime: 15_000 },
+  );
 
   const setVisual = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => {
@@ -69,10 +83,32 @@ export function ResourceDock({
     onError: (err) => setStatus(err.message),
   });
 
+  const setCards = trpc.scenes.setCards.useMutation({
+    onSuccess: () => {
+      void utils.scenes.listByProject.invalidate({ projectId });
+    },
+    onError: (err) => setStatus(err.message),
+  });
+
   const visuals = useMemo(
     () => (assets.data ?? []).filter((a) => (a.kind === "image" || a.kind === "video") && a.url),
     [assets.data],
   );
+
+  const shotBindings = useMemo(() => {
+    const map = new Map<
+      string,
+      { characterIds: string[]; scenePresetIds: string[]; propIds: string[] }
+    >();
+    for (const s of shots.data ?? []) {
+      map.set(s.id, {
+        characterIds: (s.characterIds as string[] | null) ?? [],
+        scenePresetIds: (s.scenePresetIds as string[] | null) ?? [],
+        propIds: (s.propIds as string[] | null) ?? [],
+      });
+    }
+    return map;
+  }, [shots.data]);
 
   const targetLabel =
     pickedShotIds.length === 0
@@ -89,11 +125,55 @@ export function ResourceDock({
     }
   };
 
+  /**
+   * 批次把一張定裝卡 merge 進選中鏡。
+   * - 已有該 id → 跳過（不重複）
+   * - 已達上限 → 跳過該鏡
+   * - 只送動到的那一排，避免覆寫夥伴剛改的另外兩排
+   */
+  const applyCardToPicked = (kind: CardKind, cardId: string, label: string) => {
+    if (!canEdit || pickedShotIds.length === 0 || setCards.isPending) return;
+    setStatus("");
+    const max = CARD_MAX[kind];
+    let applied = 0;
+    let skippedFull = 0;
+    let skippedDup = 0;
+
+    for (const sceneId of pickedShotIds) {
+      const binding = shotBindings.get(sceneId) ?? {
+        characterIds: [] as string[],
+        scenePresetIds: [] as string[],
+        propIds: [] as string[],
+      };
+      const current = binding[kind];
+      if (current.includes(cardId)) {
+        skippedDup += 1;
+        continue;
+      }
+      if (current.length >= max) {
+        skippedFull += 1;
+        continue;
+      }
+      const next = [...current, cardId];
+      setCards.mutate({ sceneId, [kind]: next });
+      applied += 1;
+    }
+
+    const bits: string[] = [];
+    if (applied > 0) bits.push(`✓ 「${label}」已加到 ${applied} 鏡`);
+    if (skippedDup > 0) bits.push(`${skippedDup} 鏡已有`);
+    if (skippedFull > 0) bits.push(`${skippedFull} 鏡已滿（上限 ${max}）`);
+    if (bits.length === 0) bits.push(`沒有鏡需要更新`);
+    setStatus(bits.join("・"));
+  };
+
   const onDragStartAsset = (e: DragEvent, assetId: string, title: string) => {
     e.dataTransfer.setData("application/x-aios-asset-id", assetId);
     e.dataTransfer.setData("text/plain", title);
     e.dataTransfer.effectAllowed = "copy";
   };
+
+  const canBatchCostume = canEdit && pickedShotIds.length > 0 && !setCards.isPending;
 
   return (
     <aside
@@ -222,7 +302,9 @@ export function ResourceDock({
           {tab === "costume" && (
             <div role="tabpanel" aria-label="定裝">
               <Meta as="p" style={{ margin: "0 0 8px", fontSize: "var(--fs-12)" }}>
-                鎖定後生成才會跨鏡一致。點 chip 開完整管理。
+                {pickedShotIds.length > 0
+                  ? `點 chip 把定裝加到選中的 ${pickedShotIds.length} 鏡（已有則跳過）`
+                  : "勾選分鏡後點 chip 批次套用；未勾選時點 chip 開完整管理"}
               </Meta>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div>
@@ -232,7 +314,19 @@ export function ResourceDock({
                       <Meta>尚無角色卡</Meta>
                     ) : (
                       (characters.data ?? []).slice(0, 12).map((c) => (
-                        <Chip key={c.id} title={`${c.name}——開啟定裝管理`} onClick={() => revealProjectContext("characters", { projectId, returnTo: "scenes" })}>
+                        <Chip
+                          key={c.id}
+                          title={
+                            canBatchCostume
+                              ? `把「${c.name}」加到選中的 ${pickedShotIds.length} 鏡`
+                              : `${c.name}——開啟定裝管理`
+                          }
+                          onClick={() => {
+                            if (canBatchCostume) applyCardToPicked("characterIds", c.id, c.name);
+                            else revealProjectContext("characters", { projectId, returnTo: "scenes" });
+                          }}
+                          style={canBatchCostume ? { cursor: "pointer" } : undefined}
+                        >
                           {c.name}
                         </Chip>
                       ))
@@ -246,7 +340,19 @@ export function ResourceDock({
                       <Meta>尚無場景卡</Meta>
                     ) : (
                       (scenePresets.data ?? []).slice(0, 12).map((s) => (
-                        <Chip key={s.id} title={`${s.name}——開啟定裝管理`} onClick={() => revealProjectContext("scenes", { projectId, returnTo: "scenes" })}>
+                        <Chip
+                          key={s.id}
+                          title={
+                            canBatchCostume
+                              ? `把「${s.name}」加到選中的 ${pickedShotIds.length} 鏡`
+                              : `${s.name}——開啟定裝管理`
+                          }
+                          onClick={() => {
+                            if (canBatchCostume) applyCardToPicked("scenePresetIds", s.id, s.name);
+                            else revealProjectContext("scenes", { projectId, returnTo: "scenes" });
+                          }}
+                          style={canBatchCostume ? { cursor: "pointer" } : undefined}
+                        >
                           {s.name}
                         </Chip>
                       ))
@@ -260,7 +366,19 @@ export function ResourceDock({
                       <Meta>尚無道具卡</Meta>
                     ) : (
                       (props.data ?? []).slice(0, 12).map((p) => (
-                        <Chip key={p.id} title={`${p.name}——開啟定裝管理`} onClick={() => revealProjectContext("props", { projectId, returnTo: "scenes" })}>
+                        <Chip
+                          key={p.id}
+                          title={
+                            canBatchCostume
+                              ? `把「${p.name}」加到選中的 ${pickedShotIds.length} 鏡`
+                              : `${p.name}——開啟定裝管理`
+                          }
+                          onClick={() => {
+                            if (canBatchCostume) applyCardToPicked("propIds", p.id, p.name);
+                            else revealProjectContext("props", { projectId, returnTo: "scenes" });
+                          }}
+                          style={canBatchCostume ? { cursor: "pointer" } : undefined}
+                        >
                           {p.name}
                         </Chip>
                       ))
@@ -268,15 +386,18 @@ export function ResourceDock({
                   </div>
                 </div>
               </div>
-              <div style={{ marginTop: 10 }}>
+              <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Button size="sm" variant="tonal" type="button" onClick={() => revealProjectContext("characters", { projectId, returnTo: "scenes" })}>
                   <Icon name="User" size={12} /> 管理定裝
                 </Button>
               </div>
-              {characterNames.size > 0 && pickedShotIds.length > 0 && (
+              {pickedShotIds.length === 0 && (
                 <Hint style={{ marginTop: 8, fontSize: "var(--fs-11)" }}>
-                  已選 {pickedShotIds.length} 鏡——批次套用定裝將在下一版支援
+                  提示：勾選分鏡後再點 chip，可一次把定裝加到多鏡
                 </Hint>
+              )}
+              {characterNames.size > 0 && pickedShotIds.length > 0 && shots.isLoading && (
+                <Meta as="p" style={{ marginTop: 6, fontSize: "var(--fs-11)" }}>讀取現有綁定…</Meta>
               )}
             </div>
           )}
