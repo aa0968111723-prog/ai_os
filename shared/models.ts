@@ -2033,6 +2033,15 @@ export const MODELS: ModelEntry[] = [
     bestFor: "大量簡單任務(標籤、分類)",
     input: llmOpenRouterInput("google/gemini-3.5-flash-lite"),
   },
+  {
+    // 雷達 2026-08-10：DeepSeek V4 Flash 昇級目標補錄——原只有 llmPricing 的 fal_economy 規劃檔
+    // （deepseek/deepseek-v4-flash，$0.14/$0.28），全站 LLM 目錄缺此筆，models.search/byCategory(llm) 找不到。
+    id: "openrouter/router#deepseek-v4-flash", endpoint: "openrouter/router", label: "DeepSeek V4 Flash", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.14/$0.28 per M tokens", verified: false,
+    strengths: "DeepSeek 最新輕量旗艦;極致便宜、中文語感佳",
+    bestFor: "高量低成本任務、分類標籤、預算主力",
+    input: llmOpenRouterInput("deepseek/deepseek-v4-flash"),
+  },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */
   {

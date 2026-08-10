@@ -8,6 +8,7 @@ import {
   getModel as getStaticModel,
   estimatePoints as estimateStaticPoints,
   nearestFormat,
+  realPricePoints,
   type EstimateContext,
   type ModelCategory,
   type ModelEntry,
@@ -54,10 +55,16 @@ function liveToEntry(row: LiveRow): ModelEntry {
   const staticM = getStaticModel(row.id) ?? (row.endpoint !== row.id ? getStaticModel(row.endpoint) : undefined);
   if (staticM) {
     // live 計價單位與靜態種類不相容（Fal 佔位值／誤配）→ 保留靜態官方實價，不覆寫
-    const livePrice =
-      row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind)
-        ? { points: row.points, cost: row.cost, priceUsd: row.costUsd, priceUnit: row.costUnit }
-        : null;
+    const unitOk = row.costUsd != null && row.costUnit != null && unitPlausibleForKind(row.costUnit, staticM.kind);
+    // 守門二：live 點數與官方實價（機械解析 cost 字串）偏差 ≥40% → 佔位／誤配價
+    //（如 flux-3 draft 官方 $0.06/秒=9 點、live 卻 $0.2/秒→31 點），保留靜態官方實價。
+    const official = realPricePoints(staticM);
+    const driftBlocked = unitOk && official != null && official > 0 && staticM.points > 0
+      && Math.abs(row.points - staticM.points) >= 1
+      && (row.points >= staticM.points * 1.4 || row.points <= staticM.points / 1.4);
+    const livePrice = unitOk && !driftBlocked
+      ? { points: row.points, cost: row.cost, priceUsd: row.costUsd, priceUnit: row.costUnit }
+      : null;
     return {
       ...staticM,
       points: livePrice ? livePrice.points : staticM.points,
@@ -148,11 +155,24 @@ export function estimatePointsFor(model: ModelEntry, ctx?: EstimateContext): num
   // 即時單價優先；character 單位會依本次朗讀字數換算，避免 TTS 又退回可能已過期的靜態價。
   // 單位與輸出種類語意不相容（Fal 佔位值，如影片被標 token/image）→ 退回靜態官方實價。
   if (model.priceUsd != null && model.priceUnit && unitPlausibleForKind(model.priceUnit, model.kind)) {
-    return usdUnitToPoints(model.priceUsd, model.priceUnit, {
+    const livePoints = usdUnitToPoints(model.priceUsd, model.priceUnit, {
       kindHint: model.kind,
       promptChars: ctx?.promptChars,
       usdToTwdRate: ctx?.usdToTwdRate,
     });
+    // 守門二（縱深）：live 換算點數與官方實價（機械解析 cost）偏差 ≥40% → 佔位／誤配價，退回靜態。
+    // 正常路徑由 liveToEntry 在解析時就先擋掉（priceUsd 留空）；此處是兜底，避免任何直接帶
+    // priceUsd/priceUnit 的入口把官方實價估歪。
+    const staticM = getStaticModel(model.id);
+    if (staticM) {
+      const official = realPricePoints(staticM);
+      if (official != null && official > 0 && staticM.points > 0
+          && Math.abs(livePoints - staticM.points) >= 1
+          && (livePoints >= staticM.points * 1.4 || livePoints <= staticM.points / 1.4)) {
+        return estimateStaticPoints(staticM, ctx);
+      }
+    }
+    return livePoints;
   }
   return estimateStaticPoints(model, ctx);
 }
