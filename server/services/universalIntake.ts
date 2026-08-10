@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { open, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -49,6 +49,7 @@ export interface IntakeProvenance {
   importMethod: "file-picker" | "drag-drop" | "clipboard" | "url" | "google-drive" | "desktop" | "mobile-share" | "internal";
   originalUrl?: string | null;
   externalSessionId?: string | null;
+  editingSessionId?: string | null;
   sourceExternalId?: string | null;
 }
 
@@ -90,6 +91,7 @@ export interface ImportUrlIntoProjectInput {
   source?: IntakeSource;
   sourceTool?: string;
   externalSessionId?: string;
+  editingSessionId?: string;
   context?: IntakePageContext;
   mediaMetadata?: DeterministicMediaMetadata;
   forceDuplicate?: boolean;
@@ -100,6 +102,7 @@ export interface ImportDriveFileIntoProjectInput {
   projectId: string;
   fileId: string;
   externalSessionId?: string;
+  editingSessionId?: string;
   context?: IntakePageContext;
   forceDuplicate?: boolean;
 }
@@ -156,6 +159,8 @@ async function registerSidecars(input: {
   const { asset, folderImport } = input;
   const sourceType = folderImport
     ? "folder_import"
+    : input.provenance.editingSessionId || input.provenance.source === "external-editor"
+      ? "external-editor"
     : input.provenance.sourceTool || input.provenance.externalSessionId
     ? "external-ai"
     : input.provenance.source === "internal-generation"
@@ -171,6 +176,7 @@ async function registerSidecars(input: {
     importMethod: input.provenance.importMethod,
     originalUrl: input.provenance.originalUrl ?? null,
     externalSessionId: input.provenance.externalSessionId ?? null,
+    editingSessionId: input.provenance.editingSessionId ?? null,
     sourceExternalId: input.provenance.sourceExternalId ?? null,
     ...(folderImport ? {
       folderImportSessionId: folderImport.sessionId,
@@ -245,6 +251,109 @@ async function loadExternalSession(input: IngestTmpAssetInput) {
       : [undefined];
   if (!session || session.userId !== input.auth.user.id || session.projectId !== input.project.id) return null;
   return session;
+}
+
+async function loadEditingSession(input: IngestTmpAssetInput) {
+  const id = input.provenance.editingSessionId;
+  if (!id) return null;
+  const [session] = await db.select().from(schema.externalEditingSessions)
+    .where(eq(schema.externalEditingSessions.id, id));
+  if (!session || session.userId !== input.auth.user.id || session.projectId !== input.project.id || session.groupId !== input.project.groupId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "剪輯工作階段與目前專案不相符" });
+  }
+  if (["cancelled", "completed", "failed"].includes(session.status)) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個剪輯工作階段已結束，不能再回傳成果" });
+  }
+  return session;
+}
+
+async function persistEditingReturnBinding(input: {
+  auth: AuthState;
+  project: typeof schema.projects.$inferSelect;
+  asset: typeof schema.assets.$inferSelect;
+  session: typeof schema.externalEditingSessions.$inferSelect;
+  intelligenceId: string | null;
+  libraryResourceId: string | null;
+}) {
+  const scopeType = input.session.shotIds.length === 1
+    ? "shot"
+    : input.session.storySceneIds.length === 1
+      ? "scene"
+      : "project";
+  const scopeId = scopeType === "shot"
+    ? input.session.shotIds[0]!
+    : scopeType === "scene"
+      ? input.session.storySceneIds[0]!
+      : input.project.id;
+  const [binding] = await db.insert(schema.contextBindings).values({
+    groupId: input.project.groupId,
+    projectId: input.project.id,
+    scopeType,
+    scopeId,
+    resourceKind: "asset",
+    resourceId: input.asset.id,
+    intelligenceId: input.intelligenceId,
+    libraryResourceId: input.libraryResourceId,
+    role: "DELIVERY_ASSET",
+    priority: "PRIMARY",
+    source: "AI_SUGGESTED",
+    confidence: 1,
+    confirmedByUser: false,
+    note: `LumaFusion 回傳 · Editing Session ${input.session.id}`,
+    createdBy: input.auth.user.id,
+  }).onConflictDoUpdate({
+    target: [
+      schema.contextBindings.scopeType,
+      schema.contextBindings.scopeId,
+      schema.contextBindings.resourceKind,
+      schema.contextBindings.resourceId,
+      schema.contextBindings.role,
+    ],
+    set: { confidence: 1, updatedAt: new Date() },
+  }).returning({ id: schema.contextBindings.id });
+  return { bindingId: binding?.id ?? null, scopeType, scopeId };
+}
+
+async function persistEditingLineage(input: {
+  auth: AuthState;
+  asset: typeof schema.assets.$inferSelect;
+  session: typeof schema.externalEditingSessions.$inferSelect;
+  childIntelligenceId: string | null;
+}) {
+  if (!input.session.assetIds.length) return;
+  const [editingPackage] = await db.select({ manifest: schema.externalEditingPackages.manifest })
+    .from(schema.externalEditingPackages)
+    .where(eq(schema.externalEditingPackages.sessionId, input.session.id))
+    .orderBy(desc(schema.externalEditingPackages.createdAt)).limit(1);
+  const manifestAssets = editingPackage?.manifest?.assets ?? [];
+  const primaryAssetId = manifestAssets.find((entry) => entry.role === "PRIMARY_MEDIA" || entry.role === "PRIMARY_VIDEO")?.assetId
+    ?? input.session.assetIds[0];
+  if (primaryAssetId) {
+    await db.insert(schema.assetRevisions).values({
+      assetId: input.asset.id,
+      sourceAssetId: primaryAssetId,
+      projectId: input.session.projectId,
+      groupId: input.session.groupId,
+      editorId: input.session.editorId,
+      createdBy: input.auth.user.id,
+    }).onConflictDoNothing();
+  }
+  if (!input.childIntelligenceId) return;
+  const parents = await db.select({ id: schema.assetIntelligence.id })
+    .from(schema.assetIntelligence).where(and(
+      eq(schema.assetIntelligence.resourceKind, "asset"),
+      inArray(schema.assetIntelligence.resourceId, input.session.assetIds),
+    ));
+  for (const parent of parents) {
+    await db.insert(schema.intelligenceVersionLinks).values({
+      groupId: input.session.groupId,
+      parentIntelligenceId: parent.id,
+      childIntelligenceId: input.childIntelligenceId,
+      versionKind: "external_edit",
+      label: `LumaFusion · ${input.session.id}`,
+      createdBy: input.auth.user.id,
+    }).onConflictDoNothing();
+  }
 }
 
 async function persistBestSuggestion(input: {
@@ -325,14 +434,18 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
   const serverMedia = await deterministicImageMetadata(input.tmpPath, input.mime);
   const media = { ...normalizeMetadata(input.mediaMetadata), ...serverMedia };
   const session = await loadExternalSession(input);
-  const sourceType = (input.provenance.sourceTool || session) ? "external-ai" : input.provenance.source;
+  const editingSession = await loadEditingSession(input);
+  const sourceType = editingSession ? "external-editor" : (input.provenance.sourceTool || session) ? "external-ai" : input.provenance.source;
   const provenance = {
     sourceType,
-    sourceTool: input.provenance.sourceTool ?? session?.externalTool ?? null,
+    sourceTool: editingSession?.editorId ?? input.provenance.sourceTool ?? session?.externalTool ?? null,
     importMethod: input.provenance.importMethod,
     originalFilename: input.originalName,
     originalUrl: input.provenance.originalUrl ?? null,
     externalSessionId: session?.id ?? input.provenance.externalSessionId ?? null,
+    editingSessionId: editingSession?.id ?? input.provenance.editingSessionId ?? null,
+    externalEditor: editingSession?.editorId ?? null,
+    parentAssetIds: editingSession?.assetIds ?? [],
     sourceExternalId: input.provenance.sourceExternalId ?? null,
     importedAt: new Date().toISOString(),
   };
@@ -402,16 +515,24 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
         payload: { ...media, aspectRatio: aspectRatioOf(media.width, media.height) },
       });
     }
-    const suggestion = await persistBestSuggestion({
+    const editingBinding = editingSession ? await persistEditingReturnBinding({
       auth: input.auth,
       project: input.project,
       asset: asset!,
-      originalName: input.originalName,
-      context,
-      sessionSceneId: session?.sceneId,
+      session: editingSession,
       intelligenceId: sidecars?.intelligenceId ?? null,
       libraryResourceId: sidecars?.libraryResourceId ?? null,
-    });
+    }) : null;
+    const suggestion = editingSession ? null : await persistBestSuggestion({
+        auth: input.auth,
+        project: input.project,
+        asset: asset!,
+        originalName: input.originalName,
+        context,
+        sessionSceneId: session?.sceneId,
+        intelligenceId: sidecars?.intelligenceId ?? null,
+        libraryResourceId: sidecars?.libraryResourceId ?? null,
+      });
     const nextMeta = {
       ...(asset!.meta as Record<string, unknown>),
       intake: {
@@ -424,6 +545,14 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
           confidence: suggestion.score,
           reasons: suggestion.reasons,
         } : null,
+        editingReturn: editingSession && editingBinding ? {
+          editingSessionId: editingSession.id,
+          editor: editingSession.editorId,
+          bindingId: editingBinding.bindingId,
+          scopeType: editingBinding.scopeType,
+          scopeId: editingBinding.scopeId,
+          parentAssetIds: editingSession.assetIds,
+        } : null,
       },
     };
     const [updated] = await db.update(schema.assets).set({ meta: nextMeta })
@@ -434,6 +563,20 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
         importedAssetId: asset!.id,
         updatedAt: new Date(),
       }).where(eq(schema.externalGenerationSessions.id, session.id));
+    }
+    if (editingSession) {
+      await persistEditingLineage({
+        auth: input.auth,
+        asset: updated!,
+        session: editingSession,
+        childIntelligenceId: sidecars?.intelligenceId ?? null,
+      });
+      await db.update(schema.externalEditingSessions).set({
+        status: "needs_review",
+        returnedAssetId: updated!.id,
+        returnedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(schema.externalEditingSessions.id, editingSession.id));
     }
     if (trace) {
       await recordAiTraceEventSafely({
@@ -528,6 +671,7 @@ export async function importUrlIntoProject(
         importMethod: "url",
         originalUrl: downloaded.finalUrl,
         externalSessionId: input.externalSessionId,
+        editingSessionId: input.editingSessionId,
       },
       context: input.context,
       mediaMetadata: input.mediaMetadata,
@@ -575,6 +719,7 @@ export async function importDriveFileIntoProject(
         importMethod: "google-drive",
         originalUrl: fetched.sourceUrl,
         externalSessionId: input.externalSessionId,
+        editingSessionId: input.editingSessionId,
         sourceExternalId: input.fileId,
       },
       context: input.context,

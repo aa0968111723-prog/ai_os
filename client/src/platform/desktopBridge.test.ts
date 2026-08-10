@@ -5,6 +5,7 @@ import {
   editorKindForAsset,
   hasDesktopBridge,
   hasDesktopFolderImport,
+  materializeEditingPackage,
   normalizeAiosInternalPath,
   openAssetInExternalEditor,
   parseAiosDeepLink,
@@ -151,6 +152,27 @@ describe("desktop asset handoff", () => {
     await expect(revealAssetInFolder({
       assetId: "01234567-89ab-cdef-0123-456789abcdef",
     })).resolves.toMatchObject({ ok: false, reason: "unsupported" });
+  });
+
+  it("materializes only a validated server package id, session id and ZIP name", async () => {
+    const nativeMaterialize = vi.fn().mockResolvedValue({ ok: true, localName: "Aios_Project.zip" });
+    window.__AIOS_DESKTOP__ = {
+      version: 1,
+      openAsset: vi.fn(),
+      revealAsset: vi.fn(),
+      materializeEditingPackage: nativeMaterialize,
+    };
+    const request = {
+      packageId: "01234567-89ab-cdef-0123-456789abcdef",
+      editingSessionId: "fedcba98-7654-3210-fedc-ba9876543210",
+      fileName: "Aios_Project.zip",
+    };
+    await expect(materializeEditingPackage(request)).resolves.toMatchObject({ ok: true });
+    expect(nativeMaterialize).toHaveBeenCalledWith(request);
+
+    await expect(materializeEditingPackage({ ...request, fileName: "../unsafe.zip" }))
+      .resolves.toMatchObject({ ok: false, reason: "invalid-request" });
+    expect(nativeMaterialize).toHaveBeenCalledTimes(1);
   });
 
   it("stops an active watcher only with a valid handoff id", async () => {

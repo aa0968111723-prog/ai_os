@@ -38,6 +38,9 @@ import {
 } from "@shared/assistantExecution";
 import { useAssistantContext } from "../lib/assistantContext";
 import { toWirePageContext } from "../lib/assistantQuickActions";
+import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
+import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
+import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -90,7 +93,14 @@ type Turn = {
   latency?: AssistantLatencyMetrics;
   retryText?: string;
   directResults?: ProjectDirectResult[];
+  editingSessionId?: string;
+  editingResult?: { sessionId: string; assetId: string };
 };
+
+// Project Assistant already lives in a sheet that unmounts when closed. Keep
+// each project's conversation in the module for the life of the tab, matching
+// the global Assistant's Conversation-is-Home behavior.
+const projectConversationTurns = new Map<string, Turn[]>();
 
 type ProjectDirectResult = {
   kind: string;
@@ -131,6 +141,18 @@ function ProjectDirectResultCard({ projectId, result }: { projectId: string; res
       {undo.error ? <span className="ai-copilot-action-card__error">{undo.error.message}</span> : null}
     </div>
   );
+}
+
+function ProjectEditingSessionCard({ projectId, sessionId, onReturned, onReview }: {
+  projectId: string;
+  sessionId: string;
+  onReturned: (assetIds: string[]) => void;
+  onReview: (assetId: string) => void;
+}) {
+  const sessions = trpc.externalEditing.list.useQuery({ projectId });
+  const session = sessions.data?.find((item) => item.id === sessionId);
+  if (!session) return <Meta as="p">正在讀取剪輯工作階段…</Meta>;
+  return <EditingSessionCard session={session} onChanged={() => void sessions.refetch()} onResultReturned={onReturned} onReview={onReview} />;
 }
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
@@ -241,7 +263,14 @@ export function ProjectAssistant({
   const utils = trpc.useUtils();
   const pageContext = useAssistantContext();
   const [input, setInput] = useState("");
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [turns, setTurnsState] = useState<Turn[]>(() => projectConversationTurns.get(projectId) ?? []);
+  const setTurns = (next: Turn[] | ((previous: Turn[]) => Turn[])) => {
+    setTurnsState((previous) => {
+      const resolved = typeof next === "function" ? next(previous) : next;
+      projectConversationTurns.set(projectId, resolved);
+      return resolved;
+    });
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [liveTraceOpen, setLiveTraceOpen] = useState(true);
   // 思考過程串流狀態：active＝正在問答中，events＝已收到的思考步驟（逐筆追加即時顯示）
@@ -261,6 +290,7 @@ export function ProjectAssistant({
   // 回答這則提問要用的模型：與代理規劃檔位分開存（聊天預設免費，規劃預設高品質＋計點）
   const [answerMode, setAnswerMode] = useState<AgentPlannerMode>(readAssistantAnswerMode);
   const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
+  const [editingSheetOpen, setEditingSheetOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
@@ -278,6 +308,7 @@ export function ProjectAssistant({
   activeProjectIdRef.current = projectId;
   const requestEpochRef = useRef(0);
   const projectGenerationRef = useRef(0);
+  const previousProjectIdRef = useRef(projectId);
   const requestIsCurrent = (requestProjectId: string, epoch: number) =>
     activeProjectIdRef.current === requestProjectId && requestEpochRef.current === epoch;
 
@@ -438,6 +469,13 @@ export function ProjectAssistant({
   const send = async (override?: string) => {
     const m = (override ?? input).trim();
     if (!m || busy) return;
+    if (detectEditingHandoffRequest(m)) {
+      push({ role: "you", text: m });
+      push({ role: "ai", text: "我會在這段專案對話中準備正式的 LumaFusion 交接。請先確認範圍與主要素材。" });
+      setInput("");
+      setEditingSheetOpen(true);
+      return;
+    }
     abortRef.current?.abort(); // 保險：中止任何殘留串流（busy 守門通常已擋住並行）
     const requestProjectId = projectId;
     const epoch = ++requestEpochRef.current;
@@ -541,10 +579,12 @@ export function ProjectAssistant({
   }, []);
   useEffect(() => {
     // projectId 變更：中止舊串流並重置對話狀態（本元件在 /p/A→/p/B 只換 prop 不 remount）
+    if (previousProjectIdRef.current === projectId) return;
+    previousProjectIdRef.current = projectId;
     abortRef.current?.abort();
     requestEpochRef.current += 1;
     projectGenerationRef.current += 1;
-    setTurns([]);
+    setTurns(projectConversationTurns.get(projectId) ?? []);
     setThinking({ active: false, events: [] });
     setFallbackPending(false);
     setActivePlan(null);
@@ -739,6 +779,18 @@ export function ProjectAssistant({
                 {t.directResults?.map((result, resultIndex) => (
                   <ProjectDirectResultCard key={`${result.kind}:${resultIndex}`} projectId={projectId} result={result} />
                 ))}
+                {t.editingSessionId ? (
+                  <ProjectEditingSessionCard projectId={projectId} sessionId={t.editingSessionId} onReturned={(assetIds) => {
+                    if (!assetIds[0]) return;
+                    push({
+                      role: "ai",
+                      text: "✓ LumaFusion 剪輯成果已回到原工作階段，版本來源與專案位置都已保留。",
+                      editingResult: { sessionId: t.editingSessionId!, assetId: assetIds[0] },
+                    });
+                  }} onReview={(assetId) => void send(`幫我審查剛從 LumaFusion 帶回的成片（Asset ${assetId}），比較目前專案腳本與分鏡，並清楚標示可驗證的來源；如果無法取得精確 timecode，請直接說明。`)} />
+                ) : null}
+                {t.editingResult ? <EditingResultCard assetId={t.editingResult.assetId} sessionId={t.editingResult.sessionId}
+                  onReview={(assetId) => void send(`幫我審查剛從 LumaFusion 帶回的成片（Asset ${assetId}），比較目前專案腳本與分鏡，並清楚標示可驗證的來源；如果無法取得精確 timecode，請直接說明。`)} /> : null}
                 {t.retryText ? (
                   <Button variant="ghost" size="sm" disabled={busy} onClick={() => void send(t.retryText)}>
                     <Icon name="Play" size={12} /> 繼續
@@ -1106,6 +1158,18 @@ export function ProjectAssistant({
                 : "走 fal.ai：站內仍是 0 點，但平台會實付 USD。專案內容也會傳給 fal.ai。"}
           </Hint>
         </div>
+        {editingSheetOpen ? <EditingHandoffSheet
+          open={editingSheetOpen}
+          projectId={projectId}
+          originConversationId={`project-${projectId}`}
+          originSurface="project"
+          onClose={() => setEditingSheetOpen(false)}
+          onPrepared={(sessionId) => push({
+            role: "ai",
+            text: "✓ LumaFusion 剪輯工作階段已建立；你可以直接下載交接包，完成後也從這張卡回傳。",
+            editingSessionId: sessionId,
+          })}
+        /> : null}
       </div>
     </>
   );

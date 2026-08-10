@@ -9405,3 +9405,28 @@ body.story-immersive { overflow: hidden; }
 @media (max-width: 820px) {
   .project-context__list li { align-items: flex-start; }
 }
+
+/* External Editing Bridge: one compact sheet and durable session cards. */
+.editing-handoff-sheet { width: min(720px, calc(100vw - 24px)); max-height: min(88dvh, 900px); overflow: auto; display: grid; gap: 14px; }
+.editing-handoff-sheet__head,
+.editing-session-card__head,
+.editing-session-list__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.editing-handoff-sheet__head h2 { margin: 2px 0 0; }
+.editing-handoff-sheet__section { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-12); }
+.editing-handoff-sheet__choices,
+.editing-handoff-sheet__actions,
+.editing-session-card__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.editing-handoff-sheet__actions { justify-content: flex-end; position: sticky; bottom: -1px; padding-top: 10px; background: var(--surface); }
+.editing-handoff-sheet__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px; max-height: 220px; overflow: auto; }
+.editing-handoff-sheet__list button { padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--r-8); background: var(--card2); color: inherit; text-align: start; cursor: pointer; }
+.editing-handoff-sheet__list button.is-selected { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.editing-session-list { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.editing-session-card { display: grid; gap: 6px; }
+.editing-session-card p { margin: 0; }
+.editing-result-card { display: grid; gap: 8px; align-items: start; }
+@media (max-width: 600px) {
+  .editing-handoff-sheet { width: 100vw; max-width: none; max-height: calc(100dvh - var(--safe-top)); margin: auto 0 0; border-radius: 20px 20px 0 0; padding-bottom: calc(14px + var(--safe-bottom)); }
+  .editing-handoff-sheet__list { grid-template-columns: 1fr; }
+  .editing-handoff-sheet__actions > * { flex: 1 1 auto; }
+  .editing-session-card__head { align-items: center; }
+}

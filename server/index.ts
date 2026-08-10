@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { ZipArchive } from "archiver";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./trpc";
@@ -46,6 +47,7 @@ import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
   assessStoragePersistence, verifyVolumeIdentity, storageBackend, storageBackendNote, openStoredObject,
+  openStoredReadStream, statStored,
 } from "./services/storage";
 import { setStorageDegraded } from "./services/storageHealth";
 import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
@@ -83,6 +85,7 @@ import compression from "compression";
 import { agentPlannerModeSchema } from "../shared/agentPlanner";
 import { INTAKE_SOURCES, deterministicMediaMetadataSchema, intakePageContextSchema, type IntakeSource } from "../shared/universalIntake";
 import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntake";
+import { editingManifestSchema } from "../shared/externalEditing";
 
 const app = express();
 
@@ -327,6 +330,68 @@ app.get("/api/mock-asset/:kind", (req, res) => {
   // 影片亦回傳圖片位元組（測試模式重點是流程可測；正式模式為真實 mp4）
   res.setHeader("Content-Type", "image/png");
   res.send(MOCK_PNG);
+});
+
+// External Editing Bridge package download. The ZIP is streamed from canonical
+// asset storage and is never duplicated into a second media store.
+app.get("/api/editing-packages/:packageId/download", async (req, res) => {
+  try {
+    const auth = await resolveRequestAuth(req);
+    if (!requireUsableSession(auth, res)) return;
+    const [editingPackage] = await db.select().from(schema.externalEditingPackages)
+      .where(eq(schema.externalEditingPackages.id, req.params.packageId));
+    if (!editingPackage) return res.status(404).json({ error: "找不到交接包" });
+    const [session] = await db.select().from(schema.externalEditingSessions)
+      .where(eq(schema.externalEditingSessions.id, editingPackage.sessionId));
+    if (!session || !auth.groups.some((group) => group.groupId === session.groupId)) {
+      return res.status(403).json({ error: "你沒有這個交接包的存取權" });
+    }
+    if (editingPackage.revokedAt || session.status === "cancelled") {
+      return res.status(410).json({ error: "這個交接包已撤銷，請重新建立" });
+    }
+    if (editingPackage.expiresAt.getTime() <= Date.now()) {
+      return res.status(410).json({ error: "這個交接包已過期，請重新建立" });
+    }
+    const manifest = editingManifestSchema.parse(editingPackage.manifest);
+    const assets = editingPackage.assetIds.length ? await db.select().from(schema.assets).where(and(
+      inArray(schema.assets.id, editingPackage.assetIds),
+      eq(schema.assets.projectId, session.projectId),
+      eq(schema.assets.groupId, session.groupId),
+      isNull(schema.assets.deletedAt),
+    )) : [];
+    if (assets.length !== editingPackage.assetIds.length) {
+      return res.status(409).json({ error: "部分素材已移除或權限已變更，請重新建立交接包" });
+    }
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    for (const entry of manifest.assets) {
+      const asset = byId.get(entry.assetId);
+      if (!asset?.storagePath || !(await statStored(asset.storagePath)).exists) {
+        return res.status(409).json({ error: `「${asset?.title ?? entry.fileName}」尚未安全落地，請稍後再建立交接包` });
+      }
+    }
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(editingPackage.fileName)}`);
+    res.setHeader("Cache-Control", "private, no-store");
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    archive.on("warning", (warning) => console.warn("[editing-package]", warning.message));
+    archive.on("error", (error) => {
+      recordError("editing-package", error);
+      if (!res.headersSent) res.status(500).json({ error: "交接包建立失敗，請稍後再試" });
+      else res.destroy(error);
+    });
+    archive.pipe(res);
+    archive.append(`${JSON.stringify(manifest, null, 2)}\n`, { name: "aios-manifest.json" });
+    for (const entry of manifest.assets) {
+      const asset = byId.get(entry.assetId)!;
+       archive.append(await openStoredReadStream(asset.storagePath!), { name: entry.relativePath });
+    }
+    await archive.finalize();
+  } catch (error) {
+    console.error("[editing-package]", error);
+    recordError("editing-package", error);
+    if (!res.headersSent) res.status(500).json({ error: "交接包建立失敗，請稍後再試" });
+  }
 });
 
 // 多選打包的 assetIds 逐一驗 UUID：非 UUID 一律剔除（防怪參數；剔光＝回全量打包）
@@ -729,6 +794,8 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
       const rawSource = String(req.body?.source ?? "").trim();
       const source: IntakeSource = (INTAKE_SOURCES as readonly string[]).includes(rawSource)
         ? rawSource as IntakeSource
+        : String(req.body?.editingSessionId ?? "").trim()
+          ? "external-editor"
         : String(req.body?.sourceTool ?? "").trim() || String(req.body?.externalSessionId ?? "").trim()
           ? "external-ai"
           : "upload";
@@ -751,6 +818,7 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
           sourceTool: String(req.body?.sourceTool ?? "").trim() || null,
           importMethod,
           externalSessionId: String(req.body?.externalSessionId ?? "").trim() || null,
+          editingSessionId: String(req.body?.editingSessionId ?? "").trim() || null,
         },
         context: parsedContext.success ? parsedContext.data : null,
         mediaMetadata: parsedMedia.success ? parsedMedia.data : null,

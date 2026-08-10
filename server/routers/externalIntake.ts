@@ -396,6 +396,7 @@ export const externalIntakeRouter = router({
     source: z.enum(INTAKE_SOURCES).default("url"),
     sourceTool: z.string().trim().max(100).optional(),
     externalSessionId: z.string().uuid().optional(),
+    editingSessionId: z.string().uuid().optional(),
     context: intakePageContextSchema.optional(),
     mediaMetadata: deterministicMediaMetadataSchema.optional(),
     forceDuplicate: z.boolean().default(false),
@@ -407,6 +408,7 @@ export const externalIntakeRouter = router({
     projectId: z.string().uuid(),
     fileId: z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確"),
     externalSessionId: z.string().uuid().optional(),
+    editingSessionId: z.string().uuid().optional(),
     context: intakePageContextSchema.optional(),
     forceDuplicate: z.boolean().default(false),
   })).mutation(async ({ ctx, input }) => {

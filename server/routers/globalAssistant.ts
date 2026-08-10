@@ -195,6 +195,14 @@ const recentActionResultSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_project"), projectId: z.string().uuid(), title: z.string().max(80), verification: verificationSchema }),
   z.object({ type: z.literal("create_task"), taskIds: z.array(z.string().uuid()).max(50), count: z.number().int().nonnegative(), projectId: z.string().uuid(), verification: verificationSchema }),
   z.object({ type: z.literal("generation"), generationIds: z.array(z.string().uuid()).max(50), projectId: z.string().uuid(), sceneIds: z.array(z.string().uuid()).max(50).optional(), verification: verificationSchema }),
+  z.object({
+    type: z.literal("editing_handoff"),
+    editingSessionId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    editorId: z.literal("lumafusion"),
+    assetIds: z.array(z.string().uuid()).max(50),
+    verification: verificationSchema,
+  }),
 ]);
 
 export function sanitizeRecentActionResults(raw: unknown): AssistantActionResult[] {

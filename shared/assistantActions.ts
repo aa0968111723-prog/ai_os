@@ -65,11 +65,21 @@ export interface GenerationActionResult {
   verification: AssistantVerification;
 }
 
+export interface EditingHandoffActionResult {
+  type: "editing_handoff";
+  editingSessionId: string;
+  projectId: string;
+  editorId: "lumafusion";
+  assetIds: string[];
+  verification: AssistantVerification;
+}
+
 export type AssistantActionResult =
   | ImportActionResult
   | CreateProjectActionResult
   | CreateTaskActionResult
-  | GenerationActionResult;
+  | GenerationActionResult
+  | EditingHandoffActionResult;
 
 /** Keep the reference window bounded; this is a pronoun resolver, not memory. */
 export const MAX_RECENT_ACTION_RESULTS = 5;
@@ -97,6 +107,9 @@ export function boundAssistantActionResults(
         sceneIds: result.sceneIds?.slice(0, MAX_RECENT_RESULT_IDS),
       };
     }
+    if (result.type === "editing_handoff") {
+      return { ...result, assetIds: result.assetIds.slice(0, MAX_RECENT_RESULT_IDS) };
+    }
     return result;
   });
 }
@@ -113,6 +126,9 @@ export function formatRecentActionResults(results: readonly AssistantActionResul
     }
     if (result.type === "create_task") {
       return `${index + 1}. create_task：projectId=${result.projectId}；taskIds=${result.taskIds.join(",")}`;
+    }
+    if (result.type === "editing_handoff") {
+      return `${index + 1}. editing_handoff：projectId=${result.projectId}；editingSessionId=${result.editingSessionId}；editor=${result.editorId}；assetIds=${result.assetIds.join(",") || "none"}`;
     }
     return `${index + 1}. generation：projectId=${result.projectId}；generationIds=${result.generationIds.join(",")}`;
   });

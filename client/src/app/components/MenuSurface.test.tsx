@@ -85,6 +85,17 @@ describe("MenuSurface", () => {
     expect(screen.getByRole("menu", { name: "測試選單" })).toBeInTheDocument();
   });
 
+  it("點由選單開出的 portal 對話框不會把父 sheet 一起關掉", async () => {
+    restore = stubMatchMedia(true);
+    const user = userEvent.setup();
+    render(<><Harness /><div className="modal-scrim"><button>子對話框操作</button></div></>);
+    await user.click(screen.getByRole("button", { name: "開選單" }));
+    await screen.findByRole("menu", { name: "測試選單" });
+
+    await user.click(screen.getByRole("button", { name: "子對話框操作" }));
+    expect(screen.getByRole("menu", { name: "測試選單" })).toBeInTheDocument();
+  });
+
   it("開啟聚焦首項、方向鍵漫遊、Esc 關閉並把焦點還給觸發器", async () => {
     restore = stubMatchMedia(false);
     const user = userEvent.setup();

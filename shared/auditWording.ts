@@ -55,6 +55,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "externalIntake.confirm": "確認外部成果的整理位置",
   "externalIntake.importUrl": "從公開網址帶入外部成果",
   "externalIntake.importDriveFile": "從 Google 雲端帶入外部成果",
+  "externalEditing.prepare": "準備 LumaFusion 剪輯交接包",
+  "externalEditing.markHandedOff": "標記外部剪輯交接已開始",
+  "externalEditing.reprepare": "重新準備外部剪輯交接包",
+  "externalEditing.cancel": "取消外部剪輯工作階段",
+  "externalEditing.complete": "確認外部剪輯成果完成",
   // 分享連結：唯一能讓專案內容被未登入者看到的動作，措辭必須明講「對外公開」
   "share.create": "建立對外唯讀分享連結",
   "share.revoke": "收回對外唯讀分享連結",
@@ -393,7 +398,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // dataHub 歸在資料：資料中心是「資料庫／知識／素材」的統一視圖，
   // 查「這份資料何時被提供給哪個專案」時，會跟資料表的異動一起看
   { key: "database", label: "資料中心與資料表", prefixes: ["databases", "dataHub", "intelligence", "folderImport"] },
-  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["externalIntake", "mcpTokens", "mcp", "integrations", "adobe", "userAiKeys"] },
+  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["externalIntake", "externalEditing", "mcpTokens", "mcp", "integrations", "adobe", "userAiKeys"] },
   { key: "system", label: "系統與儲存", prefixes: ["system"] },
 ];
 

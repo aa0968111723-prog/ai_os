@@ -53,6 +53,7 @@ import { collaborationRouter } from "./collaboration";
 import { decisionsRouter } from "./decisions";
 import { intelligenceRouter } from "./intelligence";
 import { externalIntakeRouter } from "./externalIntake";
+import { externalEditingRouter } from "./externalEditing";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -110,6 +111,7 @@ export const appRouter = router({
   decisions: decisionsRouter,
   intelligence: intelligenceRouter,
   externalIntake: externalIntakeRouter,
+  externalEditing: externalEditingRouter,
 });
 
 export type AppRouter = typeof appRouter;

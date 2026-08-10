@@ -22,6 +22,9 @@ import {
   ExternalAssetIntake,
   type ExternalIntakeOpenRequest,
 } from "../features/external-intake/ExternalAssetIntake";
+import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
+import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
+import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
 import {
   abortAssistantRun,
   captureAssistantReturnContext,
@@ -91,6 +94,25 @@ export interface ChatMessage {
   activity?: AssistantActivityEvent[];
   retryText?: string;
   suggestedActions?: Array<{ label: string; prompt: string }>;
+  editingSessionId?: string;
+  editingResult?: { sessionId: string; assetId: string };
+}
+
+function AssistantEditingSessionCard({
+  projectId,
+  sessionId,
+  onReturned,
+  onReview,
+}: {
+  projectId: string;
+  sessionId: string;
+  onReturned: (assetIds: string[]) => void;
+  onReview: (assetId: string) => void;
+}) {
+  const query = trpc.externalEditing.list.useQuery({ projectId });
+  const session = query.data?.find((candidate) => candidate.id === sessionId);
+  if (!session) return query.isLoading ? <span className="ai-copilot-action-card__label">正在載入剪輯工作階段…</span> : null;
+  return <EditingSessionCard session={session} onChanged={() => void query.refetch()} onResultReturned={onReturned} onReview={onReview} />;
 }
 
 /** 已解析動作 → runSiteAction 輸入（逐型別挑欄位；label 等顯示欄位不上送） */
@@ -360,6 +382,7 @@ interface AICreativeCopilotProps {
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
   const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
+  const [editingSheetOpen, setEditingSheetOpen] = useState(false);
   /**
    * 對話與進行中的執行**不放在元件 state**：這張卡活在會被卸載的面板裡（關面板、
    * 切視野、換頁都會卸載），放 state 等於使用者一關面板就把剛剛的執行紀錄丟掉。
@@ -411,6 +434,26 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     if (!text || !groupId || pending) return;
 
     const directIntakeMode = activeProjectId ? detectDirectIntakeRequest(text) : null;
+    if (activeProjectId && detectEditingHandoffRequest(text)) {
+      setInput("");
+      captureAssistantReturnContext({
+        groupId,
+        projectId: activeProjectId,
+        originRoute: pageCtx.route,
+        originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+        focusAnchor: pageCtx.entityId,
+      });
+      setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+        ...previous,
+        messages: [
+          ...previous.messages,
+          { role: "user", text },
+          { role: "assistant", text: "我會在這個對話裡準備正式的 LumaFusion 交接。請先確認範圍與主要素材；建立後工作階段會保留在這裡。", runStatus: "completed" },
+        ],
+      }));
+      setEditingSheetOpen(true);
+      return;
+    }
     // File/Drive selection is a mini workspace, not an LLM attachment. Opening
     // it is safe and synchronous; persistence/ACL/dedupe still happen in the
     // existing Universal Intake service after the user chooses a source.
@@ -727,6 +770,37 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                     />
                   ) : null}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
+                  {msg.editingSessionId && activeProjectId ? (
+                    <AssistantEditingSessionCard
+                      projectId={activeProjectId}
+                      sessionId={msg.editingSessionId}
+                      onReturned={(assetIds) => {
+                        if (!groupId || !assetIds[0]) return;
+                        recordAssistantActionResults(groupId, [{
+                          type: "import",
+                          source: "external-result",
+                          resourceIds: [],
+                          assetIds,
+                          intelligenceIds: [],
+                          projectId: activeProjectId,
+                          count: assetIds.length,
+                          duplicateCount: 0,
+                          needsReviewCount: assetIds.length,
+                          backgroundProcessing: true,
+                          verification: { status: "verified", message: "剪輯成果已安全保存並連回工作階段" },
+                        }]);
+                        pushMessage({
+                          role: "assistant",
+                          text: "✓ LumaFusion 剪輯成果已回到原工作階段，版本來源與專案位置都已保留。",
+                          runStatus: "completed",
+                          editingResult: { sessionId: msg.editingSessionId!, assetId: assetIds[0] },
+                        });
+                      }}
+                      onReview={(assetId) => void handleSend(`幫我審查剛從 LumaFusion 帶回的成片（Asset ${assetId}），比較目前專案腳本與分鏡，並清楚標示可驗證的來源；如果無法取得精確 timecode，請直接說明。`)}
+                    />
+                  ) : null}
+                  {msg.editingResult ? <EditingResultCard assetId={msg.editingResult.assetId} sessionId={msg.editingResult.sessionId}
+                    onReview={(assetId) => void handleSend(`幫我審查剛從 LumaFusion 帶回的成片（Asset ${assetId}），比較目前專案腳本與分鏡，並清楚標示可驗證的來源；如果無法取得精確 timecode，請直接說明。`)} /> : null}
 
                   {/* 讀到什麼 → 能去哪。按鈕只從真實來源長出來（見 followUpActionsFromSources）。 */}
                   {msg.role === "assistant" && onNavigate && msg.sources?.length ? (
@@ -921,6 +995,34 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         </div>
 
       </Card>
+      {activeProjectId && editingSheetOpen ? (
+        <EditingHandoffSheet
+          open={editingSheetOpen}
+          projectId={activeProjectId}
+          defaultShotIds={pageCtx.entityType === "shot" && pageCtx.entityId ? [pageCtx.entityId] : []}
+          originConversationId={conversation.returnContext?.conversationId}
+          originAssistantRunId={conversation.returnContext?.runId}
+          originSurface="global"
+          onClose={() => setEditingSheetOpen(false)}
+          onPrepared={(sessionId) => {
+            if (!groupId) return;
+            recordAssistantActionResults(groupId, [{
+              type: "editing_handoff",
+              editingSessionId: sessionId,
+              projectId: activeProjectId,
+              editorId: "lumafusion",
+              assetIds: [],
+              verification: { status: "verified", message: "剪輯工作階段與交接 manifest 已持久化" },
+            }]);
+            pushMessage({
+              role: "assistant",
+              text: "交接工作階段已建立。你可以直接從這張卡分享／下載，剪完後也從同一張卡回傳，不必離開對話。",
+              runStatus: "completed",
+              editingSessionId: sessionId,
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
