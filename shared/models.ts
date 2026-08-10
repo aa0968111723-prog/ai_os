@@ -326,6 +326,16 @@ const aspect = (f: ProjectFormat) => normalizeProjectFormat(f);
 const wideOrTall = (f: ProjectFormat) => nearestFormat(f, ["16:9", "9:16"]);
 /** LLM 系列共用(NVIDIA NIM 與舊 any-llm 皆為 {model, prompt} 形狀;NIM 端由 nimSubmit 轉 chat messages) */
 const llmInput = (model: string) => (prompt: string) => ({ model, prompt });
+/** OpenRouter 代理(付費閉源 LLM)輸入:{model, prompt, system_prompt, reasoning, temperature, max_tokens} 形狀,同 llmProvider.completeFal
+ *  (fal openrouter 部分模型強制 reasoning,設 false 會 400——與 FAL_OPENROUTER_REASONING 同口徑) */
+const llmOpenRouterInput = (model: string) => (prompt: string) => ({
+  model,
+  prompt,
+  system_prompt: "你是正式產品的中文 AI 助手。依使用者提供的內容作答，不要輸出 reasoning 或 chain-of-thought。",
+  reasoning: true,
+  temperature: 0.7,
+  max_tokens: 4096,
+});
 const llmVisionInput = (model: string) => (prompt: string, _f: ProjectFormat, sourceUrl?: string) => ({
   model,
   prompt: prompt || "請詳細描述這張圖片(繁體中文)",
@@ -1938,6 +1948,17 @@ export const MODELS: ModelEntry[] = [
     strengths: "最低成本文字生成;速度極快",
     bestFor: "大量簡單任務(標籤、分類)",
     input: llmInput("meta/llama-3.1-8b-instruct"),
+  },
+
+  /* ── OpenRouter 代理(付費閉源 LLM;endpoint "openrouter/router" 走 fal openrouter 佇列,
+     關源模型 NIM 無法承接,改由此代理代付 USD)。NVIDIA NIM 仍是免費開源主力,
+     此區是付費旗艦/降本選項(verified=false 首跑校準後再升)。舊版退路見 LEGACY_MODELS(fal-ai/any-llm#...)。 ── */
+  {
+    id: "openrouter/router#kimi-k3", endpoint: "openrouter/router", label: "Kimi K3", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$3/$15 per M tokens(推廣 $2/$10 至 8/31)", verified: false,
+    strengths: "月之暗面旗艦;2.8T 開源、1M context、原生視覺、agentic;能力標竿僅次 Fable 5",
+    bestFor: "長文撰寫、複雜推理、需要超長上下文與視覺理解的高品質任務",
+    input: llmOpenRouterInput("moonshotai/kimi-k3"),
   },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */
