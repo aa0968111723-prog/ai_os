@@ -103,7 +103,67 @@ const COMMAND_REF_LIMIT = 12;
 export const TEAM_ASSISTANT_DATA_BOUNDARY_RULE =
 `資料範圍邊界：你只能查詢與回答「本組」的資料——也就是下面 <組現況> 列出的專案／組代理／資料庫。
 - 使用者問到其他組（或其他組的專案／資料）時，直接回「我只能查詢本組資料，無法查詢其他組」，並可請對方到該組的助手詢問。
-- 嚴禁因為 <組現況> 沒有某個組的專案，就推論「那個組沒有專案」——那只是你看不到，不代表不存在。不要猜測其他組有沒有任何資料。`;
+- 嚴禁因為 <組現況> 沒有某個組的專案，就推論「那個組沒有專案」——那只是你看不到，不代表不存在。不要猜測其他組有沒有任何資料。
+- 列出或統計「本組」專案時，只能列 <組現況> 清單上出現的專案，一個都不能超出這份清單；嚴禁把先前對話、資料庫搜尋或其他任何來源出現過的專案名當成本組專案。`;
+
+/**
+ * 偵測「使用者訊息明確點名其他組」的純函式（資料層邊界強制的第一道閘）。
+ *
+ * 為什麼要資料層強制：上面那條 prompt 邊界指引是軟約束——複測證明 LLM 在「盤點其他組專案」
+ * 這類請求上仍常忽略規則，把本組專案冒充成目標組的。與其再賭 LLM 自律，不如在問題進 LLM 之前
+ * 就攔下來：偵測到明確點名其他組，伺服器直接回確定性的「只能查本組」，該問題根本不會進提示詞，
+ * 自然不會有「冒充／誤推論」。
+ *
+ * 匹配規則：
+ *  - 掃所有組名中確實出現在訊息裡的（含本組名）。
+ *  - 只有本組名出現 → 自查，不算跨組（回 null，正常走 LLM）。
+ *  - 其他組名出現且沒有被本組名子字串誤判遮蔽（例：本組「新文宣組」自問會被「文宣組」命中，
+ *    但該「文宣組」落在「新文宣組」字串內部，不算）→ 回該組名，呼叫端據此短迴路。
+ */
+export interface CrossGroupMention { targetGroupName: string }
+
+export function detectCrossGroupMention(
+  message: string,
+  currentGroupName: string,
+  allGroups: Array<{ groupId: string; groupName: string }>,
+): CrossGroupMention | null {
+  const msg = message.trim();
+  const current = currentGroupName.trim();
+  if (!msg) return null;
+
+  // 本組名在訊息裡的所有出現範圍（子字串遮蔽判斷用）
+  const currentRanges: Array<{ start: number; end: number }> = [];
+  if (current) {
+    let from = 0;
+    for (;;) {
+      const idx = msg.indexOf(current, from);
+      if (idx === -1) break;
+      currentRanges.push({ start: idx, end: idx + current.length });
+      from = idx + current.length;
+    }
+  }
+
+  // 名字越長越先比（「新文宣組」優於「文宣組」）——長名先命中，就不會被短名的子字串搶先誤判
+  const others = allGroups
+    .map((g) => g.groupName.trim())
+    .filter((n) => n && n !== current)
+    .sort((a, b) => b.length - a.length);
+
+  for (const name of others) {
+    let from = 0;
+    for (;;) {
+      const idx = msg.indexOf(name, from);
+      if (idx === -1) break;
+      const start = idx;
+      const end = idx + name.length;
+      // 其他組名的出現若完全落在本組名範圍內 → 是本組名的子字串，不是真正的跨組請求
+      const shadowed = currentRanges.some((c) => start >= c.start && end <= c.end);
+      if (!shadowed) return { targetGroupName: name };
+      from = idx + name.length;
+    }
+  }
+  return null;
+}
 
 // PostgreSQL 滑動視窗（跨 replica／重啟持久）：每人每分鐘 6 次。
 async function overLimit(userId: string): Promise<boolean> {
@@ -1205,7 +1265,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   }
 
   const context = [
-    `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
+    `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}；這份清單只含本組專案、不含其他任何組的專案）：`,
     lines.length ? lines.join("\n") : "（本組目前沒有專案）",
     `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
     "",
@@ -1245,6 +1305,31 @@ export const teamAssistantRouter = router({
           throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "團隊助手安全限流暫時無法使用，請稍後再試" });
         }
         throw error;
+      }
+      // 資料層邊界強制（複測 FAIL 的根因修復）：prompt 邊界指引是軟約束，LLM 在「盤點其他組
+      // 專案」類請求仍常忽略規則、把本組專案冒充成目標組的。這裡在問題進 LLM 之前就攔：
+      // 使用者訊息明確點名其他組 → 伺服器直接回確定性的「只能查本組」，該問題根本不會進
+      // 提示詞，自然不會有「冒充／誤推論」。組名是組織元資料，僅用於偵測，不回洩資料。
+      requireGroup(ctx.auth, input.groupId);
+      const groupNameRows = await db
+        .select({ groupId: schema.groups.id, groupName: schema.groups.name })
+        .from(schema.groups);
+      const currentGroupName = ctx.auth.groups.find((g) => g.groupId === input.groupId)?.groupName ?? "";
+      const crossGroup = detectCrossGroupMention(input.message, currentGroupName, groupNameRows);
+      if (crossGroup) {
+        const commandLevel = await getGroupCommandLevel(ctx.auth, input.groupId);
+        return {
+          answer: `我只能查詢本組資料，無法查詢其他組。若要查「${crossGroup.targetGroupName}」的資料，請到該組的助手詢問。`,
+          dispatches: [] as ResolvedDispatch[],
+          actions: [] as ResolvedCommand[],
+          steps: [] as string[],
+          canDispatch: canRunCommand(commandLevel, "dispatch"),
+          commandLevel,
+          mock: isMockMode(),
+          rationale: undefined as string | undefined,
+          contextUsed: [] as string[],
+          degraded: false,
+        };
       }
       // 組級上下文（requireGroup 在內）：與 globalAssistant.ask 共用同一份組裝
       const teamCtx = await buildTeamAskContext(ctx.auth, input.groupId);
