@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { DISCUSS_EVENT, flashAnchor } from "../discuss";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip, useFocusTrap } from "../components/interactions";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
@@ -35,33 +36,20 @@ import {
 } from "@shared/worldview";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { carriedPropIdsFor } from "@shared/propOwnership";
-import { SceneList } from "../components/SceneList";
 import { ProjectShareCard } from "../components/ProjectShareCard";
 import { FormatTag } from "../components/FormatPicker";
-import { MessagePanel } from "../components/MessagePanel";
-import { AssetLibrary } from "../components/AssetLibrary";
-import { RecycleBin } from "../components/RecycleBin";
-import { KnowledgeBase } from "../components/KnowledgeBase";
-import { ProjectContextPanel } from "../features/project-context/ProjectContextPanel";
-import { CharacterCards } from "../components/CharacterCards";
-import { ScenePresetCards } from "../components/ScenePresetCards";
-import { PropCards } from "../components/PropCards";
 import {
   CostumePackSection,
   costumeTabFromTarget,
   type CostumeTab,
 } from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
-import { StoryStage } from "../features/story-workspace/StoryStage";
-import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
-import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
 import { PeerBadge, latestViewForUser, sceneLabelOf } from "../features/collaboration/PeerBadge";
 import { buildViewState, detectVisibleSection, navigateToView } from "../features/collaboration/viewStateBridge";
 import type { ViewSection, ViewState } from "@shared/viewState";
 import { registerAssistantPage } from "../lib/assistantContext";
-import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
   type DirectGenerateApplyRequest,
@@ -79,12 +67,10 @@ import {
   type ProjectContextReturnTo,
   type ProjectContextTarget,
 } from "../features/project-nav/projectContextNav";
-import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
 import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
-import { StyleVisualGallery } from "../components/StyleVisualGallery";
 import { ToneVisualPalette } from "../components/ToneVisualPalette";
 import { ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
@@ -99,6 +85,37 @@ import {
   zoneOfPeer,
   type CollabViewMode,
 } from "../realtime";
+
+// ── 重型 feature 元件 lazy 化：樞紐頁首屏不再一次拉 40+ 個模組 ──
+// lazyWithRetry 在 chunk 載入失敗時會 cache-bust 重試一次；各使用處包 <Suspense>，
+// 區塊在需要時才拉對應模組（StoryStage/StoryboardStage/CreationWorkbench/DeliveryRoom
+// 外層另有 SectionErrorBoundary 承接最終錯誤）。
+const SceneList = lazyWithRetry(() => import("../components/SceneList").then((m) => ({ default: m.SceneList })));
+const MessagePanel = lazyWithRetry(() => import("../components/MessagePanel").then((m) => ({ default: m.MessagePanel })));
+const AssetLibrary = lazyWithRetry(() => import("../components/AssetLibrary").then((m) => ({ default: m.AssetLibrary })));
+const RecycleBin = lazyWithRetry(() => import("../components/RecycleBin").then((m) => ({ default: m.RecycleBin })));
+const KnowledgeBase = lazyWithRetry(() => import("../components/KnowledgeBase").then((m) => ({ default: m.KnowledgeBase })));
+const ProjectContextPanel = lazyWithRetry(() => import("../features/project-context/ProjectContextPanel").then((m) => ({ default: m.ProjectContextPanel })));
+const CharacterCards = lazyWithRetry(() => import("../components/CharacterCards").then((m) => ({ default: m.CharacterCards })));
+const ScenePresetCards = lazyWithRetry(() => import("../components/ScenePresetCards").then((m) => ({ default: m.ScenePresetCards })));
+const PropCards = lazyWithRetry(() => import("../components/PropCards").then((m) => ({ default: m.PropCards })));
+const StoryStage = lazyWithRetry(() => import("../features/story-workspace/StoryStage").then((m) => ({ default: m.StoryStage })));
+const DeliveryRoom = lazyWithRetry(() => import("../features/delivery/DeliveryRoom").then((m) => ({ default: m.DeliveryRoom })));
+const StoryboardStage = lazyWithRetry(() => import("../features/storyboard-center/StoryboardStage").then((m) => ({ default: m.StoryboardStage })));
+const CreationWorkbench = lazyWithRetry(() => import("../features/creation-workbench/CreationWorkbench").then((m) => ({ default: m.CreationWorkbench })));
+const ProjectDatabasesCard = lazyWithRetry(() => import("../components/ProjectDatabasesCard").then((m) => ({ default: m.ProjectDatabasesCard })));
+const StyleVisualGallery = lazyWithRetry(() => import("../components/StyleVisualGallery").then((m) => ({ default: m.StyleVisualGallery })));
+
+/** 重型區塊的 Suspense fallback：元件 chunk 尚未載入完時的低調佔位。
+ *  刻意不用「載入中…」字樣（那已是整頁 loading 的文案），避免使用者分不清是頁面在等資料
+ *  還是某個區塊在等 chunk。 */
+function SectionFallback({ label }: { label: string }) {
+  return (
+    <div className="feature-suspense-fallback" role="status" aria-busy="true" data-testid="feature-suspense-fallback">
+      <Meta as="span">正在載入{label}…</Meta>
+    </div>
+  );
+}
 
 /**
  * 協作廣播的保底輪詢間隔。
@@ -1166,24 +1183,26 @@ export function ProjectPage({ id }: { id: string }) {
   // 三幕標頭與摘要條的進度數字：全讀頁面既有查詢，查詢還沒回來就不顯示
   const stylePicker = (labelledBy: string) => {
     return (
-      <StyleVisualGallery
-        styles={wv.styles}
-        styleOpts={styleOpts}
-        labelledBy={labelledBy}
-        canEdit={canEdit}
-        isLeader={isLeader}
-        styleFamilyTab={styleFamilyTab}
-        onPickFamily={pickStyleFamily}
-        onToggleStyle={(style) => toggle("styles", style)}
-        onKeepPrimary={keepPrimaryStyle}
-        renderAddOption={
-          isLeader && canEdit ? (
-            <AddOptionChip groupId={p.groupId} type="style" onAdded={(label) => toggle("styles", label)} />
-          ) : null
-        }
-        orphans={orphansOf("styles", styleOpts)}
-        isLoading={options.isLoading}
-      />
+      <Suspense fallback={<SectionFallback label="風格" />}>
+        <StyleVisualGallery
+          styles={wv.styles}
+          styleOpts={styleOpts}
+          labelledBy={labelledBy}
+          canEdit={canEdit}
+          isLeader={isLeader}
+          styleFamilyTab={styleFamilyTab}
+          onPickFamily={pickStyleFamily}
+          onToggleStyle={(style) => toggle("styles", style)}
+          onKeepPrimary={keepPrimaryStyle}
+          renderAddOption={
+            isLeader && canEdit ? (
+              <AddOptionChip groupId={p.groupId} type="style" onAdded={(label) => toggle("styles", label)} />
+            ) : null
+          }
+          orphans={orphansOf("styles", styleOpts)}
+          isLoading={options.isLoading}
+        />
+      </Suspense>
     );
   };
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
@@ -1669,15 +1688,17 @@ export function ProjectPage({ id }: { id: string }) {
             hint={storyReady ? "已有故事" : "從這裡開始"}
           />
           <SectionErrorBoundary title="故事">
-            <StoryStage
-              projectId={id}
-              canEdit={canEdit}
-              mobileCompact={mobileCompact}
-              onOpenSettings={() => {
-                setSettingsOpen(true);
-                setToneTab("story");
-              }}
-            />
+            <Suspense fallback={<SectionFallback label="故事" />}>
+              <StoryStage
+                projectId={id}
+                canEdit={canEdit}
+                mobileCompact={mobileCompact}
+                onOpenSettings={() => {
+                  setSettingsOpen(true);
+                  setToneTab("story");
+                }}
+              />
+            </Suspense>
           </SectionErrorBoundary>
           <StageLink text="AI 解析後角色、場景、道具自動就位；「產生分鏡」把故事變成分鏡卡" />
 
@@ -1691,13 +1712,15 @@ export function ProjectPage({ id }: { id: string }) {
             hint={sceneCount > 0 ? `${sceneCount} 鏡` : "待產生"}
           />
           <SectionErrorBoundary title="分鏡">
-            <StoryboardStage
-              projectId={id}
-              canEdit={canEdit}
-              charIds={charIds}
-              sceneIds={sceneIds}
-              propIds={propIds}
-            />
+            <Suspense fallback={<SectionFallback label="分鏡" />}>
+              <StoryboardStage
+                projectId={id}
+                canEdit={canEdit}
+                charIds={charIds}
+                sceneIds={sceneIds}
+                propIds={propIds}
+              />
+            </Suspense>
           </SectionErrorBoundary>
           <StageLink text="逐鏡出圖在卡上完成；要自由發想、跑範本、多步開拍就到 ③ 製作" />
 
@@ -2387,31 +2410,37 @@ export function ProjectPage({ id }: { id: string }) {
                 }
                 panels={{
                   characters: (
-                    <CharacterCards
-                      projectId={id}
-                      selectedIds={charIds}
-                      onToggle={toggleChar}
-                      onCreated={onCharCreated}
-                      readOnly={!canEdit}
-                    />
+                    <Suspense fallback={<SectionFallback label="角色定裝" />}>
+                      <CharacterCards
+                        projectId={id}
+                        selectedIds={charIds}
+                        onToggle={toggleChar}
+                        onCreated={onCharCreated}
+                        readOnly={!canEdit}
+                      />
+                    </Suspense>
                   ),
                   scenes: (
-                    <ScenePresetCards
-                      projectId={id}
-                      selectedIds={sceneIds}
-                      onToggle={toggleScene}
-                      onCreated={onSceneCreated}
-                      readOnly={!canEdit}
-                    />
+                    <Suspense fallback={<SectionFallback label="場景定裝" />}>
+                      <ScenePresetCards
+                        projectId={id}
+                        selectedIds={sceneIds}
+                        onToggle={toggleScene}
+                        onCreated={onSceneCreated}
+                        readOnly={!canEdit}
+                      />
+                    </Suspense>
                   ),
                   props: (
-                    <PropCards
-                      projectId={id}
-                      selectedIds={propIds}
-                      onToggle={toggleProp}
-                      onCreated={onPropCreated}
-                      readOnly={!canEdit}
-                    />
+                    <Suspense fallback={<SectionFallback label="道具定裝" />}>
+                      <PropCards
+                        projectId={id}
+                        selectedIds={propIds}
+                        onToggle={toggleProp}
+                        onCreated={onPropCreated}
+                        readOnly={!canEdit}
+                      />
+                    </Suspense>
                   ),
                 }}
               />
@@ -2485,7 +2514,9 @@ export function ProjectPage({ id }: { id: string }) {
                 知識庫／素材庫／資料表繼續是資料的真相；這一區回答的是另一件事——
                 「AI 生成與問答時，優先該用誰」。加入的是引用，不複製任何原始檔案。 */}
             <div id="sec-project-context" data-fb="專案資料">
-              <ProjectContextPanel projectId={id} canEdit={canEdit} />
+              <Suspense fallback={<SectionFallback label="專案脈絡" />}>
+                <ProjectContextPanel projectId={id} canEdit={canEdit} />
+              </Suspense>
             </div>
 
             {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」）。
@@ -2500,17 +2531,21 @@ export function ProjectPage({ id }: { id: string }) {
               open={ctxOpen.knowledge}
               onOpenChange={(o) => setCtxSectionOpen("knowledge", o)}
             >
-              <KnowledgeBase projectId={id} readOnly={!canEdit} />
+              <Suspense fallback={<SectionFallback label="知識庫" />}>
+                <KnowledgeBase projectId={id} readOnly={!canEdit} />
+              </Suspense>
             </CtxCollapse>
             </CollabZone>
 
             {/* 專案資料：AI 可引用狀態 + 一鍵建表；手機受控預設收合，桌機維持展開 */}
-            <ProjectDatabasesCard
-              projectId={id}
-              canEdit={canEdit}
-              open={mobileCompact ? ctxOpen.databases : undefined}
-              onOpenChange={mobileCompact ? (o) => setCtxSectionOpen("databases", o) : undefined}
-            />
+            <Suspense fallback={<SectionFallback label="專案資料" />}>
+              <ProjectDatabasesCard
+                projectId={id}
+                canEdit={canEdit}
+                open={mobileCompact ? ctxOpen.databases : undefined}
+                onOpenChange={mobileCompact ? (o) => setCtxSectionOpen("databases", o) : undefined}
+              />
+            </Suspense>
 
             {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
             <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
@@ -2523,19 +2558,21 @@ export function ProjectPage({ id }: { id: string }) {
                   open={ctxOpen.assets}
                   onOpenChange={(o) => setCtxSectionOpen("assets", o)}
                 >
-                  <AssetLibrary
-                    projectId={id}
-                    selectedSourceId={sourceHighlightId}
-                    onPickSource={(a) => {
-                      setSourceHighlightId(a.id);
-                      setGenerateApply((prev) => ({
-                        nonce: (prev?.nonce ?? 0) + 1,
-                        sourceAsset: a,
-                      }));
-                      setSettingsOpen(false);
-                      revealWorkbenchAnchor("#sec-studio", { projectId: id });
-                    }}
-                  />
+                  <Suspense fallback={<SectionFallback label="素材庫" />}>
+                    <AssetLibrary
+                      projectId={id}
+                      selectedSourceId={sourceHighlightId}
+                      onPickSource={(a) => {
+                        setSourceHighlightId(a.id);
+                        setGenerateApply((prev) => ({
+                          nonce: (prev?.nonce ?? 0) + 1,
+                          sourceAsset: a,
+                        }));
+                        setSettingsOpen(false);
+                        revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                      }}
+                    />
+                  </Suspense>
                 </CtxCollapse>
               </div>
             </CollabZone>
@@ -2559,7 +2596,9 @@ export function ProjectPage({ id }: { id: string }) {
                 open={ctxOpen.recycle}
                 onOpenChange={(o) => setCtxSectionOpen("recycle", o)}
               >
-                <RecycleBin projectId={id} />
+                <Suspense fallback={<SectionFallback label="回收桶" />}>
+                  <RecycleBin projectId={id} />
+                </Suspense>
               </CtxCollapse>
             </CtxGroup>
           </div>
@@ -2579,30 +2618,32 @@ export function ProjectPage({ id }: { id: string }) {
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
           <SectionErrorBoundary title="製作">
-            <CreationWorkbench
-              projectId={id}
-              canEdit={canEdit}
-              isLeader={isLeader}
-              groupId={p.groupId}
-              myRole={myRole}
-              projectFormat={p.format}
-              worldview={{
-                logline: wv.logline,
-                message: wv.message,
-                tones: wv.tones,
-                styles: wv.styles,
-                taboos: wv.taboos,
-              }}
-              wvReady={wvReady}
-              characterIds={charIds}
-              scenePresetIds={sceneIds}
-              propIds={propIds}
-              carriedPropIds={carriedPropIds}
-              generateApplyRequest={generateApply}
-              onReuseGenerate={applyPrompt}
-              onGenerateSourceChange={setSourceHighlightId}
-              studioCollab={zoneProps(COLLAB_ZONES.studio)}
-            />
+            <Suspense fallback={<SectionFallback label="創作台" />}>
+              <CreationWorkbench
+                projectId={id}
+                canEdit={canEdit}
+                isLeader={isLeader}
+                groupId={p.groupId}
+                myRole={myRole}
+                projectFormat={p.format}
+                worldview={{
+                  logline: wv.logline,
+                  message: wv.message,
+                  tones: wv.tones,
+                  styles: wv.styles,
+                  taboos: wv.taboos,
+                }}
+                wvReady={wvReady}
+                characterIds={charIds}
+                scenePresetIds={sceneIds}
+                propIds={propIds}
+                carriedPropIds={carriedPropIds}
+                generateApplyRequest={generateApply}
+                onReuseGenerate={applyPrompt}
+                onGenerateSourceChange={setSourceHighlightId}
+                studioCollab={zoneProps(COLLAB_ZONES.studio)}
+              />
+            </Suspense>
           </SectionErrorBoundary>
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
@@ -2619,13 +2660,15 @@ export function ProjectPage({ id }: { id: string }) {
           {/* §12 交付室第一屏：完成度＋缺漏清單。補件本身仍在 ② 分鏡的單格工作室，
               點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
           <SectionErrorBoundary title="成片">
-            <DeliveryRoom
-              projectId={id}
-              canEdit={canEdit}
-              onOpenShot={(shotId) => {
-                scrollToSelector(`#board-shot-${shotId}`);
-              }}
-            />
+            <Suspense fallback={<SectionFallback label="成片" />}>
+              <DeliveryRoom
+                projectId={id}
+                canEdit={canEdit}
+                onOpenShot={(shotId) => {
+                  scrollToSelector(`#board-shot-${shotId}`);
+                }}
+              />
+            </Suspense>
           </SectionErrorBoundary>
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
@@ -2646,7 +2689,9 @@ export function ProjectPage({ id }: { id: string }) {
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
               {/* anchorPeers：分鏡格上「誰在改這一格」。zone 層級的「有人在分鏡」不夠用——
                   這張卡從分鏡列一路到交付中心，說了等於沒說 */}
-              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
+              <Suspense fallback={<SectionFallback label="分鏡清單" />}>
+                <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
+              </Suspense>
             </div>
           </CollabZone>
           {/* 分享連結緊接在打包下載之後：兩者都是「把成果交出去」，只是一個給檔案、一個給連結。
@@ -2660,14 +2705,16 @@ export function ProjectPage({ id }: { id: string }) {
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
             <div id="project-messages">
-              <MessagePanel
-                projectId={id}
-                groupId={p.groupId}
-                isLeader={isLeader}
-                canEdit={canEdit}
-                focusMessageId={focusMessageId}
-                onFocusHandled={() => setFocusMessageId(undefined)}
-              />
+              <Suspense fallback={<SectionFallback label="留言" />}>
+                <MessagePanel
+                  projectId={id}
+                  groupId={p.groupId}
+                  isLeader={isLeader}
+                  canEdit={canEdit}
+                  focusMessageId={focusMessageId}
+                  onFocusHandled={() => setFocusMessageId(undefined)}
+                />
+              </Suspense>
             </div>
           </CollabZone>
         )}
@@ -2715,15 +2762,17 @@ export function ProjectPage({ id }: { id: string }) {
                 </div>
                 <div className="project-messages-sheet__body">
                   <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-                    <MessagePanel
-                      projectId={id}
-                      groupId={p.groupId}
-                      isLeader={isLeader}
-                      canEdit={canEdit}
-                      bare
-                      focusMessageId={focusMessageId}
-                      onFocusHandled={() => setFocusMessageId(undefined)}
-                    />
+                    <Suspense fallback={<SectionFallback label="留言" />}>
+                      <MessagePanel
+                        projectId={id}
+                        groupId={p.groupId}
+                        isLeader={isLeader}
+                        canEdit={canEdit}
+                        bare
+                        focusMessageId={focusMessageId}
+                        onFocusHandled={() => setFocusMessageId(undefined)}
+                      />
+                    </Suspense>
                   </CollabZone>
                 </div>
               </div>

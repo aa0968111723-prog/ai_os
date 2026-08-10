@@ -14,7 +14,7 @@ const src = readFileSync(
 
 describe("ProjectPage workbench contract (WB-06)", () => {
   it("mounts CreationWorkbench and does not import parallel AI shells", () => {
-    expect(src).toMatch(/from ["'].*creation-workbench\/CreationWorkbench["']/);
+    expect(src).toMatch(/import\(["'][^"']*creation-workbench\/CreationWorkbench["']/);
     expect(src).toMatch(/<CreationWorkbench\b/);
 
     const forbidden = [
@@ -41,6 +41,26 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<WorldviewPreview\b/);
     expect(src).toMatch(/<WorldviewGuide\b/);
     expect(src).toMatch(/<WorldviewExampleCard\b/);
+  });
+
+  /**
+   * 效能契約（chunk 拆分）：樞紐頁 40+ 個 feature 元件若全走 static import，
+   * ProjectPage chunk 會一路膨脹（曾達 194KB gzip）。重型元件必須用 lazyWithRetry
+   * 動態載入（包 Suspense），讓首屏先出頁殼、區塊按需拉 chunk。
+   */
+  it("loads heavy feature components via lazyWithRetry, not static imports", () => {
+    const heavy = [
+      /^const (SceneList|MessagePanel|AssetLibrary|RecycleBin|KnowledgeBase|ProjectContextPanel) = lazyWithRetry/m,
+      /^const (CharacterCards|ScenePresetCards|PropCards|StoryStage|DeliveryRoom|StoryboardStage) = lazyWithRetry/m,
+      /^const (CreationWorkbench|ProjectDatabasesCard|StyleVisualGallery) = lazyWithRetry/m,
+    ];
+    for (const re of heavy) {
+      expect(src, `must match ${re}`).toMatch(re);
+    }
+    // 這 15 支不得以 static import 混回樞紐頁
+    expect(src).not.toMatch(/^import\s*\{[^}]*\}\s*from\s*["'][^"']*\/(SceneList|MessagePanel|AssetLibrary|RecycleBin|KnowledgeBase|ProjectContextPanel|CharacterCards|ScenePresetCards|PropCards|StoryStage|DeliveryRoom|StoryboardStage|CreationWorkbench|ProjectDatabasesCard|StyleVisualGallery)["']/m);
+    // lazy 區塊必須有 Suspense 承接（fallback 給使用者「區塊在載入」的訊號）
+    expect(src).toMatch(/<Suspense\b[\s\S]*<SectionFallback/);
   });
 
   it("never hard-codes the injection marker (must come from shared)", () => {
@@ -135,9 +155,9 @@ describe("ProjectPage workbench contract (WB-06)", () => {
    * 舊定調資料面（世界觀／定裝／知識素材／回收桶）整包住進專案設定二層 sheet。
    */
   it("mounts StoryStage / StoryboardStage and houses the old tone panels in the settings sheet", () => {
-    expect(src).toMatch(/from ["'].*story-workspace\/StoryStage["']/);
+    expect(src).toMatch(/import\(["'][^"']*story-workspace\/StoryStage["']/);
     expect(src).toMatch(/<StoryStage\b/);
-    expect(src).toMatch(/from ["'].*storyboard-center\/StoryboardStage["']/);
+    expect(src).toMatch(/import\(["'][^"']*storyboard-center\/StoryboardStage["']/);
     expect(src).toMatch(/<StoryboardStage\b/);
     expect(src).toMatch(/className="psettings-sheet"/);
     expect(src).toMatch(/aria-label="專案設定"/);
