@@ -3,8 +3,12 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 
 const BASE = process.env.BASE || "http://127.0.0.1:5173";
-const EMAIL = process.env.EMAIL || "aa0968111723@gmail.com";
-const PW = process.env.PW || "Audit2026x";
+const EMAIL = process.env.EMAIL || process.env.TEST_EMAIL;
+const PW = process.env.PW || process.env.TEST_PW;
+if (!EMAIL || !PW) {
+  console.error("audit-browser 需設 EMAIL / PW（或 TEST_EMAIL / TEST_PW，對應 .env.example）；憑證不得寫死在腳本中。");
+  process.exit(1);
+}
 const OUT = process.env.OUT || "/tmp/audit-out";
 fs.mkdirSync(OUT, { recursive: true });
 

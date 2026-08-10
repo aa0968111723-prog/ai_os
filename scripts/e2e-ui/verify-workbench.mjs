@@ -4,6 +4,11 @@ import { chromium } from "playwright";
 
 const BASE = process.env.E2E_UI_BASE || "http://127.0.0.1:3210";
 const SHOT = (n) => `${process.env.E2E_UI_OUT || "./e2e-ui-out"}/shot-${n}.png`;
+const EMAIL = process.env.TEST_EMAIL;
+const PASSWORD = process.env.TEST_PW;
+if (!EMAIL || !PASSWORD) {
+  throw new Error("verify-workbench 需設 TEST_EMAIL / TEST_PW（對應 .env.example）；憑證不得寫死在腳本中。");
+}
 const results = [];
 const ok = (name, cond) => { results.push([cond ? "✅" : "❌", name]); console.log(cond ? "✅" : "❌", name); };
 
@@ -12,8 +17,8 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
 // 登入
 await page.goto(BASE);
-await page.fill("#login-email", "aa0968111723@gmail.com");
-await page.fill("#login-pw", "test12345");
+await page.fill("#login-email", EMAIL);
+await page.fill("#login-pw", PASSWORD);
 await page.click('button:has-text("登入")');
 await page.waitForTimeout(1500);
 ok("登入成功（看得到作業台）", await page.locator("text=AI Director OS").first().isVisible());

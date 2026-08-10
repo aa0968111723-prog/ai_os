@@ -8,6 +8,11 @@ const DIR = process.env.E2E_UI_OUT || "./e2e-ui-out";
 fs.mkdirSync(DIR, { recursive: true });
 const shot = (page, n) => page.screenshot({ path: `${DIR}/${n}.png`, fullPage: false });
 const log = (...a) => console.log("▸", ...a);
+const EMAIL = process.env.TEST_EMAIL;
+const PASSWORD = process.env.TEST_PW;
+if (!EMAIL || !PASSWORD) {
+  throw new Error("golden-path 需設 TEST_EMAIL / TEST_PW（對應 .env.example）；憑證不得寫死在腳本中。");
+}
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium", headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
@@ -15,8 +20,8 @@ const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 // 1. 登入
 await page.goto(BASE);
 await shot(page, "01-login");
-await page.fill("#login-email", "aa0968111723@gmail.com");
-await page.fill("#login-pw", "test12345");
+await page.fill("#login-email", EMAIL);
+await page.fill("#login-pw", PASSWORD);
 await page.click("button[type=submit]");
 await page.waitForSelector("#np-title", { timeout: 20000 });
 await shot(page, "02-launchpad");
