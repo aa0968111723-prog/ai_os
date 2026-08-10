@@ -442,6 +442,13 @@
       "when": 1788800000000,
       "tag": "0062_external_editing_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788900000000,
+      "tag": "0063_secondary_indexes",
+      "breakpoints": true
     }
   ]
 }

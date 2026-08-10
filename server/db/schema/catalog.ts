@@ -109,7 +109,11 @@ export const feedbackReports = pgTable("feedback_reports", {
   /** 回覆信實際寄出時刻（skipped/failed 為 null） */
   emailedAt: timestamp("emailed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userCreatedIdx: index("feedback_reports_user_created_idx").on(t.userId, t.createdAt),
+  groupStatusCreatedIdx: index("feedback_reports_group_status_created_idx").on(t.groupId, t.status, t.createdAt),
+  statusAgentCreatedIdx: index("feedback_reports_status_agent_created_idx").on(t.status, t.agentReviewedAt, t.createdAt),
+}));
 
 /**
  * 回饋代理巡檢紀錄（每 3 天一次；亦可開發者手動觸發）：每次巡檢寫一列，

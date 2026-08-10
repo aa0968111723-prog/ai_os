@@ -90,7 +90,9 @@ export const textVersions = pgTable("text_versions", {
   content: text("content").notNull(),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  kindRefCreatedIdx: index("text_versions_kind_ref_created_idx").on(t.kind, t.refId, t.createdAt),
+}));
 
 /**
  * 提示詞庫（簡報「打過的咒語自動存起來，下次一鍵再用」）：
@@ -164,7 +166,9 @@ export const scenePresets = pgTable("scene_presets", {
   rev: integer("rev").notNull().default(0),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectCreatedIdx: index("scene_presets_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 /**
  * 素材設定卡（角色·場景一致性的「物件」面）：

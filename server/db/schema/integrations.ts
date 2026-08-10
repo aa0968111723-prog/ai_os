@@ -27,7 +27,9 @@ export const googleCalendarConnections = pgTable("google_calendar_connections", 
   lastError: text("last_error"),
   lastSyncAt: timestamp("last_sync_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  statusIdx: index("google_calendar_connections_status_idx").on(t.status),
+}));
 
 /**
  * 個人整合連接（每個使用者自己連自己的外部服務）：
