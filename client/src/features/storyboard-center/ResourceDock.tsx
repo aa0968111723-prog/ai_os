@@ -2,7 +2,7 @@
  * 分鏡資源 Dock（PR-4a）：在 ② 分鏡就近取用全站／專案資源，不必開「專案設定」二層 sheet。
  *
  * 三 tab：
- * - 素材：專案 AssetLibrary 視覺縮圖 → 套用到選中鏡
+ * - 素材：專案 AssetLibrary 視覺縮圖 → 套用到選中鏡（點擊或拖到 ShotCard）
  * - 定裝：角色／場景／道具摘要 + 開完整管理
  * - 知識：知識庫標題列表 + 開完整管理
  *
@@ -76,9 +76,9 @@ export function ResourceDock({
 
   const targetLabel =
     pickedShotIds.length === 0
-      ? "先勾選一鏡（或直接拖到分鏡卡）"
+      ? "先勾選一鏡，或直接拖到分鏡卡"
       : pickedShotIds.length === 1
-        ? "套用到選中的 1 鏡"
+        ? "套用到選中的 1 鏡（也可拖到卡片）"
         : `套用到選中的 ${pickedShotIds.length} 鏡`;
 
   const applyAsset = (assetId: string) => {
@@ -122,7 +122,7 @@ export function ResourceDock({
           onClick={() => setOpen((v) => !v)}
           title={open ? "收合資源面板" : "展開資源面板——就近取用素材／定裝／知識"}
         >
-          <Icon name="PanelRight" size={14} />
+          <Icon name="Layers" size={14} />
           資源
           {!open && visuals.length > 0 && (
             <Meta as="span" style={{ marginLeft: 4 }}>{visuals.length}</Meta>
@@ -180,8 +180,8 @@ export function ResourceDock({
                       key={a.id}
                       type="button"
                       role="option"
-                      title={`${a.title}——${pickedShotIds.length ? "點擊套用到選中鏡" : "先勾選分鏡再套用"}`}
-                      disabled={!canEdit || pickedShotIds.length === 0 || setVisual.isPending}
+                      title={`${a.title}——${pickedShotIds.length ? "點擊套用到選中鏡，或拖到分鏡卡" : "拖到分鏡卡，或先勾選再點擊"}`}
+                      disabled={!canEdit || setVisual.isPending}
                       draggable={canEdit}
                       onDragStart={(e) => onDragStartAsset(e, a.id, a.title)}
                       onClick={() => applyAsset(a.id)}
@@ -193,10 +193,10 @@ export function ResourceDock({
                         border: "1px solid var(--border)",
                         borderRadius: "var(--r-10, 10px)",
                         background: "var(--surface-2, var(--field))",
-                        cursor: canEdit && pickedShotIds.length ? "pointer" : "not-allowed",
+                        cursor: canEdit ? "grab" : "not-allowed",
                         overflow: "hidden",
                         textAlign: "left",
-                        opacity: !canEdit || pickedShotIds.length === 0 ? 0.55 : 1,
+                        opacity: !canEdit ? 0.55 : 1,
                       }}
                     >
                       {a.kind === "video" ? (
