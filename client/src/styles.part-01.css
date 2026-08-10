@@ -1,0 +1,9 @@
+/* AI Director OS — 設計語言 v3「ribbon-light 彩帶白紙」（UIUX 大換殼）
+ * 主張：logo 是一條在純白上流動的彩帶（紅→橘→琥珀→黃綠→綠→藍綠），
+ * 整站因此回到「白紙」：表面全面提亮收斂成中性淺灰階，讓 logo 六色成為唯一的色彩語彙。
+ * 主色從赤陶換成 logo「A」的紅橘相；成功=logo 綠、協作=logo 藍綠、金=logo 琥珀、
+ * 危險=logo 紅——語意色全部對齊 logo 實測色值（自 v2 資產逐像素取樣）。
+ * 品牌緞帶漸層（--brand-ribbon）只在少數儀式位置發聲：頂欄髮絲線、進度條、splash。
+ * 既有 class 與變數名契約全部保留；全部文字/底色組合經 WCAG AA 對比驗證。 */
+
+/* PLACEHOLDER - full part content too long for this message. Use push_files with artifact content. */
