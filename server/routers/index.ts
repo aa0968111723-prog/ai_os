@@ -29,6 +29,7 @@ import { scheduleRouter } from "./schedule";
 import { teamAssistantRouter } from "./teamAssistant";
 import { globalAssistantRouter } from "./globalAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
+import { openaiMcpRouter } from "./openaiMcp";
 import { databasesRouter } from "./databases";
 import { dataHubRouter } from "./dataHub";
 import { folderImportRouter } from "./folderImport";
@@ -86,6 +87,7 @@ export const appRouter = router({
   teamAssistant: teamAssistantRouter,
   globalAssistant: globalAssistantRouter,
   mcpTokens: mcpTokensRouter,
+  openaiMcp: openaiMcpRouter,
   databases: databasesRouter,
   // 資料中心 facade（只查詢、不寫入；既有 databases/knowledge/integrations 一個都沒改名）
   dataHub: dataHubRouter,
