@@ -144,6 +144,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "globalAssistant.ask": "詢問全站 AI 助手",
   "globalAssistant.runSiteAction": "執行全站助手確認卡動作",
   "globalAssistant.undoSiteAction": "復原全站助手直接執行的動作",
+  "openaiMcp.ask": "請 GPT 直接讀取並處理 AI-OS",
+  "openaiMcp.decide": "確認 GPT 的 AI-OS 寫入操作",
   "teamAssistant.dispatch": "團隊代理派工到專案",
   "quota.setMemberCommandLevel": "調整組員的組代理指揮權",
   "teamAssistant.command": "組代理下指令",
@@ -386,7 +388,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // story 歸在分鏡：故事、自動解析與轉分鏡是同一條創作鏈（Story-first），組長查「分鏡怎麼來的」
   // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。
   { key: "storyboard", label: "故事與分鏡", prefixes: ["scenes", "story"] },
-  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "workflows"] },
+  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "openaiMcp", "workflows"] },
   // projectContext 歸在知識：它回答的是「這個專案要用哪些資料、各自扮演什麼角色」，
   // 查的人和查知識庫／角色設定的是同一批人、同一個問題
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext"] },
