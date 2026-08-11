@@ -93,6 +93,11 @@ vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
 }));
 
+// PR-6 card is flag-gated and not under workbench shell contract tests.
+vi.mock("../../computer-runtime/ComputerRuntimeCard", () => ({
+  ComputerRuntimeCard: () => null,
+}));
+
 vi.mock("../../../components/WorkflowCard", () => ({
   WorkflowCard: (props: {
     projectId: string;
