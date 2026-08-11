@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentDagStatusKey,
   evaluateAgentDag,
   isDagStepRunnable,
+  layoutAgentDag,
   listInFlightAdobeSteps,
   listInFlightGenerationSteps,
   listRunnableDagSteps,
   selectAgentDagStep,
   stopPendingDagSteps,
+  validateAgentDag,
   type AgentDagStep,
 } from "./agentDag";
 
@@ -82,6 +85,66 @@ describe("agent DAG scheduler", () => {
     ];
     stopPendingDagSteps(steps);
     expect(steps.map((item) => item.status)).toEqual(["stopped", "stopped", "running", "stopped"]);
+  });
+});
+
+describe("validateAgentDag / layoutAgentDag (PR-3)", () => {
+  it("detects empty, missing dependency, cycle, and duplicate id", () => {
+    expect(validateAgentDag([]).code).toBe("empty_plan");
+    expect(validateAgentDag([step("a", "pending", ["ghost"])]).code).toBe("missing_dependency");
+    expect(validateAgentDag([
+      step("a", "pending", ["b"]),
+      step("b", "pending", ["a"]),
+    ]).code).toBe("cycle_detected");
+    expect(validateAgentDag([
+      { id: "same", note: "x", status: "pending", executionMode: "dag" },
+      { id: "same", note: "y", status: "pending", executionMode: "dag" },
+    ]).code).toBe("duplicate_step_id");
+    expect(validateAgentDag([step("a"), step("b", "pending", ["a"])]).ok).toBe(true);
+  });
+
+  it("lays out parallel branches on the same column", () => {
+    const layout = layoutAgentDag([
+      step("root", "done"),
+      step("a", "running", ["root"]),
+      step("b", "pending", ["root"]),
+      step("join", "pending", ["a", "b"]),
+    ]);
+    expect(layout.nodes.find((n) => n.id === "a")?.column).toBe(
+      layout.nodes.find((n) => n.id === "b")?.column,
+    );
+    expect(layout.edges).toHaveLength(4);
+    const keyBefore = layout.topologyKey;
+    const afterStatus = layoutAgentDag([
+      step("root", "done"),
+      step("a", "done", ["root"]),
+      step("b", "running", ["root"]),
+      step("join", "pending", ["a", "b"]),
+    ]);
+    expect(afterStatus.topologyKey).toBe(keyBefore);
+    expect(agentDagStatusKey([
+      step("root", "done"),
+      step("a", "done", ["root"]),
+    ])).not.toBe(agentDagStatusKey([
+      step("root", "done"),
+      step("a", "running", ["root"]),
+    ]));
+  });
+
+  it("layouts 100+ steps without throwing (large-DAG smoke)", () => {
+    const steps: AgentDagStep[] = [];
+    for (let i = 0; i < 120; i++) {
+      steps.push(step(
+        `s${i}`,
+        i === 0 ? "running" : "pending",
+        i > 0 && i % 3 === 0 ? [`s${i - 1}`] : i > 0 ? [`s0`] : undefined,
+      ));
+    }
+    const validation = validateAgentDag(steps);
+    expect(validation.ok).toBe(true);
+    const layout = layoutAgentDag(steps);
+    expect(layout.nodes).toHaveLength(120);
+    expect(layout.width).toBeGreaterThan(0);
   });
 });
 

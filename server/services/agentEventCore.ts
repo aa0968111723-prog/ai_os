@@ -59,7 +59,12 @@ export async function recordAgentEventSafely(input: RecordAgentEventInput): Prom
   // 單一漏斗，掛一次就涵蓋全部轉換——代理進度從輪詢變即時，前端看得見 AI 正在動。
   // 事件寫入失敗也照樣推：推播喚醒的是「重新查詢」，查到的是資料庫的真相，不是這筆事件。
   try {
-    notifyAgentProgress(input.projectId, { runId: input.runId, stepId: input.stepId, eventKey: input.eventKey });
+    notifyAgentProgress(input.projectId, {
+      runId: input.runId,
+      stepId: input.stepId,
+      eventKey: input.eventKey,
+      groupId: input.groupId,
+    });
   } catch {
     // 推播失敗不影響代理主流程；輪詢兜底
   }
@@ -303,7 +308,13 @@ export function assembleAgentInsights(
   const now = options.nowMs ?? Date.now();
   const recentCutoff = now - AGENT_INSIGHT_LIMITS.recentMs;
   const activeRuns = runs.filter((run) =>
-    run.status === "awaiting_approval" || run.status === "running" || run.status === "waiting",
+    run.status === "awaiting_approval"
+    || run.status === "running"
+    || run.status === "waiting"
+    || run.status === "waiting_user_input"
+    || run.status === "waiting_confirmation"
+    || run.status === "waiting_permission"
+    || run.status === "user_controlled",
   );
   const openTasks = tasks.filter((task) => task.status !== "done" && task.status !== "cancelled");
   const overdueTasks = openTasks.filter((task) => task.dueAt && task.dueAt.getTime() < now);
@@ -356,7 +367,13 @@ export function assembleAgentInsights(
   return {
     status,
     activeRuns: activeRuns.length,
-    waitingRuns: activeRuns.filter((run) => run.status === "waiting").length,
+    waitingRuns: activeRuns.filter((run) =>
+      run.status === "waiting"
+      || run.status === "waiting_user_input"
+      || run.status === "waiting_confirmation"
+      || run.status === "waiting_permission"
+      || run.status === "user_controlled",
+    ).length,
     openTasks: openTasks.length,
     overdueTasks: overdueTasks.length,
     recentFailures: recentFailures.length,
@@ -510,7 +527,15 @@ export function assembleGroupAgentInsights(
     overdueTasks: openTasks.filter((t) => t.dueAt && t.dueAt.getTime() < now),
     openTasks,
     recentFailures: runs.filter((r) => r.status === "failed" && r.updatedAt.getTime() >= now - AGENT_INSIGHT_LIMITS.recentMs),
-    activeRuns: runs.filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting"),
+    activeRuns: runs.filter((r) =>
+      r.status === "awaiting_approval"
+      || r.status === "running"
+      || r.status === "waiting"
+      || r.status === "waiting_user_input"
+      || r.status === "waiting_confirmation"
+      || r.status === "waiting_permission"
+      || r.status === "user_controlled"
+    ),
   });
 
   // ── 歸屬到專案 ──
@@ -609,7 +634,15 @@ export function assembleGroupAgentInsights(
   // 判準與 assembleAgentInsights 的 planSummaries 相同：只看仍在進行中的計畫，
   // 已終局的計畫留著待補資訊也不再是待辦。
   const planConcerns: GroupPlanConcern[] = runs
-    .filter((r) => r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval")
+    .filter((r) =>
+      r.status === "running"
+      || r.status === "waiting"
+      || r.status === "waiting_user_input"
+      || r.status === "waiting_confirmation"
+      || r.status === "waiting_permission"
+      || r.status === "user_controlled"
+      || r.status === "awaiting_approval"
+    )
     .map((r) => ({
       runId: r.id,
       projectId: r.projectId,

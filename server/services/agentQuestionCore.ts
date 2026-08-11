@@ -6,12 +6,19 @@ import type { AuthState } from "./auth";
 import { dagStepId, stopPendingDagSteps } from "../../shared/agentDag";
 import {
   canonicalizeAgentQuestionAnswer,
+  isPlanningPhaseQuestion,
   type AgentContextSlotName,
   type AgentContextSlots,
   type AgentQuestionAnswer,
   type AgentQuestionDefinition,
 } from "../../shared/agentQuestions";
+import { MAX_PLANNING_CLARIFICATION_ROUNDS } from "../../shared/agentPlanningIssues";
 import { AgentQuestionResolver } from "./agentQuestionResolver";
+import {
+  appendPlanningClarificationNote,
+  failRunPlanningClarificationExhausted,
+} from "./agentPlanningClarification";
+import { replanAgentRunAfterPlanningAnswer } from "./agentCore";
 import { notifyAgentProgress } from "./realtime";
 import type { AgentStep } from "./agentRunner";
 
@@ -72,8 +79,13 @@ export function applyAgentQuestionAnswerToRun(input: {
 }): {
   steps: AgentStep[];
   contextSlots: AgentContextSlots;
-  status: "running" | "stopped";
+  /** Runtime resume → running; planning answers never return running here. */
+  status: "running" | "stopped" | "awaiting_approval";
+  phase: "planning" | "execution";
 } {
+  const phase: "planning" | "execution" = isPlanningPhaseQuestion(input.question.context)
+    ? "planning"
+    : "execution";
   const steps = (input.run.steps as AgentStep[]).map((step) => ({ ...step }));
   const contextSlots: AgentContextSlots = { ...(input.run.contextSlots ?? {}) };
   const slot = input.question.context.slot;
@@ -88,6 +100,18 @@ export function applyAgentQuestionAnswerToRun(input: {
       const value = selected ?? (Array.isArray(canonical.value) ? canonical.value[0] : canonical.value);
       if (typeof value === "string") (contextSlots as Record<string, unknown>)[slot] = value;
     }
+  }
+
+  // Planning-time: record answer for replan; do not resume execution.
+  if (phase === "planning") {
+    const round = (contextSlots.planningClarificationRound ?? 0) + 1;
+    contextSlots.planningClarificationRound = round;
+    contextSlots.planningClarifications = appendPlanningClarificationNote(
+      contextSlots.planningClarifications,
+      input.canonicalAnswer.displayValue,
+      input.question.context.planningIssueCode,
+    );
+    return { steps, contextSlots, status: "awaiting_approval", phase };
   }
 
   let status: "running" | "stopped" = "running";
@@ -106,7 +130,7 @@ export function applyAgentQuestionAnswerToRun(input: {
       bindSlotsToStep(step, contextSlots);
     }
   }
-  return { steps, contextSlots, status };
+  return { steps, contextSlots, status, phase };
 }
 
 export async function suspendAgentRunForQuestion(input: {
@@ -184,7 +208,12 @@ export async function suspendAgentRunForQuestion(input: {
       summary: result.row.context.reason,
       data: { questionId: result.row.id, questionType: result.row.questionType, candidateCount: result.row.options.length },
     }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-    notifyAgentProgress(result.row.projectId, { runId: result.row.runId, stepId: result.row.stepId ?? undefined, eventKey: `question:${result.row.id}:waiting` });
+    notifyAgentProgress(result.row.projectId, {
+      runId: result.row.runId,
+      stepId: result.row.stepId ?? undefined,
+      eventKey: `question:${result.row.id}:waiting`,
+      groupId: result.row.groupId,
+    });
   }
   return result.row;
 }
@@ -234,8 +263,11 @@ export async function answerAgentQuestion(input: {
       updatedAt: now,
     }).where(and(eq(schema.agentQuestions.id, question.id), eq(schema.agentQuestions.status, "pending"))).returning();
     if (!answered) throw new TRPCError({ code: "CONFLICT", message: "答案已由另一個操作送出" });
+    // Planning answers leave status as waiting_* until replan finishes outside the tx
+    // (or go to awaiting_approval after replan). Never set running from planning phase.
+    const nextStatus = wake.phase === "planning" ? run.status : wake.status;
     const [updatedRun] = await tx.update(schema.agentRuns).set({
-      status: wake.status,
+      status: nextStatus,
       steps: wake.steps,
       contextSlots: wake.contextSlots,
       activeQuestionId: null,
@@ -256,12 +288,85 @@ export async function answerAgentQuestion(input: {
       actorType: "human",
       actorId: input.auth.user.id,
       summary: `已回答：${canonical.displayValue}`,
-      data: { questionId: question.id, selectedOptionIds: canonical.selectedOptionIds },
+      data: {
+        schemaVersion: 1,
+        questionId: question.id,
+        selectedOptionIds: canonical.selectedOptionIds,
+        phase: wake.phase,
+        planningIssueCode: question.context.planningIssueCode,
+      },
     }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-    return { question: answered, run: updatedRun };
+    return { question: answered, run: updatedRun, phase: wake.phase, displayValue: canonical.displayValue };
   });
-  notifyAgentProgress(result.run.projectId, { runId: result.run.id, stepId: result.question.stepId ?? undefined, eventKey: `question:${result.question.id}:answered` });
-  return result;
+  notifyAgentProgress(result.run.projectId, {
+    runId: result.run.id,
+    stepId: result.question.stepId ?? undefined,
+    eventKey: `question:${result.question.id}:answered`,
+    groupId: result.run.groupId,
+  });
+
+  // Planning-time path: replan → awaiting_approval (or next question / fail-closed).
+  if (result.phase === "planning") {
+    const round = result.run.contextSlots?.planningClarificationRound ?? 1;
+    if (round > MAX_PLANNING_CLARIFICATION_ROUNDS) {
+      const failed = await failRunPlanningClarificationExhausted({
+        runId: result.run.id,
+        projectId: result.run.projectId,
+        groupId: result.run.groupId,
+        round,
+      });
+      return { question: result.question, run: failed };
+    }
+    try {
+      const replanned = await replanAgentRunAfterPlanningAnswer({
+        auth: input.auth,
+        runId: result.run.id,
+      });
+      return { question: result.question, run: replanned };
+    } catch (error) {
+      // Replan failure must not leave a half-answered run as running.
+      const message = error instanceof TRPCError
+        ? error.message
+        : error instanceof Error ? error.message : "重新規劃失敗";
+      const [failed] = await db.update(schema.agentRuns).set({
+        status: "failed",
+        error: message.slice(0, 500),
+        activeQuestionId: null,
+        updatedAt: new Date(),
+      }).where(eq(schema.agentRuns.id, result.run.id)).returning();
+      if (failed) {
+        await db.insert(schema.agentEvents).values({
+          runId: failed.id,
+          groupId: failed.groupId,
+          projectId: failed.projectId,
+          eventKey: `run:${failed.id}:replan_failed:${result.question.id}`,
+          eventType: "run_failed",
+          actorType: "system",
+          summary: message.slice(0, 500),
+          data: {
+            schemaVersion: 1,
+            phase: "planning",
+            reason: {
+              code: "replan_failed",
+              category: "upstream",
+              userMessage: message.slice(0, 500),
+              retryable: true,
+              recommendedAction: "replan",
+            },
+          },
+        }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
+        notifyAgentProgress(failed.projectId, {
+          runId: failed.id,
+          eventKey: `run:${failed.id}:replan_failed:${result.question.id}`,
+          groupId: failed.groupId,
+        });
+        return { question: result.question, run: failed };
+      }
+      throw error;
+    }
+  }
+
+  return { question: result.question, run: result.run };
 }
 
 export async function listPendingAgentQuestionsForProject(auth: AuthState, projectId: string): Promise<AgentQuestionRow[]> {

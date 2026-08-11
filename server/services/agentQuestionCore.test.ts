@@ -35,8 +35,38 @@ describe("applyAgentQuestionAnswerToRun", () => {
       },
     });
     expect(result.status).toBe("running");
+    expect(result.phase).toBe("execution");
     expect(result.contextSlots).toEqual({ projectId: "project-a", sceneId: "scene-b" });
     expect(result.steps[0]).toMatchObject({ status: "pending", targetSceneId: "scene-b" });
+  });
+
+  it("planning-phase answers never resume running — they stash clarifications for replan", () => {
+    const result = applyAgentQuestionAnswerToRun({
+      run: {
+        currentStep: 0,
+        contextSlots: { planningClarificationRound: 0 },
+        steps: [{ id: "s1", kind: "create_note", note: "草稿", status: "pending" }],
+      },
+      question: {
+        stepId: null,
+        questionType: "date",
+        context: {
+          reason: "日期無法唯一決定",
+          phase: "planning",
+          planningIssueCode: "ambiguous_date_time",
+        },
+      },
+      canonicalAnswer: {
+        value: "2026-08-15",
+        selectedOptionIds: [],
+        displayValue: "2026-08-15",
+      },
+    });
+    expect(result.phase).toBe("planning");
+    expect(result.status).toBe("awaiting_approval");
+    expect(result.contextSlots.planningClarificationRound).toBe(1);
+    expect(result.contextSlots.planningClarifications).toContain("2026-08-15");
+    expect(result.steps[0]?.status).toBe("pending");
   });
 
   it("binds a shot picker answer to the current executable scene target", () => {

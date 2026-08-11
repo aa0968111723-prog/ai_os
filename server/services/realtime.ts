@@ -252,33 +252,135 @@ function readInvalidateScope(raw: unknown): { kind: string; id: string | null } 
 
 /** 伺服器發起的推播節流（每專案）：代理一次 tick 會連寫多筆事件，不節流會對同房重複轟炸 */
 const serverPushThrottle = new Map<string, number>();
+/** Leading + trailing：窗口內只保留最新一筆，避免中間步驟永遠被丟掉 */
+const serverPushPending = new Map<string, AgentProgressPushInput>();
+const serverPushTrailTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const SERVER_PUSH_MIN_MS = 800;
 
+/** Per-run monotonic sequence (in-process SoT). Multi-replica may diverge; clients still drop stale. */
+const agentProgressSequence = new Map<string, number>();
+
+export interface AgentProgressPushInput {
+  runId: string;
+  stepId?: string | null;
+  eventKey: string;
+  groupId?: string | null;
+  /** PR-5：presentation-only navigation hint（safe path/anchor） */
+  navigationHint?: Record<string, unknown> | null;
+}
+
+function nextProgressSequence(runId: string): number {
+  const next = (agentProgressSequence.get(runId) ?? 0) + 1;
+  agentProgressSequence.set(runId, next);
+  // Bound memory: keep counters for active runs only (soft cap)
+  if (agentProgressSequence.size > 5_000) {
+    const first = agentProgressSequence.keys().next().value;
+    if (first) agentProgressSequence.delete(first);
+  }
+  return next;
+}
+
+function buildAgentStepMessage(
+  projectId: string,
+  step: AgentProgressPushInput,
+): Record<string, unknown> {
+  const sequence = nextProgressSequence(step.runId);
+  const msg: Record<string, unknown> = {
+    type: "agent-step",
+    schemaVersion: 1,
+    runId: step.runId,
+    stepId: step.stepId ?? null,
+    projectId,
+    groupId: step.groupId ?? null,
+    eventKey: step.eventKey,
+    sequence,
+    occurredAt: new Date().toISOString(),
+  };
+  if (step.navigationHint && typeof step.navigationHint === "object") {
+    msg.navigationHint = { ...step.navigationHint, sequence };
+  }
+  return msg;
+}
+
+function emitAgentProgress(projectId: string, step: AgentProgressPushInput): void {
+  const msg = buildAgentStepMessage(projectId, step);
+  const projectRoomKey = `p:${projectId}`;
+  const projectRoom = rooms.get(projectRoomKey) ?? new Set<Client>();
+  broadcast(projectRoomKey, projectRoom, msg);
+  // invalidate 仍為既有 client 路徑；agent-step 供 ordering / 針對性 refetch
+  broadcast(projectRoomKey, projectRoom, {
+    type: "invalidate",
+    scope: { kind: "agent", id: step.runId },
+  });
+
+  // HUD 掛在 group room：把同一 signal 扇出到組房，跨頁才能即時看到 waiting / 停止
+  if (step.groupId) {
+    const groupRoomKey = `g:${step.groupId}`;
+    const groupRoom = rooms.get(groupRoomKey) ?? new Set<Client>();
+    broadcast(groupRoomKey, groupRoom, msg);
+    broadcast(groupRoomKey, groupRoom, {
+      type: "invalidate",
+      scope: { kind: "agent", id: step.runId },
+    });
+  }
+}
+
+function flushPendingAgentProgress(projectId: string): void {
+  serverPushTrailTimers.delete(projectId);
+  const pending = serverPushPending.get(projectId);
+  if (!pending) return;
+  serverPushPending.delete(projectId);
+  serverPushThrottle.set(projectId, Date.now());
+  emitAgentProgress(projectId, pending);
+}
+
 /**
- * 伺服器端事件推播（C1 操演推播的最小形）：代理每步推進時喚醒專案房間裡的所有客戶端。
+ * 伺服器端事件推播（C1 操演推播 + PR-2 hardening）：
  *
  * 訊息帶兩層：
- * - `invalidate`：客戶端**既有**的處理路徑（realtime.tsx 收到就重取 react-query 快取）——
- *   代理進度從 4-8 秒輪詢變成即時，前端零改動。
- * - `agent-step`：帶 runId/stepId/eventKey 的具名事件。現在沒有客戶端消費它（未知
- *   type 會被 else-if 鏈安靜忽略），是留給操演 HUD（C3）的接點——屆時前端能知道
- *   「哪一步剛發生什麼」而不只是「有東西變了」，伺服器不必再改。
+ * - `invalidate`（scope.kind=agent）：觸發 targeted agent refetch
+ * - `agent-step`：可排序 signal（sequence / occurredAt / projectId / eventKey）
  *
- * 房間不存在也照樣發跨實例匯流排：使用者可能連在另一個 replica 上。
- * 節流是每專案 800ms 領先緣——漏掉的尾巴由 AgentCard 保留的輪詢兜底。
+ * 節流：800ms leading + trailing coalesce——窗口內多次寫入只保留最新一筆，
+ * 不再 silently drop 尾巴（舊版 leading-only 會永遠漏掉 thrash 中的後續步驟）。
+ * 房間不存在也照樣發跨實例匯流排。
  */
 export function notifyAgentProgress(
   projectId: string,
-  step: { runId: string; stepId?: string | null; eventKey: string },
+  step: AgentProgressPushInput,
 ): void {
+  if (!step.eventKey) {
+    // Fail-closed: never emit unkeyed progress (duplicate-unsafe)
+    step = { ...step, eventKey: `run:${step.runId}:progress` };
+  }
   const now = Date.now();
   const last = serverPushThrottle.get(projectId) ?? 0;
-  if (now - last < SERVER_PUSH_MIN_MS) return;
-  serverPushThrottle.set(projectId, now);
-  const roomKey = `p:${projectId}`;
-  const room = rooms.get(roomKey) ?? new Set<Client>();
-  broadcast(roomKey, room, { type: "agent-step", runId: step.runId, stepId: step.stepId ?? null, eventKey: step.eventKey });
-  broadcast(roomKey, room, { type: "invalidate" });
+  const elapsed = now - last;
+  if (elapsed >= SERVER_PUSH_MIN_MS) {
+    serverPushThrottle.set(projectId, now);
+    serverPushPending.delete(projectId);
+    const trail = serverPushTrailTimers.get(projectId);
+    if (trail) {
+      clearTimeout(trail);
+      serverPushTrailTimers.delete(projectId);
+    }
+    emitAgentProgress(projectId, step);
+    return;
+  }
+  // Inside throttle window: keep latest only, schedule trailing flush
+  serverPushPending.set(projectId, step);
+  if (!serverPushTrailTimers.has(projectId)) {
+    const wait = Math.max(1, SERVER_PUSH_MIN_MS - elapsed);
+    serverPushTrailTimers.set(
+      projectId,
+      setTimeout(() => flushPendingAgentProgress(projectId), wait),
+    );
+  }
+}
+
+/** Test / metrics helper: last assigned sequence for a run (undefined if none). */
+export function peekAgentProgressSequence(runId: string): number | undefined {
+  return agentProgressSequence.get(runId);
 }
 
 /**

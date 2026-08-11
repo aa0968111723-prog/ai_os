@@ -44,6 +44,13 @@ export interface AgentContextSlots {
   assetIds?: string[];
   modelId?: string;
   executionMode?: string;
+  /** Planning-time clarification cycle count (fail-closed after MAX). */
+  planningClarificationRound?: number;
+  /**
+   * Concatenated, user-visible clarification answers for replan context.
+   * Never stores model CoT — only human answers and short issue labels.
+   */
+  planningClarifications?: string;
 }
 
 export interface AgentQuestionOption {
@@ -67,6 +74,15 @@ export interface AgentQuestionContext {
   requiresLogin?: boolean;
   allowAgentDecision?: boolean;
   facts?: string[];
+  /**
+   * Lifecycle phase. Planning-time answers must replan → awaiting_approval;
+   * execution answers resume running (existing HITL path).
+   */
+  phase?: "planning" | "execution";
+  /** Machine-readable planning issue code when phase is planning. */
+  planningIssueCode?: string;
+  /** 1-based planning clarification round for cycle guard. */
+  clarificationRound?: number;
 }
 
 export interface AgentQuestionDefinition {
@@ -262,4 +278,28 @@ export function isAgentRunWaitingForHuman(status: string): boolean {
     || status === "waiting_confirmation"
     || status === "waiting_permission"
     || status === "user_controlled";
+}
+
+/** Runs that should stay visible on cross-page HUD / overview aggregates. */
+export function isAgentRunActiveForHud(status: string): boolean {
+  return status === "running"
+    || status === "awaiting_approval"
+    || isAgentRunWaitingForHuman(status);
+}
+
+/** Presentation label for HUD / pills — never drop waiting_* into a black hole. */
+export function agentRunHudLabel(status: string): string {
+  if (status === "awaiting_approval") return "待你過目";
+  if (status === "waiting_user_input") return "等你補充";
+  if (status === "waiting_confirmation") return "等你確認";
+  if (status === "waiting_permission") return "需要權限";
+  if (status === "waiting" || status === "user_controlled") return "等你回覆";
+  if (status === "running") return "開拍中";
+  return status;
+}
+
+export function isPlanningPhaseQuestion(
+  context: Pick<AgentQuestionContext, "phase"> | null | undefined,
+): boolean {
+  return context?.phase === "planning";
 }

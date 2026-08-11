@@ -49,6 +49,14 @@ import { stopPendingDagSteps } from "../../shared/agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
+  attachPlanningIssuesToSummary,
+  failRunPlanningClarificationExhausted,
+  openPlanningClarification,
+  pickBlockingIssue,
+  shouldForcePlanningClarification,
+} from "./agentPlanningClarification";
+import { MAX_PLANNING_CLARIFICATION_ROUNDS } from "../../shared/agentPlanningIssues";
+import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
   RATE_LIMIT_SCOPES,
@@ -893,6 +901,10 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     if (picked.labels.length) {
       plan.summary.contextUsed = [...new Set([...(plan.summary.contextUsed ?? []), ...picked.labels])].slice(0, 30);
     }
+    // PR-1：結構化 planning issues（舊 missingInformation 仍相容）
+    plan.summary = attachPlanningIssuesToSummary(plan.summary);
+    const forceClarify = shouldForcePlanningClarification(plan.summary);
+    const blockingIssue = forceClarify ? pickBlockingIssue(plan.summary) : undefined;
     const [run] = await db
       .insert(schema.agentRuns)
       .values({
@@ -917,6 +929,17 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
       })
       .returning();
     await recordPlannedEvent(run);
+    // PR-1：blocking issues → forced clarification（不得直接待核准殘缺計畫）
+    let finalRun = run;
+    if (blockingIssue) {
+      const opened = await openPlanningClarification({
+        auth,
+        runId: run.id,
+        issue: blockingIssue,
+        clarificationRound: 1,
+      });
+      finalRun = opened.run;
+    }
     if (input.traceSessionId) {
       await recordAiTraceEventSafely({
         sessionId: input.traceSessionId,
@@ -927,19 +950,21 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
       await recordAiTraceEventSafely({
         sessionId: input.traceSessionId,
         eventType: "completed",
-        summary: "代理計畫已建立，等待使用者核准",
-        payload: { runId: run.id },
+        summary: blockingIssue
+          ? "代理計畫需先澄清後才能核准"
+          : "代理計畫已建立，等待使用者核准",
+        payload: { runId: finalRun.id, needsClarification: Boolean(blockingIssue) },
       });
       await updateAiTraceSession(input.traceSessionId, {
         status: "completed",
         provider: generated.telemetry.provider,
         model: generated.telemetry.model,
         sourceType: "agent_run",
-        sourceId: run.id,
-        summary: "代理計畫已建立",
+        sourceId: finalRun.id,
+        summary: blockingIssue ? "代理計畫待澄清" : "代理計畫已建立",
       }).catch(() => undefined);
     }
-    return run;
+    return finalRun;
   } catch (err) {
     if (input.traceSessionId) {
       await recordAiTraceEventSafely({
@@ -953,6 +978,241 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     if (err instanceof TRPCError) throw err;
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 代理暫時沒回應，請稍後再試" });
   }
+}
+
+/**
+ * PR-1：planning-time 澄清回答後重新規劃。
+ * 結果必須是 awaiting_approval（或再次 waiting_*／failed），**禁止**直接 running。
+ */
+export async function replanAgentRunAfterPlanningAnswer(input: {
+  auth: AuthState;
+  runId: string;
+}): Promise<AgentRunRow> {
+  const { auth } = input;
+  assertUuid(input.runId, "代理計畫編號");
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
+  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到代理執行" });
+  requireGroup(auth, run.groupId);
+  if (run.userId !== auth.user.id) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有這次代理的發起人可以完成規劃澄清" });
+  }
+
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(auth, project);
+  assertProjectNotArchived(project);
+
+  const clarifications = (run.contextSlots?.planningClarifications ?? "").trim();
+  const round = run.contextSlots?.planningClarificationRound ?? 1;
+  const goal = run.goal;
+  const plannerMode = (run.plannerTelemetry as AgentPlannerTelemetry | null)?.requestedMode
+    ?? DEFAULT_AGENT_PLANNER_MODE;
+
+  // Mock / e2e：不清真 LLM，用固定計畫清掉 blocking 後進 awaiting_approval
+  if (isMockMode()) {
+    const scenes = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+    const writableDbs = await listAgentWritableDbs(auth);
+    const plan = mockPlan(goal, scenes.length, writableDbs);
+    plan.planSummary = attachPlanningIssuesToSummary({
+      ...plan.planSummary,
+      missingInformation: [],
+      assumptions: [
+        ...plan.planSummary.assumptions,
+        ...(clarifications ? [`使用者澄清：${clarifications.slice(0, 200)}`] : []),
+      ],
+    });
+    const [updated] = await db.update(schema.agentRuns).set({
+      status: "awaiting_approval",
+      summary: plan.summary,
+      planSummary: plan.planSummary,
+      steps: plan.steps,
+      estPoints: plan.estPoints,
+      currentStep: 0,
+      error: null,
+      activeQuestionId: null,
+      updatedAt: new Date(),
+    }).where(eq(schema.agentRuns.id, run.id)).returning();
+    if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "找不到代理執行" });
+    await recordAgentEventSafely({
+      runId: updated.id,
+      groupId: updated.groupId,
+      projectId: updated.projectId,
+      eventKey: `run:replanned_after_clarification:${round}`,
+      eventType: "observation",
+      actorType: "system",
+      summary: "澄清後已重新規劃，等待核准",
+      data: { schemaVersion: 1, phase: "planning", clarificationRound: round },
+    });
+    return updated;
+  }
+
+  const scenes = await db
+    .select()
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+    .orderBy(asc(schema.scenes.orderIndex));
+  const writableDbs = await listAgentWritableDbs(auth);
+  const plannerContext = await buildPlannerContext(project.groupId, project.id, writableDbs);
+  const sceneLines = scenes.length
+    ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」`).join("\n")
+    : "（尚無分鏡）";
+
+  const prompt = `你是專案型 AI 代理的規劃器。使用者已回答先前的澄清問題，請依澄清結果重新產出完整可執行計畫 JSON。
+現在時間：${new Date().toISOString()}，使用者時區：Asia/Taipei。
+
+硬性規則：
+1. 必須消化下方「使用者澄清回答」，不得再對同一問題追問。
+2. 若仍有不可安全執行的缺口，列入 missingInformation；否則 missingInformation 必須為 []。
+3. 只輸出一個 JSON 物件（與首次規劃相同 schema），不要 Markdown 或 chain-of-thought。
+4. 不得輸出 UUID；只能用上下文代號。
+5. 最多 ${MAX_PLAN_STEPS} 步。
+
+輸出 summary + steps 格式與首次規劃相同（goal、successCriteria、assumptions、missingInformation、risks、milestones、steps）。
+
+可用步驟 kind：split_script, create_scene, update_scene, reorder_scenes, generate, voiceover, record_to_database, create_note, append_note, create_schedule, update_schedule, create_task, wait_for_human, request_approval。
+
+${buildPlannerRoleBlock()}
+<可用模型速查>
+${buildAiModelCheatsheet()}
+</可用模型速查>
+<可寫資料庫>
+${dbCheatsheet(writableDbs)}
+</可寫資料庫>
+${plannerContext.text}
+<專案現況>
+標題：${project.title}（${project.kind}，${project.format}）
+分鏡（共 ${scenes.length}）：
+${sceneLines}
+</專案現況>
+<原始目標>
+${goal}
+</原始目標>
+<使用者澄清回答>
+${clarifications || "（無額外文字）"}
+</使用者澄清回答>
+請重新規劃。`;
+
+  const reservedPoints = estimatePlannerPoints(plannerMode, {
+    promptChars: prompt.length,
+    maxOutputTokens: plannerOutputTokenCeiling(plannerMode),
+    attempts: PLAN_RETRY_ATTEMPTS,
+  });
+  const plannerLabel = getAgentPlannerOption(plannerMode).shortLabel;
+  const quotaError = await reserveQuota(
+    auth.user.id,
+    project.groupId,
+    reservedPoints,
+    `AI 代理澄清後重新規劃（${plannerLabel}）`,
+  );
+  if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+
+  let generated: Awaited<ReturnType<typeof generateAgentPlanDraft>>;
+  try {
+    generated = await generateAgentPlanDraft(prompt, plannerMode);
+  } catch (err) {
+    const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
+    const burned = llmPointsForUsageEntries(failedBilling);
+    if (burned == null) {
+      await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理重新規劃失敗退回");
+    } else {
+      await settleUsagePoints({
+        userId: auth.user.id,
+        groupId: project.groupId,
+        reserved: reservedPoints,
+        actual: burned,
+        reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
+      });
+    }
+    if (err instanceof AgentPlannerServiceError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
+    }
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "重新規劃暫時沒回應，請稍後再試" });
+  }
+
+  const usagePoints = llmPointsForUsageEntries(generated.billing);
+  await settleUsagePoints({
+    userId: auth.user.id,
+    groupId: project.groupId,
+    reserved: reservedPoints,
+    actual: usagePoints ?? reservedPoints,
+    reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
+  });
+
+  let plan;
+  try {
+    plan = resolveCompletePlanDraft(generated.draft, plannerContext);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "重新規劃結果含無效依賴或引用，已阻止落地" });
+  }
+  plan.summary.goal = goal;
+  plan.summary = attachPlanningIssuesToSummary(plan.summary);
+  plan.summaryText = `${goal}｜${plan.steps.length} 個步驟｜預估 ${plan.estPoints} 點｜澄清後重規劃`;
+  if (plan.steps.length === 0) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "重新規劃後仍沒有可執行步驟" });
+  }
+
+  const forceClarify = shouldForcePlanningClarification(plan.summary);
+  const blockingIssue = forceClarify ? pickBlockingIssue(plan.summary) : undefined;
+
+  const [updated] = await db.update(schema.agentRuns).set({
+    status: "awaiting_approval",
+    summary: plan.summaryText,
+    planSummary: plan.summary,
+    plannerTelemetry: {
+      ...generated.telemetry,
+      pointsReserved: reservedPoints,
+      pointsActual: usagePoints ?? reservedPoints,
+    },
+    steps: plan.steps,
+    estPoints: plan.estPoints,
+    currentStep: 0,
+    error: null,
+    activeQuestionId: null,
+    updatedAt: new Date(),
+  }).where(eq(schema.agentRuns.id, run.id)).returning();
+  if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "找不到代理執行" });
+
+  await recordAgentEventSafely({
+    runId: updated.id,
+    groupId: updated.groupId,
+    projectId: updated.projectId,
+    eventKey: `run:replanned_after_clarification:${round}`,
+    eventType: "observation",
+    actorType: "system",
+    summary: blockingIssue
+      ? "澄清後重新規劃仍需再問一題"
+      : "澄清後已重新規劃，等待核准",
+    data: {
+      schemaVersion: 1,
+      phase: "planning",
+      clarificationRound: round,
+      stillNeedsClarification: Boolean(blockingIssue),
+    },
+  });
+
+  if (blockingIssue) {
+    // Next question would be round+1; fail-closed at MAX.
+    if (round + 1 > MAX_PLANNING_CLARIFICATION_ROUNDS) {
+      return failRunPlanningClarificationExhausted({
+        runId: updated.id,
+        projectId: updated.projectId,
+        groupId: updated.groupId,
+        round: round + 1,
+      });
+    }
+    const opened = await openPlanningClarification({
+      auth,
+      runId: updated.id,
+      issue: blockingIssue,
+      clarificationRound: round + 1,
+    });
+    return opened.run;
+  }
+
+  return updated;
 }
 
 /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手）。含 per-(project,user) 併發鎖＋CAS。 */

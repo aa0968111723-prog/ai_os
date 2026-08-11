@@ -10,6 +10,7 @@ import {
   adobePhotoOperationSchema,
   adobeTimelineSchema,
 } from "./adobe";
+import { PLANNING_ISSUE_CODES } from "./agentPlanningIssues";
 
 export const planStepKindSchema = z.enum([
   "split_script",
@@ -99,6 +100,14 @@ export const planStepSchema = z.object({
   durationSec: z.number().positive().max(3_600).optional(),
   scenePrompt: z.string().max(8_000).optional(),
   script: z.string().max(80_000).optional(),
+  /** PR-4：reorder 的完整 scene id 順序（執行期／重播用；可選，additive） */
+  orderedSceneIds: z.array(z.string().uuid()).max(60).optional(),
+  orderedSceneNos: z.array(z.number().int().positive()).max(60).optional(),
+  /** PR-4：樂觀併發基準（scene.rev 或 order fingerprint） */
+  baseRevision: z.string().trim().min(1).max(2_000).optional(),
+  ambience: z.string().max(500).optional(),
+  trimStartMs: z.number().int().min(0).max(3_600_000).optional(),
+  trimEndMs: z.number().int().min(0).max(3_600_000).nullable().optional(),
   // CA-01：代理 generate 與直接生成對齊——定裝／場景／素材／來源素材（上限見 cardLimits）
   characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
   scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
@@ -130,6 +139,20 @@ export const planMilestoneSchema = z.object({
   dueAt: z.string().datetime({ offset: true }).optional(),
 });
 
+/** Machine-readable planning issues (PR-1); optional for pre-change plan fixtures. */
+export const planningIssueSchema = z.object({
+  code: z.enum(PLANNING_ISSUE_CODES),
+  field: z.string().trim().min(1).max(80).optional(),
+  reference: z.string().trim().min(1).max(200).optional(),
+  userMessage: z.string().trim().min(1).max(500),
+  blocking: z.boolean(),
+  candidates: z.array(z.object({
+    id: z.string().trim().min(1).max(200),
+    label: z.string().trim().min(1).max(200),
+  })).max(50).optional(),
+  entityType: z.enum(["project", "scene", "shot", "person", "asset", "model"]).optional(),
+});
+
 export const completePlanSummarySchema = z.object({
   goal: z.string().trim().min(1).max(1_000),
   /** 決策軌跡：1–3 句說明為何這樣排計畫（結構化結論，不是 chain-of-thought） */
@@ -139,6 +162,12 @@ export const completePlanSummarySchema = z.object({
   successCriteria: z.array(z.string().trim().min(1).max(500)).max(50),
   assumptions: z.array(z.string().trim().min(1).max(500)).max(50),
   missingInformation: z.array(z.string().trim().min(1).max(500)).max(50),
+  /**
+   * Structured planning issues (PR-1). When present, forced-clarification uses
+   * these codes; missingInformation remains a display-compatible projection.
+   * Pre-change plans without this field still load.
+   */
+  planningIssues: z.array(planningIssueSchema).max(50).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
   risks: z.array(planRiskSchema).max(50),
   milestones: z.array(planMilestoneSchema).max(50),

@@ -15,6 +15,14 @@ import { trpc } from "./api";
 import { highlightAnchor } from "./discuss";
 import { Button, Hint } from "./components/ui";
 import { sanitizeViewState, type ViewState } from "../../shared/viewState";
+import {
+  agentReconnectRecoveryLatency,
+  isProgressForCurrentProject,
+  markProgressDelivered,
+  parseAgentProgressSignal,
+  shouldAcceptProgressSequence,
+} from "../../shared/agentProgress";
+import { applyTheaterHint, bindHumanActivityListeners, markTheaterHintEmitted, theaterEnabled } from "./lib/agentTheater";
 
 export interface CollabPeer {
   userId: string;
@@ -648,6 +656,31 @@ export function useCollab(
   const lastZoneRef = useRef<string | null>(null);
   const utilsRef = useRef(utils);
   utilsRef.current = utils;
+  /** PR-2：last accepted sequence per runId — drop out-of-order / duplicate agent-step */
+  const agentSeqRef = useRef<Map<string, number>>(new Map());
+  /** Mark reconnect start so we can measure recovery latency after authoritative refetch */
+  const reconnectStartedAtRef = useRef<number | null>(null);
+
+  /** Authoritative agent refetch after reconnect or progress signal (never trust WS snapshot alone). */
+  const refetchAgentAuthoritative = useCallback((reason: "reconnect" | "agent-step" | "invalidate") => {
+    const u = utilsRef.current;
+    const started = reconnectStartedAtRef.current;
+    if (kind === "group") {
+      void u.teamAssistant.agentOverview.invalidate({ groupId: id }).then(() => {
+        if (reason === "reconnect" && started != null) {
+          agentReconnectRecoveryLatency.record(Date.now() - started);
+          reconnectStartedAtRef.current = null;
+        }
+      });
+      return;
+    }
+    void u.agents.invalidate().then(() => {
+      if (reason === "reconnect" && started != null) {
+        agentReconnectRecoveryLatency.record(Date.now() - started);
+        reconnectStartedAtRef.current = null;
+      }
+    });
+  }, [id, kind]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -656,6 +689,8 @@ export function useCollab(
     let retryDelay = RETRY_BASE_MS;
     let retryCount = 0;
     let retryTimer: number | undefined;
+    let hadConnection = false;
+    const unbindHuman = bindHumanActivityListeners();
 
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -665,6 +700,12 @@ export function useCollab(
       ws.onopen = () => {
         retryDelay = RETRY_BASE_MS;
         retryCount = 0;
+        // PR-2：重連後不能假設斷線期間沒有漏事件——立刻 authoritative refetch
+        if (hadConnection) {
+          reconnectStartedAtRef.current = Date.now();
+          refetchAgentAuthoritative("reconnect");
+        }
+        hadConnection = true;
       };
       ws.onmessage = (ev) => {
         let msg: any;
@@ -765,9 +806,40 @@ export function useCollab(
             else delete next[msg.userId];
             return next;
           });
+        } else if (msg.type === "agent-step") {
+          // PR-2：agent-step 是 signal，不是 snapshot。排序後只觸發 authoritative invalidate。
+          const signal = parseAgentProgressSignal(msg);
+          if (!signal) return;
+          const currentProject = kind === "project" ? id : null;
+          if (!isProgressForCurrentProject(signal, currentProject)) return;
+          const last = agentSeqRef.current.get(signal.runId);
+          if (!shouldAcceptProgressSequence(last, signal.sequence)) return;
+          agentSeqRef.current.set(signal.runId, signal.sequence);
+          markProgressDelivered(signal.occurredAt);
+          refetchAgentAuthoritative("agent-step");
+          // PR-5 Theater：presentation hint only（flag off = no-op）
+          if (theaterEnabled() && msg.navigationHint) {
+            markTheaterHintEmitted();
+            applyTheaterHint(
+              { ...msg.navigationHint, sequence: signal.sequence },
+              {
+                navigate: (path) => {
+                  // Soft navigation via location assignment — AppShell uses wouter
+                  if (typeof window !== "undefined") {
+                    window.history.pushState({}, "", path);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }
+                },
+                currentPathname: typeof window !== "undefined" ? window.location.pathname : undefined,
+              },
+            );
+          }
         } else if (msg.type === "invalidate") {
           const scope = msg.scope as { kind?: string; id?: string | null } | undefined;
-          if (scope?.kind === "scene" || scope?.kind === "annotation") {
+          if (scope?.kind === "agent") {
+            // Targeted agent invalidate (from notifyAgentProgress)
+            refetchAgentAuthoritative("invalidate");
+          } else if (scope?.kind === "scene" || scope?.kind === "annotation") {
             // 只失效分鏡相關的查詢：舊行為是無參數 invalidate（整棵 tRPC 快取），
             // 順帶讓 generation.listByProject 每次被抓都跑一次 sweepStaleGenerations——
             // 五人同房就是五次全專案掃描，而其中四次什麼都不會變
@@ -781,7 +853,7 @@ export function useCollab(
           }
           // 讓改動處亮一下——**只高亮不捲動**。用 flashAnchor 的話，別人每存一次分鏡標題
           // 全房畫面就被強制平滑捲走，而 smooth 捲動正是鏡像那批修掉的抖動來源
-          if (scope?.id) highlightAnchor(`scene-${scope.id}`);
+          if (scope?.id && scope.kind !== "agent") highlightAnchor(`scene-${scope.id}`);
           if (typeof msg.label === "string" && msg.label) {
             setLastChange({ name: typeof msg.name === "string" ? msg.name : "夥伴", label: msg.label, at: Date.now() });
           }
@@ -818,8 +890,9 @@ export function useCollab(
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       wsRef.current = null;
       ws?.close();
+      unbindHuman();
     };
-  }, [id, enabled, kind, syncAnchorEpoch]);
+  }, [id, enabled, kind, syncAnchorEpoch, refetchAgentAuthoritative]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

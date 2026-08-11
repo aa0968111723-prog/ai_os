@@ -450,6 +450,18 @@ describe("foldGroupStatusAggregate（整組計數，不受清單 limit 影響）
     expect(counts.totalRuns).toBe(5);
     expect(groupSummaryFromCounts(counts).health).toBe("healthy");
   });
+
+  it("waiting_user_input / waiting_confirmation / waiting_permission 計入 waiting（PR-1 HUD）", () => {
+    const counts = foldGroupStatusAggregate(
+      [
+        { status: "waiting_user_input", n: "2", nRecent: "2" },
+        { status: "waiting_confirmation", n: "1", nRecent: "1" },
+        { status: "waiting_permission", n: "1", nRecent: "1" },
+      ],
+      1,
+    );
+    expect(counts.waiting).toBe(4);
+  });
 });
 
 describe("formatGroupBlockerDigest（S5：ask 的阻塞上下文）", () => {

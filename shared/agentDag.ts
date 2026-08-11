@@ -141,3 +141,256 @@ export function stopPendingDagSteps(steps: AgentDagStep[]): void {
     if (step.status === "running" && !step.generationId && !step.adobeJobId) step.status = "stopped";
   }
 }
+
+/* ── PR-3：validation + layout for interactive canvas ── */
+
+export const AGENT_DAG_STEP_STATUSES = [
+  "pending",
+  "running",
+  "waiting",
+  "done",
+  "failed",
+  "stopped",
+] as const;
+
+export type AgentDagStepStatus = (typeof AGENT_DAG_STEP_STATUSES)[number];
+
+export type AgentDagValidationCode =
+  | "valid"
+  | "empty_plan"
+  | "missing_dependency"
+  | "cycle_detected"
+  | "duplicate_step_id"
+  | "unsupported_status";
+
+export interface AgentDagValidationIssue {
+  code: Exclude<AgentDagValidationCode, "valid">;
+  message: string;
+  stepId?: string;
+  detail?: string;
+}
+
+export interface AgentDagValidationResult {
+  ok: boolean;
+  code: AgentDagValidationCode;
+  issues: AgentDagValidationIssue[];
+}
+
+/** Large-DAG threshold: still render graph, but skip expensive per-node chrome. */
+export const AGENT_DAG_LARGE_STEP_THRESHOLD = 100;
+
+const KNOWN_STATUS = new Set<string>(AGENT_DAG_STEP_STATUSES);
+
+/**
+ * Fail-closed validation before canvas render.
+ * Does not mutate steps; canvas must not invent edges for missing deps / cycles.
+ */
+export function validateAgentDag(steps: readonly AgentDagStep[]): AgentDagValidationResult {
+  const issues: AgentDagValidationIssue[] = [];
+  if (!steps.length) {
+    return {
+      ok: false,
+      code: "empty_plan",
+      issues: [{ code: "empty_plan", message: "這份計畫沒有任何步驟" }],
+    };
+  }
+
+  const ids = steps.map((step, index) => dagStepId(step, index));
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      issues.push({
+        code: "duplicate_step_id",
+        message: `步驟代號重複：「${id}」`,
+        stepId: id,
+      });
+    }
+    seen.add(id);
+  }
+
+  const idSet = new Set(ids);
+  steps.forEach((step, index) => {
+    const id = ids[index]!;
+    const status = step.status as string;
+    if (!KNOWN_STATUS.has(status)) {
+      issues.push({
+        code: "unsupported_status",
+        message: `步驟「${id}」狀態無法辨識`,
+        stepId: id,
+        detail: status,
+      });
+    }
+    for (const dep of step.dependsOn ?? []) {
+      if (!idSet.has(dep)) {
+        issues.push({
+          code: "missing_dependency",
+          message: `步驟「${id}」依賴不存在的前置「${dep}」`,
+          stepId: id,
+          detail: dep,
+        });
+      }
+    }
+  });
+
+  // Cycle detection (only among known ids)
+  const graph = new Map<string, string[]>();
+  for (let i = 0; i < steps.length; i++) {
+    const id = ids[i]!;
+    const deps = (steps[i]!.dependsOn ?? []).filter((d) => idSet.has(d));
+    graph.set(id, deps);
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const cycleHit = (node: string): boolean => {
+    if (visited.has(node)) return false;
+    if (visiting.has(node)) return true;
+    visiting.add(node);
+    for (const dep of graph.get(node) ?? []) {
+      if (cycleHit(dep)) return true;
+    }
+    visiting.delete(node);
+    visited.add(node);
+    return false;
+  };
+  for (const id of ids) {
+    if (cycleHit(id)) {
+      issues.push({
+        code: "cycle_detected",
+        message: "步驟依賴形成迴圈，無法安全排程",
+        stepId: id,
+      });
+      break;
+    }
+  }
+
+  if (issues.some((i) => i.code === "duplicate_step_id")) {
+    return { ok: false, code: "duplicate_step_id", issues };
+  }
+  if (issues.some((i) => i.code === "cycle_detected")) {
+    return { ok: false, code: "cycle_detected", issues };
+  }
+  if (issues.some((i) => i.code === "missing_dependency")) {
+    return { ok: false, code: "missing_dependency", issues };
+  }
+  // unsupported_status is non-fatal for structure — canvas can paint "unknown"
+  if (issues.length && issues.every((i) => i.code === "unsupported_status")) {
+    return { ok: true, code: "unsupported_status", issues };
+  }
+  return { ok: true, code: "valid", issues };
+}
+
+export interface AgentDagLayoutNode {
+  id: string;
+  index: number;
+  /** Column (dependency depth, 0 = roots). */
+  column: number;
+  /** Row within column. */
+  row: number;
+  /** Pixel center for SVG (deterministic pure layout). */
+  x: number;
+  y: number;
+  label: string;
+  status: string;
+  dependsOn: string[];
+  depCount: number;
+}
+
+export interface AgentDagLayoutEdge {
+  fromId: string;
+  toId: string;
+}
+
+export interface AgentDagLayout {
+  nodes: AgentDagLayoutNode[];
+  edges: AgentDagLayoutEdge[];
+  width: number;
+  height: number;
+  /** Topology fingerprint — recompute layout only when this changes. */
+  topologyKey: string;
+}
+
+const COL_GAP = 160;
+const ROW_GAP = 72;
+const PAD_X = 48;
+const PAD_Y = 40;
+
+/**
+ * Layered left-to-right layout from dependsOn depth.
+ * Pure function: same topology → same coordinates (status changes must not re-layout).
+ */
+export function layoutAgentDag(steps: readonly AgentDagStep[]): AgentDagLayout {
+  const ids = steps.map((step, index) => dagStepId(step, index));
+  const idSet = new Set(ids);
+  const depthMemo = new Map<string, number>();
+
+  const depthOf = (id: string, stack: Set<string>): number => {
+    if (depthMemo.has(id)) return depthMemo.get(id)!;
+    if (stack.has(id)) return 0; // cycle: treat as root for layout only
+    stack.add(id);
+    const index = ids.indexOf(id);
+    const deps = (index >= 0 ? steps[index]?.dependsOn ?? [] : []).filter((d) => idSet.has(d));
+    const d = deps.length ? 1 + Math.max(...deps.map((dep) => depthOf(dep, stack))) : 0;
+    stack.delete(id);
+    depthMemo.set(id, d);
+    return d;
+  };
+
+  const columns = new Map<number, string[]>();
+  ids.forEach((id) => {
+    const col = depthOf(id, new Set());
+    const list = columns.get(col) ?? [];
+    list.push(id);
+    columns.set(col, list);
+  });
+
+  const nodes: AgentDagLayoutNode[] = [];
+  let maxCol = 0;
+  let maxRow = 0;
+  for (const [col, colIds] of [...columns.entries()].sort((a, b) => a[0] - b[0])) {
+    maxCol = Math.max(maxCol, col);
+    colIds.forEach((id, row) => {
+      maxRow = Math.max(maxRow, row);
+      const index = ids.indexOf(id);
+      const step = steps[index]!;
+      const dependsOn = (step.dependsOn ?? []).filter((d) => idSet.has(d));
+      nodes.push({
+        id,
+        index,
+        column: col,
+        row,
+        x: PAD_X + col * COL_GAP,
+        y: PAD_Y + row * ROW_GAP,
+        label: (step as AgentDagStep & { title?: string }).title?.trim()
+          || step.note
+          || id,
+        status: step.status,
+        dependsOn,
+        depCount: dependsOn.length,
+      });
+    });
+  }
+
+  const edges: AgentDagLayoutEdge[] = [];
+  for (const node of nodes) {
+    for (const fromId of node.dependsOn) {
+      edges.push({ fromId, toId: node.id });
+    }
+  }
+
+  const topologyKey = ids
+    .map((id, i) => `${id}>${(steps[i]?.dependsOn ?? []).join(",")}`)
+    .join("|");
+
+  return {
+    nodes,
+    edges,
+    width: PAD_X * 2 + maxCol * COL_GAP + 80,
+    height: PAD_Y * 2 + maxRow * ROW_GAP + 48,
+    topologyKey,
+  };
+}
+
+/** Status-only patch key — layout must not recompute when only this changes. */
+export function agentDagStatusKey(steps: readonly AgentDagStep[]): string {
+  return steps.map((step, i) => `${dagStepId(step, i)}:${step.status}`).join("|");
+}

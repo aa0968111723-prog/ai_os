@@ -23,6 +23,7 @@ import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
+import { AgentDagCanvas } from "./AgentDagCanvas";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -951,6 +952,12 @@ export function AgentCard({
                 </div>
               </details>
             )}
+            {/* PR-3：依賴圖（invalid DAG 自動文字 fallback；flag 關則只顯示列表） */}
+            {steps.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <AgentDagCanvas steps={steps} />
+              </div>
+            )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
                 <Meta key={i} as="div" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -1078,7 +1085,28 @@ export function AgentCard({
                 <Hint as="span">過目前不扣點</Hint>
               </div>
             )}
-            {r.status === "failed" && r.error && <Meta as="p" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</Meta>}
+            {r.status === "failed" && r.error && (
+              <div className="agent-failure-card" style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--danger-border, #f0c0c0)", background: "var(--danger-soft, #fff5f5)" }}>
+                <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)", fontWeight: 600 }}>為什麼停下來</Meta>
+                <Meta as="p" style={{ margin: "4px 0 0", color: "var(--danger-ink)" }}>{r.error}</Meta>
+                <Meta as="p" style={{ margin: "6px 0 0", fontSize: "var(--fs-11)" }}>
+                  建議：用下方目標框帶上失敗原因重新規劃，或先補齊缺的資料再試。
+                </Meta>
+                {canEdit && !hideComposer && (
+                  <Button
+                    size="sm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      const reason = r.error?.slice(0, 200) ?? "";
+                      setGoal(`先前失敗原因：${reason}\n請依此重新規劃：${r.goal}`);
+                      document.getElementById("sec-agent")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    帶此原因重新規劃
+                  </Button>
+                )}
+              </div>
+            )}
             {r.status === "stopped" && <Meta as="p" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</Meta>}
             {r.status === "done" && <Meta as="p" style={{ marginTop: 4, color: "var(--success-ink)" }}>全部完成——各步驟可開啟實際筆記、排程、任務與生成成果。</Meta>}
             </div>
