@@ -860,6 +860,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               type="button"
               className="ai-copilot-clear"
               onClick={() => {
+                // 先中止在途串流，再清空——否則舊 run 的 step/done 事件會在
+                // 清空後又把回覆寫回對話區，等於「清空了又長回來」。
+                if (groupId) abortAssistantRun(groupId);
                 if (groupId) clearAssistantConversation(groupId);
                 ask.reset();
               }}
