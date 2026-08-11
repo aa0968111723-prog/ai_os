@@ -69,6 +69,37 @@ export function isComputerHumanTakeoverEnabled(
   return v !== "0" && v !== "false" && v !== "off" && v !== "no";
 }
 
+/** PR-6C Artifact ingestion. */
+export function isComputerArtifactIngestionEnabled(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): boolean {
+  if (!isComputerRuntimeEnabled(env)) return false;
+  const v = String(env.COMPUTER_ARTIFACT_INGESTION_ENABLED ?? env.VITE_COMPUTER_ARTIFACT_INGESTION_ENABLED ?? "1").trim().toLowerCase();
+  return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+}
+
+export type ComputerArtifactScanStatus = "pending" | "clean" | "blocked" | "failed";
+export type ComputerArtifactImportStatus =
+  | "detected"
+  | "quarantined"
+  | "scanning"
+  | "ready"
+  | "importing"
+  | "imported"
+  | "failed"
+  | "duplicate";
+
+export interface ComputerOutputContract {
+  artifactType?: "image" | "video" | "audio" | "doc" | "any";
+  attachTo?: "project" | "scene" | "shot";
+  sceneId?: string;
+  shotId?: string;
+  title?: string;
+}
+
+/** Max download size for computer artifacts (50MB default). */
+export const COMPUTER_ARTIFACT_MAX_BYTES = (Number(process.env.COMPUTER_ARTIFACT_MAX_MB) || 50) * 1024 * 1024;
+
 /** Session guards (defaults from PR-6 plan). */
 export const COMPUTER_SESSION_DEFAULTS = {
   /** Max wall-clock session life */

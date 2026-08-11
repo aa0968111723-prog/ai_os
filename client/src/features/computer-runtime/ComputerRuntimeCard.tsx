@@ -48,11 +48,19 @@ export function ComputerRuntimeCard({ projectId }: { projectId: string }) {
   const requestTakeover = trpc.computerRuntime.requestTakeover.useMutation({ onSuccess: invalidate });
   const acquireControl = trpc.computerRuntime.acquireControl.useMutation({ onSuccess: invalidate });
   const releaseToAgent = trpc.computerRuntime.releaseToAgent.useMutation({ onSuccess: invalidate });
+  const detectArt = trpc.computerRuntime.detectMockArtifact.useMutation({ onSuccess: invalidate });
+  const importArt = trpc.computerRuntime.importArtifact.useMutation({ onSuccess: invalidate });
+  const [artifactSessionId, setArtifactSessionId] = useState<string | null>(null);
+  const artifacts = trpc.computerRuntime.listArtifacts.useQuery(
+    { sessionId: artifactSessionId! },
+    { enabled: !!artifactSessionId && !!status.data?.artifactIngestionEnabled, refetchInterval: 10_000 },
+  );
 
   if (status.isLoading) return null;
   if (!status.data?.enabled) return null;
 
   const takeoverOn = status.data.humanTakeoverEnabled !== false;
+  const artifactsOn = status.data.artifactIngestionEnabled !== false;
   const active = (sessions.data ?? []).filter(
     (s) => !["completed", "failed", "stopped", "expired"].includes(s.status),
   );
@@ -62,7 +70,7 @@ export function ComputerRuntimeCard({ projectId }: { projectId: string }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Icon name="Monitor" size={16} />
         <strong>AI 工作電腦</strong>
-        <Chip>Browser · PR-6B</Chip>
+        <Chip>Browser · PR-6C</Chip>
         {active.length > 0 && <Pill status="running">LIVE · {active.length}</Pill>}
       </div>
       <Meta as="p" style={{ margin: "6px 0 10px" }}>
@@ -259,6 +267,37 @@ export function ComputerRuntimeCard({ projectId }: { projectId: string }) {
                     </Button>
                   )}
 
+                  {artifactsOn && (
+                    <Button
+                      size="sm"
+                      type="button"
+                      disabled={detectArt.isPending}
+                      onClick={async () => {
+                        setError(null);
+                        setArtifactSessionId(s.sessionId);
+                        try {
+                          await detectArt.mutateAsync({ sessionId: s.sessionId });
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "偵測成品失敗");
+                        }
+                      }}
+                    >
+                      偵測成品
+                    </Button>
+                  )}
+                  {artifactsOn && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setArtifactSessionId(
+                        artifactSessionId === s.sessionId ? null : s.sessionId,
+                      )}
+                    >
+                      {artifactSessionId === s.sessionId ? "收合成品" : "成品列表"}
+                    </Button>
+                  )}
+
                   <Button
                     size="sm"
                     variant="ghost"
@@ -269,6 +308,44 @@ export function ComputerRuntimeCard({ projectId }: { projectId: string }) {
                     停止
                   </Button>
                 </div>
+              )}
+
+              {artifactsOn && artifactSessionId === s.sessionId && (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 4 }}>
+                  {(artifacts.data ?? []).map((a) => (
+                    <li key={a.id} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                      <Meta as="span">{a.filename}</Meta>
+                      <Chip>{a.scanStatus}</Chip>
+                      <Chip>{a.importStatus}</Chip>
+                      {a.assetId && (
+                        <Meta as="span">asset {a.assetId.slice(0, 8)}…</Meta>
+                      )}
+                      {a.importStatus === "ready" && a.scanStatus === "clean" && (
+                        <Button
+                          size="sm"
+                          type="button"
+                          disabled={importArt.isPending}
+                          onClick={async () => {
+                            setError(null);
+                            try {
+                              await importArt.mutateAsync({ artifactId: a.id });
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "匯入失敗");
+                            }
+                          }}
+                        >
+                          匯入素材庫
+                        </Button>
+                      )}
+                      {a.errorMessage && (
+                        <Meta as="span" style={{ color: "var(--danger-ink)" }}>{a.errorMessage}</Meta>
+                      )}
+                    </li>
+                  ))}
+                  {(artifacts.data ?? []).length === 0 && (
+                    <Meta as="span">尚無成品。可按「偵測成品」模擬外部下載。</Meta>
+                  )}
+                </ul>
               )}
             </li>
           );

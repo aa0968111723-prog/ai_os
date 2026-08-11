@@ -93,6 +93,42 @@ export const computerActions = pgTable("computer_actions", {
   sessionStatusIdx: index("computer_actions_session_status_idx").on(t.sessionId, t.status),
 }));
 
+/**
+ * PR-6C：外部 runtime 下載的成品。
+ * quarantine → scan → import Asset；idempotent by (session_id, sha256) / actionId.
+ */
+export const computerArtifacts = pgTable("computer_artifacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  actionId: text("action_id"),
+  sourceUrlSanitized: text("source_url_sanitized"),
+  providerFileRef: text("provider_file_ref"),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type"),
+  sizeBytes: integer("size_bytes"),
+  sha256: text("sha256"),
+  scanStatus: text("scan_status").notNull().default("pending"),
+  importStatus: text("import_status").notNull().default("detected"),
+  quarantinePath: text("quarantine_path"),
+  assetId: uuid("asset_id"),
+  sceneId: uuid("scene_id"),
+  shotId: uuid("shot_id"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  /** outputContract snapshot */
+  outputContract: jsonb("output_contract").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  sessionIdx: index("computer_artifacts_session_idx").on(t.sessionId),
+  projectIdx: index("computer_artifacts_project_idx").on(t.projectId),
+  shaSessionUq: uniqueIndex("computer_artifacts_session_sha_uq").on(t.sessionId, t.sha256),
+  actionIdUq: uniqueIndex("computer_artifacts_action_id_uq").on(t.actionId),
+  assetIdx: index("computer_artifacts_asset_idx").on(t.assetId),
+}));
+
 /** Short-lived live-view access tokens (durable revoke on stop). */
 export const computerLiveTokens = pgTable("computer_live_tokens", {
   id: uuid("id").primaryKey().defaultRandom(),

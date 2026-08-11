@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canAcceptComputerAction,
   canAcceptHumanControl,
+  isComputerArtifactIngestionEnabled,
   isComputerBrowserEnabled,
   isComputerHumanTakeoverEnabled,
   isComputerRuntimeEnabled,
@@ -19,8 +20,10 @@ describe("computer runtime flags", () => {
     expect(isComputerRuntimeEnabled({})).toBe(false);
     expect(isComputerBrowserEnabled({})).toBe(false);
     expect(isComputerHumanTakeoverEnabled({})).toBe(false);
+    expect(isComputerArtifactIngestionEnabled({})).toBe(false);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerHumanTakeoverEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
+    expect(isComputerArtifactIngestionEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_BROWSER_ENABLED: "0" })).toBe(false);
     expect(isComputerHumanTakeoverEnabled({
       COMPUTER_RUNTIME_ENABLED: "1",
