@@ -36,3 +36,5 @@ jobs:
         run: node scripts/guard-repo-integrity.mjs
       - name: Migration identity / journal / revision firewall
         run: node scripts/guard-migrations.mjs
+      - name: Prove firewall rejects destructive fixtures
+        run: node scripts/test-integrity-firewall.mjs
