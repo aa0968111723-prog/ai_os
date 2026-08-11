@@ -36,10 +36,19 @@ export const computerSessions = pgTable("computer_sessions", {
   providerSessionRef: text("provider_session_ref").notNull(),
   status: text("status").$type<ComputerSessionStatus>().notNull().default("requested"),
   controlHolder: text("control_holder").$type<ComputerControlHolder>().notNull().default("none"),
+  /** Who currently holds human control (PR-6B) */
+  controlHolderUserId: uuid("control_holder_user_id"),
   leaseVersion: integer("lease_version").notNull().default(0),
+  /** Human lease expiry — agent lease is implicit until takeover */
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   sessionRevision: integer("session_revision").notNull().default(0),
   currentUrl: text("current_url"),
   label: text("label"),
+  /** Safe message for HUD when waiting_human (no secrets) */
+  takeoverReason: text("takeover_reason"),
+  takeoverReasonCode: text("takeover_reason_code"),
+  /** After release to agent, must re-observe before agent acts */
+  needsReobserve: boolean("needs_reobserve").notNull().default(false),
   actionCount: integer("action_count").notNull().default(0),
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow().notNull(),

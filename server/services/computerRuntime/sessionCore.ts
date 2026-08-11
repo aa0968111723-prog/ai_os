@@ -48,10 +48,15 @@ function toSnapshot(row: SessionRow): ComputerSessionSnapshot {
     provider: row.provider,
     status: row.status,
     controlHolder: row.controlHolder,
+    controlHolderUserId: row.controlHolderUserId,
     leaseVersion: row.leaseVersion,
+    leaseExpiresAt: row.leaseExpiresAt?.toISOString() ?? null,
     sessionRevision: row.sessionRevision,
     currentUrl: row.currentUrl,
     label: row.label,
+    takeoverReason: row.takeoverReason,
+    takeoverReasonCode: row.takeoverReasonCode,
+    needsReobserve: row.needsReobserve,
     actionCount: row.actionCount,
     startedAt: row.startedAt.toISOString(),
     lastActivityAt: row.lastActivityAt.toISOString(),
@@ -310,10 +315,24 @@ export async function issueLiveViewToken(input: {
   if (isComputerSessionTerminal(row.status)) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "工作電腦已結束" });
   }
-  // PR-6A: watch-only for non-owner unless leader
+  // PR-6B: control mode only when human holds control (or owner starting takeover flow)
   const mode = input.mode ?? "watch";
-  if (mode === "control" && row.userId !== input.auth.user.id) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人可以控制 Live View" });
+  if (mode === "control") {
+    const role = requireGroup(input.auth, row.groupId);
+    const isOwner = row.userId === input.auth.user.id;
+    const isLeader = role !== "member";
+    const humanHolds = row.controlHolder === "human" && row.controlHolderUserId === input.auth.user.id;
+    const waiting = row.status === "waiting_human";
+    if (!isOwner && !isLeader) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "沒有權限控制 Live View" });
+    }
+    if (!humanHolds && !waiting && row.status !== "human_control") {
+      // Allow control token only after takeover or while waiting to take over
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "請先「我來操作」取得控制權後再開啟控制模式 Live View",
+      });
+    }
   }
 
   const token = randomBytes(24).toString("base64url");
@@ -412,7 +431,18 @@ export async function runComputerAction(input: {
   if (!canAcceptComputerAction(current.status, current.controlHolder)) {
     throw new TRPCError({
       code: "CONFLICT",
-      message: "目前無法由 AI 操作（可能正在等待使用者或已停止）",
+      message: current.status === "human_control" || current.controlHolder === "human"
+        ? "使用者正在控制工作電腦，AI 操作已凍結"
+        : current.status === "waiting_human"
+          ? "正在等待你接管，AI 操作已凍結"
+          : "目前無法由 AI 操作（可能已停止或暫停）",
+    });
+  }
+  // After hand-back, first successful inspect clears needsReobserve; other acts require re-observe
+  if (current.needsReobserve && input.action.kind !== "inspect") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "交回 AI 後必須先重新觀察畫面（inspect），不可沿用接管前狀態",
     });
   }
   if (input.leaseVersion != null && input.leaseVersion !== current.leaseVersion) {
@@ -491,6 +521,8 @@ export async function runComputerAction(input: {
     currentUrl: result.observation?.url ?? current.currentUrl,
     updatedAt: now,
     status: current.status === "ready" ? "agent_control" : current.status,
+    // Successful inspect after hand-back clears the reobserve gate
+    needsReobserve: input.action.kind === "inspect" && result.ok ? false : current.needsReobserve,
   }).where(and(
     eq(schema.computerSessions.id, current.id),
     eq(schema.computerSessions.sessionRevision, current.sessionRevision),
