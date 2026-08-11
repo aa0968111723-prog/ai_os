@@ -35,6 +35,12 @@ vi.mock("./fal", () => ({
   falStatus: (...args: unknown[]) => falStatus(...args),
 }));
 
+// fal 降級目標壅塞自適應的測試參數：偵測逾時縮到 25ms、冷卻 5s、門檻 2 次，
+// 讓「壅塞 → 二次降級 → 壅塞冷卻」在 fake timers 下幾秒內驗完。
+process.env.FAL_DEGRADE_PROBE_MS = "25";
+process.env.FAL_ECONOMY_COOLDOWN_MS = "5000";
+process.env.FAL_ECONOMY_CONGESTION_THRESHOLD = "2";
+
 const {
   completeText,
   extractDisclosedReasoning,
@@ -43,7 +49,9 @@ const {
   FAL_AGENT_PROFILES,
   LlmServiceError,
   NIM_DEGRADE_PROBE_MS,
+  isFalEconomyCongested,
   __resetNimDegradation,
+  __resetFalCongestion,
 } = await import("./llmProvider");
 const { AGENT_LLM_MODEL_IDS } = await import("../../shared/llmPricing");
 
@@ -64,8 +72,12 @@ beforeEach(() => {
   falSubmit.mockReset();
   falStatus.mockReset();
   __resetNimDegradation(); // NIM 降級冷卻狀態不能跨測污染
+  __resetFalCongestion(); // fal_economy 壅塞狀態不能跨測污染
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 describe("成本分類", () => {
   it("只有 fal 檔位算付費", () => {
@@ -231,6 +243,120 @@ describe("auto 模式 — 免費優先，備援要留痕", () => {
     const r2 = await completeText({ prompt: "你好", mode: "auto" });
     expect(r2.fellBack).toBe(true);
     expect(chatCompletion).toHaveBeenCalledTimes(1); // 沒再多試 NIM
+  });
+});
+
+describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態切 fal_balanced）", () => {
+  /**
+   * 共用 helper：NIM 逾時 → 降級鏈路。falStatus 依呼叫序交錯——奇數次（fal_economy 嘗試）
+   * 回 running（壅塞，會逾時）、偶數次（fal_balanced 二次降級）回 done。
+   */
+  function nimFailsThenFalCongestedThenBalancedOk() {
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falSubmit.mockResolvedValue({ requestId: "req-1" });
+    let call = 0;
+    falStatus.mockImplementation(() => {
+      call += 1;
+      return Promise.resolve(call % 2 === 1 ? { status: "running" } : { status: "done", resultText: "fal_balanced 回答" });
+    });
+  }
+
+  it("降級目標 fal_economy 壅塞（一直 running）時，逾時後自動二次降級 fal_balanced 且標 fellBack", async () => {
+    vi.useFakeTimers();
+    nimFailsThenFalCongestedThenBalancedOk();
+    const promise = completeText({ prompt: "你好", mode: "nim" });
+    // 推過 FAL_DEGRADE_PROBE_MS（測試設 25ms）：fal_economy 偵測逾時 → 二次降級
+    await vi.advanceTimersByTimeAsync(2_000);
+    const r = await promise;
+    expect(r.provider).toBe("fal-openrouter");
+    expect(r.model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced); // 不是壅塞的 fal_economy
+    expect(r.fellBack).toBe(true);
+    expect(falSubmit).toHaveBeenCalledTimes(2); // fal_economy 逾時後又試了 fal_balanced
+    expect(isFalEconomyCongested()).toBe(false); // 才逾時 1 次，未達門檻（2）
+  });
+
+  it("fal_economy 連續逾時達門檻進入壅塞冷卻，期間 nim 降級直接走 fal_balanced（不試壅塞目標）", async () => {
+    vi.useFakeTimers();
+    nimFailsThenFalCongestedThenBalancedOk();
+    // 第一次、第二次：fal_economy 各逾時 1 次 → 第二次達門檻，壅塞冷卻啟動
+    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p1;
+    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p2;
+    expect(isFalEconomyCongested()).toBe(true);
+
+    // 壅塞冷卻期間：直接走 fal_balanced，只送出一次 fal（沒有 fal_economy 嘗試）
+    falSubmit.mockClear();
+    falStatus.mockReset();
+    falStatus.mockResolvedValue({ status: "done", resultText: "第三次" });
+    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    const r3 = await p3;
+    expect(r3.model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced);
+    expect(falSubmit).toHaveBeenCalledTimes(1); // 只試 fal_balanced
+  });
+
+  it("fal_economy 成功即重置壅塞計數（單次壅塞不累積成誤判）", async () => {
+    vi.useFakeTimers();
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falSubmit.mockResolvedValue({ requestId: "req-1" });
+    // 依序：fal_economy 逾時 → fal_balanced 成功；fal_economy 直接成功（重置）→ fal_economy 再逾時 → fal_balanced
+    falStatus
+      .mockResolvedValueOnce({ status: "running" })
+      .mockResolvedValueOnce({ status: "done", resultText: "備援一" })
+      .mockResolvedValueOnce({ status: "done", resultText: "經濟檔成功" })
+      .mockResolvedValueOnce({ status: "running" })
+      .mockResolvedValue({ status: "done", resultText: "備援二" });
+
+    // 第一次：fal_economy 逾時（fail 1）→ 二次降級 fal_balanced
+    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p1;
+    // 第二次：fal_economy 成功 → 重置（fail 歸 0）
+    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await p2).model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
+    // 第三次：fal_economy 再逾時（fail 1，未達門檻 2）→ 不進冷卻
+    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await p3).model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced);
+    expect(isFalEconomyCongested()).toBe(false);
+  });
+
+  it("壅塞冷卻期滿後重新試 fal_economy（壅塞是暫時的，恢復就回低成本）", async () => {
+    vi.useFakeTimers();
+    nimFailsThenFalCongestedThenBalancedOk();
+    // 連續兩次 fal_economy 逾時 → 壅塞冷卻啟動
+    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p1;
+    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p2;
+    expect(isFalEconomyCongested()).toBe(true);
+    // 推過冷卻期（測試設 5s）後壅塞解除
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(isFalEconomyCongested()).toBe(false);
+    // 壅塞解除後 nim 降級 → 重新試 fal_economy（直接成功）
+    falStatus.mockReset();
+    falStatus.mockResolvedValue({ status: "done", resultText: "經濟檔恢復" });
+    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await p3).model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
+  });
+
+  it("使用者明確選 fal_economy 時失敗照樣報錯，不自動切 fal_balanced（成本不變式）", async () => {
+    vi.useFakeTimers();
+    falSubmit.mockResolvedValue({ requestId: "req-1" });
+    falStatus.mockResolvedValue({ status: "running" }); // 一直壅塞
+    const promise = completeText({ prompt: "你好", mode: "fal_economy" });
+    await vi.advanceTimersByTimeAsync(95_000); // 推過 fal 預設 90s 逾時
+    await expect(promise).rejects.toThrow(/暫時沒有回應/);
+    expect(falSubmit).toHaveBeenCalledTimes(1); // 沒有二次降級、沒有偷偷換檔
+    expect(chatCompletion).not.toHaveBeenCalled();
+    expect(isFalEconomyCongested()).toBe(false); // 直接檔位失敗不污染壅塞計數
   });
 });
 

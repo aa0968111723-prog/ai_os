@@ -106,6 +106,50 @@ export function __resetNimDegradation(): void {
   nimDegradedUntil = 0;
 }
 
+/* ── fal 降級目標壅塞自適應（2026-08-11 複驗 PR #653 後續） ──────────────────────
+ * 複驗發現：nim 預設成功後降級到 fal_economy（deepseek-v4-flash），但 fal_economy 本身
+ * 偶發壅塞——直接 mode=fal_economy 也有 1/3 逾時、成功樣本中位 24–45s 超 15s 驗收線，
+ * 而 fal_balanced 穩定 4.2–12.5s。三個對策一次做齊：
+ * - 降級目標只給「較短偵測預算」（FAL_DEGRADE_PROBE_MS，預設 15s，對齊驗收線）——超過即
+ *   視為壅塞並二次降級 fal_balanced，不讓壅塞的 fal_economy 獨吞等待（方向 3）。
+ * - 連續失敗達門檻（FAL_ECONOMY_CONGESTION_THRESHOLD）→ fal_economy 進入壅塞冷卻
+ *   （FAL_ECONOMY_COOLDOWN_MS），期間 nim 降級直接走 fal_balanced、不再試壅塞目標（方向 1＋2）。
+ * - fal_economy 成功即重置計數（恢復健康就回到低成本路徑）。
+ * 只作用於「nim/auto 的降級鏈路」；使用者明確選的 fal 檔位（mode=fal_economy 等）絕不
+ * 自動切檔——那是明確選擇的語意，改檔位只會多花錢（fal_balanced 輸出價約 4 倍）。
+ */
+export const FAL_DEGRADE_PROBE_MS = Number(process.env.FAL_DEGRADE_PROBE_MS ?? 15_000);
+const FAL_ECONOMY_COOLDOWN_MS = Number(process.env.FAL_ECONOMY_COOLDOWN_MS ?? 120_000);
+const FAL_ECONOMY_CONGESTION_THRESHOLD = Number(process.env.FAL_ECONOMY_CONGESTION_THRESHOLD ?? 2);
+
+let falEconomyCongestedUntil = 0;
+let falEconomyConsecutiveFailures = 0;
+
+/** fal_economy 目前是否在壅塞冷卻期（期間 nim 降級直接走 fal_balanced） */
+export function isFalEconomyCongested(): boolean {
+  return Date.now() < falEconomyCongestedUntil;
+}
+
+/** fal_economy 恢復健康：重置連續失敗計數（下一次降級重試低成本目標） */
+function resetFalEconomyHealth(): void {
+  falEconomyConsecutiveFailures = 0;
+}
+
+/** fal_economy 在降級鏈路上逾時/失敗：累計連續失敗，達門檻進入壅塞冷卻 */
+function recordFalEconomyFailure(): void {
+  falEconomyConsecutiveFailures += 1;
+  if (falEconomyConsecutiveFailures >= FAL_ECONOMY_CONGESTION_THRESHOLD) {
+    falEconomyConsecutiveFailures = 0;
+    falEconomyCongestedUntil = Date.now() + FAL_ECONOMY_COOLDOWN_MS;
+  }
+}
+
+/** 測試用：清掉 fal_economy 壅塞狀態，避免跨測污染 */
+export function __resetFalCongestion(): void {
+  falEconomyCongestedUntil = 0;
+  falEconomyConsecutiveFailures = 0;
+}
+
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new LlmServiceError("已取消"));
@@ -255,8 +299,11 @@ async function completeFal(params: CompleteTextParams, mode: FalAgentMode): Prom
  *
  * - `nim`：NVIDIA NIM 免費額度優先（站內 0 點），但 NIM 只給「快速偵測」預算
  *   （NIM_DEGRADE_PROBE_MS）——逾時/慢回/暫時性失敗自動降級 fal 經濟檔（DeepSeek V4 Flash，
- *   依 token 計點），並標 `fellBack`；金鑰/設定錯誤則照樣拋出。
+ *   依 token 計點），並標 `fellBack`；金鑰/設定錯誤則照樣拋出。降級目標 fal_economy 本身
+ *   壅塞時（見 FAL_DEGRADE 區塊）也只給較短偵測逾時、逾時二次降級 fal_balanced，壅塞冷卻
+ *   期間直接走 fal_balanced。
  * - `fal_economy` / `fal_balanced` / `fal_quality`：走 fal openrouter，平台實付 USD。
+ *   明確選的檔位絕不自動切換（改檔位會多花錢且違反「明確選擇」語意）。
  * - `auto`：免費優先，同樣只給 NIM 快速偵測預算——逾時即轉 fal 均衡並標 `fellBack`，讓 UI
  *   誠實告訴使用者「這次花到錢了」；NIM 降級冷卻期間直接走 fal、不再試 NIM（避免並行負載下
  *   每個請求都乾等，也讓 auto 不再選到 ≥60s 的慢檔位）。
@@ -275,14 +322,38 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
   if (mode === "nim" || mode === "auto") {
     // NIM 免費優先，但只給快速偵測預算：逾時/慢回/暫時性失敗立刻降級 fal
     // （nim→fal_economy 低成本、auto→fal_balanced 均衡），並標 fellBack 讓 UI 誠實顯示。
-    const target: FalAgentMode = mode === "nim" ? "fal_economy" : "fal_balanced";
+    // nim 的降級目標 fal_economy 本身也可能壅塞——見上方 FAL_DEGRADE 區塊的自適應邏輯。
     const fallback = async (nimError: unknown): Promise<LlmCompletion> => {
+      // nim 降級：fal_economy（省成本）；fal_economy 判定壅塞時直接 fal_balanced。
+      // auto 維持 fal_balanced（複驗證明穩定 4.2–12.5s，不需二次降級）。
+      const primary: FalAgentMode = mode === "nim" && !isFalEconomyCongested() ? "fal_economy" : "fal_balanced";
       try {
-        const result = await completeFal(params, target);
+        // 降級目標也套「較短偵測逾時」：fal_economy 壅塞時（實測可慢到 69s 或逾時）不讓
+        // 使用者乾等，FAL_DEGRADE_PROBE_MS（15s，對齊驗收線）一到就視為壅塞改走 fal_balanced。
+        const result = await completeFal(
+          primary === "fal_economy" ? { ...params, timeoutMs: FAL_DEGRADE_PROBE_MS } : params,
+          primary,
+        );
+        if (primary === "fal_economy") resetFalEconomyHealth();
         return { ...result, fellBack: true };
       } catch (error) {
-        // 備援也失敗：回報原始 NIM 錯誤（那才是使用者真正選的供應商）；
-        // NIM 已在冷卻、直接走備援才失敗時，備援錯誤就是唯一原因。
+        // 使用者已中斷：直接收束，不再二次降級、也不記錄壅塞——沒人在等答案就不該多花一筆
+        if (params.signal?.aborted) throw new LlmServiceError("已取消");
+        if (primary === "fal_economy") {
+          // fal_economy 壅塞/失敗：記一筆（連續達標進冷卻），並立即二次降級 fal_balanced，
+          // 讓「降級目標本身壅塞」也有備援——複驗的成功樣本中位 24–45s 就此壓回 15s 內。
+          recordFalEconomyFailure();
+          try {
+            const result = await completeFal(params, "fal_balanced");
+            return { ...result, fellBack: true };
+          } catch (secondError) {
+            // 兩檔都失敗：回報原始 NIM 錯誤（那才是使用者真正選的供應商）；
+            // NIM 已在冷卻、直接走備援才失敗時，備援錯誤就是唯一原因。
+            if (nimError !== undefined) throw sanitize(nimError, "nvidia-nim");
+            throw sanitize(secondError, "fal-openrouter");
+          }
+        }
+        // auto 的 fal_balanced 失敗：比照原語意回報原始 NIM 錯誤
         if (nimError !== undefined) throw sanitize(nimError, "nvidia-nim");
         throw sanitize(error, "fal-openrouter");
       }
