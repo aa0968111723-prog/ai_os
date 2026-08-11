@@ -313,6 +313,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "4f387a3b0a40612a97cc54e6b88e2c98a9c44f3b7ba33a2ba953f6741c0d80f8",
   ],
   "0064_computer_runtime": [
+    // Original 6A CREATE (sessions without 6B/6D columns) — already on durable base.
+    "26fdf39d7173052884b41a9ea080af48180d36a5d30da2df2286ff97fbb4da09",
+    // Folded 6B/6D columns into CREATE so bridge whole-table DDL matches schema.ts;
+    // 0065/0067 ADD COLUMN IF NOT EXISTS remain no-ops on clean installs.
     "5db181c38c3360d8a0acaf62b929ee4983a2d5be86d716cda3453701a7dafb22",
   ],
   "0065_computer_human_takeover": [
