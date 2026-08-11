@@ -100,6 +100,14 @@ export const planStepSchema = z.object({
   durationSec: z.number().positive().max(3_600).optional(),
   scenePrompt: z.string().max(8_000).optional(),
   script: z.string().max(80_000).optional(),
+  /** PR-4：reorder 的完整 scene id 順序（執行期／重播用；可選，additive） */
+  orderedSceneIds: z.array(z.string().uuid()).max(60).optional(),
+  orderedSceneNos: z.array(z.number().int().positive()).max(60).optional(),
+  /** PR-4：樂觀併發基準（scene.rev 或 order fingerprint） */
+  baseRevision: z.string().trim().min(1).max(2_000).optional(),
+  ambience: z.string().max(500).optional(),
+  trimStartMs: z.number().int().min(0).max(3_600_000).optional(),
+  trimEndMs: z.number().int().min(0).max(3_600_000).nullable().optional(),
   // CA-01：代理 generate 與直接生成對齊——定裝／場景／素材／來源素材（上限見 cardLimits）
   characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
   scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),

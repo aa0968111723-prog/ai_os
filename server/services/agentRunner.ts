@@ -61,6 +61,16 @@ import {
   projectFailureUserMessage,
   type AgentFailureReason,
 } from "../../shared/agentFailure";
+import {
+  formatRevisionConflictMessage,
+  isAgentEditStepKindsV1Enabled,
+  isReorderAlreadyApplied,
+  sceneOrderFingerprint,
+  validateReorderSceneIds,
+  validateUpdateScenePatch,
+  type AgentEditAuditSummary,
+} from "../../shared/agentEditSteps";
+import { applyWithRevision, isRevisionConflictError } from "./revisionGuard";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -160,6 +170,16 @@ export interface AgentStep {
   orderedSceneNos?: number[];
   /** 執行期：編號首次解析成 id 後保存；replay 只認這份，不再對「新順序」重解編號 */
   orderedSceneIds?: string[];
+  /**
+   * PR-4：樂觀併發基準。
+   * - update_scene：scenes.rev 字串
+   * - reorder_scenes：sceneOrderFingerprint
+   */
+  baseRevision?: string;
+  /** PR-4：update 時用於合併判定的 baseline 欄位值（observable only） */
+  editBaseline?: Record<string, unknown>;
+  /** PR-4：可觀測 before/after 稽核摘要（不寫 CoT） */
+  editAudit?: AgentEditAuditSummary;
   /** 估點（核准畫面顯示；實際扣點由各步驟守門） */
   points?: number;
   /** 執行期：生成步驟的冪等佔位 id */
@@ -1444,40 +1464,195 @@ async function advanceRun(run: RunRow): Promise<void> {
     // 核准後使用者重排分鏡，replay 仍然只改第一次指到的那一格
     const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `第 ${step.sceneNo ?? "?"} 鏡不存在（可能已被刪除）`);
-    const patch: Partial<typeof schema.scenes.$inferInsert> = {};
-    const changed: string[] = [];
-    if (step.sceneTitle?.trim()) {
-      patch.title = step.sceneTitle.trim().slice(0, 60);
-      if (patch.title !== scene.title) changed.push(`標題「${scene.title}」→「${patch.title}」`);
-    }
-    if (step.durationSec != null) {
-      patch.durationSec = Math.max(1, Math.min(60, Math.round(step.durationSec)));
-      if (patch.durationSec !== scene.durationSec) changed.push(`秒數 ${scene.durationSec}→${patch.durationSec}`);
-    }
-    if (step.scenePrompt != null) { patch.prompt = step.scenePrompt.trim().slice(0, 2000); changed.push("提示詞"); }
-    if (step.voiceover != null) { patch.voiceover = step.voiceover.trim().slice(0, 500); changed.push("旁白"); }
-    if (step.ambience != null) { patch.ambience = step.ambience.trim().slice(0, 500); changed.push("環境音"); }
-    if (step.trimStartMs != null || step.trimEndMs != null) {
-      // 出點必須大於入點——與 scenes.update 的守門同一條規則，代理不得享有更鬆的物理
-      const nextStart = step.trimStartMs != null ? Math.max(0, Math.round(step.trimStartMs)) : scene.trimStartMs;
-      const nextEnd = step.trimEndMs != null ? Math.max(1, Math.round(step.trimEndMs)) : scene.trimEndMs;
-      if (nextEnd != null && nextEnd <= nextStart) {
-        return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡的修剪出點（${nextEnd}ms）必須大於入點（${nextStart}ms）`);
-      }
-      if (step.trimStartMs != null) { patch.trimStartMs = nextStart; changed.push(`入點 ${nextStart}ms`); }
-      if (step.trimEndMs != null) { patch.trimEndMs = nextEnd; changed.push(`出點 ${nextEnd}ms`); }
-    }
-    if (changed.length === 0) {
+
+    const patchCheck = validateUpdateScenePatch(
+      {
+        sceneTitle: step.sceneTitle,
+        durationSec: step.durationSec,
+        scenePrompt: step.scenePrompt,
+        voiceover: step.voiceover,
+        ambience: step.ambience,
+        trimStartMs: step.trimStartMs,
+        trimEndMs: step.trimEndMs,
+      },
+      { trimStartMs: scene.trimStartMs, trimEndMs: scene.trimEndMs },
+    );
+    if (!patchCheck.ok && patchCheck.code === "update_empty_patch") {
       step.status = "done";
       step.detail = "沒有要改的欄位（可能重播時已套用過）";
-    } else {
-      // 天然冪等：同一份 patch 重播寫入同樣的值
-      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
-      step.status = "done";
-      step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}`;
+      addOutputRef(step, "scene", scene.id, scene.title);
+      auditAgentStep(run, step, idx, true);
+      await saveDagProgress(run, steps);
+      return;
     }
-    addOutputRef(step, "scene", scene.id, (patch.title as string | undefined) ?? scene.title);
+    if (!patchCheck.ok) {
+      return failRun(run, steps, idx, patchCheck.message);
+    }
+
+    const patch: Record<string, unknown> = {};
+    const before: Record<string, string | number | boolean | null> = {};
+    const after: Record<string, string | number | boolean | null> = {};
+    const changed: string[] = [];
+    if (step.sceneTitle?.trim()) {
+      const next = step.sceneTitle.trim().slice(0, 60);
+      if (next !== scene.title) {
+        patch.title = next;
+        before.title = scene.title;
+        after.title = next;
+        changed.push(`標題「${scene.title}」→「${next}」`);
+      }
+    }
+    if (step.durationSec != null) {
+      const next = Math.max(1, Math.min(60, Math.round(step.durationSec)));
+      if (next !== scene.durationSec) {
+        patch.durationSec = next;
+        before.durationSec = scene.durationSec ?? null;
+        after.durationSec = next;
+        changed.push(`秒數 ${scene.durationSec}→${next}`);
+      }
+    }
+    if (step.scenePrompt != null) {
+      const next = step.scenePrompt.trim().slice(0, 2000);
+      if (next !== (scene.prompt ?? "")) {
+        patch.prompt = next;
+        before.prompt = scene.prompt ?? null;
+        after.prompt = next;
+        changed.push("提示詞");
+      }
+    }
+    if (step.voiceover != null) {
+      const next = step.voiceover.trim().slice(0, 500);
+      if (next !== (scene.voiceover ?? "")) {
+        patch.voiceover = next;
+        before.voiceover = scene.voiceover ?? null;
+        after.voiceover = next;
+        changed.push("旁白");
+      }
+    }
+    if (step.ambience != null) {
+      const next = step.ambience.trim().slice(0, 500);
+      if (next !== (scene.ambience ?? "")) {
+        patch.ambience = next;
+        before.ambience = scene.ambience ?? null;
+        after.ambience = next;
+        changed.push("環境音");
+      }
+    }
+    if (step.trimStartMs != null || step.trimEndMs != null) {
+      const nextStart = step.trimStartMs != null ? Math.max(0, Math.round(step.trimStartMs)) : scene.trimStartMs;
+      const nextEnd = step.trimEndMs != null ? Math.max(1, Math.round(step.trimEndMs)) : scene.trimEndMs;
+      if (step.trimStartMs != null && nextStart !== scene.trimStartMs) {
+        patch.trimStartMs = nextStart;
+        before.trimStartMs = scene.trimStartMs ?? null;
+        after.trimStartMs = nextStart;
+        changed.push(`入點 ${nextStart}ms`);
+      }
+      if (step.trimEndMs != null && nextEnd !== scene.trimEndMs) {
+        patch.trimEndMs = nextEnd;
+        before.trimEndMs = scene.trimEndMs ?? null;
+        after.trimEndMs = nextEnd ?? null;
+        changed.push(`出點 ${nextEnd}ms`);
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      step.status = "done";
+      step.detail = "沒有要改的欄位（可能重播時已套用過）";
+      addOutputRef(step, "scene", scene.id, scene.title);
+      auditAgentStep(run, step, idx, true);
+      await saveDagProgress(run, steps);
+      return;
+    }
+
+    const revisionGate = isAgentEditStepKindsV1Enabled();
+    if (revisionGate && step.baseRevision == null) {
+      step.baseRevision = String(scene.rev);
+      step.editBaseline = { ...before };
+      await saveRun(run.id, { steps });
+    }
+
+    const effectId = await persistStepEffectId(run, steps, step);
+    try {
+      if (revisionGate) {
+        const expectedRev = Number(step.baseRevision);
+        const result = await applyWithRevision({
+          entity: "scene",
+          table: schema.scenes,
+          idColumn: schema.scenes.id,
+          revColumn: schema.scenes.rev,
+          row: scene,
+          patch,
+          expectedRev: Number.isFinite(expectedRev) ? expectedRev : undefined,
+          baseline: step.editBaseline ?? before,
+          extraWhere: isNull(schema.scenes.deletedAt),
+          reload: async () => {
+            const [fresh] = await db.select().from(schema.scenes)
+              .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+            return fresh;
+          },
+        });
+        step.editAudit = {
+          operation: "update_scene",
+          entityType: "scene",
+          entityId: scene.id,
+          baseRevision: step.baseRevision,
+          resultingRevision: String(result.row.rev),
+          changedFields: Object.keys(patch),
+          before,
+          after,
+          idempotencyKey: effectId,
+          compensatable: true,
+        };
+        step.status = "done";
+        step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}${result.merged ? "（已與夥伴修改合併）" : ""}`;
+        addOutputRef(step, "scene", scene.id, result.row.title ?? scene.title);
+      } else {
+        await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
+        step.editAudit = {
+          operation: "update_scene",
+          entityType: "scene",
+          entityId: scene.id,
+          changedFields: Object.keys(patch),
+          before,
+          after,
+          idempotencyKey: effectId,
+          compensatable: true,
+        };
+        step.status = "done";
+        step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}`;
+        addOutputRef(step, "scene", scene.id, (patch.title as string | undefined) ?? scene.title);
+      }
+    } catch (err) {
+      if (isRevisionConflictError(err)) {
+        return failRun(
+          run,
+          steps,
+          idx,
+          formatRevisionConflictMessage({
+            expectedRev: err.conflict.expectedRev,
+            currentRev: err.conflict.currentRev,
+            entityLabel: `第 ${step.sceneNo} 鏡`,
+          }),
+        );
+      }
+      if (err instanceof TRPCError && err.code === "CONFLICT") {
+        return failRun(run, steps, idx, err.message);
+      }
+      throw err;
+    }
     auditAgentStep(run, step, idx, true);
+    void trackBackgroundTask(recordAgentEventSafely({
+      runId: run.id,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      stepId: stableStepId(step, idx),
+      stepIndex: idx,
+      eventKey: `step:${stableStepId(step, idx)}:edit_audit`,
+      eventType: "observation",
+      actorType: "system",
+      summary: step.detail ?? "分鏡已更新",
+      data: { schemaVersion: 1, phase: "execution", editAudit: step.editAudit },
+    }));
     await saveDagProgress(run, steps);
     return;
   }
@@ -1491,7 +1666,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         return failRun(run, steps, idx, "重排清單無效（至少兩鏡、編號不可重複）");
       }
       const rows = await db
-        .select({ id: schema.scenes.id })
+        .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
         .from(schema.scenes)
         .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
@@ -1502,35 +1677,125 @@ async function advanceRun(run: RunRow): Promise<void> {
         ids.push(row.id);
       }
       step.orderedSceneIds = ids;
+      if (isAgentEditStepKindsV1Enabled() && step.baseRevision == null) {
+        step.baseRevision = sceneOrderFingerprint(rows);
+      }
       await saveRun(run.id, { steps });
     }
     const ordered = step.orderedSceneIds;
-    // 交易＋序號鎖，與 scenes.reorder 同一套物理：清單漏掉的分鏡依原相對順序補到尾端，
-    // 不留與新序號重疊的舊 orderIndex
-    await db.transaction(async (tx) => {
-      await lockSceneOrder(tx, run.projectId);
-      const rows = await tx
-        .select({ id: schema.scenes.id })
-        .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
-        .orderBy(asc(schema.scenes.orderIndex));
-      const own = new Set(rows.map((r) => r.id));
-      const listed = new Set(ordered);
-      let next = 0;
-      for (const id of ordered) {
-        if (!own.has(id)) continue; // 已被刪除的鏡：跳過即可，不失敗（刪除不是代理的錯）
-        await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, id));
-        next += 1;
+    const effectId = await persistStepEffectId(run, steps, step);
+    const revisionGate = isAgentEditStepKindsV1Enabled();
+
+    let resultingFp = "";
+    let beforeOrder: string[] = [];
+    let conflictMessage: string | null = null;
+    try {
+      await db.transaction(async (tx) => {
+        await lockSceneOrder(tx, run.projectId);
+        const rows = await tx
+          .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+        beforeOrder = rows.map((r) => r.id);
+        const currentIds = rows.map((r) => r.id);
+
+        if (revisionGate) {
+          const strict = validateReorderSceneIds(ordered, currentIds);
+          if (!strict.ok) {
+            throw new TRPCError({ code: "CONFLICT", message: strict.message });
+          }
+          if (step.baseRevision) {
+            const nowFp = sceneOrderFingerprint(rows);
+            if (nowFp !== step.baseRevision && !isReorderAlreadyApplied(ordered, beforeOrder)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: formatRevisionConflictMessage({
+                  expectedRev: step.baseRevision.slice(0, 48),
+                  currentRev: nowFp.slice(0, 48),
+                  entityLabel: "分鏡順序",
+                }),
+              });
+            }
+          }
+        }
+
+        if (isReorderAlreadyApplied(ordered, beforeOrder)) {
+          resultingFp = sceneOrderFingerprint(rows);
+          return;
+        }
+
+        const own = new Set(currentIds);
+        let next = 0;
+        if (revisionGate) {
+          for (const id of ordered) {
+            await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, id));
+            next += 1;
+          }
+        } else {
+          const listed = new Set(ordered);
+          for (const id of ordered) {
+            if (!own.has(id)) continue;
+            await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, id));
+            next += 1;
+          }
+          for (const row of rows) {
+            if (listed.has(row.id)) continue;
+            await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, row.id));
+            next += 1;
+          }
+        }
+        const afterRows = ordered
+          .filter((id) => own.has(id))
+          .map((id, orderIndex) => ({ id, orderIndex }));
+        resultingFp = sceneOrderFingerprint(
+          afterRows.length === rows.length
+            ? afterRows
+            : [
+              ...afterRows,
+              ...rows.filter((r) => !ordered.includes(r.id)).map((r, i) => ({ id: r.id, orderIndex: afterRows.length + i })),
+            ],
+        );
+      });
+    } catch (err) {
+      if (err instanceof TRPCError && err.code === "CONFLICT") {
+        conflictMessage = err.message;
+      } else {
+        throw err;
       }
-      for (const row of rows) {
-        if (listed.has(row.id)) continue;
-        await tx.update(schema.scenes).set({ orderIndex: next }).where(eq(schema.scenes.id, row.id));
-        next += 1;
-      }
-    });
+    }
+    if (conflictMessage) {
+      return failRun(run, steps, idx, conflictMessage);
+    }
+
+    step.editAudit = {
+      operation: "reorder_scenes",
+      entityType: "scene_order",
+      baseRevision: step.baseRevision,
+      resultingRevision: resultingFp || sceneOrderFingerprint(ordered.map((id, orderIndex) => ({ id, orderIndex }))),
+      changedFields: ["orderIndex"],
+      before: { order: beforeOrder.join(",") },
+      after: { order: ordered.join(",") },
+      idempotencyKey: effectId,
+      compensatable: true,
+    };
     step.status = "done";
-    step.detail = `已重排 ${ordered.length} 鏡的順序`;
+    step.detail = isReorderAlreadyApplied(ordered, beforeOrder)
+      ? `順序已是目標狀態（冪等重播，未重複寫入）`
+      : `已重排 ${ordered.length} 鏡的順序`;
     auditAgentStep(run, step, idx, true);
+    void trackBackgroundTask(recordAgentEventSafely({
+      runId: run.id,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      stepId: stableStepId(step, idx),
+      stepIndex: idx,
+      eventKey: `step:${stableStepId(step, idx)}:edit_audit`,
+      eventType: "observation",
+      actorType: "system",
+      summary: step.detail,
+      data: { schemaVersion: 1, phase: "execution", editAudit: step.editAudit },
+    }));
     await saveDagProgress(run, steps);
     return;
   }

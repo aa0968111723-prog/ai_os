@@ -4,6 +4,28 @@ import { formatAgentRunMessage } from "./agentRunner";
 
 const source = readFileSync(new URL("./agentRunner.ts", import.meta.url), "utf8");
 
+describe("agentRunner PR-4 revision-safe edit steps", () => {
+  it("update_scene uses applyWithRevision and pins baseRevision", () => {
+    expect(source).toContain("applyWithRevision");
+    expect(source).toContain("isAgentEditStepKindsV1Enabled");
+    expect(source).toContain("baseRevision");
+    expect(source).toContain("editAudit");
+    expect(source).toContain("formatRevisionConflictMessage");
+  });
+
+  it("reorder_scenes validates exact set and order fingerprint", () => {
+    expect(source).toContain("validateReorderSceneIds");
+    expect(source).toContain("sceneOrderFingerprint");
+    expect(source).toContain("isReorderAlreadyApplied");
+  });
+
+  it("records edit_audit observation events", () => {
+    expect(source).toContain("edit_audit");
+    expect(source).toContain("editAudit: step.editAudit");
+    expect(source).toContain('eventType: "observation"');
+  });
+});
+
 describe("agentRunner sweepZombies placeholder generationId", () => {
   it("fails stale runs when advanceGeneration returns NOT_FOUND and run is past STALE_MS", () => {
     // (a′) 佔位 generationId 永遠找不到列時，不得永久卡 running（與 workflowRunner 對齊）
