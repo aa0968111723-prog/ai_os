@@ -213,7 +213,7 @@ export async function registerArtifactFromBytes(input: {
     quarantinePath: qPath,
     errorCode: scan.status === "clean" ? null : "COMPUTER_ARTIFACT_SCAN_FAILED",
     errorMessage: scan.reason ?? null,
-    outputContract: input.outputContract ?? null,
+    outputContract: (input.outputContract as Record<string, unknown> | undefined) ?? null,
   }).returning();
 
   await emitArtifactEvent({

@@ -23,7 +23,7 @@ function expectBefore(source: string, first: string, second: string): void {
 describe("agent crash-replay effect ids", () => {
   it("persists one effect id before every replayable side effect", () => {
     expect(agentSource).toContain("effectId?: string");
-    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(9);
+    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(11);
     expectBefore(
       agentSource,
       "const effectId = await persistStepEffectId(run, steps, step);",

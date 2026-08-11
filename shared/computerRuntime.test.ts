@@ -4,10 +4,15 @@ import {
   canAcceptHumanControl,
   isComputerArtifactIngestionEnabled,
   isComputerBrowserEnabled,
+  isComputerDesktopEnabled,
   isComputerHumanTakeoverEnabled,
+  isComputerPersistedAuthEnabled,
   isComputerRuntimeEnabled,
   isComputerSessionTerminal,
+  normalizeAuthServiceHost,
   selectRuntimeRoute,
+  validateDesktopAction,
+  formatDesktopEscalationReason,
 } from "./computerRuntime";
 import {
   mapProviderErrorToCode,
@@ -21,14 +26,33 @@ describe("computer runtime flags", () => {
     expect(isComputerBrowserEnabled({})).toBe(false);
     expect(isComputerHumanTakeoverEnabled({})).toBe(false);
     expect(isComputerArtifactIngestionEnabled({})).toBe(false);
+    expect(isComputerDesktopEnabled({})).toBe(false);
+    expect(isComputerPersistedAuthEnabled({})).toBe(false);
+    expect(isComputerDesktopEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_DESKTOP_ENABLED: "1" })).toBe(true);
+    expect(isComputerPersistedAuthEnabled({
+      COMPUTER_RUNTIME_ENABLED: "1",
+      COMPUTER_PERSISTED_AUTH_ENABLED: "1",
+    })).toBe(true);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerHumanTakeoverEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerArtifactIngestionEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
+    // persisted auth stays off unless explicitly enabled (security review gate)
+    expect(isComputerPersistedAuthEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(false);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_BROWSER_ENABLED: "0" })).toBe(false);
     expect(isComputerHumanTakeoverEnabled({
       COMPUTER_RUNTIME_ENABLED: "1",
       COMPUTER_HUMAN_TAKEOVER_ENABLED: "0",
     })).toBe(false);
+  });
+});
+
+describe("auth service host normalize", () => {
+  it("accepts public hosts and rejects private", () => {
+    expect(normalizeAuthServiceHost("https://Example.COM/path")).toBe("example.com");
+    expect(normalizeAuthServiceHost("example.com")).toBe("example.com");
+    expect(normalizeAuthServiceHost("https://127.0.0.1/")).toBe(null);
+    expect(normalizeAuthServiceHost("localhost")).toBe(null);
+    expect(normalizeAuthServiceHost("")).toBe(null);
   });
 });
 
@@ -58,6 +82,17 @@ describe("runtime router", () => {
     expect(selectRuntimeRoute({
       hasNativeTool: false, needsDesktopGui: false, needsHumanLoginOrChallenge: true, hasStableDom: true,
     }).route).toBe("human_takeover");
+    expect(selectRuntimeRoute({
+      hasNativeTool: false, needsDesktopGui: true, needsHumanLoginOrChallenge: false, hasStableDom: false,
+    }).route).toBe("vision_computer_use");
+  });
+});
+
+describe("desktop action validation", () => {
+  it("accepts normalized coords and rejects shell-like keys", () => {
+    expect(validateDesktopAction({ kind: "click", x: 10, y: 20 }).ok).toBe(true);
+    expect(validateDesktopAction({ kind: "click", x: -1, y: 0 }).ok).toBe(false);
+    expect(formatDesktopEscalationReason("canvas_or_unstable_dom")).toMatch(/DOM/);
   });
 });
 

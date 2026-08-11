@@ -366,6 +366,23 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.import_drive_file": "外部 AI：匯入雲端檔案",
   // 選檔搜尋稽核（query 端點自行補記——記「誰搜了什麼」，不記檔案內容）
   "integrations.listDriveFiles": "瀏覽 Google 雲端選檔清單",
+  // PR-6 AI 工作電腦（Computer Runtime）
+  "computerRuntime.createSession": "啟動工作電腦（Browser）",
+  "computerRuntime.issueLiveView": "開啟工作電腦即時畫面",
+  "computerRuntime.act": "工作電腦操作（Browser）",
+  "computerRuntime.stop": "停止工作電腦",
+  "computerRuntime.requestTakeover": "請求接管工作電腦",
+  "computerRuntime.acquireControl": "取得工作電腦控制權",
+  "computerRuntime.releaseToAgent": "交回工作電腦給 AI",
+  "computerRuntime.detectMockArtifact": "偵測工作電腦成品",
+  "computerRuntime.registerFromUrl": "登記工作電腦下載成品",
+  "computerRuntime.importArtifact": "匯入工作電腦成品到素材庫",
+  "computerRuntime.createDesktopSession": "啟動工作電腦（Desktop）",
+  "computerRuntime.escalateToDesktop": "升級工作電腦到桌面",
+  "computerRuntime.desktopAct": "工作電腦操作（Desktop）",
+  "computerRuntime.planDesktopActions": "規劃桌面 vision 動作",
+  "computerRuntime.saveAuthContext": "記住工作電腦登入",
+  "computerRuntime.revokeAuthContext": "撤銷已記住的工作電腦登入",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */
@@ -388,7 +405,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   // story 歸在分鏡：故事、自動解析與轉分鏡是同一條創作鏈（Story-first），組長查「分鏡怎麼來的」
   // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。
   { key: "storyboard", label: "故事與分鏡", prefixes: ["scenes", "story"] },
-  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "openaiMcp", "workflows"] },
+  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "openaiMcp", "workflows", "computerRuntime"] },
   // projectContext 歸在知識：它回答的是「這個專案要用哪些資料、各自扮演什麼角色」，
   // 查的人和查知識庫／角色設定的是同一批人、同一個問題
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext"] },

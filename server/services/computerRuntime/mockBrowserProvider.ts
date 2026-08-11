@@ -20,12 +20,18 @@ interface MockSession {
   url: string;
   title: string;
   terminated: boolean;
+  /** Mock "logged-in" hosts after human login or auth context reuse */
+  authedHosts: Set<string>;
 }
+
+/** Opaque auth blobs live only in process for mock provider (encrypted in DB). */
+const authJars = new Map<string, { serviceHost: string; jarId: string }>();
 
 const sessions = new Map<string, MockSession>();
 
 export function resetMockBrowserSessions(): void {
   sessions.clear();
+  authJars.clear();
 }
 
 export class MockBrowserProvider implements ComputerRuntimeProvider, BrowserRuntimeDriver {
@@ -36,6 +42,7 @@ export class MockBrowserProvider implements ComputerRuntimeProvider, BrowserRunt
     const id = `mock-${randomUUID()}`;
     let url = "about:blank";
     let title = "New Session";
+    const authedHosts = new Set<string>();
     if (input.startUrl) {
       const check = validateComputerNavigationUrl(input.startUrl);
       if (!check.ok || !check.sanitizedUrl) {
@@ -44,7 +51,26 @@ export class MockBrowserProvider implements ComputerRuntimeProvider, BrowserRunt
       url = check.sanitizedUrl;
       title = new URL(url).hostname;
     }
-    sessions.set(id, { id, url, title, terminated: false });
+    // PR-6E: attach opaque provider auth context (server-decrypted only)
+    if (input.providerAuthContext) {
+      try {
+        const parsed = JSON.parse(input.providerAuthContext) as {
+          v?: number;
+          provider?: string;
+          serviceHost?: string;
+          jarId?: string;
+        };
+        if (parsed.serviceHost && typeof parsed.serviceHost === "string") {
+          authedHosts.add(parsed.serviceHost.toLowerCase());
+          if (parsed.jarId) {
+            authJars.set(parsed.jarId, { serviceHost: parsed.serviceHost.toLowerCase(), jarId: parsed.jarId });
+          }
+        }
+      } catch {
+        throw new Error("invalid provider auth context");
+      }
+    }
+    sessions.set(id, { id, url, title, terminated: false, authedHosts });
     return {
       sessionId: id,
       provider: this.providerKey,
@@ -52,6 +78,34 @@ export class MockBrowserProvider implements ComputerRuntimeProvider, BrowserRunt
       runtimeKind: "browser",
       status: "ready",
     };
+  }
+
+  /**
+   * Export opaque auth blob for encryption at rest (PR-6E).
+   * Contains no password — only a mock jar id + host scope.
+   */
+  async exportAuthContext(input: {
+    providerSessionRef: string;
+    serviceHost: string;
+  }): Promise<string> {
+    const s = sessions.get(input.providerSessionRef);
+    if (!s || s.terminated) throw new Error("session terminated");
+    const host = input.serviceHost.toLowerCase();
+    const jarId = `jar-${randomUUID()}`;
+    s.authedHosts.add(host);
+    authJars.set(jarId, { serviceHost: host, jarId });
+    return JSON.stringify({
+      v: 1,
+      provider: this.providerKey,
+      serviceHost: host,
+      jarId,
+    });
+  }
+
+  isHostAuthed(providerSessionRef: string, host: string): boolean {
+    const s = sessions.get(providerSessionRef);
+    if (!s || s.terminated) return false;
+    return s.authedHosts.has(host.toLowerCase());
   }
 
   async getSession(providerSessionRef: string) {
@@ -139,10 +193,17 @@ export class MockBrowserProvider implements ComputerRuntimeProvider, BrowserRunt
   }
 
   private observe(s: MockSession): BrowserObservation {
+    let host = "";
+    try {
+      host = new URL(s.url).hostname.toLowerCase();
+    } catch { /* blank */ }
+    const loggedIn = host && s.authedHosts.has(host);
     return {
       url: s.url,
       title: s.title,
-      summary: `Mock browser at ${s.title}`,
+      summary: loggedIn
+        ? `Mock browser at ${s.title} (logged in)`
+        : `Mock browser at ${s.title}`,
       readyState: "complete",
     };
   }
