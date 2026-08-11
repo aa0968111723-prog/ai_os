@@ -1,6 +1,4 @@
--- Whole-table DDL must match schema.ts (bridge compares CREATE TABLE as a unit).
--- Columns introduced by PR-6B/6D stay as ADD COLUMN IF NOT EXISTS in later files
--- for sequential apply; on a clean install they are no-ops once present here.
+-- Whole-table DDL must match schema.ts for bridge comparison.
 CREATE TABLE IF NOT EXISTS "computer_sessions" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "run_id" uuid,
@@ -23,10 +21,6 @@ CREATE TABLE IF NOT EXISTS "computer_sessions" (
   "takeover_reason_code" text,
   "needs_reobserve" boolean DEFAULT false NOT NULL,
   "action_count" integer DEFAULT 0 NOT NULL,
-  "screenshot_count" integer DEFAULT 0 NOT NULL,
-  "escalated_from_session_id" uuid,
-  "escalation_reason" text,
-  "current_app" text,
   "started_at" timestamp with time zone DEFAULT now() NOT NULL,
   "last_activity_at" timestamp with time zone DEFAULT now() NOT NULL,
   "expires_at" timestamp with time zone NOT NULL,

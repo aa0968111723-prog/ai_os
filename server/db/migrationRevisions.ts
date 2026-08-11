@@ -313,7 +313,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "4f387a3b0a40612a97cc54e6b88e2c98a9c44f3b7ba33a2ba953f6741c0d80f8",
   ],
   "0064_computer_runtime": [
-    "5db181c38c3360d8a0acaf62b929ee4983a2d5be86d716cda3453701a7dafb22",
+    "5b5cfd35743d0eac7a95207f7e9588ba48c8ac9ef0a5cd4b61b5387e524c3d2c",
   ],
   "0065_computer_human_takeover": [
     "418a05307dea13c412b2454beaad64be5fca9ebf2d949fb023ec4d6b2178596f",
