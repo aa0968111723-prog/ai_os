@@ -23,6 +23,7 @@ import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
+import { AgentDagCanvas } from "./AgentDagCanvas";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -950,6 +951,12 @@ export function AgentCard({
                   </div>
                 </div>
               </details>
+            )}
+            {/* PR-3：依賴圖（invalid DAG 自動文字 fallback；flag 關則只顯示列表） */}
+            {steps.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <AgentDagCanvas steps={steps} />
+              </div>
             )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
