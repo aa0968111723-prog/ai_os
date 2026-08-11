@@ -18,6 +18,10 @@ vi.mock("../../api", () => {
   return {
     trpc: {
       useUtils: () => ({}),
+      computerRuntime: {
+        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },
+        createSession: { useMutation: mutation },
+      },
       // 問答本體已改走 globalAssistant.ask（站級動作提議＋trace）；
       // 確認卡用 runSiteAction 與 teamAssistant 的 dispatch/command
       globalAssistant: {
