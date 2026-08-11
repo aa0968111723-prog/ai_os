@@ -2160,6 +2160,56 @@ app.get("/api/selftest", async (req, res) => {
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });
 });
 
+// PR-6A：Computer Runtime Live View broker（短效 token；不暴露 provider secret）
+app.get("/api/computer-runtime/live/:providerRef", async (req, res) => {
+  try {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (!token) {
+      res.status(401).type("html").send("<!doctype html><title>Live View</title><p>缺少存取權杖</p>");
+      return;
+    }
+    const { resolveLiveViewByToken } = await import("./services/computerRuntime/sessionCore");
+    const view = await resolveLiveViewByToken(token);
+    const url = view.currentUrl ? escapeHtml(view.currentUrl) : "about:blank";
+    const label = escapeHtml(view.label ?? "AI 工作電腦");
+    const status = escapeHtml(view.status);
+    res
+      .status(200)
+      .type("html")
+      .setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; frame-ancestors 'self'")
+      .send(`<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>${label} · Live</title>
+<style>
+  body{font:14px/1.45 system-ui,sans-serif;margin:0;background:#111;color:#eee}
+  header{padding:10px 14px;border-bottom:1px solid #333;display:flex;gap:10px;align-items:center}
+  .dot{width:8px;height:8px;border-radius:50%;background:#4caf50}
+  main{padding:16px}
+  .url{word-break:break-all;color:#9cf}
+  .note{opacity:.75;margin-top:12px;font-size:12px}
+</style></head>
+<body>
+<header><span class="dot"></span><strong>${label}</strong><span>· ${status}</span><span>· ${escapeHtml(view.mode)}</span></header>
+<main>
+  <div>目前頁面</div>
+  <div class="url">${url}</div>
+  <p class="note">Watch-only Live View（PR-6A）。真正操作走 AI OS 控制面；密碼／OTP 不會寫入 agent log。</p>
+</main>
+</body></html>`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "無法開啟 Live View";
+    res.status(403).type("html").send(`<!doctype html><title>Live View</title><p>${escapeHtml(message)}</p>`);
+  }
+});
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
