@@ -91,6 +91,8 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   read_schedule: { base: "這週有哪些交付死線？還來得及嗎？" },
   read_members: { base: "現在組內誰的工作最滿？誰還有餘裕？" },
   read_collaboration: { base: "目前所有專案裡，有哪些卡住了或需要我處理？" },
+  inspect_computer_runtime: { base: "你現在可以用真實瀏覽器嗎？" },
+  open_browser_runtime: { base: "幫我在目前專案開啟瀏覽器。" },
   read_generations: { base: "這個專案生成過哪些圖片和影片？用了哪些模型？" },
 
   create_task: { base: "幫我在這個專案建一件待辦：明天以前把旁白稿定稿。", focused: "針對{it}幫我建一件待辦，明天以前完成。" },

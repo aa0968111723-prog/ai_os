@@ -39,6 +39,10 @@ vi.mock("../api", () => {
   });
   return {
     trpc: {
+      computerRuntime: {
+        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },
+        createSession: { useMutation: mutation() },
+      },
       globalAssistant: {
         // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主
         ask: { useMutation: mutation() },

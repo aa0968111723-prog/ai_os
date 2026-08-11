@@ -10,6 +10,10 @@ vi.mock("../../api", () => {
   return {
     trpc: {
       useUtils: () => ({}),
+      computerRuntime: {
+        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },
+        createSession: { useMutation: mutation },
+      },
       globalAssistant: {
         ask: { useMutation: mutation },
         runSiteAction: { useMutation: mutation },
