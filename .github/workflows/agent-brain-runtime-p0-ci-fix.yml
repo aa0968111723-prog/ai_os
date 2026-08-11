@@ -1,0 +1,89 @@
+name: Agent Brain Runtime P0 CI Repair
+
+on:
+  push:
+    branches:
+      - fix/agent-brain-runtime-p0
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, '[agent-runtime-p0-ci-fix]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Repair client mocks and capability examples
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, got {count}\n--- OLD ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          # AICreativeCopilot unit suite: add the new runtime query/mutation to its tRPC mock.
+          replace_once(
+            "client/src/components/AICreativeCopilot.test.tsx",
+            '''      globalAssistant: {\n        // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主\n        ask: { useMutation: mutation() },''',
+            '''      computerRuntime: {\n        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },\n        createSession: { useMutation: mutation() },\n      },\n      globalAssistant: {\n        // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主\n        ask: { useMutation: mutation() },'''
+          )
+
+          # Lazy assistant mounts in navigation tests use a shared all-tRPC mock; keep it complete.
+          for path in [
+            "client/src/app/components/MobileNavigation.test.tsx",
+            "client/src/app/components/AssistantLauncher.test.tsx",
+          ]:
+              replace_once(
+                path,
+                '''      // 問答本體已改走 globalAssistant.ask（站級動作提議＋trace）；\n      // 確認卡用 runSiteAction 與 teamAssistant 的 dispatch/command\n      globalAssistant: {'''
+                if "MobileNavigation" in path else
+                '''      globalAssistant: {''',
+                '''      computerRuntime: {\n        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },\n        createSession: { useMutation: mutation },\n      },\n      // 問答本體已改走 globalAssistant.ask（站級動作提議＋trace）；\n      // 確認卡用 runSiteAction 與 teamAssistant 的 dispatch/command\n      globalAssistant: {'''
+                if "MobileNavigation" in path else
+                '''      computerRuntime: {\n        status: { useQuery: () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false }, isLoading: false, isPending: false, error: null, refetch: vi.fn(async () => ({ data: { enabled: true, browserEnabled: true, browserProvider: "mock", liveExternalWebEnabled: false } })) }) },\n        createSession: { useMutation: mutation },\n      },\n      globalAssistant: {'''
+              )
+
+          # The guide is registry-driven: every new capability needs a concrete user-facing example.
+          replace_once(
+            "client/src/lib/assistantCapabilityGuide.ts",
+            '''  read_collaboration: { base: "目前所有專案裡，有哪些卡住了或需要我處理？" },\n  read_generations:''',
+            '''  read_collaboration: { base: "目前所有專案裡，有哪些卡住了或需要我處理？" },\n  inspect_computer_runtime: { base: "你現在可以用真實瀏覽器嗎？" },\n  open_browser_runtime: { base: "幫我在目前專案開啟瀏覽器。" },\n  read_generations:'''
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Focused client regression suite
+        run: npx vitest run --config vitest.client.config.ts client/src/components/AICreativeCopilot.test.tsx client/src/app/components/MobileNavigation.test.tsx client/src/app/components/AssistantLauncher.test.tsx client/src/lib/assistantCapabilityGuide.test.ts client/src/components/assistantStream.site.test.ts client/src/lib/assistantComputerIntent.test.ts
+
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          git config user.name "Aios Runtime Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add client/src/components/AICreativeCopilot.test.tsx \
+                  client/src/app/components/MobileNavigation.test.tsx \
+                  client/src/app/components/AssistantLauncher.test.tsx \
+                  client/src/lib/assistantCapabilityGuide.ts
+          git commit -m "test(agent): keep runtime wiring green [agent-runtime-p0-ci-fix]"
+          git push origin HEAD:fix/agent-brain-runtime-p0
