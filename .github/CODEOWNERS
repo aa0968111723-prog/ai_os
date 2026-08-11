@@ -1,0 +1,17 @@
+# Critical files: AI-generated PRs touching these paths should receive explicit owner review.
+# Enforcement requires branch protection / rulesets with "Require review from Code Owners" enabled.
+
+/client/src/styles.css @aa0968111723-prog
+/client/src/pages/ProjectPage.tsx @aa0968111723-prog
+/client/src/components/GenerationList.tsx @aa0968111723-prog
+/client/src/features/storyboard-center/ShotCard.tsx @aa0968111723-prog
+/server/index.ts @aa0968111723-prog
+/server/services/mcp.ts @aa0968111723-prog
+/server/services/generationCore.ts @aa0968111723-prog
+/server/routers/generation.ts @aa0968111723-prog
+/shared/models.ts @aa0968111723-prog
+/drizzle/** @aa0968111723-prog
+/server/db/migrationRevisions.ts @aa0968111723-prog
+/.github/workflows/** @aa0968111723-prog
+/config/critical-files.json @aa0968111723-prog
+/scripts/guard-*.mjs @aa0968111723-prog
