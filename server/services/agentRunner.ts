@@ -681,7 +681,7 @@ function navigationHintForStep(run: RunRow, step: AgentStep, idx: number): Recor
       sceneId,
       label: step.note?.slice(0, 80) || "查看分鏡",
     });
-    return hint ?? undefined;
+    return (hint as Record<string, unknown> | null) ?? undefined;
   }
   const genId = step.generationId ?? step.outputRefs?.find((r) => r.type === "generation")?.id;
   if (genId) {
@@ -703,7 +703,7 @@ function navigationHintForStep(run: RunRow, step: AgentStep, idx: number): Recor
     projectId: run.projectId,
     label: step.note?.slice(0, 80) || "查看代理",
   });
-  return runHint ?? undefined;
+  return (runHint as Record<string, unknown> | null) ?? undefined;
 }
 
 function okTheater(): boolean {
