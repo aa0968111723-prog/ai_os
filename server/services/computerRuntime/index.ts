@@ -24,4 +24,12 @@ export {
   scanArtifactBytes,
   sniffMime,
 } from "./artifacts";
+export {
+  createDesktopSession,
+  escalateBrowserToDesktop,
+  runDesktopAction,
+  planAndOptionallyPreviewDesktop,
+} from "./desktopCore";
+export { mockDesktopProvider, resetMockDesktopSessions } from "./mockDesktopProvider";
+export { planDesktopActions, planDesktopActionsPolicyStub } from "./visionPlanner";
 export { mockBrowserProvider, resetMockBrowserSessions } from "./mockBrowserProvider";

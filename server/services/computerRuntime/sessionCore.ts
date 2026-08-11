@@ -58,6 +58,10 @@ function toSnapshot(row: SessionRow): ComputerSessionSnapshot {
     takeoverReasonCode: row.takeoverReasonCode,
     needsReobserve: row.needsReobserve,
     actionCount: row.actionCount,
+    screenshotCount: row.screenshotCount,
+    escalatedFromSessionId: row.escalatedFromSessionId,
+    escalationReason: row.escalationReason,
+    currentApp: row.currentApp,
     startedAt: row.startedAt.toISOString(),
     lastActivityAt: row.lastActivityAt.toISOString(),
     expiresAt: row.expiresAt.toISOString(),
@@ -568,7 +572,12 @@ async function stopComputerSessionInternal(
 ): Promise<SessionRow> {
   if (isComputerSessionTerminal(row.status)) return row;
   try {
-    await mockBrowserProvider.terminateSession(row.providerSessionRef);
+    if (row.runtimeKind === "desktop") {
+      const { mockDesktopProvider } = await import("./mockDesktopProvider");
+      await mockDesktopProvider.terminateSession(row.providerSessionRef);
+    } else {
+      await mockBrowserProvider.terminateSession(row.providerSessionRef);
+    }
   } catch {
     // still mark stopped; cleanup best-effort
   }

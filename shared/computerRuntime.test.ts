@@ -4,10 +4,13 @@ import {
   canAcceptHumanControl,
   isComputerArtifactIngestionEnabled,
   isComputerBrowserEnabled,
+  isComputerDesktopEnabled,
   isComputerHumanTakeoverEnabled,
   isComputerRuntimeEnabled,
   isComputerSessionTerminal,
   selectRuntimeRoute,
+  validateDesktopAction,
+  formatDesktopEscalationReason,
 } from "./computerRuntime";
 import {
   mapProviderErrorToCode,
@@ -21,6 +24,8 @@ describe("computer runtime flags", () => {
     expect(isComputerBrowserEnabled({})).toBe(false);
     expect(isComputerHumanTakeoverEnabled({})).toBe(false);
     expect(isComputerArtifactIngestionEnabled({})).toBe(false);
+    expect(isComputerDesktopEnabled({})).toBe(false);
+    expect(isComputerDesktopEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_DESKTOP_ENABLED: "1" })).toBe(true);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerHumanTakeoverEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerArtifactIngestionEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
@@ -58,6 +63,17 @@ describe("runtime router", () => {
     expect(selectRuntimeRoute({
       hasNativeTool: false, needsDesktopGui: false, needsHumanLoginOrChallenge: true, hasStableDom: true,
     }).route).toBe("human_takeover");
+    expect(selectRuntimeRoute({
+      hasNativeTool: false, needsDesktopGui: true, needsHumanLoginOrChallenge: false, hasStableDom: false,
+    }).route).toBe("vision_computer_use");
+  });
+});
+
+describe("desktop action validation", () => {
+  it("accepts normalized coords and rejects shell-like keys", () => {
+    expect(validateDesktopAction({ kind: "click", x: 10, y: 20 }).ok).toBe(true);
+    expect(validateDesktopAction({ kind: "click", x: -1, y: 0 }).ok).toBe(false);
+    expect(formatDesktopEscalationReason("canvas_or_unstable_dom")).toMatch(/DOM/);
   });
 });
 
