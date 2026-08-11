@@ -167,6 +167,34 @@ export function isAbortError(error: unknown): boolean {
   return !!error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError";
 }
 
+/** 等待首個 SSE 事件（open）的最長時限。逾時＝伺服器根本沒接手，可安全退回一次性 tRPC。 */
+const SSE_HEADER_TIMEOUT_MS = 30_000;
+/** 已收到 payload 後、兩事件之間的最長時限。逾時＝連線中斷。paid 模式伺服器給 120s，此值留足緩衝避免誤砍慢回應。 */
+const SSE_STREAM_IDLE_TIMEOUT_MS = 150_000;
+
+/**
+ * 包一層 idle timeout 的 reader.read()：idleMs 內沒有 chunk 進帳就 reject，
+ * 由呼叫端依 sawPayload 決定走「連線中斷」還是「退回 tRPC」。正常收到資料／
+ * 串流結束時 clearTimeout，避免計時器殘留。拋出的是普通 Error（非 AbortError），
+ * 不會被 isAbortError 當成主動中止。
+ */
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("SSE 串流 idle timeout（伺服器長時間未回應）")), idleMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function dispatchAssistantEvent(
   parsed: ParsedAssistantSseEvent,
   handlers: AssistantStreamHandlers,
@@ -339,7 +367,7 @@ export async function requestSiteAssistantStream({
     reader = response.body.getReader();
     const decoder = new AssistantSseDecoder();
     for (;;) {
-      const result = await reader.read();
+      const result = await readWithIdleTimeout(reader, sawPayload ? SSE_STREAM_IDLE_TIMEOUT_MS : SSE_HEADER_TIMEOUT_MS);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
         if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
@@ -430,7 +458,7 @@ export async function requestAssistantStream({
     reader = response.body.getReader();
     const decoder = new AssistantSseDecoder();
     for (;;) {
-      const result = await reader.read();
+      const result = await readWithIdleTimeout(reader, sawPayload ? SSE_STREAM_IDLE_TIMEOUT_MS : SSE_HEADER_TIMEOUT_MS);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
         if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
