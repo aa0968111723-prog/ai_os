@@ -8,6 +8,9 @@ import {
   approveAgentCore,
   discardAgentCore,
   stopAgentCore,
+  pauseAgentCore,
+  resumePausedAgentCore,
+  resumeFailedAgentCore,
   listAgentRunsForProject,
 } from "../services/agentCore";
 import {
@@ -23,6 +26,9 @@ import {
   answerAgentQuestion,
   listPendingAgentQuestionsForProject,
 } from "../services/agentQuestionCore";
+import { listProjectFiles, readProjectFile, searchProjectFiles } from "../services/agentProjectFiles";
+import { AGENT_SKILLS } from "../services/practicalAutonomy";
+import { agentToolRegistry } from "../services/agentToolRegistry";
 
 const agentQuestionAnswerSchema = z.union([
   z.string().max(20_000),
@@ -38,6 +44,14 @@ const agentQuestionAnswerSchema = z.union([
  * 安全設計：規劃固定守門、核准前不扣執行費、核准畫面揭示每步估點、執行期各步走既有守門與退點。
  */
 export const agentsRouter = router({
+  practicalCapabilities: authedProcedure.query(() => ({
+    tools: agentToolRegistry.capabilities(),
+    skills: AGENT_SKILLS.map(({ inputs: _inputs, ...skill }) => skill),
+  })),
+
+  listProjectFiles: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => listProjectFiles(ctx.auth, input.projectId)),
+  readProjectFile: authedProcedure.input(z.object({ projectId: z.string().uuid(), fileId: z.string().uuid(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(24_000).optional() })).query(({ ctx, input }) => readProjectFile(ctx.auth, input.projectId, input.fileId, input.offset, input.limit)),
+  searchProjectFiles: authedProcedure.input(z.object({ projectId: z.string().uuid(), query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional() })).query(({ ctx, input }) => searchProjectFiles(ctx.auth, input.projectId, input.query, input.limit)),
   preview: authedProcedure
     .input(z.object({
       projectId: z.string().uuid(),
@@ -157,6 +171,10 @@ export const agentsRouter = router({
   stop: authedProcedure
     .input(z.object({ runId: z.string().uuid() }))
     .mutation(({ ctx, input }) => stopAgentCore({ auth: ctx.auth, runId: input.runId })),
+
+  pause: authedProcedure.input(z.object({ runId: z.string().uuid() })).mutation(({ ctx, input }) => pauseAgentCore({ auth: ctx.auth, runId: input.runId })),
+  resume: authedProcedure.input(z.object({ runId: z.string().uuid() })).mutation(({ ctx, input }) => resumePausedAgentCore({ auth: ctx.auth, runId: input.runId })),
+  resumeFailed: authedProcedure.input(z.object({ runId: z.string().uuid() })).mutation(({ ctx, input }) => resumeFailedAgentCore({ auth: ctx.auth, runId: input.runId })),
 
   /** Validate a durable Human-in-the-loop answer and resume the same run. */
   answerAgentQuestion: authedProcedure

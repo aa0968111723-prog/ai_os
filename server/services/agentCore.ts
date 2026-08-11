@@ -1370,6 +1370,35 @@ export async function resumeFailedAgentCore(input: { auth: AuthState; runId: str
   return updated[0];
 }
 
+/** Pause is durable and only prevents scheduling new work. Already accepted provider work stays tracked. */
+export async function pauseAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
+  assertUuid(input.runId, "代理計畫編號");
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
+  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆代理執行" });
+  const role = requireGroup(input.auth, run.groupId);
+  if (run.userId !== input.auth.user.id && role === "member") throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以暫停" });
+  const [paused] = await db.update(schema.agentRuns).set({ status: "paused", updatedAt: new Date() }).where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "running"))).returning();
+  if (!paused) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有執行中的代理可以暫停" });
+  await recordAgentEventSafely({ runId: run.id, groupId: run.groupId, projectId: run.projectId, eventKey: `run:paused:${Date.now()}`, eventType: "paused", actorType: "human", actorId: input.auth.user.id, summary: "使用者暫停代理；既有狀態與外部工作保留" });
+  return paused;
+}
+
+/** Resume the same durable plan without resetting completed/verified steps. */
+export async function resumePausedAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
+  assertUuid(input.runId, "代理計畫編號");
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
+  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆代理執行" });
+  const role = requireGroup(input.auth, run.groupId);
+  if (run.userId !== input.auth.user.id && role === "member") throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以繼續" });
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(input.auth, project); assertProjectNotArchived(project);
+  const [resumed] = await db.update(schema.agentRuns).set({ status: "running", updatedAt: new Date() }).where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "paused"))).returning();
+  if (!resumed) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有已暫停的代理可以繼續" });
+  await recordAgentEventSafely({ runId: run.id, groupId: run.groupId, projectId: run.projectId, eventKey: `run:resumed:${Date.now()}`, eventType: "resumed", actorType: "human", actorId: input.auth.user.id, summary: "使用者繼續既有計畫；已完成步驟不重跑" });
+  return resumed;
+}
+
 /** 放棄一份還沒核准的計畫（不花錢，純標記） */
 export async function discardAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
   const { auth } = input;

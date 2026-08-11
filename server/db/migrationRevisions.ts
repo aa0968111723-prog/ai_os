@@ -331,4 +331,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0068_computer_persisted_auth": [
     "57b651952a90c2f8d82ebc0487a4a4ee4f9c2f10e8d7863ffc4b7b50126a436a",
   ],
+  "0069_agent_practical_autonomy": [
+    "cfe25c1a70e82281b3ff1068e73f395bbe7c3dbeb0db44098ba3cf600f3be04f",
+  ],
 };

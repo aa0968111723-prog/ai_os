@@ -348,10 +348,11 @@ describe("legacy migration adoption bridge", () => {
     // 0066 Artifacts: 1 CREATE TABLE IF NOT EXISTS + 5 guarded indexes — 6 statements.
     // 0067 Desktop: 4 ADD COLUMN IF NOT EXISTS on computer_sessions — 4 statements.
     // 0068 Persisted auth: 1 CREATE TABLE IF NOT EXISTS + 3 guarded indexes — 4 statements.
+    // 0069 Practical autonomy: receipt table + 2 indexes are represented by the reviewed schema fixture.
     // Verified statement by statement: no ALTER of an existing column, no UPDATE,
     // no DELETE, no data movement, so a re-run is a no-op.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3,
     );
   });
 
