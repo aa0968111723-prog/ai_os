@@ -208,7 +208,12 @@ export async function suspendAgentRunForQuestion(input: {
       summary: result.row.context.reason,
       data: { questionId: result.row.id, questionType: result.row.questionType, candidateCount: result.row.options.length },
     }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-    notifyAgentProgress(result.row.projectId, { runId: result.row.runId, stepId: result.row.stepId ?? undefined, eventKey: `question:${result.row.id}:waiting` });
+    notifyAgentProgress(result.row.projectId, {
+      runId: result.row.runId,
+      stepId: result.row.stepId ?? undefined,
+      eventKey: `question:${result.row.id}:waiting`,
+      groupId: result.row.groupId,
+    });
   }
   return result.row;
 }
@@ -297,6 +302,7 @@ export async function answerAgentQuestion(input: {
     runId: result.run.id,
     stepId: result.question.stepId ?? undefined,
     eventKey: `question:${result.question.id}:answered`,
+    groupId: result.run.groupId,
   });
 
   // Planning-time path: replan → awaiting_approval (or next question / fail-closed).
@@ -349,7 +355,11 @@ export async function answerAgentQuestion(input: {
             },
           },
         }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-        notifyAgentProgress(failed.projectId, { runId: failed.id });
+        notifyAgentProgress(failed.projectId, {
+          runId: failed.id,
+          eventKey: `run:${failed.id}:replan_failed:${result.question.id}`,
+          groupId: failed.groupId,
+        });
         return { question: result.question, run: failed };
       }
       throw error;

@@ -59,7 +59,12 @@ export async function recordAgentEventSafely(input: RecordAgentEventInput): Prom
   // 單一漏斗，掛一次就涵蓋全部轉換——代理進度從輪詢變即時，前端看得見 AI 正在動。
   // 事件寫入失敗也照樣推：推播喚醒的是「重新查詢」，查到的是資料庫的真相，不是這筆事件。
   try {
-    notifyAgentProgress(input.projectId, { runId: input.runId, stepId: input.stepId, eventKey: input.eventKey });
+    notifyAgentProgress(input.projectId, {
+      runId: input.runId,
+      stepId: input.stepId,
+      eventKey: input.eventKey,
+      groupId: input.groupId,
+    });
   } catch {
     // 推播失敗不影響代理主流程；輪詢兜底
   }

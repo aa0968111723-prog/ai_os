@@ -1565,21 +1565,34 @@ ${historyBlock}使用者的問題：${input.message}`;
             ]),
           )),
       ]);
-      const runs = rows.map(({ run, projectTitle, userName }) => ({
-        id: run.id,
-        projectId: run.projectId,
-        projectTitle,
-        goal: run.goal,
-        status: run.status,
-        doneSteps: countDoneSteps(run.steps),
-        totalSteps: Array.isArray(run.steps) ? (run.steps as unknown[]).length : 0,
-        estPoints: run.estPoints,
-        updatedAt: run.updatedAt,
-        userId: run.userId,
-        userName: userName ?? null,
-        error: run.error ? run.error.slice(0, 160) : null,
-        currentStepNote: currentStepNote(run.steps),
-      }));
+      const runs = rows.map(({ run, projectTitle, userName }) => {
+        const updatedAt = run.updatedAt;
+        const revision = updatedAt instanceof Date ? updatedAt.getTime() : new Date(updatedAt).getTime();
+        return {
+          id: run.id,
+          projectId: run.projectId,
+          projectTitle,
+          goal: run.goal,
+          status: run.status,
+          doneSteps: countDoneSteps(run.steps),
+          totalSteps: Array.isArray(run.steps) ? (run.steps as unknown[]).length : 0,
+          estPoints: run.estPoints,
+          updatedAt,
+          /** PR-2：push/poll merge 用的可比較 revision（updatedAt ms） */
+          revision: Number.isFinite(revision) ? revision : 0,
+          userId: run.userId,
+          userName: userName ?? null,
+          error: run.error ? run.error.slice(0, 160) : null,
+          currentStepNote: currentStepNote(run.steps),
+          /** waiting_* 的人話摘要（HUD 顯示；原始 status 仍在 status） */
+          waitingReason:
+            run.status === "waiting_user_input" ? "需要你補充資訊"
+            : run.status === "waiting_confirmation" ? "需要你確認"
+            : run.status === "waiting_permission" ? "需要權限"
+            : run.status === "waiting" || run.status === "user_controlled" ? "等你回覆"
+            : null,
+        };
+      });
       const counts = foldGroupStatusAggregate(statusAgg, Number(activeProjectsAgg[0]?.n ?? 0));
       const summary = groupSummaryFromCounts(counts);
       // totalRuns／listLimit：前端才能誠實說「顯示最近 30 筆（共 N 筆）」而不是把 30 當全部

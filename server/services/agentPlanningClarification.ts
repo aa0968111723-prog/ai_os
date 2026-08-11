@@ -156,6 +156,7 @@ export async function openPlanningClarification(input: {
     notifyAgentProgress(result.question.projectId, {
       runId: result.question.runId,
       eventKey: `question:${result.question.id}:planning_waiting`,
+      groupId: result.question.groupId,
     });
   }
   return { question: result.question, run: result.run };
@@ -219,7 +220,11 @@ export async function failRunPlanningClarificationExhausted(input: {
       clarificationRound: input.round,
     },
   }).onConflictDoNothing({ target: [schema.agentEvents.runId, schema.agentEvents.eventKey] });
-  notifyAgentProgress(input.projectId, { runId: input.runId, eventKey: `run:${input.runId}:planning_clarification_exhausted` });
+  notifyAgentProgress(input.projectId, {
+    runId: input.runId,
+    eventKey: `run:${input.runId}:planning_clarification_exhausted`,
+    groupId: input.groupId,
+  });
   return updated;
 }
 
