@@ -22,6 +22,7 @@ import {
   parseAgentProgressSignal,
   shouldAcceptProgressSequence,
 } from "../../shared/agentProgress";
+import { applyTheaterHint, bindHumanActivityListeners, markTheaterHintEmitted, theaterEnabled } from "./lib/agentTheater";
 
 export interface CollabPeer {
   userId: string;
@@ -689,6 +690,7 @@ export function useCollab(
     let retryCount = 0;
     let retryTimer: number | undefined;
     let hadConnection = false;
+    const unbindHuman = bindHumanActivityListeners();
 
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -815,6 +817,23 @@ export function useCollab(
           agentSeqRef.current.set(signal.runId, signal.sequence);
           markProgressDelivered(signal.occurredAt);
           refetchAgentAuthoritative("agent-step");
+          // PR-5 Theater：presentation hint only（flag off = no-op）
+          if (theaterEnabled() && msg.navigationHint) {
+            markTheaterHintEmitted();
+            applyTheaterHint(
+              { ...msg.navigationHint, sequence: signal.sequence },
+              {
+                navigate: (path) => {
+                  // Soft navigation via location assignment — AppShell uses wouter
+                  if (typeof window !== "undefined") {
+                    window.history.pushState({}, "", path);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }
+                },
+                currentPathname: typeof window !== "undefined" ? window.location.pathname : undefined,
+              },
+            );
+          }
         } else if (msg.type === "invalidate") {
           const scope = msg.scope as { kind?: string; id?: string | null } | undefined;
           if (scope?.kind === "agent") {
@@ -871,6 +890,7 @@ export function useCollab(
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       wsRef.current = null;
       ws?.close();
+      unbindHuman();
     };
   }, [id, enabled, kind, syncAnchorEpoch, refetchAgentAuthoritative]);
 

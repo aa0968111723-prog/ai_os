@@ -9712,3 +9712,39 @@ body.story-immersive { overflow: hidden; }
   .agent-dag-node { width: 104px; font-size: 10px; }
   .agent-dag-canvas__scroll { max-height: 280px; }
 }
+
+/* ── PR-5：Theater synthetic AI cursor（與真人 presence 明確區分） ── */
+.agent-theater-cursor {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  transform: translate(-2px, -2px);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.agent-theater-cursor__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px 10px 10px 10px;
+  background: color-mix(in srgb, var(--primary) 85%, #fff);
+  border: 2px solid var(--primary-ink, #1a1a1a);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--fg) 25%, transparent);
+}
+.agent-theater-cursor__label {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 18%, var(--card));
+  border: 1px dashed color-mix(in srgb, var(--primary) 55%, var(--border-soft));
+  color: var(--primary-ink);
+  font-size: var(--fs-11);
+  font-weight: 700;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-theater-cursor { display: none; }
+}
+@media (max-width: 420px) {
+  .agent-hud { gap: 4px; }
+  .agent-theater-cursor__label { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; }
+}

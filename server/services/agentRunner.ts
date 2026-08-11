@@ -70,7 +70,13 @@ import {
   validateUpdateScenePatch,
   type AgentEditAuditSummary,
 } from "../../shared/agentEditSteps";
+import {
+  buildAgentRunNavigationHint,
+  buildSceneNavigationHint,
+  isAgentTheaterV1Enabled,
+} from "../../shared/agentTheater";
 import { applyWithRevision, isRevisionConflictError } from "./revisionGuard";
+import { notifyAgentProgress } from "./realtime";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -660,6 +666,50 @@ async function checkRunAuthority(run: RunRow): Promise<string | null> {
  * 寫資料庫）完全不進 audit_log，組長只查得到 agents.approve 一列。action 掛在既有 "agents" 前綴下，
  * 自動歸到操作紀錄的「AI 助手與代理」類別。
  */
+/** PR-5：presentation-only navigation hint from completed step (safe path/anchor). */
+function navigationHintForStep(run: RunRow, step: AgentStep, idx: number): Record<string, unknown> | undefined {
+  if (!okTheater()) return undefined;
+  const stepId = stableStepId(step, idx);
+  // Prefer scene targets from known fields / output refs
+  const sceneId = step.targetSceneId
+    ?? step.outputRefs?.find((r) => r.type === "scene")?.id;
+  if (sceneId) {
+    const hint = buildSceneNavigationHint({
+      runId: run.id,
+      stepId,
+      projectId: run.projectId,
+      sceneId,
+      label: step.note?.slice(0, 80) || "查看分鏡",
+    });
+    return hint ?? undefined;
+  }
+  const genId = step.generationId ?? step.outputRefs?.find((r) => r.type === "generation")?.id;
+  if (genId) {
+    return {
+      schemaVersion: 1,
+      runId: run.id,
+      stepId,
+      projectId: run.projectId,
+      path: `/p/${run.projectId}`,
+      anchor: `generation-${genId}`,
+      reveal: true,
+      mode: "auto_if_idle",
+      label: step.note?.slice(0, 80) || "查看生成",
+    };
+  }
+  const runHint = buildAgentRunNavigationHint({
+    runId: run.id,
+    stepId,
+    projectId: run.projectId,
+    label: step.note?.slice(0, 80) || "查看代理",
+  });
+  return runHint ?? undefined;
+}
+
+function okTheater(): boolean {
+  return isAgentTheaterV1Enabled();
+}
+
 function auditAgentStep(
   run: RunRow,
   step: AgentStep,
@@ -668,6 +718,7 @@ function auditAgentStep(
   error?: string,
   reason?: AgentFailureReason,
 ): void {
+  const navigationHint = ok ? navigationHintForStep(run, step, idx) : undefined;
   void trackBackgroundTask(recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
@@ -688,8 +739,23 @@ function auditAgentStep(
       outputRefs: step.outputRefs ?? [],
       error,
       ...(reason ? { reason } : {}),
+      ...(navigationHint ? { navigationHint } : {}),
     },
   }));
+  // Theater: also push hint on the progress channel (presentation only)
+  if (navigationHint) {
+    try {
+      notifyAgentProgress(run.projectId, {
+        runId: run.id,
+        stepId: stableStepId(step, idx),
+        eventKey: `step:${stableStepId(step, idx)}:theater`,
+        groupId: run.groupId,
+        navigationHint,
+      });
+    } catch {
+      /* presentation only */
+    }
+  }
   void trackBackgroundTask(
     db
       .insert(schema.auditLog)

@@ -139,3 +139,6 @@ describe("AgentActivityHud", () => {
     expect(screen.getByText(/需要你補充資訊/)).toBeVisible();
   });
 });
+
+// Theater stop is unit-tested in client/src/lib/agentTheater.test.ts
+

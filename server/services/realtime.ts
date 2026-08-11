@@ -265,6 +265,8 @@ export interface AgentProgressPushInput {
   stepId?: string | null;
   eventKey: string;
   groupId?: string | null;
+  /** PR-5：presentation-only navigation hint（safe path/anchor） */
+  navigationHint?: Record<string, unknown> | null;
 }
 
 function nextProgressSequence(runId: string): number {
@@ -283,7 +285,7 @@ function buildAgentStepMessage(
   step: AgentProgressPushInput,
 ): Record<string, unknown> {
   const sequence = nextProgressSequence(step.runId);
-  return {
+  const msg: Record<string, unknown> = {
     type: "agent-step",
     schemaVersion: 1,
     runId: step.runId,
@@ -294,6 +296,10 @@ function buildAgentStepMessage(
     sequence,
     occurredAt: new Date().toISOString(),
   };
+  if (step.navigationHint && typeof step.navigationHint === "object") {
+    msg.navigationHint = { ...step.navigationHint, sequence };
+  }
+  return msg;
 }
 
 function emitAgentProgress(projectId: string, step: AgentProgressPushInput): void {

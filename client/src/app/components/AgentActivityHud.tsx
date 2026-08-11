@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
 import {
   agentRunHudLabel,
@@ -11,6 +11,15 @@ import {
   revisionFromUpdatedAt,
   shouldAcceptRunRevision,
 } from "../../../../shared/agentProgress";
+import {
+  applyTheaterHint,
+  cancelTheaterForRun,
+  clearPendingTheaterSuggest,
+  getPendingTheaterSuggest,
+  getTheaterCursorState,
+  subscribeTheaterCursor,
+  theaterEnabled,
+} from "../../lib/agentTheater";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Meta, Pill } from "../../components/ui";
@@ -131,6 +140,24 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     return () => window.clearTimeout(t);
   }, [stoppingId, groupId, utils]);
 
+  // PR-5：poll pending suggest for 「前往查看」 CTA (human override path)
+  const [suggestTick, setSuggestTick] = useState(0);
+  useEffect(() => {
+    if (!theaterEnabled()) return;
+    const t = window.setInterval(() => setSuggestTick((n) => n + 1), 1_500);
+    return () => window.clearInterval(t);
+  }, []);
+  const pendingSuggest = useMemo(() => {
+    void suggestTick;
+    return theaterEnabled() ? getPendingTheaterSuggest() : null;
+  }, [suggestTick]);
+
+  const cursor = useSyncExternalStore(
+    subscribeTheaterCursor,
+    getTheaterCursorState,
+    () => null,
+  );
+
   const active = runs.filter((r) => isAgentRunActiveForHud(r.status) || r.id === stoppingId);
   if (active.length === 0 && !stoppingId) return null;
 
@@ -148,38 +175,74 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
       ? `・${lead.waitingReason}`
       : lead.status === "waiting_permission" ? "・請處理權限" : "・請回覆")
     : "";
+  const suggestForLead = pendingSuggest && pendingSuggest.runId === lead.id ? pendingSuggest : null;
 
   return (
-    <div className="agent-hud" role="status" aria-live="polite">
-      <Pill status={pill}>{label}</Pill>
-      <button
-        type="button"
-        className="agent-hud__body"
-        onClick={() => navigate(`/p/${lead.projectId}?focus=agent-run-${lead.id}`)}
-      >
-        <span className="agent-hud__note">
-          {lead.currentStepNote || lead.goal}
-        </span>
-        <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
-          {lead.projectTitle}
-          {lead.totalSteps > 0 ? `・${lead.doneSteps}/${lead.totalSteps} 步` : ""}
-          {waitingHint}
-          {rest > 0 ? `・另有 ${rest} 個` : ""}
-        </Meta>
-      </button>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={isStopping}
-        onClick={() => {
-          setStoppingId(lead.id);
-          stopClickedAtRef.current = Date.now();
-          stop.mutate({ runId: lead.id });
-        }}
-      >
-        <Icon name="CircleStop" size={13} />
-        {isStopping ? "停止中…" : "停"}
-      </Button>
-    </div>
+    <>
+      <div className="agent-hud" role="status" aria-live="polite">
+        <Pill status={pill}>{label}</Pill>
+        <button
+          type="button"
+          className="agent-hud__body"
+          onClick={() => navigate(`/p/${lead.projectId}?focus=agent-run-${lead.id}`)}
+        >
+          <span className="agent-hud__note">
+            {lead.currentStepNote || lead.goal}
+          </span>
+          <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+            {lead.projectTitle}
+            {lead.totalSteps > 0 ? `・${lead.doneSteps}/${lead.totalSteps} 步` : ""}
+            {waitingHint}
+            {rest > 0 ? `・另有 ${rest} 個` : ""}
+          </Meta>
+        </button>
+        {/* PR-5：真人忙碌時不自動跳頁，改由明確 CTA 決定 */}
+        {suggestForLead && !isStopping && (
+          <Button
+            size="sm"
+            variant="primary"
+            type="button"
+            onClick={() => {
+              applyTheaterHint(suggestForLead, {
+                navigate: (path) => navigate(path),
+                force: true,
+                currentPathname: typeof window !== "undefined" ? window.location.pathname : undefined,
+              });
+              clearPendingTheaterSuggest();
+              setSuggestTick((n) => n + 1);
+            }}
+          >
+            前往查看
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={isStopping}
+          onClick={() => {
+            // Theater stop first: cancel pending nav/cursor even if stop API is slow
+            cancelTheaterForRun(lead.id);
+            clearPendingTheaterSuggest();
+            setStoppingId(lead.id);
+            stopClickedAtRef.current = Date.now();
+            stop.mutate({ runId: lead.id });
+          }}
+        >
+          <Icon name="CircleStop" size={13} />
+          {isStopping ? "停止中…" : "停"}
+        </Button>
+      </div>
+      {/* PR-5：合成 AI 游標——外觀與真人 presence 不同，標示 AI 操作提示，不產生 click */}
+      {cursor && (
+        <div
+          className="agent-theater-cursor"
+          style={{ left: cursor.x, top: cursor.y }}
+          aria-hidden="true"
+        >
+          <span className="agent-theater-cursor__dot" />
+          <span className="agent-theater-cursor__label">AI 操作提示</span>
+        </div>
+      )}
+    </>
   );
 }
