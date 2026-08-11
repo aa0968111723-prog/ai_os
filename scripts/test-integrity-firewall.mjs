@@ -76,7 +76,7 @@ try {
   });
   run(process.execPath, ["scripts/guard-migrations.mjs"], { cwd: worktree });
 
-  console.log("[integrity-selftest] fixture 1/4: destructive placeholder...");
+  console.log("[integrity-selftest] fixture 1/5: destructive placeholder...");
   const placeholderTarget = "client/src/components/GenerationList.tsx";
   fs.writeFileSync(fixturePath(placeholderTarget), "PLACEHOLDER_USE_ARTIFACT_FINAL\n", "utf8");
   commitFixture("fixture: placeholder regression", [placeholderTarget]);
@@ -89,7 +89,7 @@ try {
   });
   resetFixture();
 
-  console.log("[integrity-selftest] fixture 2/4: critical file destructive shrink...");
+  console.log("[integrity-selftest] fixture 2/5: critical file destructive shrink...");
   const shrinkTarget = "client/src/styles.css";
   fs.writeFileSync(fixturePath(shrinkTarget), ":root { --integrity-fixture: 1; }\n", "utf8");
   commitFixture("fixture: destructive critical-file shrink", [shrinkTarget]);
@@ -106,7 +106,7 @@ try {
   });
   resetFixture();
 
-  console.log("[integrity-selftest] fixture 3/4: duplicate migration number...");
+  console.log("[integrity-selftest] fixture 3/5: duplicate migration number...");
   const migrationFiles = fs.readdirSync(fixturePath("drizzle"))
     .filter((name) => /^\d{4}_.+\.sql$/.test(name))
     .sort();
@@ -125,7 +125,7 @@ try {
   });
   resetFixture();
 
-  console.log("[integrity-selftest] fixture 4/4: released migration hash tamper...");
+  console.log("[integrity-selftest] fixture 4/5: released migration hash tamper...");
   const tamperTarget = `drizzle/${latestMigration}`;
   fs.appendFileSync(fixturePath(tamperTarget), "\n-- integrity fixture tamper\n", "utf8");
   commitFixture("fixture: migration hash tamper", [tamperTarget]);
@@ -135,6 +135,31 @@ try {
     needles: ["migration hash mismatch"],
     baseSha: originalHead,
     label: "migration hash tamper",
+  });
+  resetFixture();
+
+  console.log("[integrity-selftest] fixture 5/5: ShotCard tool truncation marker...");
+  const shotCardTarget = "client/src/features/storyboard-center/ShotCard.tsx";
+  const shotCardFixture = [
+    'export function ShotCard() {',
+    '  return <article className="shot-card__face">',
+    '    {/* rest of the component continues identically to previous version... truncated for tool safety */}',
+    '  </article>;',
+    '}',
+    '',
+  ].join("\n");
+  fs.writeFileSync(fixturePath(shotCardTarget), shotCardFixture, "utf8");
+  commitFixture("fixture: ShotCard tool truncation regression", [shotCardTarget]);
+  expectFailure({
+    cwd: worktree,
+    script: "scripts/guard-repo-integrity.mjs",
+    needles: [
+      "forbidden placeholder marker detected: truncated for tool safety",
+      "forbidden placeholder marker detected: rest of the component continues identically",
+      "critical file shrank below minimum size",
+    ],
+    baseSha: originalHead,
+    label: "ShotCard tool truncation",
   });
 
   console.log("[integrity-selftest] all destructive fixtures were rejected as expected");
