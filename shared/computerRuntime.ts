@@ -87,6 +87,18 @@ export function isComputerDesktopEnabled(
   return v === "1" || v === "true" || v === "on" || v === "yes";
 }
 
+/**
+ * PR-6E Persisted Auth Context — default OFF until security review.
+ * Only stores encrypted opaque provider context refs; never raw cookies/tokens to LLM/UI.
+ */
+export function isComputerPersistedAuthEnabled(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): boolean {
+  if (!isComputerRuntimeEnabled(env)) return false;
+  const v = String(env.COMPUTER_PERSISTED_AUTH_ENABLED ?? env.VITE_COMPUTER_PERSISTED_AUTH_ENABLED ?? "0").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on" || v === "yes";
+}
+
 export type ComputerArtifactScanStatus = "pending" | "clean" | "blocked" | "failed";
 export type ComputerArtifactImportStatus =
   | "detected"
@@ -184,6 +196,63 @@ export interface CreateComputerSessionInput {
   /** If escalated from a browser session */
   escalatedFromSessionId?: string;
   escalationReason?: string;
+  /**
+   * PR-6E: decrypted opaque provider auth blob (server-only path).
+   * Never pass this through planner / LLM / client.
+   */
+  providerAuthContext?: string;
+}
+
+/** Safe client-facing metadata for a remembered login (no secrets). */
+export interface ComputerAuthContextSnapshot {
+  id: string;
+  userId: string;
+  serviceHost: string;
+  serviceLabel: string;
+  scope: string;
+  provider: string;
+  sourceSessionId?: string | null;
+  lastUsedAt?: string | null;
+  expiresAt: string;
+  revokedAt?: string | null;
+  createdAt: string;
+}
+
+/** Default TTL for persisted auth contexts (30 days). */
+export const COMPUTER_AUTH_CONTEXT_DEFAULT_TTL_MS = 30 * 24 * 60 * 60_000;
+
+/** Max remembered logins per user. */
+export const COMPUTER_AUTH_CONTEXT_MAX_PER_USER = 20;
+
+/**
+ * Normalize a public service host for service-scoped auth reuse.
+ * Returns null if not a safe hostname.
+ */
+export function normalizeAuthServiceHost(input: string): string | null {
+  const raw = input.trim().toLowerCase();
+  if (!raw || raw.length > 253) return null;
+  let host = raw;
+  try {
+    if (raw.includes("://")) {
+      const u = new URL(raw);
+      host = u.hostname;
+    } else if (raw.includes("/")) {
+      host = raw.split("/")[0]!.split(":")[0]!;
+    } else if (raw.includes(":")) {
+      host = raw.split(":")[0]!;
+    }
+  } catch {
+    return null;
+  }
+  host = host.replace(/\.$/, "");
+  if (!host || host === "localhost" || host.endsWith(".local")) return null;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host)) {
+    return null;
+  }
+  if (host === "127.0.0.1" || host.startsWith("10.") || host.startsWith("192.168.") || host.startsWith("169.254.")) {
+    return null;
+  }
+  return host;
 }
 
 export interface ComputerSessionHandle {
@@ -299,6 +368,10 @@ export type ComputerFailureCode =
   | "COMPUTER_SCREENSHOT_LIMIT"
   | "COMPUTER_DESKTOP_DISABLED"
   | "COMPUTER_ESCALATION_DENIED"
+  | "COMPUTER_PERSISTED_AUTH_DISABLED"
+  | "COMPUTER_AUTH_CONTEXT_REVOKED"
+  | "COMPUTER_AUTH_CONTEXT_EXPIRED"
+  | "COMPUTER_AUTH_CONTEXT_MISMATCH"
   | "COMPUTER_NOT_FOUND"
   | "COMPUTER_FORBIDDEN";
 

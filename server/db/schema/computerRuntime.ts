@@ -149,3 +149,33 @@ export const computerLiveTokens = pgTable("computer_live_tokens", {
   tokenHashUq: uniqueIndex("computer_live_tokens_hash_uq").on(t.tokenHash),
   sessionIdx: index("computer_live_tokens_session_idx").on(t.sessionId),
 }));
+
+/**
+ * PR-6E：使用者明確 opt-in 的 persisted auth context。
+ * 只存 AES-GCM 加密的 opaque provider ref；永不把 raw cookie/token 回傳前端或 LLM。
+ */
+export const computerAuthContexts = pgTable("computer_auth_contexts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  /** Service-scoped host (e.g. example.com) — never full cookie jar */
+  serviceHost: text("service_host").notNull(),
+  serviceLabel: text("service_label").notNull().default(""),
+  /** browser_session | provider_context */
+  scope: text("scope").notNull().default("browser_session"),
+  provider: text("provider").notNull(),
+  /** AES-GCM encrypted opaque context (iv:tag:cipher hex) */
+  contextEnc: text("context_enc").notNull(),
+  /** Non-secret fingerprint for audits (sha256 of ciphertext) */
+  contextFingerprint: text("context_fingerprint").notNull(),
+  sourceSessionId: uuid("source_session_id"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  userHostIdx: index("computer_auth_contexts_user_host_idx").on(t.userId, t.serviceHost),
+  userActiveIdx: index("computer_auth_contexts_user_idx").on(t.userId),
+  expiresIdx: index("computer_auth_contexts_expires_idx").on(t.expiresAt),
+}));

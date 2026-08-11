@@ -6,8 +6,10 @@ import {
   isComputerBrowserEnabled,
   isComputerDesktopEnabled,
   isComputerHumanTakeoverEnabled,
+  isComputerPersistedAuthEnabled,
   isComputerRuntimeEnabled,
   isComputerSessionTerminal,
+  normalizeAuthServiceHost,
   selectRuntimeRoute,
   validateDesktopAction,
   formatDesktopEscalationReason,
@@ -25,15 +27,32 @@ describe("computer runtime flags", () => {
     expect(isComputerHumanTakeoverEnabled({})).toBe(false);
     expect(isComputerArtifactIngestionEnabled({})).toBe(false);
     expect(isComputerDesktopEnabled({})).toBe(false);
+    expect(isComputerPersistedAuthEnabled({})).toBe(false);
     expect(isComputerDesktopEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_DESKTOP_ENABLED: "1" })).toBe(true);
+    expect(isComputerPersistedAuthEnabled({
+      COMPUTER_RUNTIME_ENABLED: "1",
+      COMPUTER_PERSISTED_AUTH_ENABLED: "1",
+    })).toBe(true);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerHumanTakeoverEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerArtifactIngestionEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
+    // persisted auth stays off unless explicitly enabled (security review gate)
+    expect(isComputerPersistedAuthEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(false);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_BROWSER_ENABLED: "0" })).toBe(false);
     expect(isComputerHumanTakeoverEnabled({
       COMPUTER_RUNTIME_ENABLED: "1",
       COMPUTER_HUMAN_TAKEOVER_ENABLED: "0",
     })).toBe(false);
+  });
+});
+
+describe("auth service host normalize", () => {
+  it("accepts public hosts and rejects private", () => {
+    expect(normalizeAuthServiceHost("https://Example.COM/path")).toBe("example.com");
+    expect(normalizeAuthServiceHost("example.com")).toBe("example.com");
+    expect(normalizeAuthServiceHost("https://127.0.0.1/")).toBe(null);
+    expect(normalizeAuthServiceHost("localhost")).toBe(null);
+    expect(normalizeAuthServiceHost("")).toBe(null);
   });
 });
 

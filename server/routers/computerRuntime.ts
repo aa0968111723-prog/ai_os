@@ -31,10 +31,16 @@ import {
   runDesktopAction,
 } from "../services/computerRuntime/desktopCore";
 import {
+  listAuthContexts,
+  revokeAuthContext,
+  saveAuthContextFromSession,
+} from "../services/computerRuntime/persistedAuth";
+import {
   isComputerArtifactIngestionEnabled,
   isComputerBrowserEnabled,
   isComputerDesktopEnabled,
   isComputerHumanTakeoverEnabled,
+  isComputerPersistedAuthEnabled,
   isComputerRuntimeEnabled,
 } from "../../shared/computerRuntime";
 
@@ -61,6 +67,7 @@ export const computerRuntimeRouter = router({
     humanTakeoverEnabled: isComputerHumanTakeoverEnabled(),
     artifactIngestionEnabled: isComputerArtifactIngestionEnabled(),
     desktopEnabled: isComputerDesktopEnabled(),
+    persistedAuthEnabled: isComputerPersistedAuthEnabled(),
   })),
 
   createSession: authedProcedure
@@ -70,6 +77,8 @@ export const computerRuntimeRouter = router({
       stepId: z.string().max(100).optional(),
       startUrl: z.string().max(2_000).optional(),
       label: z.string().max(160).optional(),
+      /** PR-6E: reuse remembered login (id only; ciphertext never leaves server) */
+      authContextId: z.string().uuid().optional(),
     }))
     .mutation(({ ctx, input }) => createComputerSession({ auth: ctx.auth, ...input })),
 
@@ -290,5 +299,32 @@ export const computerRuntimeRouter = router({
       auth: ctx.auth,
       sessionId: input.sessionId,
       goal: input.goal,
+    })),
+
+  /** PR-6E：明確 opt-in 記住目前 session 的服務登入（加密 opaque） */
+  saveAuthContext: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      explicitOptIn: z.literal(true),
+      serviceLabel: z.string().max(80).optional(),
+    }))
+    .mutation(({ ctx, input }) => saveAuthContextFromSession({
+      auth: ctx.auth,
+      sessionId: input.sessionId,
+      explicitOptIn: input.explicitOptIn,
+      serviceLabel: input.serviceLabel,
+    })),
+
+  listAuthContexts: authedProcedure
+    .input(z.object({ includeRevoked: z.boolean().optional() }).optional())
+    .query(({ ctx, input }) => listAuthContexts(ctx.auth, {
+      includeRevoked: input?.includeRevoked,
+    })),
+
+  revokeAuthContext: authedProcedure
+    .input(z.object({ authContextId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => revokeAuthContext({
+      auth: ctx.auth,
+      authContextId: input.authContextId,
     })),
 });

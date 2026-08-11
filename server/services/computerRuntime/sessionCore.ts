@@ -29,6 +29,7 @@ import {
 import type { ComputerEventType } from "../../../shared/computerEvents";
 import { computerEventToAgentObservationSummary } from "../../../shared/computerEvents";
 import { mockBrowserProvider } from "./mockBrowserProvider";
+import { markAuthContextReused, resolveAuthContextForProvider } from "./persistedAuth";
 
 type SessionRow = typeof schema.computerSessions.$inferSelect;
 
@@ -161,6 +162,8 @@ export async function createComputerSession(input: {
   stepId?: string;
   startUrl?: string;
   label?: string;
+  /** PR-6E: reuse saved login (opaque); never sent to LLM */
+  authContextId?: string;
 }): Promise<ComputerSessionSnapshot> {
   assertRuntimeEnabled();
   const project = await loadProjectAuth(input.auth, input.projectId);
@@ -172,11 +175,25 @@ export async function createComputerSession(input: {
     throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "此專案同時進行的工作電腦已達上限" });
   }
 
+  let sanitizedStart: string | undefined;
   if (input.startUrl) {
     const check = validateComputerNavigationUrl(input.startUrl);
     if (!check.ok) {
       throw new TRPCError({ code: "BAD_REQUEST", message: check.message ?? "起始網址不安全" });
     }
+    sanitizedStart = check.sanitizedUrl;
+  }
+
+  let providerAuthContext: string | undefined;
+  let reusedHost: string | undefined;
+  if (input.authContextId) {
+    const resolved = await resolveAuthContextForProvider({
+      auth: input.auth,
+      authContextId: input.authContextId,
+      expectedHost: sanitizedStart ?? null,
+    });
+    providerAuthContext = resolved.opaque;
+    reusedHost = resolved.snapshot.serviceHost;
   }
 
   const now = new Date();
@@ -191,8 +208,9 @@ export async function createComputerSession(input: {
       runId: input.runId,
       stepId: input.stepId,
       runtimeKind: "browser",
-      startUrl: input.startUrl,
+      startUrl: sanitizedStart ?? input.startUrl,
       label: input.label,
+      providerAuthContext,
     });
   } catch (err) {
     throw new TRPCError({
@@ -214,7 +232,7 @@ export async function createComputerSession(input: {
     controlHolder: "agent",
     leaseVersion: 1,
     sessionRevision: 1,
-    currentUrl: input.startUrl ? validateComputerNavigationUrl(input.startUrl).sanitizedUrl ?? null : null,
+    currentUrl: sanitizedStart ?? null,
     label: input.label?.slice(0, 160) ?? "AI 工作電腦",
     actionCount: 0,
     startedAt: now,
@@ -229,10 +247,23 @@ export async function createComputerSession(input: {
     stepId: row.stepId,
     sessionId: row.id,
     eventType: "computer:ready",
-    summary: "工作電腦已就緒（Browser）",
+    summary: reusedHost
+      ? `工作電腦已就緒（Browser，已套用 ${reusedHost} 登入）`
+      : "工作電腦已就緒（Browser）",
     status: row.status,
     safeUrl: row.currentUrl,
   });
+
+  if (reusedHost) {
+    await markAuthContextReused({
+      projectId: row.projectId,
+      groupId: row.groupId,
+      runId: row.runId,
+      stepId: row.stepId,
+      sessionId: row.id,
+      serviceHost: reusedHost,
+    });
+  }
 
   return toSnapshot(row);
 }
