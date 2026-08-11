@@ -36,10 +36,19 @@ export const computerSessions = pgTable("computer_sessions", {
   providerSessionRef: text("provider_session_ref").notNull(),
   status: text("status").$type<ComputerSessionStatus>().notNull().default("requested"),
   controlHolder: text("control_holder").$type<ComputerControlHolder>().notNull().default("none"),
+  /** Who currently holds human control (PR-6B) */
+  controlHolderUserId: uuid("control_holder_user_id"),
   leaseVersion: integer("lease_version").notNull().default(0),
+  /** Human lease expiry — agent lease is implicit until takeover */
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   sessionRevision: integer("session_revision").notNull().default(0),
   currentUrl: text("current_url"),
   label: text("label"),
+  /** Safe message for HUD when waiting_human (no secrets) */
+  takeoverReason: text("takeover_reason"),
+  takeoverReasonCode: text("takeover_reason_code"),
+  /** After release to agent, must re-observe before agent acts */
+  needsReobserve: boolean("needs_reobserve").notNull().default(false),
   actionCount: integer("action_count").notNull().default(0),
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow().notNull(),
@@ -82,6 +91,42 @@ export const computerActions = pgTable("computer_actions", {
   actionIdUq: uniqueIndex("computer_actions_action_id_uq").on(t.actionId),
   sessionSeqIdx: index("computer_actions_session_seq_idx").on(t.sessionId, t.sequence),
   sessionStatusIdx: index("computer_actions_session_status_idx").on(t.sessionId, t.status),
+}));
+
+/**
+ * PR-6C：外部 runtime 下載的成品。
+ * quarantine → scan → import Asset；idempotent by (session_id, sha256) / actionId.
+ */
+export const computerArtifacts = pgTable("computer_artifacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  actionId: text("action_id"),
+  sourceUrlSanitized: text("source_url_sanitized"),
+  providerFileRef: text("provider_file_ref"),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type"),
+  sizeBytes: integer("size_bytes"),
+  sha256: text("sha256"),
+  scanStatus: text("scan_status").notNull().default("pending"),
+  importStatus: text("import_status").notNull().default("detected"),
+  quarantinePath: text("quarantine_path"),
+  assetId: uuid("asset_id"),
+  sceneId: uuid("scene_id"),
+  shotId: uuid("shot_id"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  /** outputContract snapshot */
+  outputContract: jsonb("output_contract").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  sessionIdx: index("computer_artifacts_session_idx").on(t.sessionId),
+  projectIdx: index("computer_artifacts_project_idx").on(t.projectId),
+  shaSessionUq: uniqueIndex("computer_artifacts_session_sha_uq").on(t.sessionId, t.sha256),
+  actionIdUq: uniqueIndex("computer_artifacts_action_id_uq").on(t.actionId),
+  assetIdx: index("computer_artifacts_asset_idx").on(t.assetId),
 }));
 
 /** Short-lived live-view access tokens (durable revoke on stop). */

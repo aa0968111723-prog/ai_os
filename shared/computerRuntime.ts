@@ -60,6 +60,46 @@ export function isComputerBrowserEnabled(
   return v !== "0" && v !== "false" && v !== "off" && v !== "no";
 }
 
+/** PR-6B Human Takeover — requires runtime enabled. */
+export function isComputerHumanTakeoverEnabled(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): boolean {
+  if (!isComputerRuntimeEnabled(env)) return false;
+  const v = String(env.COMPUTER_HUMAN_TAKEOVER_ENABLED ?? env.VITE_COMPUTER_HUMAN_TAKEOVER_ENABLED ?? "1").trim().toLowerCase();
+  return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+}
+
+/** PR-6C Artifact ingestion. */
+export function isComputerArtifactIngestionEnabled(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): boolean {
+  if (!isComputerRuntimeEnabled(env)) return false;
+  const v = String(env.COMPUTER_ARTIFACT_INGESTION_ENABLED ?? env.VITE_COMPUTER_ARTIFACT_INGESTION_ENABLED ?? "1").trim().toLowerCase();
+  return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+}
+
+export type ComputerArtifactScanStatus = "pending" | "clean" | "blocked" | "failed";
+export type ComputerArtifactImportStatus =
+  | "detected"
+  | "quarantined"
+  | "scanning"
+  | "ready"
+  | "importing"
+  | "imported"
+  | "failed"
+  | "duplicate";
+
+export interface ComputerOutputContract {
+  artifactType?: "image" | "video" | "audio" | "doc" | "any";
+  attachTo?: "project" | "scene" | "shot";
+  sceneId?: string;
+  shotId?: string;
+  title?: string;
+}
+
+/** Max download size for computer artifacts (50MB default). */
+export const COMPUTER_ARTIFACT_MAX_BYTES = (Number(process.env.COMPUTER_ARTIFACT_MAX_MB) || 50) * 1024 * 1024;
+
 /** Session guards (defaults from PR-6 plan). */
 export const COMPUTER_SESSION_DEFAULTS = {
   /** Max wall-clock session life */
@@ -72,6 +112,8 @@ export const COMPUTER_SESSION_DEFAULTS = {
   maxConcurrentPerUser: 2,
   /** Max concurrent sessions per project */
   maxConcurrentPerProject: 3,
+  /** Human control lease TTL (must re-acquire or release) */
+  humanLeaseMs: 15 * 60_000,
 } as const;
 
 export const COMPUTER_SESSION_TERMINAL: ReadonlySet<ComputerSessionStatus> = new Set([
@@ -88,9 +130,30 @@ export function isComputerSessionTerminal(status: string): boolean {
 export function canAcceptComputerAction(status: ComputerSessionStatus, holder: ComputerControlHolder): boolean {
   if (isComputerSessionTerminal(status) || status === "provisioning" || status === "requested") return false;
   if (status === "paused" || status === "waiting_human") return false;
-  // PR-6A watch-only live view: agent_control may act; human_control blocks agent
-  if (holder === "human") return false;
+  // Agent input revoked while human holds control
+  if (holder === "human" || status === "human_control") return false;
   return status === "ready" || status === "agent_control";
+}
+
+/** Human may issue control-mode live view / local browser ops only in these states. */
+export function canAcceptHumanControl(status: ComputerSessionStatus, holder: ComputerControlHolder): boolean {
+  if (isComputerSessionTerminal(status)) return false;
+  return status === "human_control" || status === "waiting_human" || holder === "human";
+}
+
+export type TakeoverReasonCode =
+  | "login_required"
+  | "two_factor"
+  | "captcha_or_challenge"
+  | "sensitive_input"
+  | "subjective_judgment"
+  | "user_requested"
+  | "other";
+
+export interface TakeoverRequest {
+  reasonCode: TakeoverReasonCode;
+  /** Safe, non-secret user-facing message */
+  userMessage: string;
 }
 
 export interface CreateComputerSessionInput {
@@ -133,10 +196,17 @@ export interface ComputerSessionSnapshot {
   provider: string;
   status: ComputerSessionStatus;
   controlHolder: ComputerControlHolder;
+  controlHolderUserId?: string | null;
   leaseVersion: number;
+  leaseExpiresAt?: string | null;
   sessionRevision: number;
   currentUrl?: string | null;
   label?: string | null;
+  /** Safe takeover prompt when waiting_human */
+  takeoverReason?: string | null;
+  takeoverReasonCode?: string | null;
+  /** After hand-back, agent must re-observe before acting */
+  needsReobserve?: boolean;
   actionCount: number;
   startedAt: string;
   lastActivityAt: string;

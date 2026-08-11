@@ -13,7 +13,23 @@ import {
   runComputerAction,
   stopComputerSession,
 } from "../services/computerRuntime/sessionCore";
-import { isComputerBrowserEnabled, isComputerRuntimeEnabled } from "../../shared/computerRuntime";
+import {
+  acquireHumanControl,
+  releaseControlToAgent,
+  requestHumanTakeover,
+} from "../services/computerRuntime/controlLease";
+import {
+  detectMockArtifact,
+  importArtifactToProject,
+  listArtifactsForSession,
+  registerArtifactFromUrl,
+} from "../services/computerRuntime/artifacts";
+import {
+  isComputerArtifactIngestionEnabled,
+  isComputerBrowserEnabled,
+  isComputerHumanTakeoverEnabled,
+  isComputerRuntimeEnabled,
+} from "../../shared/computerRuntime";
 
 const browserActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("navigate"), url: z.string().min(1).max(2_000) }),
@@ -35,6 +51,8 @@ export const computerRuntimeRouter = router({
   status: authedProcedure.query(() => ({
     enabled: isComputerRuntimeEnabled(),
     browserEnabled: isComputerBrowserEnabled(),
+    humanTakeoverEnabled: isComputerHumanTakeoverEnabled(),
+    artifactIngestionEnabled: isComputerArtifactIngestionEnabled(),
   })),
 
   createSession: authedProcedure
@@ -86,4 +104,98 @@ export const computerRuntimeRouter = router({
   stop: authedProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(({ ctx, input }) => stopComputerSession({ auth: ctx.auth, sessionId: input.sessionId })),
+
+  /** PR-6B：AI 請求人類接管（登入／2FA／判斷） */
+  requestTakeover: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      reasonCode: z.enum([
+        "login_required",
+        "two_factor",
+        "captcha_or_challenge",
+        "sensitive_input",
+        "subjective_judgment",
+        "user_requested",
+        "other",
+      ]),
+      userMessage: z.string().trim().min(1).max(300),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => requestHumanTakeover({ auth: ctx.auth, ...input })),
+
+  /** PR-6B：使用者取得控制權（AI input 立即失效） */
+  acquireControl: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => acquireHumanControl({ auth: ctx.auth, ...input })),
+
+  /** PR-6B：交回 AI；server 會 re-observe，AI 必須 inspect 後才能再 act */
+  releaseToAgent: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => releaseControlToAgent({ auth: ctx.auth, ...input })),
+
+  /** PR-6C：列出 session 成品 */
+  listArtifacts: authedProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .query(({ ctx, input }) => listArtifactsForSession(ctx.auth, input.sessionId)),
+
+  /** PR-6C：mock / demo 偵測下載（1×1 PNG） */
+  detectMockArtifact: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      actionId: z.string().min(8).max(120).optional(),
+      sceneId: z.string().uuid().optional(),
+      title: z.string().max(80).optional(),
+    }))
+    .mutation(({ ctx, input }) => detectMockArtifact({
+      auth: ctx.auth,
+      sessionId: input.sessionId,
+      actionId: input.actionId,
+      outputContract: {
+        artifactType: "image",
+        attachTo: input.sceneId ? "scene" : "project",
+        sceneId: input.sceneId,
+        title: input.title,
+      },
+    })),
+
+  /** PR-6C：從安全 https URL 下載進 quarantine */
+  registerFromUrl: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      actionId: z.string().min(8).max(120),
+      url: z.string().url().max(2_000),
+      filename: z.string().max(200).optional(),
+      sceneId: z.string().uuid().optional(),
+      title: z.string().max(80).optional(),
+    }))
+    .mutation(({ ctx, input }) => registerArtifactFromUrl({
+      auth: ctx.auth,
+      sessionId: input.sessionId,
+      actionId: input.actionId,
+      url: input.url,
+      filename: input.filename,
+      outputContract: {
+        attachTo: input.sceneId ? "scene" : "project",
+        sceneId: input.sceneId,
+        title: input.title,
+      },
+    })),
+
+  /** PR-6C：掃描通過後匯入 Asset（sha256 去重） */
+  importArtifact: authedProcedure
+    .input(z.object({
+      artifactId: z.string().uuid(),
+      forceDuplicate: z.boolean().optional(),
+    }))
+    .mutation(({ ctx, input }) => importArtifactToProject({
+      auth: ctx.auth,
+      artifactId: input.artifactId,
+      forceDuplicate: input.forceDuplicate,
+    })),
 });

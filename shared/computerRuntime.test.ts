@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   canAcceptComputerAction,
+  canAcceptHumanControl,
+  isComputerArtifactIngestionEnabled,
   isComputerBrowserEnabled,
+  isComputerHumanTakeoverEnabled,
   isComputerRuntimeEnabled,
   isComputerSessionTerminal,
   selectRuntimeRoute,
@@ -16,8 +19,16 @@ describe("computer runtime flags", () => {
   it("defaults off", () => {
     expect(isComputerRuntimeEnabled({})).toBe(false);
     expect(isComputerBrowserEnabled({})).toBe(false);
+    expect(isComputerHumanTakeoverEnabled({})).toBe(false);
+    expect(isComputerArtifactIngestionEnabled({})).toBe(false);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
+    expect(isComputerHumanTakeoverEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
+    expect(isComputerArtifactIngestionEnabled({ COMPUTER_RUNTIME_ENABLED: "1" })).toBe(true);
     expect(isComputerBrowserEnabled({ COMPUTER_RUNTIME_ENABLED: "1", COMPUTER_BROWSER_ENABLED: "0" })).toBe(false);
+    expect(isComputerHumanTakeoverEnabled({
+      COMPUTER_RUNTIME_ENABLED: "1",
+      COMPUTER_HUMAN_TAKEOVER_ENABLED: "0",
+    })).toBe(false);
   });
 });
 
@@ -26,8 +37,13 @@ describe("session state guards", () => {
     expect(isComputerSessionTerminal("stopped")).toBe(true);
     expect(canAcceptComputerAction("agent_control", "agent")).toBe(true);
     expect(canAcceptComputerAction("agent_control", "human")).toBe(false);
+    expect(canAcceptComputerAction("human_control", "human")).toBe(false);
+    expect(canAcceptComputerAction("waiting_human", "none")).toBe(false);
     expect(canAcceptComputerAction("stopped", "agent")).toBe(false);
     expect(canAcceptComputerAction("ready", "none")).toBe(true);
+    expect(canAcceptHumanControl("human_control", "human")).toBe(true);
+    expect(canAcceptHumanControl("waiting_human", "none")).toBe(true);
+    expect(canAcceptHumanControl("agent_control", "agent")).toBe(false);
   });
 });
 
