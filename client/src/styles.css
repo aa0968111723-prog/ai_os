@@ -8220,7 +8220,10 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
  * 只針對 .global-assistant 複寫，其他選單在桌機仍然是錨定下拉，行為不變。 */
 .menu-surface.is-sheet.global-assistant {
   position: fixed;
-  z-index: 47;
+  /* Persistent Agent Surface is the workflow home. Page modals use up to
+     z-index:999; the Assistant must remain interactive above them while its
+     open event asks the page to close any stale modal. */
+  z-index: 1100;
   inset-inline: 0;
   top: auto;
   /* bottom 吃 --kb-inset：面板裡有輸入框，鍵盤彈出會直接蓋住輸入列
@@ -8263,7 +8266,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .menu-surface__scrim:has(+ .global-assistant),
 button.menu-surface__scrim:has(+ .global-assistant):hover {
   position: fixed;
-  z-index: 46;
+  z-index: 1099;
   inset: 0;
   display: block;
   width: 100%;

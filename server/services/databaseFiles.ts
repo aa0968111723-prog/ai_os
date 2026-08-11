@@ -230,18 +230,18 @@ export function isPrivateIp(ip: string): boolean {
 export async function assertPublicHostOrError(hostname: string): Promise<string | null> {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   // 有設出口代理（HTTPS_PROXY/HTTP_PROXY）時，真正的解析與連線由代理執行，本機 DNS 非權威、
-  // 也可能解不到外部名稱（純代理出口環境）。但仍「先嘗試本機解析」：只要解得到就照樣逐一判 IP，
+  // 代理環境也必須先由應用程式解析並分類目標 IP；解析失敗一律 fail closed，
   // 補上「公開主機名 DNS 解析到內網（169.254.169.254／10.x…）」這條代理未必擋得住的 SSRF 破口
-  // （舊版在代理模式一律 return null 直接放行，等於整條權威防線關閉）。只有本機真的解不到時，
-  // 才把邊界交回出口代理、不誤擋正常匯入；字面內部位址在任何情況下都已由 ssrfGuardError 快篩擋下。
-  const proxied = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
+  // 避免把無法判定的 hostname 交給 opaque proxy 後繞過 metadata/private-network 防線。
   let addrs: Array<{ address: string }>;
   try {
     addrs = await dnsLookup(host, { all: true });
   } catch {
-    return proxied ? null : "無法解析這個網址的主機（DNS 查詢失敗）";
+    // Fail closed even behind a proxy: a hostname the application cannot
+    // classify must not be delegated to an opaque proxy resolver.
+    return "無法解析這個網址的主機（DNS 查詢失敗）";
   }
-  if (addrs.length === 0) return proxied ? null : "無法解析這個網址的主機";
+  if (addrs.length === 0) return "無法解析這個網址的主機";
   for (const { address } of addrs) {
     if (isPrivateIp(address)) return "不能匯入內部網址";
   }

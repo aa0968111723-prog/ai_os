@@ -43,6 +43,8 @@ import {
   isComputerPersistedAuthEnabled,
   isComputerRuntimeEnabled,
 } from "../../shared/computerRuntime";
+import { BROWSER_EFFECTS, browserEffectPolicy, type BrowserEffect } from "../../shared/browserActionAdapter";
+import { TRPCError } from "@trpc/server";
 
 const browserActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("navigate"), url: z.string().min(1).max(2_000) }),
@@ -58,6 +60,22 @@ const browserActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("wait"), ms: z.number().int().min(0).max(30_000) }),
   z.object({ kind: z.literal("inspect") }),
 ]);
+const browserEffectSchema = z.enum(BROWSER_EFFECTS);
+
+function assertBrowserEffectContract(action: z.infer<typeof browserActionSchema>, effect: BrowserEffect, confirmedEffect?: BrowserEffect) {
+  const fixedEffect: Partial<Record<typeof action.kind, BrowserEffect>> = {
+    inspect: "observe", scroll: "observe", wait: "observe", navigate: "navigate", type: "form_fill",
+  };
+  const required = fixedEffect[action.kind];
+  if (required && effect !== required) throw new TRPCError({ code: "BAD_REQUEST", message: `Browser action ${action.kind} must declare effect ${required}` });
+  if ((action.kind === "click" || action.kind === "key") && effect === "observe") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Interactive browser actions must declare their final effect" });
+  }
+  const policy = browserEffectPolicy(effect, confirmedEffect);
+  if (policy.confirmationRequired && !policy.allowed) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Explicit confirmation required for browser effect ${effect}` });
+  }
+}
 
 export const computerRuntimeRouter = router({
   /** Product capability probe for UI */
@@ -109,17 +127,22 @@ export const computerRuntimeRouter = router({
       sessionId: z.string().uuid(),
       actionId: z.string().min(8).max(120),
       action: browserActionSchema,
+      effect: browserEffectSchema,
+      confirmedEffect: browserEffectSchema.optional(),
       leaseVersion: z.number().int().min(0).optional(),
       expectedSessionRevision: z.number().int().min(0).optional(),
     }))
-    .mutation(({ ctx, input }) => runComputerAction({
-      auth: ctx.auth,
-      sessionId: input.sessionId,
-      actionId: input.actionId,
-      action: input.action,
-      leaseVersion: input.leaseVersion,
-      expectedSessionRevision: input.expectedSessionRevision,
-    })),
+    .mutation(({ ctx, input }) => {
+      assertBrowserEffectContract(input.action, input.effect, input.confirmedEffect);
+      return runComputerAction({
+        auth: ctx.auth,
+        sessionId: input.sessionId,
+        actionId: input.actionId,
+        action: input.action,
+        leaseVersion: input.leaseVersion,
+        expectedSessionRevision: input.expectedSessionRevision,
+      });
+    }),
 
   stop: authedProcedure
     .input(z.object({ sessionId: z.string().uuid() }))

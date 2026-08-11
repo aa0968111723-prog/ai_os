@@ -38,6 +38,8 @@ import {
   clearAssistantConversation,
   endAssistantRun,
   getAssistantConversation,
+  isAssistantRunAttemptCurrent,
+  rebindAssistantRunId,
   registerAssistantRunController,
   recordAssistantActionResults,
   setAssistantConversation,
@@ -65,6 +67,10 @@ export function assistantActionResultsFromExecuted(items: readonly ExecutedSiteA
   const results: AssistantActionResult[] = [];
   for (const item of items) {
     const result = item.result;
+    // Some executed UI actions (for example add_note) have their own result
+    // card but are not typed referents. Only consume a verification contract
+    // when the result kind participates in recent-reference memory.
+    if (!("verification" in result) || result.verification.status !== "verified") continue;
     if (result.type === "import") results.push(result);
     else if (result.type === "create_project") results.push(result);
     else if (result.type === "create_task") {
@@ -431,6 +437,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const liveEventsRef = useRef<AssistantActivityEvent[]>([]);
   const stopRecordedRef = useRef(false);
   const activeGoalRef = useRef("");
+  const queuedMessageRef = useRef<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const pushMessage = (message: ChatMessage) => {
@@ -448,12 +455,59 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const createBrowserSession = trpc.computerRuntime.createSession.useMutation();
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
+  const durableConversation = trpc.globalAssistant.conversationState.useQuery(
+    { groupId: groupId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: !!groupId && messages.length === 0, retry: false, staleTime: 30_000 },
+  );
   const activeProjectId = pageCtx.projectId ?? projectId;
   const intakeProjectId = intakeTargetProjectId ?? activeProjectId;
   const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
   const breadcrumb = formatContextBreadcrumb(pageCtx);
   // 進行中的判定來自 store（跨卸載存活）與這一顆元件自己的 tRPC fallback
   const pending = (liveRun?.active ?? false) || ask.isPending;
+
+  useEffect(() => {
+    const recovered = durableConversation.data;
+    if (!groupId || !recovered) return;
+    setAssistantConversation<ChatMessage>(groupId, (previous) => {
+      if (previous.messages.length) return previous;
+      const runStatus: ChatMessage["runStatus"] = recovered.status === "completed"
+        ? "completed"
+        : recovered.status === "stopped"
+          ? "stopped"
+          : recovered.status === "failed"
+            ? "failed"
+            : "waiting";
+      const recoveredMessages = recovered.messages.map((message, index) => ({
+        ...message,
+        ...(message.role === "assistant" && index === recovered.messages.length - 1 ? { runStatus } : {}),
+      }));
+      return {
+        ...previous,
+        messages: recoveredMessages,
+        activeGoal: recovered.activeGoal ?? undefined,
+        recentActionResults: recovered.recentActionResults,
+        run: recovered.runId ? {
+          runId: recovered.runId,
+          events: recovered.events,
+          sources: recovered.sources,
+          // Network requests are not replayed on refresh. Durable agent runs
+          // resume through their server controller; this view remains honest.
+          active: false,
+          startedAt: new Date(recovered.updatedAt).getTime(),
+        } : null,
+      };
+    });
+    captureAssistantReturnContext({
+      groupId,
+      conversationId: recovered.conversationId,
+      projectId: recovered.projectId ?? undefined,
+      runId: recovered.runId ?? undefined,
+      originRoute: pageCtx.route,
+      originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+      focusAnchor: pageCtx.entityId,
+    });
+  }, [durableConversation.data, groupId, pageCtx.entityId, pageCtx.route]);
 
   /**
    * 卸載時**不再**中止串流。
@@ -466,7 +520,15 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend ?? input).trim();
-    if (!text || !groupId || pending) return;
+    if (!text || !groupId) return;
+    if (pending) {
+      // The completion bubble can render a fraction before the run finalizer
+      // releases its exact attempt. Never silently drop an Enter in that
+      // window; keep one bounded next turn and send it after finalization.
+      queuedMessageRef.current = text.slice(0, 500);
+      setInput("");
+      return;
+    }
 
     const localPlan = classifyAssistantRequest(text);
     const computerIntent = classifyAssistantComputerIntent(text);
@@ -628,18 +690,38 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     activeGoalRef.current = text;
     setInput("");
     setActivePlan(localPlan);
-    captureAssistantReturnContext({
+    const returnContext = captureAssistantReturnContext({
       groupId,
       projectId: pageCtx.projectId ?? projectId,
       originRoute: pageCtx.route,
       originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
       focusAnchor: pageCtx.entityId,
     });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
+    // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。generation 用來擋 stale finalizer。
+    const clientRunId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `assistant-run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const runAttempt = registerAssistantRunController(groupId, clientRunId, controller);
+    const runGeneration = runAttempt.generation;
+    let activeRunId = clientRunId;
+    const runStillCurrent = () => isAssistantRunAttemptCurrent(runAttempt.attemptId, activeRunId);
+
     // 送出當下就把 run 開起來：它活在 store 裡，關掉面板再回來仍看得到目前進度。
     setAssistantConversation<ChatMessage>(groupId, (previous) => ({
       ...previous,
       messages: [...previous.messages, { role: "user", text }],
-      run: { runId: "", events: [], sources: [], active: true, startedAt: Date.now() },
+      run: {
+        runId: clientRunId,
+        events: [],
+        sources: [],
+        active: true,
+        startedAt: Date.now(),
+        generation: runGeneration,
+        attemptId: runAttempt.attemptId,
+      },
     }));
     // 底部導覽那顆球與這張卡是同一個助手的兩個身體：卡片在思考時球也要跟著脈動，
     // 否則使用者把 sheet 滑下去之後，畫面上就沒有任何「它還在想」的線索。
@@ -663,6 +745,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
     };
     const applyDone = (data: AskData) => {
+      if (!runStillCurrent()) return;
       setOrbState("speaking");
       // 事件與來源一律以伺服器的最終版本為準；串流中途掉封包或整條退回 tRPC 時，
       // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
@@ -727,6 +810,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
     };
     const applyError = (message: string) => {
+      if (!runStillCurrent()) return;
       setOrbState("error");
       pushMessage({
         role: "assistant",
@@ -740,14 +824,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
     };
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
-    // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。
-    registerAssistantRunController(groupId, controller);
     try {
       const handled = await requestSiteAssistantStream({
         groupId,
+        conversationId: returnContext.conversationId,
         message: text,
         history: newHistory,
         projectId: pageCtx.projectId ?? projectId,
@@ -758,6 +838,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
+            if (!runStillCurrent()) return;
+            if (!rebindAssistantRunId(runAttempt.attemptId, run.runId)) return;
+            activeRunId = run.runId;
             setActivePlan(run.plan);
             captureAssistantReturnContext({
               groupId,
@@ -769,10 +852,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             });
             setAssistantConversation<ChatMessage>(groupId, (previous) => ({
               ...previous,
-              run: previous.run ? { ...previous.run, runId: run.runId } : previous.run,
+              run: previous.run && previous.run.attemptId === runAttempt.attemptId
+                ? { ...previous.run, runId: run.runId }
+                : previous.run,
             }));
           },
           onStep: (e) => {
+            if (!runStillCurrent()) return;
             liveEventsRef.current = [...liveEventsRef.current, e];
             // 只有真事件（帶 type/eventId 的統一 Agent 事件）才進進度面板。
             // 舊伺服器的 {phase,text} 沒有結構化欄位，畫不出可驗證的進度，
@@ -780,7 +866,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             const structured = liveEventsRef.current.filter(isAgentEvent);
             setAssistantConversation<ChatMessage>(groupId, (previous) => ({
               ...previous,
-              run: previous.run ? { ...previous.run, events: structured } : previous.run,
+              run: previous.run && previous.run.attemptId === runAttempt.attemptId
+                ? { ...previous.run, events: structured }
+                : previous.run,
             }));
           },
           // SSE payload 是 GlobalAskResult 的純 JSON（無 superjson）；guard 只驗協定形狀，
@@ -791,10 +879,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
       if (!handled) {
         // 串流沒開始：走一次性 tRPC（同一個核心；軌跡由 done 的 events/sources 補齊）
+        // 若此 generation 已被 supersede/abort，不可再 mutate——避免舊回呼污染新 run。
+        if (!runStillCurrent() || controller.signal.aborted) return;
         await new Promise<void>((resolve) => {
           ask.mutate(
             {
               groupId, message: text, history: newHistory,
+              conversationId: returnContext.conversationId,
               projectId: pageCtx.projectId ?? projectId,
               pageContext: toWirePageContext(pageCtx),
               recentActionResults: conversation.recentActionResults,
@@ -809,16 +900,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         });
       }
     } finally {
-      endAssistantRun(groupId);
-      setActivePlan(null);
+      // generation-scoped：舊 run 的 finally 不會動到已接手的新 run（含 active 旗標）
+      endAssistantRun(groupId, activeRunId, runAttempt.attemptId);
+      // activePlan 是元件本地 state：若已被更新 generation 接手，不要清掉它的 plan
+      const currentGen = getAssistantConversation<ChatMessage>(groupId).run?.generation;
+      if (currentGen == null || currentGen === runGeneration) {
+        setActivePlan(null);
+      }
     }
   };
 
   const stopCurrent = () => {
     if (!pending || stopRecordedRef.current || !groupId) return;
     stopRecordedRef.current = true;
+    const runId = liveRun?.runId;
+    const attemptId = liveRun?.attemptId;
     // store 的把手優先（跨卸載仍有效）；本地 ref 是同一顆 controller，重複 abort 無害
-    abortAssistantRun(groupId);
+    if (runId && attemptId) abortAssistantRun(runId, attemptId);
     abortRef.current?.abort();
     setOrbState("idle");
     pushMessage({
@@ -830,8 +928,15 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events: liveEventsRef.current.filter(isAgentEvent),
       retryText: activeGoalRef.current || undefined,
     });
-    endAssistantRun(groupId);
+    endAssistantRun(groupId, runId, attemptId);
   };
+
+  useEffect(() => {
+    if (pending || !groupId || !queuedMessageRef.current) return;
+    const queued = queuedMessageRef.current;
+    queuedMessageRef.current = null;
+    void handleSend(queued);
+  }, [pending, groupId]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -1041,7 +1146,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
                   {/* 如果是 AI 回覆，提供一鍵新專案的按鈕（帶靈感去建立表單；與 create_project
                       確認卡並存：卡是「AI 已擬好欄位」，這顆是「我自己去表單填」） */}
-                  {msg.role === "assistant" && onUseIdeaForNewProject && !msg.siteActions?.some((a) => a.type === "create_project") && (
+                  {msg.role === "assistant"
+                    && onUseIdeaForNewProject
+                    && !msg.siteActions?.some((a) => a.type === "create_project")
+                    && !msg.executedSiteActions?.some((item) => item.result.type === "create_project") && (
                     <div className="ai-copilot-bubble__actions">
                       <Button
                         variant="ghost"

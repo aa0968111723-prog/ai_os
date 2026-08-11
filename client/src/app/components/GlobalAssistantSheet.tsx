@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type RefObject } from "react";
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
@@ -77,6 +77,12 @@ export function GlobalAssistantSheet({
   useEffect(() => {
     setScopeOverride(null);
   }, [projectId]);
+  useLayoutEffect(() => {
+    // Publish the surface transition before the browser paints. Page-owned
+    // modals subscribe to this event and close themselves, so the Assistant
+    // never briefly shares focus or pointer ownership with a route modal.
+    window.dispatchEvent(new CustomEvent(open ? "aios:assistant-opened" : "aios:assistant-closed"));
+  }, [open]);
   const scope: "project" | "group" = projectId ? (scopeOverride ?? "project") : "group";
 
   const goTo = (href: string) => {

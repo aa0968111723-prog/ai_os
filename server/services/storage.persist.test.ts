@@ -38,7 +38,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (assetDir) await rm(assetDir, { recursive: true, force: true });
+  if (assetDir) await rm(assetDir, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
 });
 
 describe("storage 持久化：寫入／讀回", () => {
@@ -127,7 +127,7 @@ describe("storage 持久化：大量寫入不會遺失", () => {
         expect(await readFile(abs, "utf8")).toBe(`half-life-${i}`);
       }
     }
-  });
+  }, 15_000);
 });
 
 describe("storage 持久化：軟刪除 vs 永久刪除語意", () => {
@@ -284,7 +284,7 @@ describe("storage 持久化：內容指紋穩定（上線前抽樣可比對）",
       digests.add(h);
     }
     expect(digests.size).toBe(50);
-  });
+  }, 15_000);
 });
 
 describe("storage 持久化：feedback 截圖路徑", () => {

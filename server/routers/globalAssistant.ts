@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure } from "../trpc";
+import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
@@ -38,6 +38,7 @@ import {
   updateSiteTraceSession,
 } from "../services/aiSiteTrace";
 import { recordAiTraceEventSafely } from "../services/aiTrace";
+import { beginAssistantConversation, checkpointAssistantConversation, failAssistantConversation, loadAssistantConversation } from "../services/assistantConversationState";
 import { taskPrioritySchema, type GroupCommandLevel } from "../../shared/groupAgent";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import {
@@ -188,6 +189,19 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type SiteActionProposal = z.infer<typeof siteActionProposalSchema>;
+
+/** Capability-first write guard. A DIRECT/ASK turn that resolved to one
+ * concrete capability may not smuggle a second write merely because the
+ * natural-language message mentions another entity (for example the word
+ * "project" in "import into the just-created project"). This guard applies to
+ * deterministic mock proposals and model proposals alike. */
+export function siteActionProposalsForPlan(
+  plan: AssistantExecutionPlan,
+  proposals: readonly SiteActionProposal[],
+): SiteActionProposal[] {
+  if (!plan.capabilityId) return [...proposals];
+  return proposals.filter((proposal) => proposal.type === plan.capabilityId);
+}
 
 /** 全站回覆＝組回覆＋站級動作提議 */
 const globalReplySchema = teamReplySchema.extend({
@@ -503,6 +517,7 @@ export type GlobalAskStreamEvent = AgentEvent;
 export interface GlobalAskInput {
   auth: AuthState;
   groupId: string;
+  conversationId?: string;
   message: string;
   history?: ChatTurn[];
   /** 發問當下所在的專案頁（純脈絡提示，只用來記進 trace 與提示詞一句話；授權一律 requireGroup 重驗） */
@@ -667,6 +682,7 @@ export async function runGlobalAsk(
     activeGoal: input.activeGoal,
     recentActionResults: input.recentActionResults,
     pageProjectId: input.projectId,
+    continuation: semantic.continuation,
   });
   if (projectResolution.status === "resolved" && projectResolution.projectId) {
     goalFrame = { ...goalFrame, scope: { ...goalFrame.scope, projectId: projectResolution.projectId } };
@@ -1052,7 +1068,7 @@ export async function runGlobalAsk(
       : "";
     const answer = `（測試模式）本組共 ${teamCtx.totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}${evidenceSummary}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析；明確指令中的可撤銷內部動作會直接完成，對外、付費或影響較大的動作仍會先請你確認。`;
     const mockProposals: SiteActionProposal[] = [];
-    if (input.message.includes("專案") && creationOptions.platforms.length) {
+    if (executionPlan.capabilityId === "create_project" && creationOptions.platforms.length) {
       mockProposals.push({
         type: "create_project",
         title: input.message.replace(/[「」]/g, "").slice(0, 40) || "測試模式專案",
@@ -1060,10 +1076,13 @@ export async function runGlobalAsk(
         platform: creationOptions.platforms[0].value,
       });
     }
-    if (input.message.includes("筆記")) {
+    if (executionPlan.capabilityId === "add_note") {
       mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
     }
-    const proposedSiteActions = resolveSiteActions(siteRefs, [...deterministicUrlProposal, ...mockProposals]);
+    const proposedSiteActions = resolveSiteActions(
+      siteRefs,
+      siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
+    );
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const terminalStatus = executionTerminalStatus(siteActions.length, direct.executed.map((item) => item.result));
@@ -1320,10 +1339,10 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     }
 
     const reply = outcome.reply;
-    const proposedSiteActions = resolveSiteActions(siteRefs, [
+    const proposedSiteActions = resolveSiteActions(siteRefs, siteActionProposalsForPlan(executionPlan, [
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
-    ]);
+    ]));
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const terminalStatus = executionTerminalStatus(pendingConfirmation.length, direct.executed.map((item) => item.result));
@@ -1720,6 +1739,15 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
       });
       const assetId = imported.asset.id;
       const verification = await readBackVerification(async () => {
+        if (imported.duplicate) {
+          const [usage] = await db.select({ id: schema.libraryResourceUsages.id })
+            .from(schema.libraryResourceUsages).where(and(
+              eq(schema.libraryResourceUsages.libraryResourceId, imported.libraryResourceId),
+              eq(schema.libraryResourceUsages.projectId, input.projectId),
+              eq(schema.libraryResourceUsages.groupId, input.groupId),
+            ));
+          return !!usage;
+        }
         const [found] = await db.select({ id: schema.assets.id, projectId: schema.assets.projectId, deletedAt: schema.assets.deletedAt })
           .from(schema.assets).where(eq(schema.assets.id, assetId));
         return !!found && found.projectId === input.projectId && !found.deletedAt;
@@ -1727,9 +1755,9 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
       return {
         type: "import",
         source: "url",
-        resourceIds: imported.ok && imported.libraryResourceId ? [imported.libraryResourceId] : [],
+        resourceIds: imported.libraryResourceId ? [imported.libraryResourceId] : [],
         assetIds: [assetId],
-        intelligenceIds: imported.ok && imported.intelligenceId ? [imported.intelligenceId] : [],
+        intelligenceIds: imported.intelligenceId ? [imported.intelligenceId] : [],
         projectId: input.projectId,
         count: imported.ok ? 1 : 0,
         duplicateCount: imported.ok ? 0 : 1,
@@ -1877,6 +1905,21 @@ export async function undoSiteActionCore(auth: AuthState, input: UndoSiteActionI
   return { ok: true };
 }
 
+export async function runGlobalAskWithCheckpoint(
+  input: GlobalAskInput,
+  onEvent?: (event: GlobalAskStreamEvent) => void,
+): Promise<GlobalAskResult> {
+  await beginAssistantConversation(input);
+  try {
+    const result = await runGlobalAsk(input, onEvent);
+    await checkpointAssistantConversation(input, result);
+    return result;
+  } catch (error) {
+    await failAssistantConversation(input, error).catch(() => undefined);
+    throw error;
+  }
+}
+
 export const globalAssistantRouter = router({
   /**
    * 全站問答：組級視野（與 teamAssistant 同源）＋站級動作提議＋trace 落庫。
@@ -1885,6 +1928,7 @@ export const globalAssistantRouter = router({
   ask: authedProcedure
     .input(z.object({
       groupId: z.string().uuid(),
+      conversationId: z.string().uuid().optional(),
       message: z.string().min(1).max(500),
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(2000) })).max(8).optional(),
       /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
@@ -1896,9 +1940,10 @@ export const globalAssistantRouter = router({
       /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
       mode: agentPlannerModeSchema.optional(),
     }))
-    .mutation(({ ctx, input }) => runGlobalAsk({
+    .mutation(({ ctx, input }) => runGlobalAskWithCheckpoint({
       auth: ctx.auth,
       groupId: input.groupId,
+      conversationId: input.conversationId,
       message: input.message,
       history: input.history,
       projectId: input.projectId,
@@ -1907,6 +1952,13 @@ export const globalAssistantRouter = router({
       activeGoal: input.activeGoal,
       mode: input.mode,
     })),
+
+  conversationState: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), conversationId: z.string().uuid().optional() }))
+    .query(({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+      return loadAssistantConversation(ctx.auth, input.groupId, input.conversationId);
+    }),
 
   /** 使用者按下確認卡後執行單一站級動作（經 authedProcedure 落審計；ACL/policy 在被呼叫端） */
   runSiteAction: authedProcedure

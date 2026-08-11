@@ -96,6 +96,10 @@ E2E_MOCK=1 RUN_PG_INTEGRATION=1 npx vitest run \
   server/routers/sceneAmbience.pg.test.ts \
   server/routers/sceneCardScript.pg.test.ts \
   server/services/agentEffectCore.pg.test.ts \
+  server/services/agentRunLedger.pg.test.ts \
+  server/services/agentDbIntegrity.pg.test.ts \
+  server/services/agentDbPerformance.pg.test.ts \
+  server/services/assistantConversationState.pg.test.ts \
   server/services/taskWake.pg.test.ts \
   server/services/agentEvents.pg.test.ts \
   server/services/groupInsights.pg.test.ts \

@@ -1,0 +1,408 @@
+{
+  "observedAt": "2026-08-11T18:45:46.162557+00:00",
+  "baseUrl": "http://127.0.0.1:3199",
+  "mode": "mock",
+  "deployment": {
+    "sha": null,
+    "builtAt": null,
+    "appVersion": "0.1.0",
+    "schemaVersion": "0070_agent_live_certification",
+    "capabilityRegistryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97"
+  },
+  "projectId": "5b96ecc8-e052-4371-a3e3-f002ecfaf0cd",
+  "executions": [
+    {
+      "capabilityId": "project.health",
+      "runId": "ee86cb94-78b5-4165-80b2-20843659af09",
+      "state": "MOCK_VERIFIED",
+      "receipt": {
+        "goalId": "ee86cb94-78b5-4165-80b2-20843659af09",
+        "runId": "ee86cb94-78b5-4165-80b2-20843659af09",
+        "stepId": "certify-project.health",
+        "toolCallId": "44750b02-1002-44ce-87e4-8093e332a21b",
+        "attemptId": "d5fc1de9-de89-418c-b97c-3d9089bfd0c2",
+        "capabilityId": "project.health",
+        "handlerIdentity": "projectIntelligence.buildProjectIntelligence",
+        "effectFingerprint": "b3fb219b2ed42a86d238505a9ca41827d21ce090137f84e8dc0b5df01ee9fe06",
+        "idempotencyKey": "v6:0b05b9ae-42e8-4444-82de-c3b8fdc0fc82:ee86cb94-78b5-4165-80b2-20843659af09:certify-project.health:project.health:b3fb219b2ed42a86d238505a9ca41827d21ce090137f84e8dc0b5df01ee9fe06",
+        "requestedAt": "2026-08-11T18:45:45.568Z",
+        "executedAt": "2026-08-11T18:45:45.593Z",
+        "verifiedAt": "2026-08-11T18:45:45.663Z",
+        "verificationStage": "VERIFIED",
+        "verificationMethod": "authoritative_project_state_read_back",
+        "targetRefs": [
+          "project-health:5b96ecc8-e052-4371-a3e3-f002ecfaf0cd"
+        ],
+        "traceId": "capability-certification:ee86cb94-78b5-4165-80b2-20843659af09",
+        "actualPoints": 0,
+        "trustOrigin": "USER_EXPLICIT"
+      }
+    },
+    {
+      "capabilityId": "project.files.list",
+      "runId": "e665b571-f86c-426f-98be-b7af61f01415",
+      "state": "MOCK_VERIFIED",
+      "receipt": {
+        "goalId": "e665b571-f86c-426f-98be-b7af61f01415",
+        "runId": "e665b571-f86c-426f-98be-b7af61f01415",
+        "stepId": "certify-project.files.list",
+        "toolCallId": "8b1595b9-7a34-44f2-984c-cd0c9a61cc73",
+        "attemptId": "0621cf07-6311-4ac1-8afb-ad1ebd285d41",
+        "capabilityId": "project.files.list",
+        "handlerIdentity": "agentProjectFiles.listProjectFiles",
+        "effectFingerprint": "923063f6bfa5b62b24445b0bc56723982dc1e94ac33a506cb80f778f13b03eae",
+        "idempotencyKey": "v6:0b05b9ae-42e8-4444-82de-c3b8fdc0fc82:e665b571-f86c-426f-98be-b7af61f01415:certify-project.files.list:project.files.list:923063f6bfa5b62b24445b0bc56723982dc1e94ac33a506cb80f778f13b03eae",
+        "requestedAt": "2026-08-11T18:45:45.806Z",
+        "executedAt": "2026-08-11T18:45:45.833Z",
+        "verifiedAt": "2026-08-11T18:45:45.891Z",
+        "verificationStage": "VERIFIED",
+        "verificationMethod": "authoritative_project_binding_read_back",
+        "targetRefs": [],
+        "traceId": "capability-certification:e665b571-f86c-426f-98be-b7af61f01415",
+        "actualPoints": 0,
+        "trustOrigin": "USER_EXPLICIT"
+      }
+    },
+    {
+      "capabilityId": "project.files.search",
+      "runId": "b94322c4-075c-4ed6-8c30-3ced4286d0af",
+      "state": "MOCK_VERIFIED",
+      "receipt": {
+        "goalId": "b94322c4-075c-4ed6-8c30-3ced4286d0af",
+        "runId": "b94322c4-075c-4ed6-8c30-3ced4286d0af",
+        "stepId": "certify-project.files.search",
+        "toolCallId": "9245df1c-26cc-4c46-bce9-e21cd08dcca8",
+        "attemptId": "75ee9460-5245-40d5-9b4b-5e9c7488ce74",
+        "capabilityId": "project.files.search",
+        "handlerIdentity": "agentProjectFiles.searchProjectFiles",
+        "effectFingerprint": "bd30376f74f19085611b0ea6f2b20feae73a7a284c75fe5e2f7c2d5e927d235b",
+        "idempotencyKey": "v6:0b05b9ae-42e8-4444-82de-c3b8fdc0fc82:b94322c4-075c-4ed6-8c30-3ced4286d0af:certify-project.files.search:project.files.search:bd30376f74f19085611b0ea6f2b20feae73a7a284c75fe5e2f7c2d5e927d235b",
+        "requestedAt": "2026-08-11T18:45:46.014Z",
+        "executedAt": "2026-08-11T18:45:46.031Z",
+        "verifiedAt": "2026-08-11T18:45:46.078Z",
+        "verificationStage": "VERIFIED",
+        "verificationMethod": "authoritative_project_binding_read_back",
+        "targetRefs": [],
+        "traceId": "capability-certification:b94322c4-075c-4ed6-8c30-3ced4286d0af",
+        "actualPoints": 0,
+        "trustOrigin": "USER_EXPLICIT"
+      }
+    }
+  ],
+  "matrix": {
+    "identity": {
+      "sha": null,
+      "builtAt": null,
+      "appVersion": "0.1.0",
+      "schemaVersion": "0070_agent_live_certification",
+      "capabilityRegistryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97"
+    },
+    "contract": {
+      "registryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97",
+      "declaredCount": 4,
+      "danglingHandlers": [],
+      "missingCapabilities": [],
+      "unavailableRequired": [],
+      "ready": true,
+      "danglingSkills": [],
+      "skills": [
+        {
+          "id": "project_health_scan",
+          "name": "Project health scan",
+          "version": 1,
+          "inputs": null,
+          "requiredCapabilities": [
+            "project.health",
+            "project.files.list"
+          ],
+          "steps": [
+            {
+              "id": "health",
+              "toolId": "project.health",
+              "dependsOn": []
+            },
+            {
+              "id": "files",
+              "toolId": "project.files.list",
+              "dependsOn": []
+            }
+          ],
+          "maxConcurrency": 2,
+          "resumable": true,
+          "resolvable": true
+        },
+        {
+          "id": "storyboard_asset_prep",
+          "name": "Storyboard asset prep",
+          "version": 1,
+          "inputs": null,
+          "requiredCapabilities": [
+            "project.health"
+          ],
+          "steps": [
+            {
+              "id": "health",
+              "toolId": "project.health",
+              "dependsOn": []
+            }
+          ],
+          "maxConcurrency": 1,
+          "resumable": true,
+          "resolvable": true
+        },
+        {
+          "id": "creator_delivery_check",
+          "name": "Creator delivery check",
+          "version": 1,
+          "inputs": null,
+          "requiredCapabilities": [
+            "project.health"
+          ],
+          "steps": [
+            {
+              "id": "verify",
+              "toolId": "project.health",
+              "dependsOn": []
+            }
+          ],
+          "maxConcurrency": 1,
+          "resumable": true,
+          "resolvable": true
+        },
+        {
+          "id": "organize_recent_assets",
+          "name": "Organize recent assets",
+          "version": 1,
+          "inputs": null,
+          "requiredCapabilities": [
+            "project.files.list"
+          ],
+          "steps": [
+            {
+              "id": "list",
+              "toolId": "project.files.list",
+              "dependsOn": []
+            }
+          ],
+          "maxConcurrency": 1,
+          "resumable": true,
+          "resolvable": true
+        },
+        {
+          "id": "research_to_project_notes",
+          "name": "Research to project notes",
+          "version": 1,
+          "inputs": null,
+          "requiredCapabilities": [
+            "project.files.search"
+          ],
+          "steps": [
+            {
+              "id": "search",
+              "toolId": "project.files.search",
+              "dependsOn": []
+            }
+          ],
+          "maxConcurrency": 1,
+          "resumable": true,
+          "resolvable": true
+        }
+      ]
+    },
+    "tools": [
+      {
+        "capabilityId": "project.files.list",
+        "label": "List project files",
+        "domain": "project",
+        "executionMode": "DIRECT_READ",
+        "handler": "agentProjectFiles.listProjectFiles",
+        "declared": true,
+        "handlerResolved": true,
+        "routerServiceReachable": true,
+        "middlewareAuthEnforced": true,
+        "requiredContextSlotsResolvable": true,
+        "providerHealthy": true,
+        "writeEffectPersisted": null,
+        "readBackVerifierPassed": true,
+        "useful": false,
+        "retryIdempotencyTested": false,
+        "confirmationRiskTested": false,
+        "mobileFlowUsable": false,
+        "lastVerifiedAt": "2026-08-11T18:45:45.926Z",
+        "successRate": 1,
+        "p95Ms": 135,
+        "certificationState": "MOCK_VERIFIED",
+        "blockerReason": null,
+        "evidence": [
+          {
+            "ref": "agent-tool-receipt:8b1595b9-7a34-44f2-984c-cd0c9a61cc73",
+            "type": "execution_receipt",
+            "observedAt": "2026-08-11T18:45:45.926Z"
+          },
+          {
+            "ref": "http://127.0.0.1:3199/api/health",
+            "type": "live_e2e",
+            "observedAt": "2026-08-11T18:45:45.926Z"
+          }
+        ],
+        "registryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97",
+        "verificationStage": "VERIFIED",
+        "idempotencyContract": {
+          "policy": "keyed",
+          "keyStrategy": "run_step_effect_fingerprint",
+          "duplicateEffectPolicy": "return_verified_receipt",
+          "retryPolicy": "same_key_only",
+          "billingPolicy": "reserve_once_settle_once"
+        },
+        "required": true,
+        "plannerEligible": false
+      },
+      {
+        "capabilityId": "project.files.read",
+        "label": "Read project file",
+        "domain": "project",
+        "executionMode": "DIRECT_READ",
+        "handler": "agentProjectFiles.readProjectFile",
+        "declared": true,
+        "handlerResolved": true,
+        "routerServiceReachable": false,
+        "middlewareAuthEnforced": true,
+        "requiredContextSlotsResolvable": false,
+        "providerHealthy": true,
+        "writeEffectPersisted": null,
+        "readBackVerifierPassed": false,
+        "useful": false,
+        "retryIdempotencyTested": false,
+        "confirmationRiskTested": false,
+        "mobileFlowUsable": false,
+        "lastVerifiedAt": null,
+        "successRate": null,
+        "p95Ms": null,
+        "certificationState": "DECLARED_ONLY",
+        "blockerReason": null,
+        "evidence": [],
+        "registryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97",
+        "verificationStage": "VERIFIED",
+        "idempotencyContract": {
+          "policy": "keyed",
+          "keyStrategy": "run_step_effect_fingerprint",
+          "duplicateEffectPolicy": "return_verified_receipt",
+          "retryPolicy": "same_key_only",
+          "billingPolicy": "reserve_once_settle_once"
+        },
+        "required": true,
+        "plannerEligible": false
+      },
+      {
+        "capabilityId": "project.files.search",
+        "label": "Search project files",
+        "domain": "project",
+        "executionMode": "DIRECT_READ",
+        "handler": "agentProjectFiles.searchProjectFiles",
+        "declared": true,
+        "handlerResolved": true,
+        "routerServiceReachable": true,
+        "middlewareAuthEnforced": true,
+        "requiredContextSlotsResolvable": true,
+        "providerHealthy": true,
+        "writeEffectPersisted": null,
+        "readBackVerifierPassed": true,
+        "useful": false,
+        "retryIdempotencyTested": false,
+        "confirmationRiskTested": false,
+        "mobileFlowUsable": false,
+        "lastVerifiedAt": "2026-08-11T18:45:46.106Z",
+        "successRate": 1,
+        "p95Ms": 104,
+        "certificationState": "MOCK_VERIFIED",
+        "blockerReason": null,
+        "evidence": [
+          {
+            "ref": "agent-tool-receipt:9245df1c-26cc-4c46-bce9-e21cd08dcca8",
+            "type": "execution_receipt",
+            "observedAt": "2026-08-11T18:45:46.106Z"
+          },
+          {
+            "ref": "http://127.0.0.1:3199/api/health",
+            "type": "live_e2e",
+            "observedAt": "2026-08-11T18:45:46.106Z"
+          }
+        ],
+        "registryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97",
+        "verificationStage": "VERIFIED",
+        "idempotencyContract": {
+          "policy": "keyed",
+          "keyStrategy": "run_step_effect_fingerprint",
+          "duplicateEffectPolicy": "return_verified_receipt",
+          "retryPolicy": "same_key_only",
+          "billingPolicy": "reserve_once_settle_once"
+        },
+        "required": true,
+        "plannerEligible": false
+      },
+      {
+        "capabilityId": "project.health",
+        "label": "Project health and delivery gaps",
+        "domain": "creator",
+        "executionMode": "DIRECT_READ",
+        "handler": "projectIntelligence.buildProjectIntelligence",
+        "declared": true,
+        "handlerResolved": true,
+        "routerServiceReachable": true,
+        "middlewareAuthEnforced": true,
+        "requiredContextSlotsResolvable": true,
+        "providerHealthy": true,
+        "writeEffectPersisted": null,
+        "readBackVerifierPassed": true,
+        "useful": false,
+        "retryIdempotencyTested": false,
+        "confirmationRiskTested": false,
+        "mobileFlowUsable": false,
+        "lastVerifiedAt": "2026-08-11T18:45:45.711Z",
+        "successRate": 1,
+        "p95Ms": 160,
+        "certificationState": "MOCK_VERIFIED",
+        "blockerReason": null,
+        "evidence": [
+          {
+            "ref": "agent-tool-receipt:44750b02-1002-44ce-87e4-8093e332a21b",
+            "type": "execution_receipt",
+            "observedAt": "2026-08-11T18:45:45.711Z"
+          },
+          {
+            "ref": "project-health:5b96ecc8-e052-4371-a3e3-f002ecfaf0cd",
+            "type": "citation",
+            "observedAt": "2026-08-11T18:45:45.642Z"
+          },
+          {
+            "ref": "http://127.0.0.1:3199/api/health",
+            "type": "live_e2e",
+            "observedAt": "2026-08-11T18:45:45.711Z"
+          }
+        ],
+        "registryHash": "2652f585253037d6b53d1c1f7196421e6e36bcced3254de8593966c1bd6f6a97",
+        "verificationStage": "VERIFIED",
+        "idempotencyContract": {
+          "policy": "keyed",
+          "keyStrategy": "run_step_effect_fingerprint",
+          "duplicateEffectPolicy": "return_verified_receipt",
+          "retryPolicy": "same_key_only",
+          "billingPolicy": "reserve_once_settle_once"
+        },
+        "required": true,
+        "plannerEligible": false
+      }
+    ],
+    "summary": {
+      "declared": 4,
+      "liveVerified": 0,
+      "dangling": 0,
+      "broken": 0,
+      "blocked": 0,
+      "requiredReady": false
+    }
+  },
+  "limitations": [
+    "project.files.read not executed: QA project has no bound readable file"
+  ]
+}

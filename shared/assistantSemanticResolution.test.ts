@@ -114,6 +114,29 @@ describe("assistantSemanticResolution", () => {
     expect(result.source).toBe("pending_choice");
   });
 
+  it("treats '查看剛匯入的資料' as a recent-result read, not a new source import", () => {
+    const { frame } = deriveDeterministicGoalFrame("查看剛匯入的資料");
+    expect(frame).toMatchObject({ operation: "READ", objectType: "ASSET", missingSlots: [] });
+    expect(frame.referents).toContain("recent_results");
+    expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_assets" });
+  });
+
+  it("resolves '剛建立的專案' from the latest verified CreateProjectResult instead of a stale active goal", () => {
+    const result = resolveWorkingProject({
+      message: "把這個 URL 加入剛建立的專案：https://example.com/a.pdf",
+      candidates: [{ id: P1, title: "舊專案" }, { id: P2, title: "新專案" }],
+      activeGoal: active({ frame: { ...active().frame, scope: { projectId: P1 } } }),
+      recentActionResults: [{
+        type: "create_project",
+        projectId: P2,
+        title: "新專案",
+        verification: { status: "verified", message: "read back" },
+      }],
+      continuation: "NEW_GOAL",
+    });
+    expect(result).toMatchObject({ status: "resolved", projectId: P2, source: "recent_result" });
+  });
+
   it("semantic plan is sourced from the matched capability rather than keyword intent", () => {
     const { frame } = deriveDeterministicGoalFrame("從 Google Drive 選資料加入目前專案");
     const resolved = { ...frame, scope: { projectId: P1 } };

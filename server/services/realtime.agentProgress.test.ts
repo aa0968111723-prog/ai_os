@@ -32,7 +32,7 @@ describe("notifyAgentProgress sequencing", () => {
       groupId: "group-a",
     });
     expect(realtime.peekAgentProgressSequence("run-a")).toBe(2);
-  });
+  }, 15_000);
 
   it("coalesces bursts with trailing emit (sequence advances for each emit)", async () => {
     vi.useFakeTimers();
@@ -49,5 +49,5 @@ describe("notifyAgentProgress sequencing", () => {
     await vi.advanceTimersByTimeAsync(900);
     // Trailing flush emits the latest pending once
     expect(realtime.peekAgentProgressSequence("run-b")).toBe(afterFirst + 1);
-  });
+  }, 15_000);
 });

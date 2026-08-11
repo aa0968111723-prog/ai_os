@@ -265,6 +265,7 @@ export type SiteAssistantStreamHandlers = {
  */
 export async function requestSiteAssistantStream({
   groupId,
+  conversationId,
   message,
   history,
   projectId,
@@ -277,6 +278,7 @@ export async function requestSiteAssistantStream({
   fetchImpl = fetch,
 }: {
   groupId: string;
+  conversationId?: string;
   message: string;
   history?: Array<{ role: "user" | "assistant"; text: string }>;
   /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
@@ -324,6 +326,7 @@ export async function requestSiteAssistantStream({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         groupId,
+        conversationId,
         message,
         history: history?.length ? history : undefined,
         projectId,
