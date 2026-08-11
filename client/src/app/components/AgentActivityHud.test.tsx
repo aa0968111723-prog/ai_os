@@ -70,6 +70,20 @@ describe("AgentActivityHud", () => {
     expect(screen.getByText("等你回覆")).toBeVisible();
   });
 
+  it("waiting_user_input / waiting_confirmation / waiting_permission 仍顯示在 HUD，不會消失", () => {
+    for (const [status, label] of [
+      ["waiting_user_input", "等你補充"],
+      ["waiting_confirmation", "等你確認"],
+      ["waiting_permission", "需要權限"],
+    ] as const) {
+      overviewRuns = [run({ status })];
+      const { unmount } = render(<AgentActivityHud groupId="g1" />);
+      expect(screen.getByRole("status")).toBeVisible();
+      expect(screen.getByText(label)).toBeVisible();
+      unmount();
+    }
+  });
+
   it("「停」直接放在列上——代理會花點數會改資料，任何頁面都要能立刻按停", async () => {
     const user = userEvent.setup();
     overviewRuns = [run()];

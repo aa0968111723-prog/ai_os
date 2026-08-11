@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import {
+  agentRunHudLabel,
+  isAgentRunActiveForHud,
+  isAgentRunWaitingForHuman,
+} from "../../../../shared/agentQuestions";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { Button, Meta, Pill } from "../../components/ui";
@@ -15,8 +20,9 @@ import { Button, Meta, Pill } from "../../components/ui";
  *
  * ## 只在「真的有事在跑」時出現
  *
- * 沒有 running／waiting／awaiting_approval 的 run 就完全不渲染——常駐 UI 的成本
- * 是永久佔用畫面，只有在它真的有話要說時才值得。
+ * 沒有 running／waiting_*／awaiting_approval 的 run 就完全不渲染——常駐 UI 的成本
+ * 是永久佔用畫面，只有在它真的有話要說時才值得。HITL 的 waiting_user_input 等
+ * 狀態必須算 active，否則澄清中的 run 會從 HUD 消失。
  *
  * ## 停止是主權，不是進階功能
  *
@@ -43,20 +49,18 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     },
   });
 
-  const active = (overview.data?.runs ?? []).filter(
-    (r) => r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval",
-  );
+  const active = (overview.data?.runs ?? []).filter((r) => isAgentRunActiveForHud(r.status));
   if (active.length === 0) return null;
 
   // 多個同時在跑時只常駐顯示最前面那個（清單在專案頁／組代理卡裡），
   // 但要說出還有幾個——不然使用者會以為只有這一個。
   const lead = active[0]!;
   const rest = active.length - 1;
-  const label =
-    lead.status === "awaiting_approval" ? "待你過目"
-    : lead.status === "waiting" ? "等你回覆"
-    : "開拍中";
+  const label = agentRunHudLabel(lead.status);
   const pill = lead.status === "running" ? "running" as const : "queued" as const;
+  const waitingHint = isAgentRunWaitingForHuman(lead.status)
+    ? (lead.status === "waiting_permission" ? "・請處理權限" : "・請回覆")
+    : "";
 
   return (
     <div className="agent-hud" role="status" aria-live="polite">
@@ -72,6 +76,7 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
         <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
           {lead.projectTitle}
           {lead.totalSteps > 0 ? `・${lead.doneSteps}/${lead.totalSteps} 步` : ""}
+          {waitingHint}
           {rest > 0 ? `・另有 ${rest} 個` : ""}
         </Meta>
       </button>

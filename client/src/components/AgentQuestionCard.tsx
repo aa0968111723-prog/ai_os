@@ -42,6 +42,7 @@ export function AgentQuestionCard({
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const isPlanning = question.context.phase === "planning";
 
   const uploadQuestionFiles = async (files: FileList | null) => {
     if (!files?.length || !projectId || fileBusy) return;
@@ -131,10 +132,18 @@ export function AgentQuestionCard({
 
   return (
     <section className="agent-question" aria-labelledby={`agent-question-${question.id}`}>
-      <div className="agent-question__eyebrow">Aios 需要你確認</div>
+      <div className="agent-question__eyebrow">
+        {isPlanning ? "規劃前需要你補充" : "Aios 需要你確認"}
+      </div>
       <h3 id={`agent-question-${question.id}`}>{question.title}</h3>
       <p>{question.description}</p>
       <Meta as="p" className="agent-question__reason">原因：{question.context.reason}</Meta>
+      {isPlanning ? (
+        <Meta as="p" style={{ marginTop: 4 }}>
+          回答後會重新規劃，並再次請你核准——不會直接開始執行或扣執行點數。
+          {submitting ? " 重新規劃中…" : ""}
+        </Meta>
+      ) : null}
 
       {SINGLE_TYPES.has(question.questionType) ? optionCards(false) : null}
       {question.questionType === "multi_select" ? (

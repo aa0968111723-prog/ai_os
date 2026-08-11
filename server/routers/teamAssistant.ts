@@ -314,7 +314,14 @@ export function summarizeGroupAgentRuns(
     if (r.status === "running") {
       running += 1;
       activeProjectIds.add(r.projectId);
-    } else if (r.status === "waiting") {
+    } else if (
+      r.status === "waiting"
+      || r.status === "waiting_user_input"
+      || r.status === "waiting_confirmation"
+      || r.status === "waiting_permission"
+      || r.status === "user_controlled"
+    ) {
+      // PR-1：HITL waiting_* 計入 waiting，避免澄清中的 run 從 overview 消失
       waiting += 1;
       activeProjectIds.add(r.projectId);
     } else if (r.status === "awaiting_approval") {
@@ -370,8 +377,15 @@ export function foldGroupStatusAggregate(rows: GroupAgentStatusAggRow[], activeP
     counts.totalRuns += all;
     // 進行中的三態看「當下」（不套近期窗）；終局三態看「近期窗內」
     if (row.status === "running") counts.running += all;
-    else if (row.status === "waiting") counts.waiting += all;
-    else if (row.status === "awaiting_approval") counts.awaitingApproval += all;
+    else if (
+      row.status === "waiting"
+      || row.status === "waiting_user_input"
+      || row.status === "waiting_confirmation"
+      || row.status === "waiting_permission"
+      || row.status === "user_controlled"
+    ) {
+      counts.waiting += all;
+    } else if (row.status === "awaiting_approval") counts.awaitingApproval += all;
     else if (row.status === "failed") counts.failedRecent += recent;
     else if (row.status === "done") counts.doneRecent += recent;
     else if (row.status === "stopped") counts.stoppedRecent += recent;
@@ -1521,7 +1535,7 @@ ${historyBlock}使用者的問題：${input.message}`;
           .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
           .leftJoin(schema.users, eq(schema.agentRuns.userId, schema.users.id))
           .where(notDiscarded)
-          .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
+          .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','waiting_user_input','waiting_confirmation','waiting_permission','user_controlled','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
           .limit(GROUP_AGENT_LIST_LIMIT),
         // 整組計數：innerJoin projects 與清單同條件（專案沒了的孤兒列不該只在計數裡出現）
         db
@@ -1540,7 +1554,15 @@ ${historyBlock}使用者的問題：${input.message}`;
           .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
           .where(and(
             eq(schema.agentRuns.groupId, input.groupId),
-            inArray(schema.agentRuns.status, ["running", "waiting", "awaiting_approval"]),
+            inArray(schema.agentRuns.status, [
+              "running",
+              "waiting",
+              "waiting_user_input",
+              "waiting_confirmation",
+              "waiting_permission",
+              "user_controlled",
+              "awaiting_approval",
+            ]),
           )),
       ]);
       const runs = rows.map(({ run, projectTitle, userName }) => ({

@@ -56,6 +56,11 @@ import { resolveModel } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";
 import { ensureAgentStepContext } from "./agentQuestionCore";
 import type { AgentContextSlotName } from "../../shared/agentQuestions";
+import {
+  classifyStepFailureMessage,
+  projectFailureUserMessage,
+  type AgentFailureReason,
+} from "../../shared/agentFailure";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -635,7 +640,14 @@ async function checkRunAuthority(run: RunRow): Promise<string | null> {
  * 寫資料庫）完全不進 audit_log，組長只查得到 agents.approve 一列。action 掛在既有 "agents" 前綴下，
  * 自動歸到操作紀錄的「AI 助手與代理」類別。
  */
-function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, error?: string): void {
+function auditAgentStep(
+  run: RunRow,
+  step: AgentStep,
+  idx: number,
+  ok: boolean,
+  error?: string,
+  reason?: AgentFailureReason,
+): void {
   void trackBackgroundTask(recordAgentEventSafely({
     runId: run.id,
     groupId: run.groupId,
@@ -648,11 +660,14 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
     actorId: run.userId,
     summary: ok ? `完成：${step.note}` : `失敗：${step.note}`,
     data: {
+      schemaVersion: 1,
+      phase: "execution",
       kind: step.kind,
       detail: step.detail,
       sourceRefs: step.sourceRefs ?? [],
       outputRefs: step.outputRefs ?? [],
       error,
+      ...(reason ? { reason } : {}),
     },
   }));
   void trackBackgroundTask(
@@ -752,11 +767,14 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
 /** 一步失敗的統一收攏：標步驟與 run failed（代理與工作流同語義——寧可停下讓人看，不盲目燒點數） */
 async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string): Promise<void> {
   const step = steps[idx];
+  // PR-1：structured reason 是 source of truth；error 字串只投影 userMessage（相容舊 UI）
+  const reason = classifyStepFailureMessage(msg);
+  const safeMsg = projectFailureUserMessage(reason);
   step.status = "failed";
-  step.detail = msg;
-  auditAgentStep(run, step, idx, false, msg); // 失敗也入審計（可追溯代理在哪一步、為何停）
+  step.detail = safeMsg;
+  auditAgentStep(run, step, idx, false, safeMsg, reason); // 失敗也入審計；data.reason 給結構化失敗卡
   markRestStopped(steps, idx);
-  const error = `步驟「${step.note}」失敗：${msg}`;
+  const error = `步驟「${step.note}」失敗：${safeMsg}`;
   if (run.status === "running" || run.status === "waiting") {
     await saveRun(run.id, { steps, status: "failed", error });
     // 記憶體狀態必須同步：同 tick 後續邏輯（並行送出、DAG 進度）不可仍把 run 當 running

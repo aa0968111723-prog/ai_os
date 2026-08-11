@@ -10,6 +10,7 @@ import {
   adobePhotoOperationSchema,
   adobeTimelineSchema,
 } from "./adobe";
+import { PLANNING_ISSUE_CODES } from "./agentPlanningIssues";
 
 export const planStepKindSchema = z.enum([
   "split_script",
@@ -130,6 +131,20 @@ export const planMilestoneSchema = z.object({
   dueAt: z.string().datetime({ offset: true }).optional(),
 });
 
+/** Machine-readable planning issues (PR-1); optional for pre-change plan fixtures. */
+export const planningIssueSchema = z.object({
+  code: z.enum(PLANNING_ISSUE_CODES),
+  field: z.string().trim().min(1).max(80).optional(),
+  reference: z.string().trim().min(1).max(200).optional(),
+  userMessage: z.string().trim().min(1).max(500),
+  blocking: z.boolean(),
+  candidates: z.array(z.object({
+    id: z.string().trim().min(1).max(200),
+    label: z.string().trim().min(1).max(200),
+  })).max(50).optional(),
+  entityType: z.enum(["project", "scene", "shot", "person", "asset", "model"]).optional(),
+});
+
 export const completePlanSummarySchema = z.object({
   goal: z.string().trim().min(1).max(1_000),
   /** 決策軌跡：1–3 句說明為何這樣排計畫（結構化結論，不是 chain-of-thought） */
@@ -139,6 +154,12 @@ export const completePlanSummarySchema = z.object({
   successCriteria: z.array(z.string().trim().min(1).max(500)).max(50),
   assumptions: z.array(z.string().trim().min(1).max(500)).max(50),
   missingInformation: z.array(z.string().trim().min(1).max(500)).max(50),
+  /**
+   * Structured planning issues (PR-1). When present, forced-clarification uses
+   * these codes; missingInformation remains a display-compatible projection.
+   * Pre-change plans without this field still load.
+   */
+  planningIssues: z.array(planningIssueSchema).max(50).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
   risks: z.array(planRiskSchema).max(50),
   milestones: z.array(planMilestoneSchema).max(50),
