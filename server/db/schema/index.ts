@@ -24,3 +24,4 @@ export * from "./library";
 export * from "./externalIntake";
 export * from "./externalEditing";
 export * from "./computerRuntime";
+export * from "./assistantConversation";

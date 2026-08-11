@@ -349,10 +349,12 @@ describe("legacy migration adoption bridge", () => {
     // 0067 Desktop: 4 ADD COLUMN IF NOT EXISTS on computer_sessions — 4 statements.
     // 0068 Persisted auth: 1 CREATE TABLE IF NOT EXISTS + 3 guarded indexes — 4 statements.
     // 0069 Practical autonomy: receipt table + 2 indexes are represented by the reviewed schema fixture.
-    // Verified statement by statement: no ALTER of an existing column, no UPDATE,
-    // no DELETE, no data movement, so a re-run is a no-op.
+    // 0070 Live certification: optimistic run lock, receipt contract/ownership
+    // columns and indexes, certification table/index, and durable Assistant
+    // checkpoint table/indexes. One reviewed idempotent owner backfill is omitted
+    // from drift because it changes rows, leaving 29 additive DDL statements.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29,
     );
   });
 

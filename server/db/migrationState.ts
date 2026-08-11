@@ -370,17 +370,32 @@ export function isRowDeduplicationStatement(statement: string): boolean {
  */
 export function isReviewedLandingBackfillStatement(statement: string): boolean {
   const normalized = statement.replace(/\s+/g, " ").trim().toLowerCase();
-  return (
-    normalized.startsWith("update assets set")
-    && normalized.includes("land_state")
-    && normalized.includes("land_next_try_at")
-    && normalized.includes("origin_url")
-    && normalized.includes("storage_path is null")
-    && normalized.includes("url like 'http%'")
-    && normalized.includes("is_ai_generated = true")
+  const receiptOwnershipBackfill = (
+    normalized.startsWith('update "agent_tool_receipts" tr set')
+    && normalized.includes('"user_id" = r."user_id"')
+    && normalized.includes('"group_id" = r."group_id"')
+    && normalized.includes('"project_id" = r."project_id"')
+    && normalized.includes('from "agent_runs" r')
+    && normalized.includes('r."id" = tr."run_id"')
+    && normalized.includes('tr."user_id" is null')
     && !normalized.includes("delete")
     && !normalized.includes("drop")
     && !normalized.includes("truncate")
+  );
+  return (
+    receiptOwnershipBackfill
+    || (
+      normalized.startsWith("update assets set")
+      && normalized.includes("land_state")
+      && normalized.includes("land_next_try_at")
+      && normalized.includes("origin_url")
+      && normalized.includes("storage_path is null")
+      && normalized.includes("url like 'http%'")
+      && normalized.includes("is_ai_generated = true")
+      && !normalized.includes("delete")
+      && !normalized.includes("drop")
+      && !normalized.includes("truncate")
+    )
   );
 }
 

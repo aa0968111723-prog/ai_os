@@ -13,6 +13,11 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["client/src/test/setup.ts"],
     include: ["client/src/**/*.test.{ts,tsx}"],
+    // The full UI suite creates many heavyweight jsdom realms. Unbounded
+    // workers make Windows runners spend longer in module transforms than the
+    // behavioural timeout, cascading one timeout into unrelated DOM failures.
+    // Four keeps real concurrency while making the default command repeatable.
+    maxWorkers: 4,
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],

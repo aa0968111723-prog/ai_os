@@ -27,8 +27,10 @@ import {
   listPendingAgentQuestionsForProject,
 } from "../services/agentQuestionCore";
 import { listProjectFiles, readProjectFile, searchProjectFiles } from "../services/agentProjectFiles";
-import { AGENT_SKILLS } from "../services/practicalAutonomy";
+import { AGENT_SKILLS, validateSkillContracts } from "../services/practicalAutonomy";
 import { agentToolRegistry } from "../services/agentToolRegistry";
+import { buildCapabilityContractReport, executeCapabilityCertification, getCapabilityHealthView } from "../services/agentCapabilityCertification";
+import { runAgentDbIntegrityScan } from "../services/agentDbIntegrity";
 
 const agentQuestionAnswerSchema = z.union([
   z.string().max(20_000),
@@ -44,10 +46,40 @@ const agentQuestionAnswerSchema = z.union([
  * 安全設計：規劃固定守門、核准前不扣執行費、核准畫面揭示每步估點、執行期各步走既有守門與退點。
  */
 export const agentsRouter = router({
-  practicalCapabilities: authedProcedure.query(() => ({
-    tools: agentToolRegistry.capabilities(),
-    skills: AGENT_SKILLS.map(({ inputs: _inputs, ...skill }) => skill),
-  })),
+  practicalCapabilities: authedProcedure.query(async () => {
+    const health = await getCapabilityHealthView();
+    const plannerEligible = new Set(health.tools.filter((tool) => tool.plannerEligible).map((tool) => tool.capabilityId));
+    return {
+      tools: agentToolRegistry.capabilities().filter((tool) => plannerEligible.has(tool.id)),
+      skills: AGENT_SKILLS.filter((skill) =>
+        validateSkillContracts(agentToolRegistry, [skill]).length === 0
+        && skill.requiredCapabilities.every((id) => plannerEligible.has(id)))
+        .map(({ inputs: _inputs, ...skill }) => skill),
+      // Diagnostics/UI can still explain declared-but-blocked capabilities;
+      // only `tools` is planner executable truth.
+      declaredTools: agentToolRegistry.capabilities(),
+      contract: buildCapabilityContractReport(),
+      certificationSummary: health.summary,
+    };
+  }),
+
+  practicalCapabilityHealth: authedProcedure.query(() => getCapabilityHealthView()),
+
+  practicalDbIntegrity: authedProcedure.query(({ ctx }) => {
+    if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "Database integrity evidence requires a QA administrator" });
+    return runAgentDbIntegrityScan();
+  }),
+
+  certifyPracticalCapability: authedProcedure.input(z.object({
+    capabilityId: z.string().min(1).max(120),
+    projectId: z.string().uuid(),
+    toolInput: z.unknown(),
+    mode: z.enum(["contract", "mock", "staging", "external_live", "production_smoke"]),
+    resolutionObserved: z.boolean().default(false),
+    usefulObserved: z.boolean().default(false),
+    trustOrigin: z.enum(["SYSTEM", "USER_EXPLICIT", "VERIFIED_INTERNAL", "EXTERNAL_UNTRUSTED", "GENERATED_UNTRUSTED"]).optional(),
+    evidence: z.array(z.object({ type: z.string().min(1).max(80), ref: z.string().min(1).max(500) })).max(30).optional(),
+  })).mutation(({ ctx, input }) => executeCapabilityCertification({ auth: ctx.auth, ...input })),
 
   listProjectFiles: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => listProjectFiles(ctx.auth, input.projectId)),
   readProjectFile: authedProcedure.input(z.object({ projectId: z.string().uuid(), fileId: z.string().uuid(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(24_000).optional() })).query(({ ctx, input }) => readProjectFile(ctx.auth, input.projectId, input.fileId, input.offset, input.limit)),

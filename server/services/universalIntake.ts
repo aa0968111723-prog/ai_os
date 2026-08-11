@@ -74,6 +74,8 @@ export type IngestTmpAssetResult =
     ok: false;
     duplicate: true;
     asset: typeof schema.assets.$inferSelect;
+    intelligenceId: string | null;
+    libraryResourceId: string;
   }
   | {
     ok: true;
@@ -427,7 +429,35 @@ export async function ingestTmpAsset(input: IngestTmpAssetInput): Promise<Ingest
     isNull(schema.assets.deletedAt),
   )).orderBy(desc(schema.assets.createdAt)).limit(1);
   if (shouldBlockDuplicate({ duplicateAssetId: duplicate?.id, forceDuplicate: input.forceDuplicate })) {
-    return { ok: false, duplicate: true, asset: duplicate! };
+    // Deduplication is a storage decision, not a failed import. Reuse the
+    // canonical Library carrier and record that the requested target project
+    // uses it. This is especially important when the same URL/file was first
+    // imported into another project: assets.project_id remains the immutable
+    // home while library_resource_usages is the verified cross-project link.
+    const sidecars = await registerSidecars({
+      asset: duplicate!,
+      userId: input.auth.user.id,
+      originalName: input.originalName,
+      mime: duplicate!.mime ?? input.mime,
+      sizeBytes: duplicate!.sizeBytes ?? (await stat(input.tmpPath)).size,
+      checksum,
+      provenance: input.provenance,
+      folderImport: input.folderImport,
+    });
+    await recordLibraryUsage({
+      libraryResourceId: sidecars.libraryResourceId,
+      projectId: input.project.id,
+      groupId: input.project.groupId,
+      usage: "production",
+      actorId: input.auth.user.id,
+    });
+    return {
+      ok: false,
+      duplicate: true,
+      asset: duplicate!,
+      intelligenceId: sidecars.intelligenceId,
+      libraryResourceId: sidecars.libraryResourceId,
+    };
   }
 
   const contextResult = intakePageContextSchema.safeParse(input.context ?? {});

@@ -27,6 +27,7 @@ const commandMutate = vi.fn();
 const intakeRender = vi.hoisted(() => vi.fn());
 let watchInsights: unknown;
 let watchOverview: unknown;
+let durableConversationState: any;
 
 vi.mock("../api", () => {
   const mutation = (mutate = vi.fn()) => () => ({
@@ -44,6 +45,7 @@ vi.mock("../api", () => {
         createSession: { useMutation: mutation() },
       },
       globalAssistant: {
+        conversationState: { useQuery: () => ({ data: durableConversationState, isLoading: false, isPending: false, error: null }) },
         // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主
         ask: { useMutation: mutation() },
         runSiteAction: { useMutation: () => ({ mutate: runSiteActionMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
@@ -118,6 +120,7 @@ beforeEach(() => {
   resetAssistantRunStoreForTest();
   watchInsights = undefined;
   watchOverview = undefined;
+  durableConversationState = null;
   streamMock.mockImplementation(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
     handlers.onDone(DONE);
     return true;
@@ -130,6 +133,27 @@ async function sendMessage(user: ReturnType<typeof userEvent.setup>, text: strin
 }
 
 describe("AICreativeCopilot", () => {
+  it("hydrates the durable conversation checkpoint after a client refresh", async () => {
+    durableConversationState = {
+      conversationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      groupId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      projectId: PROJECT_ID,
+      runId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      goalId: null,
+      planRevision: 1,
+      status: "completed",
+      messages: [{ role: "user", text: "匯入素材" }, { role: "assistant", text: "已安全加入 3 項素材" }],
+      activeGoal: null,
+      recentActionResults: [],
+      events: [],
+      sources: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    render(<AICreativeCopilot groupId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" />);
+    expect(await screen.findByText("已安全加入 3 項素材")).toBeInTheDocument();
+  });
   it("快捷鍵隨頁面改變：沒有頁面上下文時是全站型（不再是寫死的四顆）", () => {
     render(<AICreativeCopilot groupId="grp-123" />);
     expect(screen.queryByText("AI 創作助理")).not.toBeInTheDocument();
@@ -463,13 +487,38 @@ describe("siteActionDoneLink", () => {
       return true;
     });
     const onNavigate = vi.fn();
+    const onUseIdeaForNewProject = vi.fn();
     const user = userEvent.setup();
-    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} />);
+    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} onUseIdeaForNewProject={onUseIdeaForNewProject} />);
     await sendMessage(user, "幫我建立百日夢島動畫專案");
     await screen.findByText(/已完成：建立「百日夢島」/);
     expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "以此靈感開新專案" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "前往專案" }));
     expect(onNavigate).toHaveBeenCalledWith(`/p/${PROJECT_ID}`);
+  });
+
+  it("queues one next turn entered after the completion bubble but before the exact run finalizer", async () => {
+    let releaseFirst!: () => void;
+    const firstFinalizer = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({ ...DONE, siteActions: [], dispatches: [], actions: [] });
+      await firstFinalizer;
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "建立測試專案");
+    await screen.findByText(DONE.answer);
+
+    const composer = screen.getByLabelText("向 AI 助手提問");
+    await user.type(composer, "把 URL 加入剛建立專案{Enter}");
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2));
+    expect(streamMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: "把 URL 加入剛建立專案",
+    }));
   });
 
   it("sends the previous typed ImportResult on the next turn for 'these data' references", async () => {

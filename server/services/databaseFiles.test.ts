@@ -205,7 +205,7 @@ describe("assertPublicHostOrError：DNS 解析後判內網（SSRF 權威防線�
     clearProxy();
     process.env.HTTPS_PROXY = "http://egress-proxy.internal:3128";
     // .invalid 為 RFC 保留、永不解析 → dnsLookup 拋錯 → 代理模式回 null（委派出口代理）
-    expect(await assertPublicHostOrError("nonexistent-host.invalid")).toBeNull();
+    expect(await assertPublicHostOrError("nonexistent-host.invalid")).toContain("DNS");
   });
 
   it("直連模式下解不到的名稱 → 回錯誤（不是放行）", async () => {

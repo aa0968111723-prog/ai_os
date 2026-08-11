@@ -491,6 +491,13 @@
       "when": 1789500000000,
       "tag": "0069_agent_practical_autonomy",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1789586400000,
+      "tag": "0070_agent_live_certification",
+      "breakpoints": true
     }
   ]
 }

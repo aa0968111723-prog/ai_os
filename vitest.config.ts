@@ -5,5 +5,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["server/**/*.test.ts", "shared/**/*.test.ts"],
+    // Keep stress tests meaningful without letting module transforms consume
+    // every core and starve their own filesystem/timer assertions on CI.
+    maxWorkers: 8,
   },
 });

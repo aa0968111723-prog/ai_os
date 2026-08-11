@@ -88,7 +88,12 @@ export const MAX_RECENT_RESULT_IDS = 50;
 export function boundAssistantActionResults(
   results: readonly AssistantActionResult[],
 ): AssistantActionResult[] {
-  return results.slice(-MAX_RECENT_ACTION_RESULTS).map((result) => {
+  // Pronoun resolution is authority-bearing context. Unverified writes may be
+  // rendered as failures, but can never become "these assets" or "the project
+  // I just created" on a later turn.
+  return results
+    .filter((result) => result.verification.status === "verified")
+    .slice(-MAX_RECENT_ACTION_RESULTS).map((result) => {
     if (result.type === "import") {
       return {
         ...result,
@@ -111,7 +116,7 @@ export function boundAssistantActionResults(
       return { ...result, assetIds: result.assetIds.slice(0, MAX_RECENT_RESULT_IDS) };
     }
     return result;
-  });
+    });
 }
 
 export function formatRecentActionResults(results: readonly AssistantActionResult[]): string {

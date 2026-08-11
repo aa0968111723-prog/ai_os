@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { registerAssistantPage } from "../lib/assistantContext";
 import { trpc } from "../api";
@@ -162,6 +162,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [format, setFormat] = useState<ProjectFormat>(DEFAULT_PROJECT_FORMAT);
   const [createOpen, setCreateOpen] = useState(false);
   const createAutoOpenedGroup = useRef<string | null>(null);
+  const assistantSurfaceOpen = useRef(false);
 
   const [firstRunDismissed, setFirstRunDismissed] = useState<boolean>(() => {
     try {
@@ -295,11 +296,37 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const canCreate = !!title.trim() && !!groupId && !!kind && !!platform && !create.isPending;
 
   useEffect(() => {
-    if (projects.data?.length === 0 && createAutoOpenedGroup.current !== groupId) {
+    const assistantIsVisible = assistantSurfaceOpen.current
+      || document.querySelector('#global-assistant-sheet[role="dialog"]') !== null;
+    if (!assistantIsVisible && projects.data?.length === 0 && createAutoOpenedGroup.current !== groupId) {
       createAutoOpenedGroup.current = groupId;
       setCreateOpen(true);
     }
   }, [groupId, projects.data]);
+
+  useLayoutEffect(() => {
+    // The project query can resolve after the Assistant opened. If that late
+    // result tries to auto-open onboarding, close it in the same paint rather
+    // than allowing two dialogs to compete for focus.
+    if (createOpen && document.querySelector('#global-assistant-sheet[role="dialog"]')) {
+      assistantSurfaceOpen.current = true;
+      setCreateOpen(false);
+    }
+  }, [createOpen]);
+
+  useEffect(() => {
+    // Conversation is Home: a page-level creation modal must never cover or
+    // intercept the persistent Assistant surface. The user can reopen it from
+    // a result action after closing the conversation.
+    const closePageModal = () => { assistantSurfaceOpen.current = true; setCreateOpen(false); };
+    const markAssistantClosed = () => { assistantSurfaceOpen.current = false; };
+    window.addEventListener("aios:assistant-opened", closePageModal);
+    window.addEventListener("aios:assistant-closed", markAssistantClosed);
+    return () => {
+      window.removeEventListener("aios:assistant-opened", closePageModal);
+      window.removeEventListener("aios:assistant-closed", markAssistantClosed);
+    };
+  }, []);
 
   return (
     <div

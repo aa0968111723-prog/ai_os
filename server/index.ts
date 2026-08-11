@@ -65,7 +65,7 @@ import { startExportRunner } from "./services/exportRunner";
 import { startAssetMaintenanceRunner } from "./services/assetMaintenanceRunner";
 import { startIntelligenceRunner } from "./services/intelligenceRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
-import { db, schema } from "./db";
+import { db, pool, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
 import { sanitizeAssistantPageContext } from "../shared/assistantPageContext";
@@ -87,6 +87,8 @@ import { agentPlannerModeSchema } from "../shared/agentPlanner";
 import { INTAKE_SOURCES, deterministicMediaMetadataSchema, intakePageContextSchema, type IntakeSource } from "../shared/universalIntake";
 import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntake";
 import { editingManifestSchema } from "../shared/externalEditing";
+import { currentDeploymentIdentity, deploymentDrift } from "./services/deploymentIdentity";
+import { buildCapabilityContractReport, getCapabilityHealthView } from "./services/agentCapabilityCertification";
 
 const app = express();
 
@@ -188,11 +190,6 @@ app.use(express.json({ limit: "2mb" }));
 // #268：Zeabur 可能注入 ZEABUR_GIT_COMMIT 而非 BUILD_SHA——程式側 fallback 避免 health 全 null
 // 資安：/api/health 不再對外暴露 branch——內部分支命名（如 claude/…）會洩漏工作流程
 // 與未公開的開發路徑，攻擊者可拿來推斷內部流程；commit SHA 仍保留（公開 repo 非敏感）。
-const BUILD_INFO = {
-  sha: process.env.BUILD_SHA || process.env.ZEABUR_GIT_COMMIT || process.env.COMMIT_SHA || null,
-  builtAt: process.env.BUILD_TIME || process.env.ZEABUR_BUILD_TIME || null,
-};
-
 /** Express 非 tRPC 路由共用認證閘門；避免強制改密碼只擋住其中一種傳輸層。 */
 function requireUsableSession(auth: AuthState | null, res: express.Response): auth is AuthState {
   const gate = sessionGate(auth);
@@ -210,7 +207,7 @@ function requireUsableSession(auth: AuthState | null, res: express.Response): au
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
   // 只回存活狀態＋建置版本（公開 repo 的 commit SHA 非敏感），不外洩生成模式等內部資訊（#26）
-  res.json({ ok: true, time: new Date().toISOString(), build: BUILD_INFO });
+  res.json({ ok: true, time: new Date().toISOString(), build: currentDeploymentIdentity() });
 });
 
 // 就緒診斷 — 用瀏覽器打開就知道系統就緒了沒（給非工程背景的自我診斷頁）。
@@ -224,9 +221,11 @@ app.get("/api/ready", async (_req, res) => {
   try {
     await db.execute(sql`select 1`);
     components.db = { ok: true, note: "connected（資料庫已接通）" };
+    components.dbPool = { ok: true, note: `total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
     components.db = { ok: false, note: "error（資料庫未接通）——檢查部署平台 Variables 的 DATABASE_URL" };
+    components.dbPool = { ok: false, note: `unavailable total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
   }
 
   const bootReady = isBootReady();
@@ -261,6 +260,42 @@ app.get("/api/ready", async (_req, res) => {
   components.provider = isMockMode() || process.env.FAL_KEY
     ? { ok: true, note: "ok（生成服務設定已就緒）" }
     : { ok: false, note: "missing（媒體生成金鑰未設定，生成會失敗）" };
+
+  const capabilityContract = buildCapabilityContractReport();
+  components.agentCapabilityContract = capabilityContract.ready
+    ? { ok: true, note: `ok（${capabilityContract.declaredCount} tools；registry ${capabilityContract.registryHash.slice(0, 12)}；0 dangling）` }
+    : { ok: false, note: `dangling handlers=${capabilityContract.danglingHandlers.length} skills=${capabilityContract.danglingSkills.length} missing=${capabilityContract.missingCapabilities.length}` };
+
+  const identity = currentDeploymentIdentity();
+  const expectedIdentity = {
+    ...(process.env.EXPECTED_BUILD_SHA ? { sha: process.env.EXPECTED_BUILD_SHA } : {}),
+    ...(process.env.EXPECTED_SCHEMA_VERSION ? { schemaVersion: process.env.EXPECTED_SCHEMA_VERSION } : {}),
+    ...(process.env.EXPECTED_CAPABILITY_REGISTRY_HASH ? { capabilityRegistryHash: process.env.EXPECTED_CAPABILITY_REGISTRY_HASH } : {}),
+  };
+  const identityCheck = deploymentDrift(expectedIdentity, identity);
+  components.deploymentIdentity = identityCheck.ok
+    ? { ok: true, note: `match（sha=${identity.sha?.slice(0, 12) ?? "unknown"} schema=${identity.schemaVersion} capabilities=${identity.capabilityRegistryHash.slice(0, 12)}）` }
+    : { ok: false, note: `DEPLOYMENT_DRIFT: ${identityCheck.mismatches.map((item) => item.key).join(",")}` };
+
+  try {
+    const health = await getCapabilityHealthView();
+    const certificationGate = process.env.AGENT_CERTIFICATION_GATE === "1" || (isProd && !isMockMode());
+    components.agentCapabilityCertification = !certificationGate || health.summary.requiredReady
+      ? { ok: true, note: `${health.summary.liveVerified}/${health.summary.declared} live verified${certificationGate ? "（gate enabled）" : "（gate observe-only）"}` }
+      : { ok: false, note: `certification incomplete: ${health.summary.liveVerified}/${health.summary.declared} required capabilities live verified` };
+  } catch (error) {
+    components.agentCapabilityCertification = { ok: false, note: `certification read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  try {
+    const { getCachedAgentDbIntegrityScan } = await import("./services/agentDbIntegrity");
+    const integrity = await getCachedAgentDbIntegrityScan();
+    components.agentDbIntegrity = integrity.ok
+      ? { ok: true, note: `critical=0 warnings=${integrity.warningCount}` }
+      : { ok: false, note: `DB_INTEGRITY_VIOLATION: critical=${integrity.criticalCount} warnings=${integrity.warningCount}` };
+  } catch (error) {
+    components.agentDbIntegrity = { ok: false, note: `integrity scan failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
 
   const ok = Object.values(components).every((c) => c.ok);
   // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
@@ -2364,6 +2399,8 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   const auth = await resolveRequestAuth(req);
   if (!requireUsableSession(auth, res)) return;
   const groupId = String(req.body?.groupId ?? "");
+  const conversationIdRaw = String(req.body?.conversationId ?? "");
+  const conversationId = UUID_RE.test(conversationIdRaw) ? conversationIdRaw : undefined;
   const message = String(req.body?.message ?? "").trim();
   const projectIdRaw = String(req.body?.projectId ?? "");
   const projectId = UUID_RE.test(projectIdRaw) ? projectIdRaw : undefined;
@@ -2417,12 +2454,13 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   // tRPC 端由 authedProcedure 中介層記；這裡是 Express 路由，得自己補一筆同名 action。
   const { recordAudit } = await import("./services/audit");
   try {
-    const { runGlobalAsk, sanitizeRecentActionResults } = await import("./routers/globalAssistant");
+    const { runGlobalAskWithCheckpoint, sanitizeRecentActionResults } = await import("./routers/globalAssistant");
     const recentActionResults = sanitizeRecentActionResults(req.body?.recentActionResults);
-    const result = await runGlobalAsk(
+    const result = await runGlobalAskWithCheckpoint(
       {
         auth,
         groupId,
+        conversationId,
         message,
         history: history.length ? history : undefined,
         projectId,
