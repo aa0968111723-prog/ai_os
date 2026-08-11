@@ -352,8 +352,10 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
     falSubmit.mockResolvedValue({ requestId: "req-1" });
     falStatus.mockResolvedValue({ status: "running" }); // 一直壅塞
     const promise = completeText({ prompt: "你好", mode: "fal_economy" });
+    // 先 attach rejection handler，避免 advanceTimers 期間 promise reject 變成 unhandled rejection
+    const expectRejection = expect(promise).rejects.toThrow(/回應逾時/);
     await vi.advanceTimersByTimeAsync(95_000); // 推過 fal 預設 90s 逾時
-    await expect(promise).rejects.toThrow(/暫時沒有回應/);
+    await expectRejection;
     expect(falSubmit).toHaveBeenCalledTimes(1); // 沒有二次降級、沒有偷偷換檔
     expect(chatCompletion).not.toHaveBeenCalled();
     expect(isFalEconomyCongested()).toBe(false); // 直接檔位失敗不污染壅塞計數
