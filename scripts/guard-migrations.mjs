@@ -78,25 +78,32 @@ for (const tag of fileTags) {
 }
 
 const revisionSource = fs.readFileSync(revisionsPath, "utf8");
-const revisionRegex = /["'](\d{4}_[^"']+)["']\s*:\s*["']([0-9a-f]{64})["']/g;
+const revisionEntryRegex = /["'](\d{4}_[^"']+)["']\s*:\s*\[([\s\S]*?)\],/g;
+const hashRegex = /["']([0-9a-f]{64})["']/g;
 const revisions = new Map();
-for (const match of revisionSource.matchAll(revisionRegex)) {
-  const [, tag, hash] = match;
+for (const match of revisionSource.matchAll(revisionEntryRegex)) {
+  const [, tag, body] = match;
+  const hashes = [...body.matchAll(hashRegex)].map((item) => item[1]);
+  if (!hashes.length) {
+    fail(`revision entry has no SHA-256 hashes: ${tag}`, revisionsPath);
+    continue;
+  }
   if (revisions.has(tag)) fail(`duplicate revision entry: ${tag}`, revisionsPath);
-  revisions.set(tag, hash);
+  revisions.set(tag, hashes);
 }
 
 for (const entry of entries) {
-  const expected = revisions.get(entry.tag);
-  if (!expected) {
+  const hashes = revisions.get(entry.tag);
+  if (!hashes) {
     fail(`missing MIGRATION_REVISIONS entry: ${entry.tag}`, revisionsPath);
     continue;
   }
   const sqlPath = path.join("drizzle", `${entry.tag}.sql`);
   if (!fs.existsSync(sqlPath)) continue;
   const actual = crypto.createHash("sha256").update(fs.readFileSync(sqlPath)).digest("hex");
-  if (actual !== expected) {
-    fail(`migration hash mismatch for ${entry.tag}: expected ${expected}, got ${actual}`, sqlPath);
+  const expectedCurrent = hashes.at(-1);
+  if (actual !== expectedCurrent) {
+    fail(`migration hash mismatch for ${entry.tag}: latest revision ${expectedCurrent}, got ${actual}`, sqlPath);
   }
 }
 
