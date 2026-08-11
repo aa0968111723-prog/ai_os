@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "defaultMaxShrinkPercent": 70,
+  "files": {
+    "client/src/styles.css": {
+      "minBytes": 25000,
+      "maxShrinkPercent": 35,
+      "mustContain": [":root"]
+    },
+    "client/src/pages/ProjectPage.tsx": {
+      "minBytes": 20000,
+      "maxShrinkPercent": 50,
+      "mustContain": ["export function ProjectPage"]
+    },
+    "client/src/components/GenerationList.tsx": {
+      "minBytes": 8000,
+      "maxShrinkPercent": 50,
+      "mustContain": ["GenerationList"]
+    },
+    "client/src/features/storyboard-center/ShotCard.tsx": {
+      "minBytes": 4000,
+      "maxShrinkPercent": 50,
+      "mustContain": ["ShotCard"]
+    },
+    "server/index.ts": {
+      "minBytes": 20000,
+      "maxShrinkPercent": 50
+    },
+    "server/services/mcp.ts": {
+      "minBytes": 2000,
+      "maxShrinkPercent": 50
+    },
+    "server/services/generationCore.ts": {
+      "minBytes": 5000,
+      "maxShrinkPercent": 50
+    },
+    "server/routers/generation.ts": {
+      "minBytes": 5000,
+      "maxShrinkPercent": 50
+    },
+    "shared/models.ts": {
+      "minBytes": 8000,
+      "maxShrinkPercent": 50
+    },
+    "drizzle/meta/_journal.json": {
+      "minBytes": 1000,
+      "maxShrinkPercent": 20
+    },
+    "server/db/migrationRevisions.ts": {
+      "minBytes": 3000,
+      "maxShrinkPercent": 30,
+      "mustContain": ["MIGRATION_REVISIONS"]
+    }
+  }
+}
