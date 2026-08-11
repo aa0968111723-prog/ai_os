@@ -13,7 +13,16 @@ import {
   runComputerAction,
   stopComputerSession,
 } from "../services/computerRuntime/sessionCore";
-import { isComputerBrowserEnabled, isComputerRuntimeEnabled } from "../../shared/computerRuntime";
+import {
+  acquireHumanControl,
+  releaseControlToAgent,
+  requestHumanTakeover,
+} from "../services/computerRuntime/controlLease";
+import {
+  isComputerBrowserEnabled,
+  isComputerHumanTakeoverEnabled,
+  isComputerRuntimeEnabled,
+} from "../../shared/computerRuntime";
 
 const browserActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("navigate"), url: z.string().min(1).max(2_000) }),
@@ -35,6 +44,7 @@ export const computerRuntimeRouter = router({
   status: authedProcedure.query(() => ({
     enabled: isComputerRuntimeEnabled(),
     browserEnabled: isComputerBrowserEnabled(),
+    humanTakeoverEnabled: isComputerHumanTakeoverEnabled(),
   })),
 
   createSession: authedProcedure
@@ -86,4 +96,38 @@ export const computerRuntimeRouter = router({
   stop: authedProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(({ ctx, input }) => stopComputerSession({ auth: ctx.auth, sessionId: input.sessionId })),
+
+  /** PR-6B：AI 請求人類接管（登入／2FA／判斷） */
+  requestTakeover: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      reasonCode: z.enum([
+        "login_required",
+        "two_factor",
+        "captcha_or_challenge",
+        "sensitive_input",
+        "subjective_judgment",
+        "user_requested",
+        "other",
+      ]),
+      userMessage: z.string().trim().min(1).max(300),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => requestHumanTakeover({ auth: ctx.auth, ...input })),
+
+  /** PR-6B：使用者取得控制權（AI input 立即失效） */
+  acquireControl: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => acquireHumanControl({ auth: ctx.auth, ...input })),
+
+  /** PR-6B：交回 AI；server 會 re-observe，AI 必須 inspect 後才能再 act */
+  releaseToAgent: authedProcedure
+    .input(z.object({
+      sessionId: z.string().uuid(),
+      expectedLeaseVersion: z.number().int().min(0).optional(),
+    }))
+    .mutation(({ ctx, input }) => releaseControlToAgent({ auth: ctx.auth, ...input })),
 });

@@ -9,4 +9,10 @@ export {
   stopComputerSession,
   expireStaleComputerSessions,
 } from "./sessionCore";
+export {
+  requestHumanTakeover,
+  acquireHumanControl,
+  releaseControlToAgent,
+  recoverStaleHumanLeases,
+} from "./controlLease";
 export { mockBrowserProvider, resetMockBrowserSessions } from "./mockBrowserProvider";
