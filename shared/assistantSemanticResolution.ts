@@ -52,7 +52,7 @@ export interface WorkingProjectResolution {
 }
 
 const SOURCE_MENTION: Array<[RegExp, AssistantSourceType]> = [
-  [/(?:google\s*photos?|google\s*相簿|google\s*照片|照片雲端)/iu, "GOOGLE_PHOTOS"],
+  [/(?:google\s*photos?|\bphotos?\b|google\s*相簿|google\s*照片|照片雲端)/iu, "GOOGLE_PHOTOS"],
   [/(?:google\s*drive|雲端硬碟|雲端磁碟|drive)/iu, "GOOGLE_DRIVE"],
   [/(?:本機|本地|電腦).{0,8}(?:資料夾|文件夾)|(?:資料夾|文件夾|folder)/iu, "LOCAL_FOLDER"],
   [/(?:本機|本地|電腦).{0,8}(?:檔案|文件)|(?:選檔|檔案|file)/iu, "LOCAL_FILE"],
