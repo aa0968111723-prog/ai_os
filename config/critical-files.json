@@ -18,9 +18,16 @@
       "mustContain": ["GenerationList"]
     },
     "client/src/features/storyboard-center/ShotCard.tsx": {
-      "minBytes": 4000,
-      "maxShrinkPercent": 50,
-      "mustContain": ["ShotCard"]
+      "minBytes": 20000,
+      "maxShrinkPercent": 35,
+      "mustContain": [
+        "export function ShotCard",
+        "shot-card__face",
+        "shot-card__details",
+        "BoundSummaryChips",
+        "ExternalAssetIntake",
+        "ExternalGenerationLauncher"
+      ]
     },
     "server/index.ts": {
       "minBytes": 20000,

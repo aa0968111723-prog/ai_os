@@ -65,6 +65,7 @@ function walk(dir, out = []) {
 const forbiddenMarkers = [
   "PLACEHOLDER_USE_ARTIFACT_FINAL",
   "PLACEHOLDER_WILL_FAIL_IF_TOO_LARGE",
+  "PLACEHOLDER_WILL_FAIL_TOO_LARGE",
   "PLACEHOLDER_WILL_LOAD",
   "PLACEHOLDER_WILL_REPLACE",
   "FULL_BODY_FROM_LOCAL_ARTIFACT",
@@ -73,6 +74,8 @@ const forbiddenMarkers = [
   "TODO_RESTORE",
   "TEMP - full",
   "publish button pending",
+  "truncated for tool safety",
+  "rest of the component continues identically",
 ];
 
 console.log("[integrity] scanning runtime source for destructive placeholders...");
