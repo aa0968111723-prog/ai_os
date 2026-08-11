@@ -400,6 +400,104 @@ export function isReviewedLandingBackfillStatement(statement: string): boolean {
 }
 
 /**
+ * Drizzle collapses a pending `CREATE TABLE` followed by later additive
+ * `ALTER TABLE ... ADD COLUMN` migrations into one final `CREATE TABLE` drift
+ * statement. Compare that shape at column/constraint granularity so the
+ * legacy-adoption gate stays exact without requiring published migrations to
+ * be rewritten. The splitter is quote/parenthesis aware because json defaults
+ * and SQL expressions can contain commas.
+ */
+function splitSqlDefinitionList(input: string): string[] {
+  const definitions: string[] = [];
+  let current = "";
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index]!;
+    current += character;
+    if (quote) {
+      if (character === quote) {
+        if (input[index + 1] === quote) {
+          current += input[index + 1]!;
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    else if (character === "," && depth === 0) {
+      current = current.slice(0, -1);
+      if (current.trim()) definitions.push(current.trim());
+      current = "";
+    }
+  }
+  if (current.trim()) definitions.push(current.trim());
+  return definitions;
+}
+
+function createTableShape(statement: string): { table: string; atoms: string[] } | null {
+  const match = /^CREATE TABLE "([^"]+)" \((.*)\)$/i.exec(statement.trim());
+  if (!match) return null;
+  const table = match[1]!;
+  const atoms = splitSqlDefinitionList(match[2]!.trim())
+    .map((definition) => `TABLE "${table}" ${definition.replace(/\s+/g, " ").trim()}`)
+    .sort();
+  return { table, atoms: [`TABLE "${table}"`, ...atoms].sort() };
+}
+
+function alteredColumnAtom(statement: string, table: string): string | null {
+  const match = new RegExp(`^ALTER TABLE "${table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" ADD COLUMN (.+)$`, "i")
+    .exec(statement);
+  return match ? `TABLE "${table}" ${match[1]!.trim()}` : null;
+}
+
+function equalStringArrays(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function reconcileCollapsedTableDrift(
+  unexpectedInput: string[],
+  missingInput: string[],
+): { unexpected: string[]; missing: string[] } {
+  const unexpected = [...unexpectedInput];
+  const missing = [...missingInput];
+
+  for (let unexpectedIndex = unexpected.length - 1; unexpectedIndex >= 0; unexpectedIndex -= 1) {
+    const actualShape = createTableShape(unexpected[unexpectedIndex]!);
+    if (!actualShape) continue;
+    const createIndex = missing.findIndex((statement) => createTableShape(statement)?.table === actualShape.table);
+    if (createIndex < 0) continue;
+
+    const expectedShape = createTableShape(missing[createIndex]!);
+    if (!expectedShape) continue;
+    const alterIndexes: number[] = [];
+    const expectedAtoms = [...expectedShape.atoms];
+    for (let index = 0; index < missing.length; index += 1) {
+      if (index === createIndex) continue;
+      const atom = alteredColumnAtom(missing[index]!, actualShape.table);
+      if (atom) {
+        expectedAtoms.push(atom);
+        alterIndexes.push(index);
+      }
+    }
+    expectedAtoms.sort();
+    if (!equalStringArrays(expectedAtoms, actualShape.atoms)) continue;
+
+    unexpected.splice(unexpectedIndex, 1);
+    for (const index of [...alterIndexes, createIndex].sort((a, b) => b - a)) missing.splice(index, 1);
+  }
+  return { unexpected, missing };
+}
+
+/**
  * Proves a legacy database is exactly the historical 0001 schema:
  * current-schema drift must be precisely the additive CREATE TABLE/INDEX DDL
  * in the reviewed bridge migrations—nothing missing, extra, destructive,
@@ -486,13 +584,21 @@ export function verifyLegacyAdoptionBridge(
   ) {
     const expectedSet = new Set(expectedCanonical);
     const actualSet = new Set(actualCanonical);
-    const unexpected = actualCanonical.filter((statement) => !expectedSet.has(statement));
-    const missing = expectedCanonical.filter((statement) => !actualSet.has(statement));
+    const unmatched = reconcileCollapsedTableDrift(
+      actualCanonical.filter((statement) => !expectedSet.has(statement)),
+      expectedCanonical.filter((statement) => !actualSet.has(statement)),
+    );
+    const unexpected = unmatched.unexpected;
+    const missing = unmatched.missing;
     const missingUnsafe = missing.filter((statement) => !reRunnable.has(statement));
-    if (unexpected.length > 0) errors.push(`legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift`);
+    if (unexpected.length > 0) {
+      errors.push(
+        `legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift；first=${unexpected[0]!.slice(0, 500)}`,
+      );
+    }
     if (missingUnsafe.length > 0) {
       errors.push(
-        `legacy schema 少了 ${missingUnsafe.length} 項待套用 migration 的預期 drift，且該 migration 無法安全重跑`,
+        `legacy schema 少了 ${missingUnsafe.length} 項待套用 migration 的預期 drift，且該 migration 無法安全重跑；first=${missingUnsafe[0]!.slice(0, 500)}`,
       );
     }
     if (missing.length > missingUnsafe.length) {

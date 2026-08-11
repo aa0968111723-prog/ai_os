@@ -379,6 +379,72 @@ describe("legacy migration adoption bridge", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("accepts Drizzle collapsing CREATE TABLE plus later guarded columns into one exact table shape", () => {
+    const receiptStatements = manifest.entries
+      .slice(manifest.entries.findIndex((entry) => entry.tag === LEGACY_ADOPTION_THROUGH_TAG) + 1)
+      .flatMap((entry) => entry.sql.split("--> statement-breakpoint").map(canonicalMigrationStatement))
+      .filter((statement) =>
+        /^CREATE TABLE "agent_tool_receipts"/.test(statement)
+        || /^ALTER TABLE "agent_tool_receipts" ADD COLUMN /.test(statement),
+      );
+    expect(receiptStatements.length).toBeGreaterThan(1);
+    const collapsedReceipt = canonicalMigrationStatement(`
+      CREATE TABLE "agent_tool_receipts" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "run_id" uuid NOT NULL,
+        "user_id" uuid,
+        "group_id" uuid,
+        "project_id" uuid,
+        "idempotency_key" text NOT NULL,
+        "tool_id" text NOT NULL,
+        "step_id" text,
+        "tool_call_id" uuid,
+        "attempt_id" uuid,
+        "effect_fingerprint" text,
+        "handler_identity" text,
+        "trace_id" text,
+        "conversation_id" text,
+        "goal_id" text,
+        "result" jsonb,
+        "reserved_points" integer DEFAULT 0 NOT NULL,
+        "actual_points" integer,
+        "settled" boolean DEFAULT false NOT NULL,
+        "status" text DEFAULT 'reserved' NOT NULL,
+        "lease_owner" uuid,
+        "lease_expires_at" timestamp with time zone,
+        "requested_at" timestamp with time zone,
+        "executed_at" timestamp with time zone,
+        "verification_stage" text,
+        "verification_method" text,
+        "target_refs" jsonb DEFAULT '[]'::jsonb NOT NULL,
+        "trust_origin" text,
+        "verified_at" timestamp with time zone,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+        "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+      );
+    `);
+    const baseDrift = [...expectedStatements];
+
+    const exact = verifyLegacyAdoptionBridge(
+      manifest,
+      { hasDataLoss: false, warnings: [], statements: [...baseDrift, collapsedReceipt] },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(exact.errors).toEqual([]);
+
+    const extraColumn = collapsedReceipt.replace(
+      '"updated_at" timestamp with time zone DEFAULT now() NOT NULL',
+      '"updated_at" timestamp with time zone DEFAULT now() NOT NULL,"unreviewed" text',
+    );
+    const divergent = verifyLegacyAdoptionBridge(
+      manifest,
+      { hasDataLoss: false, warnings: [], statements: [...baseDrift, extraColumn] },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(divergent.ok).toBe(false);
+    expect(divergent.errors.join(" ")).toContain("非 bridge 預期 drift");
+  });
+
   it("CREATE TABLE 的表層具名主鍵與內嵌主鍵視為同一句", () => {
     // 手寫 migration 慣用 CONSTRAINT "x_pkey" PRIMARY KEY ("id")，drizzle 產生的 drift
     // 一律內嵌。逐字比對會讓同一張表同時被判成「非預期 drift」與「缺漏」（0035 踩過）。
