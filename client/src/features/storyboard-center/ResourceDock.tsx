@@ -202,7 +202,7 @@ export function ResourceDock({
           onClick={() => setOpen((v) => !v)}
           title={open ? "收合資源面板" : "展開資源面板——就近取用素材／定裝／知識"}
         >
-          <Icon name="PanelRight" size={14} />
+          <Icon name="Layers" size={14} />
           資源
           {!open && visuals.length > 0 && (
             <Meta as="span" style={{ marginLeft: 4 }}>{visuals.length}</Meta>
