@@ -1,5 +1,6 @@
 import { Icon } from "../../../components/Icon";
 import { AgentCard } from "../../../components/AgentCard";
+import { ComputerRuntimeCard } from "../../computer-runtime/ComputerRuntimeCard";
 import { CreationCostSummary } from "../CreationCostSummary";
 import { useAgentRunBadges } from "../useAgentRunBadges";
 
@@ -117,6 +118,10 @@ export function PlanMode({
           compactComposer
           initialKnowledgeIds={knowledgeIds}
         />
+        {/* PR-6A：feature flag off 時元件自行不渲染 */}
+        <div style={{ marginTop: 12 }}>
+          <ComputerRuntimeCard projectId={projectId} />
+        </div>
       </div>
     </div>
   );
