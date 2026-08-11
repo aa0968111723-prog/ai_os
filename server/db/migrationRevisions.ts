@@ -321,4 +321,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0066_computer_artifacts": [
     "7e5d7dfefb7142e4f1cbd17ecef51711fd339843150477937ccdf352d83c18d5",
   ],
+  "0067_computer_desktop": [
+    "5e0cb19ffd980eabe8c0172203ca8c825ad39928e19b1d06964914104c26707f",
+  ],
+  "0068_computer_persisted_auth": [
+    "57b651952a90c2f8d82ebc0487a4a4ee4f9c2f10e8d7863ffc4b7b50126a436a",
+  ],
 };

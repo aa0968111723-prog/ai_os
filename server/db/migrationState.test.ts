@@ -343,11 +343,15 @@ describe("legacy migration adoption bridge", () => {
     // 7 statements. Packages and sessions are additive; existing assets are unchanged.
     // 0063 Secondary indexes adds 6 guarded CREATE INDEX IF NOT EXISTS only —
     // scene_presets / feedback_reports (×3) / text_versions / google_calendar_connections.
-    // Computer Runtime migrations (additive IF NOT EXISTS only): +13+5+6.
+    // 0064 Computer Runtime foundation: 3 CREATE TABLE IF NOT EXISTS + 10 guarded indexes — 13 statements.
+    // 0065 Human takeover: 5 ADD COLUMN IF NOT EXISTS on computer_sessions — 5 statements.
+    // 0066 Artifacts: 1 CREATE TABLE IF NOT EXISTS + 5 guarded indexes — 6 statements.
+    // 0067 Desktop: 4 ADD COLUMN IF NOT EXISTS on computer_sessions — 4 statements.
+    // 0068 Persisted auth: 1 CREATE TABLE IF NOT EXISTS + 3 guarded indexes — 4 statements.
     // Verified statement by statement: no ALTER of an existing column, no UPDATE,
     // no DELETE, no data movement, so a re-run is a no-op.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4,
     );
   });
 
