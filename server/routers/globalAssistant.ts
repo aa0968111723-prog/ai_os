@@ -77,6 +77,7 @@ import {
 } from "../../shared/assistantActions";
 import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
+import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
 import { randomUUID } from "node:crypto";
 import {
   assistantActiveGoalSchema,
@@ -223,6 +224,26 @@ const recentActionResultSchema = z.discriminatedUnion("type", [
 export function sanitizeRecentActionResults(raw: unknown): AssistantActionResult[] {
   const parsed = z.array(recentActionResultSchema).max(5).safeParse(raw);
   return parsed.success ? parsed.data : [];
+}
+
+export function recentVerifiedAssetIds(results: readonly AssistantActionResult[] | undefined): string[] {
+  if (!results?.length) return [];
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index];
+    if (result.type === "import" && result.verification.status === "verified" && result.assetIds.length) {
+      return [...new Set(result.assetIds)].slice(0, 50);
+    }
+  }
+  return [];
+}
+
+export function referencedShotOrdinal(message: string): number | undefined {
+  const match = message.match(/(?:第\s*([一二三四五六七八九十\d]+)\s*鏡|shot\s*#?\s*(\d+))/iu);
+  const raw = match?.[1] ?? match?.[2];
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) return Math.max(0, Number(raw) - 1);
+  const values: Record<string, number> = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 七: 6, 八: 7, 九: 8, 十: 9 };
+  return values[raw];
 }
 
 /** 前端拿到的「已解析」站級動作（帶真實 id＋人看得懂的標籤），確認後原樣送 runSiteAction */
@@ -830,6 +851,41 @@ export async function runGlobalAsk(
     return earlySemanticResult(`${capabilityMatch.reason}\n\n我可以改查 **已匯入 Aios 的數量**，或讓你改用可驗證的 Drive／檔案匯入流程。`);
   }
 
+  if (capabilityMatch.capabilityId === "attach_asset_to_shot" && effectiveProjectId) {
+    const assetIds = recentVerifiedAssetIds(input.recentActionResults);
+    const ordinal = referencedShotOrdinal(input.message);
+    const shots = ordinal == null ? [] : await db.select({ id: schema.scenes.id, title: schema.scenes.title })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex));
+    const shot = ordinal == null ? undefined : shots[ordinal];
+    if (!assetIds.length || !shot) {
+      const missingSlots = [...(!assetIds.length ? ["assetIds"] : []), ...(!shot ? ["shotId"] : [])];
+      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots };
+      stream.emit({
+        type: "waiting.user_input",
+        title: !assetIds.length ? "還需要先取得素材" : "找不到指定的分鏡",
+        description: !assetIds.length ? "請先完成匯入，或重新選擇要加入的素材。" : `這個專案目前沒有第 ${(ordinal ?? 0) + 1} 鏡。`,
+        status: "waiting",
+      });
+      return earlySemanticResult(!assetIds.length
+        ? "我還沒有可驗證的最近素材。請先完成匯入或選擇素材，我會接著同一個目標繼續。"
+        : `「${projectResolution.projectTitle ?? "目前專案"}」目前找不到第 ${(ordinal ?? 0) + 1} 鏡，請指定另一鏡。`);
+    }
+    activeGoal = { ...activeGoal, status: "executing", missingSlots: [], resolvedSlots: { ...activeGoal.resolvedSlots, shotId: shot.id, shotTitle: shot.title, assetIds } };
+    const stepId = stream.startStep({ type: "action.started", title: `正在把 ${assetIds.length} 項素材加入第 ${ordinal! + 1} 鏡`, toolName: "attach_asset_to_shot", target: shot.title });
+    const bound = await attachAssetsToShotVerified({ auth, projectId: effectiveProjectId, shotId: shot.id, assetIds });
+    activeGoal = { ...activeGoal, status: "verifying" };
+    const verified = bound.verification.status === "verified";
+    stream.emit({ type: "verification.completed", title: bound.verification.message, status: verified ? "ok" : "failed", toolName: "attach_asset_to_shot", target: shot.title, resultCount: bound.assetIds.length });
+    stream.finishStep(stepId, { type: verified ? "action.completed" : "action.failed", title: verified ? `已把素材加入第 ${ordinal! + 1} 鏡` : "素材綁定未通過驗證", status: verified ? "ok" : "failed", toolName: "attach_asset_to_shot", target: shot.title, resultCount: bound.assetIds.length });
+    activeGoal = { ...activeGoal, status: verified ? "completed" : "failed", resultRefIds: bound.assetIds.slice(0, 20) };
+    stream.emit({ type: verified ? "agent.completed" : "agent.failed", title: verified ? "已完成並重新讀取確認" : "操作未完成驗證", status: verified ? "ok" : "failed", resultCount: bound.assetIds.length });
+    return earlySemanticResult(verified
+      ? `✓ 已把 ${bound.assetIds.length} 項素材加入「${projectResolution.projectTitle ?? "目前專案"}」第 ${ordinal! + 1} 鏡，並重新讀取確認。`
+      : "操作已送出，但重新讀取未確認全部素材綁定，因此沒有標示為完成。");
+  }
+
   if (capabilityMatch.status === "matched" && effectiveProjectId && projectResolution.projectTitle) {
     const mode = capabilityMatch.capabilityId === "import_google_drive" ? "drive"
       : capabilityMatch.capabilityId === "import_local_file" ? "files"
@@ -1010,21 +1066,26 @@ export async function runGlobalAsk(
     const proposedSiteActions = resolveSiteActions(siteRefs, [...deterministicUrlProposal, ...mockProposals]);
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    const terminalStatus = executionTerminalStatus(siteActions.length, direct.executed.map((item) => item.result));
+    const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, siteActions);
-    stream.emit({
-      type: "agent.completed",
-      title: "已完成（測試模式）",
+    emitExecutionTerminalEvent(stream, siteActions, direct.executed, {
+      completedTitle: "已完成（測試模式）",
       resultSummary: overviewSummary,
     });
     if (traceSessionId) {
-      await finalizeSiteTraceSession({
-        sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成",
-        payload: { answer, siteActions: siteActions.map((a) => a.label) },
-      }).catch(() => undefined);
+      if (terminalStatus === "waiting") {
+        await updateSiteTraceSession(traceSessionId, { status: "running", summary: "等待使用者確認動作" }).catch(() => undefined);
+      } else {
+        await finalizeSiteTraceSession({
+          sessionId: traceSessionId, status: terminalStatus, summary: terminalStatus === "completed" ? "測試模式回答完成" : "動作驗證未通過",
+          payload: { answer, siteActions: siteActions.map((a) => a.label) },
+        }).catch(() => undefined);
+      }
     }
     return withTrace({
       answer: answerWithVerifiedActions(answer, direct.executed), dispatches: [], actions: [], siteActions, executedSiteActions: direct.executed,
-      steps: direct.executed.map((item) => `已完成：${item.action.label}`),
+      steps: verifiedExecuted.map((item) => `已完成並驗證：${item.action.label}`),
       mock: true, rationale: undefined, contextUsed: [], ...base,
     });
   }
@@ -1265,19 +1326,20 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     ]);
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    const terminalStatus = executionTerminalStatus(pendingConfirmation.length, direct.executed.map((item) => item.result));
+    const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, pendingConfirmation);
     // 收尾事件必須在 withTrace 之前發：快照是「回傳當下的事件流」，
     // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
     const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
-    stream.emit({
-      type: "agent.completed",
-      title: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
-      description: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
+    emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
+      completedTitle: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+      completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
       resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
       resultSummary: [
         { label: "來源", value: okSources.length },
         { label: "查詢", value: outcome.steps.length, unit: "次" },
-        ...(direct.executed.length ? [{ label: "已完成動作", value: direct.executed.length, unit: "件" }] : []),
+        ...(verifiedExecuted.length ? [{ label: "已完成動作", value: verifiedExecuted.length, unit: "件" }] : []),
       ],
     });
     const result: GlobalAskResult = withTrace({
@@ -1286,7 +1348,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
       siteActions: pendingConfirmation,
       executedSiteActions: direct.executed,
-      steps: [...outcome.steps, ...direct.executed.map((item) => `已完成：${item.action.label}`)],
+      steps: [...outcome.steps, ...verifiedExecuted.map((item) => `已完成並驗證：${item.action.label}`)],
       mock: false,
       rationale: sanitizeRationale(reply.rationale),
       contextUsed: sanitizeContextUsed(reply.contextUsed),
@@ -1295,18 +1357,22 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     if (traceSessionId) {
       // 答案已經算好——trace 收尾失敗只記警告，不把成功的回答變成 500（透明化失敗不拖垮創作）
       await updateSiteTraceSession(traceSessionId, { provider: usedProvider ?? null, model: usedModel ?? null }).catch(() => undefined);
-      await finalizeSiteTraceSession({
-        sessionId: traceSessionId,
-        status: "completed",
-        summary: "回答完成",
-        payload: {
-          answer: result.answer,
-          steps: result.steps,
-          dispatches: result.dispatches,
-          actions: result.actions.map((a) => a.label),
-          siteActions: result.siteActions.map((a) => a.label),
-        },
-      }).catch((err) => {
+      const tracePayload = {
+        answer: result.answer,
+        steps: result.steps,
+        dispatches: result.dispatches,
+        actions: result.actions.map((a) => a.label),
+        siteActions: result.siteActions.map((a) => a.label),
+      };
+      const traceUpdate = terminalStatus === "waiting"
+        ? updateSiteTraceSession(traceSessionId, { status: "running", summary: "等待使用者確認動作" })
+        : finalizeSiteTraceSession({
+            sessionId: traceSessionId,
+            status: terminalStatus,
+            summary: terminalStatus === "completed" ? "回答完成" : "動作驗證未通過",
+            payload: tracePayload,
+          });
+      await traceUpdate.catch((err) => {
         console.warn("[globalAssistant] trace 收尾失敗（不影響回答）：", err instanceof Error ? err.message : err);
       });
     }
@@ -1364,6 +1430,46 @@ function emitWaitingForConfirmation(stream: AgentEventStream, pending: ResolvedS
     title: `有 ${pending.length} 件動作需要你確認`,
     description: pending.map((action) => action.label).join("；").slice(0, 400),
     resultCount: pending.length,
+  });
+}
+
+export function executionTerminalStatus(
+  pendingCount: number,
+  results: readonly { verification: { status: "verified" | "unverified" } }[],
+): "waiting" | "failed" | "completed" {
+  if (pendingCount > 0) return "waiting";
+  if (results.some((result) => result.verification.status !== "verified")) return "failed";
+  return "completed";
+}
+
+function emitExecutionTerminalEvent(
+  stream: AgentEventStream,
+  pending: readonly ResolvedSiteAction[],
+  executed: readonly ExecutedSiteAction[],
+  summary: {
+    completedTitle: string;
+    completedDescription?: string;
+    resultCount?: number;
+    resultSummary?: AgentEvent["resultSummary"];
+  },
+): void {
+  const status = executionTerminalStatus(pending.length, executed.map((item) => item.result));
+  if (status === "waiting") return;
+  if (status === "failed") {
+    stream.emit({
+      type: "agent.failed",
+      title: "操作已送出，但驗證尚未通過",
+      description: "重新讀取未能確認預期狀態，因此不會標示為完成。",
+      status: "failed",
+    });
+    return;
+  }
+  stream.emit({
+    type: "agent.completed",
+    title: summary.completedTitle,
+    description: summary.completedDescription,
+    resultCount: summary.resultCount,
+    resultSummary: summary.resultSummary,
   });
 }
 
