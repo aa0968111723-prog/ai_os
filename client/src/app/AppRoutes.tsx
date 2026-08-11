@@ -17,7 +17,7 @@ const SettingsPage = lazyWithRetry(() => import("../pages/SettingsPage").then((m
 const MyReportsPage = lazyWithRetry(() => import("../pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
 const ModelsPage = lazyWithRetry(() => import("../pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
 const HelpPage = lazyWithRetry(() => import("../pages/HelpPage").then((m) => ({ default: m.HelpPage })));
-const McpPage = lazyWithRetry(() => import("../pages/McpPage").then((m) => ({ default: m.McpPage })));
+const McpHubPage = lazyWithRetry(() => import("../pages/McpHubPage").then((m) => ({ default: m.McpHubPage })));
 const IntegrationsPage = lazyWithRetry(() => import("../pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
 const DownloadsPage = lazyWithRetry(() => import("../pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
 const PlannerPage = lazyWithRetry(() => import("../pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
@@ -114,7 +114,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/my-reports"><MyReportsPage /></Route>
       <Route path="/models"><ModelsPage groupId={activeGroupId} /></Route>
       <Route path="/help"><HelpPage /></Route>
-      <Route path="/mcp"><McpPage /></Route>
+      <Route path="/mcp"><McpHubPage /></Route>
       <Route path="/integrations"><IntegrationsPage /></Route>
       <Route path="/downloads"><DownloadsPage /></Route>
       <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
@@ -151,7 +151,7 @@ export function UngroupedRoutes({ onRefresh }: { onRefresh?: () => void }) {
       <Route path="/settings"><SettingsPage /></Route>
       <Route path="/help"><HelpPage /></Route>
       {/* MCP 金鑰屬帳號層級；未分組時仍可先建立，實際連入後仍由服務端權限隔離。 */}
-      <Route path="/mcp"><McpPage /></Route>
+      <Route path="/mcp"><McpHubPage /></Route>
       {/* Google、Notion、外部 API 整合都綁個人帳號，不依賴組別。 */}
       <Route path="/integrations"><IntegrationsPage /></Route>
       {/* 未分組期間仍可能需要聯絡管理員；可訊範圍由後端守門。 */}
