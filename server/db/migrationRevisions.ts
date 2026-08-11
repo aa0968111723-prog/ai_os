@@ -312,4 +312,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0063_secondary_indexes": [
     "4f387a3b0a40612a97cc54e6b88e2c98a9c44f3b7ba33a2ba953f6741c0d80f8",
   ],
+  "0064_computer_runtime": [
+    "26fdf39d7173052884b41a9ea080af48180d36a5d30da2df2286ff97fbb4da09",
+  ],
 };
