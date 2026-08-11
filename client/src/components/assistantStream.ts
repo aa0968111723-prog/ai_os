@@ -265,6 +265,7 @@ export async function requestSiteAssistantStream({
   projectId,
   pageContext,
   recentActionResults,
+  mode,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -277,6 +278,8 @@ export async function requestSiteAssistantStream({
   /** 頁面感知上下文（在哪一頁／看哪一個／選了哪幾個）——同樣只是提示，後端逐欄夾制 */
   pageContext?: AssistantWirePageContext;
   recentActionResults?: AssistantActionResult[];
+  /** Explicit answer-model preference. Undefined keeps the server's free default. */
+  mode?: AgentPlannerMode;
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -319,6 +322,7 @@ export async function requestSiteAssistantStream({
         projectId,
         pageContext,
         recentActionResults,
+        mode,
       }),
       signal,
     });

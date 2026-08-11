@@ -129,7 +129,7 @@ describe("requestSiteAssistantStream", () => {
       return sseResponse(`event: done\ndata: ${JSON.stringify(DONE)}\n\n`);
     });
     await requestSiteAssistantStream({
-      groupId: "g1", message: "問", projectId: "p1",
+      groupId: "g1", message: "問", projectId: "p1", mode: "fal_balanced",
       history: [{ role: "user", text: "上一句" }],
       signal: new AbortController().signal, handlers: collect().handlers, fetchImpl,
     });
@@ -137,7 +137,7 @@ describe("requestSiteAssistantStream", () => {
       groupId: "g1", message: "問", history: [],
       signal: new AbortController().signal, handlers: collect().handlers, fetchImpl,
     });
-    expect(seen[0]).toEqual({ groupId: "g1", message: "問", projectId: "p1", history: [{ role: "user", text: "上一句" }] });
+    expect(seen[0]).toEqual({ groupId: "g1", message: "問", projectId: "p1", history: [{ role: "user", text: "上一句" }], mode: "fal_balanced" });
     expect(seen[1]).toEqual({ groupId: "g1", message: "問" });
     expect(fetchImpl.mock.calls[0][0]).toBe("/api/assistant/site-ask");
   });

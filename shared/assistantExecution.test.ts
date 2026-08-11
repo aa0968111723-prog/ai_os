@@ -8,6 +8,8 @@ describe("assistant execution fast path", () => {
     ["幫我建立一則會議筆記", "DIRECT"],
     ["請把這件事建立成任務", "DIRECT"],
     ["如何建立任務？", "ASK"],
+    ["你可以用瀏覽器嗎？", "ASK"],
+    ["幫我開啟瀏覽器", "DIRECT"],
     ["幫我規劃六鏡腳本", "AGENT"],
     ["持續監控失敗的生成並提醒我", "WATCH"],
   ] as const)("classifies %s as %s", (message, expected) => {
@@ -51,10 +53,16 @@ describe("assistant execution fast path", () => {
     const domains = new Set(ASSISTANT_CAPABILITIES.map((item) => item.domain));
     expect(domains).toEqual(new Set([
       "PROJECT", "TASK", "NOTE", "MEMORY", "STORYBOARD", "SCRIPT", "ASSET", "INTAKE",
-      "DATABASE", "SCHEDULE", "MEMBER", "COLLABORATION", "GENERATION",
+      "DATABASE", "SCHEDULE", "MEMBER", "COLLABORATION", "COMPUTER", "GENERATION",
     ]));
     expect(ASSISTANT_CAPABILITIES.filter((item) => item.access === "WRITE").every((item) => item.risk !== "READ")).toBe(true);
     expect(ASSISTANT_CAPABILITIES.every((item) => item.executionMode && item.handler && item.verificationStrategy && item.resultType)).toBe(true);
+    expect(classifyAssistantRequest("你可以用瀏覽器嗎？")).toMatchObject({
+      intent: "ASK", capabilityId: "inspect_computer_runtime", executionMode: "DIRECT_TOOL",
+    });
+    expect(classifyAssistantRequest("幫我開啟瀏覽器")).toMatchObject({
+      intent: "DIRECT", capabilityId: "open_browser_runtime", executionMode: "BROWSER_FALLBACK",
+    });
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "orchestrate_group_campaign")?.executionMode).toBe("GROUP_CAMPAIGN");
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "prepare_external_generation")).toMatchObject({
       risk: "EXTERNAL", direct: false, executionMode: "DIRECT_TOOL", verificationStrategy: "external_confirmation",

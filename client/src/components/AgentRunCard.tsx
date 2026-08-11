@@ -23,7 +23,7 @@ export function AgentRunCard({
 }: {
   plan: AssistantExecutionPlan;
   active: boolean;
-  outcome?: "completed" | "failed" | "stopped";
+  outcome?: "completed" | "failed" | "stopped" | "waiting";
   /** 本次執行的真實事件流；空陣列＝還沒有任何事情發生，卡片就不顯示任何計量 */
   events?: readonly AgentEvent[];
   latency?: AssistantLatencyMetrics;
@@ -35,12 +35,14 @@ export function AgentRunCard({
       ? { icon: "XCircle" as const, label: "未完成", className: undefined }
       : outcome === "stopped"
         ? { icon: "Square" as const, label: "已停止", className: undefined }
-        : { icon: "Check" as const, label: "已完成", className: undefined };
+        : outcome === "waiting"
+          ? { icon: "CircleDot" as const, label: "等待下一步", className: undefined }
+          : { icon: "Check" as const, label: "已完成", className: undefined };
 
   return (
     <section className="agent-run-card" aria-live="polite" data-intent={plan.intent}>
       <div className="agent-run-card__header">
-        <strong>{active ? "Aios 正在處理" : state.label === "已完成" ? "Aios 已完成" : `Aios ${state.label}`}</strong>
+        <strong>{active ? "Aios 正在處理" : state.label === "已完成" ? "Aios 已完成" : state.label === "等待下一步" ? "Aios 等待下一步" : `Aios ${state.label}`}</strong>
         <span className="agent-run-card__state">
           <Icon name={state.icon} size={12} className={state.className} /> {state.label}
         </span>
