@@ -921,7 +921,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 對話紀錄區域 ── */}
         {messages.length > 0 && (
-          <div className="ai-copilot-chat-feed">
+          <div
+            className="ai-copilot-chat-feed"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="AI 助手對話紀錄"
+          >
             {messages.map((msg, index) => (
               <div key={index} className={`ai-copilot-bubble ai-copilot-bubble--${msg.role}`}>
                 <div className="ai-copilot-bubble__avatar">
