@@ -85,9 +85,15 @@ const TASK_RE = /(?:任務|待辦|task)/iu;
 const GENERATION_RE = /(?:生成紀錄|生成結果|generation)/iu;
 
 function sourceFromText(text: string): AssistantSourceType | undefined {
+  let resolved: { index: number; type: AssistantSourceType } | undefined;
   for (const [re, type] of SOURCE_MENTION) {
-    if (re.test(text)) return type;
+    const index = text.search(re);
+    // A correction can name both the rejected and replacement source
+    // ("不是 Drive，是 Photos"). The last explicit source is the asserted
+    // replacement; registry order must never override conversation syntax.
+    if (index >= 0 && (!resolved || index > resolved.index)) resolved = { index, type };
   }
+  if (resolved) return resolved.type;
   if (CLOUD_ONLY_RE.test(text)) return "UNKNOWN_CLOUD";
   return undefined;
 }
