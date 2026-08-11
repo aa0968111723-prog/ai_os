@@ -77,6 +77,20 @@ import {
 } from "../../shared/assistantActions";
 import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
+import { randomUUID } from "node:crypto";
+import {
+  assistantActiveGoalSchema,
+  type AssistantActiveGoal,
+  type AssistantEvidenceScope,
+  type AssistantGoalFrame,
+} from "../../shared/assistantGoalFrame";
+import {
+  deriveDeterministicGoalFrame,
+  executionPlanFromGoal,
+  matchAssistantCapabilityForGoal,
+  resolveWorkingProject,
+  type AssistantCapabilityMatch,
+} from "../../shared/assistantSemanticResolution";
 
 /**
  * 全站助手（GLOBAL_ASSISTANT_PLAN Phase 2）：組助手（teamAssistant.ask）的演進——
@@ -481,6 +495,8 @@ export interface GlobalAskInput {
   pageContext?: AssistantWirePageContext;
   /** Bounded typed references from this conversation; never file bytes/content. */
   recentActionResults?: AssistantActionResult[];
+  /** Bounded typed active goal from the same conversation. Server re-resolves every id. */
+  activeGoal?: AssistantActiveGoal;
   /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質。
    *  與代理規劃共用 AgentPlannerMode schema；非 nim 模式會扣站內點數（見 llmPricing）。 */
   mode?: AgentPlannerMode;
@@ -510,6 +526,19 @@ export interface GlobalAskResult {
   events: AgentEvent[];
   /** 本次**真的讀過**的來源。空陣列代表沒讀任何站內資料——此時前端不得顯示來源區塊。 */
   sources: AgentSourceRecord[];
+  /** Assistant Brain v2 observable semantic state (never chain-of-thought). */
+  goalFrame?: AssistantGoalFrame;
+  activeGoal?: AssistantActiveGoal;
+  capabilityMatch?: { status: AssistantCapabilityMatch["status"]; capabilityId?: string; reason: string; missingSlots: string[] };
+  evidenceScope?: AssistantEvidenceScope;
+  intakeRequest?: AssistantIntakeRequest;
+}
+
+export interface AssistantIntakeRequest {
+  mode: "drive" | "files" | "folder";
+  projectId: string;
+  projectTitle: string;
+  message: string;
 }
 
 export interface ResolvedIntakeFallback {
@@ -558,7 +587,9 @@ export async function runGlobalAsk(
   onEvent?: (e: GlobalAskStreamEvent) => void,
 ): Promise<GlobalAskResult> {
   const { auth, groupId } = input;
-  const executionPlan = classifyAssistantRequest(input.message);
+  // Regex classifier is only the immediate SSE routing hint. The typed GoalFrame
+  // resolved after ACL-filtered context becomes the execution authority.
+  let executionPlan = classifyAssistantRequest(input.message);
   /**
    * 事件流。**這是本次執行唯一的進度來源**——前端不再自己預測步驟。
    * 每一則事件都在對應的工作真的發生時才發出（見 services/agentEventStream 檔頭）。
@@ -605,18 +636,67 @@ export async function runGlobalAsk(
     throw error;
   }
   const { commandLevel, canDispatch, canSupervise, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
-  const currentProjectRef = input.projectId
-    ? [...projByRef.entries()].find(([, p]) => p.id === input.projectId)?.[0]
+  // ── Assistant Brain v2: UNDERSTAND → GROUND → RESOLVE ───────────────────
+  const semantic = deriveDeterministicGoalFrame(input.message, input.activeGoal);
+  let goalFrame = semantic.frame;
+  const projectCandidates = [...projByRef.values()].map((project) => ({ id: project.id, title: project.title }));
+  const projectResolution = resolveWorkingProject({
+    message: input.message,
+    candidates: projectCandidates,
+    activeGoal: input.activeGoal,
+    recentActionResults: input.recentActionResults,
+    pageProjectId: input.projectId,
+  });
+  if (projectResolution.status === "resolved" && projectResolution.projectId) {
+    goalFrame = { ...goalFrame, scope: { ...goalFrame.scope, projectId: projectResolution.projectId } };
+  }
+  let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame);
+  executionPlan = executionPlanFromGoal(goalFrame, capabilityMatch, input.message);
+  const goalId = semantic.continuation === "NEW_GOAL" || !input.activeGoal ? randomUUID() : input.activeGoal.goalId;
+  let activeGoal: AssistantActiveGoal = {
+    goalId,
+    status: capabilityMatch.status === "matched" ? "ready" : "resolving",
+    frame: goalFrame,
+    resolvedSlots: {
+      ...(input.activeGoal?.resolvedSlots ?? {}),
+      ...(projectResolution.status === "resolved" && projectResolution.projectId
+        ? { projectId: projectResolution.projectId, projectTitle: projectResolution.projectTitle }
+        : {}),
+    },
+    missingSlots: [...capabilityMatch.missingSlots],
+    resultRefIds: input.activeGoal?.resultRefIds ?? [],
+  };
+  const semanticPayload = () => ({
+    goalFrame,
+    activeGoal,
+    capabilityMatch: {
+      status: capabilityMatch.status,
+      capabilityId: capabilityMatch.capabilityId,
+      reason: capabilityMatch.reason,
+      missingSlots: capabilityMatch.missingSlots,
+    },
+    evidenceScope: capabilityMatch.evidenceScope,
+  });
+  stream.emit({
+    type: "plan.created",
+    title: capabilityMatch.capability
+      ? `已理解目標：${capabilityMatch.capability.label}`
+      : capabilityMatch.status === "unsupported" ? "已確認目前能力邊界" : "已理解目標，還需要一項資訊",
+    description: capabilityMatch.reason,
+    status: capabilityMatch.status === "matched" ? "ok" : "waiting",
+    metadata: {
+      goalIntent: goalFrame.intent,
+      goalOperation: goalFrame.operation,
+      ...(capabilityMatch.capabilityId ? { capabilityId: capabilityMatch.capabilityId } : {}),
+      evidenceScope: capabilityMatch.evidenceScope,
+    },
+  });
+
+  const effectiveProjectId = goalFrame.scope.projectId ?? input.projectId;
+  const currentProjectRef = effectiveProjectId
+    ? [...projByRef.entries()].find(([, p]) => p.id === effectiveProjectId)?.[0]
     : undefined;
-  const lastCreatedProjectId = [...(input.recentActionResults ?? [])]
-    .reverse()
-    .find((result) => result.type === "create_project")?.projectId;
-  const recentProjectRef = lastCreatedProjectId
-    ? [...projByRef.entries()].find(([, project]) => project.id === lastCreatedProjectId)?.[0]
-    : undefined;
-  const referencesRecentProject = /(剛建立|剛才建立|上一個專案|這個專案|該專案)/i.test(input.message);
-  const mentionedProjectRef = resolveMentionedProjectRef(projByRef, input.message);
-  const deterministicProjectRef = currentProjectRef ?? mentionedProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined);
+  const deterministicProjectRef = currentProjectRef;
   const pastedUrl = input.message.match(/https?:\/\/[^\s<>{}\[\]"']+/i)?.[0];
   const urlCapability = pastedUrl ? publicUrlIntakeCapability(pastedUrl) : undefined;
   const deterministicUrlProposal: SiteActionProposal[] =
@@ -656,11 +736,11 @@ export async function runGlobalAsk(
           .from(schema.dataTables)
           .where(inArray(schema.dataTables.id, dbIds))
       : Promise.resolve([] as Array<{ id: string; agentAccess: string | null }>),
-    currentProjectRef && input.projectId && input.pageContext?.selectedEntityIds?.length
+    currentProjectRef && effectiveProjectId && input.pageContext?.selectedEntityIds?.length
       ? db
           .select({ id: schema.scenes.id, title: schema.scenes.title })
           .from(schema.scenes)
-          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)))
+          .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
           .orderBy(asc(schema.scenes.orderIndex))
       : Promise.resolve([] as Array<{ id: string; title: string }>),
   ]);
@@ -719,6 +799,52 @@ export async function runGlobalAsk(
       toolName: "group_overview",
       status: table.rowCount ? "ok" : "empty",
     });
+  }
+
+  const earlySemanticResult = (answer: string, intakeRequest?: AssistantIntakeRequest): GlobalAskResult => ({
+    answer,
+    dispatches: [], actions: [], siteActions: [], executedSiteActions: [], intakeFallbacks: [], steps: [],
+    canDispatch: false, commandLevel, mock: isMockMode(), rationale: undefined, contextUsed: [], degraded,
+    traceSessionId: undefined, executionPlan, runId: stream.runId,
+    events: stream.snapshotEvents(), sources: stream.snapshotSources(), ...semanticPayload(),
+    ...(intakeRequest ? { intakeRequest } : {}),
+  });
+
+  if (goalFrame.missingSlots.includes("source")) {
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["source"] };
+    stream.emit({ type: "waiting.user_input", title: "還需要確認資料來源", description: "你說的「雲端」是 Google Drive、Google Photos，還是 Aios 目前專案素材？", status: "waiting" });
+    return earlySemanticResult("我還缺一個資訊：你說的「雲端」是 **Google Drive、Google Photos，還是 Aios 目前專案素材**？你選一個，我會接著同一個目標繼續。");
+  }
+
+  if (capabilityMatch.missingSlots.includes("projectId") && projectResolution.status !== "resolved") {
+    const candidates = projectResolution.candidates.slice(0, 8);
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["projectId"], resolvedSlots: { ...activeGoal.resolvedSlots, projectCandidates: candidates } };
+    const options = candidates.length ? candidates.map((candidate, index) => `${index + 1}. ${candidate.title}`).join("\n") : "目前沒有可用的專案。";
+    stream.emit({ type: "waiting.user_input", title: "還需要確認目標專案", description: candidates.length ? `有 ${candidates.length} 個可用專案，請選一個` : "目前沒有可用專案", status: "waiting", resultCount: candidates.length });
+    return earlySemanticResult(`我知道你要做什麼，但還缺 **目標專案**。\n\n${options}\n\n直接回覆專案名稱或「第二個」即可，我會接著做。`);
+  }
+
+  if (capabilityMatch.status === "unsupported" && capabilityMatch.evidenceScope === "REMOTE_SOURCE") {
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
+    stream.emit({ type: "waiting.user_input", title: "目前無法驗證完整遠端清單", description: capabilityMatch.reason, status: "waiting", sourceType: "external", sourceName: goalFrame.source?.type === "GOOGLE_PHOTOS" ? "Google Photos" : "Google Drive" });
+    return earlySemanticResult(`${capabilityMatch.reason}\n\n我可以改查 **已匯入 Aios 的數量**，或讓你改用可驗證的 Drive／檔案匯入流程。`);
+  }
+
+  if (capabilityMatch.status === "matched" && effectiveProjectId && projectResolution.projectTitle) {
+    const mode = capabilityMatch.capabilityId === "import_google_drive" ? "drive"
+      : capabilityMatch.capabilityId === "import_local_file" ? "files"
+      : capabilityMatch.capabilityId === "import_folder" ? "folder" : undefined;
+    if (mode) {
+      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
+      const intakeRequest: AssistantIntakeRequest = {
+        mode, projectId: effectiveProjectId, projectTitle: projectResolution.projectTitle,
+        message: mode === "drive" ? `已確認要加入「${projectResolution.projectTitle}」。請選擇 Google Drive 檔案。`
+          : mode === "folder" ? `已確認要加入「${projectResolution.projectTitle}」。請選擇資料夾。`
+          : `已確認要加入「${projectResolution.projectTitle}」。請選擇檔案。`,
+      };
+      stream.emit({ type: "waiting.user_input", title: mode === "drive" ? "等待你選 Google Drive 資料" : mode === "folder" ? "等待你選資料夾" : "等待你選檔案", description: intakeRequest.message, status: "waiting" });
+      return earlySemanticResult(intakeRequest.message, intakeRequest);
+    }
   }
 
   // Known landing-page providers are a capability boundary, not a failed
@@ -847,6 +973,7 @@ export async function runGlobalAsk(
   const routeAllowsDispatch = canDispatch && (executionPlan.intent === "AGENT" || executionPlan.intent === "PLAN");
   const base = {
     canDispatch: routeAllowsDispatch, commandLevel, degraded, traceSessionId, executionPlan, runId: stream.runId, intakeFallbacks,
+    ...semanticPayload(),
   };
   /** 回傳前統一補上事件流與來源快照——四個 return 點都得帶，漏一個就是「軌跡憑空消失」 */
   const withTrace = <T extends object>(result: T) => ({
@@ -1659,6 +1786,7 @@ export const globalAssistantRouter = router({
       /** 頁面感知上下文（逐欄夾制過的白名單；同樣只是提示） */
       pageContext: assistantPageContextSchema.optional(),
       recentActionResults: z.array(recentActionResultSchema).max(5).optional(),
+      activeGoal: assistantActiveGoalSchema.optional(),
       /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
       mode: agentPlannerModeSchema.optional(),
     }))
@@ -1670,6 +1798,7 @@ export const globalAssistantRouter = router({
       projectId: input.projectId,
       pageContext: input.pageContext,
       recentActionResults: input.recentActionResults,
+      activeGoal: input.activeGoal,
       mode: input.mode,
     })),
 

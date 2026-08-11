@@ -23,6 +23,7 @@ import {
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
 import {
   ExternalAssetIntake,
@@ -658,6 +659,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events?: AgentEvent[];
       sources?: AgentSourceRecord[];
       intakeFallbacks?: IntakeFallback[];
+      activeGoal?: AssistantActiveGoal;
+      intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
@@ -679,6 +682,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           : hasVerifiedCompletion
             ? "completed"
             : "waiting";
+      if (data.activeGoal) {
+        const status: AssistantActiveGoal["status"] = resolvedRunStatus === "completed"
+          ? "completed"
+          : resolvedRunStatus === "failed"
+            ? "failed"
+            : data.activeGoal.status === "waiting_confirmation"
+              ? "waiting_confirmation"
+              : "waiting_user_input";
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          activeGoal: { ...data.activeGoal!, status },
+        }));
+      }
+      if (data.intakeRequest) {
+        setIntakeTargetProjectId(data.intakeRequest.projectId);
+        setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.intakeRequest.mode });
+      }
       pushMessage({
         role: "assistant",
         text: data.answer,
@@ -733,6 +753,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         projectId: pageCtx.projectId ?? projectId,
         pageContext: toWirePageContext(pageCtx),
         recentActionResults: conversation.recentActionResults,
+        activeGoal: conversation.activeGoal,
         mode: readAssistantAnswerMode(),
         signal: controller.signal,
         handlers: {
@@ -777,6 +798,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               projectId: pageCtx.projectId ?? projectId,
               pageContext: toWirePageContext(pageCtx),
               recentActionResults: conversation.recentActionResults,
+              activeGoal: conversation.activeGoal,
               mode: readAssistantAnswerMode(),
             },
             {
@@ -1111,6 +1133,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   backgroundProcessing: true,
                   verification: { status: "verified", message: "檔案已安全保存並登記背景整理" },
                 }]);
+                setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+                  ...previous,
+                  activeGoal: previous.activeGoal
+                    ? {
+                        ...previous.activeGoal,
+                        status: "completed",
+                        missingSlots: [],
+                        resultRefIds: notice.assetIds.slice(0, 20),
+                      }
+                    : previous.activeGoal,
+                }));
                 pushMessage({
                   role: "assistant",
                   text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理，你可以繼續聊天。`,
