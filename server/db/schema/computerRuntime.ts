@@ -50,6 +50,12 @@ export const computerSessions = pgTable("computer_sessions", {
   /** After release to agent, must re-observe before agent acts */
   needsReobserve: boolean("needs_reobserve").notNull().default(false),
   actionCount: integer("action_count").notNull().default(0),
+  /** PR-6D vision loop counter */
+  screenshotCount: integer("screenshot_count").notNull().default(0),
+  /** PR-6D browser → desktop escalation lineage */
+  escalatedFromSessionId: uuid("escalated_from_session_id"),
+  escalationReason: text("escalation_reason"),
+  currentApp: text("current_app"),
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

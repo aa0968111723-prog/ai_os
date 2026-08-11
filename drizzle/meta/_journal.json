@@ -470,6 +470,13 @@
       "when": 1789200000000,
       "tag": "0066_computer_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0067_computer_desktop",
+      "breakpoints": true
     }
   ]
 }
