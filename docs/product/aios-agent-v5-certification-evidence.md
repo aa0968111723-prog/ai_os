@@ -8,6 +8,7 @@ This file is the review index for executable evidence. It does not promote local
 
 - Required handler contract: **PASS**, 4 declared tools, 0 dangling handlers, 0 dangling skills.
 - Fresh PostgreSQL 0000 → 0070: **PASS**, 71 migrations, 128 public tables, schema drift 0.
+- Reviewed legacy 0000/0001 adoption → 0070: **PASS**, exact final-table shape reconciliation, 71 ledger rows, 128 public tables, schema drift 0.
 - Fresh DB integrity: **PASS**, critical 0, warning 0.
 - Local Command Center E2E: **PASS**, Direct create → Direct URL intake → recent-result read → user-click navigation → conversation restore.
 - Local fault/soak: **PASS**, 1,000 runs, 1,000 unique effects, 333 concurrent duplicate blocks, 71 uncertain-outcome reconciliation resumes.
@@ -103,7 +104,7 @@ All four require `userId`, `groupId`, and `projectId`. Runtime checks durable ru
 
 | Gate | Result |
 |---|---|
-| `npm test` | PASS — 237 files, 2,690 passed, 22 files / 96 tests intentionally skipped by environment gates |
+| `npm test` | PASS — 237 files, 2,691 passed, 22 files / 96 tests intentionally skipped by environment gates |
 | `npm run test:client` | PASS — 200 files, 1,791 passed |
 | `npm run typecheck` | PASS |
 | `npm run build` | PASS |
@@ -124,5 +125,7 @@ Round A found and fixed: queued next message silently dropped; generic project a
 Round B found and fixed: serialization retry was not distinguished from unknown commit; receipt payload could persist credentials; run owner was not bound to caller; receipt owner scope was indirect; timestamp CAS lost updates; result parser crashed on legacy action results; page modal z-index intercepted Persistent Assistant actions.
 
 Round C found and fixed: the empty-project onboarding modal could open after the Assistant and retain competing dialog focus; the durable conversation service imported a router in violation of ADR-009; an unbounded jsdom worker count caused cascading false failures; and synchronous capability certification inserted a normal `running` run that the background Agent runner could concurrently claim and corrupt. Certification now owns a `user_controlled` run end-to-end, with a PostgreSQL round-trip regression; rerunning all mock capabilities leaves integrity 0/0 and readiness HTTP 200.
+
+Round D found and fixed through the independent GitHub migration gate: Drizzle collapses a newly created table plus later guarded `ADD COLUMN` migrations into one final `CREATE TABLE` drift statement. The legacy bridge previously compared only whole statements and rejected the valid `agent_tool_receipts` evolution. It now reconciles table, column, type, default, and constraint atoms exactly, reports the first bounded mismatch, accepts the real 0000/0001 → 0070 path, and still rejects an injected unreviewed column.
 
 Two final clean fresh-eye rounds must still be recorded after staging credentials/data are supplied and the exact pushed deployment is exercised. Local clean rounds alone cannot satisfy the production readiness contract.
