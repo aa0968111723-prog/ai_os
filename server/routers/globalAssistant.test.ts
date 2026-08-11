@@ -3,8 +3,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   answerWithVerifiedActions,
+  executionTerminalStatus,
   formatMemberRefs,
+  recentVerifiedAssetIds,
   readBackVerification,
+  referencedShotOrdinal,
   resolveMentionedProjectRef,
   resolveSiteActions,
   type SiteActionRefs,
@@ -22,6 +25,12 @@ describe("DIRECT -> VERIFY -> COMPLETE", () => {
   it("does not hallucinate success when the verification read fails", async () => {
     const result = await readBackVerification(async () => { throw new Error("db timeout"); });
     expect(result).toEqual({ status: "unverified", message: "操作已送出，但驗證未通過" });
+  });
+
+  it("never completes while confirmation or verification is pending", () => {
+    expect(executionTerminalStatus(1, [])).toBe("waiting");
+    expect(executionTerminalStatus(0, [{ verification: { status: "unverified" } }])).toBe("failed");
+    expect(executionTerminalStatus(0, [{ verification: { status: "verified" } }])).toBe("completed");
   });
 
   it("uses server-owned verified results for the completion answer", () => {
@@ -59,6 +68,19 @@ describe("Goal -> Action routing helpers", () => {
       ["p1", { title: "挑戰營" }],
       ["p2", { title: "挑戰營回顧" }],
     ]), "加入挑戰營回顧")).toBeUndefined();
+  });
+
+  it("resolves the third shot deterministically without invoking the planner", () => {
+    expect(referencedShotOrdinal("把這些放第三鏡")).toBe(2);
+    expect(referencedShotOrdinal("attach these to shot 12")).toBe(11);
+  });
+
+  it("continues only from the latest verified bounded asset result", () => {
+    expect(recentVerifiedAssetIds([
+      { type: "import", assetIds: ["old"], verification: { status: "verified", message: "ok" } },
+      { type: "import", assetIds: ["unverified"], verification: { status: "unverified", message: "no" } },
+      { type: "import", assetIds: ["a", "a", "b"], verification: { status: "verified", message: "ok" } },
+    ] as never)).toEqual(["a", "b"]);
   });
 });
 

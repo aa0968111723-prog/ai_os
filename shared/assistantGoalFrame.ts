@@ -141,6 +141,8 @@ export const assistantActiveGoalSchema = z.object({
     "waiting_confirmation",
     "ready",
     "running",
+    "executing",
+    "verifying",
     "completed",
     "failed",
     "stopped",
@@ -150,6 +152,8 @@ export const assistantActiveGoalSchema = z.object({
   missingSlots: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
   pendingQuestionId: z.string().uuid().optional(),
   resultRefIds: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional(),
 });
 export type AssistantActiveGoal = z.infer<typeof assistantActiveGoalSchema>;
 

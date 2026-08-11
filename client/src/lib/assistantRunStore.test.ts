@@ -112,4 +112,25 @@ describe("assistantRunStore", () => {
     })));
     expect(getAssistantConversation<Message>("g1").recentActionResults).toHaveLength(5);
   });
+
+  it("active goal survives panel close and route changes without trusting it as authorization", () => {
+    setAssistantConversation<Message>("g1", (previous) => ({
+      ...previous,
+      activeGoal: {
+        goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        status: "waiting_user_input",
+        frame: {
+          intent: "IMPORT", operation: "IMPORT", objectType: "ASSET",
+          source: { type: "GOOGLE_DRIVE" }, scope: {}, referents: [], constraints: [],
+          desiredOutcome: "PERSIST_ASSETS", missingSlots: ["projectId"],
+          understandingConfidence: "high", sourceConfidence: "high",
+          entityConfidence: "low", capabilityConfidence: "medium",
+        },
+        resolvedSlots: {}, missingSlots: ["projectId"], resultRefIds: [],
+      },
+    }));
+    captureAssistantReturnContext({ groupId: "g1", originRoute: "/p/a" });
+    expect(getAssistantConversation<Message>("g1").activeGoal?.goalId)
+      .toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  });
 });

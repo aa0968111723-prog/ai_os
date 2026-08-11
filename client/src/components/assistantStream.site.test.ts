@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { requestSiteAssistantStream, type SiteAssistantStreamDone } from "./assistantStream";
 import type { AssistantActivityEvent } from "./AssistantTrace";
 import type { AssistantRunOpen } from "@shared/assistantExecution";
+import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 
 /** 把 SSE 文字包成可讀串流的 Response（模擬 /api/assistant/site-ask） */
 function sseResponse(text: string, ok = true): Response {
@@ -140,5 +141,30 @@ describe("requestSiteAssistantStream", () => {
     expect(seen[0]).toEqual({ groupId: "g1", message: "問", projectId: "p1", history: [{ role: "user", text: "上一句" }], mode: "fal_balanced" });
     expect(seen[1]).toEqual({ groupId: "g1", message: "問" });
     expect(fetchImpl.mock.calls[0][0]).toBe("/api/assistant/site-ask");
+  });
+
+  it("selected model and bounded active goal reach the same SSE execution", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const activeGoal: AssistantActiveGoal = {
+      goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      status: "waiting_user_input",
+      frame: {
+        intent: "IMPORT", operation: "IMPORT", objectType: "ASSET",
+        source: { type: "GOOGLE_DRIVE" }, scope: {}, referents: [], constraints: [],
+        desiredOutcome: "PERSIST_ASSETS", missingSlots: ["projectId"],
+        understandingConfidence: "high", sourceConfidence: "high",
+        entityConfidence: "low", capabilityConfidence: "medium",
+      },
+      resolvedSlots: {}, missingSlots: ["projectId"], resultRefIds: [],
+    };
+    await requestSiteAssistantStream({
+      groupId: "g1", message: "第二個", activeGoal, mode: "fal_quality",
+      signal: new AbortController().signal, handlers: collect().handlers,
+      fetchImpl: async (_url, init) => {
+        seen.push(JSON.parse(String(init?.body)));
+        return sseResponse(`event: done\ndata: ${JSON.stringify(DONE)}\n\n`);
+      },
+    });
+    expect(seen[0]).toMatchObject({ mode: "fal_quality", activeGoal: { goalId: activeGoal.goalId } });
   });
 });
