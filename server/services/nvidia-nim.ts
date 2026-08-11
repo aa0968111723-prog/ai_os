@@ -113,9 +113,16 @@ export interface ChatCompletionResponse {
  * 呼叫端 catch 時以 instanceof 判斷：是這個類別就把 message 原樣顯示給使用者。
  */
 export class NimServiceError extends Error {
-  constructor(message: string) {
+  /**
+   * 這個錯誤「降級到備援供應商（fal）」救不救得了：
+   * - 逾時／流量達上限（429）／暫時性問題 → true，改走 fal 使用者還有答案；
+   * - 金鑰／設定錯誤（401/402/403、未設金鑰）→ false，那是設定問題，備援只會默默多花一筆。
+   */
+  readonly degradable: boolean;
+  constructor(message: string, options?: { degradable?: boolean }) {
     super(message);
     this.name = "NimServiceError";
+    this.degradable = options?.degradable ?? true;
   }
 }
 
@@ -135,6 +142,15 @@ export function nimRetryable(err: unknown): boolean {
   return true; // 無 HTTP 狀態＝網路/逾時類，重試
 }
 
+/** 這個 NIM 錯誤該不該觸發「降級到備援供應商（fal）」：逾時／429／暫時性問題（5xx、無狀態的網路類）
+ *  可以——降級讓使用者還有答案；金鑰／設定錯誤（401/402/403、未設金鑰）備援救不了，不降級。 */
+export function nimErrorDegradable(err: unknown): boolean {
+  if (err instanceof NimServiceError) return err.degradable;
+  const status = (err as { nimStatus?: number } | null | undefined)?.nimStatus;
+  if (typeof status === "number") return status >= 500; // 5xx 暫時性可降級；4xx 客戶端錯誤不降級
+  return true; // 無 HTTP 狀態＝網路/逾時類，可降級
+}
+
 /** 呼叫 NVIDIA NIM Chat API(OpenAI 相容);金鑰未設或 HTTP 錯誤一律拋例外,由呼叫端退點。
  *  暫時性失敗（逾時/5xx/網路）會自動退避重試至多 NIM_MAX_ATTEMPTS 次（見 nimRetryable）。
  *
@@ -145,7 +161,7 @@ export function nimRetryable(err: unknown): boolean {
  *  結束並以明確人話逾時收束，不無聲地把等待時間翻三倍。 */
 export async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompletionResponse> {
   if (!NVIDIA_NIM_API_KEY) {
-    throw new NimServiceError("AI 文字服務尚未設定金鑰——請管理員到 build.nvidia.com 申請（免費）並設定 NVIDIA_NIM_API_KEY");
+    throw new NimServiceError("AI 文字服務尚未設定金鑰——請管理員到 build.nvidia.com 申請（免費）並設定 NVIDIA_NIM_API_KEY", { degradable: false });
   }
   const timeoutMs = options.timeoutMs ?? 60_000;
   // 整個呼叫（含所有重試）的總時限。逾時以 NimServiceError 拋出＝不重試、呼叫端直接顯示人話原因。
@@ -182,7 +198,7 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
           throw new NimServiceError("AI 文字服務流量達上限（NIM 免費層約每分鐘 40 次）——等一分鐘再試；常態壅塞請管理員向 NVIDIA 申請提高流量");
         }
         if (res.status === 401 || res.status === 402 || res.status === 403) {
-          throw new NimServiceError("NIM 金鑰無效或免費試用點數已用完——請管理員到 build.nvidia.com 檢查帳號點數、換新金鑰，或申請加值");
+          throw new NimServiceError("NIM 金鑰無效或免費試用點數已用完——請管理員到 build.nvidia.com 檢查帳號點數、換新金鑰，或申請加值", { degradable: false });
         }
         const e = new Error(`NVIDIA NIM API 錯誤 (${res.status}): ${error.slice(0, 300)}`) as Error & { nimStatus?: number };
         e.nimStatus = res.status; // 供 nimRetryable 判斷 5xx 可重試、4xx 不重試

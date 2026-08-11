@@ -1,7 +1,7 @@
 import type { AgentPlannerMode, AgentPlannerUsage } from "../../shared/agentPlanner";
 import { AGENT_LLM_MODEL_IDS } from "../../shared/llmPricing";
 import { summarizeLogprobs, type LlmIntrospection } from "../../shared/llmIntrospection";
-import { chatCompletion, NIM_DEFAULT_MODEL, NimServiceError } from "./nvidia-nim";
+import { chatCompletion, NIM_DEFAULT_MODEL, NimServiceError, nimErrorDegradable } from "./nvidia-nim";
 import { falStatus, falSubmit } from "./fal";
 
 /**
@@ -76,6 +76,34 @@ export function isFalMode(mode: AgentPlannerMode): mode is FalAgentMode {
 /** 這個模式會不會花平台的錢？UI 用它決定要不要顯示付費標示。 */
 export function modeCostsMoney(mode: AgentPlannerMode): boolean {
   return isFalMode(mode);
+}
+
+/**
+ * NIM 免費檔位降級（2026-08-11 效能基準：免費 NIM 成功也中位 52s、並行負載下 80-100% 逾時，
+ * fal 付費檔快 4-16 倍）：
+ * - nim/auto 嘗試 NIM 只給「快速偵測」預算（NIM_DEGRADE_PROBE_MS，預設 8s）——逾時/慢回即降級
+ *   fal（nim→fal_economy 低成本、auto→fal_balanced 均衡），不再讓免費路徑獨吞 60s（auto 過去
+ *   甚至因呼叫端「非 nim 就給 120s」而乾等到 122.8s）。
+ * - NIM 逾時/暫時失敗後進入降級冷卻（NIM_DEGRADE_COOLDOWN_MS，預設 60s）：冷卻期間 nim/auto
+ *   直接走備援、不試 NIM——並行負載下 NIM 劣化更劇，冷卻避免每個請求都乾等一段 probe。
+ */
+export const NIM_DEGRADE_PROBE_MS = Number(process.env.NIM_DEGRADE_PROBE_MS ?? 8_000);
+const NIM_DEGRADE_COOLDOWN_MS = Number(process.env.NIM_DEGRADE_COOLDOWN_MS ?? 60_000);
+
+let nimDegradedUntil = 0;
+
+/** 目前 NIM 是否在降級冷卻期（維運/測試可查） */
+export function isNimDegraded(): boolean {
+  return Date.now() < nimDegradedUntil;
+}
+
+function markNimDegraded(): void {
+  nimDegradedUntil = Date.now() + NIM_DEGRADE_COOLDOWN_MS;
+}
+
+/** 測試用：清掉 NIM 降級狀態，避免跨測污染 */
+export function __resetNimDegradation(): void {
+  nimDegradedUntil = 0;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -225,10 +253,13 @@ async function completeFal(params: CompleteTextParams, mode: FalAgentMode): Prom
 /**
  * 依模式取得一次文字補全。
  *
- * - `nim`（預設）：NVIDIA NIM 免費額度，站內 0 點。
+ * - `nim`：NVIDIA NIM 免費額度優先（站內 0 點），但 NIM 只給「快速偵測」預算
+ *   （NIM_DEGRADE_PROBE_MS）——逾時/慢回/暫時性失敗自動降級 fal 經濟檔（DeepSeek V4 Flash，
+ *   依 token 計點），並標 `fellBack`；金鑰/設定錯誤則照樣拋出。
  * - `fal_economy` / `fal_balanced` / `fal_quality`：走 fal openrouter，平台實付 USD。
- * - `auto`：先試 NIM，連線失敗才轉 fal 均衡，並在回傳值標 `fellBack`——
- *   讓 UI 能誠實告訴使用者「這次花到錢了」，而不是默默計費。
+ * - `auto`：免費優先，同樣只給 NIM 快速偵測預算——逾時即轉 fal 均衡並標 `fellBack`，讓 UI
+ *   誠實告訴使用者「這次花到錢了」；NIM 降級冷卻期間直接走 fal、不再試 NIM（避免並行負載下
+ *   每個請求都乾等，也讓 auto 不再選到 ≥60s 的慢檔位）。
  */
 export async function completeText(params: CompleteTextParams): Promise<LlmCompletion> {
   const { mode } = params;
@@ -241,25 +272,34 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
     }
   }
 
-  if (mode === "nim") {
+  if (mode === "nim" || mode === "auto") {
+    // NIM 免費優先，但只給快速偵測預算：逾時/慢回/暫時性失敗立刻降級 fal
+    // （nim→fal_economy 低成本、auto→fal_balanced 均衡），並標 fellBack 讓 UI 誠實顯示。
+    const target: FalAgentMode = mode === "nim" ? "fal_economy" : "fal_balanced";
+    const fallback = async (nimError: unknown): Promise<LlmCompletion> => {
+      try {
+        const result = await completeFal(params, target);
+        return { ...result, fellBack: true };
+      } catch (error) {
+        // 備援也失敗：回報原始 NIM 錯誤（那才是使用者真正選的供應商）；
+        // NIM 已在冷卻、直接走備援才失敗時，備援錯誤就是唯一原因。
+        if (nimError !== undefined) throw sanitize(nimError, "nvidia-nim");
+        throw sanitize(error, "fal-openrouter");
+      }
+    };
+    // NIM 降級冷卻期間直接走備援、不再試 NIM——並行負載下 NIM 劣化更劇，冷卻避免乾等。
+    if (isNimDegraded()) return await fallback(undefined);
     try {
-      return await completeNim(params);
-    } catch (error) {
-      throw sanitize(error, "nvidia-nim");
+      return await completeNim({ ...params, timeoutMs: NIM_DEGRADE_PROBE_MS });
+    } catch (nimError) {
+      if (params.signal?.aborted) throw sanitize(nimError, "nvidia-nim");
+      // 金鑰/設定錯誤（degradable=false）降級救不了，照樣拋出給管理員處理
+      if (!nimErrorDegradable(nimError)) throw sanitize(nimError, "nvidia-nim");
+      markNimDegraded();
+      return await fallback(nimError);
     }
   }
 
-  // auto：免費優先，失敗才付費備援
-  try {
-    return await completeNim(params);
-  } catch (nimError) {
-    if (params.signal?.aborted) throw sanitize(nimError, "nvidia-nim");
-    try {
-      const fallback = await completeFal(params, "fal_balanced");
-      return { ...fallback, fellBack: true };
-    } catch {
-      // 備援也失敗時回報原始的 NIM 錯誤——那才是使用者真正選的供應商
-      throw sanitize(nimError, "nvidia-nim");
-    }
-  }
+  // 理論上到不了（agentPlannerModeSchema 已限制枚舉）；留兜底避免 compile 對 never 不滿
+  throw new LlmServiceError("不支援的 AI 檔位");
 }

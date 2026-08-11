@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * 這批測試的重點是**成本安全不變式**，不是「函式跑得起來」：
  * 站內問答收 0 點是因為 NIM 走免費額度；一旦改走 fal，基金會就要實付 USD。
- * 所以「絕不在使用者沒選的情況下花錢」必須被測試鎖住。
+ * NIM 免費檔位被證實會大量逾時（2026-08-11 基準：並行下 80-100%），所以 nim/auto 允許
+ * 「NIM 逾時/暫時性失敗時自動降級 fal」——但只限可降級錯誤，且一律標 `fellBack` 讓 UI 誠實
+ * 顯示；金鑰/設定錯誤（degradable=false）與使用者主動中止**絕不**偷偷切付費。
  */
 
 const chatCompletion = vi.fn();
@@ -11,6 +13,7 @@ const falSubmit = vi.fn();
 const falStatus = vi.fn();
 
 class FakeNimError extends Error {
+  degradable?: boolean;
   constructor(message: string) {
     super(message);
     this.name = "NimServiceError";
@@ -21,6 +24,10 @@ vi.mock("./nvidia-nim", () => ({
   chatCompletion: (...args: unknown[]) => chatCompletion(...args),
   NIM_DEFAULT_MODEL: "meta/llama-3.1-70b-instruct",
   NimServiceError: FakeNimError,
+  nimErrorDegradable: (err: unknown) => {
+    if (err instanceof FakeNimError) return err.degradable !== false;
+    return true;
+  },
 }));
 
 vi.mock("./fal", () => ({
@@ -28,7 +35,16 @@ vi.mock("./fal", () => ({
   falStatus: (...args: unknown[]) => falStatus(...args),
 }));
 
-const { completeText, extractDisclosedReasoning, isFalMode, modeCostsMoney, FAL_AGENT_PROFILES, LlmServiceError } = await import("./llmProvider");
+const {
+  completeText,
+  extractDisclosedReasoning,
+  isFalMode,
+  modeCostsMoney,
+  FAL_AGENT_PROFILES,
+  LlmServiceError,
+  NIM_DEGRADE_PROBE_MS,
+  __resetNimDegradation,
+} = await import("./llmProvider");
 const { AGENT_LLM_MODEL_IDS } = await import("../../shared/llmPricing");
 
 function nimOk(text = "來自 NIM 的回答") {
@@ -47,6 +63,7 @@ beforeEach(() => {
   chatCompletion.mockReset();
   falSubmit.mockReset();
   falStatus.mockReset();
+  __resetNimDegradation(); // NIM 降級冷卻狀態不能跨測污染
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -77,11 +94,28 @@ describe("nim 模式 — 免費路徑", () => {
     expect(falSubmit).not.toHaveBeenCalled();
   });
 
-  it("NIM 失敗時直接報錯，不偷偷改用付費供應商", async () => {
-    chatCompletion.mockRejectedValue(new FakeNimError("NIM 連線失敗"));
+  it("NIM 逾時/暫時性失敗自動降級 fal 經濟檔，且標 fellBack 讓 UI 誠實顯示", async () => {
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falOk("來自 fal 的回答");
+    const r = await completeText({ prompt: "你好", mode: "nim" });
+    expect(r.provider).toBe("fal-openrouter");
+    expect(r.model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
+    expect(r.fellBack).toBe(true);
+  });
+
+  it("NIM 金鑰/設定錯誤（不可降級）仍直接報錯，不偷偷改用付費供應商", async () => {
+    const keyError = new FakeNimError("NIM 金鑰無效");
+    keyError.degradable = false;
+    chatCompletion.mockRejectedValue(keyError);
     falOk();
-    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow("NIM 連線失敗");
+    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow("NIM 金鑰無效");
     expect(falSubmit).not.toHaveBeenCalled();
+  });
+
+  it("nim 嘗試 NIM 只用快速偵測預算，不讓免費路徑獨吞 60s", async () => {
+    nimOk();
+    await completeText({ prompt: "你好", mode: "nim" });
+    expect(chatCompletion.mock.calls[0][0].timeoutMs).toBe(NIM_DEGRADE_PROBE_MS);
   });
 
   it("沒給 systemPrompt 時只送 user 訊息（與接上這層之前逐字相同）", async () => {
@@ -175,6 +209,28 @@ describe("auto 模式 — 免費優先，備援要留痕", () => {
     controller.abort();
     await expect(completeText({ prompt: "你好", mode: "auto", signal: controller.signal })).rejects.toThrow("NIM 掛了");
     expect(falSubmit).not.toHaveBeenCalled();
+  });
+
+  it("auto 嘗試 NIM 也只給快速偵測預算——不再讓免費路徑乾等 120s", async () => {
+    nimOk();
+    await completeText({ prompt: "你好", mode: "auto" });
+    expect(chatCompletion.mock.calls[0][0].timeoutMs).toBe(NIM_DEGRADE_PROBE_MS);
+  });
+
+  it("NIM 降級冷卻期間直接走備援，不再試 NIM（並行負載下避免每個請求都乾等）", async () => {
+    // 第一次：NIM 逾時 → 降級 fal 均衡（並標記降級冷卻）
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falOk("第一次");
+    const r1 = await completeText({ prompt: "你好", mode: "auto" });
+    expect(r1.fellBack).toBe(true);
+    expect(chatCompletion).toHaveBeenCalledTimes(1);
+
+    // 冷卻期間：第二次即使 NIM 會成功也不試 NIM、直接走 fal（避免並行劣化時每個請求都乾等 probe）
+    chatCompletion.mockResolvedValue({ choices: [{ message: { content: "NIM 竟然好了" } }] });
+    falOk("第二次");
+    const r2 = await completeText({ prompt: "你好", mode: "auto" });
+    expect(r2.fellBack).toBe(true);
+    expect(chatCompletion).toHaveBeenCalledTimes(1); // 沒再多試 NIM
   });
 });
 
