@@ -170,6 +170,8 @@ export const agentEvents = pgTable("agent_events", {
       "question_answered",
       "step_completed",
       "step_failed",
+      "paused",
+      "resumed",
       "human_resumed",
       "approval_rejected",
       "run_completed",
@@ -239,6 +241,24 @@ export const agentStepEffects = pgTable("agent_step_effects", {
 }, (t) => ({
   runStepUq: uniqueIndex("agent_step_effects_run_step_uq").on(t.runId, t.stepId),
   runIdx: index("agent_step_effects_run_idx").on(t.runId),
+}));
+
+/** v4 unified tool receipt: atomic idempotency + reservation/settlement across retries and deploys. */
+export const agentToolReceipts = pgTable("agent_tool_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  toolId: text("tool_id").notNull(),
+  result: jsonb("result"),
+  reservedPoints: integer("reserved_points").notNull().default(0),
+  actualPoints: integer("actual_points"),
+  settled: boolean("settled").notNull().default(false),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  idempotencyUq: uniqueIndex("agent_tool_receipts_idempotency_uq").on(t.idempotencyKey),
+  runIdx: index("agent_tool_receipts_run_idx").on(t.runId),
 }));
 
 /** AI 與團隊共用的正式人類任務；不是只存在 agent_runs.steps JSON 裡的顯示文字。 */
