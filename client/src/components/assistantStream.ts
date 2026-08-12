@@ -168,6 +168,19 @@ export function isAbortError(error: unknown): boolean {
   return !!error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError";
 }
 
+/**
+ * 後端超限時不是回 HTTP 429，而是以 SSE error 事件（status 200）回傳，訊息由
+ * server/routers 的 overLimit 檢查產生（見 runAssistantAsk／runGlobalAsk 的
+ * TOO_MANY_REQUESTS message）。前端以此子字串識別「限流」情境，改用明確的
+ * 限流提示——而不是「⚠️ 執行中斷」這種誤導措辭（請求是在開始執行前就被拒絕，
+ * 並非中斷）。重送鈕也該拿掉：使用者立刻重送只會再吃一次限流。
+ */
+export const RATE_LIMIT_MESSAGE_HINT = "問得太頻繁";
+
+export function isRateLimitMessage(message: string): boolean {
+  return message.includes(RATE_LIMIT_MESSAGE_HINT);
+}
+
 function dispatchAssistantEvent(
   parsed: ParsedAssistantSseEvent,
   handlers: AssistantStreamHandlers,

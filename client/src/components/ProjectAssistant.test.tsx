@@ -264,6 +264,33 @@ describe("ProjectAssistant project-scoped async results", () => {
     expect(screen.queryByRole("button", { name: /把目前專案腳本拆成分鏡/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /復原/ })).toBeInTheDocument();
   });
+
+  it("限流超限（SSE error 事件）時在對話顯示明確限流提示，且不提供「繼續」重送鈕", async () => {
+    // 後端超限不是回 HTTP 429，而是以 SSE error 事件（status 200）回傳：
+    // open 事件在限流檢查前送出，超限後 catch 補 error 事件（見 server/index.ts）。
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onError("問得太頻繁（每分鐘最多 6 次），休息一下再問");
+      return true;
+    });
+    render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("幫我再問一次");
+
+    expect(await screen.findByText("問得太頻繁（每分鐘最多 6 次），休息一下再問")).toBeInTheDocument();
+    // 限流拒絕不該出現「繼續」重送鈕——立刻重送只會再吃一次限流
+    expect(screen.queryByRole("button", { name: /繼續/ })).not.toBeInTheDocument();
+  });
+
+  it("一般執行錯誤仍顯示訊息並保留「繼續」重送鈕", async () => {
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onError("供應商忙碌，稍後再試");
+      return true;
+    });
+    render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("測試一般錯誤");
+
+    expect(await screen.findByText("供應商忙碌，稍後再試")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /繼續/ })).toBeInTheDocument();
+  });
 });
 
 describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {

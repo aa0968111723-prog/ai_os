@@ -10,7 +10,7 @@ import {
   type AssistantActivityEvent,
 } from "./AssistantTrace";
 import { AskSources, type AskSourcesData } from "./AskSources";
-import { requestAssistantStream } from "./assistantStream";
+import { isRateLimitMessage, requestAssistantStream } from "./assistantStream";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import {
   AGENT_PLANNER_OPTIONS,
@@ -459,6 +459,9 @@ export function ProjectAssistant({
         },
         onError: (errorMessage) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
+          // 限流拒絕不是「執行中斷」：請求在開始執行前就被後端擋下（SSE error 事件，
+          // 非 HTTP 429）。訊息本身已明確，但「繼續」鈕不能留——立刻重送只會再吃一次限流。
+          const rateLimited = isRateLimitMessage(errorMessage);
           push({
             role: "ai",
             text: errorMessage,
@@ -468,7 +471,7 @@ export function ProjectAssistant({
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             executionPlan: activePlan ?? classifyAssistantRequest(message),
             runStatus: "failed",
-            retryText: message,
+            retryText: rateLimited ? undefined : message,
           });
         },
       },

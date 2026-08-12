@@ -75,9 +75,13 @@ vi.mock("../features/external-intake/ExternalAssetIntake", () => ({
 
 /** 串流替身：預設回一則帶三種提議卡的 done（handled=true＝不退 tRPC） */
 const streamMock = vi.fn();
-vi.mock("./assistantStream", () => ({
-  requestSiteAssistantStream: (args: unknown) => streamMock(args),
-}));
+vi.mock("./assistantStream", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./assistantStream")>();
+  return {
+    ...original,
+    requestSiteAssistantStream: (args: unknown) => streamMock(args),
+  };
+});
 
 /** 一則真實事件的最小形狀（伺服器 AgentEventStream 產生的那一種） */
 const event = (over: Record<string, unknown>) => ({
@@ -633,6 +637,38 @@ describe("siteActionDoneLink", () => {
         projectId: PROJECT_ID,
       })],
     }));
+  });
+
+  it("限流超限（SSE error 事件）時顯示明確限流提示，且不提供「繼續」重送鈕", async () => {
+    // 後端超限不是回 HTTP 429，而是以 SSE error 事件（status 200）回傳：
+    // open 事件在限流檢查前送出，超限後 catch 補 error 事件（見 server/index.ts）。
+    // 前端 decode 出 error 事件 → onError(message)。
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onError: (m: string) => void } }) => {
+      handlers.onError("問得太頻繁（每分鐘最多 6 次），休息一下再問");
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "再問一次");
+
+    // 明確限流提示出現在對話裡，且不再有誤導的「執行中斷」措辭
+    expect(await screen.findByText(/問得太頻繁/)).toBeInTheDocument();
+    expect(screen.queryByText(/執行中斷/)).not.toBeInTheDocument();
+    // 限流拒絕不該出現「繼續」重送鈕（要精確 match，快捷鍵「繼續目前工作」也含「繼續」）
+    expect(screen.queryByRole("button", { name: /^繼續$/ })).not.toBeInTheDocument();
+  });
+
+  it("一般執行錯誤仍顯示「執行中斷」並保留「繼續」重送鈕", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onError: (m: string) => void } }) => {
+      handlers.onError("供應商忙碌，稍後再試");
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "測試一般錯誤");
+
+    expect(await screen.findByText(/執行中斷：供應商忙碌/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^繼續$/ })).toBeInTheDocument();
   });
 });
 
