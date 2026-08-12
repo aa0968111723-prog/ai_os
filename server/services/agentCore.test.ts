@@ -8,7 +8,9 @@ import {
   assertUuid,
   buildPickedSourceBlock,
   DRIVE_PLAN_SOURCE_CHAR_CAP,
+  enforcePlanStepLimit,
   MAX_PLAN_KNOWLEDGE_CHARS,
+  MAX_PLAN_STEPS,
   plannerKnowledgeBudget,
   plannerOutputTokenCeiling,
   plannerPlaybookDirective,
@@ -38,6 +40,26 @@ describe("assertUuid（MCP / core 入口）", () => {
   it("空字串與非 UUID 也擋", () => {
     expect(() => assertUuid("", "專案編號")).toThrow(TRPCError);
     expect(() => assertUuid("not-a-uuid", "專案編號")).toThrow(TRPCError);
+  });
+});
+
+describe("#671 enforcePlanStepLimit", () => {
+  it("accepts MAX_PLAN_STEPS and rejects one more before persistence", () => {
+    expect(() => enforcePlanStepLimit(MAX_PLAN_STEPS)).not.toThrow();
+    try {
+      enforcePlanStepLimit(MAX_PLAN_STEPS + 1);
+      throw new Error("應該要拋錯");
+    } catch (err) {
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe("BAD_REQUEST");
+      expect((err as TRPCError).message).toContain(`最多 ${MAX_PLAN_STEPS} 步`);
+      expect((err as TRPCError).message).toContain(`${MAX_PLAN_STEPS + 1}`);
+    }
+  });
+
+  it("plan and replan call the hard cap after the model returns", () => {
+    const source = readFileSync(new URL("./agentCore.ts", import.meta.url), "utf8");
+    expect(source.match(/enforcePlanStepLimit\(/g)?.length).toBeGreaterThanOrEqual(5);
   });
 });
 

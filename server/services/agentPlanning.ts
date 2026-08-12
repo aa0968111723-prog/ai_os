@@ -1,10 +1,12 @@
 import { z } from "zod";
 import {
   completePlanSchema,
+  MAX_PLAN_STEPS,
   type CompletePlan,
   type CompletePlanSummary,
   type PlanReference,
 } from "../../shared/plan";
+import { extractJsonObject } from "./assistantCore";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import type { AgentStep } from "./agentRunner";
 import {
@@ -14,7 +16,7 @@ import {
 import { resolveModel } from "./modelResolve";
 import type { ModelEntry } from "../../shared/models";
 
-const MAX_DRAFT_STEPS = 30;
+export { MAX_PLAN_STEPS };
 const TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 const stepBase = z.object({
@@ -152,7 +154,7 @@ export const completePlanDraftSchema = z.object({
       dueAt: z.string().trim().max(80).optional(),
       approverRole: z.enum(["project_owner", "group_leader", "admin"]).optional(),
     }),
-  ])).min(1).max(MAX_DRAFT_STEPS),
+  ])).min(1).max(MAX_PLAN_STEPS),
 });
 
 export type CompletePlanDraft = z.infer<typeof completePlanDraftSchema>;
@@ -331,10 +333,17 @@ function resolveAliasIdList(
   return uniqueIds.length ? uniqueIds : undefined;
 }
 
+export function assertPlanStepLimit(stepCount: number): void {
+  if (stepCount > MAX_PLAN_STEPS) {
+    throw new Error(`計畫最多 ${MAX_PLAN_STEPS} 步，目前有 ${stepCount} 步`);
+  }
+}
+
 export function resolveCompletePlanDraft(
   draft: CompletePlanDraft,
   aliases: PlannerAliases,
 ): ResolvedAgentPlan {
+  assertPlanStepLimit(draft.steps.length);
   const missingInformation = [...draft.summary.missingInformation];
   const members = aliasMap(aliases.members);
   const notes = aliasMap(aliases.notes);
@@ -655,14 +664,7 @@ export function resolveCompletePlanDraft(
 }
 
 export function extractPlanJson(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const candidate = fenced ?? raw.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) return null;
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    return null;
-  }
+  return extractJsonObject(raw);
 }
 
 export function summarizePlanDraftIssues(error: z.ZodError): string[] {

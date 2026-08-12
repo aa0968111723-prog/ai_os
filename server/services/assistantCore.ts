@@ -16,17 +16,7 @@ import type { AuthState } from "./auth";
 
 const MAX_JSON_EXTRACT_CHARS = 200_000;
 
-/**
- * String/escape-aware brace scanner: first complete JSON object, not greedy
- * first-`{` to last-`}` (#670). Nested objects, braces inside strings, and two
- * consecutive objects are handled; oversized input is bounded.
- */
-export function extractJsonObject(raw: string): unknown {
-  if (!raw || typeof raw !== "string") return null;
-  const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
-  // Prefer fenced ```json blocks when present.
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const haystack = fenced?.[1] ?? text;
+function scanFirstJsonObject(haystack: string): { value: unknown; start: number; end: number } | null {
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -60,7 +50,7 @@ export function extractJsonObject(raw: string): unknown {
       if (depth === 0 && start >= 0) {
         const slice = haystack.slice(start, i + 1);
         try {
-          return JSON.parse(slice);
+          return { value: JSON.parse(slice), start, end: i + 1 };
         } catch {
           // Invalid first candidate — keep scanning for the next complete object.
           start = -1;
@@ -71,48 +61,36 @@ export function extractJsonObject(raw: string): unknown {
   return null;
 }
 
+/**
+ * String/escape-aware brace scanner: first complete JSON object, not greedy
+ * first-`{` to last-`}` (#670). Nested objects, braces inside strings, and two
+ * consecutive objects are handled; oversized input is bounded.
+ */
+export function extractJsonObject(raw: string): unknown {
+  if (!raw || typeof raw !== "string") return null;
+  const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
+  // Prefer fenced ```json blocks when present. A truncated/broken fence must not
+  // swallow a later complete object (its unmatched `{` would poison a full-text scan).
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.index != null) {
+    const fromFence = scanFirstJsonObject(fenced[1] ?? "");
+    if (fromFence) return fromFence.value;
+    const after = scanFirstJsonObject(text.slice(fenced.index + fenced[0].length));
+    if (after) return after.value;
+    const before = scanFirstJsonObject(text.slice(0, fenced.index));
+    if (before) return before.value;
+    return null;
+  }
+  return scanFirstJsonObject(text)?.value ?? null;
+}
+
 /** 把 JSON 段落從原始輸出剝掉，留下人話（壞 JSON 回答的 fallback 顯示用） */
 export function stripJsonObject(raw: string): string {
   if (!raw) return "";
-  const extracted = extractJsonObject(raw);
-  if (extracted == null) return raw.trim();
-  // Remove the first balanced object span (same scanner semantics).
   const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escape = true;
-        continue;
-      }
-      if (ch === "\"") inString = false;
-      continue;
-    }
-    if (ch === "\"") {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth += 1;
-      continue;
-    }
-    if (ch === "}" && depth > 0) {
-      depth -= 1;
-      if (depth === 0 && start >= 0) {
-        return `${text.slice(0, start)}${text.slice(i + 1)}`.trim();
-      }
-    }
-  }
-  return raw.trim();
+  const hit = scanFirstJsonObject(text);
+  if (!hit) return raw.trim();
+  return `${text.slice(0, hit.start)}${text.slice(hit.end)}`.trim();
 }
 
 /** 一次工具執行的結果：step＝給使用者看的一行摘要；text＝回餵 LLM 的結果文字。

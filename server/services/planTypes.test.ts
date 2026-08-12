@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   completePlanSchema,
   completePlanSummarySchema,
+  MAX_PLAN_STEPS,
   planStepKindSchema,
 } from "../../shared/plan";
 
@@ -240,5 +241,23 @@ describe("complete plan schema", () => {
     expect(parsed.steps[0].sourceAssetId).toBeUndefined();
     expect(parsed.steps[0].sourceUrl).toBeUndefined();
     expect(parsed.steps[0].prompt).toBe("城市微光主視覺");
+  });
+
+  it("#671: complete plan schema rejects more than MAX_PLAN_STEPS", () => {
+    const baseStep = {
+      kind: "checkpoint",
+      title: "里程碑",
+      status: "draft",
+      actorType: "system",
+    } as const;
+    const steps = Array.from({ length: MAX_PLAN_STEPS + 1 }, (_, i) => ({
+      ...baseStep,
+      id: `s${i + 1}`,
+    }));
+    expect(completePlanSchema.safeParse({ summary, steps }).success).toBe(false);
+    expect(completePlanSchema.safeParse({
+      summary,
+      steps: steps.slice(0, MAX_PLAN_STEPS),
+    }).success).toBe(true);
   });
 });

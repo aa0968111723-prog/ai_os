@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertPlanStepLimit,
   completePlanDraftSchema,
   extractPlanJson,
+  MAX_PLAN_STEPS,
   resolveCompletePlanDraft,
   summarizePlanDraftIssues,
   type PlannerAliases,
@@ -238,6 +240,38 @@ describe("complete AI planning safety resolver", () => {
   it("extracts a single JSON object from fenced model output and rejects malformed JSON", () => {
     expect(extractPlanJson("```json\n{\"summary\":{},\"steps\":[]}\n```")).toEqual({ summary: {}, steps: [] });
     expect(extractPlanJson("not json {oops}")).toBeNull();
+  });
+
+  it("#670: takes the first complete plan object, not first-{ to last-}", () => {
+    expect(extractPlanJson('{"summary":{"goal":"a"},"steps":[]}{"noise":true}')).toEqual({
+      summary: { goal: "a" },
+      steps: [],
+    });
+    expect(extractPlanJson('{"note":"use { and } carefully","ok":true}')).toEqual({
+      note: "use { and } carefully",
+      ok: true,
+    });
+    expect(extractPlanJson('{"broken":} {"summary":{"goal":"ok"},"steps":[]}')).toEqual({
+      summary: { goal: "ok" },
+      steps: [],
+    });
+  });
+
+  it("#671: draft schema and resolver hard-cap MAX_PLAN_STEPS", () => {
+    const tooMany = Array.from({ length: MAX_PLAN_STEPS + 1 }, (_, i) => ({
+      id: `s${i + 1}`,
+      kind: "create_note" as const,
+      title: `筆記 ${i + 1}`,
+      content: `內容 ${i + 1}`,
+    }));
+    expect(completePlanDraftSchema.safeParse({ summary: summary(), steps: tooMany }).success).toBe(false);
+    expect(() => assertPlanStepLimit(MAX_PLAN_STEPS + 1)).toThrow(new RegExp(`最多 ${MAX_PLAN_STEPS} 步`));
+    expect(() => assertPlanStepLimit(MAX_PLAN_STEPS)).not.toThrow();
+    const oversized = {
+      summary: summary(),
+      steps: tooMany,
+    } as unknown as ReturnType<typeof completePlanDraftSchema.parse>;
+    expect(() => resolveCompletePlanDraft(oversized, aliases)).toThrow(/最多/);
   });
 
   it("summarizes validation paths for one-shot plan repair without leaking full data", () => {

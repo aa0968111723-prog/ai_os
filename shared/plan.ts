@@ -175,9 +175,12 @@ export const completePlanSummarySchema = z.object({
   estimatedDurationMinutes: z.number().int().min(0).max(525_600).optional(),
 });
 
+/** Hard cap for one agent plan. Prompt, draft schema, complete schema, and persistence must share this. */
+export const MAX_PLAN_STEPS = 30;
+
 export const completePlanSchema = z.object({
   summary: completePlanSummarySchema,
-  steps: z.array(planStepSchema).min(1).max(200),
+  steps: z.array(planStepSchema).min(1).max(MAX_PLAN_STEPS),
 }).superRefine((plan, ctx) => {
   const stepIds = new Set<string>();
   for (const [index, step] of plan.steps.entries()) {

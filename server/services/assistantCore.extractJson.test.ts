@@ -34,4 +34,14 @@ describe("extractJsonObject (#670)", () => {
   it("stripJsonObject leaves prose around the first balanced object", () => {
     expect(stripJsonObject('答案如下 {"x":1} 請確認')).toBe("答案如下  請確認");
   });
+
+  it("falls back to the surrounding text when a fenced block is truncated", () => {
+    const raw = "```json\n{\"broken\":\n```\n{\"good\":true}";
+    expect(extractJsonObject(raw)).toEqual({ good: true });
+  });
+
+  it("prefers a valid fenced object over later prose JSON", () => {
+    const raw = "```json\n{\"fromFence\":1}\n```\n{\"later\":2}";
+    expect(extractJsonObject(raw)).toEqual({ fromFence: 1 });
+  });
 });

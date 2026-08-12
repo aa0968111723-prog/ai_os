@@ -23,6 +23,7 @@ import {
   type AgentPlannerMode,
 } from "../../shared/agentPlanner";
 import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
+import { extractJsonObject } from "./assistantCore";
 import {
   CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_NEW_PROJECTS,
@@ -390,13 +391,7 @@ export async function planGroupCampaign(input: {
       settleKey: randomUUID(),
     });
     const raw = completion.text;
-    const match = raw.match(/\{[\s\S]*\}/);
-    let json: unknown = null;
-    try {
-      json = match ? JSON.parse(match[0]) : null;
-    } catch {
-      json = null;
-    }
+    const json = extractJsonObject(raw);
     const parsed = json ? groupPlanDraftSchema.safeParse(json) : null;
     if (!parsed?.success) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "組代理沒有產出可執行的計畫格式，請換個說法再試一次" });

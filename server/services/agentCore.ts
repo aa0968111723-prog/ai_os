@@ -27,7 +27,7 @@ import { buildAiModelCheatsheet, selectAiGenerationModel } from "./aiModelPolicy
 import type { AgentStep } from "./agentRunner";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import type { DataField } from "../../shared/databaseFields";
-import type { CompletePlanSummary } from "../../shared/plan";
+import { MAX_PLAN_STEPS, type CompletePlanSummary } from "../../shared/plan";
 import {
   DEFAULT_AGENT_PLANNER_MODE,
   getAgentPlannerOption,
@@ -38,6 +38,7 @@ import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/ll
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
+  assertPlanStepLimit,
   resolveCompletePlanDraft,
   type PlannerAliases,
 } from "./agentPlanning";
@@ -64,6 +65,8 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "./rateLimit";
+
+export { MAX_PLAN_STEPS };
 
 export type AgentRunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -126,8 +129,18 @@ export function plannerKnowledgeBudget(mode: AgentPlannerMode): number {
   };
   return Math.min(MAX_PLAN_KNOWLEDGE_CHARS, byMode[mode] ?? byMode.auto);
 }
-/** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
-const MAX_PLAN_STEPS = 30;
+
+/** Persist-time hard cap: a model cannot gain steps by ignoring the prompt (#671). */
+export function enforcePlanStepLimit(stepCount: number): void {
+  try {
+    assertPlanStepLimit(stepCount);
+  } catch (err) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: err instanceof Error ? err.message : `計畫最多 ${MAX_PLAN_STEPS} 步`,
+    });
+  }
+}
 /** PR-E2：一次規劃可指定的來源上限（使用者明確選中才注入——連接 ≠ 授權讀全部） */
 const MAX_PLAN_EXTRA_SOURCES = 10;
 /** PR-E3：一次規劃可「僅本次」納入的 Google 檔案上限與單檔字元硬頂（不落庫、不進長期知識） */
@@ -892,8 +905,11 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
   try {
     let plan;
     try {
+      enforcePlanStepLimit(generated.draft.steps.length);
       plan = resolveCompletePlanDraft(generated.draft, plannerContext);
-    } catch {
+      enforcePlanStepLimit(plan.steps.length);
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
       throw new TRPCError({ code: "BAD_REQUEST", message: "AI 計畫含有無效依賴或引用，系統已阻止落地；請重新規劃" });
     }
     plan.summary.goal = goal;
@@ -1150,8 +1166,11 @@ ${clarifications || "（無額外文字）"}
 
   let plan;
   try {
+    enforcePlanStepLimit(generated.draft.steps.length);
     plan = resolveCompletePlanDraft(generated.draft, plannerContext);
-  } catch {
+    enforcePlanStepLimit(plan.steps.length);
+  } catch (err) {
+    if (err instanceof TRPCError) throw err;
     throw new TRPCError({ code: "BAD_REQUEST", message: "重新規劃結果含無效依賴或引用，已阻止落地" });
   }
   plan.summary.goal = goal;
