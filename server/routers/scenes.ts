@@ -47,7 +47,7 @@ import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
-import { softDeleteScenesCore } from "../services/sceneWriteCore";
+import { addSceneDraftOnce, softDeleteScenesCore } from "../services/sceneWriteCore";
 import { MAX_PROMPT_CHARS } from "./prompts";
 import {
   formatEnvironmentState,
@@ -371,25 +371,12 @@ export const scenesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const project = await getProjectChecked(ctx, input.projectId, true);
-      return db.transaction(async (tx) => {
-        await lockSceneOrder(tx, project.id);
-        const [{ maxOrder }] = await tx
-          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-          .from(schema.scenes)
-          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-        const [scene] = await tx
-          .insert(schema.scenes)
-          .values({
-            projectId: project.id,
-            orderIndex: Number(maxOrder) + 1,
-            title: input.title,
-            durationSec: input.durationSec ?? (project.format === "9:16" ? 4 : 5),
-            status: "todo",
-            prompt: input.prompt,
-            voiceover: input.voiceover,
-          })
-          .returning();
-        return scene;
+      return addSceneDraftOnce({
+        projectId: project.id,
+        title: input.title,
+        prompt: input.prompt,
+        voiceover: input.voiceover,
+        durationSec: input.durationSec ?? (project.format === "9:16" ? 4 : 5),
       });
     }),
 

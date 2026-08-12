@@ -33,12 +33,12 @@ import { NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
-import { lockSceneOrder } from "../services/locks";
+
 import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
-import { softDeleteScenesCore } from "../services/sceneWriteCore";
+import { addSceneDraftOnce, softDeleteScenesCore } from "../services/sceneWriteCore";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { planAgentCore } from "../services/agentCore";
 import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
@@ -1850,27 +1850,12 @@ export const assistantRouter = router({
         // 為什麼：schema 的 min(1) 擋不掉純空白；trim 後為空就拒絕，避免生出無名分鏡
         const title = a.title.trim();
         if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡標題不能是空白" });
-        const voiceover = a.voiceover?.trim();
-        // 交易＋per-project 序號鎖（與導演拆分鏡/加入分鏡同一把）：併發「讀 max→插入」不再重號
-        const scene = await db.transaction(async (tx) => {
-          await lockSceneOrder(tx, project.id);
-          // 排在片尾：取本專案「未軟刪」分鏡的最大 orderIndex＋1——軟刪格不算，否則新格會被推到回收桶格之後留洞
-          const [{ maxOrder }] = await tx
-            .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-            .from(schema.scenes)
-            .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-          const [row] = await tx
-            .insert(schema.scenes)
-            .values({
-              projectId: project.id,
-              orderIndex: Number(maxOrder) + 1,
-              title,
-              voiceover: voiceover || undefined, // 全空白視同沒填
-              durationSec: a.durationSec ? Math.round(a.durationSec) : undefined, // zod 已限 1–60；取整配合欄位型別，沒填走預設
-              prompt: a.prompt?.trim() || undefined, // 發想落地：帶提示詞的草稿可在③就地生成
-            })
-            .returning();
-          return row;
+        const scene = await addSceneDraftOnce({
+          projectId: project.id,
+          title,
+          voiceover: a.voiceover,
+          durationSec: a.durationSec,
+          prompt: a.prompt,
         });
         return { ok: true, kind: "create_scene" as const, sceneId: scene.id, message: "已新增分鏡" };
       }

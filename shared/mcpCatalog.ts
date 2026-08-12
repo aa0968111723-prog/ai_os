@@ -107,7 +107,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   // ── MCP 寫入擴充（創作主線）：知識庫／分鏡／世界觀／素材／設定卡／生成後處理 ──
   { name: "add_knowledge", title: "新增知識", access: "write", idempotent: true, blurb: "為專案新增知識庫條目（腳本／逐字稿／見證／筆記）；需專案可編輯權限。同人同專案同標題＋內容 2 分鐘內重試回同一則。" },
   { name: "update_knowledge", title: "更新知識", access: "write", idempotent: true, blurb: "更新既有知識條目（標題／類型／內容／釘選）；內容變更會留版本快照。" },
-  { name: "add_scene", title: "新增分鏡", access: "write", blurb: "在專案新增一格分鏡草稿（標題／提示詞／旁白／秒數）。" },
+  { name: "add_scene", title: "新增分鏡", access: "write", idempotent: true, blurb: "在專案新增一格分鏡草稿（標題／提示詞／旁白／秒數）。同專案同標題＋提示詞 2 分鐘內重試回同一格。" },
   { name: "update_scene", title: "更新分鏡", access: "write", idempotent: true, blurb: "更新分鏡標題、提示詞、旁白、環境音或剪輯（秒數與素材入出點）。" },
   { name: "reorder_scenes", title: "重排分鏡順序", access: "write", idempotent: true, blurb: "依指定順序重排專案分鏡；清單漏掉的分鏡依原相對順序補到尾端。" },
   { name: "set_scene_visual", title: "掛上分鏡畫面", access: "write", blurb: "把生成結果或素材庫項目設為分鏡畫面（二選一：generationId 或 assetId）。" },

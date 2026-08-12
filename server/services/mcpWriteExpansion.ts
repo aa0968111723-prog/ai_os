@@ -9,6 +9,7 @@ import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import { assertProjectEditable } from "./projectAcl";
 import { lockSceneOrder } from "./locks";
+import { addSceneDraftOnce } from "./sceneWriteCore";
 import { worldviewSchema } from "../../shared/worldview";
 import { executeGenerationCommand } from "./generationCommand";
 import type { AuthState } from "./auth";
@@ -469,24 +470,12 @@ export async function runMcpWriteExpansion(
     await assertProjectEditable(auth, project);
     const title = String(args.title ?? "").trim();
     if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "請填分鏡標題" });
-    const scene = await db.transaction(async (tx) => {
-      const [{ maxOrder }] = await tx
-        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-        .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-      const [row] = await tx
-        .insert(schema.scenes)
-        .values({
-          projectId: project.id,
-          title: title.slice(0, 60),
-          prompt: typeof args.prompt === "string" ? args.prompt.slice(0, MAX_PROMPT) : null,
-          voiceover: typeof args.voiceover === "string" ? args.voiceover.slice(0, 500) : null,
-          durationSec: typeof args.durationSec === "number" ? Math.min(60, Math.max(1, Math.trunc(args.durationSec))) : 5,
-          orderIndex: (maxOrder ?? 0) + 1,
-          status: "todo",
-        })
-        .returning();
-      return row;
+    const scene = await addSceneDraftOnce({
+      projectId: project.id,
+      title: title.slice(0, 60),
+      prompt: typeof args.prompt === "string" ? args.prompt.slice(0, MAX_PROMPT) : null,
+      voiceover: typeof args.voiceover === "string" ? args.voiceover.slice(0, 500) : null,
+      durationSec: typeof args.durationSec === "number" ? Math.min(60, Math.max(1, Math.trunc(args.durationSec))) : 5,
     });
     return { sceneId: scene.id, title: scene.title, orderIndex: scene.orderIndex };
   }

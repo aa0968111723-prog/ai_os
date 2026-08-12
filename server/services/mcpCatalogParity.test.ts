@@ -32,6 +32,7 @@ describe("MCP catalog ↔ TOOLS 對齊（D1）", () => {
     expect(mcpToolAnnotations("stop_agent")?.destructiveHint).toBe(true);
     expect(mcpToolAnnotations("discard_agent")?.destructiveHint).toBe(true);
     expect(mcpToolAnnotations("add_knowledge")?.idempotentHint).toBe(true);
+    expect(mcpToolAnnotations("add_scene")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("add_database_rows")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("update_database_row")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("post_message")?.idempotentHint).toBe(true);
