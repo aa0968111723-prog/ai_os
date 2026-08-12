@@ -346,6 +346,11 @@ describe("紅線一契約：LLM 迴圈唯讀（源碼斷言）", () => {
     expect(src).toContain('type: verified ? "action.completed" : "action.failed"');
   });
 
+  it("WRITE capabilities require verified execution even when the frame says ANSWER", () => {
+    expect(src).toContain("planRequiresVerifiedExecution");
+    expect(src).toContain("executionPlan.capabilityId");
+  });
+
   it("站級動作型別不含任何 destructive 動作（EVAL CASE 3：刪除類不可自主執行）", () => {
     for (const banned of ["delete_project", "remove_", "discard_agent", "stop_agent", "approve_agent"]) {
       expect(src.includes(`z.literal("${banned}`)).toBe(false);

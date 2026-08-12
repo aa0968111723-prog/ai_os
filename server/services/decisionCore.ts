@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { DECISION_TITLE_MAX } from "../../shared/collabIntent";
 import { db, schema } from "../db";
@@ -60,12 +60,18 @@ export async function createProjectDecisionCore(input: {
     if (!source || source.projectId !== project.id) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此專案" });
     }
-    const [existing] = await db.select().from(schema.decisions).where(and(
-      eq(schema.decisions.projectId, project.id),
-      eq(schema.decisions.sourceMessageId, input.sourceMessageId),
-    )).limit(1);
-    if (existing && !existing.revokedAt) return existing;
   }
+  const [existing] = await db.select().from(schema.decisions).where(and(
+    eq(schema.decisions.projectId, project.id),
+    isNull(schema.decisions.revokedAt),
+    input.sourceMessageId
+      ? eq(schema.decisions.sourceMessageId, input.sourceMessageId)
+      : and(
+        eq(schema.decisions.title, title),
+        eq(schema.decisions.decidedBy, input.auth.user.id),
+      ),
+  )).limit(1);
+  if (existing) return existing;
   const [row] = await db.insert(schema.decisions).values({
     groupId: project.groupId,
     projectId: project.id,
