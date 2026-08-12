@@ -11,7 +11,7 @@
  * 但代理的執行永遠只走 agent_run + Runner——不存在第二條扣點／執行路徑。
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db, schema } from "../db";
@@ -439,26 +439,45 @@ async function recordPlannedEvent(run: AgentRunRow): Promise<void> {
   });
 }
 
+export function snapshotLines(lines: string[], total: number, empty: string, label: string): string {
+  if (total <= 0) return empty;
+  if (lines.length >= total) return lines.join("\n");
+  return [...lines, `（${label}共 ${total} 筆；此快照只展開 ${lines.length} 筆，不得宣稱已列出全部）`].join("\n");
+}
+
 async function buildPlannerContext(groupId: string, projectId: string, writableDbs: WritableDb[]): Promise<PlannerContext> {
   // CA-01：並行載入成員／筆記／排程／任務＋角色定裝／場景設定／素材庫（短代號供 generate 引用）
-  const [memberRows, noteRows, scheduleRows, taskRows, characterRows, presetRows, propRows, assetRows] = await Promise.all([
+  // 清單有硬頂；total 必須另計，否則快照頁面會被當成整庫／整組。
+  const memberWhere = eq(schema.groupMembers.groupId, groupId);
+  const noteWhere = and(eq(schema.notes.groupId, groupId), eq(schema.notes.projectId, projectId));
+  const scheduleWhere = and(eq(schema.scheduleItems.groupId, groupId), eq(schema.scheduleItems.projectId, projectId));
+  const taskWhere = and(eq(schema.projectTasks.groupId, groupId), eq(schema.projectTasks.projectId, projectId));
+  const characterWhere = eq(schema.characters.projectId, projectId);
+  const presetWhere = eq(schema.scenePresets.projectId, projectId);
+  const propWhere = eq(schema.props.projectId, projectId);
+  const assetWhere = and(eq(schema.assets.projectId, projectId), isNull(schema.assets.deletedAt));
+  const [
+    memberRows, noteRows, scheduleRows, taskRows, characterRows, presetRows, propRows, assetRows,
+    memberCountRows, noteCountRows, scheduleCountRows, taskCountRows,
+    characterCountRows, presetCountRows, propCountRows, assetCountRows,
+  ] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name, role: schema.groupMembers.role })
       .from(schema.groupMembers)
       .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
-      .where(eq(schema.groupMembers.groupId, groupId))
+      .where(memberWhere)
       .orderBy(asc(schema.users.name))
       .limit(50),
     db
       .select({ id: schema.notes.id, title: schema.notes.title, content: schema.notes.content, updatedAt: schema.notes.updatedAt })
       .from(schema.notes)
-      .where(and(eq(schema.notes.groupId, groupId), eq(schema.notes.projectId, projectId)))
+      .where(noteWhere)
       .orderBy(desc(schema.notes.updatedAt))
       .limit(20),
     db
       .select({ id: schema.scheduleItems.id, title: schema.scheduleItems.title, startsAt: schema.scheduleItems.startsAt, endsAt: schema.scheduleItems.endsAt })
       .from(schema.scheduleItems)
-      .where(and(eq(schema.scheduleItems.groupId, groupId), eq(schema.scheduleItems.projectId, projectId)))
+      .where(scheduleWhere)
       .orderBy(asc(schema.scheduleItems.startsAt))
       .limit(30),
     db
@@ -470,14 +489,14 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
         assigneeId: schema.projectTasks.assigneeId,
       })
       .from(schema.projectTasks)
-      .where(and(eq(schema.projectTasks.groupId, groupId), eq(schema.projectTasks.projectId, projectId)))
+      .where(taskWhere)
       .orderBy(desc(schema.projectTasks.updatedAt))
       .limit(30),
     // 角色定裝卡：跨鏡外觀錨點（char1…）；上限 20 防 prompt 膨脹
     db
       .select({ id: schema.characters.id, name: schema.characters.name, appearance: schema.characters.appearance })
       .from(schema.characters)
-      .where(eq(schema.characters.projectId, projectId))
+      .where(characterWhere)
       .orderBy(asc(schema.characters.createdAt))
       .limit(20),
     // 場景設定卡：色板／光線（preset1…）
@@ -489,24 +508,40 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
         lighting: schema.scenePresets.lighting,
       })
       .from(schema.scenePresets)
-      .where(eq(schema.scenePresets.projectId, projectId))
+      .where(presetWhere)
       .orderBy(asc(schema.scenePresets.createdAt))
       .limit(20),
     // 素材設定卡：道具外觀／材質（prop1…）
     db
       .select({ id: schema.props.id, name: schema.props.name, appearance: schema.props.appearance })
       .from(schema.props)
-      .where(eq(schema.props.projectId, projectId))
+      .where(propWhere)
       .orderBy(asc(schema.props.createdAt))
       .limit(20),
     // 素材庫：needs 模型（圖生圖／i2v）來源（asset1…）；排除回收桶
     db
       .select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind })
       .from(schema.assets)
-      .where(and(eq(schema.assets.projectId, projectId), isNull(schema.assets.deletedAt)))
+      .where(assetWhere)
       .orderBy(desc(schema.assets.createdAt))
       .limit(30),
+    db.select({ n: sql<number>`count(*)` }).from(schema.groupMembers).where(memberWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.notes).where(noteWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.scheduleItems).where(scheduleWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.projectTasks).where(taskWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.characters).where(characterWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.scenePresets).where(presetWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.props).where(propWhere),
+    db.select({ n: sql<number>`count(*)` }).from(schema.assets).where(assetWhere),
   ]);
+  const memberTotal = Number(memberCountRows[0]?.n ?? 0);
+  const noteTotal = Number(noteCountRows[0]?.n ?? 0);
+  const scheduleTotal = Number(scheduleCountRows[0]?.n ?? 0);
+  const taskTotal = Number(taskCountRows[0]?.n ?? 0);
+  const characterTotal = Number(characterCountRows[0]?.n ?? 0);
+  const presetTotal = Number(presetCountRows[0]?.n ?? 0);
+  const propTotal = Number(propCountRows[0]?.n ?? 0);
+  const assetTotal = Number(assetCountRows[0]?.n ?? 0);
 
   const members = memberRows.map((row, index) => ({
     ref: `member${index + 1}`,
@@ -554,57 +589,81 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
   ).length;
   const text = [
     "<團隊成員代號>",
-    memberRows.length
-      ? memberRows.map((row, index) =>
+    snapshotLines(
+      memberRows.map((row, index) =>
         `member${index + 1}=「${row.name}」（${row.role === "leader" ? "組長" : "成員"}，目前未完成任務 ${openTaskCount(row.id)} 件）`,
-      ).join("\n")
-      : "（沒有可指派成員）",
+      ),
+      memberTotal,
+      "（沒有可指派成員）",
+      "成員",
+    ),
     "</團隊成員代號>",
     "<專案筆記代號>",
-    noteRows.length
-      ? noteRows.map((row, index) => `note${index + 1}=「${row.title}」摘要：${row.content.replace(/\s+/g, " ").slice(0, 240)}`).join("\n")
-      : "（尚無專案筆記）",
+    snapshotLines(
+      noteRows.map((row, index) => `note${index + 1}=「${row.title}」摘要：${row.content.replace(/\s+/g, " ").slice(0, 240)}`),
+      noteTotal,
+      "（尚無專案筆記）",
+      "筆記",
+    ),
     "</專案筆記代號>",
     "<專案排程代號>",
-    scheduleRows.length
-      ? scheduleRows.map((row, index) => `schedule${index + 1}=「${row.title}」${dateText(row.startsAt)}～${dateText(row.endsAt)}`).join("\n")
-      : "（尚無專案排程）",
+    snapshotLines(
+      scheduleRows.map((row, index) => `schedule${index + 1}=「${row.title}」${dateText(row.startsAt)}～${dateText(row.endsAt)}`),
+      scheduleTotal,
+      "（尚無專案排程）",
+      "行程",
+    ),
     "</專案排程代號>",
     "<既有人類任務代號>",
-    taskRows.length
-      ? taskRows.map((row, index) => `task${index + 1}=「${row.title}」狀態=${row.status}，期限=${dateText(row.dueAt)}`).join("\n")
-      : "（尚無人類任務）",
+    snapshotLines(
+      taskRows.map((row, index) => `task${index + 1}=「${row.title}」狀態=${row.status}，期限=${dateText(row.dueAt)}`),
+      taskTotal,
+      "（尚無人類任務）",
+      "任務",
+    ),
     "</既有人類任務代號>",
     // CA-01：generate 可引用的定裝／場景／素材代號（禁止輸出 UUID）
     "<角色定裝代號>",
-    characterRows.length
-      ? characterRows.map((row, index) =>
+    snapshotLines(
+      characterRows.map((row, index) =>
         `char${index + 1}=「${row.name}」${row.appearance.replace(/\s+/g, " ").slice(0, 160)}`,
-      ).join("\n")
-      : "（尚無角色定裝）",
+      ),
+      characterTotal,
+      "（尚無角色定裝）",
+      "角色定裝",
+    ),
     "</角色定裝代號>",
     "<場景設定代號>",
-    presetRows.length
-      ? presetRows.map((row, index) => {
+    snapshotLines(
+      presetRows.map((row, index) => {
         const palette = row.palette.replace(/\s+/g, " ").slice(0, 120);
         const lighting = row.lighting?.trim()
           ? `｜光線 ${row.lighting.replace(/\s+/g, " ").slice(0, 80)}`
           : "";
         return `preset${index + 1}=「${row.name}」色板 ${palette}${lighting}`;
-      }).join("\n")
-      : "（尚無場景設定）",
+      }),
+      presetTotal,
+      "（尚無場景設定）",
+      "場景設定",
+    ),
     "</場景設定代號>",
     "<素材設定代號>",
-    propRows.length
-      ? propRows.map((row, index) =>
+    snapshotLines(
+      propRows.map((row, index) =>
         `prop${index + 1}=「${row.name}」${row.appearance.replace(/\s+/g, " ").slice(0, 160)}`,
-      ).join("\n")
-      : "（尚無素材設定）",
+      ),
+      propTotal,
+      "（尚無素材設定）",
+      "素材設定",
+    ),
     "</素材設定代號>",
     "<素材庫代號>",
-    assetRows.length
-      ? assetRows.map((row, index) => `asset${index + 1}=「${row.title}」（${row.kind}）`).join("\n")
-      : "（尚無可用素材）",
+    snapshotLines(
+      assetRows.map((row, index) => `asset${index + 1}=「${row.title}」（${row.kind}）`),
+      assetTotal,
+      "（尚無可用素材）",
+      "素材",
+    ),
     "</素材庫代號>",
   ].join("\n");
   return {

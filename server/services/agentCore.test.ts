@@ -15,6 +15,7 @@ import {
   plannerOutputTokenCeiling,
   plannerPlaybookDirective,
   prepareAgentStepsForResume,
+  snapshotLines,
   toEphemeralPlanSource,
 } from "./agentCore";
 import type { AgentStep } from "./agentRunner";
@@ -137,6 +138,30 @@ describe("agentCore CA-01 planner context (source-lock)", () => {
     expect(source).toContain("AGENT_WRITABLE_REF_LIMIT");
     expect(source).toContain("name:${t.id.slice(0, 8)}");
     expect(source).toContain("共 ${dbs.length} 個 AI 可寫資料庫");
+  });
+
+  it("planner snapshots count matching PostgreSQL rows and disclose truncation", () => {
+    expect(source).toContain("function snapshotLines");
+    expect(source).toContain("noteTotal");
+    expect(source).toContain("taskTotal");
+    expect(source).toContain("assetTotal");
+    expect(source).toContain("此快照只展開");
+    expect(source).toContain("snapshotLines(");
+  });
+});
+
+describe("snapshotLines（規劃快照不得把頁面當全部）", () => {
+  it("empty inventory stays empty; a full page without extra rows is not truncated", () => {
+    expect(snapshotLines([], 0, "（尚無專案筆記）", "筆記")).toBe("（尚無專案筆記）");
+    expect(snapshotLines(["note1=a", "note2=b"], 2, "（尚無專案筆記）", "筆記")).toBe("note1=a\nnote2=b");
+  });
+
+  it("discloses listed/total when the snapshot is shorter than the PostgreSQL count", () => {
+    const text = snapshotLines(["note1=a"], 80, "（尚無專案筆記）", "筆記");
+    expect(text).toContain("note1=a");
+    expect(text).toContain("筆記共 80 筆");
+    expect(text).toContain("此快照只展開 1 筆");
+    expect(text).toContain("不得宣稱已列出全部");
   });
 });
 
