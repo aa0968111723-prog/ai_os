@@ -1297,11 +1297,11 @@ ${forceFinal
 - {"tool":"read_scene","args":{"ref":"p2","sceneNo":3}}：讀某專案單一分鏡的完整內容
 - {"tool":"list_generations","args":{"ref":"p2"}}：某專案最近 15 筆生成紀錄
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：查模型目錄（兩參數皆可省略）
-- {"tool":"query_database","args":{"dbRef":"db1","keyword":"某人名"}}：鑽進某個自訂資料庫做全量搜尋
+- {"tool":"query_database","args":{"dbRef":"db1","keyword":"某人名"}}：鑽進某個自訂資料庫做全量搜尋（工作台「資料庫」頁維護的自訂表；與專案素材庫無關，別用它的資料回答「專案有幾筆素材」）
 - {"tool":"list_agent_runs","args":{"ref":"p2"}}：查 AI 代理計畫/執行動態（ref 可省略＝全組）
 - {"tool":"group_blockers"}：全組阻塞明細與人員負荷
 - {"tool":"list_tasks","args":{"ref":"p2"}}：未結的人員任務（ref 可省略＝全組）
-- {"tool":"project_intelligence","args":{"ref":"p2"}}：某專案的營運快照
+- {"tool":"project_intelligence","args":{"ref":"p2"}}：某專案的營運快照（內含「專案素材庫」統計＝該專案 assets 表的圖／影片／音訊／文件數量；回答「這案有哪些素材／素材夠不夠」一律以這個為準，不要用自訂資料庫代替）
 能從 <組現況> 直接回答就不要查——每次查詢都有成本。`}
 ${dispatchBlock}
 ${commandBlock}
