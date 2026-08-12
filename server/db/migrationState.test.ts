@@ -354,8 +354,9 @@ describe("legacy migration adoption bridge", () => {
     // checkpoint table/indexes. One reviewed idempotent owner backfill is omitted
     // from drift because it changes rows, leaving 29 additive DDL statements.
     // 0071 Note plan-step uniqueness: 1 CREATE UNIQUE INDEX (DELETE is row data).
+    // 0072 Schedule plan-step uniqueness: 1 CREATE UNIQUE INDEX.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 1,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 1 + 1,
     );
   });
 

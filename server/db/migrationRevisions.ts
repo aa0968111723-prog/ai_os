@@ -349,4 +349,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0071_note_task_plan_step_uniqueness": [
     "abc300bfd1e09353a51d3d7535d55ef6edf437e45ad4409e2d3fc94d270bac32",
   ],
+  "0072_schedule_plan_step_uniqueness": [
+    "f051c2427974f1625fa7e74b52813719eb3c11400a4dbb6ec023dc956df84691",
+  ],
 };

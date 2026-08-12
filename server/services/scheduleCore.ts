@@ -166,6 +166,14 @@ export async function addScheduleItemCore(input: {
   const endsAt = input.endsAt ? parseDate(input.endsAt, "結束") : null;
   if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
 
+  if (input.planRunId && input.planStepId) {
+    const [existing] = await db.select().from(schema.scheduleItems).where(and(
+      eq(schema.scheduleItems.planRunId, input.planRunId),
+      eq(schema.scheduleItems.planStepId, input.planStepId),
+    )).limit(1);
+    if (existing) return existing;
+  }
+
   const [row] = await db
     .insert(schema.scheduleItems)
     .values({

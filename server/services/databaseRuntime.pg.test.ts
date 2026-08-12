@@ -14,7 +14,7 @@ describe.skipIf(!RUN_PG)("database runtime probe (real PostgreSQL)", () => {
     expect(probe.latencyMs).toBeTypeOf("number");
     expect(probe.schemaCompatible).toBe(true);
     expect(probe.identity.databaseIdentityHash).toMatch(/^[a-f0-9]{16}$/);
-    expect(probe.identity.migrationHead).toBe("0071_note_task_plan_step_uniqueness");
+    expect(probe.identity.migrationHead).toBe("0072_schedule_plan_step_uniqueness");
     expect(JSON.stringify(probe)).not.toMatch(/password|postgres:\/\//i);
   });
 

@@ -451,4 +451,5 @@ export const scheduleItems = pgTable("schedule_items", {
 }, (t) => ({
   groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
   planRunIdx: index("schedule_items_plan_run_idx").on(t.planRunId),
+  planStepUq: uniqueIndex("schedule_items_plan_step_uq").on(t.planRunId, t.planStepId),
 }));
