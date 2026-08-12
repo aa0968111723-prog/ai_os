@@ -48,6 +48,19 @@ describe("assistantSemanticResolution", () => {
     expect(match.capabilityId).toBe("import_google_drive");
   });
 
+  it("does not treat a custom database as project assets", () => {
+    const { frame } = deriveDeterministicGoalFrame("db1 自訂資料表有幾列？");
+    expect(frame.source?.type).toBe("CUSTOM_DATABASE");
+    expect(frame.source?.type).not.toBe("PROJECT_ASSETS");
+    expect(frame.operation).toBe("COUNT");
+  });
+
+  it("does not treat project assets as Google Photos", () => {
+    const { frame } = deriveDeterministicGoalFrame("這個專案素材有幾張？");
+    expect(frame.source?.type).toBe("PROJECT_ASSETS");
+    expect(frame.source?.type).not.toBe("GOOGLE_PHOTOS");
+  });
+
   it("does not silently turn ambiguous cloud into project assets", () => {
     const { frame } = deriveDeterministicGoalFrame("雲端內有多少素材？");
     expect(frame.operation).toBe("COUNT");

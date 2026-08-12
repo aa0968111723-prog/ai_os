@@ -21,7 +21,7 @@ export function classifyExecutionError(error: unknown): ExecutionErrorDispositio
 
   // The effect may have committed even though its acknowledgement was lost.
   if (["57014", "57P01", "57P02", "57P03", "08000", "08001", "08003", "08004", "08006", "08007", "08P01", "53300"].includes(code)) return "reconcile";
-  if (/statement timeout|connection (?:closed|lost|reset)|socket hang up|econnreset|etimedout/i.test(message)) return "reconcile";
+  if (/statement timeout|connection (?:closed|lost|reset|terminated unexpectedly)|socket hang up|econnreset|etimedout|econnrefused/i.test(message)) return "reconcile";
 
   // Constraint, ACL and validation failures are never fixed by blind replay.
   return "permanent";

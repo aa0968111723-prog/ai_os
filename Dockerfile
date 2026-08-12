@@ -16,7 +16,11 @@ ENV NODE_ENV=production
 ARG BUILD_SHA=""
 ARG BUILD_BRANCH=""
 ARG BUILD_TIME=""
-ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME
+ARG ZEABUR_GIT_COMMIT=""
+ARG RAILWAY_GIT_COMMIT_SHA=""
+ARG SOURCE_VERSION=""
+RUN SHA="${BUILD_SHA:-${ZEABUR_GIT_COMMIT:-${RAILWAY_GIT_COMMIT_SHA:-$SOURCE_VERSION}}}"; printf '%s' "$SHA" > /app/BUILD_SHA
+ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME ZEABUR_GIT_COMMIT=$ZEABUR_GIT_COMMIT
 # 正式映像只安裝 runtime dependencies；測試、Vite 與 TypeScript 工具不進 production layer。
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force

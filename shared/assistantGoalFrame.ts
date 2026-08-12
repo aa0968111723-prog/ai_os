@@ -59,6 +59,8 @@ export type AssistantGoalObject = (typeof ASSISTANT_GOAL_OBJECTS)[number];
 export const ASSISTANT_SOURCE_TYPES = [
   "AIOS_LIBRARY",
   "PROJECT_ASSETS",
+  "CUSTOM_DATABASE",
+  "PUBLIC_AGENT_FUEL",
   "GOOGLE_DRIVE",
   "GOOGLE_PHOTOS",
   "LOCAL_FILE",
@@ -66,6 +68,7 @@ export const ASSISTANT_SOURCE_TYPES = [
   "URL",
   "EXTERNAL_AI",
   "EXTERNAL_EDITOR",
+  "REMOTE_PROVIDER",
   "UNKNOWN_CLOUD",
   "UNKNOWN",
 ] as const;

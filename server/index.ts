@@ -89,6 +89,7 @@ import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntak
 import { editingManifestSchema } from "../shared/externalEditing";
 import { currentDeploymentIdentity, deploymentDrift } from "./services/deploymentIdentity";
 import { buildCapabilityContractReport, getCapabilityHealthView } from "./services/agentCapabilityCertification";
+import { databaseReadyNote, probeDatabaseRuntime } from "./services/databaseRuntime";
 
 const app = express();
 
@@ -218,14 +219,15 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   const components: Record<string, { ok: boolean; note: string }> = {};
 
-  try {
-    await db.execute(sql`select 1`);
-    components.db = { ok: true, note: "connected（資料庫已接通）" };
-    components.dbPool = { ok: true, note: `total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
-  } catch (err) {
-    console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
-    components.db = { ok: false, note: "error（資料庫未接通）——檢查部署平台 Variables 的 DATABASE_URL" };
-    components.dbPool = { ok: false, note: `unavailable total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
+  const database = await probeDatabaseRuntime();
+  const dbNote = databaseReadyNote(database);
+  components.db = { ok: dbNote.ok, note: dbNote.note };
+  components.dbPool = {
+    ok: !database.configured || database.connected,
+    note: `total=${database.pool.totalCount} idle=${database.pool.idleCount} waiting=${database.pool.waitingCount}`,
+  };
+  if (!database.connected) {
+    console.error("[ready] DB 連線失敗：", database.errorClass ?? "unknown");
   }
 
   const bootReady = isBootReady();
@@ -331,6 +333,16 @@ app.get("/api/ready", async (_req, res) => {
     processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
+    database: {
+      configured: database.configured,
+      connected: database.connected,
+      latencyMs: database.latencyMs,
+      schemaCompatible: database.schemaCompatible,
+      errorClass: database.errorClass,
+      identity: database.identity,
+      pool: database.pool,
+      target: database.target,
+    },
     components,
     runners,
     resources,

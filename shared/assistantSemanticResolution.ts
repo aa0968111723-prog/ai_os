@@ -61,13 +61,16 @@ const SOURCE_MENTION: Array<[RegExp, AssistantSourceType]> = [
   [/(?:lumafusion|外部剪輯|剪輯軟體|editor)/iu, "EXTERNAL_EDITOR"],
   [/(?:素材庫|專案素材|目前素材|這個專案.{0,6}素材)/iu, "PROJECT_ASSETS"],
   [/(?:aios\s*資料庫|資料中心|全站素材|素材資料庫)/iu, "AIOS_LIBRARY"],
+  [/(?:自訂資料(?:庫|表)|資料表|\bdb\d+\b|query_database)/iu, "CUSTOM_DATABASE"],
+  [/(?:public\s*agent\s*fuel|公共\s*agent\s*素材|公共素材包)/iu, "PUBLIC_AGENT_FUEL"],
+  [/(?:遠端供應商|remote\s*provider|fal\s*api)/iu, "REMOTE_PROVIDER"],
 ];
 
 const CLOUD_ONLY_RE = /(?:雲端|cloud)/iu;
 const IMPORT_RE = /(?:匯入|帶入|帶進|加入|放進|上傳|丟進|丟到|塞進|塞到|import|upload|加\s*\d+\s*張|加\s*[一二三四五六七八九十百]+張|丟\s*幾張|丟\s*\d+\s*張)/iu;
 const ATTACH_RE = /(?:放到|放進|掛到|綁定|加入|放|丟到|丟進|塞到|塞進).{0,12}(?:分鏡|鏡|shot|場景|scene)|(?:分鏡|鏡|shot|場景|scene).{0,12}(?:放|掛|綁|加入|丟|塞)|(?:放|丟|掛|塞)\s*第\s*[一二三四五六七八九十\d]+\s*鏡|到\s*第\s*[一二三四五六七八九十\d]+\s*鏡/iu;
 const ORGANIZE_RE = /(?:整理|分類|歸類|標註|辨識|重整|organize|classify)/iu;
-const COUNT_RE = /(?:多少|幾個|幾項|數量|count)/iu;
+const COUNT_RE = /(?:多少|幾個|幾項|幾列|幾筆|數量|count)|(?<!丟|加|帶)幾張/iu;
 const LIST_RE = /(?:列出|有哪些|清單|顯示|show|list)/iu;
 const FIND_RE = /(?:找|搜尋|查找|find|search)/iu;
 const COMPARE_RE = /(?:比較|對比|compare)/iu;
