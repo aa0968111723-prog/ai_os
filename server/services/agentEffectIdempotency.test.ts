@@ -212,6 +212,20 @@ describe("schedule/task replay safety (#133 PR-5)", () => {
 const mcpSource = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
 const messagesSource = readFileSync(new URL("../routers/messages.ts", import.meta.url), "utf8");
 
+const knowledgeSource = readFileSync(new URL("../routers/knowledge.ts", import.meta.url), "utf8");
+const mcpKnowledgeSource = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+
+describe("knowledge retry replay", () => {
+  it("site add and MCP add_knowledge replay the same author+title+content within 2 minutes", () => {
+    expect(knowledgeSource).toContain("120_000");
+    expect(mcpKnowledgeSource).toContain("120_000");
+    expectBefore(knowledgeSource, "gte(schema.knowledge.createdAt", ".insert(schema.knowledge)");
+    expectBefore(mcpKnowledgeSource, "gte(schema.knowledge.createdAt", ".insert(schema.knowledge)");
+    expect(knowledgeSource).toContain("eq(schema.knowledge.createdBy, ctx.auth.user.id)");
+    expect(mcpKnowledgeSource).toContain("eq(schema.knowledge.createdBy, auth.user.id)");
+  });
+});
+
 describe("project message retry replay", () => {
   it("site and MCP post_message replay the same author+project+body within 2 minutes", () => {
     expect(mcpSource).toContain("120_000");

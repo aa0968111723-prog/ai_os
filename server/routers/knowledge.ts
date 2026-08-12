@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -395,13 +395,24 @@ export const knowledgeRouter = router({
         if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
       }
       const summary = extractKnowledgeSummary(input.content);
+      const title = input.title.trim();
+      const [recent] = await db.select().from(schema.knowledge).where(and(
+        eq(schema.knowledge.projectId, project.id),
+        eq(schema.knowledge.createdBy, ctx.auth.user.id),
+        eq(schema.knowledge.title, title),
+        eq(schema.knowledge.content, input.content),
+        eq(schema.knowledge.kind, input.kind),
+        isNull(schema.knowledge.deletedAt),
+        gte(schema.knowledge.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.knowledge.createdAt)).limit(1);
+      if (recent) return recent;
       const [row] = await db
         .insert(schema.knowledge)
         .values({
           projectId: project.id,
           groupId: project.groupId,
           kind: input.kind,
-          title: input.title.trim(),
+          title,
           content: input.content,
           summary: summary || null,
           sourceAssetId: input.sourceAssetId,

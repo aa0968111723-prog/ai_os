@@ -105,7 +105,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "read_dm", title: "讀取私訊", access: "read", blurb: "讀你與某位夥伴的私訊往來（只讀得到自己參與的對話）。" },
   { name: "send_dm", title: "發送私訊", access: "write", blurb: "以你的身分私訊一位同組夥伴或開發者（對方在網站「私訊」頁看到）。" },
   // ── MCP 寫入擴充（創作主線）：知識庫／分鏡／世界觀／素材／設定卡／生成後處理 ──
-  { name: "add_knowledge", title: "新增知識", access: "write", blurb: "為專案新增知識庫條目（腳本／逐字稿／見證／筆記）；需專案可編輯權限。" },
+  { name: "add_knowledge", title: "新增知識", access: "write", idempotent: true, blurb: "為專案新增知識庫條目（腳本／逐字稿／見證／筆記）；需專案可編輯權限。同人同專案同標題＋內容 2 分鐘內重試回同一則。" },
   { name: "update_knowledge", title: "更新知識", access: "write", idempotent: true, blurb: "更新既有知識條目（標題／類型／內容／釘選）；內容變更會留版本快照。" },
   { name: "add_scene", title: "新增分鏡", access: "write", blurb: "在專案新增一格分鏡草稿（標題／提示詞／旁白／秒數）。" },
   { name: "update_scene", title: "更新分鏡", access: "write", idempotent: true, blurb: "更新分鏡標題、提示詞、旁白、環境音或剪輯（秒數與素材入出點）。" },

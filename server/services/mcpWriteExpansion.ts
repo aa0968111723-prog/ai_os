@@ -3,7 +3,7 @@
  * 與 mcpUploadGrant 同模式——工具定義 + handler 獨立，由 mcp.ts 掛上 TOOLS 與 runTool。
  * 一律重用既有 ACL（requireGroup / assertProjectEditable）、點數與審計，不另開後門。
  */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -412,13 +412,24 @@ export async function runMcpWriteExpansion(
       }
       sourceAssetId = sid;
     }
+    const clippedTitle = title.slice(0, 120);
+    const [recent] = await db.select().from(schema.knowledge).where(and(
+      eq(schema.knowledge.projectId, project.id),
+      eq(schema.knowledge.createdBy, auth.user.id),
+      eq(schema.knowledge.title, clippedTitle),
+      eq(schema.knowledge.content, content),
+      eq(schema.knowledge.kind, kind),
+      isNull(schema.knowledge.deletedAt),
+      gte(schema.knowledge.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.knowledge.createdAt)).limit(1);
+    if (recent) return { knowledgeId: recent.id, kind: recent.kind, title: recent.title, chars: content.length };
     const [row] = await db
       .insert(schema.knowledge)
       .values({
         projectId: project.id,
         groupId: project.groupId,
         kind,
-        title: title.slice(0, 120),
+        title: clippedTitle,
         content,
         sourceAssetId,
         createdBy: auth.user.id,
