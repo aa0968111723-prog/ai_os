@@ -89,7 +89,8 @@ import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntak
 import { editingManifestSchema } from "../shared/externalEditing";
 import { currentDeploymentIdentity, deploymentDrift } from "./services/deploymentIdentity";
 import { buildCapabilityContractReport, getCapabilityHealthView } from "./services/agentCapabilityCertification";
-import { databaseReadyNote, probeDatabaseRuntime } from "./services/databaseRuntime";
+import { databaseReadyNote } from "./services/databaseRuntime";
+import { getCachedBackendRuntime } from "./services/backendDependencies";
 
 const app = express();
 
@@ -219,7 +220,8 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   const components: Record<string, { ok: boolean; note: string }> = {};
 
-  const database = await probeDatabaseRuntime();
+  const backend = await getCachedBackendRuntime();
+  const database = backend.database;
   const dbNote = databaseReadyNote(database);
   components.db = { ok: dbNote.ok, note: dbNote.note };
   components.dbPool = {
@@ -305,7 +307,8 @@ app.get("/api/ready", async (_req, res) => {
     components.agentDbIntegrity = { ok: false, note: `integrity scan failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 
-  const ok = Object.values(components).every((c) => c.ok);
+  const requiredOk = Object.values(components).every((c) => c.ok);
+  const ok = requiredOk && backend.ready;
   // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
   // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
@@ -330,6 +333,7 @@ app.get("/api/ready", async (_req, res) => {
   }
   res.status(ok ? 200 : 503).json({
     ok,
+    degraded: backend.degraded,
     processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
@@ -343,6 +347,7 @@ app.get("/api/ready", async (_req, res) => {
       pool: database.pool,
       target: database.target,
     },
+    dependencies: backend.dependencies,
     components,
     runners,
     resources,

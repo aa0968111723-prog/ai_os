@@ -267,6 +267,28 @@ describe("assistantSemanticResolution", () => {
     expect(b.frame.operation).toBe("ATTACH");
   });
 
+  it("runtime-blocked generate_media is unsupported instead of a fake completion", () => {
+    const { frame } = deriveDeterministicGoalFrame("幫我生成一張圖");
+    const match = matchAssistantCapabilityForGoal(frame, { blockedCapabilityIds: ["generate_media"] });
+    if (match.capabilityId === "generate_media") {
+      expect(match.status).toBe("unsupported");
+    }
+  });
+
+  it.each([
+    ["列出我的專案", "LIST", "PROJECT"],
+    ["幫我列出專案", "LIST", "PROJECT"],
+    ["可以幫我建立任務嗎？", "CREATE", "TASK"],
+    ["有幾個專案？", "COUNT", "PROJECT"],
+    ["安排明天下午三點", "CREATE", "SCHEDULE"],
+    ["最近匯入什麼", "READ", "ASSET"],
+    ["把那些放第三鏡", "ATTACH", "SHOT"],
+  ] as const)("fuzz %s", (utterance, operation, objectType) => {
+    const { frame } = deriveDeterministicGoalFrame(utterance);
+    expect(frame.operation).toBe(operation);
+    expect(frame.objectType).toBe(objectType);
+  });
+
   it("negation and correction do not invent a completed import", () => {
     const previous = active();
     const corrected = deriveDeterministicGoalFrame("不是 Drive，是 Photos", previous);

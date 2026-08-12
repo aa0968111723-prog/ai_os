@@ -104,6 +104,7 @@ import {
   executionTerminalStatus,
   type ExecutionReceipt,
 } from "../../shared/executionReceipt";
+import { blockedCapabilityIds, getCachedBackendRuntime } from "../services/backendDependencies";
 
 /** Re-export for existing tests and callers. */
 export { executionTerminalStatus };
@@ -730,7 +731,10 @@ export async function runGlobalAsk(
   if (projectResolution.status === "resolved" && projectResolution.projectId) {
     goalFrame = { ...goalFrame, scope: { ...goalFrame.scope, projectId: projectResolution.projectId } };
   }
-  let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame);
+  const backendRuntime = await getCachedBackendRuntime();
+  let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame, {
+    blockedCapabilityIds: blockedCapabilityIds(backendRuntime),
+  });
   executionPlan = executionPlanFromGoal(goalFrame, capabilityMatch, input.message);
   const goalId = semantic.continuation === "NEW_GOAL" || !input.activeGoal ? randomUUID() : input.activeGoal.goalId;
   let activeGoal: AssistantActiveGoal = {

@@ -82,7 +82,7 @@ const UPDATE_RE = /(?<!沒|未|不)(?:更新|修改|調整|改成)|(?<!not\s)(?:
 const STALE_PROJECT_RE = /(?:最久沒更新|最久未更新|最舊|最早建立|哪個最舊|哪一個最舊|stalest|oldest|least\s*recent)/iu;
 /** Already-imported provenance read — must win over IMPORT_RE (Q16 / #660 family). */
 const RECENT_IMPORT_READ_RE = /(?:最近|剛(?:才|剛)?).{0,8}(?:匯入|加入|帶入|上傳)(?:了)?(?:哪些|什麼|的)?(?:資料|素材|檔案)?|(?:查看|看|顯示|列出|開啟|打開|show|view|list).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|最近(?:匯入|加入)|剛匯入)(?:的)?(?:資料|素材|檔案)?|(?:匯入|加入)了哪些(?:資料|素材|檔案)?/iu;
-const SCHEDULE_RE = /(?:會議|開會|行程|排程|約會|calendar|meeting|schedule)|(?:安排|排).{0,12}(?:會議|開會|行程|約會)/iu;
+const SCHEDULE_RE = /(?:會議|開會|行程|排程|約會|calendar|meeting|schedule)|(?:安排|排).{0,16}(?:會議|開會|行程|約會|明天|後天|下午|早上|晚上|\d+\s*點)/iu;
 const FREE_ONLY_RE = /(?:只用|僅用|只要).{0,12}(?:免費|free).{0,12}(?:模型|model)|(?:不要|別|禁止|不得).{0,12}(?:付費|付费|paid).{0,16}(?:fallback|後備|備援|降級)|no[-\s]?paid[-\s]?fallback/iu;
 const MAX_POINTS_RE = /(?:不要超過|不超過|最多|上限|預算上限|budget|within)\s*(\d+)\s*(?:點|點數|credits?)|(?:max(?:imum)?|cap)\s*(\d+)\s*(?:points?|credits?)/iu;
 const DELIVERY_RE = /(?:做到|做到可以交|可以交|交付|交件|deadline|due).{0,16}(?:今天|今日|今晚|明天|明日)?|(?:今天|今日).{0,12}(?:可以交|交付|交件|完工|完成)/iu;
@@ -324,7 +324,10 @@ export function evidenceScopeForGoal(frame: AssistantGoalFrame): AssistantEviden
 }
 
 /** Single source of truth: GoalFrame -> ASSISTANT_CAPABILITIES. */
-export function matchAssistantCapabilityForGoal(frame: AssistantGoalFrame): AssistantCapabilityMatch {
+export function matchAssistantCapabilityForGoal(
+  frame: AssistantGoalFrame,
+  runtime?: { blockedCapabilityIds?: readonly string[] },
+): AssistantCapabilityMatch {
   const missing = [...frame.missingSlots];
   const source = frame.source?.type;
   let capabilityId: string | undefined;
@@ -403,6 +406,15 @@ export function matchAssistantCapabilityForGoal(frame: AssistantGoalFrame): Assi
       : slot === "assetIds" ? frame.referents.includes("recent_results")
       : false;
     if (!has && !missing.includes(slot)) missing.push(slot);
+  }
+  if (runtime?.blockedCapabilityIds?.includes(capability.id)) {
+    return {
+      status: "unsupported",
+      capabilityId: capability.id,
+      reason: `「${capability.label}」目前後端不可用，不能假裝執行成功。`,
+      missingSlots: [],
+      evidenceScope: evidenceScopeForGoal(frame),
+    };
   }
   return {
     status: missing.length ? "missing_context" : "matched",
