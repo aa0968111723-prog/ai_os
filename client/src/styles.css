@@ -7457,6 +7457,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   justify-content: flex-end;
 }
 .ai-copilot-clear {
+  position: relative;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -7469,6 +7470,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   color: var(--fg-secondary);
   cursor: pointer;
   transition: color var(--dur-fast), background-color var(--dur-fast);
+}
+/* 視覺維持 32px（不破壞面板密度），但把可點擊熱區擴到 --touch-min(44px)：
+   小圓鈕在手機上手指才不會點空。熱區是透明的，純擴充 hit area。 */
+.ai-copilot-clear::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--touch-min) - 32px) / -2); /* 32 → 44：每邊外擴 6px */
+  border-radius: 50%;
 }
 .ai-copilot-clear:hover {
   background: var(--ai-glass-strong);
@@ -8031,6 +8040,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 .ai-copilot-intake-trigger:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai-copilot-send-btn {
+  position: relative;
   width: 38px;
   height: 38px;
   border-radius: 50%;
@@ -8047,6 +8057,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     transform var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out),
     opacity var(--dur-fast);
+}
+/* 視覺維持 38px（輸入列才不會被撐高），但可點擊熱區擴到 --touch-min(44px)。
+   透明的 ::before 只擴 hit area，不影響外觀、hover 縮放或 disabled 狀態。 */
+.ai-copilot-send-btn::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--touch-min) - 38px) / -2); /* 38 → 44：每邊外擴 3px */
+  border-radius: 50%;
 }
 .ai-copilot-send-btn:hover:not(:disabled) {
   transform: scale(1.06);
