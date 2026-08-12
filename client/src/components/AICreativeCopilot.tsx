@@ -468,6 +468,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const activeGoalRef = useRef("");
   const queuedMessageRef = useRef<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  /* 自動捲到底部的守門員：使用者在 feed 上捲過（讀舊訊息）就停止自動捲動，
+     不要在新訊息進場時把他硬拉回底部——那是最容易棄用助手的手感之一。 */
+  const chatFeedRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const restoredPickerRef = useRef<string | undefined>(undefined);
   const presentedInteractionIdsRef = useRef(new Set<string>());
   const openedInteractionIdsRef = useRef(new Set<string>());
@@ -787,6 +791,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
     activeGoalRef.current = text;
+    // 使用者自己送出訊息＝表達「我想看接下來的回覆」，無論先前有沒有捲上去讀舊文
+    stickToBottomRef.current = true;
     setInput("");
     setActivePlan(localPlan);
     const returnContext = captureAssistantReturnContext({
@@ -1090,8 +1096,16 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     void handleSend(queued);
   }, [pending, groupId]);
 
+  // 使用者手動捲動時更新「是否貼底」：距離底部小於 48px 視為仍貼底，
+  // 之後自動捲動才會繼續接手；捲上去讀舊訊息期間新事件不再搶滾輪。
+  const onFeedScroll = () => {
+    const el = chatFeedRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && stickToBottomRef.current) {
       chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, pending]);
@@ -1175,7 +1189,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 對話紀錄區域 ── */}
         {messages.length > 0 && (
-          <div className="ai-copilot-chat-feed" role="log" aria-live="polite" aria-relevant="additions">
+          <div className="ai-copilot-chat-feed" role="log" aria-live="polite" aria-relevant="additions" ref={chatFeedRef} onScroll={onFeedScroll}>
             {messages.map((msg, index) => (
               <div key={index} className={`ai-copilot-bubble ai-copilot-bubble--${msg.role}`}>
                 <div className="ai-copilot-bubble__avatar">

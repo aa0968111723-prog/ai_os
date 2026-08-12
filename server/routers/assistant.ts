@@ -98,6 +98,7 @@ import {
 } from "../services/assistantResourceResolver";
 import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentSourceRecord, AgentSourceType } from "../../shared/agentEvents";
+import { roundThinkingTitle } from "../../shared/agentEvents";
 import { classifyAssistantRequest } from "../../shared/assistantExecution";
 import { selectAssistantCapabilities } from "../../shared/assistantCapabilityRegistry";
 import { BUILT_IN_EXTERNAL_TOOLS } from "../../shared/externalTools";
@@ -1382,12 +1383,13 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           maxToolRounds: MAX_TOOL_ROUNDS,
           signal: input.signal,
           buildPrompt,
-          /** 「思考中…」換成可理解的工作摘要：列出**已經取得**的來源（真實資料，非模型自述） */
+          /** 「思考中…」換成可理解的工作摘要：列出**已經取得**的來源（真實資料，非模型自述）。
+              標題帶上使用者問的那句話（roundThinkingTitle），不同查詢的工作過程不再長得一模一樣（#669 U7）。 */
           onRound: (round) => {
             const acquired = stream.snapshotSources().filter((s) => s.status === "ok");
             stream.emit({
               type: "agent.thinking",
-              title: round === 0 ? "整理已取得的資料" : "比對查到的資料，繼續分析",
+              title: roundThinkingTitle(round, input.message),
               description: acquired.length
                 ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
                 : undefined,
