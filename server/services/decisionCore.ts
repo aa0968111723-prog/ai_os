@@ -60,6 +60,11 @@ export async function createProjectDecisionCore(input: {
     if (!source || source.projectId !== project.id) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此專案" });
     }
+    const [existing] = await db.select().from(schema.decisions).where(and(
+      eq(schema.decisions.projectId, project.id),
+      eq(schema.decisions.sourceMessageId, input.sourceMessageId),
+    )).limit(1);
+    if (existing && !existing.revokedAt) return existing;
   }
   const [row] = await db.insert(schema.decisions).values({
     groupId: project.groupId,

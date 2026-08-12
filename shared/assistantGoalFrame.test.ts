@@ -4,6 +4,7 @@ import {
   canClaimRemoteSourceFact,
   continuationHint,
   goalRequiresVerifiedExecution,
+  planRequiresVerifiedExecution,
 } from "./assistantGoalFrame";
 
 describe("assistantGoalFrame", () => {
@@ -38,6 +39,8 @@ describe("assistantGoalFrame", () => {
     expect(goalRequiresVerifiedExecution("START_CLASSIFICATION")).toBe(true);
     expect(goalRequiresVerifiedExecution("ANSWER")).toBe(false);
     expect(goalRequiresVerifiedExecution("VERIFIED_COUNT")).toBe(false);
+    expect(planRequiresVerifiedExecution("ANSWER", "WRITE")).toBe(true);
+    expect(planRequiresVerifiedExecution("ANSWER", "READ")).toBe(false);
   });
 
   it("recognizes concise continuation/correction answers without using them as execution authority", () => {

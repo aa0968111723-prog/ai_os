@@ -187,6 +187,14 @@ export function goalRequiresVerifiedExecution(outcome: AssistantDesiredOutcome):
   return VERIFIED_EXECUTION_OUTCOMES.has(outcome);
 }
 
+/** Write capabilities cannot complete from a text answer even if the frame said ANSWER. */
+export function planRequiresVerifiedExecution(
+  outcome: AssistantDesiredOutcome,
+  capabilityAccess?: "READ" | "WRITE",
+): boolean {
+  return goalRequiresVerifiedExecution(outcome) || capabilityAccess === "WRITE";
+}
+
 /**
  * Conservative first-pass hint only. The semantic resolver remains the source
  * of truth for ambiguous natural language; this function must never trigger a

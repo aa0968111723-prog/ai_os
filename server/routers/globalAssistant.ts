@@ -53,6 +53,7 @@ import {
   retrieveAssistantDatabaseEvidence,
 } from "../services/assistantDatabaseEvidence";
 import {
+  ASSISTANT_CAPABILITIES,
   canDirectlyExecuteCapability,
   classifyAssistantRequest,
   type AssistantExecutionPlan,
@@ -86,7 +87,7 @@ import { createAssistantInteraction, recordAssistantInteractionLifecycle, submit
 import { assistantInteractionLifecycleSchema, assistantInteractionSubmissionSchema, type AssistantInteractionRequest } from "../../shared/assistantInteractions";
 import {
   assistantActiveGoalSchema,
-  goalRequiresVerifiedExecution,
+  planRequiresVerifiedExecution,
   type AssistantActiveGoal,
   type AssistantEvidenceScope,
   type AssistantGoalFrame,
@@ -1282,7 +1283,10 @@ export async function runGlobalAsk(
     );
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
-    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const requiresVerifiedWrite = planRequiresVerifiedExecution(
+      goalFrame.desiredOutcome,
+      ASSISTANT_CAPABILITIES.find((item) => item.id === executionPlan.capabilityId)?.access,
+    );
     const terminalStatus = executionTerminalStatus(
       siteActions.length,
       direct.executed.map((item) => item.result),
@@ -1551,7 +1555,10 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     ]));
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
-    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const requiresVerifiedWrite = planRequiresVerifiedExecution(
+      goalFrame.desiredOutcome,
+      ASSISTANT_CAPABILITIES.find((item) => item.id === executionPlan.capabilityId)?.access,
+    );
     const terminalStatus = executionTerminalStatus(
       pendingConfirmation.length,
       direct.executed.map((item) => item.result),
