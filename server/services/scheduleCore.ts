@@ -3,7 +3,7 @@
  * 讓 tRPC 路由與「tRPC 之外的入口」（MCP 介面）共用同一批守門（組隔離、專案／留言歸屬校驗、
  * @提及校驗、時間合法性）——與 generationCore／agentCore 同一設計理由，防護不分岔。
  */
-import { and, asc, eq, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -168,6 +168,17 @@ export async function addScheduleItemCore(input: {
 
   const replayed = await findExistingScheduleItem(input);
   if (replayed) return replayed;
+  if (!input.id && !input.planRunId) {
+    const [recent] = await db.select().from(schema.scheduleItems).where(and(
+      eq(schema.scheduleItems.groupId, input.groupId),
+      eq(schema.scheduleItems.createdBy, auth.user.id),
+      eq(schema.scheduleItems.title, title),
+      eq(schema.scheduleItems.startsAt, startsAt),
+      input.projectId ? eq(schema.scheduleItems.projectId, input.projectId) : isNull(schema.scheduleItems.projectId),
+      gte(schema.scheduleItems.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.scheduleItems.createdAt)).limit(1);
+    if (recent) return recent;
+  }
 
   const [row] = await db
     .insert(schema.scheduleItems)

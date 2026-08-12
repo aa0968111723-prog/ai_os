@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -191,6 +191,16 @@ export async function addProjectTaskCore(input: {
   }
   const replayed = await findExistingProjectTask(input);
   if (replayed) return replayed;
+  if (!input.id && !input.planRunId) {
+    const [recent] = await db.select().from(schema.projectTasks).where(and(
+      eq(schema.projectTasks.projectId, input.projectId),
+      eq(schema.projectTasks.createdBy, input.auth.user.id),
+      eq(schema.projectTasks.title, title),
+      description ? eq(schema.projectTasks.description, description) : isNull(schema.projectTasks.description),
+      gte(schema.projectTasks.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.projectTasks.createdAt)).limit(1);
+    if (recent) return recent;
+  }
   const [task] = await db
     .insert(schema.projectTasks)
     .values({

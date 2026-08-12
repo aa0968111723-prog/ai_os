@@ -171,6 +171,7 @@ describe("schedule/task replay safety (#133 PR-5)", () => {
     expect(agentSource).toContain("行程冪等識別碼碰撞，已停止以避免跨計畫覆寫");
     expect(scheduleSource).toContain("onConflictDoNothing");
     expect(scheduleSource).toContain("findExistingScheduleItem");
+    expect(scheduleSource).toContain("120_000");
     expectBefore(
       agentSource,
       "schema.scheduleItems.id, effectId",

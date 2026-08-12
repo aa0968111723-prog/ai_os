@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { applyHumanTaskWake } from "./taskCore";
 
@@ -6,6 +7,16 @@ const task = {
   title: "確認人員名單",
   taskType: "task" as const,
 };
+
+describe("taskCore retry contract", () => {
+  const source = readFileSync(new URL("./taskCore.ts", import.meta.url), "utf8");
+
+  it("site tasks without an effect id replay the same title+description within 2 minutes", () => {
+    expect(source).toContain("120_000");
+    expect(source).toContain("createdBy");
+    expect(source).toContain("findExistingProjectTask");
+  });
+});
 
 describe("human task wake state machine", () => {
   it("continues after the exact waiting task completes", () => {
