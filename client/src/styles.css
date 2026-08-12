@@ -153,6 +153,10 @@
   max-height: min(88vh, 820px);
   overflow: auto;
 }
+/* Intake can be launched from the persistent Assistant (z-index 1100).
+   Portal it above that surface so the picker is never cropped behind the
+   composer or mistaken for a second, half-open sheet on mobile. */
+.external-intake-scrim { z-index: 1200; }
 .external-intake__head,
 .external-inbox__head {
   display: flex;
@@ -233,10 +237,13 @@
 .shot-card__import-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 8px 0 0; }
 
 @media (max-width: 640px) {
+  .external-intake-scrim {
+    padding-top: max(8px, var(--safe-top));
+  }
   .external-intake, .external-launcher {
-    width: 100vw;
+    width: 100%;
     max-width: none;
-    max-height: 92dvh;
+    max-height: calc(100dvh - max(8px, var(--safe-top)) - var(--kb-inset, 0px));
     margin: auto 0 0;
     border-radius: 18px 18px 0 0;
   }
@@ -1880,6 +1887,25 @@ mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); 
 /* 這一格底是 color-mix(--primary 7%) 疊在 --bg 上（#e6dacd），比卡面暗，
    --primary-ink 在它上面只有 4.23:1。改用更深的 --primary-solid-active＝5.38:1。 */
 .msg-block.assistant .who { color: var(--primary-solid-active); }
+/* 訊息串裡的「AI 在說話」頭像＝一顆小 orb，跟全域助手/專案助手同一顆 conic brand 漸層球
+   （見 .ai-copilot-bubble--assistant .ai-copilot-bubble__avatar）。訊息串刻意不呼吸不發光暈，
+   只是身份標記；文字格仍走平底 tint——嵌在人與人的對話串裡，毛玻璃＋halo 會搶話。
+   此為 design system 明載決策（docs/uiux-audit/figma-design-system.md §7）。 */
+.msg-ai-orb {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  flex: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.72), transparent 46%),
+    conic-gradient(from 200deg,
+      var(--brand-orange), var(--brand-amber), var(--brand-lime),
+      var(--brand-teal), var(--brand-red), var(--brand-orange));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 1px 3px rgba(28, 25, 23, 0.18);
+}
 button.recording { display: inline-flex; align-items: center; gap: 4px; color: #fff; background: var(--danger);
   border-color: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -7431,6 +7457,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   justify-content: flex-end;
 }
 .ai-copilot-clear {
+  position: relative;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -7443,6 +7470,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   color: var(--fg-secondary);
   cursor: pointer;
   transition: color var(--dur-fast), background-color var(--dur-fast);
+}
+/* 視覺維持 32px（不破壞面板密度），但把可點擊熱區擴到 --touch-min(44px)：
+   小圓鈕在手機上手指才不會點空。熱區是透明的，純擴充 hit area。 */
+.ai-copilot-clear::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--touch-min) - 32px) / -2); /* 32 → 44：每邊外擴 6px */
+  border-radius: 50%;
 }
 .ai-copilot-clear:hover {
   background: var(--ai-glass-strong);
@@ -7604,6 +7639,55 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   border-color: rgba(246, 119, 30, 0.45);
 }
 
+/* ── 助手載入骨架（#677 U9）：lazy chunk 載入期的訊息氣泡 placeholder ──
+   形狀跟著真正的對話走（左側頭像＋氣泡、右側使用者氣泡），取代原本一行
+   「助手載入中…」——後者會讓版面在「一行字」與「整組氣泡」之間跳變，造成閃爍。
+   顏色用 fg-secondary 的淡色變體，不搶焦點；脈動動畫遵守 prefers-reduced-motion。 */
+.ga-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 2px;
+}
+.ga-skeleton__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ga-skeleton__avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg-secondary, #6b7280) 16%, transparent);
+  animation: ga-skeleton-pulse 1.6s ease-in-out infinite;
+}
+.ga-skeleton__bubble {
+  min-width: 96px;
+  max-width: 72%;
+  height: 34px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg-secondary, #6b7280) 16%, transparent);
+  animation: ga-skeleton-pulse 1.6s ease-in-out infinite;
+}
+.ga-skeleton__bubble--user {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--primary, #f6771e) 14%, transparent);
+}
+.ga-skeleton__bubble--assistant {
+  border-bottom-left-radius: 4px;
+}
+.ga-skeleton__bubble--tall {
+  height: 52px;
+}
+@keyframes ga-skeleton-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ga-skeleton__avatar,
+  .ga-skeleton__bubble { animation: none; opacity: 0.7; }
+}
+
 /* ── 站級動作確認卡（AI 提議 → 使用者按下才執行）── */
 .ai-copilot-action-card {
   display: flex;
@@ -7649,6 +7733,60 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .ai-copilot-action-card__buttons {
   display: flex;
   gap: 8px;
+}
+.assistant-interaction {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--ai-glass-edge);
+  border-radius: 16px;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.82));
+}
+.assistant-interaction__head { display: grid; gap: 3px; }
+.assistant-interaction__head > strong { font-size: 14px; color: var(--fg); }
+.assistant-interaction__head > span,
+.assistant-interaction__empty { margin: 0; font-size: 12px; color: var(--fg-secondary); }
+.assistant-interaction__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.assistant-interaction__option {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  text-align: left;
+  color: var(--fg);
+  background: var(--card, #fff);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  cursor: pointer;
+  min-height: 48px;
+}
+.agent-question__option:disabled { cursor: not-allowed; opacity: .58; }
+.agent-question__blocker { color: var(--warning-ink, #8a4b16); }
+.assistant-interaction__option:hover:not(:disabled),
+.assistant-interaction__option:focus-visible { border-color: var(--primary); background: var(--surface-hover); }
+.assistant-interaction__option:disabled { cursor: not-allowed; opacity: .58; }
+.assistant-interaction__option-icon { flex: 0 0 auto; display: grid; place-items: center; }
+.assistant-interaction__option-copy { min-width: 0; display: grid; gap: 2px; }
+.assistant-interaction__option-copy strong { font-size: 13px; }
+.assistant-interaction__option-copy small { font-size: 11px; color: var(--fg-secondary); overflow-wrap: anywhere; }
+.assistant-interaction__blocker { color: var(--warning-ink, #8a4b16) !important; }
+.assistant-interaction__cancel {
+  min-height: 44px;
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+@media (max-width: 420px) {
+  .assistant-interaction__options { grid-template-columns: 1fr; }
+  .assistant-interaction__option { min-height: 52px; width: 100%; }
 }
 .ai-copilot-bubble__cards {
   display: flex;
@@ -7951,6 +8089,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 }
 .ai-copilot-intake-trigger:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai-copilot-send-btn {
+  position: relative;
   width: 38px;
   height: 38px;
   border-radius: 50%;
@@ -7967,6 +8106,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     transform var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out),
     opacity var(--dur-fast);
+}
+/* 視覺維持 38px（輸入列才不會被撐高），但可點擊熱區擴到 --touch-min(44px)。
+   透明的 ::before 只擴 hit area，不影響外觀、hover 縮放或 disabled 狀態。 */
+.ai-copilot-send-btn::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--touch-min) - 38px) / -2); /* 38 → 44：每邊外擴 3px */
+  border-radius: 50%;
 }
 .ai-copilot-send-btn:hover:not(:disabled) {
   transform: scale(1.06);
@@ -8220,7 +8367,10 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
  * 只針對 .global-assistant 複寫，其他選單在桌機仍然是錨定下拉，行為不變。 */
 .menu-surface.is-sheet.global-assistant {
   position: fixed;
-  z-index: 47;
+  /* Persistent Agent Surface is the workflow home. Page modals use up to
+     z-index:999; the Assistant must remain interactive above them while its
+     open event asks the page to close any stale modal. */
+  z-index: 1100;
   inset-inline: 0;
   top: auto;
   /* bottom 吃 --kb-inset：面板裡有輸入框，鍵盤彈出會直接蓋住輸入列
@@ -8263,7 +8413,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .menu-surface__scrim:has(+ .global-assistant),
 button.menu-surface__scrim:has(+ .global-assistant):hover {
   position: fixed;
-  z-index: 46;
+  z-index: 1099;
   inset: 0;
   display: block;
   width: 100%;

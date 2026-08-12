@@ -24,9 +24,11 @@ const runSiteActionMutate = vi.fn();
 const undoSiteActionMutate = vi.fn();
 const dispatchMutate = vi.fn();
 const commandMutate = vi.fn();
+const submitInteractionMutateAsync = vi.fn();
 const intakeRender = vi.hoisted(() => vi.fn());
 let watchInsights: unknown;
 let watchOverview: unknown;
+let durableConversationState: any;
 
 vi.mock("../api", () => {
   const mutation = (mutate = vi.fn()) => () => ({
@@ -44,8 +46,11 @@ vi.mock("../api", () => {
         createSession: { useMutation: mutation() },
       },
       globalAssistant: {
+        conversationState: { useQuery: () => ({ data: durableConversationState, isLoading: false, isPending: false, error: null }) },
         // ask 只在串流失敗時作為 fallback；行為測試以串流替身為主
         ask: { useMutation: mutation() },
+        submitInteraction: { useMutation: () => ({ mutateAsync: submitInteractionMutateAsync, isPending: false, error: null }) },
+        interactionLifecycle: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ accepted: true }), isPending: false, error: null }) },
         runSiteAction: { useMutation: () => ({ mutate: runSiteActionMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
         undoSiteAction: { useMutation: () => ({ mutate: undoSiteActionMutate, isPending: false, isSuccess: false, reset: vi.fn(), error: null, data: undefined }) },
       },
@@ -118,6 +123,7 @@ beforeEach(() => {
   resetAssistantRunStoreForTest();
   watchInsights = undefined;
   watchOverview = undefined;
+  durableConversationState = null;
   streamMock.mockImplementation(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
     handlers.onDone(DONE);
     return true;
@@ -130,6 +136,27 @@ async function sendMessage(user: ReturnType<typeof userEvent.setup>, text: strin
 }
 
 describe("AICreativeCopilot", () => {
+  it("hydrates the durable conversation checkpoint after a client refresh", async () => {
+    durableConversationState = {
+      conversationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      groupId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      projectId: PROJECT_ID,
+      runId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      goalId: null,
+      planRevision: 1,
+      status: "completed",
+      messages: [{ role: "user", text: "匯入素材" }, { role: "assistant", text: "已安全加入 3 項素材" }],
+      activeGoal: null,
+      recentActionResults: [],
+      events: [],
+      sources: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    render(<AICreativeCopilot groupId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" />);
+    expect(await screen.findByText("已安全加入 3 項素材")).toBeInTheDocument();
+  });
   it("快捷鍵隨頁面改變：沒有頁面上下文時是全站型（不再是寫死的四顆）", () => {
     render(<AICreativeCopilot groupId="grp-123" />);
     expect(screen.queryByText("AI 創作助理")).not.toBeInTheDocument();
@@ -437,12 +464,43 @@ describe("siteActionDoneLink", () => {
   });
 
   it("opens the existing Drive mini workspace from conversation without starting a campaign", async () => {
+    const interactionRequest = {
+      interactionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      runId: "run-1",
+      goalId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      type: "DRIVE_PICKER",
+      title: "選擇 Google Drive 檔案",
+      description: "加入專案；完成後回到同一個對話。",
+      required: true,
+      resumeToken: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      expiresAt: "2026-09-01T00:00:00.000Z",
+      targetProjectId: PROJECT_ID,
+      expectedResultType: "import",
+      status: "pending",
+      createdAt: "2026-08-12T00:00:00.000Z",
+    };
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        answer: interactionRequest.description,
+        siteActions: [], dispatches: [], actions: [], sources: [],
+        events: [event({ type: "waiting.user_input", status: "waiting", title: interactionRequest.title })],
+        interactionRequest,
+        activeGoal: {
+          goalId: interactionRequest.goalId,
+          status: "waiting_user_input",
+          frame: { intent: "IMPORT", operation: "IMPORT", objectType: "FILE", source: { type: "GOOGLE_DRIVE" }, scope: { projectId: PROJECT_ID }, referents: [], constraints: [], desiredOutcome: "PERSIST_ASSETS", missingSlots: [], understandingConfidence: "high", sourceConfidence: "high", entityConfidence: "high", capabilityConfidence: "high" },
+          resolvedSlots: { projectId: PROJECT_ID }, missingSlots: [], resultRefIds: [], pendingInteraction: interactionRequest,
+        },
+      });
+      return true;
+    });
     const user = userEvent.setup();
     render(<AICreativeCopilot groupId="grp-123" projectId={PROJECT_ID} />);
     await sendMessage(user, "把 Google Drive 的活動資料帶進來");
 
     expect(await screen.findByText(/Google Drive 檔案/)).toBeInTheDocument();
-    expect(streamMock).not.toHaveBeenCalled();
+    expect(streamMock).toHaveBeenCalledTimes(1);
     expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
       projectId: PROJECT_ID,
       openRequest: expect.objectContaining({ mode: "drive" }),
@@ -463,13 +521,82 @@ describe("siteActionDoneLink", () => {
       return true;
     });
     const onNavigate = vi.fn();
+    const onUseIdeaForNewProject = vi.fn();
     const user = userEvent.setup();
-    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} />);
+    render(<AICreativeCopilot groupId="grp-123" onNavigate={onNavigate} onUseIdeaForNewProject={onUseIdeaForNewProject} />);
     await sendMessage(user, "幫我建立百日夢島動畫專案");
     await screen.findByText(/已完成：建立「百日夢島」/);
     expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "以此靈感開新專案" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "前往專案" }));
     expect(onNavigate).toHaveBeenCalledWith(`/p/${PROJECT_ID}`);
+  });
+
+  it("清空對話會先中止同一條 run，晚到的回覆不會復活", async () => {
+    let handlersRef: { onDone: (d: unknown) => void } | undefined;
+    let sentSignal: AbortSignal | undefined;
+    streamMock.mockImplementationOnce(({ handlers, signal }: { handlers: { onDone: (d: unknown) => void }; signal: AbortSignal }) => {
+      handlersRef = handlers;
+      sentSignal = signal;
+      return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(true), { once: true }));
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "幫我建立任務");
+    await user.click(screen.getByLabelText("清空對話紀錄"));
+    expect(sentSignal?.aborted).toBe(true);
+    handlersRef?.onDone(DONE);
+    await waitFor(() => expect(screen.queryByText(DONE.answer)).not.toBeInTheDocument());
+    expect(screen.queryByRole("log")).not.toBeInTheDocument();
+  });
+
+  it("等待檔案時只顯示一次問題，不顯示工程卡或錯誤靈感操作", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        answer: "已確認要加入「新專案」。請選擇檔案。",
+        siteActions: [], dispatches: [], actions: [], sources: [],
+        executionPlan: { intent: "ASK", confidence: "medium", title: "選擇檔案", steps: ["等待檔案"] },
+        events: [event({ type: "waiting.user_input", status: "waiting", title: "請選擇檔案" })],
+        intakeRequest: { mode: "files", projectId: PROJECT_ID, projectTitle: "新專案", message: "請選擇檔案" },
+      });
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" onUseIdeaForNewProject={vi.fn()} />);
+    await sendMessage(user, "1");
+    expect(await screen.findAllByText("已確認要加入「新專案」。請選擇檔案。")).toHaveLength(1);
+    expect(screen.queryByText("請選擇檔案", { selector: ".agent-work__step-title" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "以此靈感開新專案" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "建立1準備" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).toHaveAttribute("aria-live", "polite");
+    expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
+      dialogTitle: "加入資料",
+      closeOnImported: true,
+    }));
+  });
+
+  it("queues one next turn entered after the completion bubble but before the exact run finalizer", async () => {
+    let releaseFirst!: () => void;
+    const firstFinalizer = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({ ...DONE, siteActions: [], dispatches: [], actions: [] });
+      await firstFinalizer;
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "建立測試專案");
+    await screen.findByText(DONE.answer);
+
+    const composer = screen.getByLabelText("向 AI 助手提問");
+    await user.type(composer, "把 URL 加入剛建立專案{Enter}");
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2));
+    expect(streamMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: "把 URL 加入剛建立專案",
+    }));
   });
 
   it("sends the previous typed ImportResult on the next turn for 'these data' references", async () => {

@@ -1,10 +1,32 @@
 # Aios 公開網站
-# 公開頁（Landing）可索引；登入與 API 路徑不該被搜尋引擎收錄
+# 公開頁（Landing）可索引；其餘皆為登入後 App 路由（未登入會 redirect 回 /login），
+# 不該被搜尋引擎收錄，避免與 Landing 相同的 SPA shell 被當重複內容抓取。
 User-agent: *
 Allow: /
 Disallow: /login
 Disallow: /api/
 Disallow: /dashboard
+Disallow: /admin
+Disallow: /options
+Disallow: /logs
+Disallow: /members
+Disallow: /feedback
+Disallow: /settings
+Disallow: /my-reports
+Disallow: /models
+Disallow: /help
+Disallow: /mcp
+Disallow: /integrations
+Disallow: /downloads
+Disallow: /chat
+Disallow: /share-target
+Disallow: /collab
+Disallow: /planner
+Disallow: /databases
+Disallow: /studio
+Disallow: /community
+Disallow: /p/
 Disallow: /s/
+Disallow: /workflows
 
 Sitemap: https://ai-os-app.zeabur.app/sitemap.xml

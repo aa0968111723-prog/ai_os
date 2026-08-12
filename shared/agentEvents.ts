@@ -51,6 +51,14 @@ export const AGENT_EVENT_TYPES = [
   "agent.failed",
   "waiting.permission",
   "waiting.user_input",
+  "interaction.requested",
+  "interaction.presented",
+  "interaction.submitted",
+  "interaction.cancelled",
+  "interaction.expired",
+  "handoff.opened",
+  "handoff.returned",
+  "agent.resumed",
 ] as const;
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
 
@@ -284,6 +292,32 @@ export function formatResultSummary(summary: AgentResultSummary | undefined): st
     .filter((entry) => Number.isFinite(entry.value))
     .map((entry) => `${entry.value} ${entry.unit ?? "個"}${entry.label}`)
     .join("・");
+}
+
+/**
+ * 把使用者問題壓成一句「目前在做什麼」的語意標題（onRound 用）。
+ *
+ * #669 U7：onRound 原本只列出 stream 已登記的來源名稱，導致「列出專案」與
+ * 「比較專案」顯示完全相同的「整理已取得的資料」——使用者無法判斷 AI 現在
+ * 具體在處理哪一個請求。這裡把**使用者問的那句話**收進標題，不同查詢的
+ * 工作過程就不再長得一模一樣。只取第一個句子、截到 18 字，避免長問題
+ * 把整條軌跡撐爆。
+ */
+export function roundThinkingTitle(round: number, message: string): string {
+  const label = queryGoalLabel(message);
+  return round === 0
+    ? `整理「${label}」相關資料`
+    : `比對「${label}」相關資料，繼續分析`;
+}
+
+/** 使用者問題 → 一句簡短的目標標籤；空白或只有標點時退回通用語。 */
+export function queryGoalLabel(message: string): string {
+  const text = message.trim().replace(/\s+/g, " ");
+  if (!text) return "你的請求";
+  const first = text.split(/[。！？!?；;，,\n]/)[0]?.trim() ?? "";
+  // 句子分割後可能是空字串（例如整句只有一個「？」）——退回整段原文，不要標成「你的請求」
+  const label = first || text;
+  return label.length > 18 ? `${label.slice(0, 18)}…` : label;
 }
 
 /** 「1.8 秒」／「523 毫秒」——秒以下不要顯示 0.0 秒（看起來像沒發生） */

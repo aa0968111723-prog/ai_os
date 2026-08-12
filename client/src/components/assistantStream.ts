@@ -4,6 +4,7 @@ import type { AssistantWirePageContext } from "@shared/assistantPageContext";
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActionResult } from "@shared/assistantActions";
 import type { AssistantActiveGoal, AssistantEvidenceScope, AssistantGoalFrame } from "@shared/assistantGoalFrame";
+import type { AssistantInteractionRequest } from "@shared/assistantInteractions";
 import type {
   AssistantExecutionPlan,
   AssistantLatencyMetrics,
@@ -198,6 +199,41 @@ function dispatchAssistantEvent(
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+/** Server heartbeats every 15s. Three missed heartbeats means the transport is stale. */
+export const ASSISTANT_STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+class AssistantStreamIdleTimeoutError extends Error {
+  constructor() {
+    super("assistant stream idle timeout");
+    this.name = "AssistantStreamIdleTimeoutError";
+  }
+}
+
+async function readAssistantChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  idleTimeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new AssistantStreamIdleTimeoutError()), idleTimeoutMs);
+      }),
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /**
  * 全站助手串流的 done 形狀（/api/assistant/site-ask）。
  *
@@ -235,7 +271,7 @@ export type SiteAssistantStreamDone = {
   activeGoal?: AssistantActiveGoal;
   evidenceScope?: AssistantEvidenceScope;
   intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
-  interactionRequest?: import("@shared/assistantInteraction").AssistantInteractionRequest;
+  interactionRequest?: AssistantInteractionRequest;
 };
 
 function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
@@ -266,6 +302,7 @@ export type SiteAssistantStreamHandlers = {
  */
 export async function requestSiteAssistantStream({
   groupId,
+  conversationId,
   message,
   history,
   projectId,
@@ -277,8 +314,10 @@ export async function requestSiteAssistantStream({
   signal,
   handlers,
   fetchImpl = fetch,
+  idleTimeoutMs = ASSISTANT_STREAM_IDLE_TIMEOUT_MS,
 }: {
   groupId: string;
+  conversationId?: string;
   message: string;
   history?: Array<{ role: "user" | "assistant"; text: string }>;
   /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
@@ -294,6 +333,8 @@ export async function requestSiteAssistantStream({
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
+  /** Test seam and slow-network override; every received heartbeat resets it. */
+  idleTimeoutMs?: number;
 }): Promise<boolean> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let sawPayload = false;
@@ -328,6 +369,7 @@ export async function requestSiteAssistantStream({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         groupId,
+        conversationId,
         message,
         history: history?.length ? history : undefined,
         projectId,
@@ -344,7 +386,7 @@ export async function requestSiteAssistantStream({
     reader = response.body.getReader();
     const decoder = new AssistantSseDecoder();
     for (;;) {
-      const result = await reader.read();
+      const result = await readAssistantChunk(reader, signal, idleTimeoutMs);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
         if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
@@ -361,6 +403,10 @@ export async function requestSiteAssistantStream({
     return false;
   } catch (error) {
     if (isAbortError(error)) return true;
+    if (error instanceof AssistantStreamIdleTimeoutError) {
+      handlers.onError("連線逾時，這次工作已停止等待；不會自動重跑，以免重複執行或扣額度。");
+      return true;
+    }
     if (sawPayload) {
       handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");
       return true;
@@ -395,6 +441,7 @@ export async function requestAssistantStream({
   signal,
   handlers,
   fetchImpl = fetch,
+  idleTimeoutMs = ASSISTANT_STREAM_IDLE_TIMEOUT_MS,
 }: {
   projectId: string;
   message: string;
@@ -410,6 +457,8 @@ export async function requestAssistantStream({
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
+  /** Test seam and slow-network override; every received heartbeat resets it. */
+  idleTimeoutMs?: number;
 }): Promise<boolean> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   /** 已收到 step／done／error：伺服器已開始處理，中斷後不可退回 tRPC 重跑 */
@@ -435,7 +484,7 @@ export async function requestAssistantStream({
     reader = response.body.getReader();
     const decoder = new AssistantSseDecoder();
     for (;;) {
-      const result = await reader.read();
+      const result = await readAssistantChunk(reader, signal, idleTimeoutMs);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
         if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
@@ -453,6 +502,10 @@ export async function requestAssistantStream({
     return false;
   } catch (error) {
     if (isAbortError(error)) return true;
+    if (error instanceof AssistantStreamIdleTimeoutError) {
+      handlers.onError("連線逾時，這次工作已停止等待；不會自動重跑，以免重複執行或扣額度。");
+      return true;
+    }
     // 已有 payload 時網路錯誤也當已接手
     if (sawPayload) {
       handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");

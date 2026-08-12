@@ -2,7 +2,7 @@
  * Agent domain schema（AI 代理執行、事件、副作用、人類任務）
  */
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, index, uniqueIndex, real } from "drizzle-orm/pg-core";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import type { AgentPlannerTelemetry } from "../../../shared/agentPlanner";
 import type {
@@ -40,6 +40,8 @@ export const agentRuns = pgTable("agent_runs", {
     .notNull()
     .default("awaiting_approval"),
   currentStep: integer("current_step").notNull().default(0),
+  /** Optimistic concurrency token for whole-run JSON/state transitions. */
+  lockVersion: integer("lock_version").notNull().default(0),
   /** Durable values resolved from URL/context or a validated human answer. */
   contextSlots: jsonb("context_slots").$type<AgentContextSlots>().notNull().default({}),
   /** The single pending clarification/confirmation currently suspending this run. */
@@ -170,6 +172,8 @@ export const agentEvents = pgTable("agent_events", {
       "question_answered",
       "step_completed",
       "step_failed",
+      "paused",
+      "resumed",
       "human_resumed",
       "approval_rejected",
       "run_completed",
@@ -239,6 +243,75 @@ export const agentStepEffects = pgTable("agent_step_effects", {
 }, (t) => ({
   runStepUq: uniqueIndex("agent_step_effects_run_step_uq").on(t.runId, t.stepId),
   runIdx: index("agent_step_effects_run_idx").on(t.runId),
+}));
+
+/** v4 unified tool receipt: atomic idempotency + reservation/settlement across retries and deploys. */
+export const agentToolReceipts = pgTable("agent_tool_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull(),
+  userId: uuid("user_id"),
+  groupId: uuid("group_id"),
+  projectId: uuid("project_id"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  toolId: text("tool_id").notNull(),
+  stepId: text("step_id"),
+  toolCallId: uuid("tool_call_id"),
+  attemptId: uuid("attempt_id"),
+  effectFingerprint: text("effect_fingerprint"),
+  handlerIdentity: text("handler_identity"),
+  traceId: text("trace_id"),
+  conversationId: text("conversation_id"),
+  goalId: text("goal_id"),
+  result: jsonb("result"),
+  reservedPoints: integer("reserved_points").notNull().default(0),
+  actualPoints: integer("actual_points"),
+  settled: boolean("settled").notNull().default(false),
+  status: text("status", { enum: ["reserved", "executing", "verified", "failed"] }).notNull().default("reserved"),
+  leaseOwner: uuid("lease_owner"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  requestedAt: timestamp("requested_at", { withTimezone: true }),
+  executedAt: timestamp("executed_at", { withTimezone: true }),
+  verificationStage: text("verification_stage"),
+  verificationMethod: text("verification_method"),
+  targetRefs: jsonb("target_refs").$type<string[]>().notNull().default([]),
+  trustOrigin: text("trust_origin"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  idempotencyUq: uniqueIndex("agent_tool_receipts_idempotency_uq").on(t.idempotencyKey),
+  runIdx: index("agent_tool_receipts_run_idx").on(t.runId),
+  groupRunIdx: index("agent_tool_receipts_group_run_idx").on(t.groupId, t.runId),
+  projectCreatedIdx: index("agent_tool_receipts_project_created_idx").on(t.projectId, t.createdAt),
+  leaseIdx: index("agent_tool_receipts_lease_idx").on(t.status, t.leaseExpiresAt),
+}));
+
+/** Server-owned live proof for each declared capability. Mock evidence is kept
+ * explicit and can never be promoted to a staging/live certification. */
+export const agentCapabilityCertifications = pgTable("agent_capability_certifications", {
+  capabilityId: text("capability_id").primaryKey(),
+  certificationState: text("certification_state", { enum: [
+    "DECLARED_ONLY", "MOCK_VERIFIED", "STAGING_VERIFIED", "EXTERNAL_LIVE_VERIFIED",
+    "PRODUCTION_SMOKE_VERIFIED", "CERTIFIED", "DEGRADED",
+    "BLOCKED_BY_EXTERNAL_DEPENDENCY", "BROKEN",
+  ] }).notNull().default("DECLARED_ONLY"),
+  verificationMode: text("verification_mode", { enum: ["contract", "mock", "staging", "external_live", "production_smoke"] }).notNull().default("contract"),
+  // PostgreSQL jsonb canonical key order; matching it keeps drizzle-kit
+  // introspection stable instead of reporting a semantically empty drift.
+  proof: jsonb("proof").$type<{ declared: boolean; resolvable: boolean; reachable: boolean; executable: boolean; verifiable: boolean; useful: boolean }>().notNull().default(sql`'{"useful":false,"declared":false,"reachable":false,"executable":false,"resolvable":false,"verifiable":false}'::jsonb`),
+  evidence: jsonb("evidence").$type<Array<{ type: string; ref: string; observedAt: string }>>().notNull().default([]),
+  successRate: real("success_rate"),
+  p95Ms: integer("p95_ms"),
+  blockerReason: text("blocker_reason"),
+  deploymentSha: text("deployment_sha"),
+  schemaVersion: text("schema_version"),
+  registryHash: text("registry_hash"),
+  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  updatedBy: uuid("updated_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  stateVerifiedIdx: index("agent_capability_certifications_state_verified_idx").on(t.certificationState, t.lastVerifiedAt),
 }));
 
 /** AI 與團隊共用的正式人類任務；不是只存在 agent_runs.steps JSON 裡的顯示文字。 */

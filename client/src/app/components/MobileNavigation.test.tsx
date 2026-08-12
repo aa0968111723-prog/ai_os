@@ -25,7 +25,10 @@ vi.mock("../../api", () => {
       // 問答本體已改走 globalAssistant.ask（站級動作提議＋trace）；
       // 確認卡用 runSiteAction 與 teamAssistant 的 dispatch/command
       globalAssistant: {
+        conversationState: { useQuery: query },
         ask: { useMutation: mutation },
+        submitInteraction: { useMutation: mutation },
+        interactionLifecycle: { useMutation: mutation },
         runSiteAction: { useMutation: mutation },
       },
       teamAssistant: {

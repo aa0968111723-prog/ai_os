@@ -29,4 +29,12 @@ describe("assistant action result references", () => {
     expect(text).toContain("剛建立的專案");
     expect(text).toContain("百日夢島");
   });
+
+  it("never promotes an unverified write into recent-reference authority", () => {
+    const bounded = boundAssistantActionResults([
+      { type: "create_project", projectId: "bad", title: "未驗證", verification: { status: "unverified", message: "mismatch" } },
+      { type: "create_project", projectId: "good", title: "已驗證", verification },
+    ]);
+    expect(bounded).toEqual([{ type: "create_project", projectId: "good", title: "已驗證", verification }]);
+  });
 });

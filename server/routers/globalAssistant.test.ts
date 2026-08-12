@@ -10,6 +10,7 @@ import {
   referencedShotOrdinal,
   resolveMentionedProjectRef,
   resolveSiteActions,
+  siteActionProposalsForPlan,
   type SiteActionRefs,
 } from "./globalAssistant";
 
@@ -91,6 +92,17 @@ describe("DIRECT -> VERIFY -> COMPLETE", () => {
 });
 
 describe("Goal -> Action routing helpers", () => {
+  it("capability-first routing forbids create_project from an import_url turn", () => {
+    const proposals = siteActionProposalsForPlan(
+      { intent: "DIRECT", confidence: "high", title: "匯入", steps: [], capabilityId: "import_url", executionMode: "DIRECT_TOOL" },
+      [
+        { type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" },
+        { type: "create_project", title: "不該建立", kind: "回顧", platform: "youtube" },
+      ],
+    );
+    expect(proposals).toEqual([{ type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" }]);
+  });
+
   it("resolves a uniquely named project from the user's own ACL-filtered project list", () => {
     expect(resolveMentionedProjectRef(new Map([
       ["p1", { title: "挑戰營" }],

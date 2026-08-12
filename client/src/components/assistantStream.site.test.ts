@@ -123,6 +123,24 @@ describe("requestSiteAssistantStream", () => {
     expect(c.errors).toEqual([]);
   });
 
+  it("串流長時間沒有 heartbeat/payload 時結束等待，不會退回 tRPC 重跑", async () => {
+    const c = collect();
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() { cancelled = true; },
+    });
+    const handled = await requestSiteAssistantStream({
+      groupId: "g", message: "m", signal: new AbortController().signal,
+      handlers: c.handlers,
+      idleTimeoutMs: 10,
+      fetchImpl: async () => ({ ok: true, body }) as Response,
+    });
+    expect(handled).toBe(true);
+    expect(c.errors[0]).toContain("連線逾時");
+    expect(c.errors[0]).toContain("不會自動重跑");
+    expect(cancelled).toBe(true);
+  });
+
   it("請求 body 帶 groupId／message／history／projectId（脈絡提示），空 history 不上送", async () => {
     const seen: unknown[] = [];
     const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {

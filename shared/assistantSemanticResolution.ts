@@ -75,6 +75,7 @@ const VERIFY_RE = /(?:確認|驗證|核對|verify)/iu;
 const GENERATE_RE = /(?:生成|產生|生圖|生影片|做圖|做影片|generate)/iu;
 const CREATE_RE = /(?:建立|新增|創建|開一個|建一個|create)/iu;
 const UPDATE_RE = /(?:更新|修改|調整|改成|update|modify)/iu;
+const RECENT_IMPORT_READ_RE = /(?:查看|看|顯示|開啟|打開|show|view).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|剛匯入)(?:的)?(?:資料|素材|檔案)?/iu;
 
 const ASSET_RE = /(?:素材|圖片|照片|影片|音訊|檔案|文件|這些|那批|剛才那些|asset)/iu;
 const PROJECT_RE = /(?:專案|project)/iu;
@@ -102,6 +103,7 @@ function operationFromText(text: string): AssistantGoalOperation {
   if (COUNT_RE.test(text)) return "COUNT";
   if (COMPARE_RE.test(text)) return "COMPARE";
   if (VERIFY_RE.test(text)) return "VERIFY";
+  if (RECENT_IMPORT_READ_RE.test(text)) return "READ";
   if (ATTACH_RE.test(text)) return "ATTACH";
   if (IMPORT_RE.test(text)) return "IMPORT";
   if (ORGANIZE_RE.test(text)) return "ORGANIZE";
@@ -114,6 +116,7 @@ function operationFromText(text: string): AssistantGoalOperation {
 }
 
 function objectFromText(text: string, operation: AssistantGoalOperation): AssistantGoalObject {
+  if (RECENT_IMPORT_READ_RE.test(text)) return "ASSET";
   if (SHOT_RE.test(text)) return "SHOT";
   if (SCENE_RE.test(text)) return "SCENE";
   if (SCRIPT_RE.test(text)) return "SCRIPT";
@@ -213,7 +216,7 @@ export function deriveDeterministicGoalFrame(
     objectType,
     ...(sourceType ? { source: { type: sourceType } } : {}),
     scope: {},
-    referents: /(?:這些|那批|剛才那些|剛剛那些)/u.test(message) ? ["recent_results"] : [],
+    referents: /(?:這些|那批|剛才那些|剛剛那些)/u.test(message) || RECENT_IMPORT_READ_RE.test(message) ? ["recent_results"] : [],
     constraints: [],
     desiredOutcome: desiredOutcomeFor(operation, objectType),
     missingSlots: sourceMissing ? ["source"] : [],
@@ -338,12 +341,16 @@ function explicitProject(message: string, candidates: readonly WorkingProjectCan
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-function projectFromRecentResult(results: readonly AssistantActionResult[] | undefined): string | undefined {
+function projectFromRecentResult(
+  results: readonly AssistantActionResult[] | undefined,
+  createdProjectOnly = false,
+): string | undefined {
   if (!results?.length) return undefined;
   for (let i = results.length - 1; i >= 0; i -= 1) {
     const result = results[i];
     if (result.verification?.status !== "verified") continue;
     if (result.type === "create_project") return result.projectId;
+    if (createdProjectOnly) continue;
     if ("projectId" in result && typeof result.projectId === "string") return result.projectId;
   }
   return undefined;
@@ -369,6 +376,7 @@ export function resolveWorkingProject(input: {
   activeGoal?: AssistantActiveGoal;
   recentActionResults?: readonly AssistantActionResult[];
   pageProjectId?: string;
+  continuation?: AssistantContinuationType;
 }): WorkingProjectResolution {
   const explicit = explicitProject(input.message, input.candidates);
   if (explicit) return { status: "resolved", projectId: explicit.id, projectTitle: explicit.title, source: "explicit", candidates: [] };
@@ -383,13 +391,25 @@ export function resolveWorkingProject(input: {
     }
   }
 
-  const activeProjectId = input.activeGoal?.frame.scope.projectId;
+  const explicitlyRecentCreatedProject = /(?:剛(?:才)?(?:建立|新增|開)(?:的)?專案|剛建立的專案|剛才那個專案|just[- ]created project)/iu.test(input.message);
+  const recentProjectId = projectFromRecentResult(input.recentActionResults, explicitlyRecentCreatedProject);
+  // An explicit recent-result referent is stronger than an older active goal:
+  // "加入剛建立的專案" must not inherit a stale project from the previous
+  // durable turn. Otherwise a visually successful import can bind the wrong
+  // project while still passing a generic existence read-back.
+  if (explicitlyRecentCreatedProject && recentProjectId) {
+    const recent = input.candidates.find((candidate) => candidate.id === recentProjectId);
+    if (recent) return { status: "resolved", projectId: recent.id, projectTitle: recent.title, source: "recent_result", candidates: [] };
+  }
+
+  // A NEW_GOAL gets a new scope. Only genuine continuation/correction/answer
+  // turns are allowed to inherit the active goal's project.
+  const activeProjectId = input.continuation === "NEW_GOAL" ? undefined : input.activeGoal?.frame.scope.projectId;
   if (activeProjectId) {
     const active = input.candidates.find((candidate) => candidate.id === activeProjectId);
     if (active) return { status: "resolved", projectId: active.id, projectTitle: active.title, source: "active_goal", candidates: [] };
   }
 
-  const recentProjectId = projectFromRecentResult(input.recentActionResults);
   if (recentProjectId) {
     const recent = input.candidates.find((candidate) => candidate.id === recentProjectId);
     if (recent) return { status: "resolved", projectId: recent.id, projectTitle: recent.title, source: "recent_result", candidates: [] };

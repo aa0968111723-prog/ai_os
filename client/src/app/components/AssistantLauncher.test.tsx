@@ -15,7 +15,10 @@ vi.mock("../../api", () => {
         createSession: { useMutation: mutation },
       },
       globalAssistant: {
+        conversationState: { useQuery: query },
         ask: { useMutation: mutation },
+        submitInteraction: { useMutation: mutation },
+        interactionLifecycle: { useMutation: mutation },
         runSiteAction: { useMutation: mutation },
       },
       teamAssistant: {

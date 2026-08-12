@@ -25,13 +25,15 @@ import {
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
-import type { AssistantInteractionRequest } from "@shared/assistantInteraction";
+import { interactionPickerMode, type AssistantInteractionRequest } from "@shared/assistantInteractions";
 import {
   ExternalAssetIntake,
+  type ExternalImportNotice,
   type ExternalIntakeOpenRequest,
 } from "../features/external-intake/ExternalAssetIntake";
 import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
 import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
+import { AssistantInteractionCard } from "./AssistantInteractionCard";
 import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
 import {
   abortAssistantRun,
@@ -39,6 +41,8 @@ import {
   clearAssistantConversation,
   endAssistantRun,
   getAssistantConversation,
+  isAssistantRunAttemptCurrent,
+  rebindAssistantRunId,
   registerAssistantRunController,
   recordAssistantActionResults,
   setAssistantConversation,
@@ -66,6 +70,10 @@ export function assistantActionResultsFromExecuted(items: readonly ExecutedSiteA
   const results: AssistantActionResult[] = [];
   for (const item of items) {
     const result = item.result;
+    // Some executed UI actions (for example add_note) have their own result
+    // card but are not typed referents. Only consume a verification contract
+    // when the result kind participates in recent-reference memory.
+    if (!("verification" in result) || result.verification.status !== "verified") continue;
     if (result.type === "import") results.push(result);
     else if (result.type === "create_project") results.push(result);
     else if (result.type === "create_task") {
@@ -107,6 +115,30 @@ export interface ChatMessage {
   editingResult?: { sessionId: string; assetId: string };
   intakeFallbacks?: IntakeFallback[];
   interactionRequest?: AssistantInteractionRequest;
+  /** Explicitly derived from the user's originating ASK turn; never infer it from answer prose. */
+  offerIdeaProject?: boolean;
+}
+
+/** Tiny picker answers such as "1" are continuation data, not creative topics. */
+export function isMeaningfulIdeaSeed(value: string): boolean {
+  const text = value.trim();
+  if (text.length < 2 || text.length > 40) return false;
+  if (/^(?:第)?[\d一二三四五六七八九十]+(?:個|項|筆)?$/u.test(text)) return false;
+  if (/^(?:全部|都要|這個|那個|上一個|下一個|確認|取消|是|否)$/u.test(text)) return false;
+  return /[\p{L}]/u.test(text);
+}
+
+export function shouldOfferIdeaProject(message: ChatMessage): boolean {
+  return message.role === "assistant"
+    && message.offerIdeaProject === true
+    && message.runStatus === "completed"
+    && message.executionPlan?.intent === "ASK"
+    && !message.intakeFallbacks?.length
+    && !message.siteActions?.length
+    && !message.dispatches?.length
+    && !message.commands?.length
+    && !message.executedSiteActions?.length
+    && isMeaningfulIdeaSeed(message.text.split("\n")[0] ?? "");
 }
 
 function IntakeFallbackCard({
@@ -125,36 +157,6 @@ function IntakeFallbackCard({
         <Button size="sm" onClick={() => onChoose(fallback.projectId, "files")}>選擇檔案</Button>
         <Button variant="tonal" size="sm" onClick={() => onChoose(fallback.projectId, "drive")}>Google Drive</Button>
         <Button variant="ghost" size="sm" onClick={() => onChoose(fallback.projectId, "files")}>下載後上傳</Button>
-      </div>
-    </div>
-  );
-}
-
-/** Agent-initiated structured handoff: cards first, free text only as last resort. */
-function InteractionRequestCard({
-  request,
-  onSelect,
-}: {
-  request: AssistantInteractionRequest;
-  onSelect: (prompt: string) => void;
-}) {
-  if (!request.options.length) return null;
-  return (
-    <div className="ai-copilot-action-card" data-interaction={request.kind}>
-      <span className="ai-copilot-action-card__label">{request.title}</span>
-      {request.description ? <span className="ai-copilot-action-card__detail">{request.description}</span> : null}
-      <div className="ai-copilot-action-card__buttons">
-        {request.options.map((option, index) => (
-          <Button
-            key={option.id}
-            size="sm"
-            variant={index === 0 ? "primary" : "tonal"}
-            onClick={() => onSelect(option.prompt ?? option.label)}
-            style={{ minHeight: 44, minWidth: 44 }}
-          >
-            {option.label}
-          </Button>
-        ))}
       </div>
     </div>
   );
@@ -461,9 +463,18 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const liveEventsRef = useRef<AssistantActivityEvent[]>([]);
+  const eventFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRecordedRef = useRef(false);
   const activeGoalRef = useRef("");
+  const queuedMessageRef = useRef<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  /* 自動捲到底部的守門員：使用者在 feed 上捲過（讀舊訊息）就停止自動捲動，
+     不要在新訊息進場時把他硬拉回底部——那是最容易棄用助手的手感之一。 */
+  const chatFeedRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const restoredPickerRef = useRef<string | undefined>(undefined);
+  const presentedInteractionIdsRef = useRef(new Set<string>());
+  const openedInteractionIdsRef = useRef(new Set<string>());
 
   const pushMessage = (message: ChatMessage) => {
     if (!groupId) return;
@@ -475,17 +486,164 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
+  const submitInteraction = trpc.globalAssistant.submitInteraction.useMutation();
+  const interactionLifecycle = trpc.globalAssistant.interactionLifecycle.useMutation();
   // Capability probing is data, not LLM opinion: never ask a model whether the product can browse.
   const computerStatus = trpc.computerRuntime.status.useQuery(undefined, { staleTime: 30_000, retry: false });
   const createBrowserSession = trpc.computerRuntime.createSession.useMutation();
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
+  const durableConversation = trpc.globalAssistant.conversationState.useQuery(
+    { groupId: groupId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: !!groupId && messages.length === 0, retry: false, staleTime: 30_000 },
+  );
   const activeProjectId = pageCtx.projectId ?? projectId;
   const intakeProjectId = intakeTargetProjectId ?? activeProjectId;
   const quickActions = useMemo(() => getAssistantQuickActions(pageCtx), [pageCtx]);
   const breadcrumb = formatContextBreadcrumb(pageCtx);
   // 進行中的判定來自 store（跨卸載存活）與這一顆元件自己的 tRPC fallback
   const pending = (liveRun?.active ?? false) || ask.isPending;
+
+  useEffect(() => {
+    const recovered = durableConversation.data;
+    if (!groupId || !recovered) return;
+    setAssistantConversation<ChatMessage>(groupId, (previous) => {
+      if (previous.messages.length) return previous;
+      const runStatus: ChatMessage["runStatus"] = recovered.status === "completed"
+        ? "completed"
+        : recovered.status === "stopped"
+          ? "stopped"
+          : recovered.status === "failed"
+            ? "failed"
+            : "waiting";
+      const recoveredMessages: ChatMessage[] = recovered.messages.map((message, index) => ({
+        ...message,
+        ...(message.role === "assistant" && index === recovered.messages.length - 1
+          ? { runStatus, interactionRequest: recovered.activeGoal?.pendingInteraction }
+          : {}),
+      }));
+      return {
+        ...previous,
+        messages: recoveredMessages,
+        activeGoal: recovered.activeGoal ?? undefined,
+        pendingInteraction: recovered.activeGoal?.pendingInteraction,
+        recentActionResults: recovered.recentActionResults,
+        run: recovered.runId ? {
+          runId: recovered.runId,
+          events: recovered.events,
+          sources: recovered.sources,
+          // Network requests are not replayed on refresh. Durable agent runs
+          // resume through their server controller; this view remains honest.
+          active: false,
+          startedAt: new Date(recovered.updatedAt).getTime(),
+        } : null,
+      };
+    });
+    captureAssistantReturnContext({
+      groupId,
+      conversationId: recovered.conversationId,
+      projectId: recovered.projectId ?? undefined,
+      runId: recovered.runId ?? undefined,
+      originRoute: pageCtx.route,
+      originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+      focusAnchor: pageCtx.entityId,
+    });
+  }, [durableConversation.data, groupId, pageCtx.entityId, pageCtx.route]);
+
+  const recordInteractionLifecycle = (
+    request: AssistantInteractionRequest,
+    event: "presented" | "opened" | "cancelled",
+  ) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    void interactionLifecycle.mutateAsync({
+      groupId,
+      conversationId: conversation.returnContext.conversationId,
+      runId: request.runId,
+      goalId: request.goalId,
+      interactionId: request.interactionId,
+      resumeToken: request.resumeToken,
+      event,
+    }).catch(() => { /* lifecycle telemetry must not block the picker */ });
+  };
+
+  const openPickerForInteraction = (request: AssistantInteractionRequest | undefined) => {
+    const mode = request ? interactionPickerMode(request.type) : undefined;
+    if (!mode || !request?.targetProjectId) return;
+    setIntakeTargetProjectId(request.targetProjectId);
+    setIntakeOpenRequest({ id: request.interactionId, mode });
+    if (!openedInteractionIdsRef.current.has(request.interactionId)) {
+      openedInteractionIdsRef.current.add(request.interactionId);
+      recordInteractionLifecycle(request, "opened");
+    }
+  };
+
+  const applyInteractionResponse = (data: Awaited<ReturnType<typeof submitInteraction.mutateAsync>>) => {
+    if (!groupId) return;
+    setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+      ...previous,
+      activeGoal: data.activeGoal,
+      pendingInteraction: data.nextInteraction,
+      recentActionResults: data.actionResult
+        ? [...(previous.recentActionResults ?? []), data.actionResult].slice(-5)
+        : previous.recentActionResults,
+      run: previous.run && previous.run.runId === data.runId
+        ? { ...previous.run, events: [...previous.run.events, ...data.events], active: false }
+        : previous.run,
+    }));
+    if (data.nextInteraction) {
+      pushMessage({ role: "assistant", text: data.answer, runStatus: "waiting", interactionRequest: data.nextInteraction, runId: data.runId });
+      openPickerForInteraction(data.nextInteraction);
+    } else {
+      pushMessage({
+        role: "assistant",
+        text: data.answer,
+        runStatus: data.activeGoal.status === "completed" ? "completed" : data.activeGoal.status === "failed" ? "failed" : "waiting",
+        runId: data.runId,
+        events: data.events,
+      });
+    }
+  };
+
+  const submitInteractionSelection = async (request: AssistantInteractionRequest, selectedIds: string[]) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    try {
+      applyInteractionResponse(await submitInteraction.mutateAsync({
+        groupId,
+        conversationId: conversation.returnContext.conversationId,
+        runId: request.runId,
+        goalId: request.goalId,
+        interactionId: request.interactionId,
+        resumeToken: request.resumeToken,
+        selectedIds,
+      }));
+    } catch (error) {
+      pushMessage({ role: "assistant", text: `這個選擇已失效或無法使用：${error instanceof Error ? error.message : "請重新開啟"}`, runStatus: "waiting" });
+    }
+  };
+
+  const submitInteractionImport = async (request: AssistantInteractionRequest, notice: ExternalImportNotice) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    try {
+      applyInteractionResponse(await submitInteraction.mutateAsync({
+        groupId,
+        conversationId: conversation.returnContext.conversationId,
+        runId: request.runId,
+        goalId: request.goalId,
+        interactionId: request.interactionId,
+        resumeToken: request.resumeToken,
+        importResult: notice,
+      }));
+    } catch (error) {
+      pushMessage({ role: "assistant", text: `資料已保存，但無法接回原本工作：${error instanceof Error ? error.message : "請重新開啟"}`, runStatus: "waiting" });
+    }
+  };
+
+  useEffect(() => {
+    const request = conversation.pendingInteraction;
+    if (!request || restoredPickerRef.current === request.interactionId) return;
+    restoredPickerRef.current = request.interactionId;
+    openPickerForInteraction(request);
+  }, [conversation.pendingInteraction?.interactionId]);
 
   /**
    * 卸載時**不再**中止串流。
@@ -498,7 +656,15 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend ?? input).trim();
-    if (!text || !groupId || pending) return;
+    if (!text || !groupId) return;
+    if (pending) {
+      // The completion bubble can render a fraction before the run finalizer
+      // releases its exact attempt. Never silently drop an Enter in that
+      // window; keep one bounded next turn and send it after finalization.
+      queuedMessageRef.current = text.slice(0, 500);
+      setInput("");
+      return;
+    }
 
     const localPlan = classifyAssistantRequest(text);
     const computerIntent = classifyAssistantComputerIntent(text);
@@ -658,20 +824,42 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
     activeGoalRef.current = text;
+    // 使用者自己送出訊息＝表達「我想看接下來的回覆」，無論先前有沒有捲上去讀舊文
+    stickToBottomRef.current = true;
     setInput("");
     setActivePlan(localPlan);
-    captureAssistantReturnContext({
+    const returnContext = captureAssistantReturnContext({
       groupId,
       projectId: pageCtx.projectId ?? projectId,
       originRoute: pageCtx.route,
       originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
       focusAnchor: pageCtx.entityId,
     });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
+    // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。generation 用來擋 stale finalizer。
+    const clientRunId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `assistant-run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const runAttempt = registerAssistantRunController(groupId, clientRunId, controller);
+    const runGeneration = runAttempt.generation;
+    let activeRunId = clientRunId;
+    const runStillCurrent = () => isAssistantRunAttemptCurrent(runAttempt.attemptId, activeRunId);
+
     // 送出當下就把 run 開起來：它活在 store 裡，關掉面板再回來仍看得到目前進度。
     setAssistantConversation<ChatMessage>(groupId, (previous) => ({
       ...previous,
       messages: [...previous.messages, { role: "user", text }],
-      run: { runId: "", events: [], sources: [], active: true, startedAt: Date.now() },
+      run: {
+        runId: clientRunId,
+        events: [],
+        sources: [],
+        active: true,
+        startedAt: Date.now(),
+        generation: runGeneration,
+        attemptId: runAttempt.attemptId,
+      },
     }));
     // 底部導覽那顆球與這張卡是同一個助手的兩個身體：卡片在思考時球也要跟著脈動，
     // 否則使用者把 sheet 滑下去之後，畫面上就沒有任何「它還在想」的線索。
@@ -696,10 +884,19 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       interactionRequest?: AssistantInteractionRequest;
     };
     const applyDone = (data: AskData) => {
+      if (!runStillCurrent()) return;
+      if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+      eventFlushTimerRef.current = null;
       setOrbState("speaking");
       // 事件與來源一律以伺服器的最終版本為準；串流中途掉封包或整條退回 tRPC 時，
       // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
       const events = data.events ?? liveEventsRef.current.filter(isAgentEvent);
+      // A durable file/Drive/folder question is already rendered as the
+      // assistant answer plus the mini workspace. Repeating waiting.user_input
+      // as a work-step card made the same prompt appear twice on mobile.
+      const visibleEvents = data.interactionRequest || data.intakeRequest
+        ? events.filter((event) => event.type !== "waiting.user_input")
+        : events;
       const sources = data.sources ?? [];
       const actionResults = assistantActionResultsFromExecuted(data.executedSiteActions ?? []);
       recordAssistantActionResults(groupId, actionResults);
@@ -729,14 +926,19 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         setAssistantConversation<ChatMessage>(groupId, (previous) => ({
           ...previous,
           activeGoal: { ...data.activeGoal!, status },
+          pendingInteraction: data.interactionRequest ?? data.activeGoal!.pendingInteraction,
+        }));
+      } else if (data.interactionRequest) {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          pendingInteraction: data.interactionRequest,
         }));
       }
-      if (data.intakeRequest) {
+      if (data.interactionRequest) {
+        openPickerForInteraction(data.interactionRequest);
+      } else if (data.intakeRequest) {
         setIntakeTargetProjectId(data.intakeRequest.projectId);
         setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.intakeRequest.mode });
-      } else if (data.interactionRequest?.autoLaunch && data.interactionRequest.intakeMode && data.interactionRequest.projectId) {
-        setIntakeTargetProjectId(data.interactionRequest.projectId);
-        setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.interactionRequest.intakeMode });
       }
       pushMessage({
         role: "assistant",
@@ -749,16 +951,27 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
         // Source-transfer fallbacks are waiting for a real user choice; do not
         // render them as a completed execution card.
-        executionPlan: data.intakeFallbacks?.length ? undefined : (data.executionPlan ?? localPlan),
+        executionPlan: data.intakeFallbacks?.length || data.intakeRequest ? undefined : (data.executionPlan ?? localPlan),
         runStatus: resolvedRunStatus,
         latency: data.latency,
         activity: [...liveEventsRef.current],
         runId: data.runId,
-        events: events.length ? events : undefined,
+        events: visibleEvents.length ? visibleEvents : undefined,
         sources: sources.length ? sources : undefined,
         intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
         interactionRequest: data.interactionRequest,
-        suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
+        offerIdeaProject: !data.intakeRequest
+          && !data.intakeFallbacks?.length
+          && !data.interactionRequest
+          && resolvedRunStatus === "completed"
+          && localPlan.intent === "ASK"
+          && isMeaningfulIdeaSeed(text),
+        suggestedActions: !data.intakeRequest
+          && !data.intakeFallbacks?.length
+          && !data.interactionRequest
+          && localPlan.intent === "ASK"
+          && localPlan.confidence === "medium"
+          && isMeaningfulIdeaSeed(text)
           ? [
               { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
               { label: "查看目前資料", prompt: `請查看目前專案與「${text}」相關的資料。` },
@@ -767,6 +980,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
     };
     const applyError = (message: string) => {
+      if (!runStillCurrent()) return;
+      if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+      eventFlushTimerRef.current = null;
       setOrbState("error");
       pushMessage({
         role: "assistant",
@@ -780,15 +996,14 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
     };
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
-    // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。
-    registerAssistantRunController(groupId, controller);
-    const requestId = crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+    // Same UUID on SSE and tRPC fallback so dual-transport cannot double-execute.
+    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
     try {
       const handled = await requestSiteAssistantStream({
         groupId,
+        conversationId: returnContext.conversationId,
         message: text,
         history: newHistory,
         projectId: pageCtx.projectId ?? projectId,
@@ -800,6 +1015,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
+            if (!runStillCurrent()) return;
+            if (!rebindAssistantRunId(runAttempt.attemptId, run.runId)) return;
+            activeRunId = run.runId;
             setActivePlan(run.plan);
             captureAssistantReturnContext({
               groupId,
@@ -811,19 +1029,30 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             });
             setAssistantConversation<ChatMessage>(groupId, (previous) => ({
               ...previous,
-              run: previous.run ? { ...previous.run, runId: run.runId } : previous.run,
+              run: previous.run && previous.run.attemptId === runAttempt.attemptId
+                ? { ...previous.run, runId: run.runId }
+                : previous.run,
             }));
           },
           onStep: (e) => {
-            liveEventsRef.current = [...liveEventsRef.current, e];
+            if (!runStillCurrent()) return;
+            liveEventsRef.current.push(e);
             // 只有真事件（帶 type/eventId 的統一 Agent 事件）才進進度面板。
             // 舊伺服器的 {phase,text} 沒有結構化欄位，畫不出可驗證的進度，
             // 由下方的一行摘要負責顯示——寧可少顯示，也不假裝有結構。
-            const structured = liveEventsRef.current.filter(isAgentEvent);
-            setAssistantConversation<ChatMessage>(groupId, (previous) => ({
-              ...previous,
-              run: previous.run ? { ...previous.run, events: structured } : previous.run,
-            }));
+            if (!eventFlushTimerRef.current) {
+              eventFlushTimerRef.current = setTimeout(() => {
+                eventFlushTimerRef.current = null;
+                if (!runStillCurrent()) return;
+                const structured = liveEventsRef.current.filter(isAgentEvent);
+                setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+                  ...previous,
+                  run: previous.run && previous.run.attemptId === runAttempt.attemptId
+                    ? { ...previous.run, events: structured }
+                    : previous.run,
+                }));
+              }, 50);
+            }
           },
           // SSE payload 是 GlobalAskResult 的純 JSON（無 superjson）；guard 只驗協定形狀，
           // 欄位型別由 tRPC 推導型別收窄（同一個 router 的回傳值）
@@ -833,10 +1062,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
       if (!handled) {
         // 串流沒開始：走一次性 tRPC（同一個核心；軌跡由 done 的 events/sources 補齊）
+        // 若此 generation 已被 supersede/abort，不可再 mutate——避免舊回呼污染新 run。
+        if (!runStillCurrent() || controller.signal.aborted) return;
         await new Promise<void>((resolve) => {
           ask.mutate(
             {
               groupId, message: text, history: newHistory,
+              conversationId: returnContext.conversationId,
               projectId: pageCtx.projectId ?? projectId,
               pageContext: toWirePageContext(pageCtx),
               recentActionResults: conversation.recentActionResults,
@@ -852,17 +1084,26 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         });
       }
     } finally {
-      endAssistantRun(groupId);
-      setActivePlan(null);
+      // generation-scoped：舊 run 的 finally 不會動到已接手的新 run（含 active 旗標）
+      endAssistantRun(groupId, activeRunId, runAttempt.attemptId);
+      // activePlan 是元件本地 state：若已被更新 generation 接手，不要清掉它的 plan
+      const currentGen = getAssistantConversation<ChatMessage>(groupId).run?.generation;
+      if (currentGen == null || currentGen === runGeneration) {
+        setActivePlan(null);
+      }
     }
   };
 
   const stopCurrent = () => {
     if (!pending || stopRecordedRef.current || !groupId) return;
     stopRecordedRef.current = true;
+    const runId = liveRun?.runId;
+    const attemptId = liveRun?.attemptId;
     // store 的把手優先（跨卸載仍有效）；本地 ref 是同一顆 controller，重複 abort 無害
-    abortAssistantRun(groupId);
+    if (runId && attemptId) abortAssistantRun(runId, attemptId);
     abortRef.current?.abort();
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
     setOrbState("idle");
     pushMessage({
       role: "assistant",
@@ -873,11 +1114,47 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events: liveEventsRef.current.filter(isAgentEvent),
       retryText: activeGoalRef.current || undefined,
     });
-    endAssistantRun(groupId);
+    endAssistantRun(groupId, runId, attemptId);
+  };
+
+  const clearConversation = () => {
+    if (!groupId) return;
+    stopRecordedRef.current = true;
+    const runId = liveRun?.runId;
+    const attemptId = liveRun?.attemptId;
+    if (runId && attemptId) abortAssistantRun(runId, attemptId);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
+    queuedMessageRef.current = null;
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
+    liveEventsRef.current = [];
+    endAssistantRun(groupId, runId, attemptId);
+    clearAssistantConversation(groupId);
+    setActivePlan(null);
+    setOrbState("idle");
+    ask.reset();
   };
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (pending || !groupId || !queuedMessageRef.current) return;
+    const queued = queuedMessageRef.current;
+    queuedMessageRef.current = null;
+    void handleSend(queued);
+  }, [pending, groupId]);
+
+  // 使用者手動捲動時更新「是否貼底」：距離底部小於 48px 視為仍貼底，
+  // 之後自動捲動才會繼續接手；捲上去讀舊訊息期間新事件不再搶滾輪。
+  const onFeedScroll = () => {
+    const el = chatFeedRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+
+  useEffect(() => {
+    if (messages.length > 0 && stickToBottomRef.current) {
       chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, pending]);
@@ -902,10 +1179,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             <button
               type="button"
               className="ai-copilot-clear"
-              onClick={() => {
-                if (groupId) clearAssistantConversation(groupId);
-                ask.reset();
-              }}
+              onClick={clearConversation}
               title="清空對話紀錄"
               aria-label="清空對話紀錄"
             >
@@ -964,7 +1238,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 對話紀錄區域 ── */}
         {messages.length > 0 && (
-          <div className="ai-copilot-chat-feed">
+          <div className="ai-copilot-chat-feed" role="log" aria-live="polite" aria-relevant="additions" ref={chatFeedRef} onScroll={onFeedScroll}>
             {messages.map((msg, index) => (
               <div key={index} className={`ai-copilot-bubble ai-copilot-bubble--${msg.role}`}>
                 <div className="ai-copilot-bubble__avatar">
@@ -994,6 +1268,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                     />
                   ) : null}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
+                  {msg.interactionRequest
+                    && conversation.pendingInteraction?.interactionId === msg.interactionRequest.interactionId ? (
+                    <AssistantInteractionCard
+                      request={msg.interactionRequest}
+                      busy={submitInteraction.isPending}
+                      onPresented={() => {
+                        if (presentedInteractionIdsRef.current.has(msg.interactionRequest!.interactionId)) return;
+                        presentedInteractionIdsRef.current.add(msg.interactionRequest!.interactionId);
+                        recordInteractionLifecycle(msg.interactionRequest!, "presented");
+                      }}
+                      onSelect={(ids) => { void submitInteractionSelection(msg.interactionRequest!, ids); }}
+                      onCancel={() => {
+                        setIntakeOpenRequest(undefined);
+                        recordInteractionLifecycle(msg.interactionRequest!, "cancelled");
+                      }}
+                    />
+                  ) : null}
                   {msg.editingSessionId && activeProjectId ? (
                     <AssistantEditingSessionCard
                       projectId={activeProjectId}
@@ -1036,12 +1327,6 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       }}
                     />
                   ))}
-                  {msg.interactionRequest ? (
-                    <InteractionRequestCard
-                      request={msg.interactionRequest}
-                      onSelect={(prompt) => void handleSend(prompt)}
-                    />
-                  ) : null}
 
                   {/* 讀到什麼 → 能去哪。按鈕只從真實來源長出來（見 followUpActionsFromSources）。 */}
                   {msg.role === "assistant" && onNavigate && msg.sources?.length ? (
@@ -1090,7 +1375,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
                   {/* 如果是 AI 回覆，提供一鍵新專案的按鈕（帶靈感去建立表單；與 create_project
                       確認卡並存：卡是「AI 已擬好欄位」，這顆是「我自己去表單填」） */}
-                  {msg.role === "assistant" && onUseIdeaForNewProject && !msg.siteActions?.some((a) => a.type === "create_project") && (
+                  {onUseIdeaForNewProject
+                    && shouldOfferIdeaProject(msg)
+                    && !msg.siteActions?.some((a) => a.type === "create_project")
+                    && !msg.executedSiteActions?.some((item) => item.result.type === "create_project") && (
                     <div className="ai-copilot-bubble__actions">
                       <Button
                         variant="ghost"
@@ -1163,10 +1451,24 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               sceneId={pageCtx.entityType === "shot" ? pageCtx.entityId : undefined}
               triggerLabel="＋"
               triggerVariant="ghost"
+              dialogTitle="加入資料"
+              closeOnImported
               openRequest={intakeOpenRequest}
+              onOpenChange={(open) => {
+                if (open) return;
+                const interaction = conversation.pendingInteraction;
+                if (interaction && interactionPickerMode(interaction.type)) {
+                  recordInteractionLifecycle(interaction, "cancelled");
+                }
+              }}
               onImported={(notice) => {
                 setIntakeTargetProjectId(undefined);
                 if (!notice || !groupId) return;
+                const interaction = conversation.pendingInteraction;
+                if (interaction && interactionPickerMode(interaction.type)) {
+                  void submitInteractionImport(interaction, notice);
+                  return;
+                }
                 recordAssistantActionResults(groupId, [{
                   type: "import",
                   source: notice.source,
@@ -1193,7 +1495,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                         missingSlots: [],
                         resultRefIds: notice.assetIds.slice(0, 20),
                         updatedAt: new Date().toISOString(),
-                    }
+                      }
                     : previous.activeGoal,
                 }));
                 pushMessage({

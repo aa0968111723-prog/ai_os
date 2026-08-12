@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type RefObject } from "react";
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
@@ -58,6 +58,31 @@ export function projectIdFromRoute(path: string): string | null {
  * 並解掉了。`surfaceRole="dialog"` 是刻意的：內容是輸入框與對話卡片，不是
  * role="menuitem" 的清單，宣告成 menu 等於對讀屏承諾了沒實作的方向鍵模型。
  */
+/**
+ * 助手載入骨架（#677 U9）：lazy chunk 載入的 1–2 秒不再是白屏＋一行「助手載入中…」，
+ * 而是三組模擬訊息氣泡的灰色 placeholder——形狀跟真正的對話一樣，讀者不會看到
+ * 版面從「一行字」跳成「整組氣泡」的閃爍。
+ * aria-hidden：純裝飾；實際狀態由 MenuSurface 的 aria-label「AI 助手」與讀屏
+ * 宣告的 dialog 語義承載，不需要再朗讀一組假訊息。
+ */
+function AssistantSkeleton() {
+  return (
+    <div className="ga-skeleton" aria-hidden="true">
+      <div className="ga-skeleton__row">
+        <span className="ga-skeleton__avatar" />
+        <span className="ga-skeleton__bubble ga-skeleton__bubble--assistant" />
+      </div>
+      <div className="ga-skeleton__row">
+        <span className="ga-skeleton__bubble ga-skeleton__bubble--user" />
+      </div>
+      <div className="ga-skeleton__row">
+        <span className="ga-skeleton__avatar" />
+        <span className="ga-skeleton__bubble ga-skeleton__bubble--assistant ga-skeleton__bubble--tall" />
+      </div>
+    </div>
+  );
+}
+
 export function GlobalAssistantSheet({
   open,
   onClose,
@@ -77,6 +102,12 @@ export function GlobalAssistantSheet({
   useEffect(() => {
     setScopeOverride(null);
   }, [projectId]);
+  useLayoutEffect(() => {
+    // Publish the surface transition before the browser paints. Page-owned
+    // modals subscribe to this event and close themselves, so the Assistant
+    // never briefly shares focus or pointer ownership with a route modal.
+    window.dispatchEvent(new CustomEvent(open ? "aios:assistant-opened" : "aios:assistant-closed"));
+  }, [open]);
   const scope: "project" | "group" = projectId ? (scopeOverride ?? "project") : "group";
 
   const goTo = (href: string) => {
@@ -126,7 +157,7 @@ export function GlobalAssistantSheet({
               </button>
             </div>
           )}
-          <Suspense fallback={<Meta as="p">助手載入中…</Meta>}>
+          <Suspense fallback={<AssistantSkeleton />}>
             {scope === "project" && projectId ? (
               <>
                 {/* key=projectId：換專案時整棵重掛，對話與軌跡不殘留上一個專案的內容 */}

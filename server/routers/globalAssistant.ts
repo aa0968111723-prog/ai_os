@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure } from "../trpc";
+import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
@@ -38,6 +38,7 @@ import {
   updateSiteTraceSession,
 } from "../services/aiSiteTrace";
 import { recordAiTraceEventSafely } from "../services/aiTrace";
+import { beginAssistantConversation, checkpointAssistantConversation, failAssistantConversation, loadAssistantConversation } from "../services/assistantConversationState";
 import { taskPrioritySchema, type GroupCommandLevel } from "../../shared/groupAgent";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import {
@@ -70,6 +71,7 @@ import {
 } from "../services/rateLimit";
 import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentResultSummary, AgentSourceRecord } from "../../shared/agentEvents";
+import { roundThinkingTitle } from "../../shared/agentEvents";
 import {
   formatRecentActionResults,
   type AssistantActionResult,
@@ -79,8 +81,12 @@ import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
 import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
 import { randomUUID } from "node:crypto";
+import { listIntegrations } from "../services/integrations";
+import { createAssistantInteraction, recordAssistantInteractionLifecycle, submitAssistantInteraction } from "../services/assistantInteractionCore";
+import { assistantInteractionLifecycleSchema, assistantInteractionSubmissionSchema, type AssistantInteractionRequest } from "../../shared/assistantInteractions";
 import {
   assistantActiveGoalSchema,
+  goalRequiresVerifiedExecution,
   type AssistantActiveGoal,
   type AssistantEvidenceScope,
   type AssistantGoalFrame,
@@ -97,13 +103,6 @@ import {
   executionTerminalStatus,
   type ExecutionReceipt,
 } from "../../shared/executionReceipt";
-import {
-  intakePickerInteraction,
-  projectPickerInteraction,
-  sourcePickerInteraction,
-  type AssistantInteractionRequest,
-} from "../../shared/assistantInteraction";
-import { goalRequiresVerifiedExecution } from "../../shared/assistantGoalFrame";
 
 /** Re-export for existing tests and callers. */
 export { executionTerminalStatus };
@@ -203,6 +202,19 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type SiteActionProposal = z.infer<typeof siteActionProposalSchema>;
+
+/** Capability-first write guard. A DIRECT/ASK turn that resolved to one
+ * concrete capability may not smuggle a second write merely because the
+ * natural-language message mentions another entity (for example the word
+ * "project" in "import into the just-created project"). This guard applies to
+ * deterministic mock proposals and model proposals alike. */
+export function siteActionProposalsForPlan(
+  plan: AssistantExecutionPlan,
+  proposals: readonly SiteActionProposal[],
+): SiteActionProposal[] {
+  if (!plan.capabilityId) return [...proposals];
+  return proposals.filter((proposal) => proposal.type === plan.capabilityId);
+}
 
 /** 全站回覆＝組回覆＋站級動作提議 */
 const globalReplySchema = teamReplySchema.extend({
@@ -518,6 +530,7 @@ export type GlobalAskStreamEvent = AgentEvent;
 export interface GlobalAskInput {
   auth: AuthState;
   groupId: string;
+  conversationId?: string;
   message: string;
   history?: ChatTurn[];
   /** 發問當下所在的專案頁（純脈絡提示，只用來記進 trace 與提示詞一句話；授權一律 requireGroup 重驗） */
@@ -568,7 +581,7 @@ export interface GlobalAskResult {
   capabilityMatch?: { status: AssistantCapabilityMatch["status"]; capabilityId?: string; reason: string; missingSlots: string[] };
   evidenceScope?: AssistantEvidenceScope;
   intakeRequest?: AssistantIntakeRequest;
-  /** Structured UI handoff; client must render cards/pickers, not free-text tool hunting. */
+  /** Typed, durable UI handoff. Plain prose is only a fallback for old clients. */
   interactionRequest?: AssistantInteractionRequest;
   /** Verified side-effect receipts for this turn (empty for pure answers). */
   executionReceipts?: ExecutionReceipt[];
@@ -686,6 +699,7 @@ export async function runGlobalAsk(
     activeGoal: input.activeGoal,
     recentActionResults: input.recentActionResults,
     pageProjectId: input.projectId,
+    continuation: semantic.continuation,
   });
   if (projectResolution.status === "resolved" && projectResolution.projectId) {
     goalFrame = { ...goalFrame, scope: { ...goalFrame.scope, projectId: projectResolution.projectId } };
@@ -860,22 +874,66 @@ export async function runGlobalAsk(
   });
 
   if (goalFrame.missingSlots.includes("source")) {
-    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["source"] };
-    stream.emit({ type: "waiting.user_input", title: "還需要確認資料來源", description: "你說的「雲端」是 Google Drive、Google Photos，還是 Aios 目前專案素材？", status: "waiting" });
+    const integrations = await listIntegrations(auth.user.id);
+    const driveAvailable = integrations.googleDrive.configured
+      && integrations.googleDrive.connected
+      && integrations.googleDrive.status !== "error";
+    const interactionRequest = createAssistantInteraction({
+      runId: stream.runId,
+      goalId,
+      type: "SOURCE_PICKER",
+      title: "你要使用哪個來源？",
+      description: "選擇後 Aios 會接著同一個工作繼續。",
+      capabilityId: capabilityMatch.capabilityId,
+      missingSlot: "source",
+      targetProjectId: effectiveProjectId,
+      options: [
+        {
+          id: "google-drive", label: "Google Drive", icon: "Cloud",
+          availability: driveAvailable ? "AVAILABLE" : "BLOCKED",
+          blockerReason: driveAvailable ? undefined : (integrations.googleDrive.configured ? "尚未連線" : "站方尚未設定 Google Drive"),
+        },
+        { id: "google-photos", label: "Google Photos", icon: "Image", availability: "BLOCKED", blockerReason: "尚未連線；可改用 Drive 或本機檔案" },
+        { id: "aios-assets", label: "Aios 專案素材", icon: "Package", availability: "AVAILABLE" },
+        { id: "local-file", label: "本機檔案", icon: "Upload", availability: "AVAILABLE" },
+      ],
+    });
+    activeGoal = {
+      ...activeGoal,
+      status: "waiting_user_input",
+      missingSlots: [...new Set(["source", ...capabilityMatch.missingSlots])],
+      resolvedSlots: { ...activeGoal.resolvedSlots, projectCandidates: projectResolution.candidates.slice(0, 8) },
+      pendingInteraction: interactionRequest,
+    };
+    stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+    stream.emit({ type: "waiting.user_input", title: "還需要確認資料來源", description: interactionRequest.description, status: "waiting" });
     return earlySemanticResult(
       "我還缺一個資訊：你說的「雲端」是 **Google Drive、Google Photos，還是 Aios 目前專案素材**？請直接點選下方卡片，我會接著同一個目標繼續。",
-      { interactionRequest: sourcePickerInteraction(activeGoal.goalId) },
+      { interactionRequest },
     );
   }
 
   if (capabilityMatch.missingSlots.includes("projectId") && projectResolution.status !== "resolved") {
     const candidates = projectResolution.candidates.slice(0, 8);
-    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["projectId"], resolvedSlots: { ...activeGoal.resolvedSlots, projectCandidates: candidates } };
+    const interactionRequest = createAssistantInteraction({
+      runId: stream.runId,
+      goalId,
+      type: "PROJECT_PICKER",
+      title: "要在哪個專案執行？",
+      description: candidates.length ? "選擇後會接著同一個工作，不需要重新輸入。" : "目前沒有可用專案。",
+      capabilityId: capabilityMatch.capabilityId,
+      missingSlot: "projectId",
+      options: candidates.map((candidate) => ({ id: candidate.id, label: candidate.title, availability: "AVAILABLE" as const })),
+    });
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["projectId"], resolvedSlots: { ...activeGoal.resolvedSlots, projectCandidates: candidates }, pendingInteraction: interactionRequest };
     const options = candidates.length ? candidates.map((candidate, index) => `${index + 1}. ${candidate.title}`).join("\n") : "目前沒有可用的專案。";
     stream.emit({ type: "waiting.user_input", title: "還需要確認目標專案", description: candidates.length ? `有 ${candidates.length} 個可用專案，請選一個` : "目前沒有可用專案", status: "waiting", resultCount: candidates.length });
+    stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
     return earlySemanticResult(
-      `我知道你要做什麼，但還缺 **目標專案**。\n\n${options}\n\n直接點選下方專案卡，或回覆「第二個」。`,
-      { interactionRequest: projectPickerInteraction(candidates, activeGoal.goalId) },
+      candidates.length
+        ? `我知道你要做什麼，但還缺 **目標專案**。\n\n${options}\n\n直接點選下方專案卡，或回覆「第二個」。`
+        : `目前沒有可用的專案。\n\n${options}`,
+      { interactionRequest },
     );
   }
 
@@ -888,23 +946,54 @@ export async function runGlobalAsk(
   if (capabilityMatch.capabilityId === "attach_asset_to_shot" && effectiveProjectId) {
     const assetIds = recentVerifiedAssetIds(input.recentActionResults);
     const ordinal = referencedShotOrdinal(input.message);
-    const shots = ordinal == null ? [] : await db.select({ id: schema.scenes.id, title: schema.scenes.title })
+    // Always load shots so SHOT_PICKER options stay available when ordinal is missing.
+    const shots = await db.select({ id: schema.scenes.id, title: schema.scenes.title })
       .from(schema.scenes)
       .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
       .orderBy(asc(schema.scenes.orderIndex));
     const shot = ordinal == null ? undefined : shots[ordinal];
     if (!assetIds.length || !shot) {
       const missingSlots = [...(!assetIds.length ? ["assetIds"] : []), ...(!shot ? ["shotId"] : [])];
-      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots };
+      const interactionRequest = !assetIds.length
+        ? createAssistantInteraction({
+            runId: stream.runId, goalId, type: "ASSET_PICKER", title: "選擇要加入的素材",
+            description: "選取後會接著同一個工作。", capabilityId: capabilityMatch.capabilityId,
+            missingSlot: "assetIds", targetProjectId: effectiveProjectId,
+            options: (await db.select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind })
+              .from(schema.assets).where(and(eq(schema.assets.projectId, effectiveProjectId), isNull(schema.assets.deletedAt)))
+              .orderBy(desc(schema.assets.createdAt)).limit(60))
+              .map((asset) => ({ id: asset.id, label: asset.title, subtitle: asset.kind, availability: "AVAILABLE" as const })),
+          })
+        : createAssistantInteraction({
+            runId: stream.runId, goalId, type: "SHOT_PICKER", title: "選擇分鏡",
+            description: "選取後會接著同一個工作。", capabilityId: capabilityMatch.capabilityId,
+            missingSlot: "shotId", targetProjectId: effectiveProjectId,
+            options: shots.map((candidate, index) => ({ id: candidate.id, label: candidate.title, subtitle: `第 ${index + 1} 鏡`, availability: "AVAILABLE" as const })),
+          });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots,
+        resolvedSlots: {
+          ...activeGoal.resolvedSlots,
+          ...(assetIds.length ? { assetIds } : {}),
+          ...(shot ? { shotId: shot.id, shotTitle: shot.title } : {}),
+        },
+        pendingInteraction: interactionRequest,
+      };
       stream.emit({
         type: "waiting.user_input",
         title: !assetIds.length ? "還需要先取得素材" : "找不到指定的分鏡",
         description: !assetIds.length ? "請先完成匯入，或重新選擇要加入的素材。" : `這個專案目前沒有第 ${(ordinal ?? 0) + 1} 鏡。`,
         status: "waiting",
       });
-      return earlySemanticResult(!assetIds.length
-        ? "我還沒有可驗證的最近素材。請先完成匯入或選擇素材，我會接著同一個目標繼續。"
-        : `「${projectResolution.projectTitle ?? "目前專案"}」目前找不到第 ${(ordinal ?? 0) + 1} 鏡，請指定另一鏡。`);
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      return earlySemanticResult(
+        !assetIds.length
+          ? "我還沒有可驗證的最近素材。請先完成匯入或選擇素材，我會接著同一個目標繼續。"
+          : `「${projectResolution.projectTitle ?? "目前專案"}」目前找不到第 ${(ordinal ?? 0) + 1} 鏡，請指定另一鏡。`,
+        { interactionRequest },
+      );
     }
     activeGoal = { ...activeGoal, status: "executing", missingSlots: [], resolvedSlots: { ...activeGoal.resolvedSlots, shotId: shot.id, shotTitle: shot.title, assetIds } };
     const stepId = stream.startStep({ type: "action.started", title: `正在把 ${assetIds.length} 項素材加入第 ${ordinal! + 1} 鏡`, toolName: "attach_asset_to_shot", target: shot.title });
@@ -942,7 +1031,46 @@ export async function runGlobalAsk(
       : capabilityMatch.capabilityId === "import_local_file" ? "files"
       : capabilityMatch.capabilityId === "import_folder" ? "folder" : undefined;
     if (mode) {
-      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
+      if (mode === "drive") {
+        const integrations = await listIntegrations(auth.user.id);
+        const driveAvailable = integrations.googleDrive.configured
+          && integrations.googleDrive.connected
+          && integrations.googleDrive.status !== "error";
+        if (!driveAvailable) {
+          const interactionRequest = createAssistantInteraction({
+            runId: stream.runId,
+            goalId,
+            type: "SOURCE_PICKER",
+            title: "Google Drive 目前無法使用",
+            description: "請改用目前可用的來源；Aios 會接著同一個工作。",
+            capabilityId: capabilityMatch.capabilityId,
+            targetProjectId: effectiveProjectId,
+            options: [
+              {
+                id: "google-drive", label: "Google Drive", icon: "Cloud", availability: "BLOCKED",
+                blockerReason: integrations.googleDrive.configured ? "尚未連線" : "站方尚未設定 Google Drive",
+              },
+              { id: "local-file", label: "本機檔案", icon: "Upload", availability: "AVAILABLE" },
+              { id: "aios-assets", label: "Aios 專案素材", icon: "Package", availability: "AVAILABLE" },
+            ],
+          });
+          activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["source"], pendingInteraction: interactionRequest };
+          stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+          stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting" });
+          return earlySemanticResult(interactionRequest.description ?? interactionRequest.title, { interactionRequest });
+        }
+      }
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: mode === "drive" ? "DRIVE_PICKER" : mode === "folder" ? "FOLDER_PICKER" : "FILE_PICKER",
+        title: mode === "drive" ? "選擇 Google Drive 檔案" : mode === "folder" ? "選擇資料夾" : "選擇檔案",
+        description: `加入「${projectResolution.projectTitle}」；完成後會回到同一個對話。`,
+        capabilityId: capabilityMatch.capabilityId,
+        targetProjectId: effectiveProjectId,
+        expectedResultType: "import",
+      });
+      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [], pendingInteraction: interactionRequest };
       const intakeRequest: AssistantIntakeRequest = {
         mode, projectId: effectiveProjectId, projectTitle: projectResolution.projectTitle,
         message: mode === "drive" ? `已確認要加入「${projectResolution.projectTitle}」。請選擇 Google Drive 檔案。`
@@ -950,13 +1078,8 @@ export async function runGlobalAsk(
           : `已確認要加入「${projectResolution.projectTitle}」。請選擇檔案。`,
       };
       stream.emit({ type: "waiting.user_input", title: mode === "drive" ? "等待你選 Google Drive 資料" : mode === "folder" ? "等待你選資料夾" : "等待你選檔案", description: intakeRequest.message, status: "waiting" });
-      return earlySemanticResult(intakeRequest.message, {
-        intakeRequest,
-        interactionRequest: intakePickerInteraction({
-          ...intakeRequest,
-          goalId: activeGoal.goalId,
-        }),
-      });
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      return earlySemanticResult(intakeRequest.message, { intakeRequest, interactionRequest });
     }
   }
 
@@ -1109,7 +1232,7 @@ export async function runGlobalAsk(
       : "";
     const answer = `（測試模式）本組共 ${teamCtx.totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}${evidenceSummary}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析；明確指令中的可撤銷內部動作會直接完成，對外、付費或影響較大的動作仍會先請你確認。`;
     const mockProposals: SiteActionProposal[] = [];
-    if (input.message.includes("專案") && creationOptions.platforms.length) {
+    if (executionPlan.capabilityId === "create_project" && creationOptions.platforms.length) {
       mockProposals.push({
         type: "create_project",
         title: input.message.replace(/[「」]/g, "").slice(0, 40) || "測試模式專案",
@@ -1117,10 +1240,13 @@ export async function runGlobalAsk(
         platform: creationOptions.platforms[0].value,
       });
     }
-    if (input.message.includes("筆記")) {
+    if (executionPlan.capabilityId === "add_note") {
       mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
     }
-    const proposedSiteActions = resolveSiteActions(siteRefs, [...deterministicUrlProposal, ...mockProposals]);
+    const proposedSiteActions = resolveSiteActions(
+      siteRefs,
+      siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
+    );
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
@@ -1281,12 +1407,14 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       /**
        * 「思考中…」不再是黑盒子：把**目前已經取得的東西**列出來，
        * 那份清單來自 stream 已登記的來源（真實資料），不是模型自述。
+       * 標題帶上使用者問的那句話（roundThinkingTitle），不同查詢的工作過程
+       * 就不再長得一模一樣（#669 U7）。
        */
       onRound: (round) => {
         const acquired = stream.snapshotSources().filter((s) => s.status === "ok");
         stream.emit({
           type: "agent.thinking",
-          title: round === 0 ? "整理已取得的資料" : "比對查到的資料，繼續分析",
+          title: roundThinkingTitle(round, input.message),
           description: acquired.length
             ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
             : undefined,
@@ -1382,10 +1510,10 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     }
 
     const reply = outcome.reply;
-    const proposedSiteActions = resolveSiteActions(siteRefs, [
+    const proposedSiteActions = resolveSiteActions(siteRefs, siteActionProposalsForPlan(executionPlan, [
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
-    ]);
+    ]));
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
@@ -1800,6 +1928,15 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
       });
       const assetId = imported.asset.id;
       const verification = await readBackVerification(async () => {
+        if (imported.duplicate) {
+          const [usage] = await db.select({ id: schema.libraryResourceUsages.id })
+            .from(schema.libraryResourceUsages).where(and(
+              eq(schema.libraryResourceUsages.libraryResourceId, imported.libraryResourceId),
+              eq(schema.libraryResourceUsages.projectId, input.projectId),
+              eq(schema.libraryResourceUsages.groupId, input.groupId),
+            ));
+          return !!usage;
+        }
         const [found] = await db.select({ id: schema.assets.id, projectId: schema.assets.projectId, deletedAt: schema.assets.deletedAt })
           .from(schema.assets).where(eq(schema.assets.id, assetId));
         return !!found && found.projectId === input.projectId && !found.deletedAt;
@@ -1807,9 +1944,9 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
       return {
         type: "import",
         source: "url",
-        resourceIds: imported.ok && imported.libraryResourceId ? [imported.libraryResourceId] : [],
+        resourceIds: imported.libraryResourceId ? [imported.libraryResourceId] : [],
         assetIds: [assetId],
-        intelligenceIds: imported.ok && imported.intelligenceId ? [imported.intelligenceId] : [],
+        intelligenceIds: imported.intelligenceId ? [imported.intelligenceId] : [],
         projectId: input.projectId,
         count: imported.ok ? 1 : 0,
         duplicateCount: imported.ok ? 0 : 1,
@@ -1957,6 +2094,21 @@ export async function undoSiteActionCore(auth: AuthState, input: UndoSiteActionI
   return { ok: true };
 }
 
+export async function runGlobalAskWithCheckpoint(
+  input: GlobalAskInput,
+  onEvent?: (event: GlobalAskStreamEvent) => void,
+): Promise<GlobalAskResult> {
+  await beginAssistantConversation(input);
+  try {
+    const result = await runGlobalAsk(input, onEvent);
+    await checkpointAssistantConversation(input, result);
+    return result;
+  } catch (error) {
+    await failAssistantConversation(input, error).catch(() => undefined);
+    throw error;
+  }
+}
+
 export const globalAssistantRouter = router({
   /**
    * 全站問答：組級視野（與 teamAssistant 同源）＋站級動作提議＋trace 落庫。
@@ -1965,6 +2117,7 @@ export const globalAssistantRouter = router({
   ask: authedProcedure
     .input(z.object({
       groupId: z.string().uuid(),
+      conversationId: z.string().uuid().optional(),
       message: z.string().min(1).max(500),
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(2000) })).max(8).optional(),
       /** 發問當下所在專案頁（脈絡提示；授權一律後端重驗） */
@@ -1991,9 +2144,10 @@ export const globalAssistantRouter = router({
         });
       }
       try {
-        return await runGlobalAsk({
+        return await runGlobalAskWithCheckpoint({
           auth: ctx.auth,
           groupId: input.groupId,
+          conversationId: input.conversationId,
           message: input.message,
           history: input.history,
           projectId: input.projectId,
@@ -2006,6 +2160,23 @@ export const globalAssistantRouter = router({
         releaseAssistantRequest(ctx.auth.user.id, input.requestId);
       }
     }),
+
+  conversationState: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), conversationId: z.string().uuid().optional() }))
+    .query(({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+      return loadAssistantConversation(ctx.auth, input.groupId, input.conversationId);
+    }),
+
+  /** One-time, same-run return path for inline cards and external pickers. */
+  submitInteraction: authedProcedure
+    .input(assistantInteractionSubmissionSchema)
+    .mutation(({ ctx, input }) => submitAssistantInteraction(ctx.auth, input)),
+
+  /** Records UI truth without consuming the one-time resume callback. */
+  interactionLifecycle: authedProcedure
+    .input(assistantInteractionLifecycleSchema)
+    .mutation(({ ctx, input }) => recordAssistantInteractionLifecycle(ctx.auth, input)),
 
   /** 使用者按下確認卡後執行單一站級動作（經 authedProcedure 落審計；ACL/policy 在被呼叫端） */
   runSiteAction: authedProcedure

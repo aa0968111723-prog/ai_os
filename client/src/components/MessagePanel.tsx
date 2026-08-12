@@ -283,7 +283,7 @@ const MessageRow = memo(function MessageRow({
       <div className="msg">
         <span className="who">
           {isAssistant ? (
-            <><Icon name="Sparkles" size={12} style={{ marginRight: 3, color: "var(--primary-ink)" }} />AI 助手</>
+            <><span className="msg-ai-orb" aria-hidden="true" />AI 助手</>
           ) : (
             <>{m.userName ?? (mine ? myName : "夥伴")}{mine ? "（我）" : ""}</>
           )}

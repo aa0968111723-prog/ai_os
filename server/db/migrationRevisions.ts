@@ -331,4 +331,19 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0068_computer_persisted_auth": [
     "57b651952a90c2f8d82ebc0487a4a4ee4f9c2f10e8d7863ffc4b7b50126a436a",
   ],
+  "0069_agent_practical_autonomy": [
+    "cfe25c1a70e82281b3ff1068e73f395bbe7c3dbeb0db44098ba3cf600f3be04f",
+  ],
+  "0070_agent_live_certification": [
+    // Superseded during PR #655 live fresh-PostgreSQL validation: same
+    // semantic jsonb default, pre-canonical key order.
+    "b12c1afc7bb41d110a91f913bc9cc59abe756a7f41cde35de5f642dd4a7a42cc",
+    "67c77b475148484536d42c37762f5b1f33787661ef873a0a7d384f6b989e29cb",
+    // Adds agent_runs.lock_version after the DB certification track proved
+    // timestamp equality cannot safely guard whole-JSON concurrent saves.
+    "47c97a56a2d5344a222ba51464106fd081096e304eeef9d569e6885cc8a2506b",
+    // Adds first-class receipt owner scope and the reviewed idempotent
+    // run-owner backfill required by the database certification track.
+    "664a902dfb1176967db4186d721a30cf8a2bc268d6ca93ca0887687d5eafaef8",
+  ],
 };

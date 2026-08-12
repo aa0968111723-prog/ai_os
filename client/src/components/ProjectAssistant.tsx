@@ -101,6 +101,20 @@ type Turn = {
 // each project's conversation in the module for the life of the tab, matching
 // the global Assistant's Conversation-is-Home behavior.
 const projectConversationTurns = new Map<string, Turn[]>();
+const MAX_PROJECT_CONVERSATIONS = 12;
+const MAX_PROJECT_TURNS = 100;
+
+function persistProjectTurns(projectId: string, turns: Turn[]): Turn[] {
+  const bounded = turns.length > MAX_PROJECT_TURNS ? turns.slice(-MAX_PROJECT_TURNS) : turns;
+  projectConversationTurns.delete(projectId);
+  projectConversationTurns.set(projectId, bounded);
+  while (projectConversationTurns.size > MAX_PROJECT_CONVERSATIONS) {
+    const oldest = projectConversationTurns.keys().next().value as string | undefined;
+    if (!oldest) break;
+    projectConversationTurns.delete(oldest);
+  }
+  return bounded;
+}
 
 type ProjectDirectResult = {
   kind: string;
@@ -267,8 +281,7 @@ export function ProjectAssistant({
   const setTurns = (next: Turn[] | ((previous: Turn[]) => Turn[])) => {
     setTurnsState((previous) => {
       const resolved = typeof next === "function" ? next(previous) : next;
-      projectConversationTurns.set(projectId, resolved);
-      return resolved;
+      return persistProjectTurns(projectId, resolved);
     });
   };
   const [collapsed, setCollapsed] = useState(false);

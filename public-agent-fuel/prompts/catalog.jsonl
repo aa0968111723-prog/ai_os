@@ -1,0 +1,11 @@
+{"key":"public.prompt.style.base","category":"style","title":"Base hand-drawn style","content":"手繪插畫風格, 溫暖活潑簡約, 乾淨線條, 16:9 cinematic","tags":["style","public"]}
+{"key":"public.prompt.neg.base","category":"negative","title":"Base negatives","content":"blurry, deformed, extra limbs, bad anatomy, photorealistic, dark gloomy, watermark, low quality","tags":["negative","public"]}
+{"key":"public.prompt.neg.face","category":"negative","title":"Face-safe negatives","content":"different face, changed eye shape, changed facial proportions, deformed mouth, melted face, asymmetric eyes","tags":["negative","face","public"]}
+{"key":"public.prompt.identity.lock","category":"character","title":"Identity lock phrase","content":"Exact same character from reference — preserve face and identity perfectly","tags":["character","public"]}
+{"key":"public.prompt.expression.keep-proportions","category":"expression","title":"Keep proportions while expressing","content":"keep exact facial proportions and face shape from reference","tags":["expression","public"]}
+{"key":"public.prompt.scene.beach","category":"scene","title":"Sunny beach","content":"golden sand, blue sea, running, hopeful smiles, warm sunlight","tags":["scene","public"]}
+{"key":"public.prompt.scene.storm","category":"scene","title":"Storm harbor","content":"stormy harbor, huge waves, distant skyline, break in clouds, golden light","tags":["scene","public"]}
+{"key":"public.prompt.scene.mountain","category":"scene","title":"Mountain mist","content":"mountain trail, soft mist, green slopes, hopeful path, warm light through clouds","tags":["scene","public"]}
+{"key":"public.prompt.scene.street","category":"scene","title":"Street music","content":"lively street, musicians, warm evening lights, simple crowd, cheerful mood","tags":["scene","public"]}
+{"key":"public.prompt.emotion.hope","category":"emotion","title":"Hope peak","content":"break in the clouds, golden sunlight, open arms, warm smiles","tags":["emotion","public"]}
+{"key":"public.prompt.instantid.default","category":"tooling","title":"InstantID safe default","content":"ip_weight=0.8 cn_strength=0.55 noise=0.35 CFG=4.5","tags":["instantid","public"]}

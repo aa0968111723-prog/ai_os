@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { trpc } from "../../api";
 import { GoogleDrivePicker } from "../../components/GoogleDrivePicker";
 import { Icon } from "../../components/Icon";
@@ -43,7 +44,10 @@ export function ExternalAssetIntake({
   triggerLabel = "＋ 帶入成果",
   triggerVariant = "primary",
   openRequest,
+  dialogTitle,
+  closeOnImported = false,
   onImported,
+  onOpenChange,
 }: {
   projectId: string;
   groupId?: string;
@@ -55,7 +59,12 @@ export function ExternalAssetIntake({
   triggerVariant?: "primary" | "ghost" | "tonal";
   /** Lets the command center open the existing mini workspace from natural language. */
   openRequest?: ExternalIntakeOpenRequest;
+  /** Product-language heading; the generic external-result copy is wrong for normal intake. */
+  dialogTitle?: string;
+  /** Command Center returns to the conversation as soon as persistence is verified. */
+  closeOnImported?: boolean;
   onImported?: (notice?: ExternalImportNotice) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"files" | "url" | "drive" | "folder">("files");
@@ -67,7 +76,11 @@ export function ExternalAssetIntake({
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(dialogRef, open, () => setOpen(false));
+  const updateOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+  useFocusTrap(dialogRef, open, () => updateOpen(false));
   const utils = trpc.useUtils();
   const sessions = trpc.externalIntake.activeSessions.useQuery(
     { projectId, sceneId },
@@ -82,8 +95,15 @@ export function ExternalAssetIntake({
     if (!openRequest) return;
     setMode(openRequest.mode);
     if (openRequest.mode === "url" && openRequest.url) setUrl(openRequest.url);
-    setOpen(true);
+    updateOpen(true);
   }, [openRequest]);
+
+  // Agent-selected local files should reach the native picker directly. The
+  // visible drop zone remains a recoverable fallback if a browser blocks this.
+  useEffect(() => {
+    if (!open || openRequest?.mode !== "files" || !fileInput.current) return;
+    fileInput.current.click();
+  }, [open, openRequest?.id, openRequest?.mode]);
 
   const addDuplicate = (candidate: DuplicateCandidate) => {
     setDuplicates((current) => current.some((item) => item.key === candidate.key)
@@ -97,6 +117,7 @@ export function ExternalAssetIntake({
     void utils.projects.assets.invalidate({ projectId });
     void utils.externalEditing.list.invalidate({ projectId });
     onImported?.(notice);
+    if (notice && closeOnImported) updateOpen(false);
   };
 
   const uploadOne = async (file: File, method: ImportMethod, forceDuplicate = false): Promise<UploadedReference | null> => {
@@ -104,7 +125,7 @@ export function ExternalAssetIntake({
     const form = new FormData();
     form.append("projectId", projectId);
     form.append("intake", "1");
-    form.append("source", editingSessionId ? "external-editor" : "external-ai");
+    form.append("source", editingSessionId ? "external-editor" : activeSession ? "external-ai" : "upload");
     form.append("importMethod", method);
     form.append("context", JSON.stringify(context));
     form.append("mediaMetadata", JSON.stringify(mediaMetadata));
@@ -274,18 +295,23 @@ export function ExternalAssetIntake({
 
   return (
     <>
-      <Button size="sm" variant={triggerVariant} onClick={() => setOpen(true)}>
-        <Icon name="Package" size={13} /> {triggerLabel}
+      <Button
+        size="sm"
+        variant={triggerVariant}
+        aria-label={triggerLabel === "＋" ? "加入資料" : undefined}
+        onClick={() => updateOpen(true)}
+      >
+        {triggerLabel === "＋" ? null : <Icon name="Package" size={13} />} {triggerLabel}
       </Button>
-      {open && (
-        <div className="modal-scrim" onClick={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
-          <Card ref={dialogRef} className="modal-card external-intake" role="dialog" aria-modal="true" aria-label="帶入外部生成成果">
+      {open && typeof document !== "undefined" ? createPortal(
+        <div className="modal-scrim external-intake-scrim" onClick={(event) => { if (event.target === event.currentTarget) updateOpen(false); }}>
+          <Card ref={dialogRef} className="modal-card external-intake" role="dialog" aria-modal="true" aria-label={dialogTitle ?? "帶入外部生成成果"}>
             <div className="external-intake__head">
               <div>
-                <h2>把剛剛生成的內容帶進來</h2>
+                <h2>{dialogTitle ?? "把剛剛生成的內容帶進來"}</h2>
                 <Meta as="p" style={{ margin: 0 }}>先安全保存，再在背景整理；不用等 AI 分析完。</Meta>
               </div>
-              <Button size="sm" variant="ghost" aria-label="關閉" onClick={() => setOpen(false)}><Icon name="X" /></Button>
+              <Button size="sm" variant="ghost" aria-label="關閉" onClick={() => updateOpen(false)}><Icon name="X" /></Button>
             </div>
             {activeSession && (
               <Hint role="status" style={{ margin: "8px 0" }}>
@@ -382,8 +408,9 @@ export function ExternalAssetIntake({
             ))}
             <ExternalImportInbox projectId={projectId} compact onChanged={onImported} />
           </Card>
-        </div>
-      )}
+        </div>,
+        document.body,
+      ) : null}
     </>
   );
 }
