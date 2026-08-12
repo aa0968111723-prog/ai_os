@@ -1552,13 +1552,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const status = args.status ? String(args.status) : "";
     if (status) conds.push(eq(schema.generations.status, status as typeof schema.generations.$inferSelect.status));
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
-    const rows = await db
-      .select()
-      .from(schema.generations)
-      .where(and(...conds))
-      .orderBy(desc(schema.generations.createdAt))
-      .limit(limit);
-    return rows.map((g) => ({
+    const [rows, countRows] = await Promise.all([
+      db.select().from(schema.generations).where(and(...conds)).orderBy(desc(schema.generations.createdAt)).limit(limit),
+      db.select({ n: sql<number>`count(*)` }).from(schema.generations).where(and(...conds)),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    const items = rows.map((g) => ({
       id: g.id,
       modelId: g.modelId,
       kind: g.kind,
@@ -1569,6 +1568,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       points: g.pointsEst,
       createdAt: g.createdAt,
     }));
+    return {
+      items,
+      listedCount: items.length,
+      total,
+      truncated: total > items.length,
+      cap: limit,
+      ...(total > items.length ? { note: `生成紀錄共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "list_assets") {
@@ -1577,13 +1584,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const kind = args.kind ? String(args.kind) : "";
     if (kind) conds.push(eq(schema.assets.kind, kind));
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
-    const rows = await db
-      .select()
-      .from(schema.assets)
-      .where(and(...conds))
-      .orderBy(desc(schema.assets.createdAt))
-      .limit(limit);
-    return rows.map((a) => ({
+    const [rows, countRows] = await Promise.all([
+      db.select().from(schema.assets).where(and(...conds)).orderBy(desc(schema.assets.createdAt)).limit(limit),
+      db.select({ n: sql<number>`count(*)` }).from(schema.assets).where(and(...conds)),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    const items = rows.map((a) => ({
       id: a.id,
       kind: a.kind,
       title: a.title,
@@ -1592,6 +1598,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       url: a.storagePath ? signAssetUrl(a.id) : a.url,
       createdAt: a.createdAt,
     }));
+    return {
+      items,
+      listedCount: items.length,
+      total,
+      truncated: total > items.length,
+      cap: limit,
+      ...(total > items.length ? { note: `素材共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "submit_generation") {
