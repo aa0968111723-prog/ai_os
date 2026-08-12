@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
-import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
+import { canCreateIn, countVisibleTables, listVisibleTables, resolveTableAccess, VISIBLE_TABLE_LIST_LIMIT, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated, removeDataRow, updateDataRowValidated } from "../services/databaseCore";
 import { executeDatabaseWriteCommand } from "../services/databaseCommand";
 import {
@@ -62,6 +62,7 @@ import { importDrivePickedFileToTable } from "../services/driveImportCore";
  */
 
 const LIST_LIMIT_DEFAULT = 200;
+const FILE_LIST_LIMIT = 200;
 
 /** zod 外形（語意驗證交給 validateFields）：unknown 進來、伺服器端把關 */
 // 與 shared/databaseFields.MAX_FIELDS 對齊（語意層仍走 validateFields）
@@ -98,10 +99,14 @@ async function getFileChecked(auth: Parameters<typeof resolveTableAccess>[0], fi
 }
 
 export const databasesRouter = router({
-  /** 我可見的全部資料庫（四層範圍一次回，前端按 scope 分區）＋每庫列數與我的權限 */
+  /** 我可見的資料庫（四層範圍一次回，前端按 scope 分區）＋每庫列數與我的權限。
+   *  清單硬頂 VISIBLE_TABLE_LIST_LIMIT；超過時 truncated=true，不得把 items.length 當全部。 */
   list: authedProcedure.query(async ({ ctx }) => {
-    const tables = await listVisibleTables(ctx.auth);
-    return tables.map((t) => ({
+    const [tables, total] = await Promise.all([
+      listVisibleTables(ctx.auth),
+      countVisibleTables(ctx.auth),
+    ]);
+    const items = tables.map((t) => ({
       id: t.id,
       scope: t.scope,
       groupId: t.groupId,
@@ -115,6 +120,12 @@ export const databasesRouter = router({
       updatedAt: t.updatedAt,
       access: resolveTableAccess(ctx.auth, t),
     }));
+    return {
+      items,
+      total,
+      truncated: total > items.length,
+      cap: VISIBLE_TABLE_LIST_LIMIT,
+    };
   }),
 
   get: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -519,28 +530,34 @@ export const databasesRouter = router({
   /** 文件清單（不回全文省流量：字數與 300 字摘錄都在 SQL 端算，200 份長文不整批進記憶體）＋我的配額用量 */
   listFiles: authedProcedure.input(z.object({ tableId: z.string().uuid() })).query(async ({ ctx, input }) => {
     const { table } = await getTableChecked(ctx.auth, input.tableId);
-    const rows = await db
-      .select({
-        id: schema.dataFiles.id,
-        name: schema.dataFiles.name,
-        mime: schema.dataFiles.mime,
-        sizeBytes: schema.dataFiles.sizeBytes,
-        storagePath: schema.dataFiles.storagePath,
-        sourceUrl: schema.dataFiles.sourceUrl,
-        readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
-        excerpt: sql<string | null>`left(${schema.dataFiles.textContent}, 300)`,
-        category: schema.dataFiles.category,
-        aiDescription: schema.dataFiles.aiDescription,
-        uploadedBy: schema.dataFiles.uploadedBy,
-        uploaderName: schema.users.name,
-        createdAt: schema.dataFiles.createdAt,
-      })
-      .from(schema.dataFiles)
-      .leftJoin(schema.users, eq(schema.users.id, schema.dataFiles.uploadedBy))
-      .where(eq(schema.dataFiles.tableId, table.id))
-      .orderBy(desc(schema.dataFiles.createdAt))
-      .limit(200);
-    const [usedBytes, quotaBytes] = await Promise.all([userFileUsage(ctx.auth.user.id), fileQuotaBytes()]);
+    const fileWhere = eq(schema.dataFiles.tableId, table.id);
+    const [rows, countRow, usedBytes, quotaBytes] = await Promise.all([
+      db
+        .select({
+          id: schema.dataFiles.id,
+          name: schema.dataFiles.name,
+          mime: schema.dataFiles.mime,
+          sizeBytes: schema.dataFiles.sizeBytes,
+          storagePath: schema.dataFiles.storagePath,
+          sourceUrl: schema.dataFiles.sourceUrl,
+          readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
+          excerpt: sql<string | null>`left(${schema.dataFiles.textContent}, 300)`,
+          category: schema.dataFiles.category,
+          aiDescription: schema.dataFiles.aiDescription,
+          uploadedBy: schema.dataFiles.uploadedBy,
+          uploaderName: schema.users.name,
+          createdAt: schema.dataFiles.createdAt,
+        })
+        .from(schema.dataFiles)
+        .leftJoin(schema.users, eq(schema.users.id, schema.dataFiles.uploadedBy))
+        .where(fileWhere)
+        .orderBy(desc(schema.dataFiles.createdAt))
+        .limit(FILE_LIST_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.dataFiles).where(fileWhere),
+      userFileUsage(ctx.auth.user.id),
+      fileQuotaBytes(),
+    ]);
+    const total = Number(countRow[0]?.n ?? 0);
     return {
       files: rows.map((f) => ({
         id: f.id,
@@ -559,6 +576,9 @@ export const databasesRouter = router({
         createdAt: f.createdAt,
       })),
       quota: { usedBytes, quotaBytes }, // quotaBytes null＝不限
+      total,
+      truncated: total > rows.length,
+      cap: FILE_LIST_LIMIT,
     };
   }),
 

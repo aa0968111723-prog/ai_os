@@ -38,7 +38,7 @@ import { executeGenerationCommand } from "./generationCommand";
 import { signAssetUrl, signDbFileUrl } from "./storage";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
-import { countVisibleTables, resolveAgentAccess, VISIBLE_TABLE_LIST_LIMIT } from "./databaseAcl";
+import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated, updateDataRowValidated } from "./databaseCore";
 import {
   DATABASE_BATCH_REQUEST_LIMIT,
@@ -819,17 +819,15 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   if (name === "list_databases") {
     const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
     const linkedOnly = args.linkedOnly === true || args.linkedOnly === "true";
-    const items = await listMcpDatabases(auth, { projectId, linkedOnly });
-    const visibleTotal = await countVisibleTables(auth);
-    const truncated = visibleTotal > VISIBLE_TABLE_LIST_LIMIT;
+    const list = await listMcpDatabases(auth, { projectId, linkedOnly });
     return {
-      items,
-      listedCount: items.length,
-      visibleTotal,
-      snapshotLimit: VISIBLE_TABLE_LIST_LIMIT,
-      truncated,
-      ...(truncated
-        ? { note: `可見資料庫共 ${visibleTotal} 個；此清單最多載入 ${VISIBLE_TABLE_LIST_LIMIT} 個（本頁 ${items.length} 個 AI 可讀），不得宣稱已列出全部` }
+      items: list.items,
+      listedCount: list.items.length,
+      visibleTotal: list.total,
+      snapshotLimit: list.cap,
+      truncated: list.truncated,
+      ...(list.truncated
+        ? { note: `可見資料庫共 ${list.total} 個；此清單最多載入 ${list.cap} 個（本頁 ${list.items.length} 個 AI 可讀），不得宣稱已列出全部` }
         : {}),
     };
   }

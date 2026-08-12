@@ -96,6 +96,14 @@ describe("agentCore source：各入口呼叫 assertUuid", () => {
     expect(source).not.toContain("const burned = llmPointsForUsageEntries(failedBilling)");
   });
 
+  it("writable DB cheatsheet discloses the visible 200-cap, not only the dbN slice", () => {
+    expect(source).toContain("countVisibleTables(auth)");
+    expect(source).toContain("visibleTruncated: visibleTotal > tables.length");
+    expect(source).toContain("VISIBLE_TABLE_LIST_LIMIT");
+    expect(source).toContain("另有未載入的庫");
+    expect(source).toContain("dbCheatsheet(writableDbs, writable.visibleTruncated)");
+  });
+
   it("plan / list 驗 projectId；approve / discard / stop / get 驗 runId", () => {
     expect(source).toContain('assertUuid(input.projectId, "專案編號")');
     expect(source).toContain('assertUuid(projectId, "專案編號")');

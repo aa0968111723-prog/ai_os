@@ -12,8 +12,10 @@ import { and, desc, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import {
+  countVisibleTables,
   listVisibleTables,
   resolveAgentAccess,
+  VISIBLE_TABLE_LIST_LIMIT,
   type DataTableRow,
   type DbAccess,
 } from "./databaseAcl";
@@ -172,11 +174,21 @@ export type McpDatabaseListItem = {
  *   綁定但沒有 project 欄位的表，外部代理靜默看不到專案資料。
  * ★ 綁定不放寬可見性：readable 已經過 resolveAgentAccess，這裡只在其中挑。
  */
+export type McpDatabaseList = {
+  items: McpDatabaseListItem[];
+  total: number;
+  truncated: boolean;
+  cap: number;
+};
+
 export async function listMcpDatabases(
   auth: AuthState,
   opts: { projectId?: string; linkedOnly?: boolean } = {},
-): Promise<McpDatabaseListItem[]> {
-  const tables = await listVisibleTables(auth);
+): Promise<McpDatabaseList> {
+  const [tables, visibleTotal] = await Promise.all([
+    listVisibleTables(auth),
+    countVisibleTables(auth),
+  ]);
   const readable = tables
     .map((t) => ({ t, access: resolveAgentAccess(auth, t) }))
     .filter((x) => x.access.canRead);
@@ -232,7 +244,12 @@ export async function listMcpDatabases(
   if (projectId) {
     out.sort((a, b) => Number(b.linkedToProject) - Number(a.linkedToProject) || b.rowCount - a.rowCount);
   }
-  return out;
+  return {
+    items: out,
+    total: visibleTotal,
+    truncated: visibleTotal > tables.length,
+    cap: VISIBLE_TABLE_LIST_LIMIT,
+  };
 }
 
 export type McpQueryResult = {

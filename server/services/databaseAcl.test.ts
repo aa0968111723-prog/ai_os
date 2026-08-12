@@ -106,4 +106,18 @@ describe("visible table inventory", () => {
     expect(source).toContain("VISIBLE_TABLE_LIST_LIMIT");
     expect(source).toContain(".limit(VISIBLE_TABLE_LIST_LIMIT)");
   });
+
+  it("databases.list and MCP list disclose the 200-cap instead of a silent page", () => {
+    const router = readFileSync(new URL("../routers/databases.ts", import.meta.url), "utf8");
+    const mcp = readFileSync(new URL("./databaseMcp.ts", import.meta.url), "utf8");
+    expect(router).toContain("countVisibleTables(ctx.auth)");
+    expect(router).toContain("truncated: total > items.length");
+    expect(router).toContain("cap: VISIBLE_TABLE_LIST_LIMIT");
+    expect(router).toContain("const FILE_LIST_LIMIT = 200");
+    expect(router).toContain("truncated: total > rows.length");
+    expect(router).toContain("cap: FILE_LIST_LIMIT");
+    expect(mcp).toContain("countVisibleTables(auth)");
+    expect(mcp).toContain("truncated: visibleTotal > tables.length");
+    expect(mcp).toContain("cap: VISIBLE_TABLE_LIST_LIMIT");
+  });
 });

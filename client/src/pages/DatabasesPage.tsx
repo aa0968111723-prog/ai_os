@@ -166,7 +166,10 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
     [contextProjectId, dbProjectTitle],
   );
 
-  const tables = (list.data ?? []) as TableSummary[];
+  const inventory = list.data;
+  const tables = (Array.isArray(inventory) ? inventory : inventory?.items ?? []) as TableSummary[];
+  const inventoryTotal = Array.isArray(inventory) ? tables.length : (inventory?.total ?? tables.length);
+  const inventoryTruncated = !Array.isArray(inventory) && !!inventory?.truncated;
   const selected = tables.find((t) => t.id === selectedId) ?? null;
   const byScope = useMemo(() => {
     const out: Record<string, TableSummary[]> = { personal: [], group: [], team: [], global: [] };
@@ -281,12 +284,22 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       </h2>
       <Hint style={{ marginTop: 0 }}>
         名單、待辦、借用與發布排程這類「一列一筆」的資料才需要資料表。一般文件與素材用上方的「加入資料」就好。
+        {inventoryTruncated
+          ? ` 目前只顯示最近更新的 ${tables.length} 張表，全部共 ${inventoryTotal.toLocaleString()} 張；搜尋不到時請用更精準的名字。`
+          : ""}
       </Hint>
       <div className={`database-layout${selected || creating ? " has-detail" : ""}${list.data && tables.length === 0 ? " is-empty" : ""}`}>
         {/* 左欄：清單＋建立 */}
         <Card as="aside" className="database-sidebar" aria-label="結構化資料表清單">
           <div className="database-sidebar__head">
-            <div><strong>結構化資料表</strong><small>{tables.length} 張表・{totalRows.toLocaleString()} 列</small></div>
+            <div>
+              <strong>結構化資料表</strong>
+              <small>
+                {inventoryTruncated
+                  ? `顯示 ${tables.length} / ${inventoryTotal.toLocaleString()} 張表・${totalRows.toLocaleString()} 列`
+                  : `${tables.length} 張表・${totalRows.toLocaleString()} 列`}
+              </small>
+            </div>
             <Button size="sm" aria-label="建立資料表" onClick={() => { setCreating(true); setSelectedId(null); }}>
               <Icon name="Plus" size={14} /> 建立
             </Button>
@@ -1427,6 +1440,11 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
       {sentMsg && <Meta as="p" style={{ color: "var(--success-ink)" }}>{sentMsg}</Meta>}
 
       {allFiles.length === 0 && list.data && <Hint style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</Hint>}
+      {list.data?.truncated && (
+        <Hint style={{ marginTop: 8 }}>
+          文件超過單頁上限，只顯示最近 {allFiles.length} / {(list.data.total ?? allFiles.length).toLocaleString()} 份。
+        </Hint>
+      )}
       {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<Button size="sm" onClick={() => setCatFilter(null)}>顯示全部</Button></p>}
       {files.map((f) => {
         const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
