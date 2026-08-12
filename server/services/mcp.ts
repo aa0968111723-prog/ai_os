@@ -427,8 +427,15 @@ export const TOOLS = [
   },
   {
     name: "list_scenes",
-    description: "列出專案分鏡（唯讀摘要）：順序、標題、狀態、有無畫面／配音詞／旁白音檔。規劃拆鏡或補生成前先看這個。",
-    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+    description: "列出專案分鏡（唯讀摘要）：順序、標題、狀態、有無畫面／配音詞／旁白音檔。回 items + total + truncated；超過 limit（預設 100、上限 200）不得宣稱已列出全部。規劃拆鏡或補生成前先看這個。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        limit: { type: "number", description: "最多回幾筆（預設 100，上限 200）" },
+      },
+      required: ["projectId"],
+    },
   },
   // ── 人類任務（M2）：外部 AI 可列可建可結——完成等待節點的任務會自動恢復代理 ──
   {
@@ -466,7 +473,7 @@ export const TOOLS = [
   },
   {
     name: "list_decisions",
-    description: "列出專案 Decision Log。包含仍有效與已撤銷的正式決策、建立者、來源留言與內容指標；用於回答先前是否已定案。",
+    description: "列出專案 Decision Log。包含仍有效與已撤銷的正式決策、建立者、來源留言與內容指標。回 items + total + truncated；超過 100 筆不得宣稱已列出全部。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   {
@@ -1109,13 +1116,28 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
     if (!project) throw new Error("找不到專案");
     requireGroup(auth, project.groupId);
-    const scenes = await db
-      .select()
-      .from(schema.scenes)
-      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
-      .orderBy(schema.scenes.orderIndex);
-    return scenes.map((s, index) => ({
-      sceneNo: index + 1,
+    const limit = Math.min(Math.max(Number(args.limit) || 100, 1), 200);
+    const where = and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt));
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({
+          id: schema.scenes.id,
+          title: schema.scenes.title,
+          status: schema.scenes.status,
+          orderIndex: schema.scenes.orderIndex,
+          assetId: schema.scenes.assetId,
+          voiceover: schema.scenes.voiceover,
+          narrationAssetId: schema.scenes.narrationAssetId,
+        })
+        .from(schema.scenes)
+        .where(where)
+        .orderBy(schema.scenes.orderIndex)
+        .limit(limit),
+      db.select({ n: sql<number>`count(*)` }).from(schema.scenes).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    const items = rows.map((s) => ({
+      sceneNo: s.orderIndex + 1,
       sceneId: s.id,
       title: s.title,
       status: s.status,
@@ -1123,6 +1145,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       hasVoiceover: !!(s.voiceover ?? "").trim(),
       hasNarrationAudio: !!s.narrationAssetId,
     }));
+    return {
+      items,
+      listedCount: items.length,
+      total,
+      truncated: total > items.length,
+      cap: limit,
+      ...(total > items.length ? { note: `分鏡共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   // ── M2 任務（D3）：重用 taskCore——負責人歸屬、封存、等待節點喚醒與網頁端同一套 ──
@@ -1188,8 +1218,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   }
 
   if (name === "list_decisions") {
-    const rows = await listProjectDecisions(auth, String(args.projectId ?? ""));
-    return rows.map((row) => ({
+    const list = await listProjectDecisions(auth, String(args.projectId ?? ""));
+    const items = list.items.map((row) => ({
       id: row.id,
       title: row.title,
       active: !row.revokedAt,
@@ -1200,6 +1230,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       createdAt: row.createdAt,
       revokedAt: row.revokedAt,
     }));
+    return {
+      items,
+      listedCount: items.length,
+      total: list.total,
+      truncated: list.truncated,
+      cap: list.cap,
+      ...(list.truncated ? { note: `決策共 ${list.total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "create_decision") {

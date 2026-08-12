@@ -33,6 +33,14 @@ describe("notesCore ACL contract", () => {
     expect(source).toContain("createdBy");
   });
 
+  it("append retries replay the same suffix within 2 minutes instead of doubling the paragraph", () => {
+    const appendAt = source.indexOf("export async function appendNoteCore");
+    const onceAt = source.indexOf("export async function appendNoteOnceCore");
+    expect(appendAt).toBeGreaterThanOrEqual(0);
+    expect(source.slice(appendAt, onceAt > appendAt ? onceAt : undefined)).toContain("endsWith");
+    expect(source.slice(appendAt, onceAt > appendAt ? onceAt : undefined)).toContain("120_000");
+  });
+
   it("project-bound note writes require assertProjectEditable (viewer cannot edit own project notes)", () => {
     expect(source).toContain("assertProjectEditable");
     expect(source).toMatch(/requireEditable[\s\S]*assertProjectEditable|if \(requireEditable\) await assertProjectEditable/);

@@ -335,6 +335,13 @@ export async function appendNoteCore(input: {
   const row = await getNoteChecked(input.auth, input.id);
   const addition = contentChecked(input.content);
   const separator = input.separator ?? "\n\n";
+  // Timeout retries of the same append must not double the paragraph.
+  if (
+    (row.content.endsWith(`${separator}${addition}`) || row.content.endsWith(addition))
+    && row.updatedAt.getTime() >= Date.now() - 120_000
+  ) {
+    return row;
+  }
   return updateNoteCore({
     auth: input.auth,
     id: row.id,

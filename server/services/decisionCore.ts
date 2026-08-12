@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { DECISION_TITLE_MAX } from "../../shared/collabIntent";
 import { db, schema } from "../db";
@@ -8,6 +8,8 @@ import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { publishToProject } from "./realtime";
 
 export type DecisionRefType = "scene" | "asset" | "generation" | "note" | "schedule";
+
+export const DECISION_LIST_LIMIT = 100;
 
 async function loadProjectChecked(auth: AuthState, projectId: string, forEdit: boolean) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -20,22 +22,72 @@ async function loadProjectChecked(auth: AuthState, projectId: string, forEdit: b
   return project;
 }
 
+async function assertDecisionRef(project: { id: string; groupId: string }, refType: DecisionRefType, refId: string) {
+  const deny = () => new TRPCError({ code: "NOT_FOUND", message: "參照對象不存在或不屬於此專案" });
+  if (refType === "scene") {
+    const [row] = await db.select({ projectId: schema.scenes.projectId })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.id, refId), isNull(schema.scenes.deletedAt)));
+    if (!row || row.projectId !== project.id) throw deny();
+    return;
+  }
+  if (refType === "asset") {
+    const [row] = await db.select({ projectId: schema.assets.projectId })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, refId), isNull(schema.assets.deletedAt)));
+    if (!row || row.projectId !== project.id) throw deny();
+    return;
+  }
+  if (refType === "generation") {
+    const [row] = await db.select({ projectId: schema.generations.projectId })
+      .from(schema.generations)
+      .where(eq(schema.generations.id, refId));
+    if (!row || row.projectId !== project.id) throw deny();
+    return;
+  }
+  if (refType === "note") {
+    const [row] = await db.select({ projectId: schema.notes.projectId, groupId: schema.notes.groupId })
+      .from(schema.notes)
+      .where(eq(schema.notes.id, refId));
+    if (!row || row.groupId !== project.groupId) throw deny();
+    if (row.projectId && row.projectId !== project.id) throw deny();
+    return;
+  }
+  const [row] = await db.select({ projectId: schema.scheduleItems.projectId, groupId: schema.scheduleItems.groupId })
+    .from(schema.scheduleItems)
+    .where(eq(schema.scheduleItems.id, refId));
+  if (!row || row.groupId !== project.groupId) throw deny();
+  if (row.projectId && row.projectId !== project.id) throw deny();
+}
+
 export async function listProjectDecisions(auth: AuthState, projectId: string) {
   await loadProjectChecked(auth, projectId, false);
-  const rows = await db.select().from(schema.decisions)
-    .where(eq(schema.decisions.projectId, projectId))
-    .orderBy(desc(schema.decisions.createdAt))
-    .limit(100);
+  const where = eq(schema.decisions.projectId, projectId);
+  const [rows, countRows] = await Promise.all([
+    db.select().from(schema.decisions)
+      .where(where)
+      .orderBy(desc(schema.decisions.createdAt))
+      .limit(DECISION_LIST_LIMIT),
+    db.select({ n: sql<number>`count(*)` }).from(schema.decisions).where(where),
+  ]);
   const ids = [...new Set(rows.flatMap((row) => [row.decidedBy, row.revokedBy]).filter((id): id is string => Boolean(id)))];
   const users = ids.length
     ? await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, ids))
     : [];
   const names = new Map(users.map((user) => [user.id, user.name]));
-  return rows.map((row) => ({
+  const items = rows.map((row) => ({
     ...row,
     decidedByName: names.get(row.decidedBy) ?? null,
     revokedByName: row.revokedBy ? names.get(row.revokedBy) ?? null : null,
   }));
+  const total = Number(countRows[0]?.n ?? 0);
+  return {
+    items,
+    listedCount: items.length,
+    total,
+    truncated: total > items.length,
+    cap: DECISION_LIST_LIMIT,
+  };
 }
 
 export async function createProjectDecisionCore(input: {
@@ -53,6 +105,9 @@ export async function createProjectDecisionCore(input: {
   }
   if ((input.refType == null) !== (input.refId == null)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "refType 與 refId 必須一起提供" });
+  }
+  if (input.refType && input.refId) {
+    await assertDecisionRef(project, input.refType, input.refId);
   }
   if (input.sourceMessageId) {
     const [source] = await db.select({ projectId: schema.messages.projectId }).from(schema.messages)

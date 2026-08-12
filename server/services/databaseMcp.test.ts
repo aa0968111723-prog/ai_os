@@ -112,6 +112,8 @@ describe("mcp.ts wires databaseMcp (no full-text select on list files)", () => {
     expect(mcpSource).toContain("知識共 ${total} 筆");
     expect(mcpSource).toContain("筆記共 ${total} 筆");
     expect(mcpSource).toContain("任務共 ${total} 筆");
+    expect(mcpSource).toContain("分鏡共 ${total} 筆");
+    expect(mcpSource).toContain("決策共 ${list.total} 筆");
     expect(mcpSource).toContain('if (name === "list_projects")');
     expect(mcpSource).toContain("visibleTotal: list.total");
     expect(mcpSource).toContain("truncated: list.truncated");
