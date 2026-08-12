@@ -553,9 +553,10 @@ function pendingChoiceIndex(message: string): number | undefined {
 }
 
 /**
- * Trusted working-project resolution. Explicit project mention always wins over
- * the route. This fixes the old "current page silently overrides what the user
- * actually named" behavior.
+ * Trusted working-project resolution.
+ * Precedence: explicit mention > pending picker > explicit "剛建立的專案"
+ * > current page (new reads) > compatible activeGoal (continuation only)
+ * > recent result > unique candidate.
  */
 export function resolveWorkingProject(input: {
   message: string;
@@ -591,9 +592,20 @@ export function resolveWorkingProject(input: {
     if (recent) return { status: "resolved", projectId: recent.id, projectTitle: recent.title, source: "recent_result", candidates: [] };
   }
 
-  // A NEW_GOAL gets a new scope. Only genuine continuation/correction/answer
-  // turns are allowed to inherit the active goal's project.
-  const activeProjectId = input.continuation === "NEW_GOAL" ? undefined : input.activeGoal?.frame.scope.projectId;
+  // #673: new/ambiguous reads inherit the page, not a leftover goal.
+  // Only CONTINUE / CORRECT / CONFIRM / ANSWER may keep the previous project
+  // ("繼續剛才 B 的工作" while viewing A). Undefined continuation is a new read.
+  const inheritActiveGoal = input.continuation === "CONTINUE"
+    || input.continuation === "CORRECT"
+    || input.continuation === "CONFIRM"
+    || input.continuation === "ANSWER_PENDING_QUESTION";
+  const activeProjectId = inheritActiveGoal ? input.activeGoal?.frame.scope.projectId : undefined;
+
+  if (input.pageProjectId && !inheritActiveGoal) {
+    const page = input.candidates.find((candidate) => candidate.id === input.pageProjectId);
+    if (page) return { status: "resolved", projectId: page.id, projectTitle: page.title, source: "page_context", candidates: [] };
+  }
+
   if (activeProjectId) {
     const active = input.candidates.find((candidate) => candidate.id === activeProjectId);
     if (active) return { status: "resolved", projectId: active.id, projectTitle: active.title, source: "active_goal", candidates: [] };

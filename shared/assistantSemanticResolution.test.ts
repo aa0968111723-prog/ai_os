@@ -205,6 +205,55 @@ describe("assistantSemanticResolution", () => {
     expect(result.projectId).toBe(long);
   });
 
+  it("#673: page A + stale goal B + 列出分鏡 uses the page, not the leftover goal", () => {
+    const { continuation } = deriveDeterministicGoalFrame("列出分鏡");
+    expect(continuation).toBe("NEW_GOAL");
+    const result = resolveWorkingProject({
+      message: "列出分鏡",
+      candidates: [{ id: P1, title: "頁面專案A" }, { id: P2, title: "舊目標專案B" }],
+      pageProjectId: P1,
+      activeGoal: active({ frame: { ...active().frame, scope: { projectId: P2 } } }),
+      continuation,
+    });
+    expect(result).toMatchObject({ status: "resolved", projectId: P1, source: "page_context" });
+  });
+
+  it("#673: 繼續剛才的工作 keeps B even while viewing A", () => {
+    const { continuation } = deriveDeterministicGoalFrame("繼續剛才的工作");
+    expect(continuation).toBe("CONTINUE");
+    const result = resolveWorkingProject({
+      message: "繼續剛才的工作",
+      candidates: [{ id: P1, title: "頁面專案A" }, { id: P2, title: "舊目標專案B" }],
+      pageProjectId: P1,
+      activeGoal: active({ frame: { ...active().frame, scope: { projectId: P2 } } }),
+      continuation,
+    });
+    expect(result).toMatchObject({ status: "resolved", projectId: P2, source: "active_goal" });
+  });
+
+  it("#673: explicit C beats page A and leftover goal B; unauthorized C fails closed", () => {
+    const named = resolveWorkingProject({
+      message: "列出北藝回顧的分鏡",
+      candidates: [{ id: P1, title: "頁面專案A" }, { id: P2, title: "北藝回顧" }],
+      pageProjectId: P1,
+      activeGoal: active({ frame: { ...active().frame, scope: { projectId: P1 } } }),
+      continuation: "NEW_GOAL",
+    });
+    expect(named).toMatchObject({ status: "resolved", projectId: P2, source: "explicit" });
+
+    const foreign = "33333333-3333-4333-8333-333333333333";
+    const closed = resolveWorkingProject({
+      message: "列出外人專案的分鏡",
+      candidates: [{ id: P1, title: "頁面專案A" }, { id: P2, title: "舊目標專案B" }],
+      pageProjectId: P1,
+      activeGoal: active({ frame: { ...active().frame, scope: { projectId: P2 } } }),
+      continuation: "NEW_GOAL",
+    });
+    expect(closed.projectId).toBe(P1);
+    expect(closed.projectId).not.toBe(foreign);
+    expect(closed.source).toBe("page_context");
+  });
+
   it("explicit project mention outranks the current page project", () => {
     const result = resolveWorkingProject({
       message: "把資料加到北藝回顧",
