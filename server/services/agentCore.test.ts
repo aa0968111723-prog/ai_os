@@ -9,6 +9,7 @@ import {
   buildPickedSourceBlock,
   DRIVE_PLAN_SOURCE_CHAR_CAP,
   MAX_PLAN_KNOWLEDGE_CHARS,
+  planFailureSettlement,
   plannerKnowledgeBudget,
   plannerOutputTokenCeiling,
   plannerPlaybookDirective,
@@ -204,5 +205,29 @@ describe("規劃估點的輸出上限（預留點數的最壞情況）", () => {
     expect(
       estimatePlannerPoints("fal_quality", { promptChars, maxOutputTokens: plannerOutputTokenCeiling("fal_quality") }),
     ).toBeGreaterThan(0);
+  });
+});
+
+describe("planFailureSettlement（#672 U14：規劃失敗的退款決策，堵免費無限呼叫門路）", () => {
+  it("可計量（供應商有回 usage）：照實際用量結算、退回差額", () => {
+    // 預留 50、實際燒 30 → 退回 20；charge 為實際 30
+    expect(planFailureSettlement(50, 30, 1)).toEqual({ charge: 30, refund: 20 });
+  });
+
+  it("可計量且燒超過預留：補扣差額（charge 超過預留、refund 0）", () => {
+    expect(planFailureSettlement(50, 80, 2)).toEqual({ charge: 80, refund: 0 });
+  });
+
+  it("不可計量但呼叫有成功（billing 非空、usage 遺失）：保留預留不退款——漏洞主體", () => {
+    // 舊版此情境全額退款 →「觸發規劃失敗＋供應商不回用量」＝免費無限呼叫付費模型
+    expect(planFailureSettlement(50, null, 2)).toEqual({ charge: 50, refund: 0 });
+  });
+
+  it("不可計量且連呼叫都沒成功：真的沒燒錢 → 全額退回", () => {
+    expect(planFailureSettlement(50, null, 0)).toEqual({ charge: 0, refund: 50 });
+  });
+
+  it("不可計量且呼叫有成功，即使只有一筆也算（至少一次供應商已收費）", () => {
+    expect(planFailureSettlement(20, null, 1)).toEqual({ charge: 20, refund: 0 });
   });
 });

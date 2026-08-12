@@ -207,7 +207,10 @@ function requireUsableSession(auth: AuthState | null, res: express.Response): au
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
   // 只回存活狀態＋建置版本（公開 repo 的 commit SHA 非敏感），不外洩生成模式等內部資訊（#26）
-  res.json({ ok: true, time: new Date().toISOString(), build: currentDeploymentIdentity() });
+  // 資安（#672 稽核）：schemaVersion（DB migration 等級）與 capabilityRegistryHash（agent 能力指紋）
+  // 屬內部部署細節，對外暴露等於把資料庫結構與能力面送給偵察者——只保留 sha/builtAt 供版本追溯。
+  const identity = currentDeploymentIdentity();
+  res.json({ ok: true, time: new Date().toISOString(), build: { sha: identity.sha, builtAt: identity.builtAt } });
 });
 
 // 就緒診斷 — 用瀏覽器打開就知道系統就緒了沒（給非工程背景的自我診斷頁）。

@@ -77,6 +77,31 @@ const HUMAN_WAITING_RUN_STATUSES = [
 const ACTIVE_AGENT_RUN_STATUSES = ["running", ...HUMAN_WAITING_RUN_STATUSES] as const;
 
 /**
+ * 規劃失敗的退款決策（純函式，export 供單元測試鎖定 #672 U14）：
+ * 三種帳不能一概全退——
+ * - 可計量（burned != null）：照實際用量結算，退回「預留 − 實際」（多退少補）。
+ * - 不可計量但呼叫有成功（failedCallCount > 0）＝供應商已收費、token 已燒：
+ *   保留預留不退款，與成功路徑 `usagePoints ?? reservedPoints` 同口徑；
+ *   否則「餵壞 JSON 目標＋供應商不回 usage」就是免費無限呼叫付費模型的門路。
+ * - 不可計量且連呼叫都沒成功：真的沒燒錢 → 全額退回。
+ * @returns charge＝應入帳點數（保留預留即 charge 原預留）；refund＝應退回點數。
+ */
+export function planFailureSettlement(
+  reservedPoints: number,
+  burned: number | null,
+  failedCallCount: number,
+): { charge: number; refund: number } {
+  if (burned != null) {
+    const charge = Math.max(0, Math.round(burned));
+    return { charge, refund: Math.max(0, Math.round(reservedPoints) - charge) };
+  }
+  if (failedCallCount > 0) {
+    return { charge: Math.max(0, Math.round(reservedPoints)), refund: 0 };
+  }
+  return { charge: 0, refund: Math.max(0, Math.round(reservedPoints)) };
+}
+
+/**
  * MCP 入口無 router zod：非法 UUID 進 DB 會變 500。core 入口先擋成 BAD_REQUEST（中文）。
  * 與 agents router 的 z.string().uuid() 同精神；export 供單元測試。
  */
@@ -823,22 +848,36 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
   try {
     generated = await generateAgentPlanDraft(prompt, plannerMode);
   } catch (err) {
-    // 規劃失敗有兩種，帳完全不同：
+    // 規劃失敗有三種帳，不能一概全退：
     // - 供應商連呼叫都沒成功（金鑰錯、429、逾時）＝沒有用量 → 預留全額退回。
     // - 呼叫成功、只是兩次都吐不出合規格的計畫 ＝ 供應商照樣收錢 → 照實際用量結算。
     //   後者若也全額退，「餵一個會讓模型吐壞 JSON 的目標」就成了免費燒平台額度的門路。
+    // - 呼叫有成功但用量資訊遺失（billing 非空、換算不出點數）＝ token 已燒、帳目無法稽核
+    //   → 保留預留不退款，與成功路徑 `usagePoints ?? reservedPoints` 同口徑（#672 U14）。
     const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
     const burned = llmPointsForUsageEntries(failedBilling);
-    const chargedOnFailure = burned == null
-      ? 0
-      : await settleUsagePoints({
-          userId: auth.user.id,
-          groupId: project.groupId,
-          reserved: reservedPoints,
-          actual: burned,
-          reason: `AI 代理規劃（${plannerLabel}）`,
-        });
-    if (burned == null) {
+    const callsSucceeded = failedBilling.length > 0;
+    const { charge: chargedOnFailure, refund: refundedOnFailure } = planFailureSettlement(
+      reservedPoints,
+      burned,
+      failedBilling.length,
+    );
+    if (burned != null) {
+      // 多退少補：實際低於預留的差額在此退回、高於預留則補扣；量不到就不進這條
+      await settleUsagePoints({
+        userId: auth.user.id,
+        groupId: project.groupId,
+        reserved: reservedPoints,
+        actual: burned,
+        reason: `AI 代理規劃（${plannerLabel}）`,
+      });
+    } else if (callsSucceeded) {
+      // 供應商已收費但這次換算不出點數：保留已扣的預留當作最壞情況的帳，不憑空當免費（#672 U14）。
+      console.warn(
+        `[billing] 規劃失敗但用量無法計量，保留預留 ${reservedPoints} 點（user=${auth.user.id} group=${project.groupId} calls=${failedBilling.length} model=${failedBilling.map((e) => e.model).join(",") || "n/a"}）`,
+      );
+    } else {
+      // 供應商連呼叫都沒成功＝真的沒燒錢 → 全額退回
       await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
     }
     // 軌跡也要收尾：規劃在「模型呼叫」這一段就死掉時，session 不留 failed 會永遠停在進行中
@@ -853,7 +892,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
         payload: {
           error: message,
           pointsActual: chargedOnFailure,
-          pointsRefunded: burned == null ? reservedPoints : Math.max(0, reservedPoints - chargedOnFailure),
+          pointsRefunded: refundedOnFailure,
         },
       });
       await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: message }).catch(() => undefined);
@@ -1115,9 +1154,10 @@ ${clarifications || "（無額外文字）"}
   } catch (err) {
     const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
     const burned = llmPointsForUsageEntries(failedBilling);
-    if (burned == null) {
-      await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理重新規劃失敗退回");
-    } else {
+    // #672 U14：同 planAgentCore——billing=null 時區分「連呼叫都沒成功」（全退）與
+    // 「呼叫成功但用量遺失」（token 已燒、帳目無法稽核 → 保留預留不退款），
+    // 避免「觸發重規劃失敗」當免費無限呼叫用。
+    if (burned != null) {
       await settleUsagePoints({
         userId: auth.user.id,
         groupId: project.groupId,
@@ -1125,6 +1165,12 @@ ${clarifications || "（無額外文字）"}
         actual: burned,
         reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
       });
+    } else if (failedBilling.length === 0) {
+      await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理重新規劃失敗退回");
+    } else {
+      console.warn(
+        `[billing] 重新規劃失敗但用量無法計量，保留預留 ${reservedPoints} 點（user=${auth.user.id} group=${project.groupId} calls=${failedBilling.length} model=${failedBilling.map((e) => e.model).join(",") || "n/a"}）`,
+      );
     }
     if (err instanceof AgentPlannerServiceError) {
       throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
