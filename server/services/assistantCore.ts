@@ -14,20 +14,105 @@ import type { AuthState } from "./auth";
  * 這一層與所有呼叫端都不必動。
  */
 
-/** 從 LLM 原始輸出抽第一段 {...}；抽不到或壞 JSON 回 null（regex 撈 JSON 的唯一實作） */
+const MAX_JSON_EXTRACT_CHARS = 200_000;
+
+/**
+ * String/escape-aware brace scanner: first complete JSON object, not greedy
+ * first-`{` to last-`}` (#670). Nested objects, braces inside strings, and two
+ * consecutive objects are handled; oversized input is bounded.
+ */
 export function extractJsonObject(raw: string): unknown {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
+  if (!raw || typeof raw !== "string") return null;
+  const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
+  // Prefer fenced ```json blocks when present.
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const haystack = fenced?.[1] ?? text;
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < haystack.length; i += 1) {
+    const ch = haystack[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === "\"") inString = false;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        const slice = haystack.slice(start, i + 1);
+        try {
+          return JSON.parse(slice);
+        } catch {
+          // Invalid first candidate — keep scanning for the next complete object.
+          start = -1;
+        }
+      }
+    }
   }
+  return null;
 }
 
 /** 把 JSON 段落從原始輸出剝掉，留下人話（壞 JSON 回答的 fallback 顯示用） */
 export function stripJsonObject(raw: string): string {
-  return raw.replace(/\{[\s\S]*\}/, "").trim();
+  if (!raw) return "";
+  const extracted = extractJsonObject(raw);
+  if (extracted == null) return raw.trim();
+  // Remove the first balanced object span (same scanner semantics).
+  const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === "\"") inString = false;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        return `${text.slice(0, start)}${text.slice(i + 1)}`.trim();
+      }
+    }
+  }
+  return raw.trim();
 }
 
 /** 一次工具執行的結果：step＝給使用者看的一行摘要；text＝回餵 LLM 的結果文字。

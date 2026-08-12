@@ -903,16 +903,26 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
       const hasWaiting = !!data.intakeFallbacks?.length
         || !!data.interactionRequest
+        || !!data.intakeRequest
         || data.siteActions.length > 0
+        || data.dispatches.length > 0
+        || data.actions.length > 0
         || events.some((event) => (event.type === "waiting.permission" || event.type === "waiting.user_input") && event.status === "waiting");
       const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
-      // Write completion requires agent.completed+ok. A plain answer without that
-      // event is never "Aios 已完成" when the run is still waiting on the user.
-      const resolvedRunStatus: ChatMessage["runStatus"] = hasFailure
+      const hasVerifiedWrites = (data.executedSiteActions ?? []).some(
+        (item) => "verification" in item.result && item.result.verification?.status === "verified",
+      );
+      const hasUnverifiedWrites = (data.executedSiteActions ?? []).some(
+        (item) => "verification" in item.result && item.result.verification?.status !== "verified",
+      );
+      // Waiting / pending confirmation never completes. Pure answers and verified
+      // writes complete. Missing agent.completed alone is not enough to force
+      // "waiting" — the server may finish a read path with only tool events.
+      const resolvedRunStatus: ChatMessage["runStatus"] = hasFailure || hasUnverifiedWrites
         ? "failed"
         : hasWaiting
           ? "waiting"
-          : hasVerifiedCompletion
+          : hasVerifiedCompletion || hasVerifiedWrites || !hasWaiting
             ? "completed"
             : "waiting";
       if (data.activeGoal) {
@@ -1281,6 +1291,29 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       onSelect={(ids) => { void submitInteractionSelection(msg.interactionRequest!, ids); }}
                       onCancel={() => {
                         setIntakeOpenRequest(undefined);
+                        // Clear local pending handoff immediately so a later turn
+                        // cannot attach a cancelled picker selection (#664).
+                        if (groupId) {
+                          const interactionId = msg.interactionRequest?.interactionId;
+                          setAssistantConversation<ChatMessage>(groupId, (previous) => {
+                            const activeGoal = previous.activeGoal;
+                            const clearPending = previous.pendingInteraction?.interactionId === interactionId;
+                            const clearGoalInteraction = activeGoal?.pendingInteraction?.interactionId === interactionId;
+                            return {
+                              ...previous,
+                              pendingInteraction: clearPending ? undefined : previous.pendingInteraction,
+                              activeGoal: clearGoalInteraction && activeGoal
+                                ? {
+                                    ...activeGoal,
+                                    status: "ready" as const,
+                                    pendingInteraction: activeGoal.pendingInteraction
+                                      ? { ...activeGoal.pendingInteraction, status: "cancelled" as const }
+                                      : undefined,
+                                  }
+                                : activeGoal,
+                            };
+                          });
+                        }
                         recordInteractionLifecycle(msg.interactionRequest!, "cancelled");
                       }}
                     />

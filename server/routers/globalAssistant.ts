@@ -95,6 +95,7 @@ import {
   deriveDeterministicGoalFrame,
   executionPlanFromGoal,
   matchAssistantCapabilityForGoal,
+  parseGoalBudgetConstraints,
   resolveWorkingProject,
   type AssistantCapabilityMatch,
 } from "../../shared/assistantSemanticResolution";
@@ -203,16 +204,30 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
 ]);
 export type SiteActionProposal = z.infer<typeof siteActionProposalSchema>;
 
-/** Capability-first write guard. A DIRECT/ASK turn that resolved to one
- * concrete capability may not smuggle a second write merely because the
- * natural-language message mentions another entity (for example the word
- * "project" in "import into the just-created project"). This guard applies to
- * deterministic mock proposals and model proposals alike. */
+/** Capability-first write guard.
+ *
+ * When the plan resolved to a concrete WRITE capability, reject other write
+ * types so an import turn cannot smuggle create_project. When the plan is a
+ * READ capability (or has no capability), keep proposals so the model can still
+ * surface confirmation cards for schedule/task actions (Q13).
+ */
+const WRITE_SITE_ACTION_TYPES = new Set([
+  "create_project",
+  "add_note",
+  "save_decision",
+  "create_watch",
+  "add_schedule_item",
+  "create_task",
+  "send_dm",
+  "import_url",
+]);
+
 export function siteActionProposalsForPlan(
   plan: AssistantExecutionPlan,
   proposals: readonly SiteActionProposal[],
 ): SiteActionProposal[] {
   if (!plan.capabilityId) return [...proposals];
+  if (!WRITE_SITE_ACTION_TYPES.has(plan.capabilityId)) return [...proposals];
   return proposals.filter((proposal) => proposal.type === plan.capabilityId);
 }
 
@@ -253,15 +268,26 @@ export function sanitizeRecentActionResults(raw: unknown): AssistantActionResult
   return parsed.success ? parsed.data : [];
 }
 
-export function recentVerifiedAssetIds(results: readonly AssistantActionResult[] | undefined): string[] {
+export function recentVerifiedAssetIds(
+  results: readonly AssistantActionResult[] | undefined,
+  limit = 50,
+): string[] {
   if (!results?.length) return [];
+  const cap = Math.min(50, Math.max(1, Math.floor(limit) || 50));
   for (let index = results.length - 1; index >= 0; index -= 1) {
     const result = results[index];
     if (result.type === "import" && result.verification.status === "verified" && result.assetIds.length) {
-      return [...new Set(result.assetIds)].slice(0, 50);
+      return [...new Set(result.assetIds)].slice(0, cap);
     }
   }
   return [];
+}
+
+function recentLimitFromFrame(frame: AssistantGoalFrame | undefined): number | undefined {
+  const raw = frame?.referents.find((ref) => ref.startsWith("recent_limit:"));
+  if (!raw) return undefined;
+  const n = Number(raw.slice("recent_limit:".length));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 export function referencedShotOrdinal(message: string): number | undefined {
@@ -944,7 +970,10 @@ export async function runGlobalAsk(
   }
 
   if (capabilityMatch.capabilityId === "attach_asset_to_shot" && effectiveProjectId) {
-    const assetIds = recentVerifiedAssetIds(input.recentActionResults);
+    const assetIds = recentVerifiedAssetIds(
+      input.recentActionResults,
+      recentLimitFromFrame(goalFrame) ?? 50,
+    );
     const ordinal = referencedShotOrdinal(input.message);
     // Always load shots so SHOT_PICKER options stay available when ordinal is missing.
     const shots = await db.select({ id: schema.scenes.id, title: schema.scenes.title })
@@ -1397,7 +1426,9 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
             payload: { prompt, forceFinal },
           });
         }
-        const qualityMode = input.mode ?? "nim";
+        // Utterance constraints are execution authority: free_only never pays.
+        const budget = parseGoalBudgetConstraints(goalFrame.constraints ?? []);
+        const qualityMode: AgentPlannerMode = budget.freeOnly ? "nim" : (input.mode ?? "nim");
         const isPaidMode = qualityMode !== "nim";
         const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: input.signal });
         usedProvider = completion.provider;

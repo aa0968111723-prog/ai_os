@@ -103,6 +103,16 @@ describe("Goal -> Action routing helpers", () => {
     expect(proposals).toEqual([{ type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" }]);
   });
 
+  it("read capability plans still allow schedule write proposals for confirmation (Q13)", () => {
+    const proposals = siteActionProposalsForPlan(
+      { intent: "ASK", confidence: "medium", title: "安排會議", steps: [], capabilityId: "read_context", executionMode: "DIRECT_TOOL" },
+      [
+        { type: "add_schedule_item", title: "會議", startsAt: "2026-08-13T15:00:00+08:00" },
+      ],
+    );
+    expect(proposals).toEqual([{ type: "add_schedule_item", title: "會議", startsAt: "2026-08-13T15:00:00+08:00" }]);
+  });
+
   it("resolves a uniquely named project from the user's own ACL-filtered project list", () => {
     expect(resolveMentionedProjectRef(new Map([
       ["p1", { title: "挑戰營" }],

@@ -121,6 +121,59 @@ describe("assistantSemanticResolution", () => {
     expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_assets" });
   });
 
+  it("#662: '哪一個最久沒更新' is FIND project, not UPDATE write", () => {
+    for (const message of ["哪一個最久沒更新？", "哪個最久沒更新", "哪一個最舊"]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      expect(frame.operation).toBe("FIND");
+      expect(frame.objectType).toBe("PROJECT");
+      expect(frame.desiredOutcome).toBe("VERIFIED_LIST");
+      expect(matchAssistantCapabilityForGoal(frame).capabilityId).toBe("read_context");
+    }
+  });
+
+  it("Q16: '最近匯入了哪些素材？' is provenance read, not SOURCE_PICKER import", () => {
+    for (const message of ["最近匯入了哪些素材？", "最近加入了哪些素材", "匯入了哪些素材"]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      expect(frame.operation).toBe("READ");
+      expect(frame.objectType).toBe("ASSET");
+      expect(frame.missingSlots).not.toContain("source");
+      expect(matchAssistantCapabilityForGoal(frame).capabilityId).toBe("read_assets");
+    }
+  });
+
+  it("Q13: schedule utterance maps to add_schedule_item with verified write outcome", () => {
+    const { frame } = deriveDeterministicGoalFrame("幫我安排明天下午三點的會議");
+    expect(frame.operation).toBe("CREATE");
+    expect(frame.objectType).toBe("SCHEDULE");
+    expect(frame.desiredOutcome).toBe("PERSIST_SCHEDULE");
+    expect(matchAssistantCapabilityForGoal(frame).capabilityId).toBe("add_schedule_item");
+  });
+
+  it("parses free_only and max_points constraints from natural language", () => {
+    const a = deriveDeterministicGoalFrame("不要超過 100 點，用最好的可用模型完成");
+    expect(a.frame.constraints.some((c) => c.startsWith("max_points:100"))).toBe(true);
+    expect(a.frame.source).toBeUndefined();
+
+    const b = deriveDeterministicGoalFrame("只用免費模型，不要付費 fallback");
+    expect(b.frame.constraints).toContain("free_only");
+  });
+
+  it("delivery language on a project becomes dispatch_agent, not create_project", () => {
+    const { frame } = deriveDeterministicGoalFrame("把這個專案做到今天可以交");
+    expect(frame.operation).toBe("CREATE");
+    expect(frame.objectType).toBe("PROJECT");
+    expect(frame.constraints.some((c) => c.startsWith("delivery:"))).toBe(true);
+    expect(matchAssistantCapabilityForGoal(frame).capabilityId).toBe("dispatch_agent");
+  });
+
+  it("recent N assets attach keeps recent_results + limit referent", () => {
+    const { frame } = deriveDeterministicGoalFrame("把最近五張圖放第三鏡");
+    expect(frame.operation).toBe("ATTACH");
+    expect(frame.objectType).toBe("SHOT");
+    expect(frame.referents).toContain("recent_results");
+    expect(frame.referents).toContain("recent_limit:5");
+  });
+
   it("resolves '剛建立的專案' from the latest verified CreateProjectResult instead of a stale active goal", () => {
     const result = resolveWorkingProject({
       message: "把這個 URL 加入剛建立的專案：https://example.com/a.pdf",
@@ -171,10 +224,9 @@ describe("assistantSemanticResolution", () => {
 
   it("budget constraint language is preserved as a constraint, not a free-text side note", () => {
     const { frame } = deriveDeterministicGoalFrame("不要超過 100 點，用品質最好的可用模型完成");
-    // Operation may be READ/GENERATE depending on wording; constraints stay empty at
-    // deterministic layer unless we parse budget — ensure we do not invent a source.
     expect(frame.source).toBeUndefined();
     expect(frame.missingSlots).not.toContain("source");
+    expect(frame.constraints).toContain("max_points:100");
   });
 
   it("fresh-eye paraphrases still resolve Drive import and shot attachment", () => {

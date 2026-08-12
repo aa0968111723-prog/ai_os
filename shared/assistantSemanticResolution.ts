@@ -74,8 +74,17 @@ const COMPARE_RE = /(?:比較|對比|compare)/iu;
 const VERIFY_RE = /(?:確認|驗證|核對|verify)/iu;
 const GENERATE_RE = /(?:生成|產生|生圖|生影片|做圖|做影片|generate)/iu;
 const CREATE_RE = /(?:建立|新增|創建|開一個|建一個|create)/iu;
-const UPDATE_RE = /(?:更新|修改|調整|改成|update|modify)/iu;
-const RECENT_IMPORT_READ_RE = /(?:查看|看|顯示|開啟|打開|show|view).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|剛匯入)(?:的)?(?:資料|素材|檔案)?/iu;
+// Exclude 「沒更新／未更新／最久沒更新」 — those are staleness READs, not UPDATE writes.
+const UPDATE_RE = /(?<!沒|未|不)(?:更新|修改|調整|改成)|(?<!not\s)(?:update|modify)/iu;
+const STALE_PROJECT_RE = /(?:最久沒更新|最久未更新|最舊|最早建立|哪個最舊|哪一個最舊|stalest|oldest|least\s*recent)/iu;
+/** Already-imported provenance read — must win over IMPORT_RE (Q16 / #660 family). */
+const RECENT_IMPORT_READ_RE = /(?:最近|剛(?:才|剛)?).{0,8}(?:匯入|加入|帶入|上傳)(?:了)?(?:哪些|什麼|的)?(?:資料|素材|檔案)?|(?:查看|看|顯示|列出|開啟|打開|show|view|list).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|最近(?:匯入|加入)|剛匯入)(?:的)?(?:資料|素材|檔案)?|(?:匯入|加入)了哪些(?:資料|素材|檔案)?/iu;
+const SCHEDULE_RE = /(?:會議|開會|行程|排程|約會|calendar|meeting|schedule)|(?:安排|排).{0,12}(?:會議|開會|行程|約會)/iu;
+const FREE_ONLY_RE = /(?:只用|僅用|只要).{0,12}(?:免費|free).{0,12}(?:模型|model)|(?:不要|別|禁止|不得).{0,12}(?:付費|付费|paid).{0,16}(?:fallback|後備|備援|降級)|no[-\s]?paid[-\s]?fallback/iu;
+const MAX_POINTS_RE = /(?:不要超過|不超過|最多|上限|budget|within)\s*(\d+)\s*(?:點|點數|credits?)|(?:max(?:imum)?|cap)\s*(\d+)\s*(?:points?|credits?)/iu;
+const DELIVERY_RE = /(?:做到|做到可以交|可以交|交付|交件|deadline|due).{0,16}(?:今天|今日|今晚|明天|明日)?|(?:今天|今日).{0,12}(?:可以交|交付|交件|完工|完成)/iu;
+const RECENT_N_ASSETS_RE = /最近\s*([一二三四五六七八九十\d]+)\s*張/iu;
+const CORRECTION_PREVIOUS_RE = /(?:不是這個|不是那個|不對).{0,12}(?:是|而是).{0,8}(?:剛才|剛剛|上一個|前一個)(?:那個|的)?|(?:剛才|剛剛|上一個|前一個)(?:那個|的那[個項筆])?/iu;
 
 const ASSET_RE = /(?:素材|圖片|照片|影片|音訊|檔案|文件|這些|那批|剛才那些|asset)/iu;
 const PROJECT_RE = /(?:專案|project)/iu;
@@ -103,29 +112,87 @@ function operationFromText(text: string): AssistantGoalOperation {
   if (COUNT_RE.test(text)) return "COUNT";
   if (COMPARE_RE.test(text)) return "COMPARE";
   if (VERIFY_RE.test(text)) return "VERIFY";
+  // Staleness / oldest-project questions are pure reads (#662).
+  if (STALE_PROJECT_RE.test(text)) return "FIND";
+  // Provenance reads must beat IMPORT_RE even when the utterance contains 匯入.
   if (RECENT_IMPORT_READ_RE.test(text)) return "READ";
   if (ATTACH_RE.test(text)) return "ATTACH";
+  if (SCHEDULE_RE.test(text) && /(?:安排|排|幫我|替我|建立|新增|create|schedule)/iu.test(text)) return "CREATE";
   if (IMPORT_RE.test(text)) return "IMPORT";
   if (ORGANIZE_RE.test(text)) return "ORGANIZE";
   if (GENERATE_RE.test(text)) return "GENERATE";
   if (LIST_RE.test(text)) return "LIST";
   if (FIND_RE.test(text)) return "FIND";
-  if (CREATE_RE.test(text)) return "CREATE";
+  if (CREATE_RE.test(text) || DELIVERY_RE.test(text)) return "CREATE";
   if (UPDATE_RE.test(text)) return "UPDATE";
   return "READ";
 }
 
 function objectFromText(text: string, operation: AssistantGoalOperation): AssistantGoalObject {
-  if (RECENT_IMPORT_READ_RE.test(text)) return "ASSET";
+  // Target object wins over source material: 「最近五張圖放第三鏡」 is SHOT attach.
   if (SHOT_RE.test(text)) return "SHOT";
   if (SCENE_RE.test(text)) return "SCENE";
+  if (RECENT_IMPORT_READ_RE.test(text)) return "ASSET";
+  if (SCHEDULE_RE.test(text)) return "SCHEDULE";
   if (SCRIPT_RE.test(text)) return "SCRIPT";
   if (TASK_RE.test(text)) return "TASK";
+  if (DELIVERY_RE.test(text) && PROJECT_RE.test(text)) return "PROJECT";
   if (PROJECT_RE.test(text) && operation === "CREATE") return "PROJECT";
   if (GENERATION_RE.test(text)) return "GENERATION";
-  if (ASSET_RE.test(text) || operation === "IMPORT" || operation === "ATTACH" || operation === "ORGANIZE" || operation === "GENERATE") return "ASSET";
-  if (PROJECT_RE.test(text)) return "PROJECT";
+  if (ASSET_RE.test(text) || RECENT_N_ASSETS_RE.test(text) || operation === "IMPORT" || operation === "ATTACH" || operation === "ORGANIZE" || operation === "GENERATE") return "ASSET";
+  // 「哪一個最久沒更新」implicitly means projects in group scope.
+  if (PROJECT_RE.test(text) || STALE_PROJECT_RE.test(text)) return "PROJECT";
   return "UNKNOWN";
+}
+
+function constraintsFromText(text: string): string[] {
+  const constraints: string[] = [];
+  if (FREE_ONLY_RE.test(text)) {
+    constraints.push("free_only");
+  }
+  const maxMatch = text.match(MAX_POINTS_RE);
+  if (maxMatch) {
+    const raw = maxMatch[1] ?? maxMatch[2];
+    const points = Number(raw);
+    if (Number.isFinite(points) && points > 0 && points <= 1_000_000) {
+      constraints.push(`max_points:${points}`);
+    }
+  }
+  if (DELIVERY_RE.test(text)) {
+    constraints.push(/今天|今日/u.test(text) ? "delivery:today" : "delivery:deadline");
+  }
+  return constraints;
+}
+
+/** Parse free_only / max_points constraints from a GoalFrame. */
+export function parseGoalBudgetConstraints(constraints: readonly string[]): {
+  freeOnly: boolean;
+  maxPoints?: number;
+  deliveryToday: boolean;
+} {
+  let freeOnly = false;
+  let maxPoints: number | undefined;
+  let deliveryToday = false;
+  for (const raw of constraints) {
+    const c = raw.trim().toLowerCase();
+    if (c === "free_only" || c.includes("free_only")) freeOnly = true;
+    if (c === "delivery:today" || c.includes("delivery:today")) deliveryToday = true;
+    const m = c.match(/max_points:(\d+)/);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) maxPoints = n;
+    }
+  }
+  return { freeOnly, maxPoints, deliveryToday };
+}
+
+function recentAssetLimitFromText(text: string): number | undefined {
+  const m = text.match(RECENT_N_ASSETS_RE);
+  if (!m) return undefined;
+  const raw = m[1];
+  if (/^\d+$/.test(raw)) return Math.min(50, Math.max(1, Number(raw)));
+  const map: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  return map[raw] ?? undefined;
 }
 
 function intentFromOperation(operation: AssistantGoalOperation, continuation: AssistantContinuationType): AssistantGoalIntent {
@@ -149,6 +216,8 @@ function desiredOutcomeFor(operation: AssistantGoalOperation, objectType: Assist
   if (operation === "ORGANIZE") return "START_CLASSIFICATION";
   if (operation === "GENERATE") return "START_GENERATION";
   if (operation === "CREATE" && objectType === "PROJECT") return "PERSIST_PROJECT";
+  if (operation === "CREATE" && objectType === "SCHEDULE") return "PERSIST_SCHEDULE";
+  if (operation === "CREATE" && objectType === "TASK") return "PERSIST_TASK";
   if (operation === "CREATE" && (objectType === "SHOT" || objectType === "SCENE")) return "PERSIST_STORYBOARD";
   return "ANSWER";
 }
@@ -210,14 +279,23 @@ export function deriveDeterministicGoalFrame(
   const sourceType = sourceFromText(message);
   const sourceMissing = sourceType === "UNKNOWN_CLOUD" || (operation === "IMPORT" && !sourceType);
   const highSignal = operation !== "READ" || !!sourceType || objectType !== "UNKNOWN";
+  const recentLimit = recentAssetLimitFromText(message);
+  const referents: string[] = [];
+  if (/(?:這些|那批|剛才那些|剛剛那些)/u.test(message) || RECENT_IMPORT_READ_RE.test(message) || recentLimit) {
+    referents.push("recent_results");
+  }
+  if (recentLimit) referents.push(`recent_limit:${recentLimit}`);
+  if (CORRECTION_PREVIOUS_RE.test(message) && continuation === "CORRECT") {
+    referents.push("previous_candidate");
+  }
   const frame: AssistantGoalFrame = {
     intent: intentFromOperation(operation, continuation),
     operation,
     objectType,
     ...(sourceType ? { source: { type: sourceType } } : {}),
     scope: {},
-    referents: /(?:這些|那批|剛才那些|剛剛那些)/u.test(message) || RECENT_IMPORT_READ_RE.test(message) ? ["recent_results"] : [],
-    constraints: [],
+    referents,
+    constraints: constraintsFromText(message),
     desiredOutcome: desiredOutcomeFor(operation, objectType),
     missingSlots: sourceMissing ? ["source"] : [],
     understandingConfidence: highSignal ? "high" : "medium",
@@ -273,8 +351,13 @@ export function matchAssistantCapabilityForGoal(frame: AssistantGoalFrame): Assi
   } else if (frame.operation === "GENERATE") {
     capabilityId = source === "EXTERNAL_AI" ? "prepare_external_generation" : "generate_media";
   } else if (frame.operation === "CREATE") {
-    if (frame.objectType === "PROJECT") capabilityId = "create_project";
-    else if (frame.objectType === "TASK") capabilityId = "create_task";
+    if (frame.objectType === "PROJECT") {
+      // Delivery language is multi-step agent work (dispatch), not create_project.
+      capabilityId = frame.constraints.some((c) => c.startsWith("delivery:"))
+        ? "dispatch_agent"
+        : "create_project";
+    } else if (frame.objectType === "TASK") capabilityId = "create_task";
+    else if (frame.objectType === "SCHEDULE") capabilityId = "add_schedule_item";
     else if (frame.objectType === "SHOT" || frame.objectType === "SCENE") capabilityId = "split_script";
   } else if (frame.operation === "COUNT" || frame.operation === "LIST" || frame.operation === "FIND" || frame.operation === "READ" || frame.operation === "COMPARE" || frame.operation === "VERIFY") {
     if (source === "GOOGLE_DRIVE" || source === "GOOGLE_PHOTOS") {
