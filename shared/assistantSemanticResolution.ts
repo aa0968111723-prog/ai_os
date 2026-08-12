@@ -78,6 +78,8 @@ const COMPARE_RE = /(?:比較|對比|compare)/iu;
 const VERIFY_RE = /(?:確認|驗證|核對|verify)/iu;
 const GENERATE_RE = /(?:生成|產生|生圖|生影片|做圖|做影片|generate)/iu;
 const CREATE_RE = /(?:建立|新增|創建|開一個|建一個|create)/iu;
+/** Custom-DB row writes. Must beat IMPORT_RE「加入」and must not steal asset-library counts. */
+const ADD_ROW_RE = /(?:加|新增|寫|存)一(?:列|筆|行)|(?:寫入|寫進|存進|加入|加到|加進).{0,8}(?:資料庫|資料表|自訂(?:資料)?(?:庫|表)|\bdb\d+\b)|(?:資料庫|資料表|自訂(?:資料)?(?:庫|表)|\bdb\d+\b).{0,12}(?:加一(?:列|筆|行)|新增一(?:列|筆|行)|寫入|加列)/iu;
 // Exclude 「沒更新／未更新／最久沒更新」 — those are staleness READs, not UPDATE writes.
 const UPDATE_RE = /(?<!沒|未|不)(?:更新|修改|調整|改成)|(?<!not\s)(?:update|modify)/iu;
 const STALE_PROJECT_RE = /(?:最久沒更新|最久未更新|最舊|最早建立|哪個最舊|哪一個最舊|stalest|oldest|least\s*recent)/iu;
@@ -123,6 +125,8 @@ function operationFromText(text: string): AssistantGoalOperation {
   if (RECENT_IMPORT_READ_RE.test(text)) return "READ";
   if (ATTACH_RE.test(text)) return "ATTACH";
   if (SCHEDULE_RE.test(text) && /(?:安排|排|幫我|替我|建立|新增|create|schedule)/iu.test(text)) return "CREATE";
+  // 「在資料庫加一列」is a custom-DB write, not an asset import and not a row count.
+  if (ADD_ROW_RE.test(text)) return "CREATE";
   if (IMPORT_RE.test(text)) return "IMPORT";
   if (ORGANIZE_RE.test(text)) return "ORGANIZE";
   if (GENERATE_RE.test(text)) return "GENERATE";
@@ -144,6 +148,8 @@ function objectFromText(text: string, operation: AssistantGoalOperation): Assist
   if (DELIVERY_RE.test(text) && PROJECT_RE.test(text)) return "PROJECT";
   if (PROJECT_RE.test(text) && operation === "CREATE") return "PROJECT";
   if (GENERATION_RE.test(text)) return "GENERATION";
+  // Custom-DB writes win over ASSET even when the payload mentions 圖/清單.
+  if (ADD_ROW_RE.test(text) || (operation === "CREATE" && DATABASE_RE.test(text))) return "DATABASE";
   if (ASSET_RE.test(text) || RECENT_N_ASSETS_RE.test(text) || operation === "IMPORT" || operation === "ATTACH" || operation === "ORGANIZE" || operation === "GENERATE") return "ASSET";
   // Custom DB rows/tables are not project assets (Q18). Check after ASSET so
   // 「素材庫有幾張」 stays ASSET / PROJECT_ASSETS.
@@ -226,6 +232,7 @@ function desiredOutcomeFor(operation: AssistantGoalOperation, objectType: Assist
   if (operation === "CREATE" && objectType === "PROJECT") return "PERSIST_PROJECT";
   if (operation === "CREATE" && objectType === "SCHEDULE") return "PERSIST_SCHEDULE";
   if (operation === "CREATE" && objectType === "TASK") return "PERSIST_TASK";
+  if (operation === "CREATE" && objectType === "DATABASE") return "PERSIST_DATABASE";
   if (operation === "CREATE" && (objectType === "SHOT" || objectType === "SCENE")) return "PERSIST_STORYBOARD";
   return "ANSWER";
 }
@@ -393,6 +400,7 @@ export function matchAssistantCapabilityForGoal(
         : "create_project";
     } else if (frame.objectType === "TASK") capabilityId = "create_task";
     else if (frame.objectType === "SCHEDULE") capabilityId = "add_schedule_item";
+    else if (frame.objectType === "DATABASE") capabilityId = "add_database_row";
     else if (frame.objectType === "SHOT" || frame.objectType === "SCENE") capabilityId = "split_script";
   } else if (frame.operation === "COUNT" || frame.operation === "LIST" || frame.operation === "FIND" || frame.operation === "READ" || frame.operation === "COMPARE" || frame.operation === "VERIFY") {
     if (source === "GOOGLE_DRIVE" || source === "GOOGLE_PHOTOS") {

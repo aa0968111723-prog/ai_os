@@ -1014,6 +1014,11 @@ export interface TeamAskContext {
   projectLines: string[];
   projByRef: Map<string, ProjRow>;
   dbByRef: Map<string, TeamDb>;
+  /** Authoritative custom-table count (same filter as the visible snapshot). */
+  customDbTotal: number;
+  /** Snapshot length; Agent must not report this as the group total when truncated. */
+  customDbListedCount: number;
+  customDbHidden: number;
   commandRefs: CommandRefs;
   /** 組級阻塞讀取失敗（降級模式：提示詞裡誠實說這段沒讀到） */
   degraded: boolean;
@@ -1348,7 +1353,9 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
 
   return {
     commandLevel, canDispatch, canSupervise, totalProjects, archivedProjectCount,
-    projectLines: lines, projByRef, dbByRef, commandRefs, degraded, context,
+    projectLines: lines, projByRef, dbByRef,
+    customDbTotal, customDbListedCount: visibleTables.length, customDbHidden,
+    commandRefs, degraded, context,
   };
 }
 

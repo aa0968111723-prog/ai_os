@@ -141,6 +141,7 @@ const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> =
   { id: "add_schedule_item", pattern: /(?:安排|排|建立|新增).{0,16}(?:會議|開會|行程|約會|schedule|meeting)|(?:會議|開會|行程).{0,12}(?:安排|排|建立)/i },
   { id: "create_task", pattern: /(?:新增|建立|創建).{0,12}(?:任務|待辦|task)|(?:任務|待辦|task).{0,12}(?:新增|建立|創建)/i },
   { id: "create_project", pattern: /(?:新增|建立|創建|開).{0,16}(?:專案|project)/i },
+  { id: "add_database_row", pattern: /(?:加|新增|寫|存)一(?:列|筆|行).{0,12}(?:資料庫|資料表|db\d+)|(?:寫入|寫進|存進|加入).{0,8}(?:資料庫|資料表|db\d+)/i },
   { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
   { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
   { id: "dispatch_agent", pattern: /(?:做到|交付|交件).{0,16}(?:今天|今日|可以交)|(?:把).{0,12}專案.{0,20}(?:可以交|交付|完成)/i },

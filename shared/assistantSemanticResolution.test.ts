@@ -61,6 +61,22 @@ describe("assistantSemanticResolution", () => {
     });
   });
 
+  it("custom DB add-row language maps to add_database_row, not a read or asset import", () => {
+    for (const message of [
+      "在資料庫加一列",
+      "新增一列到資料庫",
+      "加一筆到 db1",
+      "把這次的拍攝清單寫進資料庫",
+    ]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      expect(frame.operation, message).toBe("CREATE");
+      expect(frame.objectType, message).toBe("DATABASE");
+      expect(frame.source?.type, message).toBe("CUSTOM_DATABASE");
+      expect(frame.desiredOutcome, message).toBe("PERSIST_DATABASE");
+      expect(matchAssistantCapabilityForGoal(frame).capabilityId, message).toBe("add_database_row");
+    }
+  });
+
   it("Q18: bare 資料庫 counts stay on read_database, not project inventory or assets", () => {
     for (const message of ["資料庫有幾筆？", "自訂資料庫有幾列", "這個庫有幾筆", "custom database row count"]) {
       const { frame } = deriveDeterministicGoalFrame(message);
@@ -367,6 +383,8 @@ describe("assistantSemanticResolution", () => {
     ["把那些放第三鏡", "ATTACH", "SHOT"],
     ["list projects", "LIST", "PROJECT"],
     ["幫我 list 所有專案", "LIST", "PROJECT"],
+    ["在資料庫加一列", "CREATE", "DATABASE"],
+    ["加一筆到 db1", "CREATE", "DATABASE"],
   ] as const)("fuzz %s", (utterance, operation, objectType) => {
     const { frame } = deriveDeterministicGoalFrame(utterance);
     expect(frame.operation).toBe(operation);

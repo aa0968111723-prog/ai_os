@@ -35,6 +35,7 @@ describe("assistantGoalFrame", () => {
 
   it("marks write-like outcomes as requiring real verified execution", () => {
     expect(goalRequiresVerifiedExecution("PERSIST_ASSETS")).toBe(true);
+    expect(goalRequiresVerifiedExecution("PERSIST_DATABASE")).toBe(true);
     expect(goalRequiresVerifiedExecution("VERIFIED_BINDING")).toBe(true);
     expect(goalRequiresVerifiedExecution("START_CLASSIFICATION")).toBe(true);
     expect(goalRequiresVerifiedExecution("ANSWER")).toBe(false);
