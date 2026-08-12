@@ -23,6 +23,11 @@ describe("notesCore ACL contract", () => {
     expect(source).toContain("findExistingNote");
   });
 
+  it("site notes without an effect id replay the same title+content within 2 minutes", () => {
+    expect(source).toContain("120_000");
+    expect(source).toContain("createdBy");
+  });
+
   it("project-bound note writes require assertProjectEditable (viewer cannot edit own project notes)", () => {
     expect(source).toContain("assertProjectEditable");
     expect(source).toMatch(/requireEditable[\s\S]*assertProjectEditable|if \(requireEditable\) await assertProjectEditable/);

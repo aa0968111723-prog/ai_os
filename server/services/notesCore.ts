@@ -2,7 +2,7 @@
  * 筆記核心積木：讓 tRPC、Agent Runner、MCP 與後續自動化共用同一組資料與權限守門。
  * 路由只負責傳輸層驗證；這裡仍會做完整的 transport-independent validation。
  */
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -209,16 +209,29 @@ export async function addNoteCore(input: {
     throw new TRPCError({ code: "BAD_REQUEST", message: `@提及最多 ${NOTE_MENTIONS_MAX} 人` });
   }
   const mentions = await validateMentions(input.groupId, input.mentions);
+  const title = titleChecked(input.title);
+  const content = contentChecked(input.content);
   const existing = await findExistingNote(input);
   if (existing) return existing;
+  if (!input.id && !input.planRunId) {
+    const [recent] = await db.select().from(schema.notes).where(and(
+      eq(schema.notes.groupId, input.groupId),
+      eq(schema.notes.createdBy, input.auth.user.id),
+      eq(schema.notes.title, title),
+      eq(schema.notes.content, content),
+      input.projectId ? eq(schema.notes.projectId, input.projectId) : isNull(schema.notes.projectId),
+      gte(schema.notes.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.notes.createdAt)).limit(1);
+    if (recent) return recent;
+  }
   const [inserted] = await db
     .insert(schema.notes)
     .values({
       id: input.id,
       groupId: input.groupId,
       projectId: input.projectId ?? null,
-      title: titleChecked(input.title),
-      content: contentChecked(input.content),
+      title,
+      content,
       createdBy: input.auth.user.id,
       sourceMessageId: input.sourceMessageId ?? null,
       mentions: mentions ?? null,

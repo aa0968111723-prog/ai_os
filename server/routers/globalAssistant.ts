@@ -882,7 +882,7 @@ export async function runGlobalAsk(
   const overviewSummary: AgentResultSummary = [
     { label: "專案", value: teamCtx.totalProjects },
     { label: "成員", value: memberTotal, unit: "位" },
-    { label: "可讀資料庫", value: dbByRef.size },
+    { label: "可讀資料庫", value: teamCtx.customDbTotal },
   ];
   stream.finishStep(overviewStep, {
     type: "source.read",
@@ -900,7 +900,7 @@ export async function runGlobalAsk(
     name: "全組現況",
     href: "/dashboard",
     itemCount: teamCtx.totalProjects,
-    detail: `${teamCtx.totalProjects} 個專案・${memberTotal} 位成員・${dbByRef.size} 個可讀資料庫`,
+    detail: `${teamCtx.totalProjects} 個專案・${memberTotal} 位成員・${teamCtx.customDbTotal} 個可讀資料庫${teamCtx.customDbHidden ? `（快照只展開 ${teamCtx.customDbListedCount}）` : ""}`,
     toolName: "group_overview",
     status: teamCtx.totalProjects ? "ok" : "empty",
   });
@@ -1001,9 +1001,46 @@ export async function runGlobalAsk(
   }
 
   if (capabilityMatch.status === "unsupported" && capabilityMatch.evidenceScope === "REMOTE_SOURCE") {
-    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
-    stream.emit({ type: "waiting.user_input", title: "目前無法驗證完整遠端清單", description: capabilityMatch.reason, status: "waiting", sourceType: "external", sourceName: goalFrame.source?.type === "GOOGLE_PHOTOS" ? "Google Photos" : "Google Drive" });
-    return earlySemanticResult(`${capabilityMatch.reason}\n\n我可以改查 **已匯入 Aios 的數量**，或讓你改用可驗證的 Drive／檔案匯入流程。`);
+    const integrations = await listIntegrations(auth.user.id);
+    const driveAvailable = integrations.googleDrive.configured
+      && integrations.googleDrive.connected
+      && integrations.googleDrive.status !== "error";
+    const photosRequested = goalFrame.source?.type === "GOOGLE_PHOTOS";
+    const interactionRequest = createAssistantInteraction({
+      runId: stream.runId,
+      goalId,
+      type: "SOURCE_PICKER",
+      title: photosRequested ? "Google Photos 目前無法使用" : "遠端完整清單目前無法驗證",
+      description: "請改用目前可用的來源；Aios 會接著同一個工作。",
+      capabilityId: capabilityMatch.capabilityId,
+      missingSlot: "source",
+      targetProjectId: effectiveProjectId,
+      options: [
+        {
+          id: "google-photos",
+          label: "Google Photos",
+          icon: "Image",
+          availability: "BLOCKED",
+          blockerReason: photosRequested ? capabilityMatch.reason : "尚未連線；可改用 Drive 或本機檔案",
+        },
+        {
+          id: "google-drive",
+          label: "Google Drive",
+          icon: "Cloud",
+          availability: driveAvailable ? "AVAILABLE" : "BLOCKED",
+          blockerReason: driveAvailable ? undefined : (integrations.googleDrive.configured ? "尚未連線" : "站方尚未設定 Google Drive"),
+        },
+        { id: "local-file", label: "本機檔案", icon: "Upload", availability: "AVAILABLE" },
+        { id: "aios-assets", label: "Aios 專案素材", icon: "Package", availability: "AVAILABLE" },
+      ],
+    });
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["source"], pendingInteraction: interactionRequest };
+    stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+    stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", sourceType: "external", sourceName: photosRequested ? "Google Photos" : "Google Drive" });
+    return earlySemanticResult(
+      `${capabilityMatch.reason}\n\n請直接點選下方可用來源；我會接著同一個目標繼續。`,
+      { interactionRequest },
+    );
   }
 
   if (capabilityMatch.capabilityId === "attach_asset_to_shot" && effectiveProjectId) {

@@ -366,9 +366,22 @@ describe("紅線一契約：LLM 迴圈唯讀（源碼斷言）", () => {
     expect(src).toContain('type: verified ? "action.completed" : "action.failed"');
   });
 
+  it("#665: blocked remote source offers a clickable SOURCE_PICKER, not prose-only", () => {
+    expect(src).toContain('capabilityMatch.status === "unsupported" && capabilityMatch.evidenceScope === "REMOTE_SOURCE"');
+    expect(src).toContain('type: "SOURCE_PICKER"');
+    expect(src).toContain('id: "local-file"');
+    expect(src).toContain('id: "aios-assets"');
+  });
+
   it("WRITE capabilities require verified execution even when the frame says ANSWER", () => {
     expect(src).toContain("planRequiresVerifiedExecution");
     expect(src).toContain("executionPlan.capabilityId");
+  });
+
+  it("group overview counts custom DB tables from the untruncated total, not dbByRef.size", () => {
+    expect(src).toContain("customDbTotal");
+    expect(src).toContain("{ label: \"可讀資料庫\", value: teamCtx.customDbTotal }");
+    expect(src).not.toContain("{ label: \"可讀資料庫\", value: dbByRef.size }");
   });
 
   it("站級動作型別不含任何 destructive 動作（EVAL CASE 3：刪除類不可自主執行）", () => {
