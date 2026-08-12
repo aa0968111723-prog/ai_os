@@ -174,6 +174,18 @@ describe("assistantSemanticResolution", () => {
     expect(frame.referents).toContain("recent_limit:5");
   });
 
+  it("fresh-eye: 丟幾張圖到第三鏡 is ATTACH not bare IMPORT", () => {
+    const { frame } = deriveDeterministicGoalFrame("丟幾張圖到第三鏡");
+    expect(frame.operation).toBe("ATTACH");
+    expect(frame.objectType).toBe("SHOT");
+    expect(matchAssistantCapabilityForGoal(frame).capabilityId).toBe("attach_asset_to_shot");
+  });
+
+  it("fresh-eye: 預算上限 50 點 parses max_points", () => {
+    const { frame } = deriveDeterministicGoalFrame("預算上限 50 點");
+    expect(frame.constraints).toContain("max_points:50");
+  });
+
   it("resolves '剛建立的專案' from the latest verified CreateProjectResult instead of a stale active goal", () => {
     const result = resolveWorkingProject({
       message: "把這個 URL 加入剛建立的專案：https://example.com/a.pdf",
