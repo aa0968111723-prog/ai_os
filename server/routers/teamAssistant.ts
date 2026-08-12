@@ -722,15 +722,26 @@ export async function runTeamTool(
     if (ref && !refProject) {
       return { step: `查代理動態(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組`, meta: { ok: false, error: "指定的專案不在可讀清單內" } };
     }
-    const rows = await db
-      .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
-      .from(schema.agentRuns)
-      .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
-      // groupId 用本組的（非 run 自帶的）＝範圍鎖死；放棄的計畫是雜訊不列
-      .where(and(eq(schema.agentRuns.groupId, groupId), ne(schema.agentRuns.status, "discarded"), ...(refProject ? [eq(schema.agentRuns.projectId, refProject.id)] : [])))
-      .orderBy(desc(schema.agentRuns.updatedAt))
-      .limit(12);
-    const text = rows.length
+    const TEAM_AGENT_RUN_LIST_CAP = 12;
+    const where = and(
+      eq(schema.agentRuns.groupId, groupId),
+      ne(schema.agentRuns.status, "discarded"),
+      ...(refProject ? [eq(schema.agentRuns.projectId, refProject.id)] : []),
+    );
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
+        .from(schema.agentRuns)
+        .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+        // groupId 用本組的（非 run 自帶的）＝範圍鎖死；放棄的計畫是雜訊不列
+        .where(where)
+        .orderBy(desc(schema.agentRuns.updatedAt))
+        .limit(TEAM_AGENT_RUN_LIST_CAP),
+      db.select({ n: sql<number>`count(*)` }).from(schema.agentRuns).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    const truncated = total > rows.length;
+    const listText = rows.length
       ? rows
           .map((r, i) => `${i + 1}. ${formatAgentRunLine({
             projectTitle: r.projectTitle,
@@ -744,12 +755,17 @@ export async function runTeamTool(
       : refProject
         ? `「${refProject.title}」目前沒有任何 AI 代理計畫或執行紀錄`
         : "本組目前沒有任何 AI 代理計畫或執行紀錄";
+    const text = truncated
+      ? `共 ${total} 筆代理計畫；此清單只展開 ${rows.length} 筆，不得宣稱已列出全部\n${listText}`
+      : listText;
     return {
-      step: refProject ? `查了「${refProject.title}」的代理動態(${rows.length})` : `查了全組代理動態(${rows.length})`,
+      step: refProject ? `查了「${refProject.title}」的代理動態(${rows.length}/${total})` : `查了全組代理動態(${rows.length}/${total})`,
       text,
       meta: {
         ok: true,
-        resultCount: rows.length,
+        resultCount: total,
+        listedCount: rows.length,
+        truncated,
         sourceType: "agent_run",
         sourceName: refProject ? `「${refProject.title}」的 AI 計畫` : "全組 AI 計畫",
         sourceId: refProject?.id,

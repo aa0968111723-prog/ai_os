@@ -11,7 +11,7 @@
  * 但代理的執行永遠只走 agent_run + Runner——不存在第二條扣點／執行路徑。
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db, schema } from "../db";
@@ -1609,25 +1609,97 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   return updated[0];
 }
 
-/** 讀取：待核准＋執行中全列＋最近 5 筆終局（放棄的不列）。帶組隔離。 */
-export async function listAgentRunsForProject(auth: AuthState, projectId: string): Promise<AgentRunRow[]> {
+export const AGENT_RUN_ACTIVE_LIST_CAP = 100;
+export const AGENT_RUN_FINISHED_LIST_CAP = 5;
+
+export interface AgentRunListInventory {
+  items: AgentRunRow[];
+  listedActive: number;
+  listedFinished: number;
+  activeTotal: number;
+  finishedTotal: number;
+  total: number;
+  awaitingApprovalTotal: number;
+  runningTotal: number;
+  waitingTotal: number;
+  byStatus: Record<string, number>;
+  truncated: boolean;
+  activeCap: number;
+  finishedCap: number;
+}
+
+/** COUNT 與頁面長度分開，避免 100+5 被當成專案全部代理計畫。 */
+export function summarizeAgentRunInventory(input: {
+  byStatus: Record<string, number>;
+  listedActive: number;
+  listedFinished: number;
+}): Pick<
+  AgentRunListInventory,
+  "activeTotal" | "finishedTotal" | "total" | "awaitingApprovalTotal" | "runningTotal" | "waitingTotal" | "byStatus" | "truncated"
+> {
+  const activeSet = new Set<string>(["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES]);
+  let activeTotal = 0;
+  let finishedTotal = 0;
+  for (const [status, n] of Object.entries(input.byStatus)) {
+    if (status === "discarded") continue;
+    if (activeSet.has(status)) activeTotal += n;
+    else finishedTotal += n;
+  }
+  const waitingTotal = HUMAN_WAITING_RUN_STATUSES.reduce((sum, status) => sum + (input.byStatus[status] ?? 0), 0);
+  return {
+    activeTotal,
+    finishedTotal,
+    total: activeTotal + finishedTotal,
+    awaitingApprovalTotal: input.byStatus.awaiting_approval ?? 0,
+    runningTotal: input.byStatus.running ?? 0,
+    waitingTotal,
+    byStatus: input.byStatus,
+    truncated: activeTotal > input.listedActive || finishedTotal > input.listedFinished,
+  };
+}
+
+/** 讀取：待核准＋執行中頁＋最近終局（放棄的不列）。帶組隔離與全表 COUNT。 */
+export async function listAgentRunsInventory(auth: AuthState, projectId: string): Promise<AgentRunListInventory> {
   assertUuid(projectId, "專案編號");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
-  const active = await db
-    .select()
-    .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES])))
-    .orderBy(desc(schema.agentRuns.createdAt))
-    .limit(100);
-  const finished = await db
-    .select()
-    .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), notInArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES, "discarded"])))
-    .orderBy(desc(schema.agentRuns.createdAt))
-    .limit(5);
-  return [...active, ...finished];
+  const activeWhere = and(
+    eq(schema.agentRuns.projectId, projectId),
+    inArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES]),
+  );
+  const finishedWhere = and(
+    eq(schema.agentRuns.projectId, projectId),
+    notInArray(schema.agentRuns.status, ["awaiting_approval", ...ACTIVE_AGENT_RUN_STATUSES, "discarded"]),
+  );
+  const [active, finished, statusRows] = await Promise.all([
+    db.select().from(schema.agentRuns).where(activeWhere).orderBy(desc(schema.agentRuns.createdAt)).limit(AGENT_RUN_ACTIVE_LIST_CAP),
+    db.select().from(schema.agentRuns).where(finishedWhere).orderBy(desc(schema.agentRuns.createdAt)).limit(AGENT_RUN_FINISHED_LIST_CAP),
+    db.select({ status: schema.agentRuns.status, n: sql<number>`count(*)` })
+      .from(schema.agentRuns)
+      .where(and(eq(schema.agentRuns.projectId, projectId), ne(schema.agentRuns.status, "discarded")))
+      .groupBy(schema.agentRuns.status),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = Number(row.n ?? 0);
+  const counts = summarizeAgentRunInventory({
+    byStatus,
+    listedActive: active.length,
+    listedFinished: finished.length,
+  });
+  return {
+    items: [...active, ...finished],
+    listedActive: active.length,
+    listedFinished: finished.length,
+    activeCap: AGENT_RUN_ACTIVE_LIST_CAP,
+    finishedCap: AGENT_RUN_FINISHED_LIST_CAP,
+    ...counts,
+  };
+}
+
+/** 讀取：待核准＋執行中頁＋最近終局（放棄的不列）。帶組隔離。 */
+export async function listAgentRunsForProject(auth: AuthState, projectId: string): Promise<AgentRunRow[]> {
+  return (await listAgentRunsInventory(auth, projectId)).items;
 }
 
 /** 讀取：單筆代理執行（帶組隔離）。供 MCP get_agent_run 用。 */

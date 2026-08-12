@@ -64,7 +64,7 @@ import {
 } from "./databaseMcp";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
-  listAgentRunsForProject, getAgentRunChecked,
+  listAgentRunsInventory, getAgentRunChecked,
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
 import { addNoteCore, appendNoteCore } from "./notesCore";
@@ -374,7 +374,7 @@ export const TOOLS = [
   },
   {
     name: "list_agent_runs",
-    description: "列出專案的代理計畫與執行狀態（待核准／執行中＋最近終局）。",
+    description: "列出專案的代理計畫與執行狀態（待核准／執行中頁＋最近終局）。回 items + total + truncated；活躍最多 100、終局最多 5，不得把頁面當成全部。awaitingApprovalTotal／runningTotal／waitingTotal 是全表 COUNT。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   {
@@ -656,7 +656,7 @@ export const TOOLS = [
   // ── 統整快照（把分鏡／生成／代理／排程／待辦一次給外部 AI，細部連結各子系統）──
   {
     name: "get_project_status",
-    description: "一次取回專案全貌：分鏡進度、近期生成狀態、進行中的 AI 代理、即將到來的行程、以及待處理事項。外部 AI 規劃下一步前先讀這個。",
+    description: "一次取回專案全貌：分鏡進度、近期生成狀態、進行中的 AI 代理、即將到來的行程、以及待處理事項。生成 byStatus／awaitingApproval 與 agentRuns.activeTotal／awaitingApproval 是全表 COUNT，不是清單頁長度。外部 AI 規劃下一步前先讀這個。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   // ── 素材上傳授權（實作見 mcpUploadGrant；MCP JSON-RPC 不傳二進位）──
@@ -1442,8 +1442,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     return { runId: run.id, status: run.status };
   }
   if (name === "list_agent_runs") {
-    const runs = await listAgentRunsForProject(auth, String(args.projectId ?? ""));
-    return runs.map((r) => ({
+    const inv = await listAgentRunsInventory(auth, String(args.projectId ?? ""));
+    const items = inv.items.map((r) => ({
       runId: r.id,
       goal: r.goal,
       status: r.status,
@@ -1452,6 +1452,24 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       stepCount: (r.steps as AgentStep[]).length,
       createdAt: r.createdAt,
     }));
+    return {
+      items,
+      listedCount: items.length,
+      listedActive: inv.listedActive,
+      listedFinished: inv.listedFinished,
+      total: inv.total,
+      activeTotal: inv.activeTotal,
+      finishedTotal: inv.finishedTotal,
+      awaitingApprovalTotal: inv.awaitingApprovalTotal,
+      runningTotal: inv.runningTotal,
+      waitingTotal: inv.waitingTotal,
+      truncated: inv.truncated,
+      activeCap: inv.activeCap,
+      finishedCap: inv.finishedCap,
+      ...(inv.truncated
+        ? { note: `代理計畫共 ${inv.total} 筆（活躍 ${inv.activeTotal}／終局 ${inv.finishedTotal}）；此清單只展開活躍 ${inv.listedActive}、終局 ${inv.listedFinished}，不得宣稱已列出全部` }
+        : {}),
+    };
   }
   if (name === "get_agent_run") {
     const r = await getAgentRunChecked(auth, String(args.runId ?? ""));
@@ -1584,7 +1602,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))),
       db.select({ status: schema.generations.status, n: sql<number>`count(*)` })
         .from(schema.generations).where(genWhere).groupBy(schema.generations.status),
-      listAgentRunsForProject(auth, project.id),
+      listAgentRunsInventory(auth, project.id),
       listScheduleForGroup(auth, project.groupId, false, project.id),
     ]);
     const now = new Date();
@@ -1596,6 +1614,9 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       genTally[row.status] = n;
       genTotal += n;
     }
+    const listedActive = runs.items.filter((r) =>
+      r.status === "awaiting_approval" || r.status === "running" || r.status.startsWith("waiting") || r.status === "user_controlled",
+    );
     return {
       project: { title: project.title, kind: project.kind, format: project.format, status: project.status },
       scenes: { total: scenes.length, byStatus: sceneTally },
@@ -1604,9 +1625,28 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         byStatus: genTally,
         awaitingApproval: genTally.awaiting_approval ?? 0,
       },
-      agentRuns: runs
-        .filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting")
-        .map((r) => ({ runId: r.id, goal: r.goal, status: r.status, currentStep: r.currentStep, stepCount: (r.steps as AgentStep[]).length })),
+      agentRuns: {
+        items: listedActive.map((r) => ({
+          runId: r.id,
+          goal: r.goal,
+          status: r.status,
+          currentStep: r.currentStep,
+          stepCount: (r.steps as AgentStep[]).length,
+        })),
+        listedCount: listedActive.length,
+        total: runs.total,
+        activeTotal: runs.activeTotal,
+        finishedTotal: runs.finishedTotal,
+        awaitingApproval: runs.awaitingApprovalTotal,
+        running: runs.runningTotal,
+        waiting: runs.waitingTotal,
+        truncated: runs.truncated,
+        activeCap: runs.activeCap,
+        finishedCap: runs.finishedCap,
+        ...(runs.truncated
+          ? { note: `代理計畫共 ${runs.total} 筆（活躍 ${runs.activeTotal}）；此清單只展開活躍 ${listedActive.length} 筆，不得宣稱已列出全部` }
+          : {}),
+      },
       upcomingSchedule: schedulePage.items
         .filter((i) => i.startsAt >= now)
         .slice(0, 5)

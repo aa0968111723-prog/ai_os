@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { readFileSync } from "node:fs";
 import {
+  AGENT_RUN_ACTIVE_LIST_CAP,
+  AGENT_RUN_FINISHED_LIST_CAP,
   assertUuid,
   buildPickedSourceBlock,
   DRIVE_PLAN_SOURCE_CHAR_CAP,
@@ -16,6 +18,7 @@ import {
   plannerPlaybookDirective,
   prepareAgentStepsForResume,
   snapshotLines,
+  summarizeAgentRunInventory,
   toEphemeralPlanSource,
 } from "./agentCore";
 import type { AgentStep } from "./agentRunner";
@@ -64,6 +67,42 @@ describe("#671 enforcePlanStepLimit", () => {
   });
 });
 
+describe("summarizeAgentRunInventory", () => {
+  it("does not treat the 100+5 page as the whole project", () => {
+    const counts = summarizeAgentRunInventory({
+      byStatus: {
+        awaiting_approval: 40,
+        running: 70,
+        waiting: 12,
+        done: 30,
+        failed: 4,
+        discarded: 9,
+      },
+      listedActive: AGENT_RUN_ACTIVE_LIST_CAP,
+      listedFinished: AGENT_RUN_FINISHED_LIST_CAP,
+    });
+    expect(counts.activeTotal).toBe(122);
+    expect(counts.finishedTotal).toBe(34);
+    expect(counts.total).toBe(156);
+    expect(counts.awaitingApprovalTotal).toBe(40);
+    expect(counts.runningTotal).toBe(70);
+    expect(counts.waitingTotal).toBe(12);
+    expect(counts.truncated).toBe(true);
+    expect(counts.byStatus.discarded).toBe(9);
+    expect(counts.total).toBeGreaterThan(AGENT_RUN_ACTIVE_LIST_CAP + AGENT_RUN_FINISHED_LIST_CAP);
+  });
+
+  it("is not truncated when the page covers every non-discarded run", () => {
+    const counts = summarizeAgentRunInventory({
+      byStatus: { awaiting_approval: 1, running: 1, done: 2 },
+      listedActive: 2,
+      listedFinished: 2,
+    });
+    expect(counts.truncated).toBe(false);
+    expect(counts.total).toBe(4);
+  });
+});
+
 describe("failed AgentRun minimum-step resume", () => {
   it("preserves completed effects and resets only unfinished steps", () => {
     const steps: AgentStep[] = [
@@ -95,6 +134,15 @@ describe("agentCore source：各入口呼叫 assertUuid", () => {
     expect(source).toContain("plannerPointsAfterFailure(failedBilling, reservedPoints)");
     expect((source.match(/plannerPointsAfterFailure\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(source).not.toContain("const burned = llmPointsForUsageEntries(failedBilling)");
+  });
+
+  it("listAgentRunsInventory counts full-table statuses instead of the 100+5 page", () => {
+    expect(source).toContain("export async function listAgentRunsInventory");
+    expect(source).toContain("sql<number>`count(*)`");
+    expect(source).toContain("summarizeAgentRunInventory");
+    expect(source).toContain("AGENT_RUN_ACTIVE_LIST_CAP");
+    expect(source).toContain("AGENT_RUN_FINISHED_LIST_CAP");
+    expect(source).toContain("return (await listAgentRunsInventory(auth, projectId)).items");
   });
 
   it("writable DB cheatsheet discloses the visible 200-cap, not only the dbN slice", () => {
