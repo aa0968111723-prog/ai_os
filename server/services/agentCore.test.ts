@@ -118,6 +118,12 @@ describe("agentCore CA-01 planner context (source-lock)", () => {
     expect(source).toContain("sourceAssetRef?");
     expect(source).toContain("sourceUrl?");
   });
+
+  it("writable DB cheatsheet discloses truncation and keeps hidden tables resolvable", () => {
+    expect(source).toContain("AGENT_WRITABLE_REF_LIMIT");
+    expect(source).toContain("name:${t.id.slice(0, 8)}");
+    expect(source).toContain("共 ${dbs.length} 個 AI 可寫資料庫");
+  });
 });
 
 describe("PR-E2 buildPickedSourceBlock（使用者指定來源優先注入）", () => {

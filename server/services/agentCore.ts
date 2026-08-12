@@ -305,18 +305,30 @@ async function overLimit(userId: string): Promise<boolean> {
 /** 規劃可引用的資料庫（代號→真實表）：只列此人「AI 可寫」的可見庫，避免 uuid 幻覺 */
 interface WritableDb { ref: string; id: string; name: string; label: string; fields: DataField[] }
 
+const AGENT_WRITABLE_REF_LIMIT = 8;
+
 async function listAgentWritableDbs(auth: AuthState): Promise<WritableDb[]> {
   const tables = await listVisibleTables(auth);
-  const writable = tables.filter((t) => resolveAgentAccess(auth, t).canWriteRows).slice(0, 8);
-  return writable.map((t, i) => ({ ref: `db${i + 1}`, id: t.id, name: t.name, label: t.name, fields: t.fields as DataField[] }));
+  return tables
+    .filter((t) => resolveAgentAccess(auth, t).canWriteRows)
+    .map((t, i) => ({
+      ref: i < AGENT_WRITABLE_REF_LIMIT ? `db${i + 1}` : `name:${t.id.slice(0, 8)}`,
+      id: t.id,
+      name: t.name,
+      label: t.name,
+      fields: t.fields as DataField[],
+    }));
 }
 
 /** 資料庫清單 → 規劃提示詞的速查文字（代號、名稱、欄位 key/型別） */
 function dbCheatsheet(dbs: WritableDb[]): string {
   if (dbs.length === 0) return "（目前沒有可讓 AI 寫入的資料庫）";
-  return dbs
-    .map((d) => `${d.ref}=「${d.name}」欄位：${d.fields.map((f) => `${f.key}(${f.label}/${f.type}${f.required ? "/必填" : ""}${f.type === "select" && f.options ? "/選項:" + f.options.join("|") : ""})`).join("、")}`)
-    .join("\n");
+  const listed = dbs.filter((db) => db.ref.startsWith("db"));
+  const hidden = Math.max(0, dbs.length - listed.length);
+  const head = hidden
+    ? `共 ${dbs.length} 個 AI 可寫資料庫；代號只展開 ${listed.length} 庫，不得宣稱已列出全部；未展開的庫請用完整且唯一的庫名`
+    : `共 ${dbs.length} 個 AI 可寫資料庫`;
+  return [head, ...listed.map((d) => `${d.ref}=「${d.name}」欄位：${d.fields.map((f) => `${f.key}(${f.label}/${f.type}${f.required ? "/必填" : ""}${f.type === "select" && f.options ? "/選項:" + f.options.join("|") : ""})`).join("、")}`)].join("\n");
 }
 
 /** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填，走完代理全生命週期。
@@ -748,7 +760,7 @@ export async function planAgentCore(input: {
 - reorder_scenes：orderedSceneNos（把全部分鏡的「目前編號」按新順序完整列出，例如 [3,1,2,4]；不可重複、不可漏）。免費，用於調整敘事順序。
 - generate：prompt、sceneNo?、modelId?、characterRefs?、scenePresetRefs?、propRefs?、sourceAssetRef?、sourceUrl?；生成會花點數。needs 模型（圖生圖／i2v 等）必須指定 sourceAssetRef（素材庫代號）或 sourceUrl（https）。characterRefs／scenePresetRefs／propRefs 用上下文 charN／presetN／propN 代號。
 - voiceover：sceneNo；生成會花點數。
-- record_to_database：dbRef、data；只能使用可寫資料庫代號與欄位 key。
+- record_to_database：dbRef、data；優先用可寫資料庫代號，未展開的庫可用完整且唯一的庫名與欄位 key。
 - create_note：content、notePurpose?、mentionRefs?；content 必須是根據現有資料可直接保存的實質內容，不能寫「之後補」。
 - append_note：noteRef、content、mentionRefs?；只能引用既有筆記代號。
 - create_schedule：startsAt、endsAt?、description?、ownerRef?、mentionRefs?。

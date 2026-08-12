@@ -226,6 +226,28 @@ describe("complete AI planning safety resolver", () => {
     expect(plan.summary.missingInformation.join(" ")).toContain("依賴未能建立");
   });
 
+  it("resolves a unique full database name beyond the dbN snapshot", () => {
+    const hidden = {
+      ref: "name:aaaaaaaa",
+      id: "99999999-9999-4999-8999-999999999999",
+      label: "隱藏成果庫",
+      fields: [{ key: "title", label: "標題", type: "text" }],
+    };
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "record-hidden",
+        kind: "record_to_database",
+        title: "寫入隱藏庫",
+        dbRef: "隱藏成果庫",
+        data: { title: "ok" },
+      }],
+    });
+    const plan = resolveCompletePlanDraft(draft, { ...aliases, databases: [...aliases.databases, hidden] });
+    expect(plan.steps[0]?.tableId).toBe(hidden.id);
+    expect(plan.summary.missingInformation).toEqual([]);
+  });
+
   it("rejects dependency cycles before persistence", () => {
     const draft = completePlanDraftSchema.parse({
       summary: summary(),

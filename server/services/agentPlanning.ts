@@ -228,6 +228,20 @@ function aliasMap(rows: PlannerAlias[]): Map<string, PlannerAlias> {
   return new Map(rows.map((row) => [row.ref, row]));
 }
 
+function resolvePlannerDatabase(
+  databases: Map<string, PlannerAlias>,
+  aliases: readonly PlannerDatabaseAlias[],
+  token: string,
+): PlannerDatabaseAlias | undefined {
+  const key = token.trim();
+  if (!key) return undefined;
+  const byRef = databases.get(key);
+  if (byRef) return aliases.find((row) => row.id === byRef.id) ?? (byRef as PlannerDatabaseAlias);
+  const lower = key.toLocaleLowerCase();
+  const nameHits = aliases.filter((row) => row.ref === key || row.label.toLocaleLowerCase() === lower);
+  return nameHits.length === 1 ? nameHits[0] : undefined;
+}
+
 function memberIds(
   refs: string[] | undefined,
   members: Map<string, PlannerAlias>,
@@ -381,7 +395,7 @@ export function resolveCompletePlanDraft(
     };
 
     if (source.kind === "record_to_database") {
-      const target = databases.get(source.dbRef);
+      const target = resolvePlannerDatabase(databases, aliases.databases, source.dbRef);
       if (!target) {
         missingInformation.push(`步驟「${source.title}」找不到可寫資料庫代號「${source.dbRef}」`);
         continue;
