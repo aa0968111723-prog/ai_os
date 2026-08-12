@@ -165,9 +165,10 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   const upcomingItems = (schedulePreview.data?.items ?? []) as ScheduleItem[];
   const today = new Date();
   const todayScheduleCount = upcomingItems.filter((item) => dayKey(new Date(item.startsAt)) === dayKey(today)).length;
-  const noteCount = notesPreview.data?.length ?? 0;
+  const noteItems = Array.isArray(notesPreview.data) ? notesPreview.data : (notesPreview.data?.items ?? []);
+  const noteCount = Array.isArray(notesPreview.data) ? noteItems.length : (notesPreview.data?.total ?? noteItems.length);
   const linkedKnowledgeCount = upcomingItems.filter((item) => item.projectId).length
-    + (notesPreview.data ?? []).filter((note) => note.projectId).length;
+    + noteItems.filter((note) => note.projectId).length;
 
   if (!groupId) {
     return (
@@ -973,7 +974,9 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
 
   // 筆記清單原本沒有任何搜尋——三個月的會議紀錄堆起來只能一列一列往下看。
   // 標題與摘要都比對（摘要就是內文開頭，找「那次講到分鏡的會」靠的是它）。
-  const notes = list.data ?? [];
+  const notes = (Array.isArray(list.data) ? list.data : list.data?.items ?? []) as NoteItem[];
+  const notesTruncated = !Array.isArray(list.data) && !!list.data?.truncated;
+  const notesTotal = Array.isArray(list.data) ? notes.length : (list.data?.total ?? notes.length);
   // 一次只展開一則的附件區：附件查詢是每則一支，全部常駐會在筆記一多時打爆後端
   const [openAttachments, setOpenAttachments] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -1013,6 +1016,9 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
           </span>
         )}
         <Hint>會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</Hint>
+        {notesTruncated && (
+          <Hint>筆記超過單頁上限，只顯示最近 {notes.length} / {notesTotal.toLocaleString()} 則，不能把這頁當成全部。</Hint>
+        )}
       </div>
 
       {formOpen && (

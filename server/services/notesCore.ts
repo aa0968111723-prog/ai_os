@@ -2,7 +2,7 @@
  * 筆記核心積木：讓 tRPC、Agent Runner、MCP 與後續自動化共用同一組資料與權限守門。
  * 路由只負責傳輸層驗證；這裡仍會做完整的 transport-independent validation。
  */
-import { and, desc, eq, gte, isNull, notInArray } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -14,6 +14,7 @@ import { executeAgentEffectOnce } from "./agentEffectCore";
 export const NOTE_TITLE_MAX = 120;
 export const NOTE_CONTENT_MAX = 40_000;
 export const NOTE_MENTIONS_MAX = 20;
+export const NOTE_LIST_LIMIT = 200;
 const NOTE_VERSION_KEEP = 20;
 
 export type NoteRow = typeof schema.notes.$inferSelect;
@@ -135,38 +136,49 @@ export async function getNoteChecked(auth: AuthState, id: string): Promise<NoteR
   return row;
 }
 
+export interface NoteListInventory {
+  items: NoteSummary[];
+  total: number;
+  truncated: boolean;
+  cap: number;
+}
+
 export async function listNotesCore(
   auth: AuthState,
   groupId: string,
   projectId?: string,
-): Promise<NoteSummary[]> {
+): Promise<NoteListInventory> {
   requireGroup(auth, groupId);
   if (projectId) await projectChecked(auth, groupId, projectId, false);
   const conditions = [eq(schema.notes.groupId, groupId)];
   if (projectId) conditions.push(eq(schema.notes.projectId, projectId));
-  const rows = await db
-    .select({
-      id: schema.notes.id,
-      projectId: schema.notes.projectId,
-      title: schema.notes.title,
-      content: schema.notes.content,
-      updatedAt: schema.notes.updatedAt,
-      createdBy: schema.notes.createdBy,
-      creatorName: schema.users.name,
-      sourceMessageId: schema.notes.sourceMessageId,
-      mentions: schema.notes.mentions,
-      planRunId: schema.notes.planRunId,
-      planStepId: schema.notes.planStepId,
-    })
-    .from(schema.notes)
-    .leftJoin(schema.users, eq(schema.users.id, schema.notes.createdBy))
-    .where(and(...conditions))
-    .orderBy(desc(schema.notes.updatedAt))
-    .limit(200);
+  const where = and(...conditions);
+  const [rows, countRows] = await Promise.all([
+    db
+      .select({
+        id: schema.notes.id,
+        projectId: schema.notes.projectId,
+        title: schema.notes.title,
+        content: schema.notes.content,
+        updatedAt: schema.notes.updatedAt,
+        createdBy: schema.notes.createdBy,
+        creatorName: schema.users.name,
+        sourceMessageId: schema.notes.sourceMessageId,
+        mentions: schema.notes.mentions,
+        planRunId: schema.notes.planRunId,
+        planStepId: schema.notes.planStepId,
+      })
+      .from(schema.notes)
+      .leftJoin(schema.users, eq(schema.users.id, schema.notes.createdBy))
+      .where(where)
+      .orderBy(desc(schema.notes.updatedAt))
+      .limit(NOTE_LIST_LIMIT),
+    db.select({ n: sql<number>`count(*)` }).from(schema.notes).where(where),
+  ]);
   // 動態 import 避開與 attachmentsCore 的循環相依（它要 noteWriteDenied 做權限判定）
   const { countAttachmentsByRef } = await import("./attachmentsCore");
   const attachmentCounts = await countAttachmentsByRef("note", rows.map((row) => row.id));
-  return rows.map((row) => ({
+  const items = rows.map((row) => ({
     id: row.id,
     projectId: row.projectId,
     title: row.title,
@@ -181,13 +193,20 @@ export async function listNotesCore(
     planStepId: row.planStepId,
     attachmentCount: attachmentCounts.get(row.id) ?? 0,
   }));
+  const total = Number(countRows[0]?.n ?? 0);
+  return {
+    items,
+    total,
+    truncated: total > items.length,
+    cap: NOTE_LIST_LIMIT,
+  };
 }
 
 export async function listNotesForProject(auth: AuthState, projectId: string): Promise<NoteSummary[]> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
-  return listNotesCore(auth, project.groupId, project.id);
+  return (await listNotesCore(auth, project.groupId, project.id)).items;
 }
 
 export async function addNoteCore(input: {

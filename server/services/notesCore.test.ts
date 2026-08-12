@@ -18,6 +18,11 @@ describe("notesCore ACL contract", () => {
     expect(noteWriteDenied("author", "admin", "admin")).toBe(false);
   });
 
+  it("listNotesCore counts the full group instead of treating the 200-row page as the inventory", () => {
+    expect(source).toContain("NOTE_LIST_LIMIT");
+    expect(source).toContain("truncated: total > items.length");
+  });
+
   it("retries reuse the same plan step instead of inserting again", () => {
     expect(source).toContain("onConflictDoNothing");
     expect(source).toContain("findExistingNote");

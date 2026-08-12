@@ -1136,13 +1136,13 @@ export function MessagePanel({
                   <Icon name="Clock" size={12} style={{ marginRight: 5 }} />{s.title}
                 </button>
               ))}
-              {(notesQ.data ?? []).slice(0, 8).map((n) => (
+              {(Array.isArray(notesQ.data) ? notesQ.data : notesQ.data?.items ?? []).slice(0, 8).map((n) => (
                 <button key={`n-${n.id}`} type="button" role="option" aria-selected="false"
                   onClick={() => { setPendingRef({ refType: "note", refId: n.id, title: n.title }); setRefPickerOpen(false); }}>
                   <Icon name="FileText" size={12} style={{ marginRight: 5 }} />{n.title}
                 </button>
               ))}
-              {!scheduleQ.data?.items.length && !notesQ.data?.length && (
+              {!scheduleQ.data?.items.length && !(Array.isArray(notesQ.data) ? notesQ.data : notesQ.data?.items ?? []).length && (
                 <Hint as="span" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</Hint>
               )}
             </div>
