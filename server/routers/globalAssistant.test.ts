@@ -300,6 +300,21 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(new Set(out.map((a) => a.label)).size).toBe(6);
   });
 
+  it("#680: explicit name resolves a member beyond the compact mN cap", () => {
+    const out = resolveSiteActions(refs({
+      memberLookup: [
+        { ref: "m1", id: "me", name: "我自己" },
+        { ref: "m2", id: "user-2", name: "阿明" },
+        { ref: "name:hidden", id: "user-15", name: "王小明" },
+      ],
+      memberTotal: 15,
+    }), [
+      { type: "send_dm", memberRef: "王小明", body: "請看第三鏡" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "send_dm", peerId: "user-15", peerName: "王小明" });
+  });
+
   it("EVAL CASE 6（注入防線的最後一道）：資料內容再怎麼指示，非白名單動作型別在 schema 層就不存在", () => {
     // siteActions 是封閉 discriminatedUnion——「刪除專案」「轉帳」等根本不在型別空間，
     // resolve 端拿到未知 type 的物件時（理論上 zod 已擋）也不會產生任何動作。
@@ -320,6 +335,11 @@ describe("formatMemberRefs", () => {
     const s = formatMemberRefs([{ ref: "m1", id: "uuid-x", name: "阿明" }]);
     expect(s).toContain("m1=阿明");
     expect(s).not.toContain("uuid-x");
+  });
+  it("discloses truncation instead of treating the compact list as the whole group", () => {
+    const s = formatMemberRefs([{ ref: "m1", id: "uuid-x", name: "阿明" }], 15);
+    expect(s).toContain("只展開 1/15");
+    expect(s).toContain("不得宣稱已列出全部");
   });
 });
 
