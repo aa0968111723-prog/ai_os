@@ -5,6 +5,12 @@ import { setOrbState } from "../lib/orbState";
 import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";
 import { requestSiteAssistantStream } from "./assistantStream";
+import { readAssistantAnswerMode } from "../lib/agentPlannerPreference";
+import {
+  classifyAssistantComputerIntent,
+  formatComputerCapabilityAnswer,
+  isRealBrowserReady,
+} from "../lib/assistantComputerIntent";
 import { type AssistantActivityEvent } from "./AssistantTrace";
 import { AgentRunCard } from "./AgentRunCard";
 import { AgentWorkPanel } from "./AgentWorkPanel";
@@ -17,7 +23,9 @@ import {
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
+import type { AssistantInteractionRequest } from "@shared/assistantInteraction";
 import {
   ExternalAssetIntake,
   type ExternalIntakeOpenRequest,
@@ -90,7 +98,7 @@ export interface ChatMessage {
   commands?: CommandProposal[];
   executedSiteActions?: ExecutedSiteAction[];
   executionPlan?: AssistantExecutionPlan;
-  runStatus?: "completed" | "failed" | "stopped";
+  runStatus?: "completed" | "failed" | "stopped" | "waiting";
   latency?: AssistantLatencyMetrics;
   activity?: AssistantActivityEvent[];
   retryText?: string;
@@ -98,6 +106,7 @@ export interface ChatMessage {
   editingSessionId?: string;
   editingResult?: { sessionId: string; assetId: string };
   intakeFallbacks?: IntakeFallback[];
+  interactionRequest?: AssistantInteractionRequest;
 }
 
 function IntakeFallbackCard({
@@ -116,6 +125,36 @@ function IntakeFallbackCard({
         <Button size="sm" onClick={() => onChoose(fallback.projectId, "files")}>選擇檔案</Button>
         <Button variant="tonal" size="sm" onClick={() => onChoose(fallback.projectId, "drive")}>Google Drive</Button>
         <Button variant="ghost" size="sm" onClick={() => onChoose(fallback.projectId, "files")}>下載後上傳</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Agent-initiated structured handoff: cards first, free text only as last resort. */
+function InteractionRequestCard({
+  request,
+  onSelect,
+}: {
+  request: AssistantInteractionRequest;
+  onSelect: (prompt: string) => void;
+}) {
+  if (!request.options.length) return null;
+  return (
+    <div className="ai-copilot-action-card" data-interaction={request.kind}>
+      <span className="ai-copilot-action-card__label">{request.title}</span>
+      {request.description ? <span className="ai-copilot-action-card__detail">{request.description}</span> : null}
+      <div className="ai-copilot-action-card__buttons">
+        {request.options.map((option, index) => (
+          <Button
+            key={option.id}
+            size="sm"
+            variant={index === 0 ? "primary" : "tonal"}
+            onClick={() => onSelect(option.prompt ?? option.label)}
+            style={{ minHeight: 44, minWidth: 44 }}
+          >
+            {option.label}
+          </Button>
+        ))}
       </div>
     </div>
   );
@@ -436,6 +475,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
+  // Capability probing is data, not LLM opinion: never ask a model whether the product can browse.
+  const computerStatus = trpc.computerRuntime.status.useQuery(undefined, { staleTime: 30_000, retry: false });
+  const createBrowserSession = trpc.computerRuntime.createSession.useMutation();
   /* 頁面感知：快捷動作、麵包屑與送給後端的 pageContext 都由這一份推導 */
   const pageCtx = useAssistantContext();
   const activeProjectId = pageCtx.projectId ?? projectId;
@@ -458,6 +500,107 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     const text = (textToSend ?? input).trim();
     if (!text || !groupId || pending) return;
 
+    const localPlan = classifyAssistantRequest(text);
+    const computerIntent = classifyAssistantComputerIntent(text);
+    if (computerIntent) {
+      setInput("");
+      const runtime = computerStatus.data ?? (await computerStatus.refetch()).data;
+      const capabilityAnswer = formatComputerCapabilityAnswer(runtime);
+
+      // Capability questions are answered from the actual runtime flags/provider, never model memory.
+      if (computerIntent === "capability") {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          messages: [
+            ...previous.messages,
+            { role: "user", text },
+            {
+              role: "assistant",
+              text: capabilityAnswer,
+              executionPlan: localPlan,
+              runStatus: "completed",
+              suggestedActions: isRealBrowserReady(runtime)
+                ? [{ label: "開啟瀏覽器", prompt: "幫我在目前專案開啟瀏覽器。" }]
+                : undefined,
+            },
+          ],
+        }));
+        return;
+      }
+
+      // Never fake browser work. A real external provider must be reported ready by the server first.
+      if (!isRealBrowserReady(runtime)) {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          messages: [
+            ...previous.messages,
+            { role: "user", text },
+            {
+              role: "assistant",
+              text: `${capabilityAnswer}\n\n所以這次我沒有假裝開啟瀏覽器；等真實 Browser provider 接通後再執行。`,
+              executionPlan: localPlan,
+              runStatus: "waiting",
+            },
+          ],
+        }));
+        return;
+      }
+
+      if (!activeProjectId) {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          messages: [
+            ...previous.messages,
+            { role: "user", text },
+            {
+              role: "assistant",
+              text: "要啟動隔離瀏覽器，需要先指定工作專案。請打開或告訴我是哪個專案，我會接著做。",
+              executionPlan: localPlan,
+              runStatus: "waiting",
+            },
+          ],
+        }));
+        return;
+      }
+
+      const startUrl = text.match(/https?:\/\/[^\s<>{}\[\]"']+/i)?.[0];
+      try {
+        const session = await createBrowserSession.mutateAsync({
+          projectId: activeProjectId,
+          startUrl,
+          label: `Aios：${text.slice(0, 100)}`,
+        });
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          messages: [
+            ...previous.messages,
+            { role: "user", text },
+            {
+              role: "assistant",
+              text: `已驗證啟動隔離 Browser Runtime${session.currentUrl ? `，目前網址：${session.currentUrl}` : ""}。`,
+              executionPlan: localPlan,
+              runStatus: "completed",
+            },
+          ],
+        }));
+      } catch (error) {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          messages: [
+            ...previous.messages,
+            { role: "user", text },
+            {
+              role: "assistant",
+              text: `瀏覽器沒有啟動成功：${error instanceof Error ? error.message : "執行失敗"}`,
+              executionPlan: localPlan,
+              runStatus: "failed",
+            },
+          ],
+        }));
+      }
+      return;
+    }
+
     const directIntakeMode = activeProjectId ? detectDirectIntakeRequest(text) : null;
     if (activeProjectId && detectEditingHandoffRequest(text)) {
       setInput("");
@@ -473,7 +616,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         messages: [
           ...previous.messages,
           { role: "user", text },
-          { role: "assistant", text: "我會在這個對話裡準備正式的 LumaFusion 交接。請先確認範圍與主要素材；建立後工作階段會保留在這裡。", runStatus: "completed" },
+          { role: "assistant", text: "我會在這個對話裡準備正式的 LumaFusion 交接。請先確認範圍與主要素材；建立後工作階段會保留在這裡。", runStatus: "waiting" },
         ],
       }));
       setEditingSheetOpen(true);
@@ -503,7 +646,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               : directIntakeMode === "folder"
                 ? "請選擇要匯入的資料夾。Aios 會沿用 Folder Import 2.0 建立 session，檔案安全保存後即可繼續對話。"
               : "Aios 需要檔案才能繼續。選擇後會先安全保存，AI 分析會在背景執行。",
-            runStatus: "completed",
+            runStatus: "waiting",
           },
         ],
       }));
@@ -512,7 +655,6 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     }
 
     const newHistory = messages.slice(-6).map((m) => ({ role: m.role, text: m.text }));
-    const localPlan = classifyAssistantRequest(text);
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
     activeGoalRef.current = text;
@@ -549,6 +691,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events?: AgentEvent[];
       sources?: AgentSourceRecord[];
       intakeFallbacks?: IntakeFallback[];
+      activeGoal?: AssistantActiveGoal;
+      intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
+      interactionRequest?: AssistantInteractionRequest;
     };
     const applyDone = (data: AskData) => {
       setOrbState("speaking");
@@ -558,6 +703,41 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       const sources = data.sources ?? [];
       const actionResults = assistantActionResultsFromExecuted(data.executedSiteActions ?? []);
       recordAssistantActionResults(groupId, actionResults);
+      const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+      const hasWaiting = !!data.intakeFallbacks?.length
+        || !!data.interactionRequest
+        || data.siteActions.length > 0
+        || events.some((event) => (event.type === "waiting.permission" || event.type === "waiting.user_input") && event.status === "waiting");
+      const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
+      // Write completion requires agent.completed+ok. A plain answer without that
+      // event is never "Aios 已完成" when the run is still waiting on the user.
+      const resolvedRunStatus: ChatMessage["runStatus"] = hasFailure
+        ? "failed"
+        : hasWaiting
+          ? "waiting"
+          : hasVerifiedCompletion
+            ? "completed"
+            : "waiting";
+      if (data.activeGoal) {
+        const status: AssistantActiveGoal["status"] = resolvedRunStatus === "completed"
+          ? "completed"
+          : resolvedRunStatus === "failed"
+            ? "failed"
+            : data.activeGoal.status === "waiting_confirmation"
+              ? "waiting_confirmation"
+              : "waiting_user_input";
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          activeGoal: { ...data.activeGoal!, status },
+        }));
+      }
+      if (data.intakeRequest) {
+        setIntakeTargetProjectId(data.intakeRequest.projectId);
+        setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.intakeRequest.mode });
+      } else if (data.interactionRequest?.autoLaunch && data.interactionRequest.intakeMode && data.interactionRequest.projectId) {
+        setIntakeTargetProjectId(data.interactionRequest.projectId);
+        setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.interactionRequest.intakeMode });
+      }
       pushMessage({
         role: "assistant",
         text: data.answer,
@@ -570,13 +750,14 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         // Source-transfer fallbacks are waiting for a real user choice; do not
         // render them as a completed execution card.
         executionPlan: data.intakeFallbacks?.length ? undefined : (data.executionPlan ?? localPlan),
-        runStatus: "completed",
+        runStatus: resolvedRunStatus,
         latency: data.latency,
         activity: [...liveEventsRef.current],
         runId: data.runId,
         events: events.length ? events : undefined,
         sources: sources.length ? sources : undefined,
         intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
+        interactionRequest: data.interactionRequest,
         suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
           ? [
               { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
@@ -612,6 +793,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         projectId: pageCtx.projectId ?? projectId,
         pageContext: toWirePageContext(pageCtx),
         recentActionResults: conversation.recentActionResults,
+        activeGoal: conversation.activeGoal,
+        mode: readAssistantAnswerMode(),
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
@@ -655,6 +838,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               projectId: pageCtx.projectId ?? projectId,
               pageContext: toWirePageContext(pageCtx),
               recentActionResults: conversation.recentActionResults,
+              activeGoal: conversation.activeGoal,
+              mode: readAssistantAnswerMode(),
             },
             {
               onSuccess: (data) => { applyDone(data); resolve(); },
@@ -848,6 +1033,12 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       }}
                     />
                   ))}
+                  {msg.interactionRequest ? (
+                    <InteractionRequestCard
+                      request={msg.interactionRequest}
+                      onSelect={(prompt) => void handleSend(prompt)}
+                    />
+                  ) : null}
 
                   {/* 讀到什麼 → 能去哪。按鈕只從真實來源長出來（見 followUpActionsFromSources）。 */}
                   {msg.role === "assistant" && onNavigate && msg.sources?.length ? (
@@ -988,6 +1179,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                   backgroundProcessing: true,
                   verification: { status: "verified", message: "檔案已安全保存並登記背景整理" },
                 }]);
+                setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+                  ...previous,
+                  activeGoal: previous.activeGoal
+                    ? {
+                        ...previous.activeGoal,
+                        status: "completed",
+                        missingSlots: [],
+                        resultRefIds: notice.assetIds.slice(0, 20),
+                      }
+                    : previous.activeGoal,
+                }));
                 pushMessage({
                   role: "assistant",
                   text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理，你可以繼續聊天。`,

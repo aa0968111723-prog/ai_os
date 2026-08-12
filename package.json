@@ -38,6 +38,8 @@
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",
     "check:agent-planner": "tsx scripts/check-agent-planner.ts",
+    "scan:agent-integrity": "tsx scripts/scan-agent-integrity.ts",
+    "soak:agent": "tsx scripts/agent-soak-harness.ts",
     "test:watch": "vitest",
     "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",

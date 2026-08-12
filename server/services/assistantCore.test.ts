@@ -89,7 +89,17 @@ describe("runToolLoop", () => {
     expect(prompts[1]).toMatch(/^P\|F\|/);
   });
 
-  it("壞 JSON → 純文字 fallback（不提議動作）", async () => {
+  it("壞 JSON 先修復一次，第二輪合法就不降級", async () => {
+    const outputs = ["我想想 {壞掉的json} 大概是這樣", '{"answer":"修好了"}'];
+    const out = await runToolLoop({
+      ...baseOpts,
+      llm: async () => outputs.shift()!,
+    });
+    expect(out.usedFallback).toBe(false);
+    expect(out.reply).toEqual({ answer: "修好了" });
+  });
+
+  it("格式修復仍失敗才走純文字 fallback（不提議動作）", async () => {
     const out = await runToolLoop({
       ...baseOpts,
       llm: async () => "我想想 {壞掉的json} 大概是這樣",

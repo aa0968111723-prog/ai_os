@@ -89,7 +89,7 @@ type Turn = {
   /** 本次依據（P5）：這則回答實際讀了哪些知識、各自完整度、有無被上限截斷 */
   sources?: AskSourcesData;
   executionPlan?: AssistantExecutionPlan;
-  runStatus?: "completed" | "failed" | "stopped";
+  runStatus?: "completed" | "failed" | "stopped" | "waiting";
   latency?: AssistantLatencyMetrics;
   retryText?: string;
   directResults?: ProjectDirectResult[];
@@ -423,14 +423,26 @@ export function ProjectAssistant({
           const directlyRunnable = plan.intent === "DIRECT" && plan.confidence === "high"
             ? new Set(actions.filter((action) => action.type === "split_script"))
             : new Set<Action>();
+          const pendingActions = actions.filter((action) => !directlyRunnable.has(action));
+          const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+          const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+          const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
+          // Pending confirmation / proposed writes are not "Aios 已完成".
+          const runStatus: Turn["runStatus"] = hasFailure
+            ? "failed"
+            : pendingActions.length > 0
+              ? "waiting"
+              : hasVerifiedCompletion
+                ? "completed"
+                : "waiting";
           push({
             role: "ai",
             text: result.answer,
-            actions: actions.filter((action) => !directlyRunnable.has(action)),
+            actions: pendingActions,
             steps: result.steps,
             activity: [...traceRef.current],
             // 事件與來源以伺服器最終版本為準；串流掉封包時前端累積的那份會不完整
-            agentEvents: result.agentEvents ?? traceRef.current.filter(isAgentEvent),
+            agentEvents: events,
             agentSources: result.agentSources,
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
@@ -439,6 +451,7 @@ export function ProjectAssistant({
             sources: result.sources,
             executionPlan: plan,
             latency: result.latency,
+            runStatus,
           });
           if (directlyRunnable.size) {
             void runDirectProjectActions(actions, plan, requestProjectId, epoch, signal);

@@ -3,6 +3,7 @@ import type { AssistantActivityEvent } from "./AssistantTrace";
 import type { AssistantWirePageContext } from "@shared/assistantPageContext";
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActionResult } from "@shared/assistantActions";
+import type { AssistantActiveGoal, AssistantEvidenceScope, AssistantGoalFrame } from "@shared/assistantGoalFrame";
 import type {
   AssistantExecutionPlan,
   AssistantLatencyMetrics,
@@ -230,6 +231,11 @@ export type SiteAssistantStreamDone = {
    */
   events?: AgentEvent[];
   sources?: AgentSourceRecord[];
+  goalFrame?: AssistantGoalFrame;
+  activeGoal?: AssistantActiveGoal;
+  evidenceScope?: AssistantEvidenceScope;
+  intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
+  interactionRequest?: import("@shared/assistantInteraction").AssistantInteractionRequest;
 };
 
 function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
@@ -265,6 +271,8 @@ export async function requestSiteAssistantStream({
   projectId,
   pageContext,
   recentActionResults,
+  activeGoal,
+  mode,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -277,6 +285,9 @@ export async function requestSiteAssistantStream({
   /** 頁面感知上下文（在哪一頁／看哪一個／選了哪幾個）——同樣只是提示，後端逐欄夾制 */
   pageContext?: AssistantWirePageContext;
   recentActionResults?: AssistantActionResult[];
+  activeGoal?: AssistantActiveGoal;
+  /** Explicit answer-model preference. Undefined keeps the server's free default. */
+  mode?: AgentPlannerMode;
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -319,6 +330,8 @@ export async function requestSiteAssistantStream({
         projectId,
         pageContext,
         recentActionResults,
+        activeGoal,
+        mode,
       }),
       signal,
     });
