@@ -1887,6 +1887,25 @@ mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); 
 /* 這一格底是 color-mix(--primary 7%) 疊在 --bg 上（#e6dacd），比卡面暗，
    --primary-ink 在它上面只有 4.23:1。改用更深的 --primary-solid-active＝5.38:1。 */
 .msg-block.assistant .who { color: var(--primary-solid-active); }
+/* 訊息串裡的「AI 在說話」頭像＝一顆小 orb，跟全域助手/專案助手同一顆 conic brand 漸層球
+   （見 .ai-copilot-bubble--assistant .ai-copilot-bubble__avatar）。訊息串刻意不呼吸不發光暈，
+   只是身份標記；文字格仍走平底 tint——嵌在人與人的對話串裡，毛玻璃＋halo 會搶話。
+   此為 design system 明載決策（docs/uiux-audit/figma-design-system.md §7）。 */
+.msg-ai-orb {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  flex: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.72), transparent 46%),
+    conic-gradient(from 200deg,
+      var(--brand-orange), var(--brand-amber), var(--brand-lime),
+      var(--brand-teal), var(--brand-red), var(--brand-orange));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 1px 3px rgba(28, 25, 23, 0.18);
+}
 button.recording { display: inline-flex; align-items: center; gap: 4px; color: #fff; background: var(--danger);
   border-color: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }

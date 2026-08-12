@@ -108,4 +108,20 @@ Dev Mode 可直接讀出對應的 CSS 變數名，讓這條回路有跡可循。
 - **Phase 3 續**：PR #211 的劇組 UI 元件（技能卡、已選 chip、待你過目橫幅、支線進度）
 - **Phase 4**：Code Connect 綁定（把 Figma 元件對到 `client/src/components/ui/*`）與無障礙稽核
 
+## 7. AI 呈現語彙決策（2026-08-12）
+
+**「AI 在說話」的頭像全站統一為 orb，但訊息容器依情境分兩級。** 此決策為刻意設計，非缺陷：
+
+| 情境 | 容器語彙 | 頭像 |
+|---|---|---|
+| 浮層助手（全域／專案助手，`AICreativeCopilot` / `ProjectAssistant`） | 毛玻璃 `--ai-glass-strong` ＋ backdrop-filter ＋ 品牌 halo 環境光 | orb（conic brand 漸層，28px，呼吸動畫） |
+| 訊息串內的 AI 回應（留言面板 `.msg-block.assistant`、DM `.dm-bubble.assistant`） | **平底 tint**（`color-mix(--primary 7%)` / `--primary-tint`）＋ `--r-8` 圓角 | **orb 小尺寸（`.msg-ai-orb`，14px）** |
+
+**決策理由**：訊息串是嵌在人與人的對話之間，毛玻璃＋halo 是浮層助手的儀式語彙——
+每則 AI 回應都套 backdrop-filter 會搶話，且在捲動串中是效能負擔。orb 頭像才是品牌身份標記，
+值得全站一致（同一產品內同一個「AI 在說話」不能有兩張臉）。
+
+**對應 code**：`.msg-ai-orb`（`client/src/styles.css`）；頭像語彙與
+`.ai-copilot-bubble--assistant .ai-copilot-bubble__avatar` 同源（conic brand 漸層）。
+
 視覺對照依據見 `client/gallery.html`（`npm run dev` → <http://localhost:5173/gallery.html>）。
