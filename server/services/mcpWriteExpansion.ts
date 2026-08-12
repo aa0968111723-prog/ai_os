@@ -3,16 +3,31 @@
  * 與 mcpUploadGrant 同模式——工具定義 + handler 獨立，由 mcp.ts 掛上 TOOLS 與 runTool。
  * 一律重用既有 ACL（requireGroup / assertProjectEditable）、點數與審計，不另開後門。
  */
-import { and, asc, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import { assertProjectEditable } from "./projectAcl";
+import { assertReferenceImage } from "./referenceAsset";
 import { lockSceneOrder } from "./locks";
 import { addSceneDraftOnce } from "./sceneWriteCore";
 import { worldviewSchema } from "../../shared/worldview";
 import { executeGenerationCommand } from "./generationCommand";
 import type { AuthState } from "./auth";
+import {
+  CHAR_APPEARANCE_MAX,
+  CHAR_NAME_MAX,
+  CHAR_NOTES_MAX,
+  MAX_PROJECT_CHARACTERS,
+  MAX_PROJECT_PROPS,
+  MAX_PROJECT_SCENE_PRESETS,
+  PROP_APPEARANCE_MAX,
+  PROP_NAME_MAX,
+  PROP_NOTES_MAX,
+  SCENE_LIGHTING_MAX,
+  SCENE_NAME_MAX,
+  SCENE_PALETTE_MAX,
+} from "../../shared/cardLimits";
 import {
   AdobeNotConnectedError,
   AdobeReauthRequiredError,
@@ -28,6 +43,31 @@ import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
 
 const MAX_KNOWLEDGE = 200_000;
 const MAX_PROMPT = 8_000;
+const CARD_REPLAY_MS = 120_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function optionalReferenceAssetId(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || !UUID_RE.test(value.trim())) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "參考素材 id 格式不正確" });
+  }
+  return value.trim();
+}
+
+async function assertProjectCardCap(
+  table: typeof schema.characters | typeof schema.scenePresets | typeof schema.props,
+  projectId: string,
+  max: number,
+  label: string,
+): Promise<void> {
+  const [{ n }] = await db.select({ n: count() }).from(table).where(eq(table.projectId, projectId));
+  if (Number(n) >= max) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `此專案${label}已達上限（${max} 張）——先刪不用的再新增`,
+    });
+  }
+}
 
 export const MCP_WRITE_EXPANSION_TOOLS = [
   {
@@ -720,18 +760,30 @@ export async function runMcpWriteExpansion(
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, project.groupId);
     await assertProjectEditable(auth, project);
-    const nameStr = String(args.name ?? "").trim();
-    const appearance = String(args.appearance ?? "").trim();
+    const nameStr = String(args.name ?? "").trim().slice(0, CHAR_NAME_MAX);
+    const appearance = String(args.appearance ?? "").trim().slice(0, CHAR_APPEARANCE_MAX);
+    const notes = typeof args.notes === "string" ? args.notes.trim().slice(0, CHAR_NOTES_MAX) || null : null;
     if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
+    const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+    if (referenceAssetId) await assertReferenceImage(referenceAssetId, project.groupId);
+    const [recent] = await db.select().from(schema.characters).where(and(
+      eq(schema.characters.projectId, project.id),
+      eq(schema.characters.createdBy, auth.user.id),
+      eq(schema.characters.name, nameStr),
+      eq(schema.characters.appearance, appearance),
+      gte(schema.characters.createdAt, new Date(Date.now() - CARD_REPLAY_MS)),
+    )).orderBy(desc(schema.characters.createdAt)).limit(1);
+    if (recent) return { characterId: recent.id, name: recent.name };
+    await assertProjectCardCap(schema.characters, project.id, MAX_PROJECT_CHARACTERS, "角色定裝");
     const [row] = await db
       .insert(schema.characters)
       .values({
         projectId: project.id,
         groupId: project.groupId,
-        name: nameStr.slice(0, 80),
-        appearance: appearance.slice(0, 2000),
-        notes: typeof args.notes === "string" ? args.notes.slice(0, 2000) : null,
-        referenceAssetId: typeof args.referenceAssetId === "string" ? args.referenceAssetId : null,
+        name: nameStr,
+        appearance,
+        notes,
+        referenceAssetId,
         createdBy: auth.user.id,
       })
       .returning();
@@ -745,11 +797,15 @@ export async function runMcpWriteExpansion(
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
     const patch: Record<string, unknown> = {};
-    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
-    if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
-    if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
+    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, CHAR_NAME_MAX);
+    if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, CHAR_APPEARANCE_MAX);
+    if (typeof args.notes === "string") patch.notes = args.notes.trim().slice(0, CHAR_NOTES_MAX) || null;
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (args.referenceAssetId !== undefined) {
+      const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+      if (referenceAssetId) await assertReferenceImage(referenceAssetId, row.groupId);
+      patch.referenceAssetId = referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return { characterId: row.id, name: row.name };
     const [updated] = await db.update(schema.characters).set(patch).where(eq(schema.characters.id, id)).returning();
     return { characterId: updated.id, name: updated.name };
@@ -761,18 +817,30 @@ export async function runMcpWriteExpansion(
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, project.groupId);
     await assertProjectEditable(auth, project);
-    const nameStr = String(args.name ?? "").trim();
-    const palette = String(args.palette ?? "").trim();
+    const nameStr = String(args.name ?? "").trim().slice(0, SCENE_NAME_MAX);
+    const palette = String(args.palette ?? "").trim().slice(0, SCENE_PALETTE_MAX);
+    const lighting = typeof args.lighting === "string" ? args.lighting.trim().slice(0, SCENE_LIGHTING_MAX) || null : null;
     if (!nameStr || !palette) throw new TRPCError({ code: "BAD_REQUEST", message: "請填場景名與色板" });
+    const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+    if (referenceAssetId) await assertReferenceImage(referenceAssetId, project.groupId);
+    const [recent] = await db.select().from(schema.scenePresets).where(and(
+      eq(schema.scenePresets.projectId, project.id),
+      eq(schema.scenePresets.createdBy, auth.user.id),
+      eq(schema.scenePresets.name, nameStr),
+      eq(schema.scenePresets.palette, palette),
+      gte(schema.scenePresets.createdAt, new Date(Date.now() - CARD_REPLAY_MS)),
+    )).orderBy(desc(schema.scenePresets.createdAt)).limit(1);
+    if (recent) return { presetId: recent.id, name: recent.name };
+    await assertProjectCardCap(schema.scenePresets, project.id, MAX_PROJECT_SCENE_PRESETS, "場景設定");
     const [row] = await db
       .insert(schema.scenePresets)
       .values({
         projectId: project.id,
         groupId: project.groupId,
-        name: nameStr.slice(0, 80),
-        palette: palette.slice(0, 500),
-        lighting: typeof args.lighting === "string" ? args.lighting.slice(0, 500) : null,
-        referenceAssetId: typeof args.referenceAssetId === "string" ? args.referenceAssetId : null,
+        name: nameStr,
+        palette,
+        lighting,
+        referenceAssetId,
         createdBy: auth.user.id,
       })
       .returning();
@@ -786,11 +854,15 @@ export async function runMcpWriteExpansion(
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
     const patch: Record<string, unknown> = {};
-    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
-    if (typeof args.palette === "string" && args.palette.trim()) patch.palette = args.palette.trim().slice(0, 500);
-    if (typeof args.lighting === "string") patch.lighting = args.lighting.slice(0, 500);
+    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, SCENE_NAME_MAX);
+    if (typeof args.palette === "string" && args.palette.trim()) patch.palette = args.palette.trim().slice(0, SCENE_PALETTE_MAX);
+    if (typeof args.lighting === "string") patch.lighting = args.lighting.trim().slice(0, SCENE_LIGHTING_MAX) || null;
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (args.referenceAssetId !== undefined) {
+      const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+      if (referenceAssetId) await assertReferenceImage(referenceAssetId, row.groupId);
+      patch.referenceAssetId = referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return { presetId: row.id, name: row.name };
     const [updated] = await db.update(schema.scenePresets).set(patch).where(eq(schema.scenePresets.id, id)).returning();
     return { presetId: updated.id, name: updated.name };
@@ -802,18 +874,30 @@ export async function runMcpWriteExpansion(
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, project.groupId);
     await assertProjectEditable(auth, project);
-    const nameStr = String(args.name ?? "").trim();
-    const appearance = String(args.appearance ?? "").trim();
+    const nameStr = String(args.name ?? "").trim().slice(0, PROP_NAME_MAX);
+    const appearance = String(args.appearance ?? "").trim().slice(0, PROP_APPEARANCE_MAX);
+    const notes = typeof args.notes === "string" ? args.notes.trim().slice(0, PROP_NOTES_MAX) || null : null;
     if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填素材名與外觀" });
+    const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+    if (referenceAssetId) await assertReferenceImage(referenceAssetId, project.groupId);
+    const [recent] = await db.select().from(schema.props).where(and(
+      eq(schema.props.projectId, project.id),
+      eq(schema.props.createdBy, auth.user.id),
+      eq(schema.props.name, nameStr),
+      eq(schema.props.appearance, appearance),
+      gte(schema.props.createdAt, new Date(Date.now() - CARD_REPLAY_MS)),
+    )).orderBy(desc(schema.props.createdAt)).limit(1);
+    if (recent) return { propId: recent.id, name: recent.name };
+    await assertProjectCardCap(schema.props, project.id, MAX_PROJECT_PROPS, "素材設定");
     const [row] = await db
       .insert(schema.props)
       .values({
         projectId: project.id,
         groupId: project.groupId,
-        name: nameStr.slice(0, 80),
-        appearance: appearance.slice(0, 2000),
-        notes: typeof args.notes === "string" ? args.notes.slice(0, 2000) : null,
-        referenceAssetId: typeof args.referenceAssetId === "string" ? args.referenceAssetId : null,
+        name: nameStr,
+        appearance,
+        notes,
+        referenceAssetId,
         createdBy: auth.user.id,
       })
       .returning();
@@ -827,11 +911,15 @@ export async function runMcpWriteExpansion(
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
     const patch: Record<string, unknown> = {};
-    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
-    if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
-    if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
+    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, PROP_NAME_MAX);
+    if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, PROP_APPEARANCE_MAX);
+    if (typeof args.notes === "string") patch.notes = args.notes.trim().slice(0, PROP_NOTES_MAX) || null;
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (args.referenceAssetId !== undefined) {
+      const referenceAssetId = optionalReferenceAssetId(args.referenceAssetId);
+      if (referenceAssetId) await assertReferenceImage(referenceAssetId, row.groupId);
+      patch.referenceAssetId = referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return { propId: row.id, name: row.name };
     const [updated] = await db.update(schema.props).set(patch).where(eq(schema.props.id, id)).returning();
     return { propId: updated.id, name: updated.name };

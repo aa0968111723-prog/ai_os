@@ -36,4 +36,13 @@ describe("characters router 契約", () => {
   it("生成帶入上限與 cardLimits 對齊", () => {
     expect(MAX_GENERATE_CHARACTERS).toBe(6);
   });
+
+  it("without a clientRequestId, retries replay the same author+name+appearance within 2 minutes", () => {
+    expect(source).toContain("120_000");
+    expect(source).toContain("eq(schema.characters.createdBy, ctx.auth.user.id)");
+    const lookupAt = source.indexOf("gte(schema.characters.createdAt");
+    const insertAt = source.indexOf(".insert(schema.characters)");
+    expect(lookupAt).toBeGreaterThanOrEqual(0);
+    expect(insertAt).toBeGreaterThan(lookupAt);
+  });
 });

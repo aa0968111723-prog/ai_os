@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   MAX_PROJECT_PROPS,
@@ -123,6 +123,15 @@ export const propsRouter = router({
           .where(and(eq(schema.props.id, input.clientRequestId), eq(schema.props.projectId, project.id)));
         if (existing) return existing;
       }
+
+      const [recent] = await db.select().from(schema.props).where(and(
+        eq(schema.props.projectId, project.id),
+        eq(schema.props.createdBy, ctx.auth.user.id),
+        eq(schema.props.name, input.name),
+        eq(schema.props.appearance, input.appearance),
+        gte(schema.props.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.props.createdAt)).limit(1);
+      if (recent) return recent;
 
       const [{ n }] = await db
         .select({ n: count() })

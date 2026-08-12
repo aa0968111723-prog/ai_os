@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   MAX_PROJECT_SCENE_PRESETS,
@@ -63,6 +63,15 @@ export const scenePresetsRouter = router({
           .where(and(eq(schema.scenePresets.id, input.clientRequestId), eq(schema.scenePresets.projectId, project.id)));
         if (existing) return existing;
       }
+
+      const [recent] = await db.select().from(schema.scenePresets).where(and(
+        eq(schema.scenePresets.projectId, project.id),
+        eq(schema.scenePresets.createdBy, ctx.auth.user.id),
+        eq(schema.scenePresets.name, input.name),
+        eq(schema.scenePresets.palette, input.palette),
+        gte(schema.scenePresets.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.scenePresets.createdAt)).limit(1);
+      if (recent) return recent;
 
       const [{ n }] = await db
         .select({ n: count() })

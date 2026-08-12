@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
@@ -64,6 +64,15 @@ export const charactersRouter = router({
           .where(and(eq(schema.characters.id, input.clientRequestId), eq(schema.characters.projectId, project.id)));
         if (existing) return existing;
       }
+
+      const [recent] = await db.select().from(schema.characters).where(and(
+        eq(schema.characters.projectId, project.id),
+        eq(schema.characters.createdBy, ctx.auth.user.id),
+        eq(schema.characters.name, input.name),
+        eq(schema.characters.appearance, input.appearance),
+        gte(schema.characters.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.characters.createdAt)).limit(1);
+      if (recent) return recent;
 
       const [{ n }] = await db
         .select({ n: count() })

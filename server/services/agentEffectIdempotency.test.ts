@@ -226,6 +226,37 @@ describe("knowledge retry replay", () => {
   });
 });
 
+describe("card write retry replay and reference ACL", () => {
+  const characterSource = readFileSync(new URL("../routers/characters.ts", import.meta.url), "utf8");
+  const propSource = readFileSync(new URL("../routers/props.ts", import.meta.url), "utf8");
+  const presetSource = readFileSync(new URL("../routers/scenePresets.ts", import.meta.url), "utf8");
+
+  it("site and MCP card creates replay the same author+project+identity within 2 minutes", () => {
+    expect(characterSource).toContain("120_000");
+    expect(propSource).toContain("120_000");
+    expect(presetSource).toContain("120_000");
+    expect(mcpKnowledgeSource).toContain("CARD_REPLAY_MS = 120_000");
+    expectBefore(characterSource, "gte(schema.characters.createdAt", ".insert(schema.characters)");
+    expectBefore(propSource, "gte(schema.props.createdAt", ".insert(schema.props)");
+    expectBefore(presetSource, "gte(schema.scenePresets.createdAt", ".insert(schema.scenePresets)");
+    expectBefore(mcpKnowledgeSource, "gte(schema.characters.createdAt", ".insert(schema.characters)");
+    expectBefore(mcpKnowledgeSource, "gte(schema.props.createdAt", ".insert(schema.props)");
+    expectBefore(mcpKnowledgeSource, "gte(schema.scenePresets.createdAt", ".insert(schema.scenePresets)");
+    expect(mcpKnowledgeSource).toContain("eq(schema.characters.createdBy, auth.user.id)");
+    expect(mcpKnowledgeSource).toContain("eq(schema.props.createdBy, auth.user.id)");
+    expect(mcpKnowledgeSource).toContain("eq(schema.scenePresets.createdBy, auth.user.id)");
+  });
+
+  it("MCP card writes cannot bind a foreign-group reference asset", () => {
+    expect(mcpKnowledgeSource).toContain("assertReferenceImage(referenceAssetId, project.groupId)");
+    expect(mcpKnowledgeSource).toContain("assertReferenceImage(referenceAssetId, row.groupId)");
+    expect(mcpKnowledgeSource).toContain("MAX_PROJECT_CHARACTERS");
+    expect(mcpKnowledgeSource).toContain("MAX_PROJECT_PROPS");
+    expect(mcpKnowledgeSource).toContain("MAX_PROJECT_SCENE_PRESETS");
+    expect(mcpKnowledgeSource).not.toMatch(/referenceAssetId: typeof args\.referenceAssetId === "string" \? args\.referenceAssetId : null/);
+  });
+});
+
 describe("project message retry replay", () => {
   it("site and MCP post_message replay the same author+project+body within 2 minutes", () => {
     expect(mcpSource).toContain("120_000");
