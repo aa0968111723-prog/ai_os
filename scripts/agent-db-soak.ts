@@ -128,6 +128,8 @@ async function tick(index: number): Promise<void> {
     set: { content: `retry ${index}`, updatedAt: new Date() },
   }).returning({ id: schema.notes.id });
   if (again.length !== 1) duplicateWrites += 1;
+  const noteCount = await db.select({ id: schema.notes.id }).from(schema.notes).where(eq(schema.notes.id, noteId));
+  if (noteCount.length !== 1) duplicateWrites += 1;
 
   if (index % 8 === 0) {
     const integrity = await runAgentDbIntegrityScan(15);

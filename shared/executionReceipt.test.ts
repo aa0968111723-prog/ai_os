@@ -10,6 +10,14 @@ describe("executionReceipt", () => {
     expect(executionTerminalStatus(1, [{ verification: { status: "verified" } }])).toBe("waiting");
   });
 
+  it("queued / pending / provider-accepted never count as completed", () => {
+    expect(executionTerminalStatus(0, [{ verification: { status: "pending" } }])).toBe("failed");
+    expect(executionTerminalStatus(0, [{ verification: { status: "skipped" } }])).toBe("failed");
+    expect(receiptAllowsCompletion([
+      buildExecutionReceipt({ runId: "r1", verificationMethod: "job_registered", verificationStatus: "pending" }),
+    ])).toBe(false);
+  });
+
   it("fails when any result is not verified", () => {
     expect(executionTerminalStatus(0, [
       { verification: { status: "verified" } },
