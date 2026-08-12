@@ -53,7 +53,7 @@ export function mcpToolAnnotations(name: string): McpToolAnnotations | null {
 export const MCP_TOOLS: McpToolInfo[] = [
   { name: "whoami", title: "確認身分", access: "read", blurb: "回你的名稱、所屬組別、以及這把金鑰是否唯讀——用來測試連線。" },
   { name: "list_projects", title: "列出專案", access: "read", blurb: "列出你有權存取的進行中專案（預設不含封存，與網站清單同一過濾）。回 items + total，超過 50 筆 truncated=true。" },
-  { name: "get_project_context", title: "讀取專案脈絡", access: "read", blurb: "讀專案的世界觀與分鏡進度——生成前先讀這個。" },
+  { name: "get_project_context", title: "讀取專案脈絡", access: "read", blurb: "讀專案的世界觀與分鏡進度。scenes 最多 100 筆；sceneTotal 是全表 COUNT，truncated 時不得宣稱已列出全部。" },
   { name: "find_model", title: "找模型", access: "read", blurb: "依類別／等級／關鍵字挑合適的生成模型（含契約健康與能力旗標）。" },
   { name: "get_model_contract", title: "查模型契約", access: "read", blurb: "讀單一模型的健康狀態、分詞器／負向提示／種子能力與 OpenAPI 摘要（變動對應）。" },
   { name: "list_generations", title: "查生成紀錄", access: "read", blurb: "列出某專案的生成紀錄與狀態。回 items + total，超過頁面上限 truncated=true。" },

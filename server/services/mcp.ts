@@ -128,7 +128,7 @@ export const TOOLS = [
   },
   {
     name: "get_project_context",
-    description: "讀取專案的世界觀與分鏡進度（AI 生成前先讀這個）",
+    description: "讀取專案的世界觀與分鏡進度（AI 生成前先讀這個）。scenes 最多展開 100 筆；sceneTotal 是全表 COUNT，truncated 時不得宣稱已列出全部分鏡，完整清單用 list_scenes。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   {
@@ -1666,8 +1666,32 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});
-    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-    return { title: project.title, kind: project.kind, format: project.format, worldview: wv, scenes: scenes.map((s) => ({ title: s.title, status: s.status })) };
+    const SCENE_CAP = 100;
+    const sceneWhere = and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt));
+    const [sceneRows, sceneCountRows] = await Promise.all([
+      db.select({ title: schema.scenes.title, status: schema.scenes.status })
+        .from(schema.scenes)
+        .where(sceneWhere)
+        .orderBy(schema.scenes.orderIndex)
+        .limit(SCENE_CAP),
+      db.select({ n: sql<number>`count(*)` }).from(schema.scenes).where(sceneWhere),
+    ]);
+    const sceneTotal = Number(sceneCountRows[0]?.n ?? 0);
+    const scenes = sceneRows.map((s) => ({ title: s.title, status: s.status }));
+    return {
+      title: project.title,
+      kind: project.kind,
+      format: project.format,
+      worldview: wv,
+      scenes,
+      sceneListed: scenes.length,
+      sceneTotal,
+      sceneTruncated: sceneTotal > scenes.length,
+      sceneCap: SCENE_CAP,
+      ...(sceneTotal > scenes.length
+        ? { note: `分鏡共 ${sceneTotal} 筆；scenes 只展開 ${scenes.length} 筆，不得宣稱已列出全部。完整清單用 list_scenes。` }
+        : {}),
+    };
   }
 
   if (name === "list_generations") {
