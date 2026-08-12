@@ -126,8 +126,8 @@ const HOW_TO_RE = /(?:如何|怎麼)(?:建立|新增|創建|安排|匯入|生成
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
-/** Inventory / provenance reads. 幫我列出專案 must stay ASK (#660), not AGENT/DIRECT. */
-const INVENTORY_READ_RE = /(?:列出|清單|顯示|查看|查詢|找出來|有哪些|有幾個|有多少|總共|哪一個|哪個|哪些|最舊|最早建立|最久沒更新|list|show|count).{0,24}(?:專案|素材|成員|任務|projects?)|(?:專案|素材|projects?).{0,16}(?:列出|清單|有哪些|有幾個|有多少|總共)|(?:list|show|count)\s+(?:all\s+)?projects?|(?:查看|看|顯示|列出).{0,12}(?:最近|剛).{0,8}(?:匯入|加入)/i;
+/** Inventory / provenance reads. 幫我列出專案／資料庫 must stay ASK (#660), not AGENT/DIRECT. */
+const INVENTORY_READ_RE = /(?:列出|清單|顯示|查看|查詢|找出來|有哪些|有幾個|有多少|總共|哪一個|哪個|哪些|最舊|最早建立|最久沒更新|list|show|count).{0,24}(?:專案|素材|成員|組員|任務|筆記|資料庫|資料表|排程|會議|分鏡|projects?|databases?)|(?:專案|素材|資料庫|資料表|筆記|排程|分鏡|projects?|databases?).{0,16}(?:列出|清單|有哪些|有幾個|有多少|總共|幾筆|幾列)|(?:list|show|count)\s+(?:all\s+)?(?:projects?|databases?|tasks?)|(?:查看|看|顯示|列出).{0,12}(?:最近|剛).{0,8}(?:匯入|加入)/i;
 const COMPOUND_RE = /(?:然後|接著|再把|並(?:且|逐|再|重新)|同時|之後|逐鏡|每一鏡|每個|批次|全部.*(?:生成|建立|修改))/i;
 const ACTION_VERB_RE = /(?:建立|新增|修改|更新|拆|生成|產生|指派|綁定|移動|排序|審核|核准|準備)/gi;
 const CROSS_PROJECT_PLAN_RE = /(?:跨專案|多個專案|所有專案|整個團隊|活動專案.*(?:分工|交付|監控)|(?:開|建立).{0,20}專案.{0,30}(?:分工|派工|交付|持續監控)|(?:分工|派工).{0,30}(?:交付|監控))/i;
@@ -148,6 +148,14 @@ const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> =
   { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
   { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
   { id: "dispatch_agent", pattern: /(?:做到|交付|交件).{0,16}(?:今天|今日|可以交)|(?:把).{0,12}專案.{0,20}(?:可以交|交付|完成)/i },
+  { id: "read_database", pattern: /(?:資料庫|資料表|db\d+).{0,12}(?:幾個|幾筆|幾列|列出|清單|哪些)|(?:幾個|幾筆|幾列|列出|清單).{0,12}(?:資料庫|資料表|db\d+)/i },
+  { id: "read_tasks", pattern: /(?:任務|待辦|task).{0,12}(?:列出|幾個|哪些|清單|查看)|(?:列出|幾個|哪些|查看).{0,12}(?:任務|待辦|task)/i },
+  { id: "read_notes", pattern: /(?:筆記|note).{0,12}(?:列出|幾個|哪些|清單|查看)|(?:列出|幾個|哪些|查看).{0,12}(?:筆記|note)/i },
+  { id: "read_schedule", pattern: /(?:行程|會議|排程|schedule).{0,12}(?:列出|幾個|哪些|清單|查看)|(?:列出|幾個|哪些|查看).{0,12}(?:行程|會議|排程|schedule)/i },
+  { id: "read_storyboard", pattern: /(?:分鏡|鏡次|storyboard).{0,12}(?:列出|幾個|哪些|清單|查看)|(?:列出|幾個|哪些|查看).{0,12}(?:分鏡|鏡次)/i },
+  { id: "read_assets", pattern: /(?:素材|圖片|影片).{0,12}(?:列出|幾個|哪些|幾張|清單|查看)|(?:列出|幾個|哪些|幾張|查看).{0,12}(?:素材|圖片|影片)/i },
+  { id: "read_members", pattern: /(?:成員|組員|有誰).{0,12}(?:列出|幾個|哪些|清單)|(?:列出|幾個|哪些|有誰).{0,12}(?:成員|組員)/i },
+  { id: "read_context", pattern: /(?:專案|project).{0,16}(?:列出|幾個|哪些|清單|最舊|最早|查看)|(?:列出|幾個|哪些|清單|查看).{0,16}(?:專案|project)/i },
 ];
 
 /** Match a concrete, already-registered capability before considering planning. */
@@ -179,8 +187,8 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
       ? ASSISTANT_CAPABILITIES.find((item) => item.id === "inspect_computer_runtime")
       : undefined;
     const questionCapability = browserCapability
-      ?? (inventoryRead ? ASSISTANT_CAPABILITIES.find((item) => item.id === "read_context") : undefined)
-      ?? matchedCapability;
+      ?? matchedCapability
+      ?? (inventoryRead ? ASSISTANT_CAPABILITIES.find((item) => item.id === "read_context") : undefined);
     return {
       intent: "ASK",
       confidence: "high",

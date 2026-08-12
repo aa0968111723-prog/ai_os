@@ -84,7 +84,24 @@ describe("assistant execution fast path", () => {
       expect(plan.intent, message).toBe("ASK");
       expect(plan.executionMode, message).not.toBe("PROJECT_AGENT");
     }
+    expect(classifyAssistantRequest("幫我列出任務")).toMatchObject({
+      intent: "ASK",
+      capabilityId: "read_tasks",
+    });
+    expect(classifyAssistantRequest("有幾個資料庫")).toMatchObject({
+      intent: "ASK",
+      capabilityId: "read_database",
+    });
+    expect(classifyAssistantRequest("幫我列出資料庫")).toMatchObject({
+      intent: "ASK",
+      capabilityId: "read_database",
+    });
+    expect(classifyAssistantRequest("資料庫有幾筆")).toMatchObject({
+      intent: "ASK",
+      capabilityId: "read_database",
+    });
     expect(classifyAssistantRequest("幫我建立任務").intent).toBe("DIRECT");
+    expect(classifyAssistantRequest("幫我建立任務並查看進度").intent).not.toBe("ASK");
     expect(classifyAssistantRequest("幫我安排明天下午三點的會議")).toMatchObject({
       intent: "DIRECT",
       capabilityId: "add_schedule_item",
