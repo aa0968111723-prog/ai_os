@@ -4,6 +4,8 @@ import {
   formatDuration,
   formatResultSummary,
   isAgentEvent,
+  queryGoalLabel,
+  roundThinkingTitle,
   summarizeAgentEvents,
   type AgentEvent,
 } from "./agentEvents";
@@ -110,6 +112,29 @@ describe("格式化", () => {
     expect(formatDuration(523)).toBe("523 毫秒");
     expect(formatDuration(1800)).toBe("1.8 秒");
     expect(formatDuration(undefined)).toBe("");
+  });
+});
+
+describe("roundThinkingTitle（#669 U7：不同查詢要有不同工作過程標題）", () => {
+  it("把使用者問的那句話收進標題——兩個不同問題不再長得一樣", () => {
+    expect(roundThinkingTitle(0, "列出專案")).toBe("整理「列出專案」相關資料");
+    expect(roundThinkingTitle(0, "比較專案")).toBe("整理「比較專案」相關資料");
+  });
+
+  it("第二輪以上顯示「繼續分析」語義", () => {
+    expect(roundThinkingTitle(1, "列出專案")).toBe("比對「列出專案」相關資料，繼續分析");
+  });
+
+  it("只取第一個句子，避免長問題把整條軌跡撐爆", () => {
+    const long = "列出專案並比較上週與本週的素材進度跟分鏡完成率，最後給我一段摘要";
+    expect(queryGoalLabel(long)).toBe("列出專案並比較上週與本週的素材進度跟…");
+    expect(roundThinkingTitle(0, long)).toContain("…");
+  });
+
+  it("空白或只有標點時退回通用語", () => {
+    expect(queryGoalLabel("   ")).toBe("你的請求");
+    expect(queryGoalLabel("？")).toBe("？");
+    expect(roundThinkingTitle(0, "")).toBe("整理「你的請求」相關資料");
   });
 });
 

@@ -71,6 +71,7 @@ import {
 } from "../services/rateLimit";
 import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentResultSummary, AgentSourceRecord } from "../../shared/agentEvents";
+import { roundThinkingTitle } from "../../shared/agentEvents";
 import {
   formatRecentActionResults,
   type AssistantActionResult,
@@ -1353,12 +1354,14 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       /**
        * 「思考中…」不再是黑盒子：把**目前已經取得的東西**列出來，
        * 那份清單來自 stream 已登記的來源（真實資料），不是模型自述。
+       * 標題帶上使用者問的那句話（roundThinkingTitle），不同查詢的工作過程
+       * 就不再長得一模一樣（#669 U7）。
        */
       onRound: (round) => {
         const acquired = stream.snapshotSources().filter((s) => s.status === "ok");
         stream.emit({
           type: "agent.thinking",
-          title: round === 0 ? "整理已取得的資料" : "比對查到的資料，繼續分析",
+          title: roundThinkingTitle(round, input.message),
           description: acquired.length
             ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
             : undefined,

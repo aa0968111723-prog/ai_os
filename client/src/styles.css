@@ -7639,6 +7639,55 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   border-color: rgba(246, 119, 30, 0.45);
 }
 
+/* ── 助手載入骨架（#677 U9）：lazy chunk 載入期的訊息氣泡 placeholder ──
+   形狀跟著真正的對話走（左側頭像＋氣泡、右側使用者氣泡），取代原本一行
+   「助手載入中…」——後者會讓版面在「一行字」與「整組氣泡」之間跳變，造成閃爍。
+   顏色用 fg-secondary 的淡色變體，不搶焦點；脈動動畫遵守 prefers-reduced-motion。 */
+.ga-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 2px;
+}
+.ga-skeleton__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ga-skeleton__avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg-secondary, #6b7280) 16%, transparent);
+  animation: ga-skeleton-pulse 1.6s ease-in-out infinite;
+}
+.ga-skeleton__bubble {
+  min-width: 96px;
+  max-width: 72%;
+  height: 34px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg-secondary, #6b7280) 16%, transparent);
+  animation: ga-skeleton-pulse 1.6s ease-in-out infinite;
+}
+.ga-skeleton__bubble--user {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--primary, #f6771e) 14%, transparent);
+}
+.ga-skeleton__bubble--assistant {
+  border-bottom-left-radius: 4px;
+}
+.ga-skeleton__bubble--tall {
+  height: 52px;
+}
+@keyframes ga-skeleton-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ga-skeleton__avatar,
+  .ga-skeleton__bubble { animation: none; opacity: 0.7; }
+}
+
 /* ── 站級動作確認卡（AI 提議 → 使用者按下才執行）── */
 .ai-copilot-action-card {
   display: flex;
