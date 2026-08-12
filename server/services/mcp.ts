@@ -24,7 +24,7 @@
  *     tools/list 附 shared/mcpCatalog 推導的 annotations（readOnly/destructive/idempotent/openWorld）
  */
 import type { Request, Response } from "express";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -1590,6 +1590,15 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const body = String(args.body ?? "").trim();
     if (!body) throw new Error("body 不可為空");
     if (body.length > 2000) throw new Error("訊息最長 2000 字"); // 修 IN-01：與網頁端同上限，別讓 MCP 繞過
+    const [recent] = await db.select({ id: schema.messages.id }).from(schema.messages).where(and(
+      eq(schema.messages.projectId, project.id),
+      eq(schema.messages.userId, auth.user.id),
+      eq(schema.messages.body, body),
+      eq(schema.messages.kind, "text"),
+      isNull(schema.messages.replyToId),
+      gte(schema.messages.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.messages.createdAt)).limit(1);
+    if (recent) return { messageId: recent.id };
     const [msg] = await db
       .insert(schema.messages)
       .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })

@@ -208,3 +208,17 @@ describe("schedule/task replay safety (#133 PR-5)", () => {
     expectBefore(taskCoreSource, "await memberChecked(input.groupId, input.assigneeId);", ".insert(schema.projectTasks)");
   });
 });
+
+const mcpSource = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
+const messagesSource = readFileSync(new URL("../routers/messages.ts", import.meta.url), "utf8");
+
+describe("project message retry replay", () => {
+  it("site and MCP post_message replay the same author+project+body within 2 minutes", () => {
+    expect(mcpSource).toContain("120_000");
+    expect(messagesSource).toContain("120_000");
+    expectBefore(mcpSource, "gte(schema.messages.createdAt", ".insert(schema.messages)");
+    expectBefore(messagesSource, "gte(schema.messages.createdAt", ".insert(schema.messages)");
+    expect(mcpSource).toContain("eq(schema.messages.userId, auth.user.id)");
+    expect(messagesSource).toContain("eq(schema.messages.userId, ctx.auth.user.id)");
+  });
+});

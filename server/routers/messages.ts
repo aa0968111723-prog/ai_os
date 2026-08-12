@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, count, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -231,6 +231,16 @@ export const messagesRouter = router({
       // 伺服器自己也從 body 解析一次：前端的名單是非同步載入的，打開專案立刻打字送出時
       // 它算出來的 mentions 是空的，而在此之前伺服器從頭到尾不看 body——那則 @ 就永遠消失了
       const mentions = await resolveMentions(project.groupId, input.mentions, input.body);
+      const [recent] = await db.select().from(schema.messages).where(and(
+        eq(schema.messages.projectId, input.projectId),
+        eq(schema.messages.userId, ctx.auth.user.id),
+        eq(schema.messages.body, input.body),
+        eq(schema.messages.kind, "text"),
+        input.replyToId ? eq(schema.messages.replyToId, input.replyToId) : isNull(schema.messages.replyToId),
+        input.refId ? eq(schema.messages.refId, input.refId) : isNull(schema.messages.refId),
+        gte(schema.messages.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.messages.createdAt)).limit(1);
+      if (recent) return recent;
       const [msg] = await db
         .insert(schema.messages)
         .values({

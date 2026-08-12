@@ -33,6 +33,7 @@ describe("MCP catalog ↔ TOOLS 對齊（D1）", () => {
     expect(mcpToolAnnotations("discard_agent")?.destructiveHint).toBe(true);
     expect(mcpToolAnnotations("add_database_rows")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("update_database_row")?.idempotentHint).toBe(true);
+    expect(mcpToolAnnotations("post_message")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("submit_generation")?.openWorldHint).toBe(true);
     expect(mcpToolAnnotations("plan_agent")?.openWorldHint).toBe(true);
     expect(mcpToolAnnotations("import_drive_file")?.openWorldHint).toBe(true);

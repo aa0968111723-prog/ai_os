@@ -62,7 +62,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "request_upload_grant", title: "簽發上傳授權", access: "write", blurb: "簽發單次素材上傳授權（aidup_…）；MCP 不傳二進位，請用回傳的 token 對 /api/upload 上傳或到網頁上傳台選檔。" },
   { name: "get_upload_grant_status", title: "查上傳授權狀態", access: "read", blurb: "查詢你簽發的上傳授權是否仍有效／已用／過期（不回 token 原文）。" },
   { name: "submit_generation", title: "送出生成", access: "write", openWorld: true, blurb: "提交一次生成（世界觀自動注入、扣你的點數、走你的核准門檻）。" },
-  { name: "post_message", title: "發佈留言", access: "write", blurb: "在專案留言板留言（以你的身分）。" },
+  { name: "post_message", title: "發佈留言", access: "write", idempotent: true, blurb: "在專案留言板留言（以你的身分）。同人同專案同內文 2 分鐘內重試回同一則，不重複寫入。" },
   { name: "list_databases", title: "列出資料庫", access: "read", blurb: "列出你可存取的自訂資料庫（欄位、列數、AI 存取等級）；可依 projectId 標註／只看已關聯本專案的表。" },
   { name: "query_database", title: "查詢資料庫", access: "read", blurb: "查列資料：關鍵字、欄位等值、offset 分頁；長欄位自動截斷以省上下文。" },
   { name: "add_database_row", title: "新增資料列", access: "write", blurb: "在開放 AI 寫入的庫新增一列；可帶 projectId 自動填「關聯專案」欄。" },
