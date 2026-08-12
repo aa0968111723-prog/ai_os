@@ -528,13 +528,24 @@ export function ProjectAssistant({
             if (!requestIsCurrent(requestProjectId, epoch)) return;
             setTraceSessionId(result.traceSessionId ?? null);
             const fallbackActivity = result.steps.map((text) => ({ phase: "step" as const, text }));
+            const actions = result.actions as Action[];
+            const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+            const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+            const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
+            const runStatus: Turn["runStatus"] = hasFailure
+              ? "failed"
+              : actions.length > 0
+                ? "waiting"
+                : hasVerifiedCompletion
+                  ? "completed"
+                  : "waiting";
             push({
               role: "ai",
               text: result.answer,
-              actions: result.actions as Action[],
+              actions,
               steps: result.steps,
               activity: traceRef.current.length > 0 ? [...traceRef.current] : fallbackActivity,
-              agentEvents: result.agentEvents ?? traceRef.current.filter(isAgentEvent),
+              agentEvents: events,
               agentSources: result.agentSources,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
@@ -542,6 +553,7 @@ export function ProjectAssistant({
               paidModel: result.model,
               sources: result.sources,
               executionPlan: classifyAssistantRequest(m),
+              runStatus,
             });
           },
           onError: (error) => {
@@ -553,6 +565,7 @@ export function ProjectAssistant({
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
               executionPlan: classifyAssistantRequest(m),
+              runStatus: "failed",
               retryText: m,
             });
           },

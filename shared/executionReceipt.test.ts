@@ -21,6 +21,11 @@ describe("executionReceipt", () => {
     expect(executionTerminalStatus(0, [{ verification: { status: "verified" } }])).toBe("completed");
   });
 
+  it("write goals with zero verified results stay waiting, not completed", () => {
+    expect(executionTerminalStatus(0, [], { requiresVerifiedWrite: true })).toBe("waiting");
+    expect(executionTerminalStatus(0, [{ verification: { status: "verified" } }], { requiresVerifiedWrite: true })).toBe("completed");
+  });
+
   it("receiptAllowsCompletion requires verified status", () => {
     const ok = buildExecutionReceipt({
       runId: "r1",

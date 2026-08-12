@@ -55,9 +55,15 @@ export type ExecutionTerminalStatus = "waiting" | "failed" | "completed";
 export function executionTerminalStatus(
   pendingCount: number,
   results: readonly { verification: { status: string } }[],
+  opts?: { requiresVerifiedWrite?: boolean },
 ): ExecutionTerminalStatus {
   if (pendingCount > 0) return "waiting";
   if (results.some((result) => result.verification.status !== "verified")) return "failed";
+  // Write-shaped goals with zero verified side effects are not complete answers.
+  if (opts?.requiresVerifiedWrite) {
+    const verified = results.filter((result) => result.verification.status === "verified");
+    if (!verified.length) return "waiting";
+  }
   return "completed";
 }
 

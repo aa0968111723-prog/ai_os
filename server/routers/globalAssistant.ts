@@ -103,6 +103,7 @@ import {
   sourcePickerInteraction,
   type AssistantInteractionRequest,
 } from "../../shared/assistantInteraction";
+import { goalRequiresVerifiedExecution } from "../../shared/assistantGoalFrame";
 
 /** Re-export for existing tests and callers. */
 export { executionTerminalStatus };
@@ -1120,15 +1121,20 @@ export async function runGlobalAsk(
       mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
     }
     const proposedSiteActions = resolveSiteActions(siteRefs, [...deterministicUrlProposal, ...mockProposals]);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
-    const terminalStatus = executionTerminalStatus(siteActions.length, direct.executed.map((item) => item.result));
+    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const terminalStatus = executionTerminalStatus(
+      siteActions.length,
+      direct.executed.map((item) => item.result),
+      { requiresVerifiedWrite },
+    );
     const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, siteActions);
     emitExecutionTerminalEvent(stream, siteActions, direct.executed, {
       completedTitle: "已完成（測試模式）",
       resultSummary: overviewSummary,
-    });
+    }, { requiresVerifiedWrite });
     if (traceSessionId) {
       if (terminalStatus === "waiting") {
         await updateSiteTraceSession(traceSessionId, { status: "running", summary: "等待使用者確認動作" }).catch(() => undefined);
@@ -1380,9 +1386,14 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
     ]);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
-    const terminalStatus = executionTerminalStatus(pendingConfirmation.length, direct.executed.map((item) => item.result));
+    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const terminalStatus = executionTerminalStatus(
+      pendingConfirmation.length,
+      direct.executed.map((item) => item.result),
+      { requiresVerifiedWrite },
+    );
     const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, pendingConfirmation);
     // 收尾事件必須在 withTrace 之前發：快照是「回傳當下的事件流」，
@@ -1397,7 +1408,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         { label: "查詢", value: outcome.steps.length, unit: "次" },
         ...(verifiedExecuted.length ? [{ label: "已完成動作", value: verifiedExecuted.length, unit: "件" }] : []),
       ],
-    });
+    }, { requiresVerifiedWrite });
     const result: GlobalAskResult = withTrace({
       answer: answerWithVerifiedActions(reply.answer, direct.executed),
       dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], routeAllowsDispatch),
@@ -1499,9 +1510,27 @@ function emitExecutionTerminalEvent(
     resultCount?: number;
     resultSummary?: AgentEvent["resultSummary"];
   },
+  opts?: {
+    /** When true, agent.completed requires at least one verified write result. */
+    requiresVerifiedWrite?: boolean;
+  },
 ): void {
-  const status = executionTerminalStatus(pending.length, executed.map((item) => item.result));
-  if (status === "waiting") return;
+  const status = executionTerminalStatus(
+    pending.length,
+    executed.map((item) => item.result),
+    { requiresVerifiedWrite: opts?.requiresVerifiedWrite },
+  );
+  if (status === "waiting") {
+    if (opts?.requiresVerifiedWrite && pending.length === 0) {
+      stream.emit({
+        type: "waiting.user_input",
+        title: "尚未完成可驗證的寫入",
+        description: "這次沒有通過驗證的寫入結果。你可以補充資訊，或確認後再執行。",
+        status: "waiting",
+      });
+    }
+    return;
+  }
   if (status === "failed") {
     stream.emit({
       type: "agent.failed",
@@ -1517,6 +1546,7 @@ function emitExecutionTerminalEvent(
     description: summary.completedDescription,
     resultCount: summary.resultCount,
     resultSummary: summary.resultSummary,
+    status: "ok",
   });
 }
 
@@ -1675,6 +1705,7 @@ async function executeDirectSiteActions(
   plan: AssistantExecutionPlan,
   actions: ResolvedSiteAction[],
   stream: AgentEventStream,
+  signal?: AbortSignal,
 ): Promise<{ executed: ExecutedSiteAction[]; executedActions: Set<ResolvedSiteAction> }> {
   const eligible = actions.filter((action) => {
     if (!canDirectlyExecuteCapability(plan, action.type)) return false;
@@ -1684,6 +1715,8 @@ async function executeDirectSiteActions(
   });
   const executed: ExecutedSiteAction[] = [];
   for (const action of eligible) {
+    // Client disconnect / stop must not continue SAFE_WRITE side effects.
+    if (signal?.aborted) break;
     const stepId = stream.startStep({
       type: "action.started",
       title: `正在${action.label}`,

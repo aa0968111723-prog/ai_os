@@ -43,7 +43,7 @@ describe("DIRECT -> VERIFY -> COMPLETE", () => {
     expect(recentVerifiedAssetIds([
       {
         type: "import",
-        source: "files",
+        source: "file",
         resourceIds: [],
         assetIds: ["a1"],
         intelligenceIds: [],
@@ -55,7 +55,7 @@ describe("DIRECT -> VERIFY -> COMPLETE", () => {
       },
       {
         type: "import",
-        source: "files",
+        source: "file",
         resourceIds: [],
         assetIds: ["a2", "a3"],
         intelligenceIds: [],
