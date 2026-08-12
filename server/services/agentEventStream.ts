@@ -49,6 +49,14 @@ const LEGACY_PHASE: Record<AgentEventType, LegacyAgentPhase> = {
   "agent.failed": "step",
   "waiting.permission": "thinking",
   "waiting.user_input": "thinking",
+  "interaction.requested": "thinking",
+  "interaction.presented": "thinking",
+  "interaction.submitted": "step",
+  "interaction.cancelled": "step",
+  "interaction.expired": "step",
+  "handoff.opened": "thinking",
+  "handoff.returned": "step",
+  "agent.resumed": "thinking",
 };
 
 export interface AgentEventInput {

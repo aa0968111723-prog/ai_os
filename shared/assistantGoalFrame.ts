@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assistantInteractionRequestSchema } from "./assistantInteractions";
 
 /**
  * Assistant Brain v2 semantic contract.
@@ -151,6 +152,8 @@ export const assistantActiveGoalSchema = z.object({
   resolvedSlots: z.record(z.string(), z.unknown()).default({}),
   missingSlots: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
   pendingQuestionId: z.string().uuid().optional(),
+  /** Durable Agent-initiated UI handoff; extends the existing active goal. */
+  pendingInteraction: assistantInteractionRequestSchema.optional(),
   resultRefIds: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),

@@ -59,6 +59,8 @@ export interface AgentQuestionOption {
   description?: string;
   imageUrl?: string;
   recommended?: boolean;
+  availability?: "AVAILABLE" | "DEGRADED" | "BLOCKED";
+  blockerReason?: string;
   /** Trusted, display-safe facts from the resolver. */
   metadata?: Record<string, string | number | boolean | null>;
 }
