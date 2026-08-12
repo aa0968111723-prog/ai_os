@@ -4,7 +4,7 @@
  * ACL 慣例同 characters：載卡 → requireGroup(row.groupId) → 寫入再 assertProjectEditable。
  */
 import { z } from "zod";
-import { and, asc, count, eq, isNull, getTableColumns } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, getTableColumns } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -46,6 +46,17 @@ export const characterLooksRouter = router({
       await assertProjectEditable(ctx.auth, { id: owner.projectId, groupId: owner.groupId });
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId);
 
+      const costume = input.costume || null;
+      const [recent] = await db.select().from(schema.characterLooks).where(and(
+        eq(schema.characterLooks.projectId, owner.projectId),
+        eq(schema.characterLooks.characterId, owner.id),
+        eq(schema.characterLooks.createdBy, ctx.auth.user.id),
+        eq(schema.characterLooks.name, input.name),
+        costume ? eq(schema.characterLooks.costume, costume) : isNull(schema.characterLooks.costume),
+        gte(schema.characterLooks.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.characterLooks.createdAt)).limit(1);
+      if (recent) return recent;
+
       const [{ n }] = await db
         .select({ n: count() })
         .from(schema.characterLooks)
@@ -61,7 +72,7 @@ export const characterLooksRouter = router({
           groupId: owner.groupId,
           characterId: owner.id,
           name: input.name,
-          costume: input.costume || null,
+          costume,
           notes: input.notes || null,
           referenceAssetId: input.referenceAssetId,
           source: "manual",
