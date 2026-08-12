@@ -1346,7 +1346,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
     degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
     ...(dbSections.length || customDbTotal
-      ? ["", `組可見的自訂資料庫（來源=CUSTOM_DATABASE，不是專案素材庫；前綴代號 dbN；共 ${customDbTotal} 庫${customDbHidden ? `，此快照只展開 ${visibleTables.length} 庫，不得宣稱已列出全部` : ""}；快照僅最近幾列，全量搜尋用 query_database）：`, ...(dbSections.length ? dbSections : ["（目前沒有可展開的自訂資料庫列）"])]
+      ? ["", `組可見的自訂資料庫（來源=CUSTOM_DATABASE，不是專案素材庫；前綴代號 dbN；共 ${customDbTotal} 庫${customDbHidden ? `，此快照只展開 ${visibleTables.length} 庫，不得宣稱已列出全部` : ""}；問「有幾個資料庫」以 ${customDbTotal} 為準，不得把各庫列數加總、也不得把快照 ${visibleTables.length} 當成總數；快照僅最近幾列，全量搜尋用 query_database）：`, ...(dbSections.length ? dbSections : ["（目前沒有可展開的自訂資料庫列）"])]
       : []),
     formatCommandRefs(commandRefs, commandLevel),
   ].join("\n");

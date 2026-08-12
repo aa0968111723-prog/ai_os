@@ -77,6 +77,20 @@ describe("assistantSemanticResolution", () => {
     }
   });
 
+  it("幾個資料庫 is table inventory, 幾筆 is row count — never the other way around", () => {
+    for (const message of ["有幾個資料庫？", "我們有幾個自訂資料庫", "how many custom databases"]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      expect(frame.operation, message).toBe("COUNT");
+      expect(frame.objectType, message).toBe("DATABASE");
+      expect(frame.constraints, message).toContain("count:tables");
+      expect(frame.constraints, message).not.toContain("count:rows");
+      expect(matchAssistantCapabilityForGoal(frame).capabilityId, message).toBe("read_database");
+    }
+    const rows = deriveDeterministicGoalFrame("資料庫有幾筆？");
+    expect(rows.frame.constraints).toContain("count:rows");
+    expect(rows.frame.constraints).not.toContain("count:tables");
+  });
+
   it("Q18: bare 資料庫 counts stay on read_database, not project inventory or assets", () => {
     for (const message of ["資料庫有幾筆？", "自訂資料庫有幾列", "這個庫有幾筆", "custom database row count"]) {
       const { frame } = deriveDeterministicGoalFrame(message);

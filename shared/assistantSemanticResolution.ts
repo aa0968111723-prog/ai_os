@@ -94,6 +94,8 @@ const CORRECTION_PREVIOUS_RE = /(?:不是這個|不是那個|不對).{0,12}(?:�
 
 const ASSET_RE = /(?:素材|圖片|照片|影片|音訊|檔案|文件|這些|那批|剛才那些|asset)/iu;
 const DATABASE_RE = /(?:自訂(?:資料)?(?:庫|表)|資料表|\bdb\d+\b|query_database|custom\s*databases?|(?<!素材|aios\s*|AIOS\s*)資料庫|庫有幾(?:筆|列))/iu;
+/** 「有幾個資料庫」is table inventory, not the sum of rows inside those tables. */
+const TABLE_INVENTORY_RE = /(?:有幾個|幾個)(?:自訂)?(?:資料)?庫|(?:資料庫|資料表)有幾個(?!筆|列)|how many (?:custom )?databases?/iu;
 const PROJECT_RE = /(?:專案|project)/iu;
 const SHOT_RE = /(?:第\s*[一二三四五六七八九十百\d]+\s*鏡|shot\s*#?\s*\d+|分鏡\s*#?\s*\d+)/iu;
 const SCENE_RE = /(?:場景|scene\s*#?\s*\d+)/iu;
@@ -116,7 +118,7 @@ function sourceFromText(text: string): AssistantSourceType | undefined {
 }
 
 function operationFromText(text: string): AssistantGoalOperation {
-  if (COUNT_RE.test(text)) return "COUNT";
+  if (COUNT_RE.test(text) || TABLE_INVENTORY_RE.test(text)) return "COUNT";
   if (COMPARE_RE.test(text)) return "COMPARE";
   if (VERIFY_RE.test(text)) return "VERIFY";
   // Staleness / oldest-project questions are pure reads (#662).
@@ -175,6 +177,8 @@ function constraintsFromText(text: string): string[] {
   if (DELIVERY_RE.test(text)) {
     constraints.push(/今天|今日/u.test(text) ? "delivery:today" : "delivery:deadline");
   }
+  if (TABLE_INVENTORY_RE.test(text)) constraints.push("count:tables");
+  else if (DATABASE_RE.test(text) && /幾(?:筆|列)|row count/iu.test(text)) constraints.push("count:rows");
   return constraints;
 }
 
