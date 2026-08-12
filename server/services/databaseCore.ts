@@ -5,7 +5,7 @@
  *   「AI 介面」走 resolveAgentAccess，語義不同；此核心只負責「已授權之後」的驗證與落地，
  *   讓四個入口的驗證與保險絲行為永遠一致（避免各寫各的漂移，審查曾點名的重複風險）。
  */
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { lockDatabaseRowCap } from "./locks";
@@ -300,6 +300,21 @@ export async function addDataRowValidated(
       return row;
     });
   }
+
+  const checked = validateRowData(table.fields as DataField[], rawData);
+  if (!checked.ok) throw new Error(checked.error);
+  const [recent] = await db
+    .select()
+    .from(schema.dataRows)
+    .where(and(
+      eq(schema.dataRows.tableId, table.id),
+      eq(schema.dataRows.createdBy, userId),
+      gte(schema.dataRows.createdAt, new Date(Date.now() - 120_000)),
+      sql`${schema.dataRows.data} = ${JSON.stringify(checked.data)}::jsonb`,
+    ))
+    .orderBy(desc(schema.dataRows.createdAt))
+    .limit(1);
+  if (recent) return recent;
 
   const result = await addDataRowsValidated(table, userId, [rawData], { errorLimit: 1, returnRows: true });
   if (result.errors[0]) throw new Error(result.errors[0].error);
