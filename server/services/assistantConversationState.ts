@@ -10,6 +10,7 @@ import type { AgentEvent, AgentSourceRecord } from "../../shared/agentEvents";
 import type { AssistantActiveGoal } from "../../shared/assistantGoalFrame";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
+import { expireStaleAssistantInteraction } from "./assistantInteractionCore";
 
 const MAX_DURABLE_MESSAGES = 12;
 const MAX_DURABLE_EVENTS = 200;
@@ -185,6 +186,18 @@ export async function checkpointAssistantConversation(input: AssistantConversati
   if (!inserted.length) throw new TRPCError({ code: "CONFLICT", message: "Conversation identity was claimed concurrently" });
 }
 
+function withoutResurrectingExpiredGoal(goal: AssistantActiveGoal | null | undefined): AssistantActiveGoal | null {
+  if (!goal?.pendingInteraction) return goal ?? null;
+  const pending = goal.pendingInteraction;
+  if (pending.status !== "pending") return goal;
+  if (Date.parse(pending.expiresAt) > Date.now()) return goal;
+  return {
+    ...goal,
+    status: "waiting_user_input",
+    pendingInteraction: { ...pending, status: "expired" },
+  };
+}
+
 export async function beginAssistantConversation(input: AssistantConversationInput): Promise<void> {
   if (!input.conversationId) return;
   const [existing] = await db.select().from(schema.assistantConversationStates)
@@ -192,6 +205,7 @@ export async function beginAssistantConversation(input: AssistantConversationInp
   if (existing && (existing.userId !== input.auth.user.id || existing.groupId !== input.groupId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Conversation identity belongs to another scope" });
   }
+  const current = existing ? await expireStaleAssistantInteraction(existing) : existing;
   const values = {
     conversationId: input.conversationId,
     groupId: input.groupId,
@@ -199,12 +213,12 @@ export async function beginAssistantConversation(input: AssistantConversationInp
     projectId: input.projectId ?? null,
     runId: input.runId ?? null,
     status: "running" as const,
-    messages: [...(input.history ?? existing?.messages ?? []), { role: "user" as const, text: input.message.slice(0, 2_000) }].slice(-MAX_DURABLE_MESSAGES),
-    activeGoal: input.activeGoal ?? existing?.activeGoal ?? null,
-    recentActionResults: boundAssistantActionResults(input.recentActionResults ?? existing?.recentActionResults ?? []),
-    events: existing?.events ?? [],
-    sources: existing?.sources ?? [],
-    memoryMetadata: existing?.memoryMetadata ?? {
+    messages: [...(input.history ?? current?.messages ?? []), { role: "user" as const, text: input.message.slice(0, 2_000) }].slice(-MAX_DURABLE_MESSAGES),
+    activeGoal: withoutResurrectingExpiredGoal(input.activeGoal ?? current?.activeGoal ?? null),
+    recentActionResults: boundAssistantActionResults(input.recentActionResults ?? current?.recentActionResults ?? []),
+    events: current?.events ?? [],
+    sources: current?.sources ?? [],
+    memoryMetadata: current?.memoryMetadata ?? {
       source: `assistant-conversation:${input.conversationId}`,
       sourceType: "USER_AND_VERIFIED_TOOL_RESULTS" as const,
       createdBy: input.auth.user.id,
@@ -267,5 +281,8 @@ export async function loadAssistantConversation(auth: AuthState, groupId: string
   if (Date.parse(row.memoryMetadata.expiresAt) <= Date.now()) {
     return { ...row, activeGoal: null, recentActionResults: [] };
   }
-  return row;
+  // Read-back must persist status=expired in PostgreSQL. Client reload
+  // otherwise keeps a live picker against a pending row that can no longer
+  // legally answer (callback-only expire left the durable status lying).
+  return expireStaleAssistantInteraction(row);
 }

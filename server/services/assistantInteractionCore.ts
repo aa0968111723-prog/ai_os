@@ -75,6 +75,28 @@ function constantTimeTokenEqual(expected: string, received: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export async function expireStaleAssistantInteraction(
+  row: typeof schema.assistantConversationStates.$inferSelect,
+): Promise<typeof schema.assistantConversationStates.$inferSelect> {
+  const pending = row.activeGoal?.pendingInteraction;
+  if (!pending || pending.status !== "pending") return row;
+  if (Date.parse(pending.expiresAt) > Date.now()) return row;
+  await persistExpiredInteraction(db, row);
+  const [fresh] = await db.select().from(schema.assistantConversationStates).where(and(
+    eq(schema.assistantConversationStates.conversationId, row.conversationId),
+    eq(schema.assistantConversationStates.groupId, row.groupId),
+    eq(schema.assistantConversationStates.userId, row.userId),
+  ));
+  return fresh ?? {
+    ...row,
+    activeGoal: {
+      ...row.activeGoal!,
+      status: "waiting_user_input",
+      pendingInteraction: { ...pending, status: "expired" },
+    },
+  };
+}
+
 async function persistExpiredInteraction(
   tx: typeof db,
   row: typeof schema.assistantConversationStates.$inferSelect,
