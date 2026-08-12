@@ -18,6 +18,11 @@ describe("notesCore ACL contract", () => {
     expect(noteWriteDenied("author", "admin", "admin")).toBe(false);
   });
 
+  it("retries reuse the same plan step instead of inserting again", () => {
+    expect(source).toContain("onConflictDoNothing");
+    expect(source).toContain("findExistingNote");
+  });
+
   it("project-bound note writes require assertProjectEditable (viewer cannot edit own project notes)", () => {
     expect(source).toContain("assertProjectEditable");
     expect(source).toMatch(/requireEditable[\s\S]*assertProjectEditable|if \(requireEditable\) await assertProjectEditable/);

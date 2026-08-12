@@ -10,6 +10,7 @@ import { and, eq } from "drizzle-orm";
 import { loadLocalEnv } from "../server/bootstrap/loadEnv";
 import { db, pool, schema } from "../server/db";
 import { probeDatabaseRuntime } from "../server/services/databaseRuntime";
+import { runAgentWatchdog } from "../server/services/agentWatchdog";
 import { runAgentDbIntegrityScan } from "../server/services/agentDbIntegrity";
 import { AgentRunLedger } from "../server/services/agentRunLedger";
 import { loadGroupProjectInventory, visibleProjectsWhere } from "../server/services/projectInventory";
@@ -212,6 +213,13 @@ async function tick(index: number): Promise<void> {
   if (index % 8 === 0) {
     const integrity = await runAgentDbIntegrityScan(15);
     if (!integrity.ok) integrityFails += 1;
+    const watchdog = await runAgentWatchdog(1);
+    if (watchdog.completedForbidden !== 0) falseCompletions += 1;
+    const [run] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, soakRunId));
+    if (run?.status === "done") {
+      falseCompletions += 1;
+      throw new Error("WATCHDOG_FALSE_COMPLETION: soak run marked done");
+    }
   }
 }
 
