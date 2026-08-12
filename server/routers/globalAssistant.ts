@@ -1240,15 +1240,15 @@ export async function runGlobalAsk(
    * 事件在真的開始搜／真的搜完時各發一則，所以畫面上的「正在搜尋」對應的是真的在跑的查詢。
    */
   const retrieveDatabaseEvidence = () => {
-    const readableTables = [...dbByRef.values()].filter((table) => {
-      const access = agentAccessById.get(table.id);
+    const readableTables = (teamCtx.evidenceDbs.length ? teamCtx.evidenceDbs : [...dbByRef.values()]).filter((table) => {
+      const access = agentAccessById.get(table.id) ?? table.agentAccess;
       return access === "read" || access === "write";
     });
     if (!readableTables.length) return Promise.resolve([]);
     const step = stream.startStep({
       type: "source.searching",
       title: "搜尋資料庫",
-      description: `在 ${readableTables.length} 個可讀資料庫中比對「${input.message.slice(0, 20)}」`,
+      description: `在 ${teamCtx.customDbTotal} 個可讀資料庫中比對「${input.message.slice(0, 20)}」`,
       sourceType: "database",
       toolName: "database_evidence",
     });

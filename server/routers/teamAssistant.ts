@@ -1014,6 +1014,8 @@ export interface TeamAskContext {
   projectLines: string[];
   projByRef: Map<string, ProjRow>;
   dbByRef: Map<string, TeamDb>;
+  /** All AI-readable tables for keyword evidence (snapshot refs stay in dbByRef). */
+  evidenceDbs: TeamDb[];
   /** Authoritative custom-table count (same filter as the visible snapshot). */
   customDbTotal: number;
   /** Snapshot length; Agent must not report this as the group total when truncated. */
@@ -1144,6 +1146,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   // 讓助手能回答「名單裡有誰」「器材借用狀況」這類結構化資料問題。上限收緊防提示詞灌爆。
   const teamId = auth.groups.find((g) => g.groupId === groupId)?.teamId;
   const DB_LIMIT = 5;
+  const EVIDENCE_DB_LIMIT = 200;
   const DB_ROW_LIMIT = 12;
   const dbConds = [
     and(eq(schema.dataTables.scope, "group"), eq(schema.dataTables.groupId, groupId))!,
@@ -1151,20 +1154,21 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   ];
   if (teamId) dbConds.push(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, teamId))!);
   const dbWhere = and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds));
-  const [visibleTables, customDbCountRows] = await Promise.all([
+  const [allReadableTables, customDbCountRows] = await Promise.all([
     db
       .select()
       .from(schema.dataTables)
       .where(dbWhere)
       .orderBy(desc(schema.dataTables.updatedAt))
-      .limit(DB_LIMIT),
+      .limit(EVIDENCE_DB_LIMIT),
     db.select({ n: sql<number>`count(*)` }).from(schema.dataTables).where(dbWhere),
   ]);
+  const visibleTables = allReadableTables.slice(0, DB_LIMIT);
   const customDbTotal = Number(customDbCountRows[0]?.n ?? 0);
   const customDbHidden = Math.max(0, customDbTotal - visibleTables.length);
   // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
   // 助手能直接回答「這個資料庫有幾列」「哪個庫最大」；不得拿專案素材張數冒充列數。
-  const tableIds = visibleTables.map((t) => t.id);
+  const tableIds = allReadableTables.map((t) => t.id);
   const KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
   const rowCountBy = new Map<string, number>();
   const fileAggBy = new Map<string, Array<{ kind: string; n: number; bytes: number }>>();
@@ -1196,18 +1200,17 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   const fmtMb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
 
   // 資料庫代號 db1…dbN：query_database 工具用代號鑽查（比照專案代號 pN，避免 uuid 幻覺）
+  const toTeamDb = (t: (typeof allReadableTables)[number], i: number): TeamDb => ({
+    ref: i < DB_LIMIT ? `db${i + 1}` : `name:${t.id.slice(0, 8)}`,
+    id: t.id,
+    name: t.name,
+    fields: Array.isArray(t.fields) ? t.fields as DataField[] : [],
+    rowCount: rowCountBy.get(t.id) ?? 0,
+    agentAccess: t.agentAccess === "read" ? "read" : "write",
+  });
+  const evidenceDbs = allReadableTables.map(toTeamDb);
   const dbByRef = new Map<string, TeamDb>(
-    visibleTables.map((t, i) => [
-      `db${i + 1}`,
-      {
-        ref: `db${i + 1}`,
-        id: t.id,
-        name: t.name,
-        fields: Array.isArray(t.fields) ? t.fields as DataField[] : [],
-        rowCount: rowCountBy.get(t.id) ?? 0,
-        agentAccess: t.agentAccess === "read" ? "read" : "write",
-      },
-    ]),
+    evidenceDbs.slice(0, DB_LIMIT).map((db) => [db.ref, db]),
   );
 
   const dbSections: string[] = [];
@@ -1346,14 +1349,14 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
     degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
     ...(dbSections.length || customDbTotal
-      ? ["", `組可見的自訂資料庫（來源=CUSTOM_DATABASE，不是專案素材庫；前綴代號 dbN；共 ${customDbTotal} 庫${customDbHidden ? `，此快照只展開 ${visibleTables.length} 庫，不得宣稱已列出全部` : ""}；問「有幾個資料庫」以 ${customDbTotal} 為準，不得把各庫列數加總、也不得把快照 ${visibleTables.length} 當成總數；快照僅最近幾列，全量搜尋用 query_database）：`, ...(dbSections.length ? dbSections : ["（目前沒有可展開的自訂資料庫列）"])]
+      ? ["", `組可見的自訂資料庫（來源=CUSTOM_DATABASE，不是專案素材庫；前綴代號 dbN；共 ${customDbTotal} 庫${customDbHidden ? `，此快照只展開 ${visibleTables.length} 庫，不得宣稱已列出全部` : ""}；問「有幾個資料庫」以 ${customDbTotal} 為準，不得把各庫列數加總、也不得把快照 ${visibleTables.length} 當成總數；未展開的庫仍會被關鍵字檢索；快照僅最近幾列，指定庫全量搜尋用 query_database）：`, ...(dbSections.length ? dbSections : ["（目前沒有可展開的自訂資料庫列）"])]
       : []),
     formatCommandRefs(commandRefs, commandLevel),
   ].join("\n");
 
   return {
     commandLevel, canDispatch, canSupervise, totalProjects, archivedProjectCount,
-    projectLines: lines, projByRef, dbByRef,
+    projectLines: lines, projByRef, dbByRef, evidenceDbs,
     customDbTotal, customDbListedCount: visibleTables.length, customDbHidden,
     commandRefs, degraded, context,
   };
