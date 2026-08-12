@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, compactRowLine, assistantAskInputSchema } from "./assistant";
 import { getModel } from "../../shared/models";
@@ -152,6 +153,16 @@ describe("assistantAskInputSchema（缺陷B：model 參數不再被忽略）", (
     const parsed = assistantAskInputSchema.parse(base);
     expect(parsed.model).toBeUndefined();
     expect(parsed.mode).toBeUndefined();
+  });
+});
+
+describe("project assistant custom-DB inventory", () => {
+  it("keyword evidence searches every readable table, not just the dbN snapshot", () => {
+    const source = readFileSync(new URL("./assistant.ts", import.meta.url), "utf8");
+    expect(source).toContain("readableDbInventory.evidence");
+    expect(source).toContain("readableDbInventory.total");
+    expect(source).toContain("ASSISTANT_DB_REF_LIMIT");
+    expect(source).not.toContain("retrieveAssistantDatabaseEvidence(readableDbs,");
   });
 });
 

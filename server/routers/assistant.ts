@@ -360,34 +360,45 @@ async function runMcpReadTool(
 
 /* ── 資料庫接線（連結全專案×資料庫）：AI 可讀的自訂資料庫 ── */
 
-/** 對話中可引用的資料庫（代號→真實表）：只列此人「AI 可讀」的可見庫（含本人 personal 庫），上限 32 個。 */
+/** 對話中可引用的資料庫（代號→真實表）：只列此人「AI 可讀」的可見庫（含本人 personal 庫）。 */
 type ReadableDb = AssistantReadableDatabase;
+const ASSISTANT_DB_REF_LIMIT = 32;
 
-async function listAssistantReadableDbs(auth: AuthState): Promise<ReadableDb[]> {
+async function listAssistantReadableDbs(auth: AuthState): Promise<{
+  listed: ReadableDb[];
+  evidence: ReadableDb[];
+  total: number;
+}> {
   const tables = await listVisibleTables(auth);
-  return tables
+  const readable = tables
     // The answer is generated per requesting session, not persisted as shared
     // project context. Therefore the assistant may use this user's personal
     // database while another project member still cannot see it.
     .map((t) => ({ t, access: resolveAgentAccess(auth, t) }))
     .filter((x) => x.access.canRead)
-    .slice(0, 32)
     .map((x, i) => ({
-      ref: `db${i + 1}`,
+      ref: i < ASSISTANT_DB_REF_LIMIT ? `db${i + 1}` : `name:${x.t.id.slice(0, 8)}`,
       id: x.t.id,
       name: x.t.name,
       fields: x.t.fields as DataField[],
       rowCount: x.t.rowCount,
       canWrite: x.access.canWriteRows,
     }));
+  return {
+    listed: readable.slice(0, ASSISTANT_DB_REF_LIMIT),
+    evidence: readable,
+    total: readable.length,
+  };
 }
 
 /** 資料庫清單 → 提示詞的速查文字（代號、名稱、列數、欄位 key；AI 代理可寫的標出來） */
-function assistantDbCheatsheet(dbs: ReadableDb[]): string {
-  if (dbs.length === 0) return "（目前沒有 AI 可讀的資料庫）";
-  return dbs
-    .map((d) => `${d.ref}=「${d.name}」（${d.rowCount} 列${d.canWrite ? "、AI 代理可寫" : "、唯讀"}）欄位：${d.fields.map((f) => `${f.key}(${f.label})`).join("、")}`)
-    .join("\n");
+function assistantDbCheatsheet(dbs: ReadableDb[], total = dbs.length): string {
+  if (total === 0) return "（目前沒有 AI 可讀的資料庫）";
+  const hidden = Math.max(0, total - dbs.length);
+  const head = hidden
+    ? `共 ${total} 個 AI 可讀資料庫；代號只展開 ${dbs.length} 庫，不得宣稱已列出全部；未展開的庫仍會被關鍵字檢索`
+    : `共 ${total} 個 AI 可讀資料庫`;
+  return [head, ...dbs.map((d) => `${d.ref}=「${d.name}」（${d.rowCount} 列${d.canWrite ? "、AI 代理可寫" : "、唯讀"}）欄位：${d.fields.map((f) => `${f.key}(${f.label})`).join("、")}`)].join("\n");
 }
 
 /** 一列資料 → 給 LLM 的一行摘要（欄位 key:值；長值截斷，防灌爆提示詞）。export 供 teamAssistant 的 query_database 工具重用同一格式。 */
@@ -950,7 +961,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
-      const [scenes, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, projectContext] = await Promise.all([
+      const [scenes, intelligence, knowledgeMeta, readableDbInventory, resourceResolution, projectRole, projectContext] = await Promise.all([
         db
           .select()
           .from(schema.scenes)
@@ -977,7 +988,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           budgetChars: KNOWLEDGE_BUDGET,
           items: [],
         })),
-        listAssistantReadableDbs(input.auth).catch(() => [] as ReadableDb[]),
+        listAssistantReadableDbs(input.auth).catch(() => ({ listed: [] as ReadableDb[], evidence: [] as ReadableDb[], total: 0 })),
         resolveProjectResources({
           auth: input.auth,
           projectId: project.id,
@@ -1021,7 +1032,8 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       // Retrieve matching rows before the first model call. Tool calling remains
       // available for follow-up queries, but the first answer no longer depends
       // on the model guessing that a database contains relevant evidence.
-      const databaseEvidence = await retrieveAssistantDatabaseEvidence(readableDbs, input.message, {
+      const readableDbs = readableDbInventory.listed;
+      const databaseEvidence = await retrieveAssistantDatabaseEvidence(readableDbInventory.evidence, input.message, {
         limit: 16,
         candidateLimit: 120,
         budgetChars: ASSISTANT_DATABASE_EVIDENCE_BUDGET,
@@ -1279,7 +1291,7 @@ ${sceneLines}
         const evidenceSummary = databaseEvidence.length
           ? `；資料庫實際命中 ${databaseEvidence.length} 列：${databaseEvidence.slice(0, 2).map((row) => `${row.tableName}／${row.text}`).join("；")}`
           : "";
-        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個${evidenceSummary}。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
+        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbInventory.total} 個${evidenceSummary}。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: "mock", model: "mock" }).catch(() => undefined);
         return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false, traceSessionId, sources: sourcesReport };
@@ -1338,7 +1350,7 @@ ${buildAiModelCheatsheet()}
 ${WORKFLOW_CHEATSHEET}
 </可用工作流速查>
 <可讀資料庫>
-${assistantDbCheatsheet(readableDbs)}
+${assistantDbCheatsheet(readableDbs, readableDbInventory.total)}
 </可讀資料庫>
 <情境手冊>
 ${scenarioPlaybookText()}

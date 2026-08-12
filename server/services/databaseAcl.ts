@@ -107,11 +107,9 @@ export function canCreateIn(auth: AuthState, scope: DataTableRow["scope"], group
   return auth.user.isSuperAdmin ? null : "全站資料庫只有超級管理員能建立";
 }
 
-/**
- * 列出此人可見的資料庫（tRPC 清單與 MCP list_databases 共用）：
- * 一條 or 條件查齊四層範圍，附每庫列數（彙總子查詢，無 N+1）。
- */
-export async function listVisibleTables(auth: AuthState): Promise<Array<DataTableRow & { rowCount: number }>> {
+export const VISIBLE_TABLE_LIST_LIMIT = 200;
+
+export function visibleTablesWhere(auth: AuthState): SQL {
   const groupIds = auth.groups.map((g) => g.groupId);
   const teamIds = [...memberTeamIds(auth)];
   const conds: SQL[] = [
@@ -120,13 +118,28 @@ export async function listVisibleTables(auth: AuthState): Promise<Array<DataTabl
   ];
   if (groupIds.length) conds.push(and(eq(schema.dataTables.scope, "group"), inArray(schema.dataTables.groupId, groupIds))!);
   if (teamIds.length) conds.push(and(eq(schema.dataTables.scope, "team"), inArray(schema.dataTables.teamId, teamIds))!);
+  return and(isNull(schema.dataTables.deletedAt), or(...conds))!;
+}
 
+export async function countVisibleTables(auth: AuthState): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.dataTables)
+    .where(visibleTablesWhere(auth));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * 列出此人可見的資料庫（tRPC 清單與 MCP list_databases 共用）：
+ * 一條 or 條件查齊四層範圍，附每庫列數（彙總子查詢，無 N+1）。
+ */
+export async function listVisibleTables(auth: AuthState): Promise<Array<DataTableRow & { rowCount: number }>> {
   const tables = await db
     .select()
     .from(schema.dataTables)
-    .where(and(isNull(schema.dataTables.deletedAt), or(...conds)))
+    .where(visibleTablesWhere(auth))
     .orderBy(desc(schema.dataTables.updatedAt))
-    .limit(200);
+    .limit(VISIBLE_TABLE_LIST_LIMIT);
 
   if (tables.length === 0) return [];
   const counts = await db

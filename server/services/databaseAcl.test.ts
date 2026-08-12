@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { canCreateIn, resolveAgentAccess, resolveTableAccess } from "./databaseAcl";
 import type { AuthState } from "./auth";
 
@@ -94,5 +95,15 @@ describe("canCreateIn", () => {
     expect(canCreateIn(auth(), "team", null, U.team2)).toContain("不屬於");
     expect(canCreateIn(auth(), "global")).toContain("超級管理員");
     expect(canCreateIn(auth({ user: { ...auth().user, isSuperAdmin: true } }), "global")).toBeNull();
+  });
+});
+
+describe("visible table inventory", () => {
+  it("count and list share the same ACL where; list is explicitly capped", () => {
+    const source = readFileSync(new URL("./databaseAcl.ts", import.meta.url), "utf8");
+    expect(source).toContain("export async function countVisibleTables");
+    expect(source).toContain("visibleTablesWhere(auth)");
+    expect(source).toContain("VISIBLE_TABLE_LIST_LIMIT");
+    expect(source).toContain(".limit(VISIBLE_TABLE_LIST_LIMIT)");
   });
 });
