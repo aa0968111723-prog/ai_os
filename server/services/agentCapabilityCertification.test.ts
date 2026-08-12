@@ -54,4 +54,15 @@ describe("live capability certification contract", () => {
       AGENT_CERTIFICATION_ENV: "production", NODE_ENV: "production", ZEABUR_GIT_COMMIT: "zeabur-sha",
     })).toBe("production_smoke");
   });
+
+  it("runs production_smoke on a production deployment that injects no build SHA", () => {
+    // live（Zeabur）NODE_ENV=production 但未注入任何 build SHA 變數（sha=null）。
+    // production_smoke 只需 NODE_ENV=production 即為正式部署憑證；SHA 僅供 drift 比對。
+    expect(effectiveVerificationMode("production_smoke", { NODE_ENV: "production" })).toBe("production_smoke");
+    expect(effectiveVerificationMode("production_smoke", { NODE_ENV: "production", AGENT_CERTIFICATION_ENV: "production" })).toBe("production_smoke");
+    // 明確宣告非 production（矛盾設定）仍要擋；非 production NODE_ENV 也擋。
+    expect(() => effectiveVerificationMode("production_smoke", { NODE_ENV: "production", AGENT_CERTIFICATION_ENV: "staging" })).toThrow(/does not match/);
+    expect(() => effectiveVerificationMode("production_smoke", { NODE_ENV: "development" })).toThrow(/does not match/);
+    expect(() => effectiveVerificationMode("production_smoke", {})).toThrow(/does not match/);
+  });
 });
