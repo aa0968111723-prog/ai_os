@@ -1,20 +1,15 @@
-{"key":"visual.board.caregiver_day","title":"照護者日常","prompt":"Hand-drawn gentle caregiver helping elder and teammates, warm soft light, simple lively illustration, hopeful mood 16:9"}
-{"key":"visual.board.captain_lead","title":"隊長帶領","prompt":"Hand-drawn passionate captain with straw hat pointing forward leading partners on path, warm lively simple 16:9"}
-{"key":"visual.board.navigator_plan","title":"導航策劃","prompt":"Hand-drawn navigator studying map with compass under warm lamp, partners nearby, clean simple illustration 16:9"}
-{"key":"visual.board.comic_relief","title":"活寶時刻","prompt":"Hand-drawn comic partner exaggerated gesture making team laugh at campsite, warm lively simple 16:9"}
-{"key":"visual.board.mentor_guide","title":"智者指引","prompt":"Hand-drawn elder mentor pointing path for young partners in mountain mist, warm soft light simple 16:9"}
-{"key":"visual.board.night_camp","title":"夜營談心","prompt":"Hand-drawn partners around campfire talking under stars, warm orange light, simple illustration hopeful 16:9"}
-{"key":"visual.board.morning_hike","title":"晨間出發","prompt":"Hand-drawn group starting hike at sunrise mountain trail, backpacks, warm gold light simple 16:9"}
-{"key":"visual.board.rain_support","title":"雨中扶持","prompt":"Hand-drawn teammates sharing umbrella supporting each other on wet pier, hopeful not dark, warm simple 16:9"}
-{"key":"visual.board.stage_music","title":"街頭音樂","prompt":"Hand-drawn street music performance crowd smiling, warm evening lights, lively simple illustration 16:9"}
-{"key":"visual.board.cleanup_joy","title":"淨灘喜悅","prompt":"Hand-drawn beach cleanup team bagging trash then ocean cleaner behind, warm sunny simple 16:9"}
-{"key":"visual.board.treasure_glow","title":"祕寶金光","prompt":"Hand-drawn ornate golden chest opening with soft gold light beams, peaceful ruins becoming green, warm simple 16:9"}
-{"key":"visual.board.calendar_july","title":"七月日曆","prompt":"Hand-drawn simple calendar page showing 2026 July highlighted, warm paper texture, clean illustration 16:9"}
-{"key":"visual.board.handshake","title":"擊掌約定","prompt":"Hand-drawn close-up multiple hands high-five or stack, diverse partners, warm simple hopeful 16:9"}
-{"key":"visual.board.back_view_walk","title":"背影出航","prompt":"Hand-drawn team walking toward bright horizon from behind, straw hat silhouette, warm simple cinematic 16:9"}
-{"key":"visual.board.indoor_circle","title":"會館圍圈","prompt":"Hand-drawn partners sitting in circle sharing in hall, warm window light, simple lively 16:9"}
-{"key":"visual.board.error_cases","title":"常見錯誤案例","prompt":"Hand-drawn warning poster AI agent mistakes: face drift, outfit color change, style mix photoreal, crowded composition, with red X, educational warm style 16:9"}
-{"key":"visual.board.prompt_layers","title":"提示詞分層","prompt":"Hand-drawn infographic layers Identity Action Scene Camera Light Style Constraint stacked blocks, bilingual labels warm simple 16:9"}
-{"key":"visual.board.mcp_tools","title":"MCP工具地圖","prompt":"Hand-drawn friendly map of MCP tools flow whoami context knowledge scenes generate QC, icons warm simple Chinese 16:9"}
-{"key":"visual.board.brand_safe","title":"安全與禁忌","prompt":"Hand-drawn safety poster no medical claims no gore no harmful likeness, green check hopeful path, warm simple 16:9"}
-{"key":"visual.board.agent_workspace","title":"代理工作台意象","prompt":"Hand-drawn cozy AI agent workbench desk with storyboard cards style guide character sheets, warm light simple illustration 16:9"}
+{"key":"visual.expr_grid_full","title":"全角色表情總表","prompt":"Hand-drawn mega expression grid 4 characters x 4 emotions, consistent faces, warm lively simple, small labels, 16:9"}
+{"key":"visual.outfit_lock","title":"服裝鎖定示意","prompt":"Hand-drawn same character three scenes same red team jacket, annotated 服裝一致, warm simple, 16:9"}
+{"key":"visual.face_lock","title":"臉部鎖定示意","prompt":"Hand-drawn same face different angles and lighting, identity preserved, warm illustration, labels, 16:9"}
+{"key":"visual.camera_arrows","title":"運鏡箭頭分鏡","prompt":"Hand-drawn storyboard with camera movement arrows pan tilt track push, warm simple panels, Chinese labels, 16:9"}
+{"key":"visual.broll_set","title":"B-roll物件","prompt":"Hand-drawn B-roll icon set: waves, footsteps, hands picking trash, instrument close-up, calendar flip, light rays, warm simple, 16:9"}
+{"key":"visual.title_safe","title":"字幕安全區","prompt":"Hand-drawn 9:16 frame with title-safe and subtitle zones marked, character upper third, warm simple, 16:9 comparison included"}
+{"key":"visual.cta_endcard","title":"結尾CTA卡","prompt":"Hand-drawn warm end card template with space for QR and message 下次見面, simple characters waving, 16:9 and 1:1 variants on one board"}
+{"key":"visual.mood_hope","title":"希望情緒板","prompt":"Hand-drawn mood board only hopeful images: sun break, held hands, open map, smile close-up, warm gold teal palette, 16:9"}
+{"key":"visual.mood_team","title":"團隊情緒板","prompt":"Hand-drawn team mood board: group cheer, shoulder to shoulder, shared umbrella, circle talk, warm simple, 16:9"}
+{"key":"visual.do_dont_style","title":"畫風DoDont","prompt":"Hand-drawn DO green check clean hand-drawn vs DONT red x photoreal gore messy text, educational, 16:9"}
+{"key":"visual.do_dont_char","title":"角色DoDont","prompt":"Hand-drawn DO consistent face outfit vs DONT changed hair color random clothes, warm educational, 16:9"}
+{"key":"visual.timeline_15s","title":"15秒時間軸","prompt":"Hand-drawn 15-second short video timeline graphic 0-3 hook 3-12 body 12-15 cta, icons, warm simple, 16:9"}
+{"key":"visual.timeline_60s","title":"60秒時間軸","prompt":"Hand-drawn 60-second recap timeline beats, warm illustration icons per beat, 16:9"}
+{"key":"visual.agent_tools","title":"Agent工具圖示","prompt":"Hand-drawn icons for agent tools: knowledge book, scene clapper, character card, prop box, generate spark, qc checklist, warm simple set, 16:9"}
+{"key":"visual.public_library_cover","title":"公共素材庫封面","prompt":"Hand-drawn cover poster Aios Public Agent Fuel Library, warm lively simple, treasure chest and style boards collage, Chinese title 公共代理素材庫, 16:9"}
