@@ -660,6 +660,17 @@ describe("formatCommandRefs（可下令對象的提示詞區塊）", () => {
   it("完全沒有可下令對象時回空字串（提示詞一字不多佔）", () => {
     expect(formatCommandRefs({ runs: [], tasks: [], members: [] }, "command")).toBe("");
   });
+
+  it("member truncation must be disclosed and cannot claim the full roster", () => {
+    const text = formatCommandRefs({
+      runs: [],
+      tasks: [],
+      members: [{ ref: "u1", id: "1", name: "阿光" }],
+      memberTotal: 15,
+    }, "supervise");
+    expect(text).toContain("只展開 1/15");
+    expect(text).toContain("不得宣稱已列出全部");
+  });
 });
 
 describe("TEAM_ASSISTANT_DATA_BOUNDARY_RULE（組級助手資料範圍邊界）", () => {

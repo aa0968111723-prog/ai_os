@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
@@ -40,6 +41,16 @@ export async function createProjectCore(input: {
   if (!platformFormat) throw new TRPCError({ code: "BAD_REQUEST", message: "這個發布平台已停用或不存在，請重新選一個" });
   // 使用者在建立表單挑過尺寸就以它為準（平台仍要合法，只是比例可另選）
   const format = input.format ?? platformFormat;
+
+  // Retry window: a second create with the same title in the same group by the
+  // same owner within 2 minutes is treated as the same Agent/client retry.
+  const [recent] = await db.select().from(schema.projects).where(and(
+    eq(schema.projects.groupId, groupId),
+    eq(schema.projects.ownerId, auth.user.id),
+    eq(schema.projects.title, title),
+    gte(schema.projects.createdAt, new Date(Date.now() - 120_000)),
+  )).orderBy(desc(schema.projects.createdAt)).limit(1);
+  if (recent) return recent;
 
   const [project] = await db
     .insert(schema.projects)

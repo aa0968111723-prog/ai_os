@@ -893,6 +893,7 @@ export interface CommandRefs {
   runs: Array<{ ref: string; id: string; projectTitle: string; status: string; goal: string; estPoints: number }>;
   tasks: Array<{ ref: string; id: string; title: string; projectTitle: string; assigneeName: string | null; overdueDays: number | null }>;
   members: Array<{ ref: string; id: string; name: string }>;
+  memberTotal?: number;
 }
 
 /** 解析後、可直接送 command 的提議（帶人看得懂的標籤與「為什麼」） */
@@ -990,7 +991,11 @@ export function formatCommandRefs(refs: CommandRefs, level: GroupCommandLevel): 
     }
   }
   if (refs.members.length) {
-    lines.push(`成員：${refs.members.map((m) => `${m.ref}=${m.name}`).join("、")}`);
+    const total = refs.memberTotal ?? refs.members.length;
+    const truncated = total > refs.members.length
+      ? `（只展開 ${refs.members.length}/${total} 人，不得宣稱已列出全部；未列出的請用姓名查詢）`
+      : "";
+    lines.push(`成員：${refs.members.map((m) => `${m.ref}=${m.name}`).join("、")}${truncated}`);
   }
   if (!lines.length) return "";
   return `\n可下令的對象（代號 rN／tN／uN；下令一律用代號，不要吐 uuid）：\n${lines.join("\n")}`;
@@ -1280,7 +1285,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   const commandRefs: CommandRefs = { runs: [], tasks: [], members: [] };
   if (canSupervise) {
     const nowMs = Date.now();
-    const [runRows, taskRows, memberRows] = await Promise.all([
+    const [runRows, taskRows, memberRows, memberCountRows] = await Promise.all([
       db
         .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
         .from(schema.agentRuns)
@@ -1301,6 +1306,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
         // 使用者上一輪讀到的理由對不上這一輪的按鈕；超過上限時連「哪幾個人進得了提示詞」都會飄。
         .orderBy(asc(schema.users.name), asc(schema.users.id))
         .limit(COMMAND_REF_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.groupMembers).where(eq(schema.groupMembers.groupId, groupId)),
     ]);
     commandRefs.runs = runRows.map((r, i) => ({
       ref: `r${i + 1}`,
@@ -1319,6 +1325,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
       overdueDays: t.dueAt && t.dueAt.getTime() < nowMs ? Math.floor((nowMs - t.dueAt.getTime()) / 86_400_000) : null,
     }));
     commandRefs.members = memberRows.map((m, i) => ({ ref: `u${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
+    commandRefs.memberTotal = Number(memberCountRows[0]?.n ?? memberRows.length);
   }
 
   const context = [
