@@ -84,8 +84,12 @@ import {
 
 /** 問答 0 點（NVIDIA NIM 免費額度）——與單專案助手同價；佈線保留供未來調價 */
 const ASK_COST_POINTS = 0;
-/** 上下文最多列幾個專案：夠組長看全貌，又不會把提示詞灌爆（超過的在上下文註明「另有 N 案未列」） */
-const PROJECT_LIMIT = 15;
+/** 上下文最多列幾個專案：組內專案數通常有限，正常組全列不截斷（#661/#662：原 15 案上限把組內最舊案截掉，
+ *  LLM 看不到而被誤導、清單與 totalProjects 不一致）。超過上限的極端大組由 buildTeamAskContext 末尾補列
+ *  被隱藏專案名稱＋最後活動，仍可回答「有哪些專案／哪個最舊」。 */
+const PROJECT_LIMIT = 100;
+/** 超過 PROJECT_LIMIT 時補列被隱藏專案的上限（防極端大組把提示詞灌爆；補列的是 updatedAt 最舊的那批） */
+const HIDDEN_PROJECT_LIST_LIMIT = 20;
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢）。
  *  從 3 提升到 6：讓團隊助手能深度鑽研多個專案與資料庫後再回答，顯著改善回答品質。 */
 const MAX_TOOL_ROUNDS = 6;
@@ -1041,6 +1045,36 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   // 專案代號 p1…pN：LLM 一律用代號指涉專案（查工具的 ref、派工的 projectRef），避免吐 uuid（會幻覺）
   const projByRef = new Map<string, ProjRow>(projRows.map((p, i) => [`p${i + 1}`, p]));
 
+  // ── 被 PROJECT_LIMIT 截掉的專案（僅極端大組觸發）──
+  // #661/#662 根因：PROJECT_LIMIT=15 比組內實數（17）少，最舊案被 updatedAt desc 排到末位截掉，
+  // 造成清單與 totalProjects 不一致、LLM 誤判最舊專案。提高 LIMIT 後正常組已全列；但為了讓「真的
+  // 超過上限」的組仍能回答「有哪些專案／哪個最舊」，這裡補列被隱藏專案的名稱＋最後活動。
+  const hiddenRows = totalProjects > PROJECT_LIMIT
+    ? await db
+        .select({
+          id: schema.projects.id,
+          title: schema.projects.title,
+          kind: schema.projects.kind,
+          status: schema.projects.status,
+          updatedAt: schema.projects.updatedAt,
+        })
+        .from(schema.projects)
+        .where(eq(schema.projects.groupId, groupId))
+        .orderBy(sql`case when ${schema.projects.status} = 'active' then 0 else 1 end`, desc(schema.projects.updatedAt))
+        .offset(PROJECT_LIMIT)
+        .limit(HIDDEN_PROJECT_LIST_LIMIT)
+    : [];
+  const hiddenProjectIds = hiddenRows.map((p) => p.id);
+  let hiddenLastBy = new Map<string, Date | null>();
+  if (hiddenProjectIds.length) {
+    const hiddenGenRows = await db
+      .select({ projectId: schema.generations.projectId, last: sql<Date | string | null>`max(${schema.generations.updatedAt})` })
+      .from(schema.generations)
+      .where(inArray(schema.generations.projectId, hiddenProjectIds))
+      .groupBy(schema.generations.projectId);
+    hiddenLastBy = new Map(hiddenGenRows.map((r) => [r.projectId, r.last ? new Date(r.last) : null]));
+  }
+
   // 每案聚合：各一條 groupBy 查詢一次撈齊（避免 15 案 × 4 查詢的 N+1）；
   // 沒有專案就全空——空陣列丟給 inArray 會產生無效 SQL（比照 feedbackReports 的守則）
   let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
@@ -1104,6 +1138,12 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
   });
   const hidden = totalProjects - projRows.length;
+  // 被隱藏專案一行：名稱(類型)｜最後活動（用 updatedAt 當 lastActive 底，被 hiddenRows 撈回）
+  const hiddenLines = hiddenRows.map((p, i) => {
+    const lastGen = hiddenLastBy.get(p.id);
+    const lastActive = lastGen && lastGen.getTime() > new Date(p.updatedAt).getTime() ? lastGen : new Date(p.updatedAt);
+    return `[h${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜最後活動 ${fmtTaipei(lastActive)}`;
+  });
 
   // ── 自訂資料庫注入（AI 代理系統 × 資料庫系統的內部接點）──
   // 這個組看得到的組/團隊/全站資料庫（個人庫不進共享上下文），每庫附欄位與前幾列，
@@ -1294,8 +1334,11 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   }
 
   const context = [
-    `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}；這份清單只含本組專案、不含其他任何組的專案）：`,
+    `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未完整列出，其名稱與最後活動見下方「未完整列出專案」段（前綴代號 hN）` : ""}；這份清單只含本組專案、不含其他任何組的專案）：`,
     lines.length ? lines.join("\n") : "（本組目前沒有專案）",
+    ...(hiddenLines.length
+      ? ["", `未完整列出專案（組內共 ${totalProjects} 案，以下 ${hiddenLines.length} 案因超過清單上限${hidden > hiddenLines.length ? `、另有 ${hidden - hiddenLines.length} 案未列` : ""}；前綴代號 hN，僅供回答名稱與最後活動，派工仍只能用上方 pN）：`, ...hiddenLines]
+      : []),
     `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
     "",
     "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
