@@ -25,12 +25,15 @@ import {
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
+import { interactionPickerMode, type AssistantInteractionRequest } from "@shared/assistantInteractions";
 import {
   ExternalAssetIntake,
+  type ExternalImportNotice,
   type ExternalIntakeOpenRequest,
 } from "../features/external-intake/ExternalAssetIntake";
 import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
 import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
+import { AssistantInteractionCard } from "./AssistantInteractionCard";
 import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
 import {
   abortAssistantRun,
@@ -111,6 +114,7 @@ export interface ChatMessage {
   editingSessionId?: string;
   editingResult?: { sessionId: string; assetId: string };
   intakeFallbacks?: IntakeFallback[];
+  interactionRequest?: AssistantInteractionRequest;
   /** Explicitly derived from the user's originating ASK turn; never infer it from answer prose. */
   offerIdeaProject?: boolean;
 }
@@ -464,6 +468,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const activeGoalRef = useRef("");
   const queuedMessageRef = useRef<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const restoredPickerRef = useRef<string | undefined>(undefined);
+  const presentedInteractionIdsRef = useRef(new Set<string>());
+  const openedInteractionIdsRef = useRef(new Set<string>());
 
   const pushMessage = (message: ChatMessage) => {
     if (!groupId) return;
@@ -475,6 +482,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
   // 一次性 fallback：串流根本沒開始（舊代理、網路攔 SSE）才用；串流已吐過事件絕不重跑
   const ask = trpc.globalAssistant.ask.useMutation();
+  const submitInteraction = trpc.globalAssistant.submitInteraction.useMutation();
+  const interactionLifecycle = trpc.globalAssistant.interactionLifecycle.useMutation();
   // Capability probing is data, not LLM opinion: never ask a model whether the product can browse.
   const computerStatus = trpc.computerRuntime.status.useQuery(undefined, { staleTime: 30_000, retry: false });
   const createBrowserSession = trpc.computerRuntime.createSession.useMutation();
@@ -503,14 +512,17 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           : recovered.status === "failed"
             ? "failed"
             : "waiting";
-      const recoveredMessages = recovered.messages.map((message, index) => ({
+      const recoveredMessages: ChatMessage[] = recovered.messages.map((message, index) => ({
         ...message,
-        ...(message.role === "assistant" && index === recovered.messages.length - 1 ? { runStatus } : {}),
+        ...(message.role === "assistant" && index === recovered.messages.length - 1
+          ? { runStatus, interactionRequest: recovered.activeGoal?.pendingInteraction }
+          : {}),
       }));
       return {
         ...previous,
         messages: recoveredMessages,
         activeGoal: recovered.activeGoal ?? undefined,
+        pendingInteraction: recovered.activeGoal?.pendingInteraction,
         recentActionResults: recovered.recentActionResults,
         run: recovered.runId ? {
           runId: recovered.runId,
@@ -533,6 +545,101 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       focusAnchor: pageCtx.entityId,
     });
   }, [durableConversation.data, groupId, pageCtx.entityId, pageCtx.route]);
+
+  const recordInteractionLifecycle = (
+    request: AssistantInteractionRequest,
+    event: "presented" | "opened" | "cancelled",
+  ) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    void interactionLifecycle.mutateAsync({
+      groupId,
+      conversationId: conversation.returnContext.conversationId,
+      runId: request.runId,
+      goalId: request.goalId,
+      interactionId: request.interactionId,
+      resumeToken: request.resumeToken,
+      event,
+    }).catch(() => { /* lifecycle telemetry must not block the picker */ });
+  };
+
+  const openPickerForInteraction = (request: AssistantInteractionRequest | undefined) => {
+    const mode = request ? interactionPickerMode(request.type) : undefined;
+    if (!mode || !request?.targetProjectId) return;
+    setIntakeTargetProjectId(request.targetProjectId);
+    setIntakeOpenRequest({ id: request.interactionId, mode });
+    if (!openedInteractionIdsRef.current.has(request.interactionId)) {
+      openedInteractionIdsRef.current.add(request.interactionId);
+      recordInteractionLifecycle(request, "opened");
+    }
+  };
+
+  const applyInteractionResponse = (data: Awaited<ReturnType<typeof submitInteraction.mutateAsync>>) => {
+    if (!groupId) return;
+    setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+      ...previous,
+      activeGoal: data.activeGoal,
+      pendingInteraction: data.nextInteraction,
+      recentActionResults: data.actionResult
+        ? [...(previous.recentActionResults ?? []), data.actionResult].slice(-5)
+        : previous.recentActionResults,
+      run: previous.run && previous.run.runId === data.runId
+        ? { ...previous.run, events: [...previous.run.events, ...data.events], active: false }
+        : previous.run,
+    }));
+    if (data.nextInteraction) {
+      pushMessage({ role: "assistant", text: data.answer, runStatus: "waiting", interactionRequest: data.nextInteraction, runId: data.runId });
+      openPickerForInteraction(data.nextInteraction);
+    } else {
+      pushMessage({
+        role: "assistant",
+        text: data.answer,
+        runStatus: data.activeGoal.status === "completed" ? "completed" : data.activeGoal.status === "failed" ? "failed" : "waiting",
+        runId: data.runId,
+        events: data.events,
+      });
+    }
+  };
+
+  const submitInteractionSelection = async (request: AssistantInteractionRequest, selectedIds: string[]) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    try {
+      applyInteractionResponse(await submitInteraction.mutateAsync({
+        groupId,
+        conversationId: conversation.returnContext.conversationId,
+        runId: request.runId,
+        goalId: request.goalId,
+        interactionId: request.interactionId,
+        resumeToken: request.resumeToken,
+        selectedIds,
+      }));
+    } catch (error) {
+      pushMessage({ role: "assistant", text: `這個選擇已失效或無法使用：${error instanceof Error ? error.message : "請重新開啟"}`, runStatus: "waiting" });
+    }
+  };
+
+  const submitInteractionImport = async (request: AssistantInteractionRequest, notice: ExternalImportNotice) => {
+    if (!groupId || !conversation.returnContext?.conversationId) return;
+    try {
+      applyInteractionResponse(await submitInteraction.mutateAsync({
+        groupId,
+        conversationId: conversation.returnContext.conversationId,
+        runId: request.runId,
+        goalId: request.goalId,
+        interactionId: request.interactionId,
+        resumeToken: request.resumeToken,
+        importResult: notice,
+      }));
+    } catch (error) {
+      pushMessage({ role: "assistant", text: `資料已保存，但無法接回原本工作：${error instanceof Error ? error.message : "請重新開啟"}`, runStatus: "waiting" });
+    }
+  };
+
+  useEffect(() => {
+    const request = conversation.pendingInteraction;
+    if (!request || restoredPickerRef.current === request.interactionId) return;
+    restoredPickerRef.current = request.interactionId;
+    openPickerForInteraction(request);
+  }, [conversation.pendingInteraction?.interactionId]);
 
   /**
    * 卸載時**不再**中止串流。
@@ -656,7 +763,6 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       return;
     }
 
-    const directIntakeMode = activeProjectId ? detectDirectIntakeRequest(text) : null;
     if (activeProjectId && detectEditingHandoffRequest(text)) {
       setInput("");
       captureAssistantReturnContext({
@@ -677,38 +783,6 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       setEditingSheetOpen(true);
       return;
     }
-    // File/Drive selection is a mini workspace, not an LLM attachment. Opening
-    // it is safe and synchronous; persistence/ACL/dedupe still happen in the
-    // existing Universal Intake service after the user chooses a source.
-    if (activeProjectId && (directIntakeMode === "drive" || directIntakeMode === "files" || directIntakeMode === "folder")) {
-      setInput("");
-      captureAssistantReturnContext({
-        groupId,
-        projectId: activeProjectId,
-        originRoute: pageCtx.route,
-        originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
-        focusAnchor: pageCtx.entityId,
-      });
-      setAssistantConversation<ChatMessage>(groupId, (previous) => ({
-        ...previous,
-        messages: [
-          ...previous.messages,
-          { role: "user", text },
-          {
-            role: "assistant",
-            text: directIntakeMode === "drive"
-              ? "請在這裡選擇要帶入的 Google Drive 檔案；完成後我會在同一個對話繼續。"
-              : directIntakeMode === "folder"
-                ? "請選擇要匯入的資料夾。Aios 會沿用 Folder Import 2.0 建立 session，檔案安全保存後即可繼續對話。"
-              : "Aios 需要檔案才能繼續。選擇後會先安全保存，AI 分析會在背景執行。",
-            runStatus: "waiting",
-          },
-        ],
-      }));
-      setIntakeOpenRequest({ id: `${Date.now()}`, mode: directIntakeMode });
-      return;
-    }
-
     const newHistory = messages.slice(-6).map((m) => ({ role: m.role, text: m.text }));
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
@@ -768,6 +842,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       intakeFallbacks?: IntakeFallback[];
       activeGoal?: AssistantActiveGoal;
       intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
+      interactionRequest?: AssistantInteractionRequest;
     };
     const applyDone = (data: AskData) => {
       if (!runStillCurrent()) return;
@@ -780,7 +855,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       // A durable file/Drive/folder question is already rendered as the
       // assistant answer plus the mini workspace. Repeating waiting.user_input
       // as a work-step card made the same prompt appear twice on mobile.
-      const visibleEvents = data.intakeRequest
+      const visibleEvents = data.interactionRequest || data.intakeRequest
         ? events.filter((event) => event.type !== "waiting.user_input")
         : events;
       const sources = data.sources ?? [];
@@ -809,9 +884,12 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         setAssistantConversation<ChatMessage>(groupId, (previous) => ({
           ...previous,
           activeGoal: { ...data.activeGoal!, status },
+          pendingInteraction: data.interactionRequest ?? data.activeGoal!.pendingInteraction,
         }));
       }
-      if (data.intakeRequest) {
+      if (data.interactionRequest) {
+        openPickerForInteraction(data.interactionRequest);
+      } else if (data.intakeRequest) {
         setIntakeTargetProjectId(data.intakeRequest.projectId);
         setIntakeOpenRequest({ id: `${Date.now()}`, mode: data.intakeRequest.mode });
       }
@@ -834,6 +912,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         events: visibleEvents.length ? visibleEvents : undefined,
         sources: sources.length ? sources : undefined,
         intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
+        interactionRequest: data.interactionRequest,
         offerIdeaProject: !data.intakeRequest
           && !data.intakeFallbacks?.length
           && resolvedRunStatus === "completed"
@@ -1126,6 +1205,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                     />
                   ) : null}
                   <div className="ai-copilot-bubble__text">{msg.text}</div>
+                  {msg.interactionRequest
+                    && conversation.pendingInteraction?.interactionId === msg.interactionRequest.interactionId ? (
+                    <AssistantInteractionCard
+                      request={msg.interactionRequest}
+                      busy={submitInteraction.isPending}
+                      onPresented={() => {
+                        if (presentedInteractionIdsRef.current.has(msg.interactionRequest!.interactionId)) return;
+                        presentedInteractionIdsRef.current.add(msg.interactionRequest!.interactionId);
+                        recordInteractionLifecycle(msg.interactionRequest!, "presented");
+                      }}
+                      onSelect={(ids) => { void submitInteractionSelection(msg.interactionRequest!, ids); }}
+                      onCancel={() => {
+                        setIntakeOpenRequest(undefined);
+                        recordInteractionLifecycle(msg.interactionRequest!, "cancelled");
+                      }}
+                    />
+                  ) : null}
                   {msg.editingSessionId && activeProjectId ? (
                     <AssistantEditingSessionCard
                       projectId={activeProjectId}
@@ -1295,9 +1391,21 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               dialogTitle="加入資料"
               closeOnImported
               openRequest={intakeOpenRequest}
+              onOpenChange={(open) => {
+                if (open) return;
+                const interaction = conversation.pendingInteraction;
+                if (interaction && interactionPickerMode(interaction.type)) {
+                  recordInteractionLifecycle(interaction, "cancelled");
+                }
+              }}
               onImported={(notice) => {
                 setIntakeTargetProjectId(undefined);
                 if (!notice || !groupId) return;
+                const interaction = conversation.pendingInteraction;
+                if (interaction && interactionPickerMode(interaction.type)) {
+                  void submitInteractionImport(interaction, notice);
+                  return;
+                }
                 recordAssistantActionResults(groupId, [{
                   type: "import",
                   source: notice.source,

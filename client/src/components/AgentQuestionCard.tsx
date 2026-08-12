@@ -82,6 +82,7 @@ export function AgentQuestionCard({
     <div className="agent-question__options" role={multi ? "group" : "radiogroup"} aria-label={question.title}>
       {question.options.map((option) => {
         const checked = selected.includes(option.id);
+        const blocked = option.availability === "BLOCKED";
         return (
           <button
             key={option.id}
@@ -89,7 +90,8 @@ export function AgentQuestionCard({
             className={`agent-question__option${checked ? " is-selected" : ""}`}
             role={multi ? "checkbox" : "radio"}
             aria-checked={checked}
-            disabled={submitting}
+            disabled={submitting || blocked}
+            aria-disabled={blocked || undefined}
             onClick={() => multi ? toggle(option.id) : void onAnswer(option.id)}
           >
             {option.imageUrl ? <img src={option.imageUrl} alt="" /> : null}
@@ -99,6 +101,7 @@ export function AgentQuestionCard({
                 {option.recommended ? <Pill status="done">建議</Pill> : null}
               </span>
               {option.description ? <Meta>{option.description}</Meta> : null}
+              {blocked && option.blockerReason ? <Meta className="agent-question__blocker">{option.blockerReason}</Meta> : null}
             </span>
           </button>
         );

@@ -35,6 +35,7 @@
     "test:client:coverage": "vitest run --config vitest.client.config.ts --coverage",
     "test:ui:routes": "node scripts/e2e-ui/audit-routes.mjs",
     "test:e2e:command-center": "node scripts/e2e-ui/verify-command-center.mjs",
+    "test:e2e:agent-handoffs": "node scripts/e2e-ui/verify-agent-ui-handoffs.mjs",
     "verify:agent-live": "python scripts/e2e-agent-live-certification.py",
     "verify:agent-db-integrity": "tsx scripts/verify-agent-db-integrity.ts",
     "verify:agent-db-recovery": "tsx scripts/verify-agent-db-recovery.ts",

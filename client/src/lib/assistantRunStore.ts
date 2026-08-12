@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
+import type { AssistantInteractionRequest } from "@shared/assistantInteractions";
 import {
   boundAssistantActionResults,
   type AssistantActionResult,
@@ -58,6 +59,8 @@ export interface AssistantConversationState<TMessage> {
   recentActionResults?: AssistantActionResult[];
   /** Same-goal continuation state; ids are revalidated by the server every turn. */
   activeGoal?: AssistantActiveGoal;
+  /** Current typed handoff, durable through the activeGoal checkpoint. */
+  pendingInteraction?: AssistantInteractionRequest;
 }
 
 type Listener = () => void;

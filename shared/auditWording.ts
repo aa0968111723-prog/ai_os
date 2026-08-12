@@ -146,6 +146,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
   "globalAssistant.ask": "詢問全站 AI 助手",
+  "globalAssistant.submitInteraction": "回覆 AI 助手的選擇／選檔要求",
+  "globalAssistant.interactionLifecycle": "更新 AI 助手選擇介面狀態",
   "globalAssistant.runSiteAction": "執行全站助手確認卡動作",
   "globalAssistant.undoSiteAction": "復原全站助手直接執行的動作",
   "openaiMcp.ask": "請 GPT 直接讀取並處理 AI-OS",

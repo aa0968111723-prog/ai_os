@@ -51,6 +51,14 @@ export const AGENT_EVENT_TYPES = [
   "agent.failed",
   "waiting.permission",
   "waiting.user_input",
+  "interaction.requested",
+  "interaction.presented",
+  "interaction.submitted",
+  "interaction.cancelled",
+  "interaction.expired",
+  "handoff.opened",
+  "handoff.returned",
+  "agent.resumed",
 ] as const;
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
 

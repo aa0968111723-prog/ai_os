@@ -4,6 +4,7 @@ import type { AssistantWirePageContext } from "@shared/assistantPageContext";
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
 import type { AssistantActionResult } from "@shared/assistantActions";
 import type { AssistantActiveGoal, AssistantEvidenceScope, AssistantGoalFrame } from "@shared/assistantGoalFrame";
+import type { AssistantInteractionRequest } from "@shared/assistantInteractions";
 import type {
   AssistantExecutionPlan,
   AssistantLatencyMetrics,
@@ -270,6 +271,7 @@ export type SiteAssistantStreamDone = {
   activeGoal?: AssistantActiveGoal;
   evidenceScope?: AssistantEvidenceScope;
   intakeRequest?: { mode: "drive" | "files" | "folder"; projectId: string; projectTitle: string; message: string };
+  interactionRequest?: AssistantInteractionRequest;
 };
 
 function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {

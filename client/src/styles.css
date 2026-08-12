@@ -7657,6 +7657,60 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   display: flex;
   gap: 8px;
 }
+.assistant-interaction {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--ai-glass-edge);
+  border-radius: 16px;
+  background: var(--ai-glass, rgba(255, 254, 250, 0.82));
+}
+.assistant-interaction__head { display: grid; gap: 3px; }
+.assistant-interaction__head > strong { font-size: 14px; color: var(--fg); }
+.assistant-interaction__head > span,
+.assistant-interaction__empty { margin: 0; font-size: 12px; color: var(--fg-secondary); }
+.assistant-interaction__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.assistant-interaction__option {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  text-align: left;
+  color: var(--fg);
+  background: var(--card, #fff);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  cursor: pointer;
+  min-height: 48px;
+}
+.agent-question__option:disabled { cursor: not-allowed; opacity: .58; }
+.agent-question__blocker { color: var(--warning-ink, #8a4b16); }
+.assistant-interaction__option:hover:not(:disabled),
+.assistant-interaction__option:focus-visible { border-color: var(--primary); background: var(--surface-hover); }
+.assistant-interaction__option:disabled { cursor: not-allowed; opacity: .58; }
+.assistant-interaction__option-icon { flex: 0 0 auto; display: grid; place-items: center; }
+.assistant-interaction__option-copy { min-width: 0; display: grid; gap: 2px; }
+.assistant-interaction__option-copy strong { font-size: 13px; }
+.assistant-interaction__option-copy small { font-size: 11px; color: var(--fg-secondary); overflow-wrap: anywhere; }
+.assistant-interaction__blocker { color: var(--warning-ink, #8a4b16) !important; }
+.assistant-interaction__cancel {
+  min-height: 44px;
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+@media (max-width: 420px) {
+  .assistant-interaction__options { grid-template-columns: 1fr; }
+  .assistant-interaction__option { min-height: 52px; width: 100%; }
+}
 .ai-copilot-bubble__cards {
   display: flex;
   flex-direction: column;
