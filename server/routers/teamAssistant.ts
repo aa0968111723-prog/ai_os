@@ -582,7 +582,7 @@ export interface TeamToolOutcome {
 }
 
 /** 執行一個唯讀查詢工具（範圍鎖死在 projByRef／dbByRef 列出的本組資源＋本組 groupId）；回給 LLM 的結果文字＋給使用者看的步驟摘要 */
-export export function resolveTeamDb(
+export function resolveTeamDb(
   dbByRef: Map<string, TeamDb>,
   evidenceDbs: readonly TeamDb[],
   token: string,
