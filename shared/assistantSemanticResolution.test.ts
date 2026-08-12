@@ -139,7 +139,7 @@ describe("assistantSemanticResolution", () => {
 
   it("maps a schedule listing to read_schedule", () => {
     const { frame } = deriveDeterministicGoalFrame("這週有什麼行程？");
-    expect(frame.operation).toBe("LIST");
+    expect(frame.operation).toBe("READ");
     expect(frame.objectType).toBe("SCHEDULE");
     expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_schedule" });
   });
