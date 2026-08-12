@@ -582,6 +582,23 @@ export interface TeamToolOutcome {
 }
 
 /** 執行一個唯讀查詢工具（範圍鎖死在 projByRef／dbByRef 列出的本組資源＋本組 groupId）；回給 LLM 的結果文字＋給使用者看的步驟摘要 */
+export export function resolveTeamDb(
+  dbByRef: Map<string, TeamDb>,
+  evidenceDbs: readonly TeamDb[],
+  token: string,
+): TeamDb | undefined {
+  const key = token.trim();
+  if (!key) return undefined;
+  const byRef = dbByRef.get(key);
+  if (byRef) return byRef;
+  const lower = key.toLocaleLowerCase();
+  const nameHits = evidenceDbs.filter((db) => (
+    db.ref === key
+    || db.name.toLocaleLowerCase() === lower
+  ));
+  return nameHits.length === 1 ? nameHits[0] : undefined;
+}
+
 export async function runTeamTool(
   projByRef: Map<string, ProjRow>,
   dbByRef: Map<string, TeamDb>,
@@ -589,6 +606,7 @@ export async function runTeamTool(
   call: z.infer<typeof teamToolSchema>,
   // S5 的三支新工具需要 auth 才能走既有 core 的組隔離（不自己另寫一條查詢）
   auth?: AuthState,
+  evidenceDbs: readonly TeamDb[] = [],
 ): Promise<TeamToolOutcome> {
   // ── S5：組級阻塞（誰卡住了）──
   if (call.tool === "group_blockers") {
@@ -666,14 +684,14 @@ export async function runTeamTool(
     // 與 assistant 的同名工具同語義（rowLine 同格式）：dbRef 已鎖死在本組可見／AI 可讀清單，
     // 關鍵字交給 PostgreSQL 搜完整資料集，回傳仍硬限 20 列，避免提示詞無界增長。
     const dbRef = call.args?.dbRef?.trim() ?? "";
-    const target = dbByRef.get(dbRef);
+    const target = resolveTeamDb(dbByRef, evidenceDbs, dbRef);
     if (!target) {
       return {
         step: `查資料庫(代號 ${dbRef || "未填"} 不存在)`,
-        text: dbByRef.size
-          ? `沒有代號「${dbRef}」的資料庫——可用代號：${[...dbByRef.values()].map((d) => `${d.ref}(${d.name})`).join("、")}`
+        text: evidenceDbs.length || dbByRef.size
+          ? `沒有代號「${dbRef}」的資料庫——可用代號：${[...dbByRef.values()].map((d) => `${d.ref}(${d.name})`).join("、")}；未展開的庫請用完整庫名`
           : "這個組目前沒有 AI 可讀的資料庫",
-        meta: { ok: false, error: dbByRef.size ? "指定的資料庫不在可讀清單內" : "這個組目前沒有 AI 可讀的資料庫" },
+        meta: { ok: false, error: (evidenceDbs.length || dbByRef.size) ? "指定的資料庫不在可讀清單內" : "這個組目前沒有 AI 可讀的資料庫" },
       };
     }
     const { keyword: kw, rows: matched } = await searchAssistantDatabaseRows(target.id, call.args?.keyword);
@@ -1417,7 +1435,7 @@ export const teamAssistantRouter = router({
       const { commandLevel, canDispatch, canSupervise, totalProjects, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
       const lines = teamCtx.projectLines;
       const retrieveDatabaseEvidence = () => retrieveAssistantDatabaseEvidence(
-        [...dbByRef.values()]
+        (teamCtx.evidenceDbs.length ? teamCtx.evidenceDbs : [...dbByRef.values()])
           .filter((table) => table.agentAccess === "read" || table.agentAccess === "write")
           .map((table) => ({ ...table, canWrite: false })),
         input.message,
@@ -1520,7 +1538,7 @@ ${historyBlock}使用者的問題：${input.message}`;
           },
           toolName: (call) => call.tool,
           execTool: async (call) => {
-            const r = await runTeamTool(projByRef, dbByRef, input.groupId, call, ctx.auth);
+            const r = await runTeamTool(projByRef, dbByRef, input.groupId, call, ctx.auth, teamCtx.evidenceDbs);
             steps.push(r.step);
             return r;
           },

@@ -1570,7 +1570,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         }
       },
       // 唯讀不變式：迴圈只執行 teamTool（全部唯讀、組隔離在各 core 內部）；寫入只能出現在 siteActions 提議
-      execTool: (call) => runTeamTool(projByRef, dbByRef, groupId, call, auth),
+      execTool: (call) => runTeamTool(projByRef, dbByRef, groupId, call, auth, teamCtx.evidenceDbs),
       onToolResult: async (call, r) => {
         collectedSteps.push(r.step);
         const meta = r.meta;

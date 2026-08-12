@@ -18,6 +18,7 @@ import {
   resolveCommandProposals,
   formatCommandRefs,
   summarizeGroupAgentRuns,
+  resolveTeamDb,
 } from "./teamAssistant";
 
 /** 迷你專案列（只需 id/title，resolveDispatches 泛型只吃這兩欄） */
@@ -26,6 +27,23 @@ const projByRef = new Map([
   ["p1", proj("uuid-1", "招生短片")],
   ["p2", proj("uuid-2", "社課回顧")],
 ]);
+
+describe("resolveTeamDb", () => {
+  const listed = { ref: "db1", id: "t1", name: "器材清單", fields: [], rowCount: 3, agentAccess: "write" as const };
+  const hidden = { ref: "name:aaaaaaaa", id: "t2", name: "隱藏名單", fields: [], rowCount: 9, agentAccess: "read" as const };
+  const dbByRef = new Map([["db1", listed]]);
+
+  it("resolves snapshot dbN and unique full names beyond the snapshot", () => {
+    expect(resolveTeamDb(dbByRef, [listed, hidden], "db1")?.id).toBe("t1");
+    expect(resolveTeamDb(dbByRef, [listed, hidden], "隱藏名單")?.id).toBe("t2");
+    expect(resolveTeamDb(dbByRef, [listed, hidden], "name:aaaaaaaa")?.id).toBe("t2");
+  });
+
+  it("does not guess when two tables share a name", () => {
+    const twin = { ...hidden, id: "t3", ref: "name:bbbbbbbb" };
+    expect(resolveTeamDb(dbByRef, [listed, hidden, twin], "隱藏名單")).toBeUndefined();
+  });
+});
 
 describe("dispatchAllowed（派工權純規則）", () => {
   it("組長／團隊管理員／開發者恆可派工，不看授權旗標", () => {

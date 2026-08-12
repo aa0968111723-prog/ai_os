@@ -392,6 +392,7 @@ describe("紅線一契約：LLM 迴圈唯讀（源碼斷言）", () => {
   it("database evidence searches evidenceDbs, not only the 5-table dbByRef snapshot", () => {
     expect(src).toContain("teamCtx.evidenceDbs");
     expect(src).toContain("在 ${teamCtx.customDbTotal} 個可讀資料庫中比對");
+    expect(src).toContain("runTeamTool(projByRef, dbByRef, groupId, call, auth, teamCtx.evidenceDbs)");
   });
 
   it("站級動作型別不含任何 destructive 動作（EVAL CASE 3：刪除類不可自主執行）", () => {
