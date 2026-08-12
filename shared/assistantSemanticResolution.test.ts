@@ -216,6 +216,31 @@ describe("assistantSemanticResolution", () => {
     expect(result.source).toBe("pending_choice");
   });
 
+  it("#664: cancelled or expired pending interaction cannot answer 第二個", () => {
+    const candidates = [{ id: P1, title: "A" }, { id: P2, title: "B" }];
+    const cancelled = active({
+      frame: { ...active().frame, scope: {} },
+      resolvedSlots: { projectCandidates: candidates },
+      pendingInteraction: { status: "cancelled", expiresAt: new Date(Date.now() + 60_000).toISOString() } as never,
+    });
+    expect(resolveWorkingProject({
+      message: "第二個",
+      candidates,
+      activeGoal: cancelled,
+    }).status).toBe("ambiguous");
+
+    const expired = active({
+      frame: { ...active().frame, scope: {} },
+      resolvedSlots: { projectCandidates: candidates },
+      pendingInteraction: { status: "pending", expiresAt: new Date(Date.now() - 1_000).toISOString() } as never,
+    });
+    expect(resolveWorkingProject({
+      message: "第二個",
+      candidates,
+      activeGoal: expired,
+    }).status).toBe("ambiguous");
+  });
+
   it("treats '查看剛匯入的資料' as a recent-result read, not a new source import", () => {
     const { frame } = deriveDeterministicGoalFrame("查看剛匯入的資料");
     expect(frame).toMatchObject({ operation: "READ", objectType: "ASSET", missingSlots: [] });

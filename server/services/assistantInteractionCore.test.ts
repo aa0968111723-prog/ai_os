@@ -28,6 +28,10 @@ describe("Assistant Interaction security and resumability", () => {
     expect(source).toContain("assetIntelligence");
     expect(source).toContain("alreadyRecorded");
     expect(source).toContain("interaction.cancelled");
+    expect(source).toContain('status: "expired"');
+    expect(source).toContain("interaction.expired");
+    expect(source).toContain("persistExpiredInteraction");
+    expect(source).toContain("projectCandidates: undefined");
     expect(source).toContain('request.capabilityId === "attach_asset_to_shot"');
     expect(source).toContain("attachAssetsToShotVerified");
   });

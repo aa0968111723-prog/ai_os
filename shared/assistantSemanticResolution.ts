@@ -527,6 +527,18 @@ function projectFromRecentResult(
   return undefined;
 }
 
+function pendingChoiceAllowed(goal?: AssistantActiveGoal): boolean {
+  if (!goal) return false;
+  const pending = goal.pendingInteraction;
+  if (pending) {
+    if (pending.status !== "pending") return false;
+    const expires = Date.parse(pending.expiresAt);
+    if (Number.isFinite(expires) && expires <= Date.now()) return false;
+    return true;
+  }
+  return goal.status === "waiting_user_input";
+}
+
 function pendingChoiceIndex(message: string): number | undefined {
   const m = message.trim().match(/^(?:第)?([一二三四五六七八九十\d]+)(?:個)?[。！!]?$/u);
   if (!m) return undefined;
@@ -552,7 +564,9 @@ export function resolveWorkingProject(input: {
   const explicit = explicitProject(input.message, input.candidates);
   if (explicit) return { status: "resolved", projectId: explicit.id, projectTitle: explicit.title, source: "explicit", candidates: [] };
 
-  const pending = input.activeGoal?.resolvedSlots?.projectCandidates;
+  const pending = pendingChoiceAllowed(input.activeGoal)
+    ? input.activeGoal?.resolvedSlots?.projectCandidates
+    : undefined;
   const index = pendingChoiceIndex(input.message);
   if (Array.isArray(pending) && index != null) {
     const option = pending[index] as { id?: unknown; title?: unknown } | undefined;

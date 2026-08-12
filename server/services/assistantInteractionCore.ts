@@ -75,6 +75,35 @@ function constantTimeTokenEqual(expected: string, received: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+async function persistExpiredInteraction(
+  tx: typeof db,
+  row: typeof schema.assistantConversationStates.$inferSelect,
+): Promise<void> {
+  const pending = row.activeGoal?.pendingInteraction;
+  if (!pending || pending.status !== "pending") return;
+  if (Date.parse(pending.expiresAt) > Date.now()) return;
+  const stream = new AgentEventStream(pending.runId);
+  stream.emit({
+    type: "interaction.expired",
+    title: "選擇已過期，請重新開啟",
+    status: "failed",
+    metadata: { interactionId: pending.interactionId, interactionType: pending.type },
+  });
+  await tx.update(schema.assistantConversationStates).set({
+    events: [...(row.events ?? []), ...uniqueInteractionEvents(stream)].slice(-MAX_DURABLE_EVENTS),
+    activeGoal: {
+      ...row.activeGoal!,
+      status: "waiting_user_input",
+      pendingInteraction: { ...pending, status: "expired" },
+    },
+    updatedAt: new Date(),
+  }).where(and(
+    eq(schema.assistantConversationStates.conversationId, row.conversationId),
+    eq(schema.assistantConversationStates.groupId, row.groupId),
+    eq(schema.assistantConversationStates.userId, row.userId),
+  ));
+}
+
 function assertCurrentInteraction(
   row: typeof schema.assistantConversationStates.$inferSelect,
   input: Pick<AssistantInteractionLifecycle, "runId" | "goalId" | "interactionId" | "resumeToken">,
@@ -108,6 +137,7 @@ export async function recordAssistantInteractionLifecycle(auth: AuthState, input
       eq(schema.assistantConversationStates.userId, auth.user.id),
     ));
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到 Assistant conversation" });
+    await persistExpiredInteraction(tx, row);
     const request = assertCurrentInteraction(row, input);
     const eventType = input.event === "presented" ? "interaction.presented"
       : input.event === "opened" ? "handoff.opened" : "interaction.cancelled";
@@ -135,6 +165,7 @@ export async function recordAssistantInteractionLifecycle(auth: AuthState, input
         status: "ready",
         pendingInteraction: cancelledInteraction,
         missingSlots: row.activeGoal.missingSlots,
+        resolvedSlots: { ...row.activeGoal.resolvedSlots, projectCandidates: undefined },
       };
     }
     await tx.update(schema.assistantConversationStates).set({
@@ -318,6 +349,7 @@ export async function submitAssistantInteraction(auth: AuthState, input: Assista
       eq(schema.assistantConversationStates.userId, auth.user.id),
     ));
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到 Assistant conversation" });
+    await persistExpiredInteraction(tx, row);
     const request = assertCurrentInteraction(row, input);
 
     let activeGoal: AssistantActiveGoal = row.activeGoal!;
