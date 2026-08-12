@@ -89,6 +89,22 @@ describe("runToolLoop", () => {
     expect(prompts[1]).toMatch(/^P\|F\|/);
   });
 
+  it("#675: 第一次修復失敗後還有一次極簡 schema 修復", async () => {
+    const prompts: string[] = [];
+    const outputs = ["{壞}", "{還是壞}", '{"answer":"第二次修好"}'];
+    const out = await runToolLoop({
+      ...baseOpts,
+      llm: async (prompt) => {
+        prompts.push(prompt);
+        return outputs.shift()!;
+      },
+    });
+    expect(out.usedFallback).toBe(false);
+    expect(out.reply).toEqual({ answer: "第二次修好" });
+    expect(prompts[1]).toContain("只回一個符合目前 schema 的 JSON 物件");
+    expect(prompts[2]).toContain('{"answer":"..."}');
+  });
+
   it("壞 JSON 先修復一次，第二輪合法就不降級", async () => {
     const outputs = ["我想想 {壞掉的json} 大概是這樣", '{"answer":"修好了"}'];
     const out = await runToolLoop({

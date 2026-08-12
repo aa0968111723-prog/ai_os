@@ -150,7 +150,7 @@ export async function runToolLoop<TToolCall, TReply, TResult extends ToolLoopSte
 ): Promise<ToolLoopOutcome<TReply>> {
   const steps: string[] = [];
   let toolBlocks = "";
-  let formatRepairUsed = false;
+  let formatRepairs = 0;
   for (let round = 0; ; round++) {
     if (opts.signal?.aborted) return { reply: null, steps, aborted: true, usedFallback: false };
     const forceFinal = round >= opts.maxToolRounds;
@@ -173,11 +173,13 @@ export async function runToolLoop<TToolCall, TReply, TResult extends ToolLoopSte
     }
     const reply = json !== null ? opts.tryReply(json) : null;
     if (reply !== null) return { reply, steps, aborted: false, usedFallback: false };
-    // 模型偶發會包 markdown／壞 JSON。先給一次格式修復機會；仍失敗才降級成純文字。
-    // 修復訊息只要求符合既有 schema，不增加任何工具權限，也不會把寫入提議直接執行。
-    if (!forceFinal && !formatRepairUsed) {
-      formatRepairUsed = true;
-      toolBlocks += `\n<格式修復>\n上一輪不是有效的工具呼叫或最終回覆 JSON。請不要解釋、不要加 markdown，只回一個符合目前 schema 的 JSON 物件。\n</格式修復>`;
+    // #675: bounded repair ladder — schema, then simplified keys, then prose fallback.
+    // Repairs never grant write authority; they only ask for valid JSON.
+    if (!forceFinal && formatRepairs < 2) {
+      formatRepairs += 1;
+      toolBlocks += formatRepairs === 1
+        ? `\n<格式修復>\n上一輪不是有效的工具呼叫或最終回覆 JSON。請不要解釋、不要加 markdown，只回一個符合目前 schema 的 JSON 物件。\n</格式修復>`
+        : `\n<格式修復>\n上一輪仍不是有效 JSON。這次只回一個極簡物件：工具用 {"tool":"..."}，最終回答用 {"answer":"..."}，不要 markdown。\n</格式修復>`;
       continue;
     }
     // 解析失敗：純文字 fallback（不提議任何動作——動作必須來自結構化回覆）。
