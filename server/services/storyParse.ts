@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { extractJsonObject } from "./assistantCore";
 import { db, schema } from "../db";
 import type { ParseCandidatePayload, ParseRunApplied, ParseRunStats } from "../db/schema/story";
 import {
@@ -360,13 +361,8 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
         });
       }
       const output = completion.output;
-      const match = output.match(/\{[\s\S]*\}/);
-      let parsed: ReturnType<typeof storyParseModelSchema.safeParse> | null = null;
-      try {
-        parsed = match ? storyParseModelSchema.safeParse(JSON.parse(match[0])) : null;
-      } catch {
-        parsed = null;
-      }
+      const extracted = extractJsonObject(output);
+      const parsed = extracted ? storyParseModelSchema.safeParse(extracted) : null;
       if (!parsed?.success) {
         if (trace) await updateAiTraceSession(trace.id, { status: "failed", summary: "模型輸出無法解析" }).catch(() => undefined);
         throw new TRPCError({

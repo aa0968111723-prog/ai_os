@@ -18,6 +18,7 @@ import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
+import { extractJsonObject } from "../services/assistantCore";
 import {
   expandSketch,
   sketchBoardStateBlock,
@@ -713,8 +714,8 @@ ${continuity ? `${SKETCH_CONTINUITY_RULES}\n` : ""}${boardState ? `${SKETCH_BOAR
         // 畫圖要的是空間精準不是文采：溫度壓低（座標亂跳就是「畫不準」的來源）；
         // token 上限放大到裝得下 50 個原語的計畫（預設 2048 會把長計畫的 JSON 攔腰截斷）
         const output = await nimComplete(sys, { timeoutMs: 60_000, temperature: 0.3, maxTokens: 3_500 });
-        const match = output.match(/\{[\s\S]*\}/);
-        const parsed = match ? sketchPlanSchema.safeParse(JSON.parse(match[0])) : null;
+        const extracted = extractJsonObject(output);
+        const parsed = extracted ? sketchPlanSchema.safeParse(extracted) : null;
         // 形狀不符：LLM 已實際呼叫故不退點（同 suggest 慣例），退回示範草圖並標記，前端不會拿到壞資料
         if (!parsed?.success) {
           const expanded = expandSketch(mockSketchPlan(), expandOpts);

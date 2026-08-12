@@ -2,6 +2,7 @@ import { getModel } from "../../shared/models";
 import { falStatus, falSubmit } from "./fal";
 import { proxyFetch } from "./http";
 import { nimComplete, NIM_DEFAULT_MODEL } from "./nvidia-nim";
+import { extractJsonObject } from "./assistantCore";
 import {
   LocalIntelligenceProvider,
   type IntelligenceAnalysis,
@@ -72,15 +73,10 @@ function sanitizeProviderMetadata(value: unknown, depth = 0): Record<string, unk
 }
 
 function jsonObject(raw: string): Record<string, unknown> | null {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const candidate = fenced ?? raw.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) return null;
-  try {
-    const parsed = JSON.parse(candidate);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
+  const parsed = extractJsonObject(raw);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
 }
 
 export function parseProviderAnalysis(

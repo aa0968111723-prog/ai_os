@@ -14,6 +14,7 @@ import { falSubmit, falStatus, isMockMode } from "./fal";
 import { reserveQuota, refund } from "./points";
 import { signDbFileUrl } from "./storage";
 import type { AuthState } from "./auth";
+import { extractJsonObject, stripJsonObject } from "./assistantCore";
 
 export type DataFileRow = typeof schema.dataFiles.$inferSelect;
 type DataTableRow = typeof schema.dataTables.$inferSelect;
@@ -43,21 +44,17 @@ export function mediaKindOf(mime: string): "image" | "video" | "audio" | "doc" {
  * 壞 JSON／缺鍵時把整段文字當描述、分類退「其他」——模型輸出再歪也不讓分類流程 500。
  */
 export function parseClassifyReply(raw: string): { description: string; category: string } {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const j = JSON.parse(match[0]) as { description?: unknown; category?: unknown };
-      const description = typeof j.description === "string" && j.description.trim()
-        ? j.description.trim().slice(0, MAX_AI_DESCRIPTION)
-        : null;
-      if (description) {
-        return { description, category: normalizeFileCategory(j.category) ?? "其他" };
-      }
-    } catch {
-      // 壞 JSON 走下方純文字 fallback
+  const extracted = extractJsonObject(raw);
+  if (extracted && typeof extracted === "object" && !Array.isArray(extracted)) {
+    const j = extracted as { description?: unknown; category?: unknown };
+    const description = typeof j.description === "string" && j.description.trim()
+      ? j.description.trim().slice(0, MAX_AI_DESCRIPTION)
+      : null;
+    if (description) {
+      return { description, category: normalizeFileCategory(j.category) ?? "其他" };
     }
   }
-  const text = raw.replace(/\{[\s\S]*\}/, "").trim() || raw.trim();
+  const text = stripJsonObject(raw) || raw.trim();
   return { description: (text || "（模型沒有回傳描述）").slice(0, MAX_AI_DESCRIPTION), category: "其他" };
 }
 

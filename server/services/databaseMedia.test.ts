@@ -25,6 +25,11 @@ describe("parseClassifyReply", () => {
     expect(r.description).toBe("夕陽下的寺廟。");
     expect(r.category).toBe("場景");
   });
+  it("broken fence does not swallow a later complete classify object", () => {
+    const r = parseClassifyReply('```json\n{"description":"壞\n```\n{"description":"正確的圖。","category":"場景"}');
+    expect(r.description).toBe("正確的圖。");
+    expect(r.category).toBe("場景");
+  });
   it("缺 category：分類退「其他」", () => {
     const r = parseClassifyReply('{"description":"一張海報。"}');
     expect(r.description).toBe("一張海報。");
