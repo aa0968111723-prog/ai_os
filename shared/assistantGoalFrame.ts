@@ -51,6 +51,7 @@ export const ASSISTANT_GOAL_OBJECTS = [
   "TASK",
   "SCHEDULE",
   "GENERATION",
+  "DATABASE",
   "EDIT",
   "UNKNOWN",
 ] as const;
@@ -223,6 +224,7 @@ export type AssistantEvidenceScope =
   | "IMPORTED_PROVENANCE"
   | "AIOS_LIBRARY"
   | "PROJECT_ASSETS"
+  | "CUSTOM_DATABASE"
   | "PROJECT_USAGE"
   | "UNKNOWN";
 

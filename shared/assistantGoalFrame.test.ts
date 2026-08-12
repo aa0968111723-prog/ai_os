@@ -29,6 +29,7 @@ describe("assistantGoalFrame", () => {
     expect(canClaimRemoteSourceFact("IMPORTED_PROVENANCE")).toBe(false);
     expect(canClaimRemoteSourceFact("PROJECT_ASSETS")).toBe(false);
     expect(canClaimRemoteSourceFact("AIOS_LIBRARY")).toBe(false);
+    expect(canClaimRemoteSourceFact("CUSTOM_DATABASE")).toBe(false);
   });
 
   it("marks write-like outcomes as requiring real verified execution", () => {

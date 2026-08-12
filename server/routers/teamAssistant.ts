@@ -1152,7 +1152,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   const customDbTotal = Number(customDbCountRows[0]?.n ?? 0);
   const customDbHidden = Math.max(0, customDbTotal - visibleTables.length);
   // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
-  // 助手能直接回答「素材庫裡有多少張圖」「哪個庫最大」這類資訊量問題。
+  // 助手能直接回答「這個資料庫有幾列」「哪個庫最大」；不得拿專案素材張數冒充列數。
   const tableIds = visibleTables.map((t) => t.id);
   const KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
   const rowCountBy = new Map<string, number>();

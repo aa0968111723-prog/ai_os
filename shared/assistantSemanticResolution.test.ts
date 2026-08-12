@@ -53,6 +53,38 @@ describe("assistantSemanticResolution", () => {
     expect(frame.source?.type).toBe("CUSTOM_DATABASE");
     expect(frame.source?.type).not.toBe("PROJECT_ASSETS");
     expect(frame.operation).toBe("COUNT");
+    expect(frame.objectType).toBe("DATABASE");
+    expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({
+      status: "matched",
+      capabilityId: "read_database",
+      evidenceScope: "CUSTOM_DATABASE",
+    });
+  });
+
+  it("Q18: bare 資料庫 counts stay on read_database, not project inventory or assets", () => {
+    for (const message of ["資料庫有幾筆？", "自訂資料庫有幾列", "這個庫有幾筆", "custom database row count"]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      expect(frame.source?.type, message).toBe("CUSTOM_DATABASE");
+      expect(frame.objectType, message).toBe("DATABASE");
+      expect(frame.operation, message).toBe("COUNT");
+      expect(matchAssistantCapabilityForGoal(frame).capabilityId, message).toBe("read_database");
+      expect(matchAssistantCapabilityForGoal(frame).evidenceScope, message).toBe("CUSTOM_DATABASE");
+    }
+  });
+
+  it("Q18: aios/素材資料庫 and 專案素材 stay off the custom-DB path", () => {
+    const library = deriveDeterministicGoalFrame("aios 資料庫有幾筆？");
+    expect(library.frame.source?.type).toBe("AIOS_LIBRARY");
+    expect(matchAssistantCapabilityForGoal(library.frame).capabilityId).toBe("read_assets");
+
+    const namedLibrary = deriveDeterministicGoalFrame("素材資料庫有幾筆？");
+    expect(namedLibrary.frame.source?.type).toBe("AIOS_LIBRARY");
+    expect(matchAssistantCapabilityForGoal(namedLibrary.frame).capabilityId).toBe("read_assets");
+
+    const assets = deriveDeterministicGoalFrame("這個專案素材有幾張？");
+    expect(assets.frame.source?.type).toBe("PROJECT_ASSETS");
+    expect(assets.frame.objectType).toBe("ASSET");
+    expect(matchAssistantCapabilityForGoal(assets.frame).capabilityId).toBe("read_assets");
   });
 
   it("does not treat project assets as Google Photos", () => {

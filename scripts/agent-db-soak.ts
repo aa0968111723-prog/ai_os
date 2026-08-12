@@ -11,7 +11,7 @@ import { loadLocalEnv } from "../server/bootstrap/loadEnv";
 import { db, pool, schema } from "../server/db";
 import { probeDatabaseRuntime } from "../server/services/databaseRuntime";
 import { runAgentDbIntegrityScan } from "../server/services/agentDbIntegrity";
-import { loadGroupProjectInventory } from "../server/services/projectInventory";
+import { loadGroupProjectInventory, visibleProjectsWhere } from "../server/services/projectInventory";
 
 loadLocalEnv();
 
@@ -29,7 +29,10 @@ if (!process.env.DATABASE_URL) {
 const ownerId = randomUUID();
 const groupId = randomUUID();
 const projectId = randomUUID();
+const archivedProjectIds = [randomUUID(), randomUUID()];
 const noteId = randomUUID();
+const tableId = randomUUID();
+const assetId = randomUUID();
 const startedAt = Date.now();
 let writes = 0;
 let readBacks = 0;
@@ -37,20 +40,48 @@ let probes = 0;
 let integrityFails = 0;
 let duplicateWrites = 0;
 let falseCompletions = 0;
+let sourceTruthFails = 0;
 
 async function seed(): Promise<void> {
   await db.insert(schema.users).values({
     id: ownerId, name: "soak-canary", email: `soak-${ownerId}@example.test`, passwordHash: "x",
   });
-  await db.insert(schema.projects).values({
-    id: projectId, groupId, ownerId, title: "SOAK canary — delete me", kind: "qa", platform: "internal", format: "fixture",
+  await db.insert(schema.projects).values([
+    { id: projectId, groupId, ownerId, title: "SOAK canary — delete me", kind: "qa", platform: "internal", format: "fixture" },
+    ...archivedProjectIds.map((id, i) => ({
+      id, groupId, ownerId, title: `SOAK archived ${i + 1} — delete me`, kind: "qa", platform: "internal", format: "fixture", status: "archived" as const,
+    })),
+  ]);
+  await db.insert(schema.assets).values({
+    id: assetId, projectId, groupId, kind: "image", title: "soak asset", url: "/tmp/soak-canary.png",
+  });
+  await db.insert(schema.dataTables).values({
+    id: tableId, scope: "group", groupId, name: "soak-custom-db", fields: [], agentAccess: "read", createdBy: ownerId,
   });
 }
 
 async function cleanup(): Promise<void> {
   await db.delete(schema.notes).where(eq(schema.notes.projectId, projectId)).catch(() => undefined);
-  await db.delete(schema.projects).where(eq(schema.projects.id, projectId)).catch(() => undefined);
+  await db.delete(schema.assets).where(eq(schema.assets.id, assetId)).catch(() => undefined);
+  await db.delete(schema.dataTables).where(eq(schema.dataTables.id, tableId)).catch(() => undefined);
+  await db.delete(schema.projects).where(eq(schema.projects.groupId, groupId)).catch(() => undefined);
   await db.delete(schema.users).where(eq(schema.users.id, ownerId)).catch(() => undefined);
+}
+
+async function assertInventoryAndSourceTruth(): Promise<void> {
+  const inventory = await loadGroupProjectInventory(groupId);
+  const uiRows = await db.select({ id: schema.projects.id }).from(schema.projects).where(visibleProjectsWhere([groupId]));
+  if (inventory.activeCount !== uiRows.length || inventory.activeCount !== 1 || inventory.archivedCount !== 2) {
+    sourceTruthFails += 1;
+    throw new Error(`INVENTORY_MISMATCH active=${inventory.activeCount} ui=${uiRows.length} archived=${inventory.archivedCount}`);
+  }
+  const assetRows = await db.select({ id: schema.assets.id }).from(schema.assets).where(eq(schema.assets.projectId, projectId));
+  const dbRows = await db.select({ id: schema.dataRows.id }).from(schema.dataRows).where(eq(schema.dataRows.tableId, tableId));
+  // Empty custom DB must not be treated as an empty asset library (1 canary asset vs 0 rows).
+  if (assetRows.length === dbRows.length) {
+    sourceTruthFails += 1;
+    throw new Error(`SOURCE_TRUTH: project assets (${assetRows.length}) collided with custom DB rows (${dbRows.length})`);
+  }
 }
 
 async function tick(index: number): Promise<void> {
@@ -60,7 +91,7 @@ async function tick(index: number): Promise<void> {
   await Promise.all([
     pool.query("SELECT 1"),
     pool.query("SELECT count(*)::int AS n FROM projects"),
-    loadGroupProjectInventory(groupId).catch(() => undefined),
+    assertInventoryAndSourceTruth(),
   ]);
 
   await db.insert(schema.notes).values({
@@ -124,6 +155,7 @@ try {
       integrityFails,
       duplicateWrites,
       falseCompletions,
+      sourceTruthFails,
       elapsedMs: Date.now() - startedAt,
       targetMs,
     });
@@ -141,6 +173,7 @@ const pass = wallClockMs >= targetMs * 0.98
   && falseCompletions === 0
   && duplicateWrites === 0
   && integrityFails === 0
+  && sourceTruthFails === 0
   && writes >= 2
   && readBacks === writes;
 const report = {
@@ -154,6 +187,7 @@ const report = {
   integrityFails,
   duplicateWrites,
   falseCompletions,
+  sourceTruthFails,
 };
 persist(report);
 console.log(JSON.stringify(report, null, 2));

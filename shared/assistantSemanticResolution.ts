@@ -61,7 +61,8 @@ const SOURCE_MENTION: Array<[RegExp, AssistantSourceType]> = [
   [/(?:lumafusion|外部剪輯|剪輯軟體|editor)/iu, "EXTERNAL_EDITOR"],
   [/(?:素材庫|專案素材|目前素材|這個專案.{0,6}素材)/iu, "PROJECT_ASSETS"],
   [/(?:aios\s*資料庫|資料中心|全站素材|素材資料庫)/iu, "AIOS_LIBRARY"],
-  [/(?:自訂資料(?:庫|表)|資料表|\bdb\d+\b|query_database)/iu, "CUSTOM_DATABASE"],
+  // Bare 資料庫 is a custom table, but must not steal 「素材資料庫」/「aios 資料庫」.
+  [/(?:自訂(?:資料)?(?:庫|表)|資料表|\bdb\d+\b|query_database|custom\s*databases?|(?<!素材|aios\s*|AIOS\s*)資料庫)/iu, "CUSTOM_DATABASE"],
   [/(?:public\s*agent\s*fuel|公共\s*agent\s*素材|公共素材包)/iu, "PUBLIC_AGENT_FUEL"],
   [/(?:遠端供應商|remote\s*provider|fal\s*api)/iu, "REMOTE_PROVIDER"],
 ];
@@ -90,6 +91,7 @@ const RECENT_N_ASSETS_RE = /最近\s*([一二三四五六七八九十\d]+)\s*張
 const CORRECTION_PREVIOUS_RE = /(?:不是這個|不是那個|不對).{0,12}(?:是|而是).{0,8}(?:剛才|剛剛|上一個|前一個)(?:那個|的)?|(?:剛才|剛剛|上一個|前一個)(?:那個|的那[個項筆])?/iu;
 
 const ASSET_RE = /(?:素材|圖片|照片|影片|音訊|檔案|文件|這些|那批|剛才那些|asset)/iu;
+const DATABASE_RE = /(?:自訂(?:資料)?(?:庫|表)|資料表|\bdb\d+\b|query_database|custom\s*databases?|(?<!素材|aios\s*|AIOS\s*)資料庫|庫有幾(?:筆|列))/iu;
 const PROJECT_RE = /(?:專案|project)/iu;
 const SHOT_RE = /(?:第\s*[一二三四五六七八九十百\d]+\s*鏡|shot\s*#?\s*\d+|分鏡\s*#?\s*\d+)/iu;
 const SCENE_RE = /(?:場景|scene\s*#?\s*\d+)/iu;
@@ -143,6 +145,9 @@ function objectFromText(text: string, operation: AssistantGoalOperation): Assist
   if (PROJECT_RE.test(text) && operation === "CREATE") return "PROJECT";
   if (GENERATION_RE.test(text)) return "GENERATION";
   if (ASSET_RE.test(text) || RECENT_N_ASSETS_RE.test(text) || operation === "IMPORT" || operation === "ATTACH" || operation === "ORGANIZE" || operation === "GENERATE") return "ASSET";
+  // Custom DB rows/tables are not project assets (Q18). Check after ASSET so
+  // 「素材庫有幾張」 stays ASSET / PROJECT_ASSETS.
+  if (DATABASE_RE.test(text)) return "DATABASE";
   // 「哪一個最久沒更新」implicitly means projects in group scope.
   if (PROJECT_RE.test(text) || STALE_PROJECT_RE.test(text)) return "PROJECT";
   return "UNKNOWN";
@@ -301,7 +306,8 @@ export function deriveDeterministicGoalFrame(
 
   const operation = operationFromText(message);
   const objectType = objectFromText(message, operation);
-  const sourceType = sourceFromText(message);
+  const sourceType = sourceFromText(message)
+    ?? (objectType === "DATABASE" ? "CUSTOM_DATABASE" : undefined);
   const sourceMissing = sourceType === "UNKNOWN_CLOUD" || (operation === "IMPORT" && !sourceType);
   const highSignal = operation !== "READ" || !!sourceType || objectType !== "UNKNOWN";
   const recentLimit = recentAssetLimitFromText(message);
@@ -340,7 +346,7 @@ export function evidenceScopeForGoal(frame: AssistantGoalFrame): AssistantEviden
   if (source === "GOOGLE_DRIVE" || source === "GOOGLE_PHOTOS" || source === "URL") return "REMOTE_SOURCE";
   if (source === "AIOS_LIBRARY") return "AIOS_LIBRARY";
   if (source === "PROJECT_ASSETS") return "PROJECT_ASSETS";
-  if (source === "CUSTOM_DATABASE") return "PROJECT_USAGE";
+  if (source === "CUSTOM_DATABASE" || frame.objectType === "DATABASE") return "CUSTOM_DATABASE";
   if (source === "EXTERNAL_AI" || source === "EXTERNAL_EDITOR") return "IMPORTED_PROVENANCE";
   if (frame.scope.projectId) return "PROJECT_USAGE";
   return "UNKNOWN";
@@ -401,7 +407,9 @@ export function matchAssistantCapabilityForGoal(
     else if (frame.objectType === "SCRIPT") capabilityId = "read_script";
     else if (frame.objectType === "SHOT" || frame.objectType === "SCENE") capabilityId = "read_storyboard";
     else if (frame.objectType === "GENERATION") capabilityId = "read_generations";
-    else if (frame.objectType === "ASSET" || source === "PROJECT_ASSETS" || source === "AIOS_LIBRARY") capabilityId = "read_assets";
+    else if (source === "CUSTOM_DATABASE" || (frame.objectType === "DATABASE" && source !== "AIOS_LIBRARY" && source !== "PROJECT_ASSETS")) {
+      capabilityId = "read_database";
+    } else if (frame.objectType === "ASSET" || source === "PROJECT_ASSETS" || source === "AIOS_LIBRARY") capabilityId = "read_assets";
     else capabilityId = "read_context";
   }
 
