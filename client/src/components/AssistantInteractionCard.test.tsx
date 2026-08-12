@@ -52,4 +52,73 @@ describe("AssistantInteractionCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "稍後再選" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it("PROJECT_PICKER：專案選擇卡渲染可選專案並送出結構化 id", async () => {
+    const onSelect = vi.fn();
+    const projectPicker = {
+      ...request,
+      type: "PROJECT_PICKER" as const,
+      title: "要放進哪個專案？",
+      options: [
+        { id: "p-1", label: "招生短片", subtitle: "2 個素材", availability: "AVAILABLE" as const },
+        { id: "p-2", label: "挑戰營回顧", availability: "AVAILABLE" as const },
+      ],
+    };
+    render(<AssistantInteractionCard request={projectPicker} onSelect={onSelect} />);
+    expect(screen.getByRole("button", { name: /招生短片/ })).toBeInTheDocument();
+    expect(screen.getByText("2 個素材")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /招生短片/ }));
+    expect(onSelect).toHaveBeenCalledWith(["p-1"]);
+  });
+
+  it("FILE_PICKER／FOLDER_PICKER：資料夾與檔案來源也走同一張選擇卡", async () => {
+    const onSelect = vi.fn();
+    const { unmount } = render(
+      <AssistantInteractionCard
+        request={{
+          ...request,
+          type: "FILE_PICKER" as const,
+          title: "選擇要加入的檔案",
+          options: [
+            { id: "file-1", label: "訪談逐字稿.pdf", icon: "Image", availability: "AVAILABLE" as const },
+            { id: "file-2", label: "空拍素材.mov", availability: "BLOCKED" as const, blockerReason: "超過單檔上限" },
+          ],
+        }}
+        onSelect={onSelect}
+      />,
+    );
+    // 類型標在 DOM 上，picker 前端的後續分流（external intake mini workspace）靠它
+    expect(screen.getByText("選擇要加入的檔案").closest("section")).toHaveAttribute("data-interaction-type", "FILE_PICKER");
+    expect(screen.getByRole("button", { name: /空拍素材.mov/ })).toBeDisabled();
+    expect(screen.getByText("超過單檔上限")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /訪談逐字稿.pdf/ }));
+    expect(onSelect).toHaveBeenCalledWith(["file-1"]);
+    unmount();
+
+    render(
+      <AssistantInteractionCard
+        request={{
+          ...request,
+          type: "FOLDER_PICKER" as const,
+          title: "選擇要匯入的資料夾",
+          options: [{ id: "dir-1", label: "北藝素材", availability: "AVAILABLE" as const }],
+        }}
+        onSelect={onSelect}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /北藝素材/ }));
+    expect(onSelect).toHaveBeenLastCalledWith(["dir-1"]);
+  });
+
+  it("沒有可選項目時誠實說「目前沒有可選項目。」，不給假按鈕", () => {
+    render(<AssistantInteractionCard request={{ ...request, options: [] }} onSelect={vi.fn()} />);
+    expect(screen.getByText("目前沒有可選項目。")).toBeInTheDocument();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("busy 時全部選項與取消都停用，避免同一互動重複送出", () => {
+    render(<AssistantInteractionCard request={request} busy onSelect={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Google Drive/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "稍後再選" })).toBeDisabled();
+  });
 });

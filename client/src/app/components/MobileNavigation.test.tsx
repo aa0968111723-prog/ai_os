@@ -199,4 +199,19 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
   });
+
+  it("★ U10 視覺回饋契約：按壓要縮、激活要上色、鍵盤彈出時助手 sheet 要抬升", () => {
+    // 底部導航的「有反應」由三條跨檔案契約組成：active 縮放（手指一按就看到）、
+    // 目前分頁的 primary 色標示、以及鍵盤彈出時（全站 AI 助手 sheet 內有輸入框）
+    // 底緣吃 --kb-inset 往上抬——任一條掉了，手機上就是「按了沒回饋」或「輸入框被鍵盤蓋住」。
+    const css = readFileSync("client/src/styles.css", "utf8");
+    // 按壓回饋：active 縮放，配 tap-highlight 透明＋touch-action manipulation（消 300ms 延遲）
+    expect(css).toMatch(/\.mobile-nav a:active,\s+\.mobile-nav button:active \{ transform: scale\(\.92\); \}/);
+    expect(css).toContain("-webkit-tap-highlight-color: transparent");
+    expect(css).toContain('button, a, select, summary, [role="button"] { touch-action: manipulation; }');
+    // 激活回饋：目前分頁以 primary 色標示
+    expect(css).toMatch(/\.mobile-nav a\.active,\s+\.mobile-nav button\.active \{ color: var\(--primary-ink\); background: var\(--primary-tint\); \}/);
+    // 鍵盤回饋：手機端助手 sheet 的 bottom 吃 --kb-inset
+    expect(css).toMatch(/\.menu-surface\.is-sheet \{[\s\S]*?bottom: var\(--kb-inset, 0px\)/);
+  });
 });
