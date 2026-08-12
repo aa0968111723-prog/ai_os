@@ -1541,27 +1541,39 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     }
 
     // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦）
-    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-    const gens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, project.id)).orderBy(desc(schema.generations.createdAt)).limit(50);
-    const runs = await listAgentRunsForProject(auth, project.id);
-    const { items: sched } = await listScheduleForGroup(auth, project.groupId, false, project.id);
+    const genWhere = eq(schema.generations.projectId, project.id);
+    const [scenes, genStatusRows, runs, schedulePage] = await Promise.all([
+      db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))),
+      db.select({ status: schema.generations.status, n: sql<number>`count(*)` })
+        .from(schema.generations).where(genWhere).groupBy(schema.generations.status),
+      listAgentRunsForProject(auth, project.id),
+      listScheduleForGroup(auth, project.groupId, false, project.id),
+    ]);
     const now = new Date();
-    const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
+    const sceneTally = scenes.reduce<Record<string, number>>((m, s) => ((m[s.status] = (m[s.status] ?? 0) + 1), m), {});
+    const genTally: Record<string, number> = {};
+    let genTotal = 0;
+    for (const row of genStatusRows) {
+      const n = Number(row.n ?? 0);
+      genTally[row.status] = n;
+      genTotal += n;
+    }
     return {
       project: { title: project.title, kind: project.kind, format: project.format, status: project.status },
-      scenes: { total: scenes.length, byStatus: tally(scenes.map((s) => s.status)) },
+      scenes: { total: scenes.length, byStatus: sceneTally },
       generations: {
-        recent: gens.length,
-        byStatus: tally(gens.map((g) => g.status)),
-        awaitingApproval: gens.filter((g) => g.status === "awaiting_approval").length,
+        total: genTotal,
+        byStatus: genTally,
+        awaitingApproval: genTally.awaiting_approval ?? 0,
       },
       agentRuns: runs
         .filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting")
         .map((r) => ({ runId: r.id, goal: r.goal, status: r.status, currentStep: r.currentStep, stepCount: (r.steps as AgentStep[]).length })),
-      upcomingSchedule: sched
+      upcomingSchedule: schedulePage.items
         .filter((i) => i.startsAt >= now)
         .slice(0, 5)
         .map((i) => ({ title: i.title, startsAt: i.startsAt, projectScoped: i.projectId === project.id })),
+      ...(schedulePage.truncated ? { scheduleTruncated: true } : {}),
     };
   }
 

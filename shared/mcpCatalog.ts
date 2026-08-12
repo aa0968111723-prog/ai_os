@@ -71,7 +71,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出文件（名稱／分類／AI 描述／可讀字數）；關鍵字回片段，不回全文與來源網址。" },
   { name: "read_database_file", title: "讀取資料庫文件", access: "read", blurb: "讀文件抽出的純文字（PDF/DOCX/HTML…）；圖影回 AI 描述＋短效下載網址。" },
   { name: "get_database_stats", title: "資料庫資訊量", access: "read", blurb: "一個資料庫的資訊量統計：列數、文件數、圖影音文分佈、容量、AI 可讀字數、分類分佈。" },
-  { name: "get_project_status", title: "專案全貌", access: "read", blurb: "一次取回分鏡、生成、AI 代理、排程、待辦——規劃前先讀這個。" },
+  { name: "get_project_status", title: "專案全貌", access: "read", blurb: "一次取回分鏡、生成、AI 代理、排程。生成 byStatus／awaitingApproval 是全專案 COUNT，不是最近 50 筆。" },
   { name: "plan_agent", title: "規劃 AI 代理", access: "write", openWorld: true, blurb: "請 AI 代理針對目標排一份多步製作計畫（只規劃、不執行、不扣執行點數）。" },
   { name: "approve_agent", title: "核准並執行代理", access: "write", blurb: "核准代理計畫，開始背景逐步執行（此刻起才依步驟扣點）。" },
   { name: "stop_agent", title: "停止代理", access: "write", destructive: true, blurb: "停止執行中的代理，後續步驟不再執行。" },
