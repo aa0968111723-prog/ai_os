@@ -77,6 +77,36 @@ import {
 } from "../../shared/assistantActions";
 import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
+import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
+import { randomUUID } from "node:crypto";
+import {
+  assistantActiveGoalSchema,
+  type AssistantActiveGoal,
+  type AssistantEvidenceScope,
+  type AssistantGoalFrame,
+} from "../../shared/assistantGoalFrame";
+import {
+  deriveDeterministicGoalFrame,
+  executionPlanFromGoal,
+  matchAssistantCapabilityForGoal,
+  resolveWorkingProject,
+  type AssistantCapabilityMatch,
+} from "../../shared/assistantSemanticResolution";
+import {
+  buildExecutionReceipt,
+  executionTerminalStatus,
+  type ExecutionReceipt,
+} from "../../shared/executionReceipt";
+import {
+  intakePickerInteraction,
+  projectPickerInteraction,
+  sourcePickerInteraction,
+  type AssistantInteractionRequest,
+} from "../../shared/assistantInteraction";
+import { goalRequiresVerifiedExecution } from "../../shared/assistantGoalFrame";
+
+/** Re-export for existing tests and callers. */
+export { executionTerminalStatus };
 
 /**
  * 全站助手（GLOBAL_ASSISTANT_PLAN Phase 2）：組助手（teamAssistant.ask）的演進——
@@ -209,6 +239,26 @@ const recentActionResultSchema = z.discriminatedUnion("type", [
 export function sanitizeRecentActionResults(raw: unknown): AssistantActionResult[] {
   const parsed = z.array(recentActionResultSchema).max(5).safeParse(raw);
   return parsed.success ? parsed.data : [];
+}
+
+export function recentVerifiedAssetIds(results: readonly AssistantActionResult[] | undefined): string[] {
+  if (!results?.length) return [];
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index];
+    if (result.type === "import" && result.verification.status === "verified" && result.assetIds.length) {
+      return [...new Set(result.assetIds)].slice(0, 50);
+    }
+  }
+  return [];
+}
+
+export function referencedShotOrdinal(message: string): number | undefined {
+  const match = message.match(/(?:第\s*([一二三四五六七八九十\d]+)\s*鏡|shot\s*#?\s*(\d+))/iu);
+  const raw = match?.[1] ?? match?.[2];
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) return Math.max(0, Number(raw) - 1);
+  const values: Record<string, number> = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 七: 6, 八: 7, 九: 8, 十: 9 };
+  return values[raw];
 }
 
 /** 前端拿到的「已解析」站級動作（帶真實 id＋人看得懂的標籤），確認後原樣送 runSiteAction */
@@ -481,6 +531,8 @@ export interface GlobalAskInput {
   pageContext?: AssistantWirePageContext;
   /** Bounded typed references from this conversation; never file bytes/content. */
   recentActionResults?: AssistantActionResult[];
+  /** Bounded typed active goal from the same conversation. Server re-resolves every id. */
+  activeGoal?: AssistantActiveGoal;
   /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質。
    *  與代理規劃共用 AgentPlannerMode schema；非 nim 模式會扣站內點數（見 llmPricing）。 */
   mode?: AgentPlannerMode;
@@ -510,6 +562,23 @@ export interface GlobalAskResult {
   events: AgentEvent[];
   /** 本次**真的讀過**的來源。空陣列代表沒讀任何站內資料——此時前端不得顯示來源區塊。 */
   sources: AgentSourceRecord[];
+  /** Assistant Brain v2 observable semantic state (never chain-of-thought). */
+  goalFrame?: AssistantGoalFrame;
+  activeGoal?: AssistantActiveGoal;
+  capabilityMatch?: { status: AssistantCapabilityMatch["status"]; capabilityId?: string; reason: string; missingSlots: string[] };
+  evidenceScope?: AssistantEvidenceScope;
+  intakeRequest?: AssistantIntakeRequest;
+  /** Structured UI handoff; client must render cards/pickers, not free-text tool hunting. */
+  interactionRequest?: AssistantInteractionRequest;
+  /** Verified side-effect receipts for this turn (empty for pure answers). */
+  executionReceipts?: ExecutionReceipt[];
+}
+
+export interface AssistantIntakeRequest {
+  mode: "drive" | "files" | "folder";
+  projectId: string;
+  projectTitle: string;
+  message: string;
 }
 
 export interface ResolvedIntakeFallback {
@@ -558,7 +627,9 @@ export async function runGlobalAsk(
   onEvent?: (e: GlobalAskStreamEvent) => void,
 ): Promise<GlobalAskResult> {
   const { auth, groupId } = input;
-  const executionPlan = classifyAssistantRequest(input.message);
+  // Regex classifier is only the immediate SSE routing hint. The typed GoalFrame
+  // resolved after ACL-filtered context becomes the execution authority.
+  let executionPlan = classifyAssistantRequest(input.message);
   /**
    * 事件流。**這是本次執行唯一的進度來源**——前端不再自己預測步驟。
    * 每一則事件都在對應的工作真的發生時才發出（見 services/agentEventStream 檔頭）。
@@ -605,18 +676,67 @@ export async function runGlobalAsk(
     throw error;
   }
   const { commandLevel, canDispatch, canSupervise, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
-  const currentProjectRef = input.projectId
-    ? [...projByRef.entries()].find(([, p]) => p.id === input.projectId)?.[0]
+  // ── Assistant Brain v2: UNDERSTAND → GROUND → RESOLVE ───────────────────
+  const semantic = deriveDeterministicGoalFrame(input.message, input.activeGoal);
+  let goalFrame = semantic.frame;
+  const projectCandidates = [...projByRef.values()].map((project) => ({ id: project.id, title: project.title }));
+  const projectResolution = resolveWorkingProject({
+    message: input.message,
+    candidates: projectCandidates,
+    activeGoal: input.activeGoal,
+    recentActionResults: input.recentActionResults,
+    pageProjectId: input.projectId,
+  });
+  if (projectResolution.status === "resolved" && projectResolution.projectId) {
+    goalFrame = { ...goalFrame, scope: { ...goalFrame.scope, projectId: projectResolution.projectId } };
+  }
+  let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame);
+  executionPlan = executionPlanFromGoal(goalFrame, capabilityMatch, input.message);
+  const goalId = semantic.continuation === "NEW_GOAL" || !input.activeGoal ? randomUUID() : input.activeGoal.goalId;
+  let activeGoal: AssistantActiveGoal = {
+    goalId,
+    status: capabilityMatch.status === "matched" ? "ready" : "resolving",
+    frame: goalFrame,
+    resolvedSlots: {
+      ...(input.activeGoal?.resolvedSlots ?? {}),
+      ...(projectResolution.status === "resolved" && projectResolution.projectId
+        ? { projectId: projectResolution.projectId, projectTitle: projectResolution.projectTitle }
+        : {}),
+    },
+    missingSlots: [...capabilityMatch.missingSlots],
+    resultRefIds: input.activeGoal?.resultRefIds ?? [],
+  };
+  const semanticPayload = () => ({
+    goalFrame,
+    activeGoal,
+    capabilityMatch: {
+      status: capabilityMatch.status,
+      capabilityId: capabilityMatch.capabilityId,
+      reason: capabilityMatch.reason,
+      missingSlots: capabilityMatch.missingSlots,
+    },
+    evidenceScope: capabilityMatch.evidenceScope,
+  });
+  stream.emit({
+    type: "plan.created",
+    title: capabilityMatch.capability
+      ? `已理解目標：${capabilityMatch.capability.label}`
+      : capabilityMatch.status === "unsupported" ? "已確認目前能力邊界" : "已理解目標，還需要一項資訊",
+    description: capabilityMatch.reason,
+    status: capabilityMatch.status === "matched" ? "ok" : "waiting",
+    metadata: {
+      goalIntent: goalFrame.intent,
+      goalOperation: goalFrame.operation,
+      ...(capabilityMatch.capabilityId ? { capabilityId: capabilityMatch.capabilityId } : {}),
+      evidenceScope: capabilityMatch.evidenceScope,
+    },
+  });
+
+  const effectiveProjectId = goalFrame.scope.projectId ?? input.projectId;
+  const currentProjectRef = effectiveProjectId
+    ? [...projByRef.entries()].find(([, p]) => p.id === effectiveProjectId)?.[0]
     : undefined;
-  const lastCreatedProjectId = [...(input.recentActionResults ?? [])]
-    .reverse()
-    .find((result) => result.type === "create_project")?.projectId;
-  const recentProjectRef = lastCreatedProjectId
-    ? [...projByRef.entries()].find(([, project]) => project.id === lastCreatedProjectId)?.[0]
-    : undefined;
-  const referencesRecentProject = /(剛建立|剛才建立|上一個專案|這個專案|該專案)/i.test(input.message);
-  const mentionedProjectRef = resolveMentionedProjectRef(projByRef, input.message);
-  const deterministicProjectRef = currentProjectRef ?? mentionedProjectRef ?? (referencesRecentProject ? recentProjectRef : undefined);
+  const deterministicProjectRef = currentProjectRef;
   const pastedUrl = input.message.match(/https?:\/\/[^\s<>{}\[\]"']+/i)?.[0];
   const urlCapability = pastedUrl ? publicUrlIntakeCapability(pastedUrl) : undefined;
   const deterministicUrlProposal: SiteActionProposal[] =
@@ -656,11 +776,11 @@ export async function runGlobalAsk(
           .from(schema.dataTables)
           .where(inArray(schema.dataTables.id, dbIds))
       : Promise.resolve([] as Array<{ id: string; agentAccess: string | null }>),
-    currentProjectRef && input.projectId && input.pageContext?.selectedEntityIds?.length
+    currentProjectRef && effectiveProjectId && input.pageContext?.selectedEntityIds?.length
       ? db
           .select({ id: schema.scenes.id, title: schema.scenes.title })
           .from(schema.scenes)
-          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)))
+          .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
           .orderBy(asc(schema.scenes.orderIndex))
       : Promise.resolve([] as Array<{ id: string; title: string }>),
   ]);
@@ -719,6 +839,125 @@ export async function runGlobalAsk(
       toolName: "group_overview",
       status: table.rowCount ? "ok" : "empty",
     });
+  }
+
+  const earlySemanticResult = (
+    answer: string,
+    extras?: {
+      intakeRequest?: AssistantIntakeRequest;
+      interactionRequest?: AssistantInteractionRequest;
+      executionReceipts?: ExecutionReceipt[];
+    },
+  ): GlobalAskResult => ({
+    answer,
+    dispatches: [], actions: [], siteActions: [], executedSiteActions: [], intakeFallbacks: [], steps: [],
+    canDispatch: false, commandLevel, mock: isMockMode(), rationale: undefined, contextUsed: [], degraded,
+    traceSessionId: undefined, executionPlan, runId: stream.runId,
+    events: stream.snapshotEvents(), sources: stream.snapshotSources(), ...semanticPayload(),
+    ...(extras?.intakeRequest ? { intakeRequest: extras.intakeRequest } : {}),
+    ...(extras?.interactionRequest ? { interactionRequest: extras.interactionRequest } : {}),
+    ...(extras?.executionReceipts?.length ? { executionReceipts: extras.executionReceipts } : {}),
+  });
+
+  if (goalFrame.missingSlots.includes("source")) {
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["source"] };
+    stream.emit({ type: "waiting.user_input", title: "還需要確認資料來源", description: "你說的「雲端」是 Google Drive、Google Photos，還是 Aios 目前專案素材？", status: "waiting" });
+    return earlySemanticResult(
+      "我還缺一個資訊：你說的「雲端」是 **Google Drive、Google Photos，還是 Aios 目前專案素材**？請直接點選下方卡片，我會接著同一個目標繼續。",
+      { interactionRequest: sourcePickerInteraction(activeGoal.goalId) },
+    );
+  }
+
+  if (capabilityMatch.missingSlots.includes("projectId") && projectResolution.status !== "resolved") {
+    const candidates = projectResolution.candidates.slice(0, 8);
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: ["projectId"], resolvedSlots: { ...activeGoal.resolvedSlots, projectCandidates: candidates } };
+    const options = candidates.length ? candidates.map((candidate, index) => `${index + 1}. ${candidate.title}`).join("\n") : "目前沒有可用的專案。";
+    stream.emit({ type: "waiting.user_input", title: "還需要確認目標專案", description: candidates.length ? `有 ${candidates.length} 個可用專案，請選一個` : "目前沒有可用專案", status: "waiting", resultCount: candidates.length });
+    return earlySemanticResult(
+      `我知道你要做什麼，但還缺 **目標專案**。\n\n${options}\n\n直接點選下方專案卡，或回覆「第二個」。`,
+      { interactionRequest: projectPickerInteraction(candidates, activeGoal.goalId) },
+    );
+  }
+
+  if (capabilityMatch.status === "unsupported" && capabilityMatch.evidenceScope === "REMOTE_SOURCE") {
+    activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
+    stream.emit({ type: "waiting.user_input", title: "目前無法驗證完整遠端清單", description: capabilityMatch.reason, status: "waiting", sourceType: "external", sourceName: goalFrame.source?.type === "GOOGLE_PHOTOS" ? "Google Photos" : "Google Drive" });
+    return earlySemanticResult(`${capabilityMatch.reason}\n\n我可以改查 **已匯入 Aios 的數量**，或讓你改用可驗證的 Drive／檔案匯入流程。`);
+  }
+
+  if (capabilityMatch.capabilityId === "attach_asset_to_shot" && effectiveProjectId) {
+    const assetIds = recentVerifiedAssetIds(input.recentActionResults);
+    const ordinal = referencedShotOrdinal(input.message);
+    const shots = ordinal == null ? [] : await db.select({ id: schema.scenes.id, title: schema.scenes.title })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex));
+    const shot = ordinal == null ? undefined : shots[ordinal];
+    if (!assetIds.length || !shot) {
+      const missingSlots = [...(!assetIds.length ? ["assetIds"] : []), ...(!shot ? ["shotId"] : [])];
+      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots };
+      stream.emit({
+        type: "waiting.user_input",
+        title: !assetIds.length ? "還需要先取得素材" : "找不到指定的分鏡",
+        description: !assetIds.length ? "請先完成匯入，或重新選擇要加入的素材。" : `這個專案目前沒有第 ${(ordinal ?? 0) + 1} 鏡。`,
+        status: "waiting",
+      });
+      return earlySemanticResult(!assetIds.length
+        ? "我還沒有可驗證的最近素材。請先完成匯入或選擇素材，我會接著同一個目標繼續。"
+        : `「${projectResolution.projectTitle ?? "目前專案"}」目前找不到第 ${(ordinal ?? 0) + 1} 鏡，請指定另一鏡。`);
+    }
+    activeGoal = { ...activeGoal, status: "executing", missingSlots: [], resolvedSlots: { ...activeGoal.resolvedSlots, shotId: shot.id, shotTitle: shot.title, assetIds } };
+    const stepId = stream.startStep({ type: "action.started", title: `正在把 ${assetIds.length} 項素材加入第 ${ordinal! + 1} 鏡`, toolName: "attach_asset_to_shot", target: shot.title });
+    const bound = await attachAssetsToShotVerified({ auth, projectId: effectiveProjectId, shotId: shot.id, assetIds });
+    activeGoal = { ...activeGoal, status: "verifying" };
+    const verified = bound.verification.status === "verified";
+    stream.emit({ type: "verification.completed", title: bound.verification.message, status: verified ? "ok" : "failed", toolName: "attach_asset_to_shot", target: shot.title, resultCount: bound.assetIds.length });
+    stream.finishStep(stepId, { type: verified ? "action.completed" : "action.failed", title: verified ? `已把素材加入第 ${ordinal! + 1} 鏡` : "素材綁定未通過驗證", status: verified ? "ok" : "failed", toolName: "attach_asset_to_shot", target: shot.title, resultCount: bound.assetIds.length });
+    activeGoal = { ...activeGoal, status: verified ? "completed" : "failed", resultRefIds: bound.assetIds.slice(0, 20) };
+    stream.emit({ type: verified ? "agent.completed" : "agent.failed", title: verified ? "已完成並重新讀取確認" : "操作未完成驗證", status: verified ? "ok" : "failed", resultCount: bound.assetIds.length });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "attach_asset_to_shot",
+      handler: "contextBindings.createBinding",
+      targetType: "shot",
+      targetIds: [shot.id],
+      databaseRecordIds: bound.bindingIds,
+      verificationMethod: "read_back",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: bound.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ 已把 ${bound.assetIds.length} 項素材加入「${projectResolution.projectTitle ?? "目前專案"}」第 ${ordinal! + 1} 鏡，並重新讀取確認。`
+        : "操作已送出，但重新讀取未確認全部素材綁定，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.status === "matched" && effectiveProjectId && projectResolution.projectTitle) {
+    const mode = capabilityMatch.capabilityId === "import_google_drive" ? "drive"
+      : capabilityMatch.capabilityId === "import_local_file" ? "files"
+      : capabilityMatch.capabilityId === "import_folder" ? "folder" : undefined;
+    if (mode) {
+      activeGoal = { ...activeGoal, status: "waiting_user_input", missingSlots: [] };
+      const intakeRequest: AssistantIntakeRequest = {
+        mode, projectId: effectiveProjectId, projectTitle: projectResolution.projectTitle,
+        message: mode === "drive" ? `已確認要加入「${projectResolution.projectTitle}」。請選擇 Google Drive 檔案。`
+          : mode === "folder" ? `已確認要加入「${projectResolution.projectTitle}」。請選擇資料夾。`
+          : `已確認要加入「${projectResolution.projectTitle}」。請選擇檔案。`,
+      };
+      stream.emit({ type: "waiting.user_input", title: mode === "drive" ? "等待你選 Google Drive 資料" : mode === "folder" ? "等待你選資料夾" : "等待你選檔案", description: intakeRequest.message, status: "waiting" });
+      return earlySemanticResult(intakeRequest.message, {
+        intakeRequest,
+        interactionRequest: intakePickerInteraction({
+          ...intakeRequest,
+          goalId: activeGoal.goalId,
+        }),
+      });
+    }
   }
 
   // Known landing-page providers are a capability boundary, not a failed
@@ -847,6 +1086,7 @@ export async function runGlobalAsk(
   const routeAllowsDispatch = canDispatch && (executionPlan.intent === "AGENT" || executionPlan.intent === "PLAN");
   const base = {
     canDispatch: routeAllowsDispatch, commandLevel, degraded, traceSessionId, executionPlan, runId: stream.runId, intakeFallbacks,
+    ...semanticPayload(),
   };
   /** 回傳前統一補上事件流與來源快照——四個 return 點都得帶，漏一個就是「軌跡憑空消失」 */
   const withTrace = <T extends object>(result: T) => ({
@@ -881,23 +1121,33 @@ export async function runGlobalAsk(
       mockProposals.push({ type: "add_note", title: input.message.slice(0, 40), content: input.message });
     }
     const proposedSiteActions = resolveSiteActions(siteRefs, [...deterministicUrlProposal, ...mockProposals]);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const terminalStatus = executionTerminalStatus(
+      siteActions.length,
+      direct.executed.map((item) => item.result),
+      { requiresVerifiedWrite },
+    );
+    const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, siteActions);
-    stream.emit({
-      type: "agent.completed",
-      title: "已完成（測試模式）",
+    emitExecutionTerminalEvent(stream, siteActions, direct.executed, {
+      completedTitle: "已完成（測試模式）",
       resultSummary: overviewSummary,
-    });
+    }, { requiresVerifiedWrite });
     if (traceSessionId) {
-      await finalizeSiteTraceSession({
-        sessionId: traceSessionId, status: "completed", summary: "測試模式回答完成",
-        payload: { answer, siteActions: siteActions.map((a) => a.label) },
-      }).catch(() => undefined);
+      if (terminalStatus === "waiting") {
+        await updateSiteTraceSession(traceSessionId, { status: "running", summary: "等待使用者確認動作" }).catch(() => undefined);
+      } else {
+        await finalizeSiteTraceSession({
+          sessionId: traceSessionId, status: terminalStatus, summary: terminalStatus === "completed" ? "測試模式回答完成" : "動作驗證未通過",
+          payload: { answer, siteActions: siteActions.map((a) => a.label) },
+        }).catch(() => undefined);
+      }
     }
     return withTrace({
       answer: answerWithVerifiedActions(answer, direct.executed), dispatches: [], actions: [], siteActions, executedSiteActions: direct.executed,
-      steps: direct.executed.map((item) => `已完成：${item.action.label}`),
+      steps: verifiedExecuted.map((item) => `已完成並驗證：${item.action.label}`),
       mock: true, rationale: undefined, contextUsed: [], ...base,
     });
   }
@@ -1136,30 +1386,36 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
     ]);
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
+    const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
+    const terminalStatus = executionTerminalStatus(
+      pendingConfirmation.length,
+      direct.executed.map((item) => item.result),
+      { requiresVerifiedWrite },
+    );
+    const verifiedExecuted = direct.executed.filter((item) => item.result.verification.status === "verified");
     emitWaitingForConfirmation(stream, pendingConfirmation);
     // 收尾事件必須在 withTrace 之前發：快照是「回傳當下的事件流」，
     // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
     const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
-    stream.emit({
-      type: "agent.completed",
-      title: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
-      description: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
+    emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
+      completedTitle: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+      completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
       resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
       resultSummary: [
         { label: "來源", value: okSources.length },
         { label: "查詢", value: outcome.steps.length, unit: "次" },
-        ...(direct.executed.length ? [{ label: "已完成動作", value: direct.executed.length, unit: "件" }] : []),
+        ...(verifiedExecuted.length ? [{ label: "已完成動作", value: verifiedExecuted.length, unit: "件" }] : []),
       ],
-    });
+    }, { requiresVerifiedWrite });
     const result: GlobalAskResult = withTrace({
       answer: answerWithVerifiedActions(reply.answer, direct.executed),
       dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], routeAllowsDispatch),
       actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
       siteActions: pendingConfirmation,
       executedSiteActions: direct.executed,
-      steps: [...outcome.steps, ...direct.executed.map((item) => `已完成：${item.action.label}`)],
+      steps: [...outcome.steps, ...verifiedExecuted.map((item) => `已完成並驗證：${item.action.label}`)],
       mock: false,
       rationale: sanitizeRationale(reply.rationale),
       contextUsed: sanitizeContextUsed(reply.contextUsed),
@@ -1168,18 +1424,22 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     if (traceSessionId) {
       // 答案已經算好——trace 收尾失敗只記警告，不把成功的回答變成 500（透明化失敗不拖垮創作）
       await updateSiteTraceSession(traceSessionId, { provider: usedProvider ?? null, model: usedModel ?? null }).catch(() => undefined);
-      await finalizeSiteTraceSession({
-        sessionId: traceSessionId,
-        status: "completed",
-        summary: "回答完成",
-        payload: {
-          answer: result.answer,
-          steps: result.steps,
-          dispatches: result.dispatches,
-          actions: result.actions.map((a) => a.label),
-          siteActions: result.siteActions.map((a) => a.label),
-        },
-      }).catch((err) => {
+      const tracePayload = {
+        answer: result.answer,
+        steps: result.steps,
+        dispatches: result.dispatches,
+        actions: result.actions.map((a) => a.label),
+        siteActions: result.siteActions.map((a) => a.label),
+      };
+      const traceUpdate = terminalStatus === "waiting"
+        ? updateSiteTraceSession(traceSessionId, { status: "running", summary: "等待使用者確認動作" })
+        : finalizeSiteTraceSession({
+            sessionId: traceSessionId,
+            status: terminalStatus,
+            summary: terminalStatus === "completed" ? "回答完成" : "動作驗證未通過",
+            payload: tracePayload,
+          });
+      await traceUpdate.catch((err) => {
         console.warn("[globalAssistant] trace 收尾失敗（不影響回答）：", err instanceof Error ? err.message : err);
       });
     }
@@ -1237,6 +1497,56 @@ function emitWaitingForConfirmation(stream: AgentEventStream, pending: ResolvedS
     title: `有 ${pending.length} 件動作需要你確認`,
     description: pending.map((action) => action.label).join("；").slice(0, 400),
     resultCount: pending.length,
+  });
+}
+
+function emitExecutionTerminalEvent(
+  stream: AgentEventStream,
+  pending: readonly ResolvedSiteAction[],
+  executed: readonly ExecutedSiteAction[],
+  summary: {
+    completedTitle: string;
+    completedDescription?: string;
+    resultCount?: number;
+    resultSummary?: AgentEvent["resultSummary"];
+  },
+  opts?: {
+    /** When true, agent.completed requires at least one verified write result. */
+    requiresVerifiedWrite?: boolean;
+  },
+): void {
+  const status = executionTerminalStatus(
+    pending.length,
+    executed.map((item) => item.result),
+    { requiresVerifiedWrite: opts?.requiresVerifiedWrite },
+  );
+  if (status === "waiting") {
+    if (opts?.requiresVerifiedWrite && pending.length === 0) {
+      stream.emit({
+        type: "waiting.user_input",
+        title: "尚未完成可驗證的寫入",
+        description: "這次沒有通過驗證的寫入結果。你可以補充資訊，或確認後再執行。",
+        status: "waiting",
+      });
+    }
+    return;
+  }
+  if (status === "failed") {
+    stream.emit({
+      type: "agent.failed",
+      title: "操作已送出，但驗證尚未通過",
+      description: "重新讀取未能確認預期狀態，因此不會標示為完成。",
+      status: "failed",
+    });
+    return;
+  }
+  stream.emit({
+    type: "agent.completed",
+    title: summary.completedTitle,
+    description: summary.completedDescription,
+    resultCount: summary.resultCount,
+    resultSummary: summary.resultSummary,
+    status: "ok",
   });
 }
 
@@ -1395,6 +1705,7 @@ async function executeDirectSiteActions(
   plan: AssistantExecutionPlan,
   actions: ResolvedSiteAction[],
   stream: AgentEventStream,
+  signal?: AbortSignal,
 ): Promise<{ executed: ExecutedSiteAction[]; executedActions: Set<ResolvedSiteAction> }> {
   const eligible = actions.filter((action) => {
     if (!canDirectlyExecuteCapability(plan, action.type)) return false;
@@ -1404,6 +1715,8 @@ async function executeDirectSiteActions(
   });
   const executed: ExecutedSiteAction[] = [];
   for (const action of eligible) {
+    // Client disconnect / stop must not continue SAFE_WRITE side effects.
+    if (signal?.aborted) break;
     const stepId = stream.startStep({
       type: "action.started",
       title: `正在${action.label}`,
@@ -1659,19 +1972,40 @@ export const globalAssistantRouter = router({
       /** 頁面感知上下文（逐欄夾制過的白名單；同樣只是提示） */
       pageContext: assistantPageContextSchema.optional(),
       recentActionResults: z.array(recentActionResultSchema).max(5).optional(),
+      activeGoal: assistantActiveGoalSchema.optional(),
       /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
       mode: agentPlannerModeSchema.optional(),
+      /**
+       * Client-generated UUID for this user submit. Shared by SSE and tRPC
+       * fallback so a transport race cannot start two paid/write turns.
+       */
+      requestId: z.string().uuid().optional(),
     }))
-    .mutation(({ ctx, input }) => runGlobalAsk({
-      auth: ctx.auth,
-      groupId: input.groupId,
-      message: input.message,
-      history: input.history,
-      projectId: input.projectId,
-      pageContext: input.pageContext,
-      recentActionResults: input.recentActionResults,
-      mode: input.mode,
-    })),
+    .mutation(async ({ ctx, input }) => {
+      const { acquireAssistantRequest, releaseAssistantRequest } = await import("../services/assistantRequestGate");
+      const gate = acquireAssistantRequest(ctx.auth.user.id, input.requestId);
+      if (!gate.ok) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "同一個請求仍在執行中，請勿重送（避免重複扣額度與寫入）",
+        });
+      }
+      try {
+        return await runGlobalAsk({
+          auth: ctx.auth,
+          groupId: input.groupId,
+          message: input.message,
+          history: input.history,
+          projectId: input.projectId,
+          pageContext: input.pageContext,
+          recentActionResults: input.recentActionResults,
+          activeGoal: input.activeGoal,
+          mode: input.mode,
+        });
+      } finally {
+        releaseAssistantRequest(ctx.auth.user.id, input.requestId);
+      }
+    }),
 
   /** 使用者按下確認卡後執行單一站級動作（經 authedProcedure 落審計；ACL/policy 在被呼叫端） */
   runSiteAction: authedProcedure

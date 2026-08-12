@@ -49,7 +49,7 @@ export interface AssistantLatencyMetrics {
 export interface AssistantCapability {
   id: string;
   label: string;
-  domain: "PROJECT" | "TASK" | "NOTE" | "MEMORY" | "STORYBOARD" | "SCRIPT" | "ASSET" | "INTAKE" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "GENERATION";
+  domain: "PROJECT" | "TASK" | "NOTE" | "MEMORY" | "STORYBOARD" | "SCRIPT" | "ASSET" | "INTAKE" | "DATABASE" | "SCHEDULE" | "MEMBER" | "COLLABORATION" | "COMPUTER" | "GENERATION";
   access: "READ" | "WRITE";
   risk: AssistantActionRisk;
   direct: boolean;
@@ -104,6 +104,8 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "add_schedule_item", domain: "SCHEDULE", access: "WRITE", label: "建立排程", risk: "EXTERNAL", direct: false },
   { id: "read_members", domain: "MEMBER", access: "READ", label: "讀取組員與工作負荷", risk: "READ", direct: true },
   { id: "read_collaboration", domain: "COLLABORATION", access: "READ", label: "讀取阻塞與代理狀態", risk: "READ", direct: true },
+  capability({ id: "inspect_computer_runtime", domain: "COMPUTER", access: "READ", label: "確認 Browser / Desktop Runtime 能力", risk: "READ", direct: true, executionMode: "DIRECT_TOOL", handler: "computerRuntime.status", resultType: "generic", verificationStrategy: "read_back" }),
+  capability({ id: "open_browser_runtime", domain: "COMPUTER", access: "WRITE", label: "開啟隔離瀏覽器", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], executionMode: "BROWSER_FALLBACK", handler: "computerRuntime.createSession", resultType: "generic", verificationStrategy: "read_back" }),
   { id: "send_dm", domain: "COLLABORATION", access: "WRITE", label: "傳送私訊", risk: "EXTERNAL", direct: false },
   { id: "dispatch_agent", domain: "COLLABORATION", access: "WRITE", label: "派工給專案代理", risk: "COSTFUL", direct: false },
   capability({ id: "orchestrate_group_campaign", domain: "COLLABORATION", access: "WRITE", label: "規劃跨專案活動", risk: "COSTFUL", direct: false, executionMode: "GROUP_CAMPAIGN", handler: "groupAgent.planCampaign", resultType: "generic", verificationStrategy: "read_back" }),
@@ -119,7 +121,7 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
 export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
   ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
-const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|哪些|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|\?|？)/i;
+const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
@@ -129,6 +131,7 @@ const CROSS_PROJECT_PLAN_RE = /(?:跨專案|多個專案|所有專案|整個團�
 const PROJECT_AGENT_RE = /(?:完整分鏡|腳本.{0,20}(?:整理|拆).{0,20}分鏡|逐鏡|每一鏡|人物與場景|整支影片|這支影片.{0,20}(?:完成|製作)|多步(?:驟)?)/i;
 
 const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> = [
+  { id: "open_browser_runtime", pattern: /(?:開啟|打開|啟動).{0,10}(?:瀏覽器|browser)|(?:瀏覽器|browser).{0,10}(?:開啟|打開|啟動)/i },
   { id: "import_url", pattern: /(?:https?:\/\/[^\s]+).*(?:加入|匯入|帶進|帶入|放進|存到|素材庫)|(?:加入|匯入|帶進|帶入|放進|存到).*(?:https?:\/\/[^\s]+)/i },
   { id: "import_google_drive", pattern: /(?:google\s*drive|雲端硬碟|雲端磁碟).*(?:匯入|帶進|帶入|加入|放進)|(?:匯入|帶進|帶入|加入|放進).*(?:google\s*drive|雲端硬碟|雲端磁碟)/i },
   { id: "import_folder", pattern: /(?:資料夾|文件夾|\bfolder\b).*(?:匯入|帶進|帶入|加入|放進)|(?:匯入|帶進|帶入|加入|放進).*(?:資料夾|文件夾|\bfolder\b)/i },
@@ -160,12 +163,17 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
   const matchedCapability = capabilityForAssistantGoal(text);
 
-  if (asksQuestion && /(?:如何|怎麼|能不能|可不可以)/i.test(text)) {
+  if (asksQuestion) {
+    const browserCapability = /(?:瀏覽器|browser)/i.test(text)
+      ? ASSISTANT_CAPABILITIES.find((item) => item.id === "inspect_computer_runtime")
+      : undefined;
+    const questionCapability = browserCapability ?? matchedCapability;
     return {
       intent: "ASK",
       confidence: "high",
       title,
       steps: ["讀取目前上下文", "查證需要的資料", "整理結論與下一步"],
+      ...(questionCapability ? { capabilityId: questionCapability.id, executionMode: questionCapability.executionMode } : {}),
     };
   }
   if (CROSS_PROJECT_PLAN_RE.test(text) && (asksAction || PLAN_RE.test(text))) {

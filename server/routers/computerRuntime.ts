@@ -64,6 +64,9 @@ export const computerRuntimeRouter = router({
   status: authedProcedure.query(() => ({
     enabled: isComputerRuntimeEnabled(),
     browserEnabled: isComputerBrowserEnabled(),
+    // sessionCore currently provisions MockBrowserProvider only. Expose that truth to the orchestrator/UI.
+    browserProvider: "mock" as const,
+    liveExternalWebEnabled: false,
     humanTakeoverEnabled: isComputerHumanTakeoverEnabled(),
     artifactIngestionEnabled: isComputerArtifactIngestionEnabled(),
     desktopEnabled: isComputerDesktopEnabled(),

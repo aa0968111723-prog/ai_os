@@ -70,6 +70,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
 import { sanitizeAssistantPageContext } from "../shared/assistantPageContext";
 import { classifyAssistantRequest, type AssistantLatencyMetrics } from "../shared/assistantExecution";
+import { assistantActiveGoalSchema } from "../shared/assistantGoalFrame";
 import {
   backgroundTaskCount,
   beginShutdown,
@@ -2378,8 +2379,19 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   // sanitizeAssistantPageContext 逐欄夾制（壞欄位丟棄而非整包拒絕：上下文是錦上添花，
   // 不該讓一個壞欄位害使用者問不到問題）。同樣只是提示，授權仍由 runGlobalAsk 內部重驗。
   const pageContext = sanitizeAssistantPageContext(req.body?.pageContext) ?? undefined;
+  const parsedSiteMode = agentPlannerModeSchema.safeParse(req.body?.mode);
+  const siteMode = parsedSiteMode.success ? parsedSiteMode.data : undefined;
+  const parsedActiveGoal = assistantActiveGoalSchema.safeParse(req.body?.activeGoal);
+  const activeGoal = parsedActiveGoal.success ? parsedActiveGoal.data : undefined;
+  const requestIdRaw = String(req.body?.requestId ?? "").trim();
+  const requestId = UUID_RE.test(requestIdRaw) ? requestIdRaw : undefined;
   if (!UUID_RE.test(groupId) || !message || message.length > 500) {
     return res.status(400).json({ error: "參數不正確（需 groupId 與 1–500 字的問題）" });
+  }
+  const { acquireAssistantRequest, releaseAssistantRequest } = await import("./services/assistantRequestGate");
+  const gate = acquireAssistantRequest(auth.user.id, requestId);
+  if (!gate.ok) {
+    return res.status(409).json({ error: "同一個請求仍在執行中，請勿重送（避免重複扣額度與寫入）" });
   }
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -2423,15 +2435,17 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         projectId,
         pageContext,
         recentActionResults: recentActionResults.length ? recentActionResults : undefined,
+        activeGoal,
+        mode: siteMode,
         signal: clientAbort.signal,
         runId,
       },
       (e) => { latency.observe(e); sse("step", e); },
     );
-    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, { ok: true });
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse", requestId }, { ok: true });
     sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
-    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, {
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse", requestId }, {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -2440,6 +2454,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       sse("error", { message: err instanceof Error ? err.message : "全站 AI 助手暫時沒回應，請稍後再試" });
     }
   } finally {
+    releaseAssistantRequest(auth.user.id, requestId);
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
   }

@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentSourceRecord } from "@shared/agentEvents";
+import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import {
   boundAssistantActionResults,
   type AssistantActionResult,
@@ -42,6 +43,8 @@ export interface AssistantConversationState<TMessage> {
   returnContext?: AssistantReturnContext;
   /** Bounded typed references for "這些資料／剛建立的專案". */
   recentActionResults?: AssistantActionResult[];
+  /** Same-goal continuation state; ids are revalidated by the server every turn. */
+  activeGoal?: AssistantActiveGoal;
 }
 
 type Listener = () => void;
