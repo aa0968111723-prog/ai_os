@@ -45,6 +45,7 @@ import type { AuthState } from "../services/auth";
 import type { AgentSourceType } from "../../shared/agentEvents";
 import type { DataField } from "../../shared/databaseFields";
 import {
+  formatProjectAgeHints,
   formatProjectInventoryTotals,
   loadGroupProjectInventory,
 } from "../services/projectInventory";
@@ -1335,6 +1336,7 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
       ? ["", `未完整列出專案（組內共 ${totalProjects} 案，以下 ${hiddenLines.length} 案因超過清單上限${hidden > hiddenLines.length ? `、另有 ${hidden - hiddenLines.length} 案未列` : ""}；前綴代號 hN，僅供回答名稱與最後活動，派工仍只能用上方 pN）：`, ...hiddenLines]
       : []),
     `${formatProjectInventoryTotals(inventory)}｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
+    ...formatProjectAgeHints(inventory),
     "",
     "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
     degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,

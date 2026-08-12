@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatProjectInventoryTotals, type GroupProjectInventory } from "./projectInventory";
+import { formatProjectAgeHints, formatProjectInventoryTotals, type GroupProjectInventory } from "./projectInventory";
 
 function inventory(over: Partial<GroupProjectInventory> = {}): GroupProjectInventory {
   return {
@@ -10,6 +10,8 @@ function inventory(over: Partial<GroupProjectInventory> = {}): GroupProjectInven
     hiddenCount: 0,
     listed: [],
     hidden: [],
+    oldestCreated: null,
+    leastRecentlyUpdated: null,
     ...over,
   };
 }
@@ -31,5 +33,16 @@ describe("formatProjectInventoryTotals", () => {
       archivedCount: 0,
     }));
     expect(text).toContain("不得宣稱已列出全部");
+  });
+
+  it("distinguishes earliest created from least recently updated", () => {
+    const lines = formatProjectAgeHints(inventory({
+      oldestCreated: { id: "1", title: "Old", createdAt: new Date("2020-01-01") },
+      leastRecentlyUpdated: { id: "2", title: "Stale", updatedAt: new Date("2024-01-01") },
+    }));
+    expect(lines.join("\n")).toContain("最早建立");
+    expect(lines.join("\n")).toContain("「Old」");
+    expect(lines.join("\n")).toContain("最久沒更新");
+    expect(lines.join("\n")).toContain("「Stale」");
   });
 });
