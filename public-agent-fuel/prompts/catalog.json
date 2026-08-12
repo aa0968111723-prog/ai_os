@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "description": "Public prompt catalog for system import",
+  "categories": ["style", "character", "scene", "emotion", "composition"],
+  "prompts": [
+    {"id": "p001", "category": "style", "text": "手繪插畫風格, 溫暖活潑簡約, 16:9 cinematic, 乾淨線條"},
+    {"id": "p002", "category": "style", "text": "水彩插畫, 柔和暈染, 溫暖色調, 留白呼吸感"},
+    {"id": "p003", "category": "scene", "text": "海灘陽光, 藍海金沙, 夥伴奔跑, 希望表情"},
+    {"id": "p004", "category": "scene", "text": "暴風雨碼頭, 巨浪, 台北101剪影, 破雲陽光"},
+    {"id": "p005", "category": "character", "text": "Exact same character from reference, preserve face and identity perfectly"}
+  ]
+}
