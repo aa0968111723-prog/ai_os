@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  canLinkProjectToTable,
   clampMcpLimit,
   clampMcpOffset,
   compactRowDataForMcp,
@@ -19,6 +20,22 @@ const fields: DataField[] = [
 ];
 
 const PID = "11111111-1111-4111-8111-111111111111";
+const GID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+describe("canLinkProjectToTable", () => {
+  it("rejects a project from another group even when the actor is in that other group", () => {
+    expect(canLinkProjectToTable(GID, OTHER, [GID, OTHER])).toBe(false);
+  });
+
+  it("rejects a same-group project the actor cannot see", () => {
+    expect(canLinkProjectToTable(GID, GID, [OTHER])).toBe(false);
+  });
+
+  it("allows a same-group project the actor belongs to", () => {
+    expect(canLinkProjectToTable(GID, GID, [GID])).toBe(true);
+  });
+});
 
 describe("mergeProjectIntoRowData", () => {
   it("fills empty project fields when projectId given", () => {
@@ -91,6 +108,7 @@ describe("mcp.ts wires databaseMcp (no full-text select on list files)", () => {
     expect(mcpSource).toContain("queryMcpDatabase");
     expect(mcpSource).toContain("listMcpDatabaseFiles");
     expect(mcpSource).toContain("mergeProjectIntoRowData");
+    expect(mcpSource).toContain("resolveAuthorizedMcpProjectId");
     expect(mcpSource).toContain("update_database_row");
     // 舊路徑：.select().from(schema.dataFiles) 無投影——必須消失
     expect(mcpSource).not.toMatch(/\.select\(\)\s*\n\s*\.from\(schema\.dataFiles\)/);

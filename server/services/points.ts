@@ -372,11 +372,53 @@ export async function settleUsagePoints(input: {
   reserved: number;
   actual: number;
   reason: string;
+  /** Same reservation must settle at most once (retry / double-call). */
+  settleKey?: string;
 }): Promise<number> {
   const { refund: back, extra } = settlePoints(input.reserved, input.actual);
-  if (back > 0) await refund(input.userId, input.groupId, back, `${input.reason}（實際低於預留退回）`);
-  if (extra > 0) await deduct(input.userId, input.groupId, extra, `${input.reason}（實際高於預留補扣）`);
-  return Math.max(0, Math.round(input.actual));
+  const actual = Math.max(0, Math.round(input.actual));
+  if (back <= 0 && extra <= 0) return actual;
+  const token = normalizeSettleKey(input.settleKey);
+  if (!token) {
+    if (back > 0) await refund(input.userId, input.groupId, back, `${input.reason}（實際低於預留退回）`);
+    if (extra > 0) await deduct(input.userId, input.groupId, extra, `${input.reason}（實際高於預留補扣）`);
+    return actual;
+  }
+  const marker = `#settle:${token}`;
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.userId}), 0)`);
+    const [existing] = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.costLedger)
+      .where(and(
+        eq(schema.costLedger.userId, input.userId),
+        eq(schema.costLedger.groupId, input.groupId),
+        sql`${schema.costLedger.reason} like ${`%${marker}`}`,
+      ));
+    if (Number(existing?.n ?? 0) > 0) return actual;
+    if (back > 0) {
+      await tx.insert(schema.costLedger).values({
+        userId: input.userId,
+        groupId: input.groupId,
+        delta: back,
+        reason: `${input.reason}（實際低於預留退回）${marker}`,
+      });
+    }
+    if (extra > 0) {
+      await tx.insert(schema.costLedger).values({
+        userId: input.userId,
+        groupId: input.groupId,
+        delta: -extra,
+        reason: `${input.reason}（實際高於預留補扣）${marker}`,
+      });
+    }
+    return actual;
+  });
+}
+
+function normalizeSettleKey(raw: string | undefined): string | null {
+  const key = raw?.trim() ?? "";
+  return /^[A-Za-z0-9:_-]{8,160}$/.test(key) ? key : null;
 }
 
 export async function refund(userId: string, groupId: string, points: number, reason: string, generationId?: string): Promise<void> {

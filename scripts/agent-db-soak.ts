@@ -11,6 +11,7 @@ import { loadLocalEnv } from "../server/bootstrap/loadEnv";
 import { db, pool, schema } from "../server/db";
 import { probeDatabaseRuntime } from "../server/services/databaseRuntime";
 import { runAgentDbIntegrityScan } from "../server/services/agentDbIntegrity";
+import { AgentRunLedger } from "../server/services/agentRunLedger";
 import { loadGroupProjectInventory, visibleProjectsWhere } from "../server/services/projectInventory";
 
 loadLocalEnv();
@@ -33,6 +34,7 @@ const archivedProjectIds = [randomUUID(), randomUUID()];
 const noteId = randomUUID();
 const tableId = randomUUID();
 const assetId = randomUUID();
+const soakRunId = randomUUID();
 const startedAt = Date.now();
 let writes = 0;
 let readBacks = 0;
@@ -41,6 +43,8 @@ let integrityFails = 0;
 let duplicateWrites = 0;
 let falseCompletions = 0;
 let sourceTruthFails = 0;
+let billingFails = 0;
+const ledger = new AgentRunLedger();
 
 async function seed(): Promise<void> {
   await db.insert(schema.users).values({
@@ -58,9 +62,21 @@ async function seed(): Promise<void> {
   await db.insert(schema.dataTables).values({
     id: tableId, scope: "group", groupId, name: "soak-custom-db", fields: [], agentAccess: "read", createdBy: ownerId,
   });
+  await db.insert(schema.agentRuns).values({
+    id: soakRunId,
+    projectId,
+    groupId,
+    userId: ownerId,
+    goal: "soak settleOnce",
+    steps: [],
+    estPoints: 4,
+    status: "running",
+  });
 }
 
 async function cleanup(): Promise<void> {
+  await db.delete(schema.agentToolReceipts).where(eq(schema.agentToolReceipts.groupId, groupId)).catch(() => undefined);
+  await db.delete(schema.agentRuns).where(eq(schema.agentRuns.id, soakRunId)).catch(() => undefined);
   await db.delete(schema.notes).where(eq(schema.notes.projectId, projectId)).catch(() => undefined);
   await db.delete(schema.assets).where(eq(schema.assets.id, assetId)).catch(() => undefined);
   await db.delete(schema.dataTables).where(eq(schema.dataTables.id, tableId)).catch(() => undefined);
@@ -81,6 +97,64 @@ async function assertInventoryAndSourceTruth(): Promise<void> {
   if (assetRows.length === dbRows.length) {
     sourceTruthFails += 1;
     throw new Error(`SOURCE_TRUTH: project assets (${assetRows.length}) collided with custom DB rows (${dbRows.length})`);
+  }
+}
+
+async function assertSettleOnce(index: number): Promise<void> {
+  const runId = soakRunId;
+  const key = `soak:${groupId}:${index}:${"b".repeat(64)}`.slice(0, 200);
+  const attemptId = randomUUID();
+  const owner = { userId: ownerId, groupId, projectId };
+  const claim = await ledger.claimEffect({
+    runId,
+    stepId: "soak-settle",
+    toolId: "soak.settle",
+    idempotencyKey: key,
+    effectFingerprint: "b".repeat(64),
+    attemptId,
+    reservedPoints: 4,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    owner,
+    receipt: {
+      goalId: runId,
+      runId,
+      stepId: "soak-settle",
+      toolCallId: randomUUID(),
+      attemptId,
+      capabilityId: "soak.settle",
+      handlerIdentity: "soak.settle",
+      effectFingerprint: "b".repeat(64),
+      idempotencyKey: key,
+      requestedAt: new Date().toISOString(),
+      verificationMethod: "authoritative_read_back",
+      trustOrigin: "USER_EXPLICIT",
+    },
+  });
+  if (claim.state !== "acquired") {
+    billingFails += 1;
+    throw new Error(`SETTLE_CLAIM_FAILED:${claim.state}`);
+  }
+  const result = {
+    value: { id: key },
+    evidence: [{ type: "effect" as const, ref: key, verifiedAt: new Date().toISOString() }],
+    actualPoints: 4,
+    verified: true,
+  };
+  if (!await ledger.saveEffect(runId, key, attemptId, result)) {
+    billingFails += 1;
+    throw new Error("SETTLE_SAVE_FAILED");
+  }
+  if (await ledger.settleOnce(runId, key, 4, { userId: randomUUID(), groupId })) {
+    billingFails += 1;
+    throw new Error("SETTLE_IDOR: foreign user settled receipt");
+  }
+  const raced = await Promise.all([
+    ledger.settleOnce(runId, key, 4, owner),
+    ledger.settleOnce(runId, key, 4, owner),
+  ]);
+  if (raced.filter(Boolean).length !== 1) {
+    billingFails += 1;
+    throw new Error(`SETTLE_DUPLICATE winners=${raced.filter(Boolean).length}`);
   }
 }
 
@@ -131,6 +205,10 @@ async function tick(index: number): Promise<void> {
   const noteCount = await db.select({ id: schema.notes.id }).from(schema.notes).where(eq(schema.notes.id, noteId));
   if (noteCount.length !== 1) duplicateWrites += 1;
 
+  if (index % 4 === 0) {
+    await assertSettleOnce(index);
+  }
+
   if (index % 8 === 0) {
     const integrity = await runAgentDbIntegrityScan(15);
     if (!integrity.ok) integrityFails += 1;
@@ -158,6 +236,7 @@ try {
       duplicateWrites,
       falseCompletions,
       sourceTruthFails,
+      billingFails,
       elapsedMs: Date.now() - startedAt,
       targetMs,
     });
@@ -176,6 +255,7 @@ const pass = wallClockMs >= targetMs * 0.98
   && duplicateWrites === 0
   && integrityFails === 0
   && sourceTruthFails === 0
+  && billingFails === 0
   && writes >= 2
   && readBacks === writes;
 const report = {
@@ -190,6 +270,7 @@ const report = {
   duplicateWrites,
   falseCompletions,
   sourceTruthFails,
+  billingFails,
 };
 persist(report);
 console.log(JSON.stringify(report, null, 2));

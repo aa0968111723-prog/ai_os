@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import { AgentRunLedger } from "./agentRunLedger";
 
-const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
+const RUN_PG = Boolean(process.env.DATABASE_URL);
 const describePg = RUN_PG ? describe : describe.skip;
 const createdKeys: string[] = [];
 const createdRunIds: string[] = [];
@@ -60,6 +60,37 @@ describePg("AgentRunLedger PostgreSQL leases", () => {
     expect(await ledger.settleOnce(randomUUID(), key, 4)).toBe(false);
     expect(await ledger.settleOnce(runId, key, 4)).toBe(true);
     expect(await ledger.settleOnce(runId, key, 4)).toBe(false);
+  });
+
+  it("refuses a second concurrent settlement and a foreign-tenant owner", async () => {
+    const owner = { userId: randomUUID(), groupId: randomUUID(), projectId: randomUUID() };
+    const runId = randomUUID();
+    createdRunIds.push(runId);
+    await db.insert(schema.agentRuns).values({
+      id: runId,
+      projectId: owner.projectId,
+      groupId: owner.groupId,
+      userId: owner.userId,
+      goal: "settleOnce",
+      steps: [{ id: "step", toolId: "test.write", input: {}, dependsOn: [], status: "pending", attemptCount: 0, reservedPoints: 0, actualPoints: 0 }],
+      estPoints: 10,
+      status: "running",
+    });
+    const key = `v5:${runId}:step:test.write:${"a".repeat(64)}`;
+    createdKeys.push(key);
+    const attemptId = randomUUID();
+    expect((await ledger.claimEffect({ ...claim(runId, key, attemptId), owner })).state).toBe("acquired");
+    const result = { value: { id: "effect" }, evidence: [{ type: "effect" as const, ref: "effect", verifiedAt: new Date().toISOString() }], actualPoints: 4, verified: true };
+    expect(await ledger.saveEffect(runId, key, attemptId, result)).toBe(true);
+    expect(await ledger.settleOnce(runId, key, 4, { userId: randomUUID(), groupId: owner.groupId })).toBe(false);
+    expect(await ledger.settleOnce(runId, key, 4, { userId: owner.userId, groupId: randomUUID() })).toBe(false);
+    expect(await ledger.settleOnce(runId, key, -4, { userId: owner.userId, groupId: owner.groupId })).toBe(false);
+    const raced = await Promise.all([
+      ledger.settleOnce(runId, key, 4, owner),
+      ledger.settleOnce(runId, key, 4, owner),
+    ]);
+    expect(raced.filter(Boolean)).toHaveLength(1);
+    expect(await ledger.settleOnce(runId, key, 4, owner)).toBe(false);
   });
 
   it("rejects a forged same key with different run/tool/effect identity", async () => {

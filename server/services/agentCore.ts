@@ -10,6 +10,7 @@
  * 邊界（#133 PR-4）：組級 MCP 工具（get_project_status 等）服務創作代理的「讀寫查詢」，
  * 但代理的執行永遠只走 agent_run + Runner——不存在第二條扣點／執行路徑。
  */
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -783,6 +784,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     attempts: PLAN_RETRY_ATTEMPTS,
   });
   const plannerLabel = getAgentPlannerOption(plannerMode).shortLabel;
+  const billingSettleKey = randomUUID();
   const quotaError = await reserveQuota(
     auth.user.id,
     project.groupId,
@@ -837,6 +839,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
           reserved: reservedPoints,
           actual: burned,
           reason: `AI 代理規劃（${plannerLabel}）`,
+          settleKey: billingSettleKey,
         });
     if (burned == null) {
       await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
@@ -874,6 +877,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     reserved: reservedPoints,
     actual: usagePoints ?? reservedPoints,
     reason: `AI 代理規劃（${plannerLabel}）`,
+    settleKey: billingSettleKey,
   });
 
   if (input.traceSessionId) {
@@ -1101,6 +1105,7 @@ ${clarifications || "（無額外文字）"}
     attempts: PLAN_RETRY_ATTEMPTS,
   });
   const plannerLabel = getAgentPlannerOption(plannerMode).shortLabel;
+  const billingSettleKey = randomUUID();
   const quotaError = await reserveQuota(
     auth.user.id,
     project.groupId,
@@ -1124,6 +1129,7 @@ ${clarifications || "（無額外文字）"}
         reserved: reservedPoints,
         actual: burned,
         reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
+        settleKey: billingSettleKey,
       });
     }
     if (err instanceof AgentPlannerServiceError) {
@@ -1139,6 +1145,7 @@ ${clarifications || "（無額外文字）"}
     reserved: reservedPoints,
     actual: usagePoints ?? reservedPoints,
     reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
+    settleKey: billingSettleKey,
   });
 
   let plan;

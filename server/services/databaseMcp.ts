@@ -66,6 +66,32 @@ export function hasProjectLinkField(fields: unknown): boolean {
   return Array.isArray(fields) && (fields as DataField[]).some((f) => f?.type === "project");
 }
 
+/** Group-scoped tables may only link a project from the same group the actor can see. */
+export function canLinkProjectToTable(
+  tableGroupId: string | null | undefined,
+  projectGroupId: string,
+  actorGroupIds: readonly string[],
+): boolean {
+  if (tableGroupId && tableGroupId !== projectGroupId) return false;
+  return actorGroupIds.includes(projectGroupId);
+}
+
+export async function resolveAuthorizedMcpProjectId(
+  auth: AuthState,
+  table: Pick<DataTableRow, "groupId">,
+  projectId: string | undefined,
+): Promise<string | undefined> {
+  if (!projectId || !UUID_RE.test(projectId)) return undefined;
+  const [project] = await db
+    .select({ id: schema.projects.id, groupId: schema.projects.groupId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId));
+  if (!project) return undefined;
+  return canLinkProjectToTable(table.groupId, project.groupId, auth.groups.map((g) => g.groupId))
+    ? project.id
+    : undefined;
+}
+
 /** 把外部模型／工具給的 data 與專案 id 合併：表上每個 project 欄若缺值則預填 */
 export function mergeProjectIntoRowData(
   fields: DataField[],

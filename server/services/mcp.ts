@@ -59,6 +59,7 @@ import {
   listMcpDatabases,
   mergeProjectIntoRowData,
   queryMcpDatabase,
+  resolveAuthorizedMcpProjectId,
 } from "./databaseMcp";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
@@ -853,7 +854,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     if (name === "add_database_rows") {
       const denied = databaseBatchWriteDenied(scope.readOnly, access.canWriteRows);
       if (denied) throw new TRPCError({ code: "FORBIDDEN", message: denied });
-      const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      const requestedProjectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      const projectId = await resolveAuthorizedMcpProjectId(auth, table, requestedProjectId);
+      if (requestedProjectId && !projectId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+      }
       // parseDatabaseBatchRows 回的是 data 物件陣列（非 { data } 包裝）
       const rawRows = parseDatabaseBatchRows(args).map((data) =>
         mergeProjectIntoRowData(table.fields as DataField[], data, projectId),
@@ -875,7 +880,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         });
       }
       const rowId = String(args.rowId ?? "");
-      const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      const requestedProjectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      const projectId = await resolveAuthorizedMcpProjectId(auth, table, requestedProjectId);
+      if (requestedProjectId && !projectId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+      }
       const data = mergeProjectIntoRowData(table.fields as DataField[], args.data ?? {}, projectId);
       try {
         const updated = await updateDataRowValidated(table, rowId, auth.user.id, data);
@@ -894,7 +903,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         message: "這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）",
       });
     }
-    const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+    const requestedProjectId = typeof args.projectId === "string" ? args.projectId : undefined;
+    const projectId = await resolveAuthorizedMcpProjectId(auth, table, requestedProjectId);
+    if (requestedProjectId && !projectId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+    }
     const data = mergeProjectIntoRowData(table.fields as DataField[], args.data ?? {}, projectId);
     const row = await addDataRowValidated(table, auth.user.id, data);
     return { rowId: row.id, data: row.data };

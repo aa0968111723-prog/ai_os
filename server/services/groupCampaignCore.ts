@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
@@ -386,6 +387,7 @@ export async function planGroupCampaign(input: {
       reserved: reservedPoints,
       actual: llmPointsForUsageEntries([{ model: completion.model, usage: completion.usage }]) ?? reservedPoints,
       reason: `組代理調度規劃（${plannerLabel}）`,
+      settleKey: randomUUID(),
     });
     const raw = completion.text;
     const match = raw.match(/\{[\s\S]*\}/);

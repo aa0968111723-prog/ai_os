@@ -250,7 +250,7 @@ export interface RunLedger {
   saveEffect(runId: string, idempotencyKey: string, attemptId: string, result: ToolResult): Promise<boolean>;
   claimEffect(input: { runId: string; stepId: string; toolId: string; idempotencyKey: string; effectFingerprint: string; attemptId: string; reservedPoints: number; leaseExpiresAt: string; owner: { userId: string; groupId: string; projectId: string }; receipt: Omit<ExecutionReceipt, "executedAt" | "verifiedAt" | "verificationStage" | "targetRefs" | "actualPoints"> }): Promise<{ state: "acquired" | "in_progress" | "verified"; reservationCreated: boolean; result?: ToolResult }>;
   releaseEffect(runId: string, idempotencyKey: string, attemptId: string): Promise<void>;
-  settleOnce(runId: string, idempotencyKey: string, points: number): Promise<boolean>;
+  settleOnce(runId: string, idempotencyKey: string, points: number, owner?: { userId?: string; groupId?: string }): Promise<boolean>;
 }
 
 export function runtimeUserState(run: DurableRun): RuntimeUserState {
@@ -282,7 +282,13 @@ export class InMemoryRunLedger implements RunLedger {
     return { state: "acquired" as const, reservationCreated };
   }
   async releaseEffect(runId: string, key: string, attemptId: string) { const scopedKey = `${runId}:${key}`; if (this.leases.get(scopedKey)?.attemptId === attemptId) this.leases.delete(scopedKey); }
-  async settleOnce(runId: string, key: string) { const k = `${runId}:${key}`; if (this.settlements.has(k)) return false; this.settlements.add(k); return true; }
+  async settleOnce(runId: string, key: string, points = 0) {
+    if (!Number.isFinite(points) || points < 0) return false;
+    const k = `${runId}:${key}`;
+    if (this.settlements.has(k)) return false;
+    this.settlements.add(k);
+    return true;
+  }
 }
 
 export class ProviderCircuitBreaker {
@@ -347,7 +353,7 @@ export class PracticalAutonomyRuntime {
     if (agentDepth > maxAgentDepth || visitedCapabilities.includes(tool.id)) throw new AgentRecursionError(`Recursive capability invocation blocked: ${tool.id}`);
     const fingerprint = effectFingerprint(tool.id, input); const key = canonicalIdempotencyKey(actor.groupId, run.id, step.id, tool.id, fingerprint); step.idempotencyKey = key;
     const prior = await this.ledger.getEffect(run.id, key);
-    if (prior?.verified) { if (await this.ledger.settleOnce(run.id, step.idempotencyKey, prior.actualPoints)) { run.reservedPoints = Math.max(0, run.reservedPoints - step.reservedPoints); run.actualPoints += prior.actualPoints; } step.actualPoints = prior.actualPoints; step.status = "completed"; step.verifiedResult = prior; await this.ledger.save(run); return prior; }
+    if (prior?.verified) { if (await this.ledger.settleOnce(run.id, step.idempotencyKey, prior.actualPoints, { userId: actor.userId, groupId: actor.groupId })) { run.reservedPoints = Math.max(0, run.reservedPoints - step.reservedPoints); run.actualPoints += prior.actualPoints; } step.actualPoints = prior.actualPoints; step.status = "completed"; step.verifiedResult = prior; await this.ledger.save(run); return prior; }
     const availability = tool.availability(); if (!availability.available) { step.status = "blocked"; step.error = availability.reason ?? "BLOCKED_BY_EXTERNAL_DEPENDENCY"; await this.ledger.save(run); throw new Error(step.error); }
     if ((tool.confirmation === "always" || tool.confirmation === "high_risk" || (tool.confirmation === "paid" && tool.cost.paid)) && !actor.confirmed) throw new ConfirmationRequiredError(`Confirmation required for ${tool.id}`);
     const estimate = Math.max(0, tool.cost.estimatePoints(input));
@@ -372,7 +378,7 @@ export class PracticalAutonomyRuntime {
         const verifiedAt = new Date().toISOString();
         const final = sanitizeToolResultForPersistence({ ...result, verified: true, receipt: { goalId: run.goalId, runId, stepId, toolCallId, attemptId, capabilityId: tool.id, handlerIdentity: tool.handlerIdentity, effectFingerprint: fingerprint, idempotencyKey: key, requestedAt, executedAt: new Date(startedAt).toISOString(), verifiedAt, verificationStage: (tool.verificationStage ?? "VERIFIED") as ExecutionReceipt["verificationStage"], verificationMethod: tool.verificationMethod ?? "handler_read_back", targetRefs: result.evidence.map((item) => item.ref), ...(actor.traceId ? { traceId: actor.traceId } : {}), ...(actor.conversationId ? { conversationId: actor.conversationId } : {}), actualPoints: result.actualPoints, trustOrigin: actor.inputTrust ?? "USER_EXPLICIT" } satisfies ExecutionReceipt });
         if (!await this.ledger.saveEffect(run.id, key, attemptId, final)) throw new Error("STALE_EFFECT_LEASE");
-        if (await this.ledger.settleOnce(run.id, step.idempotencyKey, final.actualPoints)) { run.reservedPoints -= step.reservedPoints; run.actualPoints += final.actualPoints; }
+        if (await this.ledger.settleOnce(run.id, step.idempotencyKey, final.actualPoints, { userId: actor.userId, groupId: actor.groupId })) { run.reservedPoints -= step.reservedPoints; run.actualPoints += final.actualPoints; }
         step.actualPoints = final.actualPoints; step.verifiedResult = final; step.status = "completed"; if (availability.provider) this.circuits.success(availability.provider, Date.now() - startedAt); await this.ledger.save(run); this.controllers.finish(runId, attemptId); return final;
       } catch (error) { lastError = error; const disposition = classifyExecutionError(error); step.error = disposition === "reconcile" ? "EFFECT_OUTCOME_REQUIRES_RECONCILIATION" : error instanceof Error ? error.message : String(error); if (availability.provider) this.circuits.failure(availability.provider); if (tool.idempotency === "none" || controller.signal.aborted || !isRetrySafeExecutionError(error)) break; if (attempt < tool.retry.maxAttempts && tool.retry.baseDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, tool.retry.baseDelayMs * 2 ** (attempt - 1))); }
     }

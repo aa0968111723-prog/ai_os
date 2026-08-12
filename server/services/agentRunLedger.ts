@@ -92,5 +92,20 @@ export class AgentRunLedger implements RunLedger {
   async releaseEffect(runId: string, key: string, attemptId: string): Promise<void> {
     await db.update(schema.agentToolReceipts).set({ status: "failed", leaseOwner: null, leaseExpiresAt: new Date(), updatedAt: new Date() }).where(and(eq(schema.agentToolReceipts.runId, runId), eq(schema.agentToolReceipts.idempotencyKey, key), eq(schema.agentToolReceipts.leaseOwner, attemptId), isNull(schema.agentToolReceipts.verifiedAt)));
   }
-  async settleOnce(runId: string, key: string, points: number): Promise<boolean> { const updated = await db.update(schema.agentToolReceipts).set({ actualPoints: points, settled: true, updatedAt: new Date() }).where(and(eq(schema.agentToolReceipts.runId, runId), eq(schema.agentToolReceipts.idempotencyKey, key), eq(schema.agentToolReceipts.status, "verified"), eq(schema.agentToolReceipts.settled, false))).returning({ id: schema.agentToolReceipts.id }); return updated.length === 1; }
+  async settleOnce(runId: string, key: string, points: number, owner?: { userId?: string; groupId?: string }): Promise<boolean> {
+    if (!Number.isFinite(points) || points < 0) return false;
+    const updated = await db.update(schema.agentToolReceipts).set({
+      actualPoints: points,
+      settled: true,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(schema.agentToolReceipts.runId, runId),
+      eq(schema.agentToolReceipts.idempotencyKey, key),
+      eq(schema.agentToolReceipts.status, "verified"),
+      eq(schema.agentToolReceipts.settled, false),
+      ...(owner?.userId ? [eq(schema.agentToolReceipts.userId, owner.userId)] : []),
+      ...(owner?.groupId ? [eq(schema.agentToolReceipts.groupId, owner.groupId)] : []),
+    )).returning({ id: schema.agentToolReceipts.id });
+    return updated.length === 1;
+  }
 }
