@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -11,6 +11,23 @@ import {
 } from "../../shared/agentQuestions";
 import { listResolvableModels } from "./modelResolve";
 import { modelIsOperationallyReady } from "./aiModelPolicy";
+import { loadGroupProjectInventory } from "./projectInventory";
+
+export const QUESTION_PICKER_LIMIT = 100;
+
+export function pickerInventoryCopy(listed: number, total: number, noun: string): { description: string; reason: string } {
+  if (total <= 0) return { description: `目前沒有可用${noun}。`, reason: `缺少${noun}。` };
+  if (listed >= total) {
+    return {
+      description: `找到 ${total} 個可用${noun}。`,
+      reason: total > 1 ? `找到多個候選${noun}。` : `缺少${noun}。`,
+    };
+  }
+  return {
+    description: `找到 ${total} 個可用${noun}；此清單只展開 ${listed} 個，不得宣稱已列出全部。`,
+    reason: `找到 ${total} 個候選${noun}，清單只展開 ${listed} 個。`,
+  };
+}
 
 function entityQuestion(
   title: string,
@@ -42,18 +59,9 @@ export class AgentQuestionResolver {
     currentProjectId?: string | null;
   }): Promise<AgentQuestionResolution> {
     requireGroup(input.auth, input.groupId);
-    const rows = await db
-      .select({
-        id: schema.projects.id,
-        title: schema.projects.title,
-        kind: schema.projects.kind,
-        platform: schema.projects.platform,
-        updatedAt: schema.projects.updatedAt,
-      })
-      .from(schema.projects)
-      .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.status, "active")))
-      .orderBy(desc(schema.projects.updatedAt))
-      .limit(100);
+    // Same archived filter + COUNT as website projects.list / Agent inventory.
+    const inventory = await loadGroupProjectInventory(input.groupId);
+    const rows = inventory.listed;
     const options: AgentQuestionOption[] = rows.map((row) => ({
       id: row.id,
       label: row.title,
@@ -61,13 +69,28 @@ export class AgentQuestionResolver {
       recommended: row.id === input.currentProjectId,
       metadata: { updatedAt: row.updatedAt.toISOString() },
     }));
+    const copy = pickerInventoryCopy(rows.length, inventory.activeCount, "專案");
+    let currentValue = rows.some((row) => row.id === input.currentProjectId) ? input.currentProjectId : undefined;
+    if (!currentValue && input.currentProjectId) {
+      const [hit] = await db
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(and(
+          eq(schema.projects.id, input.currentProjectId),
+          eq(schema.projects.groupId, input.groupId),
+          ne(schema.projects.status, "archived"),
+        ));
+      if (hit) currentValue = hit.id;
+    }
     return resolveOrAskAgentQuestion({
-      currentValue: rows.some((row) => row.id === input.currentProjectId) ? input.currentProjectId : undefined,
+      currentValue,
       candidates: options,
       question: entityQuestion(
         "選擇專案",
-        options.length ? `我找到 ${options.length} 個可用專案，請選擇這次要在哪一個專案執行。` : "目前沒有可用專案，請先建立專案。",
-        options.length > 1 ? "找到多個候選專案，缺少 projectId。" : "缺少 projectId。",
+        inventory.activeCount
+          ? `${copy.description.replace(/。$/, "")}，請選擇這次要在哪一個專案執行。`
+          : "目前沒有可用專案，請先建立專案。",
+        inventory.activeCount > 1 ? `${copy.reason.replace(/。$/, "")}，缺少 projectId。` : "缺少 projectId。",
         "projectId",
         "project",
       ),
@@ -105,26 +128,32 @@ export class AgentQuestionResolver {
     currentPersonId?: string | null;
   }): Promise<AgentQuestionResolution> {
     const project = await this.checkedProject(input.auth, input.projectId);
-    const rows = await db
-      .select({ id: schema.people.id, name: schema.people.name, projectId: schema.people.projectId })
-      .from(schema.people)
-      .where(and(
-        eq(schema.people.groupId, project.groupId),
-        eq(schema.people.status, "active"),
-        or(eq(schema.people.projectId, project.id), isNull(schema.people.projectId)),
-      ))
-      .orderBy(asc(schema.people.name))
-      .limit(100);
+    const where = and(
+      eq(schema.people.groupId, project.groupId),
+      eq(schema.people.status, "active"),
+      or(eq(schema.people.projectId, project.id), isNull(schema.people.projectId)),
+    );
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({ id: schema.people.id, name: schema.people.name, projectId: schema.people.projectId })
+        .from(schema.people)
+        .where(where)
+        .orderBy(asc(schema.people.name))
+        .limit(QUESTION_PICKER_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.people).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
     const options = rows.map((row) => ({
       id: row.id,
       label: row.name,
       description: row.projectId === project.id ? "此專案人物" : "組織人物庫",
       recommended: row.id === input.currentPersonId,
     }));
+    const copy = pickerInventoryCopy(rows.length, total, "人物");
     return resolveOrAskAgentQuestion({
       currentValue: rows.some((row) => row.id === input.currentPersonId) ? input.currentPersonId : undefined,
       candidates: options,
-      question: entityQuestion("選擇人物", `找到 ${options.length} 個可用人物。`, "缺少 personId。", "personId", "person", "person_picker"),
+      question: entityQuestion("選擇人物", copy.description, total > 1 ? copy.reason : "缺少 personId。", "personId", "person", "person_picker"),
     });
   }
 
@@ -134,12 +163,17 @@ export class AgentQuestionResolver {
     currentAssetIds?: string[];
   }): Promise<AgentQuestionResolution> {
     const project = await this.checkedProject(input.auth, input.projectId);
-    const rows = await db
-      .select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind, mime: schema.assets.mime })
-      .from(schema.assets)
-      .where(and(eq(schema.assets.projectId, project.id), eq(schema.assets.groupId, project.groupId), isNull(schema.assets.deletedAt)))
-      .orderBy(desc(schema.assets.createdAt))
-      .limit(100);
+    const where = and(eq(schema.assets.projectId, project.id), eq(schema.assets.groupId, project.groupId), isNull(schema.assets.deletedAt));
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind, mime: schema.assets.mime })
+        .from(schema.assets)
+        .where(where)
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(QUESTION_PICKER_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.assets).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
     const validCurrent = (input.currentAssetIds ?? []).filter((id) => rows.some((row) => row.id === id));
     const options = rows.map((row) => ({
       id: row.id,
@@ -147,12 +181,13 @@ export class AgentQuestionResolver {
       description: [row.kind, row.mime].filter(Boolean).join("・"),
       recommended: validCurrent.includes(row.id),
     }));
+    const copy = pickerInventoryCopy(rows.length, total, "素材");
     return resolveOrAskAgentQuestion({
       currentValue: validCurrent.length ? validCurrent : undefined,
       candidates: options,
-      requiresHumanJudgment: rows.length > 1,
+      requiresHumanJudgment: rows.length > 1 || total > 1,
       question: {
-        ...entityQuestion("選擇素材", `找到 ${options.length} 個可用素材。`, "缺少 assetIds。", "assetIds", "asset", "asset_picker"),
+        ...entityQuestion("選擇素材", copy.description, total > 1 ? copy.reason : "缺少 assetIds。", "assetIds", "asset", "asset_picker"),
         questionType: "multi_select",
       },
     });
@@ -165,9 +200,8 @@ export class AgentQuestionResolver {
     category?: string;
   }): AgentQuestionResolution {
     requireGroup(input.auth, input.groupId);
-    const rows = listResolvableModels({ category: input.category })
-      .filter(modelIsOperationallyReady)
-      .slice(0, 60);
+    const ready = listResolvableModels({ category: input.category }).filter(modelIsOperationallyReady);
+    const rows = ready.slice(0, 60);
     const options: AgentQuestionOption[] = rows.map((model) => ({
       id: model.id,
       label: model.label,
@@ -175,11 +209,12 @@ export class AgentQuestionResolver {
       recommended: model.id === input.currentModelId || (!input.currentModelId && !!model.recommended),
       metadata: { category: model.category, points: model.points, kind: model.kind },
     }));
+    const copy = pickerInventoryCopy(rows.length, ready.length, "模型");
     return resolveOrAskAgentQuestion({
       currentValue: rows.some((model) => model.id === input.currentModelId) ? input.currentModelId : undefined,
       candidates: options,
-      requiresHumanJudgment: options.length > 1,
-      question: entityQuestion("選擇生成模型", `找到 ${options.length} 個可用模型。`, "缺少 modelId。", "modelId", "model", "model_choice"),
+      requiresHumanJudgment: options.length > 1 || ready.length > 1,
+      question: entityQuestion("選擇生成模型", copy.description, ready.length > 1 ? copy.reason : "缺少 modelId。", "modelId", "model", "model_choice"),
     });
   }
 
