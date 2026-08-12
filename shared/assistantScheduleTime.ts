@@ -38,10 +38,20 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/** Clock + title for a confirmation card. Undefined unless the clock is explicit. */
+export function deterministicScheduleProposal(
+  message: string,
+  now = new Date(),
+): { title: string; startsAt: string } | undefined {
+  const startsAt = parseTaipeiScheduleTime(message, now);
+  if (!startsAt) return undefined;
+  return { title: scheduleTitleFromMessage(message), startsAt };
+}
+
 /** ISO-8601 instant in Asia/Taipei, or undefined when the clock is not explicit. */
 export function parseTaipeiScheduleTime(message: string, now = new Date()): string | undefined {
   const clock = message.match(
-    /(?:(早上|上午|中午|下午|傍晚|晚上)\s*)?(?:(\d{1,2})|([一二兩三四五六七八九十]+))\s*點(?:\s*(?:(\d{1,2})|半))?/u,
+    /(?:(早上|上午|中午|下午|傍晚|晚上|今晚)\s*)?(?:(\d{1,2})|([一二兩三四五六七八九十]+))\s*點(?:\s*(?:(\d{1,2})|半))?/u,
   );
   if (!clock) return undefined;
   const period = clock[1];
@@ -50,7 +60,7 @@ export function parseTaipeiScheduleTime(message: string, now = new Date()): stri
   let hour = zhNumber(hourRaw);
   if (hour === undefined || hour > 24) return undefined;
   if (hour === 24) hour = 0;
-  if (period === "下午" || period === "傍晚" || period === "晚上") {
+  if (period === "下午" || period === "傍晚" || period === "晚上" || period === "今晚") {
     if (hour > 0 && hour < 12) hour += 12;
   } else if (period === "中午") {
     if (hour === 0) hour = 12;

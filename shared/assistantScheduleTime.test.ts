@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTaipeiScheduleTime, scheduleTitleFromMessage } from "./assistantScheduleTime";
+import { deterministicScheduleProposal, parseTaipeiScheduleTime, scheduleTitleFromMessage } from "./assistantScheduleTime";
 
 describe("parseTaipeiScheduleTime", () => {
   const now = new Date("2026-08-12T01:00:00.000Z"); // 09:00 in Taipei on Aug 12
@@ -16,5 +16,13 @@ describe("parseTaipeiScheduleTime", () => {
 
   it("does not invent a clock when the user only said 明天開會", () => {
     expect(parseTaipeiScheduleTime("幫我安排明天開會", now)).toBeUndefined();
+  });
+
+  it("understands 晚上八點 as 20:00, not a dropped confirmation", () => {
+    expect(parseTaipeiScheduleTime("排今晚八點的會議", now)).toBe("2026-08-12T20:00:00+08:00");
+    expect(deterministicScheduleProposal("排今晚八點的會議", now)).toEqual({
+      title: "會議",
+      startsAt: "2026-08-12T20:00:00+08:00",
+    });
   });
 });
