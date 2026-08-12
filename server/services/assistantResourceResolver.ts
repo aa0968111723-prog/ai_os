@@ -179,6 +179,11 @@ function resultCount(value: unknown): number {
   if (Array.isArray(value)) return value.length;
   if (!value || typeof value !== "object") return value == null || value === "" ? 0 : 1;
   const row = value as Record<string, unknown>;
+  // Prefer the untruncated inventory count when a list tool discloses it.
+  if (typeof row.total === "number" && Number.isFinite(row.total)) return Math.max(0, Math.trunc(row.total));
+  if (typeof row.visibleTotal === "number" && Number.isFinite(row.visibleTotal)) {
+    return Math.max(0, Math.trunc(row.visibleTotal));
+  }
   if (Array.isArray(row.items)) return row.items.length;
   if (Array.isArray(row.rows)) return row.rows.length;
   return Object.keys(row).length ? 1 : 0;

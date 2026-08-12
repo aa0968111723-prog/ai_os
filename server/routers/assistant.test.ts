@@ -168,6 +168,18 @@ describe("project assistant custom-DB inventory", () => {
   });
 });
 
+describe("project assistant list inventory", () => {
+  it("asset/generation/note/task lists disclose total instead of treating the page as the full inventory", () => {
+    const source = readFileSync(new URL("./assistant.ts", import.meta.url), "utf8");
+    expect(source).toContain("查了素材庫(${rows.length}/${total} 筆)");
+    expect(source).toContain("查了生成紀錄(${rows.length}/${total} 筆)");
+    expect(source).toContain("查了${label}(${rows.length}/${total} 筆)");
+    expect(source).toContain("不得宣稱已列出全部");
+    expect(source).not.toContain("truncated: rows.length === ASSET_PREVIEW_LIMIT");
+    expect(source).not.toContain("truncated: rows.length === GENERATION_PREVIEW_LIMIT");
+  });
+});
+
 describe("compactRowLine（MCP 工具列 → 給 LLM 的一行）", () => {
   it("跳過 id 類欄位——模型拿 uuid 做不了任何事，只會拿去幻覺引用", () => {
     const line = compactRowLine({ id: "11111111-1111-4111-8111-111111111111", planRunId: "x", title: "確認六個議題" });

@@ -556,16 +556,21 @@ async function runLookupTool(
   }
   if (call.tool === "list_assets") {
     const kind = call.args?.kind?.trim();
-    const rows = await db
-      .select()
-      .from(schema.assets)
-      .where(and(
-        eq(schema.assets.projectId, project.id),
-        isNull(schema.assets.deletedAt),
-        ...(kind ? [eq(schema.assets.kind, kind)] : []),
-      ))
-      .orderBy(desc(schema.assets.createdAt))
-      .limit(ASSET_PREVIEW_LIMIT);
+    const where = and(
+      eq(schema.assets.projectId, project.id),
+      isNull(schema.assets.deletedAt),
+      ...(kind ? [eq(schema.assets.kind, kind)] : []),
+    );
+    const [rows, countRows] = await Promise.all([
+      db
+        .select()
+        .from(schema.assets)
+        .where(where)
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(ASSET_PREVIEW_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.assets).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
     if (!rows.length) {
       const text = kind ? `（沒有 ${kind} 類素材）` : "（素材庫是空的）";
       return { step: "查了素材庫(0 筆)", text, preview: { kind: "text", text } };
@@ -579,13 +584,15 @@ async function runLookupTool(
       aiGenerated: a.isAiGenerated,
       locked: a.locked,
     }));
+    const truncated = total > rows.length;
     const text = rows
       .map((a, i) => `${i + 1}. ${a.title}｜${a.kind}${a.isAiGenerated ? "｜AI生成" : "｜上傳"}${a.locked ? "｜鎖定素材(不可更動)" : ""}`)
-      .join("\n");
+      .join("\n")
+      + (truncated ? `\n（素材共 ${total} 筆；此清單只展開 ${rows.length} 筆，不得宣稱已列出全部）` : "");
     return {
-      step: `查了素材庫(${rows.length} 筆)`,
+      step: truncated ? `查了素材庫(${rows.length}/${total} 筆)` : `查了素材庫(${rows.length} 筆)`,
       text,
-      preview: { kind: "assets", items, truncated: rows.length === ASSET_PREVIEW_LIMIT },
+      preview: { kind: "assets", items, truncated },
     };
   }
 
@@ -637,12 +644,17 @@ async function runLookupTool(
   }
 
   if (call.tool === "list_generations") {
-    const rows = await db
-      .select()
-      .from(schema.generations)
-      .where(eq(schema.generations.projectId, project.id))
-      .orderBy(desc(schema.generations.createdAt))
-      .limit(GENERATION_PREVIEW_LIMIT);
+    const where = eq(schema.generations.projectId, project.id);
+    const [rows, countRows] = await Promise.all([
+      db
+        .select()
+        .from(schema.generations)
+        .where(where)
+        .orderBy(desc(schema.generations.createdAt))
+        .limit(GENERATION_PREVIEW_LIMIT),
+      db.select({ n: sql<number>`count(*)` }).from(schema.generations).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
     if (!rows.length) {
       const text = "（還沒有任何生成紀錄）";
       return { step: "查了生成紀錄(0 筆)", text, preview: { kind: "text", text } };
@@ -672,10 +684,11 @@ async function runLookupTool(
           : { source: "none", reason: g.status === "done" ? "missing" : "not_generated" },
       });
     });
+    const truncated = total > rows.length;
     return {
-      step: `查了生成紀錄(${rows.length} 筆)`,
-      text: lines.join("\n"),
-      preview: { kind: "generations", items, truncated: rows.length === GENERATION_PREVIEW_LIMIT },
+      step: truncated ? `查了生成紀錄(${rows.length}/${total} 筆)` : `查了生成紀錄(${rows.length} 筆)`,
+      text: lines.join("\n") + (truncated ? `\n（生成紀錄共 ${total} 筆；此清單只展開 ${rows.length} 筆，不得宣稱已列出全部）` : ""),
+      preview: { kind: "generations", items, truncated },
     };
   }
 
@@ -688,16 +701,24 @@ async function runLookupTool(
         : call.tool === "list_notes" ? { keyword: call.args?.keyword?.trim() || undefined, limit: 20 }
         : {};
       const result = await runMcpReadTool(auth, project.id, call.tool, extra);
-      const rows = Array.isArray(result) ? result : (result as { items?: unknown[] })?.items ?? [];
+      const payload = result && typeof result === "object" && !Array.isArray(result)
+        ? result as { items?: unknown[]; total?: number; truncated?: boolean; note?: string }
+        : null;
+      const rows = Array.isArray(result) ? result : payload?.items ?? [];
       if (!rows.length) {
         const text = `（沒有${label}）`;
         return { step: `查了${label}(0 筆)`, text, preview: { kind: "text", text } };
       }
       // 給 LLM 讀的一行一列；預覽同一次迭代（見本函式檔頭的鐵則）
       const lines = rows.map((r, i) => `${i + 1}. ${compactRowLine(r)}`);
-      const text = lines.join("\n");
+      const total = typeof payload?.total === "number" ? payload.total : rows.length;
+      const truncated = payload?.truncated === true || total > rows.length;
+      const note = truncated
+        ? (payload?.note?.trim() || `${label}共 ${total} 筆；此清單只展開 ${rows.length} 筆，不得宣稱已列出全部`)
+        : "";
+      const text = note ? `${lines.join("\n")}\n（${note}）` : lines.join("\n");
       return {
-        step: `查了${label}(${rows.length} 筆)`,
+        step: truncated ? `查了${label}(${rows.length}/${total} 筆)` : `查了${label}(${rows.length} 筆)`,
         text,
         preview: { kind: "text", text },
       };
@@ -1335,7 +1356,7 @@ ${forceFinal
 - {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 優先抄 <可讀資料庫> 的代號；未展開的庫可用完整且唯一的庫名；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
 - {"tool":"list_tasks","args":{}}：這個專案的人員任務與待核准（標題／狀態／負責人／期限）——被問到「誰卡住」「還有什麼要做」「等誰」時查這個
 - {"tool":"list_schedule","args":{}}：這個專案相關的行程與交付死線（含組層級；args 可加 {"includePast":true} 回顧過去）——被問到「什麼時候要交」「這週有什麼」時查這個
-- {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆）——被問到「上次討論的結論」「有沒有記錄」時查這個
+- {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆；truncated 時以 total 為準，不得把本頁當成全部）——被問到「上次討論的結論」「有沒有記錄」時查這個
 能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
 分鏡、生成統計與知識庫已經在 <專案現況> 裡，不要用工具重查；工具是用來看「人的事」（任務／行程／筆記）與明細（單一分鏡全文、素材清單、資料庫列）。
 例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}

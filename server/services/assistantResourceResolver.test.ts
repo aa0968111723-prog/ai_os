@@ -49,6 +49,18 @@ describe("assistant resource resolver", () => {
     expect(results[1]?.text).toContain("角色衣服定案");
   });
 
+  it("uses disclosed total, not the truncated page length, as the inventory count", async () => {
+    const results = await executeResourceReads([
+      reader("notes", async () => ({ items: [{ title: "a" }, { title: "b" }], total: 80, truncated: true })),
+      reader("knowledge", async () => ({ items: [], total: 0, truncated: false })),
+    ], { retryTransientReads: 0 });
+    expect(results[0]?.outcome).toBe("OK");
+    expect(results[0]?.itemCount).toBe(80);
+    expect(results[0]?.text).toContain("\"truncated\":true");
+    expect(results[1]?.outcome).toBe("EMPTY");
+    expect(results[1]?.itemCount).toBe(0);
+  });
+
   it("distinguishes timeout, auth denial, unavailable and tool failure", async () => {
     vi.useFakeTimers();
     const pending = new Promise<never>(() => undefined);

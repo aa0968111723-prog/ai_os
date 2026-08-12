@@ -403,7 +403,7 @@ export const TOOLS = [
   // ── 知識庫與分鏡（M3）：唯讀摘要＋分段全文——外部 AI 規劃前的素材視角 ──
   {
     name: "list_knowledge",
-    description: "列出專案知識庫條目（腳本／師父開示稿／見證／筆記）：id／類型／標題／字數／前 160 字摘要。全文用 get_knowledge 分段讀；limit 上限 50。",
+    description: "列出專案知識庫條目（腳本／師父開示稿／見證／筆記）：id／類型／標題／字數／前 160 字摘要。回 items + total + truncated；超過 limit（預設 20、上限 50）不得宣稱已列出全部。全文用 get_knowledge 分段讀。",
     inputSchema: {
       type: "object",
       properties: {
@@ -433,7 +433,7 @@ export const TOOLS = [
   // ── 人類任務（M2）：外部 AI 可列可建可結——完成等待節點的任務會自動恢復代理 ──
   {
     name: "list_tasks",
-    description: "列出專案的人員任務與核准請求：標題／類型（task/approval）／狀態／負責人／期限／來源計畫（planRunId）。最多回 100 筆並標註截斷。",
+    description: "列出專案的人員任務與核准請求：標題／類型（task/approval）／狀態／負責人／期限／來源計畫（planRunId）。回 items + total + truncated；超過 100 筆不得宣稱已列出全部。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   {
@@ -550,7 +550,7 @@ export const TOOLS = [
   // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
   {
     name: "list_notes",
-    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用），依更新時間新到舊。回摘要與字數；用 get_note 讀全文。keyword 可過濾標題／內文（讓超過 limit 的較舊筆記仍找得到）；limit 上限 50。",
+    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用），依更新時間新到舊。回 items + total + truncated；超過 limit（預設 20、上限 50）不得宣稱已列出全部。用 get_note 讀全文。keyword 可過濾標題／內文（讓超過 limit 的較舊筆記仍找得到）。",
     inputSchema: {
       type: "object",
       properties: {
@@ -1053,21 +1053,34 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     if (!project) throw new Error("找不到專案");
     requireGroup(auth, project.groupId);
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
-    // 與 knowledge.list router 同口徑：SQL 層取 length/left，不載全文
-    const rows = await db
-      .select({
-        id: schema.knowledge.id,
-        kind: schema.knowledge.kind,
-        title: schema.knowledge.title,
-        chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
-        excerpt: sql<string>`left(${schema.knowledge.content}, 160)`,
-        createdAt: schema.knowledge.createdAt,
-      })
-      .from(schema.knowledge)
-      .where(and(eq(schema.knowledge.projectId, project.id), isNull(schema.knowledge.deletedAt)))
-      .orderBy(desc(schema.knowledge.createdAt))
-      .limit(limit);
-    return rows;
+    const where = and(eq(schema.knowledge.projectId, project.id), isNull(schema.knowledge.deletedAt));
+    // 與 knowledge.list router 同口徑：SQL 層取 length/left，不載全文。
+    // 清單有硬頂；total 必須另計，否則 20 筆頁面會被當成整庫。
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({
+          id: schema.knowledge.id,
+          kind: schema.knowledge.kind,
+          title: schema.knowledge.title,
+          chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
+          excerpt: sql<string>`left(${schema.knowledge.content}, 160)`,
+          createdAt: schema.knowledge.createdAt,
+        })
+        .from(schema.knowledge)
+        .where(where)
+        .orderBy(desc(schema.knowledge.createdAt))
+        .limit(limit),
+      db.select({ n: sql<number>`count(*)` }).from(schema.knowledge).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    return {
+      items: rows,
+      listedCount: rows.length,
+      total,
+      truncated: total > rows.length,
+      cap: limit,
+      ...(total > rows.length ? { note: `知識共 ${total} 筆；此清單只展開 ${rows.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "get_knowledge") {
@@ -1115,7 +1128,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   // ── M2 任務（D3）：重用 taskCore——負責人歸屬、封存、等待節點喚醒與網頁端同一套 ──
   if (name === "list_tasks") {
     const tasks = await listProjectTasks(auth, String(args.projectId ?? ""));
-    const rows = tasks.slice(0, 100).map((t) => ({
+    const cap = 100;
+    const items = tasks.slice(0, cap).map((t) => ({
       id: t.id,
       taskType: t.taskType,
       title: t.title,
@@ -1126,9 +1140,16 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       planRunId: t.planRunId,
       createdAt: t.createdAt,
     }));
-    return tasks.length > rows.length
-      ? { items: rows, truncated: true, note: `任務超過單頁上限，僅列出前 ${rows.length} 筆` }
-      : rows;
+    const total = tasks.length;
+    const truncated = total > items.length;
+    return {
+      items,
+      listedCount: items.length,
+      total,
+      truncated,
+      cap,
+      ...(truncated ? { note: `任務共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "create_task") {
@@ -1450,19 +1471,23 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       // keyword：讓超過 limit 的較舊筆記仍能被外部 AI 找到（比照 list_database_files 的內文過濾）。
       const conds = [eq(schema.notes.groupId, project.groupId), or(eq(schema.notes.projectId, project.id), isNull(schema.notes.projectId))!];
       if (keyword) conds.push(or(sql`${schema.notes.title} ilike ${"%" + keyword + "%"}`, sql`${schema.notes.content} ilike ${"%" + keyword + "%"}`)!);
-      const rows = await db
-        .select({
-          id: schema.notes.id,
-          projectId: schema.notes.projectId,
-          title: schema.notes.title,
-          content: schema.notes.content,
-          updatedAt: schema.notes.updatedAt,
-        })
-        .from(schema.notes)
-        .where(and(...conds))
-        .orderBy(desc(schema.notes.updatedAt))
-        .limit(limit);
-      return rows.map((n) => ({
+      const where = and(...conds);
+      const [rows, countRows] = await Promise.all([
+        db
+          .select({
+            id: schema.notes.id,
+            projectId: schema.notes.projectId,
+            title: schema.notes.title,
+            content: schema.notes.content,
+            updatedAt: schema.notes.updatedAt,
+          })
+          .from(schema.notes)
+          .where(where)
+          .orderBy(desc(schema.notes.updatedAt))
+          .limit(limit),
+        db.select({ n: sql<number>`count(*)` }).from(schema.notes).where(where),
+      ]);
+      const items = rows.map((n) => ({
         id: n.id,
         title: n.title,
         chars: n.content.length,
@@ -1470,6 +1495,15 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         projectScoped: n.projectId === project.id,
         updatedAt: n.updatedAt,
       }));
+      const total = Number(countRows[0]?.n ?? 0);
+      return {
+        items,
+        listedCount: items.length,
+        total,
+        truncated: total > items.length,
+        cap: limit,
+        ...(total > items.length ? { note: `筆記共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+      };
     }
 
     if (name === "list_schedule") {
