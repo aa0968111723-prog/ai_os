@@ -470,26 +470,38 @@ function titleExactInMessage(normalizedMessage: string, title: string): boolean 
 
 function explicitProject(message: string, candidates: readonly WorkingProjectCandidate[]): WorkingProjectCandidate | undefined {
   const normalized = normalizeTitle(message);
-  const usable = candidates
+  const named = candidates
     .map((candidate) => ({ candidate, title: normalizeTitle(candidate.title) }))
-    .filter((item) => item.title.length >= 2);
+    .filter((item) => item.title.length >= 1);
 
-  // #674: exact > longest unique contains. A short title must not steal a longer unique name.
-  const exact = usable.filter((item) => titleExactInMessage(normalized, item.title));
-  if (exact.length === 1) return exact[0]!.candidate;
-  if (exact.length > 1) {
-    exact.sort((a, b) => b.title.length - a.title.length);
-    if (exact[0]!.title.length > exact[1]!.title.length) return exact[0]!.candidate;
+  // #674: exact > unique prefix > longest unique contains.
+  const pickLongestUnique = (hits: typeof named) => {
+    if (hits.length === 1) return hits[0]!.candidate;
+    if (hits.length > 1) {
+      hits.sort((a, b) => b.title.length - a.title.length);
+      if (hits[0]!.title.length > hits[1]!.title.length) return hits[0]!.candidate;
+    }
     return undefined;
-  }
+  };
 
-  const contains = usable.filter((item) => normalized.includes(item.title));
-  if (contains.length === 1) return contains[0]!.candidate;
-  if (contains.length > 1) {
-    contains.sort((a, b) => b.title.length - a.title.length);
-    if (contains[0]!.title.length > contains[1]!.title.length) return contains[0]!.candidate;
-  }
-  return undefined;
+  const exact = named.filter((item) => titleExactInMessage(normalized, item.title));
+  const exactPick = pickLongestUnique(exact);
+  if (exact.length === 1 || exactPick) return exactPick;
+  if (exact.length > 1) return undefined;
+
+  const longEnough = named.filter((item) => item.title.length >= 2);
+  const prefixes = longEnough.filter((item) => {
+    for (let len = item.title.length - 1; len >= 2; len -= 1) {
+      if (titleExactInMessage(normalized, item.title.slice(0, len))) return true;
+    }
+    return false;
+  });
+  const prefixPick = pickLongestUnique(prefixes);
+  if (prefixes.length === 1 || prefixPick) return prefixPick;
+  if (prefixes.length > 1) return undefined;
+
+  const contains = longEnough.filter((item) => normalized.includes(item.title));
+  return pickLongestUnique(contains);
 }
 
 function projectFromRecentResult(

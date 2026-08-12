@@ -134,6 +134,33 @@ describe("assistantSemanticResolution", () => {
     expect(match.status).toBe("matched");
   });
 
+  it("#674: unique prefix 北藝 resolves 北藝回顧, but two 北藝* titles stay ambiguous", () => {
+    const unique = resolveWorkingProject({
+      message: "把資料加到北藝",
+      candidates: [{ id: P1, title: "招生短片" }, { id: P2, title: "北藝回顧" }],
+    });
+    expect(unique).toMatchObject({ status: "resolved", projectId: P2, source: "explicit" });
+
+    const ambiguous = resolveWorkingProject({
+      message: "把資料加到北藝",
+      candidates: [{ id: P1, title: "北藝招生" }, { id: P2, title: "北藝回顧" }],
+    });
+    expect(ambiguous.status).toBe("ambiguous");
+  });
+
+  it("#674: D vs DDD — exact short name is not stolen by a longer contains", () => {
+    const d = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const ddd = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    expect(resolveWorkingProject({
+      message: "打開 D",
+      candidates: [{ id: d, title: "D" }, { id: ddd, title: "DDD" }],
+    }).projectId).toBe(d);
+    expect(resolveWorkingProject({
+      message: "打開 DDD",
+      candidates: [{ id: d, title: "D" }, { id: ddd, title: "DDD" }],
+    }).projectId).toBe(ddd);
+  });
+
   it("exact long project name beats a shorter substring title", () => {
     const short = "11111111-1111-4111-8111-111111111111";
     const long = "22222222-2222-4222-8222-222222222222";
