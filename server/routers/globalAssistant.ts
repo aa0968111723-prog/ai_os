@@ -349,6 +349,8 @@ export interface SiteActionRefs {
   kinds: string[];
   /** dbN → 資料庫（與 <組現況> 的代號同一套） */
   databases: Map<string, SiteDbRef>;
+  /** Full authorized table lookup beyond the compact dbN snapshot. */
+  databaseLookup?: SiteDbRef[];
 }
 
 /**
@@ -432,7 +434,7 @@ export function resolveSiteActions(
     }
 
     if (p.type === "add_database_row") {
-      const dbEntry = refs.databases.get(p.dbRef.trim());
+      const dbEntry = resolveDatabaseRef(p.dbRef, refs.databases, refs.databaseLookup ?? [...refs.databases.values()]);
       // 唯讀庫（agentAccess=read）連提議都不給：管理者說 AI 不可寫，「AI 提議＋人代按」等於繞過那個設定
       if (!dbEntry || !dbEntry.writable) continue;
       const keyByLabel = new Map(dbEntry.fields.map((f) => [f.label, f.key]));
@@ -556,6 +558,23 @@ export function resolveSiteActions(
 }
 
 /** Compact mN list plus optional full-name lookup for people beyond the prompt cap. */
+export function resolveDatabaseRef(
+  token: string,
+  databases: Map<string, SiteDbRef>,
+  lookup: readonly SiteDbRef[] = [...databases.values()],
+): SiteDbRef | undefined {
+  const key = token.trim();
+  if (!key) return undefined;
+  const byRef = databases.get(key);
+  if (byRef) return byRef;
+  const lower = key.toLocaleLowerCase();
+  const matches = lookup.filter((db) => (
+    db.name.toLocaleLowerCase() === lower
+    || `name:${db.id.slice(0, 8)}` === key
+  ));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function resolveMemberRef(
   token: string,
   members: readonly SiteMemberRef[],
@@ -839,7 +858,8 @@ export async function runGlobalAsk(
       : [];
 
   // 站級動作的解析素材：成員（mN）＋該組啟用中的專案類型/平台＋可寫資料庫（dbN 的 agentAccess）
-  const dbIds = [...dbByRef.values()].map((t) => t.id);
+  const evidenceTables = teamCtx.evidenceDbs.length ? teamCtx.evidenceDbs : [...dbByRef.values()];
+  const dbIds = [...new Set(evidenceTables.map((t) => t.id))];
   const [memberRows, memberCountRows, creationOptions, dbAccessRows, currentScenePointers] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name })
@@ -889,6 +909,12 @@ export async function runGlobalAsk(
       // 提議面收得比執行面緊：只有 agentAccess="write" 的庫才進提議白名單（執行端仍會再全套驗一次）
       writable: agentAccessById.get(t.id) === "write",
     }])),
+    databaseLookup: evidenceTables.map((t) => ({
+      id: t.id,
+      name: t.name,
+      fields: t.fields.map((f) => ({ key: f.key, label: f.label })),
+      writable: (agentAccessById.get(t.id) ?? t.agentAccess) === "write",
+    })),
   };
   // ── 現況讀完：把「真的讀到什麼」報出去（計數全部來自剛剛那幾條查詢的回傳值） ──
   const overviewSummary: AgentResultSummary = [

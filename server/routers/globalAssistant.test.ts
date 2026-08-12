@@ -284,6 +284,31 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0].label).toContain("器材清單");
   });
 
+  it("add_database_row resolves a unique full table name beyond the dbN snapshot", () => {
+    const hidden = { id: "table-9", name: "隱藏器材", writable: true, fields: [{ key: "name", label: "名稱" }] };
+    const out = resolveSiteActions(refs({
+      databaseLookup: [
+        ...refs().databases.values(),
+        hidden,
+      ],
+    }), [
+      { type: "add_database_row", dbRef: "隱藏器材", values: { "名稱": "腳架" } },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "add_database_row", tableId: "table-9", tableName: "隱藏器材" });
+  });
+
+  it("add_database_row does not guess when two writable tables share a name", () => {
+    const hidden = { id: "table-9", name: "隱藏器材", writable: true, fields: [{ key: "name", label: "名稱" }] };
+    const twin = { id: "table-8", name: "隱藏器材", writable: true, fields: [{ key: "name", label: "名稱" }] };
+    const out = resolveSiteActions(refs({
+      databaseLookup: [...refs().databases.values(), hidden, twin],
+    }), [
+      { type: "add_database_row", dbRef: "隱藏器材", values: { "名稱": "腳架" } },
+    ]);
+    expect(out).toEqual([]);
+  });
+
   it("上限 6 筆＋重複提議去重（同一件事講兩次只算一次）", () => {
     const dup = { type: "add_note" as const, projectRef: "p1", title: "同一則", content: "同一段" };
     const many = [
