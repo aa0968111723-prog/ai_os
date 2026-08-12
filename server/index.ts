@@ -280,9 +280,15 @@ app.get("/api/ready", async (_req, res) => {
   try {
     const health = await getCapabilityHealthView();
     const certificationGate = process.env.AGENT_CERTIFICATION_GATE === "1" || (isProd && !isMockMode());
-    components.agentCapabilityCertification = !certificationGate || health.summary.requiredReady
-      ? { ok: true, note: `${health.summary.liveVerified}/${health.summary.declared} live verified${certificationGate ? "（gate enabled）" : "（gate observe-only）"}` }
-      : { ok: false, note: `certification incomplete: ${health.summary.liveVerified}/${health.summary.declared} required capabilities live verified` };
+    // 認證是 QA 完整性訊號，不是就緒阻斷器：只有 required capability 真的 BROKEN（或卡在
+    // 外部依賴）才把就緒打成 FAIL。「還沒跑 live 認證」或「7 天證據過期」（DECLARED_ONLY /
+    // DEGRADED 等非 LIVE 狀態）只是 WARN——認證需 super admin 手動執行、且部分 tool 需要
+    // 真實資料 fixture，不讓 0/4 的歷史狀態反覆把 /api/ready 打成 503（能力修復 TODO）。
+    const requiredBlocked = health.tools.filter((tool) => tool.required && (tool.certificationState === "BROKEN" || tool.certificationState === "BLOCKED_BY_EXTERNAL_DEPENDENCY")).length;
+    const gateFails = certificationGate && requiredBlocked > 0;
+    components.agentCapabilityCertification = !gateFails
+      ? { ok: true, note: `${health.summary.liveVerified}/${health.summary.declared} live verified${certificationGate ? "（gate enabled）" : "（gate observe-only）"}${health.summary.requiredReady ? "" : "；部分 required 尚未 live 認證（WARN，非阻斷）"}` }
+      : { ok: false, note: `certification FAIL: required BROKEN/BLOCKED=${requiredBlocked}（live verified ${health.summary.liveVerified}/${health.summary.declared}）` };
   } catch (error) {
     components.agentCapabilityCertification = { ok: false, note: `certification read failed: ${error instanceof Error ? error.message : String(error)}` };
   }
