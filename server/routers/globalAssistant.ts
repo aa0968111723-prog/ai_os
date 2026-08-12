@@ -100,6 +100,7 @@ import {
   resolveWorkingProject,
   type AssistantCapabilityMatch,
 } from "../../shared/assistantSemanticResolution";
+import { parseTaipeiScheduleTime, scheduleTitleFromMessage } from "../../shared/assistantScheduleTime";
 import {
   buildExecutionReceipt,
   executionTerminalStatus,
@@ -232,6 +233,16 @@ export function siteActionProposalsForPlan(
   if (!plan.capabilityId) return [...proposals];
   if (!WRITE_SITE_ACTION_TYPES.has(plan.capabilityId)) return [...proposals];
   return proposals.filter((proposal) => proposal.type === plan.capabilityId);
+}
+
+function deterministicScheduleProposal(
+  message: string,
+  capabilityId?: string,
+): SiteActionProposal[] {
+  if (capabilityId !== "add_schedule_item") return [];
+  const startsAt = parseTaipeiScheduleTime(message);
+  if (!startsAt) return [];
+  return [{ type: "add_schedule_item", title: scheduleTitleFromMessage(message), startsAt }];
 }
 
 /** 全站回覆＝組回覆＋站級動作提議 */
@@ -811,6 +822,7 @@ export async function runGlobalAsk(
     pastedUrl && deterministicProjectRef && urlCapability?.kind === "direct" && /(?:加入|匯入|帶進|帶入|放進|存到|放到)/i.test(input.message)
       ? [{ type: "import_url", projectRef: deterministicProjectRef, url: pastedUrl }]
       : [];
+  const deterministicSchedule = deterministicScheduleProposal(input.message, executionPlan.capabilityId);
   const fallbackProject = deterministicProjectRef ? projByRef.get(deterministicProjectRef) : undefined;
   const intakeFallbacks: ResolvedIntakeFallback[] =
     pastedUrl && fallbackProject && urlCapability?.kind === "requires-transfer"
@@ -1348,7 +1360,7 @@ export async function runGlobalAsk(
     }
     const proposedSiteActions = resolveSiteActions(
       siteRefs,
-      siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
+      siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...deterministicSchedule, ...mockProposals]),
     );
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
@@ -1620,6 +1632,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     const reply = outcome.reply;
     const proposedSiteActions = resolveSiteActions(siteRefs, siteActionProposalsForPlan(executionPlan, [
       ...deterministicUrlProposal,
+      ...deterministicSchedule,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
     ]));
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);

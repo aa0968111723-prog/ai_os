@@ -378,6 +378,11 @@ describe("紅線一契約：LLM 迴圈唯讀（源碼斷言）", () => {
     expect(src).toContain("executionPlan.capabilityId");
   });
 
+  it("Q13: explicit 明天下午三點 seeds a confirmable add_schedule_item proposal", () => {
+    expect(src).toContain("deterministicScheduleProposal");
+    expect(src).toContain("parseTaipeiScheduleTime");
+  });
+
   it("group overview counts custom DB tables from the untruncated total, not dbByRef.size", () => {
     expect(src).toContain("customDbTotal");
     expect(src).toContain("{ label: \"可讀資料庫\", value: teamCtx.customDbTotal }");
