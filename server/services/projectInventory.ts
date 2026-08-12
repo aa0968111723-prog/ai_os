@@ -1,6 +1,8 @@
 /**
  * Authoritative project inventory shared by the website list API and Agent context.
  *
+ * Never read through Redis/cache: a cache miss must not become "0 projects".
+ *
  * The historical #661/#662 failure was Agent counting a truncated or
  * differently-filtered set than `projects.list`. Both surfaces must use the
  * same archived filter and disclose any remaining truncation.
