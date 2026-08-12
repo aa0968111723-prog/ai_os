@@ -248,6 +248,29 @@ describe("complete AI planning safety resolver", () => {
     expect(plan.summary.missingInformation).toEqual([]);
   });
 
+  it("does not guess a writable database when two tables share a name", () => {
+    const hidden = {
+      ref: "name:aaaaaaaa",
+      id: "99999999-9999-4999-8999-999999999999",
+      label: "隱藏成果庫",
+      fields: [{ key: "title", label: "標題", type: "text" }],
+    };
+    const twin = { ...hidden, ref: "name:bbbbbbbb", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "record-hidden",
+        kind: "record_to_database",
+        title: "寫入隱藏庫",
+        dbRef: "隱藏成果庫",
+        data: { title: "ok" },
+      }],
+    });
+    const plan = resolveCompletePlanDraft(draft, { ...aliases, databases: [...aliases.databases, hidden, twin] });
+    expect(plan.steps).toEqual([]);
+    expect(plan.summary.missingInformation.join(" ")).toContain("隱藏成果庫");
+  });
+
   it("rejects dependency cycles before persistence", () => {
     const draft = completePlanDraftSchema.parse({
       summary: summary(),
