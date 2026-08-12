@@ -197,6 +197,25 @@ export async function scanAgentIntegrity(opts?: {
     ));
   }
 
+  // 7) context bindings that point at missing / soft-deleted assets (report only)
+  const orphanBindings = await db
+    .select({ id: schema.contextBindings.id })
+    .from(schema.contextBindings)
+    .leftJoin(schema.assets, eq(schema.assets.id, schema.contextBindings.resourceId))
+    .where(and(
+      eq(schema.contextBindings.resourceKind, "asset"),
+      sql`${schema.assets.id} is null or ${schema.assets.deletedAt} is not null`,
+    ))
+    .limit(limit);
+  if (orphanBindings.length) {
+    findings.push(finding(
+      "BINDING_ASSET_MISSING",
+      "P1",
+      "context_bindings point at missing or recycled assets",
+      orphanBindings,
+    ));
+  }
+
   const p0Count = findings.filter((item) => item.severity === "P0").length;
   const p1Count = findings.filter((item) => item.severity === "P1").length;
   return {
