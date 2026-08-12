@@ -107,7 +107,7 @@ export function parseDatabaseUrl(connectionString: string | undefined | null): S
 
 function inferSslRequired(
   sslmode: string | null,
-  kind: HostnameKind,
+  _kind: HostnameKind,
   env: NodeJS.ProcessEnv,
 ): boolean {
   const forced = (env.DATABASE_SSL ?? "").trim().toLowerCase();
@@ -118,9 +118,13 @@ function inferSslRequired(
   if (mode === "require" || mode === "verify-ca" || mode === "verify-full" || mode === "true" || mode === "1") {
     return true;
   }
-  if (kind === "loopback" || kind === "unix" || kind === "missing") return false;
-  // Remote hosts (Zeabur / Railway / Neon / public DNS) typically require TLS.
-  return true;
+  // 沒有明確 sslmode / DATABASE_SSL 時一律不強制 SSL——與 db CLI（scripts/db/cli.ts 用裸
+  // connectionString）行為一致。先前對 remote host 預設強制 TLS，但 Zeabur 的 PostgreSQL
+  // 接受明文連接，強制 TLS 反而在 SSL 握手立即失敗（SELECT 1 抛錯、errorClass 歸類為
+  // query），造成 runtime 連不上、migration 卻成功的 website-alive/agent-blind 斷線。
+  // 真正需要 TLS 的託管商（Neon / Railway 等）會在 DATABASE_URL 帶 sslmode=require，此處
+  // 已在前幾行就回 true，不受影響。
+  return false;
 }
 
 export function sslOptionForTarget(
