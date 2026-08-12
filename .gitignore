@@ -23,3 +23,4 @@ src-tauri/gen/
 # 只是把它寫明，免得任何人本機跑過 cargo 之後 git status 就髒掉。
 # 要改成「鎖定相依、可重現桌面建置」的話，是獨立的一個決定，不該夾在功能 PR 裡。
 src-tauri/Cargo.lock
+node_modules
