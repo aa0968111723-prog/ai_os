@@ -35,7 +35,7 @@ import {
   type AgentPlannerTelemetry,
 } from "../../shared/agentPlanner";
 import { estimatePlannerPoints, llmPointsForUsageEntries, plannerPointsAfterFailure } from "../../shared/llmPricing";
-import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
+import { countVisibleTables, listVisibleTables, resolveAgentAccess, VISIBLE_TABLE_LIST_LIMIT } from "./databaseAcl";
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
