@@ -68,4 +68,34 @@ describe("assistant execution fast path", () => {
       risk: "EXTERNAL", direct: false, executionMode: "DIRECT_TOOL", verificationStrategy: "external_confirmation",
     });
   });
+
+  it("#660: inventory reads stay ASK even with 幫我; writes stay executable", () => {
+    for (const message of [
+      "幫我列出我目前有哪些專案",
+      "幫我列出目前有哪些專案",
+      "顯示全部專案",
+      "有幾個專案",
+      "哪一個最舊",
+      "查看最近匯入的素材",
+      "幫我分析專案",
+      "list projects",
+    ]) {
+      const plan = classifyAssistantRequest(message);
+      expect(plan.intent, message).toBe("ASK");
+      expect(plan.executionMode, message).not.toBe("PROJECT_AGENT");
+    }
+    expect(classifyAssistantRequest("幫我建立任務").intent).toBe("DIRECT");
+    expect(classifyAssistantRequest("幫我安排明天下午三點的會議")).toMatchObject({
+      intent: "DIRECT",
+      capabilityId: "add_schedule_item",
+    });
+  });
+
+  it("#663: a question mark does not turn a requested write into ASK", () => {
+    expect(classifyAssistantRequest("可以幫我建立一個任務嗎？")).toMatchObject({
+      intent: "DIRECT",
+      capabilityId: "create_task",
+    });
+    expect(classifyAssistantRequest("如何建立任務？").intent).toBe("ASK");
+  });
 });

@@ -122,9 +122,12 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
   ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
 const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
+const HOW_TO_RE = /(?:如何|怎麼)(?:建立|新增|創建|安排|匯入|生成)/i;
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
+/** Inventory / provenance reads. 幫我列出專案 must stay ASK (#660), not AGENT/DIRECT. */
+const INVENTORY_READ_RE = /(?:列出|清單|顯示|查看|查詢|找出來|有哪些|有幾個|有多少|總共|哪一個|哪個|哪些|最舊|最早建立|最久沒更新|list|show|count).{0,24}(?:專案|素材|成員|任務|projects?)|(?:專案|素材|projects?).{0,16}(?:列出|清單|有哪些|有幾個|有多少|總共)|(?:list|show|count)\s+(?:all\s+)?projects?|(?:查看|看|顯示|列出).{0,12}(?:最近|剛).{0,8}(?:匯入|加入)/i;
 const COMPOUND_RE = /(?:然後|接著|再把|並(?:且|逐|再|重新)|同時|之後|逐鏡|每一鏡|每個|批次|全部.*(?:生成|建立|修改))/i;
 const ACTION_VERB_RE = /(?:建立|新增|修改|更新|拆|生成|產生|指派|綁定|移動|排序|審核|核准|準備)/gi;
 const CROSS_PROJECT_PLAN_RE = /(?:跨專案|多個專案|所有專案|整個團隊|活動專案.*(?:分工|交付|監控)|(?:開|建立).{0,20}專案.{0,30}(?:分工|派工|交付|持續監控)|(?:分工|派工).{0,30}(?:交付|監控))/i;
@@ -165,12 +168,19 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   const asksAction = ACTION_RE.test(text);
   const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
   const matchedCapability = capabilityForAssistantGoal(text);
+  const matchedWrite = matchedCapability?.access === "WRITE";
+  const howTo = HOW_TO_RE.test(text) && !/(?:幫我|替我)/i.test(text);
+  const inventoryRead = INVENTORY_READ_RE.test(text) && !matchedWrite && !COMPOUND_RE.test(text);
 
-  if (asksQuestion) {
+  // #660: list/count/show inventory stays ASK even when the user says 幫我.
+  // #663: a polite 嗎／？ on a concrete write is still that write, not ASK.
+  if (inventoryRead || howTo || (asksQuestion && !matchedWrite)) {
     const browserCapability = /(?:瀏覽器|browser)/i.test(text)
       ? ASSISTANT_CAPABILITIES.find((item) => item.id === "inspect_computer_runtime")
       : undefined;
-    const questionCapability = browserCapability ?? matchedCapability;
+    const questionCapability = browserCapability
+      ?? (inventoryRead ? ASSISTANT_CAPABILITIES.find((item) => item.id === "read_context") : undefined)
+      ?? matchedCapability;
     return {
       intent: "ASK",
       confidence: "high",

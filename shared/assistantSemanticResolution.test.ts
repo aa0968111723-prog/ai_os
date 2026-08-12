@@ -461,6 +461,30 @@ describe("assistantSemanticResolution", () => {
     }
   });
 
+  it("#660: project inventory reads are ASK/read_context, never AGENT", () => {
+    for (const message of [
+      "幫我列出我目前有哪些專案",
+      "顯示全部專案",
+      "有幾個專案",
+      "哪一個最舊",
+      "list projects",
+    ]) {
+      const { frame } = deriveDeterministicGoalFrame(message);
+      const match = matchAssistantCapabilityForGoal(frame);
+      const plan = executionPlanFromGoal(frame, match, message);
+      expect(plan.intent, message).toBe("ASK");
+      expect(match.capabilityId, message).toBe("read_context");
+      expect(match.capability?.access, message).toBe("READ");
+    }
+    const assets = deriveDeterministicGoalFrame("查看最近匯入的素材");
+    expect(executionPlanFromGoal(assets.frame, matchAssistantCapabilityForGoal(assets.frame), "查看最近匯入的素材").intent).toBe("ASK");
+    const write = deriveDeterministicGoalFrame("可以幫我建立一個任務嗎？");
+    const grounded = { ...write.frame, scope: { projectId: P1 } };
+    const writePlan = executionPlanFromGoal(grounded, matchAssistantCapabilityForGoal(grounded), "可以幫我建立一個任務嗎？");
+    expect(writePlan.intent).toBe("DIRECT");
+    expect(writePlan.capabilityId).toBe("create_task");
+  });
+
   it.each([
     ["列出我的專案", "LIST", "PROJECT"],
     ["幫我列出專案", "LIST", "PROJECT"],
