@@ -55,11 +55,14 @@
 | #3 | 源碼安全零缺陷（SQLi/XSS/ACL/CSRF 全綠） | ✅ |
 | #4 | 工具鏈 216 測試全綠 | ✅ |
 | #5 | NIM 修復後效能大幅改善（0 逾時） | ✅ |
-| #6 | certification 0/4 → /api/ready 503 | 🔴 |
-| #7 | 意圖分類覆蓋不足（讀取型查詢誤判） | 🔴 |
-| #8 | SOURCE_PICKER 卡住無自動釋放 | 🔴 |
-| #9 | 真實 run 失敗率 40% | 🔴 |
-| #10 | build.sha null → 部署版本無法追蹤 | 🟡 |
+| #6 | 前端 AI 助手全功能測試 (+19 tests) PR #683 | ✅ |
+| #7 | 新使用者 onboarding 6 階段完整審查 | ✅ |
+| #8 | certification 0/4 → /api/ready 503 | 🔴 |
+| #9 | 意圖分類覆蓋不足（讀取型查詢誤判） | 🔴 |
+| #10 | SOURCE_PICKER 卡住無自動釋放 | 🔴 |
+| #11 | 真實 run 失敗率 40% | 🔴 |
+| #12 | build.sha null → 部署版本無法追蹤 | 🟡 |
+| #13 | #677 助手載入閃爍（onboarding 第一印象受損） | 🟡 |
 
 ---
 
@@ -68,7 +71,8 @@
 - **網站**：https://ai-os-app.zeabur.app
 - **GitHub**：https://github.com/aa0968111723-prog/ai_os
 - **GitHub Issues**：#660–#680（21 個缺陷追蹤）
+- **最新 PR**：#683（前端測試）、#685（報告公開）
 
 ---
 
-*由 CubeLV AI 團隊自動化測試產出 · 最後更新 2026-08-12*
+*由 CubeLV AI 團隊自動化測試產出 · 最後更新 2026-08-12 下午*
