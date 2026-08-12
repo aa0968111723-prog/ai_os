@@ -422,7 +422,7 @@ function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastAc
                 <div className={`dm-row ${rowClass}`}>
                   <div className={`dm-bubble${isAssistant ? " assistant" : ""}`}>
                     {isAssistant && (
-                      <span className="dm-ai-tag"><Icon name="Sparkles" size={11} style={{ marginRight: 3 }} />AI 助手</span>
+                      <span className="dm-ai-tag"><span className="msg-ai-orb" aria-hidden="true" />AI 助手</span>
                     )}
                     {m.attachment && <MessageAttachment att={m.attachment} />}
                     {m.body && <span className="dm-bubble-body">{m.body}</span>}
