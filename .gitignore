@@ -1,3 +1,5 @@
+.grok/longrun/state.json
+.grok/longrun/*.log
 node_modules/
 dist/
 .env

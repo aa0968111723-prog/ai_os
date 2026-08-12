@@ -43,6 +43,7 @@
     "backend:doctor": "tsx scripts/backend-doctor.ts",
     "watchdog:agent": "tsx scripts/agent-watchdog.ts",
     "keepalive:soak": "bash scripts/aios-longrun-keepalive.sh",
+    "pulse:longrun": "tsx scripts/aios-engineering-pulse.ts",
     "test:agent:soak": "tsx scripts/agent-v5-soak.ts",
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",

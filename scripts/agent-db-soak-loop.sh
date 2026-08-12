@@ -24,7 +24,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 start_soak() {
-  SOAK_MINUTES="${SOAK_MINUTES:-120}" SOAK_TICK_MS="${SOAK_TICK_MS:-20000}" \
+  SOAK_MINUTES="${SOAK_MINUTES:-1440}" SOAK_TICK_MS="${SOAK_TICK_MS:-10000}" \
     nohup npx tsx "$ROOT/scripts/agent-db-soak.ts" >>"$LOG" 2>&1 &
   echo $! >"$PIDFILE"
   echo "SOAK_STARTED pid=$! at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$LOG"

@@ -2,7 +2,7 @@
  * Live PostgreSQL soak for Agent write → receipt → read-back.
  * Real wall-clock. No fake timers. Safe canary rows only.
  *
- *   SOAK_MINUTES=120 npx tsx scripts/agent-db-soak.ts
+ *   SOAK_MINUTES=1440 npx tsx scripts/agent-db-soak.ts
  */
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -11,11 +11,12 @@ import { loadLocalEnv } from "../server/bootstrap/loadEnv";
 import { db, pool, schema } from "../server/db";
 import { probeDatabaseRuntime } from "../server/services/databaseRuntime";
 import { runAgentDbIntegrityScan } from "../server/services/agentDbIntegrity";
+import { loadGroupProjectInventory } from "../server/services/projectInventory";
 
 loadLocalEnv();
 
-const minutes = Number(process.env.SOAK_MINUTES ?? "120");
-const tickMs = Number(process.env.SOAK_TICK_MS ?? "15000");
+const minutes = Number(process.env.SOAK_MINUTES ?? "1440");
+const tickMs = Number(process.env.SOAK_TICK_MS ?? "10000");
 const targetMs = Math.max(1, Math.round(minutes * 60_000));
 const reportPath = process.env.SOAK_REPORT ?? "/tmp/aios-db-soak-report.json";
 
@@ -56,6 +57,11 @@ async function tick(index: number): Promise<void> {
   const probe = await probeDatabaseRuntime();
   probes += 1;
   if (!probe.connected) throw new Error(`db disconnected (${probe.errorClass})`);
+  await Promise.all([
+    pool.query("SELECT 1"),
+    pool.query("SELECT count(*)::int AS n FROM projects"),
+    loadGroupProjectInventory(groupId).catch(() => undefined),
+  ]);
 
   await db.insert(schema.notes).values({
     id: noteId,
