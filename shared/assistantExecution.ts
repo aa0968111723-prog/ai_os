@@ -138,10 +138,12 @@ const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> =
   { id: "import_local_file", pattern: /(?:檔案|文件|照片|圖片|影片|\bpdf\b|\bfile\b).*(?:匯入|帶進|帶入|加入|放進|上傳)|(?:匯入|帶進|帶入|加入|放進|上傳).*(?:檔案|文件|照片|圖片|影片|\bpdf\b|\bfile\b)/i },
   { id: "import_external_result", pattern: /(?:外部\s*AI|Flow|Runway|Kling).*(?:成果|結果).*(?:帶回|匯入|加入)|(?:帶回|匯入).*(?:外部\s*AI|Flow|Runway|Kling)/i },
   { id: "add_note", pattern: /(?:新增|建立|記下|紀錄|記錄).{0,12}(?:筆記|note)|(?:筆記|note).{0,12}(?:新增|建立|記下|紀錄|記錄)/i },
+  { id: "add_schedule_item", pattern: /(?:安排|排|建立|新增).{0,16}(?:會議|開會|行程|約會|schedule|meeting)|(?:會議|開會|行程).{0,12}(?:安排|排|建立)/i },
   { id: "create_task", pattern: /(?:新增|建立|創建).{0,12}(?:任務|待辦|task)|(?:任務|待辦|task).{0,12}(?:新增|建立|創建)/i },
   { id: "create_project", pattern: /(?:新增|建立|創建|開).{0,16}(?:專案|project)/i },
   { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
   { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
+  { id: "dispatch_agent", pattern: /(?:做到|交付|交件).{0,16}(?:今天|今日|可以交)|(?:把).{0,12}專案.{0,20}(?:可以交|交付|完成)/i },
 ];
 
 /** Match a concrete, already-registered capability before considering planning. */

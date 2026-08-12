@@ -95,4 +95,23 @@ describe("AgentRunCard", () => {
     expect(screen.getByText("未完成")).toBeInTheDocument();
     expect(screen.queryByText("1 項")).not.toBeInTheDocument();
   });
+
+  it("does not default to Aios 已完成 when outcome is omitted (false-completion firewall)", () => {
+    render(<AgentRunCard plan={PLAN} active={false} events={[]} />);
+    expect(screen.queryByText("Aios 已完成")).not.toBeInTheDocument();
+    expect(screen.getByText("Aios 已回應")).toBeInTheDocument();
+  });
+
+  it("waiting outcome never renders as completed", () => {
+    render(
+      <AgentRunCard
+        plan={PLAN}
+        active={false}
+        outcome="waiting"
+        events={[makeEvent({ type: "waiting.user_input", title: "還需要確認資料來源", status: "waiting" })]}
+      />,
+    );
+    expect(screen.getByText("Aios 等待下一步")).toBeInTheDocument();
+    expect(screen.queryByText("Aios 已完成")).not.toBeInTheDocument();
+  });
 });

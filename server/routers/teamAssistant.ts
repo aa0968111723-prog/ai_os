@@ -45,6 +45,10 @@ import type { AuthState } from "../services/auth";
 import type { AgentSourceType } from "../../shared/agentEvents";
 import type { DataField } from "../../shared/databaseFields";
 import {
+  formatProjectInventoryTotals,
+  loadGroupProjectInventory,
+} from "../services/projectInventory";
+import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
   retrieveAssistantDatabaseEvidence,
@@ -86,10 +90,8 @@ import {
 const ASK_COST_POINTS = 0;
 /** 上下文最多列幾個專案：組內專案數通常有限，正常組全列不截斷（#661/#662：原 15 案上限把組內最舊案截掉，
  *  LLM 看不到而被誤導、清單與 totalProjects 不一致）。超過上限的極端大組由 buildTeamAskContext 末尾補列
- *  被隱藏專案名稱＋最後活動，仍可回答「有哪些專案／哪個最舊」。 */
-const PROJECT_LIMIT = 100;
-/** 超過 PROJECT_LIMIT 時補列被隱藏專案的上限（防極端大組把提示詞灌爆；補列的是 updatedAt 最舊的那批） */
-const HIDDEN_PROJECT_LIST_LIMIT = 20;
+ *  被隱藏專案名稱＋最後活動，仍可回答「有哪些專案／哪個最舊」。
+ *  權威計數與網站 `projects.list` 同一條 archived 過濾，見 projectInventory。 */
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢）。
  *  從 3 提升到 6：讓團隊助手能深度鑽研多個專案與資料庫後再回答，顯著改善回答品質。 */
 const MAX_TOOL_ROUNDS = 6;
@@ -999,7 +1001,9 @@ export interface TeamAskContext {
   commandLevel: GroupCommandLevel;
   canDispatch: boolean;
   canSupervise: boolean;
+  /** 進行中專案數（與網站 projects.list 預設相同，不含封存） */
   totalProjects: number;
+  archivedProjectCount: number;
   /** 每案一行（前綴代號 pN）——mock 模式回覆與提示詞共用 */
   projectLines: string[];
   projByRef: Map<string, ProjRow>;
@@ -1024,46 +1028,25 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   const canDispatch = canRunCommand(commandLevel, "dispatch");
   const canSupervise = levelAtLeast(commandLevel, "supervise");
 
-  // ── 組彙總上下文：active 優先、最近更新在前，最多列 PROJECT_LIMIT 案 ──
-  const [projRows, countRows, weekRows] = await Promise.all([
-    db
-      .select()
-      .from(schema.projects)
-      .where(eq(schema.projects.groupId, groupId))
-      .orderBy(sql`case when ${schema.projects.status} = 'active' then 0 else 1 end`, desc(schema.projects.updatedAt))
-      .limit(PROJECT_LIMIT),
-    db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(eq(schema.projects.groupId, groupId)),
+  // ── 組彙總上下文：與網站 projects.list 同一條 archived 過濾，再展開進行中專案 ──
+  const [inventory, weekRows] = await Promise.all([
+    loadGroupProjectInventory(groupId),
     // 本週組花費：粗略取「近 7 天」帳本淨額（deduct 為負、refund 為正，取負和＝實花）
     db
       .select({ spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
       .from(schema.costLedger)
       .where(and(eq(schema.costLedger.groupId, groupId), gte(schema.costLedger.createdAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)))),
   ]);
-  const totalProjects = Number(countRows[0]?.n ?? 0);
+  const projRows = inventory.listed;
+  const totalProjects = inventory.activeCount;
+  const archivedProjectCount = inventory.archivedCount;
   const weekSpent = Number(weekRows[0]?.spent ?? 0);
   const projectIds = projRows.map((p) => p.id);
   // 專案代號 p1…pN：LLM 一律用代號指涉專案（查工具的 ref、派工的 projectRef），避免吐 uuid（會幻覺）
   const projByRef = new Map<string, ProjRow>(projRows.map((p, i) => [`p${i + 1}`, p]));
 
-  // ── 被 PROJECT_LIMIT 截掉的專案（僅極端大組觸發）──
-  // #661/#662 根因：PROJECT_LIMIT=15 比組內實數（17）少，最舊案被 updatedAt desc 排到末位截掉，
-  // 造成清單與 totalProjects 不一致、LLM 誤判最舊專案。提高 LIMIT 後正常組已全列；但為了讓「真的
-  // 超過上限」的組仍能回答「有哪些專案／哪個最舊」，這裡補列被隱藏專案的名稱＋最後活動。
-  const hiddenRows = totalProjects > PROJECT_LIMIT
-    ? await db
-        .select({
-          id: schema.projects.id,
-          title: schema.projects.title,
-          kind: schema.projects.kind,
-          status: schema.projects.status,
-          updatedAt: schema.projects.updatedAt,
-        })
-        .from(schema.projects)
-        .where(eq(schema.projects.groupId, groupId))
-        .orderBy(sql`case when ${schema.projects.status} = 'active' then 0 else 1 end`, desc(schema.projects.updatedAt))
-        .offset(PROJECT_LIMIT)
-        .limit(HIDDEN_PROJECT_LIST_LIMIT)
-    : [];
+  // 超過展開上限時補列被隱藏進行中專案（不得把封存案混進「全部專案」）。
+  const hiddenRows = inventory.hidden;
   const hiddenProjectIds = hiddenRows.map((p) => p.id);
   let hiddenLastBy = new Map<string, Date | null>();
   if (hiddenProjectIds.length) {
@@ -1156,13 +1139,18 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     eq(schema.dataTables.scope, "global"),
   ];
   if (teamId) dbConds.push(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, teamId))!);
-  const visibleTables = await db
-    .select()
-    .from(schema.dataTables)
-    // agentAccess='none'＝管理者不讓 AI 看這個庫——助手上下文也不注入（read/write 都可讀）
-    .where(and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds)))
-    .orderBy(desc(schema.dataTables.updatedAt))
-    .limit(DB_LIMIT);
+  const dbWhere = and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds));
+  const [visibleTables, customDbCountRows] = await Promise.all([
+    db
+      .select()
+      .from(schema.dataTables)
+      .where(dbWhere)
+      .orderBy(desc(schema.dataTables.updatedAt))
+      .limit(DB_LIMIT),
+    db.select({ n: sql<number>`count(*)` }).from(schema.dataTables).where(dbWhere),
+  ]);
+  const customDbTotal = Number(customDbCountRows[0]?.n ?? 0);
+  const customDbHidden = Math.max(0, customDbTotal - visibleTables.length);
   // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
   // 助手能直接回答「素材庫裡有多少張圖」「哪個庫最大」這類資訊量問題。
   const tableIds = visibleTables.map((t) => t.id);
@@ -1339,16 +1327,18 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     ...(hiddenLines.length
       ? ["", `未完整列出專案（組內共 ${totalProjects} 案，以下 ${hiddenLines.length} 案因超過清單上限${hidden > hiddenLines.length ? `、另有 ${hidden - hiddenLines.length} 案未列` : ""}；前綴代號 hN，僅供回答名稱與最後活動，派工仍只能用上方 pN）：`, ...hiddenLines]
       : []),
-    `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
+    `${formatProjectInventoryTotals(inventory)}｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
     "",
     "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
     degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
-    ...(dbSections.length ? ["", "組可見的自訂資料庫（前綴代號 dbN；工作台「資料庫」頁維護；快照僅最近幾列，全量搜尋用 query_database 工具）：", ...dbSections] : []),
+    ...(dbSections.length || customDbTotal
+      ? ["", `組可見的自訂資料庫（來源=CUSTOM_DATABASE，不是專案素材庫；前綴代號 dbN；共 ${customDbTotal} 庫${customDbHidden ? `，此快照只展開 ${visibleTables.length} 庫，不得宣稱已列出全部` : ""}；快照僅最近幾列，全量搜尋用 query_database）：`, ...(dbSections.length ? dbSections : ["（目前沒有可展開的自訂資料庫列）"])]
+      : []),
     formatCommandRefs(commandRefs, commandLevel),
   ].join("\n");
 
   return {
-    commandLevel, canDispatch, canSupervise, totalProjects,
+    commandLevel, canDispatch, canSupervise, totalProjects, archivedProjectCount,
     projectLines: lines, projByRef, dbByRef, commandRefs, degraded, context,
   };
 }

@@ -767,6 +767,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       return;
     }
 
+    const directIntakeMode = activeProjectId ? detectDirectIntakeRequest(text) : null;
     if (activeProjectId && detectEditingHandoffRequest(text)) {
       setInput("");
       captureAssistantReturnContext({
@@ -787,6 +788,38 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       setEditingSheetOpen(true);
       return;
     }
+    // File/Drive selection is a mini workspace, not an LLM attachment. Opening
+    // it is safe and synchronous; persistence/ACL/dedupe still happen in the
+    // existing Universal Intake service after the user chooses a source.
+    if (activeProjectId && (directIntakeMode === "drive" || directIntakeMode === "files" || directIntakeMode === "folder")) {
+      setInput("");
+      captureAssistantReturnContext({
+        groupId,
+        projectId: activeProjectId,
+        originRoute: pageCtx.route,
+        originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
+        focusAnchor: pageCtx.entityId,
+      });
+      setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+        ...previous,
+        messages: [
+          ...previous.messages,
+          { role: "user", text },
+          {
+            role: "assistant",
+            text: directIntakeMode === "drive"
+              ? "請在這裡選擇要帶入的 Google Drive 檔案；完成後我會在同一個對話繼續。"
+              : directIntakeMode === "folder"
+                ? "請選擇要匯入的資料夾。Aios 會沿用 Folder Import 2.0 建立 session，檔案安全保存後即可繼續對話。"
+              : "Aios 需要檔案才能繼續。選擇後會先安全保存，AI 分析會在背景執行。",
+            runStatus: "waiting",
+          },
+        ],
+      }));
+      setIntakeOpenRequest({ id: `${Date.now()}`, mode: directIntakeMode });
+      return;
+    }
+
     const newHistory = messages.slice(-6).map((m) => ({ role: m.role, text: m.text }));
     liveEventsRef.current = [];
     stopRecordedRef.current = false;
@@ -869,14 +902,27 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       recordAssistantActionResults(groupId, actionResults);
       const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
       const hasWaiting = !!data.intakeFallbacks?.length
+        || !!data.interactionRequest
+        || !!data.intakeRequest
         || data.siteActions.length > 0
+        || data.dispatches.length > 0
+        || data.actions.length > 0
         || events.some((event) => (event.type === "waiting.permission" || event.type === "waiting.user_input") && event.status === "waiting");
       const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
-      const resolvedRunStatus: ChatMessage["runStatus"] = hasFailure
+      const hasVerifiedWrites = (data.executedSiteActions ?? []).some(
+        (item) => "verification" in item.result && item.result.verification?.status === "verified",
+      );
+      const hasUnverifiedWrites = (data.executedSiteActions ?? []).some(
+        (item) => "verification" in item.result && item.result.verification?.status !== "verified",
+      );
+      // Waiting / pending confirmation never completes. Pure answers and verified
+      // writes complete. Missing agent.completed alone is not enough to force
+      // "waiting" — the server may finish a read path with only tool events.
+      const resolvedRunStatus: ChatMessage["runStatus"] = hasFailure || hasUnverifiedWrites
         ? "failed"
         : hasWaiting
           ? "waiting"
-          : hasVerifiedCompletion
+          : hasVerifiedCompletion || hasVerifiedWrites || !hasWaiting
             ? "completed"
             : "waiting";
       if (data.activeGoal) {
@@ -891,6 +937,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           ...previous,
           activeGoal: { ...data.activeGoal!, status },
           pendingInteraction: data.interactionRequest ?? data.activeGoal!.pendingInteraction,
+        }));
+      } else if (data.interactionRequest) {
+        setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+          ...previous,
+          pendingInteraction: data.interactionRequest,
         }));
       }
       if (data.interactionRequest) {
@@ -921,11 +972,13 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         interactionRequest: data.interactionRequest,
         offerIdeaProject: !data.intakeRequest
           && !data.intakeFallbacks?.length
+          && !data.interactionRequest
           && resolvedRunStatus === "completed"
           && localPlan.intent === "ASK"
           && isMeaningfulIdeaSeed(text),
         suggestedActions: !data.intakeRequest
           && !data.intakeFallbacks?.length
+          && !data.interactionRequest
           && localPlan.intent === "ASK"
           && localPlan.confidence === "medium"
           && isMeaningfulIdeaSeed(text)
@@ -953,6 +1006,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       });
     };
 
+    // Same UUID on SSE and tRPC fallback so dual-transport cannot double-execute.
+    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
     try {
       const handled = await requestSiteAssistantStream({
         groupId,
@@ -964,6 +1021,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         recentActionResults: conversation.recentActionResults,
         activeGoal: conversation.activeGoal,
         mode: readAssistantAnswerMode(),
+        requestId,
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
@@ -1026,6 +1084,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               recentActionResults: conversation.recentActionResults,
               activeGoal: conversation.activeGoal,
               mode: readAssistantAnswerMode(),
+              requestId,
             },
             {
               onSuccess: (data) => { applyDone(data); resolve(); },
@@ -1232,6 +1291,29 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                       onSelect={(ids) => { void submitInteractionSelection(msg.interactionRequest!, ids); }}
                       onCancel={() => {
                         setIntakeOpenRequest(undefined);
+                        // Clear local pending handoff immediately so a later turn
+                        // cannot attach a cancelled picker selection (#664).
+                        if (groupId) {
+                          const interactionId = msg.interactionRequest?.interactionId;
+                          setAssistantConversation<ChatMessage>(groupId, (previous) => {
+                            const activeGoal = previous.activeGoal;
+                            const clearPending = previous.pendingInteraction?.interactionId === interactionId;
+                            const clearGoalInteraction = activeGoal?.pendingInteraction?.interactionId === interactionId;
+                            return {
+                              ...previous,
+                              pendingInteraction: clearPending ? undefined : previous.pendingInteraction,
+                              activeGoal: clearGoalInteraction && activeGoal
+                                ? {
+                                    ...activeGoal,
+                                    status: "ready" as const,
+                                    pendingInteraction: activeGoal.pendingInteraction
+                                      ? { ...activeGoal.pendingInteraction, status: "cancelled" as const }
+                                      : undefined,
+                                  }
+                                : activeGoal,
+                            };
+                          });
+                        }
                         recordInteractionLifecycle(msg.interactionRequest!, "cancelled");
                       }}
                     />
@@ -1437,18 +1519,21 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                 }]);
                 setAssistantConversation<ChatMessage>(groupId, (previous) => ({
                   ...previous,
+                  // Import is a verified step, not the whole multi-step goal. Keep
+                  // typed result refs so "整理一下／放第三鏡" continues the same goal.
                   activeGoal: previous.activeGoal
                     ? {
                         ...previous.activeGoal,
-                        status: "completed",
+                        status: "ready",
                         missingSlots: [],
                         resultRefIds: notice.assetIds.slice(0, 20),
+                        updatedAt: new Date().toISOString(),
                       }
                     : previous.activeGoal,
                 }));
                 pushMessage({
                   role: "assistant",
-                  text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理，你可以繼續聊天。`,
+                  text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理；若還要整理或放到分鏡，直接接著說即可。`,
                   runStatus: "completed",
                 });
               }}

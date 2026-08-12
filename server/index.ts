@@ -89,6 +89,8 @@ import { ingestTmpAsset, type IntakeProvenance } from "./services/universalIntak
 import { editingManifestSchema } from "../shared/externalEditing";
 import { currentDeploymentIdentity, deploymentDrift } from "./services/deploymentIdentity";
 import { buildCapabilityContractReport, getCapabilityHealthView } from "./services/agentCapabilityCertification";
+import { databaseReadyNote } from "./services/databaseRuntime";
+import { getCachedBackendRuntime } from "./services/backendDependencies";
 
 const app = express();
 
@@ -218,14 +220,16 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   const components: Record<string, { ok: boolean; note: string }> = {};
 
-  try {
-    await db.execute(sql`select 1`);
-    components.db = { ok: true, note: "connected（資料庫已接通）" };
-    components.dbPool = { ok: true, note: `total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
-  } catch (err) {
-    console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
-    components.db = { ok: false, note: "error（資料庫未接通）——檢查部署平台 Variables 的 DATABASE_URL" };
-    components.dbPool = { ok: false, note: `unavailable total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}` };
+  const backend = await getCachedBackendRuntime();
+  const database = backend.database;
+  const dbNote = databaseReadyNote(database);
+  components.db = { ok: dbNote.ok, note: dbNote.note };
+  components.dbPool = {
+    ok: !database.configured || database.connected,
+    note: `total=${database.pool.totalCount} idle=${database.pool.idleCount} waiting=${database.pool.waitingCount}`,
+  };
+  if (!database.connected) {
+    console.error("[ready] DB 連線失敗：", database.errorClass ?? "unknown");
   }
 
   const bootReady = isBootReady();
@@ -303,7 +307,8 @@ app.get("/api/ready", async (_req, res) => {
     components.agentDbIntegrity = { ok: false, note: `integrity scan failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 
-  const ok = Object.values(components).every((c) => c.ok);
+  const requiredOk = Object.values(components).every((c) => c.ok);
+  const ok = requiredOk && backend.ready;
   // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
   // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
@@ -328,9 +333,21 @@ app.get("/api/ready", async (_req, res) => {
   }
   res.status(ok ? 200 : 503).json({
     ok,
+    degraded: backend.degraded,
     processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
+    database: {
+      configured: database.configured,
+      connected: database.connected,
+      latencyMs: database.latencyMs,
+      schemaCompatible: database.schemaCompatible,
+      errorClass: database.errorClass,
+      identity: database.identity,
+      pool: database.pool,
+      target: database.target,
+    },
+    dependencies: backend.dependencies,
     components,
     runners,
     resources,
@@ -2426,8 +2443,15 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   const siteMode = parsedSiteMode.success ? parsedSiteMode.data : undefined;
   const parsedActiveGoal = assistantActiveGoalSchema.safeParse(req.body?.activeGoal);
   const activeGoal = parsedActiveGoal.success ? parsedActiveGoal.data : undefined;
+  const requestIdRaw = String(req.body?.requestId ?? "").trim();
+  const requestId = UUID_RE.test(requestIdRaw) ? requestIdRaw : undefined;
   if (!UUID_RE.test(groupId) || !message || message.length > 500) {
     return res.status(400).json({ error: "參數不正確（需 groupId 與 1–500 字的問題）" });
+  }
+  const { acquireAssistantRequest, releaseAssistantRequest } = await import("./services/assistantRequestGate");
+  const gate = acquireAssistantRequest(auth.user.id, requestId);
+  if (!gate.ok) {
+    return res.status(409).json({ error: "同一個請求仍在執行中，請勿重送（避免重複扣額度與寫入）" });
   }
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -2479,10 +2503,10 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       },
       (e) => { latency.observe(e); sse("step", e); },
     );
-    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, { ok: true });
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse", requestId }, { ok: true });
     sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
-    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse" }, {
+    recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse", requestId }, {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -2491,6 +2515,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
       sse("error", { message: err instanceof Error ? err.message : "全站 AI 助手暫時沒回應，請稍後再試" });
     }
   } finally {
+    releaseAssistantRequest(auth.user.id, requestId);
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
   }

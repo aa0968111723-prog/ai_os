@@ -34,6 +34,41 @@ describe("DIRECT -> VERIFY -> COMPLETE", () => {
     expect(executionTerminalStatus(0, [{ verification: { status: "verified" } }])).toBe("completed");
   });
 
+  it("referencedShotOrdinal understands Chinese and English shot numbers", () => {
+    expect(referencedShotOrdinal("放第三鏡")).toBe(2);
+    expect(referencedShotOrdinal("放到 shot 1")).toBe(0);
+    expect(referencedShotOrdinal("沒有指定")).toBeUndefined();
+  });
+
+  it("recentVerifiedAssetIds only returns verified import asset ids", () => {
+    expect(recentVerifiedAssetIds([
+      {
+        type: "import",
+        source: "file",
+        resourceIds: [],
+        assetIds: ["a1"],
+        intelligenceIds: [],
+        count: 1,
+        duplicateCount: 0,
+        needsReviewCount: 0,
+        backgroundProcessing: false,
+        verification: { status: "unverified", message: "nope" },
+      },
+      {
+        type: "import",
+        source: "file",
+        resourceIds: [],
+        assetIds: ["a2", "a3"],
+        intelligenceIds: [],
+        count: 2,
+        duplicateCount: 0,
+        needsReviewCount: 0,
+        backgroundProcessing: true,
+        verification: { status: "verified", message: "ok" },
+      },
+    ])).toEqual(["a2", "a3"]);
+  });
+
   it("uses server-owned verified results for the completion answer", () => {
     const answer = answerWithVerifiedActions("我可以幫你處理。", [{
       action: { label: "加入北藝資料" },
@@ -66,6 +101,16 @@ describe("Goal -> Action routing helpers", () => {
       ],
     );
     expect(proposals).toEqual([{ type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" }]);
+  });
+
+  it("read capability plans still allow schedule write proposals for confirmation (Q13)", () => {
+    const proposals = siteActionProposalsForPlan(
+      { intent: "ASK", confidence: "medium", title: "安排會議", steps: [], capabilityId: "read_context", executionMode: "DIRECT_TOOL" },
+      [
+        { type: "add_schedule_item", title: "會議", startsAt: "2026-08-13T15:00:00+08:00" },
+      ],
+    );
+    expect(proposals).toEqual([{ type: "add_schedule_item", title: "會議", startsAt: "2026-08-13T15:00:00+08:00" }]);
   });
 
   it("resolves a uniquely named project from the user's own ACL-filtered project list", () => {

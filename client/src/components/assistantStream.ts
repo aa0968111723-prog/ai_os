@@ -310,6 +310,7 @@ export async function requestSiteAssistantStream({
   recentActionResults,
   activeGoal,
   mode,
+  requestId,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -327,6 +328,8 @@ export async function requestSiteAssistantStream({
   activeGoal?: AssistantActiveGoal;
   /** Explicit answer-model preference. Undefined keeps the server's free default. */
   mode?: AgentPlannerMode;
+  /** Same UUID as tRPC fallback so dual-transport cannot double-execute. */
+  requestId?: string;
   signal: AbortSignal;
   handlers: SiteAssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -374,6 +377,7 @@ export async function requestSiteAssistantStream({
         recentActionResults,
         activeGoal,
         mode,
+        requestId,
       }),
       signal,
     });

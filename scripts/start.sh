@@ -7,6 +7,12 @@
 # 會安靜地寫壞資料，比服務起不來難發現得多。要診斷失敗原因請看下方 [db] 開頭的輸出，
 # 它會印出 ledger 狀態（empty-unmigrated / legacy-untracked / pending / ready / invalid）。
 
+# Bake-time SHA file (Dockerfile) fills BUILD_SHA when the platform did not inject one.
+if [ -z "$BUILD_SHA" ] && [ -f /app/BUILD_SHA ]; then
+  BUILD_SHA=$(tr -d '[:space:]' < /app/BUILD_SHA)
+  export BUILD_SHA
+fi
+
 if [ -z "$DATABASE_URL" ]; then
   echo "[start] ⚠⚠⚠ DATABASE_URL 未設定！"
   echo "[start]     → 到部署平台的服務 Variables 設定 DATABASE_URL（Zeabur：跨服務引用 PostgreSQL 服務的連線字串）"

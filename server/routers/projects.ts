@@ -23,6 +23,7 @@ import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { createProjectCore } from "../services/projectCore";
 import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
+import { visibleProjectsWhere } from "../services/projectInventory";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
 const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
@@ -84,10 +85,8 @@ export const projectsRouter = router({
         ? [requireGroup(ctx.auth, input.groupId) && input.groupId]
         : ctx.auth.groups.map((g) => g.groupId);
       if (groupIds.length === 0) return [];
-      // 預設只列「未封存」；封存的專案從作業台隱藏（可還原），除非明確要求
-      const where = input?.includeArchived
-        ? inArray(schema.projects.groupId, groupIds as string[])
-        : and(inArray(schema.projects.groupId, groupIds as string[]), ne(schema.projects.status, "archived"));
+      // 預設只列「未封存」；與 Agent inventory 共用同一條過濾，避免網站 17 / Agent 15。
+      const where = visibleProjectsWhere(groupIds as string[], { includeArchived: input?.includeArchived });
       // 封面圖網址（coverUrl）：left join 素材表並過濾回收桶——素材被丟掉時卡片自動退回色塊封面
       const rows = await db
         .select({ ...getTableColumns(schema.projects), coverUrl: schema.assets.url })

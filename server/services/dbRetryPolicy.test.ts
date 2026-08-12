@@ -14,6 +14,10 @@ describe("database execution retry policy", () => {
     expect(classifyExecutionError(Object.assign(new Error("outcome unknown"), { code }))).toBe("reconcile");
   });
 
+  it("treats a killed client as reconcile, not a blind write replay", () => {
+    expect(classifyExecutionError(new Error("Connection terminated unexpectedly"))).toBe("reconcile");
+  });
+
   it("accepts an explicit pre-effect handler guarantee only", () => {
     expect(classifyExecutionError({ retryable: true, effectApplied: false })).toBe("retry_safe");
     expect(classifyExecutionError({ retryable: true, effectApplied: true })).toBe("permanent");

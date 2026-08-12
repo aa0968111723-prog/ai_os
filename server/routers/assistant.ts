@@ -1506,14 +1506,27 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           : "以安全的純文字備援完成回答";
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary, payload: { answer: reply.answer, actions, steps } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
-        // 完成事件必須在快照之前發（快照＝回傳當下的事件流）
+        // 完成事件必須在快照之前發（快照＝回傳當下的事件流）。
+        // Project assistant proposes write actions but does not execute them here.
+        // With pending confirmation, emit waiting — never "Aios 已完成" for unverified writes.
         const okAgentSources = stream.snapshotSources().filter((s) => s.status === "ok");
-        stream.emit({
-          type: "agent.completed",
-          title: okAgentSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
-          description: okAgentSources.length ? `依據 ${okAgentSources.length} 個來源` : undefined,
-          resultCount: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
-        });
+        if (actions.length > 0) {
+          stream.emit({
+            type: "waiting.user_input",
+            title: `有 ${actions.length} 件動作需要你確認`,
+            description: actions.map((action) => action.label).join("；").slice(0, 400),
+            status: "waiting",
+            resultCount: actions.length,
+          });
+        } else {
+          stream.emit({
+            type: "agent.completed",
+            title: okAgentSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+            description: okAgentSources.length ? `依據 ${okAgentSources.length} 個來源` : undefined,
+            status: "ok",
+            resultCount: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
+          });
+        }
         return {
           answer: reply.answer, actions, steps, mock: false,
           fallback: reply.source === "fallback",

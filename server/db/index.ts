@@ -1,16 +1,27 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+import { loadLocalEnv } from "../bootstrap/loadEnv";
+import { buildPoolConfig, parseDatabaseUrl } from "./connectionConfig";
 import * as schema from "./schema";
 
+loadLocalEnv();
+
 const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  // 不在啟動時丟例外——健康檢查不等 DB（healing-studio 的教訓）
+const databaseTarget = parseDatabaseUrl(connectionString);
+if (!databaseTarget.configured) {
+  // 不在啟動時丟例外——/api/health 必須在無 DB 時仍能回 liveness。
+  // /api/ready 會誠實回 configured=false / connected=false。
   console.warn("[db] DATABASE_URL 未設定 — API 呼叫將失敗，健康檢查仍可用");
+} else {
+  console.info(
+    `[db] target configured driver=${databaseTarget.driver} hostKind=${databaseTarget.hostnameKind} sslRequired=${databaseTarget.sslRequired} identity=${databaseTarget.identityHash}`,
+  );
 }
 
 // max：連線上限；connectionTimeoutMillis：借不到連線時最多等 15 秒就報錯（而非預設的永久等待），
 // 讓任何意外的連線壓力以「單一請求失敗」呈現，而不是整個服務無聲卡死。
-export const pool = new pg.Pool({ connectionString, max: 10, connectionTimeoutMillis: 15_000 });
+// idleTimeoutMillis 回收陳舊閒置連線，避免 DB restart 後一直拿死掉的 idle client。
+export const pool = new pg.Pool(buildPoolConfig(connectionString));
 // 關鍵：Pool 對閒置 client 的錯誤（DB 重啟、網路斷線、被 kill）會發 'error' 事件；
 // 未監聽時 Node 會以 unhandled 'error' 直接崩掉整個程序。這裡吞掉並記錄，讓 Pool 自行重建連線。
 pool.on("error", (err) => {
@@ -18,7 +29,7 @@ pool.on("error", (err) => {
 });
 
 // 觀測：連線池排隊時才打 log——沒有 waiting 就不要先調大 max（卡頓診斷步驟 0）
-if (connectionString) {
+if (databaseTarget.configured) {
   const poolProbe = setInterval(() => {
     if (pool.waitingCount > 0 || pool.totalCount >= 8) {
       console.warn(
@@ -30,4 +41,4 @@ if (connectionString) {
 }
 
 export const db = drizzle(pool, { schema });
-export { schema };
+export { schema, databaseTarget };

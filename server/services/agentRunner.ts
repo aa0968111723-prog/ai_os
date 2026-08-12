@@ -1933,8 +1933,15 @@ async function advanceRun(run: RunRow): Promise<void> {
           step.splitPreparedScenes = scenes.map((scene) => ({ ...scene }));
           await saveRun(run.id, { steps });
         },
-        // run 建立與核准時已由 tRPC 層做過組隔離＋可編輯檢查，之後以發起人身分執行（同工作流慣例）
-        assertAccess: () => {},
+        // Re-validate ACL at write entry: membership/role may have changed during a long plan.
+        assertAccess: async (project) => {
+          const auth = await loadAuthState(run.userId);
+          if (!auth?.user) throw new TRPCError({ code: "UNAUTHORIZED", message: "登入已失效" });
+          const { requireGroup } = await import("../trpc");
+          requireGroup(auth, project.groupId);
+          assertProjectNotArchived(project);
+          await assertProjectEditable(auth, project);
+        },
       });
       step.status = "done";
       for (let sceneIndex = 0; sceneIndex < result.count; sceneIndex += 1) {

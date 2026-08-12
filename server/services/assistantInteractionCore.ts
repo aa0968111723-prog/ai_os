@@ -92,6 +92,9 @@ function assertCurrentInteraction(
   if (Date.parse(request.expiresAt) <= Date.now()) {
     throw new TRPCError({ code: "CONFLICT", message: "Interaction 已過期，請重新開啟" });
   }
+  if (request.status !== "pending") {
+    throw new TRPCError({ code: "CONFLICT", message: "Interaction 已完成或不存在" });
+  }
   return request;
 }
 
@@ -120,8 +123,23 @@ export async function recordAssistantInteractionLifecycle(auth: AuthState, input
       metadata: { interactionId: request.interactionId, interactionType: request.type },
     });
     const lifecycleEvents = uniqueInteractionEvents(stream);
+    // Cancel/expire must leave durable state that rejects stale callbacks (#664).
+    let nextActiveGoal = row.activeGoal;
+    if (input.event === "cancelled" && row.activeGoal?.pendingInteraction) {
+      const cancelledInteraction = {
+        ...row.activeGoal.pendingInteraction,
+        status: "cancelled" as const,
+      };
+      nextActiveGoal = {
+        ...row.activeGoal,
+        status: "ready",
+        pendingInteraction: cancelledInteraction,
+        missingSlots: row.activeGoal.missingSlots,
+      };
+    }
     await tx.update(schema.assistantConversationStates).set({
       events: [...(row.events ?? []), ...lifecycleEvents].slice(-MAX_DURABLE_EVENTS),
+      ...(input.event === "cancelled" ? { activeGoal: nextActiveGoal } : {}),
       updatedAt: new Date(),
     }).where(and(
       eq(schema.assistantConversationStates.conversationId, input.conversationId),

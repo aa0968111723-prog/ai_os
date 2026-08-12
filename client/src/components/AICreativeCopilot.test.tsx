@@ -464,43 +464,14 @@ describe("siteActionDoneLink", () => {
   });
 
   it("opens the existing Drive mini workspace from conversation without starting a campaign", async () => {
-    const interactionRequest = {
-      interactionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      runId: "run-1",
-      goalId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      type: "DRIVE_PICKER",
-      title: "選擇 Google Drive 檔案",
-      description: "加入專案；完成後回到同一個對話。",
-      required: true,
-      resumeToken: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-      expiresAt: "2026-09-01T00:00:00.000Z",
-      targetProjectId: PROJECT_ID,
-      expectedResultType: "import",
-      status: "pending",
-      createdAt: "2026-08-12T00:00:00.000Z",
-    };
-    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
-      handlers.onDone({
-        ...DONE,
-        answer: interactionRequest.description,
-        siteActions: [], dispatches: [], actions: [], sources: [],
-        events: [event({ type: "waiting.user_input", status: "waiting", title: interactionRequest.title })],
-        interactionRequest,
-        activeGoal: {
-          goalId: interactionRequest.goalId,
-          status: "waiting_user_input",
-          frame: { intent: "IMPORT", operation: "IMPORT", objectType: "FILE", source: { type: "GOOGLE_DRIVE" }, scope: { projectId: PROJECT_ID }, referents: [], constraints: [], desiredOutcome: "PERSIST_ASSETS", missingSlots: [], understandingConfidence: "high", sourceConfidence: "high", entityConfidence: "high", capabilityConfidence: "high" },
-          resolvedSlots: { projectId: PROJECT_ID }, missingSlots: [], resultRefIds: [], pendingInteraction: interactionRequest,
-        },
-      });
-      return true;
-    });
+    // Explicit Drive + project short-circuits to the intake mini workspace
+    // without an LLM round-trip (no campaign, no stream).
     const user = userEvent.setup();
     render(<AICreativeCopilot groupId="grp-123" projectId={PROJECT_ID} />);
     await sendMessage(user, "把 Google Drive 的活動資料帶進來");
 
     expect(await screen.findByText(/Google Drive 檔案/)).toBeInTheDocument();
-    expect(streamMock).toHaveBeenCalledTimes(1);
+    expect(streamMock).not.toHaveBeenCalled();
     expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
       projectId: PROJECT_ID,
       openRequest: expect.objectContaining({ mode: "drive" }),

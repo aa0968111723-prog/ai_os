@@ -18,11 +18,15 @@ import { Icon } from "./Icon";
 export function AgentRunCard({
   plan,
   active,
-  outcome = "completed",
+  outcome,
   events = [],
 }: {
   plan: AssistantExecutionPlan;
   active: boolean;
+  /**
+   * Explicit terminal outcome only. Defaulting to "completed" was a false-completion
+   * bug: waiting / pending-confirmation runs looked finished on the card.
+   */
   outcome?: "completed" | "failed" | "stopped" | "waiting";
   /** 本次執行的真實事件流；空陣列＝還沒有任何事情發生，卡片就不顯示任何計量 */
   events?: readonly AgentEvent[];
@@ -37,12 +41,16 @@ export function AgentRunCard({
         ? { icon: "Square" as const, label: "已停止", className: undefined }
         : outcome === "waiting"
           ? { icon: "CircleDot" as const, label: "等待下一步", className: undefined }
-          : { icon: "Check" as const, label: "已完成", className: undefined };
+          : outcome === "completed"
+            ? { icon: "Check" as const, label: "已完成", className: undefined }
+            : summary.waiting
+              ? { icon: "CircleDot" as const, label: "等待下一步", className: undefined }
+              : { icon: "CircleDot" as const, label: "已回應", className: undefined };
 
   return (
-    <section className="agent-run-card" aria-live="polite" data-intent={plan.intent}>
+    <section className="agent-run-card" aria-live="polite" data-intent={plan.intent} data-outcome={outcome ?? (active ? "active" : "responded")}>
       <div className="agent-run-card__header">
-        <strong>{active ? "Aios 正在處理" : state.label === "已完成" ? "Aios 已完成" : state.label === "等待下一步" ? "Aios 等待下一步" : `Aios ${state.label}`}</strong>
+        <strong>{active ? "Aios 正在處理" : state.label === "已完成" ? "Aios 已完成" : state.label === "等待下一步" ? "Aios 等待下一步" : state.label === "已回應" ? "Aios 已回應" : `Aios ${state.label}`}</strong>
         <span className="agent-run-card__state">
           <Icon name={state.icon} size={12} className={state.className} /> {state.label}
         </span>

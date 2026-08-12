@@ -50,10 +50,12 @@ A response must never claim completion without verified evidence.
    - selected model/mode must reach SSE and fallback paths
    - no duplicate execution after partial SSE delivery
    - preserve one run identity across transport paths
+   - dual-transport requestId gate so SSE and tRPC fallback cannot double-execute
 
 10. **Mobile-first UX**
     - compact states: working / waiting / completed / failed / stopped
     - when waiting, clearly state what the user must do next
+    - AgentRunCard must not default outcome to completed
 
 ## Mandatory regression cases
 
@@ -71,6 +73,8 @@ A response must never claim completion without verified evidence.
 - new explicit goal does not incorrectly continue an old goal
 - partial SSE failure does not trigger duplicate tool execution
 - selected model reaches backend
+- Source corrections and numbered project choices continue the same goal
+- A plain answer without `agent.completed+ok` is never rendered as finished when still waiting
 
 ## Delivery rules
 

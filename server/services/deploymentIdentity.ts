@@ -11,14 +11,23 @@ export interface DeploymentIdentity {
 }
 
 export function deploymentShaFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  return env.BUILD_SHA
-    || env.ZEABUR_GIT_COMMIT
-    || env.ZEABUR_COMMIT_SHA
-    || env.GITHUB_SHA
-    || env.GIT_SHA
-    || env.VERCEL_GIT_COMMIT_SHA
-    || env.COMMIT_SHA
-    || null;
+  const candidates = [
+    env.BUILD_SHA,
+    env.ZEABUR_GIT_COMMIT,
+    env.ZEABUR_COMMIT_SHA,
+    env.ZB_GIT_COMMIT,
+    env.GITHUB_SHA,
+    env.GIT_SHA,
+    env.VERCEL_GIT_COMMIT_SHA,
+    env.RAILWAY_GIT_COMMIT_SHA,
+    env.COMMIT_SHA,
+    env.SOURCE_VERSION,
+  ];
+  for (const value of candidates) {
+    const sha = value?.trim();
+    if (sha) return sha;
+  }
+  return null;
 }
 
 export function currentDeploymentIdentity(env: NodeJS.ProcessEnv = process.env): DeploymentIdentity {

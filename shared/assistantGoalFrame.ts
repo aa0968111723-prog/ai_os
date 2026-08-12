@@ -49,6 +49,7 @@ export const ASSISTANT_GOAL_OBJECTS = [
   "SCENE",
   "SCRIPT",
   "TASK",
+  "SCHEDULE",
   "GENERATION",
   "EDIT",
   "UNKNOWN",
@@ -58,6 +59,8 @@ export type AssistantGoalObject = (typeof ASSISTANT_GOAL_OBJECTS)[number];
 export const ASSISTANT_SOURCE_TYPES = [
   "AIOS_LIBRARY",
   "PROJECT_ASSETS",
+  "CUSTOM_DATABASE",
+  "PUBLIC_AGENT_FUEL",
   "GOOGLE_DRIVE",
   "GOOGLE_PHOTOS",
   "LOCAL_FILE",
@@ -65,6 +68,7 @@ export const ASSISTANT_SOURCE_TYPES = [
   "URL",
   "EXTERNAL_AI",
   "EXTERNAL_EDITOR",
+  "REMOTE_PROVIDER",
   "UNKNOWN_CLOUD",
   "UNKNOWN",
 ] as const;
@@ -77,6 +81,8 @@ export const ASSISTANT_DESIRED_OUTCOMES = [
   "PERSIST_ASSETS",
   "PERSIST_PROJECT",
   "PERSIST_STORYBOARD",
+  "PERSIST_SCHEDULE",
+  "PERSIST_TASK",
   "VERIFIED_BINDING",
   "START_CLASSIFICATION",
   "START_GENERATION",
@@ -164,6 +170,8 @@ const VERIFIED_EXECUTION_OUTCOMES = new Set<AssistantDesiredOutcome>([
   "PERSIST_ASSETS",
   "PERSIST_PROJECT",
   "PERSIST_STORYBOARD",
+  "PERSIST_SCHEDULE",
+  "PERSIST_TASK",
   "VERIFIED_BINDING",
   "START_CLASSIFICATION",
   "START_GENERATION",
@@ -191,6 +199,16 @@ export function continuationHint(text: string): AssistantContinuationType {
   if (/^(?:繼續|那就做|接著做|繼續做)[。！!]?$/u.test(normalized)) return "CONTINUE";
   if (/^(?:第[一二三四五六七八九十\d]+個|[一二三四五六七八九十\d]+)[。！!]?$/u.test(normalized)) {
     return "ANSWER_PENDING_QUESTION";
+  }
+  // Short follow-up actions ("整理一下", "放第三鏡") are same-goal continuations when
+  // an active goal exists — deriveDeterministicGoalFrame only merges when previous
+  // is provided, so callers without previous still get NEW_GOAL safely.
+  if (
+    normalized.length <= 24
+    && /(?:整理|分類|歸類|放|掛|綁|繼續|接著|然後|這些|那批|剛剛|剛才)/u.test(normalized)
+    && !/(?:新的|另外|別的|重新開始|換一個專案)/u.test(normalized)
+  ) {
+    return "CONTINUE";
   }
   return "NEW_GOAL";
 }
