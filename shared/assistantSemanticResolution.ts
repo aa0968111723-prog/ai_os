@@ -461,13 +461,35 @@ function normalizeTitle(value: string): string {
   return value.toLocaleLowerCase().replace(/[\s\-_–—・,，。.!！?？「」『』()（）]/g, "");
 }
 
+function titleExactInMessage(normalizedMessage: string, title: string): boolean {
+  const index = normalizedMessage.indexOf(title);
+  if (index < 0) return false;
+  const after = normalizedMessage.slice(index + title.length);
+  return after === "" || /^(?:的|專案|裡|里|中|內|裡頭|里面)/.test(after);
+}
+
 function explicitProject(message: string, candidates: readonly WorkingProjectCandidate[]): WorkingProjectCandidate | undefined {
   const normalized = normalizeTitle(message);
-  const matches = candidates.filter((candidate) => {
-    const title = normalizeTitle(candidate.title);
-    return title.length >= 2 && normalized.includes(title);
-  });
-  return matches.length === 1 ? matches[0] : undefined;
+  const usable = candidates
+    .map((candidate) => ({ candidate, title: normalizeTitle(candidate.title) }))
+    .filter((item) => item.title.length >= 2);
+
+  // #674: exact > longest unique contains. A short title must not steal a longer unique name.
+  const exact = usable.filter((item) => titleExactInMessage(normalized, item.title));
+  if (exact.length === 1) return exact[0]!.candidate;
+  if (exact.length > 1) {
+    exact.sort((a, b) => b.title.length - a.title.length);
+    if (exact[0]!.title.length > exact[1]!.title.length) return exact[0]!.candidate;
+    return undefined;
+  }
+
+  const contains = usable.filter((item) => normalized.includes(item.title));
+  if (contains.length === 1) return contains[0]!.candidate;
+  if (contains.length > 1) {
+    contains.sort((a, b) => b.title.length - a.title.length);
+    if (contains[0]!.title.length > contains[1]!.title.length) return contains[0]!.candidate;
+  }
+  return undefined;
 }
 
 function projectFromRecentResult(

@@ -134,6 +134,20 @@ describe("assistantSemanticResolution", () => {
     expect(match.status).toBe("matched");
   });
 
+  it("exact long project name beats a shorter substring title", () => {
+    const short = "11111111-1111-4111-8111-111111111111";
+    const long = "22222222-2222-4222-8222-222222222222";
+    const result = resolveWorkingProject({
+      message: "打開短名專案完整測試",
+      candidates: [
+        { id: short, title: "短名專案" },
+        { id: long, title: "短名專案完整測試" },
+      ],
+    });
+    expect(result.status).toBe("resolved");
+    expect(result.projectId).toBe(long);
+  });
+
   it("explicit project mention outranks the current page project", () => {
     const result = resolveWorkingProject({
       message: "把資料加到北藝回顧",

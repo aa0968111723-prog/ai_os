@@ -5,7 +5,7 @@
  * - 私密界：所有讀取一律以「本人是 sender 或 recipient」過濾——組長/管理員也看不到別人的私訊。
  * - 已讀水位：與專案留言 messageReads 同一套語意（每人對每位對話者一筆 lastReadAt）。
  */
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
@@ -306,6 +306,16 @@ export async function sendDm(auth: AuthState, peerId: string, body: string, opts
   if (opts.refType && opts.refId) await assertDmRef(auth, opts.refType, opts.refId);
   const att = opts.attachmentId ? await assertDmAttachment(auth, opts.attachmentId) : null;
   if (!body.trim() && !att && !opts.refType) throw new TRPCError({ code: "BAD_REQUEST", message: "訊息不可為空" });
+
+  if (body.trim() && !att && !opts.refType) {
+    const [recent] = await db.select().from(schema.dmMessages).where(and(
+      eq(schema.dmMessages.senderId, auth.user.id),
+      eq(schema.dmMessages.recipientId, peer.id),
+      eq(schema.dmMessages.body, body),
+      gte(schema.dmMessages.createdAt, new Date(Date.now() - 120_000)),
+    )).orderBy(desc(schema.dmMessages.createdAt)).limit(1);
+    if (recent) return { message: recent, peer: { userId: peer.id, name: peer.name } };
+  }
 
   const [msg] = await db
     .insert(schema.dmMessages)
