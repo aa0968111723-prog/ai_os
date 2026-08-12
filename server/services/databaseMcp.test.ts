@@ -105,6 +105,9 @@ describe("mcp.ts wires databaseMcp (no full-text select on list files)", () => {
   it("uses databaseMcp helpers and no longer select() all columns for files", () => {
     const mcpSource = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
     expect(mcpSource).toContain("listMcpDatabases");
+    expect(mcpSource).toContain("countVisibleTables");
+    expect(mcpSource).toContain("visibleTotal");
+    expect(mcpSource).toContain("truncated");
     expect(mcpSource).toContain("queryMcpDatabase");
     expect(mcpSource).toContain("listMcpDatabaseFiles");
     expect(mcpSource).toContain("mergeProjectIntoRowData");
