@@ -34,3 +34,17 @@ describe("notesCore ACL contract", () => {
     expect(source).toMatch(/removeNoteCore[\s\S]*projectChecked/);
   });
 });
+
+const commentSource = readFileSync(new URL("./noteCommentsCore.ts", import.meta.url), "utf8");
+
+describe("note comment retry replay", () => {
+  it("replays the same author+note+body within 2 minutes instead of inserting twice", () => {
+    expect(commentSource).toContain("120_000");
+    expect(commentSource).toContain("eq(schema.noteComments.userId, input.auth.user.id)");
+    expect(commentSource).toContain("eq(schema.noteComments.noteId, note.id)");
+    const lookupAt = commentSource.indexOf("gte(schema.noteComments.createdAt");
+    const insertAt = commentSource.indexOf(".insert(schema.noteComments)");
+    expect(lookupAt).toBeGreaterThanOrEqual(0);
+    expect(insertAt).toBeGreaterThan(lookupAt);
+  });
+});

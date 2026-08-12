@@ -220,5 +220,6 @@ describe("project message retry replay", () => {
     expectBefore(messagesSource, "gte(schema.messages.createdAt", ".insert(schema.messages)");
     expect(mcpSource).toContain("eq(schema.messages.userId, auth.user.id)");
     expect(messagesSource).toContain("eq(schema.messages.userId, ctx.auth.user.id)");
+    expect(messagesSource).toContain('eq(schema.messages.kind, "annotation")');
   });
 });

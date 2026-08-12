@@ -3,7 +3,7 @@
  * 獨立於專案 messages——組層級筆記（projectId null）也能討論。
  * 組內全員可留言（含 viewer）；刪除＝作者本人或組長以上。
  */
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -124,6 +124,15 @@ export async function addNoteCommentCore(input: {
     });
   }
   const mentions = await validateMentions(note.groupId, input.mentions);
+
+  const [recent] = await db.select().from(schema.noteComments).where(and(
+    eq(schema.noteComments.noteId, note.id),
+    eq(schema.noteComments.userId, input.auth.user.id),
+    eq(schema.noteComments.body, body),
+    input.replyToId ? eq(schema.noteComments.replyToId, input.replyToId) : isNull(schema.noteComments.replyToId),
+    gte(schema.noteComments.createdAt, new Date(Date.now() - 120_000)),
+  )).orderBy(desc(schema.noteComments.createdAt)).limit(1);
+  if (recent) return recent;
 
   const [row] = await db
     .insert(schema.noteComments)

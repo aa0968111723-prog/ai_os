@@ -389,6 +389,16 @@ export const messagesRouter = router({
         ));
       if (!anchor) throw new TRPCError({ code: "BAD_REQUEST", message: "找不到這一版成品（可能已在回收桶）" });
       const mentions = await resolveMentions(project.groupId, input.mentions, input.body);
+      const [recent] = await db.select().from(schema.messages).where(and(
+        eq(schema.messages.projectId, input.projectId),
+        eq(schema.messages.userId, ctx.auth.user.id),
+        eq(schema.messages.kind, "annotation"),
+        eq(schema.messages.body, input.body),
+        eq(schema.messages.refId, input.sceneId),
+        eq(schema.messages.anchorAssetId, input.anchorAssetId),
+        gte(schema.messages.createdAt, new Date(Date.now() - 120_000)),
+      )).orderBy(desc(schema.messages.createdAt)).limit(1);
+      if (recent) return recent;
       const [msg] = await db
         .insert(schema.messages)
         .values({
