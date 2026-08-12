@@ -1,0 +1,10 @@
+{"key":"public.prompt.style.handdrawn","category":"prompt","title":"手繪溫暖前綴","content":"手繪插畫, 溫暖活潑簡約, clean lines, soft warm light, 16:9","tags":["style","handdrawn"]}
+{"key":"public.prompt.shot.closeup","category":"prompt","title":"特寫","content":"close-up, facial expression clear, shallow depth of field, hand-drawn illustration","tags":["shot"]}
+{"key":"public.prompt.shot.group","category":"prompt","title":"群像中景","content":"medium group shot, 3-6 people, readable formation, warm lively simple hand-drawn","tags":["shot","group"]}
+{"key":"public.prompt.scene.storm_hope","category":"prompt","title":"風雨希望","content":"partners supporting each other on rainy pier, lighthouse, sunlight breaking clouds, hopeful, hand-drawn warm","tags":["scene"]}
+{"key":"public.prompt.scene.beach_map","category":"prompt","title":"沙灘地圖","content":"partners on sunny beach unfolding treasure map, hopeful expressions, hand-drawn illustration","tags":["scene"]}
+{"key":"public.prompt.qc.no_medical","category":"qc","title":"禁醫療宣稱","content":"不得使用治癒/治療/療效等醫療宣稱","tags":["taboo"]}
+{"key":"public.prompt.qc.no_gore","category":"qc","title":"禁血腥","content":"no gore, no horror, no photorealistic violence","tags":["taboo"]}
+{"key":"public.copy.hook.challenge","category":"prompt","title":"挑戰Hook","content":"風雨來的那天，我們選擇一起走。","tags":["hook","copy"]}
+{"key":"public.copy.cta.partner","category":"prompt","title":"夥伴CTA","content":"想一起出海？留言「夥伴」。","tags":["cta","copy"]}
+{"key":"public.workflow.mcp.order","category":"knowledge","title":"MCP順序","content":"whoami→list_projects→get_project_context→list_knowledge→list_scenes→list_assets→generate→get_generation→set_scene_visual","tags":["mcp","workflow"]}
