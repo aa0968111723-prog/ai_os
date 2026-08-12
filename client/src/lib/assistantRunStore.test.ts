@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  MAX_ASSISTANT_CONVERSATIONS,
+  MAX_ASSISTANT_MESSAGES,
   abortAssistantRun,
   captureAssistantReturnContext,
   clearAssistantConversation,
@@ -178,5 +180,27 @@ describe("assistantRunStore", () => {
     captureAssistantReturnContext({ groupId: "g1", originRoute: "/p/a" });
     expect(getAssistantConversation<Message>("g1").activeGoal?.goalId)
       .toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  });
+
+  it("bounds inactive conversation and message history without evicting active work", () => {
+    const active = new AbortController();
+    const activeAttempt = registerAssistantRunController("active", "run-active", active);
+    setAssistantConversation<Message>("active", () => ({
+      messages: [],
+      run: { runId: "run-active", events: [], sources: [], active: true, startedAt: 1, attemptId: activeAttempt.attemptId },
+    }));
+    setAssistantConversation<Message>("long", () => ({
+      messages: Array.from({ length: MAX_ASSISTANT_MESSAGES + 20 }, (_, index) => ({ role: "user" as const, text: String(index) })),
+      run: null,
+    }));
+    expect(getAssistantConversation<Message>("long").messages).toHaveLength(MAX_ASSISTANT_MESSAGES);
+    expect(getAssistantConversation<Message>("long").messages[0].text).toBe("20");
+
+    for (let index = 0; index < MAX_ASSISTANT_CONVERSATIONS + 4; index += 1) {
+      setAssistantConversation<Message>(`g${index}`, () => ({ messages: [{ role: "user", text: String(index) }], run: null }));
+    }
+    expect(getAssistantConversation<Message>("active").run?.active).toBe(true);
+    expect(getAssistantConversation<Message>("g0").messages).toHaveLength(0);
+    expect(getAssistantConversation<Message>(`g${MAX_ASSISTANT_CONVERSATIONS + 3}`).messages).toHaveLength(1);
   });
 });

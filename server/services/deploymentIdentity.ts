@@ -10,9 +10,20 @@ export interface DeploymentIdentity {
   capabilityRegistryHash: string;
 }
 
+export function deploymentShaFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env.BUILD_SHA
+    || env.ZEABUR_GIT_COMMIT
+    || env.ZEABUR_COMMIT_SHA
+    || env.GITHUB_SHA
+    || env.GIT_SHA
+    || env.VERCEL_GIT_COMMIT_SHA
+    || env.COMMIT_SHA
+    || null;
+}
+
 export function currentDeploymentIdentity(env: NodeJS.ProcessEnv = process.env): DeploymentIdentity {
   return {
-    sha: env.BUILD_SHA || env.ZEABUR_GIT_COMMIT || env.COMMIT_SHA || null,
+    sha: deploymentShaFromEnv(env),
     builtAt: env.BUILD_TIME || env.ZEABUR_BUILD_TIME || null,
     appVersion: env.APP_VERSION || env.npm_package_version || "0.1.0",
     schemaVersion: AGENT_SCHEMA_VERSION,

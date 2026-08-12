@@ -111,6 +111,30 @@ export interface ChatMessage {
   editingSessionId?: string;
   editingResult?: { sessionId: string; assetId: string };
   intakeFallbacks?: IntakeFallback[];
+  /** Explicitly derived from the user's originating ASK turn; never infer it from answer prose. */
+  offerIdeaProject?: boolean;
+}
+
+/** Tiny picker answers such as "1" are continuation data, not creative topics. */
+export function isMeaningfulIdeaSeed(value: string): boolean {
+  const text = value.trim();
+  if (text.length < 2 || text.length > 40) return false;
+  if (/^(?:第)?[\d一二三四五六七八九十]+(?:個|項|筆)?$/u.test(text)) return false;
+  if (/^(?:全部|都要|這個|那個|上一個|下一個|確認|取消|是|否)$/u.test(text)) return false;
+  return /[\p{L}]/u.test(text);
+}
+
+export function shouldOfferIdeaProject(message: ChatMessage): boolean {
+  return message.role === "assistant"
+    && message.offerIdeaProject === true
+    && message.runStatus === "completed"
+    && message.executionPlan?.intent === "ASK"
+    && !message.intakeFallbacks?.length
+    && !message.siteActions?.length
+    && !message.dispatches?.length
+    && !message.commands?.length
+    && !message.executedSiteActions?.length
+    && isMeaningfulIdeaSeed(message.text.split("\n")[0] ?? "");
 }
 
 function IntakeFallbackCard({
@@ -435,6 +459,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const liveEventsRef = useRef<AssistantActivityEvent[]>([]);
+  const eventFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRecordedRef = useRef(false);
   const activeGoalRef = useRef("");
   const queuedMessageRef = useRef<string | null>(null);
@@ -746,10 +771,18 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     };
     const applyDone = (data: AskData) => {
       if (!runStillCurrent()) return;
+      if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+      eventFlushTimerRef.current = null;
       setOrbState("speaking");
       // 事件與來源一律以伺服器的最終版本為準；串流中途掉封包或整條退回 tRPC 時，
       // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
       const events = data.events ?? liveEventsRef.current.filter(isAgentEvent);
+      // A durable file/Drive/folder question is already rendered as the
+      // assistant answer plus the mini workspace. Repeating waiting.user_input
+      // as a work-step card made the same prompt appear twice on mobile.
+      const visibleEvents = data.intakeRequest
+        ? events.filter((event) => event.type !== "waiting.user_input")
+        : events;
       const sources = data.sources ?? [];
       const actionResults = assistantActionResultsFromExecuted(data.executedSiteActions ?? []);
       recordAssistantActionResults(groupId, actionResults);
@@ -793,15 +826,24 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         executedSiteActions: data.executedSiteActions?.length ? data.executedSiteActions : undefined,
         // Source-transfer fallbacks are waiting for a real user choice; do not
         // render them as a completed execution card.
-        executionPlan: data.intakeFallbacks?.length ? undefined : (data.executionPlan ?? localPlan),
+        executionPlan: data.intakeFallbacks?.length || data.intakeRequest ? undefined : (data.executionPlan ?? localPlan),
         runStatus: resolvedRunStatus,
         latency: data.latency,
         activity: [...liveEventsRef.current],
         runId: data.runId,
-        events: events.length ? events : undefined,
+        events: visibleEvents.length ? visibleEvents : undefined,
         sources: sources.length ? sources : undefined,
         intakeFallbacks: data.intakeFallbacks?.length ? data.intakeFallbacks : undefined,
-        suggestedActions: localPlan.intent === "ASK" && localPlan.confidence === "medium" && text.length <= 6
+        offerIdeaProject: !data.intakeRequest
+          && !data.intakeFallbacks?.length
+          && resolvedRunStatus === "completed"
+          && localPlan.intent === "ASK"
+          && isMeaningfulIdeaSeed(text),
+        suggestedActions: !data.intakeRequest
+          && !data.intakeFallbacks?.length
+          && localPlan.intent === "ASK"
+          && localPlan.confidence === "medium"
+          && isMeaningfulIdeaSeed(text)
           ? [
               { label: `建立${text}準備`, prompt: `幫我建立「${text}」準備筆記與待辦。` },
               { label: "查看目前資料", prompt: `請查看目前專案與「${text}」相關的資料。` },
@@ -811,6 +853,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     };
     const applyError = (message: string) => {
       if (!runStillCurrent()) return;
+      if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+      eventFlushTimerRef.current = null;
       setOrbState("error");
       pushMessage({
         role: "assistant",
@@ -859,17 +903,23 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           },
           onStep: (e) => {
             if (!runStillCurrent()) return;
-            liveEventsRef.current = [...liveEventsRef.current, e];
+            liveEventsRef.current.push(e);
             // 只有真事件（帶 type/eventId 的統一 Agent 事件）才進進度面板。
             // 舊伺服器的 {phase,text} 沒有結構化欄位，畫不出可驗證的進度，
             // 由下方的一行摘要負責顯示——寧可少顯示，也不假裝有結構。
-            const structured = liveEventsRef.current.filter(isAgentEvent);
-            setAssistantConversation<ChatMessage>(groupId, (previous) => ({
-              ...previous,
-              run: previous.run && previous.run.attemptId === runAttempt.attemptId
-                ? { ...previous.run, events: structured }
-                : previous.run,
-            }));
+            if (!eventFlushTimerRef.current) {
+              eventFlushTimerRef.current = setTimeout(() => {
+                eventFlushTimerRef.current = null;
+                if (!runStillCurrent()) return;
+                const structured = liveEventsRef.current.filter(isAgentEvent);
+                setAssistantConversation<ChatMessage>(groupId, (previous) => ({
+                  ...previous,
+                  run: previous.run && previous.run.attemptId === runAttempt.attemptId
+                    ? { ...previous.run, events: structured }
+                    : previous.run,
+                }));
+              }, 50);
+            }
           },
           // SSE payload 是 GlobalAskResult 的純 JSON（無 superjson）；guard 只驗協定形狀，
           // 欄位型別由 tRPC 推導型別收窄（同一個 router 的回傳值）
@@ -918,6 +968,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     // store 的把手優先（跨卸載仍有效）；本地 ref 是同一顆 controller，重複 abort 無害
     if (runId && attemptId) abortAssistantRun(runId, attemptId);
     abortRef.current?.abort();
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
     setOrbState("idle");
     pushMessage({
       role: "assistant",
@@ -929,6 +981,27 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       retryText: activeGoalRef.current || undefined,
     });
     endAssistantRun(groupId, runId, attemptId);
+  };
+
+  const clearConversation = () => {
+    if (!groupId) return;
+    stopRecordedRef.current = true;
+    const runId = liveRun?.runId;
+    const attemptId = liveRun?.attemptId;
+    if (runId && attemptId) abortAssistantRun(runId, attemptId);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
+    queuedMessageRef.current = null;
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
+    eventFlushTimerRef.current = null;
+    liveEventsRef.current = [];
+    endAssistantRun(groupId, runId, attemptId);
+    clearAssistantConversation(groupId);
+    setActivePlan(null);
+    setOrbState("idle");
+    ask.reset();
   };
 
   useEffect(() => {
@@ -964,10 +1037,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             <button
               type="button"
               className="ai-copilot-clear"
-              onClick={() => {
-                if (groupId) clearAssistantConversation(groupId);
-                ask.reset();
-              }}
+              onClick={clearConversation}
               title="清空對話紀錄"
               aria-label="清空對話紀錄"
             >
@@ -1026,7 +1096,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
         {/* ── 對話紀錄區域 ── */}
         {messages.length > 0 && (
-          <div className="ai-copilot-chat-feed">
+          <div className="ai-copilot-chat-feed" role="log" aria-live="polite" aria-relevant="additions">
             {messages.map((msg, index) => (
               <div key={index} className={`ai-copilot-bubble ai-copilot-bubble--${msg.role}`}>
                 <div className="ai-copilot-bubble__avatar">
@@ -1146,8 +1216,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
 
                   {/* 如果是 AI 回覆，提供一鍵新專案的按鈕（帶靈感去建立表單；與 create_project
                       確認卡並存：卡是「AI 已擬好欄位」，這顆是「我自己去表單填」） */}
-                  {msg.role === "assistant"
-                    && onUseIdeaForNewProject
+                  {onUseIdeaForNewProject
+                    && shouldOfferIdeaProject(msg)
                     && !msg.siteActions?.some((a) => a.type === "create_project")
                     && !msg.executedSiteActions?.some((item) => item.result.type === "create_project") && (
                     <div className="ai-copilot-bubble__actions">
@@ -1222,6 +1292,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               sceneId={pageCtx.entityType === "shot" ? pageCtx.entityId : undefined}
               triggerLabel="＋"
               triggerVariant="ghost"
+              dialogTitle="加入資料"
+              closeOnImported
               openRequest={intakeOpenRequest}
               onImported={(notice) => {
                 setIntakeTargetProjectId(undefined);

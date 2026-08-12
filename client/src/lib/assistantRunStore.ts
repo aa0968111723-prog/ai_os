@@ -78,6 +78,8 @@ export interface AssistantRunAttempt {
 
 /** 每個組一份：切組時不該看到別組的對話 */
 const byGroup = new Map<string, AssistantConversationState<unknown>>();
+export const MAX_ASSISTANT_CONVERSATIONS = 12;
+export const MAX_ASSISTANT_MESSAGES = 100;
 const listeners = new Set<Listener>();
 /**
  * 在途請求的中止把手，同樣掛在模組層。
@@ -121,7 +123,25 @@ export function setAssistantConversation<TMessage>(
   const previous = getAssistantConversation<TMessage>(groupId);
   const next = update(previous);
   if (next === previous) return;
-  byGroup.set(groupId, next as AssistantConversationState<unknown>);
+  const bounded = {
+    ...next,
+    messages: next.messages.length > MAX_ASSISTANT_MESSAGES
+      ? next.messages.slice(-MAX_ASSISTANT_MESSAGES)
+      : next.messages,
+  } as AssistantConversationState<unknown>;
+  // Map insertion order is a cheap LRU-by-write. Never evict an active run:
+  // persistence is the workflow contract, while inactive history is available
+  // from the durable server checkpoint if the tab has touched many groups.
+  byGroup.delete(groupId);
+  byGroup.set(groupId, bounded);
+  while (byGroup.size > MAX_ASSISTANT_CONVERSATIONS) {
+    const oldestInactive = [...byGroup.entries()].find(([key, state]) => (
+      key !== groupId && !state.run?.active && !activeAttemptByGroup.has(key)
+    ));
+    if (!oldestInactive) break;
+    byGroup.delete(oldestInactive[0]);
+    latestGeneration.delete(oldestInactive[0]);
+  }
   notify();
 }
 
