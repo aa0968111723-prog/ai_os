@@ -5,6 +5,7 @@ import { db, schema } from "../db";
 import { runAgentWatchdog } from "./agentWatchdog";
 import { addNoteCore } from "./notesCore";
 import { addProjectTaskCore } from "./taskCore";
+import { addScheduleItemCore } from "./scheduleCore";
 import { upsertContextBinding } from "./contextBindings";
 import type { AuthState } from "./auth";
 
@@ -19,12 +20,14 @@ describe.skipIf(!RUN_PG).sequential("Agent write retry + watchdog (real PostgreS
   const assetId = randomUUID();
   const noteId = randomUUID();
   const taskId = randomUUID();
+  const scheduleId = randomUUID();
   const runId = randomUUID();
 
   afterAll(async () => {
     await db.delete(schema.contextBindings).where(eq(schema.contextBindings.projectId, projectId));
     await db.delete(schema.notes).where(eq(schema.notes.projectId, projectId));
     await db.delete(schema.projectTasks).where(eq(schema.projectTasks.projectId, projectId));
+    await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.projectId, projectId));
     await db.delete(schema.assets).where(eq(schema.assets.projectId, projectId));
     await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
     await db.delete(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
@@ -90,6 +93,21 @@ describe.skipIf(!RUN_PG).sequential("Agent write retry + watchdog (real PostgreS
     expect(tasks[0]!.id).toBe(taskId);
     expect(tasks[1]!.id).toBe(taskId);
     expect(await db.select({ id: schema.projectTasks.id }).from(schema.projectTasks).where(eq(schema.projectTasks.projectId, projectId))).toHaveLength(1);
+
+    const scheduleInput = {
+      auth: auth(),
+      id: scheduleId,
+      groupId,
+      projectId,
+      title: "retry meeting",
+      startsAt: new Date(Date.now() + 3_600_000).toISOString(),
+      planRunId: runId,
+      planStepId: "create_schedule",
+    };
+    const schedules = await Promise.all([addScheduleItemCore(scheduleInput), addScheduleItemCore(scheduleInput)]);
+    expect(schedules[0]!.id).toBe(scheduleId);
+    expect(schedules[1]!.id).toBe(scheduleId);
+    expect(await db.select({ id: schema.scheduleItems.id }).from(schema.scheduleItems).where(eq(schema.scheduleItems.projectId, projectId))).toHaveLength(1);
 
     const bind = {
       auth: auth(),

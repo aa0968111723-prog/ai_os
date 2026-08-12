@@ -169,6 +169,8 @@ describe("schedule/task replay safety (#133 PR-5)", () => {
     );
     // 重播撞到「同 id 但不同 run/step」＝跨計畫覆寫，必須 fail-closed
     expect(agentSource).toContain("行程冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+    expect(scheduleSource).toContain("onConflictDoNothing");
+    expect(scheduleSource).toContain("findExistingScheduleItem");
     expectBefore(
       agentSource,
       "schema.scheduleItems.id, effectId",

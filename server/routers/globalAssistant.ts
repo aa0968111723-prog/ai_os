@@ -1899,8 +1899,8 @@ async function executeDirectSiteActions(
         target: action.label,
       });
       stream.finishStep(stepId, {
-        type: "action.completed",
-        title: verified ? `已完成：${action.label}` : `已送出但驗證未通過：${action.label}`,
+        type: verified ? "action.completed" : "action.failed",
+        title: verified ? `已完成：${action.label}` : `已送出但驗證尚未通過：${action.label}`,
         status: verified ? "ok" : "failed",
         toolName: action.type,
         target: action.label,

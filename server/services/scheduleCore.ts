@@ -166,13 +166,8 @@ export async function addScheduleItemCore(input: {
   const endsAt = input.endsAt ? parseDate(input.endsAt, "結束") : null;
   if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
 
-  if (input.planRunId && input.planStepId) {
-    const [existing] = await db.select().from(schema.scheduleItems).where(and(
-      eq(schema.scheduleItems.planRunId, input.planRunId),
-      eq(schema.scheduleItems.planStepId, input.planStepId),
-    )).limit(1);
-    if (existing) return existing;
-  }
+  const replayed = await findExistingScheduleItem(input);
+  if (replayed) return replayed;
 
   const [row] = await db
     .insert(schema.scheduleItems)
@@ -191,7 +186,13 @@ export async function addScheduleItemCore(input: {
       planRunId: input.planRunId ?? null,
       planStepId: input.planStepId ?? null,
     })
+    .onConflictDoNothing()
     .returning();
+  if (!row) {
+    const existing = await findExistingScheduleItem(input);
+    if (existing) return existing;
+    throw new TRPCError({ code: "CONFLICT", message: "行程寫入發生衝突，已停止以避免重複建立" });
+  }
   queueGroupSync(input.groupId); // Google 日曆直連同步：把該組已連結成員的個人日曆排進推送佇列（fire-and-forget）
   // 排程的 @提及在此之前**只存不送**：欄位寫進 DB，全檔卻沒有任何一處通知——
   // 被排進某件事的人除非自己去翻行事曆，否則永遠不會知道。比照筆記留言補上送達端。
@@ -210,6 +211,35 @@ export async function addScheduleItemCore(input: {
       url: `/planner?focus=schedule-${row.id}`,
       eventKey: `schedule_mention:${row.id}:created`,
     });
+  }
+  return row;
+}
+
+async function findExistingScheduleItem(input: {
+  id?: string;
+  groupId: string;
+  projectId?: string | null;
+  planRunId?: string | null;
+  planStepId?: string | null;
+}): Promise<ScheduleRow | undefined> {
+  const [byId] = input.id
+    ? await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, input.id))
+    : [];
+  const [byPlan] = !byId && input.planRunId && input.planStepId
+    ? await db.select().from(schema.scheduleItems).where(and(
+      eq(schema.scheduleItems.planRunId, input.planRunId),
+      eq(schema.scheduleItems.planStepId, input.planStepId),
+    ))
+    : [];
+  const row = byId ?? byPlan;
+  if (!row) return undefined;
+  if (
+    row.groupId !== input.groupId
+    || (input.projectId && row.projectId !== input.projectId)
+    || (input.planRunId && row.planRunId !== input.planRunId)
+    || (input.planStepId && row.planStepId !== input.planStepId)
+  ) {
+    throw new TRPCError({ code: "CONFLICT", message: "行程冪等識別碼碰撞，已停止以避免覆寫" });
   }
   return row;
 }
