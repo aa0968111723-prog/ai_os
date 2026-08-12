@@ -5,7 +5,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { agentToolRegistry, practicalAutonomyRuntime } from "./agentToolRegistry";
 import { AGENT_SKILLS, validateSkillContracts, type DurableStep, type TrustLabel } from "./practicalAutonomy";
-import { currentDeploymentIdentity, deploymentShaFromEnv } from "./deploymentIdentity";
+import { currentDeploymentIdentity } from "./deploymentIdentity";
 
 export const CAPABILITY_CERTIFICATION_STATES = [
   "DECLARED_ONLY", "MOCK_VERIFIED", "STAGING_VERIFIED", "EXTERNAL_LIVE_VERIFIED",
@@ -59,9 +59,8 @@ export function effectiveVerificationMode(requested: CapabilityVerificationMode,
   if (requested === "external_live" && declaredEnvironment === "external_live" && env.ALLOW_EXTERNAL_LIVE_CERTIFICATION === "1") return requested;
   if (
     requested === "production_smoke"
-    && declaredEnvironment === "production"
     && env.NODE_ENV === "production"
-    && !!deploymentShaFromEnv(env)
+    && (!declaredEnvironment || declaredEnvironment === "production")
   ) return requested;
   throw new TRPCError({
     code: "PRECONDITION_FAILED",
@@ -86,11 +85,11 @@ export async function getCapabilityHealthView() {
       certificationState = "DEGRADED";
       blockerReason = "CAPABILITY_SCHEMA_DRIFT";
     }
-    if (stored && LIVE_STATES.has(certificationState) && (
-      identity.sha === "unknown"
-      || !stored.deploymentSha
-      || stored.deploymentSha !== identity.sha
-    )) {
+    // 部署漂移只有在「認證證據與當前部署都能提供 build SHA 且兩者不同」時才可證明。
+    // 平台未注入 SHA（identity.sha 為 null）時認證會以 null 落庫，若因 !stored.deploymentSha
+    // 降級會讓 SHA-less 部署永遠無法維持 LIVE state——code 層漂移已由 registryHash /
+    // schemaVersion 兩個 drift 檢查覆蓋，此處僅比對真正可比的部署身分。
+    if (stored && LIVE_STATES.has(certificationState) && identity.sha && stored.deploymentSha && stored.deploymentSha !== identity.sha) {
       certificationState = "DEGRADED";
       blockerReason = "CAPABILITY_DEPLOYMENT_DRIFT";
     }

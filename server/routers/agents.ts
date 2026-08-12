@@ -27,6 +27,7 @@ import {
   listPendingAgentQuestionsForProject,
 } from "../services/agentQuestionCore";
 import { listProjectFiles, readProjectFile, searchProjectFiles } from "../services/agentProjectFiles";
+import { buildProjectIntelligence } from "../services/projectIntelligence";
 import { AGENT_SKILLS, validateSkillContracts } from "../services/practicalAutonomy";
 import { agentToolRegistry } from "../services/agentToolRegistry";
 import { buildCapabilityContractReport, executeCapabilityCertification, getCapabilityHealthView } from "../services/agentCapabilityCertification";
@@ -84,6 +85,15 @@ export const agentsRouter = router({
   listProjectFiles: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => listProjectFiles(ctx.auth, input.projectId)),
   readProjectFile: authedProcedure.input(z.object({ projectId: z.string().uuid(), fileId: z.string().uuid(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(24_000).optional() })).query(({ ctx, input }) => readProjectFile(ctx.auth, input.projectId, input.fileId, input.offset, input.limit)),
   searchProjectFiles: authedProcedure.input(z.object({ projectId: z.string().uuid(), query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional() })).query(({ ctx, input }) => searchProjectFiles(ctx.auth, input.projectId, input.query, input.limit)),
+  // 對應 project.health tool 的獨立 procedure：assistant.ts / teamAssistant.ts 內部
+  // 只能間接呼叫 buildProjectIntelligence，MCP／外部 harness 打不到；補一支與
+  // listProjectFiles 同等守門（專案存在 + requireGroup）的直接呼叫入口。
+  projectHealth: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+    requireGroup(ctx.auth, project.groupId);
+    return buildProjectIntelligence(input.projectId);
+  }),
   preview: authedProcedure
     .input(z.object({
       projectId: z.string().uuid(),
