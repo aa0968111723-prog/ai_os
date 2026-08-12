@@ -15,7 +15,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { resolveSession, type AuthState } from "./auth";
 import { resolveMcpIdentity } from "./mcpAuth";
-import { listVisibleTables, resolveAgentAccess, resolveTableAccess } from "./databaseAcl";
+import { countVisibleTables, listVisibleTables, resolveAgentAccess, resolveTableAccess, VISIBLE_TABLE_LIST_LIMIT } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
 import {
   databaseBatchWriteDenied,
@@ -164,7 +164,10 @@ async function readableTable(auth: AuthState, viaToken: boolean, tableId: string
 export async function handleV1ListDatabases(req: Request, res: Response): Promise<void> {
   const who = await resolveRequester(req, res);
   if (!who) return; // 401/429/503 已由 resolveRequester 寫入
-  const tables = await listVisibleTables(who.auth);
+  const [tables, visibleTotal] = await Promise.all([
+    listVisibleTables(who.auth),
+    countVisibleTables(who.auth),
+  ]);
   const out = tables.flatMap((t) => {
     const access = accessFor(who.auth, who.viaToken, t);
     if (!access.canRead) return [];
@@ -173,7 +176,15 @@ export async function handleV1ListDatabases(req: Request, res: Response): Promis
       fields: t.fields, rowCount: t.rowCount, canWrite: !who.readOnly && access.canWriteRows,
     }];
   });
-  res.json({ databases: out });
+  const truncated = visibleTotal > VISIBLE_TABLE_LIST_LIMIT;
+  res.json({
+    databases: out,
+    listedCount: out.length,
+    visibleTotal,
+    truncated,
+    cap: VISIBLE_TABLE_LIST_LIMIT,
+    ...(truncated ? { note: `可見資料庫共 ${visibleTotal} 個；此清單最多載入 ${VISIBLE_TABLE_LIST_LIMIT} 個` } : {}),
+  });
 }
 
 /** GET /api/v1/databases/:id/rows — 查列（?q= 全文粗篩、?limit=、?offset=） */

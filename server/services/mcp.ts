@@ -38,7 +38,8 @@ import { executeGenerationCommand } from "./generationCommand";
 import { signAssetUrl, signDbFileUrl } from "./storage";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
-import { resolveAgentAccess } from "./databaseAcl";
+import { countVisibleTables, resolveAgentAccess, VISIBLE_TABLE_LIST_LIMIT } from "./databaseAcl";
+import { visibleProjectsWhere } from "./projectInventory";
 import { addDataRowValidated, updateDataRowValidated } from "./databaseCore";
 import {
   DATABASE_BATCH_REQUEST_LIMIT,
@@ -116,8 +117,14 @@ export const TOOLS = [
   },
   {
     name: "list_projects",
-    description: "列出所有專案（標題、類型、格式、狀態）",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    description: "列出你有權存取的進行中專案（預設不含封存，與網站 projects.list 同一過濾）。回 items + total + truncated，超過 50 筆不得宣稱已列出全部。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        includeArchived: { type: "boolean", description: "true＝連封存一並列出；預設 false，與網站清單一致" },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "get_project_context",
@@ -748,16 +755,32 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   if (name === "list_projects") {
     // per-user 隔離：只列此人有權存取的組（直接組員＋團隊管理展開＋開發者展開全部，見 loadAuthState）。
-    // 無任何組＝回空陣列（不外洩他組專案標題）。
+    // 無任何組＝回空清單（不外洩他組專案標題）。預設不含封存，與網站 projects.list 同一過濾。
     const groupIds = auth.groups.map((g) => g.groupId);
-    if (groupIds.length === 0) return [];
-    const rows = await db
-      .select()
-      .from(schema.projects)
-      .where(inArray(schema.projects.groupId, groupIds))
-      .orderBy(desc(schema.projects.updatedAt))
-      .limit(50);
-    return rows.map((p) => ({ id: p.id, title: p.title, kind: p.kind, format: p.format, status: p.status }));
+    const includeArchived = args.includeArchived === true;
+    const where = visibleProjectsWhere(groupIds, { includeArchived });
+    const cap = 50;
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        id: schema.projects.id,
+        title: schema.projects.title,
+        kind: schema.projects.kind,
+        format: schema.projects.format,
+        status: schema.projects.status,
+      }).from(schema.projects).where(where).orderBy(desc(schema.projects.updatedAt)).limit(cap),
+      db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(where),
+    ]);
+    const total = Number(countRows[0]?.n ?? 0);
+    const truncated = total > rows.length;
+    return {
+      items: rows,
+      listedCount: rows.length,
+      total,
+      truncated,
+      cap,
+      includeArchived,
+      ...(truncated ? { note: `${includeArchived ? "專案" : "進行中專案"}共 ${total} 個；此清單只展開 ${rows.length} 個，不得宣稱已列出全部` } : {}),
+    };
   }
 
   if (name === "find_model") {
