@@ -1,0 +1,5 @@
+{"key":"public.prompt.style.base","category":"style","title":"Base hand-drawn style","content":"手繪插畫風格, 溫暖活潑簡約, 乾淨線條, 16:9 cinematic","tags":["style","public"]}
+{"key":"public.prompt.neg.base","category":"negative","title":"Base negatives","content":"blurry, deformed, extra limbs, bad anatomy, photorealistic, dark gloomy, watermark, low quality","tags":["negative","public"]}
+{"key":"public.prompt.scene.beach","category":"scene","title":"Sunny beach","content":"golden sand, blue sea, running, hopeful smiles, warm sunlight","tags":["scene","public"]}
+{"key":"public.prompt.scene.storm","category":"scene","title":"Storm harbor","content":"stormy harbor, huge waves, distant skyline, break in clouds, golden light","tags":["scene","public"]}
+{"key":"public.prompt.identity.lock","category":"character","title":"Identity lock phrase","content":"Exact same character from reference — preserve face and identity perfectly","tags":["character","public"]}
