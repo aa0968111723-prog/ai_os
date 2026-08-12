@@ -785,6 +785,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     // 把手也登記到 store：關掉面板再打開時元件是新的一份，ref 會是空的，
     // 「停止」鍵就會變成一顆按下去毫無作用的按鈕。
     registerAssistantRunController(groupId, controller);
+    const requestId = crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
     try {
       const handled = await requestSiteAssistantStream({
         groupId,
@@ -795,6 +796,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         recentActionResults: conversation.recentActionResults,
         activeGoal: conversation.activeGoal,
         mode: readAssistantAnswerMode(),
+        requestId,
         signal: controller.signal,
         handlers: {
           onOpen: (run) => {
@@ -840,6 +842,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               recentActionResults: conversation.recentActionResults,
               activeGoal: conversation.activeGoal,
               mode: readAssistantAnswerMode(),
+              requestId,
             },
             {
               onSuccess: (data) => { applyDone(data); resolve(); },

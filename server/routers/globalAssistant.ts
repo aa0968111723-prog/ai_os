@@ -1975,18 +1975,37 @@ export const globalAssistantRouter = router({
       activeGoal: assistantActiveGoalSchema.optional(),
       /** LLM 品質模式：nim=免費快速（預設）、auto=NIM優先 fal備援、fal_balanced/fal_quality=付費高品質 */
       mode: agentPlannerModeSchema.optional(),
+      /**
+       * Client-generated UUID for this user submit. Shared by SSE and tRPC
+       * fallback so a transport race cannot start two paid/write turns.
+       */
+      requestId: z.string().uuid().optional(),
     }))
-    .mutation(({ ctx, input }) => runGlobalAsk({
-      auth: ctx.auth,
-      groupId: input.groupId,
-      message: input.message,
-      history: input.history,
-      projectId: input.projectId,
-      pageContext: input.pageContext,
-      recentActionResults: input.recentActionResults,
-      activeGoal: input.activeGoal,
-      mode: input.mode,
-    })),
+    .mutation(async ({ ctx, input }) => {
+      const { acquireAssistantRequest, releaseAssistantRequest } = await import("../services/assistantRequestGate");
+      const gate = acquireAssistantRequest(ctx.auth.user.id, input.requestId);
+      if (!gate.ok) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "同一個請求仍在執行中，請勿重送（避免重複扣額度與寫入）",
+        });
+      }
+      try {
+        return await runGlobalAsk({
+          auth: ctx.auth,
+          groupId: input.groupId,
+          message: input.message,
+          history: input.history,
+          projectId: input.projectId,
+          pageContext: input.pageContext,
+          recentActionResults: input.recentActionResults,
+          activeGoal: input.activeGoal,
+          mode: input.mode,
+        });
+      } finally {
+        releaseAssistantRequest(ctx.auth.user.id, input.requestId);
+      }
+    }),
 
   /** 使用者按下確認卡後執行單一站級動作（經 authedProcedure 落審計；ACL/policy 在被呼叫端） */
   runSiteAction: authedProcedure
