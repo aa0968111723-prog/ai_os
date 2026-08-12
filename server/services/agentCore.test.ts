@@ -90,6 +90,12 @@ describe("failed AgentRun minimum-step resume", () => {
 describe("agentCore source：各入口呼叫 assertUuid", () => {
   const source = readFileSync(new URL("./agentCore.ts", import.meta.url), "utf8");
 
+  it("#672: plan and replan failures settle via plannerPointsAfterFailure, not a null refund", () => {
+    expect(source).toContain("plannerPointsAfterFailure(failedBilling, reservedPoints)");
+    expect((source.match(/plannerPointsAfterFailure\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(source).not.toContain("const burned = llmPointsForUsageEntries(failedBilling)");
+  });
+
   it("plan / list 驗 projectId；approve / discard / stop / get 驗 runId", () => {
     expect(source).toContain('assertUuid(input.projectId, "專案編號")');
     expect(source).toContain('assertUuid(projectId, "專案編號")');

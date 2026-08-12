@@ -25,7 +25,7 @@ import { lockAgentApprove } from "./locks";
 import { buildKnowledgeContextWithMeta } from "../routers/knowledge";
 import { buildAiModelCheatsheet, selectAiGenerationModel } from "./aiModelPolicy";
 import type { AgentStep } from "./agentRunner";
-import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
+
 import type { DataField } from "../../shared/databaseFields";
 import { MAX_PLAN_STEPS, type CompletePlanSummary } from "../../shared/plan";
 import {
@@ -34,7 +34,8 @@ import {
   type AgentPlannerMode,
   type AgentPlannerTelemetry,
 } from "../../shared/agentPlanner";
-import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
+import { estimatePlannerPoints, llmPointsForUsageEntries, plannerPointsAfterFailure } from "../../shared/llmPricing";
+import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
@@ -307,28 +308,44 @@ interface WritableDb { ref: string; id: string; name: string; label: string; fie
 
 const AGENT_WRITABLE_REF_LIMIT = 8;
 
-async function listAgentWritableDbs(auth: AuthState): Promise<WritableDb[]> {
-  const tables = await listVisibleTables(auth);
-  return tables
-    .filter((t) => resolveAgentAccess(auth, t).canWriteRows)
-    .map((t, i) => ({
-      ref: i < AGENT_WRITABLE_REF_LIMIT ? `db${i + 1}` : `name:${t.id.slice(0, 8)}`,
-      id: t.id,
-      name: t.name,
-      label: t.name,
-      fields: t.fields as DataField[],
-    }));
+async function listAgentWritableDbs(auth: AuthState): Promise<{
+  dbs: WritableDb[];
+  visibleTruncated: boolean;
+}> {
+  const [tables, visibleTotal] = await Promise.all([
+    listVisibleTables(auth),
+    countVisibleTables(auth),
+  ]);
+  return {
+    dbs: tables
+      .filter((t) => resolveAgentAccess(auth, t).canWriteRows)
+      .map((t, i) => ({
+        ref: i < AGENT_WRITABLE_REF_LIMIT ? `db${i + 1}` : `name:${t.id.slice(0, 8)}`,
+        id: t.id,
+        name: t.name,
+        label: t.name,
+        fields: t.fields as DataField[],
+      })),
+    visibleTruncated: visibleTotal > tables.length,
+  };
 }
 
 /** 資料庫清單 → 規劃提示詞的速查文字（代號、名稱、欄位 key/型別） */
-function dbCheatsheet(dbs: WritableDb[]): string {
-  if (dbs.length === 0) return "（目前沒有可讓 AI 寫入的資料庫）";
+function dbCheatsheet(dbs: WritableDb[], visibleTruncated = false): string {
+  if (dbs.length === 0) {
+    return visibleTruncated
+      ? `（目前快照沒有可讓 AI 寫入的資料庫；可見清單上限 ${VISIBLE_TABLE_LIST_LIMIT}，另有未載入的庫）`
+      : "（目前沒有可讓 AI 寫入的資料庫）";
+  }
   const listed = dbs.filter((db) => db.ref.startsWith("db"));
   const hidden = Math.max(0, dbs.length - listed.length);
   const head = hidden
     ? `共 ${dbs.length} 個 AI 可寫資料庫；代號只展開 ${listed.length} 庫，不得宣稱已列出全部；未展開的庫請用完整且唯一的庫名`
     : `共 ${dbs.length} 個 AI 可寫資料庫`;
-  return [head, ...listed.map((d) => `${d.ref}=「${d.name}」欄位：${d.fields.map((f) => `${f.key}(${f.label}/${f.type}${f.required ? "/必填" : ""}${f.type === "select" && f.options ? "/選項:" + f.options.join("|") : ""})`).join("、")}`)].join("\n");
+  const cap = visibleTruncated
+    ? `${head}（可見清單上限 ${VISIBLE_TABLE_LIST_LIMIT}，另有未載入的庫）`
+    : head;
+  return [cap, ...listed.map((d) => `${d.ref}=「${d.name}」欄位：${d.fields.map((f) => `${f.key}(${f.label}/${f.type}${f.required ? "/必填" : ""}${f.type === "select" && f.options ? "/選項:" + f.options.join("|") : ""})`).join("、")}`)].join("\n");
 }
 
 /** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填，走完代理全生命週期。
@@ -652,7 +669,8 @@ export async function planAgentCore(input: {
     .orderBy(asc(schema.scenes.orderIndex));
 
   // AI 代理可寫入的資料庫（規劃可引用；用代號避免 uuid 幻覺）
-  const writableDbs = await listAgentWritableDbs(auth);
+  const writable = await listAgentWritableDbs(auth);
+  const writableDbs = writable.dbs;
   const plannerContext = await buildPlannerContext(project.groupId, project.id, writableDbs);
 
   if (isMockMode()) {
@@ -786,7 +804,7 @@ ${buildPlannerRoleBlock()}
 ${buildAiModelCheatsheet()}
 </可用模型速查>
 <可寫資料庫>
-${dbCheatsheet(writableDbs)}
+${dbCheatsheet(writableDbs, writable.visibleTruncated)}
 </可寫資料庫>
 ${picked.text ? `<使用者指定來源>\n${picked.text}\n</使用者指定來源>\n` : ""}${plannerContext.text}
 <專案現況>
@@ -850,23 +868,23 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
   try {
     generated = await generateAgentPlanDraft(prompt, plannerMode);
   } catch (err) {
-    // 規劃失敗有兩種，帳完全不同：
+    // 規劃失敗有三種帳，不能把「付費呼叫沒回 usage」跟「根本沒呼叫」混成全額退回：
     // - 供應商連呼叫都沒成功（金鑰錯、429、逾時）＝沒有用量 → 預留全額退回。
     // - 呼叫成功、只是兩次都吐不出合規格的計畫 ＝ 供應商照樣收錢 → 照實際用量結算。
-    //   後者若也全額退，「餵一個會讓模型吐壞 JSON 的目標」就成了免費燒平台額度的門路。
+    // - 付費模型已進 billing 但沒回 usage ＝ 量不到，保留預留（與成功路徑同一口徑）。
     const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
-    const burned = llmPointsForUsageEntries(failedBilling);
-    const chargedOnFailure = burned == null
+    const actualOnFailure = plannerPointsAfterFailure(failedBilling, reservedPoints);
+    const chargedOnFailure = actualOnFailure === 0
       ? 0
       : await settleUsagePoints({
           userId: auth.user.id,
           groupId: project.groupId,
           reserved: reservedPoints,
-          actual: burned,
+          actual: actualOnFailure,
           reason: `AI 代理規劃（${plannerLabel}）`,
           settleKey: billingSettleKey,
         });
-    if (burned == null) {
+    if (actualOnFailure === 0) {
       await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
     }
     // 軌跡也要收尾：規劃在「模型呼叫」這一段就死掉時，session 不留 failed 會永遠停在進行中
@@ -881,7 +899,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
         payload: {
           error: message,
           pointsActual: chargedOnFailure,
-          pointsRefunded: burned == null ? reservedPoints : Math.max(0, reservedPoints - chargedOnFailure),
+          pointsRefunded: actualOnFailure === 0 ? reservedPoints : Math.max(0, reservedPoints - chargedOnFailure),
         },
       });
       await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: message }).catch(() => undefined);
@@ -1046,7 +1064,8 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
       .select()
       .from(schema.scenes)
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-    const writableDbs = await listAgentWritableDbs(auth);
+    const writable = await listAgentWritableDbs(auth);
+    const writableDbs = writable.dbs;
     const plan = mockPlan(goal, scenes.length, writableDbs);
     plan.planSummary = attachPlanningIssuesToSummary({
       ...plan.planSummary,
@@ -1086,7 +1105,8 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
     .from(schema.scenes)
     .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
     .orderBy(asc(schema.scenes.orderIndex));
-  const writableDbs = await listAgentWritableDbs(auth);
+  const writable = await listAgentWritableDbs(auth);
+  const writableDbs = writable.dbs;
   const plannerContext = await buildPlannerContext(project.groupId, project.id, writableDbs);
   const sceneLines = scenes.length
     ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」`).join("\n")
@@ -1111,7 +1131,7 @@ ${buildPlannerRoleBlock()}
 ${buildAiModelCheatsheet()}
 </可用模型速查>
 <可寫資料庫>
-${dbCheatsheet(writableDbs)}
+${dbCheatsheet(writableDbs, writable.visibleTruncated)}
 </可寫資料庫>
 ${plannerContext.text}
 <專案現況>
@@ -1147,15 +1167,15 @@ ${clarifications || "（無額外文字）"}
     generated = await generateAgentPlanDraft(prompt, plannerMode);
   } catch (err) {
     const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
-    const burned = llmPointsForUsageEntries(failedBilling);
-    if (burned == null) {
+    const actualOnFailure = plannerPointsAfterFailure(failedBilling, reservedPoints);
+    if (actualOnFailure === 0) {
       await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理重新規劃失敗退回");
     } else {
       await settleUsagePoints({
         userId: auth.user.id,
         groupId: project.groupId,
         reserved: reservedPoints,
-        actual: burned,
+        actual: actualOnFailure,
         reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
         settleKey: billingSettleKey,
       });

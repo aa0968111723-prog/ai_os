@@ -187,6 +187,27 @@ export function llmPointsForUsageEntries(entries: LlmUsageEntry[]): number | nul
   return pointsFromUsd(usd);
 }
 
+/**
+ * 規劃失敗時要結算的實扣點數（#672）。
+ *
+ * `llmPointsForUsageEntries` 的 null 同時代表「沒呼叫」與「付費呼叫沒回 usage」。
+ * 成功路徑對後者保留預留；失敗路徑若把 null 當全額退回，餵壞 JSON / 斷 usage
+ * 就成了免費燒平台額度的門路。這裡把兩種 null 拆開：
+ * - 量得到 → 用實際值
+ * - 付費模型已進 billing 但沒 usage → 保留預留
+ * - 空陣列或只有免費模型 → 0（全額退回預留）
+ */
+export function plannerPointsAfterFailure(entries: LlmUsageEntry[], reserved: number): number {
+  // NIM+fal auto: a free model marks the batch "measured=0". A later paid
+  // call with no usage must still keep the reserve, not refund as free.
+  const paidUnmeasured = entries.some((entry) => !isFreeLlmModel(entry.model) && llmUsdForUsage(entry.model, entry.usage) == null);
+  if (paidUnmeasured) {
+    const r = Number.isFinite(reserved) ? Math.max(0, Math.round(reserved)) : 0;
+    return r;
+  }
+  return llmPointsForUsageEntries(entries) ?? 0;
+}
+
 export interface PlannerEstimateInput {
   /** 送進模型的提示詞字數 */
   promptChars: number;

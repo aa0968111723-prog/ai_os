@@ -9,6 +9,7 @@ import {
   llmPointsForUsage,
   llmPointsForUsageEntries,
   llmUsdForUsage,
+  plannerPointsAfterFailure,
   plannerCostLabel,
   plannerModelId,
   pointsFromUsd,
@@ -115,6 +116,39 @@ describe("llmPricing：多模型用量（auto 備援、JSON 修復重試）", ()
 
   it("付費呼叫即使極小額也至少 1 點（帳要留得下來）", () => {
     expect(llmPointsForUsageEntries([{ model: quality, usage: { costUsd: 0.0001 } }])).toBe(1);
+  });
+});
+
+describe("#672 plannerPointsAfterFailure", () => {
+  const quality = AGENT_LLM_MODEL_IDS.fal_quality;
+  const free = "meta/llama-3.3-70b-instruct";
+
+  it("never called or only free models → 0 so reserved is refunded", () => {
+    expect(plannerPointsAfterFailure([], 12)).toBe(0);
+    expect(plannerPointsAfterFailure([{ model: free }], 12)).toBe(0);
+  });
+
+  it("paid completion with usage → measured points, not reserved", () => {
+    const measured = llmPointsForUsageEntries([{
+      model: quality,
+      usage: { promptTokens: 100_000, completionTokens: 10_000 },
+    }]) as number;
+    expect(plannerPointsAfterFailure([{
+      model: quality,
+      usage: { promptTokens: 100_000, completionTokens: 10_000 },
+    }], 99)).toBe(measured);
+    expect(measured).toBeGreaterThan(0);
+    expect(measured).not.toBe(99);
+  });
+
+  it("paid completion missing usage keeps reserved instead of a free full refund", () => {
+    expect(plannerPointsAfterFailure([{ model: quality }], 12)).toBe(12);
+    expect(plannerPointsAfterFailure([{ model: free }, { model: quality }], 7)).toBe(7);
+  });
+
+  it("non-finite reserved with unmeasured paid usage settles 0, not NaN", () => {
+    expect(plannerPointsAfterFailure([{ model: quality }], Number.NaN)).toBe(0);
+    expect(plannerPointsAfterFailure([{ model: quality }], -4)).toBe(0);
   });
 });
 
