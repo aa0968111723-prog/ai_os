@@ -493,19 +493,34 @@ const GENERATION_PREVIEW_LIMIT = 15;
  * `preview` 與 `text` 一律由**同一次迭代**產生。分開查兩次就會出現「AI 說找不到、
  * 畫面卻顯示縮圖」這種自相矛盾——而系統提示明訂 AI 只能引用工具結果裡實際列出的項目。
  */
+function resolveReadableDb(
+  listed: readonly ReadableDb[],
+  evidence: readonly ReadableDb[],
+  token: string,
+): ReadableDb | undefined {
+  const key = token.trim();
+  if (!key) return undefined;
+  const byRef = listed.find((db) => db.ref === key) ?? evidence.find((db) => db.ref === key);
+  if (byRef) return byRef;
+  const lower = key.toLocaleLowerCase();
+  const nameHits = evidence.filter((db) => db.name.toLocaleLowerCase() === lower);
+  return nameHits.length === 1 ? nameHits[0] : undefined;
+}
+
 async function runLookupTool(
   auth: AuthState,
   project: typeof schema.projects.$inferSelect,
   scenes: Array<typeof schema.scenes.$inferSelect>,
   readableDbs: ReadableDb[],
   call: z.infer<typeof toolCallSchema>,
+  evidenceDbs: readonly ReadableDb[] = readableDbs,
 ): Promise<{ step: string; text: string; preview: ToolResultPreview }> {
   if (call.tool === "query_database") {
     const ref = call.args?.dbRef?.trim() ?? "";
-    const target = readableDbs.find((d) => d.ref === ref);
+    const target = resolveReadableDb(readableDbs, evidenceDbs, ref);
     if (!target) {
-      const text = readableDbs.length
-        ? `沒有代號「${ref}」的資料庫——可用代號：${readableDbs.map((d) => `${d.ref}(${d.name})`).join("、")}`
+      const text = evidenceDbs.length || readableDbs.length
+        ? `沒有代號「${ref}」的資料庫——可用代號：${readableDbs.map((d) => `${d.ref}(${d.name})`).join("、")}；未展開的庫請用完整庫名`
         : "目前沒有 AI 可讀的資料庫";
       return { step: `查資料庫(代號 ${ref || "未填"} 不存在)`, text, preview: { kind: "text", text } };
     }
@@ -1317,7 +1332,7 @@ ${forceFinal
 - {"tool":"read_scene","args":{"sceneNo":3}}：讀某一鏡的完整內容（提示詞/旁白全文）
 - {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
-- {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
+- {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 優先抄 <可讀資料庫> 的代號；未展開的庫可用完整且唯一的庫名；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
 - {"tool":"list_tasks","args":{}}：這個專案的人員任務與待核准（標題／狀態／負責人／期限）——被問到「誰卡住」「還有什麼要做」「等誰」時查這個
 - {"tool":"list_schedule","args":{}}：這個專案相關的行程與交付死線（含組層級；args 可加 {"includePast":true} 回顧過去）——被問到「什麼時候要交」「這週有什麼」時查這個
 - {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆）——被問到「上次討論的結論」「有沒有記錄」時查這個
@@ -1446,7 +1461,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             });
             emit("lookup", `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}…`, { tool: call.tool });
           },
-          execTool: (call) => runLookupTool(input.auth, project, scenes, readableDbs, call),
+          execTool: (call) => runLookupTool(input.auth, project, scenes, readableDbs, call, readableDbInventory.evidence),
           onToolResult: async (call, r) => {
             // preview 一併落庫：trace 是「實際運作紀錄」，只存一段給 LLM 讀的文字摘要，
             // 使用者事後回看仍然看不到工具究竟查到了什麼。

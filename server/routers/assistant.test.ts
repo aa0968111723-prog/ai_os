@@ -162,6 +162,8 @@ describe("project assistant custom-DB inventory", () => {
     expect(source).toContain("readableDbInventory.evidence");
     expect(source).toContain("readableDbInventory.total");
     expect(source).toContain("ASSISTANT_DB_REF_LIMIT");
+    expect(source).toContain("resolveReadableDb");
+    expect(source).toContain("readableDbInventory.evidence)");
     expect(source).not.toContain("retrieveAssistantDatabaseEvidence(readableDbs,");
   });
 });
