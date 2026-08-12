@@ -230,15 +230,18 @@ describe("card write retry replay and reference ACL", () => {
   const characterSource = readFileSync(new URL("../routers/characters.ts", import.meta.url), "utf8");
   const propSource = readFileSync(new URL("../routers/props.ts", import.meta.url), "utf8");
   const presetSource = readFileSync(new URL("../routers/scenePresets.ts", import.meta.url), "utf8");
+  const lookSource = readFileSync(new URL("../routers/characterLooks.ts", import.meta.url), "utf8");
 
   it("site and MCP card creates replay the same author+project+identity within 2 minutes", () => {
     expect(characterSource).toContain("120_000");
     expect(propSource).toContain("120_000");
     expect(presetSource).toContain("120_000");
+    expect(lookSource).toContain("120_000");
     expect(mcpKnowledgeSource).toContain("CARD_REPLAY_MS = 120_000");
     expectBefore(characterSource, "gte(schema.characters.createdAt", ".insert(schema.characters)");
     expectBefore(propSource, "gte(schema.props.createdAt", ".insert(schema.props)");
     expectBefore(presetSource, "gte(schema.scenePresets.createdAt", ".insert(schema.scenePresets)");
+    expectBefore(lookSource, "gte(schema.characterLooks.createdAt", ".insert(schema.characterLooks)");
     expectBefore(mcpKnowledgeSource, "gte(schema.characters.createdAt", ".insert(schema.characters)");
     expectBefore(mcpKnowledgeSource, "gte(schema.props.createdAt", ".insert(schema.props)");
     expectBefore(mcpKnowledgeSource, "gte(schema.scenePresets.createdAt", ".insert(schema.scenePresets)");

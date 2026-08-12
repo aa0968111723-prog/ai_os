@@ -10,6 +10,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { assertReferenceImage } from "../services/referenceAsset";
+import { isUniqueViolation } from "../services/generationCore";
 import { LOOK_COSTUME_MAX, LOOK_NAME_MAX, MAX_PROJECT_LOOKS } from "../../shared/story";
 import { applyWithRevision } from "../services/revisionGuard";
 
@@ -37,6 +38,8 @@ export const characterLooksRouter = router({
         costume: z.string().trim().max(LOOK_COSTUME_MAX).optional(),
         notes: z.string().trim().max(500).optional(),
         referenceAssetId: z.string().uuid().optional(),
+        /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原造型，不重複建立 */
+        clientRequestId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -45,6 +48,14 @@ export const characterLooksRouter = router({
       requireGroup(ctx.auth, owner.groupId);
       await assertProjectEditable(ctx.auth, { id: owner.projectId, groupId: owner.groupId });
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId);
+
+      if (input.clientRequestId) {
+        const [existing] = await db
+          .select()
+          .from(schema.characterLooks)
+          .where(and(eq(schema.characterLooks.id, input.clientRequestId), eq(schema.characterLooks.projectId, owner.projectId)));
+        if (existing) return existing;
+      }
 
       const costume = input.costume || null;
       const [recent] = await db.select().from(schema.characterLooks).where(and(
@@ -65,21 +76,33 @@ export const characterLooksRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `此專案造型已達上限（${MAX_PROJECT_LOOKS} 個）——先刪不用的再新增` });
       }
 
-      const [row] = await db
-        .insert(schema.characterLooks)
-        .values({
-          projectId: owner.projectId,
-          groupId: owner.groupId,
-          characterId: owner.id,
-          name: input.name,
-          costume,
-          notes: input.notes || null,
-          referenceAssetId: input.referenceAssetId,
-          source: "manual",
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return row;
+      try {
+        const [row] = await db
+          .insert(schema.characterLooks)
+          .values({
+            id: input.clientRequestId,
+            projectId: owner.projectId,
+            groupId: owner.groupId,
+            characterId: owner.id,
+            name: input.name,
+            costume,
+            notes: input.notes || null,
+            referenceAssetId: input.referenceAssetId,
+            source: "manual",
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return row;
+      } catch (err) {
+        if (input.clientRequestId && isUniqueViolation(err)) {
+          const [existing] = await db
+            .select()
+            .from(schema.characterLooks)
+            .where(and(eq(schema.characterLooks.id, input.clientRequestId), eq(schema.characterLooks.projectId, owner.projectId)));
+          if (existing) return existing;
+        }
+        throw err;
+      }
     }),
 
   update: authedProcedure
