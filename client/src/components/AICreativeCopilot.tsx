@@ -1181,18 +1181,21 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
                 }]);
                 setAssistantConversation<ChatMessage>(groupId, (previous) => ({
                   ...previous,
+                  // Import is a verified step, not the whole multi-step goal. Keep
+                  // typed result refs so "整理一下／放第三鏡" continues the same goal.
                   activeGoal: previous.activeGoal
                     ? {
                         ...previous.activeGoal,
-                        status: "completed",
+                        status: "ready",
                         missingSlots: [],
                         resultRefIds: notice.assetIds.slice(0, 20),
-                      }
+                        updatedAt: new Date().toISOString(),
+                    }
                     : previous.activeGoal,
                 }));
                 pushMessage({
                   role: "assistant",
-                  text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理，你可以繼續聊天。`,
+                  text: `✓ ${notice.count} 項資料已安全加入。AI 正在背景整理；若還要整理或放到分鏡，直接接著說即可。`,
                   runStatus: "completed",
                 });
               }}
