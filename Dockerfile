@@ -22,6 +22,7 @@ ARG SOURCE_VERSION=""
 RUN SHA="${BUILD_SHA:-${ZEABUR_GIT_COMMIT:-${RAILWAY_GIT_COMMIT_SHA:-$SOURCE_VERSION}}}"; printf '%s' "$SHA" > /app/BUILD_SHA
 ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME ZEABUR_GIT_COMMIT=$ZEABUR_GIT_COMMIT
 # 正式映像只安裝 runtime dependencies；測試、Vite 與 TypeScript 工具不進 production layer。
+# tsx 是 migration/check 啟動路徑的 runtime dependency，因此保留在 production dependencies。
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=builder /app/dist ./dist
@@ -32,9 +33,9 @@ COPY --from=builder /app/server/db ./server/db
 # 分詞器詞表（server/services/t5Tokenizer 於執行期讀取；不帶進來 FLUX 那條線就量不到 token）
 COPY --from=builder /app/server/assets ./server/assets
 COPY --from=builder /app/scripts/db ./scripts/db
-COPY --from=builder /app/scripts/start.sh ./start.sh
+COPY --from=builder /app/scripts/start.sh ./scripts/start.sh
 # Windows checkout 也必須產出可由 Alpine /bin/sh 執行的 LF 腳本。
-RUN sed -i 's/\r$//' /app/start.sh
+RUN sed -i 's/\r$//' /app/scripts/start.sh
 # 資料下載區（需求 #11）在執行期服務 docs/ 與 README 原檔——runner 也要帶著
 COPY --from=builder /app/docs ./docs
 COPY --from=builder /app/README.md ./README.md
@@ -47,5 +48,5 @@ STOPSIGNAL SIGTERM
 # 使用 Node 內建 fetch，避免為單一健康檢查把 curl/wget 額外裝進 production image。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-# 啟動腳本只會套用映像內已版本化的 migration，成功通過 drift gate 後才啟動應用。
-CMD ["sh", "/app/start.sh"]
+# Docker CMD 與 npm start 共用同一條 migration-first 啟動路徑，避免平台 Start Command 覆寫時跳過 migration。
+CMD ["sh", "/app/scripts/start.sh"]
