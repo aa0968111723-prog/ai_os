@@ -340,6 +340,7 @@ export function evidenceScopeForGoal(frame: AssistantGoalFrame): AssistantEviden
   if (source === "GOOGLE_DRIVE" || source === "GOOGLE_PHOTOS" || source === "URL") return "REMOTE_SOURCE";
   if (source === "AIOS_LIBRARY") return "AIOS_LIBRARY";
   if (source === "PROJECT_ASSETS") return "PROJECT_ASSETS";
+  if (source === "CUSTOM_DATABASE") return "PROJECT_USAGE";
   if (source === "EXTERNAL_AI" || source === "EXTERNAL_EDITOR") return "IMPORTED_PROVENANCE";
   if (frame.scope.projectId) return "PROJECT_USAGE";
   return "UNKNOWN";

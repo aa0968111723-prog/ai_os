@@ -292,6 +292,8 @@ describe("assistantSemanticResolution", () => {
     ["安排明天下午三點", "CREATE", "SCHEDULE"],
     ["最近匯入什麼", "READ", "ASSET"],
     ["把那些放第三鏡", "ATTACH", "SHOT"],
+    ["list projects", "LIST", "PROJECT"],
+    ["幫我 list 所有專案", "LIST", "PROJECT"],
   ] as const)("fuzz %s", (utterance, operation, objectType) => {
     const { frame } = deriveDeterministicGoalFrame(utterance);
     expect(frame.operation).toBe(operation);
