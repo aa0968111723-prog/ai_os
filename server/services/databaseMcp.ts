@@ -343,11 +343,20 @@ export type McpFileListItem = {
   snippet?: string;
 };
 
-/** 文件列表：SQL 投影字數／snippet，不回 sourceUrl */
+export type McpFileListInventory = {
+  items: McpFileListItem[];
+  listedCount: number;
+  total: number;
+  truncated: boolean;
+  cap: number;
+  note?: string;
+};
+
+/** 文件列表：SQL 投影字數／snippet，不回 sourceUrl。total 必須另計，否則 100 筆頁面會被當成整庫。 */
 export async function listMcpDatabaseFiles(
   table: DataTableRow,
   opts: { keyword?: string; category?: string; limit?: unknown } = {},
-): Promise<McpFileListItem[]> {
+): Promise<McpFileListInventory> {
   const keyword = normalizeDatabaseSearchKeyword(opts.keyword ?? "", MCP_DB_FILE_KEYWORD_LIMIT);
   const keywordLower = keyword.toLowerCase();
   const categoryFilter = (opts.category ?? "").trim().slice(0, 30);
@@ -382,23 +391,27 @@ export async function listMcpDatabaseFiles(
       end`
     : sql<string | null>`null`;
 
-  const files = await db
-    .select({
-      id: schema.dataFiles.id,
-      name: schema.dataFiles.name,
-      mime: schema.dataFiles.mime,
-      sizeBytes: schema.dataFiles.sizeBytes,
-      category: schema.dataFiles.category,
-      aiDescription: schema.dataFiles.aiDescription,
-      readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
-      snippet: snippetExpr,
-    })
-    .from(schema.dataFiles)
-    .where(and(...conds))
-    .orderBy(desc(schema.dataFiles.createdAt))
-    .limit(limit);
+  const where = and(...conds);
+  const [files, countRows] = await Promise.all([
+    db
+      .select({
+        id: schema.dataFiles.id,
+        name: schema.dataFiles.name,
+        mime: schema.dataFiles.mime,
+        sizeBytes: schema.dataFiles.sizeBytes,
+        category: schema.dataFiles.category,
+        aiDescription: schema.dataFiles.aiDescription,
+        readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
+        snippet: snippetExpr,
+      })
+      .from(schema.dataFiles)
+      .where(where)
+      .orderBy(desc(schema.dataFiles.createdAt))
+      .limit(limit),
+    db.select({ n: sql<number>`count(*)` }).from(schema.dataFiles).where(where),
+  ]);
 
-  return files.map((f) => ({
+  const items = files.map((f) => ({
     fileId: f.id,
     name: f.name,
     mime: f.mime,
@@ -409,4 +422,13 @@ export async function listMcpDatabaseFiles(
     aiDescription: f.aiDescription ? f.aiDescription.slice(0, MCP_DB_AI_DESCRIPTION_MAX) : null,
     ...(f.snippet ? { snippet: f.snippet } : {}),
   }));
+  const total = Number(countRows[0]?.n ?? 0);
+  return {
+    items,
+    listedCount: items.length,
+    total,
+    truncated: total > items.length,
+    cap: limit,
+    ...(total > items.length ? { note: `文件共 ${total} 筆；此清單只展開 ${items.length} 筆，不得宣稱已列出全部` } : {}),
+  };
 }

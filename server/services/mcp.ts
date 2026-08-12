@@ -305,7 +305,7 @@ export const TOOLS = [
   {
     name: "list_database_files",
     description:
-      "列出資料庫文件（上傳／匯入／圖影）：名稱、類型、分類、AI 描述、可讀字數；keyword 回匹配片段。不回全文、不回來源 URL（防洩漏）。全文用 read_database_file",
+      "列出資料庫文件（上傳／匯入／圖影）：名稱、類型、分類、AI 描述、可讀字數。回 items + total + truncated；超過 limit（預設 100、上限 100）不得宣稱已列出全部。keyword 回匹配片段。不回全文、不回來源 URL（防洩漏）。全文用 read_database_file",
     inputSchema: {
       type: "object",
       properties: {

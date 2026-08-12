@@ -131,4 +131,11 @@ describe("mcp.ts wires databaseMcp (no full-text select on list files)", () => {
     const catalog = readFileSync(new URL("../../shared/mcpCatalog.ts", import.meta.url), "utf8");
     expect(catalog).toContain("update_database_row");
   });
+
+  it("list_database_files counts matching PostgreSQL rows instead of treating the 100-row page as the library", () => {
+    const source = readFileSync(new URL("./databaseMcp.ts", import.meta.url), "utf8");
+    expect(source).toContain("文件共 ${total} 筆");
+    expect(source).toContain("truncated: total > items.length");
+    expect(source).toContain("MCP_DB_FILE_LIST_LIMIT");
+  });
 });

@@ -68,7 +68,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "add_database_row", title: "新增資料列", access: "write", blurb: "在開放 AI 寫入的庫新增一列；可帶 projectId 自動填「關聯專案」欄。" },
   { name: "add_database_rows", title: "批次新增資料列", access: "write", idempotent: true, blurb: "以必填 idempotencyKey 在 24 小時內安全重試，一次新增 1–500 列而不重複寫入。" },
   { name: "update_database_row", title: "更新資料列", access: "write", idempotent: true, blurb: "更新一列（整列覆寫）；可帶 projectId 補齊關聯專案欄。" },
-  { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出文件（名稱／分類／AI 描述／可讀字數）；關鍵字回片段，不回全文與來源網址。" },
+  { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出文件（名稱／分類／AI 描述／可讀字數）。回 items + total，超過 100 筆 truncated=true；關鍵字回片段，不回全文與來源網址。" },
   { name: "read_database_file", title: "讀取資料庫文件", access: "read", blurb: "讀文件抽出的純文字（PDF/DOCX/HTML…）；圖影回 AI 描述＋短效下載網址。" },
   { name: "get_database_stats", title: "資料庫資訊量", access: "read", blurb: "一個資料庫的資訊量統計：列數、文件數、圖影音文分佈、容量、AI 可讀字數、分類分佈。" },
   { name: "get_project_status", title: "專案全貌", access: "read", blurb: "一次取回分鏡、生成、AI 代理、排程。生成 byStatus／awaitingApproval 與 agentRuns.activeTotal 是全專案 COUNT，不是清單頁長度。" },
