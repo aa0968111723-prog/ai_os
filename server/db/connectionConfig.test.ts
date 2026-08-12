@@ -23,10 +23,12 @@ describe("parseDatabaseUrl", () => {
     expect(JSON.stringify(target)).not.toContain("secret");
   });
 
-  it("requires TLS for a remote host unless sslmode=disable", () => {
+  it("does not force TLS for a remote host unless sslmode explicitly enables it", () => {
     const remote = parseDatabaseUrl("postgres://u:p@db.example.com:5432/app");
     expect(remote.hostnameKind).toBe("public");
-    expect(remote.sslRequired).toBe(true);
+    expect(remote.sslRequired).toBe(false);
+    const require = parseDatabaseUrl("postgres://u:p@db.example.com:5432/app?sslmode=require");
+    expect(require.sslRequired).toBe(true);
     const disabled = parseDatabaseUrl("postgres://u:p@db.example.com:5432/app?sslmode=disable");
     expect(disabled.sslRequired).toBe(false);
   });
