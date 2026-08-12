@@ -101,7 +101,8 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "add_database_row", domain: "DATABASE", access: "WRITE", label: "寫入資料庫", risk: "SAFE_WRITE", direct: false },
   { id: "read_schedule", domain: "SCHEDULE", access: "READ", label: "讀取排程", risk: "READ", direct: true },
   // 排程可能經既有同步器寫到 Google Calendar，因此按 EXTERNAL 處理，不自動送出。
-  { id: "add_schedule_item", domain: "SCHEDULE", access: "WRITE", label: "建立排程", risk: "EXTERNAL", direct: false },
+  // executionMode DIRECT_TOOL：讓執行端 executionPlan 維持 DIRECT（寫入仍走確認卡，不會自動送出）。
+  capability({ id: "add_schedule_item", domain: "SCHEDULE", access: "WRITE", label: "建立排程", risk: "EXTERNAL", direct: false, executionMode: "DIRECT_TOOL", handler: "scheduleCore.addScheduleItem", resultType: "schedule", verificationStrategy: "read_back" }),
   { id: "read_members", domain: "MEMBER", access: "READ", label: "讀取組員與工作負荷", risk: "READ", direct: true },
   { id: "read_collaboration", domain: "COLLABORATION", access: "READ", label: "讀取阻塞與代理狀態", risk: "READ", direct: true },
   capability({ id: "inspect_computer_runtime", domain: "COMPUTER", access: "READ", label: "確認 Browser / Desktop Runtime 能力", risk: "READ", direct: true, executionMode: "DIRECT_TOOL", handler: "computerRuntime.status", resultType: "generic", verificationStrategy: "read_back" }),
@@ -142,6 +143,8 @@ const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> =
   { id: "create_project", pattern: /(?:新增|建立|創建|開).{0,16}(?:專案|project)/i },
   { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
   { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
+  { id: "add_schedule_item", pattern: /(?:安排|排入|預約|預定).{0,20}(?:行程|排程|會議|活動|schedule)|(?:行程|排程|會議|活動|schedule).{0,6}(?:安排|排入|預約|預定)/i },
+  { id: "read_schedule", pattern: /(?:行程|排程|schedule).{0,12}(?:有哪些|什麼|多少)|(?:查|看|列).{0,12}(?:行程|排程|schedule)/i },
 ];
 
 /** Match a concrete, already-registered capability before considering planning. */

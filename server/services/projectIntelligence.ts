@@ -63,7 +63,7 @@ export function formatProjectIntelligence(
     ? snapshot.agents.blockers.join("；")
     : "無";
   return [
-    `素材：共 ${snapshot.assets.total}（${kinds}）；可作來源：${sourceReady}`,
+    `專案素材庫（assets 表，非自訂資料庫）：共 ${snapshot.assets.total}（${kinds}）；可作來源：${sourceReady}`,
     `生成：完成 ${snapshot.generations.done}／進行中 ${snapshot.generations.active}／失敗 ${snapshot.generations.failed}；完結成功率 ${successRate}`,
     `最近生成失敗：${failures}`,
     `代理：執行中 ${snapshot.agents.active}／等待 ${snapshot.agents.waiting}／失敗 ${snapshot.agents.failed}；阻塞：${blockers}`,

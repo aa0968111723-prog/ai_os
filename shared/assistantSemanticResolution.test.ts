@@ -121,6 +121,29 @@ describe("assistantSemanticResolution", () => {
     expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_assets" });
   });
 
+  it("treats '最近匯入了哪些素材？' as a recent-result read, not a source-required import", () => {
+    const { frame } = deriveDeterministicGoalFrame("最近匯入了哪些素材？");
+    expect(frame).toMatchObject({ operation: "READ", objectType: "ASSET", missingSlots: [] });
+    expect(frame.referents).toContain("recent_results");
+    expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_assets" });
+  });
+
+  it("maps '幫我安排明天下午三點的會議' to schedule creation with a DIRECT plan", () => {
+    const { frame } = deriveDeterministicGoalFrame("幫我安排明天下午三點的會議");
+    expect(frame).toMatchObject({ operation: "CREATE", objectType: "SCHEDULE", desiredOutcome: "PERSIST_SCHEDULE", missingSlots: [] });
+    const match = matchAssistantCapabilityForGoal(frame);
+    expect(match).toMatchObject({ status: "matched", capabilityId: "add_schedule_item" });
+    const plan = executionPlanFromGoal(frame, match, "安排會議");
+    expect(plan).toMatchObject({ intent: "DIRECT", capabilityId: "add_schedule_item" });
+  });
+
+  it("maps a schedule listing to read_schedule", () => {
+    const { frame } = deriveDeterministicGoalFrame("這週有什麼行程？");
+    expect(frame.operation).toBe("LIST");
+    expect(frame.objectType).toBe("SCHEDULE");
+    expect(matchAssistantCapabilityForGoal(frame)).toMatchObject({ status: "matched", capabilityId: "read_schedule" });
+  });
+
   it("resolves '剛建立的專案' from the latest verified CreateProjectResult instead of a stale active goal", () => {
     const result = resolveWorkingProject({
       message: "把這個 URL 加入剛建立的專案：https://example.com/a.pdf",

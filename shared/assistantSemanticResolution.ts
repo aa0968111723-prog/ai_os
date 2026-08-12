@@ -75,7 +75,11 @@ const VERIFY_RE = /(?:確認|驗證|核對|verify)/iu;
 const GENERATE_RE = /(?:生成|產生|生圖|生影片|做圖|做影片|generate)/iu;
 const CREATE_RE = /(?:建立|新增|創建|開一個|建一個|create)/iu;
 const UPDATE_RE = /(?:更新|修改|調整|改成|update|modify)/iu;
-const RECENT_IMPORT_READ_RE = /(?:查看|看|顯示|開啟|打開|show|view).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|剛匯入)(?:的)?(?:資料|素材|檔案)?/iu;
+const SCHEDULE_OBJECT_RE = /(?:行程|排程|schedule|行事曆|calendar|會議|活動)/iu;
+/** 讀取情境的行程指涉排除「活動」，避免把「這次活動的素材」誤判成排程。 */
+const SCHEDULE_READ_RE = /(?:行程|排程|schedule|行事曆|calendar|會議|開會)/iu;
+const SCHEDULE_CREATE_RE = /(?:安排|排入|預約|預定).{0,20}(?:行程|排程|會議|活動|schedule)|(?:行程|排程|會議|活動|schedule).{0,6}(?:安排|排入|預約|預定)/iu;
+const RECENT_IMPORT_READ_RE = /(?:(?:查看|看|顯示|開啟|打開|show|view).{0,12}(?:剛(?:才|剛)?(?:匯入|加入|帶入)|剛匯入)(?:的)?(?:資料|素材|檔案)?|(?:最近|近期|最新).{0,8}(?:匯入|加入|帶入|上傳|新增).{0,12}(?:哪些|什麼|多少))/iu;
 
 const ASSET_RE = /(?:素材|圖片|照片|影片|音訊|檔案|文件|這些|那批|剛才那些|asset)/iu;
 const PROJECT_RE = /(?:專案|project)/iu;
@@ -110,6 +114,7 @@ function operationFromText(text: string): AssistantGoalOperation {
   if (GENERATE_RE.test(text)) return "GENERATE";
   if (LIST_RE.test(text)) return "LIST";
   if (FIND_RE.test(text)) return "FIND";
+  if (SCHEDULE_CREATE_RE.test(text)) return "CREATE";
   if (CREATE_RE.test(text)) return "CREATE";
   if (UPDATE_RE.test(text)) return "UPDATE";
   return "READ";
@@ -121,6 +126,8 @@ function objectFromText(text: string, operation: AssistantGoalOperation): Assist
   if (SCENE_RE.test(text)) return "SCENE";
   if (SCRIPT_RE.test(text)) return "SCRIPT";
   if (TASK_RE.test(text)) return "TASK";
+  if (operation === "CREATE" && SCHEDULE_CREATE_RE.test(text)) return "SCHEDULE";
+  if ((operation === "READ" || operation === "LIST" || operation === "COUNT" || operation === "FIND") && SCHEDULE_READ_RE.test(text)) return "SCHEDULE";
   if (PROJECT_RE.test(text) && operation === "CREATE") return "PROJECT";
   if (GENERATION_RE.test(text)) return "GENERATION";
   if (ASSET_RE.test(text) || operation === "IMPORT" || operation === "ATTACH" || operation === "ORGANIZE" || operation === "GENERATE") return "ASSET";
@@ -150,6 +157,7 @@ function desiredOutcomeFor(operation: AssistantGoalOperation, objectType: Assist
   if (operation === "GENERATE") return "START_GENERATION";
   if (operation === "CREATE" && objectType === "PROJECT") return "PERSIST_PROJECT";
   if (operation === "CREATE" && (objectType === "SHOT" || objectType === "SCENE")) return "PERSIST_STORYBOARD";
+  if (operation === "CREATE" && objectType === "SCHEDULE") return "PERSIST_SCHEDULE";
   return "ANSWER";
 }
 
@@ -276,6 +284,7 @@ export function matchAssistantCapabilityForGoal(frame: AssistantGoalFrame): Assi
     if (frame.objectType === "PROJECT") capabilityId = "create_project";
     else if (frame.objectType === "TASK") capabilityId = "create_task";
     else if (frame.objectType === "SHOT" || frame.objectType === "SCENE") capabilityId = "split_script";
+    else if (frame.objectType === "SCHEDULE") capabilityId = "add_schedule_item";
   } else if (frame.operation === "COUNT" || frame.operation === "LIST" || frame.operation === "FIND" || frame.operation === "READ" || frame.operation === "COMPARE" || frame.operation === "VERIFY") {
     if (source === "GOOGLE_DRIVE" || source === "GOOGLE_PHOTOS") {
       return {
@@ -289,6 +298,7 @@ export function matchAssistantCapabilityForGoal(frame: AssistantGoalFrame): Assi
     else if (frame.objectType === "SCRIPT") capabilityId = "read_script";
     else if (frame.objectType === "SHOT" || frame.objectType === "SCENE") capabilityId = "read_storyboard";
     else if (frame.objectType === "GENERATION") capabilityId = "read_generations";
+    else if (frame.objectType === "SCHEDULE") capabilityId = "read_schedule";
     else if (frame.objectType === "ASSET" || source === "PROJECT_ASSETS" || source === "AIOS_LIBRARY") capabilityId = "read_assets";
     else capabilityId = "read_context";
   }

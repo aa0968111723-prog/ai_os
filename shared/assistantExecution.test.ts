@@ -10,6 +10,7 @@ describe("assistant execution fast path", () => {
     ["如何建立任務？", "ASK"],
     ["你可以用瀏覽器嗎？", "ASK"],
     ["幫我開啟瀏覽器", "DIRECT"],
+    ["幫我安排明天下午三點的會議", "DIRECT"],
     ["幫我規劃六鏡腳本", "AGENT"],
     ["持續監控失敗的生成並提醒我", "WATCH"],
   ] as const)("classifies %s as %s", (message, expected) => {
@@ -36,6 +37,12 @@ describe("assistant execution fast path", () => {
 
     const ask = classifyAssistantRequest("如何建立一則筆記？");
     expect(canDirectlyExecuteCapability(ask, "add_note")).toBe(false);
+  });
+
+  it("classifies schedule creation as DIRECT add_schedule_item but never auto-runs it", () => {
+    const plan = classifyAssistantRequest("幫我安排明天下午三點的會議");
+    expect(plan).toMatchObject({ intent: "DIRECT", capabilityId: "add_schedule_item", executionMode: "DIRECT_TOOL" });
+    expect(canDirectlyExecuteCapability(plan, "add_schedule_item")).toBe(false);
   });
 
   it("routes capability-first imports and notes without creating a campaign", () => {
