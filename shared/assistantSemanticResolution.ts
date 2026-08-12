@@ -262,10 +262,32 @@ function mergePreviousFrame(
  * frames intentionally carry lower confidence so the server can ask the
  * semantic model resolver rather than turning more regex into authority.
  */
+const ABORT_RE = /^(?:先不要|先別|不要了|先算了|取消|停下來|先停|stop|cancel)[。！!？?]?$/iu;
+
 export function deriveDeterministicGoalFrame(
   message: string,
   previous?: AssistantActiveGoal,
 ): { frame: AssistantGoalFrame; continuation: AssistantContinuationType; origin: SemanticResolutionOrigin } {
+  if (ABORT_RE.test(message.trim())) {
+    return {
+      frame: {
+        intent: "QUERY",
+        operation: "READ",
+        objectType: "UNKNOWN",
+        scope: {},
+        referents: previous ? ["previous_candidate"] : [],
+        constraints: ["abort_pending"],
+        desiredOutcome: "ANSWER",
+        missingSlots: [],
+        understandingConfidence: "high",
+        sourceConfidence: "high",
+        entityConfidence: "medium",
+        capabilityConfidence: "high",
+      },
+      continuation: "NEW_GOAL",
+      origin: "deterministic",
+    };
+  }
   const continuation = continuationHint(message);
   const merged = mergePreviousFrame(message, continuation, previous);
   if (merged) {

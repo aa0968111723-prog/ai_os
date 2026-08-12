@@ -267,6 +267,15 @@ describe("assistantSemanticResolution", () => {
     expect(b.frame.operation).toBe("ATTACH");
   });
 
+  it("先不要 aborts instead of completing the previous write", () => {
+    const previous = active();
+    const { frame, continuation } = deriveDeterministicGoalFrame("先不要", previous);
+    expect(continuation).toBe("NEW_GOAL");
+    expect(frame.constraints).toContain("abort_pending");
+    expect(frame.desiredOutcome).toBe("ANSWER");
+    expect(frame.operation).not.toBe("IMPORT");
+  });
+
   it("runtime-blocked generate_media is unsupported instead of a fake completion", () => {
     const { frame } = deriveDeterministicGoalFrame("幫我生成一張圖");
     const match = matchAssistantCapabilityForGoal(frame, { blockedCapabilityIds: ["generate_media"] });

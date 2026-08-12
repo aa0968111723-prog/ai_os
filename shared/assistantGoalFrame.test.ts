@@ -47,5 +47,6 @@ describe("assistantGoalFrame", () => {
     expect(continuationHint("整理一下")).toBe("CONTINUE");
     expect(continuationHint("放第三鏡")).toBe("CONTINUE");
     expect(continuationHint("幫我建立一個新專案")).toBe("NEW_GOAL");
+    expect(continuationHint("不是這個")).toBe("CORRECT");
   });
 });
