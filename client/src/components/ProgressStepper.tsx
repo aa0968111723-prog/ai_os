@@ -25,8 +25,10 @@ export const getStepState = (stepId: number, currentStep: number): StepState => 
 
 /** 節點內微圖標 */
 function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }) {
-  const strokeColor = state === "idle" ? "#666" : "#ffffff";
-  const fillColor = state === "idle" ? "#555" : "#ffffff";
+  // 設計 token：idle 用次前景色（灰階語彙），active/done 用主前景色。
+  // #fff 僅保留給 primary-solid 底上的圖示——本元件節點是漸層底，不屬白字情境。
+  const strokeColor = state === "idle" ? "var(--fg-secondary)" : "var(--fg)";
+  const fillColor = state === "idle" ? "var(--fg-secondary)" : "var(--fg)";
 
   switch (type) {
     case "bulb":
