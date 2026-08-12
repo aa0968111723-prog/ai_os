@@ -498,6 +498,50 @@ describe("siteActionDoneLink", () => {
     expect(onNavigate).toHaveBeenCalledWith(`/p/${PROJECT_ID}`);
   });
 
+  it("清空對話會先中止同一條 run，晚到的回覆不會復活", async () => {
+    let handlersRef: { onDone: (d: unknown) => void } | undefined;
+    let sentSignal: AbortSignal | undefined;
+    streamMock.mockImplementationOnce(({ handlers, signal }: { handlers: { onDone: (d: unknown) => void }; signal: AbortSignal }) => {
+      handlersRef = handlers;
+      sentSignal = signal;
+      return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(true), { once: true }));
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await sendMessage(user, "幫我建立任務");
+    await user.click(screen.getByLabelText("清空對話紀錄"));
+    expect(sentSignal?.aborted).toBe(true);
+    handlersRef?.onDone(DONE);
+    await waitFor(() => expect(screen.queryByText(DONE.answer)).not.toBeInTheDocument());
+    expect(screen.queryByRole("log")).not.toBeInTheDocument();
+  });
+
+  it("等待檔案時只顯示一次問題，不顯示工程卡或錯誤靈感操作", async () => {
+    streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+      handlers.onDone({
+        ...DONE,
+        answer: "已確認要加入「新專案」。請選擇檔案。",
+        siteActions: [], dispatches: [], actions: [], sources: [],
+        executionPlan: { intent: "ASK", confidence: "medium", title: "選擇檔案", steps: ["等待檔案"] },
+        events: [event({ type: "waiting.user_input", status: "waiting", title: "請選擇檔案" })],
+        intakeRequest: { mode: "files", projectId: PROJECT_ID, projectTitle: "新專案", message: "請選擇檔案" },
+      });
+      return true;
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" onUseIdeaForNewProject={vi.fn()} />);
+    await sendMessage(user, "1");
+    expect(await screen.findAllByText("已確認要加入「新專案」。請選擇檔案。")).toHaveLength(1);
+    expect(screen.queryByText("請選擇檔案", { selector: ".agent-work__step-title" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "以此靈感開新專案" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "建立1準備" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).toHaveAttribute("aria-live", "polite");
+    expect(intakeRender).toHaveBeenLastCalledWith(expect.objectContaining({
+      dialogTitle: "加入資料",
+      closeOnImported: true,
+    }));
+  });
+
   it("queues one next turn entered after the completion bubble but before the exact run finalizer", async () => {
     let releaseFirst!: () => void;
     const firstFinalizer = new Promise<void>((resolve) => { releaseFirst = resolve; });

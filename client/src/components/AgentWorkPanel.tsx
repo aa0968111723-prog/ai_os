@@ -213,18 +213,16 @@ export function AgentWorkPanel({
         </div>
       )}
 
-      <div className="agent-work__footer">
+      {(open || (live && onCancel)) ? <div className="agent-work__footer">
         {open ? (
           <button type="button" className="agent-work__detail-toggle" onClick={() => setDetailed((value) => !value)}>
             {detailed ? "隱藏詳細資訊" : "詳細資訊"}
           </button>
-        ) : (
-          <span>只顯示實際發生的工具與資料來源，不含模型私密推理。</span>
-        )}
+        ) : null}
         {live && onCancel ? (
           <Button variant="ghost" size="sm" type="button" onClick={onCancel}>停止</Button>
         ) : null}
-      </div>
+      </div> : null}
     </section>
   );
 }

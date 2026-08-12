@@ -5,7 +5,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { agentToolRegistry, practicalAutonomyRuntime } from "./agentToolRegistry";
 import { AGENT_SKILLS, validateSkillContracts, type DurableStep, type TrustLabel } from "./practicalAutonomy";
-import { currentDeploymentIdentity } from "./deploymentIdentity";
+import { currentDeploymentIdentity, deploymentShaFromEnv } from "./deploymentIdentity";
 
 export const CAPABILITY_CERTIFICATION_STATES = [
   "DECLARED_ONLY", "MOCK_VERIFIED", "STAGING_VERIFIED", "EXTERNAL_LIVE_VERIFIED",
@@ -61,7 +61,7 @@ export function effectiveVerificationMode(requested: CapabilityVerificationMode,
     requested === "production_smoke"
     && declaredEnvironment === "production"
     && env.NODE_ENV === "production"
-    && !!(env.BUILD_SHA ?? env.GIT_SHA ?? env.VERCEL_GIT_COMMIT_SHA)
+    && !!deploymentShaFromEnv(env)
   ) return requested;
   throw new TRPCError({
     code: "PRECONDITION_FAILED",

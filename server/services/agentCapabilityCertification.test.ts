@@ -46,4 +46,12 @@ describe("live capability certification contract", () => {
     expect(deploymentDrift({ sha: "abc", schemaVersion: identity.schemaVersion, capabilityRegistryHash: identity.capabilityRegistryHash }, identity).ok).toBe(true);
     expect(deploymentDrift({ sha: "other" }, identity)).toMatchObject({ ok: false, state: "DEPLOYMENT_DRIFT" });
   });
+
+  it("accepts the build SHA names used by Zeabur and GitHub production deploys", () => {
+    expect(currentDeploymentIdentity({ ZEABUR_GIT_COMMIT: "zeabur-sha" } as NodeJS.ProcessEnv).sha).toBe("zeabur-sha");
+    expect(currentDeploymentIdentity({ GITHUB_SHA: "github-sha" } as NodeJS.ProcessEnv).sha).toBe("github-sha");
+    expect(effectiveVerificationMode("production_smoke", {
+      AGENT_CERTIFICATION_ENV: "production", NODE_ENV: "production", ZEABUR_GIT_COMMIT: "zeabur-sha",
+    })).toBe("production_smoke");
+  });
 });

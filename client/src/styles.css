@@ -153,6 +153,10 @@
   max-height: min(88vh, 820px);
   overflow: auto;
 }
+/* Intake can be launched from the persistent Assistant (z-index 1100).
+   Portal it above that surface so the picker is never cropped behind the
+   composer or mistaken for a second, half-open sheet on mobile. */
+.external-intake-scrim { z-index: 1200; }
 .external-intake__head,
 .external-inbox__head {
   display: flex;
@@ -233,10 +237,13 @@
 .shot-card__import-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 8px 0 0; }
 
 @media (max-width: 640px) {
+  .external-intake-scrim {
+    padding-top: max(8px, var(--safe-top));
+  }
   .external-intake, .external-launcher {
-    width: 100vw;
+    width: 100%;
     max-width: none;
-    max-height: 92dvh;
+    max-height: calc(100dvh - max(8px, var(--safe-top)) - var(--kb-inset, 0px));
     margin: auto 0 0;
     border-radius: 18px 18px 0 0;
   }
