@@ -1,6 +1,6 @@
 import { agentToolRegistry } from "./agentToolRegistry";
 
-export const AGENT_SCHEMA_VERSION = "0070_agent_live_certification";
+export const AGENT_SCHEMA_VERSION = "0071_note_task_plan_step_uniqueness";
 
 export interface DeploymentIdentity {
   sha: string | null;

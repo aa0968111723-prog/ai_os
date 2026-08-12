@@ -209,7 +209,9 @@ export async function addNoteCore(input: {
     throw new TRPCError({ code: "BAD_REQUEST", message: `@提及最多 ${NOTE_MENTIONS_MAX} 人` });
   }
   const mentions = await validateMentions(input.groupId, input.mentions);
-  const [row] = await db
+  const existing = await findExistingNote(input);
+  if (existing) return existing;
+  const [inserted] = await db
     .insert(schema.notes)
     .values({
       id: input.id,
@@ -223,7 +225,40 @@ export async function addNoteCore(input: {
       planRunId: input.planRunId ?? null,
       planStepId: input.planStepId ?? null,
     })
+    .onConflictDoNothing()
     .returning();
+  if (inserted) return inserted;
+  const raced = await findExistingNote(input);
+  if (raced) return raced;
+  throw new TRPCError({ code: "CONFLICT", message: "筆記寫入發生衝突，已停止以避免重複建立" });
+}
+
+async function findExistingNote(input: {
+  id?: string;
+  groupId: string;
+  projectId?: string | null;
+  planRunId?: string | null;
+  planStepId?: string | null;
+}): Promise<NoteRow | undefined> {
+  const [byId] = input.id
+    ? await db.select().from(schema.notes).where(eq(schema.notes.id, input.id))
+    : [];
+  const [byPlan] = !byId && input.planRunId && input.planStepId
+    ? await db.select().from(schema.notes).where(and(
+      eq(schema.notes.planRunId, input.planRunId),
+      eq(schema.notes.planStepId, input.planStepId),
+    ))
+    : [];
+  const row = byId ?? byPlan;
+  if (!row) return undefined;
+  if (
+    row.groupId !== input.groupId
+    || (input.projectId && row.projectId !== input.projectId)
+    || (input.planRunId && row.planRunId !== input.planRunId)
+    || (input.planStepId && row.planStepId !== input.planStepId)
+  ) {
+    throw new TRPCError({ code: "CONFLICT", message: "筆記冪等識別碼碰撞，已停止以避免覆寫" });
+  }
   return row;
 }
 

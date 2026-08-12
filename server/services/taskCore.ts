@@ -189,6 +189,8 @@ export async function addProjectTaskCore(input: {
   if (startsAt && dueAt && dueAt < startsAt) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "期限不可早於開始時間" });
   }
+  const replayed = await findExistingProjectTask(input);
+  if (replayed) return replayed;
   const [task] = await db
     .insert(schema.projectTasks)
     .values({
@@ -210,7 +212,13 @@ export async function addProjectTaskCore(input: {
       sourceMessageId: input.sourceMessageId ?? null,
       mentions: mentions ?? null,
     })
+    .onConflictDoNothing()
     .returning();
+  if (!task) {
+    const existing = await findExistingProjectTask(input);
+    if (existing) return existing;
+    throw new TRPCError({ code: "CONFLICT", message: "任務寫入發生衝突，已停止以避免重複建立" });
+  }
   // Provenance 鏈的第一環：被指派的人要**知道**自己被指派了。
   // 走 services/notify（先落列再推播）——收件匣才是真相，推播只是加速通道。
   // 指派給自己不通知（自己開給自己的待辦，通知只是噪音）。
@@ -231,6 +239,35 @@ export async function addProjectTaskCore(input: {
     });
   }
   return task;
+}
+
+async function findExistingProjectTask(input: {
+  id?: string;
+  groupId: string;
+  projectId: string;
+  planRunId?: string | null;
+  planStepId?: string | null;
+}): Promise<ProjectTaskRow | undefined> {
+  const [byId] = input.id
+    ? await db.select().from(schema.projectTasks).where(eq(schema.projectTasks.id, input.id))
+    : [];
+  const [byPlan] = !byId && input.planRunId && input.planStepId
+    ? await db.select().from(schema.projectTasks).where(and(
+      eq(schema.projectTasks.planRunId, input.planRunId),
+      eq(schema.projectTasks.planStepId, input.planStepId),
+    ))
+    : [];
+  const row = byId ?? byPlan;
+  if (!row) return undefined;
+  if (
+    row.groupId !== input.groupId
+    || row.projectId !== input.projectId
+    || (input.planRunId && row.planRunId !== input.planRunId)
+    || (input.planStepId && row.planStepId !== input.planStepId)
+  ) {
+    throw new TRPCError({ code: "CONFLICT", message: "任務冪等識別碼碰撞，已停止以避免覆寫" });
+  }
+  return row;
 }
 
 function assertTaskActor(

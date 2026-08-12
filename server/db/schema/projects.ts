@@ -387,6 +387,7 @@ export const notes = pgTable("notes", {
 }, (t) => ({
   groupIdx: index("notes_group_idx").on(t.groupId),
   planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
+  planStepUq: uniqueIndex("notes_plan_step_uq").on(t.planRunId, t.planStepId),
 }));
 
 /**

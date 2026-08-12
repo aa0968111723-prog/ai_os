@@ -346,4 +346,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     // run-owner backfill required by the database certification track.
     "664a902dfb1176967db4186d721a30cf8a2bc268d6ca93ca0887687d5eafaef8",
   ],
+  "0071_note_task_plan_step_uniqueness": [
+    "abc300bfd1e09353a51d3d7535d55ef6edf437e45ad4409e2d3fc94d270bac32",
+  ],
 };
