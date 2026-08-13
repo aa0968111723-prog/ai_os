@@ -9,7 +9,7 @@
 import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, isGeminiModel, generationProviderOf, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
@@ -27,6 +27,8 @@ import {
 } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
+import { geminiSubmit, geminiStatus } from "./gemini";
+import { parseStoredResultUrl } from "./storage";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
@@ -666,7 +668,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       eventType: "prepared",
       summary: "已依專案現況組裝實際生成輸入",
       payload: {
-        provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+        provider: generationProviderOf(model),
         model: model.id,
         endpoint: endpointOf(model),
         userPrompt: prepared.userPrompt,
@@ -744,7 +746,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       if (input.traceSessionId) {
         await updateAiTraceSession(input.traceSessionId, {
           status: "prepared",
-          provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+          provider: generationProviderOf(model),
           model: model.id,
           sourceType: "generation",
           sourceId: gated.id,
@@ -813,7 +815,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   if (input.traceSessionId) {
     await updateAiTraceSession(input.traceSessionId, {
       status: "running",
-      provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+      provider: generationProviderOf(model),
       model: model.id,
       sourceType: "generation",
       sourceId: gen.id,
@@ -856,7 +858,9 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     const startedAt = Date.now();
     const { requestId } = isNimModel(model) && !isMockMode()
       ? nimSubmit(falInput)
-      : await falSubmit(endpointOf(model), model.kind, falInput, byokFalOpts(userFalKey, usedUserKey));
+      : isGeminiModel(model) && !isMockMode()
+        ? await geminiSubmit(model.kind, falInput)
+        : await falSubmit(endpointOf(model), model.kind, falInput, byokFalOpts(userFalKey, usedUserKey));
     if (input.traceSessionId) {
       await recordAiTraceEventSafely({
         sessionId: input.traceSessionId,
@@ -921,6 +925,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     statusUsedUserKey &&
     !statusUserKey &&
     !gen.requestId.startsWith("nim_") &&
+    !gen.requestId.startsWith("gemini_") &&
     !gen.requestId.startsWith("mock_")
   ) {
     const failed = await failStaleGenerationTx(
@@ -940,7 +945,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   // 用前綴而非模型註冊表判斷——部署切換期間在途的舊 any-llm 生成仍能沿 fal 佇列收尾。
   const result = gen.requestId.startsWith("nim_")
     ? nimStatus(gen.requestId)
-    : await falStatus(endpoint, kind, gen.requestId, byokFalOpts(statusUserKey, statusUsedUserKey));
+    : gen.requestId.startsWith("gemini_")
+      ? geminiStatus(gen.requestId)
+      : await falStatus(endpoint, kind, gen.requestId, byokFalOpts(statusUserKey, statusUsedUserKey));
   // 供應商回 done 卻無任何輸出：不得永久卡 queued/running 持有預扣點（先前會 fall-through 到 return gen）
   if (result.status === "done" && !(result.resultUrl || result.resultText)) {
     const emptyFailed = await failStaleGenerationTx(
@@ -988,6 +995,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       let assetId: string | null = null;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
       if (mediaUrl && mediaKind) {
+        const stored = parseStoredResultUrl(mediaUrl);
         const [asset] = await tx
           .insert(schema.assets)
           .values({
@@ -995,12 +1003,24 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
             groupId: gen.groupId,
             kind: mediaKind,
             title: gen.prompt.slice(0, 40),
-            url: mediaUrl,
+            url: stored ? "pending" : mediaUrl,
+            storagePath: stored?.storagePath ?? null,
+            mime: stored?.mime ?? null,
+            sizeBytes: stored?.sizeBytes ?? null,
+            landState: stored ? "landed" : undefined,
             isAiGenerated: true,
             meta: { generationId: gen.id, modelId: gen.modelId },
           })
           .returning();
         assetId = asset.id;
+        if (stored) {
+          const localUrl = `/api/assets/${asset.id}/file`;
+          await tx.update(schema.assets).set({ url: localUrl }).where(eq(schema.assets.id, asset.id));
+          await tx
+            .update(schema.generations)
+            .set({ resultUrl: localUrl, updatedAt: new Date() })
+            .where(eq(schema.generations.id, gen.id));
+        }
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
         if (gen.sceneId) {
@@ -1063,7 +1083,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     }
     // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
     // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
-    if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    if (advanced.assetId && mediaUrl && !parseStoredResultUrl(mediaUrl)) {
+      persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    }
     const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
     if (trace) {
       await recordAiTraceEventSafely({

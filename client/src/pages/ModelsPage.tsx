@@ -70,6 +70,7 @@ type HealthKey =
   | "openapi_404"
   | "needs_source"
   | "nim_no_key"
+  | "gemini_no_key"
   | "never_probed"
   | "unknown";
 
@@ -83,6 +84,7 @@ const HEALTH_META: Record<
   openapi_404: { label: "端點異常", short: "404", hint: "OpenAPI 端點不存在，建議換同類模型", tone: "bad" },
   needs_source: { label: "需素材", short: "需素材", hint: "要圖／音／影／zip，無法空提示詞開工", tone: "info" },
   nim_no_key: { label: "NIM", short: "NIM", hint: "走 NVIDIA NIM，非 fal 佇列", tone: "mute" },
+  gemini_no_key: { label: "Gemini", short: "Gemini", hint: "走 Google Gemini 原生，非 fal 佇列", tone: "mute" },
   never_probed: { label: "未實測", short: "未測", hint: "尚無合法生成紀錄（可能因預算）", tone: "mute" },
   unknown: { label: "未知", short: "—", hint: "尚無契約快照", tone: "mute" },
 };

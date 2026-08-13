@@ -245,7 +245,7 @@ const RULES: readonly BaseRule[] = [
 
   /* ───────── 閉源圖像 API ───────── */
   {
-    match: /nano-banana|gemini-tts|^fal-ai\/gemini/,
+    match: /nano-banana|gemini-tts|^fal-ai\/gemini|^google\/gemini/,
     spec: {
       key: "gemini-image",
       baseModel: "Google Gemini 影像／語音（Nano Banana 線）",

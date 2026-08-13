@@ -87,7 +87,7 @@ async function fetchOpenApiHints(): Promise<Record<string, OpenApiHint>> {
     console.warn("⚠ --openapi 需要 FAL_KEY，改用快取／unchecked");
     return loadOpenApiHintsFromCache();
   }
-  const endpoints = [...new Set(MODELS.filter((m) => !m.id.startsWith("nvidia-nim")).map((m) => endpointOf(m)))];
+  const endpoints = [...new Set(MODELS.filter((m) => !m.id.startsWith("nvidia-nim") && !m.id.startsWith("google/gemini")).map((m) => endpointOf(m)))];
   console.log(`OpenAPI 檢查 ${endpoints.length} 端點…`);
   const out: Record<string, OpenApiHint> = {};
   const concurrency = 10;
@@ -166,7 +166,7 @@ async function fetchOpenApiHints(): Promise<Record<string, OpenApiHint>> {
 function fillUnchecked(hints: Record<string, OpenApiHint>): Record<string, OpenApiHint> {
   const out = { ...hints };
   for (const m of MODELS) {
-    if (m.id.startsWith("nvidia-nim")) continue;
+    if (m.id.startsWith("nvidia-nim") || m.id.startsWith("google/gemini")) continue;
     const ep = endpointOf(m);
     if (!out[ep]) out[ep] = { status: "unchecked" };
   }

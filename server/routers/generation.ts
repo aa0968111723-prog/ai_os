@@ -11,7 +11,7 @@ import { signAssetUrl } from "../services/storage";
 import { resolveByokFalKey, byokFalOpts } from "../services/byokBilling";
 import { GENERATION_SOURCE_META_KEY, splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { assertProjectEditable } from "../services/projectAcl";
-import { getModel, endpointOf, supportsSeed } from "../../shared/models";
+import { getModel, endpointOf, generationProviderOf, supportsSeed } from "../../shared/models";
 import { buildAblationVariants } from "../../shared/ablation";
 import type { PromptSectionKey } from "../../shared/promptSections";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
@@ -147,7 +147,7 @@ export const generationRouter = router({
       return {
         mode: "generate" as const,
         title: "這次生成，AI 會怎麼理解",
-        provider: prepared.model.id.startsWith("nvidia-nim#") ? "nvidia-nim" : "fal.ai",
+        provider: generationProviderOf(prepared.model),
         model: prepared.model.label,
         modelId: prepared.model.id,
         endpoint: endpointOf(prepared.model),
@@ -209,7 +209,7 @@ export const generationRouter = router({
         userId: ctx.auth.user.id,
         mode: "generate",
         title: `生成：${input.prompt.trim().slice(0, 80)}`,
-        provider: prepared.model.id.startsWith("nvidia-nim#") ? "nvidia-nim" : "fal.ai",
+        provider: generationProviderOf(prepared.model),
         model: prepared.model.id,
       });
       try {

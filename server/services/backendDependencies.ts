@@ -8,6 +8,7 @@ import { probeDatabaseRuntime, type DatabaseRuntimeReport } from "./databaseRunt
 import { redisPing, redisConfig } from "./redis";
 import { objectStoreConfig, putObject, headObject, deleteObject } from "./objectStore";
 import { isMockMode } from "./fal";
+import { geminiApiKeyConfigured } from "./gemini";
 
 export const BACKEND_STATES = [
   "UNCONFIGURED",
@@ -25,6 +26,7 @@ export type BackendDependencyId =
   | "objectStore"
   | "fal"
   | "nim"
+  | "gemini"
   | "google"
   | "email"
   | "mcp";
@@ -200,11 +202,12 @@ export async function probeBackendRuntime(env: NodeJS.ProcessEnv = process.env):
 
   const fal = staticProvider("fal", !isMockMode(), Boolean(env.FAL_KEY?.trim()) || isMockMode());
   const nim = staticProvider("nim", false, Boolean(env.NVIDIA_NIM_API_KEY?.trim()));
+  const gemini = staticProvider("gemini", false, geminiApiKeyConfigured(env));
   const google = staticProvider("google", false, configuredFlag(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], env));
   const email = staticProvider("email", false, Boolean(env.RESEND_API_KEY?.trim() || env.ZSEND_API_KEY?.trim() || env.ZEABUR_EMAIL_API_KEY?.trim()));
   const mcp = staticProvider("mcp", false, Boolean(env.MCP_API_KEY?.trim()));
 
-  const dependencies = [postgres, redis, objectStore, fal, nim, google, email, mcp];
+  const dependencies = [postgres, redis, objectStore, fal, nim, gemini, google, email, mcp];
   const optionalDown = dependencies.some((item) => !item.required && (item.state === "UNHEALTHY" || item.state === "DEGRADED"));
   const postgresDown = postgres.state === "UNHEALTHY" || postgres.state === "UNCONFIGURED";
   const storageDown = objectStore.configured && objectStore.state === "UNHEALTHY";
