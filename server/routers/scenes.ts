@@ -23,6 +23,8 @@ import {
   formatDirectionContext,
 } from "../../shared/creativeDirections";
 import { splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { continuitySnapshotSchema } from "../../shared/continuity";
+import { describeDirectionChange } from "../../shared/story";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
 import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
 import {
@@ -610,8 +612,44 @@ export const scenesRouter = router({
       // 通過的是那一張圖：換了圖，審核狀態就該退回「需要修改」等人再看一次，
       // 否則「已通過」會被一張沒人審過的畫面繼承。
       if (replacesApprovedVisual) patch.reviewStatus = "changes";
+
+      /*
+       * 採用創作方向：如果這張圖是某個方向跑出來的，把那個方向的鏡頭語言還原回 Shot。
+       *
+       * 不做這一步的話，「採用低機位逆光那一版」之後，這一鏡的鏡頭語言仍寫著中景平視——
+       * Shot 的資料會與它自己現在顯示的畫面互相矛盾，連戲檢查也會立刻把這張剛採用的圖
+       * 標成「過時」。這是 Adopt 的一部分，不是背著使用者多做事：呼叫端會把
+       * 同步了哪些欄位回報出去，UI 據此明說「鏡頭語言已同步」。
+       */
+      let adoptedDirection: string[] = [];
+      if (target === "assetId") {
+        const genId = (asset.meta as { generationId?: unknown } | null)?.generationId;
+        if (typeof genId === "string") {
+          const [gen] = await db
+            .select({ continuitySnapshot: schema.generations.continuitySnapshot })
+            .from(schema.generations)
+            .where(and(eq(schema.generations.id, genId), eq(schema.generations.projectId, scene.projectId)));
+          const parsed = continuitySnapshotSchema.safeParse(gen?.continuitySnapshot);
+          const frozen = parsed.success ? parsed.data.shotDirection : null;
+          if (frozen) {
+            adoptedDirection = describeDirectionChange(
+              { ...(scene.camera ?? {}), ...(scene.performance ?? {}) },
+              { ...(frozen.camera ?? {}), ...(frozen.performance ?? {}) },
+            );
+            if ((scene.action ?? "") !== (frozen.action ?? "")) {
+              adoptedDirection.push(`動作 ${scene.action || "－"}→${frozen.action || "－"}`);
+            }
+            if (adoptedDirection.length) {
+              patch.camera = frozen.camera ?? null;
+              patch.performance = frozen.performance ?? null;
+              patch.action = frozen.action ?? null;
+            }
+          }
+        }
+      }
+
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
-      return updated;
+      return { ...updated, adoptedDirection };
     }),
 
   /**
@@ -1287,6 +1325,8 @@ export const scenesRouter = router({
         propIds: cards.propIds,
         // 本鏡造型：進錨點層與角色身份同句同強度（Identity 不變、Look 逐鏡換）
         lookIds: scene.lookIds ?? undefined,
+        // 凍結這一鏡當下的鏡頭語言：之後把「中景」改成「特寫」，這張圖就該被標成過時
+        shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
@@ -1376,6 +1416,11 @@ export const scenesRouter = router({
         prompt: slot.prompt,
         sceneId: scene.id,
         preserveScenePointer: true,
+        // 凍結這一個方向實際用的鏡頭語言：既讓「改了鏡頭 → 畫面過時」判定得出來，
+        // 也讓採用這一版時能把方向還原回 Shot（否則 Shot 的鏡頭語言會與它自己的畫面不符）
+        shotDirection: slot.compiled
+          ? { camera: slot.compiled.camera, performance: slot.compiled.performance, action: slot.compiled.action }
+          : { camera: scene.camera, performance: scene.performance, action: scene.action },
         creative: {
           batchId: input.batchId,
           batchSize: input.variants.length,

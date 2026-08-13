@@ -17,6 +17,7 @@ import {
   detectContinuityDrift,
   describeDrift,
   type ContinuityDrift,
+  type ContinuityShotDirection,
   type CurrentCards,
 } from "../../shared/continuity";
 
@@ -78,17 +79,32 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
       title: schema.scenes.title,
       assetId: schema.scenes.assetId,
       assetMeta: schema.assets.meta,
+      // 鏡頭語言漂移的右手邊：這一鏡「現在」的鏡頭語言。
+      // 與卡片一起在同一支查詢帶回來，不另外 N 次查。
+      camera: schema.scenes.camera,
+      performance: schema.scenes.performance,
+      action: schema.scenes.action,
     })
     .from(schema.scenes)
     .innerJoin(schema.assets, eq(schema.assets.id, schema.scenes.assetId))
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt), isNull(schema.assets.deletedAt)))
     .orderBy(schema.scenes.orderIndex);
 
-  const byGeneration = new Map<string, { shotId: string; title: string; assetId: string }>();
+  const byGeneration = new Map<string, {
+    shotId: string;
+    title: string;
+    assetId: string;
+    direction: ContinuityShotDirection;
+  }>();
   for (const r of rows) {
     const genId = (r.assetMeta as { generationId?: unknown } | null)?.generationId;
     if (typeof genId === "string" && r.assetId) {
-      byGeneration.set(genId, { shotId: r.shotId, title: r.title, assetId: r.assetId });
+      byGeneration.set(genId, {
+        shotId: r.shotId,
+        title: r.title,
+        assetId: r.assetId,
+        direction: { camera: r.camera, performance: r.performance, action: r.action },
+      });
     }
   }
   if (byGeneration.size === 0) return [];
@@ -106,7 +122,7 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
     // 快照可能是舊版形狀或壞資料：解析不過就當「無從判斷」，不製造假警報
     const parsed = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
     if (!parsed.success) continue;
-    const drifts = detectContinuityDrift(parsed.data, current);
+    const drifts = detectContinuityDrift(parsed.data, current, shot.direction);
     if (!drifts.length) continue;
     out.push({ shotId: shot.shotId, title: shot.title, assetId: shot.assetId, drifts, reason: describeDrift(drifts) });
   }

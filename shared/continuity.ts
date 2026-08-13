@@ -40,6 +40,26 @@ export const continuityPropSchema = z.object({
 });
 
 /**
+ * 這一鏡自己的鏡頭語言／表演／走位，凍結在生成當下。
+ *
+ * 為什麼要凍：卡片漂移（換臉、換色）v1 已經抓得到，但**鏡頭語言改了畫面同樣過時**——
+ * 使用者把「中景」改成「特寫」之後，那張中景的圖就不再是這一鏡要的東西了，
+ * 而 v1 完全看不到這件事（快照裡只有卡片）。
+ *
+ * 也正是這一層讓「相依感知」講得出區別：camera／lighting／action／performance 進快照 ⇒
+ * 改它們會讓畫面過時；voiceover／ambience／music／dialogue **刻意不進** ⇒
+ * 改配音不會讓圖被誤標成過時。
+ *
+ * 全欄 optional：舊快照沒有這一段，照樣 parse 得過（version 維持 1，不需要 migration）。
+ */
+export const continuityShotDirectionSchema = z.object({
+  camera: z.record(z.string()).nullable().optional(),
+  performance: z.record(z.string()).nullable().optional(),
+  action: z.string().nullable().optional(),
+});
+export type ContinuityShotDirection = z.infer<typeof continuityShotDirectionSchema>;
+
+/**
  * 生成當下的版本化一致性快照。重試必須沿用這份資料，避免卡片後續修改
  * 讓同一批鏡頭悄悄換臉、換色或換材質。
  */
@@ -52,6 +72,12 @@ export const continuitySnapshotSchema = z.object({
   scenes: z.array(continuitySceneSchema),
   props: z.array(continuityPropSchema),
   referenceAssetIds: z.array(z.string().uuid()),
+  /**
+   * 這一鏡的鏡頭語言（v4 起）。**刻意不進 fingerprint**——fingerprint 的用途是
+   * 「這批卡片參考是不是同一組」，把逐鏡的鏡頭語言算進去會讓同一組卡片的指紋
+   * 在每次調鏡頭時都變掉，破壞既有的重試／沿用判斷。
+   */
+  shotDirection: continuityShotDirectionSchema.nullable().optional(),
 });
 
 export type ContinuitySnapshot = z.infer<typeof continuitySnapshotSchema>;
@@ -68,11 +94,11 @@ export type ContinuitySnapshot = z.infer<typeof continuitySnapshotSchema>;
 
 /** 一項過時原因（給人看的句子由呼叫端組，這裡只回事實） */
 export interface ContinuityDrift {
-  kind: "character" | "scene" | "prop";
+  kind: "character" | "scene" | "prop" | "direction";
   id: string;
   /** 快照當時的名字（卡片可能已改名，用當時的名字才對得上那張圖） */
   name: string;
-  /** 哪些欄位變了：appearance / look / palette / lighting */
+  /** 哪些欄位變了：appearance / look / palette / lighting／或鏡頭語言欄位名 */
   fields: string[];
 }
 
@@ -98,6 +124,11 @@ function norm(v: string | null | undefined): string {
 export function detectContinuityDrift(
   snapshot: ContinuitySnapshot | null | undefined,
   current: CurrentCards,
+  /**
+   * 這一鏡**現在**的鏡頭語言。不傳＝呼叫端沒有這份資料，那一段就不比
+   * （與「卡片被刪不算過時」同一條原則：無從判斷就別猜）。
+   */
+  currentShot?: ContinuityShotDirection | null,
 ): ContinuityDrift[] {
   if (!snapshot) return [];
   const out: ContinuityDrift[] = [];
@@ -142,6 +173,21 @@ export function detectContinuityDrift(
     }
   }
 
+  /*
+   * 鏡頭語言漂移（v4）：逐欄比對，只在快照真的凍過這一段時才比。
+   * 舊資料沒有 shotDirection ⇒ 不比，不會讓歷史畫面一夜之間全被標成過時。
+   */
+  if (snapshot.shotDirection && currentShot) {
+    const fields: string[] = [];
+    const frozenDirection = { ...(snapshot.shotDirection.camera ?? {}), ...(snapshot.shotDirection.performance ?? {}) };
+    const nowDirection = { ...(currentShot.camera ?? {}), ...(currentShot.performance ?? {}) };
+    for (const key of new Set([...Object.keys(frozenDirection), ...Object.keys(nowDirection)])) {
+      if (norm(frozenDirection[key]) !== norm(nowDirection[key])) fields.push(key);
+    }
+    if (norm(snapshot.shotDirection.action) !== norm(currentShot.action)) fields.push("action");
+    if (fields.length) out.push({ kind: "direction", id: "shot", name: "這一鏡", fields: fields.sort() });
+  }
+
   return out;
 }
 
@@ -151,6 +197,16 @@ export const DRIFT_FIELD_LABEL: Record<string, string> = {
   look: "造型",
   palette: "色板",
   lighting: "光線",
+  // 鏡頭語言（與 SHOT_DIRECTION_FIELD_LABEL 同一批欄位名；這裡重列是為了讓
+  // shared/continuity 不必依賴 shared/story，兩份標籤由 continuity.test.ts 鎖住一致）
+  shotSize: "鏡別",
+  angle: "機位",
+  movement: "運鏡",
+  focalLength: "焦段",
+  composition: "構圖",
+  emotion: "情緒",
+  gaze: "視線",
+  action: "動作",
 };
 
 /** 一句話說明這張圖為什麼過時（回空字串＝沒有過時） */

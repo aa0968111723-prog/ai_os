@@ -51,6 +51,15 @@ export type GenerationSourceMeta = {
   /** Visual Creative UX v4 的創作方向與血緣 */
   creative?: GenerationCreativeMeta;
   /**
+   * 送出當下這一鏡的現用畫面指標（null 用空字串表示「當時沒有畫面」）。
+   *
+   * 用途只有一個：provider 回來時判斷「這段時間有沒有人動過這一鏡」。
+   * 生成從送出到完成可能要好幾分鐘，這期間人可以在單格工作室採用別的版本、
+   * 也可以從素材庫直接指派。沒有這個比對，晚到的 provider 結果會理直氣壯地
+   * 蓋掉人剛剛選定的畫面——使用者的操作被一個他早就忘記的舊工作覆寫。
+   */
+  scenePointerAtSubmit?: string;
+  /**
    * BYOK Phase 2：本次生成是否使用使用者個人 fal API Key。
    * true → 跳過平台點數扣／退；advanceGeneration 用同一把 key 查 status。
    * 未設或 false → 平台 FAL_KEY + 正常點數路徑。
@@ -62,7 +71,7 @@ export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -124,5 +133,10 @@ export function splitGenerationSourceMeta(params: unknown): {
         ...(typeof creativeRow.batchSize === "number" ? { batchSize: creativeRow.batchSize } : {}),
       } satisfies GenerationCreativeMeta
     : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative } };
+  const scenePointerAtSubmit = creativeRow !== undefined || rawMeta
+    ? typeof (rawMeta as Record<string, unknown>)?.scenePointerAtSubmit === "string"
+      ? (rawMeta as Record<string, string>).scenePointerAtSubmit
+      : undefined
+    : undefined;
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit } };
 }
