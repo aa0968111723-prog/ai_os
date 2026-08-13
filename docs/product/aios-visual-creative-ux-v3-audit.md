@@ -1,6 +1,8 @@
 # Aios Visual Creative UX v3 — CURRENT audit and architecture
 
-Base: `1a11a5b0d5550f6fb8f63aa5f99b39dd488eade3` (GitHub default branch at implementation start; merge commit for #722).
+## Base SHA
+
+`1a11a5b0d5550f6fb8f63aa5f99b39dd488eade3` (GitHub default branch at implementation start; merge commit for #722).
 
 ## Fresh-eye CURRENT audit
 
@@ -53,6 +55,8 @@ SceneStudio Generate 3 Variants
 
 `preserveScenePointer` is internal metadata stored inside existing `generations.params` and stripped before provider submission. It is retained by retry. It is operation policy, not a new version truth. Normal `generateInto` behavior is unchanged.
 
+## Cost, billing and idempotency
+
 Each slot uses a stable UUID as the generation primary key. A timeout/retry with the same batch ids replays existing rows and cannot reserve or charge twice. Launch and later provider failures are projected independently; successful siblings remain comparable. Awaiting-cost-approval is not reported as settled.
 
 ## Style semantics
@@ -63,13 +67,16 @@ Style cards explicitly edit project Style. Starter looks are registered in the e
 
 StoryboardStage already publishes exact single/multi-Shot focus through `registerAssistantFocus`. Aios proposals therefore remain additive: the existing Agent can read the selection and propose directions, but only the explicit Visual Choice Apply path changes Shot truth. v3 does not rebuild Agent or add an autonomous apply channel.
 
-## Verification and evidence
+## Tests
 
 - Baseline before edits: typecheck PASS; v2 targeted client tests PASS (46); CURRENT Vite started. Authenticated data could not load locally because `DATABASE_URL` is not configured.
 - Targeted v3: semantic/Mixed/fallback/Style/Variants/partial-failure/idempotency/concurrency/SceneStudio tests PASS.
 - Full client suite: PASS — 206 files, 1,821 tests.
 - Full server/shared suite: 261 files and 2,838 tests PASS; one pre-existing Windows-only path assertion fails in `server/services/gemini.test.ts`. The identical failure was reproduced from an untouched detached worktree at base `1a11a5b0d5550f6fb8f63aa5f99b39dd488eade3` (10 PASS, 1 FAIL in that file).
 - Build and static gates: `npm run typecheck`, `npm run build`, `npm run check:boundaries`, `npm run check:hooks`, and `npm run check:ui-primitives` PASS.
+
+## Desktop, 390 px and failure evidence
+
 - Browser evidence: `docs/evidence/visual-creative-ux-v3/` (desktop and 390 px Mixed + Compare/partial-failure).
 - 390 px measurement: viewport 390, document scroll width 390; visible interactive controls were all at least 44 px.
 
