@@ -101,19 +101,22 @@ added = call("POST", admin, "databases.addRow", {
     "data": {"title": "王羲之", "kind": "書法", "status": "草稿"},
 })
 ok("add row 真寫入", bool(added.get("id")))
-rows = call("GET", admin, "databases.listRows", {"tableId": table_id, "q": "書法"})
-ok("query 舊 exact match 能被找到", any(row["id"] == added["id"] for row in rows))
+listed = call("GET", admin, "databases.listRows", {"tableId": table_id, "q": "書法"})
+listed_rows = listed.get("rows", listed) if isinstance(listed, dict) else listed
+ok("query 舊 exact match 能被找到", any(row["id"] == added["id"] for row in listed_rows))
+ok("query 回傳列數誠實", listed.get("total") == 1 if isinstance(listed, dict) and "total" in listed else True)
 updated = call("POST", admin, "databases.updateRow", {
-    "rowId": added["id"],
+    "id": added["id"],
     "data": {"title": "王羲之", "kind": "書法", "status": "完成"},
 })
-ok("update 後 read-back 有新值", updated["data"]["status"] == "完成")
+ok("update 後 read-back 有新值", isinstance(updated, dict) and updated.get("data", {}).get("status") == "完成")
 
 readonly = call("POST", admin, "databases.update", {"id": table_id, "agentAccess": "read"})
 ok("改成 AI 唯讀", readonly.get("agentAccess") == "read")
 
 zero = call("GET", admin, "databases.listRows", {"tableId": table_id, "q": "絕對不存在的關鍵字xyz"})
-ok("zero-result honesty", zero == [] or (isinstance(zero, list) and len(zero) == 0))
+zero_rows = zero.get("rows", zero) if isinstance(zero, dict) else zero
+ok("zero-result honesty", (isinstance(zero, dict) and zero.get("total") == 0 and zero.get("rows") == []) or zero_rows == [])
 
 call("POST", admin, "databases.remove", {"id": table_id})
 print("e2e-agent-database: done")
