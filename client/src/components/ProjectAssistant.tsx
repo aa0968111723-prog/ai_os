@@ -62,7 +62,8 @@ type Action =
   | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
   | { type: "prepare_external_generation"; label: string; sceneId: string; sceneNo: number; externalTool: string; prompt: string }
   // 套用世界觀 chips（確認後寫入專案基調）
-  | { type: "apply_worldview_chips"; label: string; themes?: string[]; tones?: string[]; styles?: string[] };
+  | { type: "apply_worldview_chips"; label: string; themes?: string[]; tones?: string[]; styles?: string[] }
+  | { type: "add_database_row"; label: string; tableId: string; tableName: string; data: Record<string, string>; preview: string };
 
 /**
  * SSE 串流的安全活動事件：只描述「正在讀哪類資料／執行哪個查詢／完成哪一步」，
@@ -200,6 +201,7 @@ function toPayload(a: Action) {
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
   // changes/label 是給人看的預覽，不回送——伺服器會用「現值」重新合併並重算差異
   if (a.type === "direct_shot") return { type: "direct_shot" as const, sceneId: a.sceneId, camera: a.camera, performance: a.performance };
+  if (a.type === "add_database_row") return { type: "add_database_row" as const, tableId: a.tableId, data: a.data };
   return {
     type: "apply_worldview_chips" as const,
     themes: a.themes,
@@ -879,6 +881,8 @@ export function ProjectAssistant({
                                   ? `套用世界觀基調「${payloadAct.label.replace(/^套用基調：/, "")}」？會覆寫你有選到的主軸／調性／風格欄位（未列的欄位不動）。可之後在專案基調區再改。`
                                   : payloadAct.type === "direct_shot"
                                     ? `套用這一鏡的調整？${payloadAct.changes?.length ? `會改：${payloadAct.changes.join("、")}。` : ""}沒列到的欄位不動，免費。`
+                                    : payloadAct.type === "add_database_row"
+                                      ? `在資料庫「${payloadAct.tableName}」新增這一列？\n${payloadAct.preview}`
                                     : `執行「${payloadAct.label}」？`;
                       return (
                         <div
@@ -1007,6 +1011,9 @@ export function ProjectAssistant({
                                   utils.projects.get.invalidate({ id: actionProjectId });
                                   utils.projects.list.invalidate();
                                 }
+                                if (result.kind === "add_database_row") {
+                                  utils.databases.list.invalidate();
+                                }
                                 if (!actionIsCurrent()) return;
                                 push({ role: "ai", text: `✓ ${result.message}` });
                                 setExecuted((prev) => new Set(prev).add(actKey));
@@ -1040,6 +1047,7 @@ export function ProjectAssistant({
                                           : payloadAct.type === "prepare_external_generation" ? "ArrowRight"
                                           : payloadAct.type === "apply_worldview_chips" ? "Palette"
                                             : payloadAct.type === "direct_shot" ? "Camera"
+                                              : payloadAct.type === "add_database_row" ? "Database"
                                               : "Pencil"
                               }
                               size={13}
