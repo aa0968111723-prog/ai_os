@@ -310,10 +310,20 @@ describe("SceneStudio", () => {
     expect(within(items[0]!).getByText("畫面第 2 版")).toBeInTheDocument();
     expect(within(items[0]!).queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
     await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
-    // 單格工作室是「人正看著這一鏡」的地方 → 帶 acknowledgeApproved，
-    // 已通過的鏡在這裡換得掉畫面（伺服器會把審核狀態退回「需要修改」）。
-    // 分鏡中心的批次套用不帶這個旗標，因此換不動已通過的鏡。
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true });
+    /*
+     * 單格工作室是「人正看著這一鏡」的地方，所以兩個旗標都帶：
+     *  - acknowledgeApproved：已通過的鏡在這裡換得掉畫面（伺服器會把審核狀態退回「需要修改」）；
+     *  - syncShotDirection：若這一版是某個方向跑出來的，把該方向的鏡頭語言還原回本鏡，
+     *    並由 UI 明白列出同步了什麼。
+     * 分鏡中心的批次套用兩個都不帶——所以它換不動已通過的鏡，也不會用一張圖的
+     * 凍結設定覆寫 N 鏡的鏡頭語言。
+     */
+    expect(setCurrentMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      assetId: "asset-g1",
+      acknowledgeApproved: true,
+      syncShotDirection: true,
+    });
   });
 
   it("用 real sceneVersions 並排比較，Adopt 更新既有 current pointer 且不刪其他版本", async () => {
@@ -341,7 +351,12 @@ describe("SceneStudio", () => {
     expect(within(compare).getByText("V1")).toBeInTheDocument();
     expect(within(compare).getByText("V2")).toBeInTheDocument();
     await user.click(within(compare).getByRole("button", { name: /採用 V1/ }));
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true });
+    expect(setCurrentMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      assetId: "asset-g1",
+      acknowledgeApproved: true,
+      syncShotDirection: true,
+    });
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
