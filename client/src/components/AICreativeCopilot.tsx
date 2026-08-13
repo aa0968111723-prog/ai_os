@@ -259,11 +259,14 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
 
   if (run.isSuccess) {
     const link = siteActionDoneLink(action, run.data);
+    const verified = run.data.verification?.status !== "unverified";
     return (
       <div className="ai-copilot-action-card is-done" data-fb="站級動作卡">
-        <Icon name="Check" size={14} />
-        <span className="ai-copilot-action-card__label">已完成：{action.label}</span>
-        {link && onNavigate && (
+        <Icon name={verified ? "Check" : "TriangleAlert"} size={14} />
+        <span className="ai-copilot-action-card__label">
+          {verified ? `已完成：${action.label}` : `操作已送出，但驗證未通過：${action.label}`}
+        </span>
+        {link && onNavigate && verified && (
           <Button variant="ghost" size="sm" onClick={() => onNavigate(link.href)}>{link.label}</Button>
         )}
       </div>

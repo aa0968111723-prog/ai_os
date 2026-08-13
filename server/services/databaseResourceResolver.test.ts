@@ -172,3 +172,4 @@ describe("resolveAuthorizedDatabase", () => {
     })).resolves.toMatchObject({ status: "not_found" });
   });
 });
+

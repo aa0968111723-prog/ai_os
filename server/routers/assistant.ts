@@ -64,9 +64,13 @@ import { resolveContext } from "../services/contextResolver";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
+  mapLabeledDatabaseRowValues,
+  prioritizeAssistantDatabases,
   retrieveAssistantDatabaseEvidence,
   type AssistantReadableDatabase,
 } from "../services/assistantDatabaseEvidence";
+import { executeDatabaseWriteCommand } from "../services/databaseCommand";
+import { getAgentReadableTable } from "../services/databaseMcp";
 import {
   createAiTraceSession,
   recordAiTraceEventSafely,
@@ -214,6 +218,11 @@ const proposalSchema = z.discriminatedUnion("type", [
     tones: z.array(z.string().max(100)).max(5).optional(),
     styles: z.array(z.string().max(100)).max(5).optional(),
   }),
+  z.object({
+    type: z.literal("add_database_row"),
+    dbRef: z.string().trim().max(16),
+    values: z.record(z.string().max(80), z.string().max(2000)),
+  }),
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
 
@@ -232,6 +241,7 @@ const ACTION_TYPE_NAMES = new Set([
   "plan_agent",
   "prepare_external_generation",
   "apply_worldview_chips",
+  "add_database_row",
 ]);
 const COERCED_ACTION_ANSWER: Record<string, string> = {
   split_script: "好，我可以把腳本拆成一格格分鏡草稿——按下方動作就開始（AI 導演，免費）。",
@@ -243,6 +253,7 @@ const COERCED_ACTION_ANSWER: Record<string, string> = {
   update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
   direct_shot: "我幫你調了這一鏡的鏡頭語言，確認下方就套用（其他欄位不動）。",
   apply_worldview_chips: "我幫你準備了世界觀基調建議（主軸／調性／風格）——確認下方就寫入專案（可再手動微調）。",
+  add_database_row: "我幫你準備了一筆資料庫列，確認下方就寫入。",
 };
 export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
   if (!json || typeof json !== "object") return null;
@@ -275,6 +286,14 @@ type ResolvedAction =
       themes?: string[];
       tones?: string[];
       styles?: string[];
+    }
+  | {
+      type: "add_database_row";
+      label: string;
+      tableId: string;
+      tableName: string;
+      data: Record<string, string>;
+      preview: string;
     };
 
 /** runAction 輸入：前端把已確認的動作原樣送回（型別與 ResolvedAction 對齊） */
@@ -307,6 +326,11 @@ const actionInputSchema = z.discriminatedUnion("type", [
     themes: z.array(z.string().max(100)).max(5).optional(),
     tones: z.array(z.string().max(100)).max(5).optional(),
     styles: z.array(z.string().max(100)).max(5).optional(),
+  }),
+  z.object({
+    type: z.literal("add_database_row"),
+    tableId: z.string().uuid(),
+    data: z.record(z.string().min(1).max(80), z.string().min(1).max(2000)),
   }),
 ]);
 
@@ -1021,7 +1045,8 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       // Retrieve matching rows before the first model call. Tool calling remains
       // available for follow-up queries, but the first answer no longer depends
       // on the model guessing that a database contains relevant evidence.
-      const databaseEvidence = await retrieveAssistantDatabaseEvidence(readableDbs, input.message, {
+      const orderedReadableDbs = prioritizeAssistantDatabases(readableDbs, input.pageContext);
+      const databaseEvidence = await retrieveAssistantDatabaseEvidence(orderedReadableDbs, input.message, {
         limit: 16,
         candidateLimit: 120,
         budgetChars: ASSISTANT_DATABASE_EVIDENCE_BUDGET,
@@ -1259,6 +1284,20 @@ ${sceneLines}
                 ? `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，免費）`
                 : "把目前專案腳本拆成分鏡（AI 導演，免費）",
             });
+          } else if (a.type === "add_database_row") {
+            const target = orderedReadableDbs.find((d) => d.ref === a.dbRef.trim());
+            if (!target || !target.canWrite) continue;
+            const data = mapLabeledDatabaseRowValues(target.fields, a.values);
+            if (!Object.keys(data).length) continue;
+            const labelOf = new Map(target.fields.map((f) => [f.key, f.label]));
+            out.push({
+              type: "add_database_row",
+              tableId: target.id,
+              tableName: target.name,
+              data,
+              preview: Object.entries(data).map(([k, v]) => `${labelOf.get(k) ?? k}：${v}`).join("\n"),
+              label: `在資料庫「${target.name}」新增一列（${Object.keys(data).length} 欄）`,
+            });
           } else {
             const scene = scenes[a.sceneNo - 1];
             if (!scene) continue;
@@ -1279,7 +1318,7 @@ ${sceneLines}
         const evidenceSummary = databaseEvidence.length
           ? `；資料庫實際命中 ${databaseEvidence.length} 列：${databaseEvidence.slice(0, 2).map((row) => `${row.tableName}／${row.text}`).join("；")}`
           : "";
-        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個${evidenceSummary}。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
+        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${orderedReadableDbs.length} 個${evidenceSummary}。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: "mock", model: "mock" }).catch(() => undefined);
         return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false, traceSessionId, sources: sourcesReport };
@@ -1322,7 +1361,8 @@ ${forceFinal
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→逐鏡配音」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
 - prepare_external_generation：替某一鏡建立外部 AI 生成工作階段（sceneNo；externalTool 可用 flow/runway/kling/chatgpt/gemini/midjourney/elevenlabs/suno，未填預設 flow）。Prompt 必須從該分鏡的實際 prompt／動作／對白／旁白整理，不得自行假裝已生成；確認後複製 Prompt 並開啟外部工具，不扣 AI OS 點數。使用者說「幫我準備 Scene 8 去 Flow」或想用外部工具時用這個。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
-分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
+- add_database_row：在 AI 可寫的自訂資料庫新增一列（dbRef 只能抄 <可讀資料庫> 標了「AI 代理可寫」的代號；values 的鍵用欄位標籤或 key）。使用者說「記進資料庫／加一列／寫進名單」時用這個。不可寫的庫不要提議。
+分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/add_database_row/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
@@ -1338,7 +1378,7 @@ ${buildAiModelCheatsheet()}
 ${WORKFLOW_CHEATSHEET}
 </可用工作流速查>
 <可讀資料庫>
-${assistantDbCheatsheet(readableDbs)}
+${assistantDbCheatsheet(orderedReadableDbs)}
 </可讀資料庫>
 <情境手冊>
 ${scenarioPlaybookText()}
@@ -1434,7 +1474,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             });
             emit("lookup", `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}…`, { tool: call.tool });
           },
-          execTool: (call) => runLookupTool(input.auth, project, scenes, readableDbs, call),
+          execTool: (call) => runLookupTool(input.auth, project, scenes, orderedReadableDbs, call),
           onToolResult: async (call, r) => {
             // preview 一併落庫：trace 是「實際運作紀錄」，只存一段給 LLM 讀的文字摘要，
             // 使用者事後回看仍然看不到工具究竟查到了什麼。
@@ -1946,6 +1986,47 @@ export const assistantRouter = router({
           ok: true,
           kind: "apply_worldview_chips" as const,
           message: `已套用世界觀基調：${summary}。可在專案「基調與世界觀」再微調或改主要。`,
+        };
+      }
+
+      if (a.type === "add_database_row") {
+        const keys = Object.keys(a.data);
+        if (!keys.length || keys.length > 30) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "資料列需 1–30 個欄位值" });
+        }
+        const hit = await getAgentReadableTable(ctx.auth, a.tableId);
+        if (!hit) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+        if (!hit.access.canWriteRows) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫未開放 AI 寫入（管理者可在資料庫設定調整 AI 存取）" });
+        }
+        const row = await executeDatabaseWriteCommand({
+          auth: ctx.auth,
+          source: "web",
+          action: "addRow",
+          tableId: a.tableId,
+          data: a.data,
+          projectId: project.id,
+        });
+        let verification: { status: "verified" | "unverified"; message: string };
+        try {
+          const [found] = await db.select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId, data: schema.dataRows.data })
+            .from(schema.dataRows)
+            .where(eq(schema.dataRows.id, row.id));
+          verification = found && found.tableId === a.tableId
+            ? { status: "verified", message: `已重新讀取並確認寫入「${hit.table.name}」` }
+            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+        } catch {
+          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
+        }
+        return {
+          ok: true,
+          kind: "add_database_row" as const,
+          rowId: row.id,
+          tableName: hit.table.name,
+          verification,
+          message: verification.status === "verified"
+            ? `已寫入資料庫「${hit.table.name}」一列`
+            : "操作已送出，但驗證未通過",
         };
       }
 
