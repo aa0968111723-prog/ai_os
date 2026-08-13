@@ -1,13 +1,11 @@
 /**
- * Visual Creative Choice Tray（PR #710）
+ * Visual Creative Inspector (Visual Creative UX v2)
  *
- * 勾選一或多鏡後出現的情境式視覺選擇面板。
- * - 不新建 selection store：直接吃 StoryboardStage 的 pickedShotIds
- * - 套用走既有 scenes.update + mapPresetToShotPatch（merge，不清掉其他欄位）
- * - 開啟時凍結目標鏡 id，避免套用途中選取變動造成「套到錯的鏡」
- * - 手機／窄螢幕：同 ResourceDock 的 sticky 面板，之後可再換成 bottom sheet
+ * Current state first, contextual editing second. Project entities are real
+ * project truth; starter presets are developer-seeded vocabulary. Selection is
+ * frozen only at Apply time and approved shots are protected from batch edits.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   VISUAL_CHOICE_FAMILY_LABEL,
   VISUAL_CHOICE_PRESETS,
@@ -16,302 +14,404 @@ import {
   type VisualChoiceFamily,
   type VisualChoicePreset,
 } from "@shared/visualChoicePresets";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
-import { Button, Chip, Hint, Meta } from "../../components/ui";
+import { AssetImg, AssetVideo } from "../../components/MediaFallback";
+import { Button, Chip, Hint, Meta, Pill } from "../../components/ui";
+import { VisualChoicePreview } from "./VisualChoicePreview";
+import {
+  buildCreativeState,
+  presetMatchesShot,
+  snapshotOperationTargets,
+  summarizeTargetImpact,
+  type CreativeStateFamily,
+} from "./visualCreativeState";
 
-const FAMILY_ORDER: VisualChoiceFamily[] = [
-  "action",
-  "expression",
-  "camera",
-  "lighting",
-  "style",
+type ProjectFamily = "character" | "look" | "scene" | "prop" | "asset";
+type InspectorFamily = VisualChoiceFamily | ProjectFamily;
+type PendingChoice =
+  | { source: "preset"; preset: VisualChoicePreset }
+  | { source: "project"; family: ProjectFamily; id: string; label: string; ownerCharacterId?: string };
+
+const FAMILY_ORDER: Array<{ id: InspectorFamily; label: string; group: "project" | "starter" }> = [
+  { id: "character", label: "角色", group: "project" },
+  { id: "look", label: "Look", group: "project" },
+  { id: "scene", label: "Scene", group: "project" },
+  { id: "prop", label: "道具", group: "project" },
+  { id: "asset", label: "素材", group: "project" },
+  { id: "action", label: "動作", group: "starter" },
+  { id: "expression", label: "表情", group: "starter" },
+  { id: "camera", label: "Camera", group: "starter" },
+  { id: "lighting", label: "Lighting", group: "starter" },
+  { id: "style", label: "Style", group: "starter" },
 ];
+
+const STATE_TO_INSPECTOR: Record<CreativeStateFamily, InspectorFamily> = {
+  character: "character",
+  look: "look",
+  action: "action",
+  expression: "expression",
+  scene: "scene",
+  lighting: "lighting",
+  camera: "camera",
+  style: "style",
+};
+
+function appendBoundId(current: string[] | null | undefined, id: string, max: number): string[] | null {
+  const ids = current ?? [];
+  if (ids.includes(id)) return null;
+  if (ids.length >= max) return null;
+  return [...ids, id];
+}
 
 export function VisualChoiceTray({
   projectId,
   canEdit,
   pickedShotIds,
+  onOpenStudio,
 }: {
   projectId: string;
   canEdit: boolean;
-  /** 當前勾選的分鏡；tray 開啟套用時會凍結一份副本 */
   pickedShotIds: string[];
+  onOpenStudio: (sceneId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const [family, setFamily] = useState<VisualChoiceFamily>("action");
+  const [family, setFamily] = useState<InspectorFamily>("action");
+  const [pending, setPending] = useState<PendingChoice | null>(null);
   const [status, setStatus] = useState("");
-  const [frozenIds, setFrozenIds] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [instruction, setInstruction] = useState("");
   const utils = trpc.useUtils();
 
-  // 需要現有 camera / performance 才能正確 merge，避免覆寫其他欄位
   const shots = trpc.scenes.listByProject.useQuery(
     { projectId },
-    { enabled: open && pickedShotIds.length > 0, staleTime: 15_000 },
+    { enabled: pickedShotIds.length > 0, staleTime: 15_000 },
   );
+  const characters = trpc.characters.list.useQuery({ projectId }, { enabled: open, staleTime: 60_000 });
+  const looks = trpc.characterLooks.list.useQuery({ projectId }, { enabled: open, staleTime: 60_000 });
+  const scenes = trpc.scenePresets.list.useQuery({ projectId }, { enabled: open, staleTime: 60_000 });
+  const props = trpc.props.list.useQuery({ projectId }, { enabled: open, staleTime: 60_000 });
+  const assets = trpc.projects.assets.useQuery({ projectId }, { enabled: open && family === "asset", staleTime: 30_000 });
+  const project = trpc.projects.get.useQuery({ id: projectId }, { enabled: open, staleTime: 30_000 });
 
-  const update = trpc.scenes.update.useMutation({
-    onSuccess: () => {
-      void utils.scenes.listByProject.invalidate({ projectId });
-    },
-    onError: (err) => setStatus(err.message),
-  });
+  const update = trpc.scenes.update.useMutation();
+  const setCards = trpc.scenes.setCards.useMutation();
+  const setVisual = trpc.scenes.setVisualFromAsset.useMutation();
+  const updateWorldview = trpc.projects.updateWorldview.useMutation();
 
-  const presets = useMemo(
-    () => listPresetsByFamily(VISUAL_CHOICE_PRESETS, family),
+  const shotRows = shots.data ?? [];
+  const targetRows = useMemo(() => {
+    const ids = new Set(pickedShotIds);
+    return shotRows.filter((shot) => ids.has(shot.id));
+  }, [shotRows, pickedShotIds]);
+  const focusShot = targetRows.length === 1 ? targetRows[0] : undefined;
+  const focusNumber = focusShot ? shotRows.findIndex((shot) => shot.id === focusShot.id) + 1 : 0;
+
+  const characterNames = useMemo(
+    () => new Map((characters.data ?? []).map((row) => [row.id, row.name])),
+    [characters.data],
+  );
+  const lookNames = useMemo(
+    () => new Map((looks.data ?? []).map((row) => [row.id, row.name])),
+    [looks.data],
+  );
+  const sceneNames = useMemo(
+    () => new Map((scenes.data ?? []).map((row) => [row.id, row.name])),
+    [scenes.data],
+  );
+  const worldview = parseWorldviewSafe(project.data?.worldview);
+  const projectStyle = worldview.styles[0] ?? null;
+  const currentState = focusShot
+    ? buildCreativeState({ shot: focusShot, characterNames, lookNames, sceneNames, projectStyle })
+    : [];
+  const impact = summarizeTargetImpact(shotRows, pickedShotIds);
+  const selectionKey = pickedShotIds.join("|");
+
+  useEffect(() => {
+    setPending(null);
+    setStatus("");
+  }, [selectionKey]);
+
+  useEffect(() => {
+    setInstruction(focusShot?.prompt ?? "");
+  }, [focusShot?.id, focusShot?.prompt]);
+
+  const starterPresets = useMemo(
+    () => family === "character" || family === "look" || family === "scene" || family === "prop" || family === "asset"
+      ? []
+      : listPresetsByFamily(VISUAL_CHOICE_PRESETS, family),
     [family],
   );
 
-  const shotMap = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        camera: Record<string, string | undefined> | null;
-        performance: Record<string, string | undefined> | null;
-        action: string | null;
-      }
-    >();
-    for (const s of shots.data ?? []) {
-      map.set(s.id, {
-        camera: (s.camera as Record<string, string | undefined> | null) ?? null,
-        performance: (s.performance as Record<string, string | undefined> | null) ?? null,
-        action: (s.action as string | null) ?? null,
-      });
-    }
-    return map;
-  }, [shots.data]);
+  const writableRows = targetRows.filter((shot) => shot.reviewStatus !== "approved");
+  const pendingProjectStyle = pending?.source === "preset" && pending.preset.family === "style";
 
-  const targetIds = frozenIds ?? pickedShotIds;
-  const targetLabel =
-    targetIds.length === 0
-      ? "先勾選至少一鏡"
-      : targetIds.length === 1
-        ? "套用到選中的 1 鏡"
-        : `套用到選中的 ${targetIds.length} 鏡`;
-
-  const applyPreset = (preset: VisualChoicePreset) => {
-    if (!canEdit || targetIds.length === 0 || update.isPending) return;
-
-    // 凍結當下選取，避免套用過程中使用者改勾選
-    const ids = frozenIds ?? [...pickedShotIds];
-    if (!frozenIds) setFrozenIds(ids);
-
+  async function applyPending() {
+    if (!pending || !canEdit || busy || pickedShotIds.length === 0) return;
+    const targetIds = snapshotOperationTargets(pickedShotIds);
+    const targets = shotRows.filter((shot) => targetIds.includes(shot.id));
+    const editable = targets.filter((shot) => shot.reviewStatus !== "approved");
+    setBusy(true);
     setStatus("");
-    let applied = 0;
-    let styleOnly = 0;
-
-    for (const sceneId of ids) {
-      const current = shotMap.get(sceneId);
-      const patch = mapPresetToShotPatch(preset, current);
-
-      // style 目前沒有對應 shot 欄位——只記提示，不靜默改 prompt
-      const hasStructured =
-        patch.camera !== undefined ||
-        patch.performance !== undefined ||
-        patch.action !== undefined;
-
-      if (!hasStructured) {
-        if (patch.styleHint) styleOnly += 1;
-        continue;
+    try {
+      let applied = 0;
+      let incompatible = 0;
+      if (pending.source === "preset" && pending.preset.family === "style") {
+        await updateWorldview.mutateAsync({ id: projectId, worldview: { styles: [pending.preset.label] } });
+        applied = 1;
+        await utils.projects.get.invalidate({ id: projectId });
+      } else if (pending.source === "preset") {
+        await Promise.all(editable.map(async (shot) => {
+          const patch = mapPresetToShotPatch(pending.preset, {
+            camera: shot.camera,
+            performance: shot.performance,
+            action: shot.action,
+          });
+          await update.mutateAsync({
+            sceneId: shot.id,
+            ...(patch.camera !== undefined ? { camera: patch.camera } : {}),
+            ...(patch.performance !== undefined ? { performance: patch.performance } : {}),
+            ...(patch.action !== undefined ? { action: patch.action } : {}),
+          });
+          applied += 1;
+        }));
+      } else if (pending.family === "asset") {
+        await Promise.all(editable.map(async (shot) => {
+          await setVisual.mutateAsync({ sceneId: shot.id, assetId: pending.id });
+          applied += 1;
+        }));
+      } else if (pending.family === "look") {
+        await Promise.all(editable.map(async (shot) => {
+          if (pending.ownerCharacterId && !(shot.characterIds ?? []).includes(pending.ownerCharacterId)) {
+            incompatible += 1;
+            return;
+          }
+          const next = appendBoundId(shot.lookIds, pending.id, MAX_GENERATE_CHARACTERS);
+          if (!next) { incompatible += 1; return; }
+          await update.mutateAsync({ sceneId: shot.id, lookIds: next });
+          applied += 1;
+        }));
+      } else {
+        await Promise.all(editable.map(async (shot) => {
+          const key = pending.family === "character" ? "characterIds" : pending.family === "scene" ? "scenePresetIds" : "propIds";
+          const max = key === "characterIds" ? MAX_GENERATE_CHARACTERS : key === "scenePresetIds" ? MAX_GENERATE_SCENE_PRESETS : MAX_GENERATE_PROPS;
+          const next = appendBoundId(shot[key], pending.id, max);
+          if (!next) { incompatible += 1; return; }
+          await setCards.mutateAsync({ sceneId: shot.id, [key]: next });
+          applied += 1;
+        }));
       }
-
-      const payload: {
-        sceneId: string;
-        camera?: typeof patch.camera;
-        performance?: typeof patch.performance;
-        action?: string;
-      } = { sceneId };
-
-      if (patch.camera !== undefined) payload.camera = patch.camera;
-      if (patch.performance !== undefined) payload.performance = patch.performance;
-      if (patch.action !== undefined) payload.action = patch.action;
-
-      update.mutate(payload);
-      applied += 1;
+      await utils.scenes.listByProject.invalidate({ projectId });
+      const messages = [
+        pending.source === "preset" && pending.preset.family === "style"
+          ? `✓ 專案 Style 已採用「${pending.preset.label}」；會進入既有生成 context`
+          : applied > 0
+            ? `✓ 「${pending.source === "preset" ? pending.preset.label : pending.label}」已套用到 ${applied} 鏡`
+            : "沒有鏡需要更新",
+      ];
+      if (targets.length - editable.length > 0) messages.push(`${targets.length - editable.length} 鏡已通過，未修改`);
+      if (incompatible > 0) messages.push(`${incompatible} 鏡已有此項、已達上限或不相容`);
+      setStatus(messages.join("・"));
+      setPending(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "套用失敗");
+    } finally {
+      setBusy(false);
     }
-
-    const bits: string[] = [];
-    if (applied > 0) bits.push(`✓ 「${preset.label}」已套用到 ${applied} 鏡`);
-    if (styleOnly > 0) {
-      bits.push(
-        `風格「${preset.label}」已記下（生成時可作為提示；尚未寫入分鏡欄位）`,
-      );
-    }
-    if (bits.length === 0) bits.push("沒有需要更新的鏡");
-    setStatus(bits.join("・"));
-  };
-
-  // 沒有勾選時不佔版面（與 ResourceDock 的「先勾選」提示一致）
-  if (pickedShotIds.length === 0 && !frozenIds) {
-    return null;
   }
 
+  async function saveInstruction() {
+    if (!focusShot || !canEdit || busy || instruction === (focusShot.prompt ?? "")) return;
+    setBusy(true);
+    try {
+      await update.mutateAsync({ sceneId: focusShot.id, prompt: instruction });
+      await utils.scenes.listByProject.invalidate({ projectId });
+      setStatus("✓ 自然語言微調已儲存，會和結構化選擇、專案 references 一起進入生成 context");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "儲存失敗");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (pickedShotIds.length === 0) return null;
+
+  const targetLabel = pickedShotIds.length === 1 ? `Shot ${String(focusNumber).padStart(2, "0")}` : `已選 ${pickedShotIds.length} 鏡`;
+  const projectOptions = family === "character"
+    ? (characters.data ?? []).map((row) => ({ ...row, label: row.name, description: row.appearance, previewUrl: row.referenceUrl }))
+    : family === "look"
+      ? (looks.data ?? [])
+          .filter((row) => !focusShot || (focusShot.characterIds ?? []).includes(row.characterId))
+          .map((row) => ({ ...row, label: row.name, description: row.costume, previewUrl: row.referenceUrl, ownerCharacterId: row.characterId }))
+      : family === "scene"
+        ? (scenes.data ?? []).map((row) => ({ ...row, label: row.name, description: [row.palette, row.lighting].filter(Boolean).join("・"), previewUrl: row.referenceUrl }))
+        : family === "prop"
+          ? (props.data ?? []).map((row) => ({ ...row, label: row.name, description: row.appearance, previewUrl: row.referenceUrl }))
+          : family === "asset"
+            ? (assets.data ?? [])
+                .filter((row) => (row.kind === "image" || row.kind === "video") && row.url)
+                .slice(0, 24)
+                .map((row) => ({ ...row, label: row.title, description: row.kind === "video" ? "影片素材" : "圖片素材", previewUrl: row.url }))
+            : [];
+
   return (
-    <aside
-      className={`visual-choice-tray${open ? " is-open" : ""}`}
-      aria-label="視覺選擇"
-      data-fb="視覺選擇 Tray"
-      style={{
-        flex: "0 0 260px",
-        position: "sticky",
-        top: 72,
-        maxHeight: "calc(100vh - 96px)",
-        overflow: "auto",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-12, 12px)",
-        background: "var(--surface, var(--card))",
-        padding: 8,
-        minWidth: 220,
-      }}
-    >
-      <div className="visual-choice-tray__head" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <Button
-          size="sm"
-          variant="ghost"
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          title={open ? "收合視覺選擇" : "展開視覺選擇——動作／表情／鏡頭／光線／風格"}
-        >
-          <Icon name="Sparkles" size={14} />
-          視覺選擇
+    <aside className={`visual-creative-inspector${open ? " is-open" : ""}`} aria-label="Shot 創作控制" data-fb="Visual Creative Inspector">
+      <header className="visual-creative-inspector__head">
+        <div>
+          <Meta as="div">CURRENT CREATIVE STATE</Meta>
+          <strong>{targetLabel}{focusShot?.title ? `・${focusShot.title}` : ""}</strong>
+        </div>
+        <Button size="sm" variant="ghost" type="button" aria-expanded={open} aria-label={open ? "收合創作控制" : "展開創作控制"} onClick={() => setOpen((value) => !value)}>
+          <Icon name={open ? "ChevronDown" : "SlidersHorizontal"} size={15} />
         </Button>
-        {open && (
-          <Meta as="span" style={{ fontSize: "var(--fs-12)" }}>
-            {targetLabel}
-          </Meta>
-        )}
-        {frozenIds && (
-          <Button
-            size="sm"
-            variant="ghost"
-            type="button"
-            title="解除凍結，改用目前勾選"
-            onClick={() => {
-              setFrozenIds(null);
-              setStatus("");
-            }}
-          >
-            解除凍結
-          </Button>
-        )}
-      </div>
+      </header>
 
       {open && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-soft, var(--border))" }}>
-          {!canEdit && <Hint>檢視者只能瀏覽，不能套用。</Hint>}
+        <>
+          {focusShot ? (
+            <div className="creative-state-grid" role="list" aria-label={`${targetLabel} 目前創作狀態`}>
+              {currentState.map((item) => (
+                <button
+                  key={item.family}
+                  type="button"
+                  role="listitem"
+                  className={`creative-state-item${family === STATE_TO_INSPECTOR[item.family] ? " is-active" : ""}${item.empty ? " is-empty" : ""}`}
+                  onClick={() => { setFamily(STATE_TO_INSPECTOR[item.family]); setPending(null); }}
+                  aria-label={`${item.label}：${item.value}。點擊修改`}
+                >
+                  <Meta as="span">{item.label}</Meta>
+                  <strong>{item.value}</strong>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <Hint>批次模式會在按「套用」時擷取這 {pickedShotIds.length} 鏡；之後改選取不會改到已送出的 operation。</Hint>
+          )}
 
-          <div
-            role="tablist"
-            aria-label="選擇類型"
-            style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 10 }}
-          >
-            {FAMILY_ORDER.map((f) => (
+          <div className="visual-family-strip" role="tablist" aria-label="創作選擇類型">
+            {FAMILY_ORDER.map((item, index) => (
               <button
-                key={f}
+                key={item.id}
                 type="button"
                 role="tab"
-                aria-selected={family === f}
-                onClick={() => setFamily(f)}
-                style={{
-                  fontSize: "var(--fs-12)",
-                  padding: "4px 10px",
-                  border: 0,
-                  borderRadius: 999,
-                  background:
-                    family === f
-                      ? "var(--primary-soft, color-mix(in srgb, var(--primary-ink) 12%, transparent))"
-                      : "transparent",
-                  color: family === f ? "var(--primary-ink)" : "inherit",
-                  fontWeight: family === f ? 600 : 400,
-                  cursor: "pointer",
-                }}
+                aria-selected={family === item.id}
+                className={family === item.id ? "is-active" : undefined}
+                onClick={() => { setFamily(item.id); setPending(null); }}
               >
-                {VISUAL_CHOICE_FAMILY_LABEL[f]}
+                {index === 0 || FAMILY_ORDER[index - 1]?.group !== item.group ? <small>{item.group === "project" ? "PROJECT" : "STARTER"}</small> : null}
+                {item.label}
               </button>
             ))}
           </div>
 
-          <Meta as="p" style={{ margin: "0 0 8px", fontSize: "var(--fs-12)" }}>
-            點卡片套用到選中鏡（會與現有鏡頭／表情合併，不會清掉其他欄位）
-          </Meta>
-
-          <div
-            role="listbox"
-            aria-label={VISUAL_CHOICE_FAMILY_LABEL[family]}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-            }}
-          >
-            {presets.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="option"
-                title={`${p.label}${p.description ? `—${p.description}` : ""}`}
-                disabled={!canEdit || targetIds.length === 0 || update.isPending}
-                onClick={() => applyPreset(p)}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "10px 6px",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r-10, 10px)",
-                  background: "var(--surface-2, var(--field))",
-                  cursor:
-                    canEdit && targetIds.length > 0 ? "pointer" : "not-allowed",
-                  opacity: !canEdit || targetIds.length === 0 ? 0.55 : 1,
-                  textAlign: "center",
-                  minHeight: 72,
-                }}
-              >
-                <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden>
-                  {p.preview ?? "•"}
-                </span>
-                <span style={{ fontSize: "var(--fs-12)", fontWeight: 600 }}>
-                  {p.label}
-                </span>
-                {p.description && (
-                  <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
-                    {p.description}
-                  </Meta>
-                )}
-              </button>
-            ))}
+          <div className="visual-choice-context-head">
+            <div>
+              <strong>{FAMILY_ORDER.find((item) => item.id === family)?.label ?? VISUAL_CHOICE_FAMILY_LABEL[family as VisualChoiceFamily]}</strong>
+              <Meta as="div">{["character", "look", "scene", "prop", "asset"].includes(family) ? "PROJECT CHOICES・來自本專案真實資料" : "PRODUCT STARTER CHOICES・可再用文字自由微調"}</Meta>
+            </div>
+            {family === "style" && projectStyle && <Chip>Project Style：{projectStyle}</Chip>}
           </div>
 
-          {family === "style" && (
-            <Hint style={{ marginTop: 8, fontSize: "var(--fs-11)" }}>
-              風格目前作為生成提示記錄；尚未寫入分鏡專用欄位，避免靜默改掉畫面描述。
-            </Hint>
+          <div className="visual-choice-grid" role="listbox" aria-label={String(family)}>
+            {starterPresets.map((preset) => {
+              const selected = pending?.source === "preset" && pending.preset.id === preset.id;
+              const current = !!focusShot && presetMatchesShot(preset, focusShot, projectStyle);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected || current}
+                  className={`visual-choice-option${selected ? " is-selected" : ""}${current ? " is-current" : ""}`}
+                  disabled={!canEdit}
+                  onClick={() => setPending({ source: "preset", preset })}
+                >
+                  {preset.previewResource ? <VisualChoicePreview resource={preset.previewResource} /> : <span className="visual-choice-preview__fallback">{preset.preview ?? "•"}</span>}
+                  <span className="visual-choice-option__copy"><strong>{preset.label}</strong>{preset.description && <Meta as="span">{preset.description}</Meta>}</span>
+                  {current && <Pill status="done">CURRENT</Pill>}
+                  {selected && !current && <Pill status="queued">候選</Pill>}
+                </button>
+              );
+            })}
+
+            {projectOptions.map((option) => {
+              const selected = pending?.source === "project" && pending.family === family && pending.id === option.id;
+              const current = !!focusShot && (
+                family === "character" ? (focusShot.characterIds ?? []).includes(option.id)
+                : family === "look" ? (focusShot.lookIds ?? []).includes(option.id)
+                : family === "scene" ? (focusShot.scenePresetIds ?? []).includes(option.id)
+                : family === "prop" ? (focusShot.propIds ?? []).includes(option.id)
+                : focusShot.assetId === option.id
+              );
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected || current}
+                  className={`visual-choice-option visual-choice-option--project${selected ? " is-selected" : ""}${current ? " is-current" : ""}`}
+                  disabled={!canEdit}
+                  onClick={() => setPending({ source: "project", family: family as ProjectFamily, id: option.id, label: option.label, ownerCharacterId: "ownerCharacterId" in option ? option.ownerCharacterId : undefined })}
+                >
+                  {option.previewUrl ? (
+                    "kind" in option && option.kind === "video"
+                      ? <AssetVideo src={option.previewUrl} muted preload="none" className="visual-choice-preview__image" fallbackLabel="影片" />
+                      : <AssetImg src={option.previewUrl} alt={option.label} loading="lazy" className="visual-choice-preview__image" fallbackLabel="參考" />
+                  ) : <span className="visual-choice-preview__project-fallback"><Icon name={family === "character" || family === "look" ? "User" : family === "scene" ? "Image" : family === "asset" ? "LayoutGrid" : "Box"} size={24} /></span>}
+                  <span className="visual-choice-option__copy"><strong>{option.label}</strong>{option.description && <Meta as="span">{option.description}</Meta>}</span>
+                  {current && <Pill status="done">CURRENT</Pill>}
+                  {selected && !current && <Pill status="queued">候選</Pill>}
+                </button>
+              );
+            })}
+          </div>
+
+          {projectOptions.length === 0 && starterPresets.length === 0 && (
+            <Hint>{family === "look" && focusShot ? "目前角色還沒有可用 Look；可先選角色或到定裝建立 reference。" : "本專案尚無這類資料。"}</Hint>
           )}
 
-          {status && (
-            <Meta as="p" role="status" style={{ marginTop: 8, fontSize: "var(--fs-12)" }}>
-              {status}
-            </Meta>
-          )}
-
-          {targetIds.length > 0 && (
-            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-              <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
-                目標：
-              </Meta>
-              {targetIds.slice(0, 6).map((id) => (
-                <Chip key={id} className="visual-choice-tray__target-chip">
-                  {id.slice(0, 6)}…
-                </Chip>
-              ))}
-              {targetIds.length > 6 && (
-                <Chip>+{targetIds.length - 6}</Chip>
-              )}
+          {pickedShotIds.length > 1 && (
+            <div className="choice-impact" aria-label="套用影響">
+              <strong>{pendingProjectStyle ? "將更新專案 Style" : `將檢查 ${impact.total} 鏡`}</strong>
+              {pendingProjectStyle
+                ? <Meta>Style 是專案層級的生成 context；既有畫面與通過狀態不會被覆寫。</Meta>
+                : <Meta>草稿 {impact.draft}・已有畫面 {impact.withVisual}・已通過 {impact.approved}</Meta>}
+              {!pendingProjectStyle && impact.approved > 0 && <Hint>已通過鏡會保留，不參與這次批次修改。</Hint>}
             </div>
           )}
-        </div>
+
+          {focusShot && (
+            <div className="creative-refine-box">
+              <label htmlFor={`visual-refine-${focusShot.id}`}>自然語言微調</label>
+              <textarea
+                id={`visual-refine-${focusShot.id}`}
+                value={instruction}
+                maxLength={4000}
+                disabled={!canEdit || busy}
+                placeholder="例：風再大一點，但人物臉不要變。"
+                onChange={(event) => setInstruction(event.target.value)}
+              />
+              <div>
+                <Button size="sm" variant="ghost" type="button" disabled={!canEdit || busy || instruction === (focusShot.prompt ?? "")} onClick={saveInstruction}>儲存微調</Button>
+                <Button size="sm" variant="tonal" type="button" onClick={() => onOpenStudio(focusShot.id)}><Icon name="Sparkles" size={13} /> 生成／比較變體</Button>
+              </div>
+            </div>
+          )}
+
+          {status && <Meta as="p" role="status" className="visual-choice-status">{status}</Meta>}
+
+          <footer className="visual-choice-apply-bar">
+            <div>
+              <Meta as="div">{pending ? "待採用" : "先選一個方向"}</Meta>
+              <strong>{pending ? (pending.source === "preset" ? pending.preset.label : pending.label) : targetLabel}</strong>
+            </div>
+            <Button variant="primary" type="button" disabled={!pending || !canEdit || busy || (pending?.source !== "preset" || pending.preset.family !== "style") && writableRows.length === 0} onClick={applyPending}>
+              {busy ? "套用中…" : pendingProjectStyle ? "套用到專案" : `套用${pickedShotIds.length > 1 ? `到 ${pickedShotIds.length} 鏡` : ""}`}
+            </Button>
+          </footer>
+        </>
       )}
     </aside>
   );
