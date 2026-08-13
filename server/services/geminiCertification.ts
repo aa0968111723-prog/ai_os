@@ -8,7 +8,10 @@ import { geminiApiKeyConfigured, geminiStatus, geminiSubmit, parseStoredGeminiUr
 import { getModel, isGeminiModel } from "../../shared/models";
 import { db, schema } from "../db";
 import { submitGenerationCore, advanceGeneration } from "./generationCore";
-import { parseStoredResultUrl } from "./storage";
+import { parseStoredResultUrl, STORAGE_ROOT } from "./storage";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { isMockMode } from "./fal";
 
 export type GeminiCertVerdict = "PASS" | "FAIL" | "BLOCKED_BY_EXTERNAL_DEPENDENCY";
 
@@ -350,3 +353,143 @@ export function geminiCertExitCode(report: GeminiCertReport): number {
   if (report.summary.blocked > 0) return 2;
   return 0;
 }
+
+export interface StoredGeminiCert extends GeminiCertReport {
+  at: string;
+  source: "boot" | "admin" | "cli";
+}
+
+export type GeminiCertPublicStatus = "NONE" | "RUNNING" | "PASS" | "BLOCKED" | "FAIL";
+
+export interface GeminiCertPublicSnapshot {
+  status: GeminiCertPublicStatus;
+  configured: boolean;
+  at: string | null;
+  source: StoredGeminiCert["source"] | null;
+  summary: GeminiCertReport["summary"] | null;
+  items: GeminiCertItem[];
+}
+
+let inFlight: Promise<StoredGeminiCert> | null = null;
+let lastMemory: StoredGeminiCert | "running" | null = null;
+
+export function resetGeminiCertMemoryForTests(): void {
+  inFlight = null;
+  lastMemory = null;
+}
+
+function evidencePath(): string {
+  return path.join(STORAGE_ROOT, "qa", "gemini-cert-last.json");
+}
+
+function liveImagePassed(report: GeminiCertReport): boolean {
+  return report.items.some((row) => row.name === "live-image" && row.verdict === "PASS");
+}
+
+export function loadLastGeminiCert(): StoredGeminiCert | null {
+  if (lastMemory && lastMemory !== "running") return lastMemory;
+  try {
+    const raw = readFileSync(evidencePath(), "utf8");
+    const parsed = JSON.parse(raw) as StoredGeminiCert;
+    if (!parsed || !Array.isArray(parsed.items) || containsGeminiSecret(parsed)) return null;
+    lastMemory = parsed;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastGeminiCert(report: StoredGeminiCert): void {
+  if (containsGeminiSecret(report)) {
+    throw new Error("refusing to persist a certification report that still contains a secret");
+  }
+  const dir = path.dirname(evidencePath());
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(evidencePath(), `${JSON.stringify(report, null, 2)}\n`);
+  lastMemory = report;
+}
+
+export function publicGeminiCertSnapshot(): GeminiCertPublicSnapshot {
+  if (lastMemory === "running" || inFlight) {
+    const last = lastMemory !== "running" ? lastMemory : loadLastGeminiCert();
+    return {
+      status: "RUNNING",
+      configured: geminiApiKeyConfigured(),
+      at: last?.at ?? null,
+      source: last?.source ?? null,
+      summary: last?.summary ?? null,
+      items: last?.items ?? [],
+    };
+  }
+  const last = loadLastGeminiCert();
+  if (!last) {
+    return {
+      status: "NONE",
+      configured: geminiApiKeyConfigured(),
+      at: null,
+      source: null,
+      summary: null,
+      items: [],
+    };
+  }
+  const status: GeminiCertPublicStatus =
+    last.summary.fail > 0 ? "FAIL" : last.summary.blocked > 0 ? "BLOCKED" : "PASS";
+  return {
+    status,
+    configured: last.configured,
+    at: last.at,
+    source: last.source,
+    summary: last.summary,
+    items: last.items,
+  };
+}
+
+export function shouldAutoCert(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.GEMINI_LIVE_CERT_ON_BOOT === "0") return false;
+  if (env.E2E_MOCK === "1" || isMockMode()) return false;
+  if (!geminiApiKeyConfigured(env)) return false;
+  const last = loadLastGeminiCert();
+  if (last && last.summary.fail === 0 && liveImagePassed(last)) return false;
+  return true;
+}
+
+export async function runAndStoreGeminiCertification(
+  source: StoredGeminiCert["source"],
+  opts: { live?: boolean; persistAttach?: boolean } = {},
+): Promise<StoredGeminiCert> {
+  if (inFlight) return inFlight;
+  lastMemory = "running";
+  inFlight = (async () => {
+    const report = await runGeminiCertification(opts);
+    const stored: StoredGeminiCert = {
+      ...report,
+      at: new Date().toISOString(),
+      source,
+    };
+    saveLastGeminiCert(stored);
+    return stored;
+  })();
+  try {
+    return await inFlight;
+  } finally {
+    inFlight = null;
+  }
+}
+
+export function scheduleGeminiLiveCertification(): void {
+  if (!shouldAutoCert()) {
+    const snap = publicGeminiCertSnapshot();
+    console.log(`[gemini-cert] skip auto status=${snap.status} configured=${snap.configured}`);
+    return;
+  }
+  const timer = setTimeout(() => {
+    console.log("[gemini-cert] starting Zeabur live certification (key stays in process.env)");
+    void runAndStoreGeminiCertification("boot").then((report) => {
+      console.log(`[gemini-cert] ${formatGeminiCertReport(report).split("\n").pop()}`);
+    }).catch((err) => {
+      console.warn("[gemini-cert] auto run failed：", redactGeminiSecrets(err instanceof Error ? err.message : String(err)));
+    });
+  }, 8_000);
+  timer.unref?.();
+}
+
