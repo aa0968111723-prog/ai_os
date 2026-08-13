@@ -218,28 +218,34 @@ export async function runGeminiCertification(opts: {
     const assets = await db.select().from(schema.assets).where(eq(schema.assets.projectId, fixture.projectId));
     const shots = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, fixture.projectId));
 
+    const liveBlocked = items.some((row) =>
+      (row.name === "live-image" || row.name === "live-omni") && row.verdict === "BLOCKED_BY_EXTERNAL_DEPENDENCY",
+    );
+    const persistVerdict = liveBlocked ? "BLOCKED_BY_EXTERNAL_DEPENDENCY" : "FAIL";
+    const persistReason = liveBlocked ? "live Gemini blocked by external billing" : undefined;
+
     const landed = assets.filter((row) => row.storagePath && row.landState === "landed" && row.url.startsWith("/api/assets/"));
     items.push(
       landed.length > 0
         ? item("storage", "PASS", `${landed.length} asset(s) landed in existing storage`)
-        : item("storage", "FAIL", "no landed storagePath"),
+        : item("storage", persistVerdict, persistReason ?? "no landed storagePath"),
     );
     items.push(
       generations.some((row) => row.status === "done")
         ? item("generation-record", "PASS", `${generations.filter((row) => row.status === "done").length} done generation(s)`)
-        : item("generation-record", "FAIL", generations.map((row) => `${row.modelId}:${row.status}`).join(",") || "none"),
+        : item("generation-record", persistVerdict, persistReason ?? (generations.map((row) => `${row.modelId}:${row.status}`).join(",") || "none")),
     );
     items.push(
       assets.length > 0
         ? item("asset-record", "PASS", `${assets.length} asset(s)`)
-        : item("asset-record", "FAIL", "no assets"),
+        : item("asset-record", persistVerdict, persistReason ?? "no assets"),
     );
 
     const attached = shots.filter((shot) => shot.assetId && assets.some((asset) => asset.id === shot.assetId));
     items.push(
       attached.length > 0
         ? item("shot-attach", "PASS", `${attached.length} shot(s) have assetId`)
-        : item("shot-attach", "FAIL", "no shot received an asset"),
+        : item("shot-attach", persistVerdict, persistReason ?? "no shot received an asset"),
     );
 
     const reloadedGens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, fixture.projectId));
@@ -250,7 +256,7 @@ export async function runGeminiCertification(opts: {
     items.push(
       stillThere
         ? item("reload", "PASS", "generation and shot attach survive re-read")
-        : item("reload", "FAIL", "reload lost generation or shot attach"),
+        : item("reload", persistVerdict, persistReason ?? "reload lost generation or shot attach"),
     );
 
     const payload = { generations, assets, shots };
@@ -272,6 +278,10 @@ export async function runGeminiCertification(opts: {
   return { configured, items, summary: summarize(items) };
 }
 
+function isExternalBillingBlock(message: string): boolean {
+  return /RESOURCE_EXHAUSTED|prepayment credits are depleted|code": 429/i.test(message);
+}
+
 function recordProviderResult(
   items: GeminiCertItem[],
   name: string,
@@ -284,7 +294,8 @@ function recordProviderResult(
     items.push(item(name, stored || local ? "PASS" : "FAIL", stored ? "stored handle" : row.resultUrl));
     return;
   }
-  items.push(item(name, "FAIL", row.error || `${kind} status=${row.status}`));
+  const message = row.error || `${kind} status=${row.status}`;
+  items.push(item(name, isExternalBillingBlock(message) ? "BLOCKED_BY_EXTERNAL_DEPENDENCY" : "FAIL", message));
 }
 
 interface GeminiCertFixture {
@@ -450,6 +461,7 @@ export function shouldAutoCert(env: NodeJS.ProcessEnv = process.env): boolean {
   if (!geminiApiKeyConfigured(env)) return false;
   const last = loadLastGeminiCert();
   if (last && last.summary.fail === 0 && liveImagePassed(last)) return false;
+  if (last?.items.some((row) => isExternalBillingBlock(row.detail))) return false;
   return true;
 }
 
