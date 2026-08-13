@@ -279,6 +279,16 @@ describe("agent database tools", () => {
     }
   });
 
+  it("gets a row by table name without requiring a table UUID", async () => {
+    selectRows.push({ id: "row-old", tableId: table.id, data: { title: "王羲之" } });
+    const result = await executeDatabaseRowGetTool(auth, context, {
+      table: "素材清單",
+      rowId: "row-old",
+    });
+    expect(result.verified).toBe(true);
+    expect(result.value).toMatchObject({ status: "resolved", rowId: "row-old", tableId: table.id });
+  });
+
   it("gets a recent row without leaking a missing table", async () => {
     getAgentReadableTable.mockResolvedValue(null);
     const result = await executeDatabaseRowGetTool(auth, context, {
