@@ -768,3 +768,149 @@ describe("影片時間碼留言（tMs；驗收 J）", () => {
     expect(discuss.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * #725 P0-1 的可執行回歸測試（跨鏡狀態外洩）。
+ *
+ * 原始 finding：`StoryboardStage` 在固定位置渲染 `<SceneStudio>` 且沒有 `key`，
+ * 而 `ShotNavigator` 是**就地換 sceneId**。同型別、同位置、無 key ⇒ React 保留全部
+ * component state，造成三件事：寫錯鏡、對錯鏡花錢、假成功（顯示生成中但什麼都沒送）。
+ *
+ * 這一組刻意用**真的重新渲染**來證明隔離，而不是 grep 原始碼有沒有 `key=`：
+ * 以 `key={sceneId}` 掛載（＝正式呼叫端的做法）之後換鏡，逐一斷言 red team 點名的
+ * 五個外洩向量都不成立。
+ */
+describe("#725 P0-1 跨鏡狀態隔離（換鏡後不得沿用上一鏡的任何狀態）", () => {
+  /** 每一鏡有自己的伺服器資料，才分得出「顯示的是 B 的值」還是「殘留 A 的草稿」 */
+  function dataFor(sceneId: string) {
+    return {
+      ...serverData({ rows: [genRow({ generationId: `${sceneId}-g1`, createdAt: "2026-07-01T00:00:00.000Z" })] }),
+      sceneId,
+      prompt: sceneId === "s-A" ? "A 鏡的提示詞" : "B 鏡的提示詞",
+    };
+  }
+
+  /** 正式呼叫端（StoryboardStage / SceneList）都是 key={shot.id}；這裡照同樣方式掛 */
+  function renderKeyed(sceneId: string) {
+    return (
+      <SceneStudio
+        key={sceneId}
+        sceneId={sceneId}
+        projectId="p-1"
+        sceneNumber={sceneId === "s-A" ? 1 : 2}
+        canEdit
+        onClose={vi.fn()}
+        onChanged={vi.fn()}
+      />
+    );
+  }
+
+  it("A 鏡的未存草稿不會出現在 B 鏡（寫錯鏡）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    const box = screen.getByRole("textbox", { name: /這一格的提示詞/ });
+    await user.clear(box);
+    await user.type(box, "只屬於 A 鏡的草稿");
+    expect(screen.getByRole("textbox", { name: /這一格的提示詞/ })).toHaveValue("只屬於 A 鏡的草稿");
+
+    // ShotNavigator 換鏡
+    view.rerender(renderKeyed("s-B"));
+
+    // B 鏡顯示的必須是 B 自己的伺服器值，不是 A 的草稿
+    expect(screen.getByRole("textbox", { name: /這一格的提示詞/ })).toHaveValue("B 鏡的提示詞");
+    expect(screen.queryByDisplayValue("只屬於 A 鏡的草稿")).not.toBeInTheDocument();
+  });
+
+  it("在 B 鏡送出的生成帶的是 B 的 sceneId 與 B 的提示詞（對錯鏡花錢）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    const box = screen.getByRole("textbox", { name: /這一格的提示詞/ });
+    await user.clear(box);
+    await user.type(box, "只屬於 A 鏡的草稿");
+
+    view.rerender(renderKeyed("s-B"));
+
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+
+    const arg = regenMutate.mock.calls[0]![0] as { sceneId: string; prompt: string };
+    expect(arg.sceneId).toBe("s-B");
+    expect(arg.prompt).toBe("B 鏡的提示詞");
+    expect(arg.prompt).not.toContain("A 鏡");
+  });
+
+  it("B 鏡的變體用的是全新的冪等鍵與 batchId（假成功：重送 A 的 UUID）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const aCall = variantsMutate.mock.calls[0]![0] as {
+      sceneId: string; batchId: string; variants: Array<{ clientRequestId: string }>;
+    };
+
+    view.rerender(renderKeyed("s-B"));
+
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const bCall = variantsMutate.mock.calls[1]![0] as {
+      sceneId: string; batchId: string; variants: Array<{ clientRequestId: string }>;
+    };
+
+    expect(bCall.sceneId).toBe("s-B");
+    // batchId 不得沿用——否則 B 的版本會被歸進 A 的批次
+    expect(bCall.batchId).not.toBe(aCall.batchId);
+    // 冪等鍵不得沿用——否則伺服器冪等短路會回 A 的既有列並回報 ok，UI 顯示「生成中」但 B 什麼都沒送
+    const aKeys = new Set(aCall.variants.map((v) => v.clientRequestId));
+    for (const variant of bCall.variants) {
+      expect(aKeys.has(variant.clientRequestId)).toBe(false);
+    }
+  });
+
+  it("A 鏡的批次狀態不會出現在 B 鏡（殘留 candidate state ／ 假的生成中）", async () => {
+    const user = userEvent.setup();
+    // A 鏡有一批帶方向 meta 的變體（＝畫面會顯示批次狀態列）
+    const withBatch = (sceneId: string) => {
+      const base = dataFor(sceneId);
+      if (sceneId !== "s-A") return base;
+      const rows = [
+        genRow({
+          generationId: "A-v1", createdAt: "2026-07-02T00:00:00.000Z", status: "running",
+          assetId: null, assetUrl: null, assetKind: null,
+        }),
+      ];
+      const versions = buildSceneVersions(rows, { assetId: null, narrationAssetId: null, ambienceAssetId: null })
+        .map((v) => ({ ...v, creative: { batchId: "batch-A", directionId: "closer", directionLabel: "更靠近人物", batchSize: 3 } }));
+      return { ...base, versions, summary: { ...base.summary, generating: true } };
+    };
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: withBatch(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    expect(screen.getByText(/方向生成中/)).toBeInTheDocument();
+    expect(screen.getByText("更靠近人物")).toBeInTheDocument();
+
+    view.rerender(renderKeyed("s-B"));
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+
+    // B 鏡沒有任何批次 ⇒ 不得顯示 A 的批次狀態或方向標籤
+    expect(screen.queryByText(/方向生成中/)).not.toBeInTheDocument();
+    expect(screen.queryByText("更靠近人物")).not.toBeInTheDocument();
+  });
+});

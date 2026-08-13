@@ -192,3 +192,122 @@ describe.skipIf(!RUN_PG).sequential("變體指標政策（真 PostgreSQL）", ()
     expect(after!.assetId).toBe(result);
   });
 });
+
+/**
+ * #725 P0-2 的可執行回歸測試（成本核准會清掉 preserveScenePointer）。
+ *
+ * red team 明確點名要補的測試：
+ *   「DB 層：變體 → awaiting_approval → decideCost 核准 → advance → 斷言 scenes.assetId **未變**」
+ *
+ * 這裡把 decideCost 那一行的**實際資料轉換**（params 全欄覆寫）原樣重現後真的寫進 DB，
+ * 再讀回來跑 generationCore 的守衛條件。所以它測的是「meta 有沒有在那次覆寫中存活」，
+ * 而不是原始碼裡有沒有那串字。
+ */
+describe.skipIf(!RUN_PG).sequential("#725 P0-2 成本核准後變體仍不得移動指標（真 PostgreSQL）", () => {
+  const groupId = randomUUID();
+  const projectId = randomUUID();
+  const userId = randomUUID();
+  const sceneIds: string[] = [];
+  const assetIds: string[] = [];
+  const generationIds: string[] = [];
+
+  async function makeAsset(): Promise<string> {
+    const id = randomUUID();
+    await db.insert(schema.assets).values({ id, projectId, groupId, kind: "image", title: "t", url: `/api/assets/${id}/file` });
+    assetIds.push(id);
+    return id;
+  }
+
+  /** decideCost 核准分支對 params 做的事（generation.ts：重簽來源網址後全欄覆寫） */
+  async function approveLikeDecideCost(genId: string) {
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, genId));
+    const splitParams = splitGenerationSourceMeta(gen!.params);
+    await db.update(schema.generations).set({
+      status: "running",
+      params: storeGenerationSourceMeta(splitParams.providerParams, {
+        ...splitParams.meta,                 // ← 這一行就是修復本身；拿掉它就是 #725 P0-2
+        secondarySourceUrl: splitParams.meta.secondarySourceUrl,
+        usedUserKey: splitParams.meta.usedUserKey || undefined,
+      }),
+    }).where(eq(schema.generations.id, genId));
+  }
+
+  beforeAll(async () => {
+    await db.insert(schema.users).values({ id: userId, email: `u-${userId}@test.local`, name: "Bruce", passwordHash: "x" });
+    await db.insert(schema.projects).values({
+      id: projectId, groupId, ownerId: userId, title: "核准後指標測試", kind: "video", platform: "youtube", format: "16:9",
+    });
+  });
+
+  afterAll(async () => {
+    if (generationIds.length) await db.delete(schema.generations).where(inArray(schema.generations.id, generationIds));
+    if (sceneIds.length) await db.delete(schema.scenes).where(inArray(schema.scenes.id, sceneIds));
+    if (assetIds.length) await db.delete(schema.assets).where(inArray(schema.assets.id, assetIds));
+    await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
+    await db.delete(schema.users).where(eq(schema.users.id, userId));
+  });
+
+  it("變體 → awaiting_approval → 核准 → 完成：scenes.assetId 一個位元組都沒動", async () => {
+    const original = await makeAsset();
+    const sceneId = randomUUID();
+    sceneIds.push(sceneId);
+    await db.insert(schema.scenes).values({ id: sceneId, projectId, title: "shot", orderIndex: 0, assetId: original });
+
+    // 三個變體都超過組門檻 → 全部落 awaiting_approval，帶 preserveScenePointer + 方向 meta
+    const genIds: string[] = [];
+    for (const label of ["更靠近人物", "低機位強逆光", "廣角孤立感"]) {
+      const id = randomUUID();
+      genIds.push(id);
+      generationIds.push(id);
+      await db.insert(schema.generations).values({
+        id, projectId, groupId, userId, modelId: "fal-ai/x", kind: "image", prompt: "p",
+        sceneId, sceneRole: "visual", status: "awaiting_approval", pointsEst: 30,
+        params: storeGenerationSourceMeta({ prompt: "p" }, {
+          preserveScenePointer: true,
+          creative: { batchId: "batch-1", directionId: label, directionLabel: label, batchSize: 3 },
+          ablation: { runId: "run-1", section: "baseline" },
+        }),
+      });
+    }
+
+    // 組長核准三筆
+    for (const id of genIds) await approveLikeDecideCost(id);
+
+    // 核准後 meta 必須還在（這是 P0-2 的核心）
+    for (const id of genIds) {
+      const [row] = await db.select().from(schema.generations).where(eq(schema.generations.id, id));
+      const meta = splitGenerationSourceMeta(row!.params).meta;
+      expect(meta.preserveScenePointer).toBe(true);
+      expect(meta.creative?.batchId).toBe("batch-1");
+      expect(meta.ablation?.runId).toBe("run-1"); // 消融分組不得靜默失真
+    }
+
+    // provider 依序完成三筆
+    for (const id of genIds) {
+      const [row] = await db.select().from(schema.generations).where(eq(schema.generations.id, id));
+      await backfillPointer(row!, await makeAsset());
+    }
+
+    const [after] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, sceneId));
+    expect(after!.assetId).toBe(original); // 使用者從未採用任何一版 → 畫面不該被換掉
+  });
+
+  it("核准路徑不會動到 sceneRole：重試失敗的旁白不會落進主畫面槽", async () => {
+    const sceneId = randomUUID();
+    sceneIds.push(sceneId);
+    await db.insert(schema.scenes).values({ id: sceneId, projectId, title: "shot", orderIndex: 1 });
+    const id = randomUUID();
+    generationIds.push(id);
+    await db.insert(schema.generations).values({
+      id, projectId, groupId, userId, modelId: "fal-ai/tts", kind: "audio", prompt: "p",
+      sceneId, sceneRole: "narration", status: "awaiting_approval", pointsEst: 30,
+      params: storeGenerationSourceMeta({ prompt: "p" }, { preserveScenePointer: true }),
+    });
+
+    await approveLikeDecideCost(id);
+
+    const [row] = await db.select().from(schema.generations).where(eq(schema.generations.id, id));
+    expect(row!.sceneRole).toBe("narration"); // 核准只改 status/params，不得動角色欄位
+    expect(splitGenerationSourceMeta(row!.params).meta.preserveScenePointer).toBe(true);
+  });
+});
