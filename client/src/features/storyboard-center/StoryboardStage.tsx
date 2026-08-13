@@ -14,7 +14,6 @@ import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from 
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
 import { ShotNavigator } from "./ShotNavigator";
-import { ResourceDock } from "./ResourceDock";
 import { VisualChoiceTray } from "./VisualChoiceTray";
 import { registerAssistantFocus } from "../../lib/assistantContext";
 
@@ -133,7 +132,7 @@ export function StoryboardStage({
           ) : (
             <>
               <Hint style={{ margin: "4px 0 10px" }}>
-                點畫面或「單格工作室」細修；右側「資源」可就近取用素材／定裝。勾選分鏡後可用「視覺選擇」一次套用動作／表情／鏡頭／光線。
+                勾選一鏡先看目前創作狀態，再直接改角色、動作、光線或鏡頭；素材庫與定裝仍可由上方入口完整管理。
               </Hint>
               {outdatedByShot.size > 0 && (
                 <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
@@ -170,10 +169,7 @@ export function StoryboardStage({
             </>
           )}
         </Card>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: "0 0 auto" }}>
-          <ResourceDock projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} characterNames={characterNames} />
-          <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} />
-        </div>
+        <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} onOpenStudio={setStudioSceneId} />
       </div>
       {studioShot && (
         <SceneStudio

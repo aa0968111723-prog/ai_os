@@ -25,6 +25,57 @@ export type VisualChoiceFamily =
   | "style"
   | "composition";
 
+/**
+ * Provider-agnostic preview resource. React renders the resource contract and
+ * never needs to know whether an eventual thumbnail came from Gemini, Adobe,
+ * a designer, SVG, or a project reference.
+ */
+export type VisualChoicePreview =
+  | {
+      kind: "image";
+      source: "project" | "static" | "generated" | "reference";
+      src: string;
+      assetId?: string;
+      alt: string;
+    }
+  | {
+      kind: "composition";
+      motif:
+        | "wide"
+        | "full"
+        | "medium"
+        | "close"
+        | "extreme-close"
+        | "low-angle"
+        | "high-angle"
+        | "eye-level"
+        | "over-shoulder"
+        | "push-in"
+        | "static";
+      alt: string;
+    }
+  | {
+      kind: "pose";
+      motif: string;
+      energy: "still" | "gentle" | "dynamic";
+      alt: string;
+    }
+  | {
+      kind: "expression";
+      motif: string;
+      alt: string;
+    }
+  | {
+      kind: "swatch";
+      colors: readonly [string, string, ...string[]];
+      alt: string;
+    }
+  | {
+      kind: "fallback";
+      icon: string;
+      alt: string;
+    };
+
 export const VISUAL_CHOICE_FAMILY_LABEL: Record<VisualChoiceFamily, string> = {
   action: "動作",
   expression: "表情",
@@ -46,8 +97,10 @@ export interface VisualChoicePreset {
   label: string;
   /** Optional secondary line */
   description?: string;
-  /** Placeholder glyph or future asset path */
+  /** Legacy fallback glyph. Production UI should prefer previewResource. */
   preview?: string;
+  /** Replaceable visual resource; semantic payload remains stable when art changes. */
+  previewResource?: VisualChoicePreview;
   /** Fragment injected into generation prompt when this preset is active */
   promptFragment: string;
   /**

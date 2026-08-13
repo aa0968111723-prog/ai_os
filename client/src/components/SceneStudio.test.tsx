@@ -273,6 +273,35 @@ describe("SceneStudio", () => {
     expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
   });
 
+  it("用 real sceneVersions 並排比較，Adopt 更新既有 current pointer 且不刪其他版本", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [
+          genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+          genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z" }),
+        ],
+        currentAssetId: "asset-g2",
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const toggles = screen.getAllByRole("checkbox", { name: /加入比較/ });
+    await user.click(toggles[0]!);
+    await user.click(toggles[1]!);
+    await user.click(screen.getByRole("button", { name: /比較 2/ }));
+
+    const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
+    expect(within(compare).getByText("V1")).toBeInTheDocument();
+    expect(within(compare).getByText("V2")).toBeInTheDocument();
+    await user.click(within(compare).getByRole("button", { name: /Adopt V1/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
   it("「以這版為底圖」會跳回修正頁並換掉底圖", async () => {
     const user = userEvent.setup();
     versionsQuery.mockReturnValue({

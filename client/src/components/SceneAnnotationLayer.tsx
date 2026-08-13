@@ -84,7 +84,7 @@ export function SceneAnnotationLayer({
     setInner(box);
   }, []);
 
-  useLayoutEffect(measure);
+  useLayoutEffect(measure, [measure]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
