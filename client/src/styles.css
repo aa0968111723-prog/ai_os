@@ -10131,7 +10131,14 @@ body.story-immersive { overflow: hidden; }
   padding: 18px; border: 1px solid var(--border); border-radius: var(--r-16, 16px);
   background: var(--surface, var(--card)); box-shadow: var(--shadow-3, 0 24px 70px rgba(0, 0, 0, .28));
 }
-.scene-compare-surface > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+/* 置頂：這個面板是可捲的，header 捲走之後關閉鍵與比較模式切換就按不到了
+ * （實測 Playwright 點不到——被下方的版本圖蓋住）。桌機與手機同一條規則。 */
+.scene-compare-surface > header {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; padding-block: 6px;
+  background: var(--surface, var(--card));
+}
 .scene-compare-surface h3 { margin: 2px 0 0; }
 .scene-compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
 .scene-compare-grid > article {

@@ -50,11 +50,43 @@ describe("起手包結構", () => {
   it("每個方向都掛得到 preview 資源（缺圖時走 fallback，不需要 React 改動）", () => {
     for (const intent of CREATIVE_INTENTS) {
       for (const direction of intent.directions) {
-        const preview = (direction as { previewResource?: { kind: string; src?: string; fallback?: unknown } }).previewResource;
+        const preview = direction.previewResource;
         expect(preview?.kind).toBe("image");
-        expect(preview?.src).toContain("/creative-choice/");
-        expect(preview?.fallback).toBeTruthy();
+        expect(preview && "src" in preview ? preview.src : "").toContain("/creative-choice/");
+        expect(preview && "fallback" in preview ? preview.fallback : null).toBeTruthy();
       }
+    }
+  });
+
+  it("零成本預覽必須看得懂——不准退化成一個點", () => {
+    /*
+     * fallbackPreviewFor 是靠 id 反查對照表（camera.* / lighting.* / style.* / action.*）。
+     * v4 的方向用的是新的命名空間 `intent.<意圖>.<方向>`，全部反查不到 ⇒ 一律落到
+     * { kind: "fallback", icon: "•" }。零成本預覽的整個重點是「看不懂 prompt 的人
+     * 一眼分辨得出三個方向」，退化成一個點等於沒有預覽。
+     * 所以起手包自己講清楚要畫什麼，並由這條測試鎖住。
+     */
+    for (const intent of CREATIVE_INTENTS) {
+      for (const direction of intent.directions) {
+        const preview = direction.previewResource;
+        const fallback = preview && "fallback" in preview ? preview.fallback : undefined;
+        expect({ id: direction.id, kind: fallback?.kind }).not.toEqual({ id: direction.id, kind: "fallback" });
+        expect(["composition", "swatch", "pose", "expression"]).toContain(fallback?.kind);
+        // alt 由 label＋rationale 組出來，讀螢幕的人拿得到同一份資訊
+        expect(fallback?.alt).toContain(direction.label);
+      }
+    }
+  });
+
+  it("同一個意圖裡的三個方向，預覽圖形彼此不同（否則三張看起來一樣）", () => {
+    for (const intent of CREATIVE_INTENTS) {
+      const shapes = intent.directions.map((direction) => {
+        const preview = direction.previewResource;
+        const fallback = preview && "fallback" in preview ? preview.fallback : undefined;
+        const shape = fallback as { kind?: string; motif?: string; colors?: readonly string[] } | undefined;
+        return JSON.stringify([shape?.kind, shape?.motif ?? shape?.colors]);
+      });
+      expect({ intent: intent.id, unique: new Set(shapes).size }).toEqual({ intent: intent.id, unique: intent.directions.length });
     }
   });
 });

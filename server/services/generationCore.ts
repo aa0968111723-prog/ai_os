@@ -788,10 +788,24 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           })
           .returning();
       } catch (err) {
-        // 冪等重送撞唯一鍵：前次請求已建待核列——直接回既有列，不重複落列、不重發通知
+        // 冪等重送撞唯一鍵：前次請求已建待核列——直接回既有列，不重複落列、不重發通知。
+        // 範圍條件與下方一般路徑（submitGenerationCore 的 catch）必須一致：
+        // 只用 id 查會把「碰巧撞到同一個 UUID 的別組待核生成」原封不動回給呼叫端。
         if (input.id && isUniqueViolation(err)) {
-          const [existing] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+          const [existing] = await db
+            .select()
+            .from(schema.generations)
+            .where(and(
+              eq(schema.generations.id, input.id),
+              eq(schema.generations.projectId, input.projectId),
+              eq(schema.generations.groupId, project.groupId),
+              input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
+            ));
           if (existing) return existing;
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
+          });
         }
         throw err;
       }

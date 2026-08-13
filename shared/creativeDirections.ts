@@ -89,6 +89,41 @@ export interface CreativeDirection {
    * 純顯示欄位——sanitizeDirection 會把它丟掉，永遠不進生成 context 也不入庫。
    */
   previewResource?: VisualChoicePreview;
+  /**
+   * 這一鏡已經是這個樣子時，這個方向就沒有意義（提案不要再建議它）。
+   *
+   * 為什麼不能只看「結構化有沒有差」：一個方向通常同時設景別＋運鏡＋構圖，
+   * 所以就算這一鏡已經是特寫，「更靠近人物」仍然會因為多帶了運鏡與構圖而
+   * 被算成「有差」——提案於是每一鏡都給同樣三張卡。這裡讓起手包直接講明
+   * 「什麼情況下我是多餘的」，用資料表達，不寫死判斷式。
+   *
+   * 語意：列出的欄位**全部**都已符合 → 視為多餘。值可以是多個候選（任一符合即算）。
+   */
+  redundantWhen?: {
+    camera?: Partial<Record<keyof ShotCamera, string | readonly string[]>>;
+    performance?: Partial<Record<keyof ShotPerformance, string | readonly string[]>>;
+  };
+}
+
+/** 這一鏡是不是已經滿足了某個方向的「多餘條件」 */
+export function directionIsRedundant(base: DirectionBaseShot, direction: CreativeDirection): boolean {
+  const rule = direction.redundantWhen;
+  if (!rule) return false;
+  const check = (
+    spec: Partial<Record<string, string | readonly string[]>> | undefined,
+    actual: Record<string, string | undefined> | null | undefined,
+  ): boolean => {
+    if (!spec) return true;
+    for (const [key, expected] of Object.entries(spec)) {
+      if (expected === undefined) continue;
+      const value = (actual?.[key] ?? "").trim();
+      const candidates = typeof expected === "string" ? [expected] : [...expected];
+      if (!candidates.includes(value)) return false;
+    }
+    return true;
+  };
+  return check(rule.camera, base.camera as Record<string, string | undefined> | null)
+    && check(rule.performance, base.performance as Record<string, string | undefined> | null);
 }
 
 /**
@@ -165,6 +200,14 @@ export interface CompiledDirection {
   changes: string[];
   /** 這個方向與基準相比是否真的有差（結構化或自然語言任一有內容） */
   differs: boolean;
+  /**
+   * 只看結構化欄位有沒有差。
+   *
+   * 與 differs 分開的理由：起手包的每個方向都帶一句不同的 instruction，
+   * 如果把它算進「有沒有差」，那麼「這一鏡已經是特寫了，再選『更靠近人物』」
+   * 永遠會被判定成有差——多樣性守門形同虛設，使用者照樣為一張幾乎一樣的圖付錢。
+   */
+  structurallyDiffers: boolean;
 }
 
 /**
@@ -198,6 +241,7 @@ export function compileDirection(base: DirectionBaseShot, raw: CreativeDirection
     action,
     changes,
     differs: changes.length > 0 || !!direction.instruction,
+    structurallyDiffers: changes.length > 0,
   };
 }
 
@@ -252,7 +296,9 @@ export function diagnoseDirectionBatch(base: DirectionBaseShot, directions: read
   duplicates: Array<[string, string]>;
 } {
   const compiled = directions.map((direction) => compileDirection(base, direction));
-  const noop = compiled.filter((item) => !item.differs).map((item) => item.direction.id);
+  // 用 structurallyDiffers 而不是 differs：起手包每個方向都帶一句自己的 instruction，
+  // 拿 differs 判斷等於「永遠有差」，這道守門就永遠不會亮。
+  const noop = compiled.filter((item) => !item.structurallyDiffers).map((item) => item.direction.id);
   const duplicates: Array<[string, string]> = [];
   for (let i = 0; i < compiled.length; i += 1) {
     for (let j = i + 1; j < compiled.length; j += 1) {

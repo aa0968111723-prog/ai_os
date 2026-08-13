@@ -24,6 +24,7 @@
 import { CREATIVE_INTENTS, type CreativeIntent } from "./creativeDirectionPresets";
 import {
   compileDirection,
+  directionIsRedundant,
   directionsAreDistinct,
   type CreativeDirection,
   type DirectionBaseShot,
@@ -74,7 +75,18 @@ export function proposeCreativeDirections(
     for (const direction of intent.directions) {
       if (!directionSetsAnything(direction)) continue;
       const compiled = compileDirection(shot, direction);
-      if (!compiled.differs) continue; // 這一鏡已經是這樣了
+      /*
+       * 用 structurallyDiffers 而不是 differs。
+       *
+       * 起手包每個方向都帶一句自己的 instruction，所以 differs 恆為 true——
+       * 提案會變成「每一鏡都給同樣三張卡」，包括那些「這一鏡已經是特寫了」
+       * 卻還在建議「更靠近人物」的情況。以結構化差異為準，提案才真的看得懂這一鏡。
+       */
+      if (!compiled.structurallyDiffers) continue;
+      // 起手包自己講明「什麼情況下我是多餘的」——例如這一鏡已經是特寫了就別再建議更靠近。
+      // 少了這一條，提案會變成每一鏡都給同樣三張卡（結構化差異幾乎永遠成立，
+      // 因為一個方向通常同時設景別＋運鏡＋構圖）。
+      if (directionIsRedundant(shot, direction)) continue;
       if (compiledPicked.some((other) => !directionsAreDistinct(other, compiled))) continue;
       picked.push({
         intentId: intent.id,

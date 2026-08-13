@@ -568,6 +568,14 @@ export const scenesRouter = router({
        * 因為當初通過的是**那一張圖**，不是這一格的永久許可。
        */
       acknowledgeApproved: z.boolean().optional(),
+      /**
+       * 採用「這個方向」而不只是「這張圖」：把產生該素材的那次生成所凍結的
+       * 鏡頭語言／表演／走位還原回本鏡（並推進 rev）。
+       *
+       * 只有單格工作室在使用者看得到差異的情況下會帶；批次套用素材一律不帶——
+       * 否則一次操作會用某一張圖的凍結設定覆寫 N 鏡的鏡頭語言。
+       */
+      syncShotDirection: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -614,21 +622,32 @@ export const scenesRouter = router({
       if (replacesApprovedVisual) patch.reviewStatus = "changes";
 
       /*
-       * 採用創作方向：如果這張圖是某個方向跑出來的，把那個方向的鏡頭語言還原回 Shot。
+       * 採用創作方向：把產生這張圖的那個方向的鏡頭語言還原回 Shot。
        *
-       * 不做這一步的話，「採用低機位逆光那一版」之後，這一鏡的鏡頭語言仍寫著中景平視——
-       * Shot 的資料會與它自己現在顯示的畫面互相矛盾，連戲檢查也會立刻把這張剛採用的圖
-       * 標成「過時」。這是 Adopt 的一部分，不是背著使用者多做事：呼叫端會把
-       * 同步了哪些欄位回報出去，UI 據此明說「鏡頭語言已同步」。
+       * 為什麼需要：「採用低機位逆光那一版」之後，若 Shot 的鏡頭語言仍寫著中景平視，
+       * 資料就會與它自己顯示的畫面互相矛盾，連戲檢查還會立刻把這張剛採用的圖標成過時。
+       *
+       * 為什麼是 opt-in（syncShotDirection）而不是每次採用的副作用：
+       *  1. 一般的「切回舊版看看」不該把使用者**在那之後**才調好的鏡頭語言洗掉；
+       *  2. 分鏡中心的批次「套用素材」會對 N 鏡呼叫這支——靜默同步等於用一張圖的
+       *     凍結設定覆寫 N 鏡的鏡頭語言。
+       * 所以只有單格工作室在使用者看得到 diff 的情況下才會帶這個旗標。
+       *
+       * 來源生成必須**屬於這一鏡**（sceneId 綁定）：只綁專案的話，任何同專案的
+       * 生成都能把它的鏡頭語言灌進這一鏡——素材可以來自別的鏡，那份 direction 也是別鏡的。
        */
       let adoptedDirection: string[] = [];
-      if (target === "assetId") {
+      if (target === "assetId" && input.syncShotDirection) {
         const genId = (asset.meta as { generationId?: unknown } | null)?.generationId;
         if (typeof genId === "string") {
           const [gen] = await db
             .select({ continuitySnapshot: schema.generations.continuitySnapshot })
             .from(schema.generations)
-            .where(and(eq(schema.generations.id, genId), eq(schema.generations.projectId, scene.projectId)));
+            .where(and(
+              eq(schema.generations.id, genId),
+              eq(schema.generations.projectId, scene.projectId),
+              eq(schema.generations.sceneId, scene.id),
+            ));
           const parsed = continuitySnapshotSchema.safeParse(gen?.continuitySnapshot);
           const frozen = parsed.success ? parsed.data.shotDirection : null;
           if (frozen) {
@@ -643,6 +662,9 @@ export const scenesRouter = router({
               patch.camera = frozen.camera ?? null;
               patch.performance = frozen.performance ?? null;
               patch.action = frozen.action ?? null;
+              // 動到 rev-protected 的欄位就要推進 rev，否則同時在編這一鏡的夥伴
+              // 帶著舊 expectedRev 存檔仍會成功，樂觀併發守衛形同虛設。
+              patch.rev = scene.rev + 1;
             }
           }
         }

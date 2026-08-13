@@ -521,6 +521,13 @@ export const generationRouter = router({
       sceneId: gen.sceneId ?? undefined,
       sceneRole: gen.sceneRole ?? undefined,
       preserveScenePointer: meta.preserveScenePointer,
+      // 方向與批次一起沿用：不帶的話，重試出來的那一版會脫離它原本的批次
+      //（groupVisualVariantBatches 靠 params 內的 batchId 分群），
+      // 於是「A 成功／B 失敗／B 重試成功」在畫面上會變成一個孤兒版本 ＋ 一批永遠缺一個。
+      creative: meta.creative,
+      // 凍結的鏡頭語言同理：不沿用的話，重試出來的圖會立刻被連戲檢查判定為「過時」，
+      // 採用它時也還原不出當初那個方向。
+      shotDirection: parsedSnapshot.success ? parsedSnapshot.data.shotDirection ?? undefined : undefined,
       // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
       workflowRunId: gen.workflowRunId ?? undefined,
       agentRunId: gen.agentRunId ?? undefined,

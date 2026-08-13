@@ -20,6 +20,7 @@ import {
 } from "./sceneVersions";
 import { detectContinuityDrift, type ContinuitySnapshot, type CurrentCards } from "./continuity";
 import { proposeCreativeDirections } from "./creativeProposals";
+import { compileDirection, diagnoseDirectionBatch } from "./creativeDirections";
 
 const BATCH = "11111111-1111-4111-8111-111111111111";
 
@@ -284,5 +285,74 @@ describe("提案不寫入任何東西", () => {
     // 一個意圖最多一個提案 → 三個提案來自三個不同角度
     expect(new Set(proposals.map((p) => p.intentId)).size).toBe(3);
     for (const proposal of proposals) expect(proposal.because.length).toBeGreaterThan(4);
+  });
+});
+
+/**
+ * Fresh-eye 第三輪（Production Reliability）確認缺陷的回歸鎖。
+ * 每一條都對應一個「測試綠燈但行為已壞」的實際情境。
+ */
+describe("多樣性守門必須真的會亮（instruction 不得掩蓋『這一鏡已經是這樣了』）", () => {
+  const shot = { camera: { shotSize: "特寫" }, performance: null, action: null };
+
+  it("方向帶了自己的 instruction，仍然算得出結構化上沒差", () => {
+    const compiled = compileDirection(shot, {
+      id: "closer",
+      label: "更靠近人物",
+      camera: { shotSize: "特寫" },
+      instruction: "臉不要改",
+    });
+    expect(compiled.differs).toBe(true);            // 有自然語言內容
+    expect(compiled.structurallyDiffers).toBe(false); // 但結構上這一鏡已經是特寫了
+  });
+
+  it("diagnoseDirectionBatch 以結構化差異判定 no-op，否則守門永遠不亮", () => {
+    const report = diagnoseDirectionBatch(shot, [
+      { id: "closer", label: "更靠近人物", camera: { shotSize: "特寫" }, instruction: "臉不要改" },
+      { id: "low", label: "低機位", camera: { angle: "低角度" }, instruction: "壓暗背景" },
+    ]);
+    expect(report.noop).toEqual(["closer"]);
+  });
+
+  it("起手包對「已經是特寫」的鏡，提案不再建議「更靠近人物」", () => {
+    const proposals = proposeCreativeDirections({ camera: { shotSize: "特寫" }, performance: null, action: null });
+    expect(proposals.map((p) => p.direction.id)).not.toContain("closer");
+  });
+
+  it("不同的鏡拿到不同的提案（提案是 shot-aware，不是固定三張卡）", () => {
+    const plain = proposeCreativeDirections({ camera: { shotSize: "中景" }, performance: null, action: null });
+    const closeUp = proposeCreativeDirections({ camera: { shotSize: "特寫", angle: "低角度" }, performance: null, action: null });
+    expect(plain.map((p) => p.direction.id)).not.toEqual(closeUp.map((p) => p.direction.id));
+  });
+});
+
+describe("重試必須沿用方向與批次（否則重試出來的版本會脫離它那一批）", () => {
+  it("meta.creative 經過一次 store→split 往返仍完整，可直接餵回 executeGenerationCommand", () => {
+    const stored = storeGenerationSourceMeta({ prompt: "p" }, {
+      preserveScenePointer: true,
+      creative: creative("low-backlight", "低機位強逆光", { parentAssetId: "a-2", batchSize: 3 }),
+    });
+    const { meta } = splitGenerationSourceMeta(stored);
+    // retry 會把這一份原樣轉交；欄位缺一個，重試出來的版本就分不回原批
+    expect(meta.creative).toEqual({
+      batchId: BATCH,
+      directionId: "low-backlight",
+      directionLabel: "低機位強逆光",
+      parentAssetId: "a-2",
+      batchSize: 3,
+    });
+  });
+
+  it("重試沿用同一個 batchId → 仍然歸在同一批，不會變成孤兒版本", () => {
+    const rows = [
+      genRow({ generationId: "g1", assetId: "a1", assetUrl: "/a1", assetKind: "image", creative: creative("closer", "更靠近人物") }),
+      // g2 失敗、g2r 是它的重試——沿用同一個 batchId
+      genRow({ generationId: "g2", status: "failed", creative: creative("low-backlight", "低機位強逆光") }),
+      genRow({ generationId: "g2r", assetId: "a2", assetUrl: "/a2", assetKind: "image", creative: creative("low-backlight", "低機位強逆光") }),
+    ];
+    const batches = groupVisualVariantBatches(buildSceneVersions(rows, { assetId: null, narrationAssetId: null }));
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.successes).toHaveLength(2);
+    expect(batches[0]!.failed).toHaveLength(1);
   });
 });

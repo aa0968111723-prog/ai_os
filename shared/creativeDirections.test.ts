@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { CREATIVE_INTENTS } from "./creativeDirectionPresets";
 import {
   CREATIVE_KEEP_FAMILIES,
+  creativeDirectionSchema,
   compileDirection,
   diagnoseDirectionBatch,
   directionsAreDistinct,
@@ -90,6 +92,35 @@ describe("sanitizeDirection — Reference Lock 是結構保證不是提示詞求
 
   it("keep 家族清單與 CREATIVE_KEEP_FAMILIES 同步", () => {
     expect([...CREATIVE_KEEP_FAMILIES]).toEqual(["character", "look", "scene", "prop", "style"]);
+  });
+});
+
+describe("送出邊界：sanitizeDirection 的輸出必須通過伺服器的 .strict() schema", () => {
+  it("純顯示欄位（previewResource）被剝掉——起手包的方向可以直接送出", () => {
+    for (const intent of CREATIVE_INTENTS) {
+      for (const direction of intent.directions) {
+        // 起手包帶著 previewResource 供 UI 畫零成本預覽；伺服器 schema 是 .strict()，
+        // 整包送過去會 400（實際踩過：每一次「產生方向」都靜默失敗，UI 卻沒有任何動靜）。
+        expect(direction.previewResource).toBeTruthy();
+        const clean = sanitizeDirection(direction);
+        expect("previewResource" in clean).toBe(false);
+        // 送出邊界的最終驗證：清乾淨之後必須真的通過伺服器那份 schema
+        expect(creativeDirectionSchema.safeParse(clean).success).toBe(true);
+      }
+    }
+  });
+
+  it("任何越權欄位都不會混進送出的 payload", () => {
+    const hostile = {
+      id: "x", label: "x",
+      previewResource: { kind: "image", source: "static", src: "/a.webp", alt: "a" },
+      lookIds: ["l-1"],
+      assetId: "a-1",
+    } as unknown as CreativeDirection;
+    const clean = sanitizeDirection(hostile);
+    expect(creativeDirectionSchema.safeParse(clean).success).toBe(true);
+    expect(JSON.stringify(clean)).not.toContain("l-1");
+    expect(JSON.stringify(clean)).not.toContain("a-1");
   });
 });
 

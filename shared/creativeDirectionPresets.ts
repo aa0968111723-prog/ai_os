@@ -12,7 +12,7 @@
  * - 預覽沿用既有的 starterPreviewFor 契約（路徑＋fallback），不需要 React 改動就能換圖。
  */
 import { starterPreviewFor } from "./visualChoicePreviewManifest";
-import type { VisualChoicePreview } from "./visualChoiceTypes";
+import type { VisualChoiceFallbackPreview } from "./visualChoiceTypes";
 import { CREATIVE_KEEP_FAMILIES, type CreativeDirection, type CreativeKeepFamily } from "./creativeDirections";
 
 /** 全家族保持：起手包的預設姿態——方向是換做法，不是換角色 */
@@ -31,7 +31,11 @@ export interface CreativeIntent {
   directions: CreativeDirection[];
 }
 
-function withPreview(intentId: string, direction: CreativeDirection): CreativeDirection & { previewResource: VisualChoicePreview } {
+/** 起手包自己講清楚零成本預覽要畫什麼——靠 id 反查對照表對新命名空間只會落到「一個點」 */
+type DirectionSeed = CreativeDirection & { fallback: VisualChoiceFallbackPreview };
+
+function withPreview(intentId: string, seed: DirectionSeed): CreativeDirection {
+  const { fallback, ...direction } = seed;
   return {
     ...direction,
     previewResource: starterPreviewFor({
@@ -39,11 +43,19 @@ function withPreview(intentId: string, direction: CreativeDirection): CreativeDi
       family: "camera",
       label: direction.label,
       description: direction.rationale,
+      fallback,
     }),
   };
 }
 
-const RAW_INTENTS: CreativeIntent[] = [
+const composition = (motif: Extract<VisualChoiceFallbackPreview, { kind: "composition" }>["motif"]): VisualChoiceFallbackPreview =>
+  ({ kind: "composition", motif, alt: "" });
+const swatch = (colors: readonly [string, string, ...string[]]): VisualChoiceFallbackPreview =>
+  ({ kind: "swatch", colors, alt: "" });
+const pose = (motif: string, energy: "still" | "gentle" | "dynamic"): VisualChoiceFallbackPreview =>
+  ({ kind: "pose", motif, energy, alt: "" });
+
+const RAW_INTENTS: Array<Omit<CreativeIntent, "directions"> & { directions: DirectionSeed[] }> = [
   {
     id: "intent.tension",
     label: "不夠有張力",
@@ -51,6 +63,8 @@ const RAW_INTENTS: CreativeIntent[] = [
     directions: [
       {
         id: "closer",
+        redundantWhen: { camera: { shotSize: ["特寫", "大特寫", "中特寫"] } },
+        fallback: composition("close"),
         label: "更靠近人物",
         rationale: "把觀眾推到臉前，情緒直接看得到；背景維持不變",
         camera: { shotSize: "特寫", movement: "緩推", composition: "中心構圖，人物佔畫面主體" },
@@ -60,6 +74,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "low-backlight",
+        redundantWhen: { camera: { angle: ["低角度", "仰角"] } },
+        fallback: composition("low-angle"),
         label: "低機位強逆光",
         rationale: "從下往上看＋逆光壓縮空間，人物變得有壓迫感",
         camera: { angle: "低角度", lighting: "強逆光，輪廓光明顯，環境壓暗", composition: "空間壓縮，前景邊緣入鏡" },
@@ -68,6 +84,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "wide-isolate",
+        redundantWhen: { camera: { shotSize: ["遠景", "大遠景"] } },
+        fallback: composition("wide"),
         label: "廣角孤立感",
         rationale: "把人物推到畫面邊緣，用大量留白說「他很孤單」",
         camera: { shotSize: "遠景", focalLength: "廣角", composition: "人物偏畫面邊緣，大面積留白" },
@@ -84,6 +102,8 @@ const RAW_INTENTS: CreativeIntent[] = [
     directions: [
       {
         id: "side-key",
+        redundantWhen: { camera: { lighting: ["側光", "單側主光"] } },
+        fallback: swatch(["#1d2430", "#8aa0b8", "#f2ead9"]),
         label: "側光塑形",
         rationale: "一側亮一側暗，臉與空間立刻有立體感",
         camera: { lighting: "單側主光，明暗交界清楚，陰影保留細節" },
@@ -92,6 +112,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "practical-warm",
+        redundantWhen: { camera: { lighting: ["現場光", "暖調現場光"] } },
+        fallback: swatch(["#5a2d26", "#c9743f", "#f4d3a1"]),
         label: "現場光暖調",
         rationale: "讓畫面裡本來就有的光源當主光，溫暖而可信",
         camera: { lighting: "以畫面內既有光源為主光，暖色調，周圍自然衰減" },
@@ -100,6 +122,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "silhouette",
+        redundantWhen: { camera: { lighting: ["逆光剪影", "強逆光"] } },
+        fallback: swatch(["#080b16", "#2a3a63", "#ffd9a0"]),
         label: "剪影化",
         rationale: "只留輪廓，把注意力從細節推回到形狀與情緒",
         camera: { lighting: "強逆光剪影，主體幾乎全暗，背景亮", composition: "輪廓清楚不與背景交疊" },
@@ -115,6 +139,8 @@ const RAW_INTENTS: CreativeIntent[] = [
     directions: [
       {
         id: "mid-action",
+        redundantWhen: { camera: { movement: ["跟拍"] } },
+        fallback: pose("running", "dynamic"),
         label: "抓動作中段",
         rationale: "拍動作進行到一半的那一格，而不是擺好姿勢",
         action: "動作進行到一半的瞬間，重心偏移、衣角與髮絲仍在移動",
@@ -124,6 +150,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "foreground-layer",
+        redundantWhen: { camera: { composition: ["前景遮擋"] } },
+        fallback: composition("over-shoulder"),
         label: "增加前景",
         rationale: "前景遮擋製造深度，觀眾像是從某處望過去",
         camera: { composition: "前景有遮擋物入鏡，形成層次與偷看感", focalLength: "淺景深，前景失焦" },
@@ -132,6 +160,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "camera-move",
+        redundantWhen: { camera: { movement: ["緩慢橫移", "橫搖", "跟拍"] } },
+        fallback: composition("push-in"),
         label: "讓鏡頭動起來",
         rationale: "用運鏡帶出空間，而不是靠人物動",
         camera: { movement: "緩慢橫移", composition: "起幅收幅各有重點，空間關係隨移動揭露" },
@@ -147,6 +177,8 @@ const RAW_INTENTS: CreativeIntent[] = [
     directions: [
       {
         id: "isolate-subject",
+        redundantWhen: { camera: { focalLength: ["長焦"] } },
+        fallback: composition("medium"),
         label: "把主體隔離出來",
         rationale: "壓掉背景資訊，只留一個該看的東西",
         camera: { focalLength: "長焦，背景大幅虛化", composition: "主體置於視覺中心，背景簡化" },
@@ -155,6 +187,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "leading-lines",
+        redundantWhen: { camera: { composition: ["三分法"] } },
+        fallback: composition("full"),
         label: "用線條帶眼睛",
         rationale: "讓場景本來就有的線條把視線導向主體",
         camera: { composition: "利用場景既有線條引導視線至主體，三分法安置" },
@@ -163,6 +197,8 @@ const RAW_INTENTS: CreativeIntent[] = [
       },
       {
         id: "contrast-pop",
+        redundantWhen: { camera: { lighting: ["高對比"] } },
+        fallback: swatch(["#0a0a0a", "#7d7d7d", "#fff6e0"]),
         label: "用明暗分出主次",
         rationale: "主體亮、周圍暗，重點自己跳出來",
         camera: { lighting: "主體受光明顯高於周圍，周圍向暗處衰減" },
