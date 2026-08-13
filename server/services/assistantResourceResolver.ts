@@ -4,6 +4,13 @@ import type { AuthState } from "./auth";
 import { callTool } from "./mcp";
 import { assistantResourceHealthSnapshot, recordAssistantResourceHealth } from "./assistantResourceHealth";
 import { rankHybridItems } from "./hybridRetrieval";
+import {
+  prioritizeAssistantDatabases,
+  retrieveAssistantDatabaseEvidence,
+  type AssistantReadableDatabase,
+} from "./assistantDatabaseEvidence";
+import { getAgentReadableTable, listMcpDatabases } from "./databaseMcp";
+import type { DataField } from "../../shared/databaseFields";
 
 export const RESOURCE_OUTCOMES = [
   "OK",
@@ -91,7 +98,7 @@ const DECISION_QUERY_RE = /(?:之前|討論|決定|約定|設定|衣服|服裝|�
 const STORYBOARD_QUERY_RE = /(?:分鏡|鏡頭|場景|腳本|故事|shot|scene)/i;
 const ASSET_QUERY_RE = /(?:素材|缺圖|缺素材|參考圖|畫面|生成|成品|asset)/i;
 const WORK_QUERY_RE = /(?:待辦|任務|誰|負責|指派|截止|逾期|排程|行程|approval|核准)/i;
-const DATABASE_QUERY_RE = /(?:資料庫|資料表|檔案|文件|data|database|file)/i;
+const DATABASE_QUERY_RE = /(?:資料庫|資料表|清單|名單|檔案|文件|data|database|file)/i;
 
 /**
  * Route only the relevant portion of the catalog. The result is deterministic, cheap,
@@ -283,6 +290,67 @@ export async function executeResourceReads(
   }));
 }
 
+async function readProjectDatabaseResource(
+  auth: AuthState,
+  projectId: string,
+  message: string,
+  pageContext?: AssistantWirePageContext,
+): Promise<{ items: Array<Record<string, unknown>>; focusedTableId?: string }> {
+  const listed = await listMcpDatabases(auth, { projectId, linkedOnly: true });
+  const tables: AssistantReadableDatabase[] = listed.map((table, index) => ({
+    ref: `db${index + 1}`,
+    id: table.tableId,
+    name: table.name,
+    fields: table.fields,
+    rowCount: table.rowCount,
+    canWrite: table.canWriteRows,
+  }));
+
+  const selectedId = pageContext?.entityType === "database" ? pageContext.entityId : undefined;
+  if (selectedId && !tables.some((table) => table.id === selectedId)) {
+    const extra = await getAgentReadableTable(auth, selectedId);
+    if (extra) {
+      tables.unshift({
+        ref: "dbFocus",
+        id: extra.table.id,
+        name: extra.table.name,
+        fields: extra.table.fields as DataField[],
+        rowCount: 0,
+        canWrite: extra.access.canWriteRows,
+      });
+    }
+  }
+
+  const ordered = prioritizeAssistantDatabases(tables, pageContext);
+  const rows = await retrieveAssistantDatabaseEvidence(ordered, message);
+  if (rows.length) {
+    return {
+      items: rows.map((row) => ({
+        kind: "row",
+        tableId: row.tableId,
+        tableRef: row.tableRef,
+        tableName: row.tableName,
+        rowId: row.rowId,
+        text: row.text,
+        score: row.score,
+      })),
+      focusedTableId: ordered[0]?.id,
+    };
+  }
+  return {
+    items: ordered.map((table) => ({
+      kind: "table",
+      tableId: table.id,
+      tableRef: table.ref,
+      tableName: table.name,
+      rowCount: table.rowCount,
+      canWrite: table.canWrite,
+      fields: table.fields.slice(0, 12).map((field) => ({ key: field.key, label: field.label, type: field.type })),
+    })),
+    focusedTableId: ordered[0]?.id,
+  };
+}
+
 function buildPromptBlock(results: ResourceReadResult[]): string {
   const lines = results.map((result) => {
     const semantic = result.retrieval === "hybrid" ? ` semanticApplied=${result.semanticApplied === true ? "yes" : "no"}` : "";
@@ -324,6 +392,14 @@ export async function resolveProjectResources(input: {
   };
   const readers: ResourceReader[] = requestedSources.map((source) => {
     const tool = toolBySource[source];
+    if (source === "database") {
+      return {
+        source,
+        label: SOURCE_LABELS[source],
+        retrieval: "hybrid",
+        read: () => readProjectDatabaseResource(input.auth, input.projectId, input.message, input.pageContext),
+      };
+    }
     return {
       source,
       label: SOURCE_LABELS[source],
