@@ -6,6 +6,7 @@ import { loadAuthState } from "./auth";
 import { listProjectFiles, readProjectFile, searchProjectFiles } from "./agentProjectFiles";
 import { PracticalAutonomyRuntime, ToolRegistry, type ToolContext, type ToolResult } from "./practicalAutonomy";
 import { AgentRunLedger } from "./agentRunLedger";
+import { agentDatabaseToolDefinitions } from "./agentDatabaseTools";
 
 async function authFor(context: ToolContext) {
   const auth = await loadAuthState(context.userId);
@@ -23,5 +24,9 @@ export const agentToolRegistry = new ToolRegistry()
   .register({ id: "project.files.read", label: "Read project file", category: "project", access: "READ", input: z.object({ fileId: z.string().uuid(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(24_000).optional() }), output: z.unknown(), requiredContext: ["userId", "groupId", "projectId"], risk: "low", confirmation: "never", idempotency: "keyed", cost: { paid: false, estimatePoints: () => 0 }, retry: readPolicy, verify: verifiedRead, verificationStage: "VERIFIED", verificationMethod: "authoritative_project_binding_read_back", evidenceScope: "project", availability: available, handlerIdentity: "agentProjectFiles.readProjectFile", handler: async (input, context) => { const value = await readProjectFile(await authFor(context), context.projectId, input.fileId, input.offset, input.limit); return { value, evidence: citationEvidence([value.citation]), actualPoints: 0, verified: true }; } })
   .register({ id: "project.files.search", label: "Search project files", category: "project", access: "READ", input: z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional() }), output: z.array(z.unknown()), requiredContext: ["userId", "groupId", "projectId"], risk: "low", confirmation: "never", idempotency: "keyed", cost: { paid: false, estimatePoints: () => 0 }, retry: readPolicy, verify: verifiedRead, verificationStage: "VERIFIED", verificationMethod: "authoritative_project_binding_read_back", evidenceScope: "project", availability: available, handlerIdentity: "agentProjectFiles.searchProjectFiles", handler: async (input, context) => { const value = await searchProjectFiles(await authFor(context), context.projectId, input.query, input.limit); return { value, evidence: citationEvidence(value.map((item) => item.citation)), actualPoints: 0, verified: true }; } })
   .register({ id: "project.health", label: "Project health and delivery gaps", category: "creator", access: "READ", input: z.object({}), output: z.unknown(), requiredContext: ["userId", "groupId", "projectId"], risk: "low", confirmation: "never", idempotency: "keyed", cost: { paid: false, estimatePoints: () => 0 }, retry: readPolicy, verify: verifiedRead, verificationStage: "VERIFIED", verificationMethod: "authoritative_project_state_read_back", evidenceScope: "project", availability: available, handlerIdentity: "projectIntelligence.buildProjectIntelligence", handler: async (_input, context) => { await authFor(context); const value = await buildProjectIntelligence(context.projectId); return { value, evidence: [{ type: "citation", ref: `project-health:${context.projectId}`, verifiedAt: new Date().toISOString(), trust: "VERIFIED_INTERNAL" }], actualPoints: 0, verified: true }; } });
+
+for (const tool of agentDatabaseToolDefinitions(authFor)) {
+  agentToolRegistry.register(tool);
+}
 
 export const practicalAutonomyRuntime = new PracticalAutonomyRuntime(agentToolRegistry, new AgentRunLedger());
