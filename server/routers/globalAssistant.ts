@@ -50,6 +50,7 @@ import type { AuthState } from "../services/auth";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
+  mapLabeledDatabaseRowValues,
   retrieveAssistantDatabaseEvidence,
 } from "../services/assistantDatabaseEvidence";
 import {
@@ -262,6 +263,15 @@ const recentActionResultSchema = z.discriminatedUnion("type", [
     assetIds: z.array(z.string().uuid()).max(50),
     verification: verificationSchema,
   }),
+  z.object({
+    type: z.literal("database_row"),
+    tableId: z.string().uuid(),
+    tableName: z.string().max(80),
+    rowIds: z.array(z.string().uuid()).max(50),
+    query: z.string().max(80).optional(),
+    operation: z.enum(["query", "add", "update"]),
+    verification: verificationSchema,
+  }),
 ]);
 
 export function sanitizeRecentActionResults(raw: unknown): AssistantActionResult[] {
@@ -420,16 +430,7 @@ export function resolveSiteActions(
       const dbEntry = refs.databases.get(p.dbRef.trim());
       // 唯讀庫（agentAccess=read）連提議都不給：管理者說 AI 不可寫，「AI 提議＋人代按」等於繞過那個設定
       if (!dbEntry || !dbEntry.writable) continue;
-      const keyByLabel = new Map(dbEntry.fields.map((f) => [f.label, f.key]));
-      const knownKeys = new Set(dbEntry.fields.map((f) => f.key));
-      const data: Record<string, string> = {};
-      for (const [rawKey, rawVal] of Object.entries(p.values)) {
-        const key = knownKeys.has(rawKey) ? rawKey : keyByLabel.get(rawKey);
-        if (!key) continue; // 幻覺欄位：丟該欄
-        const val = String(rawVal).trim();
-        if (!val) continue;
-        data[key] = val;
-      }
+      const data = mapLabeledDatabaseRowValues(dbEntry.fields, p.values);
       if (!Object.keys(data).length) continue; // 全部欄位都對不到＝空列，不給註定沒意義的卡
       const labelOf = new Map(dbEntry.fields.map((f) => [f.key, f.label]));
       out.push({
@@ -2096,9 +2097,11 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         data: input.data,
       });
       const verification = await readBackVerification(async () => {
-        const [found] = await db.select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId })
+        const [found] = await db.select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId, data: schema.dataRows.data })
           .from(schema.dataRows).where(eq(schema.dataRows.id, row.id));
-        return !!found && found.tableId === input.tableId;
+        if (!found || found.tableId !== input.tableId) return false;
+        const actual = found.data as Record<string, unknown>;
+        return Object.entries(input.data).every(([key, value]) => String(actual[key] ?? "") === String(value));
       });
       return { type: "add_database_row", rowId: row.id, tableName: hit.table.name, verification };
     }
