@@ -2061,6 +2061,27 @@ app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
 // 素材全站備份（UI：團隊管理「立即下載素材備份」；排程：Bearer ADMIN_BACKUP_TOKEN）
 // 串流 tar.gz（內含 assets/），並寫 backup_runs → system.storageStatus.lastBackupAt
+app.post("/api/admin/gemini-cert", async (req, res) => {
+  try {
+    const { authorizeAssetBackup } = await import("./services/assetBackup");
+    const gate = await authorizeAssetBackup(req);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.error });
+      return;
+    }
+    const { runGeminiCertification, containsGeminiSecret } = await import("./services/geminiCertification");
+    const report = await runGeminiCertification({ live: true, persistAttach: true });
+    if (containsGeminiSecret(report)) {
+      res.status(500).json({ error: "certification report contained a secret and was discarded" });
+      return;
+    }
+    res.json({ triggeredBy: gate.triggeredBy, ...report });
+  } catch (err) {
+    console.error("[gemini-cert]", err instanceof Error ? err.message : err);
+    if (!res.headersSent) res.status(500).json({ error: "Gemini 認證失敗" });
+  }
+});
+
 app.get("/api/admin/backup/assets.tar.gz", async (req, res) => {
   try {
     const { authorizeAssetBackup, streamAssetsTarGz, assetBackupUnsupportedReason } = await import("./services/assetBackup");
@@ -2141,6 +2162,10 @@ app.get("/api/selftest", async (req, res) => {
     if (isMockMode()) return "E2E 測試模式(E2E_MOCK=1,僅供自動化測試——正式部署請移除)";
     if (!process.env.FAL_KEY) throw new Error("正式模式但 FAL_KEY 未設定——媒體生成會失敗,請到部署平台 Variables 填入金鑰");
     return "正式模式(FAL_KEY 已設)";
+  });
+  await run("Gemini 金鑰", async () => {
+    const { geminiApiKeyConfigured } = await import("./services/gemini");
+    return geminiApiKeyConfigured() ? "configured=true" : "configured=false";
   });
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");
