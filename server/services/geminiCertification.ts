@@ -373,7 +373,7 @@ export interface StoredGeminiCert extends GeminiCertReport {
 }
 
 /** Increment when prepaid credits were topped up and boot must retry once. */
-export const GEMINI_CERT_EPOCH = 2;
+export const GEMINI_CERT_EPOCH = 3;
 
 export type GeminiCertPublicStatus = "NONE" | "RUNNING" | "PASS" | "BLOCKED" | "FAIL";
 

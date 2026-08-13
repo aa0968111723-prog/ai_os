@@ -21,6 +21,7 @@ import {
   geminiStatus,
   geminiSubmit,
   isGeminiModelId,
+  geminiOperationPath,
   parseStoredGeminiUrl,
   redactGeminiSecrets,
 } from "./gemini";
@@ -72,6 +73,16 @@ describe("redactGeminiSecrets", () => {
     expect(redacted).toContain("x-goog-api-key=[redacted]");
     expect(redacted).toContain("key=[redacted]");
     expect(redacted).toContain("GEMINI_API_KEY=[redacted]");
+  });
+});
+
+describe("geminiOperationPath", () => {
+  it("keeps models/.../operations/... instead of nesting under /operations", () => {
+    expect(geminiOperationPath("models/veo-3.1-fast-generate-preview/operations/abc")).toBe(
+      "/v1beta/models/veo-3.1-fast-generate-preview/operations/abc",
+    );
+    expect(geminiOperationPath("operations/abc")).toBe("/v1beta/operations/abc");
+    expect(geminiOperationPath("v1beta/operations/abc")).toBe("/v1beta/operations/abc");
   });
 });
 

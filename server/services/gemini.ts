@@ -226,8 +226,14 @@ async function generateVeoFallback(input: Record<string, unknown>, sourceUrl: st
   return pollOperation(op);
 }
 
+export function geminiOperationPath(name: string): string {
+  const trimmed = name.replace(/^\//, "");
+  if (trimmed.startsWith("v1beta/")) return `/${trimmed}`;
+  return `/v1beta/${trimmed}`;
+}
+
 async function pollOperation(name: string): Promise<string> {
-  const path = name.startsWith("operations/") ? `/v1beta/${name}` : `/v1beta/operations/${name}`;
+  const path = geminiOperationPath(name);
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     const res = await geminiFetch(path, { method: "GET", timeoutMs: 30_000 });
