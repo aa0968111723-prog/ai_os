@@ -1,4 +1,6 @@
-import type { VisualChoiceFamily, VisualChoicePreview } from "./visualChoiceTypes";
+import type { VisualChoiceFallbackPreview, VisualChoiceFamily, VisualChoicePreview } from "./visualChoiceTypes";
+
+export const VISUAL_CHOICE_STARTER_ASSET_VERSION = "starter-v1" as const;
 
 const CAMERA_MOTIF: Record<string, Extract<VisualChoicePreview, { kind: "composition" }>['motif']> = {
   "camera.wide": "wide",
@@ -55,13 +57,13 @@ const ACTION_ENERGY: Record<string, "still" | "gentle" | "dynamic"> = {
  * Starter preview manifest. Replace any entry with an image resource later;
  * preset ids and React rendering stay unchanged.
  */
-export function starterPreviewFor(input: {
+function fallbackPreviewFor(input: {
   id: string;
   family: VisualChoiceFamily;
   label: string;
   description?: string;
   fallbackIcon?: string;
-}): VisualChoicePreview {
+}): VisualChoiceFallbackPreview {
   const alt = input.description ? `${input.label}：${input.description}` : input.label;
   const camera = CAMERA_MOTIF[input.id];
   if (camera) return { kind: "composition", motif: camera, alt };
@@ -76,4 +78,28 @@ export function starterPreviewFor(input: {
     return { kind: "expression", motif: input.id.replace("expression.", ""), alt };
   }
   return { kind: "fallback", icon: input.fallbackIcon ?? "•", alt };
+}
+
+/**
+ * Stable public-asset seam: designers can add/replace the .webp at this path
+ * without touching React or semantic preset ids. Missing art renders the SVG
+ * fallback, so the starter pack never requires an AI request at runtime.
+ */
+export function starterPreviewFor(input: {
+  id: string;
+  family: VisualChoiceFamily;
+  label: string;
+  description?: string;
+  fallbackIcon?: string;
+}): VisualChoicePreview {
+  const fallback = fallbackPreviewFor(input);
+  return {
+    kind: "image",
+    source: "static",
+    src: `/creative-choice/${VISUAL_CHOICE_STARTER_ASSET_VERSION}/${input.family}/${input.id}.webp`,
+    alt: fallback.alt,
+    version: VISUAL_CHOICE_STARTER_ASSET_VERSION,
+    aspect: "3:2",
+    fallback,
+  };
 }

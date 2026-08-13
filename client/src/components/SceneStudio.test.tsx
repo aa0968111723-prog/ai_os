@@ -12,6 +12,7 @@ import { SceneStudio } from "./SceneStudio";
 const versionsQuery = vi.fn();
 const updateMutate = vi.fn();
 const regenMutate = vi.fn();
+const variantsMutate = vi.fn();
 const refineMutate = vi.fn();
 const voiceMutate = vi.fn();
 const ambienceMutate = vi.fn();
@@ -30,6 +31,7 @@ vi.mock("../api", () => ({
       versions: { useQuery: (...args: unknown[]) => versionsQuery(...args) },
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
       generateInto: { useMutation: () => ({ mutate: regenMutate, isPending: false, error: null }) },
+      generateVariants: { useMutation: () => ({ mutate: variantsMutate, isPending: false, error: null }) },
       refine: { useMutation: () => ({ mutate: refineMutate, isPending: false, error: null }) },
       generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
       generateAmbience: { useMutation: () => ({ mutate: ambienceMutate, isPending: false, error: null }) },
@@ -222,6 +224,18 @@ describe("SceneStudio", () => {
     await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
     await user.click(screen.getByRole("button", { name: "確認重畫" }));
     expect(regenMutate.mock.calls[0]![0]).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
+  });
+
+  it("Generate Variants 送出三個不同冪等鍵與同一鏡完整 context", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /產生 3 個變體/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個變體" }));
+    const arg = variantsMutate.mock.calls[0]![0] as { sceneId: string; prompt: string; clientRequestIds: string[] };
+    expect(arg).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
+    expect(arg.clientRequestIds).toHaveLength(3);
+    expect(new Set(arg.clientRequestIds).size).toBe(3);
   });
 
   it("提示詞改了還沒存：提醒先存，重畫才會用新的", async () => {

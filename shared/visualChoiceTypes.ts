@@ -30,14 +30,7 @@ export type VisualChoiceFamily =
  * never needs to know whether an eventual thumbnail came from Gemini, Adobe,
  * a designer, SVG, or a project reference.
  */
-export type VisualChoicePreview =
-  | {
-      kind: "image";
-      source: "project" | "static" | "generated" | "reference";
-      src: string;
-      assetId?: string;
-      alt: string;
-    }
+export type VisualChoiceFallbackPreview =
   | {
       kind: "composition";
       motif:
@@ -75,6 +68,20 @@ export type VisualChoicePreview =
       icon: string;
       alt: string;
     };
+
+export type VisualChoicePreview = VisualChoiceFallbackPreview | {
+  kind: "image";
+  source: "project" | "static" | "generated" | "reference";
+  src: string;
+  thumbnailSrc?: string;
+  assetId?: string;
+  alt: string;
+  /** Asset-pack revision, independent of semantic preset ids. */
+  version?: string;
+  aspect?: `${number}:${number}`;
+  /** Diagram/swatch rendered when the replaceable bitmap is absent. */
+  fallback?: VisualChoiceFallbackPreview;
+};
 
 export const VISUAL_CHOICE_FAMILY_LABEL: Record<VisualChoiceFamily, string> = {
   action: "動作",

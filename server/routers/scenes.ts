@@ -1142,6 +1142,8 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      expectedRev: z.number().int().min(0).optional(),
+      baseline: z.record(z.unknown()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -1167,11 +1169,22 @@ export const scenesRouter = router({
       if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
       if (input.propIds !== undefined) patch.propIds = columns.propIds;
       if (Object.keys(patch).length === 0) return scene; // 三排都沒送＝沒事可做
-      const [updated] = await db
-        .update(schema.scenes)
-        .set(patch)
-        .where(eq(schema.scenes.id, input.sceneId))
-        .returning();
+      const { row: updated, merged } = await applyWithRevision({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: scene,
+        patch,
+        expectedRev: input.expectedRev,
+        baseline: input.baseline,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.scenes).where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
+      if (merged) publishToProject(scene.projectId, { kind: "scene", id: scene.id }, "合併了卡片綁定");
       return updated;
     }),
 
@@ -1235,6 +1248,72 @@ export const scenesRouter = router({
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
+    }),
+
+  /**
+   * First-class visual variants: 2–4 real jobs through the existing generation
+   * command. Each deterministic id is its own billing/idempotency receipt; the
+   * results remain scene-version candidates and never move current implicitly.
+   */
+  generateVariants: authedProcedure
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      modelId: z.string(),
+      prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
+      clientRequestIds: z.array(z.string().uuid()).min(2).max(4).refine((ids) => new Set(ids).size === ids.length, "每個變體需要不同的冪等鍵"),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了，沒有送出變體，也沒有扣點" });
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project);
+      const model = getModel(input.modelId);
+      const modelRejection = regenRejection(model);
+      if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
+      const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
+      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫" });
+      const cards = resolveSceneCards(scene, {
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
+      });
+      const settled = await Promise.allSettled(input.clientRequestIds.map((id) => executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id,
+        projectId: scene.projectId,
+        modelId: input.modelId,
+        prompt,
+        sceneId: scene.id,
+        preserveScenePointer: true,
+        characterIds: cards.characterIds,
+        scenePresetIds: cards.scenePresetIds,
+        propIds: cards.propIds,
+        lookIds: scene.lookIds ?? undefined,
+        reasonPrefix: "分鏡變體",
+      })));
+      return {
+        requested: input.clientRequestIds.length,
+        results: settled.map((result, index) => result.status === "fulfilled"
+          ? {
+              slot: index + 1,
+              ok: true as const,
+              generationId: result.value.id,
+              status: result.value.status,
+              pointsEst: result.value.pointsEst,
+            }
+          : {
+              slot: index + 1,
+              ok: false as const,
+              error: result.reason instanceof Error ? result.reason.message : "變體送出失敗",
+            }),
+      };
     }),
 
   /**

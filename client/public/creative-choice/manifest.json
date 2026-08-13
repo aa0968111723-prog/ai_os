@@ -1,0 +1,8 @@
+{
+  "version": "starter-v1",
+  "path": "/creative-choice/starter-v1/<family>/<stable-preset-id>.webp",
+  "aspect": "3:2",
+  "recommendedSize": "720x480",
+  "runtimeFallback": "accessible SVG diagram or color swatch",
+  "generationCost": 0
+}

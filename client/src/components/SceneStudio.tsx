@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
+import { summarizeVisualVariantBatch } from "@shared/visualVariants";
 import { Icon } from "./Icon";
 import { SceneAnnotationLayer } from "./SceneAnnotationLayer";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
@@ -148,6 +149,12 @@ export function SceneStudio({
   /** 只存使用者勾來比較的既有 asset ids；版本內容仍以 scenes.versions 為唯一真相。 */
   const [compareAssetIds, setCompareAssetIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [variantBatch, setVariantBatch] = useState<{
+    requested: number;
+    generationIds: string[];
+    launchFailures: number;
+    autoOpened: boolean;
+  } | null>(null);
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
@@ -182,7 +189,7 @@ export function SceneStudio({
     { sceneId },
     {
       // 有版本在跑時加快輪詢（等出圖的人正盯著看），閒置時放慢到與分鏡列同節奏
-      refetchInterval: (query) => (query.state.data?.summary.generating ? 4_000 : 20_000),
+      refetchInterval: (query) => (query.state.data?.summary.generating || (variantBatch && !variantBatch.autoOpened) ? 4_000 : 20_000),
     },
   );
   const data = versions.data;
@@ -207,6 +214,20 @@ export function SceneStudio({
       .filter((version): version is SceneVersion => !!version?.assetUrl),
     [compareAssetIds, visualVersions],
   );
+  const variantSummary = useMemo(
+    () => variantBatch ? summarizeVisualVariantBatch(variantBatch, visualVersions) : null,
+    [variantBatch, visualVersions],
+  );
+
+  useEffect(() => {
+    if (!variantBatch || variantBatch.autoOpened || !variantSummary?.settled) return;
+    const assets = variantSummary.compareAssetIds;
+    if (assets.length >= 2) {
+      setCompareAssetIds(assets);
+      setCompareOpen(true);
+    }
+    setVariantBatch((current) => current ? { ...current, autoOpened: true } : current);
+  }, [variantBatch, variantSummary]);
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
   // 「旁白獨立於畫面，配音生成中不該擋住畫面重生，反之亦然」相反，
@@ -261,11 +282,25 @@ export function SceneStudio({
   const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
   // 冪等鍵（QA-007）：還沒成功的重送沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const regenRequestId = useRef(crypto.randomUUID());
+  const variantRequestIds = useRef([crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]);
   const refineRequestId = useRef(crypto.randomUUID());
   const voiceRequestId = useRef(crypto.randomUUID());
   const ambienceRequestId = useRef(crypto.randomUUID());
   const regen = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { regenRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
+  });
+  const generateVariants = trpc.scenes.generateVariants.useMutation({
+    onSuccess: (result) => {
+      const accepted = result.results.filter((row): row is Extract<(typeof result.results)[number], { ok: true }> => row.ok);
+      setVariantBatch({
+        requested: result.requested,
+        generationIds: accepted.map((row) => row.generationId),
+        launchFailures: result.results.length - accepted.length,
+        autoOpened: false,
+      });
+      setTab("versions");
+      refresh();
+    },
   });
   const refine = trpc.scenes.refine.useMutation({
     onSuccess: () => { refineRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
@@ -287,7 +322,7 @@ export function SceneStudio({
     meta: { ...sceneScope, collabLabel: "換了這一鏡的現用版本" },
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? generateVariants.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
   /**
    * 存檔載荷的併發欄位（shared/revision.ts）。
@@ -380,6 +415,7 @@ export function SceneStudio({
   const savedAmbience = data?.ambience ?? "";
 
   const regenModel = getModel(regenModelId) ?? getModel(DEFAULT_REGEN_MODEL);
+  const variantEstimatedPoints = (regenModel?.points ?? 0) * 3;
   const refineModel = getModel(refineModelId);
   const refinePoints = refineModel ? estimatePoints(refineModel, { promptChars: instruction.length }) : undefined;
   // 配音走按字計費的中文 TTS：估點依「已儲存的配音詞」長度算，與後端扣點同一函式——顯示＝扣點
@@ -426,7 +462,7 @@ export function SceneStudio({
   );
 
   const refineBlocked = !refineModel || !baseUsable || instruction.trim() === "" || isGenerating || refine.isPending;
-  const regenBlocked = !regenModel || prompt.trim() === "" || isGenerating || regen.isPending;
+  const regenBlocked = !regenModel || prompt.trim() === "" || isGenerating || regen.isPending || generateVariants.isPending;
 
   const useVersionAsBase = (v: SceneVersion) => {
     setBaseAssetId(v.assetId);
@@ -829,6 +865,33 @@ export function SceneStudio({
                         </ConfirmButton>
                       )}
                     </div>
+                    <div className="scene-variant-launch">
+                      <div>
+                        <strong>Generate Variants</strong>
+                        <Meta as="div">送出 3 個真實生成工作；完成前不改 current，成功候選會自動開啟 Compare。</Meta>
+                      </div>
+                      <ConfirmButton
+                        triggerClassName="tonal"
+                        disabled={regenBlocked}
+                        triggerTitle="用同一鏡的完整 context 產生三個候選版本"
+                        message={`將送出 3 個獨立生成工作（${regenModel?.label ?? regenModelId}，合計預估 −${variantEstimatedPoints} 點）。每個工作各自扣退點；重送同一批不重複計費。`}
+                        confirmLabel="確認產生 3 個變體"
+                        onConfirm={() => {
+                          if (variantBatch?.autoOpened) variantRequestIds.current = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+                          generateVariants.mutate({
+                            sceneId,
+                            modelId: regenModelId,
+                            prompt,
+                            clientRequestIds: variantRequestIds.current,
+                            characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                            scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+                            propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
+                          });
+                        }}
+                      >
+                        <Icon name="LayoutGrid" size={14} /> {generateVariants.isPending ? "送出中…" : `產生 3 個變體（約 −${variantEstimatedPoints} 點）`}
+                      </ConfirmButton>
+                    </div>
                   </>
                 )}
               </div>
@@ -1055,6 +1118,19 @@ export function SceneStudio({
             {/* 版本：歷來每一次生成，可切回、可當底圖、可抄提示詞 */}
             {tab === "versions" && (
               <div role="tabpanel" id={`studio-panel-versions-${sceneId}`} aria-labelledby={`studio-tab-versions-${sceneId}`}>
+                {variantBatch && (
+                  <div className="scene-variant-status" role="status" aria-live="polite">
+                    <div>
+                      <strong>{variantSummary?.settled ? "Variants 已結算" : "Variants 生成中"}</strong>
+                      <Meta as="div">
+                        成功 {variantSummary?.successes.length ?? 0}/{variantBatch.requested}・失敗 {variantSummary?.failures ?? variantBatch.launchFailures}
+                        {variantSummary?.awaitingApproval ? "・等待成本核准" : ""}
+                        {(variantSummary?.actualPoints ?? 0) > 0 ? `・實際淨花費 ${variantSummary!.actualPoints} 點` : ""}
+                      </Meta>
+                    </div>
+                    {variantSummary?.settled && variantSummary.successes.length < 2 && <Hint>成功候選不足 2 個，無法自動並排；成功版本仍保留，失敗工作已依既有政策退點。</Hint>}
+                  </div>
+                )}
                 {visualVersions.filter((version) => version.assetUrl).length >= 2 && (
                   <div className="scene-version-compare-bar">
                     <div>
