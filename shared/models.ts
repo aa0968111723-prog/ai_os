@@ -383,6 +383,14 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
+    // Native Google AI（不走 fal）。金鑰只讀 process.env.GEMINI_API_KEY；verified 等 Zeabur 實跑後再升。
+    id: "google/gemini#gemini-2.5-flash-image", endpoint: "google/gemini", label: "Gemini 2.5 Flash Image", category: "text-to-image", tier: "flagship", kind: "image",
+    points: 1, cost: "$0.039/張(Google AI)", verified: false,
+    strengths: "Google 原生文生圖;口語長指令與中英文字卡",
+    bestFor: "需要 Gemini 原生出圖、不經 fal 代理的畫面",
+    input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), geminiModel: "gemini-2.5-flash-image" }),
+  },
+  {
     id: "fal-ai/flux/dev", label: "FLUX.1 [dev]", category: "text-to-image", tier: "economy", kind: "image",
     points: 1, cost: "$0.025/MP", verified: true, recommended: true,
     strengths: "開源界標竿;品質/成本平衡點、生態最豐(LoRA 可搭)",
@@ -587,6 +595,14 @@ export const MODELS: ModelEntry[] = [
     bestFor: "「把背景換成禪堂」這類口語修改、多圖合成",
     sourceHint: "要編輯的圖(素材庫或網址)",
     input: (p, _f, s) => ({ prompt: p, image_urls: [s] }),
+  },
+  {
+    id: "google/gemini#gemini-2.5-flash-image-edit", endpoint: "google/gemini", label: "Gemini 2.5 Flash Image 編輯", category: "image-to-image", tier: "flagship", kind: "image",
+    needs: "image", points: 1, cost: "$0.039/張(Google AI)", verified: false,
+    strengths: "Google 原生參考圖編輯;同一把 GEMINI_API_KEY",
+    bestFor: "用參考圖改一處、其餘盡量保留",
+    sourceHint: "要編輯的參考圖",
+    input: (p, f, s) => ({ prompt: p, aspect_ratio: aspect(f), image_url: s, geminiModel: "gemini-2.5-flash-image" }),
   },
   {
     // 審計 #32：OpenAPI id 路徑 404；真端點 fal-ai/flux-2-pro/edit（image_urls）
@@ -1207,6 +1223,13 @@ export const MODELS: ModelEntry[] = [
     strengths: "前代 Google 旗艦;寫實穩、運鏡電影感,無原生音效",
     bestFor: "相容舊專案;新案建議用 Veo 3.1",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
+  },
+  {
+    id: "google/gemini#gemini-omni-flash", endpoint: "google/gemini", label: "Gemini Omni Flash 影片", category: "text-to-video", tier: "economy", kind: "video",
+    points: 19, cost: "$0.15/秒(最短 4 秒;Veo Fast 後備)", verified: false,
+    strengths: "Google 原生最短測試影片;金鑰只走 GEMINI_API_KEY",
+    bestFor: "驗證 Gemini Omni／Veo 通路的最短成片",
+    input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), geminiModel: "gemini-omni-flash", duration: 4 }),
   },
   {
     id: "fal-ai/kling-video/v2.6/pro/text-to-video", label: "Kling 2.6 Pro", category: "text-to-video", tier: "flagship", kind: "video",
@@ -3494,6 +3517,19 @@ export function endpointOf(model: ModelEntry): string {
 /** 是否走 NVIDIA NIM(LLM 文字類):generationCore 據此把送出/輪詢分流到 nimSubmit/nimStatus */
 export function isNimModel(model: ModelEntry): boolean {
   return endpointOf(model) === "nvidia-nim";
+}
+
+/** 是否走 Google Gemini 原生（圖／編輯／Omni 影片），不經 fal 佇列 */
+export function isGeminiModel(model: ModelEntry): boolean {
+  return endpointOf(model) === "google/gemini";
+}
+
+export type GenerationProvider = "nvidia-nim" | "google/gemini" | "fal.ai";
+
+export function generationProviderOf(model: ModelEntry): GenerationProvider {
+  if (isNimModel(model)) return "nvidia-nim";
+  if (isGeminiModel(model)) return "google/gemini";
+  return "fal.ai";
 }
 
 /** 平台 → 格式自動帶入(夥伴不用懂比例) */

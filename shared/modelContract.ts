@@ -35,6 +35,7 @@ export type ModelHealthStatus =
   | "openapi_404"
   | "needs_source"
   | "nim_no_key"
+  | "gemini_no_key"
   | "never_probed"
   | "unknown";
 
@@ -163,19 +164,22 @@ export function buildModelContractRow(
   if (m.id.startsWith("nvidia-nim") || ep === "nvidia-nim") {
     health = "nim_no_key";
     healthNote = "NVIDIA NIM：無 KEY 時本站不 live；生成走 nim 分流";
+  } else if (m.id.startsWith("google/gemini") || ep === "google/gemini") {
+    health = "gemini_no_key";
+    healthNote = "Google Gemini 原生：金鑰只讀 GEMINI_API_KEY；不走 fal 佇列";
   } else if (m.needs) {
     // needs 優先於歷史 live_fail（空 live 本來就不該做）
     health = "needs_source";
     healthNote = `需要來源素材 needs=${m.needs}${m.secondaryNeeds ? `+${m.secondaryNeeds}` : ""}；禁止空 live`;
   }
 
-  if (openapi?.status === "http_404") {
+  if (openapi?.status === "http_404" && health !== "nim_no_key" && health !== "gemini_no_key") {
     health = "openapi_404";
     healthNote = "OpenAPI queue 404：端點可能下架或 slug 錯誤";
   }
 
   // live 結果只覆蓋「可空探測」路徑；needs / openapi_404 / nim 不被舊 fail 蓋掉
-  const locked = health === "needs_source" || health === "openapi_404" || health === "nim_no_key";
+  const locked = health === "needs_source" || health === "openapi_404" || health === "nim_no_key" || health === "gemini_no_key";
 
   if (live?.status && !locked) {
     const st = live.status;
@@ -196,7 +200,7 @@ export function buildModelContractRow(
     healthNote += `（歷史 empty live：${live.status}）`;
   }
 
-  if (health === "never_probed" && !m.needs && !m.id.startsWith("nvidia-nim") && openapi?.status === "ok") {
+  if (health === "never_probed" && !m.needs && !m.id.startsWith("nvidia-nim") && !m.id.startsWith("google/gemini") && openapi?.status === "ok") {
     healthNote = "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）";
   }
 

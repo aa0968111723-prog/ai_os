@@ -4,7 +4,7 @@
  */
 import { getDecryptedKey } from "./userAiKeys";
 import type { ModelEntry } from "../../shared/models";
-import { isNimModel } from "../../shared/models";
+import { isGeminiModel, isNimModel } from "../../shared/models";
 import { splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
 
 export type ByokResolveResult = {
@@ -14,7 +14,7 @@ export type ByokResolveResult = {
 
 /**
  * Resolve personal fal key for a user + model.
- * - NIM never uses fal personal key.
+ * - NIM and native Gemini never use fal personal key.
  * - New submit（無 params）：有 active+prefer 的 fal key → usedUserKey.
  * - Advance／decideCost（有 params）：以 meta.usedUserKey 為準；仍需解出 key 才能查 status。
  */
@@ -23,7 +23,7 @@ export async function resolveByokFalKey(
   model: ModelEntry | null | undefined,
   params?: unknown,
 ): Promise<ByokResolveResult> {
-  if (!model || isNimModel(model)) {
+  if (!model || isNimModel(model) || isGeminiModel(model)) {
     return { userFalKey: null, usedUserKey: false };
   }
   const metaUsed =

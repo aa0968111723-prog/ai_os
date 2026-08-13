@@ -39,6 +39,20 @@ describe("resolveByokFalKey", () => {
     expect(getDecryptedKey).not.toHaveBeenCalled();
   });
 
+  it("native Gemini never uses personal fal key", async () => {
+    const geminiModel = {
+      id: "google/gemini#gemini-2.5-flash-image",
+      endpoint: "google/gemini",
+      label: "Gemini Image",
+      kind: "image",
+      category: "text-to-image",
+    } as ModelEntry;
+    getDecryptedKey.mockResolvedValue("sk-user");
+    const r = await resolveByokFalKey("u1", geminiModel);
+    expect(r).toEqual({ userFalKey: null, usedUserKey: false });
+    expect(getDecryptedKey).not.toHaveBeenCalled();
+  });
+
   it("no personal key → platform path", async () => {
     getDecryptedKey.mockResolvedValue(null);
     const r = await resolveByokFalKey("u1", falModel);

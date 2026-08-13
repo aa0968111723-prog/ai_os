@@ -146,7 +146,7 @@ async function advanceWithGuard(id: string): Promise<void> {
       // nimStatus 對未知 requestId 一律回 running → advanceGeneration 原樣回 running → 心跳每 5 分刷新 updatedAt，
       // 讓重啟孤兒永遠逃過 30 分陳屍清掃、永卡「生成中」（連帶卡住其工作流/代理 run）。真正在跑的 NIM 60 秒內必 settle，
       // 不需心跳保護；排除後孤兒的 updatedAt 不再被刷新，陳屍清掃與 reapStuckGeneration 即可如 nvidia-nim.ts 註解承諾收斂退點。
-      if (g && g.requestId && !g.requestId.startsWith("nim_") && (g.status === "queued" || g.status === "running")) {
+      if (g && g.requestId && !g.requestId.startsWith("nim_") && !g.requestId.startsWith("gemini_") && (g.status === "queued" || g.status === "running")) {
         // B12：超過硬性生命週期不再心跳、直接回收（即使 provider 仍回 running）
         if (Date.now() - new Date(g.createdAt).getTime() > HARD_LIFETIME_MS) {
           await failStaleGenerationTx(

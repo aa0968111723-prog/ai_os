@@ -32,7 +32,7 @@
  *   產出:docs/fal端點連通報告.md
  */
 import { writeFileSync } from "node:fs";
-import { CATEGORIES, MODELS, endpointOf, isNimModel, tierLabel, type ModelEntry } from "../shared/models";
+import { CATEGORIES, MODELS, endpointOf, isGeminiModel, isNimModel, tierLabel, type ModelEntry } from "../shared/models";
 import { proxyFetch } from "../server/services/http";
 import { isMockMode } from "../server/services/fal";
 
@@ -73,7 +73,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function uniqueEndpoints(models: ModelEntry[]): Array<{ endpoint: string; category: string; modelIds: string[] }> {
   const map = new Map<string, { endpoint: string; category: string; modelIds: string[] }>();
   for (const m of models) {
-    if (isNimModel(m)) continue; // 走 NVIDIA NIM,不是 fal,用 check-nim.ts 驗
+    if (isNimModel(m) || isGeminiModel(m)) continue; // 走 NVIDIA NIM / Gemini 原生,不是 fal
     const ep = endpointOf(m);
     const cur = map.get(ep);
     if (cur) cur.modelIds.push(m.id);

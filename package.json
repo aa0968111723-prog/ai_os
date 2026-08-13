@@ -41,6 +41,7 @@
     "verify:agent-db-recovery": "tsx scripts/verify-agent-db-recovery.ts",
     "verify:database-runtime": "tsx scripts/verify-database-runtime.ts",
     "backend:doctor": "tsx scripts/backend-doctor.ts",
+    "verify:gemini": "tsx scripts/verify-gemini-runtime.ts",
     "test:agent:soak": "tsx scripts/agent-v5-soak.ts",
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",

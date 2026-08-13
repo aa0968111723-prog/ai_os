@@ -19,6 +19,12 @@ describe("certificationTargets", () => {
     expect(targets).not.toContain("nvidia-nim");
   });
 
+  it("google/gemini 只加該 id、絕不加共用 endpoint google/gemini", () => {
+    const targets = certificationTargets(["google/gemini#gemini-2.5-flash-image"]);
+    expect(targets).toContain("google/gemini#gemini-2.5-flash-image");
+    expect(targets).not.toContain("google/gemini");
+  });
+
   it("靜態表找不到的 id 至少帶 id（沒命中 catalog row 時認證即 no-op）", () => {
     expect(certificationTargets(["openrouter/router#nonexistent-model"])).toEqual([
       "openrouter/router#nonexistent-model",

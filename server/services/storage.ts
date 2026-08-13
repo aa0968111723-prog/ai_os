@@ -776,7 +776,22 @@ const PERSIST_FETCH_TIMEOUT_MS = 120_000;
  * 下載採串流累計，超過 MAX_FILE_BYTES 立即中止——不再是「整包吞進記憶體後才量大小」，
  * 沒報 Content-Length（或謊報）的來源也無法把整個 body 灌進 RAM。
  */
+/** Internal handle for media already written by saveBuffer (Gemini native path). */
+export function parseStoredResultUrl(url: string): { storagePath: string; mime: string; sizeBytes: number } | null {
+  if (!url.startsWith("stored:")) return null;
+  const body = url.slice("stored:".length);
+  const [storagePath, mime, sizeRaw] = body.split("|");
+  if (!storagePath) return null;
+  return {
+    storagePath,
+    mime: mime || "application/octet-stream",
+    sizeBytes: Number(sizeRaw) || 0,
+  };
+}
+
 export async function persistRemote(url: string): Promise<{ storagePath: string; mime: string; sizeBytes: number } | null> {
+  const already = parseStoredResultUrl(url);
+  if (already) return already;
   try {
     const res = await proxyFetch(url, { timeoutMs: PERSIST_FETCH_TIMEOUT_MS });
     if (!res.ok) {

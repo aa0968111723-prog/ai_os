@@ -42,6 +42,20 @@ afterAll(async () => {
 });
 
 describe("storage 持久化：寫入／讀回", () => {
+  it("persistRemote 對 stored: handle 直接回已落地路徑、不發 HTTP", async () => {
+    const payload = Buffer.from("gemini-already-landed");
+    const saved = await storage.saveBuffer(payload, "image/png");
+    const handle = `stored:${saved.storagePath}|image/png|${saved.sizeBytes}`;
+    const parsed = storage.parseStoredResultUrl(handle);
+    expect(parsed).toEqual({
+      storagePath: saved.storagePath,
+      mime: "image/png",
+      sizeBytes: saved.sizeBytes,
+    });
+    const persisted = await storage.persistRemote(handle);
+    expect(persisted).toEqual(parsed);
+  });
+
   it("saveBuffer 後檔案在 ASSET_DIR、內容完整、sizeBytes 正確", async () => {
     const payload = Buffer.from("persist-probe-內容-αβγ-🖼️");
     const saved = await storage.saveBuffer(payload, "text/plain");

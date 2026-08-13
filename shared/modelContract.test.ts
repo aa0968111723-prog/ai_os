@@ -38,13 +38,22 @@ describe("modelContract", () => {
   });
 
   it("openapi 404 overrides to openapi_404", () => {
-    const m = MODELS.find((x) => !x.needs && !x.id.startsWith("nvidia-nim"))!;
+    const m = MODELS.find((x) => !x.needs && !x.id.startsWith("nvidia-nim") && !x.id.startsWith("google/gemini"))!;
     const row = buildModelContractRow(m, null, { status: "http_404" });
     expect(row.health).toBe("openapi_404");
   });
 
+  it("native Gemini stays gemini_no_key and ignores fal OpenAPI 404", () => {
+    const m = getModel("google/gemini#gemini-2.5-flash-image");
+    expect(m).toBeTruthy();
+    const row = buildModelContractRow(m!, { status: "success" }, { status: "http_404" });
+    expect(row.health).toBe("gemini_no_key");
+    expect(row.healthNote).toMatch(/GEMINI_API_KEY/);
+    expect(row.healthNote).not.toMatch(/AIza/);
+  });
+
   it("live success marks live_ok", () => {
-    const m = MODELS.find((x) => !x.needs && !x.id.startsWith("nvidia-nim"))!;
+    const m = MODELS.find((x) => !x.needs && !x.id.startsWith("nvidia-nim") && !x.id.startsWith("google/gemini"))!;
     const row = buildModelContractRow(m, { status: "success" }, { status: "ok" });
     expect(row.health).toBe("live_ok");
   });

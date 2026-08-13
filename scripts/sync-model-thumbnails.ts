@@ -7,7 +7,7 @@
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { MODELS, endpointOf, isNimModel } from "../shared/models";
+import { MODELS, endpointOf, isGeminiModel, isNimModel } from "../shared/models";
 
 async function main() {
   const key = process.env.FAL_KEY?.trim();
@@ -44,7 +44,7 @@ async function main() {
 
   const byModelId: Record<string, string> = {};
   for (const m of MODELS) {
-    if (isNimModel(m)) continue;
+    if (isNimModel(m) || isGeminiModel(m)) continue;
     const ep = endpointOf(m);
     const url =
       byEndpoint[m.id] ??

@@ -54,6 +54,7 @@ try {
       "| openapi_404 | OpenAPI 端點不存在 |",
       "| needs_source | 需素材，禁止空 live |",
       "| nim_no_key | NIM 分流 |",
+      "| gemini_no_key | Gemini 原生 |",
       "| never_probed | 尚未 live |",
       "",
     );

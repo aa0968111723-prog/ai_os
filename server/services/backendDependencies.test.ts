@@ -32,6 +32,17 @@ describe("backendDependencies", () => {
     expect(text).not.toMatch(/password/i);
   });
 
+  it("reports GEMINI configured=true without the key", () => {
+    const text = formatBackendDoctor(snapshot({
+      dependencies: [
+        { id: "gemini", required: false, configured: true, connected: true, state: "HEALTHY", latencyMs: null, lastSuccessAt: null, lastFailureAt: null, failureClass: null },
+      ],
+    }));
+    expect(text).toContain("GEMINI HEALTHY configured=true connected=true");
+    expect(text).not.toMatch(/AIza/);
+    expect(text).not.toMatch(/GEMINI_API_KEY\s*[:=]\s*\S+/);
+  });
+
   it("blocks generate_media when Fal is down and Drive import when Google is missing", () => {
     const down = snapshot({
       dependencies: [
