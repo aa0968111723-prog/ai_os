@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantDatabaseQueryTerms, formatAssistantDatabaseEvidence } from "./assistantDatabaseEvidence";
+import { assistantDatabaseQueryTerms, formatAssistantDatabaseEvidence, prioritizeAssistantDatabases } from "./assistantDatabaseEvidence";
 import { serializeTableForIntelligence } from "./intelligenceLibrary";
 
 describe("assistant database evidence", () => {
@@ -10,6 +10,14 @@ describe("assistant database evidence", () => {
     expect(terms).toContain("電話");
     expect(terms).not.toContain("資料庫");
     expect(terms).not.toContain("的電");
+  });
+
+  it("puts the selected database first so page ASK does not rescan the whole site", () => {
+    const ordered = prioritizeAssistantDatabases([
+      { id: "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1" },
+      { id: "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2" },
+    ], { pageType: "database", entityType: "database", entityId: "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2" });
+    expect(ordered[0]?.id).toBe("bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2");
   });
 
   it("formats a stable source trace with table ref and row id", () => {

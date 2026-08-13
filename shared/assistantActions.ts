@@ -74,12 +74,23 @@ export interface EditingHandoffActionResult {
   verification: AssistantVerification;
 }
 
+export interface DatabaseRowActionResult {
+  type: "database_row";
+  tableId: string;
+  tableName: string;
+  rowIds: string[];
+  query?: string;
+  operation: "query" | "add" | "update";
+  verification: AssistantVerification;
+}
+
 export type AssistantActionResult =
   | ImportActionResult
   | CreateProjectActionResult
   | CreateTaskActionResult
   | GenerationActionResult
-  | EditingHandoffActionResult;
+  | EditingHandoffActionResult
+  | DatabaseRowActionResult;
 
 /** Keep the reference window bounded; this is a pronoun resolver, not memory. */
 export const MAX_RECENT_ACTION_RESULTS = 5;
@@ -115,6 +126,9 @@ export function boundAssistantActionResults(
     if (result.type === "editing_handoff") {
       return { ...result, assetIds: result.assetIds.slice(0, MAX_RECENT_RESULT_IDS) };
     }
+    if (result.type === "database_row") {
+      return { ...result, rowIds: result.rowIds.slice(0, MAX_RECENT_RESULT_IDS) };
+    }
     return result;
     });
 }
@@ -135,12 +149,15 @@ export function formatRecentActionResults(results: readonly AssistantActionResul
     if (result.type === "editing_handoff") {
       return `${index + 1}. editing_handoff：projectId=${result.projectId}；editingSessionId=${result.editingSessionId}；editor=${result.editorId}；assetIds=${result.assetIds.join(",") || "none"}`;
     }
+    if (result.type === "database_row") {
+      return `${index + 1}. database_row：table=${result.tableName}；rowIds=${result.rowIds.join(",") || "none"}；op=${result.operation}`;
+    }
     return `${index + 1}. generation：projectId=${result.projectId}；generationIds=${result.generationIds.join(",")}`;
   });
   return [
     "<最近動作結果>",
     ...lines,
-    "『這些資料／剛才那些』優先指最近的 import；『剛建立的專案』優先指最近的 create_project。這些 id 只是工具參照，不得直接顯示給使用者。",
+    "『這些資料／剛才那些』優先指最近的 import；『剛建立的專案』優先指最近的 create_project；『剛剛那筆／剛才找到的第三筆』優先指最近的 database_row。這些 id 只是工具參照，不得直接顯示給使用者。",
     "</最近動作結果>",
   ].join("\n");
 }

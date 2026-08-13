@@ -33,7 +33,7 @@ interface AssistantConversationInput {
 }
 
 interface ConversationExecutedAction {
-  action: { type: string; projectId?: string };
+  action: { type: string; projectId?: string; tableId?: string };
   result: {
     type: string;
     verification: AssistantVerification;
@@ -52,6 +52,8 @@ interface ConversationExecutedAction {
     duplicateCount?: number;
     needsReviewCount?: number;
     backgroundProcessing?: boolean;
+    rowId?: string;
+    tableName?: string;
   };
 }
 
@@ -113,6 +115,16 @@ function actionResultsFromExecution(result: AssistantConversationResult): Assist
       projectId: item.action.projectId,
       verification: item.result.verification,
     });
+    if (item.result.type === "add_database_row" && item.result.rowId && item.result.tableName && item.action.tableId) {
+      converted.push({
+        type: "database_row",
+        tableId: item.action.tableId,
+        tableName: item.result.tableName,
+        rowIds: [item.result.rowId],
+        operation: "add",
+        verification: item.result.verification,
+      });
+    }
   }
   return converted;
 }

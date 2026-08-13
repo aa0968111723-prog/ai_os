@@ -20,6 +20,11 @@ describe("assistant resource resolver", () => {
     ]));
   });
 
+  it("routes 清單 / 資料表 questions onto the custom database source", () => {
+    expect(routeAssistantResources("素材清單有什麼？")).toContain("database");
+    expect(routeAssistantResources("搜尋所有資料庫裡面的書法")).toContain("database");
+  });
+
   it("uses page/entity context to expose only relevant capabilities", () => {
     const routed = routeAssistantResources("改善這三鏡", {
       pageType: "storyboard",

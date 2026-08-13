@@ -25,9 +25,19 @@ describe("assistant action result references", () => {
   it("formats pronoun references without embedding resource content", () => {
     const text = formatRecentActionResults([{
       type: "create_project", projectId: "project-1", title: "百日夢島", verification,
+    }, {
+      type: "database_row",
+      tableId: "table-1",
+      tableName: "素材清單",
+      rowIds: ["row-1"],
+      operation: "add",
+      verification,
     }]);
     expect(text).toContain("剛建立的專案");
     expect(text).toContain("百日夢島");
+    expect(text).toContain("database_row");
+    expect(text).toContain("剛剛那筆");
+    expect(text).not.toContain("王羲之");
   });
 
   it("never promotes an unverified write into recent-reference authority", () => {

@@ -29,9 +29,8 @@ describe("agent crash-replay effect ids", () => {
       "const effectId = await persistStepEffectId(run, steps, step);",
       "id: effectId,",
     );
-    expect(agentSource).toContain(
-      "addDataRowValidated(table, run.userId, step.rowData ?? {}, effectId)",
-    );
+    expect(agentSource).toContain("executeDatabaseWriteCommand({");
+    expect(agentSource).toContain("id: effectId,");
   });
 
   it("uses fixed ids for creates and transaction-bound receipts for updates", () => {

@@ -3,6 +3,7 @@ import { db, schema } from "../db";
 import type { DataField } from "../../shared/databaseFields";
 import { lexicalOverlap } from "./intelligenceCore";
 import { escapeLikeLiteral } from "./databaseRowSearch";
+export { prioritizeAssistantDatabases, mapLabeledDatabaseRowValues } from "./databaseResourceResolver";
 
 export interface AssistantReadableDatabase {
   ref: string;

@@ -397,6 +397,7 @@ export const AGENT_SKILLS: AgentSkill[] = [
   { id: "creator_delivery_check", name: "Creator delivery check", version: 1, inputs: z.object({ projectId: z.string().uuid() }), requiredCapabilities: ["project.health"], steps: [{ id: "verify", toolId: "project.health", dependsOn: [] }], maxConcurrency: 1, resumable: true },
   { id: "organize_recent_assets", name: "Organize recent assets", version: 1, inputs: z.object({ projectId: z.string().uuid() }), requiredCapabilities: ["project.files.list"], steps: [{ id: "list", toolId: "project.files.list", dependsOn: [] }], maxConcurrency: 1, resumable: true },
   { id: "research_to_project_notes", name: "Research to project notes", version: 1, inputs: z.object({ projectId: z.string().uuid(), query: z.string() }), requiredCapabilities: ["project.files.search"], steps: [{ id: "search", toolId: "project.files.search", dependsOn: [] }], maxConcurrency: 1, resumable: true },
+  { id: "record_project_to_database", name: "Record project result to database", version: 1, inputs: z.object({ projectId: z.string().uuid(), tableId: z.string().uuid(), data: z.record(z.string(), z.unknown()) }), requiredCapabilities: ["database.list", "database.row.add"], steps: [{ id: "list", toolId: "database.list", dependsOn: [] }, { id: "write", toolId: "database.row.add", dependsOn: ["list"] }], maxConcurrency: 1, resumable: true },
 ];
 
 /** A skill is publishable only when every referenced runtime handler exists. */

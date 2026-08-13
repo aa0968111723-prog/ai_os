@@ -61,6 +61,18 @@ describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
     expect(coerceActionToolCall({ tool: "direct_shot", sceneNo: -2, camera: { shotSize: "特寫" } })).toBeNull();
   });
 
+  it("把 add_database_row 畸形工具呼叫救回", () => {
+    const r = coerceActionToolCall({
+      tool: "add_database_row",
+      args: { dbRef: "db1", values: { 標題: "王羲之", 分類: "書法" } },
+    });
+    expect(r?.actions?.[0]).toMatchObject({
+      type: "add_database_row",
+      dbRef: "db1",
+      values: { 標題: "王羲之", 分類: "書法" },
+    });
+  });
+
   it("真正的唯讀工具（list_assets）不當動作救回 → 回 null", () => {
     expect(coerceActionToolCall({ tool: "list_assets", args: { kind: "image" } })).toBeNull();
   });
