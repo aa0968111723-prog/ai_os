@@ -5,7 +5,7 @@ import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { groupVisualVariantBatches, isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
-import { MAX_CREATIVE_DIRECTIONS, MIN_CREATIVE_DIRECTIONS, diagnoseDirectionBatch } from "@shared/creativeDirections";
+import { CREATIVE_KEEP_LABEL, MAX_CREATIVE_DIRECTIONS, MIN_CREATIVE_DIRECTIONS, diagnoseDirectionBatch, type CreativeKeepFamily } from "@shared/creativeDirections";
 import { CREATIVE_INTENTS, defaultCreativeDirections, findCreativeIntent } from "@shared/creativeDirectionPresets";
 import { VisualChoicePreview } from "../features/storyboard-center/VisualChoicePreview";
 import { Icon } from "./Icon";
@@ -151,6 +151,9 @@ export function SceneStudio({
   /** 只存使用者勾來比較的既有 asset ids；版本內容仍以 scenes.versions 為唯一真相。 */
   const [compareAssetIds, setCompareAssetIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  /** 並排 vs 同位置快速切換——細微的光線／構圖差異只有在同位置切換時看得出來 */
+  const [compareMode, setCompareMode] = useState<"grid" | "ab">("grid");
+  const [abIndex, setAbIndex] = useState(0);
   /**
    * 這一批「送出當下就失敗、連生成列都沒建起來」的 slot（額度不足／政策擋下 → 伺服器
    * 刪掉待生成列，DB 沒有痕跡可推導）。只有這一類是真的推不出來的，所以只有它留在
@@ -230,6 +233,8 @@ export function SceneStudio({
    * C 等待核准」就整組消失，reload 之後只剩一串沒有分組的版本。現在同一批在任何一次
    * 查詢都湊得回來，也不需要第二個 candidate 資料表。
    */
+  /** A/B 目前看的是哪一版；比較清單變短時夾回範圍內，不要指到不存在的索引 */
+  const abVersion = compareVersions[Math.min(abIndex, Math.max(0, compareVersions.length - 1))];
   const variantBatches = useMemo(() => groupVisualVariantBatches(visualVersions), [visualVersions]);
   const latestBatch = variantBatches[0] ?? null;
   /** 這一批還沒結算＝要加快輪詢；等待成本核准可能拖很久，那段改用慢節奏（見下方 refetchInterval） */
@@ -1309,35 +1314,105 @@ export function SceneStudio({
                       <header>
                         <div>
                           <Meta as="div">COMPARE / ADOPT</Meta>
-                          <h3>第 {sceneNumber} 鏡・並排比較</h3>
+                          <h3>第 {sceneNumber} 鏡・比較這幾個方向</h3>
                         </div>
+                        <div className="scene-compare-modes" role="tablist" aria-label="比較方式">
+                          <button type="button" role="tab" aria-selected={compareMode === "grid"} className={compareMode === "grid" ? "is-active" : undefined} onClick={() => setCompareMode("grid")}>並排</button>
+                          <button type="button" role="tab" aria-selected={compareMode === "ab"} className={compareMode === "ab" ? "is-active" : undefined} onClick={() => setCompareMode("ab")}>快速切換</button>
+                        </div>
+                        {/* 手機沒有 hover、也常按不到右上角：關閉鍵放在 header 尾端並保證 44px */}
                         <Button size="sm" variant="ghost" type="button" aria-label="關閉版本比較" onClick={() => setCompareOpen(false)}><Icon name="X" size={16} /></Button>
                       </header>
-                      <div className="scene-compare-grid">
-                        {compareVersions.map((version) => (
-                          <article key={version.assetId} className={version.isCurrent ? "is-current" : undefined}>
-                            {version.assetKind === "video" ? (
-                              <AssetVideo src={version.assetUrl!} controls preload="metadata" fallbackLabel="版本影片" />
+
+                      {compareMode === "ab" && (
+                        <div className="scene-compare-ab">
+                          {/*
+                            A/B 快速切換：同一個位置換圖，眼睛不必在兩張之間掃描——
+                            細微的光線／構圖差異只有在同位置切換時才看得出來。
+                            一次只掛一個媒體元素，影片也不會全部同時載入。
+                          */}
+                          <div className="scene-compare-ab__stage">
+                            {abVersion && (abVersion.assetKind === "video" ? (
+                              <AssetVideo key={abVersion.assetId} src={abVersion.assetUrl!} controls preload="metadata" fallbackLabel="版本影片" />
                             ) : (
-                              <AssetImg src={version.assetUrl!} alt={`畫面第 ${version.index} 版`} loading="lazy" fallbackLabel="版本圖片" />
-                            )}
-                            <div className="scene-compare-card__meta">
-                              <div><strong>V{version.index}</strong> <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill></div>
-                              <Meta>{version.modelId ? getModel(version.modelId)?.label ?? version.modelId : "外部帶入"}{version.points > 0 ? `・${version.points} 點` : ""}</Meta>
-                              {version.prompt && <p>{version.prompt}</p>}
-                              <div className="scene-compare-card__actions">
-                                {version.canSetCurrent && canEdit && (
-                                  <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", version.assetId!)}>
-                                    <Icon name="Check" size={13} /> Adopt V{version.index}
-                                  </Button>
-                                )}
-                                {version.canRefineFrom && canEdit && <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); useVersionAsBase(version); }}><Icon name="Palette" size={13} /> 再變體</Button>}
-                              </div>
+                              <AssetImg key={abVersion.assetId} src={abVersion.assetUrl!} alt={`畫面第 ${abVersion.index} 版`} fallbackLabel="版本圖片" />
+                            ))}
+                          </div>
+                          <div className="scene-compare-ab__switch" role="tablist" aria-label="切換要看哪一版">
+                            {compareVersions.map((version, index) => (
+                              <button
+                                key={version.assetId}
+                                type="button"
+                                role="tab"
+                                aria-selected={abIndex === index}
+                                className={abIndex === index ? "is-active" : undefined}
+                                onClick={() => setAbIndex(index)}
+                              >
+                                <strong>V{version.index}</strong>
+                                <span>{version.creative?.directionLabel ?? (version.isCurrent ? "現用" : "候選")}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {abVersion && (
+                            <div className="scene-compare-ab__meta">
+                              {abVersion.isCurrent && <Pill status="done">CURRENT</Pill>}
+                              {abVersion.creative && <Pill status="queued">{abVersion.creative.directionLabel}</Pill>}
+                              {abVersion.parentIndex && <Meta as="span">從 V{abVersion.parentIndex} 延伸</Meta>}
+                              {abVersion.canSetCurrent && canEdit && (
+                                <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", abVersion.assetId!)}>
+                                  <Icon name="Check" size={13} /> 採用 V{abVersion.index}
+                                </Button>
+                              )}
                             </div>
-                          </article>
-                        ))}
-                      </div>
-                      <Hint>採用後其他候選仍保留在版本歷史；重新整理會從 `scenes.assetId` 讀回同一個現用版本。</Hint>
+                          )}
+                        </div>
+                      )}
+
+                      {compareMode === "grid" && (
+                        <div className="scene-compare-grid">
+                          {compareVersions.map((version) => (
+                            <article key={version.assetId} className={version.isCurrent ? "is-current" : undefined}>
+                              {version.assetKind === "video" ? (
+                                // 刻意不 autoPlay：三個影片同時播放在手機上會直接把記憶體吃掉，
+                                // 而且沒有人能同時看三段影片。preload="none" 讓使用者按了才載。
+                                <AssetVideo src={version.assetUrl!} controls preload="none" fallbackLabel="版本影片" />
+                              ) : (
+                                <AssetImg src={version.assetUrl!} alt={`畫面第 ${version.index} 版`} loading="lazy" fallbackLabel="版本圖片" />
+                              )}
+                              <div className="scene-compare-card__meta">
+                                <div className="scene-compare-card__title">
+                                  <strong>V{version.index}</strong>
+                                  {version.isCurrent && <Pill status="done">CURRENT</Pill>}
+                                  {!version.isCurrent && <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill>}
+                                </div>
+                                {/* 方向標籤：使用者比較的是「哪個做法」，不是「第幾次生成」 */}
+                                {version.creative && <strong className="scene-compare-card__direction">{version.creative.directionLabel}</strong>}
+                                <Meta>
+                                  {version.modelId ? getModel(version.modelId)?.label ?? version.modelId : "外部帶入"}
+                                  {version.points > 0 ? `・${version.points} 點` : ""}
+                                  {version.parentIndex ? `・從 V${version.parentIndex} 延伸` : ""}
+                                </Meta>
+                                {version.creative?.keep?.length ? <Meta>保持：{version.creative.keep.map((family) => CREATIVE_KEEP_LABEL[family as CreativeKeepFamily] ?? family).join("、")}</Meta> : null}
+                                {version.prompt && <p>{version.prompt}</p>}
+                                <div className="scene-compare-card__actions">
+                                  {version.canSetCurrent && canEdit && (
+                                    <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", version.assetId!)}>
+                                      <Icon name="Check" size={13} /> 採用 V{version.index}
+                                    </Button>
+                                  )}
+                                  {canEdit && version.assetId && (
+                                    <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); setVariantParentAssetId(version.assetId!); setTab("refine"); }}>
+                                      <Icon name="LayoutGrid" size={13} /> 再用這版變體
+                                    </Button>
+                                  )}
+                                  {version.canRefineFrom && canEdit && <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); useVersionAsBase(version); }}><Icon name="Palette" size={13} /> 以這版修正</Button>}
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                      <Hint>採用後其他候選仍保留在版本歷史；重新整理會從 `scenes.assetId` 讀回同一個現用版本。若這一版是某個方向跑出來的，採用時會一併把該方向的鏡頭語言同步回這一鏡。</Hint>
                     </section>
                   </div>
                 )}

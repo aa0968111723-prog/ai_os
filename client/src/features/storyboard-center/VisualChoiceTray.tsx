@@ -15,6 +15,7 @@ import {
   type VisualChoicePreset,
 } from "@shared/visualChoicePresets";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
+import { proposalHeadline, proposeCreativeDirections } from "@shared/creativeProposals";
 import { formatWorldviewStylesLabel, parseWorldviewStyleSlots, selectWorldviewStyle } from "@shared/worldview";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
@@ -143,6 +144,22 @@ export function VisualChoiceTray({
   });
   const impact = summarizeTargetImpact(shotRows, pickedShotIds);
   const selectionKey = pickedShotIds.join("|");
+  /**
+   * Aios 的視覺方向提案。純函式、零成本、可預測——打開面板不會偷偷生成或扣點。
+   * 只有單鏡聚焦時才給：多鏡批次的「方向」該在單格工作室一鏡一鏡看。
+   */
+  const proposals = useMemo(
+    () => focusShot
+      ? proposeCreativeDirections({
+          camera: focusShot.camera,
+          performance: focusShot.performance,
+          action: focusShot.action,
+          hasVisual: !!focusShot.assetId,
+          reviewStatus: focusShot.reviewStatus,
+        })
+      : [],
+    [focusShot],
+  );
 
   useEffect(() => {
     setPending(null);
@@ -478,6 +495,34 @@ export function VisualChoiceTray({
                 : <Meta>草稿 {impact.draft}・已有畫面 {impact.withVisual}・已通過 {impact.approved}</Meta>}
               {!pendingProjectStyle && impact.approved > 0 && <Hint>已通過鏡會保留，不參與這次批次修改。</Hint>}
             </div>
+          )}
+
+          {focusShot && proposals.length > 0 && (
+            <section className="creative-proposals" aria-label="Aios 視覺方向提案">
+              <Meta as="div">AIOS 提案</Meta>
+              <strong>{proposalHeadline({ hasVisual: !!focusShot.assetId }, proposals.length)}</strong>
+              <div className="creative-proposals__list">
+                {proposals.map((proposal) => (
+                  <button
+                    key={`${proposal.intentId}.${proposal.direction.id}`}
+                    type="button"
+                    className="creative-proposal-chip"
+                    disabled={!canEdit}
+                    title={proposal.because}
+                    onClick={() => onOpenStudio(focusShot.id)}
+                  >
+                    <strong>{proposal.direction.label}</strong>
+                    <Meta as="span">{proposal.because}</Meta>
+                  </button>
+                ))}
+              </div>
+              {/*
+                提案不等於已修改：這幾顆按鈕只把單格工作室打開到「換個方向再試一次」，
+                方向要不要生成、生成完要不要採用，都還是使用者按下去才發生。
+                這裡沒有任何 mutation，也沒有任何生成請求。
+              */}
+              <Hint>點一個方向會打開單格工作室；還沒有任何東西被修改，也還沒有花點數。</Hint>
+            </section>
           )}
 
           {focusShot && (

@@ -9993,6 +9993,21 @@ body.story-immersive { overflow: hidden; }
 .creative-refine-box label { display: block; font-size: var(--fs-12); font-weight: 650; margin-bottom: 5px; }
 .creative-refine-box textarea { width: 100%; min-height: 70px; resize: vertical; }
 .creative-refine-box > div { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Aios 視覺方向提案：只是選項，點了也只是打開工作室——這一區沒有任何寫入 */
+.creative-proposals {
+  margin-top: 10px; padding: 10px; border: 1px dashed var(--border);
+  border-radius: var(--r-12, 12px); background: color-mix(in srgb, var(--primary-soft, var(--field)) 40%, var(--surface));
+}
+.creative-proposals > strong { display: block; margin: 2px 0 8px; }
+.creative-proposals__list { display: flex; gap: 6px; flex-wrap: wrap; }
+.creative-proposal-chip {
+  display: flex; flex-direction: column; gap: 1px; min-height: 44px; min-width: 0; max-width: 100%;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface, var(--card)); text-align: left; cursor: pointer;
+}
+.creative-proposal-chip:disabled { opacity: .6; cursor: not-allowed; }
+.creative-proposal-chip .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .visual-choice-status { margin: 8px 0 0; }
 .visual-choice-apply-bar {
   position: sticky; bottom: -12px; z-index: 2; display: flex; align-items: center;
@@ -10003,10 +10018,25 @@ body.story-immersive { overflow: hidden; }
 .visual-choice-apply-bar strong { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 820px) {
+  /*
+   * 底部面板的三條站內契約（v3 這一塊全部踩到，v4 補齊）：
+   *
+   * 1. **不可蓋住分頁列**。分頁列是 `position: fixed; bottom: 0; z-index: 44`。
+   *    v3 用 `inset: auto 0 0` + z-52，於是面板整片壓在分頁列上——手機上打開創作控制
+   *    就換不了頁。改成底緣抬到 `--chrome-bottom`（M2／#294 契約值，≤820 有分頁列時是 100px），
+   *    面板停在分頁列上方，兩者不重疊。
+   * 2. **不可蓋住它自己叫出來的 SceneStudio**。modal-scrim 是 z-50；z-52 讓面板浮在
+   *    工作室之上，使用者按「生成／比較變體」之後工作室開在面板後面。
+   *    改成 43（低於分頁列 44、低於所有 modal），且因為已無重疊，層級不再需要爭。
+   * 3. **鍵盤**。面板裡有自然語言微調的 textarea；不抬過 --kb-inset（見 lib/keyboardInset.ts）
+   *    的話，鍵盤一彈出來就把輸入框與套用列一起蓋掉。
+   */
   .visual-creative-inspector {
-    position: fixed; z-index: 52; inset: auto 0 0; width: 100%; min-width: 0; max-width: none;
-    max-height: min(82dvh, 720px); border-radius: 18px 18px 0 0;
-    padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    position: fixed; z-index: 43; inset: auto 0 auto; width: 100%; min-width: 0; max-width: none;
+    bottom: calc(var(--chrome-bottom, 0px) + var(--safe-bottom, 0px) + var(--kb-inset, 0px));
+    max-height: min(72dvh, 720px); border-radius: 18px 18px 0 0;
+    padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+    overflow: auto;
     box-shadow: 0 -18px 48px rgba(0, 0, 0, .22);
   }
   .visual-creative-inspector:not(.is-open) { width: auto; left: 12px; right: 12px; }
@@ -10015,7 +10045,8 @@ body.story-immersive { overflow: hidden; }
   .visual-choice-option { min-height: 126px; }
   .visual-choice-preview__svg, .visual-choice-preview__image, .visual-choice-preview__swatch,
   .visual-choice-preview__project-fallback, .visual-choice-preview__fallback { height: 76px; }
-  .visual-choice-apply-bar { bottom: calc(-12px - env(safe-area-inset-bottom)); }
+  /* 套用列黏在面板底緣；面板本身已經抬過鍵盤與分頁列，這裡不再自己算偏移 */
+  .visual-choice-apply-bar { bottom: -12px; }
 }
 
 /* Real sceneVersions compare/adopt surface. */
@@ -10031,6 +10062,61 @@ body.story-immersive { overflow: hidden; }
 }
 .scene-variant-status { margin: 0 0 10px; align-items: flex-start; }
 .scene-variant-launch .meta, .scene-variant-status .meta { margin-top: 2px; }
+
+/* ── Creative Direction（v4）：選一個問題 → 看三個真的不同的做法 ── */
+.scene-variant-launch { flex-direction: column; align-items: stretch; }
+.scene-variant-launch__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.scene-intent-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.scene-intent-strip button {
+  min-height: 34px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface, var(--card)); font-size: var(--fs-12); cursor: pointer;
+}
+.scene-intent-strip button.is-active { border-color: var(--primary-ink); background: var(--primary-soft, var(--field)); font-weight: 600; }
+.scene-direction-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 8px; margin-top: 10px;
+}
+.scene-direction-card {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px;
+  border: 1px solid var(--border); border-radius: var(--r-12, 12px);
+  background: var(--surface-2, var(--field)); text-align: left; cursor: pointer;
+}
+.scene-direction-card.is-picked { border-color: var(--primary-ink); box-shadow: inset 0 0 0 2px var(--primary-ink); }
+.scene-direction-card:disabled { opacity: .6; cursor: not-allowed; }
+.scene-direction-card__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.scene-direction-card__copy strong { overflow-wrap: anywhere; }
+
+/* 逐個方向各自的狀態：整批只講一個「失敗」會讓成功的方向看起來也沒了 */
+.scene-variant-status__head { width: 100%; }
+.scene-variant-slots { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 8px 0 0; padding: 0; list-style: none; }
+.scene-variant-slots li {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface, var(--card));
+}
+.scene-variant-slots li[data-state="failed"] { border-color: color-mix(in srgb, var(--danger-ink, var(--fg)) 45%, var(--border)); }
+.scene-variant-slots li strong { min-width: 0; overflow-wrap: anywhere; }
+
+/* Compare 2.0：並排 ／ 同位置快速切換 */
+.scene-compare-modes { display: flex; gap: 4px; margin-left: auto; }
+.scene-compare-modes button {
+  min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface, var(--card)); font-size: var(--fs-12); cursor: pointer;
+}
+.scene-compare-modes button.is-active { border-color: var(--primary-ink); background: var(--primary-soft, var(--field)); font-weight: 600; }
+.scene-compare-ab { display: flex; flex-direction: column; gap: 10px; }
+.scene-compare-ab__stage { border: 1px solid var(--border); border-radius: var(--r-12, 12px); overflow: hidden; background: var(--fg); }
+.scene-compare-ab__stage img, .scene-compare-ab__stage video { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; }
+.scene-compare-ab__switch { display: flex; gap: 6px; flex-wrap: wrap; }
+.scene-compare-ab__switch button {
+  display: flex; flex-direction: column; gap: 1px; min-height: 40px; min-width: 0; padding: 5px 10px;
+  border: 1px solid var(--border); border-radius: var(--r-10, 10px);
+  background: var(--surface-2, var(--field)); font-size: var(--fs-12); cursor: pointer;
+}
+.scene-compare-ab__switch button.is-active { border-color: var(--primary-ink); box-shadow: inset 0 0 0 2px var(--primary-ink); }
+.scene-compare-ab__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.scene-compare-card__title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scene-compare-card__direction { display: block; margin-top: 2px; }
 .scene-version-compare-toggle {
   display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
   padding: 2px 7px; border-radius: 8px; font-size: var(--fs-11); cursor: pointer;
@@ -10064,7 +10150,19 @@ body.story-immersive { overflow: hidden; }
   .scene-variant-launch .btn { width: 100%; min-height: 44px; }
   .scene-version-compare-toggle { min-height: 44px; }
   .scene-compare-scrim { padding: 0; place-items: stretch; }
-  .scene-compare-surface { width: 100%; max-height: 100dvh; min-height: 100dvh; border-radius: 0; padding: 12px; }
+  .scene-compare-surface {
+    width: 100%; max-height: 100dvh; min-height: 100dvh; border-radius: 0;
+    /* 全螢幕時 header 的關閉鍵會落到瀏海／狀態列底下——手機上就變成關不掉。
+     * 上下都吃安全區，關閉鍵永遠按得到。 */
+    padding: calc(12px + var(--safe-top, env(safe-area-inset-top))) 12px calc(12px + var(--safe-bottom, env(safe-area-inset-bottom)));
+  }
+  .scene-compare-surface > header { position: sticky; top: 0; z-index: 1; padding-block: 4px; background: var(--surface, var(--card)); }
+  .scene-compare-surface > header .btn { min-height: 44px; min-width: 44px; }
   .scene-compare-grid { grid-template-columns: 1fr; }
   .scene-compare-grid img, .scene-compare-grid video { max-height: 58dvh; }
+  .scene-compare-ab__stage img, .scene-compare-ab__stage video { max-height: 52dvh; }
+  .scene-compare-ab__switch button, .scene-compare-modes button { min-height: 44px; }
+  .scene-direction-card { min-height: 132px; }
+  .scene-intent-strip { overflow-x: auto; }
+  .scene-intent-strip button { min-height: 44px; white-space: nowrap; }
 }
