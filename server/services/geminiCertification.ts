@@ -368,7 +368,12 @@ export function geminiCertExitCode(report: GeminiCertReport): number {
 export interface StoredGeminiCert extends GeminiCertReport {
   at: string;
   source: "boot" | "admin" | "cli";
+  /** Bump to force one more boot run after an operator top-up. */
+  epoch?: number;
 }
+
+/** Increment when prepaid credits were topped up and boot must retry once. */
+export const GEMINI_CERT_EPOCH = 2;
 
 export type GeminiCertPublicStatus = "NONE" | "RUNNING" | "PASS" | "BLOCKED" | "FAIL";
 
@@ -461,7 +466,13 @@ export function shouldAutoCert(env: NodeJS.ProcessEnv = process.env): boolean {
   if (!geminiApiKeyConfigured(env)) return false;
   const last = loadLastGeminiCert();
   if (last && last.summary.fail === 0 && liveImagePassed(last)) return false;
-  if (last?.items.some((row) => isExternalBillingBlock(row.detail))) return false;
+  if (
+    last &&
+    (last.epoch ?? 0) >= GEMINI_CERT_EPOCH &&
+    last.items.some((row) => isExternalBillingBlock(row.detail))
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -477,6 +488,7 @@ export async function runAndStoreGeminiCertification(
       ...report,
       at: new Date().toISOString(),
       source,
+      epoch: GEMINI_CERT_EPOCH,
     };
     saveLastGeminiCert(stored);
     return stored;
