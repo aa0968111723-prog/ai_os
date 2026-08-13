@@ -529,4 +529,6 @@ export {
   findPresetById,
   mapPresetToShotPatch,
   VISUAL_CHOICE_FAMILY_LABEL,
+  type VisualChoiceFamily,
+  type VisualChoicePreset,
 } from "./visualChoiceTypes";
