@@ -4,7 +4,7 @@ import { trpc, type AppRouter } from "../api";
 import { setOrbState } from "../lib/orbState";
 import { Icon, type IconName } from "./Icon";
 import { Button, Card } from "./ui";
-import { requestSiteAssistantStream } from "./assistantStream";
+import { isRateLimitMessage, requestSiteAssistantStream } from "./assistantStream";
 import { readAssistantAnswerMode } from "../lib/agentPlannerPreference";
 import {
   classifyAssistantComputerIntent,
@@ -997,15 +997,21 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
       eventFlushTimerRef.current = null;
       setOrbState("error");
+      // 限流拒絕不是「執行中斷」：請求在開始執行前就被後端擋下（SSE error 事件，
+      // 非 HTTP 429），「執行中斷」是誤導措辭。用明確的限流提示，且不給重送鈕——
+      // 使用者立刻重送只會再吃一次限流。
+      const rateLimited = isRateLimitMessage(message);
       pushMessage({
         role: "assistant",
-        text: `⚠️ 執行中斷：${message}`,
+        text: rateLimited
+          ? `⚠️ ${message}（問得太頻繁，每分鐘最多 6 次，稍等片刻再試）`
+          : `⚠️ 執行中斷：${message}`,
         executionPlan: localPlan,
         runStatus: "failed",
         activity: [...liveEventsRef.current],
         // 失敗也要留下已經跑過的事件：使用者最需要知道的正是「卡在哪一步」
         events: liveEventsRef.current.filter(isAgentEvent),
-        retryText: text,
+        retryText: rateLimited ? undefined : text,
       });
     };
 

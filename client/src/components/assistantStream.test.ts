@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   AssistantSseDecoder,
+  isRateLimitMessage,
   parseAssistantSseBlock,
   requestAssistantStream,
   type AssistantStreamHandlers,
@@ -287,5 +288,41 @@ describe("requestAssistantStream", () => {
     expect(handled).toBe(true);
     expect(onStep).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith(expect.stringContaining("不會自動重跑"));
+  });
+});
+
+describe("rate limit SSE error event", () => {
+  it("isRateLimitMessage 只認得後端限流文案", () => {
+    // 後端超限時以 SSE error 事件（status 200）回傳，文案由 overLimit 檢查產生
+    expect(isRateLimitMessage("問得太頻繁（每分鐘最多 6 次），休息一下再問")).toBe(true);
+    expect(isRateLimitMessage("問得太頻繁")).toBe(true);
+    expect(isRateLimitMessage("供應商忙碌，稍後再試")).toBe(false);
+    expect(isRateLimitMessage("")).toBe(false);
+  });
+
+  it("後端限流 wire 格式（open 後接 error）會被解碼並派發 onError，且視為已接手不退回 tRPC", async () => {
+    // 對照 server/index.ts 的 sse()：open 事件在 runAssistantAsk／runGlobalAsk 進
+    // 入限流檢查前就先送出，超限後 catch 再補 error 事件——所以真實 wire 一定是
+    // open → error，而不是直接 429。前端只看 open 會誤判成「連上了」。
+    const wire = [
+      'event: open\ndata: {"ok":true,"runId":"run-rl","receivedAt":"2026-08-12T06:00:00.000Z","plan":{"intent":"ASK","title":"測試","steps":[]}}\n\n',
+      'event: error\ndata: {"message":"問得太頻繁（每分鐘最多 6 次），休息一下再問"}\n\n',
+    ].join("");
+    const stream = readerResponse([encoder.encode(wire)]);
+    const onOpen = vi.fn();
+    const onError = vi.fn();
+    const handled = await requestAssistantStream({
+      projectId: "project-1",
+      message: "test",
+      nonce: "nonce-1",
+      signal: new AbortController().signal,
+      handlers: handlers({ onOpen, onError }),
+      fetchImpl: vi.fn(async () => stream.response),
+    });
+
+    expect(handled).toBe(true);
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith("問得太頻繁（每分鐘最多 6 次），休息一下再問");
   });
 });
