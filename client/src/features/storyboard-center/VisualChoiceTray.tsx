@@ -4,10 +4,11 @@
  * 勾選一或多鏡後出現的情境式視覺選擇面板。
  * - 不新建 selection store：直接吃 StoryboardStage 的 pickedShotIds
  * - 套用走既有 scenes.update + mapPresetToShotPatch（merge，不清掉其他欄位）
- * - 開啟時凍結目標鏡 id，避免套用途中選取變動造成「套到錯的鏡」
- * - 手機／窄螢幕：同 ResourceDock 的 sticky 面板，之後可再換成 bottom sheet
+ * - 多選時先顯示 impact preview（describeDirectionChange），再確認套用
+ * - 可被 ShotCard 以 initialFamily / forceOpen 深鏈開啟
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { describeDirectionChange } from "@shared/story";
 import {
   VISUAL_CHOICE_FAMILY_LABEL,
   VISUAL_CHOICE_PRESETS,
@@ -32,19 +33,43 @@ export function VisualChoiceTray({
   projectId,
   canEdit,
   pickedShotIds,
+  initialFamily,
+  forceOpen,
+  onOpened,
 }: {
   projectId: string;
   canEdit: boolean;
   /** 當前勾選的分鏡；tray 開啟套用時會凍結一份副本 */
   pickedShotIds: string[];
+  /** ShotCard 深鏈：打開時切到指定 family */
+  initialFamily?: VisualChoiceFamily | null;
+  /** 外部要求展開（例如從 ShotCard 點「視覺選擇」） */
+  forceOpen?: boolean;
+  /** forceOpen 被消費後回呼，讓父層清掉 flag */
+  onOpened?: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const [family, setFamily] = useState<VisualChoiceFamily>("action");
   const [status, setStatus] = useState("");
   const [frozenIds, setFrozenIds] = useState<string[] | null>(null);
+  const [pending, setPending] = useState<{
+    preset: VisualChoicePreset;
+    ids: string[];
+    summaryLines: string[];
+  } | null>(null);
   const utils = trpc.useUtils();
 
-  // 需要現有 camera / performance 才能正確 merge，避免覆寫其他欄位
+  useEffect(() => {
+    if (initialFamily) setFamily(initialFamily);
+  }, [initialFamily]);
+
+  useEffect(() => {
+    if (forceOpen) {
+      setOpen(true);
+      onOpened?.();
+    }
+  }, [forceOpen, onOpened]);
+
   const shots = trpc.scenes.listByProject.useQuery(
     { projectId },
     { enabled: open && pickedShotIds.length > 0, staleTime: 15_000 },
@@ -89,13 +114,40 @@ export function VisualChoiceTray({
         ? "套用到選中的 1 鏡"
         : `套用到選中的 ${targetIds.length} 鏡`;
 
-  const applyPreset = (preset: VisualChoicePreset) => {
-    if (!canEdit || targetIds.length === 0 || update.isPending) return;
+  const buildImpactSummary = (preset: VisualChoicePreset, ids: string[]): string[] => {
+    const lines: string[] = [];
+    const sampleId = ids[0];
+    const current = sampleId ? shotMap.get(sampleId) : undefined;
+    const patch = mapPresetToShotPatch(preset, current);
 
-    // 凍結當下選取，避免套用過程中使用者改勾選
-    const ids = frozenIds ?? [...pickedShotIds];
-    if (!frozenIds) setFrozenIds(ids);
+    if (patch.camera) {
+      lines.push(
+        ...describeDirectionChange(current?.camera ?? null, patch.camera as Record<string, string | undefined>),
+      );
+    }
+    if (patch.performance) {
+      lines.push(
+        ...describeDirectionChange(
+          current?.performance ?? null,
+          patch.performance as Record<string, string | undefined>,
+        ),
+      );
+    }
+    if (patch.action !== undefined) {
+      const before = current?.action?.trim() || "－";
+      const after = patch.action.trim() || "－";
+      if (before !== after) lines.push(`動作 ${before}→${after}`);
+    }
+    if (patch.styleHint) {
+      lines.push(`風格提示 → ${patch.styleHint}（僅記錄，不改畫面描述）`);
+    }
+    if (ids.length > 1) {
+      lines.unshift(`將影響 ${ids.length} 鏡（以下以第一鏡為例）`);
+    }
+    return lines.length ? lines : ["沒有可預覽的變更"];
+  };
 
+  const commitApply = (preset: VisualChoicePreset, ids: string[]) => {
     setStatus("");
     let applied = 0;
     let styleOnly = 0;
@@ -104,7 +156,6 @@ export function VisualChoiceTray({
       const current = shotMap.get(sceneId);
       const patch = mapPresetToShotPatch(preset, current);
 
-      // style 目前沒有對應 shot 欄位——只記提示，不靜默改 prompt
       const hasStructured =
         patch.camera !== undefined ||
         patch.performance !== undefined ||
@@ -133,15 +184,32 @@ export function VisualChoiceTray({
     const bits: string[] = [];
     if (applied > 0) bits.push(`✓ 「${preset.label}」已套用到 ${applied} 鏡`);
     if (styleOnly > 0) {
-      bits.push(
-        `風格「${preset.label}」已記下（生成時可作為提示；尚未寫入分鏡欄位）`,
-      );
+      bits.push(`風格「${preset.label}」已記下（生成時可作為提示；尚未寫入分鏡欄位）`);
     }
     if (bits.length === 0) bits.push("沒有需要更新的鏡");
     setStatus(bits.join("・"));
+    setPending(null);
   };
 
-  // 沒有勾選時不佔版面（與 ResourceDock 的「先勾選」提示一致）
+  const requestApply = (preset: VisualChoicePreset) => {
+    if (!canEdit || targetIds.length === 0 || update.isPending) return;
+
+    const ids = frozenIds ?? [...pickedShotIds];
+    if (!frozenIds) setFrozenIds(ids);
+
+    // 多選或會改動既有欄位 → 先預覽再確認；單選且無衝突可直接套用
+    if (ids.length > 1) {
+      setPending({
+        preset,
+        ids,
+        summaryLines: buildImpactSummary(preset, ids),
+      });
+      return;
+    }
+
+    commitApply(preset, ids);
+  };
+
   if (pickedShotIds.length === 0 && !frozenIds) {
     return null;
   }
@@ -189,6 +257,7 @@ export function VisualChoiceTray({
             title="解除凍結，改用目前勾選"
             onClick={() => {
               setFrozenIds(null);
+              setPending(null);
               setStatus("");
             }}
           >
@@ -212,7 +281,10 @@ export function VisualChoiceTray({
                 type="button"
                 role="tab"
                 aria-selected={family === f}
-                onClick={() => setFamily(f)}
+                onClick={() => {
+                  setFamily(f);
+                  setPending(null);
+                }}
                 style={{
                   fontSize: "var(--fs-12)",
                   padding: "4px 10px",
@@ -232,59 +304,98 @@ export function VisualChoiceTray({
             ))}
           </div>
 
-          <Meta as="p" style={{ margin: "0 0 8px", fontSize: "var(--fs-12)" }}>
-            點卡片套用到選中鏡（會與現有鏡頭／表情合併，不會清掉其他欄位）
-          </Meta>
+          {pending ? (
+            <div
+              role="dialog"
+              aria-label="套用影響預覽"
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-10, 10px)",
+                padding: 10,
+                background: "var(--surface-2, var(--field))",
+                marginBottom: 10,
+              }}
+            >
+              <Meta as="p" style={{ margin: "0 0 6px", fontWeight: 600 }}>
+                確認套用「{pending.preset.label}」？
+              </Meta>
+              <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: "var(--fs-12)" }}>
+                {pending.summaryLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  type="button"
+                  disabled={update.isPending}
+                  onClick={() => commitApply(pending.preset, pending.ids)}
+                >
+                  {update.isPending ? "套用中…" : `套用到 ${pending.ids.length} 鏡`}
+                </Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => setPending(null)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Meta as="p" style={{ margin: "0 0 8px", fontSize: "var(--fs-12)" }}>
+                點卡片套用到選中鏡（會與現有鏡頭／表情合併；多選會先預覽影響）
+              </Meta>
 
-          <div
-            role="listbox"
-            aria-label={VISUAL_CHOICE_FAMILY_LABEL[family]}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-            }}
-          >
-            {presets.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="option"
-                title={`${p.label}${p.description ? `—${p.description}` : ""}`}
-                disabled={!canEdit || targetIds.length === 0 || update.isPending}
-                onClick={() => applyPreset(p)}
+              <div
+                role="listbox"
+                aria-label={VISUAL_CHOICE_FAMILY_LABEL[family]}
                 style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "10px 6px",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r-10, 10px)",
-                  background: "var(--surface-2, var(--field))",
-                  cursor:
-                    canEdit && targetIds.length > 0 ? "pointer" : "not-allowed",
-                  opacity: !canEdit || targetIds.length === 0 ? 0.55 : 1,
-                  textAlign: "center",
-                  minHeight: 72,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
                 }}
               >
-                <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden>
-                  {p.preview ?? "•"}
-                </span>
-                <span style={{ fontSize: "var(--fs-12)", fontWeight: 600 }}>
-                  {p.label}
-                </span>
-                {p.description && (
-                  <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
-                    {p.description}
-                  </Meta>
-                )}
-              </button>
-            ))}
-          </div>
+                {presets.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="option"
+                    title={`${p.label}${p.description ? `—${p.description}` : ""}`}
+                    disabled={!canEdit || targetIds.length === 0 || update.isPending}
+                    onClick={() => requestApply(p)}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "10px 6px",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--r-10, 10px)",
+                      background: "var(--surface-2, var(--field))",
+                      cursor:
+                        canEdit && targetIds.length > 0 ? "pointer" : "not-allowed",
+                      opacity: !canEdit || targetIds.length === 0 ? 0.55 : 1,
+                      textAlign: "center",
+                      minHeight: 72,
+                    }}
+                  >
+                    <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden>
+                      {p.preview ?? "•"}
+                    </span>
+                    <span style={{ fontSize: "var(--fs-12)", fontWeight: 600 }}>
+                      {p.label}
+                    </span>
+                    {p.description && (
+                      <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+                        {p.description}
+                      </Meta>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
-          {family === "style" && (
+          {family === "style" && !pending && (
             <Hint style={{ marginTop: 8, fontSize: "var(--fs-11)" }}>
               風格目前作為生成提示記錄；尚未寫入分鏡專用欄位，避免靜默改掉畫面描述。
             </Hint>
@@ -306,9 +417,7 @@ export function VisualChoiceTray({
                   {id.slice(0, 6)}…
                 </Chip>
               ))}
-              {targetIds.length > 6 && (
-                <Chip>+{targetIds.length - 6}</Chip>
-              )}
+              {targetIds.length > 6 && <Chip>+{targetIds.length - 6}</Chip>}
             </div>
           )}
         </div>
