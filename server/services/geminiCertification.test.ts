@@ -63,6 +63,7 @@ describe("shouldAutoCert / public snapshot", () => {
     try {
       expect(shouldAutoCert({ ...process.env, GEMINI_API_KEY: "" })).toBe(false);
       expect(shouldAutoCert({ ...process.env, GEMINI_API_KEY: "x", GEMINI_LIVE_CERT_ON_BOOT: "0" })).toBe(false);
+      expect(shouldAutoCert({ ...process.env, GEMINI_API_KEY: "x" })).toBe(true);
       expect(publicGeminiCertSnapshot().status).toBe("NONE");
       expect(() => saveLastGeminiCert({
         configured: true,
