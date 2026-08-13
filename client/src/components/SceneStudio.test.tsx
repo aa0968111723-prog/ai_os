@@ -226,16 +226,42 @@ describe("SceneStudio", () => {
     expect(regenMutate.mock.calls[0]![0]).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
   });
 
-  it("Generate Variants 送出三個不同冪等鍵與同一鏡完整 context", async () => {
+  it("產生方向：每個 slot 一把冪等鍵＋一個真的不同的方向", async () => {
     const user = userEvent.setup();
     mountStudio();
     await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
-    await user.click(screen.getByRole("button", { name: /產生 3 個變體/ }));
-    await user.click(screen.getByRole("button", { name: "確認產生 3 個變體" }));
-    const arg = variantsMutate.mock.calls[0]![0] as { sceneId: string; prompt: string; clientRequestIds: string[] };
-    expect(arg).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
-    expect(arg.clientRequestIds).toHaveLength(3);
-    expect(new Set(arg.clientRequestIds).size).toBe(3);
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const arg = variantsMutate.mock.calls[0]![0] as {
+      sceneId: string;
+      batchId: string;
+      variants: Array<{ clientRequestId: string; direction?: { id: string; label: string; keep?: string[] } }>;
+    };
+    expect(arg).toMatchObject({ sceneId: "s-1" });
+    expect(arg.variants).toHaveLength(3);
+    // 每個 slot 各自的計費／冪等收據
+    expect(new Set(arg.variants.map((v) => v.clientRequestId)).size).toBe(3);
+    // 一批共用一個分組鍵：reload 之後靠它把這批湊回來（不靠前端記憶）
+    expect(arg.batchId).toMatch(/^[0-9a-f-]{36}$/i);
+    // 三個真的不同的方向，不是同一 prompt ×3
+    const labels = arg.variants.map((v) => v.direction?.label);
+    expect(new Set(labels).size).toBe(3);
+    // Reference Lock：每個方向都宣告保持角色／造型／場景／Style
+    for (const variant of arg.variants) {
+      expect(variant.direction?.keep).toEqual(expect.arrayContaining(["character", "look", "scene", "style"]));
+    }
+  });
+
+  it("方向卡可以取消勾選，估點跟著實際要送的方向數走", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    const cards = screen.getAllByRole("button", { pressed: true });
+    await user.click(cards[0]!); // 取消其中一個方向
+    await user.click(screen.getByRole("button", { name: /產生 2 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 2 個方向" }));
+    const arg = variantsMutate.mock.calls[0]![0] as { variants: unknown[] };
+    expect(arg.variants).toHaveLength(2);
   });
 
   it("提示詞改了還沒存：提醒先存，重畫才會用新的", async () => {
@@ -284,7 +310,10 @@ describe("SceneStudio", () => {
     expect(within(items[0]!).getByText("畫面第 2 版")).toBeInTheDocument();
     expect(within(items[0]!).queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
     await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
+    // 單格工作室是「人正看著這一鏡」的地方 → 帶 acknowledgeApproved，
+    // 已通過的鏡在這裡換得掉畫面（伺服器會把審核狀態退回「需要修改」）。
+    // 分鏡中心的批次套用不帶這個旗標，因此換不動已通過的鏡。
+    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true });
   });
 
   it("用 real sceneVersions 並排比較，Adopt 更新既有 current pointer 且不刪其他版本", async () => {
@@ -311,9 +340,38 @@ describe("SceneStudio", () => {
     const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
     expect(within(compare).getByText("V1")).toBeInTheDocument();
     expect(within(compare).getByText("V2")).toBeInTheDocument();
-    await user.click(within(compare).getByRole("button", { name: /Adopt V1/ }));
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
+    await user.click(within(compare).getByRole("button", { name: /採用 V1/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true });
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("Compare 快速切換：同位置換圖，一次只掛一個媒體元素", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [
+          genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+          genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z" }),
+        ],
+        currentAssetId: "asset-g2",
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const toggles = screen.getAllByRole("checkbox", { name: /加入比較/ });
+    await user.click(toggles[0]!);
+    await user.click(toggles[1]!);
+    await user.click(screen.getByRole("button", { name: /比較 2/ }));
+
+    const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
+    await user.click(within(compare).getByRole("tab", { name: "快速切換" }));
+    // 兩個版本兩顆切換鍵，但舞台上只有一張圖——三段影片同時掛在手機上會直接吃掉記憶體
+    const switches = within(compare).getAllByRole("tab", { name: /V[12]/ });
+    expect(switches).toHaveLength(2);
+    expect(compare.querySelectorAll(".scene-compare-ab__stage img, .scene-compare-ab__stage video")).toHaveLength(1);
   });
 
   it("「以這版為底圖」會跳回修正頁並換掉底圖", async () => {
