@@ -19,7 +19,9 @@ import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
-import { addDataRowValidated } from "./databaseCore";
+import { executeDatabaseWriteCommand } from "./databaseCommand";
+import { canonicalRowValuesEqual } from "./databaseResourceResolver";
+import { validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { sanitizeAuditInput } from "./audit";
 import { addNoteCore, appendNoteOnceCore } from "./notesCore";
@@ -1995,12 +1997,28 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (!access.canWriteRows) return failRun(run, steps, idx, "沒有這個資料庫的 AI 寫入權（或其 AI 存取設為唯讀/不開放）");
     try {
       const effectId = await persistStepEffectId(run, steps, step);
-      const row = await addDataRowValidated(table, run.userId, step.rowData ?? {}, effectId);
+      const checked = validateRowData(table.fields as DataField[], step.rowData ?? {});
+      if (!checked.ok) return failRun(run, steps, idx, checked.error);
+      const row = await executeDatabaseWriteCommand({
+        auth,
+        source: "agent",
+        action: "addRow",
+        tableId: table.id,
+        data: checked.data,
+        projectId: run.projectId,
+        id: effectId,
+      });
+      const [found] = await db.select().from(schema.dataRows).where(eq(schema.dataRows.id, row.id));
+      const verified = !!found
+        && found.tableId === table.id
+        && canonicalRowValuesEqual(found.data as DataRowData, checked.data);
+      if (!verified) {
+        return failRun(run, steps, idx, "寫入後驗證未通過，未標記完成");
+      }
       addOutputRef(step, "database_row", row.id, table.name);
       step.status = "done";
       step.detail = `已寫入「${table.name}」一列`;
       auditAgentStep(run, step, idx, true);
-      void row;
     } catch (err) {
       return failOrRetryIdempotentWrite(run, steps, idx, err);
     }
