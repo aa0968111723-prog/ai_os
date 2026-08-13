@@ -130,7 +130,7 @@ export function SceneStudio({
   onChanged: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef, true, onClose);
+  const compareRef = useRef<HTMLElement>(null);
   const utils = trpc.useUtils();
 
   const [tab, setTab] = useState<StudioTab>("refine");
@@ -145,6 +145,11 @@ export function SceneStudio({
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
   /** 舞台上看的是哪一版；null＝現用 */
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  /** 只存使用者勾來比較的既有 asset ids；版本內容仍以 scenes.versions 為唯一真相。 */
+  const [compareAssetIds, setCompareAssetIds] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  useFocusTrap(panelRef, !compareOpen, onClose);
+  useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
    * 標注模式（顯式開關，不是「按著某個鍵」）：開啟時舞台不吃捲動手勢、游標變十字。
    * 手機上沒有 hover 也沒有修飾鍵，隱式模式在觸控裝置上根本用不了。
@@ -196,6 +201,12 @@ export function SceneStudio({
     [visualVersions, narrationVersions, ambienceVersions],
   );
   const currentVisual = visualVersions.find((v) => v.isCurrent);
+  const compareVersions = useMemo(
+    () => compareAssetIds
+      .map((assetId) => visualVersions.find((version) => version.assetId === assetId))
+      .filter((version): version is SceneVersion => !!version?.assetUrl),
+    [compareAssetIds, visualVersions],
+  );
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
   // 「旁白獨立於畫面，配音生成中不該擋住畫面重生，反之亦然」相反，
@@ -431,6 +442,13 @@ export function SceneStudio({
    */
   const setCurrentVersion = (role: SceneVersionRole, assetId: string) =>
     setCurrent.mutate(role === "visual" ? { sceneId, assetId } : { sceneId, assetId, role });
+
+  const toggleCompare = (assetId: string) => {
+    setCompareAssetIds((current) => {
+      if (current.includes(assetId)) return current.filter((id) => id !== assetId);
+      return current.length >= 3 ? [...current.slice(1), assetId] : [...current, assetId];
+    });
+  };
 
   return (
     <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1037,6 +1055,61 @@ export function SceneStudio({
             {/* 版本：歷來每一次生成，可切回、可當底圖、可抄提示詞 */}
             {tab === "versions" && (
               <div role="tabpanel" id={`studio-panel-versions-${sceneId}`} aria-labelledby={`studio-tab-versions-${sceneId}`}>
+                {visualVersions.filter((version) => version.assetUrl).length >= 2 && (
+                  <div className="scene-version-compare-bar">
+                    <div>
+                      <strong>視覺比較</strong>
+                      <Meta as="div">勾選 2–3 個真實版本並排；採用只更新 current pointer。</Meta>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="tonal"
+                      type="button"
+                      disabled={compareVersions.length < 2}
+                      onClick={() => setCompareOpen(true)}
+                    >
+                      <Icon name="LayoutGrid" size={13} /> 比較 {compareVersions.length || ""}
+                    </Button>
+                  </div>
+                )}
+                {compareOpen && compareVersions.length >= 2 && (
+                  <div className="scene-compare-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setCompareOpen(false); }}>
+                    <section ref={compareRef} className="scene-compare-surface" role="dialog" aria-modal="true" aria-label={`第 ${sceneNumber} 鏡版本比較`}>
+                      <header>
+                        <div>
+                          <Meta as="div">COMPARE / ADOPT</Meta>
+                          <h3>第 {sceneNumber} 鏡・並排比較</h3>
+                        </div>
+                        <Button size="sm" variant="ghost" type="button" aria-label="關閉版本比較" onClick={() => setCompareOpen(false)}><Icon name="X" size={16} /></Button>
+                      </header>
+                      <div className="scene-compare-grid">
+                        {compareVersions.map((version) => (
+                          <article key={version.assetId} className={version.isCurrent ? "is-current" : undefined}>
+                            {version.assetKind === "video" ? (
+                              <AssetVideo src={version.assetUrl!} controls preload="metadata" fallbackLabel="版本影片" />
+                            ) : (
+                              <AssetImg src={version.assetUrl!} alt={`畫面第 ${version.index} 版`} loading="lazy" fallbackLabel="版本圖片" />
+                            )}
+                            <div className="scene-compare-card__meta">
+                              <div><strong>V{version.index}</strong> <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill></div>
+                              <Meta>{version.modelId ? getModel(version.modelId)?.label ?? version.modelId : "外部帶入"}{version.points > 0 ? `・${version.points} 點` : ""}</Meta>
+                              {version.prompt && <p>{version.prompt}</p>}
+                              <div className="scene-compare-card__actions">
+                                {version.canSetCurrent && canEdit && (
+                                  <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", version.assetId!)}>
+                                    <Icon name="Check" size={13} /> Adopt V{version.index}
+                                  </Button>
+                                )}
+                                {version.canRefineFrom && canEdit && <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); useVersionAsBase(version); }}><Icon name="Palette" size={13} /> 再變體</Button>}
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      <Hint>採用後其他候選仍保留在版本歷史；重新整理會從 `scenes.assetId` 讀回同一個現用版本。</Hint>
+                    </section>
+                  </div>
+                )}
                 {versions.isLoading ? (
                   <div aria-hidden="true">
                     {[0, 1].map((k) => (
@@ -1112,6 +1185,16 @@ export function SceneStudio({
                                       <Button size="sm" variant="ghost" onClick={() => setPromptDraft(v.prompt!)}>
                                         <Icon name="Copy" size={13} /> 用這版提示詞
                                       </Button>
+                                    )}
+                                    {section.role === "visual" && v.assetId && v.assetUrl && (
+                                      <label className="scene-version-compare-toggle">
+                                        <input
+                                          type="checkbox"
+                                          checked={compareAssetIds.includes(v.assetId)}
+                                          onChange={() => toggleCompare(v.assetId!)}
+                                        />
+                                        加入比較
+                                      </label>
                                     )}
                                     {/* 討論綁「這一版」（refType=asset），不是綁整格——
                                         「V2 的人物眼神不對」與「Shot 08 有問題」不是同一件事。
