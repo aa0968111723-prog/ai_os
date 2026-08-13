@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
-import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
+import { groupVisualVariantBatches, isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
-import { summarizeVisualVariantBatch } from "@shared/visualVariants";
+import { MAX_CREATIVE_DIRECTIONS, MIN_CREATIVE_DIRECTIONS, diagnoseDirectionBatch } from "@shared/creativeDirections";
+import { CREATIVE_INTENTS, defaultCreativeDirections, findCreativeIntent } from "@shared/creativeDirectionPresets";
+import { VisualChoicePreview } from "../features/storyboard-center/VisualChoicePreview";
 import { Icon } from "./Icon";
 import { SceneAnnotationLayer } from "./SceneAnnotationLayer";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
@@ -149,12 +151,17 @@ export function SceneStudio({
   /** 只存使用者勾來比較的既有 asset ids；版本內容仍以 scenes.versions 為唯一真相。 */
   const [compareAssetIds, setCompareAssetIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
-  const [variantBatch, setVariantBatch] = useState<{
-    requested: number;
-    generationIds: string[];
-    launchFailures: number;
-    autoOpened: boolean;
-  } | null>(null);
+  /**
+   * 這一批「送出當下就失敗、連生成列都沒建起來」的 slot（額度不足／政策擋下 → 伺服器
+   * 刪掉待生成列，DB 沒有痕跡可推導）。只有這一類是真的推不出來的，所以只有它留在
+   * 記憶體，並且明說「重新整理後就看不到了」——其餘狀態一律由版本清單推導。
+   */
+  const [launchErrors, setLaunchErrors] = useState<Array<{ directionLabel: string; error: string }>>([]);
+  /** 使用者這一輪挑的創作方向；空＝用起手包預設三方向 */
+  const [directionIntentId, setDirectionIntentId] = useState<string>(CREATIVE_INTENTS[0]!.id);
+  const [pickedDirectionIds, setPickedDirectionIds] = useState<string[] | null>(null);
+  /** 血緣：從哪一版按下「再用這版變體」的（null＝從這一鏡當下的狀態出發） */
+  const [variantParentAssetId, setVariantParentAssetId] = useState<string | null>(null);
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
@@ -189,7 +196,9 @@ export function SceneStudio({
     { sceneId },
     {
       // 有版本在跑時加快輪詢（等出圖的人正盯著看），閒置時放慢到與分鏡列同節奏
-      refetchInterval: (query) => (query.state.data?.summary.generating || (variantBatch && !variantBatch.autoOpened) ? 4_000 : 20_000),
+      // 真的有東西在跑才用快節奏。v3 是「批次還沒自動開過 Compare」就一直 4 秒一次，
+      // 於是卡在等待成本核准的批次會讓整個工作室無限期高頻輪詢（組長可能隔天才來核准）。
+      refetchInterval: (query) => (query.state.data?.summary.generating ? 4_000 : 20_000),
     },
   );
   const data = versions.data;
@@ -214,20 +223,29 @@ export function SceneStudio({
       .filter((version): version is SceneVersion => !!version?.assetUrl),
     [compareAssetIds, visualVersions],
   );
-  const variantSummary = useMemo(
-    () => variantBatch ? summarizeVisualVariantBatch(variantBatch, visualVersions) : null,
-    [variantBatch, visualVersions],
-  );
+  /**
+   * 變體批次**完全由持久化的版本清單推導**（batchId 存在 generations.params 內）。
+   *
+   * v3 是把批次身分放在 React state：關掉工作室、換一鏡、按 F5，「A 成功／B 失敗／
+   * C 等待核准」就整組消失，reload 之後只剩一串沒有分組的版本。現在同一批在任何一次
+   * 查詢都湊得回來，也不需要第二個 candidate 資料表。
+   */
+  const variantBatches = useMemo(() => groupVisualVariantBatches(visualVersions), [visualVersions]);
+  const latestBatch = variantBatches[0] ?? null;
+  /** 這一批還沒結算＝要加快輪詢；等待成本核准可能拖很久，那段改用慢節奏（見下方 refetchInterval） */
+  const batchRunning = !!latestBatch && latestBatch.generating.length > 0;
 
+  /** 自動開 Compare 只做一次：記住已經自動開過的 batchId，換批才會再開 */
+  const autoOpenedBatchId = useRef<string | null>(null);
   useEffect(() => {
-    if (!variantBatch || variantBatch.autoOpened || !variantSummary?.settled) return;
-    const assets = variantSummary.compareAssetIds;
-    if (assets.length >= 2) {
-      setCompareAssetIds(assets);
+    if (!latestBatch || !latestBatch.settled) return;
+    if (autoOpenedBatchId.current === latestBatch.batchId) return;
+    autoOpenedBatchId.current = latestBatch.batchId;
+    if (latestBatch.compareAssetIds.length >= 2) {
+      setCompareAssetIds(latestBatch.compareAssetIds);
       setCompareOpen(true);
     }
-    setVariantBatch((current) => current ? { ...current, autoOpened: true } : current);
-  }, [variantBatch, variantSummary]);
+  }, [latestBatch]);
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
   // 「旁白獨立於畫面，配音生成中不該擋住畫面重生，反之亦然」相反，
@@ -282,7 +300,15 @@ export function SceneStudio({
   const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
   // 冪等鍵（QA-007）：還沒成功的重送沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const regenRequestId = useRef(crypto.randomUUID());
-  const variantRequestIds = useRef([crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]);
+  /**
+   * 這一輪變體的分組鍵與每個 slot 的冪等鍵。送出成功後整組換新——
+   * 沿用舊鍵會撞回同一批（伺服器正確地不重複計費，但使用者會以為自己又產了三個新的）。
+   * 送出失敗時**刻意不換**：那才是「重送同一批不重複計費」真正成立的情況。
+   */
+  const variantBatchRef = useRef({
+    batchId: crypto.randomUUID(),
+    requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
+  });
   const refineRequestId = useRef(crypto.randomUUID());
   const voiceRequestId = useRef(crypto.randomUUID());
   const ambienceRequestId = useRef(crypto.randomUUID());
@@ -291,13 +317,14 @@ export function SceneStudio({
   });
   const generateVariants = trpc.scenes.generateVariants.useMutation({
     onSuccess: (result) => {
-      const accepted = result.results.filter((row): row is Extract<(typeof result.results)[number], { ok: true }> => row.ok);
-      setVariantBatch({
-        requested: result.requested,
-        generationIds: accepted.map((row) => row.generationId),
-        launchFailures: result.results.length - accepted.length,
-        autoOpened: false,
-      });
+      // 成功送出的 slot 不必記在前端——它們的 batchId 已經落在 generations 裡，
+      // 版本清單自己湊得回來。這裡只留下「連生成列都沒建起來」的那幾個 slot 的原因，
+      // 因為那一類伺服器端沒有留痕，不留就等於使用者被靜默少給一個變體。
+      const failures = result.results.filter((row): row is Extract<(typeof result.results)[number], { ok: false }> => !row.ok);
+      setLaunchErrors(failures.map((row) => ({ directionLabel: row.directionLabel, error: row.error })));
+      // 這一批已經送出去了，下一次按要用新的冪等鍵，否則會撞回同一批（不重複計費，
+      // 但使用者以為自己又產了三個新的）
+      variantBatchRef.current = { batchId: crypto.randomUUID(), requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()] };
       setTab("versions");
       refresh();
     },
@@ -415,7 +442,39 @@ export function SceneStudio({
   const savedAmbience = data?.ambience ?? "";
 
   const regenModel = getModel(regenModelId) ?? getModel(DEFAULT_REGEN_MODEL);
-  const variantEstimatedPoints = (regenModel?.points ?? 0) * 3;
+
+  /**
+   * 這一輪要生成的創作方向。
+   *
+   * 預設＝所選意圖的全部方向；使用者可以取消勾選（少花點數）或自己組合。
+   * 上限與伺服器的 MAX_CREATIVE_DIRECTIONS 同一個常數，不在 UI 另寫一個數字。
+   */
+  const intentDirections = useMemo(
+    () => findCreativeIntent(directionIntentId)?.directions ?? defaultCreativeDirections(),
+    [directionIntentId],
+  );
+  const activeDirections = useMemo(() => {
+    const chosen = pickedDirectionIds
+      ? intentDirections.filter((direction) => pickedDirectionIds.includes(direction.id))
+      : intentDirections;
+    return chosen.slice(0, MAX_CREATIVE_DIRECTIONS);
+  }, [intentDirections, pickedDirectionIds]);
+  const toggleDirection = (id: string) => {
+    setPickedDirectionIds((current) => {
+      const base = current ?? intentDirections.map((direction) => direction.id);
+      return base.includes(id) ? base.filter((row) => row !== id) : [...base, id];
+    });
+  };
+  /** 這批方向套到這一鏡之後真的彼此不同嗎——重疊就先講，不要等使用者花完點數才發現 */
+  const directionDiagnosis = useMemo(
+    () => diagnoseDirectionBatch(
+      { camera: data?.camera ?? null, performance: data?.performance ?? null, action: data?.action ?? null },
+      activeDirections,
+    ),
+    [data?.camera, data?.performance, data?.action, activeDirections],
+  );
+  // 估點跟著實際要送的方向數走；寫死 ×3 會在使用者只選兩個方向時多報一個工作的錢
+  const variantEstimatedPoints = (regenModel?.points ?? 0) * activeDirections.length;
   const refineModel = getModel(refineModelId);
   const refinePoints = refineModel ? estimatePoints(refineModel, { promptChars: instruction.length }) : undefined;
   // 配音走按字計費的中文 TTS：估點依「已儲存的配音詞」長度算，與後端扣點同一函式——顯示＝扣點
@@ -476,8 +535,17 @@ export function SceneStudio({
    * 於是在環境音那一段按「設為現用」會把音效寫進 narrationAssetId——環境音沒換到、旁白反而被蓋掉。
    * 反過來，畫面那一段不能帶 role：後端明擋「只有音訊素材可以指定要進旁白還是環境音」。
    */
+  /**
+   * 採用某一版。
+   *
+   * 單格工作室是「人正看著這一鏡」的地方，所以這裡帶 acknowledgeApproved——
+   * 已通過的鏡在這裡換得掉畫面（伺服器會同時把審核狀態退回「需要修改」），
+   * 而分鏡中心的批次套用不帶這個旗標，因此換不動已通過的鏡。
+   */
   const setCurrentVersion = (role: SceneVersionRole, assetId: string) =>
-    setCurrent.mutate(role === "visual" ? { sceneId, assetId } : { sceneId, assetId, role });
+    setCurrent.mutate(role === "visual"
+      ? { sceneId, assetId, acknowledgeApproved: true }
+      : { sceneId, assetId, role });
 
   const toggleCompare = (assetId: string) => {
     setCompareAssetIds((current) => {
@@ -608,7 +676,7 @@ export function SceneStudio({
                   size="sm"
                   variant="primary"
                   disabled={setCurrent.isPending}
-                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId! })}
+                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId!, acknowledgeApproved: true })}
                 >
                   <Icon name="Check" size={13} /> 用這一版
                 </Button>
@@ -865,33 +933,92 @@ export function SceneStudio({
                         </ConfirmButton>
                       )}
                     </div>
-                    <div className="scene-variant-launch">
-                      <div>
-                        <strong>Generate Variants</strong>
-                        <Meta as="div">送出 3 個真實生成工作；完成前不改 current，成功候選會自動開啟 Compare。</Meta>
+                    <section className="scene-variant-launch" aria-label="創作方向">
+                      <div className="scene-variant-launch__head">
+                        <div>
+                          <strong>換個方向再試一次</strong>
+                          <Meta as="div">
+                            選一個你想解決的問題，Aios 給你 {activeDirections.length} 個真的不同的做法。
+                            角色臉、造型、場景、Style 都保持不變，只換鏡頭、光線與動作。
+                          </Meta>
+                        </div>
+                        {variantParentAssetId && (
+                          <Pill status="queued">
+                            從 V{visualVersions.find((v) => v.assetId === variantParentAssetId)?.index ?? "?"} 延伸
+                          </Pill>
+                        )}
                       </div>
+
+                      <div className="scene-intent-strip" role="tablist" aria-label="你想解決什麼">
+                        {CREATIVE_INTENTS.map((intent) => (
+                          <button
+                            key={intent.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={directionIntentId === intent.id}
+                            className={directionIntentId === intent.id ? "is-active" : undefined}
+                            title={intent.hint}
+                            onClick={() => { setDirectionIntentId(intent.id); setPickedDirectionIds(null); }}
+                          >
+                            {intent.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="scene-direction-grid" role="group" aria-label="這一輪要生成哪幾個方向">
+                        {intentDirections.map((direction) => {
+                          const picked = activeDirections.some((row) => row.id === direction.id);
+                          return (
+                            <button
+                              key={direction.id}
+                              type="button"
+                              aria-pressed={picked}
+                              className={`scene-direction-card${picked ? " is-picked" : ""}`}
+                              disabled={!canEdit}
+                              onClick={() => toggleDirection(direction.id)}
+                            >
+                              {direction.previewResource && <VisualChoicePreview resource={direction.previewResource} />}
+                              <span className="scene-direction-card__copy">
+                                <strong>{direction.label}</strong>
+                                {direction.rationale && <Meta as="span">{direction.rationale}</Meta>}
+                              </span>
+                              {picked && <Pill status="queued">會生成</Pill>}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {directionDiagnosis.duplicates.length > 0 && (
+                        <Hint>這幾個方向對這一鏡的效果重疊，換一個組合比較不會白花點數。</Hint>
+                      )}
+
                       <ConfirmButton
                         triggerClassName="tonal"
-                        disabled={regenBlocked}
-                        triggerTitle="用同一鏡的完整 context 產生三個候選版本"
-                        message={`將送出 3 個獨立生成工作（${regenModel?.label ?? regenModelId}，合計預估 −${variantEstimatedPoints} 點）。每個工作各自扣退點；重送同一批不重複計費。`}
-                        confirmLabel="確認產生 3 個變體"
+                        disabled={regenBlocked || activeDirections.length < MIN_CREATIVE_DIRECTIONS}
+                        triggerTitle="每個方向各送出一個真實生成工作"
+                        message={`將送出 ${activeDirections.length} 個獨立生成工作（${regenModel?.label ?? regenModelId}，合計預估 −${variantEstimatedPoints} 點）：${activeDirections.map((row) => row.label).join("、")}。完成前不會改動這一鏡的現用畫面。若有 slot 送出失敗，重按會沿用同一批冪等鍵，不重複計費。`}
+                        confirmLabel={`確認產生 ${activeDirections.length} 個方向`}
                         onConfirm={() => {
-                          if (variantBatch?.autoOpened) variantRequestIds.current = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+                          setLaunchErrors([]);
                           generateVariants.mutate({
                             sceneId,
                             modelId: regenModelId,
-                            prompt,
-                            clientRequestIds: variantRequestIds.current,
+                            batchId: variantBatchRef.current.batchId,
+                            ...(variantParentAssetId ? { parentAssetId: variantParentAssetId } : {}),
+                            variants: activeDirections.map((direction, index) => ({
+                              clientRequestId: variantBatchRef.current.requestIds[index]!,
+                              direction,
+                            })),
                             characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });
                         }}
                       >
-                        <Icon name="LayoutGrid" size={14} /> {generateVariants.isPending ? "送出中…" : `產生 3 個變體（約 −${variantEstimatedPoints} 點）`}
+                        <Icon name="LayoutGrid" size={14} />{" "}
+                        {generateVariants.isPending ? "送出中…" : `產生 ${activeDirections.length} 個方向（約 −${variantEstimatedPoints} 點）`}
                       </ConfirmButton>
-                    </div>
+                    </section>
                   </>
                 )}
               </div>
@@ -1118,17 +1245,45 @@ export function SceneStudio({
             {/* 版本：歷來每一次生成，可切回、可當底圖、可抄提示詞 */}
             {tab === "versions" && (
               <div role="tabpanel" id={`studio-panel-versions-${sceneId}`} aria-labelledby={`studio-tab-versions-${sceneId}`}>
-                {variantBatch && (
+                {latestBatch && (
                   <div className="scene-variant-status" role="status" aria-live="polite">
-                    <div>
-                      <strong>{variantSummary?.settled ? "Variants 已結算" : "Variants 生成中"}</strong>
+                    <div className="scene-variant-status__head">
+                      <strong>{latestBatch.settled ? "這一批已結算" : "方向生成中"}</strong>
                       <Meta as="div">
-                        成功 {variantSummary?.successes.length ?? 0}/{variantBatch.requested}・失敗 {variantSummary?.failures ?? variantBatch.launchFailures}
-                        {variantSummary?.awaitingApproval ? "・等待成本核准" : ""}
-                        {(variantSummary?.actualPoints ?? 0) > 0 ? `・實際淨花費 ${variantSummary!.actualPoints} 點` : ""}
+                        成功 {latestBatch.successes.length}/{latestBatch.requested}
+                        {latestBatch.failed.length > 0 ? `・失敗 ${latestBatch.failed.length}` : ""}
+                        {latestBatch.generating.length > 0 ? `・生成中 ${latestBatch.generating.length}` : ""}
+                        {latestBatch.awaitingApproval.length > 0 ? `・等待成本核准 ${latestBatch.awaitingApproval.length}` : ""}
+                        {latestBatch.actualPoints > 0 ? `・淨花費 ${latestBatch.actualPoints} 點` : ""}
                       </Meta>
                     </div>
-                    {variantSummary?.settled && variantSummary.successes.length < 2 && <Hint>成功候選不足 2 個，無法自動並排；成功版本仍保留，失敗工作已依既有政策退點。</Hint>}
+                    {/* 逐個方向各自的狀態——整批只講一個「失敗」會讓成功的那兩個方向看起來也沒了 */}
+                    <ul className="scene-variant-slots">
+                      {latestBatch.versions.map((version) => (
+                        <li key={version.generationId ?? version.assetId} data-state={version.state}>
+                          <strong>{version.creative?.directionLabel ?? "維持現況"}</strong>
+                          <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill>
+                          {version.state === "failed" && version.error && <Meta as="span">{version.error}</Meta>}
+                          {version.assetId && <Meta as="span">V{version.index}</Meta>}
+                        </li>
+                      ))}
+                      {launchErrors.map((row, index) => (
+                        <li key={`launch-${index}`} data-state="failed">
+                          <strong>{row.directionLabel}</strong>
+                          <Pill status="failed">沒送出</Pill>
+                          <Meta as="span">{row.error}</Meta>
+                        </li>
+                      ))}
+                    </ul>
+                    {latestBatch.missing > 0 && launchErrors.length === 0 && (
+                      <Hint>
+                        這一批有 {latestBatch.missing} 個方向沒有送出成功（未扣點）。原因只在送出當下顯示過，
+                        重新整理後看不到；再按一次「產生方向」會補送同一批，不重複計費。
+                      </Hint>
+                    )}
+                    {latestBatch.settled && latestBatch.successes.length < 2 && (
+                      <Hint>成功候選不足 2 個，無法自動並排；成功版本仍保留，已扣點的失敗工作依既有政策退點。</Hint>
+                    )}
                   </div>
                 )}
                 {visualVersions.filter((version) => version.assetUrl).length >= 2 && (

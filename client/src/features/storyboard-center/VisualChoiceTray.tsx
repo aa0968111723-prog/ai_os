@@ -15,7 +15,7 @@ import {
   type VisualChoicePreset,
 } from "@shared/visualChoicePresets";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
-import { formatWorldviewStylesLabel, selectWorldviewStyle } from "@shared/worldview";
+import { formatWorldviewStylesLabel, parseWorldviewStyleSlots, selectWorldviewStyle } from "@shared/worldview";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { AssetImg, AssetVideo } from "../../components/MediaFallback";
@@ -176,6 +176,25 @@ export function VisualChoiceTray({
     ? writableRows.map((shot) => projectChoiceChange({ shot, choice: pendingProjectChoice, lookOwnerById, removeEverywhere }))
     : [];
   const operationKinds = [...new Set(pendingOperations.filter((change) => change.changed).map((change) => change.operation))];
+  /**
+   * 「移除最後一張卡」的隱性副作用：generationCore 的 resolveSceneCards 規定
+   * 三排全空的鏡改用生成台當下的勾選（fallback）。所以在這裡按下移除，
+   * 不是「這一鏡沒有角色」，而是「這一鏡改吃生成台的全域勾選」——
+   * 那通常正好是使用者想避免的事。先講清楚，不要等出圖才發現多了一個人。
+   */
+  const emptiesCardBinding = pendingProjectChoice
+    && (pendingProjectChoice.family === "character" || pendingProjectChoice.family === "scene" || pendingProjectChoice.family === "prop")
+    && pendingOperations.some((change, index) => {
+      if (!change.changed || change.operation !== "remove") return false;
+      const shot = writableRows[index];
+      if (!shot) return false;
+      const after = {
+        characterIds: change.field === "characterIds" ? (change.value as string[]) : (shot.characterIds ?? []),
+        scenePresetIds: change.field === "scenePresetIds" ? (change.value as string[]) : (shot.scenePresetIds ?? []),
+        propIds: change.field === "propIds" ? (change.value as string[]) : (shot.propIds ?? []),
+      };
+      return after.characterIds.length === 0 && after.scenePresetIds.length === 0 && after.propIds.length === 0;
+    });
   const pendingOperation = pendingProjectStyle
     ? "設為專案主風格"
     : pending?.source === "preset"
@@ -197,9 +216,19 @@ export function VisualChoiceTray({
       let applied = 0;
       let incompatible = 0;
       if (pending.source === "preset" && pending.preset.family === "style") {
-        const styles = projectStyle === pending.preset.label
+        /*
+         * selectWorldviewStyle 是**切換**語意：再點一次目前的主風格會清空。
+         * 這張卡叫「設為專案主風格」，清空從來不是使用者按下去的意思。
+         *
+         * 舊的防呆比 `styles[0]`，但 styles 是 [look, texture?] 而歷史資料的順序不保證——
+         * texture 排在前面時 styles[0] 不是主風格，防呆漏接、切換生效、Style 被清成 []，
+         * 畫面卻顯示「✓ 已採用」。改用解析出來的 look 比對，最後再補一道不接受清空的閘。
+         */
+        const currentLook = parseWorldviewStyleSlots(worldview.styles).look;
+        const nextStyles = currentLook === pending.preset.label
           ? worldview.styles
           : selectWorldviewStyle(worldview.styles, pending.preset.label);
+        const styles = nextStyles.length === 0 && worldview.styles.length > 0 ? worldview.styles : nextStyles;
         if (styles.join("\u0000") !== worldview.styles.join("\u0000")) {
           await updateWorldview.mutateAsync({ id: projectId, worldview: { styles } });
           applied = 1;
@@ -275,7 +304,15 @@ export function VisualChoiceTray({
       setStatus(messages.join("・"));
       setPending(null);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "套用失敗");
+      /*
+       * 批次是 Promise.all：一鏡失敗（rev 衝突／夥伴剛改過）會讓整段跳到這裡，
+       * 但**先前成功的那幾鏡已經寫進去了**。舊版在這條路上不 invalidate，
+       * 於是畫面繼續顯示舊值——使用者看到「套用失敗」，實際上部分已經生效，
+       * 而且 Mixed State 這個「唯一真相的投影」正在說謊。
+       * 一律重新拉一次，讓畫面回到伺服器現況再顯示錯誤。
+       */
+      await utils.scenes.listByProject.invalidate({ projectId }).catch(() => undefined);
+      setStatus(`${error instanceof Error ? error.message : "套用失敗"}（部分鏡可能已更新，上方狀態已重新讀取）`);
     } finally {
       setBusy(false);
     }
@@ -459,6 +496,19 @@ export function VisualChoiceTray({
                 <Button size="sm" variant="tonal" type="button" onClick={() => onOpenStudio(focusShot.id)}><Icon name="Sparkles" size={13} /> 生成／比較變體</Button>
               </div>
             </div>
+          )}
+
+          {emptiesCardBinding && (
+            <Hint role="alert">
+              移除後這一鏡會沒有任何角色／場景／道具綁定，出圖時會改用生成台當下的勾選。
+              想讓這一鏡真的「沒有人」，請改在提示詞裡寫明。
+            </Hint>
+          )}
+
+          {currentState.some((item) => item.unresolved > 0) && (
+            <Hint role="status">
+              有綁定的卡片還沒讀到名稱（可能正在載入或已被刪除）；上方顯示的是實際綁定，不是「尚未設定」。
+            </Hint>
           )}
 
           {status && <Meta as="p" role="status" className="visual-choice-status">{status}</Meta>}

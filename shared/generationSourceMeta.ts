@@ -18,12 +18,38 @@ export type GenerationBenchMeta = {
   runId: string;
 };
 
+/**
+ * Creative Direction v4：這一筆生成是「哪個方向」跑出來的，以及它從哪一版延伸。
+ *
+ * 為什麼放在 params 的 source meta 而不是新開欄位／新表：
+ * - `generations` 已經是每一次生成的逐筆真相（模型／提示詞／點數／成敗），版本清單是它的投影；
+ *   方向只是「這一筆是怎麼來的」的註記，不是第二份版本真相。
+ * - jsonb 加欄位不需要 migration，且重試沿用 params ⇒ 方向與血緣自動跟著重試走。
+ * - 送 provider 前整個 __aiosSourceMeta 會被 split 掉，方向標籤不會污染提示詞。
+ */
+export type GenerationCreativeMeta = {
+  /** 同一次「產生變體」的分組鍵：一批的每個方向共用，reload 後仍能把這批湊回來 */
+  batchId: string;
+  /** 起手包／自訂方向的穩定 id */
+  directionId: string;
+  /** 給人看的方向名（卡片與 Compare 直接顯示，不必回查起手包） */
+  directionLabel: string;
+  /** 這個方向承諾保持不變的家族 */
+  keep?: string[];
+  /** 血緣：使用者是從哪一版按下「再用這版變體」的（null／未帶＝從這一鏡當下的狀態出發） */
+  parentAssetId?: string;
+  /** 這一批共幾個方向——partial failure 要能算出「還缺幾個」而不必靠前端記憶 */
+  batchSize?: number;
+};
+
 export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
   ablation?: GenerationAblationMeta;
   bench?: GenerationBenchMeta;
   /** Candidate generation: keep scenes.assetId unchanged until an explicit Adopt. */
   preserveScenePointer?: boolean;
+  /** Visual Creative UX v4 的創作方向與血緣 */
+  creative?: GenerationCreativeMeta;
   /**
    * BYOK Phase 2：本次生成是否使用使用者個人 fal API Key。
    * true → 跳過平台點數扣／退；advanceGeneration 用同一把 key 查 status。
@@ -36,7 +62,7 @@ export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -76,5 +102,27 @@ export function splitGenerationSourceMeta(params: unknown): {
     rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
       ? (rawMeta as Record<string, unknown>).preserveScenePointer === true
       : false;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined } };
+  const rawCreative = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? (rawMeta as Record<string, unknown>).creative
+    : undefined;
+  // 只認「湊得齊必要欄位」的方向註記：半截的舊資料當作沒有，不要讓 UI 顯示一個沒有名字的方向
+  const creativeRow = rawCreative && typeof rawCreative === "object" && !Array.isArray(rawCreative)
+    ? (rawCreative as Record<string, unknown>)
+    : undefined;
+  const creative = creativeRow
+    && typeof creativeRow.batchId === "string"
+    && typeof creativeRow.directionId === "string"
+    && typeof creativeRow.directionLabel === "string"
+    ? {
+        batchId: creativeRow.batchId,
+        directionId: creativeRow.directionId,
+        directionLabel: creativeRow.directionLabel,
+        ...(Array.isArray(creativeRow.keep)
+          ? { keep: creativeRow.keep.filter((value): value is string => typeof value === "string") }
+          : {}),
+        ...(typeof creativeRow.parentAssetId === "string" ? { parentAssetId: creativeRow.parentAssetId } : {}),
+        ...(typeof creativeRow.batchSize === "number" ? { batchSize: creativeRow.batchSize } : {}),
+      } satisfies GenerationCreativeMeta
+    : undefined;
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative } };
 }

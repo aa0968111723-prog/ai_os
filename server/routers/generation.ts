@@ -882,7 +882,12 @@ export const generationRouter = router({
       await db
         .update(schema.generations)
         .set({
+          // 先攤平既有 meta 再覆寫這次真的變了的兩欄。
+          // 這裡是全欄覆寫（不是 merge），只挑幾個欄位重建等於把其餘 meta 丟掉：
+          // preserveScenePointer 掉了 → 核准後的變體完成時會靜默蓋掉這一鏡的現用畫面；
+          // ablation/bench 的 runId 掉了 → 使用者付了點數的比較實測查不回來（runId 只存在 params 裡）。
           params: storeGenerationSourceMeta(submitParams, {
+            ...splitParams.meta,
             secondarySourceUrl: refreshedSecondaryUrl,
             usedUserKey: usedUserKey || splitParams.meta.usedUserKey || undefined,
           }),

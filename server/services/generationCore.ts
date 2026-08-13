@@ -14,7 +14,7 @@ import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
 import { getModelContract } from "./modelContractStore";
-import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta, type GenerationBenchMeta } from "../../shared/generationSourceMeta";
+import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta, type GenerationBenchMeta, type GenerationCreativeMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -205,6 +205,11 @@ export interface SubmitCoreInput {
   sceneId?: string;
   /** 生成真實版本候選，但直到使用者 Adopt 前不移動 scene current pointer。 */
   preserveScenePointer?: boolean;
+  /**
+   * Creative Direction v4：這一筆是哪個方向、屬於哪一批、從哪一版延伸。
+   * 只落在 params 的 source meta（送 provider 前會被 split 掉），不需要 migration，重試自動沿用。
+   */
+  creative?: GenerationCreativeMeta;
   /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
@@ -702,6 +707,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     bench: input.bench,
     usedUserKey: usedUserKey || undefined,
     preserveScenePointer: input.preserveScenePointer,
+    creative: input.creative,
   });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
@@ -809,8 +815,24 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     // 冪等重送撞唯一鍵＝前次程序死亡前已插入同 id：直接回既有列，不再走守門扣點
     // （該列若卡在 queued 沒送出 fal，由既有陳屍清掃退點對帳，這裡不重複處理）
     if (input.id && isUniqueViolation(err)) {
-      const [existing] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+      // 冪等重播必須綁租戶＋同一個提交上下文再回列：只用 id 查會把「碰巧撞到同一個 UUID 的
+      // 別組生成」原封不動回給呼叫端（prompt／params／點數全都在那一列裡）。
+      // 同時綁 sceneId：同一個 SceneStudio 換鏡卻沿用同一把冪等鍵時，寧可讓它明確失敗，
+      // 也不要把 A 鏡的生成當成 B 鏡的結果回去。
+      const [existing] = await db
+        .select()
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.id, input.id),
+          eq(schema.generations.projectId, input.projectId),
+          eq(schema.generations.groupId, project.groupId),
+          input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
+        ));
       if (existing) return existing;
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
+      });
     }
     throw err;
   }
