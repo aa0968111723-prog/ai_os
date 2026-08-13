@@ -14,12 +14,14 @@ describe("visualChoicePresets", () => {
     expect(VISUAL_CHOICE_PRESETS.length).toBeGreaterThan(20);
   });
 
-  it("every preset has a stable id, family, label, and promptFragment", () => {
+  it("every preset has a stable id, semantic payload, and replaceable visual preview", () => {
     const ids = new Set<string>();
     for (const p of VISUAL_CHOICE_PRESETS) {
       expect(p.id).toMatch(/^[a-z]+\.[a-z0-9_]+$/);
       expect(p.label.trim().length).toBeGreaterThan(0);
       expect(p.promptFragment.trim().length).toBeGreaterThan(0);
+      expect(p.previewResource?.alt.trim().length).toBeGreaterThan(0);
+      expect(p.previewResource?.kind).not.toBe("fallback");
       expect(ids.has(p.id)).toBe(false);
       ids.add(p.id);
     }

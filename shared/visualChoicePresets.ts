@@ -13,6 +13,7 @@
  */
 import type { VisualChoiceManifest, VisualChoicePreset } from "./visualChoiceTypes";
 import { VISUAL_CHOICE_MANIFEST_VERSION } from "./visualChoiceTypes";
+import { starterPreviewFor } from "./visualChoicePreviewManifest";
 
 const actionPresets: VisualChoicePreset[] = [
   {
@@ -516,7 +517,16 @@ export const VISUAL_CHOICE_PRESETS: VisualChoicePreset[] = [
   ...cameraPresets,
   ...lightingPresets,
   ...stylePresets,
-];
+].map((preset) => ({
+  ...preset,
+  previewResource: starterPreviewFor({
+    id: preset.id,
+    family: preset.family,
+    label: preset.label,
+    description: preset.description,
+    fallbackIcon: preset.preview,
+  }),
+}));
 
 export const VISUAL_CHOICE_MANIFEST: VisualChoiceManifest = {
   version: VISUAL_CHOICE_MANIFEST_VERSION,
