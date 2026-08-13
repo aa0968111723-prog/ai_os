@@ -1,6 +1,7 @@
 /**
  * ② 分鏡（Storyboard Center；PE 計畫 §10）
  * PR-4a：右側 ResourceDock 就近取用素材／定裝／知識。
+ * PR #710：勾選分鏡後顯示 VisualChoiceTray（動作／表情／鏡頭／光線／風格視覺選擇）。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "../../api";
@@ -14,6 +15,7 @@ import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
 import { ShotNavigator } from "./ShotNavigator";
 import { ResourceDock } from "./ResourceDock";
+import { VisualChoiceTray } from "./VisualChoiceTray";
 import { registerAssistantFocus } from "../../lib/assistantContext";
 
 export function StoryboardStage({
@@ -131,7 +133,7 @@ export function StoryboardStage({
           ) : (
             <>
               <Hint style={{ margin: "4px 0 10px" }}>
-                點畫面或「單格工作室」細修；右側「資源」可就近取用素材／定裝。勾選分鏡後可從資源面板一鍵套用。
+                點畫面或「單格工作室」細修；右側「資源」可就近取用素材／定裝。勾選分鏡後可用「視覺選擇」一次套用動作／表情／鏡頭／光線。
               </Hint>
               {outdatedByShot.size > 0 && (
                 <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
@@ -168,7 +170,10 @@ export function StoryboardStage({
             </>
           )}
         </Card>
-        <ResourceDock projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} characterNames={characterNames} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: "0 0 auto" }}>
+          <ResourceDock projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} characterNames={characterNames} />
+          <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} />
+        </div>
       </div>
       {studioShot && (
         <SceneStudio
