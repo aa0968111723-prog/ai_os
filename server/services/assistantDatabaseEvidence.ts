@@ -83,6 +83,9 @@ export async function retrieveAssistantDatabaseEvidence(
   const tableById = new Map(databases.map((table) => [table.id, table]));
   const patterns = terms.map((term) => `%${escapeLikeLiteral(term)}%`);
   const candidateLimit = Math.min(300, Math.max(20, options.candidateLimit ?? 120));
+  // Keep a bounded, relevance-ranked slice from every authorized table. A
+  // single busy table must not fill a global updatedAt-first cap and hide an
+  // older exact match in another table (or even in the same table).
   const perTableCandidateLimit = Math.min(40, Math.max(
     5,
     Math.ceil(candidateLimit / Math.min(8, databases.length)),
