@@ -22,6 +22,8 @@ export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
   ablation?: GenerationAblationMeta;
   bench?: GenerationBenchMeta;
+  /** Candidate generation: keep scenes.assetId unchanged until an explicit Adopt. */
+  preserveScenePointer?: boolean;
   /**
    * BYOK Phase 2：本次生成是否使用使用者個人 fal API Key。
    * true → 跳過平台點數扣／退；advanceGeneration 用同一把 key 查 status。
@@ -34,7 +36,7 @@ export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -70,5 +72,9 @@ export function splitGenerationSourceMeta(params: unknown): {
     rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
       ? (rawMeta as Record<string, unknown>).usedUserKey === true
       : false;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined } };
+  const preserveScenePointer =
+    rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+      ? (rawMeta as Record<string, unknown>).preserveScenePointer === true
+      : false;
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined } };
 }

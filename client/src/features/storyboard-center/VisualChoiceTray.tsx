@@ -14,22 +14,29 @@ import {
   type VisualChoiceFamily,
   type VisualChoicePreset,
 } from "@shared/visualChoicePresets";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
+import { formatWorldviewStylesLabel, selectWorldviewStyle } from "@shared/worldview";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { AssetImg, AssetVideo } from "../../components/MediaFallback";
 import { Button, Chip, Hint, Meta, Pill } from "../../components/ui";
 import { VisualChoicePreview } from "./VisualChoicePreview";
 import {
-  buildCreativeState,
+  buildMixedCreativeState,
   presetMatchesShot,
   snapshotOperationTargets,
   summarizeTargetImpact,
   type CreativeStateFamily,
 } from "./visualCreativeState";
+import {
+  CHOICE_OPERATION_LABEL,
+  choicePresent,
+  projectChoiceChange,
+  type ProjectChoice,
+  type ProjectChoiceFamily,
+} from "./visualCreativeSemantics";
 
-type ProjectFamily = "character" | "look" | "scene" | "prop" | "asset";
+type ProjectFamily = ProjectChoiceFamily;
 type InspectorFamily = VisualChoiceFamily | ProjectFamily;
 type PendingChoice =
   | { source: "preset"; preset: VisualChoicePreset }
@@ -54,17 +61,11 @@ const STATE_TO_INSPECTOR: Record<CreativeStateFamily, InspectorFamily> = {
   action: "action",
   expression: "expression",
   scene: "scene",
+  prop: "prop",
   lighting: "lighting",
   camera: "camera",
   style: "style",
 };
-
-function appendBoundId(current: string[] | null | undefined, id: string, max: number): string[] | null {
-  const ids = current ?? [];
-  if (ids.includes(id)) return null;
-  if (ids.length >= max) return null;
-  return [...ids, id];
-}
 
 export function VisualChoiceTray({
   projectId,
@@ -121,11 +122,25 @@ export function VisualChoiceTray({
     () => new Map((scenes.data ?? []).map((row) => [row.id, row.name])),
     [scenes.data],
   );
+  const propNames = useMemo(
+    () => new Map((props.data ?? []).map((row) => [row.id, row.name])),
+    [props.data],
+  );
+  const lookOwnerById = useMemo(
+    () => new Map((looks.data ?? []).map((row) => [row.id, row.characterId])),
+    [looks.data],
+  );
   const worldview = parseWorldviewSafe(project.data?.worldview);
   const projectStyle = worldview.styles[0] ?? null;
-  const currentState = focusShot
-    ? buildCreativeState({ shot: focusShot, characterNames, lookNames, sceneNames, projectStyle })
-    : [];
+  const projectStyleLabel = formatWorldviewStylesLabel(worldview.styles) || null;
+  const currentState = buildMixedCreativeState({
+    shots: targetRows,
+    characterNames,
+    lookNames,
+    sceneNames,
+    propNames,
+    projectStyle: projectStyleLabel,
+  });
   const impact = summarizeTargetImpact(shotRows, pickedShotIds);
   const selectionKey = pickedShotIds.join("|");
 
@@ -147,6 +162,29 @@ export function VisualChoiceTray({
 
   const writableRows = targetRows.filter((shot) => shot.reviewStatus !== "approved");
   const pendingProjectStyle = pending?.source === "preset" && pending.preset.family === "style";
+  const pendingProjectChoice: ProjectChoice | null = pending?.source === "project"
+    ? { family: pending.family, id: pending.id, ownerCharacterId: pending.ownerCharacterId }
+    : null;
+  const pendingPresent = pendingProjectChoice
+    ? writableRows.filter((shot) => choicePresent(shot, pendingProjectChoice)).length
+    : 0;
+  const removeEverywhere = !!pendingProjectChoice
+    && (pendingProjectChoice.family === "character" || pendingProjectChoice.family === "look" || pendingProjectChoice.family === "prop")
+    && writableRows.length > 0
+    && pendingPresent === writableRows.length;
+  const pendingOperations = pendingProjectChoice
+    ? writableRows.map((shot) => projectChoiceChange({ shot, choice: pendingProjectChoice, lookOwnerById, removeEverywhere }))
+    : [];
+  const operationKinds = [...new Set(pendingOperations.filter((change) => change.changed).map((change) => change.operation))];
+  const pendingOperation = pendingProjectStyle
+    ? "設為專案主風格"
+    : pending?.source === "preset"
+      ? "替換"
+      : operationKinds.length === 0
+        ? "保持"
+        : operationKinds.length === 1
+          ? CHOICE_OPERATION_LABEL[operationKinds[0]!]
+          : "統一";
 
   async function applyPending() {
     if (!pending || !canEdit || busy || pickedShotIds.length === 0) return;
@@ -159,8 +197,13 @@ export function VisualChoiceTray({
       let applied = 0;
       let incompatible = 0;
       if (pending.source === "preset" && pending.preset.family === "style") {
-        await updateWorldview.mutateAsync({ id: projectId, worldview: { styles: [pending.preset.label] } });
-        applied = 1;
+        const styles = projectStyle === pending.preset.label
+          ? worldview.styles
+          : selectWorldviewStyle(worldview.styles, pending.preset.label);
+        if (styles.join("\u0000") !== worldview.styles.join("\u0000")) {
+          await updateWorldview.mutateAsync({ id: projectId, worldview: { styles } });
+          applied = 1;
+        }
         await utils.projects.get.invalidate({ id: projectId });
       } else if (pending.source === "preset") {
         await Promise.all(editable.map(async (shot) => {
@@ -174,45 +217,61 @@ export function VisualChoiceTray({
             ...(patch.camera !== undefined ? { camera: patch.camera } : {}),
             ...(patch.performance !== undefined ? { performance: patch.performance } : {}),
             ...(patch.action !== undefined ? { action: patch.action } : {}),
+            expectedRev: shot.rev,
+            baseline: {
+              ...(patch.camera !== undefined ? { camera: shot.camera } : {}),
+              ...(patch.performance !== undefined ? { performance: shot.performance } : {}),
+              ...(patch.action !== undefined ? { action: shot.action } : {}),
+            },
           });
           applied += 1;
         }));
       } else if (pending.family === "asset") {
         await Promise.all(editable.map(async (shot) => {
-          await setVisual.mutateAsync({ sceneId: shot.id, assetId: pending.id });
+          const change = projectChoiceChange({ shot, choice: pending });
+          if (!change.changed) return;
+          await setVisual.mutateAsync({ sceneId: shot.id, assetId: String(change.value) });
           applied += 1;
         }));
       } else if (pending.family === "look") {
+        const choice: ProjectChoice = pending;
+        const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
         await Promise.all(editable.map(async (shot) => {
-          if (pending.ownerCharacterId && !(shot.characterIds ?? []).includes(pending.ownerCharacterId)) {
-            incompatible += 1;
-            return;
-          }
-          const next = appendBoundId(shot.lookIds, pending.id, MAX_GENERATE_CHARACTERS);
-          if (!next) { incompatible += 1; return; }
-          await update.mutateAsync({ sceneId: shot.id, lookIds: next });
+          const change = projectChoiceChange({ shot, choice, lookOwnerById, removeEverywhere: remove });
+          if (!change.compatible) { incompatible += 1; return; }
+          if (!change.changed) return;
+          await update.mutateAsync({ sceneId: shot.id, lookIds: change.value as string[], expectedRev: shot.rev, baseline: { lookIds: shot.lookIds } });
           applied += 1;
         }));
       } else {
+        const choice: ProjectChoice = pending;
+        const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
         await Promise.all(editable.map(async (shot) => {
-          const key = pending.family === "character" ? "characterIds" : pending.family === "scene" ? "scenePresetIds" : "propIds";
-          const max = key === "characterIds" ? MAX_GENERATE_CHARACTERS : key === "scenePresetIds" ? MAX_GENERATE_SCENE_PRESETS : MAX_GENERATE_PROPS;
-          const next = appendBoundId(shot[key], pending.id, max);
-          if (!next) { incompatible += 1; return; }
-          await setCards.mutateAsync({ sceneId: shot.id, [key]: next });
+          const change = projectChoiceChange({ shot, choice, removeEverywhere: remove });
+          if (!change.compatible) { incompatible += 1; return; }
+          if (!change.changed) return;
+          const field = change.field as "characterIds" | "scenePresetIds" | "propIds";
+          await setCards.mutateAsync({
+            sceneId: shot.id,
+            [field]: change.value as string[],
+            expectedRev: shot.rev,
+            baseline: { [field]: shot[field] },
+          });
           applied += 1;
         }));
       }
       await utils.scenes.listByProject.invalidate({ projectId });
       const messages = [
         pending.source === "preset" && pending.preset.family === "style"
-          ? `✓ 專案 Style 已採用「${pending.preset.label}」；會進入既有生成 context`
+          ? applied > 0
+            ? `✓ 專案主風格已採用「${pending.preset.label}」；相容質感會保留並進入既有生成 context`
+            : "專案已是這個主風格，保持不變"
           : applied > 0
             ? `✓ 「${pending.source === "preset" ? pending.preset.label : pending.label}」已套用到 ${applied} 鏡`
             : "沒有鏡需要更新",
       ];
       if (targets.length - editable.length > 0) messages.push(`${targets.length - editable.length} 鏡已通過，未修改`);
-      if (incompatible > 0) messages.push(`${incompatible} 鏡已有此項、已達上限或不相容`);
+      if (incompatible > 0) messages.push(`${incompatible} 鏡已達上限，或 Look 所屬角色不在鏡中`);
       setStatus(messages.join("・"));
       setPending(null);
     } catch (error) {
@@ -226,7 +285,7 @@ export function VisualChoiceTray({
     if (!focusShot || !canEdit || busy || instruction === (focusShot.prompt ?? "")) return;
     setBusy(true);
     try {
-      await update.mutateAsync({ sceneId: focusShot.id, prompt: instruction });
+      await update.mutateAsync({ sceneId: focusShot.id, prompt: instruction, expectedRev: focusShot.rev, baseline: { prompt: focusShot.prompt } });
       await utils.scenes.listByProject.invalidate({ projectId });
       setStatus("✓ 自然語言微調已儲存，會和結構化選擇、專案 references 一起進入生成 context");
     } catch (error) {
@@ -270,24 +329,25 @@ export function VisualChoiceTray({
 
       {open && (
         <>
-          {focusShot ? (
+          {currentState.length > 0 ? (
             <div className="creative-state-grid" role="list" aria-label={`${targetLabel} 目前創作狀態`}>
               {currentState.map((item) => (
                 <button
                   key={item.family}
                   type="button"
                   role="listitem"
-                  className={`creative-state-item${family === STATE_TO_INSPECTOR[item.family] ? " is-active" : ""}${item.empty ? " is-empty" : ""}`}
+                  className={`creative-state-item${family === STATE_TO_INSPECTOR[item.family] ? " is-active" : ""}${item.empty ? " is-empty" : ""}${item.mode === "mixed" ? " is-mixed" : ""}`}
                   onClick={() => { setFamily(STATE_TO_INSPECTOR[item.family]); setPending(null); }}
-                  aria-label={`${item.label}：${item.value}。點擊修改`}
+                  aria-label={`${item.label}：${item.value}。${item.detail}。點擊修改`}
                 >
                   <Meta as="span">{item.label}</Meta>
                   <strong>{item.value}</strong>
+                  {item.mode === "mixed" && <small>{item.detail}</small>}
                 </button>
               ))}
             </div>
           ) : (
-            <Hint>批次模式會在按「套用」時擷取這 {pickedShotIds.length} 鏡；之後改選取不會改到已送出的 operation。</Hint>
+            <Hint>正在讀取這 {pickedShotIds.length} 鏡的目前狀態；套用時才會擷取精確目標。</Hint>
           )}
 
           <div className="visual-family-strip" role="tablist" aria-label="創作選擇類型">
@@ -311,13 +371,13 @@ export function VisualChoiceTray({
               <strong>{FAMILY_ORDER.find((item) => item.id === family)?.label ?? VISUAL_CHOICE_FAMILY_LABEL[family as VisualChoiceFamily]}</strong>
               <Meta as="div">{["character", "look", "scene", "prop", "asset"].includes(family) ? "PROJECT CHOICES・來自本專案真實資料" : "PRODUCT STARTER CHOICES・可再用文字自由微調"}</Meta>
             </div>
-            {family === "style" && projectStyle && <Chip>Project Style：{projectStyle}</Chip>}
+            {family === "style" && projectStyleLabel && <Chip>Project Style：{projectStyleLabel}</Chip>}
           </div>
 
           <div className="visual-choice-grid" role="listbox" aria-label={String(family)}>
             {starterPresets.map((preset) => {
               const selected = pending?.source === "preset" && pending.preset.id === preset.id;
-              const current = !!focusShot && presetMatchesShot(preset, focusShot, projectStyle);
+              const current = targetRows.length > 0 && targetRows.every((shot) => presetMatchesShot(preset, shot, projectStyle));
               return (
                 <button
                   key={preset.id}
@@ -338,13 +398,9 @@ export function VisualChoiceTray({
 
             {projectOptions.map((option) => {
               const selected = pending?.source === "project" && pending.family === family && pending.id === option.id;
-              const current = !!focusShot && (
-                family === "character" ? (focusShot.characterIds ?? []).includes(option.id)
-                : family === "look" ? (focusShot.lookIds ?? []).includes(option.id)
-                : family === "scene" ? (focusShot.scenePresetIds ?? []).includes(option.id)
-                : family === "prop" ? (focusShot.propIds ?? []).includes(option.id)
-                : focusShot.assetId === option.id
-              );
+              const choice = { family: family as ProjectFamily, id: option.id, ownerCharacterId: "ownerCharacterId" in option ? option.ownerCharacterId : undefined };
+              const currentCount = targetRows.filter((shot) => choicePresent(shot, choice)).length;
+              const current = targetRows.length > 0 && currentCount === targetRows.length;
               return (
                 <button
                   key={option.id}
@@ -362,11 +418,16 @@ export function VisualChoiceTray({
                   ) : <span className="visual-choice-preview__project-fallback"><Icon name={family === "character" || family === "look" ? "User" : family === "scene" ? "Image" : family === "asset" ? "LayoutGrid" : "Box"} size={24} /></span>}
                   <span className="visual-choice-option__copy"><strong>{option.label}</strong>{option.description && <Meta as="span">{option.description}</Meta>}</span>
                   {current && <Pill status="done">CURRENT</Pill>}
+                  {!current && !selected && currentCount > 0 && <Pill status="queued">{currentCount}/{targetRows.length}</Pill>}
                   {selected && !current && <Pill status="queued">候選</Pill>}
                 </button>
               );
             })}
           </div>
+
+          {family === "style" && (
+            <Hint>Style 卡會設定專案主風格，並保留同媒材的既有質感描述；只想這一鏡暫時不同，請用下方自然語言微調，不會污染專案 Style。</Hint>
+          )}
 
           {projectOptions.length === 0 && starterPresets.length === 0 && (
             <Hint>{family === "look" && focusShot ? "目前角色還沒有可用 Look；可先選角色或到定裝建立 reference。" : "本專案尚無這類資料。"}</Hint>
@@ -374,7 +435,7 @@ export function VisualChoiceTray({
 
           {pickedShotIds.length > 1 && (
             <div className="choice-impact" aria-label="套用影響">
-              <strong>{pendingProjectStyle ? "將更新專案 Style" : `將檢查 ${impact.total} 鏡`}</strong>
+              <strong>{pendingProjectStyle ? "將更新專案 Style" : pending ? `${pendingOperation}・檢查 ${impact.total} 鏡` : `將檢查 ${impact.total} 鏡`}</strong>
               {pendingProjectStyle
                 ? <Meta>Style 是專案層級的生成 context；既有畫面與通過狀態不會被覆寫。</Meta>
                 : <Meta>草稿 {impact.draft}・已有畫面 {impact.withVisual}・已通過 {impact.approved}</Meta>}
@@ -404,11 +465,11 @@ export function VisualChoiceTray({
 
           <footer className="visual-choice-apply-bar">
             <div>
-              <Meta as="div">{pending ? "待採用" : "先選一個方向"}</Meta>
+              <Meta as="div">{pending ? pendingOperation : "先選一個方向"}</Meta>
               <strong>{pending ? (pending.source === "preset" ? pending.preset.label : pending.label) : targetLabel}</strong>
             </div>
             <Button variant="primary" type="button" disabled={!pending || !canEdit || busy || (pending?.source !== "preset" || pending.preset.family !== "style") && writableRows.length === 0} onClick={applyPending}>
-              {busy ? "套用中…" : pendingProjectStyle ? "套用到專案" : `套用${pickedShotIds.length > 1 ? `到 ${pickedShotIds.length} 鏡` : ""}`}
+              {busy ? "套用中…" : pendingProjectStyle ? "設為專案主風格" : `${pendingOperation}${pickedShotIds.length > 1 ? `到 ${pickedShotIds.length} 鏡` : ""}`}
             </Button>
           </footer>
         </>

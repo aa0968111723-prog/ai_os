@@ -1,5 +1,5 @@
+import { useEffect, useState } from "react";
 import type { VisualChoicePreview as PreviewResource } from "@shared/visualChoiceTypes";
-import { AssetImg } from "../../components/MediaFallback";
 
 function CompositionDiagram({ resource }: { resource: Extract<PreviewResource, { kind: "composition" }> }) {
   const close = resource.motif === "close" || resource.motif === "extreme-close";
@@ -59,8 +59,11 @@ function ExpressionDiagram({ resource }: { resource: Extract<PreviewResource, { 
 }
 
 export function VisualChoicePreview({ resource }: { resource: PreviewResource }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  useEffect(() => { setFailedSrc(null); }, [resource.kind === "image" ? resource.src : resource.kind]);
   if (resource.kind === "image") {
-    return <AssetImg src={resource.src} alt={resource.alt} loading="lazy" className="visual-choice-preview__image" fallbackLabel="預覽" />;
+    if (failedSrc === resource.src && resource.fallback) return <VisualChoicePreview resource={resource.fallback} />;
+    return <img src={resource.thumbnailSrc ?? resource.src} alt={resource.alt} loading="lazy" className="visual-choice-preview__image" onError={() => setFailedSrc(resource.src)} />;
   }
   if (resource.kind === "composition") return <CompositionDiagram resource={resource} />;
   if (resource.kind === "pose") return <PoseDiagram resource={resource} />;

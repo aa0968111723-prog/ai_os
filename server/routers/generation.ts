@@ -520,6 +520,7 @@ export const generationRouter = router({
       continuitySnapshot: lockedSnapshot,
       sceneId: gen.sceneId ?? undefined,
       sceneRole: gen.sceneRole ?? undefined,
+      preserveScenePointer: meta.preserveScenePointer,
       // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
       workflowRunId: gen.workflowRunId ?? undefined,
       agentRunId: gen.agentRunId ?? undefined,

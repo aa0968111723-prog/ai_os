@@ -17,4 +17,11 @@ describe("generation secondary source metadata", () => {
     });
     expect(split.providerParams).not.toHaveProperty(GENERATION_SOURCE_META_KEY);
   });
+
+  it("keeps candidate-pointer policy internal and strips it from provider params", () => {
+    const stored = storeGenerationSourceMeta({ prompt: "three candidates" }, { preserveScenePointer: true });
+    const split = splitGenerationSourceMeta(stored);
+    expect(split.meta.preserveScenePointer).toBe(true);
+    expect(split.providerParams).toEqual({ prompt: "three candidates" });
+  });
 });

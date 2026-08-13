@@ -359,19 +359,32 @@ const STYLE_DEFS: readonly {
   },
 ];
 
+// Visual Creative starter looks participate in family/texture semantics but do
+// not expand ProjectPage's curated gallery (which has its own visual assets).
+const VISUAL_CHOICE_STYLE_DEFS: readonly (typeof STYLE_DEFS)[number][] = [
+  { name: "治癒繪本風", family: "illustrate", role: "look", en: "healing picture-book illustration, warm gentle colors" },
+  { name: "電影感動畫", family: "anime", role: "look", en: "cinematic animation, filmic lighting and composition" },
+  { name: "柔和水彩", family: "illustrate", role: "look", en: "soft watercolor washes, gentle pigment edges" },
+  { name: "圖像漫畫", family: "graphic", role: "look", en: "graphic manga, clean linework and panel composition" },
+  { name: "寫實電影", family: "photo", role: "look", en: "realistic cinematic film still" },
+  { name: "粗略分鏡", family: "graphic", role: "look", en: "rough storyboard sketch, quick visual blocking" },
+  { name: "柔焦夢境", family: "photo", role: "look", en: "dreamy soft-focus photography" },
+  { name: "高對比", family: "graphic", role: "look", en: "high-contrast graphic lighting" },
+];
+
 /** 視覺風格內建清單：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
 export const STYLE_OPTIONS: string[] = STYLE_DEFS.map((d) => d.name);
 
 export const STYLE_EN: Record<string, string> = Object.fromEntries(
-  STYLE_DEFS.map((d) => [d.name, d.en]),
+  [...STYLE_DEFS, ...VISUAL_CHOICE_STYLE_DEFS].map((d) => [d.name, d.en]),
 );
 
 export const STYLE_MEDIA_FAMILY: Record<string, StyleMediaFamily> = Object.fromEntries(
-  STYLE_DEFS.map((d) => [d.name, d.family]),
+  [...STYLE_DEFS, ...VISUAL_CHOICE_STYLE_DEFS].map((d) => [d.name, d.family]),
 );
 
 export const STYLE_LOOK_ROLE: Record<string, StyleLookRole> = Object.fromEntries(
-  STYLE_DEFS.map((d) => [d.name, d.role]),
+  [...STYLE_DEFS, ...VISUAL_CHOICE_STYLE_DEFS].map((d) => [d.name, d.role]),
 );
 
 /** 把 chips 轉成「中文(英文)」雙語注入形；無對應者原樣保留 */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { VISUAL_CHOICE_PRESETS } from "@shared/visualChoicePresets";
 import {
   buildCreativeState,
+  buildMixedCreativeState,
   presetMatchesShot,
   snapshotOperationTargets,
   summarizeTargetImpact,
@@ -12,6 +13,7 @@ describe("visual creative current state", () => {
     characterIds: ["char-1"],
     lookIds: ["look-4"],
     scenePresetIds: ["scene-1"],
+    propIds: ["prop-1"],
     action: "回頭望，身體仍朝前",
     camera: { shotSize: "中景", lighting: "黃昏逆光" },
     performance: { emotion: "驚訝" },
@@ -23,6 +25,7 @@ describe("visual creative current state", () => {
       characterNames: new Map([["char-1", "娜美"]]),
       lookNames: new Map([["look-4", "夏季服裝 V4"]]),
       sceneNames: new Map([["scene-1", "淺水灣"]]),
+      propNames: new Map([["prop-1", "紅傘"]]),
       projectStyle: "治癒繪本風",
     });
     expect(state.map((item) => item.value)).toEqual([
@@ -31,10 +34,29 @@ describe("visual creative current state", () => {
       "回頭望，身體仍朝前",
       "驚訝",
       "淺水灣",
+      "紅傘",
       "黃昏逆光",
       "中景",
       "治癒繪本風",
     ]);
+  });
+
+  it("projects multi-shot consensus and MIXED distributions without new truth", () => {
+    const mixed = buildMixedCreativeState({
+      shots: [shot, { ...shot, lookIds: ["look-3"], scenePresetIds: ["scene-2"] }, { ...shot, lookIds: ["look-4"] }],
+      characterNames: new Map([["char-1", "娜美"]]),
+      lookNames: new Map([["look-4", "夏季服裝 V4"], ["look-3", "夏季服裝 V3"]]),
+      sceneNames: new Map([["scene-1", "淺水灣"], ["scene-2", "禪堂"]]),
+      propNames: new Map([["prop-1", "紅傘"]]),
+      projectStyle: "治癒繪本風",
+    });
+    expect(mixed.find((item) => item.family === "character")).toMatchObject({ mode: "uniform", value: "娜美" });
+    expect(mixed.find((item) => item.family === "look")).toMatchObject({
+      mode: "mixed",
+      value: "MIXED",
+      distribution: [{ value: "夏季服裝 V4", count: 2 }, { value: "夏季服裝 V3", count: 1 }],
+    });
+    expect(mixed.find((item) => item.family === "scene")?.detail).toContain("淺水灣 ×2");
   });
 
   it("recognizes structured preset state without relying on UI state", () => {

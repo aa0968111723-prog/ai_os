@@ -203,6 +203,8 @@ export interface SubmitCoreInput {
   reasonPrefix?: string;
   /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
   sceneId?: string;
+  /** 生成真實版本候選，但直到使用者 Adopt 前不移動 scene current pointer。 */
+  preserveScenePointer?: boolean;
   /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
@@ -699,6 +701,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     ablation: input.ablation,
     bench: input.bench,
     usedUserKey: usedUserKey || undefined,
+    preserveScenePointer: input.preserveScenePointer,
   });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
@@ -1023,7 +1026,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         }
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
-        if (gen.sceneId) {
+        if (gen.sceneId && splitGenerationSourceMeta(gen.params).meta.preserveScenePointer !== true) {
           // 角色感知回填：narration→旁白音檔、ambience→環境音；其餘（visual/null）→主畫面欄位。
           // 軟刪／回收桶分鏡不回填，避免還原後突然出現意外綁定
           const patch =

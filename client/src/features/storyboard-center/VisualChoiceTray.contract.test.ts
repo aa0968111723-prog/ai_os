@@ -18,9 +18,17 @@ describe("Visual Creative UX architecture contract", () => {
 
   it("persists Style to the existing worldview truth and keeps current generation path", () => {
     expect(tray).toContain("trpc.projects.updateWorldview.useMutation");
-    expect(tray).toContain("worldview: { styles: [pending.preset.label] }");
+    expect(tray).toContain("selectWorldviewStyle(worldview.styles, pending.preset.label)");
+    expect(tray).toContain("worldview: { styles }");
     expect(tray).not.toContain("client-side Gemini");
     expect(tray).not.toMatch(/fetch\([^)]*google/i);
+  });
+
+  it("projects mixed state and communicates add/remove/replace before applying", () => {
+    expect(tray).toContain("buildMixedCreativeState");
+    expect(tray).toContain("projectChoiceChange");
+    expect(tray).toContain("pendingOperation");
+    expect(tray).not.toContain("appendBoundId");
   });
 
   it("freezes targets per operation, not as a permanent UI selection lock", () => {

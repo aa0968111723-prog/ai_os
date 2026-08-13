@@ -7,6 +7,7 @@ import {
   mapPresetToShotPatch,
 } from "./visualChoicePresets";
 import { VISUAL_CHOICE_MANIFEST_VERSION } from "./visualChoiceTypes";
+import { selectWorldviewStyle } from "./worldview";
 
 describe("visualChoicePresets", () => {
   it("has a stable manifest version and non-empty packs", () => {
@@ -21,7 +22,11 @@ describe("visualChoicePresets", () => {
       expect(p.label.trim().length).toBeGreaterThan(0);
       expect(p.promptFragment.trim().length).toBeGreaterThan(0);
       expect(p.previewResource?.alt.trim().length).toBeGreaterThan(0);
-      expect(p.previewResource?.kind).not.toBe("fallback");
+      expect(p.previewResource?.kind).toBe("image");
+      if (p.previewResource?.kind === "image") {
+        expect(p.previewResource.src).toContain(`/creative-choice/${p.previewResource.version}/`);
+        expect(p.previewResource.fallback?.kind).not.toBe("image");
+      }
       expect(ids.has(p.id)).toBe(false);
       ids.add(p.id);
     }
@@ -69,5 +74,12 @@ describe("visualChoicePresets", () => {
     const preset = findPresetById(VISUAL_CHOICE_PRESETS, "style.healing_picturebook")!;
     const patch = mapPresetToShotPatch(preset);
     expect(patch.styleHint).toBe("治癒繪本風");
+  });
+
+  it("adopting a starter main style preserves a compatible project texture descriptor", () => {
+    expect(selectWorldviewStyle(["日系水彩", "紙纖理"], "治癒繪本風"))
+      .toEqual(["治癒繪本風", "紙纖理"]);
+    expect(selectWorldviewStyle(["寫實攝影", "膠片質感"], "治癒繪本風"))
+      .toEqual(["治癒繪本風"]);
   });
 });
