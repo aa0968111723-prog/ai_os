@@ -276,9 +276,10 @@ export async function executeDatabaseRowGetTool(
   }
   if (!rowId) return ok({ status: "not_found", message: "找不到這一列" }, []);
 
-  const resolved = tableId
-    ? await resolveAuthorizedDatabase(auth, hintFrom({ ...input, tableId }, context, input.recent))
-    : { status: "not_found" as const, message: "找不到這個資料庫" };
+  const resolved = await resolveAuthorizedDatabase(
+    auth,
+    hintFrom({ ...input, tableId }, context, input.recent),
+  );
   if (resolved.status !== "resolved") return ok(resolved, [], false);
 
   const hit = await getAgentReadableTable(auth, resolved.table.tableId);
