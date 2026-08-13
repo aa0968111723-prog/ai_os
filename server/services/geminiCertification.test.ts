@@ -3,7 +3,11 @@ import {
   containsGeminiSecret,
   formatGeminiCertReport,
   geminiCertExitCode,
+  publicGeminiCertSnapshot,
+  resetGeminiCertMemoryForTests,
   runGeminiCertification,
+  saveLastGeminiCert,
+  shouldAutoCert,
 } from "./geminiCertification";
 
 describe("containsGeminiSecret", () => {
@@ -45,6 +49,34 @@ describe("runGeminiCertification without live credential", () => {
     } finally {
       if (prev === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prev;
+    }
+  });
+});
+
+describe("shouldAutoCert / public snapshot", () => {
+  it("does not auto-run without a key, and refuses to persist secrets", () => {
+    resetGeminiCertMemoryForTests();
+    const prevKey = process.env.GEMINI_API_KEY;
+    const prevBoot = process.env.GEMINI_LIVE_CERT_ON_BOOT;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_LIVE_CERT_ON_BOOT;
+    try {
+      expect(shouldAutoCert({ ...process.env, GEMINI_API_KEY: "" })).toBe(false);
+      expect(shouldAutoCert({ ...process.env, GEMINI_API_KEY: "x", GEMINI_LIVE_CERT_ON_BOOT: "0" })).toBe(false);
+      expect(publicGeminiCertSnapshot().status).toBe("NONE");
+      expect(() => saveLastGeminiCert({
+        configured: true,
+        items: [{ name: "leak", verdict: "PASS", detail: "AIzaSyDummyTokenValue0000000000000" }],
+        summary: { pass: 1, blocked: 0, fail: 0 },
+        at: "2026-08-13T00:00:00.000Z",
+        source: "boot",
+      })).toThrow(/secret/);
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+      if (prevBoot === undefined) delete process.env.GEMINI_LIVE_CERT_ON_BOOT;
+      else process.env.GEMINI_LIVE_CERT_ON_BOOT = prevBoot;
+      resetGeminiCertMemoryForTests();
     }
   });
 });

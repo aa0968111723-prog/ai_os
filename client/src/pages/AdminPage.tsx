@@ -673,6 +673,28 @@ function SelfTestCard() {
   const [result, setResult] = useState<{ ok: boolean; checks: Array<{ name: string; ok: boolean; note: string }> } | null>(null);
   const [errMsg, setErrMsg] = useState("");
   const [running, setRunning] = useState(false);
+  const [geminiMsg, setGeminiMsg] = useState("");
+  const [geminiRunning, setGeminiRunning] = useState(false);
+  const runGeminiCert = async () => {
+    setGeminiRunning(true);
+    setGeminiMsg("");
+    try {
+      const res = await fetch("/api/admin/gemini-cert", { method: "POST", credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGeminiMsg(data.error ?? `Gemini 認證失敗（HTTP ${res.status}）`);
+        return;
+      }
+      const summary = data.summary
+        ? `pass=${data.summary.pass} blocked=${data.summary.blocked} fail=${data.summary.fail}`
+        : "";
+      setGeminiMsg(`完成 ${summary}`.trim());
+    } catch (err) {
+      setGeminiMsg(`連線失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGeminiRunning(false);
+    }
+  };
   const run = async () => {
     setRunning(true);
     setErrMsg("");
@@ -697,6 +719,10 @@ function SelfTestCard() {
       <h2>系統自檢</h2>
       <Hint>部署後按一下，全部通過才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</Hint>
       <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
+      <button className="ghost" disabled={geminiRunning} onClick={runGeminiCert} style={{ marginLeft: 8 }}>
+        {geminiRunning ? "Gemini 認證中…" : "跑 Gemini 認證"}
+      </button>
+      {geminiMsg && <Meta as="p" style={{ marginTop: 8 }}>{geminiMsg}</Meta>}
       {errMsg && <p className="error" role="alert" style={{ marginTop: 10 }}>{errMsg}</p>}
       {result && (
         <div style={{ marginTop: 10 }}>

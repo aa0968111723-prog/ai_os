@@ -348,6 +348,14 @@ app.get("/api/ready", async (_req, res) => {
       target: database.target,
     },
     dependencies: backend.dependencies,
+    geminiCertification: await (async () => {
+      try {
+        const { publicGeminiCertSnapshot } = await import("./services/geminiCertification");
+        return publicGeminiCertSnapshot();
+      } catch {
+        return { status: "NONE", configured: false, at: null, source: null, summary: null, items: [] };
+      }
+    })(),
     components,
     runners,
     resources,
@@ -2061,6 +2069,22 @@ app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
 // 素材全站備份（UI：團隊管理「立即下載素材備份」；排程：Bearer ADMIN_BACKUP_TOKEN）
 // 串流 tar.gz（內含 assets/），並寫 backup_runs → system.storageStatus.lastBackupAt
+app.get("/api/admin/gemini-cert", async (req, res) => {
+  try {
+    const { authorizeAssetBackup } = await import("./services/assetBackup");
+    const gate = await authorizeAssetBackup(req);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.error });
+      return;
+    }
+    const { publicGeminiCertSnapshot } = await import("./services/geminiCertification");
+    res.json(publicGeminiCertSnapshot());
+  } catch (err) {
+    console.error("[gemini-cert]", err instanceof Error ? err.message : err);
+    if (!res.headersSent) res.status(500).json({ error: "Gemini 認證讀取失敗" });
+  }
+});
+
 app.post("/api/admin/gemini-cert", async (req, res) => {
   try {
     const { authorizeAssetBackup } = await import("./services/assetBackup");
@@ -2069,8 +2093,8 @@ app.post("/api/admin/gemini-cert", async (req, res) => {
       res.status(gate.status).json({ error: gate.error });
       return;
     }
-    const { runGeminiCertification, containsGeminiSecret } = await import("./services/geminiCertification");
-    const report = await runGeminiCertification({ live: true, persistAttach: true });
+    const { runAndStoreGeminiCertification, containsGeminiSecret } = await import("./services/geminiCertification");
+    const report = await runAndStoreGeminiCertification("admin", { live: true, persistAttach: true });
     if (containsGeminiSecret(report)) {
       res.status(500).json({ error: "certification report contained a secret and was discarded" });
       return;
@@ -2166,6 +2190,18 @@ app.get("/api/selftest", async (req, res) => {
   await run("Gemini 金鑰", async () => {
     const { geminiApiKeyConfigured } = await import("./services/gemini");
     return geminiApiKeyConfigured() ? "configured=true" : "configured=false";
+  });
+  await run("Gemini live 認證", async () => {
+    const { publicGeminiCertSnapshot } = await import("./services/geminiCertification");
+    const { geminiApiKeyConfigured } = await import("./services/gemini");
+    const snap = publicGeminiCertSnapshot();
+    if (snap.status === "NONE" || snap.status === "RUNNING") {
+      return `${snap.status} configured=${geminiApiKeyConfigured() ? "true" : "false"}`;
+    }
+    const summary = snap.summary ? `pass=${snap.summary.pass} blocked=${snap.summary.blocked} fail=${snap.summary.fail}` : "";
+    if (snap.status === "FAIL") throw new Error(`${snap.status} ${summary}`);
+    if (snap.status === "BLOCKED" && geminiApiKeyConfigured()) throw new Error(`${snap.status} ${summary}`);
+    return `${snap.status} ${summary}`.trim();
   });
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");
@@ -2811,6 +2847,9 @@ const httpServer = app.listen(port, () => {
           startAssetMaintenanceRunner(); // 素材維護：落地強化／sha256／縮圖（有佇列才忙；BG_ASSET_MAINT=0 可關）
           startIntelligenceRunner(); // Intelligence Library：分類、embedding、去重與關聯，失敗 stage 可獨立重試
           scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
+          void import("./services/geminiCertification").then(({ scheduleGeminiLiveCertification }) => {
+            scheduleGeminiLiveCertification();
+          }).catch((err) => console.warn("[gemini-cert] 無法排程：", err instanceof Error ? err.message : err));
           startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
           const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
           startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）
