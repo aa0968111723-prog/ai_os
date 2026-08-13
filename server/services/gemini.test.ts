@@ -21,6 +21,7 @@ import {
   geminiStatus,
   geminiSubmit,
   isGeminiModelId,
+  extractGeminiRemoteMediaUrl,
   geminiOperationPath,
   parseStoredGeminiUrl,
   redactGeminiSecrets,
@@ -73,6 +74,19 @@ describe("redactGeminiSecrets", () => {
     expect(redacted).toContain("x-goog-api-key=[redacted]");
     expect(redacted).toContain("key=[redacted]");
     expect(redacted).toContain("GEMINI_API_KEY=[redacted]");
+  });
+});
+
+describe("extractGeminiRemoteMediaUrl", () => {
+  it("finds Veo generatedSamples video.uri", () => {
+    expect(extractGeminiRemoteMediaUrl({
+      done: true,
+      response: {
+        generateVideoResponse: {
+          generatedSamples: [{ video: { uri: "https://example.com/clip.mp4", mimeType: "video/mp4" } }],
+        },
+      },
+    })).toEqual({ url: "https://example.com/clip.mp4", mime: "video/mp4" });
   });
 });
 

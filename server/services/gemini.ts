@@ -101,6 +101,49 @@ async function fetchSourceBytes(sourceUrl: string): Promise<{ mime: string; data
   return { mime, data: buf.toString("base64") };
 }
 
+export function extractGeminiRemoteMediaUrl(payload: unknown): { url: string; mime?: string } | null {
+  if (!payload || typeof payload !== "object") return null;
+  const walk = (value: unknown, parentKey = ""): { url: string; mime?: string } | null => {
+    if (!value || typeof value !== "object") return null;
+    const row = value as Record<string, unknown>;
+    const uri = typeof row.uri === "string" ? row.uri : typeof row.videoUri === "string" ? row.videoUri : "";
+    const mime = typeof row.mimeType === "string" ? row.mimeType : typeof row.mime_type === "string" ? row.mime_type : undefined;
+    if (uri.startsWith("http://") || uri.startsWith("https://")) {
+      if ((mime && (mime.startsWith("video/") || mime.startsWith("image/"))) || /video|generatedSample|generatedVideo/i.test(parentKey) || /\.mp4(\?|$)/i.test(uri)) {
+        return { url: uri, mime };
+      }
+    }
+    for (const [key, child] of Object.entries(row)) {
+      if (Array.isArray(child)) {
+        for (const item of child) {
+          const hit = walk(item, key);
+          if (hit) return hit;
+        }
+      } else {
+        const hit = walk(child, key);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+  return walk(payload);
+}
+
+async function persistGeminiPayload(kind: OutputKind, payload: unknown): Promise<string> {
+  const inline = extractInlineMedia(payload);
+  if (inline) return persistMedia(kind, inline.mime, inline.bytes);
+  const remote = extractGeminiRemoteMediaUrl(payload);
+  if (remote) {
+    const res = await proxyFetch(remote.url, { headers: geminiHeaders(), timeoutMs: 120_000 });
+    if (!res.ok) throw new Error(`Gemini 成品下載失敗：${await readError(res)}`);
+    const mime = remote.mime || (res.headers.get("content-type") ?? "").split(";")[0].trim() || (kind === "video" ? "video/mp4" : "image/png");
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length < 32) throw new Error("Gemini 成品內容為空");
+    return persistMedia(kind, mime, bytes);
+  }
+  throw new Error("Gemini operation 完成但沒有媒體");
+}
+
 function extractInlineMedia(payload: unknown): { mime: string; bytes: Buffer } | null {
   if (!payload || typeof payload !== "object") return null;
   const walk = (value: unknown): { mime: string; bytes: Buffer } | null => {
@@ -165,9 +208,11 @@ async function generateImage(input: Record<string, unknown>): Promise<string> {
   });
   if (!res.ok) throw new Error(`Gemini Image 失敗：${await readError(res)}`);
   const body = await res.json();
-  const media = extractInlineMedia(body);
-  if (!media) throw new Error("Gemini Image 沒有回傳圖片");
-  return persistMedia("image", media.mime, media.bytes);
+  try {
+    return await persistGeminiPayload("image", body);
+  } catch {
+    throw new Error("Gemini Image 沒有回傳圖片");
+  }
 }
 
 async function generateOmniVideo(input: Record<string, unknown>): Promise<string> {
@@ -195,9 +240,7 @@ async function generateOmniVideo(input: Record<string, unknown>): Promise<string
   const body = await res.json();
   const op = extractOperationName(body);
   if (op) return pollOperation(op);
-  const media = extractInlineMedia(body);
-  if (!media) throw new Error("Gemini Omni 沒有回傳影片");
-  return persistMedia("video", media.mime || "video/mp4", media.bytes);
+  return persistGeminiPayload("video", body);
 }
 
 async function generateVeoFallback(input: Record<string, unknown>, sourceUrl: string): Promise<string> {
@@ -218,11 +261,7 @@ async function generateVeoFallback(input: Record<string, unknown>, sourceUrl: st
   if (!res.ok) throw new Error(`Gemini 影片失敗：${await readError(res)}`);
   const body = await res.json();
   const op = extractOperationName(body);
-  if (!op) {
-    const media = extractInlineMedia(body);
-    if (!media) throw new Error("Gemini 影片沒有回傳 operation");
-    return persistMedia("video", media.mime || "video/mp4", media.bytes);
-  }
+  if (!op) return persistGeminiPayload("video", body);
   return pollOperation(op);
 }
 
@@ -240,11 +279,7 @@ async function pollOperation(name: string): Promise<string> {
     if (!res.ok) throw new Error(`Gemini operation 失敗：${await readError(res)}`);
     const body = await res.json() as { done?: boolean; error?: { message?: string } };
     if (body.error?.message) throw new Error(redactGeminiSecrets(body.error.message));
-    if (body.done) {
-      const media = extractInlineMedia(body);
-      if (!media) throw new Error("Gemini operation 完成但沒有媒體");
-      return persistMedia("video", media.mime || "video/mp4", media.bytes);
-    }
+    if (body.done) return persistGeminiPayload("video", body);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   throw new Error("Gemini 影片等候逾時");
