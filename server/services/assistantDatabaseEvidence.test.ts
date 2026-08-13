@@ -4,8 +4,8 @@ import { serializeTableForIntelligence } from "./intelligenceLibrary";
 
 describe("assistant database evidence", () => {
   it("extracts useful row lookup terms from a natural-language question", () => {
-    const terms = assistantDatabaseQueryTerms("請問安偵在淡水的電話是什麼？");
-    expect(terms).toContain("安偵");
+    const terms = assistantDatabaseQueryTerms("請問安倢在淡水的電話是什麼？");
+    expect(terms).toContain("安倢");
     expect(terms).toContain("淡水");
     expect(terms).toContain("電話");
     expect(terms).not.toContain("資料庫");
@@ -26,12 +26,12 @@ describe("assistant database evidence", () => {
       tableRef: "db1",
       tableName: "拍攝聯絡表",
       rowId: "row-1",
-      text: "姓名: 安偵 | 電話: 0912",
+      text: "姓名: 安倢 | 電話: 0912",
       score: 0.91,
     }]);
     expect(text).toContain("db1 拍攝聯絡表");
     expect(text).toContain("row row-1");
-    expect(text).toContain("姓名: 安偵");
+    expect(text).toContain("姓名: 安倢");
   });
 });
 
@@ -44,11 +44,11 @@ describe("structured database ingestion", () => {
         { key: "person", label: "人物", type: "text" },
         { key: "weather", label: "天氣", type: "text" },
       ],
-      rows: [{ id: "row-1", data: { person: "安偵", weather: "淡水雨天" } }],
+      rows: [{ id: "row-1", data: { person: "安倢", weather: "淡水雨天" } }],
     });
     expect(snapshot.text).toContain("資料表：場景資料");
     expect(snapshot.text).toContain("[row:row-1]");
-    expect(snapshot.text).toContain("人物: 安偵");
+    expect(snapshot.text).toContain("人物: 安倢");
     expect(snapshot.indexedRows).toBe(1);
     expect(snapshot.truncated).toBe(false);
   });
