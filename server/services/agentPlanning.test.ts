@@ -250,6 +250,16 @@ describe("complete AI planning safety resolver", () => {
     expect(issues.some((issue) => issue.startsWith("steps:"))).toBe(true);
   });
 
+  it("rejects a 31-step draft at parse time, not only in the planner prompt", () => {
+    const steps = Array.from({ length: 31 }, (_, index) => ({
+      id: `n${index + 1}`,
+      kind: "create_note" as const,
+      title: `筆記 ${index + 1}`,
+      content: "內容需超過二十個字才會通過草稿長度下限。",
+    }));
+    expect(completePlanDraftSchema.safeParse({ summary: summary(), steps }).success).toBe(false);
+  });
+
   // ── CA-01：generate 代號解析＋safeModel 雙閘門 ──
 
   it("resolves characterRefs / scenePresetRefs / sourceAssetRef to UUIDs and sourceRefs", () => {

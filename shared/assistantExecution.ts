@@ -121,7 +121,7 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
 export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
   ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
-const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
+const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|哪一個|哪個|什麼|何時|哪裡|列出|清單|有幾個|有多少|總共|有誰|誰是|顯示|查看|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;

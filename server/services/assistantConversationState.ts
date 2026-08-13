@@ -7,7 +7,7 @@ import {
   type ImportActionResult,
 } from "../../shared/assistantActions";
 import type { AgentEvent, AgentSourceRecord } from "../../shared/agentEvents";
-import type { AssistantActiveGoal } from "../../shared/assistantGoalFrame";
+import { expireStaleActiveGoal, type AssistantActiveGoal } from "../../shared/assistantGoalFrame";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 
@@ -279,5 +279,17 @@ export async function loadAssistantConversation(auth: AuthState, groupId: string
   if (Date.parse(row.memoryMetadata.expiresAt) <= Date.now()) {
     return { ...row, activeGoal: null, recentActionResults: [] };
   }
-  return row;
+  const expiredGoal = expireStaleActiveGoal(row.activeGoal);
+  if (expiredGoal === row.activeGoal) return row;
+  const nextStatus = row.status === "waiting_user_input" ? "completed" as const : row.status;
+  await db.update(schema.assistantConversationStates).set({
+    activeGoal: expiredGoal ?? null,
+    status: nextStatus,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(schema.assistantConversationStates.conversationId, row.conversationId),
+    eq(schema.assistantConversationStates.userId, auth.user.id),
+    eq(schema.assistantConversationStates.groupId, groupId),
+  ));
+  return { ...row, activeGoal: expiredGoal ?? null, status: nextStatus };
 }

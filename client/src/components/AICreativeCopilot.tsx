@@ -23,7 +23,7 @@ import {
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
-import type { AssistantActiveGoal } from "@shared/assistantGoalFrame";
+import { expireStaleActiveGoal, type AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
 import { interactionPickerMode, type AssistantInteractionRequest } from "@shared/assistantInteractions";
 import {
@@ -512,24 +512,30 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     if (!groupId || !recovered) return;
     setAssistantConversation<ChatMessage>(groupId, (previous) => {
       if (previous.messages.length) return previous;
+      const activeGoal = expireStaleActiveGoal(recovered.activeGoal) ?? undefined;
+      const pendingInteraction = activeGoal?.pendingInteraction?.status === "pending"
+        ? activeGoal.pendingInteraction
+        : undefined;
       const runStatus: ChatMessage["runStatus"] = recovered.status === "completed"
         ? "completed"
         : recovered.status === "stopped"
           ? "stopped"
           : recovered.status === "failed"
             ? "failed"
-            : "waiting";
+            : pendingInteraction
+              ? "waiting"
+              : "completed";
       const recoveredMessages: ChatMessage[] = recovered.messages.map((message, index) => ({
         ...message,
         ...(message.role === "assistant" && index === recovered.messages.length - 1
-          ? { runStatus, interactionRequest: recovered.activeGoal?.pendingInteraction }
+          ? { runStatus, interactionRequest: pendingInteraction }
           : {}),
       }));
       return {
         ...previous,
         messages: recoveredMessages,
-        activeGoal: recovered.activeGoal ?? undefined,
-        pendingInteraction: recovered.activeGoal?.pendingInteraction,
+        activeGoal,
+        pendingInteraction,
         recentActionResults: recovered.recentActionResults,
         run: recovered.runId ? {
           runId: recovered.runId,

@@ -100,6 +100,28 @@ export function interactionPickerMode(type: AssistantInteractionType): "files" |
   return undefined;
 }
 
-export function interactionIsWaiting(request: AssistantInteractionRequest | null | undefined): boolean {
-  return request?.status === "pending";
+export function interactionIsWaiting(
+  request: AssistantInteractionRequest | null | undefined,
+  now = Date.now(),
+): boolean {
+  return request?.status === "pending" && !isAssistantInteractionExpired(request, now);
+}
+
+export function isAssistantInteractionExpired(
+  request: Pick<AssistantInteractionRequest, "expiresAt" | "status"> | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!request) return false;
+  if (request.status === "expired") return true;
+  const expiresAt = Date.parse(request.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+/** Mark a pending handoff expired without touching consumed/cancelled rows. */
+export function expireAssistantInteraction(
+  request: AssistantInteractionRequest,
+  now = Date.now(),
+): AssistantInteractionRequest {
+  if (request.status !== "pending" || !isAssistantInteractionExpired(request, now)) return request;
+  return { ...request, status: "expired" };
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   completePlanSchema,
+  MAX_PLAN_STEPS,
   type CompletePlan,
   type CompletePlanSummary,
   type PlanReference,
@@ -14,7 +15,6 @@ import {
 import { resolveModel } from "./modelResolve";
 import type { ModelEntry } from "../../shared/models";
 
-const MAX_DRAFT_STEPS = 30;
 const TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 const stepBase = z.object({
@@ -152,7 +152,7 @@ export const completePlanDraftSchema = z.object({
       dueAt: z.string().trim().max(80).optional(),
       approverRole: z.enum(["project_owner", "group_leader", "admin"]).optional(),
     }),
-  ])).min(1).max(MAX_DRAFT_STEPS),
+  ])).min(1).max(MAX_PLAN_STEPS),
 });
 
 export type CompletePlanDraft = z.infer<typeof completePlanDraftSchema>;

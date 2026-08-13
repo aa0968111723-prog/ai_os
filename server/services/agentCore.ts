@@ -26,7 +26,7 @@ import { buildAiModelCheatsheet, selectAiGenerationModel } from "./aiModelPolicy
 import type { AgentStep } from "./agentRunner";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import type { DataField } from "../../shared/databaseFields";
-import type { CompletePlanSummary } from "../../shared/plan";
+import { MAX_PLAN_STEPS, type CompletePlanSummary } from "../../shared/plan";
 import {
   DEFAULT_AGENT_PLANNER_MODE,
   getAgentPlannerOption,
@@ -125,8 +125,6 @@ export function plannerKnowledgeBudget(mode: AgentPlannerMode): number {
   };
   return Math.min(MAX_PLAN_KNOWLEDGE_CHARS, byMode[mode] ?? byMode.auto);
 }
-/** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
-const MAX_PLAN_STEPS = 30;
 /** PR-E2：一次規劃可指定的來源上限（使用者明確選中才注入——連接 ≠ 授權讀全部） */
 const MAX_PLAN_EXTRA_SOURCES = 10;
 /** PR-E3：一次規劃可「僅本次」納入的 Google 檔案上限與單檔字元硬頂（不落庫、不進長期知識） */
