@@ -5,6 +5,7 @@
 
 import { flashAnchor } from "../../discuss";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
+import { revealStoryInlineFromSelector } from "../story-workspace/storyInlineNav";
 
 export const PROJECT_CONTEXT_REVEAL_EVENT = "aios:project-context-reveal";
 
@@ -114,9 +115,15 @@ export function revealProjectContext(
   window.dispatchEvent(
     new CustomEvent<ProjectContextRevealDetail>(PROJECT_CONTEXT_REVEAL_EVENT, { detail }),
   );
+  const selector = selectorForContextTarget(target);
+  // Story-inline: character/scene/prop (and stage aliases) open the matching collapsed row.
+  revealStoryInlineFromSelector(selector, {
+    projectId: opts?.projectId,
+    highlight: false,
+    scroll: false,
+  });
 
   if (detail.scroll === false) return;
-  const selector = selectorForContextTarget(target);
   const id = selector.replace(/^#/, "");
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {

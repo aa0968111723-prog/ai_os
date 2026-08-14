@@ -1594,6 +1594,7 @@ export function ProjectPage({ id }: { id: string }) {
               title="角色"
               summary={charCount == null ? "載入中…" : `${charCount} 位`}
               warning={pendingCount > 0 ? `${pendingCount} 項待確認` : undefined}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "characters"}
               onOpenChange={(next) => openInlineSection(next ? "characters" : null)}
             >
@@ -1610,6 +1611,7 @@ export function ProjectPage({ id }: { id: string }) {
               anchorId="sec-scenes"
               title="場景"
               summary={presetCount == null ? "載入中…" : `${presetCount} 處`}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "scenes"}
               onOpenChange={(next) => openInlineSection(next ? "scenes" : null)}
             >
@@ -1626,6 +1628,7 @@ export function ProjectPage({ id }: { id: string }) {
               anchorId="sec-props"
               title="道具"
               summary={propCount == null ? "載入中…" : `${propCount} 件`}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "props"}
               onOpenChange={(next) => openInlineSection(next ? "props" : null)}
             >
@@ -1642,6 +1645,7 @@ export function ProjectPage({ id }: { id: string }) {
               anchorId="stage-board"
               title="分鏡"
               summary={sceneCount > 0 ? `${sceneCount} 鏡` : "尚未產生"}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "storyboard"}
               onOpenChange={(next) => openInlineSection(next ? "storyboard" : null)}
             >
@@ -2540,6 +2544,7 @@ export function ProjectPage({ id }: { id: string }) {
               anchorId="stage-create"
               title="製作"
               summary={doneGenCount != null ? `已完成 ${doneGenCount} 次` : "載入中…"}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "production"}
               onOpenChange={(next) => openInlineSection(next ? "production" : null)}
             >
@@ -2575,6 +2580,7 @@ export function ProjectPage({ id }: { id: string }) {
               anchorId="stage-deliver"
               title="交付"
               summary={sceneCount > 0 ? `${sceneCount} 鏡` : "尚無分鏡"}
+              presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "delivery"}
               onOpenChange={(next) => openInlineSection(next ? "delivery" : null)}
             >

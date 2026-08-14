@@ -142,6 +142,23 @@ export function revealStoryInlineSection(
   );
 }
 
+/** Parse-summary chip keys from storyDraft.summaryChips → the section they open. */
+export function sectionForSummaryChip(key: string): StoryInlineSectionId | null {
+  switch (key) {
+    case "characters":
+    case "looks":
+      return "characters";
+    case "locations":
+      return "scenes";
+    case "props":
+      return "props";
+    case "shots":
+      return "storyboard";
+    default:
+      return null;
+  }
+}
+
 export function revealStoryInlineFromSelector(
   selector: string,
   opts?: {

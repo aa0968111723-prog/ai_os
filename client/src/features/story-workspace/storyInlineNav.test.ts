@@ -5,6 +5,7 @@ import {
   defForSection,
   isStoryHomeHash,
   revealStoryInlineFromSelector,
+  sectionForSummaryChip,
   sectionFromHash,
   sectionFromSelector,
   selectorForInlineSection,
@@ -59,6 +60,15 @@ describe("storyInlineNav", () => {
     window.removeEventListener(STORY_INLINE_REVEAL_EVENT, handler);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ projectId: "p1", section: "storyboard", scroll: false });
+  });
+
+  it("maps parse-summary chips onto inline sections", () => {
+    expect(sectionForSummaryChip("characters")).toBe("characters");
+    expect(sectionForSummaryChip("looks")).toBe("characters");
+    expect(sectionForSummaryChip("locations")).toBe("scenes");
+    expect(sectionForSummaryChip("props")).toBe("props");
+    expect(sectionForSummaryChip("shots")).toBe("storyboard");
+    expect(sectionForSummaryChip("unknown")).toBeNull();
   });
 
   it("classifies readiness without inventing a generation gate", () => {
