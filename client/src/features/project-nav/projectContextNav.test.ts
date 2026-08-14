@@ -111,4 +111,15 @@ describe("returnFromContext", () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[0]).toMatchObject({ projectId: "p1", anchor: "sec-studio" });
   });
+
+  it("opens the in-place delivery slot instead of scrolling a lower rail", () => {
+    const seen: StoryInlineRevealDetail[] = [];
+    const handler = (e: Event) => {
+      seen.push((e as CustomEvent<StoryInlineRevealDetail>).detail);
+    };
+    window.addEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    returnFromContext("scenes", { projectId: "p1" });
+    window.removeEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    expect(seen[0]).toMatchObject({ projectId: "p1", section: "delivery" });
+  });
 });

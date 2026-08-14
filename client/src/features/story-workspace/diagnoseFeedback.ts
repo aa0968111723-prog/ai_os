@@ -29,7 +29,7 @@ const RULES: Array<{ kind: FeedbackKind; needles: string[]; label: string; secti
     kind: "costume",
     needles: ["服裝", "造型", "衣服", "不一致", "穿錯"],
     label: "服裝不一致",
-    section: "characters",
+    section: "looks",
     proposal: "可能是 Character Look。先看影響範圍，Apply 後只標記引用該造型的鏡頭過時。",
   },
   {

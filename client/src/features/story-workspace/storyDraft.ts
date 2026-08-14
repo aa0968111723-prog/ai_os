@@ -37,12 +37,16 @@ export function summaryChips(summary: {
   looks: number;
   storyScenes: number;
   shots: number;
+  flagged?: number;
+  pending?: number;
 }): Array<{ key: string; label: string }> {
+  const marks = (summary.flagged ?? 0) + (summary.pending ?? 0);
   return [
     { key: "characters", label: `角色 ${summary.characters}` },
     { key: "locations", label: `場景 ${summary.locations}` },
     { key: "props", label: `道具 ${summary.props}` },
-    ...(summary.looks > 0 ? [{ key: "looks", label: `造型 ${summary.looks}` }] : []),
+    { key: "looks", label: `造型 ${summary.looks}` },
     { key: "shots", label: `分鏡 ${summary.storyScenes} 場 ${summary.shots} 鏡` },
+    { key: "markers", label: `標記 ${marks}` },
   ];
 }

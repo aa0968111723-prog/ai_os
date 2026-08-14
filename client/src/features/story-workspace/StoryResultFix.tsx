@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
-import type { StoryInlineSectionId } from "./storyInlineNav";
+import { defForSection, type StoryInlineSectionId } from "./storyInlineNav";
 import {
   FEEDBACK_PRESETS,
   diagnoseFeedback,
@@ -93,7 +93,7 @@ export function StoryResultFix({
                 setOpen(false);
               }}
             >
-              套用建議・打開{d.section === "characters" ? "角色" : d.section === "scenes" ? "場景" : d.section === "storyboard" ? "分鏡" : d.section === "production" ? "製作" : "交付"}
+              套用建議・打開{d.section === "story" ? "故事" : defForSection(d.section).label}
             </Button>
           </div>
         ))

@@ -2,9 +2,8 @@ import { Button, Card, Hint, Meta } from "../../components/ui";
 import type { StoryReadiness } from "./storyInlineNav";
 
 /**
- * Compact first-screen readiness + the single primary action slot.
- * The action is always a real existing capability (parse / storyboard /
- * open production / open delivery). One-click video orchestration is PR 4.
+ * Compact first-screen readiness + the single primary generation CTA.
+ * The action stays on the existing one-click / parse / storyboard path.
  */
 export function StoryReadinessBar({
   readiness,

@@ -111,28 +111,32 @@ describe("ProjectPage workbench contract (WB-06)", () => {
   });
 
   /**
-   * C3（story-inline）：空專案不再走四階段 onboard。故事是唯一主畫面，
-   * 角色／場景／道具／分鏡／製作／交付預設收合。範例一鍵仍進真實創作台。
+   * C3（story-inline PR6）：空專案不再走四階段 onboard。故事是唯一主畫面，
+   * 紅色 chips 在正下方單一 reveal slot 展開真實管理卡，不再有第二組大型收合列。
    */
-  it("C3 story-inline home: no four-stage primary nav, six collapsed sections, apply-and-studio", () => {
+  it("C3 story-inline home: no four-stage primary nav, in-place chip slot, apply-and-studio", () => {
     expect(src).not.toMatch(/label: "① 故事"/);
     expect(src).not.toMatch(/label: "② 分鏡"/);
     expect(src).not.toMatch(/label: "③ 製作"/);
     expect(src).not.toMatch(/label: "④ 成片"/);
     expect(src).not.toMatch(/<VisualJourney\b/);
     expect(src).not.toMatch(/<TocNav\b/);
-    expect(src).toMatch(/<StoryInlineSection\b/);
-    expect(src).toMatch(/sectionId="characters"/);
-    expect(src).toMatch(/sectionId="scenes"/);
-    expect(src).toMatch(/sectionId="props"/);
-    expect(src).toMatch(/sectionId="storyboard"/);
-    expect(src).toMatch(/sectionId="production"/);
-    expect(src).toMatch(/sectionId="delivery"/);
+    expect(src).not.toMatch(/<StoryInlineSection\b/);
+    expect(src).not.toMatch(/story-inline-rail/);
+    expect(src).not.toMatch(/presentation=\{mobileCompact \? "sheet" : "inline"\}/);
+    expect(src).toMatch(/#story-reveal-slot/);
+    expect(src).toMatch(/revealSlot=/);
+    expect(src).toMatch(/activeSection=\{openInline\}/);
     expect(src).toMatch(/<StoryReadinessBar\b/);
     expect(src).toMatch(/useOneClickFilm/);
     expect(src).toMatch(/生成影片/);
     expect(src).toMatch(/<StoryResultFix\b/);
-    expect(src).toMatch(/presentation=\{mobileCompact \? "sheet" : "inline"\}/);
+    expect(src).toMatch(/<CreationWorkbench\b/);
+    expect(src).toMatch(/<StoryboardStage\b/);
+    expect(src).toMatch(/<DeliveryRoom\b/);
+    expect(src).toMatch(/isPlayableFilmAsset/);
+    expect(src).toMatch(/subscribeStoryReveal/);
+    expect(src).toMatch(/setSettingsOpen\(false\)/);
     // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）
     expect(src).toMatch(/onApplyAndGoStudio/);
     expect(src).toMatch(/revealWorkbenchAnchor\("#sec-studio"/);
@@ -160,9 +164,8 @@ describe("ProjectPage workbench contract (WB-06)", () => {
 
   it("keeps legacy stage anchors without four-stage StageHead chrome", () => {
     expect(src).toMatch(/id="stage-story"/);
-    expect(src).toMatch(/anchorId="stage-board"/);
-    expect(src).toMatch(/anchorId="stage-create"/);
-    expect(src).toMatch(/anchorId="stage-deliver"/);
+    expect(src).toMatch(/id=\{section\.anchorId\}/);
+    expect(src).toMatch(/STORY_INLINE_SECTIONS\.map/);
     expect(src).not.toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
     expect(src).not.toMatch(/<StageHead\b/);
     // Mode anchors must not be extra StageHead sections on the page

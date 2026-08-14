@@ -8790,7 +8790,10 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 @media (max-width: 820px) {
   .story-readiness__cta { width: 100%; }
   .story-inline-section__toggle { min-height: 48px; }
-  .story-parse-bar__chips .chip { min-height: 44px; }
+  .story-reveal-slot,
+  .story-readiness {
+    padding-bottom: calc(16px + var(--fab-slot, 58px));
+  }
 }
 
 .story-context-sheet-root {
@@ -8849,8 +8852,14 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 }
 .story-editor:focus { border-color: var(--primary-border, var(--primary-solid)); }
 .story-parse-bar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
   margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
+}
+.story-reveal-slot {
+  width: 100%; min-width: 0;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--border-soft);
+  scroll-margin-top: calc(72px + var(--safe-top, 0px));
 }
 
 /* ── 劇本編輯器：全螢幕寫作＋標注＋專業工具 ──
@@ -8946,6 +8955,11 @@ body.story-immersive .app-update-banner,
 body.story-immersive .share-rescue-banner { display: none !important; }
 body.story-immersive { overflow: hidden; }
 .story-parse-bar__chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; }
+.story-parse-bar__chips .chip {
+  min-height: 44px; min-width: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding-inline: 12px;
+}
 .story-parse-bar__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .story-chip-dirty { border-style: dashed; color: var(--warn, #b45309); border-color: currentColor; }
 .story-confirm-card { margin-top: 8px; }

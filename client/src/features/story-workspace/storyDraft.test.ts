@@ -25,10 +25,28 @@ describe("shouldAdoptRemote", () => {
 });
 
 describe("summaryChips", () => {
-  it("固定順序；造型 0 時不顯示；分鏡顯示 場×鏡", () => {
+  it("固定六顆；造型 0 也顯示；標記含 flagged+pending", () => {
     const chips = summaryChips({ characters: 2, locations: 1, props: 3, looks: 0, storyScenes: 2, shots: 5 });
-    expect(chips.map((c) => c.label)).toEqual(["角色 2", "場景 1", "道具 3", "分鏡 2 場 5 鏡"]);
+    expect(chips.map((c) => c.label)).toEqual([
+      "角色 2",
+      "場景 1",
+      "道具 3",
+      "造型 0",
+      "分鏡 2 場 5 鏡",
+      "標記 0",
+    ]);
     const withLooks = summaryChips({ characters: 0, locations: 0, props: 0, looks: 1, storyScenes: 0, shots: 0 });
     expect(withLooks.some((c) => c.label === "造型 1")).toBe(true);
+    const withMarks = summaryChips({
+      characters: 0,
+      locations: 0,
+      props: 0,
+      looks: 0,
+      storyScenes: 0,
+      shots: 0,
+      flagged: 1,
+      pending: 2,
+    });
+    expect(withMarks.some((c) => c.label === "標記 3")).toBe(true);
   });
 });
