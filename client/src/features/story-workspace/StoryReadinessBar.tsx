@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Button, Card, Hint, Meta } from "../../components/ui";
 import type { StoryReadiness } from "./storyInlineNav";
 
@@ -13,6 +14,7 @@ export function StoryReadinessBar({
   onPrimary,
   latestLabel,
   onOpenLatest,
+  contextStatus,
 }: {
   readiness: StoryReadiness;
   canEdit: boolean;
@@ -21,6 +23,7 @@ export function StoryReadinessBar({
   onPrimary?: () => void;
   latestLabel?: string;
   onOpenLatest?: () => void;
+  contextStatus?: ReactNode;
 }) {
   return (
     <Card as="section" className="story-readiness" data-fb="故事準備狀態" data-kind={readiness.kind}>
@@ -40,6 +43,7 @@ export function StoryReadinessBar({
           </Button>
         )}
       </div>
+      {contextStatus}
       {latestLabel && onOpenLatest && (
         <Hint as="p" className="story-readiness__latest">
           <Button variant="ghost" size="sm" type="button" onClick={onOpenLatest}>

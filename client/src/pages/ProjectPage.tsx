@@ -70,6 +70,7 @@ import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
 import { ONE_CLICK_BATCH_KIND } from "../features/story-workspace/oneClickFilm";
 import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
+import { StoryContextStatus } from "../features/story-workspace/StoryContextStatus";
 
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
@@ -835,6 +836,8 @@ export function ProjectPage({ id }: { id: string }) {
   const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
   // 故事狀態（與 StoryStage 共用同一快取 key，零額外請求）：判定 ① 是否完成
   const storyMeta = trpc.story.get.useQuery({ projectId: id });
+  const trainingAvailability = trpc.creativeContext.trainingAvailability.useQuery();
+  const workspace = trpc.creativeContext.workspace.useQuery({ projectId: id });
   // 上下文摘要條的計數查詢：key 與各子元件內部完全相同 → 共用快取，零額外請求
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   const characters = trpc.characters.list.useQuery({ projectId: id });
@@ -1204,6 +1207,16 @@ export function ProjectPage({ id }: { id: string }) {
     isDirty: storyDirty || Boolean(storyMeta.data?.story?.isDirty),
   });
   const hasDeliverable = playableResultCount > 0;
+  const contextCounts = {
+    characters: characters.data?.length ?? storyMeta.data?.summary.characters ?? 0,
+    looks: storyMeta.data?.summary.looks ?? 0,
+    scenes: scenePresets.data?.length ?? storyMeta.data?.summary.locations ?? 0,
+    props: propCards.data?.length ?? storyMeta.data?.summary.props ?? 0,
+    assets: assets.data?.length ?? 0,
+    knowledge: knowledge.data?.length ?? 0,
+    pending: pendingCount,
+  };
+  const contextApplied = hasParsed && contextCounts.characters + contextCounts.scenes + contextCounts.props > 0;
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
     id: string;
     title: string;
@@ -1698,6 +1711,14 @@ export function ProjectPage({ id }: { id: string }) {
                   )}
                   {mountedInline.storyboard && (
                     <div hidden={openInline !== "storyboard"}>
+                      <StoryContextStatus
+                        counts={contextCounts}
+                        applied={contextApplied}
+                        trainingAvailable={Boolean(trainingAvailability.data?.available)}
+                        compactStatus={workspace.data?.compactStatus}
+                        nextAction={workspace.data?.nextAction}
+                        showSources
+                      />
                       <SectionErrorBoundary title="創作台">
                         <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
                       </SectionErrorBoundary>
@@ -1776,6 +1797,15 @@ export function ProjectPage({ id }: { id: string }) {
           </SectionErrorBoundary>
           <StoryReadinessBar
             readiness={readiness}
+            contextStatus={
+              <StoryContextStatus
+                counts={contextCounts}
+                applied={contextApplied}
+                trainingAvailable={Boolean(trainingAvailability.data?.available)}
+                compactStatus={workspace.data?.compactStatus}
+                nextAction={workspace.data?.nextAction}
+              />
+            }
             canEdit={canEdit}
             primaryLabel={
               readiness.kind === "empty"

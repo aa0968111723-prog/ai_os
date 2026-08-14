@@ -975,6 +975,19 @@ export const scenesRouter = router({
         const prompt = await buildShotContextPrompt(scene, model);
         if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
         const cards = resolveSceneCards(scene, null);
+        let packetId: string | undefined;
+        try {
+          const { freezeShotContextPacket } = await import("../services/shotContextPackets");
+          const frozen = await freezeShotContextPacket({
+            auth: ctx.auth,
+            projectId: project.id,
+            shotId: scene.id,
+            modelId: model.id,
+          });
+          packetId = frozen.packetId;
+        } catch (error) {
+          console.warn("[scenes.batchGenerate] packet freeze skipped:", error instanceof Error ? error.message : error);
+        }
         steps.push({
           kind: "generate",
           note: `第 ${i + 1} 鏡「${scene.title}」生成畫面`,
@@ -986,6 +999,7 @@ export const scenesRouter = router({
           characterIds: cards.characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
+          shotContextPacketId: packetId,
         });
       }
       if (!steps.length) {
@@ -1423,6 +1437,7 @@ export const scenesRouter = router({
         lookIds: scene.lookIds ?? undefined,
         // 凍結這一鏡當下的鏡頭語言：之後把「中景」改成「特寫」，這張圖就該被標成過時
         shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+        preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };

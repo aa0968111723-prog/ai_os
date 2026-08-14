@@ -57,3 +57,89 @@ export const storyEntityBindingProposals = pgTable("story_entity_binding_proposa
   projectStatusIdx: index("story_entity_binding_proposals_project_status_idx").on(t.projectId, t.status),
   mentionIdx: index("story_entity_binding_proposals_mention_idx").on(t.projectId, t.mentionKey, t.entityKind),
 }));
+
+export const shotContextPackets = pgTable("shot_context_packets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  shotId: uuid("shot_id").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  packet: jsonb("packet").$type<import("../../../shared/shotContextPacket").ShotContextPacketPayload>().notNull(),
+  parentPacketId: uuid("parent_packet_id"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  shotCreatedIdx: index("shot_context_packets_shot_created_idx").on(t.shotId, t.createdAt),
+  projectShotIdx: index("shot_context_packets_project_shot_idx").on(t.projectId, t.shotId),
+  fingerprintIdx: index("shot_context_packets_fingerprint_idx").on(t.shotId, t.fingerprint),
+}));
+
+export const shotContextPacketHeads = pgTable("shot_context_packet_heads", {
+  shotId: uuid("shot_id").primaryKey(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  packetId: uuid("packet_id").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  stale: boolean("stale").notNull().default(false),
+  staleReason: text("stale_reason"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectStaleIdx: index("shot_context_packet_heads_project_stale_idx").on(t.projectId, t.stale),
+}));
+
+export const consistencyDatasetManifests = pgTable("consistency_dataset_manifests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  characterId: uuid("character_id"),
+  lookId: uuid("look_id"),
+  fingerprint: text("fingerprint").notNull(),
+  manifest: jsonb("manifest").$type<import("../../../shared/consistencyTraining").DatasetManifestPayload>().notNull(),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  projectCreatedIdx: index("consistency_dataset_manifests_project_created_idx").on(t.projectId, t.createdAt),
+  fingerprintUq: uniqueIndex("consistency_dataset_manifests_fingerprint_uq").on(t.projectId, t.fingerprint),
+}));
+
+export const consistencyTrainingJobs = pgTable("consistency_training_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  characterId: uuid("character_id"),
+  lookId: uuid("look_id"),
+  datasetId: uuid("dataset_id").notNull(),
+  provider: text("provider").notNull().default("fal"),
+  modelId: text("model_id").notNull(),
+  status: text("status").notNull().default("queued"),
+  externalJobId: text("external_job_id"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  estPoints: integer("est_points").notNull().default(0),
+  lookRevAtStart: integer("look_rev_at_start"),
+  lookChanged: boolean("look_changed").notNull().default(false),
+  error: text("error"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectStatusIdx: index("consistency_training_jobs_project_status_idx").on(t.projectId, t.status),
+  idempotencyUq: uniqueIndex("consistency_training_jobs_idempotency_uq").on(t.projectId, t.idempotencyKey),
+}));
+
+export const consistencyModelVersions = pgTable("consistency_model_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  characterId: uuid("character_id"),
+  jobId: uuid("job_id").notNull(),
+  adapterRef: text("adapter_ref"),
+  active: boolean("active").notNull().default(false),
+  metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  promotedAt: timestamp("promoted_at"),
+  promotedBy: uuid("promoted_by"),
+}, (t) => ({
+  projectActiveIdx: index("consistency_model_versions_project_active_idx").on(t.projectId, t.active),
+  jobUq: uniqueIndex("consistency_model_versions_job_uq").on(t.jobId),
+}));

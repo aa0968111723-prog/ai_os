@@ -65,13 +65,15 @@ export type GenerationSourceMeta = {
    * 未設或 false → 平台 FAL_KEY + 正常點數路徑。
    */
   usedUserKey?: boolean;
+  /** Frozen Shot Context Packet used for this generation. Resume/retry must reuse it. */
+  shotContextPacketId?: string;
 };
 
 export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined && !meta.shotContextPacketId) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -138,5 +140,10 @@ export function splitGenerationSourceMeta(params: unknown): {
       ? (rawMeta as Record<string, string>).scenePointerAtSubmit
       : undefined
     : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit } };
+  const shotContextPacketId =
+    rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+      && typeof (rawMeta as Record<string, unknown>).shotContextPacketId === "string"
+      ? (rawMeta as Record<string, string>).shotContextPacketId
+      : undefined;
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit, shotContextPacketId } };
 }
