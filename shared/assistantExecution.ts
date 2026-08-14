@@ -121,7 +121,21 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
 export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
   ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
-const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|哪一個|哪個|什麼|何時|哪裡|列出|清單|有幾個|有多少|總共|有誰|誰是|顯示|查看|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
+/**
+ * 疑問句：這些詞本身就代表「在問」，即使句子裡有寫入動詞也是問句
+ * （「如何建立任務？」是問，不是要你去建）。命中即走 ASK。
+ */
+const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|哪一個|哪個|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
+
+/**
+ * 唯讀查詢動詞（#663）。與 QUESTION_RE 分開的理由：
+ * 「列出／顯示／查看」是動詞不是疑問詞，單獨出現時是查詢（「幫我列出專案」→ ASK，
+ * 不該燒規劃點數也不該開寫入），但它們**經常出現在複合寫入的後半段**
+ * （「幫我建立專案，然後顯示結果」「產生第 3 鏡並列出候選」）。
+ * 若比照疑問詞無條件短路成 ASK，這些請求會變成只回答、不執行——那是靜默失效。
+ * 因此唯讀查詢只有在「句中沒有任何寫入動詞」時才算問句。
+ */
+const READ_QUERY_RE = /(?:列出|清單|有幾個|有多少|總共|有誰|誰是|顯示|查看)/i;
 const WATCH_RE = /(?:持續|監控|監看|追蹤|盯著|有變化|一有.*就|定期|每天|每週|提醒我)/i;
 const PLAN_RE = /(?:規劃|計畫|排步驟|拆解|分解|排程規劃|roadmap|執行方案)/i;
 const ACTION_RE = /(?:幫我|替我|直接|立刻|現在|請|新增|建立|創建|記下|紀錄|記錄|加入|安排|排入|指派|更新|修改|套用|執行|產生|生成|拆成|切成)/i;
@@ -160,9 +174,10 @@ function compactTitle(message: string): string {
 export function classifyAssistantRequest(message: string): AssistantExecutionPlan {
   const text = message.trim();
   const title = compactTitle(text) || "處理這項請求";
-  const asksQuestion = QUESTION_RE.test(text);
   const asksAction = ACTION_RE.test(text);
   const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
+  // 唯讀查詢只有在句中沒有任何寫入動詞時才算問句——見 READ_QUERY_RE 的說明。
+  const asksQuestion = QUESTION_RE.test(text) || (actionVerbCount === 0 && READ_QUERY_RE.test(text));
   const matchedCapability = capabilityForAssistantGoal(text);
 
   if (asksQuestion) {

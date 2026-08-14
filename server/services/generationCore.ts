@@ -14,7 +14,7 @@ import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
 import { getModelContract } from "./modelContractStore";
-import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta, type GenerationBenchMeta } from "../../shared/generationSourceMeta";
+import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta, type GenerationBenchMeta, type GenerationCreativeMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -35,11 +35,12 @@ import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
 import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
-import type { ContinuitySnapshot } from "../../shared/continuity";
+import type { ContinuitySnapshot, ContinuityShotDirection } from "../../shared/continuity";
 import {
   applyContinuityReferences,
   analyzeContinuitySnapshot,
   buildContinuitySnapshot,
+  emptyContinuitySnapshot,
   resolveContinuityReferenceUrls,
   type ContinuityReferenceResult,
   type ContinuityCoverage,
@@ -206,6 +207,19 @@ export interface SubmitCoreInput {
   /** 生成真實版本候選，但直到使用者 Adopt 前不移動 scene current pointer。 */
   preserveScenePointer?: boolean;
   /**
+   * 這次生成實際用的鏡頭語言／表演／走位，凍進 continuity 快照。
+   *
+   * 兩個用途：(1) 改了鏡頭語言之後畫面要能被判定為過時（v1 只看卡片，看不到這件事）；
+   * (2) 創作方向變體的「採用這個方向」——採用時把這份還原回 Shot，
+   * 否則這一鏡的鏡頭語言會與它自己現在顯示的那張圖不一致。
+   */
+  shotDirection?: ContinuityShotDirection | null;
+  /**
+   * Creative Direction v4：這一筆是哪個方向、屬於哪一批、從哪一版延伸。
+   * 只落在 params 的 source meta（送 provider 前會被 split 掉），不需要 migration，重試自動沿用。
+   */
+  creative?: GenerationCreativeMeta;
+  /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
    */
@@ -257,6 +271,11 @@ export interface PreparedGenerationRequest {
   /** 其中「因為勾了主人才被帶進來」的那幾張——供 UI 與軌跡說明「多帶了什麼」。 */
   carriedPropIds: string[];
   continuitySnapshot: ContinuitySnapshot | null;
+  /**
+   * 送出當下這一鏡的現用畫面（null＝當時沒有畫面／這筆生成不綁分鏡）。
+   * 完成時用它比對「這期間有沒有人動過這一鏡」，避免晚到的結果蓋掉人剛選的版本。
+   */
+  scenePointerAtSubmit: string | null;
   continuityReferences: ContinuityReferenceResult;
   continuityCoverage: ContinuityCoverage;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
@@ -309,12 +328,36 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     secondarySourceAssetId: input.secondarySourceAssetId,
   });
 
-  const continuitySnapshot = input.continuitySnapshot ?? await buildContinuitySnapshot(project.id, {
+  const cardSnapshot = input.continuitySnapshot ?? await buildContinuitySnapshot(project.id, {
     characterIds: input.characterIds,
     scenePresetIds: input.scenePresetIds,
     propIds: effectivePropIds,
     lookIds: input.lookIds,
   }, input.continuityMode !== false);
+  /*
+   * 把這一鏡的鏡頭語言掛上快照。
+   *
+   * 沒有卡片時 buildContinuitySnapshot 回 null（正確：沒有卡片就沒有卡片漂移可言），
+   * 但鏡頭語言漂移與有沒有卡片無關——純寫景的鏡照樣會因為改了鏡別而過時。
+   * 所以這裡在必要時補一個「只有鏡頭語言」的空殼快照。
+   * fingerprint 沿用原本的空 payload 算法，語意不變（那是卡片參考的指紋）。
+   */
+  const continuitySnapshot: ContinuitySnapshot | null = input.shotDirection
+    ? { ...(cardSnapshot ?? emptyContinuitySnapshot(input.continuityMode !== false)), shotDirection: input.shotDirection }
+    : cardSnapshot;
+
+  /*
+   * 送出當下這一鏡的現用畫面：完成時用它判斷「這期間有沒有人動過」。
+   * 只有會回填指標的生成才需要（候選變體不動指標）。
+   */
+  let scenePointerAtSubmit: string | null = null;
+  if (input.sceneId && !input.preserveScenePointer) {
+    const [row] = await db
+      .select({ assetId: schema.scenes.assetId })
+      .from(schema.scenes)
+      .where(eq(schema.scenes.id, input.sceneId));
+    scenePointerAtSubmit = row?.assetId ?? null;
+  }
 
   let effectiveSourceAssetId = input.sourceAssetId;
   let usedCardReference: "character" | "scene" | "prop" | null = null;
@@ -556,6 +599,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     effectivePropIds: effectivePropIds ?? [],
     carriedPropIds: (effectivePropIds ?? []).filter((id) => !(input.propIds ?? []).includes(id)),
     continuitySnapshot,
+    scenePointerAtSubmit,
     continuityReferences,
     continuityCoverage,
     warnings,
@@ -573,6 +617,39 @@ export function isUniqueViolation(err: unknown): boolean {
  * CA-01／KD-12：fail-closed 實體 ACL——角色／場景／來源素材必須屬於本 projectId，
  * 否則拒絕寫入 generation 列（不靜默 persist 外鍵 UUID）。空／未傳＝略過該欄。
  */
+/**
+ * 分鏡「現用畫面」回填的完整判定，**生產路徑與 *.pg.test.ts 共用同一份**。
+ *
+ * 回 null＝這一筆不該回填（候選變體、或根本沒綁分鏡）。
+ * 回條件＝那一次 UPDATE 的原子 where：軟刪、已通過審核、人類優先指標三道一起判，
+ * 多條件 update 天然原子，沒有先查再判的 TOCTOU 空隙。
+ *
+ * 為什麼要匯出：測試若自己抄一份 where，生產端的守衛被改壞了測試依然全綠——
+ * 那正是這批 pg 測試當初要取代的 readFileSync+toContain 的盲點，只是換到高一層。
+ * （實測抄出來的那份還漏了 narration/ambience 的例外，兩邊已經不一樣了。）
+ */
+export function sceneBackfillWhere(gen: {
+  sceneId: string | null;
+  sceneRole: string | null;
+  params: unknown;
+}) {
+  const meta = splitGenerationSourceMeta(gen.params).meta;
+  if (!gen.sceneId || meta.preserveScenePointer === true) return null;
+  const pointerGuard = gen.sceneRole === "narration" || gen.sceneRole === "ambience"
+    ? undefined // 這一輪只保護主畫面軌；音軌沒有對應的送出基準
+    : meta.scenePointerAtSubmit === undefined
+      ? undefined // 舊資料沒有基準 ⇒ 維持既有行為
+      : meta.scenePointerAtSubmit === ""
+        ? isNull(schema.scenes.assetId)
+        : eq(schema.scenes.assetId, meta.scenePointerAtSubmit);
+  return and(
+    eq(schema.scenes.id, gen.sceneId),
+    isNull(schema.scenes.deletedAt),
+    ne(schema.scenes.reviewStatus, "approved"),
+    ...(pointerGuard ? [pointerGuard] : []),
+  );
+}
+
 export async function assertGenerationEntityIds(
   projectId: string,
   opts: {
@@ -702,6 +779,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     bench: input.bench,
     usedUserKey: usedUserKey || undefined,
     preserveScenePointer: input.preserveScenePointer,
+    creative: input.creative,
+    // 只有「完成後真的會動指標」的生成才需要記基準；候選變體不動指標，記了也用不到。
+    scenePointerAtSubmit: input.sceneId && !input.preserveScenePointer
+      ? prepared.scenePointerAtSubmit ?? "" // 空字串＝送出時這一鏡沒有畫面（與「沒記錄」區分開）
+      : undefined,
   });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
@@ -739,10 +821,24 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           })
           .returning();
       } catch (err) {
-        // 冪等重送撞唯一鍵：前次請求已建待核列——直接回既有列，不重複落列、不重發通知
+        // 冪等重送撞唯一鍵：前次請求已建待核列——直接回既有列，不重複落列、不重發通知。
+        // 範圍條件與下方一般路徑（submitGenerationCore 的 catch）必須一致：
+        // 只用 id 查會把「碰巧撞到同一個 UUID 的別組待核生成」原封不動回給呼叫端。
         if (input.id && isUniqueViolation(err)) {
-          const [existing] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+          const [existing] = await db
+            .select()
+            .from(schema.generations)
+            .where(and(
+              eq(schema.generations.id, input.id),
+              eq(schema.generations.projectId, input.projectId),
+              eq(schema.generations.groupId, project.groupId),
+              input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
+            ));
           if (existing) return existing;
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
+          });
         }
         throw err;
       }
@@ -809,8 +905,24 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     // 冪等重送撞唯一鍵＝前次程序死亡前已插入同 id：直接回既有列，不再走守門扣點
     // （該列若卡在 queued 沒送出 fal，由既有陳屍清掃退點對帳，這裡不重複處理）
     if (input.id && isUniqueViolation(err)) {
-      const [existing] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+      // 冪等重播必須綁租戶＋同一個提交上下文再回列：只用 id 查會把「碰巧撞到同一個 UUID 的
+      // 別組生成」原封不動回給呼叫端（prompt／params／點數全都在那一列裡）。
+      // 同時綁 sceneId：同一個 SceneStudio 換鏡卻沿用同一把冪等鍵時，寧可讓它明確失敗，
+      // 也不要把 A 鏡的生成當成 B 鏡的結果回去。
+      const [existing] = await db
+        .select()
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.id, input.id),
+          eq(schema.generations.projectId, input.projectId),
+          eq(schema.generations.groupId, project.groupId),
+          input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
+        ));
       if (existing) return existing;
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
+      });
     }
     throw err;
   }
@@ -994,8 +1106,10 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
-      if (rows.length === 0) return { updated: null, assetId: null as string | null };
+      if (rows.length === 0) return { updated: null, assetId: null as string | null, pointerMoved: false };
       let assetId: string | null = null;
+      /** 這一筆有沒有真的移動分鏡的現用指標——決定完成廣播要說「畫面已更新」還是「已存為候選」 */
+      let pointerMoved = false;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
       if (mediaUrl && mediaKind) {
         const stored = parseStoredResultUrl(mediaUrl);
@@ -1026,7 +1140,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         }
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
-        if (gen.sceneId && splitGenerationSourceMeta(gen.params).meta.preserveScenePointer !== true) {
+        const backfillWhere = sceneBackfillWhere(gen);
+        if (gen.sceneId && backfillWhere) {
           // 角色感知回填：narration→旁白音檔、ambience→環境音；其餘（visual/null）→主畫面欄位。
           // 軟刪／回收桶分鏡不回填，避免還原後突然出現意外綁定
           const patch =
@@ -1036,27 +1151,28 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
                 ? { ambienceAssetId: asset.id }
                 : { assetId: asset.id };
           /*
-           * §17：已通過審核（approved）的鏡不自動換掉現用版本。
-           * 生成本身照做、也照樣落成一個新版本（generations 那一列就是版本），
-           * 只是不動指標欄——要換成新版得由人在單格工作室按「設為正式版本」。
-           * 否則「已通過」等於沒有意義：任何一次重生成都會靜默蓋掉團隊審過的畫面。
+           * 人類優先（v4）＋ §17 已通過審核：兩道守衛都在 sceneBackfillWhere 裡，
+           * 與 *.pg.test.ts 共用同一份，不在這裡再抄一次。
            *
-           * 用 where 條件擋而不是先查再判：這裡在交易內且與 CAS 同一段，
-           * 多條件 update 天然原子，先查再判會有 TOCTOU 空隙。
+           * 人類優先：生成從送出到 provider 回來可能要好幾分鐘，這期間人可能已經
+           * 採用了別的版本。舊行為是照樣覆寫——使用者剛選好的畫面被一個他早就忘記的
+           * 舊工作蓋掉，而且沒有任何提示。條件不滿足時：生成照樣完成、素材照樣入庫、
+           * 版本清單照樣看得到這一版（它就是一個候選），只是指標不動。
+           *
+           * §17：已通過審核的鏡不自動換掉現用版本，否則「已通過」等於沒有意義。
            */
-          await tx
+          const moved = await tx
             .update(schema.scenes)
             .set(patch)
-            .where(
-              and(
-                eq(schema.scenes.id, gen.sceneId),
-                isNull(schema.scenes.deletedAt),
-                ne(schema.scenes.reviewStatus, "approved"),
-              ),
-            );
+            .where(backfillWhere)
+            .returning({ id: schema.scenes.id });
+          // 守衛擋下來時（人已經採用了別版／這一鏡已通過審核）指標沒有動。
+          // 這件事必須往上傳：下面的全房廣播寫的是「畫面已更新」，
+          // 若照樣送出，等於對每一位協作者謊報畫面換了。
+          pointerMoved = moved.length > 0;
         }
       }
-      return { updated: rows[0], assetId };
+      return { updated: rows[0], assetId, pointerMoved };
     });
     if (!advanced.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
@@ -1066,7 +1182,17 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 沒有這一段的話，「組長按下生成、把畫面留給組員看」時組員端毫無訊號——
     // 這條路徑不經 tRPC，客戶端的 mutation 快取訂閱看不到它，只能等 10/20/45 秒的輪詢追上。
     if (gen.projectId && gen.sceneId) {
-      publishToProject(gen.projectId, { kind: "scene", id: gen.sceneId }, "生成完成，畫面已更新");
+      /*
+       * 訊息要跟著「指標到底有沒有動」走。人類優先守衛擋下回填時（有人已經採用了
+       * 別的版本，或這一鏡已通過審核），畫面其實沒有變；照樣廣播「畫面已更新」
+       * 會讓每一位協作者以為自己看到的是新版，反而把剛採用的人推去重看一次。
+       * 候選仍然入庫、版本清單仍然看得到，所以這裡講的是實話而不是失敗。
+       */
+      publishToProject(
+        gen.projectId,
+        { kind: "scene", id: gen.sceneId },
+        advanced.pointerMoved ? "生成完成，畫面已更新" : "生成完成，已存為候選版本（現用畫面未變）",
+      );
     }
     if (
       (gen.modelId.startsWith("fal-ai/") || gen.modelId.startsWith("openrouter/router#"))

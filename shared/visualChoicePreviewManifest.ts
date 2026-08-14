@@ -91,8 +91,19 @@ export function starterPreviewFor(input: {
   label: string;
   description?: string;
   fallbackIcon?: string;
+  /**
+   * 明確指定 fallback 圖形。
+   *
+   * 沒帶時 fallbackPreviewFor 靠 id 反查對照表——那對既有的 `camera.*`／`lighting.*`
+   * 預設有效，但對新的 id 命名空間（例如 v4 的 `intent.tension.closer`）一律落到
+   * 「一個點」。零成本預覽的重點是**看得懂**，退化成一個點等於沒有預覽。
+   * 新的起手包自己講清楚要畫什麼，不要猜。
+   */
+  fallback?: VisualChoiceFallbackPreview;
 }): VisualChoicePreview {
-  const fallback = fallbackPreviewFor(input);
+  const fallback = input.fallback
+    ? { ...input.fallback, alt: input.description ? `${input.label}：${input.description}` : input.label }
+    : fallbackPreviewFor(input);
   return {
     kind: "image",
     source: "static",

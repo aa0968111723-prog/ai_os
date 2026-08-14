@@ -23,3 +23,9 @@ src-tauri/gen/
 # 只是把它寫明，免得任何人本機跑過 cargo 之後 git status 就髒掉。
 # 要改成「鎖定相依、可重現桌面建置」的話，是獨立的一個決定，不該夾在功能 PR 裡。
 src-tauri/Cargo.lock
+
+# 本機 e2e／證據擷取時的素材落地目錄（ASSET_DIR）。
+# 內容是 storage 層的 .volume-id 與 E2E_MOCK 的 1x1 假 PNG——runtime 產物，不是原始碼。
+# 正式證據（截圖與量測）留在 docs/evidence/**，那才是耐久產物。
+.evidence-assets/
+.claude/launch.json

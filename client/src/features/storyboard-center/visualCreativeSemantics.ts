@@ -28,6 +28,12 @@ export interface ProjectChoiceChange {
   changed: boolean;
   compatible: boolean;
   reason?: "missing-character" | "limit";
+  /**
+   * 移除角色時要一併清掉的孤兒 Look（#725 P1-12）。
+   * 呼叫端必須把它寫進同一次更新，否則該角色的 Look 會留在鏡上：
+   * 顯示為現況、生成時被忽略、任何 UI 都刪不掉、角色一回來就復活。
+   */
+  orphanedLookIds?: string[];
 }
 
 const LIMIT: Record<Exclude<ProjectChoiceFamily, "asset" | "look">, number> = {
@@ -102,7 +108,24 @@ export function projectChoiceChange(input: {
   const current = unique(shot[field]);
   const has = current.includes(choice.id);
   if (has && input.removeEverywhere) {
-    return { operation: "remove", field, value: current.filter((id) => id !== choice.id), changed: true, compatible: true };
+    /*
+     * 移除角色時一併帶走它的 Look（#725 P1-12）。
+     *
+     * 不這樣做的話，該角色的 Look 會孤兒留在這一鏡：畫面上顯示為現況、生成時因為
+     * 角色不在而被忽略、任何 UI 都刪不掉，而且角色一回來就復活。
+     * orphanedLookIds 由呼叫端一起寫進同一次 setCards/update，語意才完整。
+     */
+    const orphanedLookIds = choice.family === "character" && input.lookOwnerById
+      ? unique(shot.lookIds).filter((lookId) => input.lookOwnerById!.get(lookId) === choice.id)
+      : [];
+    return {
+      operation: "remove",
+      field,
+      value: current.filter((id) => id !== choice.id),
+      changed: true,
+      compatible: true,
+      ...(orphanedLookIds.length ? { orphanedLookIds } : {}),
+    };
   }
   if (has) return { operation: "keep", field, value: current, changed: false, compatible: true };
   if (current.length >= LIMIT[choice.family]) {

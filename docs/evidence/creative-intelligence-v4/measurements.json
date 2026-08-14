@@ -1,0 +1,61 @@
+{
+  "desktop": {
+    "viewport": 1440,
+    "documentScrollWidth": 1440,
+    "horizontalOverflow": [],
+    "under44": [
+      "a:跳到主要內容=40",
+      "a:=26",
+      "a:私訊=36",
+      "a:今日=36",
+      "a:筆記排程=36",
+      "a:資料中心=36",
+      "a:動畫創作室=36",
+      "a:靈感頻道=36",
+      "a:怎麼用=36",
+      "a:今日工作台=19"
+    ],
+    "v4ControlsUnder44": []
+  },
+  "mobileTray": {
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "horizontalOverflow": [],
+    "under44": [
+      "a:跳到主要內容=40",
+      "a:今日工作台=19",
+      "button:改=25",
+      "button:改=25",
+      "button:改=25",
+      "input:=40",
+      "a:Rates by Excha=17",
+      "button:全部=36",
+      "button:待處理=36",
+      "button:完成=36"
+    ],
+    "v4ControlsUnder44": []
+  },
+  "mobileStudio": {
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "horizontalOverflow": [],
+    "under44": [
+      "a:跳到主要內容=40",
+      "a:今日工作台=19",
+      "button:改=25",
+      "button:改=25",
+      "button:改=25",
+      "button:1=28",
+      "button:○=28",
+      "button:○=28",
+      "input:=40",
+      "a:Rates by Excha=17"
+    ],
+    "v4ControlsUnder44": []
+  },
+  "tabbar": {
+    "found": true,
+    "coveredBy": "span.",
+    "reachable": true
+  }
+}
