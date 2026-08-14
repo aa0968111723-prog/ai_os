@@ -115,6 +115,13 @@ describe("storyInlineNav", () => {
       hasParsed: true,
       pendingCount: 0,
       sceneCount: 4,
+      playableResultCount: 0,
+    }).detail).toMatch(/生成畫面/);
+    expect(storyReadiness({
+      storyReady: true,
+      hasParsed: true,
+      pendingCount: 0,
+      sceneCount: 4,
       playableResultCount: 3,
     }).kind).toBe("has_result");
   });

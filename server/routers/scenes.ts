@@ -27,6 +27,7 @@ import { continuitySnapshotSchema } from "../../shared/continuity";
 import { describeDirectionChange } from "../../shared/story";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
 import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
+import { batchGenerateFingerprint } from "../../shared/projectCreativeContext";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
@@ -991,6 +992,39 @@ export const scenesRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可以批次生成的鏡（都已有畫面、已通過審核，或還沒寫畫面描述）" });
       }
 
+      const fingerprint = batchGenerateFingerprint({
+        modelId: model.id,
+        sceneIds: steps.map((step) => String(step.sceneNo ?? "")),
+      });
+      const pending = await db
+        .select({
+          id: schema.agentRuns.id,
+          estPoints: schema.agentRuns.estPoints,
+          steps: schema.agentRuns.steps,
+          contextSlots: schema.agentRuns.contextSlots,
+        })
+        .from(schema.agentRuns)
+        .where(and(
+          eq(schema.agentRuns.projectId, project.id),
+          eq(schema.agentRuns.userId, ctx.auth.user.id),
+          eq(schema.agentRuns.status, "awaiting_approval"),
+        ))
+        .orderBy(desc(schema.agentRuns.createdAt))
+        .limit(20);
+      const reused = pending.find((run) => {
+        const slots = run.contextSlots as { batchFingerprint?: string } | null;
+        if (slots?.batchFingerprint === fingerprint) return true;
+        const existingSteps = Array.isArray(run.steps) ? run.steps as Array<{ kind?: string; sceneNo?: number; modelId?: string }> : [];
+        const existingFp = batchGenerateFingerprint({
+          modelId: model.id,
+          sceneIds: existingSteps.filter((step) => step.kind === "generate").map((step) => String(step.sceneNo ?? "")),
+        });
+        return existingFp === fingerprint;
+      });
+      if (reused) {
+        return { runId: reused.id, shots: steps.length, estPoints: reused.estPoints, reused: true as const };
+      }
+
       const [run] = await db
         .insert(schema.agentRuns)
         .values({
@@ -1001,9 +1035,10 @@ export const scenesRouter = router({
           summary: `依分鏡順序逐鏡生成畫面，共 ${steps.length} 鏡。單鏡失敗不影響其他鏡，可隨時停止。`,
           steps,
           estPoints: (model.points ?? 0) * steps.length,
+          contextSlots: { batchFingerprint: fingerprint },
         })
         .returning({ id: schema.agentRuns.id, estPoints: schema.agentRuns.estPoints });
-      return { runId: run.id, shots: steps.length, estPoints: run.estPoints };
+      return { runId: run.id, shots: steps.length, estPoints: run.estPoints, reused: false as const };
     }),
 
   update: authedProcedure

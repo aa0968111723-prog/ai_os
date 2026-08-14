@@ -129,12 +129,14 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/activeSection=\{openInline\}/);
     expect(src).toMatch(/<StoryReadinessBar\b/);
     expect(src).toMatch(/useOneClickFilm/);
-    expect(src).toMatch(/生成影片/);
+    expect(src).toMatch(/oneClickPrimaryLabel/);
+    expect(src).toMatch(/ONE_CLICK_BATCH_KIND/);
+    expect(src).not.toMatch(/: "生成影片"/);
     expect(src).toMatch(/<StoryResultFix\b/);
     expect(src).toMatch(/<CreationWorkbench\b/);
     expect(src).toMatch(/<StoryboardStage\b/);
     expect(src).toMatch(/<DeliveryRoom\b/);
-    expect(src).toMatch(/isPlayableFilmAsset/);
+    expect(src).toMatch(/isAssembledProjectFilm/);
     expect(src).toMatch(/subscribeStoryReveal/);
     expect(src).toMatch(/setSettingsOpen\(false\)/);
     // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）

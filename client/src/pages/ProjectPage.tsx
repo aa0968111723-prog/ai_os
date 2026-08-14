@@ -56,7 +56,7 @@ import { StoryReadinessBar } from "../features/story-workspace/StoryReadinessBar
 import {
   STORY_INLINE_REVEAL_EVENT,
   STORY_INLINE_SECTIONS,
-  isPlayableFilmAsset,
+  isAssembledProjectFilm,
   revealStoryInlineSection,
   sectionFromHash,
   sectionFromSelector,
@@ -65,8 +65,10 @@ import {
   type StoryInlineRevealDetail,
   type StoryInlineSectionId,
 } from "../features/story-workspace/storyInlineNav";
-import { consumeNestedReveal, subscribeStoryReveal } from "../features/story-workspace/storyRevealQueue";
+import { consumeNestedReveal, peekStoryReveal, subscribeStoryReveal } from "../features/story-workspace/storyRevealQueue";
 import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
+import { ONE_CLICK_BATCH_KIND } from "../features/story-workspace/oneClickFilm";
+import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
 
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
@@ -1016,16 +1018,20 @@ export function ProjectPage({ id }: { id: string }) {
       if (!detail?.section) return;
       if (detail.projectId && detail.projectId !== id) return;
       openInlineSection(detail.section);
-      if (detail.nestedSelector) {
+      const nestedTarget = detail.nestedSelector ?? peekStoryReveal()?.nestedSelector;
+      if (nestedTarget) {
         let tries = 0;
         const timer = window.setInterval(() => {
           tries += 1;
-          const nested = consumeNestedReveal() ?? detail.nestedSelector;
+          const nested = peekStoryReveal()?.nestedSelector ?? nestedTarget;
           const el = nested ? document.querySelector(nested) : null;
-          if ((el && el.getClientRects().length > 0) || tries >= 50) {
+          if (el && el.getClientRects().length > 0) {
             window.clearInterval(timer);
-            if (el) scrollToSelector(nested!);
+            consumeNestedReveal();
+            scrollToSelector(nested);
+            return;
           }
+          if (tries >= 50) window.clearInterval(timer);
         }, 200);
       }
       if (detail.scroll === false) return;
@@ -1165,7 +1171,10 @@ export function ProjectPage({ id }: { id: string }) {
   const storyReady = typeof storyContent === "string" && storyContent.trim().length > 0;
   const hasParsed = Boolean(storyMeta.data?.story?.lastParsedAt);
   const pendingCount = Array.isArray(storyMeta.data?.pending) ? storyMeta.data.pending.length : 0;
-  const playableResultCount = (scenes.data ?? []).filter((s) => isPlayableFilmAsset(s.assetKind)).length;
+  const playableResultCount = (scenes.data ?? []).filter((s) => isAssembledProjectFilm({
+    kind: s.assetKind,
+    role: "shot",
+  })).length;
   const readiness = storyReadiness({
     storyReady,
     hasParsed,
@@ -1752,11 +1761,11 @@ export function ProjectPage({ id }: { id: string }) {
             primaryLabel={
               readiness.kind === "empty"
                 ? undefined
-                : oneClick.pending
-                  ? "準備生成中…"
-                  : oneClick.result
-                    ? "繼續生成"
-                    : "生成影片"
+                : oneClickPrimaryLabel({
+                    pending: oneClick.pending,
+                    hasBatch: Boolean(oneClick.result),
+                    modelKind: ONE_CLICK_BATCH_KIND,
+                  })
             }
             primaryDisabled={oneClick.pending || readiness.kind === "empty"}
             onPrimary={

@@ -12,7 +12,7 @@ import { ConflictNotice, conflictFromError } from "../../components/ConflictNoti
 import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { revealStoryInlineSection, sectionForSummaryChip, type StoryInlineSectionId } from "./storyInlineNav";
-import { STORY_FLUSH_EVENT } from "./oneClickFilm";
+import { STORY_FLUSH_EVENT, STORY_FLUSH_FAILED_EVENT, STORY_FLUSHED_EVENT } from "./oneClickFilm";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
@@ -294,23 +294,40 @@ export function StoryStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, projectId]);
 
-  // 一鍵生成前先把未存故事落盤。共編中由伺服器 materialize，這裡只回報 flushed。
+  const flushCollab = trpc.story.flushCollab.useMutation();
+  const flushCollabRef = useRef(flushCollab.mutateAsync);
+  flushCollabRef.current = flushCollab.mutateAsync;
+
+  // 一鍵生成前先把未存故事落盤。共編必須等伺服器 materialize 成功，儲存失敗不得放行。
   useEffect(() => {
+    const fail = (message: string) => {
+      window.dispatchEvent(new CustomEvent(STORY_FLUSH_FAILED_EVENT, { detail: { message } }));
+    };
     const onFlush = () => {
       if (yActiveRef.current) {
-        window.dispatchEvent(new Event("aios:story-flushed"));
+        void flushCollabRef.current({ projectId }).then(
+          () => window.dispatchEvent(new Event(STORY_FLUSHED_EVENT)),
+          (err) => fail(err instanceof Error ? err.message : "共編故事尚未落到伺服器"),
+        );
+        return;
+      }
+      if (saveStateRef.current === "conflict" || saveStateRef.current === "error") {
+        fail(saveStateRef.current === "conflict" ? "故事有衝突尚未處理" : "故事儲存失敗，請先修好再生成");
         return;
       }
       const live = contentRef.current;
-      if (live === null || remote === null || live === remote || save.isPending) {
-        window.dispatchEvent(new Event("aios:story-flushed"));
+      if (live === null || remote === null || live === remote) {
+        window.dispatchEvent(new Event(STORY_FLUSHED_EVENT));
         return;
       }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       setSaveState("saving");
       save.mutate(
         { projectId, content: live, expectedRev: revRef.current, baseline: baselineRef.current },
-        { onSettled: () => window.dispatchEvent(new Event("aios:story-flushed")) },
+        {
+          onSuccess: () => window.dispatchEvent(new Event(STORY_FLUSHED_EVENT)),
+          onError: (err) => fail(err.message || "故事儲存失敗"),
+        },
       );
     };
     window.addEventListener(STORY_FLUSH_EVENT, onFlush);

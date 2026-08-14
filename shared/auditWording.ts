@@ -184,6 +184,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "story.confirmCandidate": "處理解析確認卡",
   "story.generateStoryboard": "從故事產生分鏡",
   "story.undoRun": "撤銷一次故事解析",
+  "story.flushCollab": "把共編故事立刻落盤",
+  "creativeContext.resolveBindings": "解析故事實體對應",
+  "creativeContext.confirmProposal": "確認故事實體對應",
+  "creativeContext.dismissProposal": "略過故事實體對應",
+  "creativeContext.setLock": "鎖定或解除故事實體對應",
+  "creativeContext.undoBinding": "撤銷故事實體對應",
   "story.sceneUpdate": "更新場設定",
   "story.sceneRemove": "刪除場（鏡改為未分場）",
   "characterLooks.add": "新增造型",
@@ -415,7 +421,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "openaiMcp", "workflows", "computerRuntime"] },
   // projectContext 歸在知識：它回答的是「這個專案要用哪些資料、各自扮演什麼角色」，
   // 查的人和查知識庫／角色設定的是同一批人、同一個問題
-  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext"] },
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext", "creativeContext"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "decisions", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
