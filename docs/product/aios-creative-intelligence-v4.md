@@ -214,3 +214,94 @@ WHERE id = ? AND deleted_at IS NULL
 6. **自訂方向 UI 未實作。** 伺服器 schema 已經接受任意 delta ＋ 500 字自由指示，
    但 SceneStudio 目前只送得出內建的 12 個方向。這是 UI 缺口，不是架構缺口。
 7. **本機 pg 測試需要 Docker。** 未啟動時 `*.pg.test.ts` 依既有慣例 skip。
+
+
+---
+
+# #725 RED TEAM RECONCILIATION
+
+對象：PR #725《Visual Creative UX v2/v3 上線前獨立審查》（docs-only，已 merge，
+文件在 `docs/product/aios-visual-creative-ux-v3-production-review.md`）。
+
+**規則：不把 P0 偷偷改叫 P1。** 每一條都以 CURRENT code 重新驗證，
+並附上真正可執行的回歸測試或瀏覽器量測。
+
+## P0
+
+### P0-1 `<SceneStudio>` 沒有 `key`：寫錯鏡、對錯鏡花錢、假成功
+
+| | |
+| --- | --- |
+| **Original severity** | P0 |
+| **CURRENT status** | **FIXED**（兩層都補） |
+| **Fix** | ① `client/src/features/storyboard-center/StoryboardStage.tsx` 加 `key={studioShot.id}`（比照 `SceneList.tsx`）。② `server/services/generationCore.ts` 的冪等重播查詢補上租戶＋分鏡範圍——**一般路徑與 awaiting_approval 路徑各一處**；撞號改回 `CONFLICT`，不再把跨鏡重用的鍵回報成一次成功送出。 |
+| **Regression test** | `client/src/components/SceneStudio.test.tsx` →「#725 P0-1 跨鏡狀態隔離」4 項：A 的草稿不出現在 B、B 的生成帶 B 的 sceneId 與 B 的提示詞、B 的變體用全新冪等鍵與 batchId、A 的批次狀態不出現在 B。**以真的重新渲染證明，不是 grep `key=`。** |
+| **Evidence** | **Mutation test**：拿掉 `key` → 紅 3 項，正好對應 red team 點名的三個傷害。還原 → 全綠。<br>**FLOW B**（瀏覽器，用真的 ShotNavigator 換鏡）：`switched=true leakedDraft=false A鏡輸入框已卸載=true B鏡生成數=1 A鏡生成數=0`。 |
+
+> 補充：批次狀態這一項在 v4 是**架構上**不可能外洩的——批次由 `generations.params` 的
+> `batchId` 分群推導，不再是 React state。所以第 4 項測試即使拿掉 `key` 也是綠的。
+
+### P0-2 成本核准會清掉 `preserveScenePointer`
+
+| | |
+| --- | --- |
+| **Original severity** | P0（無成本門檻時 red team 自評降為 P1） |
+| **CURRENT status** | **FIXED** |
+| **Fix** | `server/routers/generation.ts` 的核准分支改成 `storeGenerationSourceMeta(submitParams, { ...splitParams.meta, secondarySourceUrl, usedUserKey })`。攤平既有 meta 而不是只挑兩個欄位重建——同時救回 `ablation`／`bench` 的 `runId`（消融／競技場的分組鍵只存在 params 裡）。 |
+| **Regression test** | `server/services/creativeVariantPointer.pg.test.ts` →「#725 P0-2 核准後變體仍不得移動指標」2 項，**真 PostgreSQL**：變體 → `awaiting_approval` → 核准 → 完成 → 斷言 `scenes.assetId` 未變；核准不得動 `sceneRole`。這正是 red team 交接清單第一條要求的測試。 |
+| **Evidence** | **Mutation test**：拿掉 `...splitParams.meta` → 紅 2 項。還原 → 全綠。<br>**FLOW D**（瀏覽器＋DB）：`核准後 preserveScenePointer=true 完成後 current 未動=true 明確 Adopt 生效=true`。 |
+
+### P0-3 手機：選擇面板蓋在所有 modal 之上
+
+| | |
+| --- | --- |
+| **Original severity** | P0 |
+| **CURRENT status** | **FIXED** |
+| **Fix** | `client/src/styles.css` `@media (max-width: 820px)`：`z-index: 52 → 43`（低於 `.mobile-nav` 的 44 與 `.modal-scrim` 的 50）；底緣從 `inset: auto 0 0` 改為抬到 `--chrome-bottom + safe-bottom + kb-inset`，面板停在分頁列上方而不是壓在它身上；面板內有 textarea，補 `--kb-inset` 讓鍵盤不蓋掉輸入框與套用列。Compare 全螢幕加上下安全區、header 置頂、關閉鍵 44px。 |
+| **Regression test** | FLOW E（`scripts/e2e-ui/creative-golden-flows.mjs`）。 |
+| **Evidence** | **真瀏覽器量測，非讀 CSS**（red team 自己標明它的結論來自讀 CSS 計算）：<br>`分頁列可觸及=true (tray z=43, bar z=44)`、`modal在最上層=true (scrim z=50)`、`Compare未被面板蓋=true`、`關閉鍵=44x44`、`關閉後無殘留=true`、`無橫向溢出=true`。<br>用 `document.elementFromPoint()` 在 modal 的上／中／下三點量測最上層元素，不是比對 CSS 數值。 |
+
+## P1
+
+| # | Finding | Original | CURRENT status | Fix | Regression test |
+| --- | --- | --- | --- | --- | --- |
+| 4 | MCP `retry_generation` 是退化版重複實作 | P1 | **FIXED** | 抽出 `server/services/generationRetryInput.ts` 當單一真相，`generation.retry` 與 MCP 兩個入口共用；`signedAssetId` 一併下移到 service 層（`services` 不得 import `routers`） | `generationRetryInput.test.ts` 11 項（含「兩個入口拿到同一份輸入」） |
+| 5 | 完成寫入沒有陳舊守衛；`setVisualFromAsset` 不遞增 `rev` | P1 | **FIXED** | `scenePointerAtSubmit` 記在送出當下，完成回填時進**同一條原子 WHERE**；`setVisualFromAsset` 在同步鏡頭語言時推進 `rev` | pg 指標政策 7 項＋FLOW C |
+| 6 | `generateVariants` 略過 `assertNoPendingVisual` | P1 | **FIXED** | 補上同一道閘（與 `generateInto`／`refine` 一致） | — |
+| 7 | 連戲引擎看不見任何面板寫入 | P1 | **FIXED** | `detectContinuityDrift` 新增 `currentBindings`：比對快照凍住的 id 集合 vs 這一鏡現在綁的 id 集合。換 Look／加減角色／換場景／加減道具都會標過時。用快照裡本來就有的 id，**無新欄位、無 migration** | `creativeVariantLifecycle.test.ts` →「#725 P1-7」7 項 |
+| 8 | `refine` 沒帶 `lookIds` | P1 | **FIXED** | 補上（`generateInto`／`generateVariants` 本來就有） | — |
+| 9 | 批次套用非原子、錯誤路徑跳過 invalidate | P1 | **FIXED** | `Promise.all` → `Promise.allSettled`（`applyPerShot`），逐鏡回報成功／衝突筆數；**任何情況都 invalidate** | — |
+| 10 | 核准路徑寫死 `falSubmit` | P1 | **FIXED** | 比照 `advanceGeneration` 依 `isNimModel`／`isGeminiModel` 分流。原本任何超過門檻的 Gemini／NIM 生成核准後必敗 | `generation.continuity.test.ts` 第 3 項 |
+| 11 | 專業模式分鏡板 ~130 鏡撞 header 上限 | P1 | **DEFERRED** | — | — |
+| 12 | Look 語意外洩（移除角色留下孤兒 Look） | P1 | **FIXED** | `projectChoiceChange` 回報 `orphanedLookIds`，`VisualChoiceTray` 在同一次套用一併清掉 | `visualCreativeSemantics.test.ts` 4 項 |
+| 13 | `registerAssistantPage` 的 cleanup 誤清 `focusLayer` | P1 | **FIXED** | cleanup 只清自己那一層；焦點層有自己的 token 與 cleanup | — |
+
+### P1-11 DEFERRED WITH REASON
+
+**Finding**：`ShotCard.tsx` 每張卡各發一個 `story.shotAssetSuggestions` 查詢，
+桌機專業模式預設展開 ⇒ 200 鏡約 25KB query string，超過 Node 預設 16KB header 上限，
+連同批的 `props.list` 一起失敗。
+
+**為什麼 DEFER 而不是修**：
+
+1. **Pre-existing on base**，#726 完全沒有觸碰 `ShotCard` 的這條查詢路徑。
+2. 修它的正解是**新增伺服器端批次端點**（一次拿整個專案的建議），
+   那是新 API ＝ 本次 closeout 明確排除的 scope（「禁止新增功能／新 API」）。
+   在收尾 PR 裡順手加一支端點，等於把一個沒有測試預算的新介面塞進 review。
+3. 次佳解（viewport gate）會改動分鏡板的載入語意，同樣不屬於本 PR 的責任範圍。
+
+**建議**：獨立處理，與「分鏡板每個影片鏡都掛 `<video preload="metadata">` 無視窗閘門」
+（同一份 red team 的 P2）一起做，因為兩者都是「專業模式大量分鏡下的載入策略」。
+
+## 被推翻／不修（採信 red team 自己的更正）
+
+red team 在自己的〈誤報／已驗證安全〉一節推翻了兩條，本 PR 尊重該更正：
+
+- **「approved 保護只在前端」＝框架錯誤**。repo 的不變式是「approved 的素材不會被 **AI 自動**覆蓋」，
+  不是「approved 唯讀」；人工在單格工作室按「設為正式版本」是**核准的例外出口**。
+  因此 #726 的 `setVisualFromAsset` 守衛只擋「沒有明確承認」的批次路徑
+  （`acknowledgeApproved` opt-in），不擋人工採用——並在換圖時把審核狀態退回「需要修改」，
+  因為當初通過的是**那一張圖**。
+- **「血緣無法重建」＝講得太重**。父素材 id 本來就在 `generations.source_url` 裡，
+  真正的缺口只是沒有投影出來。#726 因此**沒有新增表**，
+  而是把血緣放進既有的 source meta 並投影成 `SceneVersion.parentIndex`。
