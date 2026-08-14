@@ -52,25 +52,29 @@ vi.mock("../../api", () => {
 describe("MobileNavigation", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
 
-  it("keeps a four-item primary bar and still reaches /planner from More", async () => {
+  it("keeps a three-item primary bar with the assistant dead centre", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/planner");
     render(<MobileNavigation />);
 
     const nav = screen.getByRole("navigation", { name: "主要功能" });
     expect(nav).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("href", "/dashboard");
+    // 專案｜AI 助手｜更多——三格，助手在正中央（第 2 格）。四格時中央落在兩格交界，
+    // 球會偏右；格數與 CSS 的 repeat(3, 1fr) 是同一條契約（見底下的 U10 案例）。
+    const cells = [...nav.children];
+    expect(cells).toHaveLength(3);
+    expect(cells[1]).toBe(screen.getByRole("button", { name: "AI 助手" }));
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("href", "/dashboard#projects");
-    expect(screen.getByRole("button", { name: "AI 助手" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "更多" })).toBeInTheDocument();
     // 正中央的球不再是導航連結——它開啟全站 AI 助手（見下方專屬案例）
     expect(screen.queryByRole("link", { name: /AI/ })).not.toBeInTheDocument();
-    // 筆記排程不再是底欄一級；/planner 改由 More 承接，且 More 必須亮起
+    // 今日與筆記排程都不再是底欄一級；route 不刪，改由 More 承接，且 More 必須亮起
+    expect(nav.querySelector('a[href="/dashboard"]')).toBeNull();
     expect(nav.querySelector('a[href="/planner"]')).toBeNull();
     expect(screen.getByRole("button", { name: "更多" })).toHaveClass("active");
-    expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /今日/ })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveAttribute("href", "/planner");
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveClass("active");
     expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
@@ -114,17 +118,24 @@ describe("MobileNavigation", () => {
     }
   });
 
-  it("highlights exactly one dashboard tab per hash（今日／專案互斥）", () => {
+  it("highlights the 專案 tab only on #projects（與 More 的今日互斥）", async () => {
+    // 今日與專案是同一個 pathname，wouter 的 location 又不含 hash：不比 hash 就會
+    // 「底欄專案」與「More 的今日」一起亮——連帶讓「更多」在專案分頁上恆亮。
+    const user = userEvent.setup();
     window.history.replaceState(null, "", "/dashboard");
     const { unmount } = render(<MobileNavigation />);
-    expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "專案" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "更多" })).toHaveClass("active");
+    await user.click(screen.getByRole("button", { name: "更多" }));
+    expect(screen.getByRole("link", { name: /今日/ })).toHaveAttribute("aria-current", "page");
     unmount();
 
     window.history.replaceState(null, "", "/dashboard#projects");
     render(<MobileNavigation />);
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "更多" })).not.toHaveClass("active");
+    await user.click(screen.getByRole("button", { name: "更多" }));
+    expect(screen.getByRole("link", { name: /今日/ })).not.toHaveAttribute("aria-current");
   });
 
   it("switches dashboard tabs without a full page reload from other routes", async () => {
@@ -139,17 +150,19 @@ describe("MobileNavigation", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
-  it("returns to 今日 from a hash tab on the same page", async () => {
-    // 停在 /dashboard#projects 時「今日」和其他分頁同 pathname：wouter 的 location
-    // 不含 hash，pushState 也不發 hashchange——分頁列因此不重繪，看起來就是「按了沒反應」。
+  it("returns to 今日 from More while on the 專案 hash tab", async () => {
+    // 停在 /dashboard#projects 時「今日」同 pathname：wouter 的 location 不含 hash，
+    // pushState 也不發 hashchange——沒人叫得動重繪，面板不關、分頁列還亮在專案，
+    // 看起來就是「按了沒反應」。今日搬進 More 之後這條修法跟著搬（navigateFromSheet）。
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/dashboard#projects");
     render(<MobileNavigation />);
-    await user.click(screen.getByRole("link", { name: "今日" }));
+    await user.click(screen.getByRole("button", { name: "更多" }));
+    await user.click(screen.getByRole("link", { name: /今日/ }));
 
     expect(window.location.pathname).toBe("/dashboard");
     expect(window.location.hash).toBe("");
-    expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("complementary", { name: "更多功能" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "專案" })).not.toHaveAttribute("aria-current");
   });
 
@@ -206,7 +219,7 @@ describe("MobileNavigation", () => {
     window.history.replaceState(null, "", "/p/some-project-id");
     render(<MobileNavigation />);
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "更多" })).not.toHaveClass("active");
   });
 
   it("★ U10 視覺回饋契約：按壓要縮、激活要上色、鍵盤彈出時助手 sheet 要抬升", () => {
@@ -223,8 +236,10 @@ describe("MobileNavigation", () => {
     expect(css).toMatch(/\.mobile-nav a\.active,\s+\.mobile-nav button\.active \{ color: var\(--primary-ink\); background: var\(--primary-tint\); \}/);
     // 鍵盤回饋：手機端助手 sheet 的 bottom 吃 --kb-inset
     expect(css).toMatch(/\.menu-surface\.is-sheet \{[\s\S]*?bottom: var\(--kb-inset, 0px\)/);
-    // 四項底欄：不再是五格，觸控高仍 ≥44
-    expect(css).toContain("grid-template-columns: repeat(4, 1fr)");
+    // 三項底欄：AI 助手因此落在正中央那一格（四／五格時中央落在兩格交界，球會偏右）。
+    // 觸控高仍 ≥44。
+    expect(css).toContain("grid-template-columns: repeat(3, 1fr)");
+    expect(css).not.toContain("grid-template-columns: repeat(4, 1fr)");
     expect(css).not.toContain("grid-template-columns: repeat(5, 1fr)");
     expect(css).toMatch(/\.mobile-nav a,\s+\.mobile-nav button \{[\s\S]*?min-height: 50px;/);
   });

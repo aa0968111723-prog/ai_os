@@ -192,18 +192,22 @@ export const topbarNavItems: NavigationItem[] = [
 /**
  * 手機底欄一級入口契約（全站導覽去重 PR 1）。
  *
- * 底欄只保留四項：今日、專案、AI 助手、更多。
- * 「筆記排程」不再是底欄一級——`/planner` 的 route、query、hash 與 deep link
- * 全部保留，改由 More 承接，避免與今日頁「安排今天」重複。
+ * 底欄只保留三項：專案、AI 助手、更多——AI 助手因此落在正中央那一格。
+ * 這是刻意的：助手是全站最主要的動作入口，中央格是拇指最好按到的位置，
+ * 而「今日」與「專案」本來就是同一頁（`/dashboard` 與 `/dashboard#projects`），
+ * 兩顆並排等於用兩格底欄講同一個去處。
+ *
+ * 「今日」不再是底欄一級——`/dashboard` 的 route、hash 與 deep link 全部保留，
+ * 改由 More 承接（同 planner 的作法）。「筆記排程」同樣由 More 承接，
+ * 避免與今日頁「安排今天」重複。
  *
  * 所有權（誰是主要入口；舊路徑仍可達）：
- * - dashboard → 底欄「今日」
  * - /dashboard#projects、/p/:id → 底欄「專案」
  * - Global Assistant → 底欄中央 AI 助手（不是 route）
- * - planner / databases / studio / community / chat / help / models / downloads → More
+ * - dashboard / planner / databases / studio / community / chat / help / models / downloads → More
  * - mcp / integrations → 桌機帳號選單（手機 More 不列；路由保留）
  */
-export const MOBILE_PRIMARY_NAV = ["today", "projects", "assistant", "more"] as const;
+export const MOBILE_PRIMARY_NAV = ["projects", "assistant", "more"] as const;
 
 /**
  * 手機「更多」面板的分組。
@@ -226,6 +230,10 @@ export const MOBILE_PRIMARY_NAV = ["today", "projects", "assistant", "more"] as 
 export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
 
 export const mobileMoreGroups: MobileMoreGroup[] = [
+  // 「今日」從底欄搬進來（中央讓給 AI 助手）。底欄的「專案」雖然同樣落在 /dashboard，
+  // 但它帶 #projects：不含 hash 的今日工作台若不在這裡，手機就再也沒有入口——
+  // 頂欄的 .topbar-nav-link 在 ≤820px 整條隱藏（同 databases 當年消失的原因）。
+  { label: "工作台", keys: ["dashboard"] },
   { label: "資料", keys: ["databases"] },
   { label: "安排", keys: ["planner"] },
   { label: "訊息", keys: ["chat"] },
