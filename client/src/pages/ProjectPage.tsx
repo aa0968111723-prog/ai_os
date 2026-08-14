@@ -70,7 +70,8 @@ import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
 import { ONE_CLICK_BATCH_KIND } from "../features/story-workspace/oneClickFilm";
 import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
-import { StoryContextStatus } from "../features/story-workspace/StoryContextStatus";
+import { StoryContextStatusBlock } from "../features/story-workspace/StoryContextStatusBlock";
+import { StoryCanonPanel } from "../features/story-workspace/StoryCanonPanel";
 
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
@@ -836,8 +837,8 @@ export function ProjectPage({ id }: { id: string }) {
   const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
   // 故事狀態（與 StoryStage 共用同一快取 key，零額外請求）：判定 ① 是否完成
   const storyMeta = trpc.story.get.useQuery({ projectId: id });
-  const trainingAvailability = trpc.creativeContext.trainingAvailability.useQuery();
-  const workspace = trpc.creativeContext.workspace.useQuery({ projectId: id });
+  // 脈絡摘要條（workspace projection＋training availability）整組搬進
+  // StoryContextStatusBlock（PR-C 瘦身）——頁面不再自己拼 counts、不再持有那兩個查詢
   // 上下文摘要條的計數查詢：key 與各子元件內部完全相同 → 共用快取，零額外請求
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   const characters = trpc.characters.list.useQuery({ projectId: id });
@@ -1207,16 +1208,6 @@ export function ProjectPage({ id }: { id: string }) {
     isDirty: storyDirty || Boolean(storyMeta.data?.story?.isDirty),
   });
   const hasDeliverable = playableResultCount > 0;
-  const contextCounts = {
-    characters: characters.data?.length ?? storyMeta.data?.summary.characters ?? 0,
-    looks: storyMeta.data?.summary.looks ?? 0,
-    scenes: scenePresets.data?.length ?? storyMeta.data?.summary.locations ?? 0,
-    props: propCards.data?.length ?? storyMeta.data?.summary.props ?? 0,
-    assets: assets.data?.length ?? 0,
-    knowledge: knowledge.data?.length ?? 0,
-    pending: pendingCount,
-  };
-  const contextApplied = hasParsed && contextCounts.characters + contextCounts.scenes + contextCounts.props > 0;
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
     id: string;
     title: string;
@@ -1711,14 +1702,7 @@ export function ProjectPage({ id }: { id: string }) {
                   )}
                   {mountedInline.storyboard && (
                     <div hidden={openInline !== "storyboard"}>
-                      <StoryContextStatus
-                        counts={contextCounts}
-                        applied={contextApplied}
-                        trainingAvailable={Boolean(trainingAvailability.data?.available)}
-                        compactStatus={workspace.data?.compactStatus}
-                        nextAction={workspace.data?.nextAction}
-                        showSources
-                      />
+                      <StoryContextStatusBlock projectId={id} showSources />
                       <SectionErrorBoundary title="創作台">
                         <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
                       </SectionErrorBoundary>
@@ -1797,15 +1781,7 @@ export function ProjectPage({ id }: { id: string }) {
           </SectionErrorBoundary>
           <StoryReadinessBar
             readiness={readiness}
-            contextStatus={
-              <StoryContextStatus
-                counts={contextCounts}
-                applied={contextApplied}
-                trainingAvailable={Boolean(trainingAvailability.data?.available)}
-                compactStatus={workspace.data?.compactStatus}
-                nextAction={workspace.data?.nextAction}
-              />
-            }
+            contextStatus={<StoryContextStatusBlock projectId={id} />}
             canEdit={canEdit}
             primaryLabel={
               readiness.kind === "empty"
@@ -2658,6 +2634,12 @@ export function ProjectPage({ id }: { id: string }) {
                 「AI 生成與問答時，優先該用誰」。加入的是引用，不複製任何原始檔案。 */}
             <div id="sec-project-context" data-fb="專案資料">
               <ProjectContextPanel projectId={id} canEdit={canEdit} />
+            </div>
+
+            {/* Team Canon 引用（PR-C）：團隊共用設定的 pin／升級／版本採用。
+                狀態全部來自 server（canon router＋workspace projection），頁面不自算。 */}
+            <div id="sec-team-canon">
+              <StoryCanonPanel projectId={id} canEdit={canEdit} />
             </div>
 
             {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」）。

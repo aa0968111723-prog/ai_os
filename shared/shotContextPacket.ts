@@ -5,6 +5,8 @@
  * edits mint a new fingerprint and mark only dependent shots stale.
  * Historical packets are never mutated.
  */
+import type { CharacterSlot } from "./characterSlots";
+import type { ScriptAuthorizedChange } from "./scriptChanges";
 
 export const SHOT_CONTEXT_PACKET_SCHEMA_VERSION = "shot-context-packet.v1";
 
@@ -65,7 +67,8 @@ export interface ShotContextPacketPayload {
   characters: ShotContextEntityRef[];
   looks: ShotContextEntityRef[];
   presets: ShotContextEntityRef[];
-  props: ShotContextEntityRef[];
+  /** 道具帶歸屬（§8/§9）：preflight 才能驗 wrong_prop_owner；額外欄位不進指紋 key */
+  props: Array<ShotContextEntityRef & { ownerKind?: string | null; ownerId?: string | null }>;
   assets: ShotContextEntityRef[];
   knowledge: ShotContextEntityRef[];
   dataRows: ShotContextEntityRef[];
@@ -90,6 +93,12 @@ export interface ShotContextPacketPayload {
     currentEnd?: ShotContinuityState | null;
   };
   references?: ShotReferenceBinding[];
+  /** Scene Package（§6）：這一鏡繼承的場景凍結；舊 packet 沒有此欄（指紋不受影響） */
+  scenePackage?: { packageId: string; fingerprint: string } | null;
+  /** Character Slots（§8）：多角色結構化表達；舊 packet 沒有此欄 */
+  characterSlots?: CharacterSlot[];
+  /** 腳本明確授權的狀態改變（§11）：換裝／淋濕／道具轉手等，不得報 drift */
+  scriptAuthorizedChanges?: ScriptAuthorizedChange[];
   locks: Array<{ mentionKey: string; entityKind: string; entityId: string }>;
   negativeConstraints: string[];
   worldStyle: string[];
@@ -136,6 +145,12 @@ export function canonicalShotContextMaterial(payload: ShotContextPacketPayload):
     negativeConstraints: payload.negativeConstraints,
     worldStyle: payload.worldStyle,
     provider: payload.provider,
+    // 新欄位（PR-B）條件性納入：舊 packet 沒有這些欄位時素材不變，歷史指紋穩定
+    ...(payload.scenePackage ? { scenePackage: payload.scenePackage } : {}),
+    ...(payload.characterSlots?.length ? { characterSlots: payload.characterSlots } : {}),
+    ...(payload.scriptAuthorizedChanges?.length
+      ? { scriptAuthorizedChanges: payload.scriptAuthorizedChanges }
+      : {}),
   });
 }
 

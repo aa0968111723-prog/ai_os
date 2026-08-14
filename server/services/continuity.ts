@@ -211,6 +211,33 @@ export async function resolveContinuityReferenceUrls(
   });
 }
 
+/**
+ * 依明確 asset id 清單解析簽名 URL（reference mixer 用）：
+ * 與 resolveContinuityReferenceUrls 同一套存活／同組／圖片驗證，保持輸入順序。
+ */
+export async function resolveAssetReferenceUrlsById(
+  assetIds: readonly string[],
+  groupId: string,
+): Promise<string[]> {
+  if (!assetIds.length) return [];
+  const rows = await db.select({
+    id: schema.assets.id,
+    url: schema.assets.url,
+    storagePath: schema.assets.storagePath,
+  }).from(schema.assets).where(and(
+    inArray(schema.assets.id, [...assetIds]),
+    eq(schema.assets.groupId, groupId),
+    eq(schema.assets.kind, "image"),
+    isNull(schema.assets.deletedAt),
+  ));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return assetIds.flatMap((id) => {
+    const row = byId.get(id);
+    if (!row) return [];
+    return [row.storagePath ? signAssetUrl(row.id) : row.url].filter(Boolean);
+  });
+}
+
 /** 執行中的鎖定工作流仍需要參考圖時，素材不得刪除或清除。 */
 export async function findRunningWorkflowUsingReferenceAsset(
   projectId: string,

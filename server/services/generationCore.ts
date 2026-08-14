@@ -222,6 +222,12 @@ export interface SubmitCoreInput {
   /** Frozen packet this generation must stay bound to. */
   shotContextPacketId?: string;
   /**
+   * §10：凍結 packet 的完整 payload（generationCommand 傳入）。
+   * 有它才會啟用 role-aware reference mixer 與 identity adapter 套用；
+   * 沒有它時走既有 continuitySnapshot 路徑，行為不變。
+   */
+  shotContextPacket?: import("../../shared/shotContextPacket").ShotContextPacketPayload;
+  /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
    */
@@ -280,6 +286,8 @@ export interface PreparedGenerationRequest {
   scenePointerAtSubmit: string | null;
   continuityReferences: ContinuityReferenceResult;
   continuityCoverage: ContinuityCoverage;
+  /** §10：role-aware reference mixer 的計畫與降級（null＝本次沒有 packet） */
+  referenceMix: import("../../shared/referenceMixer").ReferenceMixPlan | null;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
   /** 提示詞 token 實測（見 services/promptTokens）；預覽與警告共用同一份量測 */
   promptBudget: PromptBudgetReport;
@@ -468,6 +476,62 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
+
+  // §10：packet 存在時啟用 role-aware reference mixer——依 身份→造型→場景→道具→風格
+  // 重排參考順序、依模型真實能力截斷，降級全部明講（不得假稱一致性已鎖定）。
+  let referenceMix: PreparedGenerationRequest["referenceMix"] = null;
+  if (input.shotContextPacket?.references?.length) {
+    const { capabilityForModel } = await import("../../shared/providerCapabilities");
+    const { mixShotReferences } = await import("../../shared/referenceMixer");
+    const capability = capabilityForModel(model);
+    const activeAdapter = input.shotContextPacket.provider.activeAdapter ?? null;
+    referenceMix = mixShotReferences({
+      references: input.shotContextPacket.references,
+      capability,
+      primaryAssetId: effectiveSourceAssetId ?? null,
+      characterCount: input.shotContextPacket.characters.length,
+      activeAdapter,
+    });
+    if (
+      referenceMix.attachedField
+      && referenceMix.orderedAssetIds.length
+      && Array.isArray(providerInput[referenceMix.attachedField])
+    ) {
+      const { resolveAssetReferenceUrlsById } = await import("./continuity");
+      const orderedUrls = await resolveAssetReferenceUrlsById(referenceMix.orderedAssetIds, project.groupId);
+      if (orderedUrls.length) {
+        providerInput[referenceMix.attachedField] = [...new Set([
+          ...(sourceUrl ? [sourceUrl] : []),
+          ...orderedUrls,
+        ])].slice(0, capability.maxReferenceImages);
+      }
+    }
+    // Canon 訓練成果（identity adapter）：模型真的有 loras 槽、且來源槽沒被使用者佔用才套
+    if (
+      activeAdapter
+      && capability.identityAdapterSupport
+      && Array.isArray(providerInput.loras)
+    ) {
+      const loras = providerInput.loras as Array<{ path?: unknown }>;
+      if (!loras.length || loras.every((row) => !row?.path)) {
+        providerInput.loras = [{ path: activeAdapter, scale: 1 }];
+        warnings.push({
+          code: "identity_adapter_applied",
+          severity: "info",
+          title: "已套用角色一致性模型",
+          detail: "這次生成使用 Team Canon 訓練出的角色 adapter 維持身份一致。",
+        });
+      }
+    }
+    for (const downgrade of referenceMix.downgrades) {
+      warnings.push({
+        code: `reference_mix_${downgrade.code}`,
+        severity: "warning",
+        title: "一致性能力降級",
+        detail: downgrade.message,
+      });
+    }
+  }
   const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (effectivePropIds?.length ?? 0);
   if (selectedCards > 0 && !CARD_ANCHOR_CATEGORIES.has(model.category)) warnings.push({
     code: "cards_ignored",
@@ -604,6 +668,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     scenePointerAtSubmit,
     continuityReferences,
     continuityCoverage,
+    referenceMix,
     warnings,
   };
 }
