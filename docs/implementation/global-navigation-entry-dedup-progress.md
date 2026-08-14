@@ -107,7 +107,7 @@
 - PR 1：`e163cc33181ba9b0a13149f738608c856ee93f30`
 - PR 2：`1ef3fddf`
 - PR 3：`392401c5df3990f5cc3a9454715fc3a9714b9e27`
-- PR 4：`2a0ed044`＋後續 presence 測試修正
+- PR 4：`2dd07816`
 
 ## 分支與 PR 連結
 
@@ -117,7 +117,7 @@
 | 1 | `cursor/global-nav-01-contract-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/737 | `e163cc33`（已合併） |
 | 2 | `cursor/global-nav-02-today-planner-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/738 | `1ef3fddf` |
 | 3 | `cursor/global-nav-03-shell-dedup-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/739 | `392401c5` |
-| 4 | `cursor/global-nav-04-destination-consolidation-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/740 | 見 git log |
+| 4 | `cursor/global-nav-04-destination-consolidation-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/740 | `2dd07816` |
 
 ## 實際測試結果
 
