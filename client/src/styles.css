@@ -8741,6 +8741,56 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 /* ── ① 故事工作台 ── */
 .story-stage__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .story-stage__savestate { font-size: var(--fs-12); }
+
+/* ── Story-inline：單一故事主畫面 + 六個預設收合摘要 ── */
+.story-inline-legacy-anchor {
+  scroll-margin-top: inherit;
+  height: 0;
+  overflow: hidden;
+}
+.story-inline-layout { min-width: 0; }
+.story-readiness { margin: 10px 0 12px; padding: 12px 14px; }
+.story-readiness__row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.story-readiness__copy { flex: 1 1 160px; min-width: 0; }
+.story-readiness__label { display: block; font-size: var(--fs-15); }
+.story-readiness__detail { margin: 4px 0 0; }
+.story-readiness__cta { min-height: 44px; flex: 0 0 auto; }
+.story-readiness__latest { margin: 8px 0 0; }
+.story-inline-rail {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+}
+.story-inline-section {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 12px);
+  background: var(--card, var(--bg));
+  min-width: 0;
+  overflow: hidden;
+}
+.story-inline-section__toggle {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; min-height: 44px; padding: 10px 12px;
+  border: 0; background: transparent; color: inherit; text-align: left;
+  cursor: pointer;
+}
+.story-inline-section__title { font-weight: 650; font-size: var(--fs-14); }
+.story-inline-section__summary {
+  font-size: var(--fs-12); color: var(--muted, inherit); opacity: .82;
+  min-width: 0;
+}
+.story-inline-section__warn { margin-left: auto; }
+.story-inline-section__caret { margin-left: auto; flex-shrink: 0; transition: transform .15s ease; }
+.story-inline-section[data-open="true"] .story-inline-section__caret { transform: rotate(180deg); }
+.story-inline-section__anchor { height: 0; overflow: hidden; }
+.story-inline-section__body {
+  padding: 0 12px 12px; min-width: 0;
+  border-top: 1px solid var(--border-soft);
+}
+@media (max-width: 820px) {
+  .story-readiness__cta { width: 100%; }
+  .story-inline-section__toggle { min-height: 48px; }
+}
 .story-editor {
   width: 100%; margin-top: 10px; padding: 12px 14px;
   font-size: calc(var(--fs-15) * var(--script-font-scale, 1)); line-height: 1.75; resize: vertical;
