@@ -1,4 +1,4 @@
-# Aios 一致性與全功能閉環總計畫
+# Aios 腳本專案全分鏡一致性與全功能閉環總計畫
 
 狀態：可執行的 umbrella specification（本 PR 僅文件）  
 日期：2026-08-14  
@@ -22,7 +22,7 @@ Repository：`aa0968111723-prog/ai_os`
 
 最終產品驗收句：
 
-> Aios，把這個故事的第一幕做成可看的粗剪；人物與場景保持一致，30 點內，缺的聲音補上。完成後告訴我哪些地方仍需要我決定，以及哪些素材有商用風險。
+> Aios，把這個故事的第一幕做成可看的粗剪；同一批人物在山嵐、海灘、街頭與安老院的每個分鏡都要保持身份、造型、場景狀態、道具與畫風一致，30 點內，缺的聲音補上。完成後告訴我哪些地方仍需要我決定，以及哪些素材有商用風險。
 
 ## 2. 2026-08-14 的真實基線
 
@@ -89,11 +89,246 @@ Repository：`aa0968111723-prog/ai_os`
 - 預設只呈現「目前狀態、下一步、正在執行、需要決定」；模型、provider、fingerprint、lineage 與權利證據放 Advanced／details。
 - 使用者不必理解 LoRA、adapter、packet 或 provider ID 才能完成主流程。
 
-## 4. UI/UX × 資料庫 × 一致性整合核心
+## 4. 腳本專案一致性生產系統（全案核心）
+
+本計畫的最終目的不是做一個「一致性功能」，而是讓一份腳本在被拆成幾十個場景、分鏡與圖影音素材後，仍然像同一部作品。
+
+UI/UX、資料庫、Shot Context Packet、生成模型、素材庫與訓練都必須服務同一份 **Project Consistency Graph**：
+
+```text
+腳本／世界規則
+→ canonical 角色、造型、場景、道具、風格與聲音
+→ 每段劇情綁定 canonical IDs
+→ 每個 Shot 凍結完整 Context Packet
+→ 圖／影／聲音 provider 使用同一份約束
+→ 生成結果以相同約束評估
+→ Candidate 比較與人類 Adopt
+→ downstream continuity 與 affected-shot 更新
+→ Timeline／交付仍能追到同一份腳本與素材血緣
+```
+
+### 4.1 「一致」在腳本專案中的定義
+
+一致性不是每張圖長得一模一樣，而是該維持的部分穩定、腳本要求改變的部分可以明確改變：
+
+| 維度 | 必須保持 | 允許改變的條件 |
+| --- | --- | --- |
+| 人物身份 | 臉部特徵、年齡感、身形、髮型核心特徵、角色 ID | 腳本明確成長、受傷、變身或時間跳躍 |
+| 人物造型 | 當前 CharacterLook、服裝、配件、色彩、標誌性物件 | 換裝事件或新 Look 被明確採用 |
+| 場景身份 | location/preset、空間語彙、建築與地理特徵 | 劇情換場、場景狀態版本改變 |
+| 時空狀態 | 時段、天氣、季節、光線方向、前後鏡連續性 | 劇情註明時間經過或天候轉變 |
+| 道具 | 所有者、外觀、手持位置、損壞／使用狀態 | 劇情中的取得、交接、遺失、破損 |
+| 視覺風格 | 畫風、palette、質感、鏡頭語言、長寬比 | 使用者明確建立新的章節／序列風格 |
+| 動作連續 | 人物位置、朝向、進出畫、動作開始／結束狀態 | 鏡頭省略、轉場或腳本明確跳接 |
+| 聲音身份 | 角色聲線、語速基線、口音、環境聲世界 | 情緒表演、場景切換或劇情需求 |
+| 故事事實 | 人物關係、目標、已知資訊、世界規則 | 腳本 revision 經確認後更新 |
+
+系統必須同時避免兩種錯誤：
+
+- **漂移**：同一角色跨鏡變臉、服裝亂換、場景忽然換建築、道具憑空消失。
+- **過度鎖死**：腳本明明要求換裝、下雨、夜晚或情緒轉折，卻因一致性鎖定而無法改變。
+
+### 4.2 Project Consistency Graph
+
+不要把所有內容壓成一段超長 prompt。資料庫以 canonical nodes + versioned edges 表達整部作品：
+
+**Nodes**
+
+- Story / Act / Sequence / Scene / Shot
+- Character / CharacterLook / voice profile
+- ScenePreset / environment state
+- Prop / prop state / ownership
+- Asset / approved reference / candidate / current version
+- Style profile / palette / camera language / sound world
+- Knowledge / structured data / rights evidence
+- Active consistency model version（若有）
+
+**Edges**
+
+- Story mention → canonical entity binding
+- Character → active Look in a Scene/Shot
+- Character/Scene/Prop → approved reference assets
+- Shot → required characters/looks/scene/props/style
+- Shot → previous/next continuity state
+- Generation → exact frozen packet/model/provider/source assets
+- Candidate → parent/current/derived assets
+- Timeline item → selected Shot asset version
+- Training manifest/model → included approved assets and rights decision
+
+Graph 以既有 tables 與 additive mapping/packet structures 實作；不得另建一套脫離現有 records 的「AI 記憶資料庫」。
+
+### 4.3 腳本解析不是只抽文字，而是建立可確認的綁定
+
+腳本進站後必須依序：
+
+1. 切分 Act / Sequence / Scene / Shot intent，保留原始 script revision 與文字範圍。
+2. 抽取人物、造型提示、場景、時段、天氣、道具、動作、情緒、對白、聲音與畫風要求。
+3. 將名稱／別名／代稱解析到 project canonical IDs。
+4. 高信心且唯一的結果可建立 proposal；模糊或衝突項目顯示「需要確認」。
+5. 使用者確認／鎖定後，重跑 parse 不得覆蓋 locked binding。
+6. 每個 Scene/Shot 都能回溯到使用的 script revision、text range 與 binding decision。
+
+原始名稱不能直接成為生成唯一依據。例如同名角色、同一角色多套服裝、同一地點不同時段，都必須先解析成明確 ID/version/state。
+
+### 4.4 每個 Shot 的完整 Context Packet
+
+每個分鏡在生成前凍結不可變 packet。它不是只有 prompt，而是該鏡頭的完整製作合約：
+
+```text
+ShotContextPacket
+├─ projectId / storyRevision / sceneId / shotId / fingerprint
+├─ narrative: script range, goal, action, emotion, dialogue
+├─ characters[]: canonical ID, Look ID, identity refs, pose/state
+├─ scene: preset ID, environment state, time, weather, lighting
+├─ props[]: canonical ID, owner, state, required refs
+├─ style: project/sequence style, palette, aspect ratio, camera rules
+├─ continuity: previous end-state, this start/end-state, next constraints
+├─ sound: voice IDs, ambience, music/SFX intent
+├─ references[]: asset ID, role, priority, crop/region, rights state
+├─ modelPolicy: required capabilities, active adapter, fallback limits
+├─ negativeConstraints: forbidden drift/conflicts
+└─ rights/cost/approval snapshot
+```
+
+Packet 必須在扣點與 provider submit 前同步 freeze。等待核准、排隊、重試與 callback 都使用同一個 packet ID；若使用者修改 canonical 資料，舊 packet 仍代表當時的歷史，新狀態只會使相依 Shot stale。
+
+### 4.5 混合人物、場景與素材的規則
+
+同一鏡通常會混合人物定裝圖、場景照片、道具圖、風格圖、前一鏡畫面與構圖參考。系統不能把全部圖片無差別塞給模型：
+
+| Reference role | 只負責 | 不得覆蓋 |
+| --- | --- | --- |
+| `identity` | 臉、身形、角色辨識 | 服裝、場景、構圖 |
+| `look` | 當鏡服裝、配件、髮妝狀態 | 角色身份、場景 |
+| `scene` | 空間、建築、地理、環境狀態 | 人物身份、服裝 |
+| `prop` | 道具外觀與狀態 | 人物或場景風格 |
+| `style` | palette、媒材、光影、整體畫風 | canonical identity/scene facts |
+| `composition` | 鏡位、景別、位置關係 | 角色與物件身份 |
+| `continuity` | 前一鏡可見狀態 | 本鏡腳本明確要求的變更 |
+
+必要規則：
+
+- 每份 reference 有 canonical owner、role、priority、approved/current、quality 與 rights state。
+- identity 與 Look 分開；換衣服不能順便換臉，換表情不能順便換服裝。
+- 兩份素材若在人數、服裝、場景或風格上衝突，preflight 必須提示或阻擋，不能交給模型隨機平均。
+- provider 必須真的支援需要的 reference input／adapter 能力；不支援時不得假裝已鎖定。
+- Prompt compiler 依 provider capability 轉換同一 packet，但不能重新發明另一份上下文。
+- 任何自動裁切、去背、合成或外部編輯產物都保留 parent asset lineage。
+
+### 4.6 圖片、影片與聲音共享同一個世界
+
+一致性不能只停在分鏡圖：
+
+- **圖片生成**：使用人物 identity/Look、ScenePreset、Prop、Style 與 continuity refs。
+- **影片生成**：必須以被採用的 image/current version 或明確 reference 為 parent，保留人物、場景與動作起迄；不能拿未採用 candidate 偷生成影片。
+- **配音**：對白綁定 character voice ID、語言、聲線與情緒，不因換 provider 漂移成另一個人。
+- **環境音／音效／配樂**：綁 Scene/Sequence sound world，跨鏡延續 span，不每鏡重新隨機生成。
+- **Timeline／粗剪**：只使用各 Shot 的 selected current versions；任何 parent 改變要標記 downstream stale。
+- **交付**：檢查缺漏、stale、未採用 candidate、未核准、rights blocker 與聲畫不同步。
+
+### 4.7 生成後評估與採用
+
+每個 output 必須對原 packet 評估，而不是只判斷「圖片好不好看」：
+
+- identity match
+- Look/costume match
+- scene/location/state match
+- prop presence/ownership/state
+- style/palette/camera match
+- action/composition intent
+- previous/next continuity
+- dialogue/voice/audio match（適用時）
+- required reference coverage
+- safety/rights/technical validity
+
+必要人物、Look、ScenePreset 或 Prop 缺失是 hard issue，不能被其他高分平均掉。評估輸出 findings、dimension scores 與 repair suggestions，但即使全部通過也只產生 Candidate；只有使用者明確 Adopt 才改 current。
+
+### 4.8 跨鏡頭 continuity state
+
+每個 Shot 除了靜態設定，還要保存 start/end state：
+
+- 人物位置、朝向、姿勢、表情、傷勢、濕／乾、髒污程度
+- 目前 CharacterLook 與配件
+- 手上／場內道具、所有者與狀態
+- 場景時段、天氣、光向、群眾與可見背景
+- 動作在鏡頭開始與結束時的階段
+- dialogue/narration/music/ambience 的時間連續
+
+下一鏡繼承前一鏡 end state，再套用腳本明確 delta。若 Scene 切換、蒙太奇或時間跳躍，必須用 transition type 解釋哪些狀態不需延續，不能一律硬接或一律重置。
+
+### 4.9 變更後只更新受影響內容
+
+依賴圖決定 stale 範圍：
+
+- 改 Character identity → 該角色出現的 image/video Shots。
+- 改一個 Look → 只影響使用該 Look 的 Shots。
+- 改 ScenePreset/time/weather → 只影響該場景與依賴它的 downstream media。
+- 改 Prop state → 只影響需要該狀態的 Shot range。
+- 改 Style profile → 影響其 scope 內尚未鎖定或經使用者確認要更新的 Shots。
+- 改旁白文字 → voice/timing/captions，不能重生人物與場景。
+- 切換 current image → 以其他 parent 生成的 video/timeline item 變 stale。
+
+UI 先告知「影響 6 鏡、預估成本、哪些已核准」，由使用者選擇全部或部分更新。系統生成新 Candidates，保留舊 current 與所有版本。
+
+### 4.10 訓練的角色：加強，不是取代資料治理
+
+一致性訓練只有在以下條件成立時才出現：
+
+- 足夠多已核准且身份一致的角色／專案素材。
+- dataset rights 與 training consent 可驗證。
+- 資料已去除錯角、錯 Look、低品質、重複與衝突樣本。
+- provider 真的配置，且使用者明確允許付費訓練。
+
+訓練產生 candidate adapter/model version；評估通過仍需 Promote。即使有 adapter，Shot 仍需要 canonical IDs、Look、ScenePreset、Prop、packet、reference roles 與 explicit Adopt。訓練不能掩蓋錯誤綁定或混亂素材。
+
+### 4.11 使用者實際感受到的幫助
+
+預設 UX 不顯示 graph、fingerprint 或 adapter 細節，而是：
+
+- 寫完腳本後顯示「已辨識 7 位人物、5 個場景、3 項需要確認」。
+- 生成前顯示「人物與場景已套用」，必要時只問缺少的 Look／場景狀態。
+- 分鏡上顯示「一致」「需確認」「2 項漂移」「受角色換裝影響」。
+- 點問題直接看到受影響 Shots、原因、reference 對照與「只重做這些鏡頭」。
+- 每次生成後先看 Candidates 的人物／場景／道具差異，再採用。
+- Assistant 可回答「為什麼第 8 鏡人物不一致？」並從 packet、references、evaluation 與 lineage 給出可執行修復。
+- 交付前回答「哪些鏡頭仍不一致、缺素材或有商用風險」。
+
+使用者只需要管理故事與必要決定，深層資料綁定、傳遞、評估與影響計算由系統完成。
+
+### 4.12 本腳本專案的端到端驗收情境
+
+以同一冒險團隊依序經過山嵐、淺水灣海灘、街頭、仁濟安老院與音樂挑戰為例：
+
+1. 團隊每位角色先建立 canonical identity、目前 Look、聲線與 approved references。
+2. 山嵐、淺水灣、街頭、安老院分別建立 ScenePreset；同地點的早晚／晴雨是 environment state，不複製成無關場景。
+3. 藏寶圖、愛心、清潔工具、樂器等建立 Prop 與劇情狀態／所有權。
+4. Script parser 將每次出場、換裝、地點、道具交接、情緒與對白綁到 IDs。
+5. 每個 Shot packet 繼承團隊畫風與前一鏡 continuity，只套用本鏡的鏡位、動作與劇情 delta。
+6. 團體鏡、雙人鏡、單人特寫即使混用不同人物 reference，也必須維持各自身份與 Look，不互相污染。
+7. 場景從海灘切到街頭時可以換環境，但人物不能變臉；下雨時可變濕，下一鏡仍要延續濕衣狀態，除非腳本跳時。
+8. 某位角色定裝更新後，系統只標記該角色使用舊 Look 的 Shots，不重做沒有他的鏡頭。
+9. 多模型產生的圖、影片與聲音都記錄相同 packet/lineage；能力不足的模型不得被選為需要強 reference lock 的任務。
+10. 最終 Storyboard、Timeline 與 Delivery 能逐鏡顯示使用的人物、Look、場景、道具、current asset、consistency findings 與修復狀態。
+
+通過標準：不看 prompt，只看整套分鏡與粗剪，觀眾仍能辨認這是同一批人物在同一個世界中完成連續冒險，而不是每一鏡重新抽卡。
+
+### 4.13 腳本一致性實作切片
+
+- **SCRIPT-C0：Consistency Graph projection** — 盤點 canonical nodes/edges，建立 project/scene/shot dependency projection，不新增第二真相。
+- **SCRIPT-C1：Script binding closure** — script range → canonical IDs → proposal/confirm/lock → Shot materialization。
+- **SCRIPT-C2：Full Shot Packet compiler** — 人物/Look/場景/道具/style/continuity/sound/reference roles 的 deterministic fingerprint。
+- **SCRIPT-C3：Provider-aware reference mixing** — capability gate、role/priority、conflict preflight、同 packet 多 provider compiler。
+- **SCRIPT-C4：Cross-shot continuity** — start/end state、transition delta、sequence propagation 與 targeted stale。
+- **SCRIPT-C5：Evaluation and repair loop** — hard issues、Candidate compare、explicit Adopt、affected-shot regeneration。
+- **SCRIPT-C6：Image → Video/Audio → Timeline closure** — parent lineage、current-only assembly、downstream stale 與 delivery readiness。
+
+依賴：FC-00 → SCRIPT-C0 → C1 → C2 → C3/C4 → C5 → C6。UI-DB-C0 應與 SCRIPT-C0 共用 projection contract，但各 PR 仍保持單一責任與可回退。
+
+## 5. UI/UX × 資料庫 × 一致性整合核心
 
 這三層不得分開實作。UI 不能自己猜完成度；資料庫不能只有資料卻沒有可操作的狀態；一致性引擎不能只產生分數卻無法在創作流程中被看見、修正與恢復。
 
-### 4.1 唯一閉環
+### 5.1 唯一閉環
 
 ```text
 既有 project-scoped records
@@ -114,7 +349,7 @@ Repository：`aa0968111723-prog/ai_os`
 - 生成 callback 只更新畫面，不更新 persisted candidate、lineage、evaluation 與 receipt。
 - 為了 dashboard 再建一組可變的統計真相表；優先使用可重算 projection，必要 cache 必須可失效與重建。
 
-### 4.2 資料庫真相與讀取投影
+### 5.2 資料庫真相與讀取投影
 
 沿用現有 `projects`、故事/Yjs、characters、characterLooks、scenePresets、props、assets、knowledge、data_files/data_rows、scenes、generations、sceneVersions、timeline、agent/workflow、points/quota、#743 creative context 與 #748–#750 packet/training 結構。
 
@@ -142,7 +377,7 @@ Repository：`aa0968111723-prog/ai_os`
 - 支援 reload、deep link、mobile sheet 與 reconnect；selection 可以是 view state，但 active target/run 必須 durable。
 - 回傳穩定 finding/action codes；自然語言由共用 mapping 產生，避免每頁不同說法。
 
-### 4.3 三種完成度必須分開
+### 5.3 三種完成度必須分開
 
 首屏不得再用一個百分比掩蓋不同問題：
 
@@ -157,7 +392,7 @@ Repository：`aa0968111723-prog/ai_os`
 - `X 項待確認`：binding proposal、低信心評估或 rights needs_review。
 - `已阻擋`：缺必要場景/reference、權利 blocked、preflight fail 或 project state 禁止。
 
-### 4.4 UI 狀態與資料動作必須一對一
+### 5.4 UI 狀態與資料動作必須一對一
 
 | 使用者看到的狀態 | 資料庫／引擎真相 | 唯一主要動作 |
 | --- | --- | --- |
@@ -177,7 +412,7 @@ Repository：`aa0968111723-prog/ai_os`
 
 任何狀態都不得只有提示文字；必須有可達的 action，或明確說明誰有權限、缺少哪個外部依賴。
 
-### 4.5 專案頁的簡單資訊架構
+### 5.5 專案頁的簡單資訊架構
 
 維持 #742 的單一 Story workspace 與唯一 reveal slot：
 
@@ -188,7 +423,7 @@ Repository：`aa0968111723-prog/ai_os`
 5. **結果／問題優先**：生成後先顯示 current、candidates、affected shots 與可修動作，再展開 trace/model/packet。
 6. **Assistant scope**：永遠顯示目前 project、scene/shot selection、budget policy；執行後以 read-back 更新同一畫面。
 
-### 4.6 一致性變更的 UI 行為
+### 5.6 一致性變更的 UI 行為
 
 以「修改角色 Look」為代表流程：
 
@@ -204,7 +439,7 @@ Repository：`aa0968111723-prog/ai_os`
 
 場景、道具、reference、故事 binding、active adapter、rights decision 的變更都使用同一 impact → review → regenerate candidate → adopt 模式。
 
-### 4.7 資料匯入到生成的可見生命週期
+### 5.7 資料匯入到生成的可見生命週期
 
 外部連接成功不等於 AI 可使用。UI 與資料庫必須共同呈現：
 
@@ -223,7 +458,7 @@ Repository：`aa0968111723-prog/ai_os`
 - Prompt 只取與當前 Story/Shot 有關、已授權且 AI-readable 的片段；UI 可展開 citation/source。
 - 刪除、替換或失效的來源要計算受影響 bindings/packets，不能只把卡片從畫面移除。
 
-### 4.8 整合實作切片
+### 5.8 整合實作切片
 
 為避免又變成大型 UI PR，將三層整合切成以下可驗證的小 PR：
 
@@ -236,7 +471,7 @@ Repository：`aa0968111723-prog/ai_os`
 
 依賴：FC-00 完成後才能進 UI-DB-C0；C0 → C1 → C2；C3/C4 可在 C2 後分開開 Draft，C5 最後收斂。不得直接在 #752 docs branch 實作 runtime。
 
-### 4.9 成對驗收證據
+### 5.9 成對驗收證據
 
 每個 UI 行為都必須有對應 DB 證據：
 
@@ -250,7 +485,7 @@ UI-DB 整合的完成標準不是「畫面做好」，而是：
 
 > 畫面上的每個狀態都能追到資料庫；每個動作都能追到 command、transaction、event 與 receipt；重新整理後仍一致。
 
-## 5. 完整能力閉環矩陣
+## 6. 完整能力閉環矩陣
 
 每一列都必須同時具備：入口可達、後端真實執行、persisted read-back、權限／成本／核准一致、失敗可恢復、手機可用、可驗證證據。只有元件或 router 存在不算完成。
 
@@ -275,7 +510,7 @@ UI-DB 整合的完成標準不是「畫面做好」，而是：
 | Admin／可觀測性 | Admin、audit、aiTrace、receipts、health | readiness 不假綠、worker lease、bounded retention、隱私化 log、可追蹤失敗 |
 | 商用權利 | 新增於既有 Asset/Generation/Training/Export 邊界 | evidence、risk findings、policy decision、override reason、audit、expiry/recheck |
 
-## 6. 執行 PR 序列
+## 7. 執行 PR 序列
 
 後續不得做成一支 mega runtime PR。每支 implementation PR 只處理一個主要邊界，可獨立回退；全部預設 Draft、禁止 auto-merge 與 force-push。
 
@@ -391,7 +626,7 @@ Exit gate：failure injection、soak、restart、multi-replica、migration dry-r
 
 Exit gate：能力清單無未分類缺口；所有 P0/P1 關閉；核心 golden flows 有 production-like 證據；剩餘外部阻擋有明確 owner 與解除條件。
 
-## 7. Golden flows
+## 8. Golden flows
 
 至少自動化以下流程；每個流程都要檢查資料庫 read-back、成本、權限、lineage、reload 與手機結果。
 
@@ -418,7 +653,7 @@ Exit gate：能力清單無未分類缺口；所有 P0/P1 關閉；核心 golden
 21. viewer/paused/archived/cross-tenant → 所有入口一致拒絕且不扣點。
 22. assistant SOURCE_PICKER cancel/expire/resume → 不卡死、不重複提交。
 
-## 8. 測試與證據
+## 9. 測試與證據
 
 ### 每支 PR 必跑
 
@@ -457,7 +692,7 @@ npm run audit:high
 - baseline failure 要在同一 base SHA 重現；introduced failure 必須修復。
 - 測試必須有 mutation proof：移除關鍵 guard 時至少一項會紅。
 
-## 9. PR 治理與不衝突規則
+## 10. PR 治理與不衝突規則
 
 1. 開始前讀 default、所有 applicable `AGENTS.md`、本文件、#726、#746 與 #748–#751 最終 diff/review。
 2. 先 `git status -sb`、`git remote -v`、`git fetch --all --prune`；dirty worktree 使用獨立 worktree，不 stash/reset 使用者工作。
@@ -468,7 +703,7 @@ npm run audit:high
 7. 不 auto-merge、不 force-push、不以關閉 review thread 取代修正與測試。
 8. 不在沒有使用者明確授權時呼叫付費 generation/training provider。
 
-## 10. 明確非目標
+## 11. 明確非目標
 
 - 不重寫整站或更換 React/Express/tRPC/Drizzle/PostgreSQL 架構。
 - 不建立另一套 Agent framework、LangGraph/CrewAI runtime 或第二資料庫。
@@ -478,7 +713,7 @@ npm run audit:high
 - 不宣稱素材百分之百不侵權，也不產生法院判決式結論。
 - 不把未連接、未授權或不存在的外部 API/MCP 顯示成可用。
 
-## 11. 全案完成定義
+## 12. 全案完成定義
 
 只有同時符合以下條件，才可稱「一致性與所有功能已補齊」：
 
@@ -492,6 +727,6 @@ npm run audit:high
 - live deployment SHA、schema、worker、provider readiness 與功能清單一致。
 - 交付報告誠實區分 mock/local/live/external-blocked，沒有未分類 P0/P1。
 
-## 12. 給實作代理的最短指令
+## 13. 給實作代理的最短指令
 
-> 執行本 PR 的 Aios 一致性與全功能閉環總計畫。先完成 FC-00，從最新 default 建新的 integration branch，逐提交收斂 #748–#751，處理 #749 全部 unresolved review threads，並逐檔 reconciliation #726；不要盲合。每支後續 PR 只做一個 FC 階段、保持 Draft、不 auto-merge、不 force-push、不建立第二套真相、不呼叫未授權付費 provider。持續做到該階段 Exit gate，附真 PostgreSQL、browser、mobile 與 failure-injection 證據；環境或外部服務無法驗證時誠實標示 blocker。
+> 執行本 PR 的 Aios 腳本專案全分鏡一致性與全功能閉環總計畫。先完成 FC-00，從最新 default 建新的 integration branch，逐提交收斂 #748–#751，處理 #749 全部 unresolved review threads，並逐檔 reconciliation #726；不要盲合。FC-00 後以 SCRIPT-C0→C6 為產品主線，讓腳本中的人物、Look、場景、道具、畫風、聲音與 continuity 經同一 Project Consistency Graph、Shot Context Packet、reference mixing、evaluation、Candidate/Adopt 與 downstream lineage 貫穿所有分鏡、圖片、影片、聲音、Timeline 和交付；UI-DB-C0～C5 只負責把這份真相簡單呈現與操作。每支後續 PR 保持 Draft、不 auto-merge、不 force-push、不建立第二套真相、不呼叫未授權付費 provider，持續做到該階段 Exit gate，附真 PostgreSQL、browser、mobile 與 failure-injection 證據；環境或外部服務無法驗證時誠實標示 blocker。
