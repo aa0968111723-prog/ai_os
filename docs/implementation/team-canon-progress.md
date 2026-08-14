@@ -62,6 +62,47 @@ Base: `claude/healing-migration-ai-os-erewp2` @ `26bc101a`（#754 merge、含 #7
 - prop 的 ownerKind/ownerId 跨專案映射（owner 也要先 pin）——PR-B Character/Prop slots 處理
 - style／voice／sound_world Canon 無本地卡，等 PR-B 由 packet 直接消費
 
+## PR-B — Canon-to-Shot composition
+
+### 落地內容
+
+- [x] Migration `0075_scene_packages_continuity`：`scene_packages`／`scene_package_heads`／
+      `shot_continuity_states`（全 additive、insert-only／head 模式）
+- [x] `shared/scenePackage.ts`＋`server/services/scenePackages.ts`：場景脈絡凍結
+      （地點卡＋Scene Canon pin＋environment＋活動角色/造型/道具＋style＋soundWorld＋
+      cameraLanguage＋entryContinuity）；`generateStoryboard` 先凍 package 再凍 shot packet
+- [x] `shared/characterSlots.ts`：slot 結構＋歸屬驗證（duplicate_look_binding／
+      look_without_character／wrong_prop_owner）；packet.characterSlots
+- [x] `shared/providerCapabilities.ts`：capability matrix 由 model.input 實際輸出推導
+      （probe image_urls／reference_image_urls／loras），multiCharacterIdentity 誠實 false
+- [x] `shared/referenceMixer.ts`：role/priority 排序＋能力截斷＋降級明碼；
+      `generationCore.prepareGenerationRequest` 在 packet 存在時套用（含
+      reference_image_urls 欄位支援與 Canon adapter loras 套用）
+- [x] `shared/scriptChanges.ts`：授權改變解析（保守）＋轉場推導＋
+      `classifyCostumeChange`＋`deriveShotEndState`
+- [x] `consistencyAdopt.adoptGenerationCurrent`：Adopt 時抽 end-state →
+      `shot_continuity_states`（upsert）；packet build 讀前一鏡 end-state 繼承 currentStart
+- [x] `consistencyEval`：preflight 增 wrong_prop_owner；eval 增 continuity_costume_break
+      （UNINTENTIONAL_DRIFT vs SCRIPT_AUTHORIZED_CHANGE）
+- [x] Video lineage（§13）：generationCommand 對 image-to-video＋綁分鏡強制
+      「current 畫面或明確 parent」；沒有 current → BAD_REQUEST
+- [x] packet provider 標記：supportsIdentityRef（能力）＋activeAdapter
+      （pinned Canon production 版本的 adapterRef，generationAllowed 才算）
+
+### 指紋相容性
+
+- 新欄位（scenePackage／characterSlots／scriptAuthorizedChanges／previousEnd）
+  條件性進 canonical material：舊 payload 素材 bit-for-bit 不變（shotContextPacket.test 鎖住）。
+- 有角色的鏡在下次 refresh 會出現一次性 stale 波（packet 真的長出 slots）——
+  semantic upgrade，屬預期。
+
+### 已知限制（誠實）
+
+- deriveShotEndState 的道具轉手不改 heldProp（無法可靠對到目標角色，留白）
+- style／voice／sound_world Canon 尚未進 packet 消費（PR-C/PR-D 也不做假接線，
+  等真的有 style adapter 模型再接）
+- mixer 只在「模型 payload 已有參考欄位」時重排（與既有 duck-typing 同一保守原則）
+
 ## Tests（PR-A 當下）
 
 | Check | Class |
