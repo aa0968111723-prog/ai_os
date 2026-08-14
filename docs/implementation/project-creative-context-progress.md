@@ -5,7 +5,17 @@ PR #742 merge SHA: `cdde3883993d1b9b04e71e8c0ed2f213866f9368`
 Base branch: `claude/healing-migration-ai-os-erewp2` @ `cdde388`  
 This PR: https://github.com/aa0968111723-prog/ai_os/pull/743  
 Head: `agent/project-creative-context-plan`  
-Last successful commit: `881d87c`
+Last successful commit: `881d87c` (Phase 1)
+
+Stacked Draft PRs:
+
+| Phase | PR | Branch | SHA |
+|---|---|---|---|
+| 1 | #743 | `agent/project-creative-context-plan` | `6fd5d4b` |
+| 2 | #748 | `agent/project-context-02-shot-packets` | `c900c3f` |
+| 3 | #749 | `agent/project-context-03-generation-wiring` | `bf77084` |
+| 4 | #750 | `agent/project-context-04-consistency-training` | `2546f7a` |
+| 5 | #751 | `agent/project-context-05-simple-ux` | `6b46b65` |
 
 ## Current phase
 
