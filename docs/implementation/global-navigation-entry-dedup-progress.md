@@ -21,7 +21,7 @@
 
 ## 現在階段
 
-**PR 1 已改完、準備 commit／push／開 Draft PR；全庫檢查進行中**
+**PR 2 實作中：今天頁與排程整合（PR 1 已開 #737 且全庫檢查通過）**
 
 ## 四個實作 PR checklist
 
@@ -48,14 +48,17 @@
 
 ### PR 2 — 今天頁與排程整合
 
-- 分支：`cursor/global-nav-02-today-planner-32e8`（以 PR 1 head 為 base）
-- [ ] 移除 daily-quick-links 重複的安排今天／整理資料／聯絡夥伴
-- [ ] 單一「下一步」主操作
-- [ ] 今日安排接入既有 Schedule 資料（不建第二套 query）
-- [ ] 合併重複建立專案 CTA
-- [ ] `/planner` 完整清單／月曆／Google Calendar／ICS 仍可用
-- [ ] 保留 #610 Launchpad 專案卡 a11y（覆蓋連結與按鈕解耦）
-- [ ] tests / commit / push / Draft PR
+- 分支：`cursor/global-nav-02-today-planner-32e8`（以 PR 1 head `e163cc33` 為 base）
+- PR：尚未建立
+- [x] 移除 daily-quick-links 重複的安排今天／整理資料／聯絡夥伴
+- [x] 單一「下一步」主操作
+- [x] 今日安排接入既有 `schedule.list`（不建第二套 query）
+- [x] 合併重複建立專案 CTA
+- [x] `/planner` 完整清單／月曆／Google Calendar／ICS 仍可用
+- [x] 套用 #610 Launchpad 專案卡 a11y（覆蓋連結與按鈕解耦）
+- [x] targeted tests：Launchpad today / cover / create / PeerBadge 25 passed
+- [ ] commit / push / Draft PR
+- [ ] 全庫 typecheck / test / test:client / build
 
 ### PR 3 — More、Account、Header 與訊息去重
 
@@ -97,14 +100,15 @@
 
 ## 最後成功 commit SHA
 
-（尚無本任務 commit）
+- PR 1：`e163cc33181ba9b0a13149f738608c856ee93f30`
+- PR 2：尚未 commit
 
 ## 分支與 PR 連結
 
 | PR | 分支 | URL | HEAD SHA |
 | --- | --- | --- | --- |
 | 規格 #732 | `agent/global-navigation-entry-dedup-plan` | https://github.com/aa0968111723-prog/ai_os/pull/732 | 已合併 `4e3a782a` |
-| 1 | `cursor/global-nav-01-contract-32e8` | 尚未建立 | — |
+| 1 | `cursor/global-nav-01-contract-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/737 | `e163cc33` |
 | 2 | — | — | — |
 | 3 | — | — | — |
 | 4 | — | — | — |
@@ -133,10 +137,10 @@
 
 ## 下一個精確操作
 
-1. commit / push PR 1
-2. 開 Draft PR（base = default）
-3. 跑 typecheck / boundaries / ui-primitives / hooks / test / test:client / build
-4. 從 PR 1 head 開 PR 2 分支，開始今天頁與排程整合
+1. commit / push PR 2
+2. 開 Draft PR 2（base = PR 1 分支）
+3. 跑 PR 2 全庫檢查
+4. 從 PR 2 head 開 PR 3：More／Account／Header／訊息去重
 
 ## 真正需要人工決策的 blocker
 

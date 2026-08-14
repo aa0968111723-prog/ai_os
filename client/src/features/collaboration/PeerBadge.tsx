@@ -150,10 +150,12 @@ export function PeerBadge({
             >
               {following ? "停止跟隨" : "跟隨畫面"}
             </Button>
-            <Link href={`/chat/${peer.userId}`}>
-              <Button size="sm" variant="ghost" style={{ minHeight: TAP }}>
-                <Icon name="MessageCircle" size={14} /> 傳訊息
-              </Button>
+            <Link
+              href={`/chat/${peer.userId}`}
+              className="btn-ghost btn-sm"
+              style={{ minHeight: TAP, display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Icon name="MessageCircle" size={14} /> 傳訊息
             </Link>
           </div>
         </div>

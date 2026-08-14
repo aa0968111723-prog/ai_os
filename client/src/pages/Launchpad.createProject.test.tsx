@@ -106,7 +106,7 @@ function seed(opts: { role?: "leader" | "member"; options?: unknown[] } = {}) {
 
 async function openCreateForm() {
   const view = render(<Launchpad groupId={GROUP} />);
-  // 頁面上有多顆「建立新專案」（招呼列與空狀態）；固定用招呼列那顆開表單
+  // 全頁只留一顆建立入口（專案列表區）；下一步卡在空狀態才會自己開表單
   const trigger = view.container.querySelector(".daily-new-project") as HTMLButtonElement;
   await userEvent.click(trigger);
 }
