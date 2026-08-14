@@ -1,5 +1,7 @@
 # AIOS Project Workspace — Story-first Deep Refactor Brief
 
+> **2026-08-14 方向更新：** 最新專案頁資訊架構請以 [PROJECT_WORKSPACE_STORY_INLINE_GENERATION_PLAN.md](./PROJECT_WORKSPACE_STORY_INLINE_GENERATION_PLAN.md) 為準。新方向取消「故事／分鏡／製作／成片」四個主要頁籤，改為故事單一主畫面、所有能力按需收合，以及先生成成果再局部細修。本文仍保留作為資料模型、安全、相容性與工程約束的技術基線；與新文件衝突的導航、工作區拆分與使用者流程段落已被取代。
+
 > Status: canonical implementation brief for the Project Page refactor.
 > Target repo: `aa0968111723-prog/ai_os`
 > Main route contract: keep `/p/:id` compatible.
