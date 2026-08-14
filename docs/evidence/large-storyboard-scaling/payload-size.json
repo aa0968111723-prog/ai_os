@@ -1,0 +1,32 @@
+{
+  "afterCompactBatch": [
+    {
+      "shotCount": 20,
+      "afterDbQueries": 5,
+      "payloadBytes": 2482,
+      "uniqueAssets": 1,
+      "beforeDbQueries": 100
+    },
+    {
+      "shotCount": 100,
+      "afterDbQueries": 5,
+      "payloadBytes": 12002,
+      "uniqueAssets": 1,
+      "beforeDbQueries": 500
+    },
+    {
+      "shotCount": 200,
+      "afterDbQueries": 5,
+      "payloadBytes": 24002,
+      "uniqueAssets": 1,
+      "beforeDbQueries": 1000
+    },
+    {
+      "shotCount": 300,
+      "afterDbQueries": 5,
+      "payloadBytes": 36002,
+      "uniqueAssets": 1,
+      "beforeDbQueries": 1500
+    }
+  ]
+}

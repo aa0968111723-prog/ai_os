@@ -20,6 +20,7 @@ vi.mock("../../api", () => ({
       scenes: { listByProject: { invalidate } },
       externalIntake: { inbox: { invalidate } },
       projects: { assets: { invalidate } },
+      story: { shotAssetSuggestionsBatch: { invalidate } },
     }),
     scenes: {
       update: { useMutation: () => ({ mutate: mutateUpdate, isPending: false, error: null }) },
@@ -33,9 +34,6 @@ vi.mock("../../api", () => ({
     },
     externalIntake: {
       confirm: { useMutation: () => ({ mutate: mutateConfirm, isPending: false, error: null }) },
-    },
-    story: {
-      shotAssetSuggestions: { useQuery: () => ({ data: { items: [] } }) },
     },
     projects: {
       assets: {
@@ -178,6 +176,19 @@ describe("ShotCard progressive disclosure", () => {
     const option = await screen.findByRole("option", { name: /參考圖 A/ });
     await user.click(option);
     expect(mutateSetVisual).toHaveBeenCalledWith({ sceneId: "shot-1", assetId: "a1" });
+  });
+
+  it("專業模式用注入的 assetHints 畫推薦 chips，不自行查詢", () => {
+    render(
+      <ShotCard
+        {...defaultProps}
+        mode="pro"
+        shot={baseShot()}
+        assetHints={[{ id: "hint-1", title: "安倢定裝", kind: "image", url: "/a.jpg", matched: ["安倢"] }]}
+      />,
+    );
+    expect(screen.getByText("專案素材裡名稱或標籤對得上的：")).toBeInTheDocument();
+    expect(screen.getByText("安倢定裝")).toBeInTheDocument();
   });
 
   it("文案區分帶入我的素材 vs 外部成果", async () => {
