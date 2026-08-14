@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { assistantInteractionRequestSchema } from "./assistantInteractions";
+import {
+  assistantInteractionRequestSchema,
+  expireAssistantInteraction,
+  isAssistantInteractionExpired,
+} from "./assistantInteractions";
 
 /**
  * Assistant Brain v2 semantic contract.
@@ -228,4 +232,22 @@ export type AssistantEvidenceScope =
 
 export function canClaimRemoteSourceFact(scope: AssistantEvidenceScope): boolean {
   return scope === "REMOTE_SOURCE";
+}
+
+/**
+ * Conversation reopen must not keep a timed-out SOURCE_PICKER in waiting_user_input.
+ * Expired handoffs become ready so the next turn can start cleanly (#664).
+ */
+export function expireStaleActiveGoal(
+  goal: AssistantActiveGoal | null | undefined,
+  now = Date.now(),
+): AssistantActiveGoal | null | undefined {
+  const pending = goal?.pendingInteraction;
+  if (!goal || !pending || !isAssistantInteractionExpired(pending, now)) return goal;
+  return {
+    ...goal,
+    status: goal.status === "waiting_user_input" ? "ready" : goal.status,
+    pendingInteraction: expireAssistantInteraction(pending, now),
+    updatedAt: new Date(now).toISOString(),
+  };
 }

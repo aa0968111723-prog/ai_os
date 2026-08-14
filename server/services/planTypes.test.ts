@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   completePlanSchema,
   completePlanSummarySchema,
+  MAX_PLAN_STEPS,
   planStepKindSchema,
 } from "../../shared/plan";
 
@@ -240,5 +241,17 @@ describe("complete plan schema", () => {
     expect(parsed.steps[0].sourceAssetId).toBeUndefined();
     expect(parsed.steps[0].sourceUrl).toBeUndefined();
     expect(parsed.steps[0].prompt).toBe("城市微光主視覺");
+  });
+
+  it("rejects plans longer than the shared step cap instead of trusting the planner prompt", () => {
+    const steps = Array.from({ length: MAX_PLAN_STEPS + 1 }, (_, index) => ({
+      id: `step-${index + 1}`,
+      kind: "checkpoint" as const,
+      title: `檢查 ${index + 1}`,
+      status: "draft" as const,
+      actorType: "system" as const,
+    }));
+    expect(completePlanSchema.safeParse({ summary, steps }).success).toBe(false);
+    expect(completePlanSchema.safeParse({ summary, steps: steps.slice(0, MAX_PLAN_STEPS) }).success).toBe(true);
   });
 });

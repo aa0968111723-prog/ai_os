@@ -34,6 +34,22 @@ describe("AssistantInteractionCard", () => {
     expect(screen.getByText("尚未連線")).toBeInTheDocument();
   });
 
+  it("keeps available alternatives clickable when Google Photos is blocked", async () => {
+    const onSelect = vi.fn();
+    render(<AssistantInteractionCard request={{
+      ...request,
+      title: "改用可驗證的來源",
+      options: [
+        { id: "google-drive", label: "改用 Google Drive", availability: "AVAILABLE" },
+        { id: "google-photos", label: "Google Photos", availability: "BLOCKED", blockerReason: "尚未連線；可改用 Drive 或本機檔案" },
+        { id: "local-file", label: "改用本機檔案", availability: "AVAILABLE" },
+      ],
+    }} onSelect={onSelect} />);
+    expect(screen.getByRole("button", { name: /Google Photos/ })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /改用本機檔案/ }));
+    expect(onSelect).toHaveBeenCalledWith(["local-file"]);
+  });
+
   it("keeps every mobile selection target at least 44px through the CSS contract", () => {
     const css = readFileSync("client/src/styles.css", "utf8");
     expect(css).toContain(".assistant-interaction__option");

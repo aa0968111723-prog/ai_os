@@ -8,6 +8,12 @@ describe("assistant execution fast path", () => {
     ["幫我建立一則會議筆記", "DIRECT"],
     ["請把這件事建立成任務", "DIRECT"],
     ["如何建立任務？", "ASK"],
+    ["幫我列出目前有哪些專案", "ASK"],
+    ["列出專案清單", "ASK"],
+    ["有幾個進行中的專案", "ASK"],
+    ["哪個專案最舊", "ASK"],
+    ["顯示目前專案", "ASK"],
+    ["查看組員有誰", "ASK"],
     ["你可以用瀏覽器嗎？", "ASK"],
     ["幫我開啟瀏覽器", "DIRECT"],
     ["幫我規劃六鏡腳本", "AGENT"],
@@ -36,6 +42,7 @@ describe("assistant execution fast path", () => {
 
     const ask = classifyAssistantRequest("如何建立一則筆記？");
     expect(canDirectlyExecuteCapability(ask, "add_note")).toBe(false);
+    expect(canDirectlyExecuteCapability(classifyAssistantRequest("幫我列出專案"), "create_project")).toBe(false);
   });
 
   it("routes capability-first imports and notes without creating a campaign", () => {

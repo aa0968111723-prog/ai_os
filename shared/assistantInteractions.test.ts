@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantInteractionLifecycleSchema, assistantInteractionRequestSchema, assistantInteractionSubmissionSchema, interactionPickerMode } from "./assistantInteractions";
+import { assistantInteractionLifecycleSchema, assistantInteractionRequestSchema, assistantInteractionSubmissionSchema, expireAssistantInteraction, interactionIsWaiting, interactionPickerMode, isAssistantInteractionExpired } from "./assistantInteractions";
 
 describe("Assistant interaction contract", () => {
   const request = {
@@ -40,5 +40,15 @@ describe("Assistant interaction contract", () => {
       resumeToken: request.resumeToken,
       event: "cancelled",
     }).success).toBe(true);
+  });
+
+  it("expires a pending handoff after expiresAt so reopen cannot stay waiting forever", () => {
+    const pending = assistantInteractionRequestSchema.parse({ ...request, status: "pending" });
+    expect(isAssistantInteractionExpired(pending, Date.parse("2026-09-01T00:00:01.000Z"))).toBe(true);
+    expect(isAssistantInteractionExpired(pending, Date.parse("2026-08-31T23:59:59.000Z"))).toBe(false);
+    expect(interactionIsWaiting(pending, Date.parse("2026-09-01T00:00:01.000Z"))).toBe(false);
+    expect(interactionIsWaiting(pending, Date.parse("2026-08-31T23:59:59.000Z"))).toBe(true);
+    expect(expireAssistantInteraction(pending, Date.parse("2026-09-01T00:00:01.000Z")).status).toBe("expired");
+    expect(expireAssistantInteraction({ ...pending, status: "cancelled" }, Date.parse("2026-09-01T00:00:01.000Z")).status).toBe("cancelled");
   });
 });
