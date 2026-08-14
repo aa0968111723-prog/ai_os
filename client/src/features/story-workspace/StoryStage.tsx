@@ -1,7 +1,7 @@
 /**
- * ① 故事（Story Workspace；PE 計畫 §09）：第一層只留創作必要項——
+ * 故事主畫面（story-inline）：第一層只留創作必要項——
  * 故事編輯器（autosave）＋解析摘要 chips＋需要確認的最小卡片＋「產生分鏡」主 CTA。
- * 角色庫／場景庫／素材庫全部退到專案設定二層：從新專案到第一版分鏡不必打開任何資料庫頁。
+ * 角色／場景／道具／分鏡／製作／交付改由 ProjectPage 的收合列按需展開。
  */
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../../api";
@@ -11,6 +11,7 @@ import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui"
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
+import { revealStoryInlineSection, type StoryInlineSectionId } from "./storyInlineNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
@@ -124,12 +125,15 @@ export function StoryStage({
   canEdit,
   mobileCompact,
   onOpenSettings,
+  onRevealSection,
 }: {
   projectId: string;
   canEdit: boolean;
   mobileCompact: boolean;
   /** 開「專案設定」二層（微調角色/場景/道具時才需要，非必經） */
   onOpenSettings: () => void;
+  /** 產生分鏡後打開故事內的分鏡收合區（舊 #stage-board 深連結仍有效） */
+  onRevealSection?: (section: StoryInlineSectionId) => void;
 }) {
   const utils = trpc.useUtils();
   const storyQ = trpc.story.get.useQuery({ projectId }, { refetchInterval: 30_000 });
@@ -308,12 +312,14 @@ export function StoryStage({
   const board = trpc.story.generateStoryboard.useMutation({
     onSuccess: (r) => {
       setParseNotice(
-        r.reused ? "這次解析已經轉過分鏡了——直接看「② 分鏡」" : `已建立 ${r.storySceneIds.length} 場、${r.sceneIds.length} 個分鏡`,
+        r.reused ? "這次解析已經轉過分鏡了——直接看下方「分鏡」" : `已建立 ${r.storySceneIds.length} 場、${r.sceneIds.length} 個分鏡`,
       );
       utils.scenes.listByProject.invalidate({ projectId });
       utils.story.scenesList.invalidate({ projectId });
       utils.story.get.invalidate({ projectId });
       utils.story.storyboardPreview.invalidate({ projectId });
+      onRevealSection?.("storyboard");
+      revealStoryInlineSection("storyboard", { projectId, scroll: true });
       requestAnimationFrame(() => scrollToSelector("#stage-board"));
     },
   });

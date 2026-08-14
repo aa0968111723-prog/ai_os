@@ -51,8 +51,19 @@ import {
   costumeTabFromTarget,
   type CostumeTab,
 } from "../components/CostumePackSection";
-import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { StoryStage } from "../features/story-workspace/StoryStage";
+import { StoryInlineSection } from "../features/story-workspace/StoryInlineSection";
+import { StoryReadinessBar } from "../features/story-workspace/StoryReadinessBar";
+import {
+  STORY_INLINE_REVEAL_EVENT,
+  sectionFromHash,
+  sectionFromSelector,
+  selectorForInlineSection,
+  storyReadiness,
+  writeInlineHash,
+  type StoryInlineRevealDetail,
+  type StoryInlineSectionId,
+} from "../features/story-workspace/storyInlineNav";
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { VisibleCreativeWorkspace } from "../features/visible-workspace/VisibleCreativeWorkspace";
@@ -81,7 +92,6 @@ import {
   type ProjectContextTarget,
 } from "../features/project-nav/projectContextNav";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
-import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
 import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
@@ -212,45 +222,7 @@ function CtxGroup({
 
 // HelpTip 已移到 components/interactions（SceneList 等元件的標題也要用），這裡從共用處匯入
 
-/**
- * 三幕標頭（工作台一體化）：沿用既有 group-head 樣式，帶錨點 id 供 TocNav 捲動定位。
- * hint 顯示該幕進度（全用頁面既有查詢；拿不到資料就不顯示，絕不為此新增後端呼叫）。
- */
-function StageHead({ id, num, title, desc, accent, hint }: {
-  id: string;
-  num: string;
-  title: string;
-  desc?: string;
-  accent: "group-1" | "group-2" | "group-3";
-  hint?: string;
-}) {
-  // scroll-margin 由 styles.css 契約管（桌機 #stage-* 清單、手機 ≤820 96px 清單）；
-  // 行內 scrollMarginTop 會蓋掉契約、讓錨點落在 sticky 頂欄底下——不可加回來
-  return (
-    <div
-      id={id}
-      role="heading"
-      aria-level={2}
-      className={`group-head project-stage-head ${accent}`}
-    >
-      <span className="group-num">{num}</span>
-      <span className="group-title">{title}</span>
-      {desc && <span className="group-desc">{desc}</span>}
-      <span className="group-rule" />
-      {hint && <Meta style={{ whiteSpace: "nowrap" }}>{hint}</Meta>}
-    </div>
-  );
-}
 
-/** 幕與幕之間的銜接語：告訴使用者上一幕的東西怎麼流進下一幕（環環相扣的敘事線） */
-function StageLink({ text }: { text: string }) {
-  return (
-    <Meta as="p" aria-hidden style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0 2px" }}>
-      <Icon name="ChevronDown" size={14} style={{ flexShrink: 0 }} />
-      {text}
-    </Meta>
-  );
-}
 
 /**
  * 世界觀欄位「會不會改變我的畫面」徽章。
@@ -671,7 +643,15 @@ export function ProjectPage({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(settingsPanelRef, settingsOpen, () => setSettingsOpen(false));
-  // 舊書籤／推播裡的 #stage-context（重構前的「① 定調」）→ 新「① 故事」；TocNav 的別名表負責捲動
+  /** Story-inline：同一時間手機只開一個主要收合區；桌機也先維持單開，避免再長成四段長頁。 */
+  const [openInline, setOpenInline] = useState<StoryInlineSectionId | null>(() =>
+    typeof window === "undefined" ? null : sectionFromHash(window.location.hash),
+  );
+  const openInlineSection = useCallback((section: StoryInlineSectionId | null) => {
+    setOpenInline(section);
+    writeInlineHash(section);
+  }, []);
+  // 舊書籤／推播裡的 #stage-context（重構前的「① 定調」）→ 故事主畫面
   useEffect(() => {
     if (window.location.hash === "#stage-context") history.replaceState(null, "", "#stage-story");
   }, []);
@@ -704,10 +684,12 @@ export function ProjectPage({ id }: { id: string }) {
       return;
     }
     if (focus === "pending") {
+      openInlineSection("delivery");
       scrollToSelector("#onboard-delivery");
       return;
     }
     if (/^generation-[0-9a-f-]+$/i.test(focus)) {
+      openInlineSection("production");
       revealWorkbenchAnchor("#sec-generations", { projectId: id });
       let tries = 0;
       const timer = window.setInterval(() => {
@@ -717,6 +699,7 @@ export function ProjectPage({ id }: { id: string }) {
       return () => window.clearInterval(timer);
     }
     if (/^scene-[0-9a-f-]+$/i.test(focus)) {
+      openInlineSection("storyboard");
       let tries = 0;
       const timer = window.setInterval(() => {
         tries += 1;
@@ -889,26 +872,7 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
   const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
-  /** 引導步驟列收合偏好（per 專案持久化，重整後不會重新佔滿首屏）
-   *  無偏好時：手機預設收合、桌機預設展開；已寫入 localStorage 的 "0"/"1" 一律尊重 */
-  const onboardStorageKey = `aios.projectGuide.collapsed.${id}`;
-  const [onboardCollapsed, setOnboardCollapsed] = useState(() => {
-    try {
-      const stored = localStorage.getItem(onboardStorageKey);
-      if (stored === "1") return true;
-      if (stored === "0") return false;
-      return typeof window !== "undefined" && !!window.matchMedia?.(PROJECT_MOBILE_MQ).matches;
-    } catch {
-      return false;
-    }
-  });
-  const toggleOnboard = () => {
-    setOnboardCollapsed((current) => {
-      const next = !current;
-      try { localStorage.setItem(onboardStorageKey, next ? "1" : "0"); } catch { /* 偏好儲存失敗不影響操作 */ }
-      return next;
-    });
-  };
+  /** 引導步驟列收合偏好已退役：四階段 VisualJourney 不再是主畫面。 */
   /** 世界觀範例卡「我自己填」的關閉旗標（per 專案，沿用引導列同一套 localStorage 手法） */
   const wvExampleStorageKey = `aios.wvExample.dismissed.${id}`;
   const [wvExampleDismissed, setWvExampleDismissed] = useState(() => {
@@ -944,9 +908,17 @@ export function ProjectPage({ id }: { id: string }) {
     if (key === "recycle") return "manage";
     return "world";
   };
-  /** 展開專案設定對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責）。
-   *  重構後這些區塊都住在「專案設定」二層 sheet 裡——揭示前先把 sheet 打開。 */
+  /** 展開對應收合區或專案設定分組。角色／場景／道具現在住在故事下方，不再先打開設定 sheet。 */
   const expandContextForSelector = (target: string) => {
+    const inline = sectionFromSelector(target);
+    if (inline === "characters" || inline === "scenes" || inline === "props") {
+      openInlineSection(inline);
+      return;
+    }
+    if (inline === "storyboard" || inline === "production" || inline === "delivery") {
+      openInlineSection(inline);
+      return;
+    }
     setSettingsOpen(true);
     const costume = costumeTabFromTarget(target);
     if (costume) {
@@ -1015,6 +987,30 @@ export function ProjectPage({ id }: { id: string }) {
     // expand helpers close over latest open state setters (stable enough for reveal)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, mobileCompact]);
+
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const detail = (ev as CustomEvent<StoryInlineRevealDetail>).detail;
+      if (!detail?.section) return;
+      if (detail.projectId && detail.projectId !== id) return;
+      openInlineSection(detail.section);
+      if (detail.scroll === false) return;
+      const selector = selectorForInlineSection(detail.section);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollToSelector(selector));
+      });
+    };
+    const onHash = () => {
+      const section = sectionFromHash(window.location.hash);
+      if (section) setOpenInline(section);
+    };
+    window.addEventListener(STORY_INLINE_REVEAL_EVENT, onReveal);
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      window.removeEventListener(STORY_INLINE_REVEAL_EVENT, onReveal);
+      window.removeEventListener("hashchange", onHash);
+    };
+  }, [id, openInlineSection]);
 
   if (project.isLoading) return <Meta as="p">載入中…</Meta>;
   if (project.error || !project.data) {
@@ -1112,6 +1108,7 @@ export function ProjectPage({ id }: { id: string }) {
       sourceAssetId: settings?.sourceAssetId,
     }));
     // 切到直接生成模式並露出 #sec-studio / #gen-prompt
+    openInlineSection("production");
     revealWorkbenchAnchor("#sec-studio", { projectId: id });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1123,46 +1120,21 @@ export function ProjectPage({ id }: { id: string }) {
     return true;
   };
 
-  // Story-first：「從這裡開始」四步＝①②③④ 同口徑（故事 → 分鏡 → 製作 → 成片）
   const sceneCount = scenes.data?.length ?? 0;
   // typeof 守衛：hookOrder 測試以泛用 stub 餵 query 資料，content 可能不是字串——防禦性判定
   const storyContent = storyMeta.data?.story?.content;
   const storyReady = typeof storyContent === "string" && storyContent.trim().length > 0;
-  const onboardSteps = [
-    {
-      label: "① 故事",
-      done: storyReady,
-      target: "#stage-story",
-      hint: "貼上或寫下故事，按「AI 解析」讓角色場景自動就位",
-    },
-    {
-      label: "② 分鏡",
-      done: sceneCount > 0,
-      target: "#stage-board",
-      hint: "按「產生分鏡」把故事變成分鏡卡",
-    },
-    {
-      label: "③ 製作",
-      done: !!generations.data?.some((g) => g.status === "done"),
-      target: "#gen-prompt",
-      hint: "從分鏡卡逐鏡生成，或到製作台自由出圖",
-    },
-    {
-      label: "④ 成片",
-      done: !!scenes.data?.some((s) => s.assetId),
-      target: "#stage-deliver",
-      hint: "粗剪預覽、配音，打包交付",
-    },
-  ];
-  const allStepsDone = onboardSteps.every((s) => s.done);
-  const completedStepCount = onboardSteps.filter((step) => step.done).length;
-  const nextOnboardIndex = onboardSteps.findIndex((step) => !step.done);
-  const projectJourneySteps: VisualJourneyStep[] = onboardSteps.map((step, index) => ({
-    id: `onboard-step-${index + 1}`,
-    label: step.label,
-    detail: step.hint,
-    state: step.done ? "done" : index === nextOnboardIndex ? "current" : "upcoming",
-  }));
+  const hasParsed = Boolean(storyMeta.data?.story?.lastParsedAt);
+  const pendingCount = Array.isArray(storyMeta.data?.pending) ? storyMeta.data.pending.length : 0;
+  const doneGenCountForReady = generations.data?.filter((g) => g.status === "done").length ?? 0;
+  const readiness = storyReadiness({
+    storyReady,
+    hasParsed,
+    pendingCount,
+    sceneCount,
+    doneGenerationCount: doneGenCountForReady,
+  });
+  const hasDeliverable = !!scenes.data?.some((s) => s.assetId);
 
   // 三幕標頭與摘要條的進度數字：全讀頁面既有查詢，查詢還沒回來就不顯示
   const stylePicker = (labelledBy: string) => {
@@ -1563,19 +1535,6 @@ export function ProjectPage({ id }: { id: string }) {
         <FormatTag format={p.format} />・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
-      {/* #25 常駐交付出口指引：桌機完整句；手機隱藏長句（③ 區內改一行短提示，見下方） */}
-      {!mobileCompact && (
-        <p
-          className="project-delivery-link"
-          role="button"
-          tabIndex={0}
-          onClick={() => scrollToSelector("#onboard-delivery")}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
-          style={{ marginTop: -4, marginBottom: 10, cursor: "pointer", fontSize: 13 }}
-        >
-          做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
-        </p>
-      )}
       </header>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
@@ -1592,83 +1551,9 @@ export function ProjectPage({ id }: { id: string }) {
         </Card>
       )}
 
-      {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
-      <Card as="section" className="project-guide" data-fb="從這裡開始">
-        <div className="project-guide__head">
-          <h2 style={{ margin: 0 }}>從這裡開始</h2>
-          <HelpTip text="四步對齊頁面四段：故事 → 分鏡 → 製作 → 成片。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
-          <span style={{ flex: "1 1 auto" }} />
-          <span className="project-guide__progress" aria-label={`已完成 ${completedStepCount}／${onboardSteps.length} 步`}>
-            <span className="project-guide__progress-track" aria-hidden>
-              <span style={{ width: `${(completedStepCount / onboardSteps.length) * 100}%` }} />
-            </span>
-            {completedStepCount}/{onboardSteps.length}
-          </span>
-          {allStepsDone && <Chip style={{ fontSize: 12 }}>全部完成</Chip>}
-          <Button size="sm"
-            onClick={toggleOnboard}
-            aria-expanded={!onboardCollapsed}
-            aria-controls="project-getting-started-steps">
-            {onboardCollapsed ? "展開" : "收合"}
-          </Button>
-        </div>
-        {!onboardCollapsed && (
-          <div id="project-getting-started-steps">
-            <VisualJourney
-              steps={projectJourneySteps}
-              ariaLabel="專案製作進度"
-              compact
-              onSelect={(_, index) => {
-                const step = onboardSteps[index];
-                if (!step) return;
-                // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
-                if (step.target === "#gen-prompt" || step.target === "#sec-studio" || step.target === "#sec-agent" || step.target === "#sec-assistant") {
-                  revealWorkbenchAnchor(step.target, { projectId: id });
-                } else if (step.target === "#onboard-worldview" || step.target === "#stage-context") {
-                  // 舊目標相容：世界觀已移入專案設定二層——開 sheet 再捲
-                  revealProjectContext("worldview", { projectId: id });
-                } else {
-                  scrollToSelector(step.target);
-                }
-              }}
-            />
-            {/* 展開時不再補「下一步：…」——上面的步驟卡已用「現在」標出同一步同一句話（去重複文案） */}
-          </div>
-        )}
-        {/* 收合時仍留下一步一行，避免新手不知道下一步（手機預設收合尤為重要） */}
-        {onboardCollapsed && !allStepsDone && nextOnboardIndex >= 0 && (
-          <p className="project-guide__next project-guide__next--collapsed">
-            下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
-          </p>
-        )}
-      </Card>
-
-      {/* #28 章節導覽：三幕錨點（上下文 → 工作台 → 交付）；② 只跳 #stage-create，不列各模式。
-          ③ 帶留言未讀徽章（@N 表示有人提及）。 */}
-      <div className="toc-layout">
-      <TocNav
-        items={TOC_DEFAULT_ITEMS.map((it) =>
-          it.id === "stage-deliver" && unread.data && unread.data.count > 0
-            ? {
-                ...it,
-                badge: unread.data.mentioned
-                  ? `@${Math.min(unread.data.count, 99)}`
-                  : String(Math.min(unread.data.count, 99)),
-              }
-            : it,
-        )}
-      />
-      <div className="cols">
+      <div className="cols story-inline-layout">
         <div className="stack">
-          {/* ① 故事（Story Workspace；PE 計畫）：故事是來源——AI 在背景整理成世界資料與分鏡 */}
-          <StageHead
-            id="stage-story"
-            num="①"
-            title="故事"
-            desc="先說故事——角色、場景、道具交給 AI 整理"
-            accent="group-1"
-            hint={storyReady ? "已有故事" : "從這裡開始"}
-          />
+          <div id="stage-story" className="story-inline-legacy-anchor" />
           <SectionErrorBoundary title="故事">
             <StoryStage
               projectId={id}
@@ -1678,36 +1563,102 @@ export function ProjectPage({ id }: { id: string }) {
                 setSettingsOpen(true);
                 setToneTab("story");
               }}
+              onRevealSection={openInlineSection}
             />
           </SectionErrorBoundary>
-          <StageLink text="AI 解析後角色、場景、道具自動就位；「產生分鏡」把故事變成分鏡卡" />
-
-          {/* ② 分鏡（Storyboard Center）：分鏡卡＝製作中心——所有生成從 Shot 出發、可追溯 */}
-          <StageHead
-            id="stage-board"
-            num="②"
-            title="分鏡"
-            desc="場與鏡的創作中心——畫面、引用、鏡頭語言、生成"
-            accent="group-2"
-            hint={sceneCount > 0 ? `${sceneCount} 鏡` : "待產生"}
+          <StoryReadinessBar
+            readiness={readiness}
+            canEdit={canEdit}
+            primaryLabel={
+              readiness.kind === "ready_to_produce"
+                ? "展開製作"
+                : readiness.kind === "has_result"
+                  ? "觀看成果"
+                  : undefined
+            }
+            onPrimary={
+              readiness.kind === "ready_to_produce"
+                ? () => openInlineSection("production")
+                : readiness.kind === "has_result"
+                  ? () => openInlineSection("delivery")
+                  : undefined
+            }
+            latestLabel={hasDeliverable ? "已有成片，展開交付" : doneGenCount ? `已完成 ${doneGenCount} 次生成` : undefined}
+            onOpenLatest={hasDeliverable ? () => openInlineSection("delivery") : doneGenCount ? () => openInlineSection("production") : undefined}
           />
-          {/* Visible Creative Workspace：作品優先的創作台，排在分鏡卡之前。
-              打開專案的第一眼要是「現在做到哪一張畫面」，而不是一排設定與文字。
-              它是純投影（scenes.listByProject / scenes.versions / story.continuityCheck），
-              沒有自己的 candidate/version 狀態，reload 後一致。 */}
-          <SectionErrorBoundary title="創作台">
-            <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
-          </SectionErrorBoundary>
-          <SectionErrorBoundary title="分鏡">
-            <StoryboardStage
-              projectId={id}
-              canEdit={canEdit}
-              charIds={charIds}
-              sceneIds={sceneIds}
-              propIds={propIds}
-            />
-          </SectionErrorBoundary>
-          <StageLink text="逐鏡出圖在卡上完成；要自由發想、跑範本、多步開拍就到 ③ 製作" />
+
+          <div className="story-inline-rail" data-fb="故事收合列">
+            <StoryInlineSection
+              sectionId="characters"
+              anchorId="sec-characters"
+              title="角色"
+              summary={charCount == null ? "載入中…" : `${charCount} 位`}
+              warning={pendingCount > 0 ? `${pendingCount} 項待確認` : undefined}
+              open={openInline === "characters"}
+              onOpenChange={(next) => openInlineSection(next ? "characters" : null)}
+            >
+              <CharacterCards
+                projectId={id}
+                selectedIds={charIds}
+                onToggle={toggleChar}
+                onCreated={onCharCreated}
+                readOnly={!canEdit}
+              />
+            </StoryInlineSection>
+            <StoryInlineSection
+              sectionId="scenes"
+              anchorId="sec-scenes"
+              title="場景"
+              summary={presetCount == null ? "載入中…" : `${presetCount} 處`}
+              open={openInline === "scenes"}
+              onOpenChange={(next) => openInlineSection(next ? "scenes" : null)}
+            >
+              <ScenePresetCards
+                projectId={id}
+                selectedIds={sceneIds}
+                onToggle={toggleScene}
+                onCreated={onSceneCreated}
+                readOnly={!canEdit}
+              />
+            </StoryInlineSection>
+            <StoryInlineSection
+              sectionId="props"
+              anchorId="sec-props"
+              title="道具"
+              summary={propCount == null ? "載入中…" : `${propCount} 件`}
+              open={openInline === "props"}
+              onOpenChange={(next) => openInlineSection(next ? "props" : null)}
+            >
+              <PropCards
+                projectId={id}
+                selectedIds={propIds}
+                onToggle={toggleProp}
+                onCreated={onPropCreated}
+                readOnly={!canEdit}
+              />
+            </StoryInlineSection>
+            <StoryInlineSection
+              sectionId="storyboard"
+              anchorId="stage-board"
+              title="分鏡"
+              summary={sceneCount > 0 ? `${sceneCount} 鏡` : "尚未產生"}
+              open={openInline === "storyboard"}
+              onOpenChange={(next) => openInlineSection(next ? "storyboard" : null)}
+            >
+              <SectionErrorBoundary title="創作台">
+                <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
+              </SectionErrorBoundary>
+              <SectionErrorBoundary title="分鏡">
+                <StoryboardStage
+                  projectId={id}
+                  canEdit={canEdit}
+                  charIds={charIds}
+                  sceneIds={sceneIds}
+                  propIds={propIds}
+                />
+              </SectionErrorBoundary>
+            </StoryInlineSection>
+          </div>
 
           {/* 專案設定（二層；PE 計畫 §03）：舊「定調」的資料面全數收納於此——
               整體風格／角色與定裝／知識與素材／回收桶。非必經：主流程 0 個資料庫管理頁。 */}
@@ -1900,6 +1851,7 @@ export function ProjectPage({ id }: { id: string }) {
                     onClick={() => {
                       // 就緒後主 CTA：關掉設定、進創作台直接出圖
                       setSettingsOpen(false);
+                      openInlineSection("production");
                       revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     }}
                   >
@@ -1919,6 +1871,7 @@ export function ProjectPage({ id }: { id: string }) {
                     // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal；設定 sheet 先關）
                     updateWv.mutate({ id, worldview: patch });
                     setSettingsOpen(false);
+                    openInlineSection("production");
                     revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     requestAnimationFrame(() => {
                       requestAnimationFrame(() => {
@@ -2375,6 +2328,7 @@ export function ProjectPage({ id }: { id: string }) {
               onOpenChange={setCostumePackOpen}
             >
               <CostumePackSection
+                omitLegacyAnchors
                 tab={costumeTab}
                 onTabChange={(t) => {
                   setCostumeTab(t);
@@ -2447,6 +2401,7 @@ export function ProjectPage({ id }: { id: string }) {
                   variant={contextReturnTo === "studio" ? "primary" : "ghost"}
                   onClick={() => {
                     setSettingsOpen(false);
+                    openInlineSection("production");
                     returnFromContext("studio", { projectId: id });
                     setContextReturnTo(null);
                   }}
@@ -2459,6 +2414,7 @@ export function ProjectPage({ id }: { id: string }) {
                   variant={contextReturnTo === "scenes" ? "primary" : "ghost"}
                   onClick={() => {
                     setSettingsOpen(false);
+                    openInlineSection("delivery");
                     returnFromContext("scenes", { projectId: id });
                     setContextReturnTo(null);
                   }}
@@ -2541,6 +2497,7 @@ export function ProjectPage({ id }: { id: string }) {
                         sourceAsset: a,
                       }));
                       setSettingsOpen(false);
+                      openInlineSection("production");
                       revealWorkbenchAnchor("#sec-studio", { projectId: id });
                     }}
                   />
@@ -2577,89 +2534,68 @@ export function ProjectPage({ id }: { id: string }) {
             document.body,
           )}
 
-          {/* ③ 製作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
-          <StageHead
-            id="stage-create"
-            num="③"
-            title="製作"
-            desc="問 AI・生成・範本・計畫 — 同一入口"
-            accent="group-2"
-            hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
-          />
-          <SectionErrorBoundary title="製作">
-            <CreationWorkbench
-              projectId={id}
-              canEdit={canEdit}
-              isLeader={isLeader}
-              groupId={p.groupId}
-              myRole={myRole}
-              projectFormat={p.format}
-              worldview={{
-                logline: wv.logline,
-                message: wv.message,
-                tones: wv.tones,
-                styles: wv.styles,
-                taboos: wv.taboos,
-              }}
-              wvReady={wvReady}
-              characterIds={charIds}
-              scenePresetIds={sceneIds}
-              propIds={propIds}
-              carriedPropIds={carriedPropIds}
-              generateApplyRequest={generateApply}
-              onReuseGenerate={applyPrompt}
-              onGenerateSourceChange={setSourceHighlightId}
-              studioCollab={zoneProps(COLLAB_ZONES.studio)}
-            />
-          </SectionErrorBoundary>
-
-          <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
-
-          {/* ④ 成片：粗剪・配音管線・打包交付（SceneList 一體卡） */}
-          <StageHead
-            id="stage-deliver"
-            num="④"
-            title="成片"
-            desc="粗剪・配音・打包交付"
-            accent="group-3"
-            hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
-          />
-          {/* §12 交付室第一屏：完成度＋缺漏清單。補件本身仍在 ② 分鏡的單格工作室，
-              點缺漏只是跳過去——避免交付頁長成第二套製作流程。 */}
-          <SectionErrorBoundary title="成片">
-            <DeliveryRoom
-              projectId={id}
-              canEdit={canEdit}
-              onOpenShot={(shotId) => {
-                scrollToSelector(`#board-shot-${shotId}`);
-              }}
-            />
-          </SectionErrorBoundary>
-          {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
-          {mobileCompact && (
-            <p
-              className="project-delivery-link project-delivery-link--stage"
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSelector("#onboard-delivery")}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
+          <div className="story-inline-rail">
+            <StoryInlineSection
+              sectionId="production"
+              anchorId="stage-create"
+              title="製作"
+              summary={doneGenCount != null ? `已完成 ${doneGenCount} 次` : "載入中…"}
+              open={openInline === "production"}
+              onOpenChange={(next) => openInlineSection(next ? "production" : null)}
             >
-              做好可打包 zip 交付 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
-            </p>
-          )}
-          <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
-            {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
-            {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
-            <div data-fb="打包下載" id="onboard-delivery">
-              {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              {/* anchorPeers：分鏡格上「誰在改這一格」。zone 層級的「有人在分鏡」不夠用——
-                  這張卡從分鏡列一路到交付中心，說了等於沒說 */}
-              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
-            </div>
-          </CollabZone>
-          {/* 分享連結緊接在打包下載之後：兩者都是「把成果交出去」，只是一個給檔案、一個給連結。
-              刻意放在 CollabZone 外——它不是分鏡的協作區塊，不該把在場游標標到這裡。 */}
-          <ProjectShareCard projectId={id} canEdit={canEdit} />
+              <SectionErrorBoundary title="製作">
+                <CreationWorkbench
+                  projectId={id}
+                  canEdit={canEdit}
+                  isLeader={isLeader}
+                  groupId={p.groupId}
+                  myRole={myRole}
+                  projectFormat={p.format}
+                  worldview={{
+                    logline: wv.logline,
+                    message: wv.message,
+                    tones: wv.tones,
+                    styles: wv.styles,
+                    taboos: wv.taboos,
+                  }}
+                  wvReady={wvReady}
+                  characterIds={charIds}
+                  scenePresetIds={sceneIds}
+                  propIds={propIds}
+                  carriedPropIds={carriedPropIds}
+                  generateApplyRequest={generateApply}
+                  onReuseGenerate={applyPrompt}
+                  onGenerateSourceChange={setSourceHighlightId}
+                  studioCollab={zoneProps(COLLAB_ZONES.studio)}
+                />
+              </SectionErrorBoundary>
+            </StoryInlineSection>
+            <StoryInlineSection
+              sectionId="delivery"
+              anchorId="stage-deliver"
+              title="交付"
+              summary={sceneCount > 0 ? `${sceneCount} 鏡` : "尚無分鏡"}
+              open={openInline === "delivery"}
+              onOpenChange={(next) => openInlineSection(next ? "delivery" : null)}
+            >
+              <SectionErrorBoundary title="交付">
+                <DeliveryRoom
+                  projectId={id}
+                  canEdit={canEdit}
+                  onOpenShot={(shotId) => {
+                    openInlineSection("storyboard");
+                    requestAnimationFrame(() => scrollToSelector(`#board-shot-${shotId}`));
+                  }}
+                />
+              </SectionErrorBoundary>
+              <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
+                <div data-fb="打包下載" id="onboard-delivery">
+                  <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} format={p.format} anchorPeers={collab.anchorPeers} />
+                </div>
+              </CollabZone>
+              <ProjectShareCard projectId={id} canEdit={canEdit} />
+            </StoryInlineSection>
+          </div>
         </div>
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
@@ -2679,7 +2615,6 @@ export function ProjectPage({ id }: { id: string }) {
             </div>
           </CollabZone>
         )}
-      </div>
       </div>
 
       {mobileCompact && (
