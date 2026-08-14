@@ -1025,7 +1025,7 @@ export function ProjectPage({ id }: { id: string }) {
           tries += 1;
           const nested = peekStoryReveal()?.nestedSelector ?? nestedTarget;
           const el = nested ? document.querySelector(nested) : null;
-          if (el && el.getClientRects().length > 0) {
+          if (el && el.getClientRects().length > 0 && !(el instanceof HTMLElement && el.hidden)) {
             window.clearInterval(timer);
             consumeNestedReveal();
             scrollToSelector(nested);
@@ -1054,6 +1054,26 @@ export function ProjectPage({ id }: { id: string }) {
       stopQueue();
     };
   }, [id, openInlineSection]);
+
+  // Production / drawer mount after the first workbench reveal event. Replay
+  // the queued nested selector so ?focus=generation-* still opens the drawer.
+  useEffect(() => {
+    if (!mountedInline.production) return;
+    const nested = peekStoryReveal()?.nestedSelector;
+    if (!nested) return;
+    if (
+      nested === "#sec-generations"
+      || nested === "#sec-studio"
+      || nested === "#gen-prompt"
+      || nested === "#sec-agent"
+      || nested === "#sec-workflow"
+      || nested === "#sec-assistant"
+      || nested === "#sec-trail"
+      || nested === "#sec-prompts"
+    ) {
+      revealWorkbenchAnchor(nested, { projectId: id });
+    }
+  }, [mountedInline.production, id]);
 
   const oneClick = useOneClickFilm(id);
 
@@ -1688,7 +1708,6 @@ export function ProjectPage({ id }: { id: string }) {
                           charIds={charIds}
                           sceneIds={sceneIds}
                           propIds={propIds}
-                          hideInspector={mobileCompact}
                           onSendToWorkbench={(shot) => {
                             openInlineSection("production");
                             applyPrompt(shot.prompt || shot.action || shot.title, {
