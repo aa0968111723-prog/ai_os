@@ -45,6 +45,17 @@ async function rpc(page, path, input) {
   }, { path, input });
 }
 
+/** tRPC query 是 GET；POST 打 query 會 405（稽核抓到的假證據來源） */
+async function rpcQuery(page, path, input) {
+  return page.evaluate(async ({ path, input }) => {
+    const qs = encodeURIComponent(JSON.stringify({ json: input }));
+    const res = await fetch(`/api/trpc/${path}?input=${qs}`);
+    const body = await res.json();
+    if (body?.error) throw new Error(`${path}: ${body.error.json?.message ?? "failed"}`);
+    return body?.result?.data?.json;
+  }, { path, input });
+}
+
 async function seed(page) {
   const me = await page.evaluate(async () => (await (await fetch("/api/trpc/auth.me")).json())?.result?.data?.json);
   const groupId = me?.groups?.[0]?.groupId;
@@ -92,8 +103,26 @@ async function openSettingsPanel(page, projectId) {
   await page.goto(`${BASE}/p/${projectId}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("text=專案設定", { timeout: 30000 });
   await page.click("text=專案設定");
-  await page.waitForSelector("#sec-team-canon", { timeout: 30000 });
-  await page.locator("#sec-team-canon").scrollIntoViewIfNeeded();
+  // #sec-team-canon 在「資料來源」群組裡（分頁／<details> 收合，視視口而定）——
+  // 先把它所有的收合祖先打開，再等它真的可見，證據才不是拍到空白
+  await page.waitForSelector("#sec-team-canon", { state: "attached", timeout: 30000 });
+  await page.evaluate(() => {
+    const target = document.querySelector("#sec-team-canon");
+    let node = target;
+    while (node) {
+      if (node instanceof HTMLDetailsElement) node.open = true;
+      node = node.parentElement;
+    }
+    target?.scrollIntoView({ block: "center" });
+  });
+  // 桌機的群組分頁：若 canon 面板仍不可見，點含「資料」的分頁鈕再試
+  const visible = await page.locator("#sec-team-canon").isVisible();
+  if (!visible) {
+    const tab = page.locator("button", { hasText: "資料" }).first();
+    if (await tab.count()) await tab.click().catch(() => {});
+    await page.evaluate(() => document.querySelector("#sec-team-canon")?.scrollIntoView({ block: "center" }));
+  }
+  await page.waitForSelector(".story-canon-panel", { state: "visible", timeout: 30000 });
   await page.waitForTimeout(800);
 }
 
@@ -168,7 +197,7 @@ try {
     await upgradeBtn.first().click();
     await page.waitForTimeout(2500);
     await page.screenshot({ path: `${OUT}/desktop-1280-after-upgrade.png`, fullPage: false });
-    const packets = await rpc(page, "creativeContext.listShotPackets", { projectId: ctx.projectB });
+    const packets = await rpcQuery(page, "creativeContext.listShotPackets", { projectId: ctx.projectB });
     const staleShots = packets.filter((row) => row.stale).map((row) => row.shotId);
     results.push({ tag: "upgrade", staleShots, expected: [ctx.shotId] });
     log("upgrade done; stale shots:", JSON.stringify(staleShots), "expected:", ctx.shotId);

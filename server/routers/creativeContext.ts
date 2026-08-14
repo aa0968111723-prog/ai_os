@@ -144,13 +144,22 @@ export const creativeContextRouter = router({
       changedId: z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      return refreshShotContextStaleness({
+      const changed = input.changedKind && input.changedId
+        ? { kind: input.changedKind, id: input.changedId }
+        : undefined;
+      // 場景 package 與 shot packet 同一次重算（§6：package 也有指紋與 stale）
+      const { refreshScenePackageStaleness } = await import("../services/scenePackages");
+      const scenePackages = await refreshScenePackageStaleness({
         auth: ctx.auth,
         projectId: input.projectId,
-        changed: input.changedKind && input.changedId
-          ? { kind: input.changedKind, id: input.changedId }
-          : undefined,
+        changed,
       });
+      const shots = await refreshShotContextStaleness({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        changed,
+      });
+      return { ...shots, staleStorySceneIds: scenePackages.staleStorySceneIds };
     }),
 
   trainingAvailability: authedProcedure.query(async () => trainingAvailability()),

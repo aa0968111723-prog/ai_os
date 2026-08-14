@@ -46,6 +46,7 @@ function CanonPinDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const invalidateAll = async () => {
+    setError(null); // 成功後清掉舊錯誤——403 過的訊息不該黏在下一次成功的動作上
     await Promise.all([
       utils.canon.projectPins.invalidate(),
       utils.canon.get.invalidate({ canonId }),
@@ -144,6 +145,7 @@ export function StoryCanonPanel({ projectId, canEdit }: { projectId: string; can
   const [error, setError] = useState<string | null>(null);
   const createCanon = trpc.canon.createFromEntity.useMutation({
     onSuccess: async () => {
+      setError(null);
       await Promise.all([
         utils.canon.projectPins.invalidate(),
         utils.creativeContext.workspace.invalidate(),

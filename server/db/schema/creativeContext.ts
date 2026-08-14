@@ -104,6 +104,8 @@ export const scenePackages = pgTable("scene_packages", {
   sceneCreatedIdx: index("scene_packages_scene_created_idx").on(t.storySceneId, t.createdAt),
   projectIdx: index("scene_packages_project_idx").on(t.projectId, t.storySceneId),
   fingerprintIdx: index("scene_packages_fingerprint_idx").on(t.storySceneId, t.fingerprint),
+  // 0076：同場同指紋只留一列——凍結去重是資料庫保證，不是 best-effort（並行凍結 race）
+  sceneFingerprintUq: uniqueIndex("scene_packages_scene_fingerprint_uq").on(t.storySceneId, t.fingerprint),
 }));
 
 export const scenePackageHeads = pgTable("scene_package_heads", {

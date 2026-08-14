@@ -12,7 +12,7 @@
  *    未確認前 reuseScope 落在 private（只有來源專案可用）。
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
@@ -102,34 +102,45 @@ async function insertCanonVersion(input: {
   parentVersionId: string | null;
 }): Promise<{ version: CanonVersionRow; reused: boolean }> {
   const fingerprint = canonVersionFingerprint(input.payload);
-  const [existing] = await db.select().from(schema.canonVersions).where(and(
-    eq(schema.canonVersions.canonId, input.canon.id),
-    eq(schema.canonVersions.fingerprint, fingerprint),
-  ));
-  if (existing) return { version: existing, reused: true };
-  const versionNumber = await nextVersionNumber(input.canon.id);
-  const [inserted] = await db.insert(schema.canonVersions).values({
-    canonId: input.canon.id,
-    groupId: input.canon.groupId,
-    versionNumber,
-    parentVersionId: input.parentVersionId,
-    fingerprint,
-    payload: input.payload,
-    datasetFingerprint: input.payload.datasetFingerprint,
-    adapterRef: input.payload.adapterRef,
-    trainingJobId: input.payload.trainingJobId,
-    createdReason: input.reason,
-    evaluation: input.payload.evaluation,
-    createdBy: input.auth.user.id,
-  }).returning();
-  await recordCanonEvent({
-    canonId: input.canon.id,
-    versionId: inserted.id,
-    event: "created",
-    detail: { reason: input.reason, versionNumber },
-    actor: input.auth.user.id,
-  });
-  return { version: inserted, reused: false };
+  // 並行安全：fingerprint 撞 unique＝別人剛開了同內容版本→冪等回它；
+  // version_number 撞 unique＝別人剛佔了號碼→重算再試（最多 3 次）。
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [existing] = await db.select().from(schema.canonVersions).where(and(
+      eq(schema.canonVersions.canonId, input.canon.id),
+      eq(schema.canonVersions.fingerprint, fingerprint),
+    ));
+    if (existing) return { version: existing, reused: true };
+    const versionNumber = await nextVersionNumber(input.canon.id);
+    try {
+      const [inserted] = await db.insert(schema.canonVersions).values({
+        canonId: input.canon.id,
+        groupId: input.canon.groupId,
+        versionNumber,
+        parentVersionId: input.parentVersionId,
+        fingerprint,
+        payload: input.payload,
+        datasetFingerprint: input.payload.datasetFingerprint,
+        adapterRef: input.payload.adapterRef,
+        trainingJobId: input.payload.trainingJobId,
+        createdReason: input.reason,
+        evaluation: input.payload.evaluation,
+        createdBy: input.auth.user.id,
+      }).returning();
+      await recordCanonEvent({
+        canonId: input.canon.id,
+        versionId: inserted.id,
+        event: "created",
+        detail: { reason: input.reason, versionNumber },
+        actor: input.auth.user.id,
+      });
+      return { version: inserted, reused: false };
+    } catch (error) {
+      const { isUniqueViolation } = await import("./generationCore");
+      if (!isUniqueViolation(error)) throw error;
+      // 下一輪先查 fingerprint（同內容 race）再重算號碼（同號碼 race）
+    }
+  }
+  throw new TRPCError({ code: "CONFLICT", message: "同時有其他人在開版本，請再試一次" });
 }
 
 type LocalEntityRow = {
@@ -390,6 +401,10 @@ export async function addCanonVersionFromPin(input: {
   if (canon.status === "archived") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個 Canon 已封存，不能開新版本" });
   }
+  // rights 撤回要對既有 pin 生效：private 之後，非來源專案不能再往共享 Canon 寫版本（§18）
+  if (canon.reuseScope === "private" && canon.sourceProjectId !== project.id) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "這個 Canon 的授權已收回，僅來源專案可以更新它" });
+  }
   if (!pin.localEntityKind || !pin.localEntityId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這個引用沒有本地卡片，無法從卡片建版本" });
   }
@@ -439,8 +454,15 @@ export async function createCanonVersionFromTraining(input: {
   if (!job || job.status !== "succeeded") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "訓練尚未成功，不能掛成 Canon 版本" });
   }
-  // 訓練對象要真的對應這個 Canon：來源卡或任何 pin 的本地卡
-  if (job.characterId) {
+  // ACL 與其他 canon 寫入同一口徑：訓練來源專案的內容編輯權（viewer 擋下）
+  await loadCreativeContextProject(input.auth, job.projectId, true);
+  // 訓練對象要「明確」對應這個 Canon：來源卡或任何 pin 的本地卡。
+  // characterId 為 null 的專案級訓練沒有對象可對應——不得掛上任何 Canon（防止把
+  // 不相干的 adapter 掛成看似可信的候選版本，之後被 promote 到所有引用專案）。
+  if (!job.characterId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "這個訓練工作沒有明確的角色對象，無法掛成 Canon 版本" });
+  }
+  {
     const pins = await db.select().from(schema.projectCanonPins)
       .where(eq(schema.projectCanonPins.canonId, canon.id));
     const localIds = new Set(pins.map((row) => row.localEntityId).filter(Boolean));
@@ -512,11 +534,21 @@ export async function promoteCanonVersion(input: {
   if (canon.productionVersionId === version.id) {
     return { canonId: canon.id, productionVersionId: version.id };
   }
-  await db.update(schema.canonEntries).set({
+  // 樂觀 CAS：只有「讀到的 production 指標沒被別人動過」才移動；撞了請重試，
+  // 不讓兩個並行 promote/rollback 交錯出「指標指 A、事件記 B」的歷史。
+  const moved = await db.update(schema.canonEntries).set({
     productionVersionId: version.id,
     updatedBy: input.auth.user.id,
     updatedAt: new Date(),
-  }).where(eq(schema.canonEntries.id, canon.id));
+  }).where(and(
+    eq(schema.canonEntries.id, canon.id),
+    canon.productionVersionId
+      ? eq(schema.canonEntries.productionVersionId, canon.productionVersionId)
+      : isNull(schema.canonEntries.productionVersionId),
+  )).returning({ id: schema.canonEntries.id });
+  if (!moved.length) {
+    throw new TRPCError({ code: "CONFLICT", message: "有其他人剛變更了 production 版本，請重新整理後再試" });
+  }
   await recordCanonEvent({
     canonId: canon.id,
     versionId: version.id,
@@ -539,15 +571,39 @@ export async function rollbackCanonVersion(input: {
   if (target.canonId !== canon.id) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這個版本不屬於這個 Canon" });
   }
-  if (target.archived) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "已封存的版本不能退回採用" });
+  // rollback 也是「把某版本設為 production」——必須過同一個 promote 守門，
+  // 否則 look-drift 被擋下的訓練候選可以繞道 rollback 上線。
+  let rollbackJobStatus: TrainingJobState | null = null;
+  let rollbackLookChanged = false;
+  if (target.trainingJobId) {
+    const [job] = await db.select().from(schema.consistencyTrainingJobs)
+      .where(eq(schema.consistencyTrainingJobs.id, target.trainingJobId));
+    rollbackJobStatus = (job?.status ?? "failed") as TrainingJobState;
+    rollbackLookChanged = job?.lookChanged ?? false;
+  }
+  const rollbackGate = canPromoteCanonVersion({
+    versionArchived: target.archived,
+    canonArchived: canon.status === "archived",
+    trainingJobStatus: rollbackJobStatus,
+    lookChangedDuringTraining: rollbackLookChanged,
+  });
+  if (!rollbackGate.ok) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: rollbackGate.reason ?? "這個版本不能退回採用" });
   }
   const fromVersionId = canon.productionVersionId;
-  await db.update(schema.canonEntries).set({
+  const moved = await db.update(schema.canonEntries).set({
     productionVersionId: target.id,
     updatedBy: input.auth.user.id,
     updatedAt: new Date(),
-  }).where(eq(schema.canonEntries.id, canon.id));
+  }).where(and(
+    eq(schema.canonEntries.id, canon.id),
+    fromVersionId
+      ? eq(schema.canonEntries.productionVersionId, fromVersionId)
+      : isNull(schema.canonEntries.productionVersionId),
+  )).returning({ id: schema.canonEntries.id });
+  if (!moved.length) {
+    throw new TRPCError({ code: "CONFLICT", message: "有其他人剛變更了 production 版本，請重新整理後再試" });
+  }
   await recordCanonEvent({
     canonId: canon.id,
     versionId: target.id,
@@ -569,7 +625,14 @@ export async function archiveCanonVersion(input: {
   if (canon.productionVersionId === version.id) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "production 版本不能封存，請先 rollback 到其他版本" });
   }
-  await db.update(schema.canonVersions).set({ archived: true }).where(eq(schema.canonVersions.id, version.id));
+  // 寫入當下再驗一次（防 read-then-write 交錯：檢查後別人剛把它 promote 成 production）
+  const archivedRows = await db.update(schema.canonVersions).set({ archived: true }).where(and(
+    eq(schema.canonVersions.id, version.id),
+    sql`NOT EXISTS (SELECT 1 FROM ${schema.canonEntries} WHERE ${schema.canonEntries.id} = ${version.canonId} AND ${schema.canonEntries.productionVersionId} = ${version.id})`,
+  )).returning({ id: schema.canonVersions.id });
+  if (!archivedRows.length) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "production 版本不能封存，請先 rollback 到其他版本" });
+  }
   await recordCanonEvent({
     canonId: canon.id,
     versionId: version.id,
@@ -950,6 +1013,13 @@ export async function applyCanonUpgrade(input: {
   if (version.archived) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "已封存的版本不能採用" });
   }
+  // rights／生命週期在升級時也要守（撤回授權、封存 Canon 不得再流內容到其他專案）
+  if (canon.status === "archived") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個 Canon 已封存，不能再升級引用" });
+  }
+  if (canon.reuseScope === "private" && canon.sourceProjectId !== project.id) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "這個 Canon 的授權已收回，僅來源專案可以繼續使用" });
+  }
 
   const impact = await canonUpgradeImpact({
     auth: input.auth,
@@ -957,66 +1027,72 @@ export async function applyCanonUpgrade(input: {
     canonId: canon.id,
     toVersionId,
   });
-  if (pin.pinnedVersionId === toVersionId) {
-    return { impact, staleShotIds: [] };
-  }
 
-  await db.update(schema.projectCanonPins).set({
-    pinnedVersionId: toVersionId,
-    updatedAt: new Date(),
-  }).where(eq(schema.projectCanonPins.id, pin.id));
+  // 同步本地 handle（handle 是 Canon 的 runtime 投影，不是獨立真相）。
+  // pin 移動與 handle 同步收在同一個交易：不會出現「pin 已在新版本、卡片還是舊描述」
+  // 的半套狀態；pin 已在目標版本時仍重跑同步＝失敗後重呼叫即修復（冪等）。
+  await db.transaction(async (tx) => {
+    await tx.update(schema.projectCanonPins).set({
+      pinnedVersionId: toVersionId,
+      updatedAt: new Date(),
+    }).where(eq(schema.projectCanonPins.id, pin.id));
 
-  // 同步本地 handle（handle 是 Canon 的 runtime 投影，不是獨立真相）
-  if (pin.localEntityKind && pin.localEntityId) {
-    const fields = localFieldsForCanonKind(canon.kind);
-    const descriptor = version.payload.descriptor;
-    const primaryRef = version.payload.references.find((ref) => ref.priority === "PRIMARY")?.assetId ?? null;
-    const patch: Record<string, unknown> = { referenceAssetId: primaryRef };
-    for (const field of fields) {
-      if (descriptor[field] !== undefined) patch[field] = descriptor[field];
-    }
-    if (pin.localEntityKind === "character") {
-      if (patch.appearance == null) delete patch.appearance; // NOT NULL 欄位不寫入 null
-      const [row] = await db.select({ rev: schema.characters.rev }).from(schema.characters)
-        .where(eq(schema.characters.id, pin.localEntityId));
-      if (row) {
-        await db.update(schema.characters).set({ ...patch, rev: row.rev + 1 })
+    if (pin.localEntityKind && pin.localEntityId) {
+      const fields = localFieldsForCanonKind(canon.kind);
+      const descriptor = version.payload.descriptor;
+      const primaryRef = version.payload.references.find((ref) => ref.priority === "PRIMARY")?.assetId ?? null;
+      const patch: Record<string, unknown> = { referenceAssetId: primaryRef };
+      for (const field of fields) {
+        if (descriptor[field] !== undefined) patch[field] = descriptor[field];
+      }
+      if (pin.localEntityKind === "character") {
+        if (patch.appearance == null) delete patch.appearance; // NOT NULL 欄位不寫入 null
+        const [row] = await tx.select({ rev: schema.characters.rev }).from(schema.characters)
           .where(eq(schema.characters.id, pin.localEntityId));
-      }
-    } else if (pin.localEntityKind === "character_look") {
-      const [row] = await db.select({ rev: schema.characterLooks.rev }).from(schema.characterLooks)
-        .where(eq(schema.characterLooks.id, pin.localEntityId));
-      if (row) {
-        await db.update(schema.characterLooks).set({ ...patch, rev: row.rev + 1 })
+        if (row) {
+          await tx.update(schema.characters).set({ ...patch, rev: row.rev + 1 })
+            .where(eq(schema.characters.id, pin.localEntityId));
+        }
+      } else if (pin.localEntityKind === "character_look") {
+        const [row] = await tx.select({ rev: schema.characterLooks.rev }).from(schema.characterLooks)
           .where(eq(schema.characterLooks.id, pin.localEntityId));
-      }
-    } else if (pin.localEntityKind === "scene_preset") {
-      if (patch.palette == null) delete patch.palette;
-      const [row] = await db.select({ rev: schema.scenePresets.rev }).from(schema.scenePresets)
-        .where(eq(schema.scenePresets.id, pin.localEntityId));
-      if (row) {
-        await db.update(schema.scenePresets).set({ ...patch, rev: row.rev + 1 })
+        if (row) {
+          await tx.update(schema.characterLooks).set({ ...patch, rev: row.rev + 1 })
+            .where(eq(schema.characterLooks.id, pin.localEntityId));
+        }
+      } else if (pin.localEntityKind === "scene_preset") {
+        if (patch.palette == null) delete patch.palette;
+        const [row] = await tx.select({ rev: schema.scenePresets.rev }).from(schema.scenePresets)
           .where(eq(schema.scenePresets.id, pin.localEntityId));
-      }
-    } else if (pin.localEntityKind === "prop") {
-      if (patch.appearance == null) delete patch.appearance;
-      const [row] = await db.select({ rev: schema.props.rev }).from(schema.props)
-        .where(eq(schema.props.id, pin.localEntityId));
-      if (row) {
-        await db.update(schema.props).set({ ...patch, rev: row.rev + 1 })
+        if (row) {
+          await tx.update(schema.scenePresets).set({ ...patch, rev: row.rev + 1 })
+            .where(eq(schema.scenePresets.id, pin.localEntityId));
+        }
+      } else if (pin.localEntityKind === "prop") {
+        if (patch.appearance == null) delete patch.appearance;
+        const [row] = await tx.select({ rev: schema.props.rev }).from(schema.props)
           .where(eq(schema.props.id, pin.localEntityId));
+        if (row) {
+          await tx.update(schema.props).set({ ...patch, rev: row.rev + 1 })
+            .where(eq(schema.props.id, pin.localEntityId));
+        }
       }
     }
-  }
+  });
 
-  // 只 stale 依賴這張卡的鏡（refreshShotContextStaleness 會重算指紋後才標）
+  // 只 stale 依賴這張卡的鏡（refreshShotContextStaleness 會重算指紋後才標）；
+  // 場景 package 也一併重算（升級地點卡會改變 package 指紋）
   let staleShotIds: string[] = [];
   if (pin.localEntityKind && pin.localEntityId) {
+    const changed = { kind: PACKET_KIND_BY_LOCAL[pin.localEntityKind], id: pin.localEntityId };
     const { refreshShotContextStaleness } = await import("./shotContextPackets");
+    const { refreshScenePackageStaleness } = await import("./scenePackages");
+    await refreshScenePackageStaleness({ auth: input.auth, projectId: project.id, changed })
+      .catch((error) => console.warn("[canon.applyUpgrade] scene package staleness skipped:", error instanceof Error ? error.message : error));
     const result = await refreshShotContextStaleness({
       auth: input.auth,
       projectId: project.id,
-      changed: { kind: PACKET_KIND_BY_LOCAL[pin.localEntityKind], id: pin.localEntityId },
+      changed,
     });
     staleShotIds = result.staleShotIds;
   }

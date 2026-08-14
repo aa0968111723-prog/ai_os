@@ -94,12 +94,20 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
       const [shotRow] = await db.select({ assetId: schema.scenes.assetId })
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, core.sceneId), isNull(schema.scenes.deletedAt)));
-      if (shotRow?.assetId) {
-        core.sourceAssetId = shotRow.assetId; // 血緣預設：current 畫面就是影片的 parent
+      // current 必須真的是圖片才能當 i2v parent——current 已是影片時不能把影片餵給圖生影模型
+      const [currentAsset] = shotRow?.assetId
+        ? await db.select({ id: schema.assets.id, kind: schema.assets.kind })
+          .from(schema.assets)
+          .where(and(eq(schema.assets.id, shotRow.assetId), isNull(schema.assets.deletedAt)))
+        : [];
+      if (currentAsset?.kind === "image") {
+        core.sourceAssetId = currentAsset.id; // 血緣預設：current 畫面就是影片的 parent
       } else {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "這一鏡還沒有已採用的畫面——先生成並採用一張畫面，或明確指定影片來源",
+          message: currentAsset
+            ? "這一鏡目前的採用結果不是圖片——請明確指定要當影片來源的畫面"
+            : "這一鏡還沒有已採用的畫面——先生成並採用一張畫面，或明確指定影片來源",
         });
       }
     }
