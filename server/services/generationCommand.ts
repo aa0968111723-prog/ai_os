@@ -76,6 +76,32 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
    */
   if (generation.sceneId) {
     void (async () => {
+      const { freezeShotContextPacket, buildShotContextPacketPayload } = await import("./shotContextPackets");
+      const { preflightShotPacket, evaluateGenerationCandidate } = await import("../../shared/consistencyEval");
+      const frozen = await freezeShotContextPacket({
+        auth,
+        projectId: generation.projectId,
+        shotId: generation.sceneId,
+        modelId: generation.modelId,
+      });
+      const payload = await buildShotContextPacketPayload({
+        auth,
+        projectId: generation.projectId,
+        shotId: generation.sceneId,
+        modelId: generation.modelId,
+      });
+      const preflight = preflightShotPacket(payload);
+      const evaluation = evaluateGenerationCandidate({
+        packet: payload,
+        candidate: {
+          prompt: generation.prompt,
+          characterIds: generation.characterIds,
+          lookIds: payload.looks.map((row) => row.id),
+          scenePresetIds: generation.scenePresetIds,
+          propIds: generation.propIds,
+          status: generation.status,
+        },
+      });
       const { resolveContext, recordContextResolution } = await import("./contextResolver");
       const context = await resolveContext({
         auth,
@@ -90,7 +116,17 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
         auth,
         intent: generation.kind === "video" ? "video" : generation.kind === "audio" ? "audio" : "image",
         shotId: generation.sceneId,
-        extraTrace: { generationId: generation.id, modelId: generation.modelId, prompt: generation.prompt.slice(0, 500) },
+        extraTrace: {
+          generationId: generation.id,
+          modelId: generation.modelId,
+          prompt: generation.prompt.slice(0, 500),
+          shotContextPacketId: frozen.packetId,
+          shotContextFingerprint: frozen.fingerprint,
+          preflight,
+          evaluation,
+          adoptAllowed: evaluation.adoptAllowed,
+          silentAdopt: false,
+        },
       });
     })().catch((error) => console.warn(
       "[generation] context trace skipped:",
