@@ -219,12 +219,12 @@ export function HelpPage() {
         <MapGroup title="最上面那一排（頂欄・隨時都在）" icon="MousePointer2">
           <Spot icon="Ellipsis" name="手機底部分頁列" where="手機・螢幕最下面">
             手機沒有頂欄那排連結，改成貼底四顆：<b>今日、專案、AI 助手、更多</b>。
-            「更多」點開就是低頻目的地（資料中心、筆記排程、私訊、怎麼用、模型指南、
-            動畫創作室、靈感頻道、共用下載）——手機上要換頁面一律從這裡走，
-            右上角頭像只管「我與團隊」。舊路徑 <code>/planner</code> 仍可直達。
+            「更多」第一層只留<b>資料中心、私訊、說明中心、進階工具</b>；
+            筆記排程、動畫創作室、靈感頻道、連接與下載在進階工具裡，舊路徑仍可直達。
+            右上角頭像只管「我與團隊」。
           </Spot>
           <Spot icon="Gem" name="剩餘點數" where="頂欄">
-            這顆鑽石徽章隨時顯示你還能生多少。滑上去看週／日上限與是哪一層額度最緊；帳號選單裡有更完整的個人用量條。
+            這顆鑽石徽章隨時顯示你還能生多少。點進去到個人設定看完整明細——全站只留這一個點數明細入口。
           </Spot>
           <Spot icon="Bell" name="待辦鈴鐺" where="頂欄・有待辦才出現">
             有幾筆分鏡等你審、幾格生成待核准（含成本門檻待核）。點開直接跳到那個專案。沒待辦就不出現。
@@ -232,7 +232,7 @@ export function HelpPage() {
           <Spot icon="User" name="誰在線" where="頂欄（有協作時）">
             同組目前在線的夥伴，不必進私訊就看得到——方便找人對稿、請審。
           </Spot>
-          <Spot icon="Clock" name="筆記排程" where="電腦頂欄／手機「更多」">
+          <Spot icon="Clock" name="筆記排程" where="今天頁摘要／電腦頂欄／手機「更多・進階工具」">
             週會、腳本審稿、待辦排進行事曆，也能寫會議紀錄。標題打 @人 可通知對方；可串 Google 日曆（整合連接）。
             筆記可以夾附件——白板照片、簽到表、講義 PDF 都直接掛在那則紀錄底下。
           </Spot>
@@ -242,7 +242,7 @@ export function HelpPage() {
           <Spot icon="MessageCircle" name="私訊" where="電腦頂欄／手機「更多」">
             一對一討論；可附圖檔。與專案留言分開——私訊只有雙方看得到。
           </Spot>
-          <Spot icon="Sparkles" name="靈感頻道" where="電腦帳號選單／手機「更多」">
+          <Spot icon="Sparkles" name="靈感頻道" where="電腦頂欄／手機「更多・進階工具」">
             全站共用的作品牆：別人發布的提示詞、成品與設定卡，<b>不必點開就看得到完整 prompt</b>，
             按「一鍵再用」直接帶進你選的專案生成台。上面那排<b>分類</b>（題材／風格／氛圍／光線／鏡頭／用途）
             是系統從標題、說明與提示詞自動判讀的，每格都帶數量，點下去逐層收斂。
@@ -252,16 +252,15 @@ export function HelpPage() {
             發布後隨時可在「我的發布」下架，下架後也能再上架，讚數與再用次數不會歸零。
           </Spot>
           <Spot icon="User" name="你的名字（選單）" where="頂欄右上・手機為貼底選單">
-            <b>手機</b>這裡放的是「我與團隊」：點數用量、我的回報、通知設定、<b>安裝成 App</b>、
-            改密碼、登出；要去別的頁面請按最底下的<b>「更多」</b>。<b>電腦</b>沒有底部分頁列，
-            所以同一個選單多列了說明／工作兩組（模型指南、接上外部 AI、靈感頻道、
-            連接的資料來源、共用下載、桌面 Companion）。組長／管理員還會多出<b>管理</b>那一組。多個組可切換作用組。
+            第一層只留身份與角色、一行點數、個人設定、有權限才出現的<b>管理</b>、登出。
+            改密碼、通知、裝置連結、匯出與登出全部裝置都在<b>個人設定</b>。
+            要去其他頁面：手機按最底下「更多」，電腦用頂欄。
           </Spot>
-          <Spot icon="Download" name="安裝成 App" where="橫幅或帳號選單">
+          <Spot icon="Download" name="安裝成 App" where="橫幅或個人設定">
             加到主畫面／桌面，像真正 App 一樣開。完整步驟見
             <a href="#help-install">「把 Aios 裝到手機或電腦」</a>。
           </Spot>
-          <Spot icon="Bell" name="通知設定" where="你的名字選單裡">
+          <Spot icon="Bell" name="通知設定" where="個人設定・安全與裝置">
             把手機和電腦連結進來，成本核准、私訊、@提及、生成完成會直接推到裝置——
             <b>關掉網頁也收得到</b>。手機（iPhone 要先「加入主畫面」）和電腦各啟用一次。
           </Spot>
@@ -338,14 +337,14 @@ export function HelpPage() {
         </MapGroup>
 
         <MapGroup title="其他好用的" icon="Info">
-          <Spot icon="Info" name="模型指南" where="電腦：選單・說明／手機：更多・說明">
+          <Spot icon="Info" name="模型指南" where="電腦頂欄／手機：更多・說明中心">
             大量模型分 11 類、旗艦／經濟／最省，可搜「中文、對嘴、金句」找對模型；含製作範本。
           </Spot>
-          <Spot icon="Sparkles" name="接上外部 AI" where="電腦：選單・工作／手機：更多・連接與下載">
+          <Spot icon="Sparkles" name="接上外部 AI" where="個人設定／手機：更多・進階工具">
             建金鑰讓 Claude 等外部 AI 用<b>你的身分</b>操作專案（MCP）。可設唯讀、會到期。
           </Spot>
-          <Spot icon="Download" name="共用下載／匯出我的資料" where="共用下載在電腦選單・工作或手機「更多」；匯出我的個人資料一律在帳號選單">
-            交付過的 zip 可再下；帳號選單「匯出我的個人資料」含帳號、組別、
+          <Spot icon="Download" name="共用下載／匯出我的資料" where="共用下載在手機「更多・進階工具」；匯出我的個人資料在個人設定">
+            交付過的 zip 可再下；個人設定「匯出我的個人資料」含帳號、組別、
             <b>相關專案</b>（世界觀／分鏡／知識／角色／場景摘要）、生成、留言、筆記、排程（不含密碼與媒體檔）。
           </Spot>
           <Spot icon="Monitor" name="桌面 Companion" where="電腦：選單・工作">
@@ -354,7 +353,7 @@ export function HelpPage() {
           <Spot icon="MessageCircle" name="我的回報／回饋" where="選單・帳號＋右下浮標">
             右下角浮標隨時提意見或回報問題；「我的回報」看管理員回覆。
           </Spot>
-          <Spot icon="Share2" name="連接的資料來源" where="電腦：選單・工作／手機：更多・連接與下載">
+          <Spot icon="Share2" name="連接的資料來源" where="個人設定／手機：更多・進階工具">
             連結 Google 日曆／雲端、Notion、Adobe 等，方便匯入文件與同步行程。
           </Spot>
         </MapGroup>

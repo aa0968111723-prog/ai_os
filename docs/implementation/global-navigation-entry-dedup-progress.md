@@ -21,7 +21,7 @@
 
 ## 現在階段
 
-**PR 2 實作中：今天頁與排程整合（PR 1 已開 #737 且全庫檢查通過）**
+**PR 3 實作完成、準備 commit／Draft PR：More／Account／Header／訊息去重**
 
 ## 四個實作 PR checklist
 
@@ -29,48 +29,51 @@
 
 - 分支：`cursor/global-nav-01-contract-32e8`
 - Base：`claude/healing-migration-ai-os-erewp2` @ `4e3a782a`
-- PR：尚未建立
+- PR：https://github.com/aa0968111723-prog/ai_os/pull/737
+- HEAD：`e163cc33181ba9b0a13149f738608c856ee93f30`
+- 狀態：已被合併（非本任務自行 merge）
 
 - [x] 手機底欄只留：今日、專案、AI 助手、更多
 - [x] 移除「筆記排程」作為底欄一級入口
 - [x] 保留 `/planner` route、query、hash 與 deep link
-- [x] `/planner` 時 More 為 active（不再有底欄排程格）
+- [x] `/planner` 時 More 為 active
 - [x] 更新 `navigationItems.ts` 目的地所有權與 More 群組契約
-- [x] More 暫保全部真功能（含 planner 改由 More 進入）
 - [x] 保留中央 AI 助手真實能力
 - [x] 保留 PWA safe area、鍵盤 `--kb-inset`、swipe sheet
-- [x] 觸控區 ≥ 44×44；底欄改 4 欄、無水平溢位
-- [x] 納入 #683 U10 CSS 契約測試（不覆蓋、不弱化）
-- [x] 更新 Help 底欄文案（五顆 → 四顆）以免規格與畫面矛盾
-- [x] targeted tests：6 files / 40 passed
-- [ ] typecheck / boundaries / ui-primitives / hooks / test / test:client / build
-- [ ] commit / push / Draft PR
+- [x] 觸控區 ≥ 44×44；底欄改 4 欄
+- [x] 納入 #683 U10 CSS 契約測試
+- [x] targeted / typecheck / boundaries / ui-primitives / hooks / test / test:client / build
 
 ### PR 2 — 今天頁與排程整合
 
 - 分支：`cursor/global-nav-02-today-planner-32e8`（以 PR 1 head `e163cc33` 為 base）
-- PR：尚未建立
+- PR：https://github.com/aa0968111723-prog/ai_os/pull/738（Draft）
+- HEAD：`1ef3fddf`
 - [x] 移除 daily-quick-links 重複的安排今天／整理資料／聯絡夥伴
 - [x] 單一「下一步」主操作
-- [x] 今日安排接入既有 `schedule.list`（不建第二套 query）
+- [x] 今日安排接入既有 `schedule.list`
 - [x] 合併重複建立專案 CTA
 - [x] `/planner` 完整清單／月曆／Google Calendar／ICS 仍可用
-- [x] 套用 #610 Launchpad 專案卡 a11y（覆蓋連結與按鈕解耦）
-- [x] targeted tests：Launchpad today / cover / create / PeerBadge 25 passed
-- [ ] commit / push / Draft PR
-- [ ] 全庫 typecheck / test / test:client / build
+- [x] 套用 #610 Launchpad 專案卡 a11y
+- [x] targeted tests PASS
+- [x] commit / push / Draft PR
+- [x] typecheck / boundaries / ui-primitives / hooks / `npm test` PASS
+- [ ] 本機 `test:client` / `build`（CI build 已 SUCCESS；test job 當時仍 IN_PROGRESS）
 
 ### PR 3 — More、Account、Header 與訊息去重
 
-- 分支：`cursor/global-nav-03-shell-dedup-32e8`（以 PR 2 head 為 base）
-- [ ] More 第一層：資料中心、私訊、說明中心、進階工具
-- [ ] Account 第一層：身份、點數一行、設定、有權限才顯示管理、登出
-- [ ] 安全／裝置／匯出移入 Settings
-- [ ] 移除全站常駐 FloatingDmBubble；More 顯示未讀
-- [ ] 專案 MessagePanel 不變
-- [ ] Header 隱藏無語意零值；icon 有 accessible name
-- [ ] More sheet swipe / Escape / 返回 / focus trap 保留
-- [ ] tests / commit / push / Draft PR
+- 分支：`cursor/global-nav-03-shell-dedup-32e8`（以 PR 2 head `1ef3fddf` 為 base）
+- [x] More 第一層：資料中心、私訊、說明中心、進階工具
+- [x] Account 第一層：身份、點數一行、設定、有權限才顯示管理、登出
+- [x] 安全／裝置／匯出移入 Settings
+- [x] 移除全站常駐 FloatingDmBubble；More 顯示未讀
+- [x] 專案 MessagePanel 不變
+- [x] Header 隱藏無語意零值；icon 有 accessible name
+- [x] More sheet swipe / Escape / 返回 / focus trap 保留
+- [x] targeted tests：28 passed
+- [x] typecheck / boundaries / ui-primitives / hooks PASS
+- [ ] commit / push / Draft PR
+- [ ] 全庫 test / test:client / build
 
 ### PR 4 — 資料、說明與舊入口歸位
 
@@ -87,43 +90,41 @@
 ## 已完成
 
 - 工作區安全檢查：乾淨、已 fetch、gh 已登入
-- 完整閱讀 #732、計畫、UIUX 計畫、Data Hub 現況、MobileNavigation、navigationItems
-- 確認 #732 已合併；從最新 default `4e3a782a` 建實作分支
-- 衝突盤點：#683（U10 CSS 契約，未合入）必須補進測試；#610（Launchpad a11y，未合入）PR 2 不得退回巢狀互動
-- 其他 open PR（#735 故事工作台、#726 等）不碰 `/p/:id`
-- PR 1 程式：四項底欄、planner 改入 More、4 欄 CSS、Help 文案、#683 U10 測試
-- Baseline targeted：38 passed；改後 targeted：40 passed
+- PR 1 #737、PR 2 #738
+- PR 3 程式：More 兩層、Account 第一層收斂、Settings 承接安全動作、移除全站 FloatingDmBubble、Header a11y／零值徽章
 
 ## 未完成
 
-- PR 1～4 實作、測試、手機證據、四個 Draft PR
+- PR 3 commit／Draft PR／全庫測試
+- PR 4 目的地歸位
+- 手機 20 條流程實際操作與 evidence
 
 ## 最後成功 commit SHA
 
 - PR 1：`e163cc33181ba9b0a13149f738608c856ee93f30`
-- PR 2：尚未 commit
+- PR 2：`1ef3fddf`
+- PR 3：尚未 commit
 
 ## 分支與 PR 連結
 
 | PR | 分支 | URL | HEAD SHA |
 | --- | --- | --- | --- |
 | 規格 #732 | `agent/global-navigation-entry-dedup-plan` | https://github.com/aa0968111723-prog/ai_os/pull/732 | 已合併 `4e3a782a` |
-| 1 | `cursor/global-nav-01-contract-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/737 | `e163cc33` |
-| 2 | — | — | — |
-| 3 | — | — | — |
+| 1 | `cursor/global-nav-01-contract-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/737 | `e163cc33`（已合併） |
+| 2 | `cursor/global-nav-02-today-planner-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/738 | `1ef3fddf` |
+| 3 | `cursor/global-nav-03-shell-dedup-32e8` | — | — |
 | 4 | — | — | — |
 
 ## 實際測試結果
 
-### Baseline（改碼前，default @ `4e3a782a`）
+### PR 3 targeted（改後）
 
-- 正在跑：MobileNavigation / navigationItems / styles.contract / mobileOrb / fabRail
-- 全庫 `npm test` / `test:client` / `build` 尚未跑完（待 PR 1 改完後連同 targeted 一併記錄）
-- 已知環境：#732 CI 的 `migration` job 為 FAILURE（docs-only PR 亦失敗）→ 視為 **BASELINE_EXISTING_FAILURE**，與本任務無關
+- MobileNavigation / AccountMenu / navigationItems.naming / SettingsPage.security / styles.contract：**28 passed**
+- typecheck / boundaries / ui-primitives / hooks：**PASS**
 
 ## Baseline failure
 
-- CI `migration` on #732：FAILURE（既有，非本任務引入）
+- CI `migration` on #732／後續 stacked PR：FAILURE（既有，非本任務引入）→ **BASELINE_EXISTING_FAILURE**
 
 ## Introduced failure
 
@@ -131,16 +132,15 @@
 
 ## 遇到的問題
 
-- 開始時 #732 仍為 Draft；讀規格途中已合併。已改從最新 default 建分支，未自行 merge。
-- 工作區無 `node_modules`，已 `npm ci`。
-- 產品文案沿用既有去處名「今日」（DESTINATIONS.dashboard.label），不等於另造「今天」第二個名字。
+- PR 1 #737 已被合併（非本任務自行 merge）。後續 PR 仍保持 Draft、不 merge、不 force push。
+- 產品文案沿用既有去處名「今日」。
 
 ## 下一個精確操作
 
-1. commit / push PR 2
-2. 開 Draft PR 2（base = PR 1 分支）
-3. 跑 PR 2 全庫檢查
-4. 從 PR 2 head 開 PR 3：More／Account／Header／訊息去重
+1. commit / push PR 3
+2. 開 Draft PR 3（base = PR 2 分支）
+3. 跑 PR 3 全庫檢查
+4. 從 PR 3 head 開 PR 4：目的地歸位與舊路徑相容
 
 ## 真正需要人工決策的 blocker
 

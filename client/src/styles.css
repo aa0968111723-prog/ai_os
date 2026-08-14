@@ -6182,21 +6182,28 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     color: var(--fg-secondary); letter-spacing: .06em; user-select: none;
   }
   .mobile-more-sheet__label:first-child { padding-top: 2px; }
-  .mobile-more-sheet__grid a {
+  .mobile-more-sheet__grid a,
+  .mobile-more-sheet__grid .mobile-more-sheet__row {
     min-width: 0; min-height: 54px;
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
     gap: 9px; padding: 7px 8px; border-radius: 12px;
     color: var(--fg); text-decoration: none;
+    background: transparent; border: 0; width: 100%; text-align: start;
+    font: inherit; cursor: pointer;
   }
-  .mobile-more-sheet__grid a:active { background: var(--card2); }
-  .mobile-more-sheet__grid a.active { background: var(--primary-tint); color: var(--primary-ink); }
+  .mobile-more-sheet__grid a:active,
+  .mobile-more-sheet__grid .mobile-more-sheet__row:active { background: var(--card2); }
+  .mobile-more-sheet__grid a.active,
+  .mobile-more-sheet__grid .mobile-more-sheet__row.active { background: var(--primary-tint); color: var(--primary-ink); }
   .mobile-more-sheet__icon {
     width: 36px; height: 36px; display: grid; place-items: center;
     border-radius: 11px; background: var(--card2); color: var(--primary-ink);
   }
-  .mobile-more-sheet__grid a > span:nth-child(2) { min-width: 0; display: grid; }
+  .mobile-more-sheet__grid a > span:nth-child(2),
+  .mobile-more-sheet__grid .mobile-more-sheet__row > span:nth-child(2) { min-width: 0; display: grid; }
   .mobile-more-sheet__grid strong { font-size: var(--fs-13); }
   .mobile-more-sheet__grid small { color: var(--fg-secondary); font-size: var(--fs-11); }
+  .mobile-more-sheet__head > span { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 @keyframes mobile-sheet-up {
   from { transform: translateY(28px); opacity: .78; }

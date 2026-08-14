@@ -52,11 +52,12 @@ export function OnlinePresenceMenu() {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="online-presence-menu"
+        aria-label={title}
         title={title}
         onClick={() => setOpen((v) => !v)}
       >
         <span className={`presence-dot-inline${count && count > 0 ? " is-on" : ""}`} aria-hidden />
-        <span className="mono">{count === null ? "…" : count}</span>
+        {count != null && count > 0 && <span className="mono">{count}</span>}
         <span className="online-presence__label">在線</span>
       </button>
       <MenuSurface

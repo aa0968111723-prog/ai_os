@@ -225,7 +225,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
       await copyLinkDeviceGuide();
       setNotice("已複製「如何在另一台裝置連結」說明——可貼到 LINE 或備忘錄");
     } catch {
-      setError("無法複製到剪貼簿——請手動告訴對方：登入後到「連結手機與電腦」啟用");
+      setError("無法複製到剪貼簿——請手動告訴對方：登入後到個人設定啟用通知");
     }
   };
 
@@ -288,7 +288,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             </li>
             <li>
               <strong>另一台裝置</strong>
-              ——用同一個帳號登入 → 頭像選單 →「連結手機與電腦」→ 再啟用一次
+              ——用同一個帳號登入 → 個人設定 →「通知設定與裝置連結」→ 再啟用一次
             </li>
           </ol>
           <Button variant="ghost" className="device-link-copy" type="button" onClick={() => void copyGuide()} disabled={busy}>
