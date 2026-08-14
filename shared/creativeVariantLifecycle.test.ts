@@ -366,9 +366,6 @@ describe("重試必須沿用方向與批次（否則重試出來的版本會脫�
  * 都不會被標「畫面過時」。
  */
 describe("#725 P1-7 換卡片同樣讓畫面過時（綁定漂移）", () => {
-  const EMPTY_CARDS: CurrentCards = {
-    characters: new Map(), scenes: new Map(), props: new Map(), looks: new Map(),
-  };
   const CHAR_A = "aaaaaaaa-1111-4111-8111-111111111111";
   const CHAR_B = "bbbbbbbb-1111-4111-8111-111111111111";
   const LOOK_1 = "11111111-2222-4222-8222-222222222222";
@@ -376,6 +373,14 @@ describe("#725 P1-7 換卡片同樣讓畫面過時（綁定漂移）", () => {
   const SCENE_1 = "33333333-3333-4333-8333-333333333333";
   const SCENE_2 = "44444444-3333-4333-8333-333333333333";
   const PROP_1 = "55555555-4444-4444-8444-444444444444";
+  /** 造型的擁有者要查得到，綁定漂移才分得出「換造型」與「孤兒造型」 */
+  const EMPTY_CARDS: CurrentCards = {
+    characters: new Map(), scenes: new Map(), props: new Map(),
+    looks: new Map([
+      [LOOK_1, { name: "L1", costume: null, characterId: CHAR_A }],
+      [LOOK_2, { name: "L2", costume: null, characterId: CHAR_A }],
+    ]),
+  };
 
   /** 生成當下綁了：角色 A（造型 LOOK_1）、場景 1、道具 1 */
   const frozen: ContinuitySnapshot = {
@@ -413,9 +418,23 @@ describe("#725 P1-7 換卡片同樣讓畫面過時（綁定漂移）", () => {
     expect(drifts[0]!.fields).toEqual(["scenes"]);
   });
 
-  it("移除道具 → 過時", () => {
-    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, propIds: [] });
+  it("加道具 → 過時", () => {
+    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, {
+      ...sameBindings, propIds: [PROP_1, "66666666-4444-4444-8444-444444444444"],
+    });
     expect(drifts[0]!.fields).toEqual(["props"]);
+  });
+
+  it("移除道具刻意**不**報過時（快照因自動帶入合法地比綁定多，雙向比會誤報）", () => {
+    // mergePropIdsWithCarried 會把掛在角色/場景底下的道具自動帶進生成，
+    // 但 scenes.propIds 不會跟著變 ⇒ 快照 ⊇ 綁定。寧可漏報也不要每張圖一出生就過時。
+    expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, propIds: [] })).toEqual([]);
+  });
+
+  it("這一鏡完全沒有自己的卡片綁定 → 不比對（生成用的是生成台的 fallback 勾選）", () => {
+    expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, {
+      characterIds: [], lookIds: [], scenePresetIds: [], propIds: [],
+    })).toEqual([]);
   });
 
   it("順序不同不算差異（id 集合語意）", () => {
@@ -434,5 +453,20 @@ describe("#725 P1-7 換卡片同樣讓畫面過時（綁定漂移）", () => {
 
   it("呼叫端沒傳綁定 → 不比對（無從判斷就別猜，舊呼叫端維持既有行為）", () => {
     expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, undefined)).toEqual([]);
+  });
+
+  it("孤兒造型不算漂移：造型掛在鏡上但它的角色沒被綁，生成時本來就沒注入", () => {
+    // e2e「卡片沒動時不誤報過時」實際踩到的情形：該鏡有 lookIds 但 characterIds 是 null
+    const orphanFrozen: ContinuitySnapshot = { ...frozen, characters: [] };
+    expect(detectContinuityDrift(orphanFrozen, EMPTY_CARDS, undefined, {
+      characterIds: [], lookIds: [LOOK_1], scenePresetIds: [SCENE_1], propIds: [PROP_1],
+    })).toEqual([]);
+  });
+
+  it("查不到擁有者的造型同樣不比（無從判斷就別猜）", () => {
+    const unknownLook = "99999999-2222-4222-8222-222222222222";
+    expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, {
+      ...sameBindings, lookIds: [LOOK_1, unknownLook],
+    })).toEqual([]);
   });
 });

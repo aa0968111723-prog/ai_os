@@ -122,8 +122,13 @@ export interface CurrentCards {
   characters: Map<string, { appearance: string }>;
   scenes: Map<string, { palette: string; lighting: string | null }>;
   props: Map<string, { appearance: string }>;
-  /** 造型卡（以 lookId 為鍵）：只跟快照凍的那一張比 */
-  looks: Map<string, { name: string; costume: string | null }>;
+  /**
+   * 造型卡（以 lookId 為鍵）：只跟快照凍的那一張比。
+   * `characterId`＝這套造型屬於誰。綁定漂移要用它濾掉**孤兒造型**
+   *（掛在鏡上但它的角色沒被綁）——那種造型生成時本來就進不了錨點，
+   * 不是「改過」。沒帶 characterId 的呼叫端＝無從判斷，那一段就不比。
+   */
+  looks: Map<string, { name: string; costume: string | null; characterId?: string }>;
 }
 
 function norm(v: string | null | undefined): string {
@@ -201,21 +206,69 @@ export function detectContinuityDrift(
    * 排序後比對——順序不是創作差異。
    */
   if (currentBindings) {
-    const sameSet = (a: readonly string[], b: readonly string[]) => {
-      const x = [...new Set(a)].sort();
-      const y = [...new Set(b)].sort();
-      return x.length === y.length && x.every((v, i) => v === y[i]);
-    };
-    const frozenLooks = snapshot.characters
-      .map((row) => row.lookId)
-      .filter((id): id is string => !!id);
-    const bindingFields: string[] = [];
-    if (!sameSet(snapshot.characters.map((r) => r.id), currentBindings.characterIds ?? [])) bindingFields.push("characters");
-    if (!sameSet(frozenLooks, currentBindings.lookIds ?? [])) bindingFields.push("looks");
-    if (!sameSet(snapshot.scenes.map((r) => r.id), currentBindings.scenePresetIds ?? [])) bindingFields.push("scenes");
-    if (!sameSet(snapshot.props.map((r) => r.id), currentBindings.propIds ?? [])) bindingFields.push("props");
-    if (bindingFields.length) {
-      out.push({ kind: "binding", id: "shot", name: "這一鏡", fields: bindingFields.sort() });
+    const chars = [...new Set(currentBindings.characterIds ?? [])];
+    const looks = [...new Set(currentBindings.lookIds ?? [])];
+    const scenes = [...new Set(currentBindings.scenePresetIds ?? [])];
+    const props = [...new Set(currentBindings.propIds ?? [])];
+
+    /*
+     * 這一鏡完全沒有自己的卡片綁定時**不比對**。
+     *
+     * `resolveSceneCards` 的規則是「沒綁定就沿用生成台當下的勾選」，
+     * 所以快照裡會有這一鏡本身沒有的卡片。那是 fallback，不是漂移——
+     * 硬比會讓每一張這樣產生的圖一出生就被標成過時。
+     */
+    const hasOwnBinding = chars.length > 0 || scenes.length > 0 || props.length > 0;
+    if (hasOwnBinding) {
+      const sameSet = (a: readonly string[], b: readonly string[]) => {
+        const x = [...new Set(a)].sort();
+        const y = [...new Set(b)].sort();
+        return x.length === y.length && x.every((v, i) => v === y[i]);
+      };
+      /** 現在綁著、但當初沒進快照 ⇒ 一定是生成之後才加／換上去的（安全訊號） */
+      const addedSince = (nowIds: readonly string[], frozenIds: readonly string[]) => {
+        const frozen = new Set(frozenIds);
+        return nowIds.some((id) => !frozen.has(id));
+      };
+
+      const frozenChars = snapshot.characters.map((r) => r.id);
+      const frozenScenes = snapshot.scenes.map((r) => r.id);
+      const frozenProps = snapshot.props.map((r) => r.id);
+      const frozenLooks = snapshot.characters.map((r) => r.lookId).filter((id): id is string => !!id);
+      /*
+       * 只看「屬於目前綁定角色」的造型。
+       *
+       * 孤兒造型（造型掛在鏡上、它的角色卻沒被綁）生成時根本進不了錨點層，
+       * 快照裡自然沒有它——拿它當「生成後新增的」會讓每一張這種鏡的圖一出生就過時。
+       * （e2e「卡片沒動時不誤報過時」正是被這個抓到：該鏡有 lookIds 但 characterIds 是 null。）
+       * 查不到 characterId 的造型同樣不比——無從判斷就別猜。
+       */
+      const boundChars = new Set(chars);
+      const looksOfBoundCharacters = looks.filter((lookId) => {
+        const owner = current.looks.get(lookId)?.characterId;
+        return !!owner && boundChars.has(owner);
+      });
+
+      const bindingFields: string[] = [];
+      // 角色與場景沒有「自動帶入」機制 ⇒ 快照與綁定應該逐一相等，可以雙向比
+      if (!sameSet(frozenChars, chars)) bindingFields.push("characters");
+      if (!sameSet(frozenScenes, scenes)) bindingFields.push("scenes");
+      /*
+       * 造型與道具只比「多出來的」，不比「少掉的」。
+       *
+       * 快照這兩類**合法地會比綁定多**：
+       *  - 道具：`mergePropIdsWithCarried` 會把「掛在所選角色／場景底下的道具」自動帶進生成，
+       *    但 `scenes.propIds` 欄位不會跟著變 ⇒ 快照 ⊇ 綁定。
+       *  - 造型：快照的 lookId 是「配對到快照內角色的那一張」，綁定裡可能有配不到角色的造型。
+       * 雙向比會把這兩種正常情況誤報成過時（e2e「卡片沒動時不誤報過時」正是被這個抓到）。
+       * 「多出來的」則毫無歧義：生成當時沒有它，現在有了。
+       * 代價：純粹的「移除造型／道具」不會被標過時——寧可漏報也不要每張圖一出生就過時。
+       */
+      if (addedSince(looksOfBoundCharacters, frozenLooks)) bindingFields.push("looks");
+      if (addedSince(props, frozenProps)) bindingFields.push("props");
+      if (bindingFields.length) {
+        out.push({ kind: "binding", id: "shot", name: "這一鏡", fields: bindingFields.sort() });
+      }
     }
   }
 

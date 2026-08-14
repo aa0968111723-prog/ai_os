@@ -52,6 +52,8 @@ async function loadCurrentCards(projectId: string): Promise<CurrentCards> {
         id: schema.characterLooks.id,
         name: schema.characterLooks.name,
         costume: schema.characterLooks.costume,
+        // 綁定漂移要靠它濾掉孤兒造型（造型在鏡上、角色沒綁 ⇒ 生成時本來就沒注入）
+        characterId: schema.characterLooks.characterId,
       })
       .from(schema.characterLooks)
       .where(eq(schema.characterLooks.projectId, projectId)),
@@ -64,7 +66,7 @@ async function loadCurrentCards(projectId: string): Promise<CurrentCards> {
     characters: new Map(characters.map((c) => [c.id, { appearance: c.appearance }])),
     scenes: new Map(scenes.map((s) => [s.id, { palette: s.palette, lighting: s.lighting }])),
     props: new Map(props.map((p) => [p.id, { appearance: p.appearance }])),
-    looks: new Map(looks.map((l) => [l.id, { name: l.name, costume: l.costume }])),
+    looks: new Map(looks.map((l) => [l.id, { name: l.name, costume: l.costume, characterId: l.characterId }])),
   };
 }
 
