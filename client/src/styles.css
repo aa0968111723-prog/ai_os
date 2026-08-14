@@ -8827,6 +8827,19 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   flex: 1 1 auto; min-height: 0; overflow: auto;
   padding: 12px; -webkit-overflow-scrolling: touch;
 }
+
+.story-result-fix { margin: 8px 0 12px; padding: 12px 14px; }
+.story-result-fix__head { display: flex; align-items: center; gap: 8px; }
+.story-result-fix__head strong { flex: 1 1 auto; }
+.story-result-fix__presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.story-result-fix__label { display: block; font-size: var(--fs-12); margin-top: 4px; }
+.story-result-fix__text {
+  width: 100%; min-height: 72px; margin-top: 4px; padding: 8px 10px;
+  border-radius: var(--r-md, 10px); border: 1px solid var(--border);
+  background: var(--field); color: inherit; resize: vertical;
+}
+.story-result-fix__proposal, .story-result-fix__shots { margin-top: 10px; }
+.story-result-fix__entry { min-height: 44px; }
 .story-editor {
   width: 100%; margin-top: 10px; padding: 12px 14px;
   font-size: calc(var(--fs-15) * var(--script-font-scale, 1)); line-height: 1.75; resize: vertical;

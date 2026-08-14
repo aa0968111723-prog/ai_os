@@ -122,7 +122,7 @@ export function DeliveryRoom({
         <EmptyState
           icon={<Icon name="Clapperboard" size={20} />}
           title="還沒有分鏡可以交付"
-          description="先回到「① 故事」寫故事、產生分鏡，這裡就會自動出現整部片的完成度與待辦。"
+          description="先回到故事寫內容、產生分鏡，這裡就會自動出現整部片的完成度與待辦。"
         />
       </Card>
     );

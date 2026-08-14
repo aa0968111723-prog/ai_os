@@ -65,6 +65,8 @@ import {
   type StoryInlineSectionId,
 } from "../features/story-workspace/storyInlineNav";
 import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
+import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
+
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { storyboardRailSummary } from "../features/storyboard-center/storyboardRailSummary";
@@ -1624,6 +1626,27 @@ export function ProjectPage({ id }: { id: string }) {
                   : undefined
             }
           />
+          {(hasDeliverable || doneGenCount || oneClick.result) ? (
+            <StoryResultFix
+              onApplySection={(section) => {
+                if (section === "story") {
+                  window.scrollTo({ top: 0 });
+                  return;
+                }
+                openInlineSection(section);
+              }}
+              shotChoices={(scenes.data ?? []).map((s) => ({
+                id: s.id,
+                title: (s as { title?: string }).title || s.id.slice(0, 8),
+              }))}
+              onRegenerateShots={(shotIds) => {
+                if (!window.confirm(`只重生成選取的 ${shotIds.length} 鏡。會建立批次計畫，核准後才扣點，不會重做整部影片。`)) return;
+                void oneClick.regenShots(shotIds).then(() => openInlineSection("production")).catch(() => {
+                  openInlineSection("production");
+                });
+              }}
+            />
+          ) : null}
 
           <div className="story-inline-rail" data-fb="故事收合列">
             <StoryInlineSection
