@@ -147,6 +147,7 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<StoryStage\b/);
     expect(src).toMatch(/from ["'].*storyboard-center\/StoryboardStage["']/);
     expect(src).toMatch(/<StoryboardStage\b/);
+    expect(src).toMatch(/onSendToWorkbench/);
     expect(src).toMatch(/className="psettings-sheet"/);
     expect(src).toMatch(/aria-label="專案設定"/);
     // 舊書籤 #stage-context 正規化到 #stage-story（深連結不能斷）
