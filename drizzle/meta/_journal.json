@@ -512,6 +512,13 @@
       "when": 1789654800000,
       "tag": "0072_shot_context_packets",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789658400000,
+      "tag": "0073_consistency_training",
+      "breakpoints": true
     }
   ]
 }
