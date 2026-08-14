@@ -135,6 +135,7 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<StoryResultFix\b/);
     expect(src).toMatch(/<CreationWorkbench\b/);
     expect(src).toMatch(/<StoryboardStage\b/);
+    expect(src).not.toMatch(/hideInspector=\{mobileCompact\}/);
     expect(src).toMatch(/<DeliveryRoom\b/);
     expect(src).toMatch(/isAssembledProjectFilm/);
     expect(src).toMatch(/subscribeStoryReveal/);
