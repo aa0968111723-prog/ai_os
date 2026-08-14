@@ -18,6 +18,7 @@ import {
   describeDrift,
   type ContinuityDrift,
   type ContinuityShotDirection,
+  type CurrentShotBindings,
   type CurrentCards,
 } from "../../shared/continuity";
 
@@ -84,6 +85,11 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
       camera: schema.scenes.camera,
       performance: schema.scenes.performance,
       action: schema.scenes.action,
+      // 綁定漂移的右手邊（#725 P1-7）：這一鏡「現在」綁了哪些卡片
+      characterIds: schema.scenes.characterIds,
+      lookIds: schema.scenes.lookIds,
+      scenePresetIds: schema.scenes.scenePresetIds,
+      propIds: schema.scenes.propIds,
     })
     .from(schema.scenes)
     .innerJoin(schema.assets, eq(schema.assets.id, schema.scenes.assetId))
@@ -95,6 +101,7 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
     title: string;
     assetId: string;
     direction: ContinuityShotDirection;
+    bindings: CurrentShotBindings;
   }>();
   for (const r of rows) {
     const genId = (r.assetMeta as { generationId?: unknown } | null)?.generationId;
@@ -104,6 +111,12 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
         title: r.title,
         assetId: r.assetId,
         direction: { camera: r.camera, performance: r.performance, action: r.action },
+        bindings: {
+          characterIds: r.characterIds,
+          lookIds: r.lookIds,
+          scenePresetIds: r.scenePresetIds,
+          propIds: r.propIds,
+        },
       });
     }
   }
@@ -122,7 +135,7 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
     // 快照可能是舊版形狀或壞資料：解析不過就當「無從判斷」，不製造假警報
     const parsed = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
     if (!parsed.success) continue;
-    const drifts = detectContinuityDrift(parsed.data, current, shot.direction);
+    const drifts = detectContinuityDrift(parsed.data, current, shot.direction, shot.bindings);
     if (!drifts.length) continue;
     out.push({ shotId: shot.shotId, title: shot.title, assetId: shot.assetId, drifts, reason: describeDrift(drifts) });
   }

@@ -356,3 +356,83 @@ describe("重試必須沿用方向與批次（否則重試出來的版本會脫�
     expect(batches[0]!.failed).toHaveLength(1);
   });
 });
+
+
+/**
+ * #725 P1-7：連戲／過時引擎原本看不見任何面板寫入。
+ *
+ * 原始 finding：detectContinuityDrift 只迭代**凍結快照**並比對卡片**內容文字**，
+ * 從不比對該鏡當下綁了哪些 id。換 Look、加減角色、換場景——#722/#723 面板的全部意義——
+ * 都不會被標「畫面過時」。
+ */
+describe("#725 P1-7 換卡片同樣讓畫面過時（綁定漂移）", () => {
+  const EMPTY_CARDS: CurrentCards = {
+    characters: new Map(), scenes: new Map(), props: new Map(), looks: new Map(),
+  };
+  const CHAR_A = "aaaaaaaa-1111-4111-8111-111111111111";
+  const CHAR_B = "bbbbbbbb-1111-4111-8111-111111111111";
+  const LOOK_1 = "11111111-2222-4222-8222-222222222222";
+  const LOOK_2 = "22222222-2222-4222-8222-222222222222";
+  const SCENE_1 = "33333333-3333-4333-8333-333333333333";
+  const SCENE_2 = "44444444-3333-4333-8333-333333333333";
+  const PROP_1 = "55555555-4444-4444-8444-444444444444";
+
+  /** 生成當下綁了：角色 A（造型 LOOK_1）、場景 1、道具 1 */
+  const frozen: ContinuitySnapshot = {
+    version: 1,
+    locked: true,
+    capturedAt: "2026-08-14T00:00:00.000Z",
+    fingerprint: "a".repeat(64),
+    characters: [{ id: CHAR_A, name: "安倢", appearance: "黑色長髮", notes: null, referenceAssetId: null, lookId: LOOK_1 }],
+    scenes: [{ id: SCENE_1, name: "晨光禪堂", palette: "米白", lighting: null, referenceAssetId: null }],
+    props: [{ id: PROP_1, name: "紅傘", appearance: "紅色", notes: null, referenceAssetId: null }],
+    referenceAssetIds: [],
+  };
+  const sameBindings = {
+    characterIds: [CHAR_A], lookIds: [LOOK_1], scenePresetIds: [SCENE_1], propIds: [PROP_1],
+  };
+
+  it("綁定完全沒動 → 不誤報", () => {
+    expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, sameBindings)).toEqual([]);
+  });
+
+  it("換 Look（面板把 Look A 換成 B）→ 這一鏡被標為過時", () => {
+    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, lookIds: [LOOK_2] });
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]!.kind).toBe("binding");
+    expect(drifts[0]!.fields).toEqual(["looks"]);
+  });
+
+  it("加一個角色 → 過時", () => {
+    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, characterIds: [CHAR_A, CHAR_B] });
+    expect(drifts[0]!.fields).toEqual(["characters"]);
+  });
+
+  it("換場景 → 過時", () => {
+    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, scenePresetIds: [SCENE_2] });
+    expect(drifts[0]!.fields).toEqual(["scenes"]);
+  });
+
+  it("移除道具 → 過時", () => {
+    const drifts = detectContinuityDrift(frozen, EMPTY_CARDS, undefined, { ...sameBindings, propIds: [] });
+    expect(drifts[0]!.fields).toEqual(["props"]);
+  });
+
+  it("順序不同不算差異（id 集合語意）", () => {
+    const twoChars: ContinuitySnapshot = {
+      ...frozen,
+      characters: [
+        { id: CHAR_A, name: "安倢", appearance: "x", notes: null, referenceAssetId: null, lookId: LOOK_1 },
+        { id: CHAR_B, name: "慕恩", appearance: "y", notes: null, referenceAssetId: null, lookId: null },
+      ],
+    };
+    const drifts = detectContinuityDrift(twoChars, EMPTY_CARDS, undefined, {
+      ...sameBindings, characterIds: [CHAR_B, CHAR_A],
+    });
+    expect(drifts).toEqual([]);
+  });
+
+  it("呼叫端沒傳綁定 → 不比對（無從判斷就別猜，舊呼叫端維持既有行為）", () => {
+    expect(detectContinuityDrift(frozen, EMPTY_CARDS, undefined, undefined)).toEqual([]);
+  });
+});

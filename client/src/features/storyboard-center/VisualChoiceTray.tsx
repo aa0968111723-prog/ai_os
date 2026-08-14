@@ -331,7 +331,8 @@ export function VisualChoiceTray({
         const choice: ProjectChoice = pending;
         const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
         const outcome = await applyPerShot(editable, async (shot) => {
-          const change = projectChoiceChange({ shot, choice, removeEverywhere: remove });
+          // lookOwnerById 是移除角色時判斷「哪些 Look 會變孤兒」的依據（#725 P1-12）
+          const change = projectChoiceChange({ shot, choice, lookOwnerById, removeEverywhere: remove });
           if (!change.compatible) return "incompatible";
           if (!change.changed) return "skipped";
           const field = change.field as "characterIds" | "scenePresetIds" | "propIds";
@@ -341,6 +342,16 @@ export function VisualChoiceTray({
             expectedRev: shot.rev,
             baseline: { [field]: shot[field] },
           });
+          // 移除角色時一併清掉它留下的孤兒 Look（#725 P1-12）。
+          // 分兩支寫入：setCards 只管三排卡片，lookIds 屬於 scenes.update 的欄位。
+          if (change.orphanedLookIds?.length) {
+            const keptLooks = (shot.lookIds ?? []).filter((id) => !change.orphanedLookIds!.includes(id));
+            await update.mutateAsync({
+              sceneId: shot.id,
+              lookIds: keptLooks,
+              baseline: { lookIds: shot.lookIds },
+            });
+          }
           return "applied";
         });
         applied = outcome.applied;

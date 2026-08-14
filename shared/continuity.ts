@@ -94,12 +94,27 @@ export type ContinuitySnapshot = z.infer<typeof continuitySnapshotSchema>;
 
 /** 一項過時原因（給人看的句子由呼叫端組，這裡只回事實） */
 export interface ContinuityDrift {
-  kind: "character" | "scene" | "prop" | "direction";
+  kind: "character" | "scene" | "prop" | "direction" | "binding";
   id: string;
   /** 快照當時的名字（卡片可能已改名，用當時的名字才對得上那張圖） */
   name: string;
   /** 哪些欄位變了：appearance / look / palette / lighting／或鏡頭語言欄位名 */
   fields: string[];
+}
+
+/**
+ * 這一鏡**現在**綁了哪些卡片（#725 P1-7）。
+ *
+ * v1 的漂移偵測只比「快照凍住的那幾張卡，內容有沒有被改過」——完全看不到
+ * 「這一鏡換了一張卡」。換 Look、加減角色、換場景（也就是 #722/#723 面板的全部意義）
+ * 都不會被標成畫面過時。快照裡本來就有當時綁了哪些 id，比對 id 集合即可，
+ * 不需要新欄位、不需要 migration。
+ */
+export interface CurrentShotBindings {
+  characterIds?: string[] | null;
+  lookIds?: string[] | null;
+  scenePresetIds?: string[] | null;
+  propIds?: string[] | null;
 }
 
 /** 現在的卡片內容（只取會影響畫面的欄位；呼叫端從 DB 撈） */
@@ -129,6 +144,11 @@ export function detectContinuityDrift(
    * （與「卡片被刪不算過時」同一條原則：無從判斷就別猜）。
    */
   currentShot?: ContinuityShotDirection | null,
+  /**
+   * 這一鏡現在綁了哪些卡片（#725 P1-7）。不傳＝呼叫端沒有這份資料，那一段不比
+   * （與「卡片被刪不算過時」同一條原則：無從判斷就別猜）。
+   */
+  currentBindings?: CurrentShotBindings | null,
 ): ContinuityDrift[] {
   if (!snapshot) return [];
   const out: ContinuityDrift[] = [];
@@ -174,6 +194,32 @@ export function detectContinuityDrift(
   }
 
   /*
+   * 綁定漂移（#725 P1-7）：這一鏡**換了卡片**同樣讓畫面過時。
+   *
+   * 比的是 id 集合：快照凍住的那批 vs 這一鏡現在綁的那批。
+   * Look 從快照的 characters[].lookId 取（那是「這一鏡當時鎖的那一張造型卡」）。
+   * 排序後比對——順序不是創作差異。
+   */
+  if (currentBindings) {
+    const sameSet = (a: readonly string[], b: readonly string[]) => {
+      const x = [...new Set(a)].sort();
+      const y = [...new Set(b)].sort();
+      return x.length === y.length && x.every((v, i) => v === y[i]);
+    };
+    const frozenLooks = snapshot.characters
+      .map((row) => row.lookId)
+      .filter((id): id is string => !!id);
+    const bindingFields: string[] = [];
+    if (!sameSet(snapshot.characters.map((r) => r.id), currentBindings.characterIds ?? [])) bindingFields.push("characters");
+    if (!sameSet(frozenLooks, currentBindings.lookIds ?? [])) bindingFields.push("looks");
+    if (!sameSet(snapshot.scenes.map((r) => r.id), currentBindings.scenePresetIds ?? [])) bindingFields.push("scenes");
+    if (!sameSet(snapshot.props.map((r) => r.id), currentBindings.propIds ?? [])) bindingFields.push("props");
+    if (bindingFields.length) {
+      out.push({ kind: "binding", id: "shot", name: "這一鏡", fields: bindingFields.sort() });
+    }
+  }
+
+  /*
    * 鏡頭語言漂移（v4）：逐欄比對，只在快照真的凍過這一段時才比。
    * 舊資料沒有 shotDirection ⇒ 不比，不會讓歷史畫面一夜之間全被標成過時。
    */
@@ -207,6 +253,11 @@ export const DRIFT_FIELD_LABEL: Record<string, string> = {
   emotion: "情緒",
   gaze: "視線",
   action: "動作",
+  // 綁定漂移（換了卡片，不是卡片內容被改）
+  characters: "角色綁定",
+  looks: "造型綁定",
+  scenes: "場景綁定",
+  props: "道具綁定",
 };
 
 /** 一句話說明這張圖為什麼過時（回空字串＝沒有過時） */
