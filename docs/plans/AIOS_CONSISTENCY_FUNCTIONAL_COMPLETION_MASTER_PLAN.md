@@ -89,7 +89,168 @@ Repository：`aa0968111723-prog/ai_os`
 - 預設只呈現「目前狀態、下一步、正在執行、需要決定」；模型、provider、fingerprint、lineage 與權利證據放 Advanced／details。
 - 使用者不必理解 LoRA、adapter、packet 或 provider ID 才能完成主流程。
 
-## 4. 完整能力閉環矩陣
+## 4. UI/UX × 資料庫 × 一致性整合核心
+
+這三層不得分開實作。UI 不能自己猜完成度；資料庫不能只有資料卻沒有可操作的狀態；一致性引擎不能只產生分數卻無法在創作流程中被看見、修正與恢復。
+
+### 4.1 唯一閉環
+
+```text
+既有 project-scoped records
+→ server-side workspace projection
+→ Story workspace 顯示狀態／缺口／下一步
+→ 使用者確認或執行動作
+→ 共用 command + policy + transaction
+→ persisted result / event / receipt
+→ query invalidation 或既有 event stream
+→ 重新讀取 workspace projection
+```
+
+禁止以下捷徑：
+
+- Client 依「按過按鈕」或本地 state 顯示完成。
+- UI 自行用不同公式計算 ready、coverage 或 consistency。
+- Agent/MCP 直接寫表而略過 command/policy layer。
+- 生成 callback 只更新畫面，不更新 persisted candidate、lineage、evaluation 與 receipt。
+- 為了 dashboard 再建一組可變的統計真相表；優先使用可重算 projection，必要 cache 必須可失效與重建。
+
+### 4.2 資料庫真相與讀取投影
+
+沿用現有 `projects`、故事/Yjs、characters、characterLooks、scenePresets、props、assets、knowledge、data_files/data_rows、scenes、generations、sceneVersions、timeline、agent/workflow、points/quota、#743 creative context 與 #748–#750 packet/training 結構。
+
+新增或抽出的 server read model 建議命名為 `ProjectCreativeWorkspaceProjection`（實作前以 CURRENT repo 命名慣例校正），它是查詢投影，不是第二資料庫。至少包含：
+
+| 投影區塊 | 必要欄位 | UI 用途 |
+| --- | --- | --- |
+| `revision` | project/story/context revision、generatedAt | 防止舊回應蓋新畫面，顯示資料時間 |
+| `worldReadiness` | required/ready/missing entities | 世界觀是否可解析，不與素材覆蓋率混算 |
+| `visualCoverage` | 每角色/Look/場景/道具 reference coverage | 0 張視覺素材必須是 0，不可顯示高完成度 |
+| `generationReadiness` | blocking/warning issues、provider/cost/approval | 主 CTA 是否可執行與為何被擋 |
+| `consistencyHealth` | healthy/stale/needs_review/blocked + affected shot IDs | 只修受影響鏡頭 |
+| `storyBindings` | confirmed/proposed/locked/unresolved | chips 狀態與需要確認數量 |
+| `shotStates` | packet/current/candidates/stale/evaluation/approval | 分鏡卡、比較、Adopt 與局部重生 |
+| `activeRuns` | generation/training/export phase、progress、retryable | reload 後恢復真實進度 |
+| `dataReadiness` | parsing/OCR/AI-readable/failed/project-bound | 資料是否真的能被 AI 引用 |
+| `rightsReadiness` | clear/needs_review/blocked/unknown | training、share、export gate |
+| `nextActions` | capability key、target IDs、blocked reason、cost preview | 單一下一步與 Action Palette |
+
+投影必須：
+
+- 由 server 根據 actor capability 與 project state 過濾，viewer 不取得可寫 action。
+- 使用同一套 pure projection/helper 供 Project UI、Assistant、MCP read 與 Delivery 使用。
+- 對大量 Shots 使用 aggregate/batch query，禁止每張卡各打一串 N+1 查詢。
+- 支援 reload、deep link、mobile sheet 與 reconnect；selection 可以是 view state，但 active target/run 必須 durable。
+- 回傳穩定 finding/action codes；自然語言由共用 mapping 產生，避免每頁不同說法。
+
+### 4.3 三種完成度必須分開
+
+首屏不得再用一個百分比掩蓋不同問題：
+
+1. **世界觀完整度**：角色、場景、道具、故事設定與必要欄位是否存在。
+2. **視覺素材覆蓋率**：逐角色/Look/場景/道具是否有合格 reference；以 entity coverage 計算，不以檔案總數灌高。
+3. **生成準備度**：binding、packet、provider、成本、核准、權利與必要輸入是否可執行。
+
+一致性健康度另外顯示，不混入完成度：
+
+- `已套用`：目前 Shot 與 project records/packet 一致。
+- `X 鏡需更新`：資料改變造成 targeted stale。
+- `X 項待確認`：binding proposal、低信心評估或 rights needs_review。
+- `已阻擋`：缺必要場景/reference、權利 blocked、preflight fail 或 project state 禁止。
+
+### 4.4 UI 狀態與資料動作必須一對一
+
+| 使用者看到的狀態 | 資料庫／引擎真相 | 唯一主要動作 |
+| --- | --- | --- |
+| 尚未加入資料 | project-scoped readable source = 0 | 加入資料 |
+| 資料解析中 | durable intake job running | 查看進度／取消 |
+| 需要 OCR／解析失敗 | source status + retry reason | 修復或改用其他來源 |
+| 有 X 項需要確認 | unresolved binding proposals | 逐項確認／鎖定 |
+| 已準備生成 | preflight pass + cost/approval known | 生成畫面／影片 |
+| 正在生成 | durable run + per-target phases | 查看進度／停止 |
+| 部分完成 | persisted successes + retryable failures | 只重試失敗項 |
+| X 鏡一致性過時 | dependency impact set | 檢視影響／只更新 X 鏡 |
+| 有候選版本 | candidate exists、current unchanged | 比較並採用 |
+| 可加強角色一致性 | dataset eligible + provider configured + paid authorization | 建立訓練候選 |
+| 訓練完成待採用 | model version succeeded、not active | 比較／Promote |
+| 可交付 | Delivery readiness 全部通過 | 預覽／匯出 |
+| 交付被擋 | stale/missing/unapproved/rights finding | 修復列出的阻擋項 |
+
+任何狀態都不得只有提示文字；必須有可達的 action，或明確說明誰有權限、缺少哪個外部依賴。
+
+### 4.5 專案頁的簡單資訊架構
+
+維持 #742 的單一 Story workspace 與唯一 reveal slot：
+
+1. **首屏狀態列**：世界觀、視覺素材、生成準備、一致性四個短狀態；不顯示技術術語。
+2. **單一主 CTA**：由 `nextActions` 與 capability/policy 決定，不由 component 自行判斷。
+3. **Story chips**：角色、造型、場景、道具、素材、知識、分鏡、製作、交付；badge 直接來自 projection。
+4. **Reveal slot**：顯示既有真實元件；切換 chip 取代同一 slot，手機用 sheet/drawer 深修。
+5. **結果／問題優先**：生成後先顯示 current、candidates、affected shots 與可修動作，再展開 trace/model/packet。
+6. **Assistant scope**：永遠顯示目前 project、scene/shot selection、budget policy；執行後以 read-back 更新同一畫面。
+
+### 4.6 一致性變更的 UI 行為
+
+以「修改角色 Look」為代表流程：
+
+1. 使用者在既有 CharacterLook 卡確認新造型。
+2. command 以 rev/CAS 更新 canonical Look，記錄 actor、reason、source references。
+3. server 依 packet dependencies 計算 affected Shot IDs，不立即重生、不修改 current。
+4. projection 回傳「6 鏡需更新」與精準 Shot 清單。
+5. 首屏與分鏡 chips 顯示 badge；打開後只列 affected shots、impact reason 與預估成本。
+6. 使用者選擇全部或部分 Shot 執行；每鏡先 freeze 新 packet、preflight、cost/approval，再生成 Candidate。
+7. 成功與失敗分開保存；current 仍不變。
+8. 使用者 compare/adopt 後，projection 重算 downstream video/timeline stale 狀態。
+9. reload 後 badge、candidates、current、失敗重試與成本 receipt 必須相同。
+
+場景、道具、reference、故事 binding、active adapter、rights decision 的變更都使用同一 impact → review → regenerate candidate → adopt 模式。
+
+### 4.7 資料匯入到生成的可見生命週期
+
+外部連接成功不等於 AI 可使用。UI 與資料庫必須共同呈現：
+
+```text
+已選來源
+→ 已取得／隔離掃描
+→ 解析中
+→ 需要 OCR 或解析失敗（可恢復）
+→ AI 可讀
+→ 已連到專案
+→ 已被哪個 entity/Shot 引用
+→ 已凍結進哪個 packet／generation
+```
+
+- `data_files.text_content` 等既有欄位繼續作為 AI 讀取真相；project-scoped projection 只做關聯與狀態彙整。
+- Prompt 只取與當前 Story/Shot 有關、已授權且 AI-readable 的片段；UI 可展開 citation/source。
+- 刪除、替換或失效的來源要計算受影響 bindings/packets，不能只把卡片從畫面移除。
+
+### 4.8 整合實作切片
+
+為避免又變成大型 UI PR，將三層整合切成以下可驗證的小 PR：
+
+- **UI-DB-C0：Projection contract** — pure types/helpers、aggregate query、capability-filtered `nextActions`；不改頁面布局。
+- **UI-DB-C1：First-screen truth** — Story status bar、三種完成度、badge 與單一 CTA 全部讀 projection。
+- **UI-DB-C2：Consistency impact loop** — Look/scene/prop/binding 變更 → affected shots → targeted action → Candidate/adopt/read-back。
+- **UI-DB-C3：Durable runs** — generation/training/import/export 的 reload/resume/partial/retry 狀態接入同一 projection。
+- **UI-DB-C4：Data and rights readiness** — AI-readable、citation、training eligibility、share/export blockers 接入 chips 與 Delivery。
+- **UI-DB-C5：Mobile and accessibility closure** — 390/430 sheet、focus/scroll restore、44px、keyboard/ARIA、錯誤恢復。
+
+依賴：FC-00 完成後才能進 UI-DB-C0；C0 → C1 → C2；C3/C4 可在 C2 後分開開 Draft，C5 最後收斂。不得直接在 #752 docs branch 實作 runtime。
+
+### 4.9 成對驗收證據
+
+每個 UI 行為都必須有對應 DB 證據：
+
+- Client test：畫面正確顯示 server projection，不自己重算。
+- PostgreSQL test：真實 records/transactions 產生正確 projection、impact set、candidate/current 與 durable run。
+- Browser flow：使用者操作 → API/command → reload → 相同狀態。
+- Mutation proof：移除 preflight、CAS、explicit adopt、project filter 或 projection finding 時至少一項會紅。
+- Performance：大量 Shot 使用 aggregate query，記錄 query count、payload size 與 idle polling。
+
+UI-DB 整合的完成標準不是「畫面做好」，而是：
+
+> 畫面上的每個狀態都能追到資料庫；每個動作都能追到 command、transaction、event 與 receipt；重新整理後仍一致。
+
+## 5. 完整能力閉環矩陣
 
 每一列都必須同時具備：入口可達、後端真實執行、persisted read-back、權限／成本／核准一致、失敗可恢復、手機可用、可驗證證據。只有元件或 router 存在不算完成。
 
@@ -114,7 +275,7 @@ Repository：`aa0968111723-prog/ai_os`
 | Admin／可觀測性 | Admin、audit、aiTrace、receipts、health | readiness 不假綠、worker lease、bounded retention、隱私化 log、可追蹤失敗 |
 | 商用權利 | 新增於既有 Asset/Generation/Training/Export 邊界 | evidence、risk findings、policy decision、override reason、audit、expiry/recheck |
 
-## 5. 執行 PR 序列
+## 6. 執行 PR 序列
 
 後續不得做成一支 mega runtime PR。每支 implementation PR 只處理一個主要邊界，可獨立回退；全部預設 Draft、禁止 auto-merge 與 force-push。
 
@@ -230,7 +391,7 @@ Exit gate：failure injection、soak、restart、multi-replica、migration dry-r
 
 Exit gate：能力清單無未分類缺口；所有 P0/P1 關閉；核心 golden flows 有 production-like 證據；剩餘外部阻擋有明確 owner 與解除條件。
 
-## 6. Golden flows
+## 7. Golden flows
 
 至少自動化以下流程；每個流程都要檢查資料庫 read-back、成本、權限、lineage、reload 與手機結果。
 
@@ -257,7 +418,7 @@ Exit gate：能力清單無未分類缺口；所有 P0/P1 關閉；核心 golden
 21. viewer/paused/archived/cross-tenant → 所有入口一致拒絕且不扣點。
 22. assistant SOURCE_PICKER cancel/expire/resume → 不卡死、不重複提交。
 
-## 7. 測試與證據
+## 8. 測試與證據
 
 ### 每支 PR 必跑
 
@@ -296,7 +457,7 @@ npm run audit:high
 - baseline failure 要在同一 base SHA 重現；introduced failure 必須修復。
 - 測試必須有 mutation proof：移除關鍵 guard 時至少一項會紅。
 
-## 8. PR 治理與不衝突規則
+## 9. PR 治理與不衝突規則
 
 1. 開始前讀 default、所有 applicable `AGENTS.md`、本文件、#726、#746 與 #748–#751 最終 diff/review。
 2. 先 `git status -sb`、`git remote -v`、`git fetch --all --prune`；dirty worktree 使用獨立 worktree，不 stash/reset 使用者工作。
@@ -307,7 +468,7 @@ npm run audit:high
 7. 不 auto-merge、不 force-push、不以關閉 review thread 取代修正與測試。
 8. 不在沒有使用者明確授權時呼叫付費 generation/training provider。
 
-## 9. 明確非目標
+## 10. 明確非目標
 
 - 不重寫整站或更換 React/Express/tRPC/Drizzle/PostgreSQL 架構。
 - 不建立另一套 Agent framework、LangGraph/CrewAI runtime 或第二資料庫。
@@ -317,7 +478,7 @@ npm run audit:high
 - 不宣稱素材百分之百不侵權，也不產生法院判決式結論。
 - 不把未連接、未授權或不存在的外部 API/MCP 顯示成可用。
 
-## 10. 全案完成定義
+## 11. 全案完成定義
 
 只有同時符合以下條件，才可稱「一致性與所有功能已補齊」：
 
@@ -331,6 +492,6 @@ npm run audit:high
 - live deployment SHA、schema、worker、provider readiness 與功能清單一致。
 - 交付報告誠實區分 mock/local/live/external-blocked，沒有未分類 P0/P1。
 
-## 11. 給實作代理的最短指令
+## 12. 給實作代理的最短指令
 
 > 執行本 PR 的 Aios 一致性與全功能閉環總計畫。先完成 FC-00，從最新 default 建新的 integration branch，逐提交收斂 #748–#751，處理 #749 全部 unresolved review threads，並逐檔 reconciliation #726；不要盲合。每支後續 PR 只做一個 FC 階段、保持 Draft、不 auto-merge、不 force-push、不建立第二套真相、不呼叫未授權付費 provider。持續做到該階段 Exit gate，附真 PostgreSQL、browser、mobile 與 failure-injection 證據；環境或外部服務無法驗證時誠實標示 blocker。
