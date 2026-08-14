@@ -133,9 +133,47 @@ export async function buildShotContextPacketPayload(input: {
       ambience: shot.ambience,
       music: shot.music,
     },
+    references: [
+      ...characters.filter((row) => row.referenceAssetId).map((row) => ({
+        assetId: row.referenceAssetId!,
+        role: "identity" as const,
+        priority: "PRIMARY" as const,
+        ownerKind: "character",
+        ownerId: row.id,
+      })),
+      ...looks.filter((row) => row.referenceAssetId).map((row) => ({
+        assetId: row.referenceAssetId!,
+        role: "look" as const,
+        priority: "PRIMARY" as const,
+        ownerKind: "character_look",
+        ownerId: row.id,
+      })),
+      ...presets.filter((row) => row.referenceAssetId).map((row) => ({
+        assetId: row.referenceAssetId!,
+        role: "scene" as const,
+        priority: "PRIMARY" as const,
+        ownerKind: "scene_preset",
+        ownerId: row.id,
+      })),
+      ...props.filter((row) => row.referenceAssetId).map((row) => ({
+        assetId: row.referenceAssetId!,
+        role: "prop" as const,
+        priority: "PRIMARY" as const,
+        ownerKind: "prop",
+        ownerId: row.id,
+      })),
+    ],
     continuity: {
       previousShotId: idx > 0 ? shots[idx - 1]!.id : null,
       nextShotId: idx >= 0 && idx < shots.length - 1 ? shots[idx + 1]!.id : null,
+      currentStart: {
+        actors: characters.map((row) => ({
+          characterId: row.id,
+          lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
+        })),
+        environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+        transitionType: idx > 0 && shots[idx - 1] ? "cut" as const : null,
+      },
     },
     locks: locked.map((row) => ({
       mentionKey: row.mentionKey,
@@ -161,7 +199,7 @@ export async function freezeShotContextPacket(input: {
   projectId: string;
   shotId: string;
   modelId?: string | null;
-}): Promise<{ packetId: string; fingerprint: string; reused: boolean; stale: boolean }> {
+}): Promise<{ packetId: string; fingerprint: string; reused: boolean; stale: boolean; payload: ShotContextPacketPayload }> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, true);
   const payload = await buildShotContextPacketPayload(input);
   const fingerprint = hashShotContextPacket(payload);
@@ -206,7 +244,22 @@ export async function freezeShotContextPacket(input: {
     },
   });
 
-  return { packetId: packetId!, fingerprint, reused: Boolean(existing), stale: false };
+  const payloadOut = existing?.packet ?? payload;
+  return { packetId: packetId!, fingerprint, reused: Boolean(existing), stale: false, payload: payloadOut };
+}
+
+export async function loadShotContextPacket(input: {
+  auth: AuthState;
+  projectId: string;
+  packetId: string;
+}): Promise<{ packetId: string; fingerprint: string; payload: ShotContextPacketPayload }> {
+  const project = await loadCreativeContextProject(input.auth, input.projectId, false);
+  const [row] = await db.select().from(schema.shotContextPackets).where(and(
+    eq(schema.shotContextPackets.id, input.packetId),
+    eq(schema.shotContextPackets.projectId, project.id),
+  ));
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份分鏡脈絡包" });
+  return { packetId: row.id, fingerprint: row.fingerprint, payload: row.packet };
 }
 
 export async function listShotContextPackets(input: {

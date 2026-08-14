@@ -3,7 +3,7 @@
  *
  * A low-scoring output stays a candidate. This module never adopts current.
  */
-import type { ShotContextPacketPayload } from "./shotContextPacket";
+import { referenceRoleConflicts, type ShotContextPacketPayload } from "./shotContextPacket";
 
 export const CONSISTENCY_ADOPT_MIN = 0.75;
 
@@ -40,6 +40,9 @@ export function preflightShotPacket(packet: ShotContextPacketPayload): {
   for (const look of packet.looks) {
     // look without a bound character is allowed; swapping is the later check
     if (!look.id) issues.push({ code: "empty_look", message: "造型引用是空的" });
+  }
+  for (const conflict of referenceRoleConflicts(packet.references ?? [])) {
+    issues.push({ code: "reference_conflict", message: conflict.reason });
   }
   if (packet.characters.length > 1 && packet.looks.length > 1) {
     const lookOwners = packet.looks.map((row) => row.id);
@@ -94,6 +97,7 @@ export function evaluateGenerationCandidate(input: {
   if (identity < 1 && packetChar.size) issues.push({ code: "identity_mismatch", message: "候選沒有沿用這一鏡綁定的角色" });
   if (look < 1 && packetLook.size) issues.push({ code: "look_mismatch", message: "候選沒有沿用這一鏡綁定的造型" });
   if (prop < 1 && packetProp.size) issues.push({ code: "prop_mismatch", message: "候選沒有沿用這一鏡綁定的道具" });
+  if (scene < 1 && packetPreset.size) issues.push({ code: "scene_mismatch", message: "候選沒有沿用這一鏡綁定的場景卡" });
 
   const scores: ConsistencyScores = { identity, look, scene, prop, semantic, continuity };
   const overall = (identity + look + scene + prop + semantic + continuity) / 6;

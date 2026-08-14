@@ -13,6 +13,8 @@ import {
   rollbackConsistencyVersion,
   trainingAvailability,
 } from "../services/consistencyTraining";
+import { projectWorkspaceProjection } from "../services/projectConsistencyGraph";
+import { adoptGenerationCurrent } from "../services/consistencyAdopt";
 import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
@@ -27,6 +29,18 @@ export const creativeContextRouter = router({
    * 組出這個專案目前真正會用到的創作脈絡。
    * 回的是引用與出處，不是第二份角色／場景庫。
    */
+  workspace: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return projectWorkspaceProjection({ auth: ctx.auth, projectId: input.projectId });
+    }),
+
+  adoptGeneration: authedProcedure
+    .input(z.object({ generationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return adoptGenerationCurrent({ auth: ctx.auth, generationId: input.generationId });
+    }),
+
   compose: authedProcedure
     .input(z.object({
       projectId: z.string().uuid(),

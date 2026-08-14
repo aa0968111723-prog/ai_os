@@ -6,11 +6,13 @@
  * 2. 專案狀態機（assertProjectAllows generate）
  * 3. 組隔離 + 專案 ACL（editor）
  * 4. Policy Engine generation.submit
- * 5. 委託 submitGenerationCore（估點、門檻、扣點、provider）
+ * 5. 若綁分鏡：同步 freeze Shot Context Packet，並在扣點前跑 consistency preflight
+ * 6. 委託 submitGenerationCore（估點、門檻、扣點、provider）
  *
- * Router／MCP／workflow／agent 應優先走本 Command；Runner 內部續跑可帶 source=workflow|agent
- * 並在已通過建立 run 時沿用既有 assertAccess 薄殼。
+ * Scene-bound 視覺生成預設 preserveScenePointer：結果只當 Candidate，
+ * 必須明確 Adopt 才改 current。
  */
+import { TRPCError } from "@trpc/server";
 import type { AuthState } from "./auth";
 import { getProjectRole } from "./projectAcl";
 import { assertProjectAllows } from "./projectState";
@@ -25,32 +27,66 @@ import {
   type GenerationRow,
   type SubmitCoreInput,
 } from "./generationCore";
+import type { ShotContextPacketPayload } from "../../shared/shotContextPacket";
 
 export type ExecuteGenerationInput = Omit<SubmitCoreInput, "assertAccess" | "userId"> & {
   auth: AuthState;
   source: PolicySource;
   /** 工作流／代理背景續跑：已在建立 run 時驗過權限時可 true，仍跑狀態機＋組隔離 */
   backgroundResume?: boolean;
+  /** Reuse a packet frozen at batch/approval time. Do not rebuild from a later shot edit. */
+  shotContextPacketId?: string;
 };
+
+function isVisualSceneBound(input: Pick<ExecuteGenerationInput, "sceneId" | "sceneRole">): boolean {
+  return Boolean(input.sceneId) && (input.sceneRole ?? "visual") === "visual";
+}
 
 /**
  * 人類／MCP 直接發起，或背景 resume。
  * 回傳 generation 列（含 awaiting_approval）。
  */
 export async function executeGenerationCommand(input: ExecuteGenerationInput): Promise<GenerationRow> {
-  const { auth, source, backgroundResume, ...core } = input;
+  const { auth, source, backgroundResume, shotContextPacketId, ...core } = input;
+
+  let frozen: { packetId: string; fingerprint: string; payload: ShotContextPacketPayload } | null = null;
+  if (isVisualSceneBound(core) && core.sceneId) {
+    const { freezeShotContextPacket, loadShotContextPacket } = await import("./shotContextPackets");
+    const { preflightShotPacket } = await import("../../shared/consistencyEval");
+    frozen = shotContextPacketId
+      ? await loadShotContextPacket({
+        auth,
+        projectId: core.projectId,
+        packetId: shotContextPacketId,
+      })
+      : await freezeShotContextPacket({
+        auth,
+        projectId: core.projectId,
+        shotId: core.sceneId,
+        modelId: core.modelId,
+      });
+    const preflight = preflightShotPacket(frozen.payload);
+    if (!preflight.ok) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: preflight.issues[0]?.message ?? "這一鏡尚未準備好生成",
+      });
+    }
+  }
+
+  const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core);
 
   const generation = await submitGenerationCore({
     ...core,
+    preserveScenePointer,
+    shotContextPacketId: frozen?.packetId ?? shotContextPacketId,
     userId: auth.user.id,
     assertAccess: async (project) => {
-      // 專案生命週期：封存／暫停不得新生成
       assertProjectAllows(project, "generate");
 
       const role = requireGroup(auth, project.groupId);
       const projectRole = await getProjectRole(auth, project);
 
-      // 背景 resume：發起人可能已被降為 viewer——仍擋寫入（與「每步重查 ACL」方向一致）
       assertPolicy(
         "generation.submit",
         policyContextFromAuth(auth, {
@@ -65,44 +101,22 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
     },
   });
 
-  /**
-   * Context Source Trace（§28 / §30）：這一鏡生成時，實際可用的脈絡是哪幾份。
-   *
-   * 之後「這張圖為什麼長這樣？」要答得出來——人物參考、場景參考、Style、Scene Script、
-   * 前後鏡各是誰——靠的就是這一列 `context_resolution_runs`。
-   *
-   * ★ 刻意 fire-and-forget：追蹤是加法，任何失敗都不該讓一筆已經送出的生成失敗。
-   * ★ 刻意不改 prompt 組裝與 provider payload：那條路徑另有既有的錨點機制與測試。
-   */
-  if (generation.sceneId) {
+  if (generation.sceneId && frozen) {
     void (async () => {
-      const { freezeShotContextPacket, buildShotContextPacketPayload } = await import("./shotContextPackets");
-      const { preflightShotPacket, evaluateGenerationCandidate } = await import("../../shared/consistencyEval");
-      const frozen = await freezeShotContextPacket({
-        auth,
-        projectId: generation.projectId,
-        shotId: generation.sceneId,
-        modelId: generation.modelId,
-      });
-      const payload = await buildShotContextPacketPayload({
-        auth,
-        projectId: generation.projectId,
-        shotId: generation.sceneId,
-        modelId: generation.modelId,
-      });
-      const preflight = preflightShotPacket(payload);
+      const { evaluateGenerationCandidate } = await import("../../shared/consistencyEval");
+      const { preflightShotPacket } = await import("../../shared/consistencyEval");
+      const { resolveContext, recordContextResolution } = await import("./contextResolver");
       const evaluation = evaluateGenerationCandidate({
-        packet: payload,
+        packet: frozen.payload,
         candidate: {
           prompt: generation.prompt,
           characterIds: generation.characterIds,
-          lookIds: payload.looks.map((row) => row.id),
+          lookIds: frozen.payload.looks.map((row) => row.id),
           scenePresetIds: generation.scenePresetIds,
           propIds: generation.propIds,
           status: generation.status,
         },
       });
-      const { resolveContext, recordContextResolution } = await import("./contextResolver");
       const context = await resolveContext({
         auth,
         projectId: generation.projectId,
@@ -122,10 +136,11 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
           prompt: generation.prompt.slice(0, 500),
           shotContextPacketId: frozen.packetId,
           shotContextFingerprint: frozen.fingerprint,
-          preflight,
+          preflight: preflightShotPacket(frozen.payload),
           evaluation,
           adoptAllowed: evaluation.adoptAllowed,
           silentAdopt: false,
+          preserveScenePointer,
         },
       });
     })().catch((error) => console.warn(

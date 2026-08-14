@@ -65,6 +65,27 @@ describe("consistency evaluation", () => {
     expect(shouldAdoptCandidate(report, true)).toBe(true);
   });
 
+  it("blocks adopt when the required scene preset is missing even if other scores are high", () => {
+    const withScene: typeof packet = {
+      ...packet,
+      presets: [{ kind: "scene_preset", id: "sp1", rev: 1 }],
+    };
+    const report = evaluateGenerationCandidate({
+      packet: withScene,
+      candidate: {
+        prompt: "安倢撐傘走上石階",
+        characterIds: ["c1"],
+        lookIds: ["l1"],
+        propIds: ["pr1"],
+        scenePresetIds: [],
+      },
+    });
+    expect(report.scores.scene).toBe(0);
+    expect(report.issues.some((issue) => issue.code === "scene_mismatch")).toBe(true);
+    expect(report.adoptAllowed).toBe(false);
+    expect(shouldAdoptCandidate(report, true)).toBe(false);
+  });
+
   it("blocks generation when the packet has no visual description", () => {
     const pre = preflightShotPacket({
       ...packet,

@@ -219,6 +219,8 @@ export interface SubmitCoreInput {
    * 只落在 params 的 source meta（送 provider 前會被 split 掉），不需要 migration，重試自動沿用。
    */
   creative?: GenerationCreativeMeta;
+  /** Frozen packet this generation must stay bound to. */
+  shotContextPacketId?: string;
   /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
@@ -780,6 +782,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     usedUserKey: usedUserKey || undefined,
     preserveScenePointer: input.preserveScenePointer,
     creative: input.creative,
+    shotContextPacketId: input.shotContextPacketId,
     // 只有「完成後真的會動指標」的生成才需要記基準；候選變體不動指標，記了也用不到。
     scenePointerAtSubmit: input.sceneId && !input.preserveScenePointer
       ? prepared.scenePointerAtSubmit ?? "" // 空字串＝送出時這一鏡沒有畫面（與「沒記錄」區分開）

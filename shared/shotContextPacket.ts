@@ -8,6 +8,44 @@
 
 export const SHOT_CONTEXT_PACKET_SCHEMA_VERSION = "shot-context-packet.v1";
 
+export const SHOT_REFERENCE_ROLES = [
+  "identity",
+  "look",
+  "scene",
+  "prop",
+  "style",
+  "composition",
+  "continuity",
+] as const;
+export type ShotReferenceRole = (typeof SHOT_REFERENCE_ROLES)[number];
+
+export interface ShotReferenceBinding {
+  assetId: string;
+  role: ShotReferenceRole;
+  priority: "PRIMARY" | "SECONDARY" | "SUPPORTING";
+  ownerKind?: string | null;
+  ownerId?: string | null;
+}
+
+export const SHOT_TRANSITION_TYPES = ["cut", "scene_change", "montage", "time_jump"] as const;
+export type ShotTransitionType = (typeof SHOT_TRANSITION_TYPES)[number];
+
+export interface ShotContinuityActorState {
+  characterId: string;
+  lookId: string | null;
+  pose?: string | null;
+  emotion?: string | null;
+  wetness?: string | null;
+  injury?: string | null;
+  heldPropId?: string | null;
+}
+
+export interface ShotContinuityState {
+  actors: ShotContinuityActorState[];
+  environment: Record<string, unknown> | null;
+  transitionType?: ShotTransitionType | null;
+}
+
 export interface ShotContextEntityRef {
   kind: string;
   id: string;
@@ -47,13 +85,19 @@ export interface ShotContextPacketPayload {
   continuity: {
     previousShotId: string | null;
     nextShotId: string | null;
+    previousEnd?: ShotContinuityState | null;
+    currentStart?: ShotContinuityState | null;
+    currentEnd?: ShotContinuityState | null;
   };
+  references?: ShotReferenceBinding[];
   locks: Array<{ mentionKey: string; entityKind: string; entityId: string }>;
   negativeConstraints: string[];
   worldStyle: string[];
   provider: {
     modelId: string | null;
     policyVersion: string;
+    supportsIdentityRef?: boolean;
+    activeAdapter?: string | null;
   };
   why: string[];
 }
@@ -87,6 +131,7 @@ export function canonicalShotContextMaterial(payload: ShotContextPacketPayload):
     environment: payload.environment,
     visual: payload.visual,
     continuity: payload.continuity,
+    references: payload.references ?? [],
     locks: payload.locks,
     negativeConstraints: payload.negativeConstraints,
     worldStyle: payload.worldStyle,
@@ -126,4 +171,49 @@ export function staleShotIdsForEntityChange(
 
 export function packetsAreImmutable(previous: ShotContextPacketPayload, next: ShotContextPacketPayload): boolean {
   return JSON.stringify(previous) === JSON.stringify(next);
+}
+
+export function referenceRoleConflicts(refs: readonly ShotReferenceBinding[]): Array<{ a: ShotReferenceBinding; b: ShotReferenceBinding; reason: string }> {
+  const conflicts: Array<{ a: ShotReferenceBinding; b: ShotReferenceBinding; reason: string }> = [];
+  const primaries = refs.filter((ref) => ref.priority === "PRIMARY");
+  for (let i = 0; i < primaries.length; i += 1) {
+    for (let j = i + 1; j < primaries.length; j += 1) {
+      const a = primaries[i]!;
+      const b = primaries[j]!;
+      if (a.role === b.role && a.assetId !== b.assetId) {
+        conflicts.push({ a, b, reason: `同一職責 ${a.role} 有兩份主要參考` });
+      }
+    }
+  }
+  return conflicts;
+}
+
+export function inheritContinuityState(
+  previousEnd: ShotContinuityState | null | undefined,
+  delta: Partial<ShotContinuityState> | null | undefined,
+  transitionType: ShotTransitionType | null | undefined,
+): ShotContinuityState {
+  if (transitionType === "time_jump" || transitionType === "montage") {
+    return {
+      actors: delta?.actors ?? [],
+      environment: delta?.environment ?? null,
+      transitionType,
+    };
+  }
+  if (!previousEnd) {
+    return {
+      actors: delta?.actors ?? [],
+      environment: delta?.environment ?? null,
+      transitionType: transitionType ?? "cut",
+    };
+  }
+  const byId = new Map(previousEnd.actors.map((actor) => [actor.characterId, actor]));
+  for (const actor of delta?.actors ?? []) {
+    byId.set(actor.characterId, { ...byId.get(actor.characterId), ...actor });
+  }
+  return {
+    actors: [...byId.values()],
+    environment: delta?.environment ?? previousEnd.environment,
+    transitionType: transitionType ?? "cut",
+  };
 }

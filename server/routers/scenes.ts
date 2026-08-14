@@ -1437,6 +1437,7 @@ export const scenesRouter = router({
         lookIds: scene.lookIds ?? undefined,
         // 凍結這一鏡當下的鏡頭語言：之後把「中景」改成「特寫」，這張圖就該被標成過時
         shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+        preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };

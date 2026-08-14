@@ -196,6 +196,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.queueTraining": "送出一致性訓練",
   "creativeContext.promoteVersion": "採用一致性版本",
   "creativeContext.rollbackVersion": "還原一致性版本",
+  "creativeContext.adoptGeneration": "採用生成結果為 current",
   "story.sceneUpdate": "更新場設定",
   "story.sceneRemove": "刪除場（鏡改為未分場）",
   "characterLooks.add": "新增造型",

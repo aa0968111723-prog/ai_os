@@ -837,6 +837,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 故事狀態（與 StoryStage 共用同一快取 key，零額外請求）：判定 ① 是否完成
   const storyMeta = trpc.story.get.useQuery({ projectId: id });
   const trainingAvailability = trpc.creativeContext.trainingAvailability.useQuery();
+  const workspace = trpc.creativeContext.workspace.useQuery({ projectId: id });
   // 上下文摘要條的計數查詢：key 與各子元件內部完全相同 → 共用快取，零額外請求
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id }, { refetchInterval: COLLAB_FALLBACK_POLL_MS });
   const characters = trpc.characters.list.useQuery({ projectId: id });
@@ -1714,6 +1715,8 @@ export function ProjectPage({ id }: { id: string }) {
                         counts={contextCounts}
                         applied={contextApplied}
                         trainingAvailable={Boolean(trainingAvailability.data?.available)}
+                        compactStatus={workspace.data?.compactStatus}
+                        nextAction={workspace.data?.nextAction}
                         showSources
                       />
                       <SectionErrorBoundary title="創作台">
@@ -1799,6 +1802,8 @@ export function ProjectPage({ id }: { id: string }) {
                 counts={contextCounts}
                 applied={contextApplied}
                 trainingAvailable={Boolean(trainingAvailability.data?.available)}
+                compactStatus={workspace.data?.compactStatus}
+                nextAction={workspace.data?.nextAction}
               />
             }
             canEdit={canEdit}
