@@ -95,3 +95,64 @@ describe("consistency evaluation", () => {
     expect(pre.issues[0]?.code).toBe("missing_visual");
   });
 });
+
+describe("PR-B deepening: prop ownership and continuity", () => {
+  it("wrong_prop_owner blocks preflight unless the script transfers the prop", () => {
+    const withForeignProp = {
+      ...packet,
+      props: [{ kind: "prop", id: "sword", rev: 1, name: "刀", ownerKind: "character", ownerId: "zoro" }],
+    };
+    const blocked = preflightShotPacket(withForeignProp);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.issues.some((issue) => issue.code === "wrong_prop_owner")).toBe(true);
+
+    const transferred = preflightShotPacket({
+      ...withForeignProp,
+      scriptAuthorizedChanges: [{ type: "prop_transfer", excerpt: "索隆把刀交給魯夫" }],
+    });
+    expect(transferred.issues.some((issue) => issue.code === "wrong_prop_owner")).toBe(false);
+  });
+
+  it("continuity_costume_break fires only for unauthorized look changes", () => {
+    const withContinuity = {
+      ...packet,
+      continuity: {
+        previousShotId: "sh0",
+        nextShotId: null,
+        previousEnd: { actors: [{ characterId: "c1", lookId: "look-red" }], environment: null },
+        currentStart: {
+          actors: [{ characterId: "c1", lookId: "look-blue" }],
+          environment: null,
+          transitionType: "cut" as const,
+        },
+      },
+    };
+    const drift = evaluateGenerationCandidate({
+      packet: withContinuity,
+      candidate: { prompt: "安倢撐傘走上石階", characterIds: ["c1"], lookIds: ["l1"], propIds: ["pr1"] },
+    });
+    // 警示不擋 Adopt：metadata 分不出漂移與刻意改綁，決定權留給人（Adopt 本來就是明確動作）
+    expect(drift.warnings.some((issue) => issue.code === "continuity_costume_break")).toBe(true);
+    expect(drift.issues.some((issue) => issue.code === "continuity_costume_break")).toBe(false);
+    expect(drift.adoptAllowed).toBe(true);
+
+    const authorized = evaluateGenerationCandidate({
+      packet: {
+        ...withContinuity,
+        scriptAuthorizedChanges: [{ type: "costume_change", excerpt: "脫掉紅外套" }],
+      },
+      candidate: { prompt: "安倢撐傘走上石階", characterIds: ["c1"], lookIds: ["l1"], propIds: ["pr1"] },
+    });
+    expect(authorized.warnings.some((issue) => issue.code === "continuity_costume_break")).toBe(false);
+  });
+
+  it("prop-only close-ups (no characters bound) are not wrong_prop_owner", () => {
+    const closeup = preflightShotPacket({
+      ...packet,
+      characters: [],
+      looks: [],
+      props: [{ kind: "prop", id: "sword", rev: 1, name: "刀", ownerKind: "character", ownerId: "zoro" }],
+    });
+    expect(closeup.issues.some((issue) => issue.code === "wrong_prop_owner")).toBe(false);
+  });
+});

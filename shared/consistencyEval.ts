@@ -4,6 +4,7 @@
  * A low-scoring output stays a candidate. This module never adopts current.
  */
 import { referenceRoleConflicts, type ShotContextPacketPayload } from "./shotContextPacket";
+import { classifyCostumeChange } from "./scriptChanges";
 
 export const CONSISTENCY_ADOPT_MIN = 0.75;
 
@@ -25,6 +26,12 @@ export interface ConsistencyReport {
   scores: ConsistencyScores;
   overall: number;
   issues: ConsistencyIssue[];
+  /**
+   * 警示不擋 Adopt：訊號給人看、決定權在人。
+   * 例：continuity_costume_break——metadata 分不出「模型漂移」與「使用者刻意改綁造型」，
+   * 硬擋會把刻意換裝的成果變成花了點數卻採用不了的死結（Adopt 本來就是明確人為動作）。
+   */
+  warnings: ConsistencyIssue[];
   adoptAllowed: boolean;
 }
 
@@ -50,7 +57,20 @@ export function preflightShotPacket(packet: ShotContextPacketPayload): {
       issues.push({ code: "duplicate_look", message: "多角色鏡的造型不能重複綁同一套" });
     }
   }
-  void charIds;
+  // §8：道具主人不在這一鏡＝wrong_prop_owner；腳本明確轉手（交給／接過）放行；
+  // 純道具鏡（沒綁任何角色的特寫／空景）不適用——那不是「拿錯人」，是根本沒有人。
+  const propTransferAuthorized = (packet.scriptAuthorizedChanges ?? [])
+    .some((change) => change.type === "prop_transfer" || change.type === "prop_loss");
+  if (packet.characters.length > 0 && !propTransferAuthorized) {
+    for (const prop of packet.props) {
+      if (prop.ownerKind === "character" && prop.ownerId && !charIds.has(prop.ownerId)) {
+        issues.push({
+          code: "wrong_prop_owner",
+          message: `道具「${prop.name ?? prop.id}」的主人不在這一鏡——確認是否換了持有者`,
+        });
+      }
+    }
+  }
   return { ok: issues.length === 0, issues };
 }
 
@@ -99,12 +119,37 @@ export function evaluateGenerationCandidate(input: {
   if (prop < 1 && packetProp.size) issues.push({ code: "prop_mismatch", message: "候選沒有沿用這一鏡綁定的道具" });
   if (scene < 1 && packetPreset.size) issues.push({ code: "scene_mismatch", message: "候選沒有沿用這一鏡綁定的場景卡" });
 
+  // §11：連戲斷裂 vs 腳本授權——previousEnd 穿 look-A、本鏡綁 look-B 而腳本沒說要換裝＝
+  // continuity_costume_break（UNINTENTIONAL_DRIFT）；有換裝授權或 time_jump/montage 則放行。
+  // 進 warnings 不進 issues：metadata 分不出漂移與刻意改綁，擋下會誤傷刻意換裝（見型別註解）。
+  const warnings: ConsistencyIssue[] = [];
+  const previousEnd = input.packet.continuity.previousEnd;
+  const currentStart = input.packet.continuity.currentStart;
+  if (previousEnd && currentStart) {
+    const prevLookByChar = new Map(previousEnd.actors.map((actor) => [actor.characterId, actor.lookId]));
+    for (const actor of currentStart.actors) {
+      const verdict = classifyCostumeChange({
+        previousLookId: prevLookByChar.get(actor.characterId) ?? null,
+        currentLookId: actor.lookId,
+        authorizedChanges: input.packet.scriptAuthorizedChanges ?? [],
+        transitionType: currentStart.transitionType,
+      });
+      if (verdict === "unintentional_drift") {
+        warnings.push({
+          code: "continuity_costume_break",
+          message: "上一鏡結束時的造型與這一鏡不同，且腳本沒有換裝——請確認是否為漂移",
+        });
+      }
+    }
+  }
+
   const scores: ConsistencyScores = { identity, look, scene, prop, semantic, continuity };
   const overall = (identity + look + scene + prop + semantic + continuity) / 6;
   return {
     scores,
     overall,
     issues,
+    warnings,
     adoptAllowed: overall >= CONSISTENCY_ADOPT_MIN && issues.length === 0,
   };
 }

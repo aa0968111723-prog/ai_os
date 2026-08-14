@@ -25,6 +25,19 @@ export interface WorkspaceCompleteness {
   consistencyHealth: number;
 }
 
+/** Team Canon 引用摘要（PR-C：第一屏只講人話，細節點開再 fetch） */
+export interface WorkspaceCanonPin {
+  pinId: string;
+  canonId: string;
+  kind: string;
+  name: string;
+  state: "PINNED" | "UPDATE_AVAILABLE";
+  pinnedVersionNumber: number | null;
+  productionVersionNumber: number | null;
+  localEntityKind: string | null;
+  localEntityId: string | null;
+}
+
 export interface WorkspaceProjection {
   projectId: string;
   applied: {
@@ -46,6 +59,21 @@ export interface WorkspaceProjection {
   nextAction: string;
   nodes: ConsistencyGraphNode[];
   edges: ConsistencyGraphEdge[];
+  /** Team Canon 引用（pin）＋是否有新版可升級——server 是唯一真相，UI 不得自算 */
+  canonPins: WorkspaceCanonPin[];
+  /** 因上游變更而過期的鏡（packet head stale）——「只重做不一致的鏡頭」的依據 */
+  staleShotIds: string[];
+  /** 交付阻擋（人話）；空陣列＝可交付 */
+  deliveryBlockers: string[];
+}
+
+/** 第一屏 Canon 摘要行（人話；0 引用回 null 不佔版面） */
+export function canonStatusLine(pins: readonly WorkspaceCanonPin[]): string | null {
+  if (!pins.length) return null;
+  const updates = pins.filter((pin) => pin.state === "UPDATE_AVAILABLE").length;
+  return updates > 0
+    ? `${pins.length} 個團隊設定引用 · ${updates} 個有新版`
+    : `${pins.length} 個團隊設定引用`;
 }
 
 export function visualCoverageScore(visualReferences: number, expectedSlots: number): number {
