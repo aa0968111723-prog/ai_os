@@ -87,8 +87,8 @@
 - [x] `/studio` 仍可達，不再是全站一級（頂欄溢位＋More 進階工具）
 - [x] `/community` `/models` `/downloads` 相容轉接，不是 404／placeholder
 - [x] 不得改 `/p/:id` 故事工作台
-- [ ] targeted tests / typecheck / boundaries / ui-primitives / hooks
-- [ ] commit / push / Draft PR
+- [x] targeted tests / typecheck / boundaries / ui-primitives / hooks
+- [x] commit / push / Draft PR
 - [ ] 全庫 test / test:client / build
 - [ ] 手機 20 條流程實際操作與 evidence
 

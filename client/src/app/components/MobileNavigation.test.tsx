@@ -94,7 +94,7 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("button", { name: /進階工具/ })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /怎麼用/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /筆記排程/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /模型指南/ })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/models"]')).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /進階工具/ }));
     for (const key of ["planner", "studio", "community", "integrations", "mcp", "downloads"] as const) {

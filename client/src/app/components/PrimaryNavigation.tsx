@@ -48,7 +48,7 @@ export function PrimaryNavigation() {
         );
       })}
       <details className="topbar-overflow">
-        <summary className={`badge topbar-nav-link${overflowActive ? " active" : ""}`}>
+        <summary className={`topbar-nav-link${overflowActive ? " active" : ""}`} aria-label="進階工具">
           <Icon name="Ellipsis" size={14} />
           <span className="topbar-quick-label">進階</span>
         </summary>

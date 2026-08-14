@@ -2675,6 +2675,10 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
 .topbar-overflow { position: relative; }
 .topbar-overflow > summary { list-style: none; cursor: pointer; }
 .topbar-overflow > summary::-webkit-details-marker { display: none; }
+.topbar-overflow > summary.topbar-nav-link {
+  padding: 6px 14px; border: 1px solid var(--border); background: var(--card);
+  border-radius: 999px; font-size: 13px; box-shadow: var(--e1);
+}
 .topbar-overflow__menu {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
   min-width: 200px; padding: 6px; border-radius: 12px;
