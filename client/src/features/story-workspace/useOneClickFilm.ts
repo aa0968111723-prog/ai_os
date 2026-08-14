@@ -17,6 +17,20 @@ export function useOneClickFilm(projectId: string) {
 
   const pending = parse.isPending || board.isPending || batch.isPending;
 
+  const regenShots = async (sceneIds: string[]) => {
+    setError(null);
+    const r = await batch.mutateAsync({
+      projectId,
+      modelId: ONE_CLICK_BATCH_MODEL,
+      sceneIds,
+    });
+    const next = { runId: r.runId, shots: r.shots, estPoints: r.estPoints ?? 0 };
+    setResult(next);
+    utils.agents.listByProject.invalidate({ projectId });
+    utils.scenes.listByProject.invalidate({ projectId });
+    return next;
+  };
+
   const run = async () => {
     setError(null);
     try {
@@ -46,5 +60,5 @@ export function useOneClickFilm(projectId: string) {
     }
   };
 
-  return { run, pending, error, result };
+  return { run, regenShots, pending, error, result };
 }

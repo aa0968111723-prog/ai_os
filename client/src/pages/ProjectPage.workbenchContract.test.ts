@@ -131,6 +131,7 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<StoryReadinessBar\b/);
     expect(src).toMatch(/useOneClickFilm/);
     expect(src).toMatch(/生成影片/);
+    expect(src).toMatch(/<StoryResultFix\b/);
     expect(src).toMatch(/presentation=\{mobileCompact \? "sheet" : "inline"\}/);
     // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）
     expect(src).toMatch(/onApplyAndGoStudio/);
