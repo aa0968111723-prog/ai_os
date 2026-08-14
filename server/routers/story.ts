@@ -273,7 +273,7 @@ export const storyRouter = router({
   parse: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
-      return runStoryParse({
+      const result = await runStoryParse({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         force: input.force,
@@ -283,6 +283,17 @@ export const storyRouter = router({
           assertProjectNotArchived(project);
         },
       });
+      try {
+        const { resolveStoryEntityBindings } = await import("../services/storyEntityBinding");
+        await resolveStoryEntityBindings({
+          auth: ctx.auth,
+          projectId: input.projectId,
+          persist: true,
+        });
+      } catch (error) {
+        console.warn("[story.parse] entity binding skipped:", error instanceof Error ? error.message : error);
+      }
+      return result;
     }),
 
   /** 確認卡：建立／併入既有／略過（PE 計畫 §06——使用者只處理 AI 真正不確定的事） */
@@ -444,7 +455,7 @@ export const storyRouter = router({
   generateStoryboard: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), runId: z.string().uuid().optional() }))
     .mutation(async ({ ctx, input }) => {
-      return materializeStoryboard({
+      const result = await materializeStoryboard({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         runId: input.runId,
@@ -454,6 +465,19 @@ export const storyRouter = router({
           assertProjectNotArchived(project);
         },
       });
+      try {
+        const { freezeShotContextPacket } = await import("../services/shotContextPackets");
+        for (const shotId of result.sceneIds ?? []) {
+          await freezeShotContextPacket({
+            auth: ctx.auth,
+            projectId: input.projectId,
+            shotId,
+          });
+        }
+      } catch (error) {
+        console.warn("[story.generateStoryboard] packet freeze skipped:", error instanceof Error ? error.message : error);
+      }
+      return result;
     }),
 
   /** 撤銷一次解析（含它轉出的分鏡；Shot 進回收桶可再還原） */

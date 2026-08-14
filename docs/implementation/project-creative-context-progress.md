@@ -21,7 +21,7 @@ Phase 1 — Canonical context and prerequisites (continuing this PR, no duplicat
 - [x] Additive schema `0071_project_creative_context`
 - [x] Progress journal
 - [x] Phase 2 Shot Context Packets (stacked Draft PR)
-- [ ] Phase 3 Generation wiring (stacked Draft PR)
+- [x] Phase 3 Generation wiring (stacked Draft PR)
 - [ ] Phase 4 Consistency training (stacked Draft PR)
 - [ ] Phase 5 Simple UX + E2E (stacked Draft PR)
 
