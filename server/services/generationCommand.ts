@@ -72,6 +72,45 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
         message: preflight.issues[0]?.message ?? "這一鏡尚未準備好生成",
       });
     }
+
+    // §13：影片一致性血緣——image-to-video 只能由「這一鏡已採用的畫面」或
+    // 呼叫端明確指定的 parent 生成；不得退回角色卡湊圖（那正是換臉的來源）。
+    const { getModel } = await import("../../shared/models");
+    const { capabilityForModel } = await import("../../shared/providerCapabilities");
+    const model = getModel(core.modelId);
+
+    // §10：Canon 訓練成果（identity adapter）→ LoRA 模型的來源槽。
+    // 這類模型 needs=zip：不在這裡填，needs gate 會在 adapter 能生效前就擋下；
+    // 使用者自己給了來源（自選 LoRA）時尊重使用者，不覆蓋。
+    const activeAdapter = frozen.payload.provider.activeAdapter;
+    if (activeAdapter && !core.sourceUrl && !core.sourceAssetId
+      && model && capabilityForModel(model).identityAdapterSupport) {
+      core.sourceUrl = activeAdapter;
+    }
+
+    if (model && capabilityForModel(model).imageToVideo && !core.sourceAssetId && !core.sourceUrl) {
+      const { db, schema } = await import("../db");
+      const { and, eq, isNull } = await import("drizzle-orm");
+      const [shotRow] = await db.select({ assetId: schema.scenes.assetId })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, core.sceneId), isNull(schema.scenes.deletedAt)));
+      // current 必須真的是圖片才能當 i2v parent——current 已是影片時不能把影片餵給圖生影模型
+      const [currentAsset] = shotRow?.assetId
+        ? await db.select({ id: schema.assets.id, kind: schema.assets.kind })
+          .from(schema.assets)
+          .where(and(eq(schema.assets.id, shotRow.assetId), isNull(schema.assets.deletedAt)))
+        : [];
+      if (currentAsset?.kind === "image") {
+        core.sourceAssetId = currentAsset.id; // 血緣預設：current 畫面就是影片的 parent
+      } else {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: currentAsset
+            ? "這一鏡目前的採用結果不是圖片——請明確指定要當影片來源的畫面"
+            : "這一鏡還沒有已採用的畫面——先生成並採用一張畫面，或明確指定影片來源",
+        });
+      }
+    }
   }
 
   const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core);
@@ -80,6 +119,7 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
     ...core,
     preserveScenePointer,
     shotContextPacketId: frozen?.packetId ?? shotContextPacketId,
+    shotContextPacket: frozen?.payload,
     userId: auth.user.id,
     assertAccess: async (project) => {
       assertProjectAllows(project, "generate");

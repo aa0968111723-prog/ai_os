@@ -40,14 +40,20 @@ describe("導覽命名（一個地方一個名字）", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("手機底欄一級只留今日／專案／AI 助手／更多；planner 改由 More 承接且 route 不變", () => {
-    expect([...MOBILE_PRIMARY_NAV]).toEqual(["today", "projects", "assistant", "more"]);
+  it("手機底欄一級只留專案／AI 助手／更多；今日與 planner 改由 More 承接且 route 不變", () => {
+    // 三項＝AI 助手落在正中央那一格（四項時中央落在兩格交界，球會偏右）
+    expect([...MOBILE_PRIMARY_NAV]).toEqual(["projects", "assistant", "more"]);
+    expect(MOBILE_PRIMARY_NAV[1]).toBe("assistant");
     expect(DESTINATIONS.planner.href).toBe("/planner");
     expect(DESTINATIONS.planner.label).toBe("筆記排程");
+    expect(DESTINATIONS.dashboard.href).toBe("/dashboard");
+    expect(DESTINATIONS.dashboard.label).toBe("今日");
     const moreKeys = mobileMoreGroups.flatMap((group) => group.keys);
     expect(moreKeys).toContain("planner");
+    // 今日從底欄撤下後，More 是它在手機上唯一的入口（頂欄 ≤820px 整條隱藏）
+    expect(moreKeys).toContain("dashboard");
     expect(moreKeys).toEqual(expect.arrayContaining([
-      "databases", "planner", "chat", "help", "models", "studio", "community", "downloads",
+      "dashboard", "databases", "planner", "chat", "help", "models", "studio", "community", "downloads",
     ]));
     expect(moreKeys).not.toContain("mcp");
     expect(moreKeys).not.toContain("integrations");

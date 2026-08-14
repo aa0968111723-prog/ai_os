@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
@@ -9,18 +9,21 @@ import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } fr
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 
 /**
- * 底欄一級：今日、專案。中央 AI 助手與「更多」不在這個陣列裡。
+ * 底欄一級：專案。中央 AI 助手與右側「更多」不在這個陣列裡。
  *
- * 「筆記排程」已從底欄撤下——`/planner` 仍由 More 與頂欄進入，route 不刪。
+ * 底欄是三格：專案｜AI 助手｜更多——助手因此真的落在正中央那一格（拇指最好按的位置）。
+ * 「今日」已從底欄撤下：它與「專案」本來就是同一頁（`/dashboard` 與 `/dashboard#projects`），
+ * 兩顆並排等於用兩格講同一個去處。`/dashboard` 的 route 與 deep link 不刪，改由 More 承接
+ *（同「筆記排程」的作法，兩者都仍可從 More 與頂欄進入）。
+ *
  * 正中央的球是「開啟全站 AI 助手」的按鈕，不是 `/dashboard#ai-work` 捲動錨點。
  */
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
-  { href: "/dashboard", label: DESTINATIONS.dashboard.label, icon: DESTINATIONS.dashboard.icon, match: [] },
   { href: "/dashboard#projects", label: "專案", icon: "Package", match: ["/p/"] },
 ];
 
-/** wouter 的 location 不含 hash——今日與專案都指向 /dashboard（帶不同 hash），
- *  只比 pathname 會兩顆同時亮；這裡自己追 hash 讓「今日／專案」互斥。
+/** wouter 的 location 不含 hash——底欄「專案」與 More 的「今日」都指向 /dashboard
+ *  （帶不同 hash），只比 pathname 會兩處同時亮；這裡自己追 hash 讓兩者互斥。
  *  渲染時直接讀 window.location.hash（pushState 導航靠 useLocation 重繪即拿到新值），
  *  hashchange/popstate 監聽只補「純 hash 變化」不經 wouter 的情況。
  *  回傳的 sync 給「只清掉 hash」的導航用：那種切換不發 hashchange，wouter 的
@@ -89,8 +92,29 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   const closeMore = useCallback(() => setMoreOpen(false), []);
   useSheetSwipeDismiss(moreSheetRef, closeMore, moreOpen);
   const groups = moreGroups();
-  const isHere = (item: SheetItem) => destinationMatch(item).some((prefix) => location.startsWith(prefix));
+  const isHere = (item: SheetItem) => {
+    const matched = destinationMatch(item).some((prefix) => location.startsWith(prefix));
+    // 「今日」＝不帶 hash 的 /dashboard。停在 /dashboard#projects 時「這裡」是底欄的
+    // 「專案」——若不扣掉 hash，兩顆會一起亮（連帶讓「更多」在專案分頁上恆亮）。
+    if (item.href === DESTINATIONS.dashboard.href) return matched && !hash;
+    return matched;
+  };
   const moreActive = groups.some((group) => group.items.some(isHere));
+
+  /** More 面板裡的導航。除了關掉面板，還要補「只清掉 hash」那一種切換：
+   *  從 /dashboard#projects 點「今日」時 wouter 的 pushState 清得掉 hash，卻不發
+   *  hashchange，location 快照（pathname+search）也一樣 → React 跳過重繪，面板不關、
+   *  畫面不動，看起來就是「按了沒反應」。與底欄「今日」還在時的修法同一條。 */
+  const navigateFromSheet = (href: string) => (event: ReactMouseEvent) => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.button !== 0) return;
+    setMoreOpen(false);
+    const [pathname] = href.split("#");
+    if (href.includes("#") || location !== pathname || !window.location.hash) return;
+    event.preventDefault();
+    navigate(href);
+    syncHash();
+    window.scrollTo({ top: 0 });
+  };
 
   useEffect(() => setMoreOpen(false), [location]);
   useEffect(() => {
@@ -128,7 +152,13 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
                 <Fragment key={group.label}>
                   <div className="mobile-more-sheet__label" role="presentation">{group.label}</div>
                   {group.items.map((item) => (
-                    <Link key={item.href} href={item.href} className={isHere(item) ? "active" : ""}>
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={isHere(item) ? "active" : ""}
+                      aria-current={isHere(item) ? "page" : undefined}
+                      onClick={navigateFromSheet(item.href)}
+                    >
                       <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
                       <span><strong>{item.label}{item.href === "/chat" && dmUnread > 0 && (
                         <span className="dm-nav-unread" aria-label={`${dmUnread} 則未讀私訊`}>{dmUnread > 99 ? "99+" : dmUnread}</span>
@@ -151,8 +181,9 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
       <nav className="mobile-nav" aria-label="主要功能">
         {ITEMS.map((item) => {
           const [pathname, anchor] = item.href.split("#");
-          // 同 pathname 的分頁以 hash 互斥：/dashboard 無 hash＝今日、#projects＝專案
-          const hashMatched = anchor ? hash === `#${anchor}` : !ITEMS.some((i) => i.href === `${pathname}${hash}` && i.href !== item.href);
+          // 同 pathname 的去處以 hash 互斥：/dashboard 無 hash＝More 的「今日」、#projects＝本分頁。
+          // 底欄現在只剩帶 hash 的分頁，不帶 hash 的那條走 navigateFromSheet（見上方）。
+          const hashMatched = anchor ? hash === `#${anchor}` : !hash;
           const active = (location === pathname && hashMatched) || item.match.some((prefix) => location.startsWith(prefix));
           const content = (
             <>
@@ -160,7 +191,7 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
               <span>{item.label}</span>
             </>
           );
-          return item.href.includes("#") ? (
+          return (
             <a
               key={item.label}
               href={item.href}
@@ -180,28 +211,6 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
             >
               {content}
             </a>
-          ) : (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={active ? "active" : ""}
-              aria-current={active ? "page" : undefined}
-              onClick={(e) => {
-                // 「今日」＝同 pathname 但不帶 hash。從 /dashboard#projects 回來時 wouter
-                // 的 pushState 雖然清得掉 hash，卻不會發 hashchange，快照（pathname+search）
-                // 也一樣 → React 直接跳過重繪：分頁列還亮在「專案」、畫面停在原處，
-                // 使用者看到的就是「按了沒反應」。自己導航後補 syncHash()，再捲回頁首，
-                // 讓它跟其他分頁一樣真的換頁。
-                if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button !== 0) return;
-                if (location !== pathname || !window.location.hash) return;
-                e.preventDefault();
-                navigate(item.href);
-                syncHash();
-                window.scrollTo({ top: 0 });
-              }}
-            >
-              {content}
-            </Link>
           );
         })}
         <button

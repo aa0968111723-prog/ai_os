@@ -1,0 +1,12 @@
+{
+  "postgresql300Shot": "BLOCKED_BY_ENVIRONMENT",
+  "postgresqlReason": "This runner cannot start PostgreSQL (no unprivileged cluster, no Docker). CI npm test also does not set RUN_PG_INTEGRATION. The gated file server/services/shotAssetSuggestions.pg.test.ts is the live-SQL 100/200/300 + tenancy suite.",
+  "browser": "BLOCKED_BY_ENVIRONMENT",
+  "browserReason": "No headed browser tooling and no app database in this environment, so 390/430/1280/1440 screenshots and live Network-panel request counts were not captured.",
+  "whatDidRun": [
+    "shared/shotAssetSuggestions.test.ts (GET URL / header / request-count model)",
+    "server/services/shotAssetSuggestions.test.ts (300-shot assemble + bounded query count + compact payload)",
+    "client ShotCard + 100-card fan-out + StoryboardStage contract tests",
+    "typecheck of changed files (no new errors; consistencyTraining.ts errors pre-exist on default and are out of scope)"
+  ]
+}

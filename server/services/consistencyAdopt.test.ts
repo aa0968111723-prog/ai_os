@@ -8,6 +8,7 @@ describe("adopt and delivery gates", () => {
       scores: { identity: 1, look: 1, scene: 1, prop: 1, semantic: 1, continuity: 1 },
       overall: 1,
       issues: [],
+      warnings: [],
       adoptAllowed: true,
     }, false)).toBe(false);
   });

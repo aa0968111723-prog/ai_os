@@ -10,6 +10,11 @@ import { SceneStudio } from "../../components/SceneStudio";
 import { Button, Card, EmptyState, Hint, Meta } from "../../components/ui";
 import { scrollToSelector } from "../creation-workbench/workbenchNav";
 import { revealProjectContext } from "../project-nav/projectContextNav";
+import {
+  EMPTY_SHOT_SUGGESTION_ITEMS,
+  expandShotSuggestions,
+  type ShotAssetSuggestionItem,
+} from "@shared/shotAssetSuggestions";
 import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from "./boardPrefs";
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
@@ -45,6 +50,10 @@ export function StoryboardStage({
   const continuity = trpc.story.continuityCheck.useQuery({ projectId });
   const [mode, setMode] = useState<BoardMode>(() => loadBoardMode(projectId));
   const [studioSceneId, setStudioSceneId] = useState<string | null>(null);
+  const suggestionBatch = trpc.story.shotAssetSuggestionsBatch.useQuery(
+    { projectId },
+    { enabled: mode === "pro", staleTime: 60_000 },
+  );
   const switchMode = (m: BoardMode) => {
     setMode(m);
     saveBoardMode(projectId, m);
@@ -68,6 +77,15 @@ export function StoryboardStage({
     const sorted = [...shotRows].sort((a, b) => a.orderIndex - b.orderIndex);
     return new Map(sorted.map((s, i) => [s.id, i + 1]));
   }, [shotRows]);
+  const hintsByShot = useMemo(() => {
+    const map = new Map<string, ShotAssetSuggestionItem[]>();
+    const payload = suggestionBatch.data;
+    if (!payload) return map;
+    for (const shotId of Object.keys(payload.byShotId)) {
+      map.set(shotId, expandShotSuggestions(payload, shotId));
+    }
+    return map;
+  }, [suggestionBatch.data]);
   const studioShot = studioSceneId ? shotRows.find((s) => s.id === studioSceneId) : null;
   const isEmpty = !shots.isLoading && shotRows.length === 0;
 
@@ -174,7 +192,7 @@ export function StoryboardStage({
                       ) : (
                         <div className="board-shots">
                           {group.shots.map((shot) => (
-                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} />
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
                           ))}
                         </div>
                       )}
@@ -208,7 +226,10 @@ export function StoryboardStage({
           propIds={propIds}
           nav={<ShotNavigator shots={shotRows} currentId={studioShot.id} onGo={(nextId) => setStudioSceneId(nextId)} />}
           onClose={() => setStudioSceneId(null)}
-          onChanged={() => { utils.scenes.listByProject.invalidate({ projectId }); }}
+          onChanged={() => {
+            void utils.scenes.listByProject.invalidate({ projectId });
+            void utils.story.shotAssetSuggestionsBatch.invalidate({ projectId });
+          }}
         />
       )}
     </div>

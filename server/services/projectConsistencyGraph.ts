@@ -2,7 +2,7 @@
  * Server-side Project Consistency Graph + workspace projection.
  * UI must read this; it must not invent completeness from button clicks.
  */
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import {
@@ -13,6 +13,8 @@ import {
   type ConsistencyGraphNode,
   type WorkspaceProjection,
 } from "../../shared/projectConsistencyGraph";
+import { pinState } from "../../shared/teamCanon";
+import { deliveryBlockers } from "./consistencyAdopt";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
 
 export async function projectWorkspaceProjection(input: {
@@ -45,6 +47,48 @@ export async function projectWorkspaceProjection(input: {
     listStoryEntityBindings({ auth: input.auth, projectId: project.id }),
     db.select().from(schema.shotContextPacketHeads).where(eq(schema.shotContextPacketHeads.projectId, project.id)).catch(() => []),
   ]);
+
+  // Team Canon 引用摘要（PR-C）：pins ＋ pinned/production 版本號。
+  // 只回摘要 IDs/states——版本 payload、events、upgrade impact 點開再 fetch，避免 projection 膨脹。
+  const pins = await db.select().from(schema.projectCanonPins)
+    .where(eq(schema.projectCanonPins.projectId, project.id)).catch(() => []);
+  let canonPins: WorkspaceProjection["canonPins"] = [];
+  if (pins.length) {
+    const canonIds = [...new Set(pins.map((row) => row.canonId))];
+    const canons = await db.select({
+      id: schema.canonEntries.id,
+      kind: schema.canonEntries.kind,
+      name: schema.canonEntries.name,
+      productionVersionId: schema.canonEntries.productionVersionId,
+    }).from(schema.canonEntries).where(inArray(schema.canonEntries.id, canonIds));
+    const versionIds = [...new Set([
+      ...pins.map((row) => row.pinnedVersionId),
+      ...canons.map((row) => row.productionVersionId).filter((id): id is string => Boolean(id)),
+    ])];
+    const versions = versionIds.length
+      ? await db.select({ id: schema.canonVersions.id, versionNumber: schema.canonVersions.versionNumber })
+        .from(schema.canonVersions).where(inArray(schema.canonVersions.id, versionIds))
+      : [];
+    const canonById = new Map(canons.map((row) => [row.id, row]));
+    const versionById = new Map(versions.map((row) => [row.id, row]));
+    canonPins = pins.flatMap((pin) => {
+      const canon = canonById.get(pin.canonId);
+      if (!canon) return [];
+      return [{
+        pinId: pin.id,
+        canonId: pin.canonId,
+        kind: canon.kind,
+        name: canon.name,
+        state: pinState({ pinnedVersionId: pin.pinnedVersionId, productionVersionId: canon.productionVersionId }),
+        pinnedVersionNumber: versionById.get(pin.pinnedVersionId)?.versionNumber ?? null,
+        productionVersionNumber: canon.productionVersionId
+          ? versionById.get(canon.productionVersionId)?.versionNumber ?? null
+          : null,
+        localEntityKind: pin.localEntityKind,
+        localEntityId: pin.localEntityId,
+      }];
+    });
+  }
 
   const nodes: ConsistencyGraphNode[] = [
     ...characters.map((row) => ({ kind: "character", id: row.id, title: row.name, rev: row.rev })),
@@ -120,6 +164,12 @@ export async function projectWorkspaceProjection(input: {
     rightsReadiness: summarizeRightsRows(assets.length, rightsRows ?? []),
     nodes,
     edges,
+    canonPins,
+    staleShotIds: [...stale],
+    deliveryBlockers: deliveryBlockers({
+      shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
+      staleShotIds: [...stale],
+    }),
   };
   return projection;
 }
