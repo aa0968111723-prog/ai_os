@@ -73,7 +73,7 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /資料中心/ })).toHaveAttribute("href", "/databases");
     expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
-    expect(screen.getByRole("button", { name: /說明中心/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /說明中心/ })).toHaveAttribute("href", "/help");
     expect(screen.getByRole("button", { name: /進階工具/ })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /筆記排程/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /進階工具/ }));
@@ -87,20 +87,15 @@ describe("MobileNavigation", () => {
     render(<MobileNavigation />);
     await user.click(screen.getByRole("button", { name: "更多" }));
 
-    // 第一層只留四項；其餘真功能在說明中心／進階工具第二層，名稱仍取自 DESTINATIONS
+    // 第一層只留四項；說明中心是連結（含 /models），其餘真功能在進階工具第二層
     expect(screen.getByRole("link", { name: new RegExp(DESTINATIONS.databases.label) })).toHaveAttribute("href", "/databases");
     expect(screen.getByRole("link", { name: new RegExp(DESTINATIONS.chat.label) })).toHaveAttribute("href", "/chat");
-    expect(screen.getByRole("button", { name: /說明中心/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: new RegExp(DESTINATIONS.help.label) })).toHaveAttribute("href", "/help");
     expect(screen.getByRole("button", { name: /進階工具/ })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /怎麼用/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /筆記排程/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /模型指南/ })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /說明中心/ }));
-    for (const key of ["help", "models"] as const) {
-      const d = DESTINATIONS[key];
-      expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
-    }
-    await user.click(screen.getByRole("button", { name: "返回更多" }));
     await user.click(screen.getByRole("button", { name: /進階工具/ }));
     for (const key of ["planner", "studio", "community", "integrations", "mcp", "downloads"] as const) {
       const d = DESTINATIONS[key];
@@ -124,11 +119,9 @@ describe("MobileNavigation", () => {
     const reachable = new Map<string, string>();
     reachable.set(DESTINATIONS.databases.label, DESTINATIONS.databases.href);
     reachable.set(DESTINATIONS.chat.label, DESTINATIONS.chat.href);
-    await user.click(screen.getByRole("button", { name: /說明中心/ }));
     reachable.set(DESTINATIONS.help.label, DESTINATIONS.help.href);
-    await user.click(screen.getByRole("button", { name: "返回更多" }));
     await user.click(screen.getByRole("button", { name: /進階工具/ }));
-    for (const key of ["planner", "studio", "community"] as const) {
+    for (const key of ["planner", "studio", "community", "downloads"] as const) {
       reachable.set(DESTINATIONS[key].label, DESTINATIONS[key].href);
     }
     for (const item of topbarNavItems) {

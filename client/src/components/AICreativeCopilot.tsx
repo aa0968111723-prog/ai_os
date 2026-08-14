@@ -1,5 +1,6 @@
 import { useAssistantComposeListener } from "../lib/assistantCompose";
 import { useState, useRef, useEffect, useMemo, useSyncExternalStore } from "react";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc, type AppRouter } from "../api";
 import { setOrbState } from "../lib/orbState";
@@ -1260,6 +1261,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
               <span>{item.label}</span>
             </button>
           ))}
+          <Link href="/community" className="ai-copilot-prompt-pill" title="全站共用提示詞與素材">
+            <span>靈感頻道</span>
+          </Link>
         </div>
 
         {/* ── 對話紀錄區域 ── */}

@@ -5,6 +5,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { AddDataSheet, pendingAddDataMethod } from "../components/AddDataSheet";
 import { DataHubOverview } from "../components/DataHubOverview";
+import { DataHubRelatedDestinations } from "../components/DataHubRelatedDestinations";
 import { GoogleDrivePicker } from "../components/GoogleDrivePicker";
 import { NotionPagePicker } from "../components/NotionPagePicker";
 import { ConfirmButton } from "../components/interactions";
@@ -280,6 +281,8 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         projectTitle={contextProject.data?.title ?? null}
         onAddData={() => setAddOpen(true)}
       />
+
+      <DataHubRelatedDestinations groupId={groupId} />
 
       <h2 className="hub-section-title">
         <Icon name="Database" size={16} /> 結構化資料表

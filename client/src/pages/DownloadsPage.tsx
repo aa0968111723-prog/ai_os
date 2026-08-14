@@ -72,7 +72,7 @@ export function DownloadsPage() {
         title="共用下載"
         icon="Download"
         badge={data ? `${data.items.length} 份可下載文件` : "自動保持最新版"}
-        description={<>開發筆記、模型資料、設計與法律文件集中在這裡；想匯出個人資料，請使用帳號選單的專用功能。</>}
+        description={<>開發筆記、模型資料、設計與法律文件集中在這裡。主要入口在<Link href="/databases#hub-downloads">資料中心</Link>與進階工具；想匯出個人資料，請到<Link href="/settings#security">個人設定</Link>。</>}
       />
 
       {/* 電腦版安裝包：使用者要「當應用程式用」的入口——不跟文件白名單混在一起 */}
