@@ -24,6 +24,7 @@ import {
 import { computeShotCompletion, COMPLETION_TRACKS, TRACK_LABEL, type ShotCompletionInput } from "@shared/shotCompletion";
 import { hasSceneCardBinding } from "@shared/sceneCards";
 import { formatPropDisplayName } from "@shared/propOwnership";
+import type { ShotAssetSuggestionItem } from "@shared/shotAssetSuggestions";
 import type { BoardMode } from "./boardPrefs";
 import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 import { ExternalGenerationLauncher } from "../external-intake/ExternalGenerationLauncher";
@@ -91,6 +92,7 @@ export function ShotCard({
   onOpenStudio,
   picked,
   onTogglePick,
+  assetHints = [],
 }: {
   projectId: string;
   shot: ShotRow;
@@ -107,28 +109,37 @@ export function ShotCard({
   /** 是否被勾選（多選交給 AI 助手一起處理）；未提供 onTogglePick 時整個勾選欄不渲染 */
   picked?: boolean;
   onTogglePick?: (sceneId: string) => void;
+  /**
+   * 專業模式相關素材。由 StoryboardStage 一次批次載入後注入，
+   * 卡片本身不再發 suggestion query。
+   */
+  assetHints?: ShotAssetSuggestionItem[];
 }) {
   const utils = trpc.useUtils();
+  const refreshBoard = () => {
+    void utils.scenes.listByProject.invalidate({ projectId });
+    void utils.story.shotAssetSuggestionsBatch.invalidate({ projectId });
+  };
   const update = trpc.scenes.update.useMutation({
-    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+    onSuccess: refreshBoard,
   });
   const removeShot = trpc.scenes.remove.useMutation({
-    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+    onSuccess: refreshBoard,
   });
   /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
-    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+    onSuccess: refreshBoard,
   });
   const setVisual = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => {
-      void utils.scenes.listByProject.invalidate({ projectId });
+      refreshBoard();
       setLibraryOpen(false);
       setDropStatus("✓ 已從素材庫套用到這一鏡");
     },
   });
   const confirmImported = trpc.externalIntake.confirm.useMutation({
     onSuccess: () => {
-      void utils.scenes.listByProject.invalidate({ projectId });
+      refreshBoard();
       void utils.externalIntake.inbox.invalidate({ projectId });
       setDropResult(null);
       setDropStatus("✓ 已套用到這一鏡");
@@ -194,6 +205,7 @@ export function ShotCard({
       setDropStatus(imported === 1 ? `成果已安全保存。要設為第 ${shotNumber} 鏡成果嗎？` : `${imported} 個成果已安全保存，請到匯入收件匣批次確認。`);
       void utils.externalIntake.inbox.invalidate({ projectId });
       void utils.projects.assets.invalidate({ projectId });
+      void utils.story.shotAssetSuggestionsBatch.invalidate({ projectId });
     }
     setDropBusy(false);
   };
@@ -220,16 +232,6 @@ export function ShotCard({
   // 與成片頁、前後鏡導航同一支純函式——不會出現「這裡說缺、那裡說有」
   const completion = computeShotCompletion(shot);
   const boundLocked = hasSceneCardBinding(shot) || (shot.lookIds ?? []).length > 0;
-
-  /**
-   * §13 相關素材：只在專業模式且展開時查（簡單模式／收合不打這支）。
-   * 這不是語意檢索——是拿這一鏡綁定的角色／場景／道具名字比對素材標題與標籤。
-   */
-  const assetSuggest = trpc.story.shotAssetSuggestions.useQuery(
-    { sceneId: shot.id },
-    { enabled: mode === "pro" && detailsOpen, staleTime: 60_000 },
-  );
-  const assetHints = assetSuggest.data?.items ?? [];
 
   const openLibrary = (e?: MouseEvent) => {
     e?.stopPropagation();
@@ -482,7 +484,7 @@ export function ShotCard({
               projectId={projectId}
               scene={{ id: shot.id, characterIds: shot.characterIds, scenePresetIds: shot.scenePresetIds, propIds: shot.propIds }}
               canEdit={canEdit}
-              onSaved={() => utils.scenes.listByProject.invalidate({ projectId })}
+              onSaved={refreshBoard}
             />
             {availableLooks.length > 0 && (
               <span className="shot-card__looks" role="group" aria-label="造型">
