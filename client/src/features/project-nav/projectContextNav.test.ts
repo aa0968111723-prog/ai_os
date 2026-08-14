@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { STORY_INLINE_REVEAL_EVENT, type StoryInlineRevealDetail } from "../story-workspace/storyInlineNav";
 import {
   PROJECT_CONTEXT_REVEAL_EVENT,
   contextTargetFromSelector,
@@ -68,6 +69,17 @@ describe("revealProjectContext", () => {
       scroll: false,
       highlight: false,
     });
+  });
+
+  it("also opens the story-inline characters section", () => {
+    const seen: StoryInlineRevealDetail[] = [];
+    const handler = (e: Event) => {
+      seen.push((e as CustomEvent<StoryInlineRevealDetail>).detail);
+    };
+    window.addEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    revealProjectContext("characters", { projectId: "p1", scroll: false, highlight: false });
+    window.removeEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    expect(seen[0]).toMatchObject({ projectId: "p1", section: "characters" });
   });
 
   it("revealProjectContextFromSelector maps chip targets", () => {

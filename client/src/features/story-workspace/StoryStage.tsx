@@ -11,7 +11,7 @@ import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui"
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
-import { revealStoryInlineSection, type StoryInlineSectionId } from "./storyInlineNav";
+import { revealStoryInlineSection, sectionForSummaryChip, type StoryInlineSectionId } from "./storyInlineNav";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
@@ -494,7 +494,23 @@ export function StoryStage({
             <>
               <div className="story-parse-bar">
                 <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
-                  {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
+                  {summary && summaryChips(summary).map((c) => {
+                    const section = sectionForSummaryChip(c.key);
+                    const empty = c.label.endsWith(" 0");
+                    return (
+                      <Chip
+                        key={c.key}
+                        className={empty ? undefined : "on"}
+                        title={section ? `查看${c.label}` : undefined}
+                        onClick={section ? () => {
+                          onRevealSection?.(section);
+                          revealStoryInlineSection(section, { projectId });
+                        } : undefined}
+                      >
+                        {c.label}
+                      </Chip>
+                    );
+                  })}
                   {summary && summary.flagged > 0 && (
                     <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
                   )}
