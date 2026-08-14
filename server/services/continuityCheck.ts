@@ -17,6 +17,8 @@ import {
   detectContinuityDrift,
   describeDrift,
   type ContinuityDrift,
+  type ContinuityShotDirection,
+  type CurrentShotBindings,
   type CurrentCards,
 } from "../../shared/continuity";
 
@@ -50,6 +52,8 @@ async function loadCurrentCards(projectId: string): Promise<CurrentCards> {
         id: schema.characterLooks.id,
         name: schema.characterLooks.name,
         costume: schema.characterLooks.costume,
+        // 綁定漂移要靠它濾掉孤兒造型（造型在鏡上、角色沒綁 ⇒ 生成時本來就沒注入）
+        characterId: schema.characterLooks.characterId,
       })
       .from(schema.characterLooks)
       .where(eq(schema.characterLooks.projectId, projectId)),
@@ -62,7 +66,7 @@ async function loadCurrentCards(projectId: string): Promise<CurrentCards> {
     characters: new Map(characters.map((c) => [c.id, { appearance: c.appearance }])),
     scenes: new Map(scenes.map((s) => [s.id, { palette: s.palette, lighting: s.lighting }])),
     props: new Map(props.map((p) => [p.id, { appearance: p.appearance }])),
-    looks: new Map(looks.map((l) => [l.id, { name: l.name, costume: l.costume }])),
+    looks: new Map(looks.map((l) => [l.id, { name: l.name, costume: l.costume, characterId: l.characterId }])),
   };
 }
 
@@ -78,17 +82,44 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
       title: schema.scenes.title,
       assetId: schema.scenes.assetId,
       assetMeta: schema.assets.meta,
+      // 鏡頭語言漂移的右手邊：這一鏡「現在」的鏡頭語言。
+      // 與卡片一起在同一支查詢帶回來，不另外 N 次查。
+      camera: schema.scenes.camera,
+      performance: schema.scenes.performance,
+      action: schema.scenes.action,
+      // 綁定漂移的右手邊（#725 P1-7）：這一鏡「現在」綁了哪些卡片
+      characterIds: schema.scenes.characterIds,
+      lookIds: schema.scenes.lookIds,
+      scenePresetIds: schema.scenes.scenePresetIds,
+      propIds: schema.scenes.propIds,
     })
     .from(schema.scenes)
     .innerJoin(schema.assets, eq(schema.assets.id, schema.scenes.assetId))
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt), isNull(schema.assets.deletedAt)))
     .orderBy(schema.scenes.orderIndex);
 
-  const byGeneration = new Map<string, { shotId: string; title: string; assetId: string }>();
+  const byGeneration = new Map<string, {
+    shotId: string;
+    title: string;
+    assetId: string;
+    direction: ContinuityShotDirection;
+    bindings: CurrentShotBindings;
+  }>();
   for (const r of rows) {
     const genId = (r.assetMeta as { generationId?: unknown } | null)?.generationId;
     if (typeof genId === "string" && r.assetId) {
-      byGeneration.set(genId, { shotId: r.shotId, title: r.title, assetId: r.assetId });
+      byGeneration.set(genId, {
+        shotId: r.shotId,
+        title: r.title,
+        assetId: r.assetId,
+        direction: { camera: r.camera, performance: r.performance, action: r.action },
+        bindings: {
+          characterIds: r.characterIds,
+          lookIds: r.lookIds,
+          scenePresetIds: r.scenePresetIds,
+          propIds: r.propIds,
+        },
+      });
     }
   }
   if (byGeneration.size === 0) return [];
@@ -106,7 +137,7 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
     // 快照可能是舊版形狀或壞資料：解析不過就當「無從判斷」，不製造假警報
     const parsed = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
     if (!parsed.success) continue;
-    const drifts = detectContinuityDrift(parsed.data, current);
+    const drifts = detectContinuityDrift(parsed.data, current, shot.direction, shot.bindings);
     if (!drifts.length) continue;
     out.push({ shotId: shot.shotId, title: shot.title, assetId: shot.assetId, drifts, reason: describeDrift(drifts) });
   }

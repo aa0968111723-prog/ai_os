@@ -66,6 +66,23 @@ export function assembleContinuitySnapshot(input: {
   };
 }
 
+/**
+ * 只有鏡頭語言、沒有任何卡片的空殼快照。
+ *
+ * 純寫景的鏡（沒綁角色／場景／道具）本來拿不到快照，於是「改了鏡別畫面就過時」
+ * 這件事在那些鏡上完全失效。這支讓鏡頭語言漂移不必依賴卡片存在。
+ */
+export function emptyContinuitySnapshot(locked = true, capturedAt?: string): ContinuitySnapshot {
+  return assembleContinuitySnapshot({
+    characterRows: [],
+    sceneRows: [],
+    propRows: [],
+    selected: {},
+    locked,
+    capturedAt,
+  });
+}
+
 /** 讀取並凍結這次生成使用的角色、場景與素材設定。 */
 export async function buildContinuitySnapshot(
   projectId: string,

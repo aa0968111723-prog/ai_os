@@ -15,6 +15,16 @@ import {
   type SceneCardKind,
 } from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import {
+  MAX_CREATIVE_DIRECTIONS,
+  MIN_CREATIVE_DIRECTIONS,
+  compileDirection,
+  creativeDirectionSchema,
+  formatDirectionContext,
+} from "../../shared/creativeDirections";
+import { splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { continuitySnapshotSchema } from "../../shared/continuity";
+import { describeDirectionChange } from "../../shared/story";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
 import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
 import {
@@ -423,6 +433,9 @@ export const scenesRouter = router({
         pointsEst: schema.generations.pointsEst,
         pointsActual: schema.generations.pointsActual,
         pointsRefunded: schema.generations.pointsRefunded,
+        // 方向與血緣就住在 params 的 source meta 裡；一起撈回來投影成版本欄位，
+        // 免掉「每列再查一次 params」的 N+1，也不需要新表。
+        params: schema.generations.params,
       })
       .from(schema.generations)
       .where(eq(schema.generations.sceneId, scene.id))
@@ -470,6 +483,7 @@ export const scenesRouter = router({
         assetId: asset?.id ?? null,
         assetUrl: asset?.url ?? null,
         assetKind: asset?.kind ?? null,
+        creative: splitGenerationSourceMeta(g.params).meta.creative ?? null,
       };
     });
 
@@ -521,6 +535,10 @@ export const scenesRouter = router({
       action: scene.action,
       dialogue: scene.dialogue,
       music: scene.music,
+      // 鏡頭語言／表演：單格工作室要用它當「創作方向 delta 的基準」算出這批方向到底差在哪，
+      // 沒有它就只能在前端猜，或再打一次 listByProject。
+      camera: scene.camera,
+      performance: scene.performance,
       versions,
       summary: summarizeSceneVersions(versions),
       /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
@@ -538,6 +556,26 @@ export const scenesRouter = router({
       assetId: z.string().uuid(),
       /** 音訊要進哪一軌；不給＝沿用 sceneSlotForAssetKind 的既有預設（旁白） */
       role: z.enum(["narration", "ambience", "music"]).optional(),
+      /**
+       * 明確承認「我知道這一鏡已經通過審核，還是要換掉它的畫面」。
+       *
+       * §17 說已通過的鏡不該被自動換掉畫面，但 CURRENT 只在 advanceGeneration 那條
+       * 回填路徑擋住；這支是**直接指派**指標，過去完全沒有檢查——於是分鏡中心的
+       * 批次「套用素材」在伺服器端照樣寫得進已通過的鏡（前端濾掉只是禮貌，
+       * 15 秒的快取、並行核准、或任何直接呼叫都繞得過）。
+       *
+       * 帶 true＝人正看著那一鏡按下 Adopt；此時同時把審核狀態退回「需要修改」，
+       * 因為當初通過的是**那一張圖**，不是這一格的永久許可。
+       */
+      acknowledgeApproved: z.boolean().optional(),
+      /**
+       * 採用「這個方向」而不只是「這張圖」：把產生該素材的那次生成所凍結的
+       * 鏡頭語言／表演／走位還原回本鏡（並推進 rev）。
+       *
+       * 只有單格工作室在使用者看得到差異的情況下會帶；批次套用素材一律不帶——
+       * 否則一次操作會用某一張圖的凍結設定覆寫 N 鏡的鏡頭語言。
+       */
+      syncShotDirection: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -567,9 +605,73 @@ export const scenesRouter = router({
         narration: "narrationAssetId",
       };
       const target: SceneAssetSlot = input.role ? ROLE_SLOT[input.role]! : slot;
-      const patch = { [target]: asset.id };
+      // 已通過的鏡：換主畫面要有人明確承認。其他軌（旁白／環境音／配樂）不受此限——
+      // §17 保護的是「團隊審過的那張畫面」，不是這一格的所有欄位。
+      const replacesApprovedVisual = target === "assetId"
+        && scene.reviewStatus === "approved"
+        && scene.assetId !== asset.id;
+      if (replacesApprovedVisual && !input.acknowledgeApproved) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "這一鏡已通過審核，不會被批次修改換掉畫面。要換請打開單格工作室，確認後再採用這一版。",
+        });
+      }
+      const patch: Record<string, unknown> = { [target]: asset.id };
+      // 通過的是那一張圖：換了圖，審核狀態就該退回「需要修改」等人再看一次，
+      // 否則「已通過」會被一張沒人審過的畫面繼承。
+      if (replacesApprovedVisual) patch.reviewStatus = "changes";
+
+      /*
+       * 採用創作方向：把產生這張圖的那個方向的鏡頭語言還原回 Shot。
+       *
+       * 為什麼需要：「採用低機位逆光那一版」之後，若 Shot 的鏡頭語言仍寫著中景平視，
+       * 資料就會與它自己顯示的畫面互相矛盾，連戲檢查還會立刻把這張剛採用的圖標成過時。
+       *
+       * 為什麼是 opt-in（syncShotDirection）而不是每次採用的副作用：
+       *  1. 一般的「切回舊版看看」不該把使用者**在那之後**才調好的鏡頭語言洗掉；
+       *  2. 分鏡中心的批次「套用素材」會對 N 鏡呼叫這支——靜默同步等於用一張圖的
+       *     凍結設定覆寫 N 鏡的鏡頭語言。
+       * 所以只有單格工作室在使用者看得到 diff 的情況下才會帶這個旗標。
+       *
+       * 來源生成必須**屬於這一鏡**（sceneId 綁定）：只綁專案的話，任何同專案的
+       * 生成都能把它的鏡頭語言灌進這一鏡——素材可以來自別的鏡，那份 direction 也是別鏡的。
+       */
+      let adoptedDirection: string[] = [];
+      if (target === "assetId" && input.syncShotDirection) {
+        const genId = (asset.meta as { generationId?: unknown } | null)?.generationId;
+        if (typeof genId === "string") {
+          const [gen] = await db
+            .select({ continuitySnapshot: schema.generations.continuitySnapshot })
+            .from(schema.generations)
+            .where(and(
+              eq(schema.generations.id, genId),
+              eq(schema.generations.projectId, scene.projectId),
+              eq(schema.generations.sceneId, scene.id),
+            ));
+          const parsed = continuitySnapshotSchema.safeParse(gen?.continuitySnapshot);
+          const frozen = parsed.success ? parsed.data.shotDirection : null;
+          if (frozen) {
+            adoptedDirection = describeDirectionChange(
+              { ...(scene.camera ?? {}), ...(scene.performance ?? {}) },
+              { ...(frozen.camera ?? {}), ...(frozen.performance ?? {}) },
+            );
+            if ((scene.action ?? "") !== (frozen.action ?? "")) {
+              adoptedDirection.push(`動作 ${scene.action || "－"}→${frozen.action || "－"}`);
+            }
+            if (adoptedDirection.length) {
+              patch.camera = frozen.camera ?? null;
+              patch.performance = frozen.performance ?? null;
+              patch.action = frozen.action ?? null;
+              // 動到 rev-protected 的欄位就要推進 rev，否則同時在編這一鏡的夥伴
+              // 帶著舊 expectedRev 存檔仍會成功，樂觀併發守衛形同虛設。
+              patch.rev = scene.rev + 1;
+            }
+          }
+        }
+      }
+
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
-      return updated;
+      return { ...updated, adoptedDirection };
     }),
 
   /**
@@ -1245,22 +1347,38 @@ export const scenesRouter = router({
         propIds: cards.propIds,
         // 本鏡造型：進錨點層與角色身份同句同強度（Identity 不變、Look 逐鏡換）
         lookIds: scene.lookIds ?? undefined,
+        // 凍結這一鏡當下的鏡頭語言：之後把「中景」改成「特寫」，這張圖就該被標成過時
+        shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
     }),
 
   /**
-   * First-class visual variants: 2–4 real jobs through the existing generation
-   * command. Each deterministic id is its own billing/idempotency receipt; the
-   * results remain scene-version candidates and never move current implicitly.
+   * Creative Direction variants（v4）：2–4 個**真的不同做法**，各自是一個真實生成工作。
+   *
+   * 與 v3 的差別不在數量而在內容：v3 是同一份 prompt 送三次，差異只來自模型雜訊；
+   * 這裡每個 slot 帶一個 Direction（camera／performance／action 的 delta ＋ 一句指示），
+   * 虛擬套用到這一鏡之後才組 prompt——Shot 本身一個位元組都不動（提案 ≠ 已修改）。
+   *
+   * 每個 deterministic id 仍是自己的計費／冪等收據；結果一律是候選版本，
+   * 不會隱式移動 current 指標（preserveScenePointer）。
    */
   generateVariants: authedProcedure
     .input(z.object({
       sceneId: z.string().uuid(),
       modelId: z.string(),
       prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
-      clientRequestIds: z.array(z.string().uuid()).min(2).max(4).refine((ids) => new Set(ids).size === ids.length, "每個變體需要不同的冪等鍵"),
+      /** 一個 slot＝一把冪等鍵＋一個方向；方向可省略（＝沿用這一鏡現況，等同 v3 行為） */
+      variants: z.array(z.object({
+        clientRequestId: z.string().uuid(),
+        direction: creativeDirectionSchema.optional(),
+      })).min(MIN_CREATIVE_DIRECTIONS).max(MAX_CREATIVE_DIRECTIONS)
+        .refine((rows) => new Set(rows.map((row) => row.clientRequestId)).size === rows.length, "每個變體需要不同的冪等鍵"),
+      /** 血緣：使用者是從哪一版按下「再用這版變體」的；不帶＝從這一鏡當下的狀態出發 */
+      parentAssetId: z.string().uuid().optional(),
+      /** 同一批的分組鍵——reload 之後靠它把這批從 generations 湊回來，不靠前端記憶 */
+      batchId: z.string().uuid(),
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
@@ -1276,22 +1394,69 @@ export const scenesRouter = router({
       const model = getModel(input.modelId);
       const modelRejection = regenRejection(model);
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
-      const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
-      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫" });
+      /*
+       * 單飛守衛（#725 P1-6）：generateVariants 原本是唯一略過這道檢查的畫面生成入口。
+       * 前端的 regenBlocked 只擋得住同一個分頁——重新整理、開第二個分頁、或直接呼叫，
+       * 都能對同一鏡再送一整批要付費的工作。與 generateInto／refine 同一道閘。
+       */
+      await assertNoPendingVisual(scene.id);
       const cards = resolveSceneCards(scene, {
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
-      const settled = await Promise.allSettled(input.clientRequestIds.map((id) => executeGenerationCommand({
+      // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
+      if (input.parentAssetId) {
+        const [parent] = await db
+          .select({ id: schema.assets.id })
+          .from(schema.assets)
+          .where(and(
+            eq(schema.assets.id, input.parentAssetId),
+            eq(schema.assets.projectId, scene.projectId),
+            isNull(schema.assets.deletedAt),
+          ));
+        if (!parent) throw new TRPCError({ code: "BAD_REQUEST", message: "找不到要延伸的那一版素材（可能已在回收桶）" });
+      }
+
+      /**
+       * 每個方向各自組 prompt：把 direction 虛擬套用成一個 in-memory scene 再走
+       * 既有的 buildShotContextPrompt。刻意不共用一份 prompt——共用就退回成 v3 的
+       * 「同一 prompt ×3」，這一輪的整個重點就沒了。
+       */
+      const slots = await Promise.all(input.variants.map(async (row) => {
+        const compiled = row.direction ? compileDirection(scene, row.direction) : null;
+        const virtualScene = compiled
+          ? { ...scene, camera: compiled.camera, performance: compiled.performance, action: compiled.action }
+          : scene;
+        const base = input.prompt ?? (await buildShotContextPrompt(virtualScene, model));
+        const prompt = compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base;
+        return { row, compiled, prompt };
+      }));
+      const empty = slots.find((slot) => !slot.prompt.trim());
+      if (empty) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫" });
+
+      const settled = await Promise.allSettled(slots.map((slot) => executeGenerationCommand({
         auth: ctx.auth,
         source: "web",
-        id,
+        id: slot.row.clientRequestId,
         projectId: scene.projectId,
         modelId: input.modelId,
-        prompt,
+        prompt: slot.prompt,
         sceneId: scene.id,
         preserveScenePointer: true,
+        // 凍結這一個方向實際用的鏡頭語言：既讓「改了鏡頭 → 畫面過時」判定得出來，
+        // 也讓採用這一版時能把方向還原回 Shot（否則 Shot 的鏡頭語言會與它自己的畫面不符）
+        shotDirection: slot.compiled
+          ? { camera: slot.compiled.camera, performance: slot.compiled.performance, action: slot.compiled.action }
+          : { camera: scene.camera, performance: scene.performance, action: scene.action },
+        creative: {
+          batchId: input.batchId,
+          batchSize: input.variants.length,
+          directionId: slot.compiled?.direction.id ?? "as-is",
+          directionLabel: slot.compiled?.direction.label ?? "維持現況",
+          ...(slot.compiled?.direction.keep?.length ? { keep: slot.compiled.direction.keep } : {}),
+          ...(input.parentAssetId ? { parentAssetId: input.parentAssetId } : {}),
+        },
         characterIds: cards.characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
@@ -1299,20 +1464,29 @@ export const scenesRouter = router({
         reasonPrefix: "分鏡變體",
       })));
       return {
-        requested: input.clientRequestIds.length,
-        results: settled.map((result, index) => result.status === "fulfilled"
-          ? {
-              slot: index + 1,
-              ok: true as const,
-              generationId: result.value.id,
-              status: result.value.status,
-              pointsEst: result.value.pointsEst,
-            }
-          : {
-              slot: index + 1,
-              ok: false as const,
-              error: result.reason instanceof Error ? result.reason.message : "變體送出失敗",
-            }),
+        batchId: input.batchId,
+        requested: input.variants.length,
+        results: settled.map((result, index) => {
+          const slot = slots[index]!;
+          const shared = {
+            slot: index + 1,
+            directionId: slot.compiled?.direction.id ?? "as-is",
+            directionLabel: slot.compiled?.direction.label ?? "維持現況",
+          };
+          return result.status === "fulfilled"
+            ? {
+                ...shared,
+                ok: true as const,
+                generationId: result.value.id,
+                status: result.value.status,
+                pointsEst: result.value.pointsEst,
+              }
+            : {
+                ...shared,
+                ok: false as const,
+                error: result.reason instanceof Error ? result.reason.message : "變體送出失敗",
+              };
+        }),
       };
     }),
 
@@ -1390,6 +1564,9 @@ export const scenesRouter = router({
         characterIds: cards.characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
+        // 本鏡造型（#725 P1-8）：generateInto 與 generateVariants 都有帶，refine 漏了——
+        // 於是每一次「以這版修正」都丟失造型錨點，改出來的圖會換掉衣服。
+        lookIds: scene.lookIds ?? undefined,
         reasonPrefix: "分鏡修圖",
       });
       return { generationId: gen.id };

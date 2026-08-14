@@ -10,8 +10,11 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { resolveByokFalKey, byokFalOpts } from "../services/byokBilling";
 import { GENERATION_SOURCE_META_KEY, splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { buildRetryGenerationInput, signedAssetId } from "../services/generationRetryInput";
+import { geminiSubmit } from "../services/gemini";
+import { nimSubmit } from "../services/nvidia-nim";
 import { assertProjectEditable } from "../services/projectAcl";
-import { getModel, endpointOf, generationProviderOf, supportsSeed } from "../../shared/models";
+import { getModel, endpointOf, generationProviderOf, isGeminiModel, isNimModel, supportsSeed } from "../../shared/models";
 import { buildAblationVariants } from "../../shared/ablation";
 import type { PromptSectionKey } from "../../shared/promptSections";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
@@ -24,9 +27,6 @@ const publicHttpsUrl = z.string().url().refine((value) => new URL(value).protoco
   message: "來源網址需以 https:// 開頭",
 });
 
-function signedAssetId(url: string | null | undefined): string | undefined {
-  return url?.match(/\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i)?.[1];
-}
 import { MAX_PROMPT_CHARS } from "./prompts";
 import { creativePromptOverrideSchema } from "../../shared/aiTrace";
 import { continuitySnapshotSchema } from "../../shared/continuity";
@@ -498,32 +498,12 @@ export const generationRouter = router({
     // 素材庫來源存的是短效簽名網址——取回 assetId 走 sourceAssetId 讓核心重新簽名（順帶重過相容性守門）。
     // 嚴格 UUID 形（8-4-4-4-12）：外部網址可能剛好含 /api/assets/<36字>/file，寬鬆比對抓到
     // 非 UUID 會讓 pg 的 uuid cast 直接 500——非 UUID 一律走 sourceUrl 原樣透傳
-    const assetId = signedAssetId(gen.sourceUrl);
-    const { meta } = splitGenerationSourceMeta(gen.params);
-    const secondaryAssetId = signedAssetId(meta.secondarySourceUrl);
-    const parsedSnapshot = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
-    const lockedSnapshot = parsedSnapshot.success && parsedSnapshot.data.locked ? parsedSnapshot.data : undefined;
+    // 重試輸入的組法是單一真相（services/generationRetryInput）——MCP 的 retry_generation
+    // 走同一支，兩邊不會再漂移（#725 P1-4：MCP 版曾少帶 sceneRole/preserveScenePointer/卡片）。
     return executeGenerationCommand({
       auth: ctx.auth,
       source: "web",
-      projectId: gen.projectId,
-      modelId: gen.modelId,
-      prompt: gen.prompt,
-      sourceAssetId: assetId,
-      sourceUrl: assetId ? undefined : gen.sourceUrl ?? undefined,
-      secondarySourceAssetId: secondaryAssetId,
-      secondarySourceUrl: secondaryAssetId ? undefined : meta.secondarySourceUrl,
-      characterIds: (gen.characterIds as string[] | null) ?? undefined,
-      scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
-      propIds: (gen.propIds as string[] | null) ?? undefined,
-      continuityMode: parsedSnapshot.success ? parsedSnapshot.data.locked : undefined,
-      continuitySnapshot: lockedSnapshot,
-      sceneId: gen.sceneId ?? undefined,
-      sceneRole: gen.sceneRole ?? undefined,
-      preserveScenePointer: meta.preserveScenePointer,
-      // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
-      workflowRunId: gen.workflowRunId ?? undefined,
-      agentRunId: gen.agentRunId ?? undefined,
+      ...buildRetryGenerationInput(gen),
       reasonPrefix: "重試生成",
     });
   }),
@@ -882,7 +862,12 @@ export const generationRouter = router({
       await db
         .update(schema.generations)
         .set({
+          // 先攤平既有 meta 再覆寫這次真的變了的兩欄。
+          // 這裡是全欄覆寫（不是 merge），只挑幾個欄位重建等於把其餘 meta 丟掉：
+          // preserveScenePointer 掉了 → 核准後的變體完成時會靜默蓋掉這一鏡的現用畫面；
+          // ablation/bench 的 runId 掉了 → 使用者付了點數的比較實測查不回來（runId 只存在 params 裡）。
           params: storeGenerationSourceMeta(submitParams, {
+            ...splitParams.meta,
             secondarySourceUrl: refreshedSecondaryUrl,
             usedUserKey: usedUserKey || splitParams.meta.usedUserKey || undefined,
           }),
@@ -898,12 +883,24 @@ export const generationRouter = router({
           await updateAiTraceSession(trace.id, { status: "running", summary: "已核准並送出 provider" }).catch(() => undefined);
         }
         const startedAt = Date.now();
-        const { requestId } = await falSubmit(
-          endpointOf(model),
-          model.kind,
-          submitParams,
-          byokFalOpts(userFalKey, usedUserKey),
-        );
+        /*
+         * 依 provider 分流（#725 P1-10）。
+         *
+         * 這裡原本寫死 falSubmit，但 advanceGeneration 是依 requestId 的 `nim_`／`gemini_`
+         * 前綴決定去哪裡查狀態的。於是**任何超過成本門檻的 Gemini／NIM 生成，
+         * 在組長核准之後必定失敗**——送去了 fal，而 fal 不認得這個 endpoint。
+         * 與 generationCore 送出時的分流保持同一份判斷（isNimModel / isGeminiModel／mock 一律走假佇列）。
+         */
+        const { requestId } = isNimModel(model) && !isMockMode()
+          ? nimSubmit(submitParams)
+          : isGeminiModel(model) && !isMockMode()
+            ? await geminiSubmit(model.kind, submitParams)
+            : await falSubmit(
+                endpointOf(model),
+                model.kind,
+                submitParams,
+                byokFalOpts(userFalKey, usedUserKey),
+              );
         if (trace) await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_response", summary: "Provider 已接受核准後的工作", latencyMs: Date.now() - startedAt, payload: { requestId, status: "running" } });
         const [updated] = await db
           .update(schema.generations)

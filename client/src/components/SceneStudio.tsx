@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
-import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
+import { groupVisualVariantBatches, isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
 import { parseMusicMarker } from "@shared/sceneMusic";
-import { summarizeVisualVariantBatch } from "@shared/visualVariants";
+import { CREATIVE_KEEP_LABEL, MAX_CREATIVE_DIRECTIONS, MIN_CREATIVE_DIRECTIONS, diagnoseDirectionBatch, sanitizeDirection, type CreativeKeepFamily } from "@shared/creativeDirections";
+import { CREATIVE_INTENTS, defaultCreativeDirections, findCreativeIntent } from "@shared/creativeDirectionPresets";
+import { VisualChoicePreview } from "../features/storyboard-center/VisualChoicePreview";
 import { Icon } from "./Icon";
 import { SceneAnnotationLayer } from "./SceneAnnotationLayer";
 import { ConfirmButton, HelpTip, useFocusTrap } from "./interactions";
@@ -149,12 +151,20 @@ export function SceneStudio({
   /** 只存使用者勾來比較的既有 asset ids；版本內容仍以 scenes.versions 為唯一真相。 */
   const [compareAssetIds, setCompareAssetIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
-  const [variantBatch, setVariantBatch] = useState<{
-    requested: number;
-    generationIds: string[];
-    launchFailures: number;
-    autoOpened: boolean;
-  } | null>(null);
+  /** 並排 vs 同位置快速切換——細微的光線／構圖差異只有在同位置切換時看得出來 */
+  const [compareMode, setCompareMode] = useState<"grid" | "ab">("grid");
+  const [abIndex, setAbIndex] = useState(0);
+  /**
+   * 這一批「送出當下就失敗、連生成列都沒建起來」的 slot（額度不足／政策擋下 → 伺服器
+   * 刪掉待生成列，DB 沒有痕跡可推導）。只有這一類是真的推不出來的，所以只有它留在
+   * 記憶體，並且明說「重新整理後就看不到了」——其餘狀態一律由版本清單推導。
+   */
+  const [launchErrors, setLaunchErrors] = useState<Array<{ directionLabel: string; error: string }>>([]);
+  /** 使用者這一輪挑的創作方向；空＝用起手包預設三方向 */
+  const [directionIntentId, setDirectionIntentId] = useState<string>(CREATIVE_INTENTS[0]!.id);
+  const [pickedDirectionIds, setPickedDirectionIds] = useState<string[] | null>(null);
+  /** 血緣：從哪一版按下「再用這版變體」的（null＝從這一鏡當下的狀態出發） */
+  const [variantParentAssetId, setVariantParentAssetId] = useState<string | null>(null);
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
@@ -189,7 +199,9 @@ export function SceneStudio({
     { sceneId },
     {
       // 有版本在跑時加快輪詢（等出圖的人正盯著看），閒置時放慢到與分鏡列同節奏
-      refetchInterval: (query) => (query.state.data?.summary.generating || (variantBatch && !variantBatch.autoOpened) ? 4_000 : 20_000),
+      // 真的有東西在跑才用快節奏。v3 是「批次還沒自動開過 Compare」就一直 4 秒一次，
+      // 於是卡在等待成本核准的批次會讓整個工作室無限期高頻輪詢（組長可能隔天才來核准）。
+      refetchInterval: (query) => (query.state.data?.summary.generating ? 4_000 : 20_000),
     },
   );
   const data = versions.data;
@@ -214,20 +226,38 @@ export function SceneStudio({
       .filter((version): version is SceneVersion => !!version?.assetUrl),
     [compareAssetIds, visualVersions],
   );
-  const variantSummary = useMemo(
-    () => variantBatch ? summarizeVisualVariantBatch(variantBatch, visualVersions) : null,
-    [variantBatch, visualVersions],
-  );
+  /**
+   * 變體批次**完全由持久化的版本清單推導**（batchId 存在 generations.params 內）。
+   *
+   * v3 是把批次身分放在 React state：關掉工作室、換一鏡、按 F5，「A 成功／B 失敗／
+   * C 等待核准」就整組消失，reload 之後只剩一串沒有分組的版本。現在同一批在任何一次
+   * 查詢都湊得回來，也不需要第二個 candidate 資料表。
+   */
+  /** A/B 目前看的是哪一版；比較清單變短時夾回範圍內，不要指到不存在的索引 */
+  const abVersion = compareVersions[Math.min(abIndex, Math.max(0, compareVersions.length - 1))];
+  const variantBatches = useMemo(() => groupVisualVariantBatches(visualVersions), [visualVersions]);
+  const latestBatch = variantBatches[0] ?? null;
+  /** 這一批還沒結算＝要加快輪詢；等待成本核准可能拖很久，那段改用慢節奏（見下方 refetchInterval） */
+  const batchRunning = !!latestBatch && latestBatch.generating.length > 0;
 
+  /**
+   * 自動開 Compare 只對「這次工作室裡送出的那一批」做一次。
+   *
+   * 只比對 batchId 不夠：每次打開工作室，上一次留下的已結算批次都是「還沒自動開過」，
+   * 於是一進來就被全螢幕 Compare 蓋住。這裡只認本次 mount 之後由使用者送出的批次。
+   */
+  const launchedBatchId = useRef<string | null>(null);
+  const autoOpenedBatchId = useRef<string | null>(null);
   useEffect(() => {
-    if (!variantBatch || variantBatch.autoOpened || !variantSummary?.settled) return;
-    const assets = variantSummary.compareAssetIds;
-    if (assets.length >= 2) {
-      setCompareAssetIds(assets);
+    if (!latestBatch || !latestBatch.settled) return;
+    if (launchedBatchId.current !== latestBatch.batchId) return; // 不是這次送出的，不要跳出來
+    if (autoOpenedBatchId.current === latestBatch.batchId) return;
+    autoOpenedBatchId.current = latestBatch.batchId;
+    if (latestBatch.compareAssetIds.length >= 2) {
+      setCompareAssetIds(latestBatch.compareAssetIds);
       setCompareOpen(true);
     }
-    setVariantBatch((current) => current ? { ...current, autoOpened: true } : current);
-  }, [variantBatch, variantSummary]);
+  }, [latestBatch]);
   // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
   // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
   // 「旁白獨立於畫面，配音生成中不該擋住畫面重生，反之亦然」相反，
@@ -282,7 +312,15 @@ export function SceneStudio({
   const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
   // 冪等鍵（QA-007）：還沒成功的重送沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const regenRequestId = useRef(crypto.randomUUID());
-  const variantRequestIds = useRef([crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]);
+  /**
+   * 這一輪變體的分組鍵與每個 slot 的冪等鍵。送出成功後整組換新——
+   * 沿用舊鍵會撞回同一批（伺服器正確地不重複計費，但使用者會以為自己又產了三個新的）。
+   * 送出失敗時**刻意不換**：那才是「重送同一批不重複計費」真正成立的情況。
+   */
+  const variantBatchRef = useRef({
+    batchId: crypto.randomUUID(),
+    requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
+  });
   const refineRequestId = useRef(crypto.randomUUID());
   const voiceRequestId = useRef(crypto.randomUUID());
   const ambienceRequestId = useRef(crypto.randomUUID());
@@ -291,13 +329,28 @@ export function SceneStudio({
   });
   const generateVariants = trpc.scenes.generateVariants.useMutation({
     onSuccess: (result) => {
-      const accepted = result.results.filter((row): row is Extract<(typeof result.results)[number], { ok: true }> => row.ok);
-      setVariantBatch({
-        requested: result.requested,
-        generationIds: accepted.map((row) => row.generationId),
-        launchFailures: result.results.length - accepted.length,
-        autoOpened: false,
-      });
+      // 成功送出的 slot 不必記在前端——它們的 batchId 已經落在 generations 裡，
+      // 版本清單自己湊得回來。這裡只留下「連生成列都沒建起來」的那幾個 slot 的原因，
+      // 因為那一類伺服器端沒有留痕，不留就等於使用者被靜默少給一個變體。
+      const failures = result.results.filter((row): row is Extract<(typeof result.results)[number], { ok: false }> => !row.ok);
+      setLaunchErrors(failures.map((row) => ({ directionLabel: row.directionLabel, error: row.error })));
+      launchedBatchId.current = result.batchId; // 只有這一批完成時才自動跳出 Compare
+      /*
+       * 冪等鍵只在**整批都成功**時換新。
+       *
+       * generateVariants 是 Promise.allSettled：部分 slot 失敗時整支 mutation 仍然
+       * resolve，所以這裡照樣會跑。舊版無條件換鍵 ⇒ 使用者照著畫面上的
+       * 「重按不重複計費」再按一次，送出的是三把全新的鍵，已經成功的那個方向
+       * 會被重新生成、重新扣點——而額度冪等是綁 generationId 的，全新的鍵救不了。
+       * 失敗時保留整批鍵：重按會用同一批鍵補送，成功的那幾筆撞回既有列不重複計費。
+       */
+      if (failures.length === 0) {
+        variantBatchRef.current = {
+          batchId: crypto.randomUUID(),
+          requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
+        };
+        setVariantParentAssetId(null); // 血緣綁定只屬於這一批，不該延續到下一批
+      }
       setTab("versions");
       refresh();
     },
@@ -318,9 +371,15 @@ export function SceneStudio({
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
   });
+  /** 採用時如果一併同步了鏡頭語言，把伺服器回報的差異顯示出來（不做靜默寫入） */
+  const [adoptedDirection, setAdoptedDirection] = useState<string[]>([]);
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     meta: { ...sceneScope, collabLabel: "換了這一鏡的現用版本" },
-    onSuccess: () => { setPreviewAssetId(null); refresh(); },
+    onSuccess: (result) => {
+      setPreviewAssetId(null);
+      setAdoptedDirection((result as { adoptedDirection?: string[] })?.adoptedDirection ?? []);
+      refresh();
+    },
   });
   const actionError = update.error ?? saveVoice.error ?? saveAmbience.error ?? saveAction.error ?? saveDialogue.error ?? saveMusic.error ?? regen.error ?? generateVariants.error ?? refine.error ?? generateVoiceover.error ?? generateAmbience.error ?? setCurrent.error;
 
@@ -415,7 +474,39 @@ export function SceneStudio({
   const savedAmbience = data?.ambience ?? "";
 
   const regenModel = getModel(regenModelId) ?? getModel(DEFAULT_REGEN_MODEL);
-  const variantEstimatedPoints = (regenModel?.points ?? 0) * 3;
+
+  /**
+   * 這一輪要生成的創作方向。
+   *
+   * 預設＝所選意圖的全部方向；使用者可以取消勾選（少花點數）或自己組合。
+   * 上限與伺服器的 MAX_CREATIVE_DIRECTIONS 同一個常數，不在 UI 另寫一個數字。
+   */
+  const intentDirections = useMemo(
+    () => findCreativeIntent(directionIntentId)?.directions ?? defaultCreativeDirections(),
+    [directionIntentId],
+  );
+  const activeDirections = useMemo(() => {
+    const chosen = pickedDirectionIds
+      ? intentDirections.filter((direction) => pickedDirectionIds.includes(direction.id))
+      : intentDirections;
+    return chosen.slice(0, MAX_CREATIVE_DIRECTIONS);
+  }, [intentDirections, pickedDirectionIds]);
+  const toggleDirection = (id: string) => {
+    setPickedDirectionIds((current) => {
+      const base = current ?? intentDirections.map((direction) => direction.id);
+      return base.includes(id) ? base.filter((row) => row !== id) : [...base, id];
+    });
+  };
+  /** 這批方向套到這一鏡之後真的彼此不同嗎——重疊就先講，不要等使用者花完點數才發現 */
+  const directionDiagnosis = useMemo(
+    () => diagnoseDirectionBatch(
+      { camera: data?.camera ?? null, performance: data?.performance ?? null, action: data?.action ?? null },
+      activeDirections,
+    ),
+    [data?.camera, data?.performance, data?.action, activeDirections],
+  );
+  // 估點跟著實際要送的方向數走；寫死 ×3 會在使用者只選兩個方向時多報一個工作的錢
+  const variantEstimatedPoints = (regenModel?.points ?? 0) * activeDirections.length;
   const refineModel = getModel(refineModelId);
   const refinePoints = refineModel ? estimatePoints(refineModel, { promptChars: instruction.length }) : undefined;
   // 配音走按字計費的中文 TTS：估點依「已儲存的配音詞」長度算，與後端扣點同一函式——顯示＝扣點
@@ -476,8 +567,24 @@ export function SceneStudio({
    * 於是在環境音那一段按「設為現用」會把音效寫進 narrationAssetId——環境音沒換到、旁白反而被蓋掉。
    * 反過來，畫面那一段不能帶 role：後端明擋「只有音訊素材可以指定要進旁白還是環境音」。
    */
+  /**
+   * 採用某一版。
+   *
+   * 單格工作室是「人正看著這一鏡」的地方，所以這裡帶 acknowledgeApproved——
+   * 已通過的鏡在這裡換得掉畫面（伺服器會同時把審核狀態退回「需要修改」），
+   * 而分鏡中心的批次套用不帶這個旗標，因此換不動已通過的鏡。
+   */
+  /**
+   * 採用某一版。
+   *
+   * `syncShotDirection` 只在單格工作室帶：這裡是人正看著這一鏡、看得到方向標籤的地方，
+   * 而且採用之後 UI 會把伺服器回報的 adoptedDirection 明白列出來。分鏡中心的批次
+   * 「套用素材」不帶這個旗標，所以不會用一張圖的凍結設定覆寫 N 鏡的鏡頭語言。
+   */
   const setCurrentVersion = (role: SceneVersionRole, assetId: string) =>
-    setCurrent.mutate(role === "visual" ? { sceneId, assetId } : { sceneId, assetId, role });
+    setCurrent.mutate(role === "visual"
+      ? { sceneId, assetId, acknowledgeApproved: true, syncShotDirection: true }
+      : { sceneId, assetId, role });
 
   const toggleCompare = (assetId: string) => {
     setCompareAssetIds((current) => {
@@ -608,7 +715,7 @@ export function SceneStudio({
                   size="sm"
                   variant="primary"
                   disabled={setCurrent.isPending}
-                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId! })}
+                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId!, acknowledgeApproved: true })}
                 >
                   <Icon name="Check" size={13} /> 用這一版
                 </Button>
@@ -865,33 +972,116 @@ export function SceneStudio({
                         </ConfirmButton>
                       )}
                     </div>
-                    <div className="scene-variant-launch">
-                      <div>
-                        <strong>Generate Variants</strong>
-                        <Meta as="div">送出 3 個真實生成工作；完成前不改 current，成功候選會自動開啟 Compare。</Meta>
+                    <section className="scene-variant-launch" aria-label="創作方向">
+                      <div className="scene-variant-launch__head">
+                        <div>
+                          <strong>換個方向再試一次</strong>
+                          <Meta as="div">
+                            選一個你想解決的問題，Aios 給你 {activeDirections.length} 個真的不同的做法。
+                            角色臉、造型、場景、Style 都保持不變，只換鏡頭、光線與動作。
+                          </Meta>
+                        </div>
+                        {variantParentAssetId && (
+                          // 誠實用字：這一批走的是「重畫」模型（沒有圖片輸入槽），
+                          // parentAssetId 記錄的是「從哪一版接著想」，不是「以那張圖為底重繪」。
+                          // 想以某張圖為底改，那是「以這版修正」（image-to-image）那條路。
+                          <button
+                            type="button"
+                            className="scene-lineage-chip"
+                            aria-label="取消這次的延伸標記"
+                            onClick={() => setVariantParentAssetId(null)}
+                          >
+                            接續 V{visualVersions.find((v) => v.assetId === variantParentAssetId)?.index ?? "?"} 的想法（重新生成，不以該圖為底）
+                            <Icon name="X" size={12} />
+                          </button>
+                        )}
                       </div>
+
+                      <div className="scene-intent-strip" role="tablist" aria-label="你想解決什麼">
+                        {CREATIVE_INTENTS.map((intent) => (
+                          <button
+                            key={intent.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={directionIntentId === intent.id}
+                            className={directionIntentId === intent.id ? "is-active" : undefined}
+                            title={intent.hint}
+                            onClick={() => { setDirectionIntentId(intent.id); setPickedDirectionIds(null); }}
+                          >
+                            {intent.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="scene-direction-grid" role="group" aria-label="這一輪要生成哪幾個方向">
+                        {intentDirections.map((direction) => {
+                          const picked = activeDirections.some((row) => row.id === direction.id);
+                          return (
+                            <button
+                              key={direction.id}
+                              type="button"
+                              aria-pressed={picked}
+                              className={`scene-direction-card${picked ? " is-picked" : ""}`}
+                              disabled={!canEdit}
+                              onClick={() => toggleDirection(direction.id)}
+                            >
+                              {direction.previewResource && <VisualChoicePreview resource={direction.previewResource} />}
+                              <span className="scene-direction-card__copy">
+                                <strong>{direction.label}</strong>
+                                {direction.rationale && <Meta as="span">{direction.rationale}</Meta>}
+                              </span>
+                              {picked && <Pill status="queued">會生成</Pill>}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {directionDiagnosis.duplicates.length > 0 && (
+                        <Hint>這幾個方向對這一鏡的效果重疊，換一個組合比較不會白花點數。</Hint>
+                      )}
+                      {directionDiagnosis.noop.length > 0 && (
+                        <Hint>
+                          有 {directionDiagnosis.noop.length} 個方向這一鏡已經是這樣了——生成出來會很接近現在這張，仍然會扣點。
+                        </Hint>
+                      )}
+                      {activeDirections.length < MIN_CREATIVE_DIRECTIONS && (
+                        // 按鈕變灰而沒有理由，使用者只會以為壞了
+                        <Hint id={`variant-min-${sceneId}`}>
+                          至少選 2 個方向才能比較。只想改一項的話，用上面的「重畫這格」或「修正這張」。
+                        </Hint>
+                      )}
+
                       <ConfirmButton
                         triggerClassName="tonal"
-                        disabled={regenBlocked}
-                        triggerTitle="用同一鏡的完整 context 產生三個候選版本"
-                        message={`將送出 3 個獨立生成工作（${regenModel?.label ?? regenModelId}，合計預估 −${variantEstimatedPoints} 點）。每個工作各自扣退點；重送同一批不重複計費。`}
-                        confirmLabel="確認產生 3 個變體"
+                        disabled={regenBlocked || activeDirections.length < MIN_CREATIVE_DIRECTIONS}
+                        triggerTitle="每個方向各送出一個真實生成工作"
+                        message={`將送出 ${activeDirections.length} 個各自獨立的生成（${regenModel?.label ?? regenModelId}，合計預估 −${variantEstimatedPoints} 點）：${activeDirections.map((row) => row.label).join("、")}。完成前不會換掉這一鏡現在的畫面。若其中幾個沒送出成功，再按一次只會補送沒成功的那幾個，不會重複收費。`}
+                        confirmLabel={`確認產生 ${activeDirections.length} 個方向`}
                         onConfirm={() => {
-                          if (variantBatch?.autoOpened) variantRequestIds.current = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+                          setLaunchErrors([]);
                           generateVariants.mutate({
                             sceneId,
                             modelId: regenModelId,
-                            prompt,
-                            clientRequestIds: variantRequestIds.current,
+                            batchId: variantBatchRef.current.batchId,
+                            ...(variantParentAssetId ? { parentAssetId: variantParentAssetId } : {}),
+                            variants: activeDirections.map((direction, index) => ({
+                              clientRequestId: variantBatchRef.current.requestIds[index]!,
+                              // sanitizeDirection 是送出邊界：起手包的方向帶著 previewResource
+                              // 這種純顯示欄位，而伺服器的 schema 是 .strict()——直接送整包會被
+                              // 400 擋掉（實際踩過：每一次「產生方向」都靜默失敗）。
+                              // 它同時也是越權欄位的第二道濾網（AI 提案／未來的自訂方向都走這裡）。
+                              direction: sanitizeDirection(direction),
+                            })),
                             characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });
                         }}
                       >
-                        <Icon name="LayoutGrid" size={14} /> {generateVariants.isPending ? "送出中…" : `產生 3 個變體（約 −${variantEstimatedPoints} 點）`}
+                        <Icon name="LayoutGrid" size={14} />{" "}
+                        {generateVariants.isPending ? "送出中…" : `產生 ${activeDirections.length} 個方向（約 −${variantEstimatedPoints} 點）`}
                       </ConfirmButton>
-                    </div>
+                    </section>
                   </>
                 )}
               </div>
@@ -1118,24 +1308,61 @@ export function SceneStudio({
             {/* 版本：歷來每一次生成，可切回、可當底圖、可抄提示詞 */}
             {tab === "versions" && (
               <div role="tabpanel" id={`studio-panel-versions-${sceneId}`} aria-labelledby={`studio-tab-versions-${sceneId}`}>
-                {variantBatch && (
+                {adoptedDirection.length > 0 && (
+                  <Hint role="status">
+                    已採用這個方向，並把這一鏡的鏡頭語言同步成產生它的那一組：{adoptedDirection.join("・")}。
+                    不想要的話，到上方欄位改回來即可。
+                  </Hint>
+                )}
+                {latestBatch && (
                   <div className="scene-variant-status" role="status" aria-live="polite">
-                    <div>
-                      <strong>{variantSummary?.settled ? "Variants 已結算" : "Variants 生成中"}</strong>
+                    <div className="scene-variant-status__head">
+                      <strong>{latestBatch.settled ? "這一批已結算" : "方向生成中"}</strong>
                       <Meta as="div">
-                        成功 {variantSummary?.successes.length ?? 0}/{variantBatch.requested}・失敗 {variantSummary?.failures ?? variantBatch.launchFailures}
-                        {variantSummary?.awaitingApproval ? "・等待成本核准" : ""}
-                        {(variantSummary?.actualPoints ?? 0) > 0 ? `・實際淨花費 ${variantSummary!.actualPoints} 點` : ""}
+                        成功 {latestBatch.successes.length}/{latestBatch.requested}
+                        {latestBatch.failed.length > 0 ? `・失敗 ${latestBatch.failed.length}` : ""}
+                        {latestBatch.generating.length > 0 ? `・生成中 ${latestBatch.generating.length}` : ""}
+                        {latestBatch.awaitingApproval.length > 0 ? `・等待成本核准 ${latestBatch.awaitingApproval.length}` : ""}
+                        {latestBatch.actualPoints > 0 ? `・淨花費 ${latestBatch.actualPoints} 點` : ""}
                       </Meta>
                     </div>
-                    {variantSummary?.settled && variantSummary.successes.length < 2 && <Hint>成功候選不足 2 個，無法自動並排；成功版本仍保留，失敗工作已依既有政策退點。</Hint>}
+                    {/* 逐個方向各自的狀態——整批只講一個「失敗」會讓成功的那兩個方向看起來也沒了 */}
+                    <ul className="scene-variant-slots">
+                      {latestBatch.versions.map((version) => (
+                        <li key={version.generationId ?? version.assetId} data-state={version.state}>
+                          <strong>{version.creative?.directionLabel ?? "維持現況"}</strong>
+                          <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill>
+                          {version.state === "failed" && version.error && <Meta as="span">{version.error}</Meta>}
+                          {version.assetId && <Meta as="span">V{version.index}</Meta>}
+                        </li>
+                      ))}
+                      {launchErrors.map((row, index) => (
+                        <li key={`launch-${index}`} data-state="failed">
+                          <strong>{row.directionLabel}</strong>
+                          <Pill status="failed">沒送出</Pill>
+                          <Meta as="span">{row.error}</Meta>
+                        </li>
+                      ))}
+                    </ul>
+                    {latestBatch.missing > 0 && launchErrors.length === 0 && (
+                      <Hint>
+                        這一批有 {latestBatch.missing} 個方向沒有送出成功（未扣點）。原因只在送出當下顯示過，
+                        重新整理後看不到；再按一次「產生方向」會補送同一批，不重複計費。
+                      </Hint>
+                    )}
+                    {latestBatch.settled && latestBatch.successes.length < 2 && (
+                      <Hint>成功候選不足 2 個，無法自動並排；成功版本仍保留，已扣點的失敗工作依既有政策退點。</Hint>
+                    )}
                   </div>
                 )}
                 {visualVersions.filter((version) => version.assetUrl).length >= 2 && (
                   <div className="scene-version-compare-bar">
                     <div>
                       <strong>視覺比較</strong>
-                      <Meta as="div">勾選 2–3 個真實版本並排；採用只更新 current pointer。</Meta>
+                      <Meta as="div">
+                        勾選 2–3 版並排。採用會換掉這一鏡的現用畫面；若那一版是某個方向跑出來的，
+                        會一併把鏡頭語言同步過來（同步了什麼會列出來）。已通過審核的鏡會退回「需要修改」。
+                      </Meta>
                     </div>
                     <Button
                       size="sm"
@@ -1154,35 +1381,107 @@ export function SceneStudio({
                       <header>
                         <div>
                           <Meta as="div">COMPARE / ADOPT</Meta>
-                          <h3>第 {sceneNumber} 鏡・並排比較</h3>
+                          <h3>第 {sceneNumber} 鏡・比較這幾個方向</h3>
                         </div>
+                        <div className="scene-compare-modes" role="tablist" aria-label="比較方式">
+                          <button type="button" role="tab" aria-selected={compareMode === "grid"} className={compareMode === "grid" ? "is-active" : undefined} onClick={() => setCompareMode("grid")}>並排</button>
+                          <button type="button" role="tab" aria-selected={compareMode === "ab"} className={compareMode === "ab" ? "is-active" : undefined} onClick={() => setCompareMode("ab")}>快速切換</button>
+                        </div>
+                        {/* 手機沒有 hover、也常按不到右上角：關閉鍵放在 header 尾端並保證 44px */}
                         <Button size="sm" variant="ghost" type="button" aria-label="關閉版本比較" onClick={() => setCompareOpen(false)}><Icon name="X" size={16} /></Button>
                       </header>
-                      <div className="scene-compare-grid">
-                        {compareVersions.map((version) => (
-                          <article key={version.assetId} className={version.isCurrent ? "is-current" : undefined}>
-                            {version.assetKind === "video" ? (
-                              <AssetVideo src={version.assetUrl!} controls preload="metadata" fallbackLabel="版本影片" />
+
+                      {compareMode === "ab" && (
+                        <div className="scene-compare-ab">
+                          {/*
+                            A/B 快速切換：同一個位置換圖，眼睛不必在兩張之間掃描——
+                            細微的光線／構圖差異只有在同位置切換時才看得出來。
+                            一次只掛一個媒體元素，影片也不會全部同時載入。
+                          */}
+                          <div className="scene-compare-ab__stage">
+                            {abVersion && (abVersion.assetKind === "video" ? (
+                              <AssetVideo key={abVersion.assetId} src={abVersion.assetUrl!} controls preload="metadata" fallbackLabel="版本影片" />
                             ) : (
-                              <AssetImg src={version.assetUrl!} alt={`畫面第 ${version.index} 版`} loading="lazy" fallbackLabel="版本圖片" />
-                            )}
-                            <div className="scene-compare-card__meta">
-                              <div><strong>V{version.index}</strong> <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill></div>
-                              <Meta>{version.modelId ? getModel(version.modelId)?.label ?? version.modelId : "外部帶入"}{version.points > 0 ? `・${version.points} 點` : ""}</Meta>
-                              {version.prompt && <p>{version.prompt}</p>}
-                              <div className="scene-compare-card__actions">
-                                {version.canSetCurrent && canEdit && (
-                                  <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", version.assetId!)}>
-                                    <Icon name="Check" size={13} /> Adopt V{version.index}
-                                  </Button>
-                                )}
-                                {version.canRefineFrom && canEdit && <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); useVersionAsBase(version); }}><Icon name="Palette" size={13} /> 再變體</Button>}
-                              </div>
+                              <AssetImg key={abVersion.assetId} src={abVersion.assetUrl!} alt={`畫面第 ${abVersion.index} 版`} fallbackLabel="版本圖片" />
+                            ))}
+                          </div>
+                          <div className="scene-compare-ab__switch" role="tablist" aria-label="切換要看哪一版">
+                            {compareVersions.map((version, index) => (
+                              <button
+                                key={version.assetId}
+                                type="button"
+                                role="tab"
+                                aria-selected={abIndex === index}
+                                className={abIndex === index ? "is-active" : undefined}
+                                onClick={() => setAbIndex(index)}
+                              >
+                                <strong>V{version.index}</strong>
+                                <span>{version.creative?.directionLabel ?? (version.isCurrent ? "現用" : "候選")}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {abVersion && (
+                            <div className="scene-compare-ab__meta">
+                              {abVersion.isCurrent && <Pill status="done">CURRENT</Pill>}
+                              {abVersion.creative && <Pill status="queued">{abVersion.creative.directionLabel}</Pill>}
+                              {abVersion.parentIndex && <Meta as="span">從 V{abVersion.parentIndex} 延伸</Meta>}
+                              {abVersion.canSetCurrent && canEdit && (
+                                <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", abVersion.assetId!)}>
+                                  <Icon name="Check" size={13} /> 採用 V{abVersion.index}
+                                </Button>
+                              )}
                             </div>
-                          </article>
-                        ))}
-                      </div>
-                      <Hint>採用後其他候選仍保留在版本歷史；重新整理會從 `scenes.assetId` 讀回同一個現用版本。</Hint>
+                          )}
+                        </div>
+                      )}
+
+                      {compareMode === "grid" && (
+                        <div className="scene-compare-grid">
+                          {compareVersions.map((version) => (
+                            <article key={version.assetId} className={version.isCurrent ? "is-current" : undefined}>
+                              {version.assetKind === "video" ? (
+                                // 刻意不 autoPlay：三個影片同時播放在手機上會直接把記憶體吃掉，
+                                // 而且沒有人能同時看三段影片。preload="none" 讓使用者按了才載。
+                                <AssetVideo src={version.assetUrl!} controls preload="none" fallbackLabel="版本影片" />
+                              ) : (
+                                <AssetImg src={version.assetUrl!} alt={`畫面第 ${version.index} 版`} loading="lazy" fallbackLabel="版本圖片" />
+                              )}
+                              <div className="scene-compare-card__meta">
+                                <div className="scene-compare-card__title">
+                                  <strong>V{version.index}</strong>
+                                  {version.isCurrent && <Pill status="done">CURRENT</Pill>}
+                                  {!version.isCurrent && <Pill status={VERSION_STATE[version.state].cls}>{VERSION_STATE[version.state].label}</Pill>}
+                                </div>
+                                {/* 方向標籤：使用者比較的是「哪個做法」，不是「第幾次生成」 */}
+                                {version.creative && <strong className="scene-compare-card__direction">{version.creative.directionLabel}</strong>}
+                                <Meta>
+                                  {version.modelId ? getModel(version.modelId)?.label ?? version.modelId : "外部帶入"}
+                                  {version.points > 0 ? `・${version.points} 點` : ""}
+                                  {version.parentIndex ? `・從 V${version.parentIndex} 延伸` : ""}
+                                </Meta>
+                                {version.creative?.keep?.length ? <Meta>保持：{version.creative.keep.map((family) => CREATIVE_KEEP_LABEL[family as CreativeKeepFamily] ?? family).join("、")}</Meta> : null}
+                                {version.prompt && <p>{version.prompt}</p>}
+                                <div className="scene-compare-card__actions">
+                                  {version.canSetCurrent && canEdit && (
+                                    <Button variant="primary" size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion("visual", version.assetId!)}>
+                                      <Icon name="Check" size={13} /> 採用 V{version.index}
+                                    </Button>
+                                  )}
+                                  {canEdit && version.assetId && (
+                                    // 方向選擇器在「重畫這格」分頁；跳到「修正這張」等於把使用者
+                                    // 丟到一個沒有方向 UI 的地方，還把他剛選的版本忘掉。
+                                    <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); setVariantParentAssetId(version.assetId!); setTab("regen"); }}>
+                                      <Icon name="LayoutGrid" size={13} /> 從這版換方向
+                                    </Button>
+                                  )}
+                                  {version.canRefineFrom && canEdit && <Button size="sm" variant="ghost" onClick={() => { setCompareOpen(false); useVersionAsBase(version); }}><Icon name="Palette" size={13} /> 以這版修正</Button>}
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                      <Hint>採用後其他候選仍保留在版本歷史；重新整理會從 `scenes.assetId` 讀回同一個現用版本。若這一版是某個方向跑出來的，採用時會一併把該方向的鏡頭語言同步回這一鏡。</Hint>
                     </section>
                   </div>
                 )}

@@ -5,7 +5,7 @@
  * - 扣退模式不變：先扣預估、失敗全額退回（帳本可查）。
  * - 方案 C：Fal 台幣等值硬上限（即時動態，見 falCeiling.ts）。
  */
-import { and, eq, gt, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { settlePoints } from "../../shared/llmPricing";
 import { falCeilingReason } from "./falCeiling";
@@ -291,6 +291,23 @@ export async function reserveQuota(
     // 同一使用者一律序列化（週額度／個人預算）；組預算另上 per-group 鎖（class 1，與 user 的 class 0 區隔）；
     // 只有在「有總預算上限」時才另上全域鎖串行化總預算。沒設任何上限 → 零額外爭用。
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), 0)`);
+    /*
+     * 冪等預留（防重試雙倍扣）——與下方 refund 的冪等檢查對稱。
+     *
+     * 同一筆 generation 有兩條路會再次走進這裡：冪等重送撞唯一鍵後回既有列的路徑，
+     * 以及成本審核核准時的補扣。沒有這道檢查，同一次生成就會在帳本上出現兩筆扣款，
+     * 而失敗退點是「每筆生成至多一列」——退一次、扣兩次，差額永久由使用者承擔。
+     *
+     * 放在 per-user advisory lock 之後：同一使用者的預留已被序列化，
+     * 這個「先查再插」不會有 TOCTOU 空隙。
+     */
+    if (generationId) {
+      const [charged] = await tx
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.costLedger)
+        .where(and(eq(schema.costLedger.generationId, generationId), lt(schema.costLedger.delta, 0)));
+      if (Number(charged?.n ?? 0) > 0) return null; // 這筆生成已經扣過了，放行但不重複記帳
+    }
     if (mBudget != null) {
       // 個人預算：受既有 per-user 鎖序列化，不必再上新鎖。累計淨消耗（含退點抵銷）綁本組。
       const [m] = await tx

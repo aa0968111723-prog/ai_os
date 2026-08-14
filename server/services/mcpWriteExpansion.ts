@@ -10,6 +10,7 @@ import { requireGroup } from "../trpc";
 import { assertProjectEditable } from "./projectAcl";
 import { lockSceneOrder } from "./locks";
 import { worldviewSchema } from "../../shared/worldview";
+import { buildRetryGenerationInput } from "./generationRetryInput";
 import { executeGenerationCommand } from "./generationCommand";
 import type { AuthState } from "./auth";
 import {
@@ -861,14 +862,13 @@ export async function runMcpWriteExpansion(
     requireGroup(auth, gen.groupId);
     if (gen.status !== "failed") throw new TRPCError({ code: "BAD_REQUEST", message: "只有失敗的生成可以重試" });
     await assertProjectEditable(auth, { id: gen.projectId, groupId: gen.groupId });
+    // 與 generation.retry 共用同一份重試輸入（#725 P1-4）。
+    // 這裡原本是退化版重複實作，少帶 sceneRole（重試失敗的旁白 → 音訊寫進主畫面槽）、
+    // preserveScenePointer（重試失敗的變體 → 變成會移動指標的生成）與全部卡片錨點。
     const newGen = await executeGenerationCommand({
       auth,
       source: "mcp",
-      projectId: gen.projectId,
-      modelId: gen.modelId,
-      prompt: gen.prompt,
-      sourceUrl: gen.sourceUrl ?? undefined,
-      sceneId: gen.sceneId ?? undefined,
+      ...buildRetryGenerationInput(gen),
       reasonPrefix: "MCP 重試生成",
     });
     return {

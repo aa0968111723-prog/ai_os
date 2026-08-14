@@ -15,7 +15,8 @@ import {
   type VisualChoicePreset,
 } from "@shared/visualChoicePresets";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
-import { formatWorldviewStylesLabel, selectWorldviewStyle } from "@shared/worldview";
+import { proposalHeadline, proposeCreativeDirections } from "@shared/creativeProposals";
+import { formatWorldviewStylesLabel, parseWorldviewStyleSlots, selectWorldviewStyle } from "@shared/worldview";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { AssetImg, AssetVideo } from "../../components/MediaFallback";
@@ -66,6 +67,31 @@ const STATE_TO_INSPECTOR: Record<CreativeStateFamily, InspectorFamily> = {
   camera: "camera",
   style: "style",
 };
+
+/**
+ * 逐鏡套用（#725 P1-9）。
+ *
+ * 原本是 `Promise.all`：任何一鏡衝突就整組 reject，**但已經提交的寫入仍然成立**——
+ * 於是使用者看到「套用失敗」，實際上有幾鏡已經改了，畫面卻還顯示舊值與過期的 rev，
+ * 之後每一次重試都會再失敗。改成 allSettled：全部都跑完，回報成功／衝突筆數，
+ * 呼叫端無論如何都會重新抓一次。
+ */
+async function applyPerShot<T>(
+  rows: readonly T[],
+  fn: (row: T) => Promise<"applied" | "skipped" | "incompatible">,
+): Promise<{ applied: number; incompatible: number; failed: string[] }> {
+  const settled = await Promise.allSettled(rows.map((row) => fn(row)));
+  let applied = 0;
+  let incompatible = 0;
+  const failed: string[] = [];
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      failed.push(result.reason instanceof Error ? result.reason.message : "套用失敗");
+    } else if (result.value === "applied") applied += 1;
+    else if (result.value === "incompatible") incompatible += 1;
+  }
+  return { applied, incompatible, failed };
+}
 
 export function VisualChoiceTray({
   projectId,
@@ -143,6 +169,22 @@ export function VisualChoiceTray({
   });
   const impact = summarizeTargetImpact(shotRows, pickedShotIds);
   const selectionKey = pickedShotIds.join("|");
+  /**
+   * Aios 的視覺方向提案。純函式、零成本、可預測——打開面板不會偷偷生成或扣點。
+   * 只有單鏡聚焦時才給：多鏡批次的「方向」該在單格工作室一鏡一鏡看。
+   */
+  const proposals = useMemo(
+    () => focusShot
+      ? proposeCreativeDirections({
+          camera: focusShot.camera,
+          performance: focusShot.performance,
+          action: focusShot.action,
+          hasVisual: !!focusShot.assetId,
+          reviewStatus: focusShot.reviewStatus,
+        })
+      : [],
+    [focusShot],
+  );
 
   useEffect(() => {
     setPending(null);
@@ -176,6 +218,25 @@ export function VisualChoiceTray({
     ? writableRows.map((shot) => projectChoiceChange({ shot, choice: pendingProjectChoice, lookOwnerById, removeEverywhere }))
     : [];
   const operationKinds = [...new Set(pendingOperations.filter((change) => change.changed).map((change) => change.operation))];
+  /**
+   * 「移除最後一張卡」的隱性副作用：generationCore 的 resolveSceneCards 規定
+   * 三排全空的鏡改用生成台當下的勾選（fallback）。所以在這裡按下移除，
+   * 不是「這一鏡沒有角色」，而是「這一鏡改吃生成台的全域勾選」——
+   * 那通常正好是使用者想避免的事。先講清楚，不要等出圖才發現多了一個人。
+   */
+  const emptiesCardBinding = pendingProjectChoice
+    && (pendingProjectChoice.family === "character" || pendingProjectChoice.family === "scene" || pendingProjectChoice.family === "prop")
+    && pendingOperations.some((change, index) => {
+      if (!change.changed || change.operation !== "remove") return false;
+      const shot = writableRows[index];
+      if (!shot) return false;
+      const after = {
+        characterIds: change.field === "characterIds" ? (change.value as string[]) : (shot.characterIds ?? []),
+        scenePresetIds: change.field === "scenePresetIds" ? (change.value as string[]) : (shot.scenePresetIds ?? []),
+        propIds: change.field === "propIds" ? (change.value as string[]) : (shot.propIds ?? []),
+      };
+      return after.characterIds.length === 0 && after.scenePresetIds.length === 0 && after.propIds.length === 0;
+    });
   const pendingOperation = pendingProjectStyle
     ? "設為專案主風格"
     : pending?.source === "preset"
@@ -196,17 +257,29 @@ export function VisualChoiceTray({
     try {
       let applied = 0;
       let incompatible = 0;
+      /** 逐鏡失敗（多半是夥伴剛改過、rev 衝突）；不再讓一鏡失敗把整批講成失敗 */
+      let conflicts: string[] = [];
       if (pending.source === "preset" && pending.preset.family === "style") {
-        const styles = projectStyle === pending.preset.label
+        /*
+         * selectWorldviewStyle 是**切換**語意：再點一次目前的主風格會清空。
+         * 這張卡叫「設為專案主風格」，清空從來不是使用者按下去的意思。
+         *
+         * 舊的防呆比 `styles[0]`，但 styles 是 [look, texture?] 而歷史資料的順序不保證——
+         * texture 排在前面時 styles[0] 不是主風格，防呆漏接、切換生效、Style 被清成 []，
+         * 畫面卻顯示「✓ 已採用」。改用解析出來的 look 比對，最後再補一道不接受清空的閘。
+         */
+        const currentLook = parseWorldviewStyleSlots(worldview.styles).look;
+        const nextStyles = currentLook === pending.preset.label
           ? worldview.styles
           : selectWorldviewStyle(worldview.styles, pending.preset.label);
+        const styles = nextStyles.length === 0 && worldview.styles.length > 0 ? worldview.styles : nextStyles;
         if (styles.join("\u0000") !== worldview.styles.join("\u0000")) {
           await updateWorldview.mutateAsync({ id: projectId, worldview: { styles } });
           applied = 1;
         }
         await utils.projects.get.invalidate({ id: projectId });
       } else if (pending.source === "preset") {
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const patch = mapPresetToShotPatch(pending.preset, {
             camera: shot.camera,
             performance: shot.performance,
@@ -224,32 +297,44 @@ export function VisualChoiceTray({
               ...(patch.action !== undefined ? { action: shot.action } : {}),
             },
           });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else if (pending.family === "asset") {
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const change = projectChoiceChange({ shot, choice: pending });
-          if (!change.changed) return;
+          if (!change.changed) return "skipped";
+          // 批次套用刻意不帶 acknowledgeApproved／syncShotDirection：
+          // 已通過的鏡換不動畫面，也不會用一張圖的凍結設定覆寫 N 鏡的鏡頭語言。
           await setVisual.mutateAsync({ sceneId: shot.id, assetId: String(change.value) });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else if (pending.family === "look") {
         const choice: ProjectChoice = pending;
         const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const change = projectChoiceChange({ shot, choice, lookOwnerById, removeEverywhere: remove });
-          if (!change.compatible) { incompatible += 1; return; }
-          if (!change.changed) return;
+          if (!change.compatible) return "incompatible";
+          if (!change.changed) return "skipped";
           await update.mutateAsync({ sceneId: shot.id, lookIds: change.value as string[], expectedRev: shot.rev, baseline: { lookIds: shot.lookIds } });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else {
         const choice: ProjectChoice = pending;
         const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
-        await Promise.all(editable.map(async (shot) => {
-          const change = projectChoiceChange({ shot, choice, removeEverywhere: remove });
-          if (!change.compatible) { incompatible += 1; return; }
-          if (!change.changed) return;
+        const outcome = await applyPerShot(editable, async (shot) => {
+          // lookOwnerById 是移除角色時判斷「哪些 Look 會變孤兒」的依據（#725 P1-12）
+          const change = projectChoiceChange({ shot, choice, lookOwnerById, removeEverywhere: remove });
+          if (!change.compatible) return "incompatible";
+          if (!change.changed) return "skipped";
           const field = change.field as "characterIds" | "scenePresetIds" | "propIds";
           await setCards.mutateAsync({
             sceneId: shot.id,
@@ -257,8 +342,21 @@ export function VisualChoiceTray({
             expectedRev: shot.rev,
             baseline: { [field]: shot[field] },
           });
-          applied += 1;
-        }));
+          // 移除角色時一併清掉它留下的孤兒 Look（#725 P1-12）。
+          // 分兩支寫入：setCards 只管三排卡片，lookIds 屬於 scenes.update 的欄位。
+          if (change.orphanedLookIds?.length) {
+            const keptLooks = (shot.lookIds ?? []).filter((id) => !change.orphanedLookIds!.includes(id));
+            await update.mutateAsync({
+              sceneId: shot.id,
+              lookIds: keptLooks,
+              baseline: { lookIds: shot.lookIds },
+            });
+          }
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       }
       await utils.scenes.listByProject.invalidate({ projectId });
       const messages = [
@@ -272,10 +370,20 @@ export function VisualChoiceTray({
       ];
       if (targets.length - editable.length > 0) messages.push(`${targets.length - editable.length} 鏡已通過，未修改`);
       if (incompatible > 0) messages.push(`${incompatible} 鏡已達上限，或 Look 所屬角色不在鏡中`);
+      // 部分失敗如實講出來：成功的那幾鏡是真的寫進去了，不能一概說「套用失敗」
+      if (conflicts.length > 0) messages.push(`${conflicts.length} 鏡沒改成（夥伴剛動過，已重新讀取）：${conflicts[0]}`);
       setStatus(messages.join("・"));
       setPending(null);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "套用失敗");
+      /*
+       * 批次是 Promise.all：一鏡失敗（rev 衝突／夥伴剛改過）會讓整段跳到這裡，
+       * 但**先前成功的那幾鏡已經寫進去了**。舊版在這條路上不 invalidate，
+       * 於是畫面繼續顯示舊值——使用者看到「套用失敗」，實際上部分已經生效，
+       * 而且 Mixed State 這個「唯一真相的投影」正在說謊。
+       * 一律重新拉一次，讓畫面回到伺服器現況再顯示錯誤。
+       */
+      await utils.scenes.listByProject.invalidate({ projectId }).catch(() => undefined);
+      setStatus(`${error instanceof Error ? error.message : "套用失敗"}（部分鏡可能已更新，上方狀態已重新讀取）`);
     } finally {
       setBusy(false);
     }
@@ -443,6 +551,34 @@ export function VisualChoiceTray({
             </div>
           )}
 
+          {focusShot && proposals.length > 0 && (
+            <section className="creative-proposals" aria-label="Aios 視覺方向提案">
+              <Meta as="div">AIOS 提案</Meta>
+              <strong>{proposalHeadline({ hasVisual: !!focusShot.assetId }, proposals.length)}</strong>
+              <div className="creative-proposals__list">
+                {proposals.map((proposal) => (
+                  <button
+                    key={`${proposal.intentId}.${proposal.direction.id}`}
+                    type="button"
+                    className="creative-proposal-chip"
+                    disabled={!canEdit}
+                    title={proposal.because}
+                    onClick={() => onOpenStudio(focusShot.id)}
+                  >
+                    <strong>{proposal.direction.label}</strong>
+                    <Meta as="span">{proposal.because}</Meta>
+                  </button>
+                ))}
+              </div>
+              {/*
+                提案不等於已修改：這幾顆按鈕只把單格工作室打開到「換個方向再試一次」，
+                方向要不要生成、生成完要不要採用，都還是使用者按下去才發生。
+                這裡沒有任何 mutation，也沒有任何生成請求。
+              */}
+              <Hint>點一個方向會打開單格工作室；還沒有任何東西被修改，也還沒有花點數。</Hint>
+            </section>
+          )}
+
           {focusShot && (
             <div className="creative-refine-box">
               <label htmlFor={`visual-refine-${focusShot.id}`}>自然語言微調</label>
@@ -459,6 +595,19 @@ export function VisualChoiceTray({
                 <Button size="sm" variant="tonal" type="button" onClick={() => onOpenStudio(focusShot.id)}><Icon name="Sparkles" size={13} /> 生成／比較變體</Button>
               </div>
             </div>
+          )}
+
+          {emptiesCardBinding && (
+            <Hint role="alert">
+              移除後這一鏡會沒有任何角色／場景／道具綁定，出圖時會改用生成台當下的勾選。
+              想讓這一鏡真的「沒有人」，請改在提示詞裡寫明。
+            </Hint>
+          )}
+
+          {currentState.some((item) => item.unresolved > 0) && (
+            <Hint role="status">
+              有綁定的卡片還沒讀到名稱（可能正在載入或已被刪除）；上方顯示的是實際綁定，不是「尚未設定」。
+            </Hint>
           )}
 
           {status && <Meta as="p" role="status" className="visual-choice-status">{status}</Meta>}

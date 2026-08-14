@@ -163,7 +163,15 @@ export function registerAssistantPage(layer: AssistantPageLayer): () => void {
   return () => {
     if (pageToken !== mine) return; // 已被後來的頁面接管，不是我該清的
     pageLayer = EMPTY_PAGE;
-    focusLayer = {};
+    /*
+     * 只清自己那一層（#725 P1-13）。
+     *
+     * 這支 cleanup 原本連 focusLayer 一起清，與上面那段註解（兩層各自擁有、
+     * 同一頁捲動不該清掉打開中的分鏡）自相矛盾：React 的 effect 順序是
+     * 「新的 effect → 舊的 cleanup」，所以頁面層一重新註冊，剛註冊好的焦點就被
+     * 這裡抹掉。焦點層有自己的 token 與 cleanup（registerAssistantFocus），
+     * 該由它自己負責——v4 的 Aios 提案接縫正是依賴這個焦點。
+     */
     recentAction = undefined;
     recompute();
   };
