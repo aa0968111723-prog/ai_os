@@ -72,6 +72,27 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
         message: preflight.issues[0]?.message ?? "這一鏡尚未準備好生成",
       });
     }
+
+    // §13：影片一致性血緣——image-to-video 只能由「這一鏡已採用的畫面」或
+    // 呼叫端明確指定的 parent 生成；不得退回角色卡湊圖（那正是換臉的來源）。
+    const { getModel } = await import("../../shared/models");
+    const { capabilityForModel } = await import("../../shared/providerCapabilities");
+    const model = getModel(core.modelId);
+    if (model && capabilityForModel(model).imageToVideo && !core.sourceAssetId && !core.sourceUrl) {
+      const { db, schema } = await import("../db");
+      const { and, eq, isNull } = await import("drizzle-orm");
+      const [shotRow] = await db.select({ assetId: schema.scenes.assetId })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, core.sceneId), isNull(schema.scenes.deletedAt)));
+      if (shotRow?.assetId) {
+        core.sourceAssetId = shotRow.assetId; // 血緣預設：current 畫面就是影片的 parent
+      } else {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "這一鏡還沒有已採用的畫面——先生成並採用一張畫面，或明確指定影片來源",
+        });
+      }
+    }
   }
 
   const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core);
@@ -80,6 +101,7 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
     ...core,
     preserveScenePointer,
     shotContextPacketId: frozen?.packetId ?? shotContextPacketId,
+    shotContextPacket: frozen?.payload,
     userId: auth.user.id,
     assertAccess: async (project) => {
       assertProjectAllows(project, "generate");

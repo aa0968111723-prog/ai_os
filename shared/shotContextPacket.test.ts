@@ -56,6 +56,23 @@ describe("shot context packets", () => {
     expect(a).not.toBe(b);
   });
 
+  it("PR-B optional fields do not disturb legacy fingerprints, but change material when present", () => {
+    const legacy = canonicalShotContextMaterial(packet());
+    // 空陣列／null 的新欄位＝與 #753 相同素材（歷史指紋不動）
+    expect(canonicalShotContextMaterial(packet({
+      scenePackage: null,
+      characterSlots: [],
+      scriptAuthorizedChanges: [],
+    }))).toBe(legacy);
+    // 真的有 Scene Package／授權改變時，素材要跟著變（凍結內容不同）
+    expect(canonicalShotContextMaterial(packet({
+      scenePackage: { packageId: "pkg1", fingerprint: "f1" },
+    }))).not.toBe(legacy);
+    expect(canonicalShotContextMaterial(packet({
+      scriptAuthorizedChanges: [{ type: "costume_change", excerpt: "脫掉紅外套" }],
+    }))).not.toBe(legacy);
+  });
+
   it("stales only shots that depend on the changed look", () => {
     const rain = packetDependencies(packet({ shotId: "rain" }));
     const interior = packetDependencies(packet({

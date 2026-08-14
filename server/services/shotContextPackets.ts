@@ -18,6 +18,11 @@ import {
   type ShotContextPacketPayload,
 } from "../../shared/shotContextPacket";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
+import { buildCharacterSlots } from "../../shared/characterSlots";
+import { detectTransitionType, parseScriptAuthorizedChanges } from "../../shared/scriptChanges";
+import { inheritContinuityState, type ShotContinuityState } from "../../shared/shotContextPacket";
+import { capabilityForModel } from "../../shared/providerCapabilities";
+import { getModel } from "../../shared/models";
 
 export function hashShotContextPacket(payload: ShotContextPacketPayload): string {
   return createHash("sha256").update(canonicalShotContextMaterial(payload)).digest("hex");
@@ -78,6 +83,68 @@ export async function buildShotContextPacketPayload(input: {
   const worldview = parseWorldviewSafe(project.worldview);
   const locked = bindings.bindings.filter((row) => row.locked);
 
+  // Scene Package（§6）：這場戲已凍結的脈絡（有才帶；不在讀路徑做寫入）
+  const [scenePackageHead] = storyScene
+    ? await db.select({
+      packageId: schema.scenePackageHeads.packageId,
+      fingerprint: schema.scenePackageHeads.fingerprint,
+    }).from(schema.scenePackageHeads).where(eq(schema.scenePackageHeads.storySceneId, storyScene.id))
+    : [];
+
+  // 前一鏡 end-state（Adopt 時抽出）＋轉場類型 → 本鏡 start-state 繼承（§11）
+  const previousShotId = idx > 0 ? shots[idx - 1]!.id : null;
+  const [previousState] = previousShotId
+    ? await db.select().from(schema.shotContinuityStates)
+      .where(eq(schema.shotContinuityStates.shotId, previousShotId))
+    : [];
+  const previousShotSceneId = previousShotId
+    ? (await db.select({ storySceneId: schema.scenes.storySceneId })
+      .from(schema.scenes).where(eq(schema.scenes.id, previousShotId)))[0]?.storySceneId ?? null
+    : null;
+  const shotText = [shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n");
+  const authorizedChanges = parseScriptAuthorizedChanges(
+    [shotText, storyScene?.storyExcerpt].filter(Boolean).join("\n"),
+  );
+  const transitionType = detectTransitionType({
+    shotText,
+    sceneText: storyScene?.summary ?? null,
+    previousStorySceneId: previousShotSceneId,
+    currentStorySceneId: storyScene?.id ?? null,
+  });
+  const previousEnd = (previousState?.endState as ShotContinuityState | undefined) ?? null;
+
+  // Character Slots（§8）：canon pin 一併帶上（跨專案追溯＋adapter 來源）
+  const slotPins = characterIds.length
+    ? await db.select().from(schema.projectCanonPins).where(and(
+      eq(schema.projectCanonPins.projectId, project.id),
+      inArray(schema.projectCanonPins.localEntityId, characterIds),
+    ))
+    : [];
+
+  // Provider 能力（§10）：不猜——由 model.input 實際輸出推導；
+  // active adapter 只在模型真的有 loras 槽、且 pinned Canon 版本帶訓練成果時標上
+  const model = input.modelId ? getModel(input.modelId) : null;
+  const capability = model ? capabilityForModel(model) : null;
+  let activeAdapter: string | null = null;
+  if (capability?.identityAdapterSupport && slotPins.length) {
+    const pinnedVersionIds = slotPins.map((pin) => pin.pinnedVersionId);
+    const versions = await db.select({
+      id: schema.canonVersions.id,
+      adapterRef: schema.canonVersions.adapterRef,
+      canonId: schema.canonVersions.canonId,
+    }).from(schema.canonVersions).where(inArray(schema.canonVersions.id, pinnedVersionIds));
+    const withAdapter = versions.filter((row) => row.adapterRef);
+    if (withAdapter.length) {
+      const canonIds = withAdapter.map((row) => row.canonId);
+      const canons = await db.select({
+        id: schema.canonEntries.id,
+        generationAllowed: schema.canonEntries.generationAllowed,
+      }).from(schema.canonEntries).where(inArray(schema.canonEntries.id, canonIds));
+      const allowed = new Set(canons.filter((row) => row.generationAllowed).map((row) => row.id));
+      activeAdapter = withAdapter.find((row) => allowed.has(row.canonId))?.adapterRef ?? null;
+    }
+  }
+
   const assetIds = [
     ...characters.map((row) => row.referenceAssetId),
     ...looks.map((row) => row.referenceAssetId),
@@ -116,7 +183,11 @@ export async function buildShotContextPacketPayload(input: {
     characters: characters.map((row) => ({ kind: "character", id: row.id, rev: row.rev, name: row.name })),
     looks: looks.map((row) => ({ kind: "character_look", id: row.id, rev: row.rev, name: row.name })),
     presets: presets.map((row) => ({ kind: "scene_preset", id: row.id, rev: row.rev, name: row.name })),
-    props: props.map((row) => ({ kind: "prop", id: row.id, rev: row.rev, name: row.name })),
+    props: props.map((row) => ({
+      kind: "prop", id: row.id, rev: row.rev, name: row.name,
+      // 歸屬跟著走：preflight 才能驗 wrong_prop_owner（額外欄位不進 entityFingerprintKey）
+      ownerKind: row.ownerKind, ownerId: row.ownerId,
+    })),
     assets: assets.map((row) => ({ kind: "asset_revision", id: row.id, rev: null, name: row.title })),
     knowledge: knowledgeRows.map((row) => ({ kind: "knowledge", id: row.id, rev: null, name: row.title })),
     dataRows: [],
@@ -164,17 +235,42 @@ export async function buildShotContextPacketPayload(input: {
       })),
     ],
     continuity: {
-      previousShotId: idx > 0 ? shots[idx - 1]!.id : null,
+      previousShotId,
       nextShotId: idx >= 0 && idx < shots.length - 1 ? shots[idx + 1]!.id : null,
-      currentStart: {
-        actors: characters.map((row) => ({
-          characterId: row.id,
-          lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
-        })),
-        environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
-        transitionType: idx > 0 && shots[idx - 1] ? "cut" as const : null,
-      },
+      // §11：previousEnd（上一鏡 Adopt 抽出的 end-state）＋轉場類型 → 繼承出本鏡 start；
+      // time_jump／montage 依規則解除濕度／傷勢等延續。
+      // 條件性帶欄位：沒有 end-state 時 payload 形狀與 #753 一致，歷史指紋不動
+      ...(previousEnd ? { previousEnd } : {}),
+      currentStart: (() => {
+        const inherited = inheritContinuityState(
+          previousEnd,
+          {
+            actors: characters.map((row) => ({
+              characterId: row.id,
+              lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
+            })),
+            environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+          },
+          previousShotId ? transitionType : null,
+        );
+        // 第一鏡沒有轉場（與 #753 既有指紋語義一致，避免無意義的整批 stale）
+        if (!previousShotId) inherited.transitionType = null;
+        return inherited;
+      })(),
     },
+    scenePackage: scenePackageHead
+      ? { packageId: scenePackageHead.packageId, fingerprint: scenePackageHead.fingerprint }
+      : null,
+    characterSlots: buildCharacterSlots({
+      characters,
+      looks,
+      props,
+      references: undefined, // slot 參考直接用卡片 referenceAssetId（下方 references 陣列同源）
+      canonPins: slotPins
+        .filter((pin) => pin.localEntityId)
+        .map((pin) => ({ localEntityId: pin.localEntityId!, canonId: pin.canonId, pinnedVersionId: pin.pinnedVersionId })),
+    }).slots,
+    scriptAuthorizedChanges: authorizedChanges,
     locks: locked.map((row) => ({
       mentionKey: row.mentionKey,
       entityKind: row.entityKind,
@@ -185,6 +281,9 @@ export async function buildShotContextPacketPayload(input: {
     provider: {
       modelId: input.modelId ?? null,
       policyVersion: "generation-command.v1",
+      // §10：能力誠實標記——模型真的有對應槽才會是 true／有值
+      ...(capability ? { supportsIdentityRef: capability.identityAdapterSupport } : {}),
+      ...(activeAdapter ? { activeAdapter } : {}),
     },
     why: [
       ...characters.map((row) => `角色 ${row.name} 來自專案角色卡`),

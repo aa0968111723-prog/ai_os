@@ -9,6 +9,8 @@ import { evaluateGenerationCandidate, shouldAdoptCandidate } from "../../shared/
 import { loadCreativeContextProject } from "./storyEntityBinding";
 import { loadShotContextPacket } from "./shotContextPackets";
 import { splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { deriveShotEndState } from "../../shared/scriptChanges";
+import type { ShotContextPacketPayload } from "../../shared/shotContextPacket";
 
 export async function adoptGenerationCurrent(input: {
   auth: AuthState;
@@ -24,12 +26,14 @@ export async function adoptGenerationCurrent(input: {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成沒有綁分鏡" });
   }
   const meta = splitGenerationSourceMeta(generation.params).meta;
+  let frozenPayload: ShotContextPacketPayload | null = null;
   if (meta.shotContextPacketId) {
     const frozen = await loadShotContextPacket({
       auth: input.auth,
       projectId: generation.projectId,
       packetId: meta.shotContextPacketId,
     });
+    frozenPayload = frozen.payload;
     const report = evaluateGenerationCandidate({
       packet: frozen.payload,
       candidate: {
@@ -65,6 +69,35 @@ export async function adoptGenerationCurrent(input: {
     isNull(schema.scenes.deletedAt),
   )).returning({ id: schema.scenes.id });
   if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個分鏡" });
+
+  // §11：Adopt 是 end-state 的抽取點——這一鏡「確定長這樣」之後，
+  // 濕度／傷勢／造型狀態才能可靠地流進下一鏡的 start-state。
+  if (frozenPayload) {
+    const endState = deriveShotEndState({
+      currentStart: frozenPayload.continuity.currentStart,
+      authorizedChanges: frozenPayload.scriptAuthorizedChanges ?? [],
+      environment: frozenPayload.environment,
+    });
+    await db.insert(schema.shotContinuityStates).values({
+      shotId: updated.id,
+      projectId: generation.projectId,
+      groupId: generation.groupId,
+      endState,
+      sourceGenerationId: generation.id,
+      sourceAssetId: asset.id,
+      extractedAt: new Date(),
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: schema.shotContinuityStates.shotId,
+      set: {
+        endState,
+        sourceGenerationId: generation.id,
+        sourceAssetId: asset.id,
+        extractedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+  }
   return { shotId: updated.id, assetId: asset.id, adopted: true };
 }
 

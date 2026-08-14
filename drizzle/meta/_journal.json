@@ -526,6 +526,13 @@
       "when": 1789662000000,
       "tag": "0074_team_canon",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789665600000,
+      "tag": "0075_scene_packages_continuity",
+      "breakpoints": true
     }
   ]
 }
