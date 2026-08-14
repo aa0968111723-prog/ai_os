@@ -519,6 +519,13 @@
       "when": 1789658400000,
       "tag": "0073_consistency_training",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789662000000,
+      "tag": "0074_team_canon",
+      "breakpoints": true
     }
   ]
 }

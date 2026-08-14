@@ -57,6 +57,7 @@ import { intelligenceRouter } from "./intelligence";
 import { externalIntakeRouter } from "./externalIntake";
 import { externalEditingRouter } from "./externalEditing";
 import { computerRuntimeRouter } from "./computerRuntime";
+import { canonRouter } from "./canon";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -96,6 +97,7 @@ export const appRouter = router({
   folderImport: folderImportRouter,
   projectContext: projectContextRouter,
   creativeContext: creativeContextRouter,
+  canon: canonRouter,
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,

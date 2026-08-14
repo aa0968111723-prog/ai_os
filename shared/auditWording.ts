@@ -197,6 +197,16 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.promoteVersion": "採用一致性版本",
   "creativeContext.rollbackVersion": "還原一致性版本",
   "creativeContext.adoptGeneration": "採用生成結果為 current",
+  "canon.createFromEntity": "把設定卡升為 Team Canon",
+  "canon.addVersionFromPin": "從專案卡片建立 Canon 新版本",
+  "canon.addVersionFromTraining": "把訓練成果掛為 Canon 候選版本",
+  "canon.promoteVersion": "採用 Canon 版本為 production",
+  "canon.rollbackVersion": "退回 Canon production 版本",
+  "canon.archiveVersion": "封存 Canon 版本",
+  "canon.setRights": "調整 Canon 授權與重用範圍",
+  "canon.pin": "把 Team Canon 引用進專案",
+  "canon.unpin": "解除專案的 Canon 引用",
+  "canon.applyUpgrade": "把專案的 Canon 引用升到新版本",
   "story.sceneUpdate": "更新場設定",
   "story.sceneRemove": "刪除場（鏡改為未分場）",
   "characterLooks.add": "新增造型",
@@ -428,7 +438,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "aiTrace", "teamAssistant", "globalAssistant", "openaiMcp", "workflows", "computerRuntime"] },
   // projectContext 歸在知識：它回答的是「這個專案要用哪些資料、各自扮演什麼角色」，
   // 查的人和查知識庫／角色設定的是同一批人、同一個問題
-  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext", "creativeContext"] },
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "characterLooks", "props", "projectContext", "creativeContext", "canon"] },
   // attachments 同時服務筆記與知識庫；歸在協作＝跟著「筆記」走（附件的主場是會議紀錄），
   // action 標籤本身已寫明「筆記／知識庫附件」，查知識庫附件時不會被分類誤導
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "decisions", "dm", "googleCalendar", "push", "notifications", "community", "attachments"] },
