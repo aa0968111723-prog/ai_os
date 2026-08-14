@@ -1,0 +1,38 @@
+[
+  {
+    "tag": "desktop-1280",
+    "panel": true,
+    "updateChip": true
+  },
+  {
+    "tag": "desktop-1440",
+    "panel": true,
+    "updateChip": true
+  },
+  {
+    "tag": "mobile-390",
+    "panel": true,
+    "updateChip": true
+  },
+  {
+    "tag": "mobile-430",
+    "panel": true,
+    "updateChip": true
+  },
+  {
+    "tag": "perf-first-load",
+    "totalTrpcProcedures": 34,
+    "duplicated": [
+      "auth.me×4"
+    ]
+  },
+  {
+    "tag": "upgrade",
+    "staleShots": [
+      "e24e693d-6def-4c53-824d-2f6ba9b38766"
+    ],
+    "expected": [
+      "e24e693d-6def-4c53-824d-2f6ba9b38766"
+    ]
+  }
+]

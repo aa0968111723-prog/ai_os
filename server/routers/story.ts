@@ -466,6 +466,15 @@ export const storyRouter = router({
         },
       });
       try {
+        // §6：先凍結每場戲的 Scene Package，Shot packet 才能繼承（順序刻意）
+        const { freezeScenePackage } = await import("../services/scenePackages");
+        for (const storySceneId of result.storySceneIds ?? []) {
+          await freezeScenePackage({
+            auth: ctx.auth,
+            projectId: input.projectId,
+            storySceneId,
+          });
+        }
         const { freezeShotContextPacket } = await import("../services/shotContextPackets");
         for (const shotId of result.sceneIds ?? []) {
           await freezeShotContextPacket({

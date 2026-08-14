@@ -88,6 +88,57 @@ export const shotContextPacketHeads = pgTable("shot_context_packet_heads", {
   projectStaleIdx: index("shot_context_packet_heads_project_stale_idx").on(t.projectId, t.stale),
 }));
 
+/** Scene Package（master plan §6）：insert-only 凍結，同 shot packet 模式 */
+export const scenePackages = pgTable("scene_packages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  storySceneId: uuid("story_scene_id").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  payload: jsonb("payload").$type<import("../../../shared/scenePackage").ScenePackagePayload>().notNull(),
+  parentPackageId: uuid("parent_package_id"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  sceneCreatedIdx: index("scene_packages_scene_created_idx").on(t.storySceneId, t.createdAt),
+  projectIdx: index("scene_packages_project_idx").on(t.projectId, t.storySceneId),
+  fingerprintIdx: index("scene_packages_fingerprint_idx").on(t.storySceneId, t.fingerprint),
+  // 0076：同場同指紋只留一列——凍結去重是資料庫保證，不是 best-effort（並行凍結 race）
+  sceneFingerprintUq: uniqueIndex("scene_packages_scene_fingerprint_uq").on(t.storySceneId, t.fingerprint),
+}));
+
+export const scenePackageHeads = pgTable("scene_package_heads", {
+  storySceneId: uuid("story_scene_id").primaryKey(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  packageId: uuid("package_id").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  stale: boolean("stale").notNull().default(false),
+  staleReason: text("stale_reason"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectStaleIdx: index("scene_package_heads_project_stale_idx").on(t.projectId, t.stale),
+}));
+
+/**
+ * Shot 連戲 end-state（master plan §11）：Adopt 當下抽出、供下一鏡繼承。
+ * head 式 upsert——只有「最新一次 Adopt 的結果」是有效 end-state；
+ * 歷史脈絡在 packet 與 generation lineage，不在這裡重複。
+ */
+export const shotContinuityStates = pgTable("shot_continuity_states", {
+  shotId: uuid("shot_id").primaryKey(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  endState: jsonb("end_state").$type<import("../../../shared/shotContextPacket").ShotContinuityState>().notNull(),
+  sourceGenerationId: uuid("source_generation_id"),
+  sourceAssetId: uuid("source_asset_id"),
+  extractedAt: timestamp("extracted_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectIdx: index("shot_continuity_states_project_idx").on(t.projectId),
+}));
+
 export const consistencyDatasetManifests = pgTable("consistency_dataset_manifests", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),

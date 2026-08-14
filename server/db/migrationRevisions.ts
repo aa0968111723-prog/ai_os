@@ -358,4 +358,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0074_team_canon": [
     "cc202b94aad8db282666963f6a4a6d75e42223e3b70bf9a83352960d0de8334e",
   ],
+  "0075_scene_packages_continuity": [
+    "8dbd72150ab397adb86ed64f73c5be947a79465c5993441a7ce4320168bc0f03",
+  ],
+  "0076_canon_hardening": [
+    "79ea09b9296535d9d676bc4be1d09c1c88bb0e027a9935cf8a78bf13a461ab4d",
+  ],
 };
