@@ -70,6 +70,15 @@ function coverOf(id: string): string {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return COVERS[h % COVERS.length];
 }
+/** 與 PlannerPage 同一套本地日鍵，避免 toISOString 跨日偏移；不另建資料來源。 */
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+function fmtTime(d: string | Date): string {
+  const t = new Date(d);
+  return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+}
+
 function recordRecent(id: string) {
   try {
     const cur = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]") as string[];
@@ -88,7 +97,7 @@ function readRecent(): string[] {
 
 /** 首頁作業台：搜尋/篩選/排序的專案卡格 ＋ 頂部精簡建立列 */
 export function Launchpad({ groupId }: { groupId: string }) {
-  // 助手頁面感知：首頁＝全站視角（快捷變成「安排今天／繼續上次／哪裡卡住」）
+  // 助手頁面感知：首頁＝全站視角（下一步／今日安排／最近專案）
   useEffect(() => registerAssistantPage({ pageType: "home" }), []);
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
@@ -112,6 +121,11 @@ export function Launchpad({ groupId }: { groupId: string }) {
   );
   // 跨專案待辦（UX 高：首頁不顯示待核→組長漏核、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
   const pendingSummary = trpc.generation.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
+  // 與 /planner 共用 schedule.list，不另建 UI 專用資料來源
+  const schedulePreview = trpc.schedule.list.useQuery(
+    { groupId, includePast: false },
+    { enabled: !!groupId },
+  );
   const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
   const agentOverview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
@@ -247,6 +261,18 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const waitingRuns = (agentSummary?.waiting ?? 0) + (agentSummary?.awaitingApproval ?? 0);
   const completedRuns = agentSummary?.doneRecent ?? 0;
   const pendingTotal = pendingSummary.data?.totalAwaitingGenerations ?? 0;
+  const upcomingItems = (schedulePreview.data?.items ?? []) as Array<{
+    id: string;
+    title: string;
+    startsAt: string | Date;
+    endsAt: string | Date | null;
+    note: string | null;
+    projectId: string | null;
+  }>;
+  const today = new Date();
+  const todayItems = upcomingItems
+    .filter((item) => dayKey(new Date(item.startsAt)) === dayKey(today))
+    .slice(0, 4);
   const todayLabel = new Intl.DateTimeFormat("zh-TW", {
     month: "long",
     day: "numeric",
@@ -273,6 +299,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
           action: "查看專案",
           icon: "Sparkles" as const,
         }
+      : todayItems.length > 0
+        ? {
+            kind: "schedule",
+            eyebrow: "今天先做",
+            title: todayItems[0]!.title,
+            detail: `${fmtTime(todayItems[0]!.startsAt)} 開始・今日還有 ${todayItems.length} 項安排`,
+            href: "#today-schedule",
+            action: "查看今日安排",
+            icon: "Clock" as const,
+          }
       : focusProject
         ? {
             kind: "continue",
@@ -341,48 +377,76 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <p className="daily-date"><Icon name="CalendarPlus" size={14} />{todayLabel}</p>
           <p className="eyebrow">今日工作台</p>
           <h1 id="daily-title">
-            {me.data?.user.name ? `${me.data.user.name}，` : ""}今天從哪裡<span className="accent">開始</span>？
+            {me.data?.user.name ? `${me.data.user.name}，` : ""}現在先做<span className="accent">這件</span>
           </h1>
           <p className="sub">
-            {activeGroup ? `這裡整理「${activeGroup.groupName}」需要你處理的事、AI 進度與最近專案。` : "需要你處理的事與 AI 進度都在這裡。"}
+            {activeGroup ? `「${activeGroup.groupName}」今天最該先處理的事。` : "今天最該先處理的事。"}
           </p>
-          {/*
-            原本這裡只有一排名字 chip（「組內在線 Bruce 韋澔」）。它回答不了任何一個
-            使用者真正會問的問題——誰在忙什麼、有什麼找我、哪裡卡住了。
-            換成 CollabPanel：同一份即時在場資料，加上一支伺服器聚合，
-            讓首頁真的能回答「我的下一步是什麼」。
-          */}
-          <CollabPanel groupId={groupId || null} livePeerCount={collab.connected ? collab.peers.length : undefined} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="primary daily-new-project"
-            aria-expanded={createOpen}
-            aria-controls="new-project-panel"
-            onClick={() => {
-              setCreateOpen((open) => {
-                const next = !open;
-                if (next) {
-                  requestAnimationFrame(() => {
-                    document.getElementById("np-title")?.focus({ preventScroll: true });
-                  });
-                }
-                return next;
-              });
-            }}
-          >
-            <Icon name={createOpen ? "X" : "Plus"} size={16} />
-            {createOpen ? "收起建立表單" : "建立新專案"}
-          </button>
         </div>
       </section>
 
-      <nav className="daily-quick-links" aria-label="常用工具">
-        <Link href="/planner"><Icon name="Clock" size={15} /><span>安排今天</span><small>排程與筆記</small></Link>
-        <Link href="/databases"><Icon name="Database" size={15} /><span>整理資料</span><small>清單與批次匯入</small></Link>
-        <Link href="/chat"><Icon name="MessageCircle" size={15} /><span>聯絡夥伴</span><small>私訊與標注</small></Link>
-      </nav>
+      {focusState.kind === "start" ? (
+        <button
+          type="button"
+          className={`daily-focus-card ${focusState.kind}`}
+          style={{ width: "100%", textAlign: "left" }}
+          onClick={() => {
+            setCreateOpen(true);
+            requestAnimationFrame(() => document.getElementById("np-title")?.focus());
+          }}
+        >
+          <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+          <span className="daily-focus-card__copy">
+            <small>{focusState.eyebrow}</small>
+            <strong>{focusState.title}</strong>
+            <span>{focusState.detail}</span>
+          </span>
+          <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+        </button>
+      ) : (
+        <a href={focusState.href} className={`daily-focus-card ${focusState.kind}`} style={{ width: "100%", textAlign: "left" }}>
+          <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+          <span className="daily-focus-card__copy">
+            <small>{focusState.eyebrow}</small>
+            <strong>{focusState.title}</strong>
+            <span>{focusState.detail}</span>
+          </span>
+          <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+        </a>
+      )}
+
+      <section id="today-schedule" className="dashboard-section" aria-labelledby="today-schedule-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">今天</p>
+            <h2 id="today-schedule-title">今日安排</h2>
+          </div>
+          <Link href="/planner" className="m-touch" style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 44 }}>
+            完整排程 <Icon name="ChevronRight" size={14} />
+          </Link>
+        </div>
+        {schedulePreview.isLoading ? (
+          <Hint>行程載入中…</Hint>
+        ) : todayItems.length > 0 ? (
+          <ul className="today-schedule-list">
+            {todayItems.map((item) => (
+              <li key={item.id}>
+                <Link href={`/planner?focus=schedule-${item.id}`} className="today-schedule-item">
+                  <time dateTime={new Date(item.startsAt).toISOString()}>{fmtTime(item.startsAt)}</time>
+                  <span>
+                    <strong>{item.title}</strong>
+                    {item.note ? <small>{item.note}</small> : null}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Hint>今天還沒有行程。完整月曆、Google 日曆與 ICS 仍在進階排程。</Hint>
+        )}
+      </section>
+
+      <CollabPanel groupId={groupId || null} livePeerCount={collab.connected ? collab.peers.length : undefined} />
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
@@ -625,37 +689,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
               </div>
             </section>
           ) : (
-            <div style={{ padding: "8px 0" }}>
-              {focusState.kind === "start" ? (
-                <button
-                  type="button"
-                  className={`daily-focus-card ${focusState.kind}`}
-                  style={{ width: "100%", textAlign: "left" }}
-                  onClick={() => {
-                    setCreateOpen(true);
-                    requestAnimationFrame(() => document.getElementById("np-title")?.focus());
-                  }}
-                >
-                  <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
-                  <span className="daily-focus-card__copy">
-                    <small>{focusState.eyebrow}</small>
-                    <strong>{focusState.title}</strong>
-                    <span>{focusState.detail}</span>
-                  </span>
-                  <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
-                </button>
-              ) : (
-                <a href={focusState.href} className={`daily-focus-card ${focusState.kind}`} style={{ width: "100%", textAlign: "left" }}>
-                  <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
-                  <span className="daily-focus-card__copy">
-                    <small>{focusState.eyebrow}</small>
-                    <strong>{focusState.title}</strong>
-                    <span>{focusState.detail}</span>
-                  </span>
-                  <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
-                </a>
-              )}
-            </div>
+            <Hint>還沒有最近專案。下面清單可以開新案，或先看今日安排。</Hint>
           )}
         </div>
       </div>
@@ -663,13 +697,29 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
         <div className="section-heading">
           <div><p className="eyebrow">完整清單</p><h2 id="projects-title">所有專案</h2></div>
-          <Button size="sm" onClick={() => {
-            setCreateOpen(true);
-            requestAnimationFrame(() => {
-              document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
-              document.getElementById("np-title")?.focus({ preventScroll: true });
-            });
-          }}>建立新專案</Button>
+          {focusState.kind !== "start" && (
+            <button
+              type="button"
+              className="primary daily-new-project"
+              aria-expanded={createOpen}
+              aria-controls="new-project-panel"
+              onClick={() => {
+                setCreateOpen((open) => {
+                  const next = !open;
+                  if (next) {
+                    requestAnimationFrame(() => {
+                      document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      document.getElementById("np-title")?.focus({ preventScroll: true });
+                    });
+                  }
+                  return next;
+                });
+              }}
+            >
+              <Icon name={createOpen ? "X" : "Plus"} size={16} />
+              {createOpen ? "收起建立表單" : "建立新專案"}
+            </button>
+          )}
         </div>
 
       {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；
@@ -849,13 +899,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
           }
 
           return (
-            <Link
-              key={p.id}
-              href={`/p/${p.id}`}
-              className="launch-card"
-              style={{ textDecoration: "none", color: "inherit", opacity: isArchived ? 0.85 : undefined }}
-              onClick={() => recordRecent(p.id)}
-            >
+            <div key={p.id} className="launch-card" style={{ opacity: isArchived ? 0.85 : undefined }}>
+              {/* 整張卡可點的覆蓋連結：與卡內按鈕互為兄弟，不再把按鈕嵌進 <a>（巢狀互動元素，WCAG 4.1.2）。
+                  換圖／還原按鈕 z-index 2 壓在連結之上，各自獨立接收點擊與鍵盤焦點。 */}
+              <Link
+                href={`/p/${p.id}`}
+                className="launch-card__link"
+                aria-label={`開啟專案 ${p.title}`}
+                onClick={() => recordRecent(p.id)}
+              />
               <div className="launch-cover" style={{ background: coverOf(p.id) }}>
                 {/* 有綁封面圖就顯示圖，沒綁（或素材進了回收桶→coverUrl 為 null）退回首字色塊 */}
                 {p.coverUrl ? (
@@ -877,12 +929,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     size="sm"
                     className="launch-cover__swap"
                     title="換一張封面圖"
-                    onClick={(e) => {
-                      // 卡片本身是連結：不攔的話按「換圖」會直接跳進專案
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setCoverEditId(p.id);
-                    }}
+                    onClick={() => setCoverEditId(p.id)}
                   >
                     <Icon name="Image" size={13} />
                     {p.coverUrl ? "換圖" : "加圖"}
@@ -905,13 +952,10 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   {canRestore && (
                     <Button
                       size="sm"
+                      className="launch-card__restore"
                       disabled={restoreProject.isPending}
                       title="還原後會重新出現在作業台"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        restoreProject.mutate({ id: p.id, archived: false });
-                      }}
+                      onClick={() => restoreProject.mutate({ id: p.id, archived: false })}
                     >
                       {restoreProject.isPending ? "還原中…" : "還原"}
                     </Button>
@@ -923,7 +967,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   </div>
                 )}
               </div>
-            </Link>
+            </div>
           );
         })}
       </div>

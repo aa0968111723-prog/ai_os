@@ -769,6 +769,15 @@ h2 { font-family: var(--sans); font-weight: 600; font-size: var(--fs-19); line-h
   border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); box-shadow: var(--e2);
   transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out); }
 .launch-card:hover { transform: translateY(-2px); box-shadow: var(--e3); }
+/* 覆蓋式卡片連結：整張卡可點，但換圖／還原按鈕是卡內獨立元素（不再嵌進 <a>，WCAG 4.1.2）。
+   z-index 1 蓋在內容上；卡內按鈕升到 2，點擊／鍵盤焦點永遠先落在按鈕上。
+   outline-offset 用負值讓焦點環畫在卡片內緣——父層 overflow:hidden 會把向外畫的環裁掉。 */
+.launch-card__link {
+  position: absolute; inset: 0; z-index: 1;
+  border-radius: inherit; text-decoration: none; color: inherit;
+}
+.launch-card__link:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.launch-card__restore { position: relative; z-index: 2; }
 .launch-cover { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; overflow: hidden; }
 .launch-mono { font-family: var(--serif); font-size: 40px; color: var(--cover-veil); user-select: none; }
 /* 專案封面圖（projects.cover_asset_id）：綁了圖就鋪滿封面區，沒綁沿用首字色塊。
@@ -780,7 +789,7 @@ h2 { font-family: var(--sans); font-weight: 600; font-size: var(--fs-19); line-h
 /* 換圖鈕：桌面滑過（或鍵盤聚焦）才浮出，不長期壓在封面上；
    觸控裝置沒有 hover，一律常駐，否則永遠點不到。 */
 .launch-cover__swap {
-  position: absolute; right: 8px; bottom: 8px; z-index: 1;
+  position: absolute; right: 8px; bottom: 8px; z-index: 2; /* 蓋在 .launch-card__link 覆蓋連結之上 */
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 9px; font-size: var(--fs-12);
   opacity: 0; transition: opacity var(--dur-base) var(--ease-out);
@@ -3017,6 +3026,19 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   font-size: var(--fs-12);
   font-weight: 650;
 }
+.today-schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.today-schedule-item {
+  display: flex; align-items: flex-start; gap: 12px; min-height: 44px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); color: inherit; text-decoration: none;
+}
+.today-schedule-item:hover { border-color: var(--border-strong); color: inherit; }
+.today-schedule-item time {
+  flex: none; min-width: 3.2em; font-variant-numeric: tabular-nums;
+  color: var(--primary-ink); font-weight: 700;
+}
+.today-schedule-item span { min-width: 0; display: grid; gap: 2px; }
+.today-schedule-item small { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daily-quick-links {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

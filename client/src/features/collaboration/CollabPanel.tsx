@@ -15,7 +15,7 @@
 import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon, type IconName } from "../../components/Icon";
-import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
+import { Card, Chip, Hint, Meta } from "../../components/ui";
 
 /** 首頁只攤這麼多件事；其餘去協作中心 */
 const HOME_ATTENTION_LIMIT = 2;
@@ -50,10 +50,12 @@ export function CollabPanel({
           團隊協作
         </h2>
         <span style={{ flex: "1 1 auto" }} />
-        <Link href="/collab">
-          <Button size="sm" variant="ghost" style={{ minHeight: 44 }}>
-            全部 <Icon name="ChevronRight" size={14} />
-          </Button>
+        <Link
+          href="/collab"
+          className="btn-ghost btn-sm"
+          style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          全部 <Icon name="ChevronRight" size={14} />
         </Link>
       </div>
 
@@ -166,11 +168,9 @@ export function AttentionRow({
         </Hint>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-        <Link href={item.url}>
+        <Link href={item.url} className="btn btn-sm" style={{ minHeight: 44 }}>
           {/* 44px：手機是一級公民，這是主要操作 */}
-          <Button size="sm" style={{ minHeight: 44 }}>
-            查看
-          </Button>
+          查看
         </Link>
       </div>
     </div>
