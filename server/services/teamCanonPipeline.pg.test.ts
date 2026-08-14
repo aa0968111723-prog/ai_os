@@ -103,7 +103,7 @@ describe.skipIf(!RUN_PG).sequential("Canon-to-Shot pipeline (real PostgreSQL)", 
     const genId = randomUUID();
     const url = `https://assets.example.test/${assetId}.png`;
     await db.insert(schema.assets).values({
-      id: assetId, projectId, groupId, kind: "image", title: "雨中畫面", url, createdBy: userId,
+      id: assetId, projectId, groupId, kind: "image", title: "雨中畫面", url, uploadedBy: userId,
     });
     await db.insert(schema.generations).values({
       id: genId, projectId, groupId, userId, modelId: "fal-ai/fast-lightning-sdxl",
