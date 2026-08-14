@@ -617,6 +617,39 @@ export function isUniqueViolation(err: unknown): boolean {
  * CA-01／KD-12：fail-closed 實體 ACL——角色／場景／來源素材必須屬於本 projectId，
  * 否則拒絕寫入 generation 列（不靜默 persist 外鍵 UUID）。空／未傳＝略過該欄。
  */
+/**
+ * 分鏡「現用畫面」回填的完整判定，**生產路徑與 *.pg.test.ts 共用同一份**。
+ *
+ * 回 null＝這一筆不該回填（候選變體、或根本沒綁分鏡）。
+ * 回條件＝那一次 UPDATE 的原子 where：軟刪、已通過審核、人類優先指標三道一起判，
+ * 多條件 update 天然原子，沒有先查再判的 TOCTOU 空隙。
+ *
+ * 為什麼要匯出：測試若自己抄一份 where，生產端的守衛被改壞了測試依然全綠——
+ * 那正是這批 pg 測試當初要取代的 readFileSync+toContain 的盲點，只是換到高一層。
+ * （實測抄出來的那份還漏了 narration/ambience 的例外，兩邊已經不一樣了。）
+ */
+export function sceneBackfillWhere(gen: {
+  sceneId: string | null;
+  sceneRole: string | null;
+  params: unknown;
+}) {
+  const meta = splitGenerationSourceMeta(gen.params).meta;
+  if (!gen.sceneId || meta.preserveScenePointer === true) return null;
+  const pointerGuard = gen.sceneRole === "narration" || gen.sceneRole === "ambience"
+    ? undefined // 這一輪只保護主畫面軌；音軌沒有對應的送出基準
+    : meta.scenePointerAtSubmit === undefined
+      ? undefined // 舊資料沒有基準 ⇒ 維持既有行為
+      : meta.scenePointerAtSubmit === ""
+        ? isNull(schema.scenes.assetId)
+        : eq(schema.scenes.assetId, meta.scenePointerAtSubmit);
+  return and(
+    eq(schema.scenes.id, gen.sceneId),
+    isNull(schema.scenes.deletedAt),
+    ne(schema.scenes.reviewStatus, "approved"),
+    ...(pointerGuard ? [pointerGuard] : []),
+  );
+}
+
 export async function assertGenerationEntityIds(
   projectId: string,
   opts: {
@@ -1073,8 +1106,10 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
-      if (rows.length === 0) return { updated: null, assetId: null as string | null };
+      if (rows.length === 0) return { updated: null, assetId: null as string | null, pointerMoved: false };
       let assetId: string | null = null;
+      /** 這一筆有沒有真的移動分鏡的現用指標——決定完成廣播要說「畫面已更新」還是「已存為候選」 */
+      let pointerMoved = false;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
       if (mediaUrl && mediaKind) {
         const stored = parseStoredResultUrl(mediaUrl);
@@ -1105,8 +1140,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         }
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
-        const genMeta = splitGenerationSourceMeta(gen.params).meta;
-        if (gen.sceneId && genMeta.preserveScenePointer !== true) {
+        const backfillWhere = sceneBackfillWhere(gen);
+        if (gen.sceneId && backfillWhere) {
           // 角色感知回填：narration→旁白音檔、ambience→環境音；其餘（visual/null）→主畫面欄位。
           // 軟刪／回收桶分鏡不回填，避免還原後突然出現意外綁定
           const patch =
@@ -1116,48 +1151,28 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
                 ? { ambienceAssetId: asset.id }
                 : { assetId: asset.id };
           /*
-           * 人類優先（v4）：只有在「這一鏡的現用畫面還是送出當下那一張」時才回填。
+           * 人類優先（v4）＋ §17 已通過審核：兩道守衛都在 sceneBackfillWhere 裡，
+           * 與 *.pg.test.ts 共用同一份，不在這裡再抄一次。
            *
-           * 生成從送出到 provider 回來可能要好幾分鐘。這期間人可能已經在單格工作室
-           * 採用了別的版本、或從素材庫直接指派。舊行為是照樣覆寫——使用者剛選好的畫面
-           * 被一個他早就忘記的舊工作蓋掉，而且沒有任何提示。
+           * 人類優先：生成從送出到 provider 回來可能要好幾分鐘，這期間人可能已經
+           * 採用了別的版本。舊行為是照樣覆寫——使用者剛選好的畫面被一個他早就忘記的
+           * 舊工作蓋掉，而且沒有任何提示。條件不滿足時：生成照樣完成、素材照樣入庫、
+           * 版本清單照樣看得到這一版（它就是一個候選），只是指標不動。
            *
-           * 條件不滿足時：生成照樣完成、素材照樣入庫、版本清單照樣看得到這一版
-           * （它就是一個候選，使用者可以自己採用），只是指標不動。
-           *
-           * 與 approved 同一條 where：多條件 update 天然原子，沒有 TOCTOU 空隙。
-           * 舊資料沒有 scenePointerAtSubmit ⇒ 不加這個條件，維持既有行為。
+           * §17：已通過審核的鏡不自動換掉現用版本，否則「已通過」等於沒有意義。
            */
-          const pointerGuard = gen.sceneRole === "narration" || gen.sceneRole === "ambience"
-            ? undefined // 這一輪只保護主畫面軌；音軌沒有對應的送出基準
-            : genMeta.scenePointerAtSubmit === undefined
-              ? undefined
-              : genMeta.scenePointerAtSubmit === ""
-                ? isNull(schema.scenes.assetId)
-                : eq(schema.scenes.assetId, genMeta.scenePointerAtSubmit);
-          /*
-           * §17：已通過審核（approved）的鏡不自動換掉現用版本。
-           * 生成本身照做、也照樣落成一個新版本（generations 那一列就是版本），
-           * 只是不動指標欄——要換成新版得由人在單格工作室按「設為正式版本」。
-           * 否則「已通過」等於沒有意義：任何一次重生成都會靜默蓋掉團隊審過的畫面。
-           *
-           * 用 where 條件擋而不是先查再判：這裡在交易內且與 CAS 同一段，
-           * 多條件 update 天然原子，先查再判會有 TOCTOU 空隙。
-           */
-          await tx
+          const moved = await tx
             .update(schema.scenes)
             .set(patch)
-            .where(
-              and(
-                eq(schema.scenes.id, gen.sceneId),
-                isNull(schema.scenes.deletedAt),
-                ne(schema.scenes.reviewStatus, "approved"),
-                ...(pointerGuard ? [pointerGuard] : []),
-              ),
-            );
+            .where(backfillWhere)
+            .returning({ id: schema.scenes.id });
+          // 守衛擋下來時（人已經採用了別版／這一鏡已通過審核）指標沒有動。
+          // 這件事必須往上傳：下面的全房廣播寫的是「畫面已更新」，
+          // 若照樣送出，等於對每一位協作者謊報畫面換了。
+          pointerMoved = moved.length > 0;
         }
       }
-      return { updated: rows[0], assetId };
+      return { updated: rows[0], assetId, pointerMoved };
     });
     if (!advanced.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
@@ -1167,7 +1182,17 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 沒有這一段的話，「組長按下生成、把畫面留給組員看」時組員端毫無訊號——
     // 這條路徑不經 tRPC，客戶端的 mutation 快取訂閱看不到它，只能等 10/20/45 秒的輪詢追上。
     if (gen.projectId && gen.sceneId) {
-      publishToProject(gen.projectId, { kind: "scene", id: gen.sceneId }, "生成完成，畫面已更新");
+      /*
+       * 訊息要跟著「指標到底有沒有動」走。人類優先守衛擋下回填時（有人已經採用了
+       * 別的版本，或這一鏡已通過審核），畫面其實沒有變；照樣廣播「畫面已更新」
+       * 會讓每一位協作者以為自己看到的是新版，反而把剛採用的人推去重看一次。
+       * 候選仍然入庫、版本清單仍然看得到，所以這裡講的是實話而不是失敗。
+       */
+      publishToProject(
+        gen.projectId,
+        { kind: "scene", id: gen.sceneId },
+        advanced.pointerMoved ? "生成完成，畫面已更新" : "生成完成，已存為候選版本（現用畫面未變）",
+      );
     }
     if (
       (gen.modelId.startsWith("fal-ai/") || gen.modelId.startsWith("openrouter/router#"))

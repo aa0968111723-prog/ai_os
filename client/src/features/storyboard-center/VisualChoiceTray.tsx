@@ -336,22 +336,23 @@ export function VisualChoiceTray({
           if (!change.compatible) return "incompatible";
           if (!change.changed) return "skipped";
           const field = change.field as "characterIds" | "scenePresetIds" | "propIds";
+          // 移除角色時一併清掉它留下的孤兒 Look（#725 P1-12）——與卡片同一次寫入。
+          // 曾經是分兩支（setCards 再 scenes.update），第二支失敗就留下一個沒有主人的
+          // 造型：看得到、生成時被忽略、刪不掉，角色加回來還會復活。setCards 現在收
+          // lookIds，兩者一起走同一個 applyWithRevision，要嘛全成立要嘛全不動。
+          const orphaned = change.orphanedLookIds ?? [];
           await setCards.mutateAsync({
             sceneId: shot.id,
             [field]: change.value as string[],
+            ...(orphaned.length
+              ? { lookIds: (shot.lookIds ?? []).filter((id) => !orphaned.includes(id)) }
+              : {}),
             expectedRev: shot.rev,
-            baseline: { [field]: shot[field] },
+            baseline: {
+              [field]: shot[field],
+              ...(orphaned.length ? { lookIds: shot.lookIds } : {}),
+            },
           });
-          // 移除角色時一併清掉它留下的孤兒 Look（#725 P1-12）。
-          // 分兩支寫入：setCards 只管三排卡片，lookIds 屬於 scenes.update 的欄位。
-          if (change.orphanedLookIds?.length) {
-            const keptLooks = (shot.lookIds ?? []).filter((id) => !change.orphanedLookIds!.includes(id));
-            await update.mutateAsync({
-              sceneId: shot.id,
-              lookIds: keptLooks,
-              baseline: { lookIds: shot.lookIds },
-            });
-          }
           return "applied";
         });
         applied = outcome.applied;

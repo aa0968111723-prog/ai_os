@@ -710,12 +710,15 @@ export function SceneStudio({
                   <Icon name="Download" size={13} /> 下載這版
                 </Button>
               )}
+              {/* 舞台上的「用這一版」走與版本列、A/B 比較同一支 setCurrentVersion。
+                  漏掉 syncShotDirection 的話，同一個動作在同一個面板裡會有兩種語意：
+                  鏡頭語言不同步，也看不到 adoptedDirection 回饋。 */}
               {canEdit && stageVersion?.canSetCurrent && (
                 <Button
                   size="sm"
                   variant="primary"
                   disabled={setCurrent.isPending}
-                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId!, acknowledgeApproved: true })}
+                  onClick={() => setCurrentVersion("visual", stageVersion.assetId!)}
                 >
                   <Icon name="Check" size={13} /> 用這一版
                 </Button>

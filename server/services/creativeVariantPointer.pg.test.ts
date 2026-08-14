@@ -18,28 +18,22 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import { storeGenerationSourceMeta, splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { sceneBackfillWhere } from "./generationCore";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 
 /**
- * 完成回填的判定條件，與 generationCore.advanceGeneration 內那一段同一份邏輯。
- * 這裡直接對真表跑同樣的 where，斷言「條件不成立時那一列沒被改」。
+ * 完成回填：**直接呼叫生產端匯出的 `sceneBackfillWhere`**，不在測試裡另抄一份 where。
+ *
+ * 這一點是這支測試能不能算數的關鍵。原本這裡自己重建了一次條件，於是
+ * generationCore 的守衛就算被改壞，這支測試依然全綠——那正是它要取代的
+ * readFileSync+toContain 的同一種盲點，只是換到高一層。（實測抄出來的那份
+ * 還漏了 narration/ambience 的例外，兩邊當時已經不一樣。）
  */
 async function backfillPointer(gen: typeof schema.generations.$inferSelect, assetId: string): Promise<void> {
-  const meta = splitGenerationSourceMeta(gen.params).meta;
-  if (!gen.sceneId || meta.preserveScenePointer === true) return;
-  const { and, isNull, ne } = await import("drizzle-orm");
-  const pointerGuard = meta.scenePointerAtSubmit === undefined
-    ? undefined
-    : meta.scenePointerAtSubmit === ""
-      ? isNull(schema.scenes.assetId)
-      : eq(schema.scenes.assetId, meta.scenePointerAtSubmit);
-  await db.update(schema.scenes).set({ assetId }).where(and(
-    eq(schema.scenes.id, gen.sceneId),
-    isNull(schema.scenes.deletedAt),
-    ne(schema.scenes.reviewStatus, "approved"),
-    ...(pointerGuard ? [pointerGuard] : []),
-  ));
+  const where = sceneBackfillWhere(gen);
+  if (!where) return;
+  await db.update(schema.scenes).set({ assetId }).where(where);
 }
 
 describe.skipIf(!RUN_PG).sequential("變體指標政策（真 PostgreSQL）", () => {

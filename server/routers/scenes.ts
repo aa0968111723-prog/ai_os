@@ -670,7 +670,26 @@ export const scenesRouter = router({
         }
       }
 
-      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
+      /*
+       * patch.rev 只有在「同步採用版本的鏡頭語言」真的動到 camera/performance/action
+       * 時才會設定。那些是 rev-protected 欄位，所以那一路必須是真正的 CAS：
+       * 只帶 set(rev: scene.rev + 1) 而 where 只比對 id，等於用一個讀取當下的舊值去寫，
+       * 夥伴若在讀與寫之間存過檔，他的修改會被這次覆蓋掉，而且 rev 停在同一個數字——
+       * 樂觀併發守衛在它唯一該生效的地方失效。加上 rev 條件後，撞車就是 0 列，
+       * 明確回 CONFLICT 讓呼叫端重讀，而不是靜默蓋掉別人的字。
+       */
+      const guarded = patch.rev !== undefined
+        ? and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt), eq(schema.scenes.rev, scene.rev))
+        : and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt));
+      const [updated] = await db.update(schema.scenes).set(patch).where(guarded).returning();
+      if (!updated) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: patch.rev !== undefined
+            ? "夥伴剛改過這一鏡的鏡頭語言，請重新整理後再採用這一版"
+            : "這一鏡剛被夥伴刪除了，沒有切換版本",
+        });
+      }
       return { ...updated, adoptedDirection };
     }),
 
@@ -1244,6 +1263,15 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      /**
+       * 造型：移除角色時必須「同一次寫入」把它留下的孤兒 Look 一起清掉。
+       *
+       * 先前是 setCards 移角色、再用 scenes.update 清 lookIds 兩支寫入。第二支失敗
+       * （分頁關掉、網路斷、rev 撞車）就會留下一個沒有主人的造型：畫面上看得到、
+       * 生成時被忽略、任何 UI 都刪不掉，而且那個角色一被加回來它就復活。
+       * 併進同一個 applyWithRevision 之後，這件事要嘛整組成立、要嘛整組不動。
+       */
+      lookIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       expectedRev: z.number().int().min(0).optional(),
       baseline: z.record(z.unknown()).optional(),
     }))
@@ -1260,6 +1288,16 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      // 造型同樣 fail-closed（與 scenes.update 同一道關）：不屬於本專案就不寫進外鍵
+      if (input.lookIds?.length) {
+        const lookRows = await db
+          .select({ id: schema.characterLooks.id, projectId: schema.characterLooks.projectId })
+          .from(schema.characterLooks)
+          .where(inArray(schema.characterLooks.id, input.lookIds));
+        if (lookRows.length !== new Set(input.lookIds).size || lookRows.some((r) => r.projectId !== scene.projectId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
+        }
+      }
       // 只覆寫真的送上來的那幾排（空陣列→null 的正規化仍由 sceneCardColumns 統一做）
       const columns = sceneCardColumns({
         characterIds: input.characterIds ?? [],
@@ -1270,7 +1308,8 @@ export const scenesRouter = router({
       if (input.characterIds !== undefined) patch.characterIds = columns.characterIds;
       if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
       if (input.propIds !== undefined) patch.propIds = columns.propIds;
-      if (Object.keys(patch).length === 0) return scene; // 三排都沒送＝沒事可做
+      if (input.lookIds !== undefined) patch.lookIds = input.lookIds.length ? [...new Set(input.lookIds)] : null;
+      if (Object.keys(patch).length === 0) return scene; // 什麼都沒送＝沒事可做
       const { row: updated, merged } = await applyWithRevision({
         entity: "scene",
         table: schema.scenes,
