@@ -23,7 +23,7 @@ Phase 1 — Canonical context and prerequisites (continuing this PR, no duplicat
 - [x] Phase 2 Shot Context Packets (stacked Draft PR)
 - [x] Phase 3 Generation wiring (stacked Draft PR)
 - [x] Phase 4 Consistency training (stacked Draft PR)
-- [ ] Phase 5 Simple UX + E2E (stacked Draft PR)
+- [x] Phase 5 Simple UX + E2E (stacked Draft PR)
 
 ## #742 prerequisite findings
 

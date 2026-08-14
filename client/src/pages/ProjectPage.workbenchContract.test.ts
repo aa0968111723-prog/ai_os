@@ -128,6 +128,7 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/revealSlot=/);
     expect(src).toMatch(/activeSection=\{openInline\}/);
     expect(src).toMatch(/<StoryReadinessBar\b/);
+    expect(src).toMatch(/<StoryContextStatus\b/);
     expect(src).toMatch(/useOneClickFilm/);
     expect(src).toMatch(/oneClickPrimaryLabel/);
     expect(src).toMatch(/ONE_CLICK_BATCH_KIND/);
