@@ -16,6 +16,12 @@ describe("consistency training gates", () => {
     expect(classifyAssetForTraining({
       projectId: "p1", deletedAt: null, locked: true, isAiGenerated: false, sha256: "a", kind: "image", title: "x",
     }, project).included).toBe(true);
+    expect(classifyAssetForTraining({
+      projectId: "p1", deletedAt: null, locked: true, isAiGenerated: false, sha256: "a", kind: "image", title: "x",
+    }, project, { trainingAllowed: false }).excludeReason).toBe("rights_training_forbidden");
+    expect(classifyAssetForTraining({
+      projectId: "p1", deletedAt: null, locked: true, isAiGenerated: false, sha256: "a", kind: "image", title: "x",
+    }, project, { trainingAllowed: null }).excludeReason).toBe("rights_unknown");
   });
 
   it("does not claim a paid trainer is available in this environment", () => {

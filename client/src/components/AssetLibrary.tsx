@@ -24,6 +24,7 @@ import {
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 import { ExternalAssetIntake } from "../features/external-intake/ExternalAssetIntake";
 import { ExternalImportInbox } from "../features/external-intake/ExternalImportInbox";
+import { AssetRightsChip, ProjectRightsReadiness } from "./AssetRightsChip";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -68,6 +69,11 @@ export function AssetLibrary({
   // QA-013：素材上限不再硬卡 100——預設載 100，「載入更多」逐次加大 limit 取回全部
   const [assetLimit, setAssetLimit] = useState(100);
   const assets = trpc.projects.assets.useQuery({ projectId, limit: assetLimit });
+  const rightsBoard = trpc.commercialRights.project.useQuery({ projectId }, { staleTime: 30_000 });
+  const rightsByAsset = useMemo(
+    () => new Map((rightsBoard.data?.items ?? []).map((item) => [item.assetId, item.profile])),
+    [rightsBoard.data],
+  );
   // Phase C：素材一鍵發布到靈感頻道
   const publish = trpc.community.publishFromSource.useMutation({
     onSuccess: () => utils.community.invalidate(),
@@ -406,6 +412,7 @@ export function AssetLibrary({
         <Icon name="Camera" size={13} /> 拍照上傳
       </Button>
       {uploadError && <p className="error">{uploadError}</p>}
+      <ProjectRightsReadiness projectId={projectId} />
       <ExternalImportInbox
         projectId={projectId}
         compact
@@ -612,6 +619,7 @@ export function AssetLibrary({
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </Meta>
+                      <AssetRightsChip assetId={a.id} canEdit={Boolean(me.data)} profile={rightsByAsset.get(a.id) ?? null} />
                       {/* AUTH-03／asset_revisions：來源 + 編輯器；可篩子版本 */}
                       {(() => {
                         const lineage = formatLineageSummary(a.meta, (id) =>

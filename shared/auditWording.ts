@@ -46,6 +46,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.deleteAsset": "刪除素材（進回收桶）",
   "projects.restoreAsset": "還原素材",
   "projects.purgeAsset": "永久刪除素材",
+  "commercialRights.recheck": "重新檢查素材商用權利",
+  "commercialRights.submitEvidence": "補充素材授權依據",
   // 外部 AI 成果帶入與交接
   "externalIntake.saveTool": "儲存我的外部 AI 工具",
   "externalIntake.removeTool": "移除我的外部 AI 工具",
@@ -430,7 +432,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
   // share 歸在專案：對外分享是「把這個專案交出去」的一種交付方式，組長要查時
   // 會跟封存、打包下載一起看，不該散在另一個分類裡
-  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs", "share"] },
+  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs", "share", "commercialRights"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
   // story 歸在分鏡：故事、自動解析與轉分鏡是同一條創作鏈（Story-first），組長查「分鏡怎麼來的」
   // 會連著看解析與撤銷紀錄；characterLooks 是角色的造型層，跟著知識庫與角色那一類走。

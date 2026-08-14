@@ -71,6 +71,7 @@ export async function adoptGenerationCurrent(input: {
 export function deliveryBlockers(input: {
   shots: Array<{ id: string; assetId: string | null; reviewStatus: string | null }>;
   staleShotIds: readonly string[];
+  rightsBlockers?: readonly string[];
 }): string[] {
   const blockers: string[] = [];
   const stale = new Set(input.staleShotIds);
@@ -79,5 +80,6 @@ export function deliveryBlockers(input: {
   if (input.shots.some((shot) => shot.reviewStatus && shot.reviewStatus !== "approved" && shot.reviewStatus !== "ready")) {
     blockers.push("有鏡頭尚未核准");
   }
+  for (const reason of input.rightsBlockers ?? []) blockers.push(reason);
   return blockers;
 }
