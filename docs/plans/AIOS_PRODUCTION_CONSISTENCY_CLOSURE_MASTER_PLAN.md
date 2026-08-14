@@ -304,6 +304,84 @@ script-authorized change 與 unintended drift 必須分開。
 
 ---
 
+## 12A. Project Settings — long-lived policy layer, not a second workspace
+
+「專案設定」必須保留，但定位必須明確：它是**低頻、長期、專案級規則與治理層**，不是第二個 Story workspace，也不是第二套 consistency truth。
+
+核心產品分工：
+
+> Story workspace = 使用者今天把作品做完的地方。
+>
+> Project Settings = 這部作品長期遵守什麼規則的地方。
+
+### Project Settings 應保留的內容
+
+建議最後收斂為最多四個主要區塊：
+
+1. **基本資料**
+   - 專案名稱、封面、描述等低頻 metadata
+2. **團隊與權限**
+   - 成員、角色、project access、reuse/generation rights 等治理設定
+3. **作品設定**
+   - Project Canon pins / Team Canon references
+   - 專案預設 Style / palette / visual language
+   - Character Voice / narration voice 的 project-level binding 或預設
+   - Scene/Sequence Sound World 的專案級預設與 inheritance 規則
+   - 必要的 generation / delivery policy defaults
+4. **進階設定**
+   - 只有確實需要人工治理、除錯或專業覆寫的低頻選項；不得把一般創作流程搬進來
+
+### 不應放進 Project Settings 的內容
+
+以下屬於日常 production flow，應留在 Story workspace / Shot repair flow：
+
+- 寫故事、拆場景、生成分鏡
+- 單鏡 Character/Look 修正
+- Candidate 比較與 Adopt
+- 重生成某幾鏡
+- consistency finding 的逐鏡修復
+- Timeline 日常剪輯/選片
+- 逐鏡 provider 微調
+
+使用者不應為了修一鏡問題被迫離開 Story workspace 進設定頁。
+
+### Single truth / inheritance rule
+
+Project Settings 只能**編輯或選擇真正的 project-level source of truth / default dependency**，Story workspace 再消費同一份 server-authoritative projection。
+
+不得：
+
+- Project Settings 自己算另一套一致性分數
+- 複製 Canon payload 形成第二份真相
+- 建一套與 Story workspace 不同步的 Style/Voice/Sound 設定
+- 讓設定頁和分鏡頁各自維護不同 current/version
+
+Style / Voice / Sound World 在本 closure 中完成 runtime 接線時，必須同時決定清楚其 project-level default/inheritance UX；若已有 Canon/pin/source record，Project Settings 只呈現與操作該既有真相，不再建新的 manager truth。
+
+### Progressive disclosure
+
+一般成員第一層只需要看到人話狀態，例如：
+
+- `使用團隊角色設定`
+- `視覺風格已套用`
+- `4 位角色有固定聲線`
+- `場景聲音世界已設定`
+- `1 項權限需要確認`
+
+版本歷史、rights、impact、technical provenance 等放第二層；raw UUID、fingerprint、LoRA engineering parameters 不應出現在一般設定 UI。
+
+### UX acceptance
+
+Implementation PR 必須確認：
+
+- Project Settings 不產生新的頂層創作 CTA
+- 使用者不進設定頁也能完成 Story → Storyboard → Repair → Result 主流程
+- 修改 project-level Style/Voice/Sound/Canon 後，Story workspace 立即從同一 server projection 反映 targeted impact/stale 狀態
+- mobile 上設定頁維持 bounded sections / sheet disclosure，不重新變成巨型表單
+- 沒有 duplicated query/state 導致設定頁與 workspace 顯示不同 truth
+
+---
+
 ## 13. Full-script golden acceptance scenario
 
 建立固定、可重跑的 production acceptance fixture，至少包含：
@@ -342,6 +420,7 @@ script-authorized change 與 unintended drift 必須分開。
 11. Timeline 不使用 stale/unapproved selection
 12. Delivery 阻擋真正不可交付內容
 13. rights 在 approval resume 前撤回時 provider 不被呼叫
+14. Project Settings 修改 project-level Style/Voice/Sound/Canon 後，Story workspace 讀到同一 truth 並只標記真正受影響內容
 
 付費 generation/training 不得為了測試而擅自執行。可以用 deterministic provider adapters/fixtures 驗證 lineage、routing 與 rights；若真外部 provider 是唯一驗收條件，標記 `BLOCKED_BY_EXTERNAL_DEPENDENCY`。
 
@@ -360,6 +439,7 @@ Implementation 必須包含：
 - targeted stale propagation tests
 - lineage tests
 - Candidate/Adopt tests
+- Project Settings ↔ Story workspace single-truth/inheritance tests
 - browser E2E
 - 390 / 430 / 1280 / 1440 viewport evidence
 - full-script golden acceptance results
@@ -397,6 +477,7 @@ Implementation 必須包含：
 - Style Canon consumption
 - Voice Canon consumption
 - Sound World consumption
+- project-level Style/Voice/Sound default + inheritance contract
 - capability/downgrade contracts
 
 ### PR-B — Full media lineage + targeted downstream stale
@@ -406,18 +487,20 @@ Implementation 必須包含：
 - targeted artifact staleness
 - current preservation + Candidate/Adopt
 
-### PR-C — Prop continuity + multi-character routing + repair UX
+### PR-C — Prop continuity + multi-character routing + Project Settings / repair UX
 
 - durable prop state
 - unresolved transfer confirmation
 - provider-aware multi-character routing
 - consistency scorecard projection
+- Project Settings 四區收斂與 single-truth integration
 - invisible-complexity repair UX
 
 ### PR-D — PostgreSQL/browser/full-script hardening
 
 - real PG evidence
 - concurrency/idempotency adversarial tests
+- Project Settings ↔ Story workspace E2E
 - 390/430/1280/1440 evidence
 - golden full-script acceptance
 - final audit and confirmed finding fixes
@@ -435,6 +518,10 @@ Implementation 必須包含：
 並且：
 
 > 改一個 Canon 只影響真正依賴它的內容；舊 current 不被偷偷替換；新成果遵守 Candidate → explicit Adopt；rights 撤回可在真正 execution 前生效。
+
+同時：
+
+> Project Settings 只管理長期 project-level 規則與治理，Story workspace 專注日常製作；兩者讀寫同一份 server-authoritative truth，不形成第二個工作台或第二套一致性。
 
 最終驗收不是「資料庫有 consistency 欄位」，而是：
 
@@ -454,10 +541,11 @@ Implementation 必須包含：
 - no silent Adopt/Promote/upgrade
 - no project-wide indiscriminate stale
 - no unauthorized paid provider calls
+- 不把 Project Settings 擴張成第二個創作工作台
 - 任務大也不得停在 TODO/scaffold；持續做到每支 PR 的 Definition of Done，除非是真外部 blocker
 
 ---
 
 ## 19. Short execution instruction
 
-> 完整執行本 PR 的 `docs/plans/AIOS_PRODUCTION_CONSISTENCY_CLOSURE_MASTER_PLAN.md`。先做 FC-00，確認 #757～#759 的 unique commits 真正 landing 到最新 default；不得把 stacked PR 的「merged」誤認為已進 default。之後從完整最新 default 建 PR-A～PR-D stacked Draft implementation PR，完成 execution-rights revalidation、Style/Voice/Sound runtime、full-media lineage、targeted stale、Prop continuity、multi-character routing、server-authoritative scorecard、Project repair UX、真 PostgreSQL/browser/full-script hardening。嚴守 no second truth、no fake provider、no silent Adopt/Promote、no auto-merge/force-push，且不要搶 #755 scaling scope。最後只回報實際 PR numbers、base/head、PASS/BLOCKED evidence、remaining P0/P1 與真正外部 blocker。
+> 完整執行本 PR 的 `docs/plans/AIOS_PRODUCTION_CONSISTENCY_CLOSURE_MASTER_PLAN.md`。先做 FC-00，確認 #757～#759 的 unique commits 真正 landing 到最新 default；不得把 stacked PR 的「merged」誤認為已進 default。之後從完整最新 default 建 PR-A～PR-D stacked Draft implementation PR，完成 execution-rights revalidation、Style/Voice/Sound runtime、project-level defaults/inheritance、full-media lineage、targeted stale、Prop continuity、multi-character routing、server-authoritative scorecard、Project Settings 長期治理層收斂、Project repair UX、真 PostgreSQL/browser/full-script hardening。Project Settings 不得變成第二個 Story workspace，且必須與 workspace 共用同一 server truth。嚴守 no second truth、no fake provider、no silent Adopt/Promote、no auto-merge/force-push，且不要搶 #755 scaling scope。最後只回報實際 PR numbers、base/head、PASS/BLOCKED evidence、remaining P0/P1 與真正外部 blocker。
