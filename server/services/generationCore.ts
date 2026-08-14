@@ -506,22 +506,21 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
         ])].slice(0, capability.maxReferenceImages);
       }
     }
-    // Canon 訓練成果（identity adapter）：模型真的有 loras 槽、且來源槽沒被使用者佔用才套
-    if (
-      activeAdapter
-      && capability.identityAdapterSupport
-      && Array.isArray(providerInput.loras)
-    ) {
+    // Canon 訓練成果（identity adapter）：generationCommand 已在 needs gate 前把 adapter
+    // 填進來源槽（lora 模型的來源＝LoRA 檔）；這裡負責誠實回報＋兜底空槽。
+    if (activeAdapter && capability.identityAdapterSupport && Array.isArray(providerInput.loras)) {
       const loras = providerInput.loras as Array<{ path?: unknown }>;
-      if (!loras.length || loras.every((row) => !row?.path)) {
+      const adapterLoaded = loras.some((row) => typeof row?.path === "string" && row.path.includes(activeAdapter))
+        || input.sourceUrl === activeAdapter;
+      if (!adapterLoaded && (!loras.length || loras.every((row) => !row?.path))) {
         providerInput.loras = [{ path: activeAdapter, scale: 1 }];
-        warnings.push({
-          code: "identity_adapter_applied",
-          severity: "info",
-          title: "已套用角色一致性模型",
-          detail: "這次生成使用 Team Canon 訓練出的角色 adapter 維持身份一致。",
-        });
       }
+      warnings.push({
+        code: "identity_adapter_applied",
+        severity: "info",
+        title: "已套用角色一致性模型",
+        detail: "這次生成使用 Team Canon 訓練出的角色 adapter 維持身份一致。",
+      });
     }
     for (const downgrade of referenceMix.downgrades) {
       warnings.push({

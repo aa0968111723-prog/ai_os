@@ -78,6 +78,16 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
     const { getModel } = await import("../../shared/models");
     const { capabilityForModel } = await import("../../shared/providerCapabilities");
     const model = getModel(core.modelId);
+
+    // §10：Canon 訓練成果（identity adapter）→ LoRA 模型的來源槽。
+    // 這類模型 needs=zip：不在這裡填，needs gate 會在 adapter 能生效前就擋下；
+    // 使用者自己給了來源（自選 LoRA）時尊重使用者，不覆蓋。
+    const activeAdapter = frozen.payload.provider.activeAdapter;
+    if (activeAdapter && !core.sourceUrl && !core.sourceAssetId
+      && model && capabilityForModel(model).identityAdapterSupport) {
+      core.sourceUrl = activeAdapter;
+    }
+
     if (model && capabilityForModel(model).imageToVideo && !core.sourceAssetId && !core.sourceUrl) {
       const { db, schema } = await import("../db");
       const { and, eq, isNull } = await import("drizzle-orm");
