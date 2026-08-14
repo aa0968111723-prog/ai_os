@@ -277,9 +277,18 @@ export function summarizeDirection(compiled: CompiledDirection): string {
  * 使用者付了三次點數卻只拿到同一題的三張抽卡。這支讓那件事在測試裡是可斷言的。
  */
 export function directionsAreDistinct(a: CompiledDirection, b: CompiledDirection): boolean {
+  /*
+   * 逐鍵排序後再比。
+   *
+   * mergeShotDirection 是「先鋪 base 的鍵、再鋪 patch 的鍵」，所以兩個設了**相同值**
+   * 但宣告順序不同的方向，合併出來的物件鍵序不同 ⇒ JSON.stringify 產生不同字串 ⇒
+   * 會被判成「不同方向」。多樣性守門因此漏放，使用者為同一張圖付兩次錢。
+   */
+  const stable = (obj: Record<string, string | undefined> | null | undefined) =>
+    obj ? Object.entries(obj).filter(([, v]) => v !== undefined).sort(([x], [y]) => (x < y ? -1 : 1)) : null;
   const key = (compiled: CompiledDirection) => JSON.stringify([
-    compiled.camera ?? null,
-    compiled.performance ?? null,
+    stable(compiled.camera as Record<string, string | undefined> | null),
+    stable(compiled.performance as Record<string, string | undefined> | null),
     compiled.action ?? null,
     compiled.direction.instruction ?? "",
   ]);

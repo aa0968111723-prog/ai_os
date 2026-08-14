@@ -296,8 +296,15 @@ export function groupVisualVariantBatches(versions: readonly SceneVersion[]): Vi
     const failed = rows.filter((row) => row.state === "failed");
     const generating = rows.filter((row) => row.state === "generating");
     const awaitingApproval = rows.filter((row) => row.state === "awaiting_approval");
-    // batchSize 是送出當下寫進 meta 的；舊資料沒有就退回「看得到幾筆算幾筆」
-    const requested = Math.max(rows[0]?.creative?.batchSize ?? rows.length, rows.length);
+    /*
+     * 分母以「送出當下的方向數」為準，不是「這一批有幾列」。
+     *
+     * 重試會用同一個 batchId 再落一列（方向相同），所以拿 rows.length 當分母會讓
+     * 一批 3 個方向變成 `成功 2/4`，而且同一個方向在清單裡出現兩次。
+     * 舊資料沒有 batchSize 時退回「不同方向的數量」，仍然比 rows.length 準。
+     */
+    const distinctDirections = new Set(rows.map((row) => row.creative?.directionId ?? row.generationId)).size;
+    const requested = rows[0]?.creative?.batchSize ?? distinctDirections;
     batches.push({
       batchId,
       requested,

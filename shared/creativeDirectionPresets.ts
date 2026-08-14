@@ -224,15 +224,14 @@ export function starterDirectionKey(intentId: string, directionId: string): stri
 }
 
 /**
- * 沒有指定意圖時的預設三方向：跨意圖各取一個彼此差最遠的做法。
- * 用在「使用者只按了產生變體、什麼都沒說」——仍然要給三個看得懂的不同方向，
- * 而不是退回成同一 prompt ×3。
+ * 沒有指定意圖時的預設三方向：**跨意圖各取一個**（張力／光線／動勢），
+ * 三個角度彼此差最遠。用在「使用者只按了產生變體、什麼都沒說」——
+ * 仍然要給三個看得懂的不同方向，而不是退回成同一 prompt ×3。
  */
 export function defaultCreativeDirections(): CreativeDirection[] {
-  const tension = findCreativeIntent("intent.tension")!;
   return [
-    tension.directions[0]!,
-    tension.directions[1]!,
-    tension.directions[2]!,
+    findCreativeIntent("intent.tension")!.directions[0]!,   // 更靠近人物
+    findCreativeIntent("intent.flat-light")!.directions[0]!, // 側光塑形
+    findCreativeIntent("intent.static")!.directions[1]!,     // 增加前景
   ];
 }

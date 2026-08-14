@@ -18,28 +18,23 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import { storeGenerationSourceMeta, splitGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { sceneBackfillPointerGuard, sceneBackfillWhere } from "./generationCore";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 
 /**
- * 完成回填的判定條件，與 generationCore.advanceGeneration 內那一段同一份邏輯。
- * 這裡直接對真表跑同樣的 where，斷言「條件不成立時那一列沒被改」。
+ * 完成回填：**呼叫生產程式碼本身的守衛**，不重寫一份。
+ *
+ * 一開始這裡是把 advanceGeneration 的 where 抄一份下來——那樣伺服器端改壞了測試照樣綠，
+ * 正好犯了這些測試自己在批評 source-grep 測試的同一種盲點（CodeRabbit #5）。
+ * 現在 `sceneBackfillPointerGuard` / `sceneBackfillWhere` 由 generationCore 匯出，
+ * 生產路徑與這裡跑的是同一份條件。
  */
 async function backfillPointer(gen: typeof schema.generations.$inferSelect, assetId: string): Promise<void> {
   const meta = splitGenerationSourceMeta(gen.params).meta;
   if (!gen.sceneId || meta.preserveScenePointer === true) return;
-  const { and, isNull, ne } = await import("drizzle-orm");
-  const pointerGuard = meta.scenePointerAtSubmit === undefined
-    ? undefined
-    : meta.scenePointerAtSubmit === ""
-      ? isNull(schema.scenes.assetId)
-      : eq(schema.scenes.assetId, meta.scenePointerAtSubmit);
-  await db.update(schema.scenes).set({ assetId }).where(and(
-    eq(schema.scenes.id, gen.sceneId),
-    isNull(schema.scenes.deletedAt),
-    ne(schema.scenes.reviewStatus, "approved"),
-    ...(pointerGuard ? [pointerGuard] : []),
-  ));
+  const guard = sceneBackfillPointerGuard(gen.sceneRole, meta.scenePointerAtSubmit);
+  await db.update(schema.scenes).set({ assetId }).where(sceneBackfillWhere(gen.sceneId, guard));
 }
 
 describe.skipIf(!RUN_PG).sequential("變體指標政策（真 PostgreSQL）", () => {

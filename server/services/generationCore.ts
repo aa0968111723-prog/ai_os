@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, isGeminiModel, generationProviderOf, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -802,6 +802,10 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
               input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
             ));
           if (existing) return existing;
+          // isUniqueViolation 會對 generations 上**任何**唯一鍵成立，不只主鍵。
+          // 範圍查詢查不到列時一律回同一句 CONFLICT，原始錯誤（含 constraint 名）會消失——
+          // 這條路在扣點之前，重複發生時帳上看不出任何線索。先留下痕跡再轉譯。
+          console.error("[generation] 冪等重播找不到同範圍的既有列（待核路徑）：", err);
           throw new TRPCError({
             code: "CONFLICT",
             message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
@@ -886,6 +890,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
         ));
       if (existing) return existing;
+      // 同上：保留原始錯誤，否則這條金錢路徑上的重複約束衝突完全無跡可循。
+      console.error("[generation] 冪等重播找不到同範圍的既有列（一般送出路徑）：", err);
       throw new TRPCError({
         code: "CONFLICT",
         message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
@@ -1073,8 +1079,10 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
-      if (rows.length === 0) return { updated: null, assetId: null as string | null };
+      if (rows.length === 0) return { updated: null, assetId: null as string | null, pointerMoved: false };
       let assetId: string | null = null;
+      /** 這一次有沒有真的移動分鏡的現用指標（守衛擋下、候選變體、沒綁分鏡都是 false） */
+      let pointerMoved = false;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
       if (mediaUrl && mediaKind) {
         const stored = parseStoredResultUrl(mediaUrl);
@@ -1128,13 +1136,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
            * 與 approved 同一條 where：多條件 update 天然原子，沒有 TOCTOU 空隙。
            * 舊資料沒有 scenePointerAtSubmit ⇒ 不加這個條件，維持既有行為。
            */
-          const pointerGuard = gen.sceneRole === "narration" || gen.sceneRole === "ambience"
-            ? undefined // 這一輪只保護主畫面軌；音軌沒有對應的送出基準
-            : genMeta.scenePointerAtSubmit === undefined
-              ? undefined
-              : genMeta.scenePointerAtSubmit === ""
-                ? isNull(schema.scenes.assetId)
-                : eq(schema.scenes.assetId, genMeta.scenePointerAtSubmit);
+          const pointerGuard = sceneBackfillPointerGuard(gen.sceneRole, genMeta.scenePointerAtSubmit);
           /*
            * §17：已通過審核（approved）的鏡不自動換掉現用版本。
            * 生成本身照做、也照樣落成一個新版本（generations 那一列就是版本），
@@ -1144,20 +1146,17 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
            * 用 where 條件擋而不是先查再判：這裡在交易內且與 CAS 同一段，
            * 多條件 update 天然原子，先查再判會有 TOCTOU 空隙。
            */
-          await tx
+          const moved = await tx
             .update(schema.scenes)
             .set(patch)
-            .where(
-              and(
-                eq(schema.scenes.id, gen.sceneId),
-                isNull(schema.scenes.deletedAt),
-                ne(schema.scenes.reviewStatus, "approved"),
-                ...(pointerGuard ? [pointerGuard] : []),
-              ),
-            );
+            .where(sceneBackfillWhere(gen.sceneId, pointerGuard))
+            .returning({ id: schema.scenes.id });
+          // 守衛擋下時要讓呼叫端知道——不然下面會對整個專案廣播「畫面已更新」，
+          // 而剛剛採用了別版的人會收到一則說他的鏡被換掉的通知（實際上沒有）。
+          pointerMoved = moved.length > 0;
         }
       }
-      return { updated: rows[0], assetId };
+      return { updated: rows[0], assetId, pointerMoved };
     });
     if (!advanced.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
@@ -1167,7 +1166,18 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 沒有這一段的話，「組長按下生成、把畫面留給組員看」時組員端毫無訊號——
     // 這條路徑不經 tRPC，客戶端的 mutation 快取訂閱看不到它，只能等 10/20/45 秒的輪詢追上。
     if (gen.projectId && gen.sceneId) {
-      publishToProject(gen.projectId, { kind: "scene", id: gen.sceneId }, "生成完成，畫面已更新");
+      /*
+       * 只有指標真的移動了才說「畫面已更新」。
+       *
+       * 候選變體（preserveScenePointer）、已通過審核的鏡、以及「人在生成期間採用了別版」
+       * 這三種情況，指標都刻意沒動——此時廣播「畫面已更新」等於對全房說謊，
+       * 剛採用完的人還會收到一則說他的鏡被換掉的通知。
+       */
+      publishToProject(
+        gen.projectId,
+        { kind: "scene", id: gen.sceneId },
+        advanced.pointerMoved ? "生成完成，畫面已更新" : "生成完成，新版本已加入版本清單（現用畫面未變）",
+      );
     }
     if (
       (gen.modelId.startsWith("fal-ai/") || gen.modelId.startsWith("openrouter/router#"))
@@ -1343,4 +1353,38 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
     }
   }
   return landed;
+}
+
+
+/**
+ * 完成回填的「指標守衛」條件——**生產路徑與測試共用同一份**。
+ *
+ * 抽出來的理由（CodeRabbit #5）：pg 測試原本自己重寫了一次同樣的 where，
+ * 於是伺服器端改壞了測試照樣綠——那正是這些測試批評 source-grep 測試的同一種盲點。
+ *
+ * 回 undefined＝這一筆不受指標守衛保護（音軌，或舊資料沒有記錄送出當下的指標）。
+ */
+export function sceneBackfillPointerGuard(
+  sceneRole: string | null | undefined,
+  scenePointerAtSubmit: string | undefined,
+): SQL | undefined {
+  // 這一輪只保護主畫面軌；音軌沒有對應的送出基準
+  if (sceneRole === "narration" || sceneRole === "ambience") return undefined;
+  if (scenePointerAtSubmit === undefined) return undefined;
+  return scenePointerAtSubmit === ""
+    ? isNull(schema.scenes.assetId)
+    : eq(schema.scenes.assetId, scenePointerAtSubmit);
+}
+
+/**
+ * 完成回填的完整 where：分鏡存在且未軟刪、未通過審核、且指標仍是送出當下那一張。
+ * 三個條件寫在同一個 UPDATE 裡是刻意的——多條件 update 天然原子，沒有 TOCTOU 空隙。
+ */
+export function sceneBackfillWhere(sceneId: string, pointerGuard: SQL | undefined): SQL | undefined {
+  return and(
+    eq(schema.scenes.id, sceneId),
+    isNull(schema.scenes.deletedAt),
+    ne(schema.scenes.reviewStatus, "approved"),
+    ...(pointerGuard ? [pointerGuard] : []),
+  );
 }

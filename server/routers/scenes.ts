@@ -670,7 +670,32 @@ export const scenesRouter = router({
         }
       }
 
-      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
+      /*
+       * 這一支自己就是一次 compare-and-set。
+       *
+       * 只 `where(eq(id))` 有兩個洞（CodeRabbit #3，確認為真）：
+       *  1. 同步鏡頭語言時把 rev 寫成「我讀到的 rev + 1」——夥伴若在我讀取之後
+       *     用 applyWithRevision 存過一次，rev 早就是同一個數字，這次寫入會把他的
+       *     camera/performance/action 蓋掉，而 rev 沒有前進 ⇒ 守衛整個失效。
+       *  2. 沒有 `deletedAt is null`：分鏡剛被軟刪時 0 列命中，`updated` 是 undefined，
+       *     卻回傳一個沒有任何分鏡欄位的物件而不是錯誤。
+       * 加上 rev 條件之後，夥伴插隊就是 0 列命中，明確回衝突讓呼叫端重讀。
+       */
+      const [updated] = await db
+        .update(schema.scenes)
+        .set(patch)
+        .where(and(
+          eq(schema.scenes.id, scene.id),
+          isNull(schema.scenes.deletedAt),
+          eq(schema.scenes.rev, scene.rev),
+        ))
+        .returning();
+      if (!updated) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "這一鏡剛被夥伴改過（或已被刪除），沒有套用這次採用——請重新整理後再試一次",
+        });
+      }
       return { ...updated, adoptedDirection };
     }),
 
@@ -1270,6 +1295,35 @@ export const scenesRouter = router({
       if (input.characterIds !== undefined) patch.characterIds = columns.characterIds;
       if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
       if (input.propIds !== undefined) patch.propIds = columns.propIds;
+
+      /*
+       * 角色被移除時，一併清掉只屬於它的造型（#725 P1-12）。
+       *
+       * 為什麼在伺服器做、而且是同一個 patch：孤兒 Look 的判定需要
+       * 「這套造型屬於誰」，那是專案範圍的資料。原本由前端算出 orphanedLookIds
+       * 再送第二支 mutation，有兩個問題（CodeRabbit #2）：
+       *  1. 兩次寫入不是同一個交易——第二支失敗就留下孤兒；
+       *  2. 判定依賴前端非同步載入的 lookOwnerById，載不全就靜默漏掉。
+       * 這裡直接查 characterLooks，與卡片寫入放進同一次 applyWithRevision。
+       */
+      if (input.characterIds !== undefined && (scene.lookIds ?? []).length > 0) {
+        const keptCharacters = new Set(columns.characterIds ?? []);
+        const looks = await db
+          .select({ id: schema.characterLooks.id, characterId: schema.characterLooks.characterId })
+          .from(schema.characterLooks)
+          .where(and(
+            eq(schema.characterLooks.projectId, scene.projectId),
+            inArray(schema.characterLooks.id, scene.lookIds!),
+          ));
+        const ownerById = new Map(looks.map((row) => [row.id, row.characterId]));
+        const kept = (scene.lookIds ?? []).filter((lookId) => {
+          const owner = ownerById.get(lookId);
+          // 查不到擁有者的造型不動——無從判斷就別猜（與連戲檢查同一條原則）
+          return owner === undefined || keptCharacters.has(owner);
+        });
+        if (kept.length !== (scene.lookIds ?? []).length) patch.lookIds = kept.length ? kept : null;
+      }
+
       if (Object.keys(patch).length === 0) return scene; // 三排都沒送＝沒事可做
       const { row: updated, merged } = await applyWithRevision({
         entity: "scene",

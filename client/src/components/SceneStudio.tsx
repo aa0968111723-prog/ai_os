@@ -317,10 +317,23 @@ export function SceneStudio({
    * 沿用舊鍵會撞回同一批（伺服器正確地不重複計費，但使用者會以為自己又產了三個新的）。
    * 送出失敗時**刻意不換**：那才是「重送同一批不重複計費」真正成立的情況。
    */
-  const variantBatchRef = useRef({
+  const variantBatchRef = useRef<{ batchId: string; keyByDirection: Record<string, string> }>({
     batchId: crypto.randomUUID(),
-    requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
+    keyByDirection: {},
   });
+  /**
+   * 冪等鍵以**方向 id** 為鍵，不是位置。
+   *
+   * 用位置（第 0/1/2 把鍵）會在部分失敗之後出事：使用者換一個意圖 → 選到的方向整組換掉，
+   * 但保留下來的鍵仍照位置配過去 ⇒ 新方向配到舊方向的鍵。伺服器的冪等短路只比對
+   * project/group/scene，不比方向，於是回傳上一個方向的既有生成並回報成功——
+   * 新方向根本沒生成，畫面卻顯示這個 slot 成功了。
+   */
+  const requestIdFor = (directionId: string) => {
+    const map = variantBatchRef.current.keyByDirection;
+    if (!map[directionId]) map[directionId] = crypto.randomUUID();
+    return map[directionId]!;
+  };
   const refineRequestId = useRef(crypto.randomUUID());
   const voiceRequestId = useRef(crypto.randomUUID());
   const ambienceRequestId = useRef(crypto.randomUUID());
@@ -345,10 +358,7 @@ export function SceneStudio({
        * 失敗時保留整批鍵：重按會用同一批鍵補送，成功的那幾筆撞回既有列不重複計費。
        */
       if (failures.length === 0) {
-        variantBatchRef.current = {
-          batchId: crypto.randomUUID(),
-          requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
-        };
+        variantBatchRef.current = { batchId: crypto.randomUUID(), keyByDirection: {} };
         setVariantParentAssetId(null); // 血緣綁定只屬於這一批，不該延續到下一批
       }
       setTab("versions");
@@ -1064,8 +1074,9 @@ export function SceneStudio({
                             modelId: regenModelId,
                             batchId: variantBatchRef.current.batchId,
                             ...(variantParentAssetId ? { parentAssetId: variantParentAssetId } : {}),
-                            variants: activeDirections.map((direction, index) => ({
-                              clientRequestId: variantBatchRef.current.requestIds[index]!,
+                            variants: activeDirections.map((direction) => ({
+                              // 以方向 id 取鍵：換意圖之後不會把新方向配到舊方向的鍵
+                              clientRequestId: requestIdFor(direction.id),
                               // sanitizeDirection 是送出邊界：起手包的方向帶著 previewResource
                               // 這種純顯示欄位，而伺服器的 schema 是 .strict()——直接送整包會被
                               // 400 擋掉（實際踩過：每一次「產生方向」都靜默失敗）。

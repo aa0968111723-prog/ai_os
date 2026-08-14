@@ -65,6 +65,16 @@ export function buildRetryGenerationInput(
     continuityMode: parsedSnapshot.success ? parsedSnapshot.data.locked : undefined,
     continuitySnapshot: lockedSnapshot,
     sceneId: gen.sceneId ?? undefined,
+    /*
+     * `generations` 沒有 lookIds 欄位，唯一的副本在 continuitySnapshot.characters[].lookId。
+     * 快照沒鎖（locked=false）時不會整份沿用，此時若不另外把造型帶出來，
+     * 重試就會以「重試當下」重建錨點而丟掉原本的造型——同一鏡重試一次就換了衣服。
+     */
+    lookIds: parsedSnapshot.success
+      ? parsedSnapshot.data.characters
+          .map((row) => row.lookId)
+          .filter((id): id is string => !!id)
+      : undefined,
     // 少了這個，重試失敗的旁白會把音訊寫進主畫面槽
     sceneRole: gen.sceneRole ?? undefined,
     // 少了這個，重試失敗的變體會變成會移動指標的生成

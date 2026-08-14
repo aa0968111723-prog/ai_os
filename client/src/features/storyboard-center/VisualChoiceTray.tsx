@@ -342,16 +342,8 @@ export function VisualChoiceTray({
             expectedRev: shot.rev,
             baseline: { [field]: shot[field] },
           });
-          // 移除角色時一併清掉它留下的孤兒 Look（#725 P1-12）。
-          // 分兩支寫入：setCards 只管三排卡片，lookIds 屬於 scenes.update 的欄位。
-          if (change.orphanedLookIds?.length) {
-            const keptLooks = (shot.lookIds ?? []).filter((id) => !change.orphanedLookIds!.includes(id));
-            await update.mutateAsync({
-              sceneId: shot.id,
-              lookIds: keptLooks,
-              baseline: { lookIds: shot.lookIds },
-            });
-          }
+          // 孤兒 Look 的清理在伺服器端與卡片寫入同一次完成（scenes.setCards），
+          // 前端不再送第二支 mutation——兩次寫入不是同一個交易，第二支失敗會留下孤兒。
           return "applied";
         });
         applied = outcome.applied;

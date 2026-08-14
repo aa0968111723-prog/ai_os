@@ -98,17 +98,23 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt), isNull(schema.assets.deletedAt)))
     .orderBy(schema.scenes.orderIndex);
 
-  const byGeneration = new Map<string, {
+  /*
+   * 一筆生成可能被**多個鏡**引用：`addFromGeneration` 明寫「同一筆成品被加進第二格」，
+   * `setVisualFromAsset` 也接受專案內任何素材。所以這裡是 generationId → 鏡**清單**。
+   * 用 Map<id, 單一鏡> 會讓後面的鏡覆蓋前面的，而每一筆現在都帶著該鏡自己的
+   * 鏡頭語言與綁定 —— 只有最後那一鏡會被比對，其餘的鏡即使真的過時也永遠不會被通知。
+   */
+  const byGeneration = new Map<string, Array<{
     shotId: string;
     title: string;
     assetId: string;
     direction: ContinuityShotDirection;
     bindings: CurrentShotBindings;
-  }>();
+  }>>();
   for (const r of rows) {
     const genId = (r.assetMeta as { generationId?: unknown } | null)?.generationId;
     if (typeof genId === "string" && r.assetId) {
-      byGeneration.set(genId, {
+      const entry = {
         shotId: r.shotId,
         title: r.title,
         assetId: r.assetId,
@@ -119,7 +125,10 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
           scenePresetIds: r.scenePresetIds,
           propIds: r.propIds,
         },
-      });
+      };
+      const list = byGeneration.get(genId);
+      if (list) list.push(entry);
+      else byGeneration.set(genId, [entry]);
     }
   }
   if (byGeneration.size === 0) return [];
@@ -132,14 +141,17 @@ export async function checkProjectContinuity(projectId: string): Promise<ShotCon
   const current = await loadCurrentCards(projectId);
   const out: ShotContinuityStatus[] = [];
   for (const gen of generations) {
-    const shot = byGeneration.get(gen.id);
-    if (!shot) continue;
+    const shots = byGeneration.get(gen.id);
+    if (!shots?.length) continue;
     // 快照可能是舊版形狀或壞資料：解析不過就當「無從判斷」，不製造假警報
     const parsed = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
     if (!parsed.success) continue;
-    const drifts = detectContinuityDrift(parsed.data, current, shot.direction, shot.bindings);
-    if (!drifts.length) continue;
-    out.push({ shotId: shot.shotId, title: shot.title, assetId: shot.assetId, drifts, reason: describeDrift(drifts) });
+    // 每一鏡各自比對自己的鏡頭語言與綁定（同一張圖在兩鏡可能一鏡過時、一鏡沒有）
+    for (const shot of shots) {
+      const drifts = detectContinuityDrift(parsed.data, current, shot.direction, shot.bindings);
+      if (!drifts.length) continue;
+      out.push({ shotId: shot.shotId, title: shot.title, assetId: shot.assetId, drifts, reason: describeDrift(drifts) });
+    }
   }
   return out;
 }
