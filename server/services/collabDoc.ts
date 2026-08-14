@@ -156,6 +156,33 @@ function schedulePersist(docKey: string, room: DocRoom): void {
   room.persistTimer.unref?.();
 }
 
+/**
+ * Force the live Y.Doc (if any) onto stories.content now.
+ * One-click generation must not start from a stale materialized snapshot
+ * while the debounce timer is still waiting.
+ */
+export async function flushStoryDocNow(projectId: string): Promise<{
+  content: string;
+  rev: number | null;
+  liveRoom: boolean;
+}> {
+  const docKey = `story:${projectId}`;
+  const room = docRooms.get(docKey);
+  if (room) {
+    if (room.persistTimer) {
+      clearTimeout(room.persistTimer);
+      room.persistTimer = null;
+    }
+    await flushRoom(docKey, room);
+  }
+  const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+  return {
+    content: story?.content ?? (room ? room.doc.getText(STORY_TEXT_KEY).toString() : ""),
+    rev: story?.rev ?? null,
+    liveRoom: Boolean(room),
+  };
+}
+
 async function flushRoom(docKey: string, room: DocRoom): Promise<void> {
   if (room.persisting) return; // 進行中：dirty 已立旗，完成後的補排會接手
   room.persisting = true;

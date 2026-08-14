@@ -11,7 +11,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { db, schema } from "../db";
-import { loadStoryDoc, persistStoryDoc, STORY_TEXT_KEY } from "./collabDoc";
+import { flushStoryDocNow, loadStoryDoc, persistStoryDoc, STORY_TEXT_KEY } from "./collabDoc";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 
@@ -112,5 +112,15 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     });
     const doc = await loadStoryDoc(projectId);
     expect(doc.getText(STORY_TEXT_KEY).toString()).toBe("備援內容");
+  });
+
+  it("flushStoryDocNow returns the materialized story instead of a pre-persist snapshot", async () => {
+    const projectId = await newProject("尚未落盤前");
+    const doc = await loadStoryDoc(projectId);
+    doc.getText(STORY_TEXT_KEY).insert(doc.getText(STORY_TEXT_KEY).length, "＋已改");
+    await persistStoryDoc(projectId, groupId, doc, editor);
+    const flushed = await flushStoryDocNow(projectId);
+    expect(flushed.content).toBe("尚未落盤前＋已改");
+    expect(flushed.rev).toBeGreaterThan(0);
   });
 });

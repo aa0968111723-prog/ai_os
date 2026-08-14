@@ -7,9 +7,12 @@
  * 任何一個多餘字元都會讓父程序的 `JSON.parse` 失敗——CI 的「驗證分散式 rate limit」
  * 因此紅燈，而不是 rate limit 邏輯真的錯。
  *
- * 所以在載入任何模組之前先把整支 stdout 改道到 stderr（不只是 console.log／info／debug，
- * 連相依套件直接 `process.stdout.write` 的診斷也一併擋下），只留一支私有的原始 writer
+ * 所以在載入任何模組之前先把整支 stdout 改道到 stderr，只留一支私有的原始 writer
  * 給最後的結果用。診斷不會消失，全都在 stderr，CI log 仍看得到。
+ *
+ * 這裡刻意不另外覆寫 console.log／info／debug：console.* 本來就走 process.stdout.write，
+ * 已被這道改道涵蓋，再覆寫一次只是同一件事做兩遍；而改道整支 stdout 還多擋下相依套件
+ * 直接 `process.stdout.write` 的診斷——那是覆寫 console 方法擋不到的。
  */
 const writeResult = process.stdout.write.bind(process.stdout);
 process.stdout.write = ((
@@ -60,4 +63,3 @@ main().then(
     process.exit(1);
   },
 );
-

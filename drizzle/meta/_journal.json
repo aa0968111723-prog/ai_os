@@ -498,6 +498,13 @@
       "when": 1789586400000,
       "tag": "0070_agent_live_certification",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789651200000,
+      "tag": "0071_project_creative_context",
+      "breakpoints": true
     }
   ]
 }

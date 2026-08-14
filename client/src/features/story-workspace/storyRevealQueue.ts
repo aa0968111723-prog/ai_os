@@ -26,6 +26,10 @@ export function peekStoryReveal(): PendingStoryReveal | null {
   return pending;
 }
 
+export function peekNestedReveal(): string | undefined {
+  return pending?.nestedSelector;
+}
+
 export function consumeNestedReveal(): string | undefined {
   if (!pending?.nestedSelector) return undefined;
   const selector = pending.nestedSelector;
