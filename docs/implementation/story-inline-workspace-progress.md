@@ -76,7 +76,7 @@ No INTRODUCED_BY_THIS_PR failures. Skipped tests are pre-existing suite skips, n
 
 ## Last successful commit SHA
 
-Update after this journal commit.
+`b3d40bec` (evidence + journal). Runtime: `93ebe126`.
 
 ## Next precise action
 
