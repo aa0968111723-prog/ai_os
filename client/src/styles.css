@@ -6040,7 +6040,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 分頁列：貼齊螢幕底、毛玻璃、safe-area 內距——Home 指示條不壓字 */
   .mobile-nav {
     position: fixed; z-index: 44; inset-inline: 0; bottom: 0;
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
     padding: 6px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
     border-top: 1px solid var(--border-soft);
     background: color-mix(in srgb, var(--popover) 90%, transparent);
@@ -8840,6 +8840,7 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 }
 .story-result-fix__proposal, .story-result-fix__shots { margin-top: 10px; }
 .story-result-fix__entry { min-height: 44px; }
+
 .story-editor {
   width: 100%; margin-top: 10px; padding: 12px 14px;
   font-size: calc(var(--fs-15) * var(--script-font-scale, 1)); line-height: 1.75; resize: vertical;
