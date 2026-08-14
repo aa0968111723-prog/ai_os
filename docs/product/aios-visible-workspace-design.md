@@ -5,7 +5,7 @@
 > 這裡只回答一個問題：**那些真相，畫面上應該長什麼樣。**
 
 Base：`70fcbda7`（CURRENT default，含 #722 / #723）。
-原型：`/prototype/visible-workspace`（PROTOTYPE ONLY，全 fixture，不呼叫任何 API）。
+正式實作：`client/src/features/visible-workspace/`，掛在專案頁分鏡卡之前。**已接真實資料**，原型與 fixture 已刪除。
 
 ---
 
@@ -220,9 +220,9 @@ placeholder 由選取狀態決定，不是由對話長度決定：
 
 ---
 
-## 9. 本輪未做（明確標示）
+## 9. 現況與未做
 
-- **未接線**：原型不呼叫任何 API，不讀也不寫任何 truth。
+- **已接線**：分鏡列與縮圖走 `scenes.listByProject`（單一查詢，無 N+1）；版本／方向／候選／血緣／成本走 `scenes.versions`；過時走 `story.continuityCheck`；採用走 `scenes.setVisualFromAsset`。前端不持有任何 candidate/version/current 狀態，reload 後一致。
 - **未改動** `SceneStudio` / `VisualChoiceTray` / `StoryboardStage` / `generationCore` / `scenes` router / `sceneVersions` / continuity / CreativeDirection backend——v4 主工程正在改。
 - **未截圖**：本機 Browser pane 未顯示，無法擷取畫面；上表數字改以 `getBoundingClientRect()` 實測，量測方式與數值都列在上面可重驗。
 - **Direct Manipulation**（點角色→Look、點背景→Scene）本輪只做到概念驗證層級，未實作；CURRENT 的 `SceneAnnotationLayer` 是否適合承載，需另案評估。

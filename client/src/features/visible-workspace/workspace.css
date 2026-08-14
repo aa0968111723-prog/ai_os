@@ -1,8 +1,8 @@
-/* PROTOTYPE ONLY — Aios Visible Creative Workspace 設計原型樣式。
+/* Aios Visible Creative Workspace 樣式。
  *
  * 刻意獨立成一支檔案而不是併進 styles.css：
- * v4 主工程正在改 styles.css，這輪明確要求避開 hotspot。
- * 這支只被 ./VisibleCreativeWorkspacePrototype.tsx 匯入，全部 class 以 .vcw- 開頭。
+ * 避免與同時在改 styles.css 的工作衝突，也讓這個表面可以獨立演進。
+ * 這支只被 ./VisibleCreativeWorkspace.tsx 匯入，全部 class 以 .vcw- 開頭。
  *
  * 只使用 styles.css :root 已定義的 token；未定義者（--surface / --fs-10 / --shadow-*）
  * 一律帶字面 fallback，比照站內既有寫法。
@@ -21,16 +21,6 @@
 }
 
 .vcw-spacer { flex: 1 1 auto; }
-
-/* ── PROTOTYPE 橫幅：任何人一眼要知道這不是真的 ─────────────────────────── */
-.vcw-proto-bar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 12px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-12, 12px);
-  background: color-mix(in srgb, var(--danger-ink) 7%, transparent);
-}
-.vcw-proto-bar__tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
 
 /* ── 頂部脈絡列：細，只交代「你在哪一鏡」 ───────────────────────────────── */
 .vcw-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 32px; }
@@ -217,11 +207,7 @@
   .vcw { padding: 8px 10px calc(10px + var(--safe-bottom, 0px)); --vcw-gap: 10px; }
   /* 原型自己的鷹架不該在手機上佔掉四分之一畫面——被評估的是設計，不是切換器。
      徽章與情境切換保留（仍看得出這是原型），長說明收起來。 */
-  .vcw-proto-bar { padding: 6px 8px; gap: 6px; }
-  .vcw-proto-bar > .hint { display: none; }
-  .vcw-proto-bar__tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
-  .vcw-proto-bar__tabs .chip { white-space: nowrap; }
-  .vcw-body { grid-template-columns: minmax(0, 1fr); }
+          .vcw-body { grid-template-columns: minmax(0, 1fr); }
   .vcw-stage__art { max-height: 42dvh; }
   .vcw-stage__placeholder { min-height: 200px; }
   .vcw-directions__list { grid-template-columns: minmax(0, 1fr); }

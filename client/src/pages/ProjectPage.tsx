@@ -55,6 +55,7 @@ import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav
 import { StoryStage } from "../features/story-workspace/StoryStage";
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
+import { VisibleCreativeWorkspace } from "../features/visible-workspace/VisibleCreativeWorkspace";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
 import { PeerBadge, latestViewForUser, sceneLabelOf } from "../features/collaboration/PeerBadge";
@@ -1690,6 +1691,13 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-2"
             hint={sceneCount > 0 ? `${sceneCount} 鏡` : "待產生"}
           />
+          {/* Visible Creative Workspace：作品優先的創作台，排在分鏡卡之前。
+              打開專案的第一眼要是「現在做到哪一張畫面」，而不是一排設定與文字。
+              它是純投影（scenes.listByProject / scenes.versions / story.continuityCheck），
+              沒有自己的 candidate/version 狀態，reload 後一致。 */}
+          <SectionErrorBoundary title="創作台">
+            <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
+          </SectionErrorBoundary>
           <SectionErrorBoundary title="分鏡">
             <StoryboardStage
               projectId={id}

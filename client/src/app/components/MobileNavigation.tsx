@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
 import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
+import { useAssistantComposeListener } from "../../lib/assistantCompose";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
@@ -80,6 +81,9 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   const [hash, syncHash] = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  // 創作台的情境命令列把話丟過來時要順手打開助手（桌機那顆球在 AssistantLauncher 同理）
+  const openAssistantForCompose = useCallback(() => setAssistantOpen(true), []);
+  useAssistantComposeListener(openAssistantForCompose);
   const orbRef = useRef<HTMLButtonElement | null>(null);
   // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」。手勢掛在整張 sheet
   // （不只把手），內容捲動中自動讓路——為什麼必須這樣做（修壞過兩輪的

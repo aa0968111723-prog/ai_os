@@ -1,3 +1,4 @@
+import { useAssistantComposeListener } from "../lib/assistantCompose";
 import { useState, useRef, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc, type AppRouter } from "../api";
@@ -448,6 +449,12 @@ interface AICreativeCopilotProps {
 
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
+  /**
+   * 別的表面（創作台的情境命令列）把話丟過來時填進輸入框，**不自動送出**：
+   * 使用者仍然看得到自己要送的是什麼、可以改字或放棄。命令列打的字與在這裡
+   * 自己打的字走完全同一條意圖判定與確認流程，沒有繞過任何一關。
+   */
+  useAssistantComposeListener(setInput);
   const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
   const [intakeTargetProjectId, setIntakeTargetProjectId] = useState<string>();
   const [editingSheetOpen, setEditingSheetOpen] = useState(false);

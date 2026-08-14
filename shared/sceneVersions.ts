@@ -128,8 +128,19 @@ function stateOf(status: string): SceneVersionState {
   return "candidate";
 }
 
-/** 實花點數：結算後用 pointsActual 扣掉退回；未結算先用預估值（與帳本同口徑：淨消耗） */
-function pointsOf(row: Pick<SceneVersionGenerationRow, "pointsEst" | "pointsActual" | "pointsRefunded">): number {
+/**
+ * 實花點數：結算後用 pointsActual 扣掉退回；未結算先用預估值（與帳本同口徑：淨消耗）。
+ *
+ * `awaiting_approval` 例外回 0（IR-2 / #725 P2）：那個狀態的定義就是
+ * **未扣點、未送 provider**（見上面 SceneVersionState 的註解），
+ * 但 pointsActual 是 null，沿用 pointsEst 會讓「實際淨花費」把還沒發生的錢算進去。
+ * 三個變體全部卡在待核時，UI 會顯示花了 3×N 點而帳本上是 0——對使用者是謊報。
+ * 被駁回／取消（rejected → failed）同理：從未扣點，退點欄也不會有值。
+ */
+function pointsOf(
+  row: Pick<SceneVersionGenerationRow, "pointsEst" | "pointsActual" | "pointsRefunded" | "status">,
+): number {
+  if (row.status === "awaiting_approval" || row.status === "rejected") return 0;
   const charged = row.pointsActual ?? row.pointsEst;
   return Math.max(0, charged - row.pointsRefunded);
 }

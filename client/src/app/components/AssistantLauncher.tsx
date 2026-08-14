@@ -3,6 +3,7 @@ import { Icon } from "../../components/Icon";
 import { useMatchMedia } from "../../lib/useMatchMedia";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 import { MENU_SHEET_MQ } from "./MenuSurface";
+import { useAssistantComposeListener } from "../../lib/assistantCompose";
 
 /**
  * 桌機的 AI 助手入口（頂欄那顆球）。
@@ -32,6 +33,10 @@ export function AssistantLauncher({ groupId }: { groupId: string }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
+  // 別的表面（創作台的情境命令列）把話丟過來時要順手打開面板。
+  // 這個 hook 必須排在下面的 early return 之前，否則 compact 切換時 hook 數量會變。
+  const openForCompose = useCallback(() => setOpen(true), []);
+  useAssistantComposeListener(openForCompose);
 
   // 手機走底部導覽那顆 orb；這裡連 sheet 都不掛，避免同時存在兩張面板
   if (compact) return null;
