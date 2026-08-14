@@ -44,7 +44,7 @@ Phase 1 — Canonical context and prerequisites (continuing this PR, no duplicat
 | Save failure / conflict still flushes | STILL REAL | flushed only on success; failed event otherwise |
 | Reload / 繼續生成 duplicates awaiting_approval | STILL REAL | `batchGenerate` reuses same fingerprint |
 | Nested reveal lost after lazy mount | PARTIALLY REAL | peek until the node exists, then consume |
-| Mobile VisualChoiceTray missing sheet | ALREADY FIXED | existing 820px bottom sheet contract |
+| Mobile VisualChoiceTray missing sheet | STILL REAL then fixed | stop unmounting tray via `hideInspector={mobileCompact}`; keep 820px sheet |
 | One shot video treated as whole film | STILL REAL | `isAssembledProjectFilm` only |
 
 ## Schema / compatibility
