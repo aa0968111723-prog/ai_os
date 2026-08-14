@@ -5,7 +5,7 @@
  * missing paid authorization leaves the job unsubmitted.
  */
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
@@ -16,7 +16,9 @@ import {
   trainingActionAvailable,
   type DatasetAssetEntry,
   type DatasetManifestPayload,
+  type TrainingJobState,
   type TrainingProviderAdapter,
+  type TrainingProviderHandle,
   type TrainingProviderRequest,
 } from "../../shared/consistencyTraining";
 import { isMockMode } from "./fal";
@@ -36,7 +38,7 @@ export class FalConsistencyTrainer implements TrainingProviderAdapter {
     return falTrainerConfigured();
   }
 
-  async submit(request: TrainingProviderRequest) {
+  async submit(request: TrainingProviderRequest): Promise<TrainingProviderHandle> {
     if (!this.configured) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "訓練供應商未設定，不能開始一致性訓練" });
     }
@@ -51,7 +53,7 @@ export class FalConsistencyTrainer implements TrainingProviderAdapter {
     });
   }
 
-  async poll() {
+  async poll(): Promise<{ status: TrainingJobState; adapterRef?: string | null; error?: string | null }> {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "沒有外部訓練工作可查詢" });
   }
 
@@ -308,9 +310,12 @@ export async function promoteConsistencyVersion(input: {
   if (!job || !canPromoteTrainingJob(job.status as "succeeded", job.lookChanged)) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個版本還不能採用（訓練未成功，或造型已變）" });
   }
+  // 同一個角色（或同為專案層級）的舊 active 版本讓位；不同角色的 active 版本互不影響
   await db.update(schema.consistencyModelVersions).set({ active: false }).where(and(
     eq(schema.consistencyModelVersions.projectId, version.projectId),
-    eq(schema.consistencyModelVersions.characterId, version.characterId ?? version.characterId),
+    version.characterId
+      ? eq(schema.consistencyModelVersions.characterId, version.characterId)
+      : isNull(schema.consistencyModelVersions.characterId),
   ));
   await db.update(schema.consistencyModelVersions).set({
     active: true,
