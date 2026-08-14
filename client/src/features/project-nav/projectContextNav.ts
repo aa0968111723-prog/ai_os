@@ -5,6 +5,7 @@
 
 import { flashAnchor } from "../../discuss";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
+import { revealStoryInlineFromSelector, sectionFromSelector } from "../story-workspace/storyInlineNav";
 
 export const PROJECT_CONTEXT_REVEAL_EVENT = "aios:project-context-reveal";
 
@@ -114,16 +115,24 @@ export function revealProjectContext(
   window.dispatchEvent(
     new CustomEvent<ProjectContextRevealDetail>(PROJECT_CONTEXT_REVEAL_EVENT, { detail }),
   );
+  const selector = selectorForContextTarget(target);
+  // Story-inline: character/scene/prop (and stage aliases) open the in-place slot.
+  const inline = sectionFromSelector(selector);
+  revealStoryInlineFromSelector(selector, {
+    projectId: opts?.projectId,
+    highlight: false,
+    scroll: false,
+  });
 
   if (detail.scroll === false) return;
-  const selector = selectorForContextTarget(target);
-  const id = selector.replace(/^#/, "");
+  const scrollSelector = inline ? "#story-reveal-slot" : selector;
+  const id = scrollSelector.replace(/^#/, "");
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       if (detail.highlight !== false) {
-        if (!flashAnchor(id)) scrollToSelector(selector);
+        if (!flashAnchor(id)) scrollToSelector(scrollSelector);
       } else {
-        scrollToSelector(selector);
+        scrollToSelector(scrollSelector);
       }
     });
   });
@@ -154,14 +163,11 @@ export function returnFromContext(
   opts?: { projectId?: string },
 ): void {
   if (returnTo === "studio") {
+    revealStoryInlineFromSelector("#stage-create", { projectId: opts?.projectId, scroll: false });
     revealWorkbenchAnchor("#sec-studio", { projectId: opts?.projectId });
     return;
   }
-  // 分鏡／交付
-  scrollToSelector("#stage-deliver");
-  requestAnimationFrame(() => {
-    flashAnchor("stage-deliver");
-  });
+  revealStoryInlineFromSelector("#stage-deliver", { projectId: opts?.projectId, scroll: true });
 }
 
 /**

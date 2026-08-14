@@ -1,9 +1,9 @@
 /**
  * 故事主畫面（story-inline）：第一層只留創作必要項——
  * 故事編輯器（autosave）＋解析摘要 chips＋需要確認的最小卡片＋「產生分鏡」主 CTA。
- * 角色／場景／道具／分鏡／製作／交付改由 ProjectPage 的收合列按需展開。
+ * 角色／場景／道具／造型／分鏡／標記由紅色 chips 在正下方單一 slot 展開。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton, HelpTip } from "../../components/interactions";
@@ -11,7 +11,8 @@ import { Button, Card, Chip, EmptyState, Hint, Meta } from "../../components/ui"
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
-import { revealStoryInlineSection, type StoryInlineSectionId } from "./storyInlineNav";
+import { revealStoryInlineSection, sectionForSummaryChip, type StoryInlineSectionId } from "./storyInlineNav";
+import { STORY_FLUSH_EVENT } from "./oneClickFilm";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
@@ -126,6 +127,10 @@ export function StoryStage({
   mobileCompact,
   onOpenSettings,
   onRevealSection,
+  activeSection = null,
+  extraChips = [],
+  revealSlot,
+  onDirtyChange,
 }: {
   projectId: string;
   canEdit: boolean;
@@ -133,7 +138,13 @@ export function StoryStage({
   /** 開「專案設定」二層（微調角色/場景/道具時才需要，非必經） */
   onOpenSettings: () => void;
   /** 產生分鏡後打開故事內的分鏡收合區（舊 #stage-board 深連結仍有效） */
-  onRevealSection?: (section: StoryInlineSectionId) => void;
+  onRevealSection?: (section: StoryInlineSectionId | null) => void;
+  /** Currently open chip; null = slot collapsed. */
+  activeSection?: StoryInlineSectionId | null;
+  extraChips?: Array<{ key: string; label: string; section: StoryInlineSectionId }>;
+  /** Real manager cards rendered immediately under the chip row. */
+  revealSlot?: ReactNode;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const utils = trpc.useUtils();
   const storyQ = trpc.story.get.useQuery({ projectId }, { refetchInterval: 30_000 });
@@ -185,6 +196,7 @@ export function StoryStage({
   /** guard 用（autosave／收養 effect 讀 ref，不進依賴陣列） */
   const yActiveRef = useRef(false);
   yActiveRef.current = ydoc.active;
+
   // 共編中回報 caret（節流在 hook 內）——夥伴的編輯器上才畫得出我的游標
   useEffect(() => {
     if (!ydoc.active) return;
@@ -282,6 +294,29 @@ export function StoryStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, projectId]);
 
+  // 一鍵生成前先把未存故事落盤。共編中由伺服器 materialize，這裡只回報 flushed。
+  useEffect(() => {
+    const onFlush = () => {
+      if (yActiveRef.current) {
+        window.dispatchEvent(new Event("aios:story-flushed"));
+        return;
+      }
+      const live = contentRef.current;
+      if (live === null || remote === null || live === remote || save.isPending) {
+        window.dispatchEvent(new Event("aios:story-flushed"));
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setSaveState("saving");
+      save.mutate(
+        { projectId, content: live, expectedRev: revRef.current, baseline: baselineRef.current },
+        { onSettled: () => window.dispatchEvent(new Event("aios:story-flushed")) },
+      );
+    };
+    window.addEventListener(STORY_FLUSH_EVENT, onFlush);
+    return () => window.removeEventListener(STORY_FLUSH_EVENT, onFlush);
+  }, [projectId, remote, save]);
+
   const parse = trpc.story.parse.useMutation({
     onSuccess: (r) => {
       const s = r.stats;
@@ -320,7 +355,7 @@ export function StoryStage({
       utils.story.storyboardPreview.invalidate({ projectId });
       onRevealSection?.("storyboard");
       revealStoryInlineSection("storyboard", { projectId, scroll: true });
-      requestAnimationFrame(() => scrollToSelector("#stage-board"));
+      requestAnimationFrame(() => scrollToSelector("#story-reveal-slot"));
     },
   });
 
@@ -356,6 +391,18 @@ export function StoryStage({
   const isBlank = (content ?? "").trim().length === 0;
   const isDirty = Boolean(data?.story?.isDirty) || (content !== null && remote !== null && content !== remote);
   const hasParsed = Boolean(data?.story?.lastParsedAt);
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  const toggleChip = (section: StoryInlineSectionId) => {
+    if (activeSection === section) {
+      onRevealSection?.(null);
+      return;
+    }
+    onRevealSection?.(section);
+    revealStoryInlineSection(section, { projectId, scroll: false });
+  };
   const lastRun = data?.lastRun;
 
   /**
@@ -458,7 +505,18 @@ export function StoryStage({
             description="貼上你寫好的故事或腳本；還沒有想法，也可以先跟 AI 聊聊。角色與場景不用先建——AI 解析時會自動整理。"
             action={
               canEdit ? (
-                <Button variant="ghost" onClick={() => revealWorkbenchAnchor("#sec-assistant", { projectId })}>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    onRevealSection?.("production");
+                    revealStoryInlineSection("production", {
+                      projectId,
+                      scroll: false,
+                      nestedSelector: "#sec-assistant",
+                    });
+                    revealWorkbenchAnchor("#sec-assistant", { projectId });
+                  }}
+                >
                   <Icon name="MessageSquare" size={14} /> 與 AI 一起開始
                 </Button>
               ) : undefined
@@ -494,12 +552,62 @@ export function StoryStage({
             <>
               <div className="story-parse-bar">
                 <div className="story-parse-bar__chips" role="group" aria-label="解析摘要">
-                  {summary && summaryChips(summary).map((c) => <Chip key={c.key} className={c.label.endsWith(" 0") ? undefined : "on"}>{c.label}</Chip>)}
-                  {summary && summary.flagged > 0 && (
-                    <Chip title="信心 70–89% 的項目已自動建立，但建議看一眼" className="on">標記 {summary.flagged}</Chip>
-                  )}
+                  {summary && summaryChips({ ...summary, flagged: summary.flagged, pending: pending.length }).map((c) => {
+                    const section = sectionForSummaryChip(c.key);
+                    const selected = section != null && activeSection === section;
+                    return (
+                      <Chip
+                        key={c.key}
+                        selected={section ? selected : undefined}
+                        className="on"
+                        title={section ? `查看${c.label}` : undefined}
+                        aria-expanded={section ? selected : undefined}
+                        aria-controls={section ? "story-reveal-slot" : undefined}
+                        onClick={section ? () => toggleChip(section) : undefined}
+                      >
+                        {c.label}
+                      </Chip>
+                    );
+                  })}
+                  {extraChips.map((c) => {
+                    const selected = activeSection === c.section;
+                    return (
+                      <Chip
+                        key={c.key}
+                        selected={selected}
+                        className="on"
+                        title={`查看${c.label}`}
+                        aria-expanded={selected}
+                        aria-controls="story-reveal-slot"
+                        onClick={() => toggleChip(c.section)}
+                      >
+                        {c.label}
+                      </Chip>
+                    );
+                  })}
                   {isDirty && hasParsed && <Chip className="story-chip-dirty">內容已改，建議重新解析</Chip>}
                 </div>
+                {activeSection ? (
+                  <div
+                    id="story-reveal-slot"
+                    className="story-reveal-slot"
+                    role="region"
+                    aria-label={activeSection === "markers" ? "標記" : "目前展開的工作區"}
+                    data-section={activeSection}
+                  >
+                    {activeSection === "markers" ? (
+                      pending.length > 0 ? (
+                        <section className="story-confirm-list" aria-label="需要確認的解析項目">
+                          {pending.map((c) => (
+                            <CandidateCard key={c.id} projectId={projectId} candidate={c} canEdit={canEdit} />
+                          ))}
+                        </section>
+                      ) : (
+                        <Hint>目前沒有待確認的標記。信心較高的項目已自動建立。</Hint>
+                      )
+                    ) : revealSlot}
+                  </div>
+                ) : null}
                 {canEdit && (
                   <div className="story-parse-bar__actions">
                     <Button
@@ -562,17 +670,11 @@ export function StoryStage({
           <RemoteCarets textareaRef={editorElRef} peers={ydoc.peers} value={content ?? ""} />
         )}
 
-        {/* 需要確認：只顯示 AI 真正不確定的項目（<70%），其他一律背景處理 */}
-        {pending.length > 0 && (
-          <section className="story-confirm-list" aria-label="需要確認的解析項目">
-            <Meta as="p" style={{ margin: "10px 0 6px", fontWeight: 600 }}>
-              需要你確認（{pending.length}）
-              <HelpTip text="AI 只在不確定時才問你。信心高的項目已自動建立，可在活動紀錄或專案設定查看。" />
-            </Meta>
-            {pending.map((c) => (
-              <CandidateCard key={c.id} projectId={projectId} candidate={c} canEdit={canEdit} />
-            ))}
-          </section>
+        {pending.length > 0 && activeSection !== "markers" && (
+          <Hint as="p" style={{ margin: "8px 0 0" }}>
+            {pending.length} 項需要確認——點上方「標記」在 chips 下方處理。
+            <HelpTip text="AI 只在不確定時才問你。信心高的項目已自動建立。" />
+          </Hint>
         )}
       </Card>
     </CardShell>

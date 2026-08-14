@@ -1,0 +1,255 @@
+{
+  "base": "http://127.0.0.1:5174",
+  "steps": [
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "login": "PASS"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "createProject": "PASS",
+      "title": "PR742 chips 98301",
+      "projectId": "1c28ba5d-c3f1-4f92-a74f-8e65954d01aa"
+    },
+    {
+      "parse": "API_PASS",
+      "pendingCount": 0,
+      "mock": true
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "openCharacters": "PASS",
+      "measure": {
+        "overflowX": 0,
+        "railCount": 0,
+        "slotPresent": true,
+        "slotSection": "characters",
+        "slotBelowChips": true,
+        "chips": [
+          {
+            "text": "角色 2",
+            "w": 60,
+            "h": 44,
+            "expanded": "true",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "場景 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "道具 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "造型 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "分鏡 0 場 0 鏡",
+            "w": 100,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "標記 0",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          }
+        ]
+      }
+    },
+    {
+      "switchScenes": "PASS",
+      "measure": {
+        "overflowX": 0,
+        "railCount": 0,
+        "slotPresent": true,
+        "slotSection": "scenes",
+        "slotBelowChips": true,
+        "chips": [
+          {
+            "text": "角色 2",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "場景 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "true",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "道具 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "造型 1",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "分鏡 0 場 0 鏡",
+            "w": 100,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          },
+          {
+            "text": "標記 0",
+            "w": 60,
+            "h": 44,
+            "expanded": "false",
+            "controls": "story-reveal-slot"
+          }
+        ]
+      }
+    },
+    {
+      "collapse": "PASS"
+    },
+    {
+      "storyboard": "API_PASS"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "console": "Failed to load resource: net::ERR_UNSAFE_PORT"
+    },
+    {
+      "openStoryboard": "PASS"
+    },
+    {
+      "oneClick": "CLICKED"
+    }
+  ],
+  "viewports": [
+    {
+      "viewport": "390x844",
+      "overflowX": 0,
+      "railCount": 0,
+      "slotBelowChips": true,
+      "slotSection": "characters",
+      "chipMinHeight": 44,
+      "smallChips": [],
+      "screenshot": "390x844-characters.png",
+      "status": "PASS"
+    },
+    {
+      "viewport": "430x932",
+      "overflowX": 0,
+      "railCount": 0,
+      "slotBelowChips": true,
+      "slotSection": "characters",
+      "chipMinHeight": 44,
+      "smallChips": [],
+      "screenshot": "430x932-characters.png",
+      "status": "PASS"
+    },
+    {
+      "viewport": "768x1024",
+      "overflowX": 0,
+      "railCount": 0,
+      "slotBelowChips": true,
+      "slotSection": "characters",
+      "chipMinHeight": 44,
+      "smallChips": [],
+      "screenshot": "768x1024-characters.png",
+      "status": "PASS"
+    },
+    {
+      "viewport": "1280x800",
+      "overflowX": 0,
+      "railCount": 0,
+      "slotBelowChips": true,
+      "slotSection": "characters",
+      "chipMinHeight": 44,
+      "smallChips": [],
+      "screenshot": "1280x800-characters.png",
+      "status": "PASS"
+    },
+    {
+      "viewport": "1440x900",
+      "overflowX": 0,
+      "railCount": 0,
+      "slotBelowChips": true,
+      "slotSection": "characters",
+      "chipMinHeight": 44,
+      "smallChips": [],
+      "screenshot": "1440x900-characters.png",
+      "status": "PASS"
+    }
+  ]
+}
