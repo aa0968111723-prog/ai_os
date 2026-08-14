@@ -22,6 +22,22 @@ describe("assistant execution fast path", () => {
     expect(classifyAssistantRequest(message).intent).toBe(expected);
   });
 
+  /**
+   * #663 的修法是把「列出／顯示／查看」視為問句。但這些是動詞不是疑問詞，
+   * 經常出現在複合寫入的後半段；若無條件短路成 ASK，這些請求會變成只回答、不執行，
+   * 而且完全沒有錯誤訊息——對使用者是靜默失效，對 v4 更是直接打斷
+   * 「產生候選 → 列出」這條主線。唯讀查詢因此只在句中沒有寫入動詞時才算問句。
+   */
+  it.each([
+    ["幫我建立一個新專案，然後顯示結果", "AGENT"],
+    ["新增任務並列出清單", "DIRECT"],
+    ["幫我把這段腳本拆成六鏡並顯示分鏡表", "DIRECT"],
+    ["幫我建立會議筆記，查看有沒有重複", "DIRECT"],
+    ["產生第 3 鏡的畫面並列出候選", "DIRECT"],
+  ] as const)("still executes compound write %s (not ASK)", (message, expected) => {
+    expect(classifyAssistantRequest(message).intent).toBe(expected);
+  });
+
   it("keeps bounded writes on DIRECT, project work on AGENT, and true coordination on PLAN", () => {
     expect(classifyAssistantRequest("幫我把腳本拆成分鏡，然後逐鏡生成畫面").intent).toBe("AGENT");
     expect(classifyAssistantRequest("把這三鏡改善並重新生成素材").intent).toBe("AGENT");
