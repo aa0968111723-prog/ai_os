@@ -25,5 +25,10 @@ describe("adopt and delivery gates", () => {
       "有鏡頭因上游變更而過期",
       "有鏡頭尚未核准",
     ]);
+    expect(deliveryBlockers({
+      shots: [{ id: "a", assetId: "x", reviewStatus: "approved" }],
+      staleShotIds: [],
+      rightsBlockers: ["1 份素材目前不建議商用"],
+    })).toEqual(["1 份素材目前不建議商用"]);
   });
 });

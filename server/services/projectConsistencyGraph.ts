@@ -23,7 +23,7 @@ export async function projectWorkspaceProjection(input: {
 }): Promise<WorkspaceProjection> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, false);
   const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, project.id));
-  const [characters, looks, presets, props, shots, assets, bindings, heads] = await Promise.all([
+  const [characters, looks, presets, props, shots, assets, rightsRows, bindings, heads] = await Promise.all([
     db.select({ id: schema.characters.id, name: schema.characters.name, rev: schema.characters.rev, referenceAssetId: schema.characters.referenceAssetId })
       .from(schema.characters).where(eq(schema.characters.projectId, project.id)),
     db.select({ id: schema.characterLooks.id, name: schema.characterLooks.name, characterId: schema.characterLooks.characterId, rev: schema.characterLooks.rev, referenceAssetId: schema.characterLooks.referenceAssetId })
@@ -41,6 +41,9 @@ export async function projectWorkspaceProjection(input: {
       reviewStatus: schema.scenes.reviewStatus,
     }).from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))).orderBy(asc(schema.scenes.orderIndex)),
     db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.projectId, project.id), isNull(schema.assets.deletedAt))),
+    db.select({
+      rightsStatus: schema.assetRightsProfiles.rightsStatus,
+    }).from(schema.assetRightsProfiles).where(eq(schema.assetRightsProfiles.projectId, project.id)).catch(() => []),
     listStoryEntityBindings({ auth: input.auth, projectId: project.id }),
     db.select().from(schema.shotContextPacketHeads).where(eq(schema.shotContextPacketHeads.projectId, project.id)).catch(() => []),
   ]);
@@ -158,6 +161,7 @@ export async function projectWorkspaceProjection(input: {
       needsConfirm,
       consistentShots,
     }),
+    rightsReadiness: summarizeRightsRows(assets.length, rightsRows ?? []),
     nodes,
     edges,
     canonPins,
@@ -167,6 +171,26 @@ export async function projectWorkspaceProjection(input: {
       staleShotIds: [...stale],
     }),
   };
-  void assets;
   return projection;
+}
+
+function summarizeRightsRows(assetCount: number, rows: Array<{ rightsStatus: string }>) {
+  const counts = { CLEAR: 0, CONDITIONAL: 0, REVIEW_REQUIRED: 0, BLOCKED: 0, UNKNOWN: 0 };
+  for (const row of rows) {
+    if (row.rightsStatus in counts) counts[row.rightsStatus as keyof typeof counts] += 1;
+  }
+  const unknown = counts.UNKNOWN + Math.max(0, assetCount - rows.length);
+  let status: "clear" | "needs_review" | "blocked" | "unknown" = "unknown";
+  if (counts.BLOCKED > 0) status = "blocked";
+  else if (counts.REVIEW_REQUIRED > 0 || unknown > 0) status = assetCount === 0 ? "unknown" : (unknown === assetCount ? "unknown" : "needs_review");
+  else if (assetCount > 0 && counts.CLEAR + counts.CONDITIONAL === assetCount) status = "clear";
+  return {
+    status,
+    total: assetCount,
+    clear: counts.CLEAR,
+    conditional: counts.CONDITIONAL,
+    reviewRequired: counts.REVIEW_REQUIRED,
+    blocked: counts.BLOCKED,
+    unknown,
+  };
 }

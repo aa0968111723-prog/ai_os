@@ -18,6 +18,16 @@ export interface ConsistencyGraphEdge {
   rel: string;
 }
 
+export interface WorkspaceRightsReadiness {
+  status: "clear" | "needs_review" | "blocked" | "unknown";
+  total: number;
+  clear: number;
+  conditional: number;
+  reviewRequired: number;
+  blocked: number;
+  unknown: number;
+}
+
 export interface WorkspaceCompleteness {
   world: number;
   visualCoverage: number;
@@ -57,6 +67,7 @@ export interface WorkspaceProjection {
   completeness: WorkspaceCompleteness;
   compactStatus: string;
   nextAction: string;
+  rightsReadiness: WorkspaceRightsReadiness;
   nodes: ConsistencyGraphNode[];
   edges: ConsistencyGraphEdge[];
   /** Team Canon 引用（pin）＋是否有新版可升級——server 是唯一真相，UI 不得自算 */

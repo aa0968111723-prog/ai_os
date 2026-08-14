@@ -540,6 +540,13 @@
       "when": 1789669200000,
       "tag": "0076_canon_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789672800000,
+      "tag": "0077_commercial_rights",
+      "breakpoints": true
     }
   ]
 }

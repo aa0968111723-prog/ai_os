@@ -26,6 +26,8 @@ export const TRAINING_EXCLUDE_REASONS = [
   "identity_wrong",
   "cross_project",
   "unconsented",
+  "rights_training_forbidden",
+  "rights_unknown",
 ] as const;
 export type TrainingExcludeReason = (typeof TRAINING_EXCLUDE_REASONS)[number];
 

@@ -72,7 +72,7 @@ export function classifyAssetForTraining(asset: {
   sha256: string | null;
   kind: string;
   title: string;
-}, scopeProjectId: string): DatasetAssetEntry {
+}, scopeProjectId: string, rights?: { trainingAllowed: boolean | null } | null): DatasetAssetEntry {
   const base = {
     assetRevisionId: "",
     assetId: "",
@@ -86,6 +86,13 @@ export function classifyAssetForTraining(asset: {
   if (asset.deletedAt) return { ...base, included: false, excludeReason: "revoked" };
   if (asset.kind !== "image") return { ...base, included: false, excludeReason: "low_quality" };
   if (asset.isAiGenerated && !asset.locked) return { ...base, included: false, excludeReason: "identity_wrong" };
+  if (rights && rights.trainingAllowed !== true) {
+    return {
+      ...base,
+      included: false,
+      excludeReason: rights.trainingAllowed === false ? "rights_training_forbidden" : "rights_unknown",
+    };
+  }
   return { ...base, included: true, excludeReason: null, split: asset.locked ? "eval" : "train" };
 }
 
@@ -97,8 +104,17 @@ export async function buildDatasetManifest(input: {
 }): Promise<{ manifestId: string; fingerprint: string; included: number; excluded: number }> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, true);
   const assets = await db.select().from(schema.assets).where(eq(schema.assets.projectId, project.id));
+  const rightsRows = assets.length
+    ? await db.select({
+      assetId: schema.assetRightsProfiles.assetId,
+      trainingAllowed: schema.assetRightsProfiles.trainingAllowed,
+    }).from(schema.assetRightsProfiles).where(eq(schema.assetRightsProfiles.projectId, project.id))
+    : [];
+  const rightsByAsset = new Map(rightsRows.map((row) => [row.assetId, row.trainingAllowed]));
   const entries: DatasetAssetEntry[] = assets.map((asset) => {
-    const classified = classifyAssetForTraining(asset, project.id);
+    const classified = classifyAssetForTraining(asset, project.id, {
+      trainingAllowed: rightsByAsset.has(asset.id) ? rightsByAsset.get(asset.id) ?? null : null,
+    });
     return {
       ...classified,
       assetId: asset.id,

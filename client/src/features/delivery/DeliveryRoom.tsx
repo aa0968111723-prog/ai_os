@@ -34,6 +34,7 @@ import {
 } from "@shared/shotCompletion";
 
 import { ONE_CLICK_BATCH_MODEL } from "../story-workspace/oneClickFilm";
+import { ProjectRightsReadiness } from "../../components/AssetRightsChip";
 
 /** 批次生成用的預設文生圖模型（與一鍵生成／單格工作室同一顆，畫風不分岔） */
 const BATCH_MODEL = ONE_CLICK_BATCH_MODEL;
@@ -185,6 +186,8 @@ export function DeliveryRoom({
           </div>
         ))}
       </div>
+
+      <ProjectRightsReadiness projectId={projectId} />
 
       {issues.length === 0 ? (
         <Hint role="status" style={{ marginTop: 10 }}>

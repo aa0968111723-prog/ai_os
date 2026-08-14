@@ -364,4 +364,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0076_canon_hardening": [
     "79ea09b9296535d9d676bc4be1d09c1c88bb0e027a9935cf8a78bf13a461ab4d",
   ],
+  "0077_commercial_rights": [
+    "9aa15ecc37664fa85dcf3eb9f3333f353aa78a17695736c7c51970864bb30428",
+  ],
 };
