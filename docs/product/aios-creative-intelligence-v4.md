@@ -305,3 +305,33 @@ red team 在自己的〈誤報／已驗證安全〉一節推翻了兩條，本 P
 - **「血緣無法重建」＝講得太重**。父素材 id 本來就在 `generations.source_url` 裡，
   真正的缺口只是沒有投影出來。#726 因此**沒有新增表**，
   而是把血緣放進既有的 source meta 並投影成 `SceneVersion.parentIndex`。
+
+
+---
+
+# CodeRabbit FINAL REVIEW RECONCILIATION
+
+在 FINAL CLOSEOUT 的最終 diff 上手動觸發 `@coderabbitai review`，對 HEAD `7a13ce70` 跑完整 review。
+**12 項 inline findings，全部處理完畢**（8 Major／4 Minor）。
+
+| # | Finding | Severity | Status | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | 變體冪等鍵照**位置**配，部分失敗後換意圖會把新方向配到舊方向的鍵，伺服器回既有生成並回報成功（新方向根本沒生成） | Major | **FIXED** | 冪等鍵改以 `directionId` 為鍵（`requestIdFor`） |
+| 2 | 移除角色與清孤兒 Look 是兩支 client mutation，非同一交易；且依賴非同步載入的 `lookOwnerById`，載不全會靜默漏掉 | Major | **FIXED** | 移到伺服器端 `scenes.setCards`，查 `characterLooks` 後與卡片寫入同一次 `applyWithRevision` |
+| 3 | `setVisualFromAsset` 的 `rev` 推進不是 CAS（只 `where(id)`），夥伴插隊時會蓋掉他的編輯而 `rev` 沒前進；且缺 `deletedAt` 條件時回傳沒有分鏡欄位的物件 | Major | **FIXED** | `where(id + deletedAt is null + rev = 讀到的 rev)`，0 列命中回 `CONFLICT` |
+| 4 | `continuityCheck` 以 `generationId` 為鍵，兩鏡共用同一素材時只剩最後一鏡；這一輪每筆還帶該鏡自己的鏡頭語言與綁定 ⇒ 另一鏡永遠比對不到 | Major | **FIXED** | 改成 `generationId → 鏡清單`，逐鏡各自比對 |
+| 5 | pg 測試自己重寫了一份 `advanceGeneration` 的 where ⇒ 伺服器改壞照樣綠，正是這些測試在批評 source-grep 的同一種盲點 | Major | **FIXED** | `sceneBackfillPointerGuard` / `sceneBackfillWhere` 由 `generationCore` 匯出，生產與測試共用同一份條件。**已實測：關掉生產守衛 → pg 測試紅 3 項** |
+| 6 | 冪等 catch 把任何唯一鍵衝突都轉成同一句 `CONFLICT` 並丟掉原始錯誤（含 constraint 名），而這條在扣點之前 | Minor | **FIXED** | 轉譯前先 `console.error(err)`，兩處用同一個訊息前綴便於搜尋 |
+| 7 | 指標守衛擋下更新時仍廣播「畫面已更新」——剛採用別版的人會收到一則說他的鏡被換掉的通知 | Major | **FIXED** | `.returning()` 取命中列數，依實際結果分流用字 |
+| 8 | 未鎖定的重試掉了 `lookIds`（`generations` 沒有這個欄位，唯一副本在快照的 `characters[].lookId`）⇒ 重試一次就換了衣服 | Major | **FIXED** | 從快照取出非空的 `lookId` 補進重試輸入 |
+| 9 | 重試用同一個 `batchId` 再落一列 ⇒ 3 個方向的批次變成 `成功 2/4`，同一方向列兩次 | Minor | **FIXED** | 分母改用送出當下的 `batchSize`（舊資料退回「不同方向數」） |
+| 10 | fallback 卡片 id 不該算綁定漂移 | Major | **已於前一 commit 修正** | `hasOwnBinding`：三排卡片全空時整段不比對 |
+| 11 | `defaultCreativeDirections` 註解說「跨意圖各取一個」但實作只取 tension 三個 | Minor | **FIXED** | 依註解改成張力／光線／動勢各一 |
+| 12 | `directionsAreDistinct` 受鍵序影響：`mergeShotDirection` 先鋪 base 再鋪 patch，同值不同宣告順序會被判成不同方向 ⇒ 多樣性守門漏放、使用者付兩次錢 | Minor | **FIXED** | 逐鍵排序後再比 |
+
+## 這一輪 review 最有價值的一條
+
+**#5**。這份 PR 花了很多篇幅論證「source-grep 測試證明不了行為」，然後自己在 pg 測試裡
+把生產程式碼的 where 條件抄了一份——同一種盲點換了個位置。修法不是加測試，而是把守衛
+從 `generationCore` 匯出，讓測試呼叫生產程式碼本身；之後把**生產守衛**關掉時，
+pg 測試會紅 3 項。這才是「測試不是陪 code 一起通過」的實證。
