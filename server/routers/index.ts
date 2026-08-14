@@ -34,6 +34,7 @@ import { databasesRouter } from "./databases";
 import { dataHubRouter } from "./dataHub";
 import { folderImportRouter } from "./folderImport";
 import { projectContextRouter } from "./projectContext";
+import { creativeContextRouter } from "./creativeContext";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
@@ -94,6 +95,7 @@ export const appRouter = router({
   dataHub: dataHubRouter,
   folderImport: folderImportRouter,
   projectContext: projectContextRouter,
+  creativeContext: creativeContextRouter,
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,

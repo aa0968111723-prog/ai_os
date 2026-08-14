@@ -51,6 +51,8 @@ export interface AgentContextSlots {
    * Never stores model CoT — only human answers and short issue labels.
    */
   planningClarifications?: string;
+  /** Idempotency key for one-click / batchGenerate awaiting-approval reuse. */
+  batchFingerprint?: string;
 }
 
 export interface AgentQuestionOption {

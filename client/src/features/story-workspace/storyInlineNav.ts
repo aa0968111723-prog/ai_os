@@ -207,10 +207,12 @@ export function revealStoryInlineFromSelector(
   return section;
 }
 
-/** Assembled playable film — stills / audio / generic done generations do not count. */
+/** A video file. Per-shot video is not an assembled project film. */
 export function isPlayableFilmAsset(kind: string | null | undefined): boolean {
   return kind === "video";
 }
+
+export { isAssembledProjectFilm } from "@shared/projectCreativeContext";
 
 export type StoryReadinessKind = "empty" | "needs_parse" | "ready_for_board" | "ready_to_produce" | "has_result";
 
@@ -260,7 +262,7 @@ export function storyReadiness(input: {
     return {
       kind: "ready_to_produce",
       label: "可製作",
-      detail: `已有 ${input.sceneCount} 鏡。按「生成影片」做第一版，不必先打開製作。`,
+      detail: `已有 ${input.sceneCount} 鏡。按「生成畫面」做第一版，不必先打開製作。`,
     };
   }
   return {

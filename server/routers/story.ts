@@ -22,6 +22,7 @@ import {
   undoParseRun,
 } from "../services/storyParse";
 import { checkProjectContinuity } from "../services/continuityCheck";
+import { flushStoryDocNow } from "../services/collabDoc";
 import {
   diffStoryboardPlan,
   summarizeStoryboardDiff,
@@ -210,6 +211,17 @@ export const storyRouter = router({
         updatedAtField: "updatedAt",
       });
       return { id: row.id, rev: row.rev, updatedAt: row.updatedAt, versioned, merged };
+    }),
+
+  /**
+   * 一鍵生成前強制把共編 Y.Doc 落到 stories.content。
+   * 成功才回；失敗讓呼叫端中止，避免用舊伺服器文字去解析／生成。
+   */
+  flushCollab: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      return flushStoryDocNow(project.id);
     }),
 
   /** 版本清單（story 版）：由新到舊，只回摘要不回全文（比照 knowledge.listVersions） */
