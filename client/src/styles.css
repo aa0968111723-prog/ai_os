@@ -8758,6 +8758,11 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .story-readiness__detail { margin: 4px 0 0; }
 .story-readiness__cta { min-height: 44px; flex: 0 0 auto; }
 .story-readiness__latest { margin: 8px 0 0; }
+.story-context-status { margin: 8px 0 0; }
+.story-context-status__states { display: flex; flex-wrap: wrap; gap: 6px; }
+.story-context-status__states .chip,
+.story-context-status__states button { min-height: 44px; }
+.story-context-status__sources { margin: 6px 0 0; }
 .story-inline-rail {
   display: flex; flex-direction: column; gap: 8px; min-width: 0;
 }
