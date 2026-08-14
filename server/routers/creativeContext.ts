@@ -7,6 +7,13 @@ import {
   refreshShotContextStaleness,
 } from "../services/shotContextPackets";
 import {
+  buildDatasetManifest,
+  promoteConsistencyVersion,
+  queueConsistencyTraining,
+  rollbackConsistencyVersion,
+  trainingAvailability,
+} from "../services/consistencyTraining";
+import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
   listStoryEntityBindings,
@@ -130,5 +137,49 @@ export const creativeContextRouter = router({
           ? { kind: input.changedKind, id: input.changedId }
           : undefined,
       });
+    }),
+
+  trainingAvailability: authedProcedure.query(async () => trainingAvailability()),
+
+  buildDataset: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      characterId: z.string().uuid().optional(),
+      lookId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return buildDatasetManifest({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        characterId: input.characterId,
+        lookId: input.lookId,
+      });
+    }),
+
+  queueTraining: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      characterId: z.string().uuid().optional(),
+      lookId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return queueConsistencyTraining({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        characterId: input.characterId,
+        lookId: input.lookId,
+      });
+    }),
+
+  promoteVersion: authedProcedure
+    .input(z.object({ versionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return promoteConsistencyVersion({ auth: ctx.auth, versionId: input.versionId });
+    }),
+
+  rollbackVersion: authedProcedure
+    .input(z.object({ versionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return rollbackConsistencyVersion({ auth: ctx.auth, versionId: input.versionId });
     }),
 });
