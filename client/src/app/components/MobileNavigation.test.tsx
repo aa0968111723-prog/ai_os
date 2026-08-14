@@ -52,19 +52,27 @@ vi.mock("../../api", () => {
 describe("MobileNavigation", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
 
-  it("keeps daily destinations and secondary tools reachable", async () => {
+  it("keeps a four-item primary bar and still reaches /planner from More", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/planner");
     render(<MobileNavigation />);
 
-    expect(screen.getByRole("navigation", { name: "主要功能" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "主要功能" });
+    expect(nav).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("href", "/dashboard#projects");
+    expect(screen.getByRole("button", { name: "AI 助手" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更多" })).toBeInTheDocument();
     // 正中央的球不再是導航連結——它開啟全站 AI 助手（見下方專屬案例）
     expect(screen.queryByRole("link", { name: /AI/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "筆記排程" })).toHaveAttribute("aria-current", "page");
+    // 筆記排程不再是底欄一級；/planner 改由 More 承接，且 More 必須亮起
+    expect(nav.querySelector('a[href="/planner"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "更多" })).toHaveClass("active");
+    expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveAttribute("href", "/planner");
+    expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveClass("active");
     expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
     expect(screen.getByRole("link", { name: /怎麼用/ })).toHaveAttribute("href", "/help");
   });
@@ -75,7 +83,8 @@ describe("MobileNavigation", () => {
     await user.click(screen.getByRole("button", { name: "更多" }));
 
     // 面板收日常會用到的頁面，名稱一律取自 DESTINATIONS（同一頁不得有第二個名字）
-    for (const key of ["databases", "studio", "community", "chat", "help", "models", "downloads"] as const) {
+    // planner 已從底欄搬進 More，仍必須用同一個去處名
+    for (const key of ["planner", "databases", "studio", "community", "chat", "help", "models", "downloads"] as const) {
       const d = DESTINATIONS[key];
       expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
     }
@@ -198,5 +207,25 @@ describe("MobileNavigation", () => {
     render(<MobileNavigation />);
     expect(screen.getByRole("link", { name: "專案" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("★ U10 視覺回饋契約：按壓要縮、激活要上色、鍵盤彈出時助手 sheet 要抬升", () => {
+    // 底部導航的「有反應」由三條跨檔案契約組成：active 縮放（手指一按就看到）、
+    // 目前分頁的 primary 色標示、以及鍵盤彈出時（全站 AI 助手 sheet 內有輸入框）
+    // 底緣吃 --kb-inset 往上抬——任一條掉了，手機上就是「按了沒回饋」或「輸入框被鍵盤蓋住」。
+    // 來自開放 PR #683，不得覆蓋或弱化。
+    const css = readFileSync("client/src/styles.css", "utf8");
+    // 按壓回饋：active 縮放，配 tap-highlight 透明＋touch-action manipulation（消 300ms 延遲）
+    expect(css).toMatch(/\.mobile-nav a:active,\s+\.mobile-nav button:active \{ transform: scale\(.92\); \}/);
+    expect(css).toContain("-webkit-tap-highlight-color: transparent");
+    expect(css).toContain('button, a, select, summary, [role="button"] { touch-action: manipulation; }');
+    // 激活回饋：目前分頁以 primary 色標示
+    expect(css).toMatch(/\.mobile-nav a\.active,\s+\.mobile-nav button\.active \{ color: var\(--primary-ink\); background: var\(--primary-tint\); \}/);
+    // 鍵盤回饋：手機端助手 sheet 的 bottom 吃 --kb-inset
+    expect(css).toMatch(/\.menu-surface\.is-sheet \{[\s\S]*?bottom: var\(--kb-inset, 0px\)/);
+    // 四項底欄：不再是五格，觸控高仍 ≥44
+    expect(css).toContain("grid-template-columns: repeat(4, 1fr)");
+    expect(css).not.toContain("grid-template-columns: repeat(5, 1fr)");
+    expect(css).toMatch(/\.mobile-nav a,\s+\.mobile-nav button \{[\s\S]*?min-height: 50px;/);
   });
 });

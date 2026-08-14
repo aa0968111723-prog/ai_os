@@ -6040,7 +6040,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 分頁列：貼齊螢幕底、毛玻璃、safe-area 內距——Home 指示條不壓字 */
   .mobile-nav {
     position: fixed; z-index: 44; inset-inline: 0; bottom: 0;
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
     padding: 6px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
     border-top: 1px solid var(--border-soft);
     background: color-mix(in srgb, var(--popover) 90%, transparent);
