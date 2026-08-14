@@ -33,8 +33,10 @@ import {
   type ShotCompletionInput,
 } from "@shared/shotCompletion";
 
-/** 批次生成用的預設文生圖模型（與單格工作室、分鏡表同一顆，畫風不分岔） */
-const BATCH_MODEL = "fal-ai/fast-lightning-sdxl";
+import { ONE_CLICK_BATCH_MODEL } from "../story-workspace/oneClickFilm";
+
+/** 批次生成用的預設文生圖模型（與一鍵生成／單格工作室同一顆，畫風不分岔） */
+const BATCH_MODEL = ONE_CLICK_BATCH_MODEL;
 
 const FILTERS = [
   { key: "all", label: "全部" },
