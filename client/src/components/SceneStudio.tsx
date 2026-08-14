@@ -725,7 +725,10 @@ export function SceneStudio({
                   size="sm"
                   variant="primary"
                   disabled={setCurrent.isPending}
-                  onClick={() => setCurrent.mutate({ sceneId, assetId: stageVersion.assetId!, acknowledgeApproved: true })}
+                  // 走與版本清單／Compare 同一支：舞台上的「用這一版」是同一個動作，
+                  // 不能少帶 syncShotDirection（否則採用了某個方向的版本，鏡頭語言卻留在舊值，
+                  // 而且拿不到 adoptedDirection、UI 也就不會告訴使用者同步了什麼）。
+                  onClick={() => setCurrentVersion("visual", stageVersion.assetId!)}
                 >
                   <Icon name="Check" size={13} /> 用這一版
                 </Button>

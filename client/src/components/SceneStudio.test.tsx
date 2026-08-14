@@ -3,6 +3,7 @@
  * 隔離 trpc mock，不掛 ProjectPage。重點在「花錢的鈕何時可按」與「檢視者唯讀」，
  * 這兩件事錯了就是扣了點或越權，畫面看不出來。
  */
+import { readFileSync } from "node:fs";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -912,5 +913,73 @@ describe("#725 P0-1 跨鏡狀態隔離（換鏡後不得沿用上一鏡的任何
     // B 鏡沒有任何批次 ⇒ 不得顯示 A 的批次狀態或方向標籤
     expect(screen.queryByText(/方向生成中/)).not.toBeInTheDocument();
     expect(screen.queryByText("更靠近人物")).not.toBeInTheDocument();
+  });
+});
+
+
+/**
+ * CodeRabbit 覆核（HEAD 973a9d00）唯一的 Major：舞台工具列的「用這一版」繞過了
+ * `setCurrentVersion`，少帶 `syncShotDirection`。
+ *
+ * 同一個使用者動作（採用某一版畫面）在站內有三個入口：舞台工具列、版本清單、Compare。
+ * 三者必須送出同一組旗標，否則「從舞台採用某個方向的版本」會把畫面換掉、
+ * 鏡頭語言卻留在舊值，而且拿不到 adoptedDirection ⇒ UI 不會告訴使用者同步了什麼。
+ */
+describe("採用畫面的三個入口必須送出同一組旗標", () => {
+  const EXPECTED = { sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true, syncShotDirection: true };
+
+  /** 兩版：g1（舊）與 g2（現用）。舞台先切到 g1 才會出現「用這一版」 */
+  function twoVersions() {
+    return serverData({
+      rows: [
+        genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+        genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z" }),
+      ],
+      currentAssetId: "asset-g2",
+    });
+  }
+
+  beforeEach(() => {
+    versionsQuery.mockReturnValue({ data: twoVersions(), isLoading: false, isError: false, refetch: vi.fn() });
+  });
+
+  it("舞台工具列的「用這一版」帶 syncShotDirection（原本漏掉）", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    // 先在版本頁把舞台預覽切到非現用的那一版，工具列才會出現「用這一版」
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    await user.click(screen.getByRole("button", { name: "預覽畫面第 1 版" }));
+    await user.click(screen.getByRole("button", { name: /用這一版/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("版本清單的「設為現用」帶同一組旗標", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const items = screen.getAllByRole("listitem");
+    await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("Compare 的「採用」帶同一組旗標", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const toggles = screen.getAllByRole("checkbox", { name: /加入比較/ });
+    await user.click(toggles[0]!);
+    await user.click(toggles[1]!);
+    await user.click(screen.getByRole("button", { name: /比較 2/ }));
+    const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
+    await user.click(within(compare).getByRole("button", { name: /採用 V1/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("原始碼層：採用畫面只有一個出口（setCurrentVersion），沒有第二處直接 mutate", () => {
+    // 這一條刻意是結構斷言——它擋的是「有人又在別的地方直接呼叫 setCurrent.mutate」，
+    // 那是新增第二個出口，不是行為變化。行為由上面三項覆蓋。
+    // jsdom 環境的 import.meta.url 不是 file: URL，用 cwd 相對路徑（與站內其他契約測試同做法）
+    const source = readFileSync("client/src/components/SceneStudio.tsx", "utf8");
+    expect(source.match(/setCurrent\.mutate\(/g) ?? []).toHaveLength(1);
   });
 });
