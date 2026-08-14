@@ -6040,7 +6040,10 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 分頁列：貼齊螢幕底、毛玻璃、safe-area 內距——Home 指示條不壓字 */
   .mobile-nav {
     position: fixed; z-index: 44; inset-inline: 0; bottom: 0;
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+    /* 三格：專案｜AI 助手｜更多——中間那格就是 .mobile-nav__orb（球抬升靠 ::before，
+       幾何綁在「自己這一格」而非 DOM 序，見 styles.mobile-tokens.css）。四格時中央
+       落在兩格交界，球看起來偏右；三格才真的置中。 */
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
     padding: 6px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
     border-top: 1px solid var(--border-soft);
     background: color-mix(in srgb, var(--popover) 90%, transparent);
