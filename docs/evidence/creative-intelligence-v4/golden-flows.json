@@ -1,0 +1,27 @@
+[
+  {
+    "flow": "A",
+    "ok": true,
+    "detail": "directions=3/3 currentAfterGenerate=null(未被移動) adopted=set afterReload=same versions=3 adoptBtns=3"
+  },
+  {
+    "flow": "B",
+    "ok": true,
+    "detail": "switched=true leakedDraft=false A鏡輸入框已卸載=true B鏡生成數=1(應為1) A鏡生成數=0(應為0，A 的草稿沒被拿去花錢) B顯示=\"安倢點起一炷香\""
+  },
+  {
+    "flow": "C",
+    "ok": true,
+    "detail": "humanPick 保留=true 晚到的結果仍存在為候選=true"
+  },
+  {
+    "flow": "D",
+    "ok": true,
+    "detail": "核准後 preserveScenePointer=true 完成後 current 未動=true 明確 Adopt 生效=true"
+  },
+  {
+    "flow": "E",
+    "ok": true,
+    "detail": "分頁列可觸及=true(tray z=43, bar z=44) modal在最上層=true(scrim z=50) Compare未被面板蓋=true 關閉鍵=44x44 關閉後無殘留=true 無橫向溢出=true"
+  }
+]

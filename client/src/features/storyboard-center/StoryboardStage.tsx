@@ -173,6 +173,14 @@ export function StoryboardStage({
       </div>
       {studioShot && (
         <SceneStudio
+          /*
+           * key 綁 shot id：沒有它，用 ShotNavigator 換到下一鏡時 React 會**原地重用**
+           * 同一個 SceneStudio 實例，於是這一鏡的變體冪等鍵、草稿、批次狀態全部跟著
+           * 跑到下一鏡——按下「產生方向」會撞回上一鏡的那批生成（同一把鍵），
+           * 使用者以為在替第 4 鏡出圖，實際拿回第 3 鏡的結果。
+           * SceneList 那支早就有這個 key，分鏡中心這支漏了。
+           */
+          key={studioShot.id}
           sceneId={studioShot.id}
           projectId={projectId}
           sceneNumber={shotNumber.get(studioShot.id) ?? 1}

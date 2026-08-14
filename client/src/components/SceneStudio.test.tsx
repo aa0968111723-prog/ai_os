@@ -3,6 +3,7 @@
  * 隔離 trpc mock，不掛 ProjectPage。重點在「花錢的鈕何時可按」與「檢視者唯讀」，
  * 這兩件事錯了就是扣了點或越權，畫面看不出來。
  */
+import { readFileSync } from "node:fs";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -226,16 +227,42 @@ describe("SceneStudio", () => {
     expect(regenMutate.mock.calls[0]![0]).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
   });
 
-  it("Generate Variants 送出三個不同冪等鍵與同一鏡完整 context", async () => {
+  it("產生方向：每個 slot 一把冪等鍵＋一個真的不同的方向", async () => {
     const user = userEvent.setup();
     mountStudio();
     await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
-    await user.click(screen.getByRole("button", { name: /產生 3 個變體/ }));
-    await user.click(screen.getByRole("button", { name: "確認產生 3 個變體" }));
-    const arg = variantsMutate.mock.calls[0]![0] as { sceneId: string; prompt: string; clientRequestIds: string[] };
-    expect(arg).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
-    expect(arg.clientRequestIds).toHaveLength(3);
-    expect(new Set(arg.clientRequestIds).size).toBe(3);
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const arg = variantsMutate.mock.calls[0]![0] as {
+      sceneId: string;
+      batchId: string;
+      variants: Array<{ clientRequestId: string; direction?: { id: string; label: string; keep?: string[] } }>;
+    };
+    expect(arg).toMatchObject({ sceneId: "s-1" });
+    expect(arg.variants).toHaveLength(3);
+    // 每個 slot 各自的計費／冪等收據
+    expect(new Set(arg.variants.map((v) => v.clientRequestId)).size).toBe(3);
+    // 一批共用一個分組鍵：reload 之後靠它把這批湊回來（不靠前端記憶）
+    expect(arg.batchId).toMatch(/^[0-9a-f-]{36}$/i);
+    // 三個真的不同的方向，不是同一 prompt ×3
+    const labels = arg.variants.map((v) => v.direction?.label);
+    expect(new Set(labels).size).toBe(3);
+    // Reference Lock：每個方向都宣告保持角色／造型／場景／Style
+    for (const variant of arg.variants) {
+      expect(variant.direction?.keep).toEqual(expect.arrayContaining(["character", "look", "scene", "style"]));
+    }
+  });
+
+  it("方向卡可以取消勾選，估點跟著實際要送的方向數走", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    const cards = screen.getAllByRole("button", { pressed: true });
+    await user.click(cards[0]!); // 取消其中一個方向
+    await user.click(screen.getByRole("button", { name: /產生 2 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 2 個方向" }));
+    const arg = variantsMutate.mock.calls[0]![0] as { variants: unknown[] };
+    expect(arg.variants).toHaveLength(2);
   });
 
   it("提示詞改了還沒存：提醒先存，重畫才會用新的", async () => {
@@ -284,7 +311,20 @@ describe("SceneStudio", () => {
     expect(within(items[0]!).getByText("畫面第 2 版")).toBeInTheDocument();
     expect(within(items[0]!).queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
     await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
+    /*
+     * 單格工作室是「人正看著這一鏡」的地方，所以兩個旗標都帶：
+     *  - acknowledgeApproved：已通過的鏡在這裡換得掉畫面（伺服器會把審核狀態退回「需要修改」）；
+     *  - syncShotDirection：若這一版是某個方向跑出來的，把該方向的鏡頭語言還原回本鏡，
+     *    並由 UI 明白列出同步了什麼。
+     * 分鏡中心的批次套用兩個都不帶——所以它換不動已通過的鏡，也不會用一張圖的
+     * 凍結設定覆寫 N 鏡的鏡頭語言。
+     */
+    expect(setCurrentMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      assetId: "asset-g1",
+      acknowledgeApproved: true,
+      syncShotDirection: true,
+    });
   });
 
   it("用 real sceneVersions 並排比較，Adopt 更新既有 current pointer 且不刪其他版本", async () => {
@@ -311,9 +351,43 @@ describe("SceneStudio", () => {
     const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
     expect(within(compare).getByText("V1")).toBeInTheDocument();
     expect(within(compare).getByText("V2")).toBeInTheDocument();
-    await user.click(within(compare).getByRole("button", { name: /Adopt V1/ }));
-    expect(setCurrentMutate).toHaveBeenCalledWith({ sceneId: "s-1", assetId: "asset-g1" });
+    await user.click(within(compare).getByRole("button", { name: /採用 V1/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith({
+      sceneId: "s-1",
+      assetId: "asset-g1",
+      acknowledgeApproved: true,
+      syncShotDirection: true,
+    });
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("Compare 快速切換：同位置換圖，一次只掛一個媒體元素", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [
+          genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+          genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z" }),
+        ],
+        currentAssetId: "asset-g2",
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const toggles = screen.getAllByRole("checkbox", { name: /加入比較/ });
+    await user.click(toggles[0]!);
+    await user.click(toggles[1]!);
+    await user.click(screen.getByRole("button", { name: /比較 2/ }));
+
+    const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
+    await user.click(within(compare).getByRole("tab", { name: "快速切換" }));
+    // 兩個版本兩顆切換鍵，但舞台上只有一張圖——三段影片同時掛在手機上會直接吃掉記憶體
+    const switches = within(compare).getAllByRole("tab", { name: /V[12]/ });
+    expect(switches).toHaveLength(2);
+    expect(compare.querySelectorAll(".scene-compare-ab__stage img, .scene-compare-ab__stage video")).toHaveLength(1);
   });
 
   it("「以這版為底圖」會跳回修正頁並換掉底圖", async () => {
@@ -693,5 +767,219 @@ describe("影片時間碼留言（tMs；驗收 J）", () => {
     await user.click(screen.getByRole("tab", { name: /版本/ }));
     const discuss = screen.getAllByTestId("discuss-version");
     expect(discuss.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #725 P0-1 的可執行回歸測試（跨鏡狀態外洩）。
+ *
+ * 原始 finding：`StoryboardStage` 在固定位置渲染 `<SceneStudio>` 且沒有 `key`，
+ * 而 `ShotNavigator` 是**就地換 sceneId**。同型別、同位置、無 key ⇒ React 保留全部
+ * component state，造成三件事：寫錯鏡、對錯鏡花錢、假成功（顯示生成中但什麼都沒送）。
+ *
+ * 這一組刻意用**真的重新渲染**來證明隔離，而不是 grep 原始碼有沒有 `key=`：
+ * 以 `key={sceneId}` 掛載（＝正式呼叫端的做法）之後換鏡，逐一斷言 red team 點名的
+ * 五個外洩向量都不成立。
+ */
+describe("#725 P0-1 跨鏡狀態隔離（換鏡後不得沿用上一鏡的任何狀態）", () => {
+  /** 每一鏡有自己的伺服器資料，才分得出「顯示的是 B 的值」還是「殘留 A 的草稿」 */
+  function dataFor(sceneId: string) {
+    return {
+      ...serverData({ rows: [genRow({ generationId: `${sceneId}-g1`, createdAt: "2026-07-01T00:00:00.000Z" })] }),
+      sceneId,
+      prompt: sceneId === "s-A" ? "A 鏡的提示詞" : "B 鏡的提示詞",
+    };
+  }
+
+  /** 正式呼叫端（StoryboardStage / SceneList）都是 key={shot.id}；這裡照同樣方式掛 */
+  function renderKeyed(sceneId: string) {
+    return (
+      <SceneStudio
+        key={sceneId}
+        sceneId={sceneId}
+        projectId="p-1"
+        sceneNumber={sceneId === "s-A" ? 1 : 2}
+        canEdit
+        onClose={vi.fn()}
+        onChanged={vi.fn()}
+      />
+    );
+  }
+
+  it("A 鏡的未存草稿不會出現在 B 鏡（寫錯鏡）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    const box = screen.getByRole("textbox", { name: /這一格的提示詞/ });
+    await user.clear(box);
+    await user.type(box, "只屬於 A 鏡的草稿");
+    expect(screen.getByRole("textbox", { name: /這一格的提示詞/ })).toHaveValue("只屬於 A 鏡的草稿");
+
+    // ShotNavigator 換鏡
+    view.rerender(renderKeyed("s-B"));
+
+    // B 鏡顯示的必須是 B 自己的伺服器值，不是 A 的草稿
+    expect(screen.getByRole("textbox", { name: /這一格的提示詞/ })).toHaveValue("B 鏡的提示詞");
+    expect(screen.queryByDisplayValue("只屬於 A 鏡的草稿")).not.toBeInTheDocument();
+  });
+
+  it("在 B 鏡送出的生成帶的是 B 的 sceneId 與 B 的提示詞（對錯鏡花錢）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    const box = screen.getByRole("textbox", { name: /這一格的提示詞/ });
+    await user.clear(box);
+    await user.type(box, "只屬於 A 鏡的草稿");
+
+    view.rerender(renderKeyed("s-B"));
+
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+
+    const arg = regenMutate.mock.calls[0]![0] as { sceneId: string; prompt: string };
+    expect(arg.sceneId).toBe("s-B");
+    expect(arg.prompt).toBe("B 鏡的提示詞");
+    expect(arg.prompt).not.toContain("A 鏡");
+  });
+
+  it("B 鏡的變體用的是全新的冪等鍵與 batchId（假成功：重送 A 的 UUID）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: dataFor(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const aCall = variantsMutate.mock.calls[0]![0] as {
+      sceneId: string; batchId: string; variants: Array<{ clientRequestId: string }>;
+    };
+
+    view.rerender(renderKeyed("s-B"));
+
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /產生 3 個方向/ }));
+    await user.click(screen.getByRole("button", { name: "確認產生 3 個方向" }));
+    const bCall = variantsMutate.mock.calls[1]![0] as {
+      sceneId: string; batchId: string; variants: Array<{ clientRequestId: string }>;
+    };
+
+    expect(bCall.sceneId).toBe("s-B");
+    // batchId 不得沿用——否則 B 的版本會被歸進 A 的批次
+    expect(bCall.batchId).not.toBe(aCall.batchId);
+    // 冪等鍵不得沿用——否則伺服器冪等短路會回 A 的既有列並回報 ok，UI 顯示「生成中」但 B 什麼都沒送
+    const aKeys = new Set(aCall.variants.map((v) => v.clientRequestId));
+    for (const variant of bCall.variants) {
+      expect(aKeys.has(variant.clientRequestId)).toBe(false);
+    }
+  });
+
+  it("A 鏡的批次狀態不會出現在 B 鏡（殘留 candidate state ／ 假的生成中）", async () => {
+    const user = userEvent.setup();
+    // A 鏡有一批帶方向 meta 的變體（＝畫面會顯示批次狀態列）
+    const withBatch = (sceneId: string) => {
+      const base = dataFor(sceneId);
+      if (sceneId !== "s-A") return base;
+      const rows = [
+        genRow({
+          generationId: "A-v1", createdAt: "2026-07-02T00:00:00.000Z", status: "running",
+          assetId: null, assetUrl: null, assetKind: null,
+        }),
+      ];
+      const versions = buildSceneVersions(rows, { assetId: null, narrationAssetId: null, ambienceAssetId: null })
+        .map((v) => ({ ...v, creative: { batchId: "batch-A", directionId: "closer", directionLabel: "更靠近人物", batchSize: 3 } }));
+      return { ...base, versions, summary: { ...base.summary, generating: true } };
+    };
+    versionsQuery.mockImplementation((input: { sceneId: string }) => ({
+      data: withBatch(input.sceneId), isLoading: false, isError: false, refetch: vi.fn(),
+    }));
+
+    const view = render(renderKeyed("s-A"));
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    expect(screen.getByText(/方向生成中/)).toBeInTheDocument();
+    expect(screen.getByText("更靠近人物")).toBeInTheDocument();
+
+    view.rerender(renderKeyed("s-B"));
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+
+    // B 鏡沒有任何批次 ⇒ 不得顯示 A 的批次狀態或方向標籤
+    expect(screen.queryByText(/方向生成中/)).not.toBeInTheDocument();
+    expect(screen.queryByText("更靠近人物")).not.toBeInTheDocument();
+  });
+});
+
+
+/**
+ * CodeRabbit 覆核（HEAD 973a9d00）唯一的 Major：舞台工具列的「用這一版」繞過了
+ * `setCurrentVersion`，少帶 `syncShotDirection`。
+ *
+ * 同一個使用者動作（採用某一版畫面）在站內有三個入口：舞台工具列、版本清單、Compare。
+ * 三者必須送出同一組旗標，否則「從舞台採用某個方向的版本」會把畫面換掉、
+ * 鏡頭語言卻留在舊值，而且拿不到 adoptedDirection ⇒ UI 不會告訴使用者同步了什麼。
+ */
+describe("採用畫面的三個入口必須送出同一組旗標", () => {
+  const EXPECTED = { sceneId: "s-1", assetId: "asset-g1", acknowledgeApproved: true, syncShotDirection: true };
+
+  /** 兩版：g1（舊）與 g2（現用）。舞台先切到 g1 才會出現「用這一版」 */
+  function twoVersions() {
+    return serverData({
+      rows: [
+        genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+        genRow({ generationId: "g2", createdAt: "2026-07-02T00:00:00.000Z" }),
+      ],
+      currentAssetId: "asset-g2",
+    });
+  }
+
+  beforeEach(() => {
+    versionsQuery.mockReturnValue({ data: twoVersions(), isLoading: false, isError: false, refetch: vi.fn() });
+  });
+
+  it("舞台工具列的「用這一版」帶 syncShotDirection（原本漏掉）", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    // 先在版本頁把舞台預覽切到非現用的那一版，工具列才會出現「用這一版」
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    await user.click(screen.getByRole("button", { name: "預覽畫面第 1 版" }));
+    await user.click(screen.getByRole("button", { name: /用這一版/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("版本清單的「設為現用」帶同一組旗標", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const items = screen.getAllByRole("listitem");
+    await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("Compare 的「採用」帶同一組旗標", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /版本/ }));
+    const toggles = screen.getAllByRole("checkbox", { name: /加入比較/ });
+    await user.click(toggles[0]!);
+    await user.click(toggles[1]!);
+    await user.click(screen.getByRole("button", { name: /比較 2/ }));
+    const compare = screen.getByRole("dialog", { name: /第 3 鏡版本比較/ });
+    await user.click(within(compare).getByRole("button", { name: /採用 V1/ }));
+    expect(setCurrentMutate).toHaveBeenCalledWith(EXPECTED);
+  });
+
+  it("原始碼層：採用畫面只有一個出口（setCurrentVersion），沒有第二處直接 mutate", () => {
+    // 這一條刻意是結構斷言——它擋的是「有人又在別的地方直接呼叫 setCurrent.mutate」，
+    // 那是新增第二個出口，不是行為變化。行為由上面三項覆蓋。
+    // jsdom 環境的 import.meta.url 不是 file: URL，用 cwd 相對路徑（與站內其他契約測試同做法）
+    const source = readFileSync("client/src/components/SceneStudio.tsx", "utf8");
+    expect(source.match(/setCurrent\.mutate\(/g) ?? []).toHaveLength(1);
   });
 });

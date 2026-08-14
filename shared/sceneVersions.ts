@@ -49,6 +49,25 @@ export interface SceneVersionGenerationRow {
   assetId: string | null;
   assetUrl: string | null;
   assetKind: string | null;
+  /** Creative Direction v4：這一版是哪個方向、屬於哪一批、從哪一版延伸（null＝不是方向變體） */
+  creative?: SceneVersionCreative | null;
+}
+
+/**
+ * 方向與血緣投影（v4）。
+ *
+ * 值來自 `generations.params.__aiosSourceMeta.creative`——與版本清單同一筆生成紀錄，
+ * 不是第二份真相。這也是「partial failure reload 後仍然一致」的關鍵：
+ * 一批變體的身分（batchId）落在 DB 裡，不在 React state 裡。
+ */
+export interface SceneVersionCreative {
+  batchId: string;
+  directionId: string;
+  directionLabel: string;
+  keep?: string[];
+  /** 使用者是從哪一版按下「再用這版變體」的——V2 →（變體）→ V5 的那條線 */
+  parentAssetId?: string;
+  batchSize?: number;
 }
 
 /** 現用指標（scenes 表的兩個欄位）＋它們指到的素材 */
@@ -91,6 +110,14 @@ export interface SceneVersion {
   canRefineFrom: boolean;
   /** 可否把這一版的提示詞抄回這一格 */
   canReusePrompt: boolean;
+  /** 方向與血緣（null＝一般生成／外部帶入，不是方向變體） */
+  creative: SceneVersionCreative | null;
+  /**
+   * 血緣：這一版延伸自第幾版（null＝沒有可解析的來源）。
+   * 由 parentAssetId 對回同一份版本清單算出來，所以「V5 是從 V2 延伸」在 UI 上
+   * 講的是使用者看得到的版次，而不是一串 uuid。
+   */
+  parentIndex: number | null;
 }
 
 /** 生成狀態 → 版本狀態（現用與否由指標決定，另外覆寫） */
@@ -163,6 +190,8 @@ export function buildSceneVersions(
       canSetCurrent: !!row.assetId && !isCurrent && row.status === "done",
       canRefineFrom: !!row.assetId && row.assetKind === "image",
       canReusePrompt: row.prompt.trim() !== "",
+      creative: row.creative ?? null,
+      parentIndex: null, // 版次還沒編，血緣在下方編號完成後回填
     });
   }
 
@@ -196,6 +225,8 @@ export function buildSceneVersions(
       canSetCurrent: !isCurrent,
       canRefineFrom: ext.assetKind === "image",
       canReusePrompt: false,
+      creative: null,
+      parentIndex: null,
     });
   }
 
@@ -208,9 +239,88 @@ export function buildSceneVersions(
     indexByKey.set(d.key, counters[d.role]);
   }
 
+  // 血緣：parentAssetId → 那一版的版次。編號完成後才算得出來，所以放在這裡而不是建 draft 時。
+  const indexByAssetId = new Map<string, number>();
+  for (const draft of ascendingAll) {
+    if (draft.assetId) indexByAssetId.set(draft.assetId, indexByKey.get(draft.key) ?? 0);
+  }
+
   return ascendingAll
     .reverse()
-    .map(({ key, ...rest }) => ({ ...rest, index: indexByKey.get(key) ?? 0 }));
+    .map(({ key, ...rest }) => ({
+      ...rest,
+      index: indexByKey.get(key) ?? 0,
+      parentIndex: rest.creative?.parentAssetId ? indexByAssetId.get(rest.creative.parentAssetId) ?? null : null,
+    }));
+}
+
+/**
+ * 一批方向變體的狀態——**完全由持久化的版本清單推導**。
+ *
+ * 這支存在的理由是 v3 的實際缺口：批次身分只活在 React state 裡，重新整理就沒了，
+ * 於是「A 成功／B 失敗／C 等待核准」這件事在 reload 之後講不出來。batchId 現在
+ * 落在 `generations.params` 內，所以同一批在任何一次查詢都湊得回來，
+ * 不需要第二個 candidate 資料表，也不需要前端記憶。
+ */
+export interface VisualVariantBatch {
+  batchId: string;
+  /** 送出時就寫進 meta 的預期數量；用來算「還缺幾個」 */
+  requested: number;
+  versions: SceneVersion[];
+  successes: SceneVersion[];
+  failed: SceneVersion[];
+  generating: SceneVersion[];
+  awaitingApproval: SceneVersion[];
+  /** 送出當下就失敗、連生成列都沒建起來的 slot 數（requested − 實際落庫數） */
+  missing: number;
+  settled: boolean;
+  actualPoints: number;
+  /** 可並排比較的候選（最多 3 個，與 Compare 上限同口徑） */
+  compareAssetIds: string[];
+  createdAt: string;
+}
+
+/** 把版本清單分群成「批」；新到舊。沒有方向 meta 的版本不屬於任何一批。 */
+export function groupVisualVariantBatches(versions: readonly SceneVersion[]): VisualVariantBatch[] {
+  const byBatch = new Map<string, SceneVersion[]>();
+  for (const version of versions) {
+    if (version.role !== "visual" || !version.creative) continue;
+    const rows = byBatch.get(version.creative.batchId);
+    if (rows) rows.push(version);
+    else byBatch.set(version.creative.batchId, [version]);
+  }
+
+  const batches: VisualVariantBatch[] = [];
+  for (const [batchId, rows] of byBatch) {
+    const successes = rows.filter((row) => !!row.assetId && row.state !== "failed");
+    const failed = rows.filter((row) => row.state === "failed");
+    const generating = rows.filter((row) => row.state === "generating");
+    const awaitingApproval = rows.filter((row) => row.state === "awaiting_approval");
+    /*
+     * 分母以「送出當下的方向數」為準，不是「這一批有幾列」。
+     *
+     * 重試會用同一個 batchId 再落一列（方向相同），所以拿 rows.length 當分母會讓
+     * 一批 3 個方向變成 `成功 2/4`，而且同一個方向在清單裡出現兩次。
+     * 舊資料沒有 batchSize 時退回「不同方向的數量」，仍然比 rows.length 準。
+     */
+    const distinctDirections = new Set(rows.map((row) => row.creative?.directionId ?? row.generationId)).size;
+    const requested = rows[0]?.creative?.batchSize ?? distinctDirections;
+    batches.push({
+      batchId,
+      requested,
+      versions: rows,
+      successes,
+      failed,
+      generating,
+      awaitingApproval,
+      missing: Math.max(0, requested - rows.length),
+      settled: generating.length === 0 && awaitingApproval.length === 0,
+      actualPoints: rows.reduce((sum, row) => sum + row.points, 0),
+      compareAssetIds: successes.map((row) => row.assetId!).slice(0, 3),
+      createdAt: rows.reduce((latest, row) => (row.createdAt > latest ? row.createdAt : latest), rows[0]!.createdAt),
+    });
+  }
+  return batches.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
 export interface SceneVersionSummary {
