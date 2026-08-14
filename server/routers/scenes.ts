@@ -1394,6 +1394,12 @@ export const scenesRouter = router({
       const model = getModel(input.modelId);
       const modelRejection = regenRejection(model);
       if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
+      /*
+       * 單飛守衛（#725 P1-6）：generateVariants 原本是唯一略過這道檢查的畫面生成入口。
+       * 前端的 regenBlocked 只擋得住同一個分頁——重新整理、開第二個分頁、或直接呼叫，
+       * 都能對同一鏡再送一整批要付費的工作。與 generateInto／refine 同一道閘。
+       */
+      await assertNoPendingVisual(scene.id);
       const cards = resolveSceneCards(scene, {
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
@@ -1558,6 +1564,9 @@ export const scenesRouter = router({
         characterIds: cards.characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
+        // 本鏡造型（#725 P1-8）：generateInto 與 generateVariants 都有帶，refine 漏了——
+        // 於是每一次「以這版修正」都丟失造型錨點，改出來的圖會換掉衣服。
+        lookIds: scene.lookIds ?? undefined,
         reasonPrefix: "分鏡修圖",
       });
       return { generationId: gen.id };

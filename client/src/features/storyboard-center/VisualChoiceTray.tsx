@@ -68,6 +68,31 @@ const STATE_TO_INSPECTOR: Record<CreativeStateFamily, InspectorFamily> = {
   style: "style",
 };
 
+/**
+ * 逐鏡套用（#725 P1-9）。
+ *
+ * 原本是 `Promise.all`：任何一鏡衝突就整組 reject，**但已經提交的寫入仍然成立**——
+ * 於是使用者看到「套用失敗」，實際上有幾鏡已經改了，畫面卻還顯示舊值與過期的 rev，
+ * 之後每一次重試都會再失敗。改成 allSettled：全部都跑完，回報成功／衝突筆數，
+ * 呼叫端無論如何都會重新抓一次。
+ */
+async function applyPerShot<T>(
+  rows: readonly T[],
+  fn: (row: T) => Promise<"applied" | "skipped" | "incompatible">,
+): Promise<{ applied: number; incompatible: number; failed: string[] }> {
+  const settled = await Promise.allSettled(rows.map((row) => fn(row)));
+  let applied = 0;
+  let incompatible = 0;
+  const failed: string[] = [];
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      failed.push(result.reason instanceof Error ? result.reason.message : "套用失敗");
+    } else if (result.value === "applied") applied += 1;
+    else if (result.value === "incompatible") incompatible += 1;
+  }
+  return { applied, incompatible, failed };
+}
+
 export function VisualChoiceTray({
   projectId,
   canEdit,
@@ -232,6 +257,8 @@ export function VisualChoiceTray({
     try {
       let applied = 0;
       let incompatible = 0;
+      /** 逐鏡失敗（多半是夥伴剛改過、rev 衝突）；不再讓一鏡失敗把整批講成失敗 */
+      let conflicts: string[] = [];
       if (pending.source === "preset" && pending.preset.family === "style") {
         /*
          * selectWorldviewStyle 是**切換**語意：再點一次目前的主風格會清空。
@@ -252,7 +279,7 @@ export function VisualChoiceTray({
         }
         await utils.projects.get.invalidate({ id: projectId });
       } else if (pending.source === "preset") {
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const patch = mapPresetToShotPatch(pending.preset, {
             camera: shot.camera,
             performance: shot.performance,
@@ -270,32 +297,43 @@ export function VisualChoiceTray({
               ...(patch.action !== undefined ? { action: shot.action } : {}),
             },
           });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else if (pending.family === "asset") {
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const change = projectChoiceChange({ shot, choice: pending });
-          if (!change.changed) return;
+          if (!change.changed) return "skipped";
+          // 批次套用刻意不帶 acknowledgeApproved／syncShotDirection：
+          // 已通過的鏡換不動畫面，也不會用一張圖的凍結設定覆寫 N 鏡的鏡頭語言。
           await setVisual.mutateAsync({ sceneId: shot.id, assetId: String(change.value) });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else if (pending.family === "look") {
         const choice: ProjectChoice = pending;
         const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const change = projectChoiceChange({ shot, choice, lookOwnerById, removeEverywhere: remove });
-          if (!change.compatible) { incompatible += 1; return; }
-          if (!change.changed) return;
+          if (!change.compatible) return "incompatible";
+          if (!change.changed) return "skipped";
           await update.mutateAsync({ sceneId: shot.id, lookIds: change.value as string[], expectedRev: shot.rev, baseline: { lookIds: shot.lookIds } });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       } else {
         const choice: ProjectChoice = pending;
         const remove = editable.length > 0 && editable.every((shot) => choicePresent(shot, choice));
-        await Promise.all(editable.map(async (shot) => {
+        const outcome = await applyPerShot(editable, async (shot) => {
           const change = projectChoiceChange({ shot, choice, removeEverywhere: remove });
-          if (!change.compatible) { incompatible += 1; return; }
-          if (!change.changed) return;
+          if (!change.compatible) return "incompatible";
+          if (!change.changed) return "skipped";
           const field = change.field as "characterIds" | "scenePresetIds" | "propIds";
           await setCards.mutateAsync({
             sceneId: shot.id,
@@ -303,8 +341,11 @@ export function VisualChoiceTray({
             expectedRev: shot.rev,
             baseline: { [field]: shot[field] },
           });
-          applied += 1;
-        }));
+          return "applied";
+        });
+        applied = outcome.applied;
+        incompatible = outcome.incompatible;
+        conflicts = outcome.failed;
       }
       await utils.scenes.listByProject.invalidate({ projectId });
       const messages = [
@@ -318,6 +359,8 @@ export function VisualChoiceTray({
       ];
       if (targets.length - editable.length > 0) messages.push(`${targets.length - editable.length} 鏡已通過，未修改`);
       if (incompatible > 0) messages.push(`${incompatible} 鏡已達上限，或 Look 所屬角色不在鏡中`);
+      // 部分失敗如實講出來：成功的那幾鏡是真的寫進去了，不能一概說「套用失敗」
+      if (conflicts.length > 0) messages.push(`${conflicts.length} 鏡沒改成（夥伴剛動過，已重新讀取）：${conflicts[0]}`);
       setStatus(messages.join("・"));
       setPending(null);
     } catch (error) {
