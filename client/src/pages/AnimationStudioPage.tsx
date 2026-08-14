@@ -53,7 +53,7 @@ export function AnimationStudioPage({ groupId, projectId }: { groupId: string; p
   return (
     <div className="page-shell secondary-page">
       <SecondaryPageHeader
-        eyebrow="動畫創作室"
+        eyebrow="進階工具・動畫創作室"
         title="先挑一個專案開工"
         icon="Brush"
         badge="手繪白板 × 分鏡表"

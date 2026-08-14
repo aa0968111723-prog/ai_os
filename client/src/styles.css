@@ -2672,6 +2672,20 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   color: var(--primary-ink); border-color: var(--primary-border);
   background: var(--primary-tint);
 }
+.topbar-overflow { position: relative; }
+.topbar-overflow > summary { list-style: none; cursor: pointer; }
+.topbar-overflow > summary::-webkit-details-marker { display: none; }
+.topbar-overflow > summary.topbar-nav-link {
+  padding: 6px 14px; border: 1px solid var(--border); background: var(--card);
+  border-radius: 999px; font-size: 13px; box-shadow: var(--e1);
+}
+.topbar-overflow__menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
+  min-width: 200px; padding: 6px; border-radius: 12px;
+  border: 1px solid var(--border-soft); background: var(--popover);
+  box-shadow: var(--e3);
+}
+.topbar-overflow__menu .menu-item { min-height: 44px; }
 
 .mobile-nav { display: none; }
 
@@ -5223,6 +5237,18 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   margin-top: 30px;
   scroll-margin-top: 116px;
 }
+.help-center-tabs {
+  display: flex; gap: 8px; margin: 0 0 16px; flex-wrap: wrap;
+}
+.help-center-tabs [role="tab"] {
+  min-height: 44px; padding: 8px 16px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card); color: var(--fg);
+  font: inherit; font-weight: 650; cursor: pointer;
+}
+.help-center-tabs [role="tab"].is-selected {
+  color: var(--primary-ink); border-color: var(--primary-border); background: var(--primary-tint);
+}
+.help-models-embed { margin-top: 8px; }
 .support-topic-nav {
   position: sticky;
   z-index: 16;
@@ -7527,6 +7553,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   gap: 6px;
   padding: 8px 14px;
   border-radius: 999px;
+  text-decoration: none;
   background: var(--ai-glass);
   -webkit-backdrop-filter: blur(10px);
           backdrop-filter: blur(10px);
@@ -9535,6 +9562,11 @@ body.story-immersive { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.hub-knowledge-map,
+.hub-downloads-card {
+  scroll-margin-top: 96px;
+  margin-top: 20px;
 }
 
 @media (max-width: 640px) {

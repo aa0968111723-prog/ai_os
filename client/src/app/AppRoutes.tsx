@@ -113,7 +113,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/settings"><SettingsPage /></Route>
       <Route path="/my-reports"><MyReportsPage /></Route>
       <Route path="/models"><ModelsPage groupId={activeGroupId} /></Route>
-      <Route path="/help"><HelpPage /></Route>
+      <Route path="/help"><HelpPage groupId={activeGroupId} /></Route>
       <Route path="/mcp"><McpHubPage /></Route>
       <Route path="/integrations"><IntegrationsPage /></Route>
       <Route path="/downloads"><DownloadsPage /></Route>

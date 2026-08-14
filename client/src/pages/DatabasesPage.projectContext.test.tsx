@@ -83,6 +83,9 @@ vi.mock("../components/DatabaseDetailTabs", () => ({
 vi.mock("../components/DataHubOverview", () => ({
   DataHubOverview: () => null,
 }));
+vi.mock("../components/DataHubRelatedDestinations", () => ({
+  DataHubRelatedDestinations: () => null,
+}));
 vi.mock("../components/AddDataSheet", () => ({
   AddDataSheet: () => null,
   pendingAddDataMethod: () => null,

@@ -99,10 +99,11 @@ export const DESTINATIONS: Record<DestinationKey, Destination> = {
   },
   help: {
     key: "help",
-    label: "怎麼用",
-    description: "白話說明與常見問題",
+    label: "說明中心",
+    description: "白話說明、常見問題與模型指南",
     href: "/help",
     icon: "HelpCircle",
+    match: ["/help", "/models"],
   },
   models: {
     key: "models",
@@ -184,9 +185,14 @@ export const topbarNavItems: NavigationItem[] = [
   fromDestination("dashboard", "topbar"),
   fromDestination("planner", "topbar"),
   fromDestination("databases", "topbar"),
+  fromDestination("help", "topbar"),
+];
+
+/** 桌機頂欄「進階」溢位：創作室／靈感／下載不再當全站一級，但仍一鍵可達。 */
+export const topbarOverflowItems: NavigationItem[] = [
   fromDestination("studio", "topbar"),
   fromDestination("community", "topbar"),
-  fromDestination("help", "topbar"),
+  fromDestination("downloads", "topbar"),
 ];
 
 /**
@@ -200,8 +206,7 @@ export const topbarNavItems: NavigationItem[] = [
  * - dashboard → 底欄「今日」
  * - /dashboard#projects、/p/:id → 底欄「專案」
  * - Global Assistant → 底欄中央 AI 助手（不是 route）
- * - databases / chat → More 第一層
- * - help / models → More「說明中心」
+ * - databases / chat / help（說明中心，含 /models）→ More 第一層
  * - planner / studio / community / integrations / mcp / downloads → More「進階工具」
  */
 export const MOBILE_PRIMARY_NAV = ["today", "projects", "assistant", "more"] as const;
@@ -216,7 +221,7 @@ export const MOBILE_PRIMARY_NAV = ["today", "projects", "assistant", "more"] as 
  * planner 改由今天頁摘要＋進階工具進入；mcp／integrations 依規格回到進階工具
  * （路由與深連結本來就在，只是入口歸位）。
  */
-export type MobileMoreFolderId = "help" | "tools";
+export type MobileMoreFolderId = "tools";
 
 export type MobileMoreRootItem =
   | { kind: "link"; key: DestinationKey }
@@ -232,14 +237,7 @@ export type MobileMoreRootItem =
 export const mobileMoreRoot: MobileMoreRootItem[] = [
   { kind: "link", key: "databases" },
   { kind: "link", key: "chat" },
-  {
-    kind: "folder",
-    id: "help",
-    label: "說明中心",
-    description: "白話說明、常見問題與模型指南",
-    icon: "HelpCircle",
-    keys: ["help", "models"],
-  },
+  { kind: "link", key: "help" },
   {
     kind: "folder",
     id: "tools",

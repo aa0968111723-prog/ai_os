@@ -10,7 +10,8 @@
  * 動作只有一份實作，不會兩邊行為分岔。
  */
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { registerAssistantPage } from "../lib/assistantContext";
 import { inspirationTagLabel } from "@shared/inspirationTaxonomy";
 import { trpc } from "../api";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
@@ -71,6 +72,7 @@ export function CommunityPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [reusedId, setReusedId] = useState<string | null>(null);
+  useEffect(() => registerAssistantPage({ pageType: "community" }), []);
 
   const mediaKind = mediaFilter === "all" ? undefined : mediaFilter;
 
@@ -190,13 +192,13 @@ export function CommunityPage() {
   return (
     <div data-fb="靈感頻道" style={{ maxWidth: 1120, margin: "0 auto", padding: "0 12px 48px" }}>
       <SecondaryPageHeader
-        eyebrow="全站共用"
+        eyebrow="AI 助手／提示詞"
         title="靈感頻道"
         icon="Sparkles"
         description={
           <>
             別人發布的提示詞、生成結果與設定卡——可偷看完整 prompt、一鍵帶入你的專案生成台。
-            上傳的素材會自動細化分類，別人靠分類就找得到你的作品。
+            也可從<Link href="/dashboard">AI 助手</Link>的靈感入口進來；舊路徑 <code>/community</code> 與 <code>?post=</code> 分享連結仍有效。
           </>
         }
       />

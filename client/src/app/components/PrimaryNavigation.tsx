@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
-import { topbarNavItems } from "../navigation/navigationItems";
+import { destinationMatch, topbarNavItems, topbarOverflowItems } from "../navigation/navigationItems";
 
 /** 頂欄私訊入口：常駐圖示＋未讀數輪詢（30 秒）；0 未讀只顯示入口不顯示數字 */
 function DmNavBadge() {
@@ -17,29 +17,59 @@ function DmNavBadge() {
   );
 }
 
+function isActive(href: string, match: string[] | undefined, location: string): boolean {
+  const prefixes = destinationMatch({ href, match });
+  return prefixes.some((prefix) => location === prefix || (prefix !== "/dashboard" && location.startsWith(prefix)));
+}
+
 /**
- * High-frequency topbar navigation: DM entry + data-driven quick links
- * (筆記排程／資料庫／怎麼用). Special badges (pending / points / account) stay outside.
+ * 桌機高頻頂欄：今日、排程、資料中心、說明中心、私訊。
+ * 創作室／靈感／下載改到「進階」溢位，不再當全站一級。
  */
 export function PrimaryNavigation() {
   const [location] = useLocation();
+  const overflowActive = topbarOverflowItems.some((item) => isActive(item.href, undefined, location));
   return (
     <>
       <DmNavBadge />
-      {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
-       * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
-      {topbarNavItems.map((item) => (
-        <Link
-          key={item.key}
-          href={item.href}
-          className={`badge topbar-nav-link ${location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href)) ? "active" : ""}`}
-          title={item.title}
-          aria-current={location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href)) ? "page" : undefined}
-        >
-          {item.icon && <Icon name={item.icon} size={14} />}
-          <span className={item.key === "help" ? "topbar-help-label" : "topbar-quick-label"}>{item.label}</span>
-        </Link>
-      ))}
+      {topbarNavItems.map((item) => {
+        const active = isActive(item.href, item.key === "help" ? ["/help", "/models"] : undefined, location);
+        return (
+          <Link
+            key={item.key}
+            href={item.href}
+            className={`badge topbar-nav-link ${active ? "active" : ""}`}
+            title={item.title}
+            aria-current={active ? "page" : undefined}
+          >
+            {item.icon && <Icon name={item.icon} size={14} />}
+            <span className={item.key === "help" ? "topbar-help-label" : "topbar-quick-label"}>{item.label}</span>
+          </Link>
+        );
+      })}
+      <details className="topbar-overflow">
+        <summary className={`topbar-nav-link${overflowActive ? " active" : ""}`} aria-label="進階工具">
+          <Icon name="Ellipsis" size={14} />
+          <span className="topbar-quick-label">進階</span>
+        </summary>
+        <div className="topbar-overflow__menu" role="group" aria-label="進階工具">
+          {topbarOverflowItems.map((item) => {
+            const active = isActive(item.href, undefined, location);
+            return (
+              <Link
+                key={item.key}
+                href={item.href}
+                className={`menu-item${active ? " active" : ""}`}
+                title={item.title}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.icon && <Icon name={item.icon} size={15} />}
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      </details>
     </>
   );
 }

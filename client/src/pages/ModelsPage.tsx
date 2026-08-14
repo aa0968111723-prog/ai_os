@@ -139,7 +139,7 @@ const DECISION_MODES: ReadonlyArray<{ id: DecisionMode; label: string; hint: str
   { id: "heatmap", label: "分析熱力圖", hint: "整類攤開,一眼看出誰強在哪一格", icon: "LayoutGrid" },
 ];
 
-export function ModelsPage({ groupId = "" }: { groupId?: string }) {
+export function ModelsPage({ groupId = "", embedded = false }: { groupId?: string; embedded?: boolean }) {
   const categories = trpc.models.categories.useQuery();
   const moneyMeta = trpc.models.moneyMeta.useQuery();
   const contractSummary = trpc.models.contractSummary.useQuery(undefined, {
@@ -308,9 +308,9 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
   const maxCatalogPoints = Math.max(1, ...catalogItems.map((m) => m.points));
 
   return (
-    <div className="page-shell secondary-page models-page" data-fb="模型指南頁">
+    <div className={embedded ? "help-models-embed" : "page-shell secondary-page models-page"} data-fb="模型指南頁" id={embedded ? "help-models" : undefined}>
       <SecondaryPageHeader
-        eyebrow="創作決策"
+        eyebrow={embedded ? "說明中心" : "說明中心・模型指南"}
         title="模型指南"
         icon="Sparkles"
         // 目錄規模是這頁最量化的兩個事實,用全站的統計條(襯線數字)呈現,不是壓成一顆灰色膠囊
@@ -324,6 +324,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
           <>
             不用先懂所有模型。從情境、風格或三題開始挑；挑不定就<strong>拿自己的題目讓它們同題並跑</strong>，或用熱力圖把整類攤開比。
             每顆都標示<strong>底層模型</strong>、實測健康、素材需求與文字塔能力，和創作台／MCP 同一份契約。
+            {!embedded && <> 也可從<Link href="/help#help-models">說明中心</Link>打開同一頁。</>}
             {moneyMeta.data?.fxNote ? (
               <Meta as="span" style={{ display: "block", marginTop: 6 }}>{moneyMeta.data.fxNote}</Meta>
             ) : null}

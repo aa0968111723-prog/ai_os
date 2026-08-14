@@ -1,8 +1,9 @@
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Card, Chip, Hint, Meta } from "../components/ui";
+import { ModelsPage } from "./ModelsPage";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -154,16 +155,45 @@ function H2({ icon, children, id }: { icon: IconName; children: ReactNode; id?: 
   );
 }
 
-export function HelpPage() {
+function helpPanelFromLocation(): "guide" | "models" {
+  if (typeof window === "undefined") return "guide";
+  if (window.location.hash === "#help-models") return "models";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "models" ? "models" : "guide";
+}
+
+export function HelpPage({ groupId = "" }: { groupId?: string }) {
+  const [panel, setPanel] = useState<"guide" | "models">(helpPanelFromLocation);
+  useEffect(() => {
+    const sync = () => setPanel(helpPanelFromLocation());
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  const showGuide = (next: "guide" | "models") => {
+    setPanel(next);
+    const url = next === "models" ? "/help#help-models" : "/help";
+    window.history.replaceState(window.history.state, "", url);
+  };
+
   return (
-    <div className="page-shell secondary-page secondary-page--reading help-page" data-fb="怎麼用頁">
+    <div className="page-shell secondary-page secondary-page--reading help-page" data-fb="說明中心">
       <SecondaryPageHeader
-        eyebrow="快速上手"
+        eyebrow="說明中心"
         title="一頁看懂整個網站"
         icon="HelpCircle"
-        badge="6 步＋進階能力"
-        description={<>從第一份腳本到交付素材的完整路線，加上知識庫、代理、母版系列、素材保全等新能力——卡住就往下找答案。</>}
+        badge="怎麼用＋模型指南"
+        description={<>從第一份腳本到交付素材的完整路線，以及每個模型擅長什麼、要花多少點。舊路徑 <code>/models</code> 仍會打開同一份模型指南。</>}
       />
+      <div className="help-center-tabs" role="tablist" aria-label="說明中心">
+        <button type="button" role="tab" aria-selected={panel === "guide"} className={panel === "guide" ? "is-selected" : ""} onClick={() => showGuide("guide")}>
+          怎麼用
+        </button>
+        <button type="button" role="tab" aria-selected={panel === "models"} className={panel === "models" ? "is-selected" : ""} onClick={() => showGuide("models")}>
+          模型指南
+        </button>
+      </div>
+      {panel === "models" ? <ModelsPage groupId={groupId} embedded /> : null}
+      {panel === "guide" ? <>
       <nav className="support-topic-nav" aria-label="說明主題">
         <a href="#help-route"><Icon name="Clapperboard" size={14} />六步路線</a>
         <a href="#help-map"><Icon name="MousePointer2" size={14} />功能地圖</a>
@@ -236,13 +266,14 @@ export function HelpPage() {
             週會、腳本審稿、待辦排進行事曆，也能寫會議紀錄。標題打 @人 可通知對方；可串 Google 日曆（整合連接）。
             筆記可以夾附件——白板照片、簽到表、講義 PDF 都直接掛在那則紀錄底下。
           </Spot>
-          <Spot icon="Package" name="資料庫" where="電腦頂欄／手機「更多」">
-            你自己的表格與資料集（例：器材借用表、拍攝清單）。可上傳文件、匯入 Google／Notion，給 AI 讀。
+          <Spot icon="Database" name="資料中心" where="電腦頂欄／手機「更多」">
+            文件、素材、資料表與<b>知識地圖</b>都在這裡。知識地圖與筆記排程用同一份關聯圖，不是第二套資料。
+            共用下載也可從這一頁的「共用下載」進去；舊路徑 <code>/downloads</code> 仍可直達。
           </Spot>
           <Spot icon="MessageCircle" name="私訊" where="電腦頂欄／手機「更多」">
             一對一討論；可附圖檔。與專案留言分開——私訊只有雙方看得到。
           </Spot>
-          <Spot icon="Sparkles" name="靈感頻道" where="電腦頂欄／手機「更多・進階工具」">
+          <Spot icon="Sparkles" name="靈感頻道" where="AI 助手靈感入口／手機「更多・進階工具」／舊路徑 /community">
             全站共用的作品牆：別人發布的提示詞、成品與設定卡，<b>不必點開就看得到完整 prompt</b>，
             按「一鍵再用」直接帶進你選的專案生成台。上面那排<b>分類</b>（題材／風格／氛圍／光線／鏡頭／用途）
             是系統從標題、說明與提示詞自動判讀的，每格都帶數量，點下去逐層收斂。
@@ -337,8 +368,9 @@ export function HelpPage() {
         </MapGroup>
 
         <MapGroup title="其他好用的" icon="Info">
-          <Spot icon="Info" name="模型指南" where="電腦頂欄／手機：更多・說明中心">
+          <Spot icon="Info" name="模型指南" where="說明中心分頁／舊路徑 /models">
             大量模型分 11 類、旗艦／經濟／最省，可搜「中文、對嘴、金句」找對模型；含製作範本。
+            與「怎麼用」同屬說明中心；舊路徑 <code>/models</code> 仍打開同一份指南。
           </Spot>
           <Spot icon="Sparkles" name="接上外部 AI" where="個人設定／手機：更多・進階工具">
             建金鑰讓 Claude 等外部 AI 用<b>你的身分</b>操作專案（MCP）。可設唯讀、會到期。
@@ -672,12 +704,13 @@ export function HelpPage() {
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>
         <Meta style={{ margin: "0 10px" }}>·</Meta>
-        <Link href="/models">看模型指南</Link>
+        <Link href="/help#help-models">看模型指南</Link>
         <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/mcp">接上外部 AI</Link>
         <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/help#help-advanced">進階能力</Link>
       </p>
+      </> : null}
     </div>
   );
 }
