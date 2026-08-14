@@ -64,6 +64,7 @@ import {
   type StoryInlineRevealDetail,
   type StoryInlineSectionId,
 } from "../features/story-workspace/storyInlineNav";
+import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
 import { storyboardRailSummary } from "../features/storyboard-center/storyboardRailSummary";
@@ -1013,6 +1014,8 @@ export function ProjectPage({ id }: { id: string }) {
     };
   }, [id, openInlineSection]);
 
+  const oneClick = useOneClickFilm(id);
+
   if (project.isLoading) return <Meta as="p">載入中…</Meta>;
   if (project.error || !project.data) {
     const code = project.error?.data?.code;
@@ -1583,21 +1586,43 @@ export function ProjectPage({ id }: { id: string }) {
             readiness={readiness}
             canEdit={canEdit}
             primaryLabel={
-              readiness.kind === "ready_to_produce"
-                ? "展開製作"
-                : readiness.kind === "has_result"
-                  ? "觀看成果"
-                  : undefined
+              readiness.kind === "empty"
+                ? undefined
+                : oneClick.pending
+                  ? "準備生成中…"
+                  : oneClick.result
+                    ? "繼續生成"
+                    : "生成影片"
             }
+            primaryDisabled={oneClick.pending || readiness.kind === "empty"}
             onPrimary={
-              readiness.kind === "ready_to_produce"
+              readiness.kind === "empty"
+                ? undefined
+                : () => {
+                    if (!window.confirm("會先儲存並解析故事、補齊缺少的分鏡，再建立批次生成計畫。估點後由你核准才扣點；已細修或已通過審核的鏡不會被覆蓋。開始？")) return;
+                    void oneClick.run().then(() => openInlineSection("production")).catch(() => {
+                      openInlineSection("production");
+                    });
+                  }
+            }
+            latestLabel={
+              oneClick.error
+                ? oneClick.error
+                : oneClick.result
+                  ? `已建立 ${oneClick.result.shots} 鏡批次（約 ${oneClick.result.estPoints} 點，核准後才扣點）`
+                  : hasDeliverable
+                    ? "已有成片，展開交付"
+                    : doneGenCount
+                      ? `已完成 ${doneGenCount} 次生成`
+                      : undefined
+            }
+            onOpenLatest={
+              oneClick.result || doneGenCount
                 ? () => openInlineSection("production")
-                : readiness.kind === "has_result"
+                : hasDeliverable
                   ? () => openInlineSection("delivery")
                   : undefined
             }
-            latestLabel={hasDeliverable ? "已有成片，展開交付" : doneGenCount ? `已完成 ${doneGenCount} 次生成` : undefined}
-            onOpenLatest={hasDeliverable ? () => openInlineSection("delivery") : doneGenCount ? () => openInlineSection("production") : undefined}
           />
 
           <div className="story-inline-rail" data-fb="故事收合列">

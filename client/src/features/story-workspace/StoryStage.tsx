@@ -12,6 +12,7 @@ import { ConflictNotice, conflictFromError } from "../../components/ConflictNoti
 import type { RevisionConflict } from "@shared/revision";
 import { revealWorkbenchAnchor, scrollToSelector } from "../creation-workbench/workbenchNav";
 import { revealStoryInlineSection, sectionForSummaryChip, type StoryInlineSectionId } from "./storyInlineNav";
+import { STORY_FLUSH_EVENT } from "./oneClickFilm";
 import { CANDIDATE_KIND_LABEL, type CandidateKind } from "@shared/story";
 import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
@@ -185,6 +186,7 @@ export function StoryStage({
   /** guard 用（autosave／收養 effect 讀 ref，不進依賴陣列） */
   const yActiveRef = useRef(false);
   yActiveRef.current = ydoc.active;
+
   // 共編中回報 caret（節流在 hook 內）——夥伴的編輯器上才畫得出我的游標
   useEffect(() => {
     if (!ydoc.active) return;
@@ -281,6 +283,29 @@ export function StoryStage({
     // remote 變動不重觸發（收養 effect 已處理）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, projectId]);
+
+  // 一鍵生成前先把未存故事落盤。共編中由伺服器 materialize，這裡只回報 flushed。
+  useEffect(() => {
+    const onFlush = () => {
+      if (yActiveRef.current) {
+        window.dispatchEvent(new Event("aios:story-flushed"));
+        return;
+      }
+      const live = contentRef.current;
+      if (live === null || remote === null || live === remote || save.isPending) {
+        window.dispatchEvent(new Event("aios:story-flushed"));
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setSaveState("saving");
+      save.mutate(
+        { projectId, content: live, expectedRev: revRef.current, baseline: baselineRef.current },
+        { onSettled: () => window.dispatchEvent(new Event("aios:story-flushed")) },
+      );
+    };
+    window.addEventListener(STORY_FLUSH_EVENT, onFlush);
+    return () => window.removeEventListener(STORY_FLUSH_EVENT, onFlush);
+  }, [projectId, remote, save]);
 
   const parse = trpc.story.parse.useMutation({
     onSuccess: (r) => {
