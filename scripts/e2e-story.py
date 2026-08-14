@@ -154,15 +154,23 @@ ok("有鏡引用紅傘（錨點鏈的起點）", shot_umbrella is not None)
 
 if shot_umbrella:
     g2 = call("POST", admin, "scenes.generateInto", {"sceneId": shot_umbrella["id"], "modelId": "fal-ai/flux/schnell"})
-    landed = None
+    # #753（master plan §12）：就地生成是 Candidate，不 silent 改 current——
+    # 先等生成完成，明確採用（Adopt）之後畫面才會回填到分鏡。
     for _ in range(40):
+        _st = call("GET", admin, "generation.status", {"id": g2["generationId"]})
+        if _st.get("status") in ("done", "failed"):
+            break
+        _time.sleep(1)
+    call("POST", admin, "creativeContext.adoptGeneration", {"generationId": g2["generationId"]})
+    landed = None
+    for _ in range(10):
         _rows = call("GET", admin, "scenes.listByProject", {"projectId": pid})
         _s = next((r for r in _rows if r["id"] == shot_umbrella["id"]), None)
         if _s and _s.get("assetId"):
             landed = _s
             break
         _time.sleep(1)
-    ok("生成落地回填分鏡畫面", landed is not None)
+    ok("生成完成＋明確採用後回填分鏡畫面", landed is not None)
 
     grow2 = next(g for g in call("GET", admin, "generation.listByProject", {"projectId": pid}) if g["id"] == g2["generationId"])
     ok("生成凍結了道具卡（錨點可回溯）", umbrella["id"] in (grow2.get("propIds") or []))
