@@ -349,4 +349,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0071_project_creative_context": [
     "abe45f620846ddc3e0966ee698d4087f02bfd7ea6a6831cb88ccfe2950b74a71",
   ],
+  "0072_shot_context_packets": [
+    "e89d982c81ff2c511a028e66915051bea5fa8656ca5fd76fc0dd6c4c36883db6",
+  ],
 };

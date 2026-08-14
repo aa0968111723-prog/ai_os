@@ -57,3 +57,33 @@ export const storyEntityBindingProposals = pgTable("story_entity_binding_proposa
   projectStatusIdx: index("story_entity_binding_proposals_project_status_idx").on(t.projectId, t.status),
   mentionIdx: index("story_entity_binding_proposals_mention_idx").on(t.projectId, t.mentionKey, t.entityKind),
 }));
+
+export const shotContextPackets = pgTable("shot_context_packets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  shotId: uuid("shot_id").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  packet: jsonb("packet").$type<import("../../../shared/shotContextPacket").ShotContextPacketPayload>().notNull(),
+  parentPacketId: uuid("parent_packet_id"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  shotCreatedIdx: index("shot_context_packets_shot_created_idx").on(t.shotId, t.createdAt),
+  projectShotIdx: index("shot_context_packets_project_shot_idx").on(t.projectId, t.shotId),
+  fingerprintIdx: index("shot_context_packets_fingerprint_idx").on(t.shotId, t.fingerprint),
+}));
+
+export const shotContextPacketHeads = pgTable("shot_context_packet_heads", {
+  shotId: uuid("shot_id").primaryKey(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  packetId: uuid("packet_id").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  stale: boolean("stale").notNull().default(false),
+  staleReason: text("stale_reason"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectStaleIdx: index("shot_context_packet_heads_project_stale_idx").on(t.projectId, t.stale),
+}));
