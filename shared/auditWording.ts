@@ -190,6 +190,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.dismissProposal": "略過故事實體對應",
   "creativeContext.setLock": "鎖定或解除故事實體對應",
   "creativeContext.undoBinding": "撤銷故事實體對應",
+  "creativeContext.freezeShotPacket": "凍結分鏡脈絡包",
+  "creativeContext.refreshStalePackets": "重算過期分鏡脈絡",
   "story.sceneUpdate": "更新場設定",
   "story.sceneRemove": "刪除場（鏡改為未分場）",
   "characterLooks.add": "新增造型",
