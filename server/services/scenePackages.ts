@@ -157,17 +157,29 @@ export async function freezeScenePackage(input: {
   if (!existing) {
     const [head] = await db.select().from(schema.scenePackageHeads)
       .where(eq(schema.scenePackageHeads.storySceneId, input.storySceneId));
-    const [inserted] = await db.insert(schema.scenePackages).values({
-      projectId: project.id,
-      groupId: project.groupId,
-      storySceneId: input.storySceneId,
-      schemaVersion: payload.schemaVersion,
-      fingerprint,
-      payload,
-      parentPackageId: head?.packageId ?? null,
-      createdBy: input.auth.user.id,
-    }).returning({ id: schema.scenePackages.id });
-    packageId = inserted.id;
+    try {
+      const [inserted] = await db.insert(schema.scenePackages).values({
+        projectId: project.id,
+        groupId: project.groupId,
+        storySceneId: input.storySceneId,
+        schemaVersion: payload.schemaVersion,
+        fingerprint,
+        payload,
+        parentPackageId: head?.packageId ?? null,
+        createdBy: input.auth.user.id,
+      }).returning({ id: schema.scenePackages.id });
+      packageId = inserted.id;
+    } catch (error) {
+      // 並行凍結同指紋：unique index（0076）擋下第二筆→冪等取用先到的那筆
+      const { isUniqueViolation } = await import("./generationCore");
+      if (!isUniqueViolation(error)) throw error;
+      const [winner] = await db.select({ id: schema.scenePackages.id }).from(schema.scenePackages).where(and(
+        eq(schema.scenePackages.storySceneId, input.storySceneId),
+        eq(schema.scenePackages.fingerprint, fingerprint),
+      )).limit(1);
+      if (!winner) throw error;
+      packageId = winner.id;
+    }
   }
 
   await db.insert(schema.scenePackageHeads).values({

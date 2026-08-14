@@ -218,7 +218,7 @@ export async function resolveContinuityReferenceUrls(
 export async function resolveAssetReferenceUrlsById(
   assetIds: readonly string[],
   groupId: string,
-): Promise<string[]> {
+): Promise<Array<{ assetId: string; url: string }>> {
   if (!assetIds.length) return [];
   const rows = await db.select({
     id: schema.assets.id,
@@ -234,7 +234,8 @@ export async function resolveAssetReferenceUrlsById(
   return assetIds.flatMap((id) => {
     const row = byId.get(id);
     if (!row) return [];
-    return [row.storagePath ? signAssetUrl(row.id) : row.url].filter(Boolean);
+    const url = row.storagePath ? signAssetUrl(row.id) : row.url;
+    return url ? [{ assetId: id, url }] : [];
   });
 }
 

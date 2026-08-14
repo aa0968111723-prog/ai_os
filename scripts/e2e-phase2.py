@@ -173,9 +173,15 @@ sid = scene["id"]
 old_asset = scene["assetId"]
 g_new = call("POST", mem, "scenes.generateInto", {"sceneId": sid, "modelId": "fal-ai/flux/schnell", "prompt": "改成星空"})
 wait_done(mem, g_new["generationId"])
+# #753 起（master plan §12）：就地生成是 Candidate，不 silent 改 current——
+# 完成後 current 必須「還是舊畫面」，明確 Adopt 之後才回填新畫面。
 scenes = call("GET", mem, "scenes.listByProject", {"projectId": pid})
 cur = next(s for s in scenes if s["id"] == sid)
-ok("就地生成回填新畫面", cur["assetId"] != old_asset)
+ok("就地生成完成後不動 current（候選）", cur["assetId"] == old_asset)
+call("POST", mem, "creativeContext.adoptGeneration", {"generationId": g_new["generationId"]})
+scenes = call("GET", mem, "scenes.listByProject", {"projectId": pid})
+cur = next(s for s in scenes if s["id"] == sid)
+ok("明確採用後回填新畫面", cur["assetId"] != old_asset)
 by_scene = call("GET", mem, "generation.listByProjectPaged", {"projectId": pid, "sceneId": sid})
 ok("列表可按分鏡聚合", len(by_scene["items"]) >= 1 and all(x["sceneId"] == sid for x in by_scene["items"]))
 back = call("POST", mem, "scenes.setVisualFromGeneration", {"sceneId": sid, "generationId": g_cheap["id"]})

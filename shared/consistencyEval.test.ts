@@ -131,8 +131,10 @@ describe("PR-B deepening: prop ownership and continuity", () => {
       packet: withContinuity,
       candidate: { prompt: "安倢撐傘走上石階", characterIds: ["c1"], lookIds: ["l1"], propIds: ["pr1"] },
     });
-    expect(drift.issues.some((issue) => issue.code === "continuity_costume_break")).toBe(true);
-    expect(drift.adoptAllowed).toBe(false);
+    // 警示不擋 Adopt：metadata 分不出漂移與刻意改綁，決定權留給人（Adopt 本來就是明確動作）
+    expect(drift.warnings.some((issue) => issue.code === "continuity_costume_break")).toBe(true);
+    expect(drift.issues.some((issue) => issue.code === "continuity_costume_break")).toBe(false);
+    expect(drift.adoptAllowed).toBe(true);
 
     const authorized = evaluateGenerationCandidate({
       packet: {
@@ -141,6 +143,16 @@ describe("PR-B deepening: prop ownership and continuity", () => {
       },
       candidate: { prompt: "安倢撐傘走上石階", characterIds: ["c1"], lookIds: ["l1"], propIds: ["pr1"] },
     });
-    expect(authorized.issues.some((issue) => issue.code === "continuity_costume_break")).toBe(false);
+    expect(authorized.warnings.some((issue) => issue.code === "continuity_costume_break")).toBe(false);
+  });
+
+  it("prop-only close-ups (no characters bound) are not wrong_prop_owner", () => {
+    const closeup = preflightShotPacket({
+      ...packet,
+      characters: [],
+      looks: [],
+      props: [{ kind: "prop", id: "sword", rev: 1, name: "刀", ownerKind: "character", ownerId: "zoro" }],
+    });
+    expect(closeup.issues.some((issue) => issue.code === "wrong_prop_owner")).toBe(false);
   });
 });

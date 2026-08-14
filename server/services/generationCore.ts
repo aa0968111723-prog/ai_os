@@ -492,34 +492,66 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
       characterCount: input.shotContextPacket.characters.length,
       activeAdapter,
     });
+    const mixField = referenceMix.attachedField;
     if (
-      referenceMix.attachedField
+      mixField
       && referenceMix.orderedAssetIds.length
-      && Array.isArray(providerInput[referenceMix.attachedField])
+      && Array.isArray(providerInput[mixField])
     ) {
       const { resolveAssetReferenceUrlsById } = await import("./continuity");
-      const orderedUrls = await resolveAssetReferenceUrlsById(referenceMix.orderedAssetIds, project.groupId);
-      if (orderedUrls.length) {
-        providerInput[referenceMix.attachedField] = [...new Set([
+      const resolved = await resolveAssetReferenceUrlsById(referenceMix.orderedAssetIds, project.groupId);
+      // 誠實回報實際送出的內容：解析階段被過濾掉的素材（已刪除／跨組／非圖片）
+      // 要出現在 dropped，計畫不能宣稱「已附上」它沒附上的東西。
+      const resolvedIds = new Set(resolved.map((row) => row.assetId));
+      const unresolved = referenceMix.orderedAssetIds.filter((id) => !resolvedIds.has(id));
+      if (unresolved.length) {
+        referenceMix = {
+          ...referenceMix,
+          orderedAssetIds: referenceMix.orderedAssetIds.filter((id) => resolvedIds.has(id)),
+          dropped: [
+            ...referenceMix.dropped,
+            ...unresolved.map((assetId) => ({ assetId, role: "identity" as const, reason: "素材已不可用（刪除／非圖片／跨組）" })),
+          ],
+          consistencyMode: "degraded" as const,
+        };
+        warnings.push({
+          code: "reference_mix_assets_unavailable",
+          severity: "warning",
+          title: "部分一致性參考已不可用",
+          detail: `有 ${unresolved.length} 份參考素材無法送出（已刪除、非圖片或不在本組）。`,
+        });
+      }
+      if (resolved.length) {
+        providerInput[mixField] = [...new Set([
           ...(sourceUrl ? [sourceUrl] : []),
-          ...orderedUrls,
+          ...resolved.map((row) => row.url),
         ])].slice(0, capability.maxReferenceImages);
       }
     }
-    // Canon 訓練成果（identity adapter）：模型真的有 loras 槽、且來源槽沒被使用者佔用才套
-    if (
-      activeAdapter
-      && capability.identityAdapterSupport
-      && Array.isArray(providerInput.loras)
-    ) {
+    // Canon 訓練成果（identity adapter）：generationCommand 已在 needs gate 前把 adapter
+    // 填進來源槽（lora 模型的來源＝LoRA 檔）；這裡負責誠實回報＋兜底空槽。
+    // 使用者自帶 LoRA 蓋過 adapter 時「不」宣稱已套用一致性模型。
+    if (activeAdapter && capability.identityAdapterSupport && Array.isArray(providerInput.loras)) {
       const loras = providerInput.loras as Array<{ path?: unknown }>;
-      if (!loras.length || loras.every((row) => !row?.path)) {
+      let adapterLoaded = loras.some((row) => typeof row?.path === "string" && row.path.includes(activeAdapter))
+        || input.sourceUrl === activeAdapter;
+      if (!adapterLoaded && (!loras.length || loras.every((row) => !row?.path))) {
         providerInput.loras = [{ path: activeAdapter, scale: 1 }];
+        adapterLoaded = true;
+      }
+      if (adapterLoaded) {
         warnings.push({
           code: "identity_adapter_applied",
           severity: "info",
           title: "已套用角色一致性模型",
           detail: "這次生成使用 Team Canon 訓練出的角色 adapter 維持身份一致。",
+        });
+      } else {
+        warnings.push({
+          code: "identity_adapter_displaced",
+          severity: "warning",
+          title: "自帶 LoRA 取代了角色一致性模型",
+          detail: "這次生成使用你指定的 LoRA，Team Canon 的角色 adapter 未套用。",
         });
       }
     }
