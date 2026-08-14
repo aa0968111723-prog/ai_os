@@ -48,7 +48,13 @@ function runWorker(
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    // worker 的診斷（含 server/db 的啟動訊息）全走 stderr。這裡除了累積起來備用，
+    // 也即時轉發到父程序的 stderr——否則成功的 run 會把診斷整段吞掉，workflow 的
+    // `tee` 與 migration-and-rate-limit-* artifact 就只在失敗時才看得到東西。
+    child.stderr.setEncoding("utf8").on("data", (chunk) => {
+      stderr += chunk;
+      process.stderr.write(`[worker ${action}] ${chunk}`);
+    });
     child.once("error", reject);
     child.once("close", (code) => {
       if (code !== 0) return reject(new Error(`worker ${action} failed (${code}): ${stderr || stdout}`));
