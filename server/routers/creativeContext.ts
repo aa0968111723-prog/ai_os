@@ -2,6 +2,11 @@ import { z } from "zod";
 import { authedProcedure, router } from "../trpc";
 import { composeProjectCreativeContext } from "../services/projectCreativeContext";
 import {
+  freezeShotContextPacket,
+  listShotContextPackets,
+  refreshShotContextStaleness,
+} from "../services/shotContextPackets";
+import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
   listStoryEntityBindings,
@@ -81,5 +86,49 @@ export const creativeContextRouter = router({
     .input(z.object({ bindingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return undoStoryEntityBinding({ auth: ctx.auth, bindingId: input.bindingId });
+    }),
+
+  freezeShotPacket: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid(),
+      modelId: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return freezeShotContextPacket({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        shotId: input.shotId,
+        modelId: input.modelId,
+      });
+    }),
+
+  listShotPackets: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return listShotContextPackets({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        shotId: input.shotId,
+      });
+    }),
+
+  refreshStalePackets: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      changedKind: z.string().optional(),
+      changedId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return refreshShotContextStaleness({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        changed: input.changedKind && input.changedId
+          ? { kind: input.changedKind, id: input.changedId }
+          : undefined,
+      });
     }),
 });
