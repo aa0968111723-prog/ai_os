@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DESTINATIONS, MOBILE_PRIMARY_NAV, accountMenuItems, mobileMoreGroups, topbarNavItems } from "./navigationItems";
+import { DESTINATIONS, MOBILE_PRIMARY_NAV, accountMenuItems, mobileMoreGroups, mobileMoreReachableKeys, mobileMoreRoot, topbarNavItems } from "./navigationItems";
 
 /**
  * 命名一致性迴歸（資料中心 P1）。
@@ -40,16 +40,19 @@ describe("導覽命名（一個地方一個名字）", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("手機底欄一級只留今日／專案／AI 助手／更多；planner 改由 More 承接且 route 不變", () => {
+  it("手機底欄一級只留今日／專案／AI 助手／更多；More 第一層收斂且舊路徑仍可達", () => {
     expect([...MOBILE_PRIMARY_NAV]).toEqual(["today", "projects", "assistant", "more"]);
     expect(DESTINATIONS.planner.href).toBe("/planner");
     expect(DESTINATIONS.planner.label).toBe("筆記排程");
-    const moreKeys = mobileMoreGroups.flatMap((group) => group.keys);
-    expect(moreKeys).toContain("planner");
+    expect(mobileMoreRoot.map((item) => (item.kind === "link" ? item.key : item.label))).toEqual([
+      "databases", "chat", "說明中心", "進階工具",
+    ]);
+    const moreKeys = mobileMoreReachableKeys();
     expect(moreKeys).toEqual(expect.arrayContaining([
-      "databases", "planner", "chat", "help", "models", "studio", "community", "downloads",
+      "databases", "planner", "chat", "help", "models", "studio", "community", "downloads", "mcp", "integrations",
     ]));
-    expect(moreKeys).not.toContain("mcp");
-    expect(moreKeys).not.toContain("integrations");
+    expect(mobileMoreGroups.map((group) => group.label)).toEqual([
+      "資料中心", "私訊", "說明中心", "進階工具",
+    ]);
   });
 });

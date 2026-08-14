@@ -51,6 +51,7 @@ export function AssistantLauncher({ groupId }: { groupId: string }) {
         aria-expanded={open}
         aria-controls="global-assistant-sheet"
         onClick={() => setOpen((v) => !v)}
+        aria-label="AI 助手"
         title="AI 助手"
       >
         <Icon name="Sparkles" size={16} />

@@ -38,6 +38,7 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{ color: "var(--gold-ink)", cursor: "pointer" }}
+        aria-label={`生成待核准 ${summ.totalAwaitingGenerations}`}
         title={`生成待核准 ${summ.totalAwaitingGenerations}——點開看是哪些專案`}
       >
         <Icon name="Bell" size={14} />

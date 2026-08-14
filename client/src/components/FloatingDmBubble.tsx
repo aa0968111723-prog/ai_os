@@ -29,7 +29,11 @@ function avatarInitial(name: string): string {
 
 /**
  * Messenger 風格私訊浮動小球球（左下角）。
- * - 登入後、偏好開啟時顯示
+ *
+ * 全站導覽去重 PR 3 起不再由 AppShell 常駐掛載——全站私訊改由 More／頂欄
+ * 「私訊」入口承接，未讀仍走 sessionBoot.unreadTotal 與 /chat。
+ * 元件與偏好保留，避免舊設定與測試引用變成死碼；不要再掛回全站殼層。
+ *
  * - 圓形按鈕＋未讀角標；點擊展開最近對話串清單
  * - 點串列導向 /chat/:peerId
  * - 關頁通知仍由既有 Web Push 處理（本元件只負責站內浮層）

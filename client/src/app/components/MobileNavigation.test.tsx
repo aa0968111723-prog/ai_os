@@ -71,10 +71,15 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("link", { name: "今日" })).not.toHaveAttribute("aria-current");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /資料中心/ })).toHaveAttribute("href", "/databases");
+    expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
+    expect(screen.getByRole("button", { name: /說明中心/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /進階工具/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /筆記排程/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /進階工具/ }));
+    expect(screen.getByRole("complementary", { name: "進階工具" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveAttribute("href", "/planner");
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveClass("active");
-    expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
-    expect(screen.getByRole("link", { name: /怎麼用/ })).toHaveAttribute("href", "/help");
   });
 
   it("names every destination exactly as the shared catalog does（同一頁不再有第二個名字）", async () => {
@@ -82,19 +87,25 @@ describe("MobileNavigation", () => {
     render(<MobileNavigation />);
     await user.click(screen.getByRole("button", { name: "更多" }));
 
-    // 面板收日常會用到的頁面，名稱一律取自 DESTINATIONS（同一頁不得有第二個名字）
-    // planner 已從底欄搬進 More，仍必須用同一個去處名
-    for (const key of ["planner", "databases", "studio", "community", "chat", "help", "models", "downloads"] as const) {
+    // 第一層只留四項；其餘真功能在說明中心／進階工具第二層，名稱仍取自 DESTINATIONS
+    expect(screen.getByRole("link", { name: new RegExp(DESTINATIONS.databases.label) })).toHaveAttribute("href", "/databases");
+    expect(screen.getByRole("link", { name: new RegExp(DESTINATIONS.chat.label) })).toHaveAttribute("href", "/chat");
+    expect(screen.getByRole("button", { name: /說明中心/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /進階工具/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /怎麼用/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /筆記排程/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /說明中心/ }));
+    for (const key of ["help", "models"] as const) {
       const d = DESTINATIONS[key];
       expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
     }
-    // 外部資料／MCP 刻意不在這裡：兩者是一次性的進階設定，已改為情境化入口
-    //（走 /settings 的「進階與相關功能」或桌機的使用者選單）。
-    // 路由與深連結仍然有效，只是不再出現在手機的頁面總表裡。
-    for (const key of ["mcp", "integrations"] as const) {
-      expect(screen.queryByRole("link", { name: new RegExp(DESTINATIONS[key].label) })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回更多" }));
+    await user.click(screen.getByRole("button", { name: /進階工具/ }));
+    for (const key of ["planner", "studio", "community", "integrations", "mcp", "downloads"] as const) {
+      const d = DESTINATIONS[key];
+      expect(screen.getByRole("link", { name: new RegExp(d.label) })).toHaveAttribute("href", d.href);
     }
-    // 舊的第二套名字不得復活
     expect(screen.queryByText("使用說明")).not.toBeInTheDocument();
     expect(screen.queryByText("外部資料")).not.toBeInTheDocument();
   });
@@ -108,10 +119,31 @@ describe("MobileNavigation", () => {
     render(<MobileNavigation />);
     await user.click(screen.getByRole("button", { name: "更多" }));
 
-    for (const item of topbarNavItems) {
-      const link = screen.getByRole("link", { name: new RegExp(item.label) });
-      expect(link).toHaveAttribute("href", item.href);
+    // 今日在底欄；其餘頂欄去處必須能從 More 兩層走到，不能再消失
+    expect(screen.getByRole("link", { name: "今日" })).toHaveAttribute("href", "/dashboard");
+    const reachable = new Map<string, string>();
+    reachable.set(DESTINATIONS.databases.label, DESTINATIONS.databases.href);
+    reachable.set(DESTINATIONS.chat.label, DESTINATIONS.chat.href);
+    await user.click(screen.getByRole("button", { name: /說明中心/ }));
+    reachable.set(DESTINATIONS.help.label, DESTINATIONS.help.href);
+    await user.click(screen.getByRole("button", { name: "返回更多" }));
+    await user.click(screen.getByRole("button", { name: /進階工具/ }));
+    for (const key of ["planner", "studio", "community"] as const) {
+      reachable.set(DESTINATIONS[key].label, DESTINATIONS[key].href);
     }
+    for (const item of topbarNavItems) {
+      if (item.key === "dashboard") continue;
+      expect(reachable.get(item.label)).toBe(item.href);
+    }
+  });
+
+  it("More 第一層私訊與底欄都顯示未讀，不再依賴全站浮動氣泡", async () => {
+    const user = userEvent.setup();
+    render(<MobileNavigation dmUnread={4} />);
+    expect(screen.getByRole("button", { name: /更多/ })).toHaveTextContent("有未讀私訊");
+    await user.click(screen.getByRole("button", { name: /更多/ }));
+    expect(screen.getByLabelText("4 則未讀私訊")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /私訊/ })).toHaveAttribute("href", "/chat");
   });
 
   it("highlights exactly one dashboard tab per hash（今日／專案互斥）", () => {

@@ -1,17 +1,25 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
+import { useFocusTrap } from "../../components/interactions";
 import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
 import { useAssistantComposeListener } from "../../lib/assistantCompose";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
-import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
+import {
+  DESTINATIONS,
+  destinationMatch,
+  mobileMoreRoot,
+  type Destination,
+  type DestinationKey,
+  type MobileMoreFolderId,
+} from "../navigation/navigationItems";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 
 /**
  * 底欄一級：今日、專案。中央 AI 助手與「更多」不在這個陣列裡。
  *
- * 「筆記排程」已從底欄撤下——`/planner` 仍由 More 與頂欄進入，route 不刪。
+ * 「筆記排程」已從底欄撤下——`/planner` 仍由今天頁摘要與 More「進階工具」進入，route 不刪。
  * 正中央的球是「開啟全站 AI 助手」的按鈕，不是 `/dashboard#ai-work` 捲動錨點。
  */
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
@@ -50,14 +58,21 @@ const DESKTOP_BRIDGE: SheetItem = {
   icon: "Monitor",
 };
 
-/** 更多面板的分組內容：名稱與說明全部取自 DESTINATIONS，不在這裡另外寫字 */
-function moreGroups(): { label: string; items: SheetItem[] }[] {
-  const groups: { label: string; items: SheetItem[] }[] = mobileMoreGroups.map((group) => ({
-    label: group.label,
-    items: group.keys.map((key) => DESTINATIONS[key]),
-  }));
-  if (hasDesktopBridge()) groups[groups.length - 1]?.items.push(DESKTOP_BRIDGE);
-  return groups;
+function folderOf(id: MobileMoreFolderId) {
+  const item = mobileMoreRoot.find((entry) => entry.kind === "folder" && entry.id === id);
+  return item?.kind === "folder" ? item : null;
+}
+
+function destItems(keys: DestinationKey[]): SheetItem[] {
+  const items: SheetItem[] = keys.map((key) => DESTINATIONS[key]);
+  if (keys.includes("downloads") && hasDesktopBridge()) items.push(DESKTOP_BRIDGE);
+  return items;
+}
+
+function allMoreDestinations(): SheetItem[] {
+  return mobileMoreRoot.flatMap((entry) =>
+    entry.kind === "link" ? [DESTINATIONS[entry.key]] : destItems(entry.keys),
+  );
 }
 
 /** SPA 導航後等目標區塊掛載完成再捲過去（lazy chunk／資料載入中時 getElementById 還拿不到）。
@@ -73,12 +88,45 @@ function scrollToAnchorWhenReady(anchor: string) {
   requestAnimationFrame(tick);
 }
 
+function MoreRow({
+  item,
+  active,
+  unread,
+  onClick,
+}: {
+  item: SheetItem;
+  active: boolean;
+  unread?: number;
+  onClick?: () => void;
+}) {
+  return (
+    <Link
+      href={item.href}
+      className={`mobile-more-sheet__row${active ? " active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+    >
+      <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
+      <span>
+        <strong>
+          {item.label}
+          {item.href === "/chat" && unread != null && unread > 0 && (
+            <span className="dm-nav-unread" aria-label={`${unread} 則未讀私訊`}>{unread > 99 ? "99+" : unread}</span>
+          )}
+        </strong>
+        <small>{item.description}</small>
+      </span>
+      <Icon name="ChevronRight" size={16} />
+    </Link>
+  );
+}
+
 export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: number; groupId?: string }) {
   const [location, navigate] = useLocation();
   const [hash, syncHash] = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [moreView, setMoreView] = useState<"root" | MobileMoreFolderId>("root");
   const [assistantOpen, setAssistantOpen] = useState(false);
-  // 創作台的情境命令列把話丟過來時要順手打開助手（桌機那顆球在 AssistantLauncher 同理）
   const openAssistantForCompose = useCallback(() => setAssistantOpen(true), []);
   useAssistantComposeListener(openAssistantForCompose);
   const orbRef = useRef<HTMLButtonElement | null>(null);
@@ -86,21 +134,61 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   // （不只把手），內容捲動中自動讓路——為什麼必須這樣做（修壞過兩輪的
   // 完整記載）在 useSheetSwipeDismiss 檔頭。
   const moreSheetRef = useRef<HTMLElement | null>(null);
-  const closeMore = useCallback(() => setMoreOpen(false), []);
-  useSheetSwipeDismiss(moreSheetRef, closeMore, moreOpen);
-  const groups = moreGroups();
-  const isHere = (item: SheetItem) => destinationMatch(item).some((prefix) => location.startsWith(prefix));
-  const moreActive = groups.some((group) => group.items.some(isHere));
+  const historyPushedRef = useRef(false);
 
-  useEffect(() => setMoreOpen(false), [location]);
+  const closeMore = useCallback(() => {
+    setMoreOpen(false);
+    setMoreView("root");
+    if (historyPushedRef.current) {
+      historyPushedRef.current = false;
+      if (window.history.state?.aiosMore) window.history.back();
+    }
+  }, []);
+
+  const openMore = useCallback(() => {
+    setMoreView("root");
+    setMoreOpen(true);
+    if (!historyPushedRef.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), aiosMore: true }, "");
+      historyPushedRef.current = true;
+    }
+  }, []);
+
+  const dismissMore = useCallback(() => {
+    if (moreView !== "root") {
+      setMoreView("root");
+      return;
+    }
+    closeMore();
+  }, [moreView, closeMore]);
+
+  useSheetSwipeDismiss(moreSheetRef, closeMore, moreOpen);
+  useFocusTrap(moreSheetRef, moreOpen, dismissMore);
+
+  const isHere = (item: SheetItem) => destinationMatch(item).some((prefix) => location.startsWith(prefix));
+  const moreActive = allMoreDestinations().some(isHere);
+  const folder = moreView === "root" ? null : folderOf(moreView);
+  const folderItems = folder ? destItems(folder.keys) : [];
+
+  useEffect(() => {
+    setMoreOpen(false);
+    setMoreView("root");
+    historyPushedRef.current = false;
+  }, [location]);
+
   useEffect(() => {
     if (!moreOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMoreOpen(false);
+    const onPop = () => {
+      historyPushedRef.current = false;
+      if (moreView !== "root") {
+        setMoreView("root");
+        return;
+      }
+      setMoreOpen(false);
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [moreOpen]);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [moreOpen, moreView]);
 
   return (
     <>
@@ -110,34 +198,72 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
             type="button"
             className="mobile-more-scrim"
             aria-label="關閉更多功能"
-            onClick={() => setMoreOpen(false)}
+            onClick={closeMore}
           />
-          <aside id="mobile-more-tools" className="mobile-more-sheet" aria-label="更多功能" ref={moreSheetRef}>
+          <aside
+            id="mobile-more-tools"
+            className="mobile-more-sheet"
+            aria-label={folder ? folder.label : "更多功能"}
+            aria-modal="true"
+            tabIndex={-1}
+            ref={moreSheetRef}
+          >
             <div className="mobile-more-sheet__grip" aria-hidden="true" />
             <div className="mobile-more-sheet__head">
               <span>
-                <strong>全部功能</strong>
-                <small>底下分頁列放不下的頁面都在這裡</small>
+                {folder ? (
+                  <Button variant="ghost" size="sm" type="button" onClick={() => setMoreView("root")} aria-label="返回更多">
+                    <Icon name="ChevronRight" size={16} style={{ transform: "rotate(180deg)" }} />
+                    返回
+                  </Button>
+                ) : (
+                  <strong>更多</strong>
+                )}
+                {folder && <strong>{folder.label}</strong>}
               </span>
-              <Button variant="ghost" size="sm" type="button" onClick={() => setMoreOpen(false)} aria-label="關閉更多功能">
+              <Button variant="ghost" size="sm" type="button" onClick={closeMore} aria-label="關閉更多功能">
                 <Icon name="X" size={16} />
               </Button>
             </div>
             <div className="mobile-more-sheet__grid">
-              {groups.map((group) => (
-                <Fragment key={group.label}>
-                  <div className="mobile-more-sheet__label" role="presentation">{group.label}</div>
-                  {group.items.map((item) => (
-                    <Link key={item.href} href={item.href} className={isHere(item) ? "active" : ""}>
-                      <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
-                      <span><strong>{item.label}{item.href === "/chat" && dmUnread > 0 && (
-                        <span className="dm-nav-unread" aria-label={`${dmUnread} 則未讀私訊`}>{dmUnread > 99 ? "99+" : dmUnread}</span>
-                      )}</strong><small>{item.description}</small></span>
-                      <Icon name="ChevronRight" size={16} />
-                    </Link>
+              {moreView === "root"
+                ? mobileMoreRoot.map((entry) => {
+                    if (entry.kind === "link") {
+                      const dest = DESTINATIONS[entry.key];
+                      return (
+                        <MoreRow
+                          key={dest.href}
+                          item={dest}
+                          active={isHere(dest)}
+                          unread={entry.key === "chat" ? dmUnread : undefined}
+                        />
+                      );
+                    }
+                    const childActive = destItems(entry.keys).some(isHere);
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className={`mobile-more-sheet__row${childActive ? " active" : ""}`}
+                        onClick={() => setMoreView(entry.id)}
+                      >
+                        <span className="mobile-more-sheet__icon"><Icon name={entry.icon} size={19} /></span>
+                        <span>
+                          <strong>{entry.label}</strong>
+                          <small>{entry.description}</small>
+                        </span>
+                        <Icon name="ChevronRight" size={16} />
+                      </button>
+                    );
+                  })
+                : folderItems.map((item) => (
+                    <MoreRow
+                      key={item.href}
+                      item={item}
+                      active={isHere(item)}
+                      unread={item.href === "/chat" ? dmUnread : undefined}
+                    />
                   ))}
-                </Fragment>
-              ))}
             </div>
           </aside>
         </>
@@ -221,11 +347,11 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
           className={moreOpen || moreActive ? "active" : ""}
           aria-expanded={moreOpen}
           aria-controls="mobile-more-tools"
-          onClick={() => setMoreOpen((open) => !open)}
+          aria-haspopup="dialog"
+          onClick={() => (moreOpen ? closeMore() : openMore())}
         >
           <span className="mobile-nav__icon-wrap">
             <Icon name="Ellipsis" size={20} />
-            {/* 私訊未讀紅點：私訊入口在「更多」第二層，錯過推播的人回 App 至少看得到訊號 */}
             {dmUnread > 0 && <span className="mobile-nav__dot" aria-hidden />}
           </span>
           <span>更多{dmUnread > 0 && <span className="sr-only">（有未讀私訊）</span>}</span>

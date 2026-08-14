@@ -16,7 +16,13 @@ import { Badge } from "../../components/ui";
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
-  if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
+  if (my.error) {
+    return (
+      <Link href="/settings#quota" className="status-chip" title="點數暫時讀不到，稍後會自動重試" aria-label="點數暫時讀不到，查看明細">
+        <Icon name="Gem" size={14} /><span className="mono">—</span>
+      </Link>
+    );
+  }
   if (!my.data) return null;
   const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining } = my.data;
   // 徽章主數字＝最緊的「累計剩餘」：個人分配 → 組預算 → 全域總預算（任一為 null 即該層不限）
@@ -50,10 +56,15 @@ function PointsBadge({ groupId }: { groupId: string }) {
     "單位：站內點數",
   ].filter(Boolean);
   return (
-    <span className="status-chip points-badge" title={detailParts.join("；")}>
+    <Link
+      href="/settings#quota"
+      className="status-chip points-badge"
+      title={detailParts.join("；")}
+      aria-label={`點數${label}${weekly}${daily}。查看明細`}
+    >
       <Icon name="Gem" size={14} />
       <span className="mono"><span>{label}</span><span className="points-badge__cadence">{weekly}{daily}</span></span>
-    </span>
+    </Link>
   );
 }
 
@@ -77,10 +88,7 @@ export type AppHeaderProps = {
   activeIsLeader: boolean;
   canSeeOrg: boolean;
   mockMode?: boolean;
-  onChangePw: () => void;
-  onNotifSettings: () => void;
   onLogout: () => void;
-  onLogoutAll?: () => void;
   loggingOut: boolean;
 };
 
@@ -99,10 +107,7 @@ export function AppHeader({
   activeIsLeader,
   canSeeOrg,
   mockMode,
-  onChangePw,
-  onNotifSettings,
   onLogout,
-  onLogoutAll,
   loggingOut,
 }: AppHeaderProps) {
   const [location, navigate] = useLocation();
@@ -148,7 +153,6 @@ export function AppHeader({
       {signedIn && <NotifyBell />}
       {signedIn && <PendingApprovalsBadge groupId={activeGroupId} />}
       {signedIn && <PointsBadge groupId={activeGroupId} />}
-      {/* 頂欄收斂：次要入口（模型指南/接上外部 AI/資料下載/管理組/改密碼）＋登出全收進使用者選單 */}
       {signedIn && (
         <AccountMenu
           userName={userName}
@@ -158,10 +162,7 @@ export function AppHeader({
           isAdmin={isAdmin}
           activeIsLeader={activeIsLeader}
           canSeeOrg={canSeeOrg}
-          onChangePw={onChangePw}
-          onNotifSettings={onNotifSettings}
           onLogout={onLogout}
-          onLogoutAll={onLogoutAll}
           loggingOut={loggingOut}
         />
       )}

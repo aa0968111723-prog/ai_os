@@ -235,7 +235,7 @@ export async function copyLinkDeviceGuide(origin: string = typeof location !== "
     "把 Aios 通知連到另一台裝置：",
     `1. 在那台裝置用瀏覽器打開 ${origin || "本站"}`,
     "2. 登入同一個帳號",
-    "3. 右上角頭像 →「連結手機與電腦」→「在本裝置啟用通知」",
+    "3. 個人設定 →「通知設定與裝置連結」→「在本裝置啟用通知」",
     "4. 允許瀏覽器通知權限",
     "",
     "iPhone/iPad：需先「分享 → 加入主畫面」，再從主畫面圖示開啟（iOS 16.4+）",

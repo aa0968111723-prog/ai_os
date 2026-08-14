@@ -2,8 +2,7 @@ import { Suspense, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { FeedbackWidget } from "../feedback/FeedbackWidget";
-import { FloatingDmBubble } from "../components/FloatingDmBubble";
-import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
+import { PushSubscriptionSync } from "../components/NotificationSettings";
 import { AppUpdateBanner } from "../components/AppUpdateBanner";
 import { unsubscribeThisDevice } from "../push";
 import { SplashScreen } from "../components/SplashScreen";
@@ -114,14 +113,6 @@ export function AppShell() {
       void utils.auth.me.invalidate();
     },
   });
-  const logoutAll = trpc.auth.logoutAll.useMutation({
-    onSuccess: () => {
-      posthog.reset();
-      identifiedUserId.current = null;
-      void utils.sessionBoot.bootstrap.invalidate();
-      void utils.auth.me.invalidate();
-    },
-  });
   const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
 
@@ -134,21 +125,13 @@ export function AppShell() {
     identifiedUserId.current = user.id;
   }, [me.data?.user?.id, me.data?.user?.email, me.data?.user?.name]);
   // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/核准通知）。
-  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
+  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到個人設定「連結手機與電腦」重新啟用。
   const logoutWithPushCleanup = async () => {
     try {
       const endpoint = await unsubscribeThisDevice();
       if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
     } catch { /* 推播清理失敗照樣登出 */ }
     logout.mutate();
-  };
-  /** 登出全部裝置：撤銷所有 sessions 後本機換發新 cookie；不撤 MCP（見 AUTH-01）。 */
-  const logoutAllDevices = async () => {
-    try {
-      const endpoint = await unsubscribeThisDevice();
-      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
-    } catch { /* 推播清理失敗照樣登出全部 */ }
-    logoutAll.mutate();
   };
 
   // AUTH-01 sliding：掛載與回到前景時節流呼叫 touchSession（本地 6h），
@@ -218,8 +201,6 @@ export function AppShell() {
   // 通訊錄／操作紀錄：只要在「任一組」是組長或管理員就能看（跨組彙總）——比照後端 directory/audit 的可見界；
   // 不可只看「作用中的組」的角色，否則多組組長切到自己是純組員的那一組時會被誤擋在外。
   const canSeeOrg = isAdmin || groups.some((g) => g.role !== "member");
-  const [showChangePw, setShowChangePw] = useState(false);
-  const [showNotifSettings, setShowNotifSettings] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
   // 進站 splash：auth 就緒後淡出；不阻擋互動路徑以外的預載，僅首次掛載
@@ -232,7 +213,7 @@ export function AppShell() {
         <SplashScreen ready={!me.isLoading} onDone={() => setSplashDone(true)} />
       )}
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
-      <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
+      <div inert={mustChangePw || undefined}>
         {me.data && <AppHeader
           userName={me.data?.user.name}
           avatarUrl={me.data?.user.avatarUrl}
@@ -244,11 +225,8 @@ export function AppShell() {
           activeIsLeader={activeIsLeader}
           canSeeOrg={canSeeOrg}
           mockMode={info.data?.mockMode}
-          onChangePw={() => setShowChangePw(true)}
-          onNotifSettings={() => setShowNotifSettings(true)}
           onLogout={() => { void logoutWithPushCleanup(); }}
-          onLogoutAll={() => { void logoutAllDevices(); }}
-          loggingOut={logout.isPending || logoutAll.isPending}
+          loggingOut={logout.isPending}
         />}
 
         {/* 新版已下載完成時由使用者主動更新；不在編輯途中自動刷新。 */}
@@ -291,22 +269,13 @@ export function AppShell() {
         )}
       </div>
 
-      {mustChangePw ? (
-        <ChangePasswordDialog forced onClose={() => setShowChangePw(false)} />
-      ) : (
-        showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
-      )}
-
-      {!mustChangePw && showNotifSettings && me.data && <NotificationSettingsDialog onClose={() => setShowNotifSettings(false)} />}
+      {mustChangePw && <ChangePasswordDialog forced onClose={() => undefined} />}
 
       {/* 例行推播訂閱同步（零 UI）：已啟用通知的裝置每次開 App 回報一次，刷新裝置清單的「最近同步」 */}
       {me.data && <PushSubscriptionSync />}
 
       {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
       {me.data && <FeedbackWidget />}
-
-      {/* 私訊 Messenger 風格小球球（左下角）；偏好可在「連結手機與電腦」關閉 */}
-      {me.data && <FloatingDmBubble />}
     </div>
   );
 }

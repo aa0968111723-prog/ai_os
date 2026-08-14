@@ -1,9 +1,15 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 import { Icon } from "../components/Icon";
+import { ChangePasswordDialog } from "../app/session/ChangePasswordDialog";
+import { NotificationSettingsDialog } from "../components/NotificationSettings";
+import { hasDesktopBridge } from "../platform/desktopBridge";
+import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../pwa";
+import { unsubscribeThisDevice } from "../push";
+import posthog from "../posthog";
 
 const AVATAR_MAX_DATA_URL = 190 * 1024; // ~140KB binary payload
 
@@ -113,10 +119,68 @@ function AvatarPreview({
   );
 }
 
+function InstallAppButton() {
+  const [, bump] = useState(0);
+  useEffect(() => subscribeInstallUi(() => bump((n) => n + 1)), []);
+  if (isStandaloneApp() || !canOfferInstall()) return null;
+  return (
+    <Button
+      type="button"
+      variant="tonal"
+      size="sm"
+      onClick={() => {
+        if (isIosDevice()) {
+          window.location.assign("/help#help-install");
+          return;
+        }
+        void promptInstall();
+      }}
+    >
+      <Icon name="Download" size={15} />安裝成 App
+    </Button>
+  );
+}
+
+function QuotaDetail({ groupId }: { groupId?: string }) {
+  const my = trpc.quota.my.useQuery(
+    { groupId: groupId || undefined },
+    { enabled: !!groupId, staleTime: 30_000 },
+  );
+  if (!groupId) return <Hint as="p">選好作用組別後可看個人點數用量</Hint>;
+  if (my.isLoading) return <Skeleton style={{ height: 72 }} />;
+  if (my.error || !my.data) return <Meta>點數暫時讀不到</Meta>;
+  const d = my.data;
+  const caps = [d.memberBudgetRemaining, d.groupBudgetRemaining, d.totalRemaining].filter(
+    (v): v is number => v != null,
+  );
+  const tight = caps.length > 0 ? Math.min(...caps) : null;
+  return (
+    <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <strong>目前剩餘</strong>
+        <span className="mono">{tight == null ? "不限" : `${tight.toLocaleString()} 點`}</span>
+      </div>
+      <Meta as="div">
+        今日已用 {d.dailyUsed.toLocaleString()}{d.dailyQuota != null ? `／日額 ${d.dailyQuota.toLocaleString()}` : ""}
+        ｜本週已用 {d.weeklyUsed.toLocaleString()}{d.weeklyQuota != null ? `／週額 ${d.weeklyQuota.toLocaleString()}` : ""}
+      </Meta>
+      {(d.memberBudgetRemaining != null || d.groupBudgetRemaining != null) && (
+        <Meta as="div">
+          {d.memberBudgetRemaining != null && <div>個人預算剩 {d.memberBudgetRemaining.toLocaleString()} 點</div>}
+          {d.groupBudgetRemaining != null && <div>本組預算剩 {d.groupBudgetRemaining.toLocaleString()} 點</div>}
+        </Meta>
+      )}
+      <Hint as="div" style={{ fontSize: 11 }}>單位為站內點數。頂欄鑽石只顯示摘要，明細以這裡為準。</Hint>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [showNotif, setShowNotif] = useState(false);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [avatarBust, setAvatarBust] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -169,6 +233,31 @@ export function SettingsPage() {
     [setAvatar],
   );
 
+  const logoutAll = trpc.auth.logoutAll.useMutation({
+    onSuccess: () => {
+      posthog.reset();
+      void utils.sessionBoot.bootstrap.invalidate();
+      void utils.auth.me.invalidate();
+    },
+  });
+  const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
+  const logoutAllDevices = async () => {
+    try {
+      const endpoint = await unsubscribeThisDevice();
+      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
+    } catch { /* 推播清理失敗照樣登出全部 */ }
+    logoutAll.mutate();
+  };
+
+  useEffect(() => {
+    const hash = typeof window === "undefined" ? "" : window.location.hash.replace(/^#/, "");
+    if (hash === "password") setShowChangePw(true);
+    if (hash === "devices" || hash === "notifications") setShowNotif(true);
+    if (hash === "quota" || hash === "security") {
+      document.getElementById(`settings-${hash}`)?.scrollIntoView({ block: "start" });
+    }
+  }, []);
+
   if (me.isLoading) {
     return (
       <div className="page-shell secondary-page settings-page" style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px 48px" }}>
@@ -188,6 +277,7 @@ export function SettingsPage() {
   }
 
   const user = me.data.user;
+  const userGroups = me.data.groups ?? [];
   const displayName = nameDraft ?? user.name;
   const nameDirty = nameDraft !== null && nameDraft.trim() !== user.name;
 
@@ -287,36 +377,86 @@ export function SettingsPage() {
         </p>
       ) : null}
 
+      <Card as="section" id="settings-quota" style={{ marginTop: 20, padding: "20px 24px" }}>
+        <h2 style={{ fontSize: "var(--fs-15)", fontWeight: 600, margin: "0 0 12px" }}>點數明細</h2>
+        <QuotaDetail
+          groupId={(() => {
+            const stored = typeof localStorage !== "undefined" ? localStorage.getItem("aidos_group") : null;
+            if (stored && userGroups.some((g) => g.groupId === stored)) return stored;
+            return userGroups[0]?.groupId;
+          })()}
+        />
+      </Card>
+
+      <Card as="section" id="settings-security" style={{ marginTop: 20, padding: "20px 24px" }}>
+        <h2 style={{ fontSize: "var(--fs-15)", fontWeight: 600, margin: "0 0 8px" }}>安全與裝置</h2>
+        <Hint as="p" style={{ margin: "0 0 16px", fontSize: 12 }}>
+          改密碼、通知、裝置連結與匯出都在這裡，不再藏在頭像選單底層。
+        </Hint>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Button type="button" variant="tonal" size="sm" onClick={() => setShowChangePw(true)}>
+            <Icon name="Lock" size={15} />改密碼
+          </Button>
+          <Button type="button" variant="tonal" size="sm" onClick={() => setShowNotif(true)}>
+            <Icon name="Bell" size={15} />通知設定與裝置連結
+          </Button>
+          <a href="/api/me/export" download className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }} title="下載你的可讀資料備份：帳號、組別、相關專案、生成、留言、筆記、排程；不含密碼與媒體二進位檔">
+            <Icon name="Download" size={15} />匯出我的個人資料
+          </a>
+          <InstallAppButton />
+          {hasDesktopBridge() ? (
+            <Link href="/desktop" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="Monitor" size={15} />桌面剪輯連接
+            </Link>
+          ) : (
+            <Link href="/downloads#desktop-app" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="Download" size={15} />下載電腦版應用程式
+            </Link>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={logoutAll.isPending}
+            onClick={() => {
+              if (window.confirm("要登出全部裝置嗎？其他手機／電腦需重新登入；本裝置會繼續保持登入。")) {
+                void logoutAllDevices();
+              }
+            }}
+          >
+            <Icon name="Smartphone" size={15} />{logoutAll.isPending ? "處理中…" : "登出全部裝置"}
+          </Button>
+        </div>
+      </Card>
+
       <section style={{ marginTop: 28 }}>
-        <h2 style={{ fontSize: "var(--fs-14)", fontWeight: 600, marginBottom: 12 }}>進階與相關功能</h2>
+        <h2 style={{ fontSize: "var(--fs-14)", fontWeight: 600, marginBottom: 12 }}>相關功能</h2>
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-          {/* 團隊資料表：日常用不到（在專案頁需要時就地出現），這裡是想直接管理時的入口。
-              與 integrations／mcp 同組——三者都已移出手機「更多」面板。 */}
           <li>
-            <Link href="/databases" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }}>
-              <Icon name="Database" size={15} />團隊資料表（清單、文件與批次匯入）
+            <Link href="/my-reports" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="MessageCircle" size={15} />我的回報
             </Link>
           </li>
           <li>
-            <Link href="/integrations" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }}>
-              <Icon name="SlidersHorizontal" size={15} />整合與個人 AI 金鑰
+            <Link href="/databases" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="Database" size={15} />資料中心
             </Link>
           </li>
           <li>
-            <Link href="/mcp" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }}>
-              <Icon name="Lock" size={15} />MCP 連線金鑰
+            <Link href="/integrations" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="Waypoints" size={15} />連接與服務
             </Link>
           </li>
           <li>
-            <a href="/api/me/export" download className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8 }} title="下載你的可讀資料備份">
-              <Icon name="Download" size={15} />匯出我的個人資料（可讀 HTML 備份）
-            </a>
+            <Link href="/mcp" className="menu-item" style={{ display: "flex", gap: 8, alignItems: "center", textDecoration: "none", padding: "8px 12px", borderRadius: 8, minHeight: 44 }}>
+              <Icon name="Bot" size={15} />接上外部 AI
+            </Link>
           </li>
         </ul>
-        <Hint as="div" style={{ marginTop: 12, fontSize: 11 }}>
-          變更密碼、連結手機與電腦、登出裝置——請由頂欄右上角的使用者選單進行操作。
-        </Hint>
       </section>
+
+      {showChangePw && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />}
+      {showNotif && <NotificationSettingsDialog onClose={() => setShowNotif(false)} />}
     </div>
   );
 }

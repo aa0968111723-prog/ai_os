@@ -200,38 +200,68 @@ export const topbarNavItems: NavigationItem[] = [
  * - dashboard → 底欄「今日」
  * - /dashboard#projects、/p/:id → 底欄「專案」
  * - Global Assistant → 底欄中央 AI 助手（不是 route）
- * - planner / databases / studio / community / chat / help / models / downloads → More
- * - mcp / integrations → 桌機帳號選單（手機 More 不列；路由保留）
+ * - databases / chat → More 第一層
+ * - help / models → More「說明中心」
+ * - planner / studio / community / integrations / mcp / downloads → More「進階工具」
  */
 export const MOBILE_PRIMARY_NAV = ["today", "projects", "assistant", "more"] as const;
 
 /**
- * 手機「更多」面板的分組。
+ * 手機「更多」第一層（全站導覽去重 PR 3）。
  *
- * PR 1 只重整群組契約、暫保全部真功能。planner 從底欄搬進來之後，
- * 頂欄有的去處在手機仍必須走得到（迴歸鎖在 MobileNavigation.test.tsx）。
+ * 第一層只留四個可理解的目的地／資料夾，不再把底欄塞不下的頁面全部平鋪：
+ * 資料中心、私訊、說明中心、進階工具。
  *
- * 手機「更多」不列 integrations／mcp（兩者路由與深連結全部保留）：這兩頁是以
- * 「系統」為單位組織的（這是連結、這是 MCP），但使用者的需求發生在「專案的某一刻」
- * ——實測回報是「不知道該如何使用在專案上，很複雜」。改成情境化入口：需要進階設定
- * 時從桌機的使用者選單進入（accountMenuItems 仍保留這兩項）。MCP 尤其如此——該頁
- * 自己就寫明「這一步要在電腦上做，手機沒有地方貼設定」，放在手機選單沒有落點。
- *
- * ★ databases（資料中心）曾一起被拿掉，那是過頭了——它跟 integrations／mcp 不同，
- * 是天天要進去的去處，不是一次性設定。桌機它常駐頂欄，但 `.topbar .topbar-nav-link`
- * 在 ≤820px 整條隱藏，而使用者選單在同一個斷點只留一句指路（見 AccountMenu），
- * 於是手機／直立平板上「資料中心」三個選單一個入口都沒有。專案頁的
- * ProjectDatabasesCard 只涵蓋「在某個專案裡」的情境，跨專案總覽仍需固定入口。
+ * 資料夾內仍是既有 DESTINATIONS——不刪 route、不造第二套名字。
+ * planner 改由今天頁摘要＋進階工具進入；mcp／integrations 依規格回到進階工具
+ * （路由與深連結本來就在，只是入口歸位）。
  */
+export type MobileMoreFolderId = "help" | "tools";
+
+export type MobileMoreRootItem =
+  | { kind: "link"; key: DestinationKey }
+  | {
+      kind: "folder";
+      id: MobileMoreFolderId;
+      label: string;
+      description: string;
+      icon: IconName;
+      keys: DestinationKey[];
+    };
+
+export const mobileMoreRoot: MobileMoreRootItem[] = [
+  { kind: "link", key: "databases" },
+  { kind: "link", key: "chat" },
+  {
+    kind: "folder",
+    id: "help",
+    label: "說明中心",
+    description: "白話說明、常見問題與模型指南",
+    icon: "HelpCircle",
+    keys: ["help", "models"],
+  },
+  {
+    kind: "folder",
+    id: "tools",
+    label: "進階工具",
+    description: "排程、創作室、整合與下載",
+    icon: "SlidersHorizontal",
+    keys: ["planner", "studio", "community", "integrations", "mcp", "downloads"],
+  },
+];
+
+/** 由第一層展開的扁平分組——給測試與「仍可達」契約用，UI 走兩層 sheet。 */
 export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
 
-export const mobileMoreGroups: MobileMoreGroup[] = [
-  { label: "資料", keys: ["databases"] },
-  { label: "安排", keys: ["planner"] },
-  { label: "訊息", keys: ["chat"] },
-  { label: "說明", keys: ["help", "models"] },
-  { label: "進階工具", keys: ["studio", "community", "downloads"] },
-];
+export const mobileMoreGroups: MobileMoreGroup[] = mobileMoreRoot.map((item) =>
+  item.kind === "link"
+    ? { label: DESTINATIONS[item.key].label, keys: [item.key] }
+    : { label: item.label, keys: item.keys },
+);
+
+export function mobileMoreReachableKeys(): DestinationKey[] {
+  return mobileMoreRoot.flatMap((item) => (item.kind === "link" ? [item.key] : item.keys));
+}
 
 /** Account menu items, grouped by section. Order within each section is render order. */
 export const accountMenuItems: NavigationItem[] = [

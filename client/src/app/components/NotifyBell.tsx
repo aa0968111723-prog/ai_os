@@ -65,7 +65,8 @@ export function NotifyBell() {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{ cursor: "pointer", color: unread ? "var(--danger-ink)" : undefined }}
-        title={unread ? `${unread} 則未讀通知` : "通知（沒有未讀）"}
+        aria-label={unread ? `${unread} 則未讀通知` : "通知"}
+        title={unread ? `${unread} 則未讀通知` : "通知"}
       >
         <Icon name="Inbox" size={14} />
         {unread > 0 && <span className="mono">{unread}</span>}
