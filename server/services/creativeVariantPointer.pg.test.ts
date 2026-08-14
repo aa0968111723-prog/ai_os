@@ -311,3 +311,106 @@ describe.skipIf(!RUN_PG).sequential("#725 P0-2 成本核准後變體仍不得移
     expect(splitGenerationSourceMeta(row!.params).meta.preserveScenePointer).toBe(true);
   });
 });
+
+
+/**
+ * 面板批次寫入的樂觀併發（#725 P2：把 source-grep 契約測試換成真行為）。
+ *
+ * `scenes.visualChoiceConcurrency.contract.test.ts` 原本宣稱證明「setCards 受版本守衛保護」，
+ * 但它只是 readFileSync + toContain：`applyWithRevision` 這串字在不在。字串在、行為壞掉，
+ * 它照樣綠。這一組真的對 PostgreSQL 跑一次併發，斷言「兩個人同時改，只有一個會中」。
+ */
+describe.skipIf(!RUN_PG).sequential("面板寫入的樂觀併發（真 PostgreSQL）", () => {
+  const groupId = randomUUID();
+  const projectId = randomUUID();
+  const userId = randomUUID();
+  const sceneIds: string[] = [];
+
+  beforeAll(async () => {
+    await db.insert(schema.users).values({ id: userId, email: `u-${userId}@test.local`, name: "Bruce", passwordHash: "x" });
+    await db.insert(schema.projects).values({
+      id: projectId, groupId, ownerId: userId, title: "面板併發測試", kind: "video", platform: "youtube", format: "16:9",
+    });
+  });
+
+  afterAll(async () => {
+    if (sceneIds.length) await db.delete(schema.scenes).where(inArray(schema.scenes.id, sceneIds));
+    await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
+    await db.delete(schema.users).where(eq(schema.users.id, userId));
+  });
+
+  async function newScene(fields: Partial<typeof schema.scenes.$inferInsert> = {}) {
+    const id = randomUUID();
+    sceneIds.push(id);
+    const [row] = await db.insert(schema.scenes)
+      .values({ id, projectId, title: "shot", orderIndex: 0, ...fields })
+      .returning();
+    return row!;
+  }
+
+  /** setCards 實際走的那條：applyWithRevision + expectedRev + baseline */
+  async function applyCards(
+    row: typeof schema.scenes.$inferSelect,
+    patch: Partial<typeof schema.scenes.$inferInsert>,
+    baseline: Record<string, unknown>,
+    expectedRev: number | undefined,
+  ) {
+    const { applyWithRevision } = await import("./revisionGuard");
+    const { isNull } = await import("drizzle-orm");
+    return applyWithRevision({
+      entity: "scene",
+      table: schema.scenes,
+      idColumn: schema.scenes.id,
+      revColumn: schema.scenes.rev,
+      row,
+      patch,
+      expectedRev,
+      baseline,
+      extraWhere: isNull(schema.scenes.deletedAt),
+      reload: async () => {
+        const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, row.id));
+        return fresh!;
+      },
+    });
+  }
+
+  it("帶著過期的 expectedRev 改同一欄 → 不會靜默覆蓋", async () => {
+    const scene = await newScene({ characterIds: ["c-original"] });
+
+    // 夥伴先改了（rev 前進）
+    await applyCards(scene, { characterIds: ["c-partner"] }, { characterIds: ["c-original"] }, scene.rev);
+    const [afterPartner] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, scene.id));
+    expect(afterPartner!.rev).toBeGreaterThan(scene.rev);
+
+    // 我拿著載入時的舊 rev 與舊 baseline 再改同一欄
+    let conflicted = false;
+    try {
+      await applyCards(scene, { characterIds: ["c-mine"] }, { characterIds: ["c-original"] }, scene.rev);
+    } catch {
+      conflicted = true;
+    }
+    const [final] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, scene.id));
+    // 要嘛擋下（衝突），要嘛合併——但**絕不能**變成我的值靜默蓋掉夥伴的
+    expect(conflicted || final!.characterIds?.[0] !== "c-mine").toBe(true);
+    expect(final!.characterIds).toEqual(["c-partner"]);
+  });
+
+  it("各改各的欄位 → 兩邊都保留（欄位級合併，不是整列覆寫）", async () => {
+    const scene = await newScene({ characterIds: ["c-1"], propIds: ["p-1"] });
+
+    await applyCards(scene, { characterIds: ["c-2"] }, { characterIds: ["c-1"] }, scene.rev);
+    // 我改的是 propIds，帶的是載入時的舊 rev
+    await applyCards(scene, { propIds: ["p-2"] }, { propIds: ["p-1"] }, scene.rev).catch(() => undefined);
+
+    const [final] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, scene.id));
+    expect(final!.characterIds).toEqual(["c-2"]); // 夥伴的改動還在
+    expect(final!.propIds).toEqual(["p-2"]);      // 我的改動也在
+  });
+
+  it("每次成功寫入都推進 rev（守衛才有東西可比）", async () => {
+    const scene = await newScene({ characterIds: ["c-1"] });
+    await applyCards(scene, { characterIds: ["c-2"] }, { characterIds: ["c-1"] }, scene.rev);
+    const [after] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, scene.id));
+    expect(after!.rev).toBe(scene.rev + 1);
+  });
+});

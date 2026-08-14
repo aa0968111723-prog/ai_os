@@ -1,3 +1,14 @@
+/**
+ * ⚠️ 這一份是**結構**斷言（有沒有長出第二套 selection store／第二條生成管線／
+ * 第二個 dock），不是行為證明。#725 P2 點名 v3 的兩支 contract test 是讀原始碼字串。
+ *
+ * 這一區真正的行為由這些覆蓋：
+ *   → client/src/features/storyboard-center/visualCreativeState.test.ts（Mixed State 分群鍵）
+ *   → client/src/features/storyboard-center/visualCreativeSemantics.test.ts（語意與孤兒 Look）
+ *   → client/src/components/SceneStudio.test.tsx（跨鏡隔離、方向送出、Compare）
+ *   → server/services/creativeVariantPointer.pg.test.ts（指標與併發，真 PostgreSQL）
+ *   → scripts/e2e-ui/creative-golden-flows.mjs（瀏覽器 FLOW A–E）
+ */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,7 +18,7 @@ const tray = readFileSync(join(root, "client/src/features/storyboard-center/Visu
 const stage = readFileSync(join(root, "client/src/features/storyboard-center/StoryboardStage.tsx"), "utf8");
 const css = readFileSync(join(root, "client/src/styles.css"), "utf8");
 
-describe("Visual Creative UX architecture contract", () => {
+describe("Visual Creative UX 的結構約束（行為見上方檔案清單）", () => {
   it("uses real project sources instead of generic Character/Look/Scene/Prop presets", () => {
     expect(tray).toContain("trpc.characters.list.useQuery");
     expect(tray).toContain("trpc.characterLooks.list.useQuery");
