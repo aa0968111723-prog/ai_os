@@ -355,4 +355,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0073_consistency_training": [
     "3929431d893e899b239c794de2b2df2e5b75b2f09df016be58381faa85b94b11",
   ],
+  "0074_team_canon": [
+    "cc202b94aad8db282666963f6a4a6d75e42223e3b70bf9a83352960d0de8334e",
+  ],
 };
