@@ -20,7 +20,7 @@
 
 ## 現在階段
 
-**PR 4 實作完成、準備 targeted tests／Draft PR：資料、說明與舊入口歸位**
+**PR 4 已開 Draft #740；全庫檢查通過。手機 20 條流程尚缺登入後瀏覽器證據。**
 
 ## 四個實作 PR checklist
 
@@ -89,8 +89,8 @@
 - [x] 不得改 `/p/:id` 故事工作台
 - [x] targeted tests / typecheck / boundaries / ui-primitives / hooks
 - [x] commit / push / Draft PR
-- [ ] 全庫 test / test:client / build
-- [ ] 手機 20 條流程實際操作與 evidence
+- [x] 全庫 test / test:client / build
+- [ ] 手機 20 條流程實際操作與 evidence（需登入 session）
 
 ## 已完成
 
@@ -100,15 +100,14 @@
 
 ## 未完成
 
-- PR 4 targeted／全庫測試與 Draft PR
-- 手機 20 條流程實際操作與 evidence
+- 手機 20 條流程實際操作與 evidence（需登入 session）
 
 ## 最後成功 commit SHA
 
 - PR 1：`e163cc33181ba9b0a13149f738608c856ee93f30`
 - PR 2：`1ef3fddf`
 - PR 3：`392401c5df3990f5cc3a9454715fc3a9714b9e27`
-- PR 4：尚未 commit
+- PR 4：`2a0ed044`＋後續 presence 測試修正
 
 ## 分支與 PR 連結
 
@@ -118,7 +117,7 @@
 | 1 | `cursor/global-nav-01-contract-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/737 | `e163cc33`（已合併） |
 | 2 | `cursor/global-nav-02-today-planner-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/738 | `1ef3fddf` |
 | 3 | `cursor/global-nav-03-shell-dedup-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/739 | `392401c5` |
-| 4 | `cursor/global-nav-04-destination-consolidation-32e8` | — | — |
+| 4 | `cursor/global-nav-04-destination-consolidation-32e8` | https://github.com/aa0968111723-prog/ai_os/pull/740 | 見 git log |
 
 ## 實際測試結果
 
@@ -128,9 +127,14 @@
 - typecheck / boundaries / ui-primitives / hooks：**PASS**
 - `npm test`：**2934 passed**
 
-### PR 4 targeted
+### PR 4
 
-- 尚未跑
+- targeted client：**27 passed**
+- typecheck / boundaries / ui-primitives / hooks：**PASS**
+- `npm test`：**2934 passed** / 119 skipped
+- `npm run test:client`：**1861 passed**（含 OnlinePresenceMenu 對齊 PR 3 aria-label／隱藏零值）
+- `npm run build`：**PASS**
+- 瀏覽器 20 條流程：**BLOCKED_BY_ENVIRONMENT**（此環境無登入 session，無法操作已登入殼層）
 
 ## Baseline failure
 
@@ -147,10 +151,8 @@
 
 ## 下一個精確操作
 
-1. 跑 PR 4 targeted tests 與靜態檢查
-2. commit / push PR 4
-3. 開 Draft PR 4（base = PR 3 分支）
-4. 跑全庫檢查與手機 20 條流程
+1. 以登入 session 在 390×844／430×932／768×1024／1280×800／1440×900 跑 20 條流程
+2. 截圖存 `docs/evidence/global-navigation-entry-dedup/`
 
 ## 真正需要人工決策的 blocker
 

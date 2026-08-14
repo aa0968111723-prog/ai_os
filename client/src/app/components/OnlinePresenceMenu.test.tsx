@@ -86,7 +86,7 @@ describe("OnlinePresenceMenu", () => {
       { userId: "u3", name: "老王", lastActiveAt: ago(60) },
     ];
     render(<OnlinePresenceMenu />);
-    const btn = screen.getByRole("button", { name: /在線/ });
+    const btn = screen.getByRole("button", { name: /2 位夥伴上線中/ });
     expect(btn).toHaveTextContent("2");
     expect(btn).toHaveTextContent("在線");
   });
@@ -98,7 +98,7 @@ describe("OnlinePresenceMenu", () => {
     ];
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<OnlinePresenceMenu />);
-    await user.click(screen.getByRole("button", { name: /在線/ }));
+    await user.click(screen.getByRole("button", { name: /1 位夥伴上線中/ }));
     expect(screen.getByRole("dialog", { name: "誰在線" })).toBeInTheDocument();
     expect(screen.getByText("上線中 · 1")).toBeInTheDocument();
     expect(screen.getByText("剛離開 · 1")).toBeInTheDocument();
@@ -111,8 +111,10 @@ describe("OnlinePresenceMenu", () => {
     h.presence = [{ userId: "u3", name: "老王", lastActiveAt: ago(60) }];
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<OnlinePresenceMenu />);
-    expect(screen.getByRole("button", { name: /在線/ })).toHaveTextContent("0");
-    await user.click(screen.getByRole("button", { name: /在線/ }));
+    const btn = screen.getByRole("button", { name: /目前沒有夥伴上線/ });
+    expect(btn).toHaveTextContent("在線");
+    expect(btn).not.toHaveTextContent("0");
+    await user.click(btn);
     expect(screen.getByText(/目前沒有夥伴在線或剛離開/)).toBeInTheDocument();
   });
 });
