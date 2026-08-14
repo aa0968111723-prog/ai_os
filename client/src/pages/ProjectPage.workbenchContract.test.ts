@@ -80,10 +80,12 @@ describe("ProjectPage workbench contract (WB-06)", () => {
   });
 
   /**
-   * C1 (#402)：定裝三卡合一 Tab；錨點仍由 CostumePackSection 掛 #sec-characters|scenes|props。
+   * C1 (#402)：定裝三卡合一 Tab 仍在專案設定；#sec-characters|scenes|props 改由故事收合列掛載，
+   * 設定裡的 CostumePackSection 使用 omitLegacyAnchors 避免雙重 id。
    */
   it("C1 costume pack: unified tabs replace three parallel full sections", () => {
     expect(src).toMatch(/CostumePackSection/);
+    expect(src).toMatch(/omitLegacyAnchors/);
     expect(src).toMatch(/sectionId="sec-costume"/);
     // 仍掛載三卡元件（在 tab panel 內）
     expect(src).toMatch(/<CharacterCards\b/);
@@ -109,22 +111,27 @@ describe("ProjectPage workbench contract (WB-06)", () => {
   });
 
   /**
-   * C3（Story-first PE 計畫）：空專案四步＝故事→分鏡→製作→成片；範例一鍵去創作台；
-   * Stage 用語對齊 TocNav 四段。「定調」不再是階段——其資料面收進專案設定二層。
+   * C3（story-inline）：空專案不再走四階段 onboard。故事是唯一主畫面，
+   * 角色／場景／道具／分鏡／製作／交付預設收合。範例一鍵仍進真實創作台。
    */
-  it("C3 empty journey: four onboard stages, apply-and-studio, stage titles 故事/分鏡/製作/成片", () => {
-    expect(src).toMatch(/label: "① 故事"/);
-    expect(src).toMatch(/label: "② 分鏡"/);
-    expect(src).toMatch(/label: "③ 製作"/);
-    expect(src).toMatch(/label: "④ 成片"/);
+  it("C3 story-inline home: no four-stage primary nav, six collapsed sections, apply-and-studio", () => {
+    expect(src).not.toMatch(/label: "① 故事"/);
+    expect(src).not.toMatch(/label: "② 分鏡"/);
+    expect(src).not.toMatch(/label: "③ 製作"/);
+    expect(src).not.toMatch(/label: "④ 成片"/);
+    expect(src).not.toMatch(/<VisualJourney\b/);
+    expect(src).not.toMatch(/<TocNav\b/);
+    expect(src).toMatch(/<StoryInlineSection\b/);
+    expect(src).toMatch(/sectionId="characters"/);
+    expect(src).toMatch(/sectionId="scenes"/);
+    expect(src).toMatch(/sectionId="props"/);
+    expect(src).toMatch(/sectionId="storyboard"/);
+    expect(src).toMatch(/sectionId="production"/);
+    expect(src).toMatch(/sectionId="delivery"/);
+    expect(src).toMatch(/<StoryReadinessBar\b/);
     // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）
     expect(src).toMatch(/onApplyAndGoStudio/);
     expect(src).toMatch(/revealWorkbenchAnchor\("#sec-studio"/);
-    // StageHead titles（與 TocNav 故事→分鏡→製作→成片 同口徑）
-    expect(src).toMatch(/title="故事"/);
-    expect(src).toMatch(/title="分鏡"/);
-    expect(src).toMatch(/title="製作"/);
-    expect(src).toMatch(/title="成片"/);
     // 舊「定調」不得再以階段身分出現
     expect(src).not.toMatch(/label: "① 定調"/);
     expect(src).not.toMatch(/id="stage-context"/);
@@ -146,10 +153,13 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/#stage-story/);
   });
 
-  it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {
-    expect(src).toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
-    expect(src).toMatch(/id="stage-create"/);
-    expect(src).toMatch(/同一入口/);
+  it("keeps legacy stage anchors without four-stage StageHead chrome", () => {
+    expect(src).toMatch(/id="stage-story"/);
+    expect(src).toMatch(/anchorId="stage-board"/);
+    expect(src).toMatch(/anchorId="stage-create"/);
+    expect(src).toMatch(/anchorId="stage-deliver"/);
+    expect(src).not.toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
+    expect(src).not.toMatch(/<StageHead\b/);
     // Mode anchors must not be extra StageHead sections on the page
     expect(src).not.toMatch(/StageHead[^]*id="sec-studio"/);
     expect(src).not.toMatch(/id="stage-assets"/);

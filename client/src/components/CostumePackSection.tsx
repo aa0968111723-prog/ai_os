@@ -28,6 +28,7 @@ export function CostumePackSection({
   counts,
   carriedHint,
   panels,
+  omitLegacyAnchors = false,
 }: {
   tab: CostumeTab;
   onTabChange: (tab: CostumeTab) => void;
@@ -35,6 +36,8 @@ export function CostumePackSection({
   /** 固定說明：勾選主人卡會自動帶入歸屬道具（與 generation 同源規則） */
   carriedHint?: ReactNode;
   panels: Record<CostumeTab, ReactNode>;
+  /** Story-inline rail owns #sec-characters|scenes|props; settings must not duplicate those ids. */
+  omitLegacyAnchors?: boolean;
 }) {
   const reactId = useId();
   const prefix = `costume-pack-${reactId.replace(/:/g, "")}`;
@@ -108,7 +111,7 @@ export function CostumePackSection({
               role="tab"
               id={`${prefix}-tab-${item.id}`}
               aria-selected={selected}
-              aria-controls={item.panelId}
+              aria-controls={omitLegacyAnchors ? `${prefix}-panel-${item.id}` : item.panelId}
               tabIndex={selected ? 0 : -1}
               className={`costume-pack-tab${selected ? " is-selected" : ""}`}
               data-costume-tab={item.id}
@@ -129,7 +132,7 @@ export function CostumePackSection({
         return (
           <div
             key={item.id}
-            id={item.panelId}
+            id={omitLegacyAnchors ? `${prefix}-panel-${item.id}` : item.panelId}
             role="tabpanel"
             aria-labelledby={`${prefix}-tab-${item.id}`}
             hidden={!selected}
