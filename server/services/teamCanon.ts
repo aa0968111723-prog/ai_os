@@ -298,7 +298,29 @@ export async function createCanonFromEntity(input: {
   });
   const fingerprint = canonVersionFingerprint(payload);
 
-  const created = await db.transaction(async (tx) => {
+  const retryExisting = async () => {
+    // 並行 race：同一張卡同時被兩個人升級——unique index 擋下第二筆後改走冪等回傳
+    const [row] = await db.select().from(schema.canonEntries).where(and(
+      eq(schema.canonEntries.groupId, project.groupId),
+      eq(schema.canonEntries.sourceEntityKind, input.entityKind),
+      eq(schema.canonEntries.sourceEntityId, input.entityId),
+    ));
+    if (!row) return null;
+    const [pin] = await db.select().from(schema.projectCanonPins).where(and(
+      eq(schema.projectCanonPins.projectId, project.id),
+      eq(schema.projectCanonPins.canonId, row.id),
+    ));
+    return {
+      canonId: row.id,
+      versionId: row.productionVersionId ?? "",
+      pinId: pin?.id ?? "",
+      reused: true as const,
+    };
+  };
+
+  let created: { canonId: string; versionId: string; pinId: string };
+  try {
+    created = await db.transaction(async (tx) => {
     const [canon] = await tx.insert(schema.canonEntries).values({
       groupId: project.groupId,
       kind,
@@ -344,7 +366,15 @@ export async function createCanonFromEntity(input: {
       actor: input.auth.user.id,
     });
     return { canonId: canon.id, versionId: version.id, pinId: pin.id };
-  });
+    });
+  } catch (error) {
+    const { isUniqueViolation } = await import("./generationCore");
+    if (isUniqueViolation(error)) {
+      const winner = await retryExisting();
+      if (winner) return winner;
+    }
+    throw error;
+  }
   return { ...created, reused: false };
 }
 
@@ -693,12 +723,15 @@ export async function pinCanonToProject(input: {
   }
 
   const localKind = localEntityKindForCanon(canon.kind);
+  // 本地 handle 與 pin 同一個交易：pin 撞 unique（並行 pin race）時 handle 一起回滾，不留孤兒卡
+  try {
+    return await db.transaction(async (tx) => {
   let localEntityId: string | null = null;
   if (localKind) {
     const payload = version.payload;
     const primaryRef = payload.references.find((ref) => ref.priority === "PRIMARY")?.assetId ?? null;
     if (localKind === "character") {
-      const [row] = await db.insert(schema.characters).values({
+      const [row] = await tx.insert(schema.characters).values({
         projectId: project.id,
         groupId: project.groupId,
         name: payload.name,
@@ -712,14 +745,14 @@ export async function pinCanonToProject(input: {
       if (!canon.parentCanonId) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個造型 Canon 缺少所屬角色" });
       }
-      const [parentPin] = await db.select().from(schema.projectCanonPins).where(and(
+      const [parentPin] = await tx.select().from(schema.projectCanonPins).where(and(
         eq(schema.projectCanonPins.projectId, project.id),
         eq(schema.projectCanonPins.canonId, canon.parentCanonId),
       ));
       if (!parentPin?.localEntityId) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "請先把所屬角色 pin 進這個專案" });
       }
-      const [row] = await db.insert(schema.characterLooks).values({
+      const [row] = await tx.insert(schema.characterLooks).values({
         projectId: project.id,
         groupId: project.groupId,
         characterId: parentPin.localEntityId,
@@ -732,7 +765,7 @@ export async function pinCanonToProject(input: {
       }).returning({ id: schema.characterLooks.id });
       localEntityId = row.id;
     } else if (localKind === "scene_preset") {
-      const [row] = await db.insert(schema.scenePresets).values({
+      const [row] = await tx.insert(schema.scenePresets).values({
         projectId: project.id,
         groupId: project.groupId,
         name: payload.name,
@@ -743,7 +776,7 @@ export async function pinCanonToProject(input: {
       }).returning({ id: schema.scenePresets.id });
       localEntityId = row.id;
     } else {
-      const [row] = await db.insert(schema.props).values({
+      const [row] = await tx.insert(schema.props).values({
         projectId: project.id,
         groupId: project.groupId,
         name: payload.name,
@@ -756,7 +789,7 @@ export async function pinCanonToProject(input: {
     }
   }
 
-  const [pin] = await db.insert(schema.projectCanonPins).values({
+  const [pin] = await tx.insert(schema.projectCanonPins).values({
     projectId: project.id,
     groupId: project.groupId,
     canonId: canon.id,
@@ -766,6 +799,20 @@ export async function pinCanonToProject(input: {
     pinnedBy: input.auth.user.id,
   }).returning();
   return { pinId: pin.id, localEntityId, versionId: version.id, reused: false };
+    });
+  } catch (error) {
+    const { isUniqueViolation } = await import("./generationCore");
+    if (isUniqueViolation(error)) {
+      const [winner] = await db.select().from(schema.projectCanonPins).where(and(
+        eq(schema.projectCanonPins.projectId, project.id),
+        eq(schema.projectCanonPins.canonId, canon.id),
+      ));
+      if (winner) {
+        return { pinId: winner.id, localEntityId: winner.localEntityId, versionId: winner.pinnedVersionId, reused: true };
+      }
+    }
+    throw error;
+  }
 }
 
 /** 解除引用：pin 移除、本地卡保留（變成獨立卡，不再收到 Canon 更新） */
