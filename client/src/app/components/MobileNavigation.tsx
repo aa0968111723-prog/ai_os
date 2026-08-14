@@ -9,21 +9,18 @@ import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } fr
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 
 /**
- * 分頁列的四個導航格。
+ * 底欄一級：今日、專案。中央 AI 助手與「更多」不在這個陣列裡。
  *
- * 正中央的「AI 工作」**不在這個陣列裡**——它從導航連結變成了「開啟全站 AI 助手」
- * 的按鈕（見下方 orb）。原本它只是 `/dashboard#ai-work` 的捲動錨點：按下去跳回
- * 今日工作台捲到「繼續創作」那一格，而那一格本來就在 dashboard 上、捲一下就到。
- * 換成助手入口幾乎不犧牲任何既有功能，卻讓那顆球真的有事做。
+ * 「筆記排程」已從底欄撤下——`/planner` 仍由 More 與頂欄進入，route 不刪。
+ * 正中央的球是「開啟全站 AI 助手」的按鈕，不是 `/dashboard#ai-work` 捲動錨點。
  */
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
   { href: "/dashboard", label: DESTINATIONS.dashboard.label, icon: DESTINATIONS.dashboard.icon, match: [] },
   { href: "/dashboard#projects", label: "專案", icon: "Package", match: ["/p/"] },
-  { href: "/planner", label: DESTINATIONS.planner.label, icon: DESTINATIONS.planner.icon, match: ["/planner"] },
 ];
 
-/** wouter 的 location 不含 hash——分頁列有三顆都指向 /dashboard（帶不同 hash），
- *  只比 pathname 會三顆同時亮；這裡自己追 hash 讓「今日／專案／AI 工作」互斥。
+/** wouter 的 location 不含 hash——今日與專案都指向 /dashboard（帶不同 hash），
+ *  只比 pathname 會兩顆同時亮；這裡自己追 hash 讓「今日／專案」互斥。
  *  渲染時直接讀 window.location.hash（pushState 導航靠 useLocation 重繪即拿到新值），
  *  hashchange/popstate 監聽只補「純 hash 變化」不經 wouter 的情況。
  *  回傳的 sync 給「只清掉 hash」的導航用：那種切換不發 hashchange，wouter 的
@@ -152,25 +149,9 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
         triggerRef={orbRef}
       />
       <nav className="mobile-nav" aria-label="主要功能">
-        {ITEMS.map((item, index) => {
-          // 正中央插入 AI 球（第 2 顆之後）：它不是導航連結，是開啟助手的按鈕
-          const orb = index === 2 ? (
-            <button
-              key="ai-orb"
-              type="button"
-              ref={orbRef}
-              className={`mobile-nav__orb${assistantOpen ? " active" : ""}`}
-              aria-haspopup="dialog"
-              aria-expanded={assistantOpen}
-              aria-controls="global-assistant-sheet"
-              onClick={() => setAssistantOpen((v) => !v)}
-            >
-              <Icon name="Sparkles" size={20} />
-              <span>AI 助手</span>
-            </button>
-          ) : null;
+        {ITEMS.map((item) => {
           const [pathname, anchor] = item.href.split("#");
-          // 同 pathname 的分頁以 hash 互斥：/dashboard 無 hash＝今日、#projects＝專案、#ai-work＝AI 工作
+          // 同 pathname 的分頁以 hash 互斥：/dashboard 無 hash＝今日、#projects＝專案
           const hashMatched = anchor ? hash === `#${anchor}` : !ITEMS.some((i) => i.href === `${pathname}${hash}` && i.href !== item.href);
           const active = (location === pathname && hashMatched) || item.match.some((prefix) => location.startsWith(prefix));
           const content = (
@@ -179,8 +160,9 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
               <span>{item.label}</span>
             </>
           );
-          const link = item.href.includes("#") ? (
+          return item.href.includes("#") ? (
             <a
+              key={item.label}
               href={item.href}
               className={active ? "active" : ""}
               aria-current={active ? "page" : undefined}
@@ -200,6 +182,7 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
             </a>
           ) : (
             <Link
+              key={item.label}
               href={item.href}
               className={active ? "active" : ""}
               aria-current={active ? "page" : undefined}
@@ -220,14 +203,19 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
               {content}
             </Link>
           );
-          // orb 在中央：先渲染前兩顆導航格，插入球，再接後面的
-          return (
-            <Fragment key={item.label}>
-              {orb}
-              {link}
-            </Fragment>
-          );
         })}
+        <button
+          type="button"
+          ref={orbRef}
+          className={`mobile-nav__orb${assistantOpen ? " active" : ""}`}
+          aria-haspopup="dialog"
+          aria-expanded={assistantOpen}
+          aria-controls="global-assistant-sheet"
+          onClick={() => setAssistantOpen((v) => !v)}
+        >
+          <Icon name="Sparkles" size={20} />
+          <span>AI 助手</span>
+        </button>
         <button
           type="button"
           className={moreOpen || moreActive ? "active" : ""}
