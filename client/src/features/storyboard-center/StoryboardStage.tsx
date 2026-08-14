@@ -23,12 +23,18 @@ export function StoryboardStage({
   charIds,
   sceneIds,
   propIds,
+  hideInspector = false,
+  onSendToWorkbench,
 }: {
   projectId: string;
   canEdit: boolean;
   charIds: string[];
   sceneIds: string[];
   propIds: string[];
+  /** Mobile story sheet already occupies the one visible layer; desktop Inspector stays. */
+  hideInspector?: boolean;
+  /** Selected-shot adapter: reuse the existing CreationWorkbench, do not clone it. */
+  onSendToWorkbench?: (shot: ShotRow) => void;
 }) {
   const utils = trpc.useUtils();
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
@@ -121,12 +127,22 @@ export function StoryboardStage({
               <button type="button" role="tab" aria-selected={mode === "simple"} className={mode === "simple" ? "active" : undefined} onClick={() => switchMode("simple")}>簡單</button>
               <button type="button" role="tab" aria-selected={mode === "pro"} className={mode === "pro" ? "active" : undefined} onClick={() => switchMode("pro")}>專業</button>
             </div>
+            {canEdit && onSendToWorkbench && focusShot && (
+              <Button
+                size="sm"
+                variant="tonal"
+                type="button"
+                onClick={() => onSendToWorkbench(focusShot)}
+              >
+                用此鏡去製作
+              </Button>
+            )}
           </div>
           {isEmpty ? (
             <EmptyState
               icon={<Icon name="Clapperboard" size={20} />}
               title="還沒有分鏡"
-              description="回到「① 故事」貼上故事、按「AI 解析」再「產生分鏡」。"
+              description="回到故事貼上內容，按「AI 解析」再「產生分鏡」。"
               action={<Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>去寫故事</Button>}
             />
           ) : (
@@ -169,7 +185,9 @@ export function StoryboardStage({
             </>
           )}
         </Card>
-        <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} onOpenStudio={setStudioSceneId} />
+        {!hideInspector && (
+          <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} onOpenStudio={setStudioSceneId} />
+        )}
       </div>
       {studioShot && (
         <SceneStudio

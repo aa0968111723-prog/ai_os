@@ -66,6 +66,7 @@ import {
 } from "../features/story-workspace/storyInlineNav";
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
 import { StoryboardStage } from "../features/storyboard-center/StoryboardStage";
+import { storyboardRailSummary } from "../features/storyboard-center/storyboardRailSummary";
 import { VisibleCreativeWorkspace } from "../features/visible-workspace/VisibleCreativeWorkspace";
 import { usePresenterFollow } from "../features/collaboration/usePresenterFollow";
 import { FollowStatusBar, PresenterBadge, PresenterInvite, PresentButton } from "../features/collaboration/PresenterBar";
@@ -1135,6 +1136,18 @@ export function ProjectPage({ id }: { id: string }) {
     doneGenerationCount: doneGenCountForReady,
   });
   const hasDeliverable = !!scenes.data?.some((s) => s.assetId);
+  const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
+    id: string;
+    title: string;
+    orderIndex: number;
+    assetId: string | null;
+    assetKind: string | null;
+    storySceneId?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    pendingGenStatus?: string | null;
+    reviewStatus?: "draft" | "in_progress" | "ready" | "changes" | "approved" | null;
+  }>);
 
   // 三幕標頭與摘要條的進度數字：全讀頁面既有查詢，查詢還沒回來就不顯示
   const stylePicker = (labelledBy: string) => {
@@ -1644,7 +1657,8 @@ export function ProjectPage({ id }: { id: string }) {
               sectionId="storyboard"
               anchorId="stage-board"
               title="分鏡"
-              summary={sceneCount > 0 ? `${sceneCount} 鏡` : "尚未產生"}
+              summary={boardRail.summary}
+              warning={boardRail.warning}
               presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "storyboard"}
               onOpenChange={(next) => openInlineSection(next ? "storyboard" : null)}
@@ -1659,6 +1673,15 @@ export function ProjectPage({ id }: { id: string }) {
                   charIds={charIds}
                   sceneIds={sceneIds}
                   propIds={propIds}
+                  hideInspector={mobileCompact}
+                  onSendToWorkbench={(shot) => {
+                    openInlineSection("production");
+                    applyPrompt(shot.prompt || shot.action || shot.title, {
+                      characterIds: shot.characterIds,
+                      scenePresetIds: shot.scenePresetIds,
+                      propIds: shot.propIds,
+                    });
+                  }}
                 />
               </SectionErrorBoundary>
             </StoryInlineSection>
@@ -2543,7 +2566,7 @@ export function ProjectPage({ id }: { id: string }) {
               sectionId="production"
               anchorId="stage-create"
               title="製作"
-              summary={doneGenCount != null ? `已完成 ${doneGenCount} 次` : "載入中…"}
+              summary={doneGenCount != null ? `已完成 ${doneGenCount} 次・可生成 ${boardRail.readyCount}` : "載入中…"}
               presentation={mobileCompact ? "sheet" : "inline"}
               open={openInline === "production"}
               onOpenChange={(next) => openInlineSection(next ? "production" : null)}
