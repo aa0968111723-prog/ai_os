@@ -28,3 +28,4 @@ src-tauri/Cargo.lock
 # 內容是 storage 層的 .volume-id 與 E2E_MOCK 的 1x1 假 PNG——runtime 產物，不是原始碼。
 # 正式證據（截圖與量測）留在 docs/evidence/**，那才是耐久產物。
 .evidence-assets/
+.claude/launch.json
