@@ -148,6 +148,8 @@ export function deliveryBlockers(input: {
   shots: Array<{ id: string; assetId: string | null; reviewStatus: string | null }>;
   staleShotIds: readonly string[];
   rightsBlockers?: readonly string[];
+  /** closure §8：downstream artifact 推導出的不一致（影片舊底圖／聲線漂移／聲音世界漂移） */
+  artifactFindings?: ReadonlyArray<{ track: string; code: string }>;
 }): string[] {
   const blockers: string[] = [];
   const stale = new Set(input.staleShotIds);
@@ -157,5 +159,10 @@ export function deliveryBlockers(input: {
     blockers.push("有鏡頭尚未核准");
   }
   for (const reason of input.rightsBlockers ?? []) blockers.push(reason);
+  const findings = input.artifactFindings ?? [];
+  if (findings.some((row) => row.track === "visual")) blockers.push("有影片仍是用舊畫面生成的");
+  if (findings.some((row) => row.track === "narration" || row.track === "ambience" || row.track === "music")) {
+    blockers.push("有聲音與現行聲線／聲音世界不一致");
+  }
   return blockers;
 }
