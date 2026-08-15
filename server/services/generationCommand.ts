@@ -198,6 +198,28 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
           adoptAllowed: evaluation.adoptAllowed,
           silentAdopt: false,
           preserveScenePointer,
+          // closure §10：多角色路由決策落軌跡——「為什麼這一鏡用這顆模型、降了什麼級」
+          // 可回答。決策不 silent 改模型（suggestedModelId 只是建議，由 UI 呈現）。
+          multiCharacterRouting: await (async () => {
+            const slotCount = frozen.payload.characterSlots?.length ?? frozen.payload.characters.length;
+            if (slotCount <= 1) return null;
+            const { routeMultiCharacterModel } = await import("../../shared/modelRouting");
+            const { getModel: getModelById } = await import("../../shared/models");
+            const { capabilityForModel: capOf } = await import("../../shared/providerCapabilities");
+            const requested = getModelById(generation.modelId);
+            if (!requested) return null;
+            const { listResolvableModels } = await import("./modelResolve");
+            const alternatives = listResolvableModels()
+              .filter((row) => row.kind === requested.kind && row.id !== requested.id && row.verified)
+              .slice(0, 40)
+              .map((row) => ({ modelId: row.id, capability: capOf(row) }));
+            return routeMultiCharacterModel({
+              requestedModelId: requested.id,
+              characterCount: slotCount,
+              capability: capOf(requested),
+              alternatives,
+            });
+          })().catch(() => null),
         },
       });
     })().catch((error) => console.warn(

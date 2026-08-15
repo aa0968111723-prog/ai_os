@@ -6,6 +6,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import {
+  buildConsistencyScorecard,
   compactWorkspaceStatus,
   nextWorkspaceAction,
   visualCoverageScore,
@@ -13,6 +14,7 @@ import {
   type ConsistencyGraphNode,
   type WorkspaceProjection,
 } from "../../shared/projectConsistencyGraph";
+import { parseScriptAuthorizedChanges, resolvePropTransfers, unresolvedPropTransfers } from "../../shared/scriptChanges";
 import { pinState } from "../../shared/teamCanon";
 import { deliveryBlockers } from "./consistencyAdopt";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
@@ -26,9 +28,13 @@ export async function projectWorkspaceProjection(input: {
   // closure §8：downstream artifact staleness（影片 parent／聲線版本／聲音世界版本）——
   // 推導不落盤，與 packet 級 staleness 互補；失敗不擋 projection（訊號層，不是門）
   const { projectMediaLineage } = await import("./mediaLineage");
-  const artifactFindings = await projectMediaLineage({ auth: input.auth, projectId: input.projectId })
-    .then((result) => result.findings)
-    .catch(() => []);
+  const lineageResult = await projectMediaLineage({ auth: input.auth, projectId: input.projectId })
+    .catch(() => ({ findings: [], lineages: [], lineageGapShotIds: [] as string[] }));
+  const artifactFindings = lineageResult.findings;
+  // closure §11 scorecard 的 canon 現況輸入
+  const { resolveProjectCanonDefaults } = await import("./teamCanon");
+  const canonDefaults = await resolveProjectCanonDefaults(project.id)
+    .catch(() => ({ styleCanon: null, styleStyles: null, styleNegative: null, styleReferences: [], characterVoices: new Map(), narrationVoice: null, soundWorld: null }));
   const [characters, looks, presets, props, shots, assets, rightsRows, bindings, heads] = await Promise.all([
     db.select({ id: schema.characters.id, name: schema.characters.name, rev: schema.characters.rev, referenceAssetId: schema.characters.referenceAssetId })
       .from(schema.characters).where(eq(schema.characters.projectId, project.id)),
@@ -45,6 +51,11 @@ export async function projectWorkspaceProjection(input: {
       prompt: schema.scenes.prompt,
       assetId: schema.scenes.assetId,
       reviewStatus: schema.scenes.reviewStatus,
+      // closure §9–§11 scorecard 輸入：多角色數／道具轉手解析用文字
+      characterIds: schema.scenes.characterIds,
+      propIds: schema.scenes.propIds,
+      action: schema.scenes.action,
+      dialogue: schema.scenes.dialogue,
     }).from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))).orderBy(asc(schema.scenes.orderIndex)),
     db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.projectId, project.id), isNull(schema.assets.deletedAt))),
     db.select({
@@ -131,6 +142,11 @@ export async function projectWorkspaceProjection(input: {
   const worldview = project.worldview && typeof project.worldview === "object" ? project.worldview as Record<string, unknown> : {};
   const worldBits = [worldview.logline, Array.isArray(worldview.styles) ? worldview.styles[0] : null, Array.isArray(worldview.taboos) ? worldview.taboos[0] : null].filter(Boolean).length;
 
+  const blockers = deliveryBlockers({
+    shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
+    staleShotIds: [...stale],
+    artifactFindings,
+  });
   const projection: WorkspaceProjection = {
     projectId: project.id,
     applied: {
@@ -173,10 +189,48 @@ export async function projectWorkspaceProjection(input: {
     canonPins,
     staleShotIds: [...stale],
     artifactFindings,
-    deliveryBlockers: deliveryBlockers({
-      shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
+    deliveryBlockers: blockers,
+    scorecard: buildConsistencyScorecard({
+      charactersMissingReference: characters.filter((row) => !row.referenceAssetId).map((row) => row.id),
+      charactersBoundShotIds: (() => {
+        const missing = new Set(characters.filter((row) => !row.referenceAssetId).map((row) => row.id));
+        return shots.filter((shot) => (shot.characterIds ?? []).some((id) => missing.has(id))).map((shot) => shot.id);
+      })(),
+      looksMissingReference: looks.filter((row) => !row.referenceAssetId).map((row) => row.id),
+      presetsMissingReference: presets.filter((row) => !row.referenceAssetId).map((row) => row.id),
+      unresolvedPropShotIds: shots.filter((shot) => {
+        if (!(shot.propIds ?? []).length) return false;
+        const text = [shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n");
+        if (!text) return false;
+        const changes = resolvePropTransfers({
+          changes: parseScriptAuthorizedChanges(text),
+          shotText: text,
+          characters: characters.filter((row) => (shot.characterIds ?? []).includes(row.id)),
+          props: props.filter((row) => (shot.propIds ?? []).includes(row.id)),
+        });
+        return unresolvedPropTransfers(changes).length > 0;
+      }).map((shot) => shot.id),
+      styleCanonPinned: Boolean(canonDefaults.styleCanon),
       staleShotIds: [...stale],
-      artifactFindings,
+      multiCharacterShotIds: shots.filter((shot) => (shot.characterIds ?? []).length > 1).map((shot) => shot.id),
+      voiceFindingShotIds: artifactFindings.filter((row) => row.track === "narration").map((row) => row.shotId),
+      charactersSpeakingWithoutVoice: (() => {
+        if (!canonDefaults.narrationVoice && canonDefaults.characterVoices.size === 0) {
+          // 完全沒綁聲線：算「有台詞的角色」數（提示綁定，不逐鏡展開）
+          const speaking = new Set<string>();
+          for (const shot of shots) {
+            if (shot.dialogue?.includes("@") || shot.dialogue?.includes("＠")) {
+              for (const id of shot.characterIds ?? []) speaking.add(id);
+            }
+          }
+          return speaking.size;
+        }
+        return 0;
+      })(),
+      soundFindingShotIds: artifactFindings.filter((row) => row.track === "ambience" || row.track === "music").map((row) => row.shotId),
+      soundWorldPinned: Boolean(canonDefaults.soundWorld),
+      lineageGapShotIds: lineageResult.lineageGapShotIds,
+      deliveryBlockers: blockers,
     }),
   };
   return projection;
