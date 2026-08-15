@@ -62,6 +62,10 @@ beforeEach(() => {
   composed.length = 0;
   heavyLoads.length = 0;
   navigate.mockClear();
+  // mockReturnValue 不會清掉呼叫紀錄——不清的話「只有一個 query key」那條
+  // 讀到的是跨案例累積的 calls，等於在驗別的測試留下的殘影。
+  projectQuery.mockClear();
+  assetsQuery.mockClear();
   projectQuery.mockReturnValue({ data: SUMMARY, isLoading: false, isError: false, error: null });
   assetsQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false });
 });

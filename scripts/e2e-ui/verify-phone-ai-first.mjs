@@ -139,14 +139,19 @@ const main = async () => {
     const quick = await page.locator(".m-ai__chip").count();
     check(quick >= 2 && quick <= 4, `${vp.name}: 快捷 2–4 顆`, `實際 ${quick}`);
 
-    const desktopNav = await page.locator(".topbar-nav-link").first().isVisible().catch(() => false);
-    check(!desktopNav, `${vp.name}: 沒有第二套（桌面）導航`);
+    // `.catch(() => false)` 搭配否定斷言＝任何錯誤都被記成 PASS。用 count() 計數，
+    // 它不會因為元素不存在而丟例外，真的壞掉時才會炸出來。
+    const desktopNavCount = await page.locator(".topbar-nav-link:visible").count();
+    check(desktopNavCount === 0, `${vp.name}: 沒有第二套（桌面）導航`, `可見的桌面導覽連結 ${desktopNavCount} 條`);
 
     // No horizontal overflow at any phone width
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(overflow <= 1, `${vp.name}: 無水平溢出`, `${overflow}px`);
 
     phoneMetrics[vp.name] = { homeSettled: net.snapshot(), homeInteractive };
+    // 首頁同樣要有預算，不能只印不驗
+    const homeApi = new Set(homeInteractive.api).size;
+    check(homeApi <= 12, `${vp.name}: 首頁 API 支數在預算內`, `${homeApi} 支（上限 12）`);
     await page.screenshot({ path: path.join(OUT, `${vp.name}-home.png`), fullPage: false });
 
     // AI compose: typing on the home screen must open the assistant with the text
@@ -177,7 +182,11 @@ const main = async () => {
     //   • opening a project (no hash)  → cheap summary, workbench NOT downloaded
     //   • pressing 繼續製作 (with hash) → straight into the workbench at that section
     // Testing only one of them is how the anchor bug survived a "58/58 passed" run.
-    const projectHref = await page.locator(".m-current__go").first().isVisible().catch(() => false);
+    // 前置條件本身要是一條 check：舊寫法把整段包在 if 裡而不留紀錄，
+    // 一旦首頁沒有專案，最重要的那幾條斷言會整段消失，腳本照樣印「N/N passed」。
+    // 那正是錨點 bug 能活下來的環境（那次跑的時候根本沒有 seed 專案）。
+    const projectHref = await page.locator(".m-current__go").count() > 0;
+    check(projectHref, `${vp.name}: 首頁有可進入的專案（下面的專案頁斷言全靠它）`);
     if (projectHref) {
       // Recover the project id from the button's navigation target by using the
       // recent list when present, else read it after a plain click-through.
@@ -203,6 +212,13 @@ const main = async () => {
       phoneMetrics[vp.name].project = net.snapshot();
 
       check(true, `${vp.name}: 專案頁走手機摘要版`, `url=${page.url()}`);
+      // 量到的數字要真的被斷言，否則回歸到 900 kB 也只是印出來然後 PASS。
+      // 門檻取實測值（~6.5 kB / 1 支）的寬鬆上限：抓的是「整包桌面工作台被拉回來」
+      // 這種等級的回歸，不是幾百 bytes 的漂移。
+      const projectKB = phoneMetrics[vp.name].project.jsBytes / 1024;
+      check(projectKB < 120, `${vp.name}: 開專案的 JS 在預算內`, `${projectKB.toFixed(1)} kB（上限 120）`);
+      const projectApi = new Set(phoneMetrics[vp.name].project.api).size;
+      check(projectApi <= 3, `${vp.name}: 開專案的 API 支數在預算內`, `${projectApi} 支（上限 3）`);
       const heavyLoaded = await page.locator(".m-project-full").count();
       check(heavyLoaded === 0, `${vp.name}: 開專案不下載完整工作台`, `m-project-full=${heavyLoaded}`);
       const stillMobileNav = await page.locator("nav.mobile-nav").isVisible().catch(() => false);

@@ -5,10 +5,6 @@
         "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
-          "system.storageStatus",
-          "sessionBoot.bootstrap",
-          "auth.touchSession",
-          "quota.my",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -26,10 +22,6 @@
         "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
-          "system.storageStatus",
-          "sessionBoot.bootstrap",
-          "auth.touchSession",
-          "quota.my",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -46,7 +38,9 @@
       "project": {
         "jsBytes": 6641,
         "jsChunks": 1,
-        "api": []
+        "api": [
+          "phone.project"
+        ]
       }
     },
     "phone-390x844": {
@@ -55,8 +49,8 @@
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
-          "sessionBoot.bootstrap",
           "quota.my",
+          "sessionBoot.bootstrap",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
@@ -72,8 +66,8 @@
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
-          "sessionBoot.bootstrap",
           "quota.my",
+          "sessionBoot.bootstrap",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
@@ -165,12 +159,17 @@
     {
       "ok": true,
       "name": "phone-360x800: 沒有第二套（桌面）導航",
-      "detail": ""
+      "detail": "可見的桌面導覽連結 0 條"
     },
     {
       "ok": true,
       "name": "phone-360x800: 無水平溢出",
       "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 首頁 API 支數在預算內",
+      "detail": "9 支（上限 12）"
     },
     {
       "ok": true,
@@ -184,8 +183,23 @@
     },
     {
       "ok": true,
+      "name": "phone-360x800: 首頁有可進入的專案（下面的專案頁斷言全靠它）",
+      "detail": ""
+    },
+    {
+      "ok": true,
       "name": "phone-360x800: 專案頁走手機摘要版",
       "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 開專案的 JS 在預算內",
+      "detail": "6.5 kB（上限 120）"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 開專案的 API 支數在預算內",
+      "detail": "1 支（上限 3）"
     },
     {
       "ok": true,
@@ -230,12 +244,17 @@
     {
       "ok": true,
       "name": "phone-390x844: 沒有第二套（桌面）導航",
-      "detail": ""
+      "detail": "可見的桌面導覽連結 0 條"
     },
     {
       "ok": true,
       "name": "phone-390x844: 無水平溢出",
       "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 首頁 API 支數在預算內",
+      "detail": "9 支（上限 12）"
     },
     {
       "ok": true,
@@ -249,8 +268,23 @@
     },
     {
       "ok": true,
+      "name": "phone-390x844: 首頁有可進入的專案（下面的專案頁斷言全靠它）",
+      "detail": ""
+    },
+    {
+      "ok": true,
       "name": "phone-390x844: 專案頁走手機摘要版",
       "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 開專案的 JS 在預算內",
+      "detail": "6.5 kB（上限 120）"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 開專案的 API 支數在預算內",
+      "detail": "1 支（上限 3）"
     },
     {
       "ok": true,
@@ -295,12 +329,17 @@
     {
       "ok": true,
       "name": "phone-430x932: 沒有第二套（桌面）導航",
-      "detail": ""
+      "detail": "可見的桌面導覽連結 0 條"
     },
     {
       "ok": true,
       "name": "phone-430x932: 無水平溢出",
       "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 首頁 API 支數在預算內",
+      "detail": "9 支（上限 12）"
     },
     {
       "ok": true,
@@ -314,8 +353,23 @@
     },
     {
       "ok": true,
+      "name": "phone-430x932: 首頁有可進入的專案（下面的專案頁斷言全靠它）",
+      "detail": ""
+    },
+    {
+      "ok": true,
       "name": "phone-430x932: 專案頁走手機摘要版",
       "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 開專案的 JS 在預算內",
+      "detail": "6.5 kB（上限 120）"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 開專案的 API 支數在預算內",
+      "detail": "1 支（上限 3）"
     },
     {
       "ok": true,
