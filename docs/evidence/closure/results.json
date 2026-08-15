@@ -1,0 +1,47 @@
+{
+  "viewports": {
+    "desktop-1280": {
+      "tabs": [
+        "基本資料",
+        "作品設定1",
+        "團隊與權限",
+        "進階",
+        "角色1",
+        "場景0",
+        "道具0"
+      ],
+      "fourBlocks": false
+    },
+    "desktop-1440": {
+      "tabs": [
+        "基本資料",
+        "作品設定1",
+        "團隊與權限",
+        "進階",
+        "角色1",
+        "場景0",
+        "道具0"
+      ],
+      "fourBlocks": false
+    },
+    "mobile-390": {
+      "settingsAvailable": false,
+      "note": "#766 手機殼層無專案設定入口（另有 AI-first 導覽）"
+    },
+    "mobile-430": {
+      "settingsAvailable": false,
+      "note": "#766 手機殼層無專案設定入口（另有 AI-first 導覽）"
+    }
+  },
+  "singleTruth": {
+    "beforeStyleRow": {
+      "dimension": "style",
+      "status": "warning",
+      "affectedShotIds": [],
+      "reason": "尚未固定視覺風格設定——各鏡風格靠即時世界觀，跨腳本重用時可能漂移"
+    },
+    "afterStyleRow": null,
+    "pass": true
+  },
+  "tabs": []
+}
