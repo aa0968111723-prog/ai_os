@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   CANON_VERSION_SCHEMA_VERSION,
   buildCanonDescriptorFromEntity,
+  buildProjectCanonDescriptor,
   canPromoteCanonVersion,
   canonKindForLocalEntity,
   canonicalCanonVersionMaterial,
   localEntityKindForCanon,
   localFieldsForCanonKind,
   pinState,
+  styleCanonStyles,
   type CanonVersionPayload,
 } from "./teamCanon";
 
@@ -111,5 +113,39 @@ describe("local entity mapping", () => {
     const char = buildCanonDescriptorFromEntity("character", { appearance: "草帽", notes: "  " });
     expect(char).toEqual({ appearance: "草帽", notes: null });
     expect(Object.keys(char).sort()).toEqual([...localFieldsForCanonKind("character")].sort());
+  });
+});
+
+describe("project canon descriptors (closure §4–§6)", () => {
+  it("style requires at least one style anchor and canonical-joins the list", () => {
+    expect(buildProjectCanonDescriptor("style", {}).error).toBeTruthy();
+    const built = buildProjectCanonDescriptor("style", {
+      styles: ["水彩", "吉卜力"], palette: "低飽和暖色", negative: "不要棚拍打光",
+    });
+    expect(built.error).toBeNull();
+    expect(built.descriptor.style).toBe("水彩、吉卜力");
+    expect(styleCanonStyles(built.descriptor)).toEqual(["水彩", "吉卜力"]);
+    expect(built.descriptor.negative).toBe("不要棚拍打光");
+  });
+
+  it("voice requires model+voiceId, and a character binding unless it is the narration default", () => {
+    expect(buildProjectCanonDescriptor("voice", { modelId: "m" }).error).toBeTruthy();
+    expect(buildProjectCanonDescriptor("voice", { modelId: "m", voiceId: "v" }).error).toBeTruthy();
+    const narration = buildProjectCanonDescriptor("voice", { modelId: "m", voiceId: "v", role: "narration" });
+    expect(narration.error).toBeNull();
+    expect(narration.descriptor.role).toBe("narration");
+    expect(narration.descriptor.characterId).toBeNull();
+    const character = buildProjectCanonDescriptor("voice", {
+      modelId: "fal-ai/kokoro/mandarin-chinese", voiceId: "zm_yunjian", characterId: "c1", language: "Chinese",
+    });
+    expect(character.error).toBeNull();
+    expect(character.descriptor.characterId).toBe("c1");
+  });
+
+  it("sound_world requires ambience or music", () => {
+    expect(buildProjectCanonDescriptor("sound_world", { notes: "x" }).error).toBeTruthy();
+    const built = buildProjectCanonDescriptor("sound_world", { ambience: "海浪、遠處人聲", music: "溫暖木吉他" });
+    expect(built.error).toBeNull();
+    expect(built.descriptor.ambience).toBe("海浪、遠處人聲");
   });
 });

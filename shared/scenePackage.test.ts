@@ -56,15 +56,33 @@ describe("scene package material", () => {
 });
 
 describe("scene package dependencies", () => {
-  it("lists location, characters, looks, and props exactly once", () => {
+  it("lists location, characters, looks, props and the scene canon exactly once", () => {
     const deps = scenePackageDependencies(payload());
     expect(deps.storySceneId).toBe("sc1");
     expect(deps.entityKeys).toEqual([
+      // closure §8：sceneCanon 也是依賴——canon 換版只 stale 真依賴的場
+      "canon:canon-beach",
       "character:luffy",
       "character:nami",
       "character_look:look-red",
       "prop:map",
       "scene_preset:beach",
     ]);
+  });
+});
+
+describe("closure §6 sound-world canon dependency", () => {
+  it("legacy packages without sound canon keep soundWorld shape unchanged", () => {
+    const material = canonicalScenePackageMaterial(payload());
+    // soundWorld 沒有 canon 欄位＝與 #757 形狀 bit-for-bit 相同（歷史指紋穩定）
+    expect(material).toContain('"soundWorld":{"ambience":"海浪聲"}');
+  });
+
+  it("adds canon:<id> keys so canon upgrades stale only dependent scenes", () => {
+    const withCanon = payload({
+      soundWorld: { ambience: "海浪", canonId: "cw1", canonVersionId: "v1", music: "木吉他" },
+    });
+    expect(scenePackageDependencies(withCanon).entityKeys).toContain("canon:cw1");
+    expect(canonicalScenePackageMaterial(withCanon)).not.toBe(canonicalScenePackageMaterial(payload()));
   });
 });
