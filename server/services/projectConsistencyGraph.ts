@@ -23,6 +23,12 @@ export async function projectWorkspaceProjection(input: {
 }): Promise<WorkspaceProjection> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, false);
   const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, project.id));
+  // closure §8：downstream artifact staleness（影片 parent／聲線版本／聲音世界版本）——
+  // 推導不落盤，與 packet 級 staleness 互補；失敗不擋 projection（訊號層，不是門）
+  const { projectMediaLineage } = await import("./mediaLineage");
+  const artifactFindings = await projectMediaLineage({ auth: input.auth, projectId: input.projectId })
+    .then((result) => result.findings)
+    .catch(() => []);
   const [characters, looks, presets, props, shots, assets, rightsRows, bindings, heads] = await Promise.all([
     db.select({ id: schema.characters.id, name: schema.characters.name, rev: schema.characters.rev, referenceAssetId: schema.characters.referenceAssetId })
       .from(schema.characters).where(eq(schema.characters.projectId, project.id)),
@@ -166,9 +172,11 @@ export async function projectWorkspaceProjection(input: {
     edges,
     canonPins,
     staleShotIds: [...stale],
+    artifactFindings,
     deliveryBlockers: deliveryBlockers({
       shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
       staleShotIds: [...stale],
+      artifactFindings,
     }),
   };
   return projection;
