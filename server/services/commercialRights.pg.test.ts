@@ -18,7 +18,7 @@ function authFor(userId: string, groupId: string): AuthState {
     user: { id: userId, name: "t", email: `${userId}@t.test`, isSuperAdmin: false, mustChangePassword: false },
     groups: [{ groupId, groupName: "t", teamId: randomUUID(), teamName: "t", role: "leader" }],
     adminTeamIds: [],
-  } as AuthState;
+  };
 }
 
 async function seed() {

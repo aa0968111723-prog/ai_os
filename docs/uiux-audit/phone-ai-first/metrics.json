@@ -5,13 +5,9 @@
         "jsBytes": 817788,
         "jsChunks": 17,
         "api": [
-          "auth.touchSession",
-          "system.storageStatus",
-          "dm.presence",
-          "dm.unread",
-          "generation.pendingSummary",
+          "auth.me",
           "sessionBoot.bootstrap",
-          "sessionBoot.bootstrap",
+          "quota.my",
           "sessionBoot.bootstrap",
           "dm.presence",
           "dm.unread",
@@ -19,7 +15,6 @@
           "auth.me",
           "phone.home",
           "teamAssistant.agentOverview",
-          "quota.my",
           "system.storageStatus",
           "dm.unread"
         ]
@@ -28,13 +23,9 @@
         "jsBytes": 817788,
         "jsChunks": 17,
         "api": [
-          "auth.touchSession",
-          "system.storageStatus",
-          "dm.presence",
-          "dm.unread",
-          "generation.pendingSummary",
+          "auth.me",
           "sessionBoot.bootstrap",
-          "sessionBoot.bootstrap",
+          "quota.my",
           "sessionBoot.bootstrap",
           "dm.presence",
           "dm.unread",
@@ -42,7 +33,6 @@
           "auth.me",
           "phone.home",
           "teamAssistant.agentOverview",
-          "quota.my",
           "system.storageStatus",
           "dm.unread"
         ]
@@ -50,9 +40,7 @@
       "project": {
         "jsBytes": 6289,
         "jsChunks": 1,
-        "api": [
-          "phone.project"
-        ]
+        "api": []
       }
     },
     "phone-390x844": {
@@ -61,8 +49,8 @@
         "jsChunks": 17,
         "api": [
           "sessionBoot.bootstrap",
-          "quota.my",
           "sessionBoot.bootstrap",
+          "quota.my",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
@@ -78,8 +66,8 @@
         "jsChunks": 17,
         "api": [
           "sessionBoot.bootstrap",
-          "quota.my",
           "sessionBoot.bootstrap",
+          "quota.my",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
@@ -103,13 +91,6 @@
         "jsBytes": 817788,
         "jsChunks": 17,
         "api": [
-          "auth.touchSession",
-          "sessionBoot.bootstrap",
-          "quota.my",
-          "system.storageStatus",
-          "dm.presence",
-          "dm.unread",
-          "generation.pendingSummary",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -127,13 +108,6 @@
         "jsBytes": 817788,
         "jsChunks": 17,
         "api": [
-          "auth.touchSession",
-          "sessionBoot.bootstrap",
-          "quota.my",
-          "system.storageStatus",
-          "dm.presence",
-          "dm.unread",
-          "generation.pendingSummary",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",

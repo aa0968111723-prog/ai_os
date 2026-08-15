@@ -4,11 +4,7 @@
  */
 import { useState } from "react";
 import { trpc } from "../api";
-// View-only import: @shared/commercialRights pulls in node:crypto + the full zod
-// schema set, which fails the browser build and would ship the whole rights engine
-// to every phone. commercialRightsView is the pure label half.
-import { rightsChip, rightsDetailRows } from "@shared/commercialRightsView";
-import type { RightsProfile, RightsStatus } from "@shared/commercialRights";
+import { rightsChip, rightsDetailRows, type RightsProfile, type RightsStatus } from "@shared/commercialRights";
 import { Button, Chip, Hint, Meta } from "./ui";
 
 function symbolOf(status: RightsStatus): string {
