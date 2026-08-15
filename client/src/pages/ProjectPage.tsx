@@ -671,6 +671,9 @@ export function ProjectPage({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** closure §12A 基本資料區：封面挑選對話框 */
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
+  /** closure §12 分軌修復：聲線／聲音世界的過期走音訊重生（不打視覺批次） */
+  const repairVoice = trpc.scenes.generateVoiceover.useMutation();
+  const repairAmbience = trpc.scenes.generateAmbience.useMutation();
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(settingsPanelRef, settingsOpen, () => setSettingsOpen(false));
   /** Story-inline：同一時間手機只開一個主要收合區；桌機也先維持單開，避免再長成四段長頁。 */
@@ -1717,7 +1720,21 @@ export function ProjectPage({ id }: { id: string }) {
                         projectId={id}
                         showSources
                         canEdit={canEdit}
-                        onRepairShots={(shotIds) => {
+                        onRepairShots={(row) => {
+                          const shotIds = row.affectedShotIds;
+                          // 分軌修復（稽核修正）：聲線／聲音世界的過期是「音訊」——
+                          // 走對應的音訊重生，不是視覺批次（那修不了聲音還會多扣點）
+                          if (row.dimension === "voice" || row.dimension === "sound_world") {
+                            if (!window.confirm(`重新生成受影響的 ${shotIds.length} 段${row.dimension === "voice" ? "旁白" : "環境音"}（每段直接扣點）。`)) return;
+                            for (const shotId of shotIds) {
+                              if (row.dimension === "voice") {
+                                repairVoice.mutate({ sceneId: shotId, clientRequestId: crypto.randomUUID() });
+                              } else {
+                                repairAmbience.mutate({ sceneId: shotId, clientRequestId: crypto.randomUUID() });
+                              }
+                            }
+                            return;
+                          }
                           if (!window.confirm(`只重生成受影響的 ${shotIds.length} 鏡。結果會先當候選，由你比較後採用，不會動現有畫面。`)) return;
                           void oneClick.regenShots(shotIds).then(() => openInlineSection("production")).catch(() => {
                             openInlineSection("production");

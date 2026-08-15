@@ -61,9 +61,24 @@ export function packetCanonDependencies(payload: ShotContextPacketPayload): {
 export async function revalidatePacketCanonRights(input: {
   payload: ShotContextPacketPayload;
   projectId: string;
+  /** packet 之外的 canon 依賴（audio 生成的 meta.voice／meta.soundWorld） */
+  extraCanonIds?: string[];
+  extraVersionIds?: string[];
+}): Promise<ExecutionRightsBlocker[]> {
+  const deps = packetCanonDependencies(input.payload);
+  const canonIds = [...new Set([...deps.canonIds, ...(input.extraCanonIds ?? [])])];
+  const versionIds = [...new Set([...deps.versionIds, ...(input.extraVersionIds ?? [])])];
+  return revalidateCanonIds({ canonIds, versionIds, projectId: input.projectId });
+}
+
+/** canon id 集合的此刻授權檢查（packet 路徑與 audio-meta 路徑共用同一套規則） */
+export async function revalidateCanonIds(input: {
+  canonIds: string[];
+  versionIds: string[];
+  projectId: string;
 }): Promise<ExecutionRightsBlocker[]> {
   const blockers: ExecutionRightsBlocker[] = [];
-  const deps = packetCanonDependencies(input.payload);
+  const deps = { canonIds: input.canonIds, versionIds: input.versionIds };
   if (!deps.canonIds.length) return blockers;
 
   const canons = await db.select({
@@ -145,9 +160,20 @@ export async function revalidateExecutionRights(input: {
     blockers.push({ code: "membership_revoked", message: "送出者已不在這個組，請由現任成員重新送出" });
   }
 
-  // 3. Packet 的 canon 依賴此刻仍可執行
+  // 3. Canon 依賴此刻仍可執行——packet（visual）＋meta.voice／meta.soundWorld（audio 生成
+  //    沒有 packet，聲線／聲音世界依賴在 source meta 上；漏了它們＝撤權的聲線照樣出聲）
   const { splitGenerationSourceMeta } = await import("../../shared/generationSourceMeta");
   const meta = splitGenerationSourceMeta(input.generation.params).meta;
+  const extraCanonIds: string[] = [];
+  const extraVersionIds: string[] = [];
+  if (meta.voice) {
+    extraCanonIds.push(meta.voice.canonId);
+    extraVersionIds.push(meta.voice.versionId);
+  }
+  if (meta.soundWorld) {
+    extraCanonIds.push(meta.soundWorld.canonId);
+    extraVersionIds.push(meta.soundWorld.versionId);
+  }
   if (meta.shotContextPacketId) {
     const [packetRow] = await db.select({ packet: schema.shotContextPackets.packet })
       .from(schema.shotContextPackets)
@@ -159,8 +185,18 @@ export async function revalidateExecutionRights(input: {
       blockers.push(...await revalidatePacketCanonRights({
         payload: packetRow.packet,
         projectId: input.generation.projectId,
+        extraCanonIds,
+        extraVersionIds,
       }));
+      return { ok: blockers.length === 0, blockers };
     }
+  }
+  if (extraCanonIds.length) {
+    blockers.push(...await revalidateCanonIds({
+      canonIds: extraCanonIds,
+      versionIds: extraVersionIds,
+      projectId: input.generation.projectId,
+    }));
   }
   return { ok: blockers.length === 0, blockers };
 }

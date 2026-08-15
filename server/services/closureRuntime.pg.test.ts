@@ -89,16 +89,16 @@ describe.skipIf(!RUN_PG).sequential("Production consistency closure (real Postgr
     }).returning({ id: schema.props.id });
     mapPropId = prop.id;
     const [shot1] = await db.insert(schema.scenes).values({
-      projectId, groupId, title: "交出藏寶圖", orderIndex: 1, durationSec: 4,
-      prompt: "娜美把藏寶圖交給索隆", characterIds: [namiId, zoroId], propIds: [mapPropId], createdBy: userId,
+      projectId, title: "交出藏寶圖", orderIndex: 1, durationSec: 4,
+      prompt: "娜美把藏寶圖交給索隆", characterIds: [namiId, zoroId], propIds: [mapPropId],
     }).returning({ id: schema.scenes.id });
     const [shot2] = await db.insert(schema.scenes).values({
-      projectId, groupId, title: "索隆查看地圖", orderIndex: 2, durationSec: 4,
-      prompt: "索隆展開地圖細看", characterIds: [zoroId], propIds: [mapPropId], createdBy: userId,
+      projectId, title: "索隆查看地圖", orderIndex: 2, durationSec: 4,
+      prompt: "索隆展開地圖細看", characterIds: [zoroId], propIds: [mapPropId],
     }).returning({ id: schema.scenes.id });
     const [shot3] = await db.insert(schema.scenes).values({
-      projectId, groupId, title: "旁白鏡", orderIndex: 3, durationSec: 4,
-      prompt: "海面遠景", voiceover: "傳說中的寶藏就在前方", createdBy: userId,
+      projectId, title: "旁白鏡", orderIndex: 3, durationSec: 4,
+      prompt: "海面遠景", voiceover: "傳說中的寶藏就在前方", ambience: "海浪拍岸",
     }).returning({ id: schema.scenes.id });
     transferShotId = shot1.id;
     nextShotId = shot2.id;
@@ -134,10 +134,17 @@ describe.skipIf(!RUN_PG).sequential("Production consistency closure (real Postgr
     expect(frozen.payload.styleCanon?.canonId).toBe(styleCanonId);
     expect(frozen.payload.worldStyle).toEqual(["水彩", "吉卜力"]);
     expect(frozen.payload.negativeConstraints).toContain("不要棚拍打光");
-    expect(frozen.payload.narrationVoice?.voiceId).toBe("zf_xiaoxiao");
-    expect(frozen.payload.soundWorld?.ambience).toBe("海浪、遠處人聲");
+    // 稽核修正後：無台詞的純視覺鏡不依賴旁白聲線（targeted stale 的前提）
+    expect(frozen.payload.narrationVoice).toBeUndefined();
+    // 稽核修正後：無聲音意圖的鏡不掛 soundWorld；無台詞的鏡 slot 不掛角色聲線
+    expect(frozen.payload.soundWorld).toBeUndefined();
     const zoroSlot = frozen.payload.characterSlots?.find((slot) => slot.characterId === zoroId);
-    expect(zoroSlot?.voiceId).toBe("zm_yunjian");
+    expect(zoroSlot?.voiceId).toBeUndefined();
+
+    // 有台詞＋環境音的旁白鏡：聲線與聲音世界真的掛上（targeted 依賴的正例）
+    const narrFrozen = await freezeShotContextPacket({ auth: leaderAuth, projectId, shotId: narrationShotId });
+    expect(narrFrozen.payload.narrationVoice?.voiceId).toBe("zf_xiaoxiao");
+    expect(narrFrozen.payload.soundWorld?.ambience).toBe("海浪、遠處人聲");
   });
 
   it("§9：resolved 道具轉手在 Adopt 後流進下一鏡 previousEnd（索隆真的拿著地圖）", async () => {

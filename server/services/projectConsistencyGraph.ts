@@ -56,6 +56,7 @@ export async function projectWorkspaceProjection(input: {
       propIds: schema.scenes.propIds,
       action: schema.scenes.action,
       dialogue: schema.scenes.dialogue,
+      storySceneId: schema.scenes.storySceneId,
     }).from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))).orderBy(asc(schema.scenes.orderIndex)),
     db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.projectId, project.id), isNull(schema.assets.deletedAt))),
     db.select({
@@ -142,6 +143,14 @@ export async function projectWorkspaceProjection(input: {
   const worldview = project.worldview && typeof project.worldview === "object" ? project.worldview as Record<string, unknown> : {};
   const worldBits = [worldview.logline, Array.isArray(worldview.styles) ? worldview.styles[0] : null, Array.isArray(worldview.taboos) ? worldview.taboos[0] : null].filter(Boolean).length;
 
+  const storySceneIds = [...new Set(shots.map((shot) => shot.storySceneId).filter((id): id is string => Boolean(id)))];
+  const storyExcerptByScene = new Map(
+    storySceneIds.length
+      ? (await db.select({ id: schema.storyScenes.id, storyExcerpt: schema.storyScenes.storyExcerpt })
+        .from(schema.storyScenes).where(inArray(schema.storyScenes.id, storySceneIds)))
+        .map((row) => [row.id, row.storyExcerpt])
+      : [],
+  );
   const blockers = deliveryBlockers({
     shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
     staleShotIds: [...stale],
@@ -200,7 +209,9 @@ export async function projectWorkspaceProjection(input: {
       presetsMissingReference: presets.filter((row) => !row.referenceAssetId).map((row) => row.id),
       unresolvedPropShotIds: shots.filter((shot) => {
         if (!(shot.propIds ?? []).length) return false;
-        const text = [shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n");
+        // 與 packet build 同一份語料（含場的 storyExcerpt）——scorecard 不得比 packet 少看半句
+        const excerpt = shot.storySceneId ? storyExcerptByScene.get(shot.storySceneId) ?? null : null;
+        const text = [shot.prompt, shot.action, shot.dialogue, excerpt].filter(Boolean).join("\n");
         if (!text) return false;
         const changes = resolvePropTransfers({
           changes: parseScriptAuthorizedChanges(text),

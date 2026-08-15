@@ -39,8 +39,11 @@ export function StoryScorecardRepair({
 }: {
   rows: ScorecardRow[];
   canEdit: boolean;
-  /** 修復＝把受影響鏡送重生成（結果進 Candidate，不動 current） */
-  onRepairShots?: (shotIds: string[]) => void;
+  /**
+   * 修復＝把受影響鏡送「對的軌」重生成（結果進 Candidate，不動 current）。
+   * 帶 row 而非只有 shotIds——voice/sound_world 要走音訊重生，不是視覺批次（稽核修正）。
+   */
+  onRepairShots?: (row: ScorecardRow) => void;
 }) {
   if (!rows.length) return null;
   return (
@@ -57,7 +60,7 @@ export function StoryScorecardRepair({
               variant="ghost"
               size="sm"
               type="button"
-              onClick={() => onRepairShots(row.affectedShotIds)}
+              onClick={() => onRepairShots(row)}
             >
               修復 {row.affectedShotIds.length} 鏡
             </Button>
