@@ -223,7 +223,7 @@ export const MOBILE_PRIMARY_NAV = ["projects", "assistant", "more"] as const;
  *
  * ★ databases（資料中心）曾一起被拿掉，那是過頭了——它跟 integrations／mcp 不同，
  * 是天天要進去的去處，不是一次性設定。桌機它常駐頂欄，但 `.topbar .topbar-nav-link`
- * 在 ≤820px 整條隱藏，而使用者選單在同一個斷點只留一句指路（見 AccountMenu），
+ * 在 <768px 整條隱藏，而使用者選單在同一個斷點只留一句指路（見 AccountMenu），
  * 於是手機／直立平板上「資料中心」三個選單一個入口都沒有。專案頁的
  * ProjectDatabasesCard 只涵蓋「在某個專案裡」的情境，跨專案總覽仍需固定入口。
  */
@@ -232,7 +232,7 @@ export type MobileMoreGroup = { label: string; keys: DestinationKey[] };
 export const mobileMoreGroups: MobileMoreGroup[] = [
   // 「今日」從底欄搬進來（中央讓給 AI 助手）。底欄的「專案」雖然同樣落在 /dashboard，
   // 但它帶 #projects：不含 hash 的今日工作台若不在這裡，手機就再也沒有入口——
-  // 頂欄的 .topbar-nav-link 在 ≤820px 整條隱藏（同 databases 當年消失的原因）。
+  // 頂欄的 .topbar-nav-link 在 <768px 整條隱藏（同 databases 當年消失的原因）。
   { label: "工作台", keys: ["dashboard"] },
   { label: "資料", keys: ["databases"] },
   { label: "安排", keys: ["planner"] },

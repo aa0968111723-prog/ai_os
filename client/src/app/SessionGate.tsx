@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
 import { Redirect, Route, Switch, useLocation } from "wouter";
-import { AcceptInvitePage } from "../pages/AcceptInvitePage";
-import { SharedProjectPage } from "../pages/SharedProjectPage";
-import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AppRoutes, UngroupedRoutes } from "./AppRoutes";
 import { Button, Meta } from "../components/ui";
 import { safeInternalPath } from "../lib/safePath";
+import { lazyWithRetry } from "../lib/lazyWithRetry";
+
+/**
+ * 這三頁靜態 import 時全部躺在首屏 entry chunk 裡（約 28KB 原始碼），
+ * 但它們都是「一輩子可能只走一次」的入口：邀請連結、對外分享檢視、桌面版配對。
+ * 一般登入者的每一次開站都在替這三頁付錢。改 lazy，網址契約與行為不變。
+ * 外層 AppShell 已有 <Suspense fallback={<RouteFallback />}> 承接載入過場。
+ */
+const AcceptInvitePage = lazyWithRetry(() => import("../pages/AcceptInvitePage").then((m) => ({ default: m.AcceptInvitePage })));
+const SharedProjectPage = lazyWithRetry(() => import("../pages/SharedProjectPage").then((m) => ({ default: m.SharedProjectPage })));
+const DesktopCompanionPage = lazyWithRetry(() => import("../pages/DesktopCompanionPage").then((m) => ({ default: m.DesktopCompanionPage })));
 
 export type SessionMe = {
   user: { isSuperAdmin: boolean; mustChangePassword: boolean };

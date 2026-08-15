@@ -161,7 +161,7 @@ export function GlobalAssistantSheet({
             {scope === "project" && projectId ? (
               <>
                 {/* key=projectId：換專案時整棵重掛，對話與軌跡不殘留上一個專案的內容 */}
-                <ProjectAssistant key={projectId} projectId={projectId} embedded />
+                <ProjectAssistant key={projectId} projectId={projectId} embedded claimsPendingCompose />
               </>
             ) : (
               <>

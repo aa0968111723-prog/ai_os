@@ -9,7 +9,7 @@
  * 由 `studioLayout.resolveStudioLayout()` 算出來後掛在根節點上。
  *
  * 為什麼：輕量版的條件是「窄 **或**（觸控 且 ≤1100px）」，media query 寫不出
- * 第二個條件。先前 CSS 自己寫了 `@media (max-width: 820px)`，於是 821–1100px 的
+ * 第二個條件。先前 CSS 自己寫了 `@media (max-width: 767.98px)`，於是 768–1100px 的
  * 觸控裝置（桌面模式的手機瀏覽器、平板）出現「JS 說輕量版、CSS 套桌機三欄」的錯位：
  * 白板被擠進 200px 的側欄格，筆刷櫃因為沒套到 dock 規則而直向鋪滿整頁。
  * 這裡只保留與版面無關的 media query（動效偏好）。

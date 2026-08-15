@@ -203,7 +203,7 @@
 .vcw-command:focus-within { border-color: var(--primary-ink); }
 
 /* ── 390px：單欄、作品仍然最大、觸控 44px ───────────────────────────────── */
-@media (max-width: 820px) {
+@media (max-width: 767.98px) {
   .vcw { padding: 8px 10px calc(10px + var(--safe-bottom, 0px)); --vcw-gap: 10px; }
   /* 原型自己的鷹架不該在手機上佔掉四分之一畫面——被評估的是設計，不是切換器。
      徽章與情境切換保留（仍看得出這是原型），長說明收起來。 */

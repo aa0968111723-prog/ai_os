@@ -59,7 +59,7 @@ describe("AssistantLauncher", () => {
     delete window.matchMedia;
   });
 
-  it("桌機：頂欄按鈕叫得出助手——這是 >820 唯一的入口（底部導覽那顆球被 display:none）", async () => {
+  it("桌機：頂欄按鈕叫得出助手——這是 ≥768 唯一的入口（底部導覽那顆球被 display:none）", async () => {
     const user = userEvent.setup();
     render(<AssistantLauncher groupId="11111111-1111-4111-8111-111111111111" />);
 

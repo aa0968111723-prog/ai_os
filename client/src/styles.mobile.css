@@ -1,0 +1,393 @@
+/**
+ * 手機 AI-first 殼層樣式（Phone UX，<768px）。
+ *
+ * ## 紅線：這個檔案不得影響 ≥768px
+ *
+ * 全檔每一條規則都包在 `@media (max-width: 767.98px)` 內，沒有任何頂層選擇器。
+ * `styles.mobile.contract.test.ts` 會把 media query 整段挖掉再驗剩下的內容裡
+ * 沒有 `{`——多寫一條在外面就會紅。
+ *
+ * 兩層保險：`.m-*` 這些 class 只出現在 `client/src/mobile/**`，而那些元件只在
+ * `useIsPhone()` 為真時才渲染。就算 media query 寫錯，桌面也沒有節點吃得到。
+ *
+ * ## 斷點
+ *
+ * `767.98px` 與 `lib/viewport.ts` 的 `PHONE_MAX_WIDTH` 是同一個值。改斷點時
+ * 兩邊要一起改，否則會出現「JS 說手機、CSS 說桌面」的錯位（站內修過兩次的坑，
+ * 記載在 studioLayout.ts 檔頭）。
+ */
+
+@media (max-width: 767.98px) {
+  /* ── 共用版位 ───────────────────────────────────────────────────── */
+  .m-home,
+  .m-project {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 14px max(14px, var(--safe-left)) var(--chrome-bottom, 100px) max(14px, var(--safe-right));
+  }
+
+  .m-section-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fg-secondary);
+    letter-spacing: .02em;
+  }
+
+  /* ── 目前專案卡 ─────────────────────────────────────────────────── */
+  .m-current,
+  .m-project__head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .m-current__eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .m-current__title,
+  .m-project__title {
+    margin: 0;
+    /* clamp：長專案名在 360px 上不爆版，但在 430px 上仍讀得出份量 */
+    font-size: clamp(21px, 6vw, 26px);
+    line-height: 1.25;
+    font-weight: 750;
+    /* 兩行後截斷——標題吃掉整個首屏就違反「一眼看到下一步」 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .m-current__status,
+  .m-project__status {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--fg-secondary);
+  }
+
+  /* 主要動作：滿寬、56px 高——拇指區裡最好按的那一顆 */
+  .m-current__go {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 56px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  /* ── 進度列：故事 → 分鏡 → 視覺 → 生成 → 交付 ───────────────────── */
+  .m-stages {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .m-stages__step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 2px;
+    border-radius: 11px;
+    background: var(--muted);
+    color: var(--fg-secondary);
+    /* 360px ÷ 5 格 ≈ 68px：兩個中文字 + icon 剛好，再大就會換行 */
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .m-stages__step.is-done {
+    color: var(--primary-ink);
+    background: var(--primary-tint);
+    opacity: .72;
+  }
+
+  .m-stages__step.is-current {
+    color: var(--primary-ink);
+    background: var(--primary-tint);
+    box-shadow: inset 0 0 0 1.5px var(--primary-ink);
+  }
+
+  /* ── AI 輸入列（手機的主要入口） ─────────────────────────────────── */
+  .m-ai {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--popover);
+  }
+
+  .m-ai__form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* 選擇器刻意寫成 `.m-ai input.m-ai__input`：全域的
+     `input:not([type=checkbox]):not([type=radio])` 特異度是 (0,2,1)，
+     單一 class 的 (0,1,0) 壓不過它——會留下輸入框的外框與 `width: 100%`。
+     而 `width: 100%` 在 flex 容器裡會讓 flex-basis 解成整個容器寬，
+     於是輸入框與送出鈕各分一半（實機截圖就是這個症狀）。 */
+  .m-ai input.m-ai__input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    /* 16px 是 iOS 的紅線：小於它，聚焦輸入框時 Safari 會自動放大整頁，
+       使用者回來還要手動縮回去。這一條不能為了美觀調小。 */
+    font-size: 16px;
+    color: var(--fg);
+  }
+
+  .m-ai input.m-ai__input:hover { border-color: transparent; }
+
+  .m-ai input.m-ai__input:focus {
+    background: transparent;
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  /* 前導的 Sparkles 圖示：不參與伸縮，否則會被壓成 0 寬（實機截圖確認過） */
+  .m-ai__form > svg { flex: 0 0 auto; }
+
+  /* 送出鈕不參與伸縮：它是一顆固定大小的圖示鈕，輸入框才該吃掉剩下的寬度。
+     選擇器要三層 class：styles.css 有一條 `form .primary[type="submit"]
+     { width: 100% }`（給登入卡那種整寬送出鈕用的），特異度 (0,2,1)，
+     單一 class 壓不過——結果就是送出鈕撐滿整列、輸入框被擠成 8px。 */
+  .m-ai .m-ai__form .m-ai__send {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .m-ai__quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .m-ai__chip {
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg-secondary);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .m-ai__chip--lead {
+    border-color: transparent;
+    background: var(--primary-tint);
+    color: var(--primary-ink);
+  }
+
+  .m-ai__chip:active { transform: scale(.95); }
+
+  /* ── 清單列（最近專案／次級入口） ───────────────────────────────── */
+  .m-recent__list,
+  .m-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .m-recent__row,
+  .m-entries__row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    /* 48px：Material 與 HIG 的觸控下限之上，長清單快速掃時不會誤觸鄰列 */
+    min-height: 56px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--popover);
+    text-align: start;
+  }
+
+  .m-recent__row:active,
+  .m-entries__row:active { transform: scale(.985); }
+
+  .m-recent__text,
+  .m-entries__text {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .m-recent__text strong,
+  .m-entries__text strong {
+    font-size: 15px;
+    font-weight: 680;
+    /* 單行截斷：專案名可以很長，但列高必須是固定的，否則清單會參差 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .m-recent__text small,
+  .m-entries__text small {
+    font-size: 12.5px;
+    color: var(--fg-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .m-entries__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+    background: var(--muted);
+    color: var(--fg-secondary);
+  }
+
+  /* ── 數字摘要 ───────────────────────────────────────────────────── */
+  .m-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .m-stats__item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 10px;
+    border-radius: 13px;
+    background: var(--muted);
+  }
+
+  .m-stats__label { font-size: 11px; font-weight: 700; }
+  .m-stats__value { font-size: 17px; font-weight: 720; color: var(--fg); }
+  .m-stats__hint { font-size: 11px; }
+
+  /* ── 縮圖牆 ─────────────────────────────────────────────────────── */
+  .m-thumbs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .m-thumbs li,
+  .m-thumbs__skeleton {
+    /* 固定比例＝圖片到位前版位就佔好了。沒有這一條，lazy 圖片一張張載入時
+       整頁會反覆往下跳（CLS）——手機上最惱人的一種抖動。 */
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: 11px;
+    background: var(--muted);
+  }
+
+  .m-thumbs img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .m-thumbs--grid { margin-bottom: 12px; }
+
+  /* ── 次級連結 ───────────────────────────────────────────────────── */
+  .m-secondary-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 48px;
+    border: 0;
+    border-radius: 13px;
+    background: transparent;
+    color: var(--fg-secondary);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .m-secondary-link--back { justify-content: flex-start; padding-inline: 12px; }
+
+  /* ── 素材抽屜（貼底 sheet；幾何與 MenuSurface 的 .is-sheet 同語彙） ─ */
+  .m-sheet {
+    position: fixed;
+    z-index: 47;
+    inset-inline: 0;
+    bottom: var(--kb-inset, 0px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: calc(100dvh - 64px - var(--safe-top));
+    padding: 0 14px max(16px, var(--safe-bottom));
+    border: 1px solid var(--border-soft);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    background: var(--popover);
+    box-shadow: var(--e4);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    animation: mobile-sheet-up 260ms var(--ease-out);
+  }
+
+  .m-sheet__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 16px;
+  }
+
+  .m-sheet__more { width: 100%; min-height: 48px; }
+
+  /* 完整工作台掛在手機上時，底部仍要讓開分頁列 */
+  .m-project-full { padding-bottom: var(--chrome-bottom, 100px); }
+}
+
+/* 動作偏好：關掉按壓縮放（與 styles.css 的 reduced-motion 區塊同一條契約） */
+@media (max-width: 767.98px) and (prefers-reduced-motion: reduce) {
+  .m-ai__chip:active,
+  .m-recent__row:active,
+  .m-entries__row:active { transform: none; }
+  .m-sheet { animation: none; }
+}

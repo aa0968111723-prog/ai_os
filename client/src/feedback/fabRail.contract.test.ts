@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 /**
  * MOB-FAB-03：右下 FAB 軌道不可壓到底部分頁列。
  *
- * 實機回報「回饋系統直接擋住選項」：≤820px 分頁列常駐時，回饋 FAB（z45）落在
+ * 實機回報「回饋系統直接擋住選項」：<768px 分頁列常駐時，回饋 FAB（z45）落在
  * .mobile-nav（z44）右端，把第 5 顆分頁「更多」整顆蓋掉——那是私訊／設定等次要入口
  * 的唯一入口，還帶未讀紅點，等於整條路被一顆浮鈕封死。
  *
- * 根因是 CSS 疊層：styles.css 的 ≤820px 早就把 FAB 墊到 72px，但 mobile-fab-01
+ * 根因是 CSS 疊層：styles.css 的 <768px 早就把 FAB 墊到 72px，但 mobile-fab-01
  * 載入在後、又帶 !important，把避讓洗回貼底。所以這裡不能只檢查「某個檔案裡有 72px」，
  * 要檢查「最後生效的那條」——也就是軌道基準 --fab-rail-base 在有分頁列時夠高。
  *
@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const read = (rel: string) => readFileSync(path.join(repoRoot, rel), "utf8").replace(/\r\n/g, "\n");
 
-/** .mobile-nav 的內容高（見 styles.css ≤820px：padding 6 + min-height 50 + padding-bottom 8） */
+/** .mobile-nav 的內容高（見 styles.css <768px：padding 6 + min-height 50 + padding-bottom 8） */
 const NAV_HEIGHT = 64;
 
 describe("右下 FAB 軌道與底部分頁列", () => {
@@ -26,7 +26,7 @@ describe("右下 FAB 軌道與底部分頁列", () => {
 
   it("有分頁列時，軌道基準抬得比分頁列高（否則槽 0 直接蓋住「更多」）", () => {
     const css = rail();
-    const at = css.indexOf("@media (max-width: 820px)", css.indexOf("--fab-rail-base"));
+    const at = css.indexOf("@media (max-width: 767.98px)", css.indexOf("--fab-rail-base"));
     expect(at, "缺少「有分頁列就抬高軌道」的覆寫").toBeGreaterThan(-1);
 
     const block = css.slice(at, css.indexOf("\n}\n", at));

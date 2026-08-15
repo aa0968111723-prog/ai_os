@@ -29,6 +29,7 @@ import type { BoardMode } from "./boardPrefs";
 import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 import { ExternalGenerationLauncher } from "../external-intake/ExternalGenerationLauncher";
 import { readLocalMediaMetadata } from "../external-intake/mediaMetadata";
+import { PHONE_MQ } from "../../lib/viewport";
 
 export interface ShotRow {
   id: string;
@@ -70,7 +71,7 @@ export interface LookRow {
 function preferDetailsOpen(mode: BoardMode): boolean {
   if (typeof window === "undefined") return mode === "pro";
   try {
-    const mobile = window.matchMedia("(max-width: 820px)").matches;
+    const mobile = window.matchMedia(PHONE_MQ).matches;
     // 專業模式桌機預設開；簡單模式與手機一律預設關
     return mode === "pro" && !mobile;
   } catch {

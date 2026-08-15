@@ -1,7 +1,7 @@
 /* 手機 board 字族（MOB-T／D-005）：由 main.tsx 動態 import（不擋首繪）。
  * Latin-only 子集（Fraunces variable 36K、Manrope 16K×2），woff2 依
  * unicode-range 按需載入；中文自動回退既有 Noto 堆疊。
- * 只有 styles.mobile-tokens.css 的 --m-font-* token（≤820）引用這些字族，
+ * 只有 styles.mobile-tokens.css 的 --m-font-* token（<768）引用這些字族，
  * 桌機沒有任何規則指向它們。 */
 @import "@fontsource-variable/fraunces/index.css";
 @import "@fontsource/manrope/latin-400.css";

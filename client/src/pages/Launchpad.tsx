@@ -12,6 +12,7 @@ import { AddOptionInline } from "../components/AddOptionInline";
 import { FormatPicker } from "../components/FormatPicker";
 import { Button, Card, Chip, EmptyState, Hint, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { DESKTOP_MQ } from "../lib/viewport";
 import { useCollab, CursorOverlay } from "../realtime";
 import { CollabPanel } from "../features/collaboration/CollabPanel";
 import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
@@ -21,7 +22,7 @@ import posthog from "../posthog";
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
 /** 最近開啟：點卡片時記下 id，置頂顯示（純前端 localStorage） */
 const RECENT_KEY = "aios.recentProjects";
-/** 作業台專案列表版面：grid 卡片／list 列表（僅桌面 ≥821 顯示切換） */
+/** 作業台專案列表版面：grid 卡片／list 列表（僅桌面 ≥768 顯示切換） */
 export const LAUNCH_LAYOUT_KEY = "aios.launchpad.layout";
 export type LaunchLayout = "grid" | "list";
 
@@ -100,7 +101,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [limit, setLimit] = useState(24);
   /** 桌面列表／卡片；手機強制卡片（CSS + 不顯示切換） */
-  const isDesktop = useMatchMedia("(min-width: 821px)");
+  const isDesktop = useMatchMedia(DESKTOP_MQ);
   const [layout, setLayout] = useState<LaunchLayout>(() => loadLaunchLayout());
   const setLaunchLayout = (next: LaunchLayout) => {
     setLayout(next);

@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { DISCUSS_EVENT, flashAnchor } from "../discuss";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { PHONE_MQ } from "../lib/viewport";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip, useFocusTrap } from "../components/interactions";
 import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
@@ -129,8 +130,8 @@ import {
  */
 const COLLAB_FALLBACK_POLL_MS = 60_000;
 
-/** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
-const PROJECT_MOBILE_MQ = "(max-width: 820px)";
+/** 與 styles.css 單欄／平板界線對齊：<768px 為手機減負模式 */
+const PROJECT_MOBILE_MQ = PHONE_MQ;
 
 type CtxSectionKey = "worldview" | "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
 type CtxGroupKey = "world" | "sources" | "manage";
@@ -324,7 +325,7 @@ function TokenListEditor({
         {fieldKey && <FieldReaders field={fieldKey} />}
         {hint && <HelpTip text={hint} />}
       </label>
-      {/* token-chips：≤820 讓長 URL chip 斷行（否則 360px 上移除 ✕ 被 overflow clip 裁在畫面外） */}
+      {/* token-chips：<768 讓長 URL chip 斷行（否則 360px 上移除 ✕ 被 overflow clip 裁在畫面外） */}
       <div role="group" aria-labelledby={`${id}-label`} className="token-chips">
         {values.map((v) => (
           <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -606,7 +607,7 @@ export function ProjectPage({ id }: { id: string }) {
       : null;
   /** 有幾個人跟著我（用房內 viewState 與我的位置比對太脆弱，直接數在場人數上限即可保守顯示） */
   const followerCount = collab.selfPresenting ? Math.max(0, collab.peers.length - 1) : 0;
-  /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
+  /** UX-M1：<768px 手機減負（收合上下文、留言 sheet）；桌機 ≥768 行為不變 */
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
   const [presenceExpanded, setPresenceExpanded] = useState(false);
   const [messagesSheetOpen, setMessagesSheetOpen] = useState(false);

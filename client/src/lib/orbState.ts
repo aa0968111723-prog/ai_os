@@ -2,7 +2,7 @@
  * 手機 Orb（底部導航中央 AI 球）狀態機（MOB-T2）。
  *
  * 視覺在 styles.mobile-tokens.css：html[data-orb-state] 驅動四態動畫，
- * 只在 ≤820 有樣式——桌機沒有 .mobile-nav，本屬性等於無感。
+ * 只在 <768 有樣式——桌機沒有 .mobile-nav，本屬性等於無感。
  * 這裡只負責把狀態寫上 <html>，呼叫端（生成送出等）不必知道視覺細節。
  *
  * speaking/error 屬「一次性回饋」：短暫播放後自動回 idle，

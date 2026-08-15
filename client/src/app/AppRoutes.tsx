@@ -1,12 +1,15 @@
 import { Redirect, Route, Switch, Link } from "wouter";
-import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
-import { GroupQuotaSettings } from "../components/GroupQuotaSettings";
 import { NoGroupGuide } from "../components/NoGroupGuide";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
+import { HomeRoute, ProjectRoute } from "../mobile/PhoneRoute";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
 // 避免首屏（作業台、專案頁、登入）揹整個 App 的 JS。具名匯出需轉成 lazy 所需的 default export。
+// 組選項編輯器連著 FormatPicker → @shared/models（165KB 原始碼）與 @shared/worldview，
+// 靜態 import 讓每個人的首屏都揹上兩個只有組長在 /options 用得到的模組。
+const GroupOptionsEditor = lazyWithRetry(() => import("../components/GroupOptionsEditor").then((m) => ({ default: m.GroupOptionsEditor })));
+const GroupQuotaSettings = lazyWithRetry(() => import("../components/GroupQuotaSettings").then((m) => ({ default: m.GroupQuotaSettings })));
 const AdminPage = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AuditLogCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
 const ConsumptionMonitorCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
@@ -24,8 +27,8 @@ const PlannerPage = lazyWithRetry(() => import("../pages/PlannerPage").then((m) 
 const CollaborationCenter = lazyWithRetry(() => import("../pages/CollaborationCenter").then((m) => ({ default: m.CollaborationCenter })));
 const DatabasesPage = lazyWithRetry(() => import("../pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
 const ChatPage = lazyWithRetry(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
-const Launchpad = lazyWithRetry(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
-const ProjectPage = lazyWithRetry(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
+// 首頁與專案頁走 Phone/Desktop 分岔（<768px 用手機版，≥768px 用既有桌面版）。
+// 兩邊都是 lazy，所以手機不下載桌面那兩包、桌面不下載手機那兩包——見 mobile/PhoneRoute.tsx。
 const ShareTargetPage = lazyWithRetry(() => import("../pages/ShareTargetPage").then((m) => ({ default: m.ShareTargetPage })));
 const CommunityPage = lazyWithRetry(() => import("../pages/CommunityPage").then((m) => ({ default: m.CommunityPage })));
 // 創作室連白板引擎與自己的 CSS chunk 一起走，尤其不該進首屏 bundle
@@ -46,7 +49,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
         <Redirect to="/dashboard" />
       </Route>
       <Route path="/dashboard">
-        <Launchpad groupId={activeGroupId} />
+        <HomeRoute groupId={activeGroupId} />
       </Route>
       <Route path="/admin">
         {isAdmin ? <AdminPage /> : (
@@ -134,7 +137,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/community"><CommunityPage /></Route>
       {/* key=id：從通知、待辦或上一頁／下一頁切換專案時強制重建 ProjectPage。
           否則前一案的提示詞、模型、角色場景勾選與 localStorage 初始化狀態可能殘留到新案。 */}
-      <Route path="/p/:id">{(params) => <ProjectPage key={params.id} id={params.id} />}</Route>
+      <Route path="/p/:id">{(params) => <ProjectRoute key={params.id} id={params.id} />}</Route>
       <Route>
         <p>
           找不到頁面 — <Link href="/dashboard">回今日工作台</Link>

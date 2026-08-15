@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
-import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/options";
+// 直接指向 feedbackOptions，不走 @shared/options —— 後者會連帶拉進 shared/models（145KB）
+// 與 shared/worldview（43KB），而這顆全站常駐的浮標一個都用不到。
+import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/feedbackOptions";
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useFocusTrap, useRovingRadio } from "../components/interactions";

@@ -453,8 +453,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
    * 別的表面（創作台的情境命令列）把話丟過來時填進輸入框，**不自動送出**：
    * 使用者仍然看得到自己要送的是什麼、可以改字或放棄。命令列打的字與在這裡
    * 自己打的字走完全同一條意圖判定與確認流程，沒有繞過任何一關。
+   *
+   * replayPending：這張卡是 lazy chunk，發話端 dispatch 事件時它還沒掛載——
+   * 不補領的話「打開面板但輸入框是空的」是必現的（見 assistantCompose 檔頭）。
    */
-  useAssistantComposeListener(setInput);
+  useAssistantComposeListener(setInput, true);
   const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
   const [intakeTargetProjectId, setIntakeTargetProjectId] = useState<string>();
   const [editingSheetOpen, setEditingSheetOpen] = useState(false);

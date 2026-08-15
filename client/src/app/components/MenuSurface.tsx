@@ -1,10 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useMatchMedia } from "../../lib/useMatchMedia";
+import { PHONE_MQ } from "../../lib/viewport";
 import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
 
-/** 選單改為貼底 sheet 的斷點：與 styles.css 的手機殼層 v2（≤820px）同界線 */
-export const MENU_SHEET_MQ = "(max-width: 820px)";
+/**
+ * 選單改為貼底 sheet 的斷點。
+ *
+ * 不再自己寫一個數字：這是 Phone UX ↔ Desktop UX 的產品切換點之一，
+ * 與底部分頁列、手機首頁／專案頁必須是**同一條界線**，否則會出現
+ * 「有底欄卻是桌面下拉」或「桌面版卻彈出 bottom sheet」的錯位區間。
+ * 單一出處在 lib/viewport.ts。
+ */
+export const MENU_SHEET_MQ = PHONE_MQ;
 
 /** 下拉與觸發器的間距，與 styles.css `.menu { top: calc(100% + 8px) }` 同值 */
 const MENU_ANCHOR_GAP = 8;
@@ -18,7 +26,7 @@ const MENU_VIEWPORT_GUTTER = 12;
 const MENU_MIN_DESKTOP_H = 160;
 
 /**
- * 選單載體：桌機是錨定觸發器的下拉，手機（≤820px）自動變成貼底 bottom sheet。
+ * 選單載體：桌機是錨定觸發器的下拉，手機（<768px）自動變成貼底 bottom sheet。
  *
  * 為什麼要抽成共用元件——手機版下拉有三個每個選單都會單獨踩一次的陷阱：
  *

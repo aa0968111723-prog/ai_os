@@ -12,6 +12,7 @@ import {
 import { AskSources, type AskSourcesData } from "./AskSources";
 import { requestAssistantStream } from "./assistantStream";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
+import { useAssistantComposeListener } from "../lib/assistantCompose";
 import {
   AGENT_PLANNER_OPTIONS,
   getAgentPlannerOption,
@@ -236,6 +237,7 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
 export function ProjectAssistant({
   projectId,
   embedded = false,
+  claimsPendingCompose = false,
   onCreationAction,
   onSavePromptSuggestion,
   onSaveSceneDraft,
@@ -251,6 +253,11 @@ export function ProjectAssistant({
 }: {
   projectId: string;
   embedded?: boolean;
+  /**
+   * 這一張是不是「使用者按下送出後才打開」的那一張助手。
+   * 只有全站助手面板該設 true——見上方 useAssistantComposeListener 的說明。
+   */
+  claimsPendingCompose?: boolean;
   /** Workbench bring-in: fill draft / switch mode only (no submit, no charge). */
   onCreationAction?: (action: CreationAction) => void;
   /** Optional: 存進提示詞庫 from suggestion strip. */
@@ -279,6 +286,18 @@ export function ProjectAssistant({
   const utils = trpc.useUtils();
   const pageContext = useAssistantContext();
   const [input, setInput] = useState("");
+  /**
+   * 別的表面把話丟過來時填進輸入框，**不自動送出**——與 AICreativeCopilot 同一條契約。
+   * 在專案路徑（/p/:id、/studio/:id）下，全站助手渲染的是這張卡而不是 Copilot；
+   * 少了這行，手機專案頁 AI 輸入列送出的句子會在專案視野裡整句掉光。
+   *
+   * 補領（replayPending）只給**助手面板裡那一張**。這張卡有兩個渲染點：
+   * 全站助手面板，以及創作台側欄常駐的那一張（CreationWorkbench）。側欄那張在
+   * 桌面專案頁是「一直掛著」的，若它也補領，就會在面板還沒掛好之前先把暫存吃掉——
+   * 使用者按下送出後面板照樣開一個空輸入框，等於這個 bug 沒修。
+   * 所以由呼叫端明確宣告誰是主人，不用「反正我是那一張」去猜。
+   */
+  useAssistantComposeListener(setInput, claimsPendingCompose);
   const [turns, setTurnsState] = useState<Turn[]>(() => projectConversationTurns.get(projectId) ?? []);
   const setTurns = (next: Turn[] | ((previous: Turn[]) => Turn[])) => {
     setTurnsState((previous) => {
