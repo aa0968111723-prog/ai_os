@@ -39,7 +39,7 @@ export async function projectMediaLineage(input: {
   projectId: string;
   /** 只回這些 shot 的完整 lineage（findings 仍是全專案）；不帶＝只回 findings */
   lineageShotIds?: string[];
-}): Promise<{ findings: ArtifactFinding[]; lineages: ShotLineage[] }> {
+}): Promise<{ findings: ArtifactFinding[]; lineages: ShotLineage[]; lineageGapShotIds: string[] }> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, false);
 
   // 批次 1：全部分鏡（指標＋語音文字）
@@ -108,6 +108,7 @@ export async function projectMediaLineage(input: {
 
   const findings: ArtifactFinding[] = [];
   const lineages: ShotLineage[] = [];
+  const lineageGapShotIds: string[] = [];
   const wantLineage = new Set(input.lineageShotIds ?? []);
 
   for (const shot of shots) {
@@ -159,6 +160,10 @@ export async function projectMediaLineage(input: {
     for (const finding of [visualFinding, narrationFinding, ambienceFinding]) {
       if (finding) findings.push(finding);
     }
+    // §7 lineage gap：現用影片查不到 parent 血緣列（meta.sourceAssetId 之前的舊生成）
+    if (visualAsset?.kind === "video" && !parentByAsset.has(visualAsset.id)) {
+      lineageGapShotIds.push(shot.id);
+    }
 
     if (wantLineage.has(shot.id)) {
       const head = headByShot.get(shot.id);
@@ -209,5 +214,5 @@ export async function projectMediaLineage(input: {
     }
   }
 
-  return { findings, lineages };
+  return { findings, lineages, lineageGapShotIds };
 }
