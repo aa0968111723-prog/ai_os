@@ -14,7 +14,13 @@ const revealAssetInFolder = vi.fn();
 const hasDesktopBridge = vi.fn();
 const detectDesktopEditors = vi.fn();
 
-vi.mock("../api", () => ({
+vi.mock("../api", async () => {
+  // 用真的 summarize 產空看板，替身才不會跟 router 的回傳形狀漂開
+  const { summarizeProjectRights } = await vi.importActual<typeof import("@shared/commercialRights")>(
+    "@shared/commercialRights",
+  );
+  const emptyRightsBoard = { projectId: "p1", summary: summarizeProjectRights([]), items: [] };
+  return {
   trpc: {
     useUtils: () => ({
       projects: {
@@ -23,6 +29,7 @@ vi.mock("../api", () => ({
       },
       knowledge: { list: { invalidate: vi.fn() } },
       community: { invalidate: vi.fn() },
+      commercialRights: { project: { invalidate: vi.fn() } },
       externalIntake: {
         inbox: { invalidate: vi.fn() },
         activeSessions: { invalidate: vi.fn() },
@@ -45,6 +52,11 @@ vi.mock("../api", () => ({
         useMutation: () => ({ mutate: vi.fn(), isPending: false, variables: null, error: null }),
       },
     },
+    // 商用權利徽章（AssetRightsChip）：缺替身會讓 AssetLibrary 連渲染都失敗
+    commercialRights: {
+      project: { useQuery: () => ({ data: emptyRightsBoard, isLoading: false }) },
+      submitEvidence: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+    },
     // 靈感頻道「發布」鈕；缺替身會讓元件連渲染都失敗
     community: {
       publishFromSource: {
@@ -63,7 +75,8 @@ vi.mock("../api", () => ({
       importDriveFile: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
     },
   },
-}));
+  };
+});
 
 vi.mock("../platform/desktopBridge", async () => {
   const actual = await vi.importActual<typeof import("../platform/desktopBridge")>("../platform/desktopBridge");

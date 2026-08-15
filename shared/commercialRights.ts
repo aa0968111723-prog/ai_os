@@ -5,8 +5,8 @@
  * Decisions say whether Aios currently has enough evidence to use an asset
  * for a named purpose — commercial generation and training stay separate.
  */
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { sha256Hex } from "./sha256";
 
 export const RIGHTS_DECISION_VERSION = "commercial-rights.v1";
 
@@ -237,8 +237,12 @@ export const submitRightsAttestationSchema = z.object({
   licenseText: z.string().trim().max(8_000).optional(),
 });
 
+/**
+ * 穩定指紋（去重／變更偵測用，不是密碼學用途）。
+ * 走 shared/sha256 的純 TS 實作——這個模組同時被瀏覽器端 bundle，不能相依 node:crypto。
+ */
 export function fingerprintText(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+  return sha256Hex(value);
 }
 
 export function emptyRisks(): RightsRisks {
