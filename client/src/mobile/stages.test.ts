@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PHONE_STAGES } from "@shared/phoneStages";
 import { STORY_INLINE_SECTIONS, isStoryHomeHash, sectionFromHash } from "../features/story-workspace/storyInlineNav";
-import { MOBILE_STAGES, continueAnchor, continueLabel, stageIndex, stageLabel, stageSentence } from "./stages";
+import { MOBILE_STAGES, anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageIndex, stageLabel, stageSentence } from "./stages";
 
 describe("手機製作階段", () => {
   it("前後端的階段字面值完全一致", () => {
@@ -47,6 +47,28 @@ describe("手機製作階段", () => {
     for (const step of MOBILE_STAGES) {
       expect(rendered, `${step.id} 的錨點不在專案頁實際渲染的 id 裡`).toContain(continueAnchor(step.id));
     }
+  });
+
+  it("次級入口（分鏡／角色／知識）的錨點也是真的 anchorId", () => {
+    // 這幾顆原本直接把 key 當錨點傳（characters／knowledge），同一種錯：
+    // DOM 上沒有那些 id，點下去工作台會開但不會捲到該去的地方。
+    const rendered = new Set([...STORY_INLINE_SECTIONS.map((s) => s.anchorId), "stage-story"]);
+    for (const section of ["storyboard", "characters", "scenes"]) {
+      expect(rendered).toContain(anchorForSection(section));
+    }
+    expect(anchorForSection("characters")).toBe("sec-characters");
+    // 不認得的 section 退回故事本體，不會回一個 DOM 上不存在的字串
+    expect(anchorForSection("knowledge")).toBe("stage-story");
+  });
+
+  it("isProjectAnchor 只認專案頁真的渲染得出來的錨點", () => {
+    expect(isProjectAnchor("#stage-board")).toBe(true);
+    expect(isProjectAnchor("stage-story")).toBe(true);
+    expect(isProjectAnchor("#sec-characters")).toBe(true);
+    // section id 不是錨點——這正是原本那個 bug 的形狀
+    expect(isProjectAnchor("#storyboard")).toBe(false);
+    expect(isProjectAnchor("#production")).toBe(false);
+    expect(isProjectAnchor("")).toBe(false);
   });
 
   it("錨點同時是桌面 hash 路由認得的值（深連結契約）", () => {

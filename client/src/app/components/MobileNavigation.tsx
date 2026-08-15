@@ -7,6 +7,7 @@ import { useAssistantComposeListener } from "../../lib/assistantCompose";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
+import { useIsPhone } from "../../lib/viewport";
 
 /**
  * 底欄一級：專案。中央 AI 助手與右側「更多」不在這個陣列裡。
@@ -81,8 +82,23 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
   const [hash, syncHash] = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  /**
+   * 助手面板的擁有權：**每個寬度只能有一個主人**。
+   *
+   * 這個元件在 ≥768px 仍會渲染（`.mobile-nav` 只是 `display: none`），而它掛的
+   * `GlobalAssistantSheet` 走 `forceSheet`，portal 到 body——所以它不受 `.mobile-nav`
+   * 的 display 影響，照樣看得見。桌機另有 `AssistantLauncher` 掛第二張。
+   * 兩邊又都監聽 compose 事件，於是創作台命令列送一句話會**同時開兩張面板**。
+   *
+   * `AssistantLauncher` 那邊已經用 `if (compact) return null` 讓出手機；
+   * 這裡對稱地讓出桌面。兩個條件同源（PHONE_MQ），所以不會有哪個寬度是
+   * 兩個都掛、或兩個都不掛。
+   */
+  const phone = useIsPhone();
   // 創作台的情境命令列把話丟過來時要順手打開助手（桌機那顆球在 AssistantLauncher 同理）
-  const openAssistantForCompose = useCallback(() => setAssistantOpen(true), []);
+  const openAssistantForCompose = useCallback(() => {
+    if (phone) setAssistantOpen(true);
+  }, [phone]);
   useAssistantComposeListener(openAssistantForCompose);
   const orbRef = useRef<HTMLButtonElement | null>(null);
   // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」。手勢掛在整張 sheet
@@ -172,12 +188,15 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
           </aside>
         </>
       )}
-      <GlobalAssistantSheet
-        open={assistantOpen}
-        onClose={() => setAssistantOpen(false)}
-        groupId={groupId}
-        triggerRef={orbRef}
-      />
+      {/* 只有手機掛這張；桌面（含平板）由頂欄 AssistantLauncher 掛（見上方擁有權說明） */}
+      {phone && (
+        <GlobalAssistantSheet
+          open={assistantOpen}
+          onClose={() => setAssistantOpen(false)}
+          groupId={groupId}
+          triggerRef={orbRef}
+        />
+      )}
       <nav className="mobile-nav" aria-label="主要功能">
         {ITEMS.map((item) => {
           const [pathname, anchor] = item.href.split("#");

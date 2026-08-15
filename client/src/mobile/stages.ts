@@ -68,7 +68,7 @@ export function stageSentence(input: {
 const STORY_HOME_ANCHOR = "stage-story";
 
 /** section id → 真正渲染在 DOM 上的 anchorId（storyboard→stage-board、production→stage-create） */
-const ANCHOR_BY_SECTION = new Map(STORY_INLINE_SECTIONS.map((s) => [s.id, s.anchorId]));
+const ANCHOR_BY_SECTION = new Map<string, string>(STORY_INLINE_SECTIONS.map((s) => [s.id, s.anchorId]));
 
 /**
  * 「繼續製作」要跳到哪一段。
@@ -91,6 +91,23 @@ export function continueAnchor(stage: string): string {
     default:
       return ANCHOR_BY_SECTION.get("production") ?? STORY_HOME_ANCHOR;
   }
+}
+
+/**
+ * 某個 section 在專案頁實際渲染的錨點 id。
+ *
+ * 次級入口（分鏡／角色／知識）要跳的段落用這個取，不要直接把 section id 當錨點——
+ * 那正是 `continueAnchor` 上面那段記載的坑。
+ */
+export function anchorForSection(section: string): string {
+  return ANCHOR_BY_SECTION.get(section) ?? STORY_HOME_ANCHOR;
+}
+
+/** 這個 hash 是不是專案頁認得的錨點（深連結進來時用來判斷要不要直接開工作台） */
+export function isProjectAnchor(hash: string): boolean {
+  const id = hash.replace(/^#/, "").trim();
+  if (!id) return false;
+  return id === STORY_HOME_ANCHOR || [...ANCHOR_BY_SECTION.values()].includes(id);
 }
 
 /** 「繼續製作」按鈕上的字：按鈕要講出它會做什麼，不是講一個泛稱 */

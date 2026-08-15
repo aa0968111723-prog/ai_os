@@ -2,9 +2,13 @@
   "phoneMetrics": {
     "phone-360x800": {
       "homeSettled": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
+          "system.storageStatus",
+          "sessionBoot.bootstrap",
+          "auth.touchSession",
+          "quota.my",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -19,9 +23,13 @@
         ]
       },
       "homeInteractive": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
+          "system.storageStatus",
+          "sessionBoot.bootstrap",
+          "auth.touchSession",
+          "quota.my",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -36,16 +44,14 @@
         ]
       },
       "project": {
-        "jsBytes": 6429,
+        "jsBytes": 6641,
         "jsChunks": 1,
-        "api": [
-          "phone.project"
-        ]
+        "api": []
       }
     },
     "phone-390x844": {
       "homeSettled": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
@@ -62,7 +68,7 @@
         ]
       },
       "homeInteractive": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
@@ -79,7 +85,7 @@
         ]
       },
       "project": {
-        "jsBytes": 6429,
+        "jsBytes": 6641,
         "jsChunks": 1,
         "api": [
           "phone.project"
@@ -88,7 +94,7 @@
     },
     "phone-430x932": {
       "homeSettled": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
@@ -105,7 +111,7 @@
         ]
       },
       "homeInteractive": {
-        "jsBytes": 824533,
+        "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
           "sessionBoot.bootstrap",
@@ -122,7 +128,7 @@
         ]
       },
       "project": {
-        "jsBytes": 6429,
+        "jsBytes": 6641,
         "jsChunks": 1,
         "api": [
           "phone.project"
@@ -179,17 +185,22 @@
     {
       "ok": true,
       "name": "phone-360x800: 專案頁走手機摘要版",
-      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#stage-create m-project=1 m-home=0 detail=true"
+      "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
     },
     {
       "ok": true,
-      "name": "phone-360x800: 「開始做畫面」開啟工作台且錨點真的存在",
-      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
+      "name": "phone-360x800: 開專案不下載完整工作台",
+      "detail": "m-project-full=0"
     },
     {
       "ok": true,
       "name": "phone-360x800: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
       "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 「開始寫故事」開啟工作台且錨點真的存在",
+      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
     },
     {
       "ok": true,
@@ -239,17 +250,22 @@
     {
       "ok": true,
       "name": "phone-390x844: 專案頁走手機摘要版",
-      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#stage-create m-project=1 m-home=0 detail=true"
+      "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
     },
     {
       "ok": true,
-      "name": "phone-390x844: 「開始做畫面」開啟工作台且錨點真的存在",
-      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
+      "name": "phone-390x844: 開專案不下載完整工作台",
+      "detail": "m-project-full=0"
     },
     {
       "ok": true,
       "name": "phone-390x844: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
       "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 「開始寫故事」開啟工作台且錨點真的存在",
+      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
     },
     {
       "ok": true,
@@ -299,17 +315,22 @@
     {
       "ok": true,
       "name": "phone-430x932: 專案頁走手機摘要版",
-      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#stage-create m-project=1 m-home=0 detail=true"
+      "detail": "url=http://127.0.0.1:3000/p/c2c6728f-1853-f896-4ded-a5e3a54cbb35"
     },
     {
       "ok": true,
-      "name": "phone-430x932: 「開始做畫面」開啟工作台且錨點真的存在",
-      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
+      "name": "phone-430x932: 開專案不下載完整工作台",
+      "detail": "m-project-full=0"
     },
     {
       "ok": true,
       "name": "phone-430x932: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
       "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 「開始寫故事」開啟工作台且錨點真的存在",
+      "detail": "found=stage-story,stage-board,stage-create,stage-deliver"
     },
     {
       "ok": true,

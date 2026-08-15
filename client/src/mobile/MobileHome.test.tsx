@@ -106,6 +106,32 @@ describe("手機首頁", () => {
     );
   });
 
+  it("查詢失敗講「載不到」，不是「還沒有專案」", () => {
+    // 沿用空狀態會讓使用者以為自己的專案不見了——那是最不該給的錯誤訊息
+    homeQuery.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      isError: true,
+      error: { message: "連線逾時" },
+      refetch: vi.fn(),
+    });
+    render(<MobileHome groupId="g1" />);
+    expect(screen.getByText("載不到你的專案")).toBeInTheDocument();
+    expect(screen.queryByText("還沒有專案")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+  });
+
+  it("看全部專案時保留前一份資料，畫面不閃回骨架", () => {
+    render(<MobileHome groupId="g1" />);
+    const opts = homeQuery.mock.calls.at(-1)?.[1] as { placeholderData?: unknown };
+    // 換 limit＝換 query key＝data 瞬間變 undefined；沒有 placeholderData 的話
+    // 整個首頁（含 AI 輸入列裡打到一半的字）會被卸載重來
+    expect(typeof opts?.placeholderData).toBe("function");
+    const keepPrevious = opts.placeholderData as (p: unknown) => unknown;
+    expect(keepPrevious({ projects: [1] })).toEqual({ projects: [1] });
+  });
+
   it("沒有組別時給的是指路，不是空白畫面", () => {
     render(<MobileHome groupId="" />);
     expect(screen.getByText("還沒有組別")).toBeInTheDocument();

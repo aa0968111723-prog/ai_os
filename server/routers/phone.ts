@@ -25,7 +25,7 @@
  * one. This router reads only; it has no mutations.
  */
 import { z } from "zod";
-import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -88,7 +88,9 @@ export const phoneRouter = router({
             withVisual: sql<number>`count(${schema.scenes.assetId})`,
           })
           .from(schema.scenes)
-          .where(inArray(schema.scenes.projectId, ids))
+          // 分鏡有回收桶（scenes.deletedAt）：不濾掉的話，使用者刪掉的鏡仍算進
+          // 「8 鏡」，畫面上的分母永遠比專案頁看到的多，而且不會有人發現是哪裡錯。
+          .where(and(inArray(schema.scenes.projectId, ids), isNull(schema.scenes.deletedAt)))
           .groupBy(schema.scenes.projectId),
         db
           .select({
@@ -174,7 +176,7 @@ export const phoneRouter = router({
             withNarration: sql<number>`count(${schema.scenes.narrationAssetId})`,
           })
           .from(schema.scenes)
-          .where(eq(schema.scenes.projectId, input.projectId)),
+          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt))),
         db
           .select({
             awaiting: sql<number>`count(*) filter (where ${schema.generations.status} = 'awaiting_approval')`,
@@ -201,10 +203,13 @@ export const phoneRouter = router({
             createdAt: schema.assets.createdAt,
           })
           .from(schema.assets)
+          // kind = image only：這幾筆直接餵進手機專案頁的 <img> 縮圖牆，
+          // 混進音檔／影片會變成一格永遠載不出來的破圖。
+          // （原本還加了 isNotNull(url)，但 url 是 NOT NULL 欄位，那條件永遠為真。）
           .where(and(
             eq(schema.assets.projectId, input.projectId),
             isNull(schema.assets.deletedAt),
-            isNotNull(schema.assets.url),
+            eq(schema.assets.kind, "image"),
           ))
           .orderBy(desc(schema.assets.createdAt), desc(schema.assets.id))
           .limit(RECENT_ASSET_LIMIT),

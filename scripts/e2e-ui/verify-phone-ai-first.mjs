@@ -173,42 +173,55 @@ const main = async () => {
       await page.locator(".menu-surface__scrim").waitFor({ state: "detached", timeout: 10_000 }).catch(() => {});
     }
 
-    // Project page: summary first, heavy workbench only on demand
-    const firstProject = page.locator(".m-current__go, .m-recent__row").first();
-    if (await firstProject.isVisible().catch(() => false)) {
+    // Project page. Two distinct entries, and they must behave differently:
+    //   • opening a project (no hash)  → cheap summary, workbench NOT downloaded
+    //   • pressing 繼續製作 (with hash) → straight into the workbench at that section
+    // Testing only one of them is how the anchor bug survived a "58/58 passed" run.
+    const projectHref = await page.locator(".m-current__go").first().isVisible().catch(() => false);
+    if (projectHref) {
+      // Recover the project id from the button's navigation target by using the
+      // recent list when present, else read it after a plain click-through.
+      const summaryUrl = await page.evaluate(() => {
+        const row = document.querySelector(".m-recent__row");
+        return row ? "row" : null;
+      });
+
       net.reset();
-      await firstProject.click();
-      // 導航必須真的發生——吞掉逾時會讓「沒導航」看起來像「導航後沒東西」
+      if (summaryUrl === "row") {
+        await page.locator(".m-recent__row").first().click();
+      } else {
+        // No second project seeded: reach the summary by dropping the hash.
+        await page.locator(".m-current__go").first().click();
+        await page.waitForURL(/\/p\//, { timeout: 20_000 });
+        const bare = page.url().split("#")[0];
+        net.reset();
+        await page.goto(bare, { waitUntil: "commit" });
+      }
       await page.waitForURL(/\/p\//, { timeout: 20_000 });
-      // SPA 導航之後 waitForLoadState("networkidle") 會立刻回來（load state 早就是
-      // networkidle 了），量到的會是「chunk 還沒開始下載」的那一瞬間。要等真正的
-      // 元素出現——順帶證明這支 chunk 確實是點了才載，沒有被預先抓下來。
       await page.locator(".m-project").first().waitFor({ state: "visible", timeout: 30_000 });
       await page.waitForLoadState("networkidle");
       phoneMetrics[vp.name].project = net.snapshot();
-      const summary = await page.locator(".m-project").first().isVisible().catch((e) => String(e).slice(0, 120));
-      check(summary === true, `${vp.name}: 專案頁走手機摘要版`, `url=${page.url()} m-project=${await page.locator(".m-project").count()} m-home=${await page.locator(".m-home").count()} detail=${summary}`);
 
-      // 「繼續製作」必須真的捲到那一段。這條是補一個真實踩過的洞：錨點原本用的是
-      // section id（storyboard／production），但 DOM 上渲染的是 anchorId
-      //（stage-board／stage-create），getElementById 永遠回 null——工作台打開了、
-      // 卻停在頁面最上方，而且完全不報錯。只驗「頁面有打開」抓不到這種失敗。
-      if (summary === true) {
-        const goLabel = await page.locator(".m-current__go").first().innerText().catch(() => "");
-        await page.locator(".m-current__go").first().click();
-        const landed = await page.waitForFunction(() => {
-          const el = document.querySelector(".m-project-full");
-          if (!el) return null;
-          // 手機摘要頁把錨點交給完整工作台；工作台掛好後那個 id 必須存在
-          const ids = ["stage-story", "stage-board", "stage-create", "stage-deliver"];
-          return ids.filter((id) => document.getElementById(id)).join(",") || null;
-        }, null, { timeout: 40_000 }).then((h) => h.jsonValue()).catch(() => null);
-        check(!!landed, `${vp.name}: 「${goLabel.trim()}」開啟工作台且錨點真的存在`, `found=${landed}`);
-        await page.screenshot({ path: path.join(OUT, `${vp.name}-workbench.png`) });
-      }
+      check(true, `${vp.name}: 專案頁走手機摘要版`, `url=${page.url()}`);
+      const heavyLoaded = await page.locator(".m-project-full").count();
+      check(heavyLoaded === 0, `${vp.name}: 開專案不下載完整工作台`, `m-project-full=${heavyLoaded}`);
       const stillMobileNav = await page.locator("nav.mobile-nav").isVisible().catch(() => false);
       check(stillMobileNav, `${vp.name}: 導航到專案頁後底欄仍在（SPA 未整頁重載）`);
       await page.screenshot({ path: path.join(OUT, `${vp.name}-project.png`) });
+
+      // 「繼續製作」必須真的捲到那一段。錨點原本用的是 section id
+      // （storyboard／production），但 DOM 上渲染的是 anchorId（stage-board／
+      // stage-create），getElementById 永遠回 null——工作台打開了卻停在頁面最上方，
+      // 而且完全不報錯。只驗「頁面有打開」抓不到這種失敗。
+      const goLabel = await page.locator(".m-current__go").first().innerText().catch(() => "");
+      await page.locator(".m-current__go").first().click();
+      const landed = await page.waitForFunction(() => {
+        if (!document.querySelector(".m-project-full")) return null;
+        const ids = ["stage-story", "stage-board", "stage-create", "stage-deliver"];
+        return ids.filter((id) => document.getElementById(id)).join(",") || null;
+      }, null, { timeout: 40_000 }).then((h) => h.jsonValue()).catch(() => null);
+      check(!!landed, `${vp.name}: 「${goLabel.trim()}」開啟工作台且錨點真的存在`, `found=${landed}`);
+      await page.screenshot({ path: path.join(OUT, `${vp.name}-workbench.png`) });
     }
 
     await ctx.close();

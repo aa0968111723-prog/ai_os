@@ -46,6 +46,13 @@ export function MobileHome({ groupId }: { groupId: string }) {
       // 30 秒內回到首頁不重打：手機在專案與首頁之間來回是最常見的動線
       staleTime: 30_000,
       refetchOnWindowFocus: true,
+      /**
+       * 換 limit＝換 query key＝一支全新的查詢，data 會瞬間變 undefined。
+       * 沒有這行的話，按「看全部專案」會讓**整個首頁閃回骨架**——目前專案、
+       * 進度、繼續製作全部消失一兩秒，連 AI 輸入列裡打到一半的字都會被卸載掉。
+       * 保留前一份資料，新的到了才換上，畫面只是「多了幾列」。
+       */
+      placeholderData: (previous) => previous,
     },
   );
 
@@ -71,9 +78,26 @@ export function MobileHome({ groupId }: { groupId: string }) {
     );
   }
 
+  // 查詢失敗要講「載不到」，不能沿用空狀態——「還沒有專案」會讓使用者以為
+  // 自己的專案不見了，那是最不該給的錯誤訊息。
+  if (home.isError && !home.data) {
+    return (
+      <div className="m-home">
+        <EmptyState
+          icon={<Icon name="XCircle" size={28} />}
+          title="載不到你的專案"
+          description={home.error?.message ?? "連線好像不太穩，再試一次看看。"}
+          action={<Button variant="primary" onClick={() => { void home.refetch(); }}>重試</Button>}
+        />
+      </div>
+    );
+  }
+
   const projects = home.data?.projects ?? [];
   const current = projects[0];
-  const others = showAll ? projects.slice(1) : projects.slice(1, 4);
+  // slice(1) 不再另外截斷：伺服器已經只回首屏該有的那幾筆，前端再砍一刀
+  // 只會讓「最近」少一個專案，而使用者永遠不知道少的是哪一個。
+  const others = projects.slice(1);
 
   return (
     <div className="m-home">

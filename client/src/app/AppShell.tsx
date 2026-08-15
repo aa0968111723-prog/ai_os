@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { AppUpdateBanner } from "../components/AppUpdateBanner";
@@ -9,6 +9,7 @@ import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
 import { RouteFallback } from "../components/RouteFallback";
+import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { safeInternalPath } from "../lib/safePath";
@@ -23,15 +24,20 @@ import posthog from "../posthog";
  * 通知設定對話框要按了選單才會開。改 lazy 之後首屏不必等它們，
  * 它們自己在下一個 tick 掛上來，UI 與行為完全不變。
  *
+ * 用 `lazyWithRetry` 而不是裸 `lazy`：站內為此寫過一個包裝（見 lib/lazyWithRetry 檔頭）——
+ * 裸 lazy 的 import 一 reject，錯誤會冒到全站 ErrorBoundary，整個 App 變成
+ * 「畫面出了點狀況」。這幾個是登入後全站常駐的裝置，為了一顆回饋浮標沒抓到
+ * 就把整站白掉，是這次重構不能換來的代價（重新部署後舊 hash 消失時必中）。
+ *
  * 每一個都用 `<Suspense fallback={null}>` 包住：它們本來就沒有版位
  *（浮標是 fixed、HUD 空著時是 null、同步元件零 UI），所以「還沒到」看起來
  * 就跟原本「還沒有東西要顯示」一模一樣，不會有版面跳動。
  */
-const FeedbackWidget = lazy(() => import("../feedback/FeedbackWidget").then((m) => ({ default: m.FeedbackWidget })));
-const FloatingDmBubble = lazy(() => import("../components/FloatingDmBubble").then((m) => ({ default: m.FloatingDmBubble })));
-const AgentActivityHud = lazy(() => import("./components/AgentActivityHud").then((m) => ({ default: m.AgentActivityHud })));
-const PushSubscriptionSync = lazy(() => import("../components/NotificationSettings").then((m) => ({ default: m.PushSubscriptionSync })));
-const NotificationSettingsDialog = lazy(() => import("../components/NotificationSettings").then((m) => ({ default: m.NotificationSettingsDialog })));
+const FeedbackWidget = lazyWithRetry(() => import("../feedback/FeedbackWidget").then((m) => ({ default: m.FeedbackWidget })));
+const FloatingDmBubble = lazyWithRetry(() => import("../components/FloatingDmBubble").then((m) => ({ default: m.FloatingDmBubble })));
+const AgentActivityHud = lazyWithRetry(() => import("./components/AgentActivityHud").then((m) => ({ default: m.AgentActivityHud })));
+const PushSubscriptionSync = lazyWithRetry(() => import("../components/NotificationSettings").then((m) => ({ default: m.PushSubscriptionSync })));
+const NotificationSettingsDialog = lazyWithRetry(() => import("../components/NotificationSettings").then((m) => ({ default: m.NotificationSettingsDialog })));
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 

@@ -8,7 +8,7 @@ import { registerAssistantPage } from "../lib/assistantContext";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { MobileAiBar } from "./MobileAiBar";
 import { StageTrack } from "./MobileHome";
-import { continueAnchor, continueLabel, stageSentence } from "./stages";
+import { anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageSentence } from "./stages";
 
 /**
  * 手機專案頁（<768px）。
@@ -44,17 +44,19 @@ const FullProjectPage = lazyWithRetry(() =>
 /** 手機素材抽屜：縮圖牆＋分頁載入，點「素材」才載 */
 const MobileAssetSheet = lazy(() => import("./MobileAssetSheet"));
 
-type SecondaryEntry = { key: string; label: string; icon: IconName; hint: string };
+type SecondaryEntry = { key: string; label: string; icon: IconName; hint: string; anchor: string | null };
 
 /**
  * 次級入口。手機首屏只放這四個，其餘（設定、歷史、成員、交付）留在完整工作台裡——
  * 每一個都是「點了才載」，不點就不下載、不掛載、不查詢。
  */
 const SECONDARY: SecondaryEntry[] = [
-  { key: "storyboard", label: "分鏡", icon: "Clapperboard", hint: "看每一鏡、接著往下排" },
-  { key: "assets", label: "素材", icon: "Image", hint: "這個專案的圖與影片" },
-  { key: "characters", label: "角色", icon: "Users", hint: "角色定裝與一致性" },
-  { key: "knowledge", label: "知識", icon: "FileText", hint: "腳本、開示稿、參考資料" },
+  // anchor 一律取自 storyInlineNav 的單一出處（section id ≠ DOM id，踩過一次了）。
+  // 素材走自己的抽屜，不進工作台，所以 anchor 是 null。
+  { key: "storyboard", label: "分鏡", icon: "Clapperboard", hint: "看每一鏡、接著往下排", anchor: anchorForSection("storyboard") },
+  { key: "assets", label: "素材", icon: "Image", hint: "這個專案的圖與影片", anchor: null },
+  { key: "characters", label: "角色", icon: "Users", hint: "角色定裝與一致性", anchor: anchorForSection("characters") },
+  { key: "knowledge", label: "知識", icon: "FileText", hint: "腳本、開示稿、參考資料", anchor: anchorForSection("scenes") },
 ];
 
 export function MobileProjectPage({ id }: { id: string }) {
@@ -65,6 +67,16 @@ export function MobileProjectPage({ id }: { id: string }) {
    * 但**預設是關的**——第一屏永遠不付它的錢。
    */
   const [fullOpen, setFullOpen] = useState(false);
+
+  /**
+   * 深連結：`/p/:id#stage-board` 這種網址從通知、書籤或桌機分享過來時，手機不能
+   * 只顯示摘要就當作到了——使用者要的是那一段。有 hash 就直接進工作台並帶著錨點。
+   *
+   * 只在掛載時看一次：之後的 hash 變動是 openFull 自己寫的，再讀一次會打架。
+   */
+  const [initialHash] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.hash.replace(/^#/, ""),
+  );
 
   const summary = trpc.phone.project.useQuery(
     { projectId: id },
@@ -97,6 +109,13 @@ export function MobileProjectPage({ id }: { id: string }) {
       requestAnimationFrame(tick);
     }
   };
+
+  // 帶著 hash 進來就直接開工作台（等同使用者自己按了「繼續製作」）
+  useEffect(() => {
+    if (initialHash && isProjectAnchor(initialHash)) openFull(initialHash);
+    // openFull 是穩定的區域函式；刻意只在掛載時跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialHash]);
 
   if (fullOpen) {
     return (
@@ -207,7 +226,7 @@ export function MobileProjectPage({ id }: { id: string }) {
             key={entry.key}
             type="button"
             className="m-entries__row"
-            onClick={() => (entry.key === "assets" ? setAssetsOpen(true) : openFull(entry.key))}
+            onClick={() => (entry.anchor === null ? setAssetsOpen(true) : openFull(entry.anchor))}
           >
             <span className="m-entries__icon"><Icon name={entry.icon} size={18} /></span>
             <span className="m-entries__text">

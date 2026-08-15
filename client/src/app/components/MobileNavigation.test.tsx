@@ -6,6 +6,30 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileNavigation } from "./MobileNavigation";
 import { DESTINATIONS, topbarNavItems } from "../navigation/navigationItems";
 
+/**
+ * jsdom 沒有 `window.matchMedia`，`useMatchMedia` 因此一律回 false ——
+ * 也就是「桌面」。這支測的是**手機底欄**，而底欄現在只在手機掛助手面板
+ *（桌面那張由頂欄 AssistantLauncher 掛，確保每個寬度只有一個主人）。
+ * 所以這裡要明確把視窗宣告成手機，否則測到的是一個刻意不掛面板的分支。
+ */
+function stubPhoneViewport() {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: /max-width/.test(query),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+stubPhoneViewport();
+
 /** 助手是 lazy 載入的真元件，會打 trpc——整支 api 換成假的（站內慣例）。
  *
  *  面板裡不只有問答：GroupCampaignPanel 也在這張 sheet 內，且同樣 lazy 載入。

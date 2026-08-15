@@ -1,15 +1,17 @@
 /**
  * Thin app entry (TD-06): providers live in main.tsx; shell + routes compose here.
  */
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
+import { lazyWithRetry } from "./lib/lazyWithRetry";
 import { AppShell } from "./app/AppShell";
 
 /**
  * 素材儲存警示橫幅：登入前渲染 null、儲存正常時也渲染 null——也就是說**絕大多數
  * 開站它都不顯示任何東西**，卻靜態佔著首屏 entry chunk 約 13KB。改 lazy 之後
  * 首屏不必等它；真的降級時它照樣掛在版面最上方（fallback 是 null，沒有版位變化）。
+ * 用 lazyWithRetry：chunk 抓不到時退回重試／重載，而不是讓整站掉進 ErrorBoundary。
  */
-const StorageAlertBanner = lazy(() =>
+const StorageAlertBanner = lazyWithRetry(() =>
   import("./components/StorageAlertBanner").then((m) => ({ default: m.StorageAlertBanner })),
 );
 

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const projectQuery = vi.fn();
 const assetsQuery = vi.fn();
@@ -55,6 +55,8 @@ const SUMMARY = {
     { id: "a2", title: "香爐", url: "/assets/a2.png", kind: "image", createdAt: new Date() },
   ],
 };
+
+afterEach(() => window.history.replaceState(null, "", "/"));
 
 beforeEach(() => {
   composed.length = 0;
@@ -129,6 +131,28 @@ describe("手機專案頁", () => {
     expect(composed).toHaveLength(1);
     expect(composed[0]).toContain("禪心一炷香");
     expect(composed[0]).toContain("畫面 3／8 鏡");
+  });
+
+  it("帶錨點的深連結直接進工作台，不是停在摘要", async () => {
+    // /p/:id#stage-board 從通知或桌機分享過來時，使用者要的是那一段。
+    // 手機版原本完全不看 location.hash，錨點被靜靜吃掉。
+    window.history.replaceState(null, "", "/p/p1#stage-board");
+    render(<MobileProjectPage id="p1" />);
+    expect(await screen.findByTestId("desktop-workbench")).toBeInTheDocument();
+  });
+
+  it("沒有錨點的網址維持摘要優先（首屏不載 234KB 工作台）", () => {
+    window.history.replaceState(null, "", "/p/p1");
+    render(<MobileProjectPage id="p1" />);
+    expect(screen.queryByTestId("desktop-workbench")).not.toBeInTheDocument();
+    expect(heavyLoads).toEqual([]);
+  });
+
+  it("不認得的 hash 不會誤開工作台", () => {
+    // #storyboard 是 section id 不是錨點——不能因為「看起來像」就開
+    window.history.replaceState(null, "", "/p/p1#storyboard");
+    render(<MobileProjectPage id="p1" />);
+    expect(screen.queryByTestId("desktop-workbench")).not.toBeInTheDocument();
   });
 
   it("打不開的專案給的是可行動的錯誤，不是空白", () => {
