@@ -16,6 +16,7 @@ const navigate = vi.fn();
 vi.mock("wouter", () => ({ useLocation: () => ["/dashboard", navigate] }));
 
 import { MobileHome } from "./MobileHome";
+import { continueAnchor } from "./stages";
 
 const project = (over: Record<string, unknown> = {}) => ({
   id: "11111111-1111-4111-8111-111111111111",
@@ -54,7 +55,12 @@ describe("手機首頁", () => {
   it("「繼續製作」直接帶到專案的對應段落，不是丟到專案頁頂端", () => {
     render(<MobileHome groupId="g1" />);
     fireEvent.click(screen.getByRole("button", { name: /繼續生成/ }));
-    expect(navigate).toHaveBeenCalledWith("/p/11111111-1111-4111-8111-111111111111#production");
+    // 錨點取自 continueAnchor（它自己對照 storyInlineNav 的單一出處），不在這裡寫死字串——
+    // 寫死的話錨點改名時這條會綠著騙人，而使用者按下去不會捲到任何地方。
+    expect(navigate).toHaveBeenCalledWith(
+      `/p/11111111-1111-4111-8111-111111111111#${continueAnchor("generate")}`,
+    );
+    expect(continueAnchor("generate")).toBe("stage-create");
   });
 
   it("AI 輸入列送出的話走既有的 compose 接縫（不另起一套助手）", () => {

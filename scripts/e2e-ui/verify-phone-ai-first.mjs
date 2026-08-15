@@ -188,6 +188,24 @@ const main = async () => {
       phoneMetrics[vp.name].project = net.snapshot();
       const summary = await page.locator(".m-project").first().isVisible().catch((e) => String(e).slice(0, 120));
       check(summary === true, `${vp.name}: 專案頁走手機摘要版`, `url=${page.url()} m-project=${await page.locator(".m-project").count()} m-home=${await page.locator(".m-home").count()} detail=${summary}`);
+
+      // 「繼續製作」必須真的捲到那一段。這條是補一個真實踩過的洞：錨點原本用的是
+      // section id（storyboard／production），但 DOM 上渲染的是 anchorId
+      //（stage-board／stage-create），getElementById 永遠回 null——工作台打開了、
+      // 卻停在頁面最上方，而且完全不報錯。只驗「頁面有打開」抓不到這種失敗。
+      if (summary === true) {
+        const goLabel = await page.locator(".m-current__go").first().innerText().catch(() => "");
+        await page.locator(".m-current__go").first().click();
+        const landed = await page.waitForFunction(() => {
+          const el = document.querySelector(".m-project-full");
+          if (!el) return null;
+          // 手機摘要頁把錨點交給完整工作台；工作台掛好後那個 id 必須存在
+          const ids = ["stage-story", "stage-board", "stage-create", "stage-deliver"];
+          return ids.filter((id) => document.getElementById(id)).join(",") || null;
+        }, null, { timeout: 40_000 }).then((h) => h.jsonValue()).catch(() => null);
+        check(!!landed, `${vp.name}: 「${goLabel.trim()}」開啟工作台且錨點真的存在`, `found=${landed}`);
+        await page.screenshot({ path: path.join(OUT, `${vp.name}-workbench.png`) });
+      }
       const stillMobileNav = await page.locator("nav.mobile-nav").isVisible().catch(() => false);
       check(stillMobileNav, `${vp.name}: 導航到專案頁後底欄仍在（SPA 未整頁重載）`);
       await page.screenshot({ path: path.join(OUT, `${vp.name}-project.png`) });

@@ -1,5 +1,7 @@
 import type { IconName } from "../components/Icon";
 import { PHONE_STAGES } from "@shared/phoneStages";
+// 錨點的單一出處：桌面 hash 路由（sectionFromHash）也是讀這一份
+import { STORY_INLINE_SECTIONS } from "../features/story-workspace/storyInlineNav";
 
 /**
  * 手機版的五段製作階段：故事 → 分鏡 → 視覺 → 生成 → 交付。
@@ -58,19 +60,36 @@ export function stageSentence(input: {
 }
 
 /**
+ * 專案頁「故事本體」的錨點。
+ *
+ * 它不在 `STORY_INLINE_SECTIONS` 裡——故事是主表面，不是可收合的區段
+ *（見 storyInlineNav.ts 的 `STORY_HOME_ALIASES`），所以只能寫死這一個。
+ */
+const STORY_HOME_ANCHOR = "stage-story";
+
+/** section id → 真正渲染在 DOM 上的 anchorId（storyboard→stage-board、production→stage-create） */
+const ANCHOR_BY_SECTION = new Map(STORY_INLINE_SECTIONS.map((s) => [s.id, s.anchorId]));
+
+/**
  * 「繼續製作」要跳到哪一段。
  *
- * 專案頁的分段錨點是既有契約（桌面版的 `#story`／`#storyboard` 等區塊 id 沒變），
- * 手機沿用同一組——不另外發明一套網址，深連結與通知點進來仍落在同一個地方。
+ * 回傳的是**真正渲染在 DOM 上的 anchorId**，不是 section id。這兩者不一樣，
+ * 而且踩過：`storyboard` 是 section id，它的 anchorId 其實是 `stage-board`。
+ * 直接把 section id 當錨點用的話，`document.getElementById()` 永遠找不到元素——
+ * 症狀是「繼續製作」把工作台打開了，但停在頁面最上方沒有捲到那一段，
+ * 而且完全不會報錯（呼叫端輪詢三秒後靜靜放棄）。
+ *
+ * 所以這裡從 `STORY_INLINE_SECTIONS` 推導，不自己寫字串——那份清單同時是
+ * 桌面版 hash 路由（`sectionFromHash`）的來源，兩邊因此不可能再對不上。
  */
 export function continueAnchor(stage: string): string {
   switch (stage) {
     case "story":
-      return "story";
+      return STORY_HOME_ANCHOR;
     case "storyboard":
-      return "storyboard";
+      return ANCHOR_BY_SECTION.get("storyboard") ?? STORY_HOME_ANCHOR;
     default:
-      return "production";
+      return ANCHOR_BY_SECTION.get("production") ?? STORY_HOME_ANCHOR;
   }
 }
 
