@@ -55,7 +55,7 @@ describe("Visual Creative UX 的結構約束（行為見上方檔案清單）", 
 
   it("becomes a bottom sheet at mobile width with 44px controls and no 260px rail", () => {
     const mobile = css.slice(css.indexOf("/* ── Visual Creative UX v2"));
-    expect(mobile).toContain("@media (max-width: 820px)");
+    expect(mobile).toContain("@media (max-width: 767.98px)");
     expect(mobile).toContain("position: fixed");
     expect(mobile).toContain("min-height: 44px");
     expect(mobile).not.toContain("260px");

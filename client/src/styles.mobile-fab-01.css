@@ -1,7 +1,7 @@
 /* MOB-FAB-01：手機／窄屏底部 chrome 契約 + 回饋 FAB 清位 + 工作台密度
  *
  * 與 styles.css 的 --chrome-bottom 變數對齊：
- * - ≤820 有 .mobile-nav → 100px（styles.css）
+ * - <768 有 .mobile-nav → 100px（styles.css）
  * - ≤560 有 .mobile-nav → 140px（本檔，特異性同為 .app:has(.mobile-nav)，後載入勝出）
  * - 表單展開 .series-form-open / .form-dock-open → 再加高，避免送出鈕被 nav 蓋住
  *
@@ -67,14 +67,14 @@
  * 寫死 48px+safe（特異性 0,2,1），蓋過 --chrome-bottom 契約的 100/140px——
  * 裝成 PWA 後底部分頁列反而壓住內容。本檔後載入、同選擇器即勝出；
  * 桌機 standalone 不受影響（--chrome-bottom 預設就是 48px，算出來同值）。 */
-@media (max-width: 820px) {
+@media (max-width: 767.98px) {
   html.is-standalone .app {
     padding-bottom: calc(var(--chrome-bottom, 48px) + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
   }
 }
 
-/* 平板窄寬（≤820px、>560px）：分頁列已常駐，表單展開時同樣加高 */
-@media (max-width: 820px) and (min-width: 561px) {
+/* 平板窄寬（<768px、>560px）：分頁列已常駐，表單展開時同樣加高 */
+@media (max-width: 767.98px) and (min-width: 561px) {
   .app:has(.series-form-open),
   .app:has(.form-dock-open) {
     --chrome-bottom: 160px;
@@ -107,22 +107,22 @@
 /* MOB-FAB-03（2026-08-08 實機回報「回饋系統直接擋住選項」）：
  * 軌道底端必須從「底部 chrome 的上緣」起算，不是從螢幕底邊。
  *
- * 上面那條 --fab-rail-base 只讓開了 safe-area，於是 ≤820px 有分頁列時，槽 0 的回饋 FAB
+ * 上面那條 --fab-rail-base 只讓開了 safe-area，於是 <768px 有分頁列時，槽 0 的回饋 FAB
  * （z45、48×48）正好落在 .mobile-nav（z44、高 ≈64+safe）的右端，把第 5 顆分頁「更多」
  * 整個蓋掉——那顆是私訊／設定等所有次要入口的唯一入口，還帶未讀紅點。
  *
- * 而且是它「贏」的：styles.css 的 ≤820px 早就寫了 `bottom: 72px + safe` 來避開分頁列，
+ * 而且是它「贏」的：styles.css 的 <768px 早就寫了 `bottom: 72px + safe` 來避開分頁列，
  * 但本檔載入在後又帶 !important，把那份避讓整個洗掉。修在這裡（軌道的單一出處），
  * 而不是回頭把 !important 拔掉——拔掉只會讓「同一條軌道」的契約再次散回各檔各自貼底。
  *
  * 72px = nav 內容高 ≈64 + 呼吸 8；safe-bottom 另計，與 styles.css 的避讓值同步。 */
-@media (max-width: 820px) {
+@media (max-width: 767.98px) {
   .app:has(.mobile-nav) {
     --fab-rail-base: calc(72px + var(--safe-bottom));
   }
 }
 
-/* 同一條軌道就要對齊同一個右緣：styles.css 的 ≤820px 還留著留言膠囊「向左閃 70px」，
+/* 同一條軌道就要對齊同一個右緣：styles.css 的 <768px 還留著留言膠囊「向左閃 70px」，
    那是兩顆都貼底時用水平位移互相讓位的舊做法——改成上下疊之後只剩視覺歪掉。 */
 .fb-fab-root,
 .project-page--mobile-compact .project-messages-fab {

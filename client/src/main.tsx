@@ -10,11 +10,14 @@ import { installOrbState } from "./lib/orbState";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
 // 手機 design token（MOB-T）：必須在 styles.css/styles.mobile-fab-01.css 之後載入
-// （同特異性覆寫靠載入順序勝出）；全檔規則都包在 ≤820 media 內，桌機零改動
+// （同特異性覆寫靠載入順序勝出）；全檔規則都包在 <768 media 內，桌機零改動
 import "./styles.mobile-tokens.css";
 // 靈感頻道深色舞台（flow-*）：全站唯一的深色區塊，class 前綴獨立、不覆寫任何既有規則，
 // 載入順序放在手機 token 之後只是為了讓 --safe-bottom 等變數已經就位
 import "./styles.inspiration.css";
+// 手機 AI-first 殼層（<768px）：全檔規則都在 @media (max-width: 767.98px) 內，
+// 且 .m-* 節點只在 useIsPhone() 為真時才渲染——桌面雙重零影響（見 styles.mobile.css 檔頭）
+import "./styles.mobile.css";
 import "./splash.css";
 // 中文字型 CSS（MOB-G）：兩份 fontsource variable index.css 共 ~300KB raw 的 @font-face
 // 宣告，先前 @import 在 styles.css 頂端＝跟主樣式合成單一 render-blocking CSS，
@@ -33,7 +36,7 @@ bootstrapTauriDesktop();
 bootstrapPwa();
 // 貼底面板要讓開虛擬鍵盤：整個 App 生命週期都要追蹤，故不綁在任何元件上
 installKeyboardInset();
-// 手機 Orb（底部導航中央 AI 球）預設 idle；視覺只在 ≤820 生效
+// 手機 Orb（底部導航中央 AI 球）預設 idle；視覺只在 <768 生效
 installOrbState();
 
 /**

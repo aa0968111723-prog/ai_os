@@ -43,7 +43,7 @@ describe("全螢幕寫作", () => {
 });
 
 describe("手機全螢幕打字", () => {
-  const mobile = declarations.slice(declarations.indexOf("@media (max-width: 820px)"));
+  const mobile = declarations.slice(declarations.indexOf("@media (max-width: 767.98px)"));
 
   it("工具列單列橫捲：換行成兩三排會把定高容器裡的稿子壓成一條縫", () => {
     expect(mobile).toMatch(
@@ -70,14 +70,14 @@ describe("字級偏好", () => {
   it("走 CSS 變數，手機的 ≥16px 防自動放大守則仍然成立", () => {
     expect(ruleFor(".story-editor")).toMatch(/font-size:\s*calc\(var\(--fs-15\)\s*\*\s*var\(--script-font-scale, 1\)\)/);
     // 手機覆寫用 max()：使用者可以調大，但不能調到 iOS 會自動縮放的門檻以下
-    const mobile = declarations.slice(declarations.indexOf("@media (max-width: 820px)"));
+    const mobile = declarations.slice(declarations.indexOf("@media (max-width: 767.98px)"));
     expect(mobile).toMatch(/\.story-editor\s*\{\s*font-size:\s*max\(16px,/);
   });
 });
 
 describe("手機版面", () => {
   it("大綱在手機改成稿子上方的一段（側欄會把編輯區壓到剩一半寬）", () => {
-    const mobile = declarations.slice(declarations.indexOf("@media (max-width: 820px)"));
+    const mobile = declarations.slice(declarations.indexOf("@media (max-width: 767.98px)"));
     expect(mobile).toMatch(/\.script-editor__body\s*\{\s*flex-direction:\s*column/);
     expect(mobile).toMatch(/\.script-outline\s*\{[^}]*max-height/);
   });

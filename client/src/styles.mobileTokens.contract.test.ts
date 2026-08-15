@@ -8,10 +8,10 @@ const mainTsx = readFileSync(resolve(process.cwd(), "client/src/main.tsx"), "utf
 
 /** 手機 design token（MOB-T）契約：board 視覺只准動手機，桌機零改動 */
 describe("mobile design-token contract (MOB-T)", () => {
-  // 全檔規則必須都活在 @media (max-width: 820px) 內——頂層出現任何選擇器＝改到桌機
+  // 全檔規則必須都活在 @media (max-width: 767.98px) 內——頂層出現任何選擇器＝改到桌機
   it("keeps every token rule inside the mobile media query", () => {
     const topLevel = tokenRules
-      .replace(/@media \(max-width: 820px\)\s*\{[\s\S]*\}/, "")
+      .replace(/@media \(max-width: 767.98px\)\s*\{[\s\S]*\}/, "")
       .trim();
     expect(topLevel).toBe("");
   });

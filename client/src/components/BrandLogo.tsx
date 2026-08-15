@@ -123,7 +123,7 @@ export function BrandLogo({
             直接不渲染（桌機與 >560 的 DOM 維持原狀；斷點放大時 useMatchMedia 會補渲染） */}
         {responsive && compactBrand ? null : (
           /* <picture>＝透明容器（display:contents 保證版面不變）：
-             ≤820 命中 WebP source（62KB，landing hero 在手機是 LCP 元素）；
+             <768 命中 WebP source（62KB，landing hero 在手機是 LCP 元素）；
              桌機不命中 media → 走原本 img src/srcSet，選圖位元不變 */
           <picture style={{ display: "contents" }}>
             {logo2x && <source media="(max-width: 820px)" type="image/webp" srcSet={BRAND_LOGO_SRC_MOBILE} />}

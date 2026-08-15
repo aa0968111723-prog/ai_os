@@ -1,0 +1,451 @@
+{
+  "phoneMetrics": {
+    "phone-360x800": {
+      "homeSettled": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "auth.touchSession",
+          "system.storageStatus",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "quota.my",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "homeInteractive": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "auth.touchSession",
+          "system.storageStatus",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "quota.my",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "project": {
+        "jsBytes": 6289,
+        "jsChunks": 1,
+        "api": [
+          "phone.project"
+        ]
+      }
+    },
+    "phone-390x844": {
+      "homeSettled": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "sessionBoot.bootstrap",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "homeInteractive": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "sessionBoot.bootstrap",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "project": {
+        "jsBytes": 6289,
+        "jsChunks": 1,
+        "api": [
+          "phone.project"
+        ]
+      }
+    },
+    "phone-430x932": {
+      "homeSettled": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "auth.touchSession",
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "system.storageStatus",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "homeInteractive": {
+        "jsBytes": 817788,
+        "jsChunks": 17,
+        "api": [
+          "auth.touchSession",
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "system.storageStatus",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "sessionBoot.bootstrap",
+          "sessionBoot.bootstrap",
+          "quota.my",
+          "dm.presence",
+          "dm.unread",
+          "generation.pendingSummary",
+          "auth.me",
+          "phone.home",
+          "teamAssistant.agentOverview",
+          "system.storageStatus",
+          "dm.unread"
+        ]
+      },
+      "project": {
+        "jsBytes": 6289,
+        "jsChunks": 1,
+        "api": [
+          "phone.project"
+        ]
+      }
+    }
+  },
+  "results": [
+    {
+      "ok": true,
+      "name": "phone-360x800: 底部分頁列出現",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 底欄三格（專案｜AI 助手｜更多）",
+      "detail": "實際 3"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 中央 AI 助手球是主要入口",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 首頁有 AI 輸入列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 快捷 2–4 顆",
+      "detail": "實際 4"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 沒有第二套（桌面）導航",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 無水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 送出後 AI 面板打開",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 那句話有帶進助手輸入框",
+      "detail": "實際「繼續上一個專案」"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 專案頁走手機摘要版",
+      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#production m-project=1 m-home=0 detail=true"
+    },
+    {
+      "ok": true,
+      "name": "phone-360x800: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 底部分頁列出現",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 底欄三格（專案｜AI 助手｜更多）",
+      "detail": "實際 3"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 中央 AI 助手球是主要入口",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 首頁有 AI 輸入列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 快捷 2–4 顆",
+      "detail": "實際 4"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 沒有第二套（桌面）導航",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 無水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 送出後 AI 面板打開",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 那句話有帶進助手輸入框",
+      "detail": "實際「繼續上一個專案」"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 專案頁走手機摘要版",
+      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#production m-project=1 m-home=0 detail=true"
+    },
+    {
+      "ok": true,
+      "name": "phone-390x844: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 底部分頁列出現",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 底欄三格（專案｜AI 助手｜更多）",
+      "detail": "實際 3"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 中央 AI 助手球是主要入口",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 首頁有 AI 輸入列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 快捷 2–4 顆",
+      "detail": "實際 4"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 沒有第二套（桌面）導航",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 無水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 送出後 AI 面板打開",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 那句話有帶進助手輸入框",
+      "detail": "實際「繼續上一個專案」"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 專案頁走手機摘要版",
+      "detail": "url=http://127.0.0.1:3000/p/7b2c3756-5cd4-063b-b1d4-5bbb83d762c3#production m-project=1 m-home=0 detail=true"
+    },
+    {
+      "ok": true,
+      "name": "phone-430x932: 導航到專案頁後底欄仍在（SPA 未整頁重載）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-768x1024: 不出現手機底部分頁列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-768x1024: 桌面頂欄導航正常",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-768x1024: 桌面 AI 助手入口在頂欄",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-768x1024: 沒有手機版首頁節點（不是兩套 UI 疊著）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-768x1024: 無嚴重水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "tablet-820x1180: 不出現手機底部分頁列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-820x1180: 桌面頂欄導航正常",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-820x1180: 桌面 AI 助手入口在頂欄",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-820x1180: 沒有手機版首頁節點（不是兩套 UI 疊著）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-820x1180: 無嚴重水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "tablet-1024x1366: 不出現手機底部分頁列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-1024x1366: 桌面頂欄導航正常",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-1024x1366: 桌面 AI 助手入口在頂欄",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-1024x1366: 沒有手機版首頁節點（不是兩套 UI 疊著）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "tablet-1024x1366: 無嚴重水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "desktop-1280x800: 不出現手機底部分頁列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1280x800: 桌面頂欄導航正常",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1280x800: 桌面 AI 助手入口在頂欄",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1280x800: 沒有手機版首頁節點（不是兩套 UI 疊著）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1280x800: 無嚴重水平溢出",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "name": "desktop-1440x900: 不出現手機底部分頁列",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1440x900: 桌面頂欄導航正常",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1440x900: 桌面 AI 助手入口在頂欄",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1440x900: 沒有手機版首頁節點（不是兩套 UI 疊著）",
+      "detail": ""
+    },
+    {
+      "ok": true,
+      "name": "desktop-1440x900: 無嚴重水平溢出",
+      "detail": "0px"
+    }
+  ]
+}

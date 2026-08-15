@@ -31,6 +31,7 @@ import type { CreativePromptOverride } from "@shared/aiTrace";
 import { AiUnderstandingPanel } from "../AiUnderstandingPanel";
 import { RecentGenerationsStrip } from "../RecentGenerationsStrip";
 import posthog from "../../../posthog";
+import { PHONE_MQ } from "../../../lib/viewport";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -168,7 +169,7 @@ export function DirectGenerateMode({
 
   const submitRequestId = useRef<string>(crypto.randomUUID());
   const submit = trpc.generation.submit.useMutation({
-    // 手機 Orb 回饋（≤820 才有視覺；桌機這些屬性無感）：
+    // 手機 Orb 回饋（<768 才有視覺；桌機這些屬性無感）：
     // 送出中=thinking、成功=speaking（短暫後自動回 idle）、失敗=error
     onMutate: () => setOrbState("thinking"),
     onError: () => setOrbState("error"),
@@ -491,8 +492,8 @@ export function DirectGenerateMode({
             // 手機上「生成」鈕常位於視窗底部，確認面板 inline 展開會整塊落在
             // 摺線之下——看起來像按了沒反應。等面板掛載完成後捲進可視帶
             //（scrollIntoViewForChrome 讓開 --chrome-bottom；面板已可見時是 no-op）。
-            // gate ≤820：桌機行為維持原狀。
-            if (window.matchMedia?.("(max-width: 820px)")?.matches) {
+            // gate <768：桌機行為維持原狀。
+            if (window.matchMedia?.(PHONE_MQ)?.matches) {
               requestAnimationFrame(() => {
                 scrollIntoViewForChrome(document.querySelector(".confirm-panel"));
               });

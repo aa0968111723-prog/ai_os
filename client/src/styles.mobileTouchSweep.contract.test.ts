@@ -8,12 +8,12 @@ const declarations = styles.replace(/\/\*[\s\S]*?\*\//g, "");
 /** 手機批次 H1（觸控目標掃蕩）契約：jsdom 讀不到媒體查詢，以樣式表文字守住 */
 describe("mobile touch-target sweep contract (batch H1)", () => {
   // .m-touch 是「獨立動作裸連結／span[role=button]／summary」的手機觸控下限工具類；
-  // 規則只能活在 ≤820 media 內——放到外面就改到桌機（紅線）
+  // 規則只能活在 <768 media 內——放到外面就改到桌機（紅線）
   it("keeps the m-touch utility mobile-scoped", () => {
     const i = declarations.indexOf(".m-touch {");
     expect(i).toBeGreaterThan(-1);
     const before = declarations.slice(0, i);
-    const lastMedia = before.lastIndexOf("@media (max-width: 820px)");
+    const lastMedia = before.lastIndexOf("@media (max-width: 767.98px)");
     expect(lastMedia).toBeGreaterThan(-1);
     // m-touch 規則與其所屬 media 區塊之間不得再出現關閉的頂層（粗略檢查：區塊內）
     expect(declarations.slice(i, i + 120)).toContain("min-height: var(--touch-min)");

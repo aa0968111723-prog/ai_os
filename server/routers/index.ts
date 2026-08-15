@@ -3,6 +3,7 @@ import { authRouter } from "./auth";
 import { sessionBootRouter } from "./sessionBoot";
 import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
+import { phoneRouter } from "./phone";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 import { scenesRouter } from "./scenes";
@@ -66,6 +67,8 @@ export const appRouter = router({
   sessionBoot: sessionBootRouter,
   admin: adminRouter,
   projects: projectsRouter,
+  // 手機首屏專用唯讀彙總（<768px）；桌面沿用既有 procedures，未動一行
+  phone: phoneRouter,
   generation: generationRouter,
   messages: messagesRouter,
   scenes: scenesRouter,

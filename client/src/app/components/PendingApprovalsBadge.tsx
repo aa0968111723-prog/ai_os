@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { MenuSurface } from "./MenuSurface";
+import { useIsPhone } from "../../lib/viewport";
 
 /**
  * 頂欄待辦徽章（UX 高：頂欄完全不顯示待核→多專案組長必然漏核）：
@@ -11,9 +12,29 @@ import { MenuSurface } from "./MenuSurface";
  * CSP 下自製下拉（無外部庫）：點外面或 Esc 關閉，比照 AccountMenu。
  */
 export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
-  const summary = trpc.generation.pendingSummary.useQuery({ groupId }, { refetchInterval: 60_000, enabled: !!groupId });
+  /**
+   * 手機（<768px）的取用策略不同，桌面維持原樣。
+   *
+   * 這顆徽章在 0 筆待辦時 `return null`——但兩支查詢照打不誤，而 `projects.list`
+   * 回的是**每個專案的每一個欄位**（含整包 worldview JSON）。手機首屏因此在
+   * 為一個通常根本不顯示的徽章，付一份全站最大的列表 payload。
+   * 手機改成「真的有待辦才去查名字」；桌面的 enabled 條件一字未動。
+   *
+   * 輪詢同理：`refetchInterval: 60_000` 在手機上是每分鐘一次的背景耗電與流量。
+   * 手機關掉排程輪詢，改靠 react-query 的 refetchOnWindowFocus——回到前景時
+   * 本來就會補一次，那正是使用者看得到徽章的時刻。
+   */
+  const phone = useIsPhone();
+  const summary = trpc.generation.pendingSummary.useQuery(
+    { groupId },
+    { refetchInterval: phone ? false : 60_000, enabled: !!groupId },
+  );
+  const pendingTotal = summary.data?.totalAwaitingGenerations ?? 0;
   // 專案名稱查詢（pendingSummary 只回 projectId）：與 Launchpad 同一條 query，react-query 會去重快取
-  const projectList = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  const projectList = trpc.projects.list.useQuery(
+    { groupId: groupId || undefined },
+    { enabled: !!groupId && (!phone || pendingTotal > 0) },
+  );
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Hooks 必須無條件呼叫——close 的 useCallback 放在任何 return 之前，之後才依資料條件決定要不要渲染。

@@ -1,9 +1,6 @@
-import { Suspense, useEffect, useState, useRef } from "react";
+import { Suspense, lazy, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "../api";
-import { FeedbackWidget } from "../feedback/FeedbackWidget";
-import { FloatingDmBubble } from "../components/FloatingDmBubble";
-import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
 import { AppUpdateBanner } from "../components/AppUpdateBanner";
 import { unsubscribeThisDevice } from "../push";
 import { SplashScreen } from "../components/SplashScreen";
@@ -11,12 +8,30 @@ import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
-import { AgentActivityHud } from "./components/AgentActivityHud";
 import { RouteFallback } from "../components/RouteFallback";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { safeInternalPath } from "../lib/safePath";
 import posthog from "../posthog";
+
+/**
+ * 登入後全站常駐、但**不屬於第一屏**的裝置：回饋浮標、私訊小球、Agent 活動 HUD、
+ * 推播訂閱同步、通知設定對話框。
+ *
+ * 靜態 import 時它們合計約 90KB 原始碼躺在 entry chunk 裡，而每一個都是
+ *「畫面已經可用之後才需要」的東西——HUD 沒有進行中的 run 時甚至渲染 null，
+ * 通知設定對話框要按了選單才會開。改 lazy 之後首屏不必等它們，
+ * 它們自己在下一個 tick 掛上來，UI 與行為完全不變。
+ *
+ * 每一個都用 `<Suspense fallback={null}>` 包住：它們本來就沒有版位
+ *（浮標是 fixed、HUD 空著時是 null、同步元件零 UI），所以「還沒到」看起來
+ * 就跟原本「還沒有東西要顯示」一模一樣，不會有版面跳動。
+ */
+const FeedbackWidget = lazy(() => import("../feedback/FeedbackWidget").then((m) => ({ default: m.FeedbackWidget })));
+const FloatingDmBubble = lazy(() => import("../components/FloatingDmBubble").then((m) => ({ default: m.FloatingDmBubble })));
+const AgentActivityHud = lazy(() => import("./components/AgentActivityHud").then((m) => ({ default: m.AgentActivityHud })));
+const PushSubscriptionSync = lazy(() => import("../components/NotificationSettings").then((m) => ({ default: m.PushSubscriptionSync })));
+const NotificationSettingsDialog = lazy(() => import("../components/NotificationSettings").then((m) => ({ default: m.NotificationSettingsDialog })));
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 
@@ -272,7 +287,7 @@ export function AppShell() {
                 />
               </Suspense>
             </main>
-            <AgentActivityHud groupId={activeGroupId} />
+            <Suspense fallback={null}><AgentActivityHud groupId={activeGroupId} /></Suspense>
             <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} groupId={activeGroupId} />
           </>
         ) : (
@@ -297,16 +312,18 @@ export function AppShell() {
         showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
       )}
 
-      {!mustChangePw && showNotifSettings && me.data && <NotificationSettingsDialog onClose={() => setShowNotifSettings(false)} />}
+      {!mustChangePw && showNotifSettings && me.data && (
+        <Suspense fallback={null}><NotificationSettingsDialog onClose={() => setShowNotifSettings(false)} /></Suspense>
+      )}
 
       {/* 例行推播訂閱同步（零 UI）：已啟用通知的裝置每次開 App 回報一次，刷新裝置清單的「最近同步」 */}
-      {me.data && <PushSubscriptionSync />}
+      {me.data && <Suspense fallback={null}><PushSubscriptionSync /></Suspense>}
 
       {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
-      {me.data && <FeedbackWidget />}
+      {me.data && <Suspense fallback={null}><FeedbackWidget /></Suspense>}
 
       {/* 私訊 Messenger 風格小球球（左下角）；偏好可在「連結手機與電腦」關閉 */}
-      {me.data && <FloatingDmBubble />}
+      {me.data && <Suspense fallback={null}><FloatingDmBubble /></Suspense>}
     </div>
   );
 }

@@ -8,17 +8,18 @@
  * 2. **渲染像素比**（DPR 3 的手機畫 2000×1200 的白板＝2160 萬像素／幀）
  * 3. **同時在畫面上的面板數**（分鏡帶與 AI 欄改成貼底 sheet，一次只出現一個）
  *
- * 斷點 820px 沿用全站手機斷點（styles.mobile-tokens.css 的 `max-width: 820px`），
+ * 斷點沿用全站唯一的 Phone/Desktop 產品切換點（lib/viewport.ts 的 PHONE_MAX_WIDTH），
  * 兩邊各寫一個數字遲早會錯開。粗指標（觸控）在窄視窗下也走輕量版——
- * 平板橫向雖然夠寬，但手指的觸控目標需求與手機相同。
+ * 但平板（≥768px）現在一律走桌面版，與全站一致。
  */
+import { PHONE_MAX_WIDTH } from "../../lib/viewport";
 
-/** 全站手機斷點：與 styles.mobile-tokens.css／styles.mobile-fab-01.css 一致 */
-export const STUDIO_MOBILE_BREAKPOINT = 820;
+/** 全站手機斷點：與 lib/viewport.ts 的 PHONE_MQ／CSS 的 767.98px 同一條界線 */
+export const STUDIO_MOBILE_BREAKPOINT = PHONE_MAX_WIDTH;
 
 /**
  * 桌機要同時容納「筆刷櫃＋白板＋AI 欄」的最小寬度。
- * 比這窄時 AI 欄改成可切換的抽屜——直接 display:none 會讓 821–1180px 的
+ * 比這窄時 AI 欄改成可切換的抽屜——直接 display:none 會讓 768–1180px 的
  * 使用者連入口都沒有（那正是先前的行為，實測就是「AI 欄不見了」）。
  */
 export const STUDIO_THREE_COLUMN_MIN = 1180;
@@ -26,8 +27,8 @@ export const STUDIO_THREE_COLUMN_MIN = 1180;
 /**
  * 觸控裝置走輕量版的寬度上限。
  *
- * **這個條件必須只有一份**。先前 CSS 另外寫了 `@media (max-width: 820px)`，
- * 於是 821–1100px 的觸控裝置（例如桌面模式的手機瀏覽器、平板）出現
+ * **這個條件必須只有一份**。先前 CSS 另外寫了自己的手機 media query，
+ * 於是 768–1100px 的觸控裝置（例如桌面模式的手機瀏覽器、平板）出現
  * 「JS 說輕量版、CSS 還套桌機三欄」的錯位：白板被擠進 200px 的側欄格，
  * 筆刷櫃因為沒套到 dock 規則而直向鋪滿整頁。
  * 現在版面一律由 `resolveStudioLayout` 決定，再以 `data-mode` 交給 CSS。

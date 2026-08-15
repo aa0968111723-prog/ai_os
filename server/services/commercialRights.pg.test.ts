@@ -15,8 +15,8 @@ const d = RUN_PG ? describe : describe.skip;
 
 function authFor(userId: string, groupId: string): AuthState {
   return {
-    user: { id: userId, name: "t", email: `${userId}@t.test`, isSuperAdmin: false },
-    groups: [{ groupId, role: "leader" }],
+    user: { id: userId, name: "t", email: `${userId}@t.test`, isSuperAdmin: false, mustChangePassword: false },
+    groups: [{ groupId, groupName: "t", teamId: randomUUID(), teamName: "t", role: "leader" }],
     adminTeamIds: [],
   } as AuthState;
 }

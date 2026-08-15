@@ -26,7 +26,8 @@ export const BRAND_LOGO_SRC: Record<BrandTone, string> = {
 };
 
 /** 手機用完整 Logo（1080w WebP，62KB）：landing hero 在手機是 LCP 元素，
- *  DPR 2-3 的 srcSet 會抓 535KB 的 @2x PNG——<picture> 的 ≤820 source 走這張。 */
+ *  DPR 2-3 的 srcSet 會抓 535KB 的 @2x PNG——<picture> 的 ≤820 source 走這張。
+ *  （這個 820 是圖片來源斷點，不是 Phone/Desktop 產品切換點，刻意維持原值。）*/
 export const BRAND_LOGO_SRC_MOBILE = "/brand/logo-aios-color-v2-1080.webp";
 
 /** Retina 用 2× 完整 Logo（僅 color；其餘 tone 回退 1×） */

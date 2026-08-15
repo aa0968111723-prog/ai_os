@@ -41,7 +41,7 @@ describe("resolveStudioLayout", () => {
     expect(resolveStudioLayout({ viewportWidth: STUDIO_MOBILE_BREAKPOINT + 1 }).mode).toBe("desktop");
   });
 
-  it("窄桌機把 AI 欄收成抽屜，而不是藏起來——先前 821–1180px 連入口都沒有", () => {
+  it("窄桌機把 AI 欄收成抽屜，而不是藏起來——先前 768–1180px 連入口都沒有", () => {
     const narrow = resolveStudioLayout({ viewportWidth: STUDIO_THREE_COLUMN_MIN - 1 });
     expect(narrow.mode).toBe("desktop");
     expect(narrow.aiPanel).toBe("sheet");

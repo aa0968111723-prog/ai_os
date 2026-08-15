@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
+import { useIsPhone } from "../../lib/viewport";
 import {
   agentRunHudLabel,
   isAgentRunActiveForHud,
@@ -60,12 +61,22 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
   const runCacheRef = useRef<Map<string, OverviewRun>>(new Map());
   const utils = trpc.useUtils();
 
+  /**
+   * 手機（<768px）不做背景輪詢，桌面維持原樣。
+   *
+   * `refetchIntervalInBackground: true` 在桌機是對的：使用者常把分頁擺著、
+   * 回頭看 agent 跑完了沒。在手機上同一條設定變成「App 切到背景仍每 30 秒
+   * 打一次 API」——耗電、耗流量，而且使用者根本沒在看。
+   * 手機只在**畫面可見**時輪詢；停止中的 2 秒快輪詢兩邊都保留（那是使用者
+   * 剛按下停止、正在等回應的當下）。
+   */
+  const phone = useIsPhone();
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
     {
       enabled: !!groupId,
       refetchInterval: stoppingId ? 2_000 : 30_000,
-      refetchIntervalInBackground: true,
+      refetchIntervalInBackground: !phone,
     },
   );
 

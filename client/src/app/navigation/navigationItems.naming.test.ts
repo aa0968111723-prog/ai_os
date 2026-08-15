@@ -50,7 +50,7 @@ describe("導覽命名（一個地方一個名字）", () => {
     expect(DESTINATIONS.dashboard.label).toBe("今日");
     const moreKeys = mobileMoreGroups.flatMap((group) => group.keys);
     expect(moreKeys).toContain("planner");
-    // 今日從底欄撤下後，More 是它在手機上唯一的入口（頂欄 ≤820px 整條隱藏）
+    // 今日從底欄撤下後，More 是它在手機上唯一的入口（頂欄 <768px 整條隱藏）
     expect(moreKeys).toContain("dashboard");
     expect(moreKeys).toEqual(expect.arrayContaining([
       "dashboard", "databases", "planner", "chat", "help", "models", "studio", "community", "downloads",

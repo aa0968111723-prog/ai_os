@@ -23,6 +23,7 @@ import {
   type ScenarioRecipe,
   type StyleShowdown,
 } from "@shared/models";
+import { PHONE_MQ } from "../lib/viewport";
 
 /**
  * 模型指南:全模型目錄總覽＋決策中心,挑選器的百科版。
@@ -973,10 +974,10 @@ function ModelThumb({
 
 /** 契約健康徽章。
  *  showNoteOnCompact：完整說明原本只放 title 屬性，手機沒有 hover 看不到——
- *  並排比較表與精靈結果開這個開關，≤820 時在徽章下補一行說明（桌機維持 title 不變；
+ *  並排比較表與精靈結果開這個開關，<768 時在徽章下補一行說明（桌機維持 title 不變；
  *  完整目錄卡已有行內 healthNote 補救，不開以免重複顯示）。 */
 function HealthBadge({ health, note, showNoteOnCompact = false }: { health?: string | null; note?: string | null; showNoteOnCompact?: boolean }) {
-  const compact = useMatchMedia("(max-width: 820px)");
+  const compact = useMatchMedia(PHONE_MQ);
   const key = normalizeHealth(health);
   const meta = HEALTH_META[key];
   const icon: IconName =

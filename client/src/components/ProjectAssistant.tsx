@@ -12,6 +12,7 @@ import {
 import { AskSources, type AskSourcesData } from "./AskSources";
 import { requestAssistantStream } from "./assistantStream";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
+import { useAssistantComposeListener } from "../lib/assistantCompose";
 import {
   AGENT_PLANNER_OPTIONS,
   getAgentPlannerOption,
@@ -279,6 +280,13 @@ export function ProjectAssistant({
   const utils = trpc.useUtils();
   const pageContext = useAssistantContext();
   const [input, setInput] = useState("");
+  /**
+   * 別的表面把話丟過來時填進輸入框，**不自動送出**——與 AICreativeCopilot 同一條契約。
+   * 在專案路徑（/p/:id、/studio/:id）下，全站助手渲染的是這張卡而不是 Copilot；
+   * 少了這行，手機專案頁 AI 輸入列送出的句子會在專案視野裡整句掉光。
+   * replayPending=true：這張卡是 lazy chunk，事件發出時它還沒掛載（見 assistantCompose 檔頭）。
+   */
+  useAssistantComposeListener(setInput, true);
   const [turns, setTurnsState] = useState<Turn[]>(() => projectConversationTurns.get(projectId) ?? []);
   const setTurns = (next: Turn[] | ((previous: Turn[]) => Turn[])) => {
     setTurnsState((previous) => {
