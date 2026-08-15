@@ -55,6 +55,29 @@ describe("把話交給 Aios（assistantCompose）", () => {
     expect(screen.getByTestId("assistant-input")).toHaveTextContent("檢查一致性");
   });
 
+  it("常駐的那一張不會把話吃掉，晚掛載的面板照樣領得到", () => {
+    /**
+     * ProjectAssistant 有兩個渲染點：創作台側欄那張在桌面專案頁是**一直掛著**的，
+     * 助手面板那張才是使用者按下送出後才掛。若兩張都補領，先掛的會先把暫存吃掉，
+     * 面板照樣開一個空輸入框——等於這個 bug 沒修。
+     * 所以補領要由呼叫端明確宣告（claimsPendingCompose），這裡驗那個語義。
+     */
+    function Inline() {
+      const [text, setText] = useState("使用者打到一半的草稿");
+      useAssistantComposeListener(setText, false);
+      return <output data-testid="inline">{text}</output>;
+    }
+    render(<Inline />);
+    say("幫我把第 3 鏡改成夜景");
+
+    // 常駐那張不領，也不該被覆寫掉使用者自己打的字
+    expect(screen.getByTestId("inline")).toHaveTextContent("幫我把第 3 鏡改成夜景");
+
+    // 面板晚一步掛載，仍然領得到同一句話
+    render(<LateAssistantBody />);
+    expect(screen.getByTestId("assistant-input")).toHaveTextContent("幫我把第 3 鏡改成夜景");
+  });
+
   it("空字串不觸發任何東西", () => {
     render(<LateAssistantBody />);
     say("   ");
