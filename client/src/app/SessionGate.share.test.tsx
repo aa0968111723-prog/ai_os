@@ -69,10 +69,14 @@ describe("SessionGate × 分享連結", () => {
     expect(screen.queryByTestId("app-routes")).not.toBeInTheDocument();
   });
 
-  it("其他路由的行為不受影響（未登入仍走登入頁）", () => {
+  it("其他路由的行為不受影響（未登入仍走登入頁）", async () => {
     window.history.replaceState(null, "", "/dashboard");
-    render(<SessionGate {...props} me={null} />);
+    renderGate(<SessionGate {...props} me={null} />);
 
+    // 要斷言「真的到了登入頁」，不能只斷言「沒有分享頁」。
+    // 分享頁改 lazy 之後，它在 suspend 期間同樣什麼都不渲染——只驗缺席的話，
+    // 這條在「登入頁也沒渲染出來」的情況下照樣綠，等於什麼都沒守住。
+    expect(await screen.findByTestId("login")).toBeInTheDocument();
     expect(screen.queryByTestId("shared-page")).not.toBeInTheDocument();
   });
 });

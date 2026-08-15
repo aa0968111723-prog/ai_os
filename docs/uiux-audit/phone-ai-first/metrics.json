@@ -7,13 +7,13 @@
         "api": [
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
-          "quota.my",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
           "auth.me",
           "phone.home",
           "teamAssistant.agentOverview",
+          "quota.my",
           "system.storageStatus",
           "dm.unread"
         ]
@@ -24,13 +24,13 @@
         "api": [
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
-          "quota.my",
           "dm.presence",
           "dm.unread",
           "generation.pendingSummary",
           "auth.me",
           "phone.home",
           "teamAssistant.agentOverview",
+          "quota.my",
           "system.storageStatus",
           "dm.unread"
         ]
@@ -38,9 +38,7 @@
       "project": {
         "jsBytes": 6641,
         "jsChunks": 1,
-        "api": [
-          "phone.project"
-        ]
+        "api": []
       }
     },
     "phone-390x844": {
@@ -48,6 +46,10 @@
         "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
+          "system.storageStatus",
+          "auth.touchSession",
+          "quota.my",
+          "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -65,6 +67,10 @@
         "jsBytes": 825024,
         "jsChunks": 19,
         "api": [
+          "system.storageStatus",
+          "auth.touchSession",
+          "quota.my",
+          "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "sessionBoot.bootstrap",
           "quota.my",
@@ -199,7 +205,7 @@
     {
       "ok": true,
       "name": "phone-360x800: 開專案的 API 支數在預算內",
-      "detail": "1 支（上限 3）"
+      "detail": "0 支（上限 3）"
     },
     {
       "ok": true,
@@ -254,7 +260,7 @@
     {
       "ok": true,
       "name": "phone-390x844: 首頁 API 支數在預算內",
-      "detail": "9 支（上限 12）"
+      "detail": "10 支（上限 12）"
     },
     {
       "ok": true,

@@ -42,7 +42,21 @@ export function MobileAssetSheet({ projectId, onClose }: { projectId: string; on
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const assets = trpc.projects.assets.useQuery({ projectId, limit }, { staleTime: 30_000 });
+  const assets = trpc.projects.assets.useQuery(
+    { projectId, limit },
+    {
+      staleTime: 30_000,
+      /**
+       * `limit` 在 query key 裡，所以按「載入更多」等於換一支全新的查詢，
+       * data 會瞬間變 undefined、isLoading 變 true。沒有這行的話，下面那個
+       * `isLoading && !data` 分支會把**已經載好的整面縮圖**換成六格骨架——
+       * 而 `.m-sheet` 自己就是捲動容器，內容從八列縮成兩列時捲動位置被夾回頂端。
+       * 使用者按「載入更多」的結果是畫面清空、捲回最上面，再重新捲過同樣那 24 張。
+       * 保留前一份，新的到了才接上去，才是分頁該有的樣子。
+       */
+      placeholderData: (previous) => previous,
+    },
+  );
   const rows = assets.data ?? [];
   // 拿滿一頁就代表「可能還有」；不滿就是到底了（不用另外打一支 count）
   const maybeMore = rows.length >= limit;
