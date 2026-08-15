@@ -23,6 +23,7 @@ import { detectTransitionType, parseScriptAuthorizedChanges } from "../../shared
 import { inheritContinuityState, type ShotContinuityState } from "../../shared/shotContextPacket";
 import { capabilityForModel } from "../../shared/providerCapabilities";
 import { getModel } from "../../shared/models";
+import { styleCanonStyles } from "../../shared/teamCanon";
 
 export function hashShotContextPacket(payload: ShotContextPacketPayload): string {
   return createHash("sha256").update(canonicalShotContextMaterial(payload)).digest("hex");
@@ -119,6 +120,34 @@ export async function buildShotContextPacketPayload(input: {
       eq(schema.projectCanonPins.projectId, project.id),
       inArray(schema.projectCanonPins.localEntityId, characterIds),
     ))
+    : [];
+
+  // closure §4–§6：project canon（style／voice／sound world）——pin 直讀，無本地卡。
+  // 唯一解析器 resolveProjectCanonDefaults（§12A single truth）；rights 在消費點也守。
+  const { resolveProjectCanonDefaults } = await import("./teamCanon");
+  const canonDefaults = await resolveProjectCanonDefaults(project.id);
+  const styleCanon = canonDefaults.styleCanon;
+  const narrationVoice = canonDefaults.narrationVoice
+    ? {
+      canonId: canonDefaults.narrationVoice.canonId,
+      versionId: canonDefaults.narrationVoice.versionId,
+      modelId: canonDefaults.narrationVoice.modelId,
+      voiceId: canonDefaults.narrationVoice.voiceId,
+      language: canonDefaults.narrationVoice.language,
+    }
+    : null;
+  const soundWorld = canonDefaults.soundWorld;
+  const voiceByCharacter = canonDefaults.characterVoices;
+  const styleWorldStyle = canonDefaults.styleStyles;
+  const styleNegative = canonDefaults.styleNegative;
+  const styleReferences = styleCanon
+    ? canonDefaults.styleReferences.map((ref) => ({
+      assetId: ref.assetId,
+      role: "style" as const,
+      priority: ref.priority,
+      ownerKind: "canon",
+      ownerId: styleCanon.canonId,
+    }))
     : [];
 
   // Provider 能力（§10）：不猜——由 model.input 實際輸出推導；
@@ -233,6 +262,8 @@ export async function buildShotContextPacketPayload(input: {
         ownerKind: "prop",
         ownerId: row.id,
       })),
+      // closure §4：pinned Style Canon 的 rights-ready 參考（mixer 的 style 職責槽）
+      ...styleReferences,
     ],
     continuity: {
       previousShotId,
@@ -269,15 +300,30 @@ export async function buildShotContextPacketPayload(input: {
       canonPins: slotPins
         .filter((pin) => pin.localEntityId)
         .map((pin) => ({ localEntityId: pin.localEntityId!, canonId: pin.canonId, pinnedVersionId: pin.pinnedVersionId })),
-    }).slots,
+    }).slots.map((slot) => {
+      // closure §5：角色聲線掛上 slot（durable voice identity；沒有聲線的 slot 形狀不變）
+      const voice = voiceByCharacter.get(slot.characterId);
+      return voice
+        ? { ...slot, voiceCanonId: voice.canonId, voiceVersionId: voice.versionId, voiceModelId: voice.modelId, voiceId: voice.voiceId }
+        : slot;
+    }),
     scriptAuthorizedChanges: authorizedChanges,
+    // closure §4–§6 條件欄位（null 時不進指紋素材，歷史指紋穩定）
+    ...(styleCanon ? { styleCanon } : {}),
+    ...(narrationVoice ? { narrationVoice } : {}),
+    ...(soundWorld ? { soundWorld } : {}),
     locks: locked.map((row) => ({
       mentionKey: row.mentionKey,
       entityKind: row.entityKind,
       entityId: row.entityId,
     })),
-    negativeConstraints: parseWorldviewSafe(project.worldview).taboos,
-    worldStyle: worldview.styles,
+    negativeConstraints: [
+      ...parseWorldviewSafe(project.worldview).taboos,
+      // Style Canon 的負向風格語彙（例：不要棚拍打光）——與 taboos 同一條負向通道
+      ...(styleNegative ? [styleNegative] : []),
+    ],
+    // Style Canon pinned＝專案風格真相；沒有 pin 才用 worldview 即時值（single truth，不並存）
+    worldStyle: styleWorldStyle ?? worldview.styles,
     provider: {
       modelId: input.modelId ?? null,
       policyVersion: "generation-command.v1",
@@ -289,6 +335,9 @@ export async function buildShotContextPacketPayload(input: {
       ...characters.map((row) => `角色 ${row.name} 來自專案角色卡`),
       ...looks.map((row) => `造型 ${row.name} 綁在這一鏡`),
       ...props.map((row) => `道具 ${row.name} 綁在這一鏡`),
+      ...(styleCanon ? ["視覺風格來自 pinned Style Canon"] : []),
+      ...(narrationVoice ? ["旁白聲線來自專案聲線設定"] : []),
+      ...(soundWorld ? ["聲音世界來自專案 Sound World 設定"] : []),
     ],
   };
 }

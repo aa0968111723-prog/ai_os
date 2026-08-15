@@ -232,6 +232,13 @@ export interface SubmitCoreInput {
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
    */
   sceneRole?: "visual" | "narration" | "ambience";
+  /**
+   * Voice identity（closure §5）：TTS 生成綁定的聲線 canon。
+   * 支援的模型把 voiceId 真正寫進 provider 參數；不支援＝structured warning，不假裝。
+   */
+  voiceIdentity?: import("../../shared/voiceRouting").VoiceIdentity;
+  /** Sound World（closure §6）：ambience／music 生成依賴的聲音世界 canon（lineage 用） */
+  soundWorldRef?: { canonId: string; versionId: string };
   /** 來源工作流執行 id：runner 帶入，生成列落庫後可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId?: string;
   /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
@@ -288,6 +295,8 @@ export interface PreparedGenerationRequest {
   continuityCoverage: ContinuityCoverage;
   /** §10：role-aware reference mixer 的計畫與降級（null＝本次沒有 packet） */
   referenceMix: import("../../shared/referenceMixer").ReferenceMixPlan | null;
+  /** closure §5：voice identity 是否真的寫進 provider 參數（false＝模型不支援，已記 warning） */
+  voiceApplied: boolean;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
   /** 提示詞 token 實測（見 services/promptTokens）；預覽與警告共用同一份量測 */
   promptBudget: PromptBudgetReport;
@@ -440,7 +449,17 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源是測試佔位素材，正式生成無法使用——請上傳真實檔案" });
   }
 
-  const worldview = worldviewSchema.parse(project.worldview ?? {});
+  let worldview = worldviewSchema.parse(project.worldview ?? {});
+  // closure §4：packet＝凍結意圖。有 packet 時，風格與負向約束以凍結值為準——
+  // pinned Style Canon 的 styles／negative 才會真的流進 provider prompt，
+  // 而不是「packet 記了一份、prompt 又臨時抓 live worldview」的兩套真相。
+  if (input.shotContextPacket) {
+    worldview = {
+      ...worldview,
+      styles: input.shotContextPacket.worldStyle,
+      taboos: input.shotContextPacket.negativeConstraints,
+    };
+  }
   const character = continuitySnapshot
     ? formatCharacterAnchor(continuitySnapshot.characters, continuitySnapshot.characters.map((row) => row.id))
     : "";
@@ -476,6 +495,30 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
+
+  // closure §5：voice identity → provider 參數。只有真的支援 voice 參數的模型會套用；
+  // 不支援＝structured warning（誠實降級），提示詞不假裝已鎖定聲線。
+  let voiceApplied = false;
+  if (input.voiceIdentity && model.kind === "audio") {
+    const { applyVoiceIdentity } = await import("../../shared/voiceRouting");
+    voiceApplied = applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
+    if (voiceApplied) {
+      warnings.push({
+        code: "voice_identity_applied",
+        severity: "info",
+        title: "已套用固定聲線",
+        detail: "這段音訊使用專案綁定的聲線 identity 生成，跨鏡不會換聲。",
+      });
+    } else {
+      warnings.push({
+        code: "voice_identity_unsupported",
+        severity: "warning",
+        title: "此模型不支援指定聲線",
+        detail: "已綁定聲線，但這個 TTS 模型沒有 voice/speaker 參數——本次使用模型預設聲音。",
+        suggestion: "換支援聲線的模型（Kokoro／Qwen-TTS／VibeVoice），或接受預設聲音。",
+      });
+    }
+  }
 
   // §10：packet 存在時啟用 role-aware reference mixer——依 身份→造型→場景→道具→風格
   // 重排參考順序、依模型真實能力截斷，降級全部明講（不得假稱一致性已鎖定）。
@@ -701,6 +744,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     continuityReferences,
     continuityCoverage,
     referenceMix,
+    voiceApplied,
     warnings,
   };
 }
@@ -880,6 +924,16 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     preserveScenePointer: input.preserveScenePointer,
     creative: input.creative,
     shotContextPacketId: input.shotContextPacketId,
+    // closure §5／§6：聲線與聲音世界的 canon 依賴落進 meta——lineage 與 targeted stale 的根據
+    voice: input.voiceIdentity
+      ? {
+        canonId: input.voiceIdentity.canonId,
+        versionId: input.voiceIdentity.versionId,
+        voiceId: input.voiceIdentity.voiceId,
+        applied: prepared.voiceApplied,
+      }
+      : undefined,
+    soundWorld: input.soundWorldRef,
     // 只有「完成後真的會動指標」的生成才需要記基準；候選變體不動指標，記了也用不到。
     scenePointerAtSubmit: input.sceneId && !input.preserveScenePointer
       ? prepared.scenePointerAtSubmit ?? "" // 空字串＝送出時這一鏡沒有畫面（與「沒記錄」區分開）

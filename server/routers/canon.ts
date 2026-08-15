@@ -6,14 +6,16 @@
  */
 import { z } from "zod";
 import { authedProcedure, router } from "../trpc";
-import { CANON_KINDS, CANON_LOCAL_ENTITY_KINDS, CANON_REUSE_SCOPES } from "../../shared/teamCanon";
+import { CANON_KINDS, CANON_LOCAL_ENTITY_KINDS, CANON_REUSE_SCOPES, PROJECT_CANON_KINDS } from "../../shared/teamCanon";
 import {
   addCanonVersionFromPin,
+  addProjectCanonVersion,
   applyCanonUpgrade,
   archiveCanonVersion,
   canonUpgradeImpact,
   createCanonFromEntity,
   createCanonVersionFromTraining,
+  createProjectCanon,
   getCanonEntry,
   listCanonEntries,
   listProjectPins,
@@ -74,6 +76,44 @@ export const canonRouter = router({
     .input(z.object({ pinId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return addCanonVersionFromPin({ auth: ctx.auth, pinId: input.pinId });
+    }),
+
+  /** closure §4–§6：建立 Style／Voice／Sound World project canon（無本地卡，pin 直讀） */
+  createProjectCanon: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      kind: z.enum(PROJECT_CANON_KINDS),
+      name: z.string().trim().min(1).max(80),
+      /** 結構化 descriptor 輸入：styles[]／modelId+voiceId+characterId／ambience+music */
+      descriptor: z.record(z.string(), z.unknown()),
+      referenceAssetId: z.string().uuid().optional(),
+      confirmRights: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return createProjectCanon({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        kind: input.kind,
+        name: input.name,
+        descriptorInput: input.descriptor,
+        referenceAssetId: input.referenceAssetId,
+        confirmRights: input.confirmRights,
+      });
+    }),
+
+  addProjectCanonVersion: authedProcedure
+    .input(z.object({
+      pinId: z.string().uuid(),
+      descriptor: z.record(z.string(), z.unknown()),
+      referenceAssetId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return addProjectCanonVersion({
+        auth: ctx.auth,
+        pinId: input.pinId,
+        descriptorInput: input.descriptor,
+        referenceAssetId: input.referenceAssetId,
+      });
     }),
 
   addVersionFromTraining: authedProcedure
