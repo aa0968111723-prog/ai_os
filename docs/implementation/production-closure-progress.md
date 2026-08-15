@@ -98,7 +98,10 @@ Branch: `agent/closure-pr-a`（base＝最新 default，含 #761–#766）
       390/430＝#766 手機 AI-first 殼層（無設定入口，誠實記錄＋殼層截圖）
 - [x] Settings↔workspace 單一真相 E2E：建立 Style Canon 前 scorecard 有「風格」列→
       建立後同一查詢消失（results.json singleTruth.pass=true）
-- [ ] 對抗稽核（進行中，確認缺陷將以 follow-up commit 修復）
+- [x] 對抗稽核：3 維度自證式稽核→14 項確認缺陷全修（重點：audio 生成的 rights 重驗
+      涵蓋 meta.voice/soundWorld；聲線/聲音世界只掛有聲鏡＝聲線升級不再全專案 stale；
+      migration 0078 partial unique index 讓 project canon 名稱冪等成為 DB 保證；
+      接過/搶走動詞方向反轉；代理旁白接聲線路由；修復 CTA 分軌；t2v 不誤報 lineage gap）
 
 ## Paid provider
 

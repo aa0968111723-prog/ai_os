@@ -5,6 +5,7 @@
  * 專案透過 project_canon_pins 引用（pin），不 copy——本地卡片只是 runtime handle，
  * 升級（applyCanonUpgrade）是明確動作，不 silent-update。
  */
+import { sql } from "drizzle-orm";
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import type {
   CanonKind,
@@ -48,6 +49,11 @@ export const canonEntries = pgTable("canon_entries", {
   groupStatusIdx: index("canon_entries_group_status_idx").on(t.groupId, t.status),
   // 同一張專案卡只會升成一個 Canon（createCanonFromEntity 冪等的依據）
   sourceUq: uniqueIndex("canon_entries_source_uq").on(t.groupId, t.sourceEntityKind, t.sourceEntityId),
+  // 0078：project canon（無來源卡）以 group+kind+name 唯一——createProjectCanon 的
+  // 名稱冪等靠它成為資料庫保證（select-then-insert race 的第二筆會撞這裡）
+  projectKindNameUq: uniqueIndex("canon_entries_project_kind_name_uq")
+    .on(t.groupId, t.kind, t.name)
+    .where(sql`${t.sourceEntityId} IS NULL`),
 }));
 
 export const canonVersions = pgTable("canon_versions", {

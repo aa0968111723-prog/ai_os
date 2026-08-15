@@ -146,7 +146,10 @@ export async function projectMediaLineage(input: {
     const narrationFinding = deriveNarrationFinding({
       shotId: shot.id,
       narrationAssetId: shot.narrationAssetId,
-      usedVoice: narration.meta?.voice ? { canonId: narration.meta.voice.canonId, versionId: narration.meta.voice.versionId } : null,
+      // applied=false＝當時模型不支援指定聲線（實際是預設聲音）——視同未綁聲線（誠實）
+      usedVoice: narration.meta?.voice?.applied
+        ? { canonId: narration.meta.voice.canonId, versionId: narration.meta.voice.versionId }
+        : null,
       expectedVoice: expectedVoice ? { canonId: expectedVoice.canonId, versionId: expectedVoice.versionId } : null,
     });
     const ambienceFinding = deriveAmbienceFinding({
@@ -160,9 +163,11 @@ export async function projectMediaLineage(input: {
     for (const finding of [visualFinding, narrationFinding, ambienceFinding]) {
       if (finding) findings.push(finding);
     }
-    // §7 lineage gap：現用影片查不到 parent 血緣列（meta.sourceAssetId 之前的舊生成）
+    // §7 lineage gap：現用影片「本來該有」parent 卻查不到血緣列——
+    // 只有生成時真的帶了來源（i2v）才算 gap；t2v 本來就沒有 parent，不是缺陷（稽核修正）
     if (visualAsset?.kind === "video" && !parentByAsset.has(visualAsset.id)) {
-      lineageGapShotIds.push(shot.id);
+      const visualMeta = metaOf(shot.assetId).meta;
+      if (visualMeta?.sourceAssetId) lineageGapShotIds.push(shot.id);
     }
 
     if (wantLineage.has(shot.id)) {
