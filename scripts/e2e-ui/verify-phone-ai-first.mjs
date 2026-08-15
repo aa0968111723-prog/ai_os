@@ -244,6 +244,13 @@ const main = async () => {
   }
 
   // ── Tablets + desktops: existing desktop UI, no phone shell ───────────────
+  //
+  // 平板要拿到的是「和桌機一樣的桌面版」，不是「一個被壓窄的桌面版」。覆審曾指出
+  // 768–820px 的頂欄會因為某條 nowrap 規則被蓋掉而變成雙高；實測七個寬度後發現
+  // 那條規則在**所有**寬度都是死的，頂欄一律同高——也就是平板拿到的與 1440 相同，
+  // 是預期結果而不是回歸。把那次一次性的量測變成常駐守衛：平板的頂欄高度必須與
+  // 桌機基準一致，真的哪天只有平板變高了才會紅。
+  const topbarHeights = {};
   for (const vp of [...TABLETS, ...DESKTOPS]) {
     console.log(`\n[${vp.name}]`);
     const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
@@ -266,8 +273,24 @@ const main = async () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(overflow <= 1, `${vp.name}: 無嚴重水平溢出`, `${overflow}px`);
 
+    topbarHeights[vp.name] = await page
+      .locator(".topbar").first()
+      .evaluate((el) => Math.round(el.getBoundingClientRect().height))
+      .catch(() => -1);
+
     await page.screenshot({ path: path.join(OUT, `${vp.name}-home.png`) });
     await ctx.close();
+  }
+
+  // 桌機基準（1280）與每一台平板比對：平板不得比桌機高
+  const desktopRef = topbarHeights["desktop-1280x800"];
+  check(desktopRef > 0, "桌機頂欄量得到高度", `${desktopRef}px`);
+  for (const vp of TABLETS) {
+    check(
+      topbarHeights[vp.name] === desktopRef,
+      `${vp.name}: 頂欄高度與桌機一致（平板沒有被壓成雙高）`,
+      `平板 ${topbarHeights[vp.name]}px vs 桌機 ${desktopRef}px`,
+    );
   }
 
   await browser.close();
