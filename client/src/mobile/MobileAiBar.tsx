@@ -68,7 +68,7 @@ export function MobileAiBar({
   projectTitle?: string;
 }) {
   const ctx = useAssistantContext();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const [text, setText] = useState("");
   /** 攔下來的模糊刪除：有值＝正在問使用者要刪哪一個，且**尚未送出任何請求** */
   const [ambiguous, setAmbiguous] = useState<{ text: string; candidates: PhoneTargetCandidate[] } | null>(null);
@@ -151,7 +151,19 @@ export function MobileAiBar({
       return;
     }
     if (action.kind === "navigate" && action.href) {
-      navigate(action.href);
+      const [path, hash] = action.href.split("#");
+      /*
+       * 已經在同一頁時要走 `location.hash`，不能走 wouter 的 navigate：
+       * navigate 底層是 history.pushState，而 pushState **不會**觸發 hashchange，
+       * 於是專案頁那支等錨點的監聽器收不到訊號——按鈕看起來壞掉。
+       * 指派 location.hash 才會發事件（同一個 hash 再指派一次不發，所以先清掉）。
+       */
+      if (hash && path === location) {
+        if (window.location.hash === `#${hash}`) window.location.hash = "";
+        window.location.hash = hash;
+      } else {
+        navigate(action.href);
+      }
       return;
     }
     openAssistantSurface();

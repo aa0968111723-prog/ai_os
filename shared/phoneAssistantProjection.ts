@@ -383,7 +383,10 @@ export function derivePhoneCard(input: PhoneProjectionInput): PhoneCard | null {
 
   // 3) 有待確認的提議：提議 ≠ 已寫入
   const proposals = input.pendingProposals ?? [];
-  if (proposals.length > 0 || goal?.status === "waiting_confirmation" || goal?.status === "waiting_user_input") {
+  // waiting_user_input **without** a typed handoff or a listed proposal has nothing
+  // to show on a proposal card — an empty "準備執行" card is worse than the answer
+  // text that explains what is missing. The typed handoff case already returned above.
+  if (proposals.length > 0 || goal?.status === "waiting_confirmation") {
     const affordances = proposals
       .map((proposal) => phoneCapabilityAffordance(proposal.capabilityId))
       .filter((a): a is PhoneCapabilityAffordance => !!a);

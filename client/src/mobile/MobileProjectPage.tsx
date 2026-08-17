@@ -117,6 +117,26 @@ export function MobileProjectPage({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHash]);
 
+  /**
+   * 已經在這一頁時的錨點交接。
+   *
+   * 助手結果卡的「去裁決候選」導到 `/p/:id#stage-create`。使用者若本來就在這個
+   * 專案的摘要頁，路由沒有換頁、元件沒有重掛，上面那支只跑一次的 effect 不會再跑——
+   * 症狀是按了按鈕但畫面完全沒動，看起來像壞掉的按鈕而不是漏掉的監聽器。
+   *
+   * 這是**唯一**會自動打開完整工作台的第二條路徑，而且仍然由使用者的一次點擊
+   * 觸發：卡片不會自己導航，工作台也不會因為卡片渲染就被載進來（計畫 §10／§11）。
+   */
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      if (hash && isProjectAnchor(hash)) openFull(hash);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (fullOpen) {
     return (
       <div className="m-project-full">

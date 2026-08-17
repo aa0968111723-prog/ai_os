@@ -966,17 +966,27 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           : hasVerifiedCompletion || hasVerifiedWrites || !hasWaiting
             ? "completed"
             : "waiting";
-      if (data.activeGoal) {
-        const status: AssistantActiveGoal["status"] = resolvedRunStatus === "completed"
-          ? "completed"
-          : resolvedRunStatus === "failed"
-            ? "failed"
-            : data.activeGoal.status === "waiting_confirmation"
-              ? "waiting_confirmation"
-              : "waiting_user_input";
+      /* The resolved status — not the raw server-issued one — is what the user is
+         shown. Publishing the raw goal to the phone projection made a finished
+         turn render as "進行中" forever, because the server may still say
+         "ready"/"executing" on the frame it hands back. One resolution, two
+         consumers. */
+      const resolvedGoal: AssistantActiveGoal | undefined = data.activeGoal
+        ? {
+          ...data.activeGoal,
+          status: resolvedRunStatus === "completed"
+            ? "completed"
+            : resolvedRunStatus === "failed"
+              ? "failed"
+              : data.activeGoal.status === "waiting_confirmation"
+                ? "waiting_confirmation"
+                : "waiting_user_input",
+        }
+        : undefined;
+      if (resolvedGoal) {
         setAssistantConversation<ChatMessage>(groupId, (previous) => ({
           ...previous,
-          activeGoal: { ...data.activeGoal!, status },
+          activeGoal: resolvedGoal,
           pendingInteraction: data.interactionRequest ?? data.activeGoal!.pendingInteraction,
         }));
       } else if (data.interactionRequest) {
@@ -1041,7 +1051,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
           ...data.dispatches.map((a, i) => ({ id: `dispatch-${i}`, label: a.label })),
           ...data.actions.map((a, i) => ({ id: `command-${i}`, label: a.label })),
         ],
-        activeGoal: data.activeGoal,
+        activeGoal: resolvedGoal,
         pendingInteraction: data.interactionRequest,
         // 已驗證的收據；bridge 會再濾一次 verification（雙保險，見其檔頭不變式 3）
         results: actionResults,
