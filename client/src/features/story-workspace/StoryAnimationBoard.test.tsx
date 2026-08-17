@@ -84,7 +84,7 @@ describe("StoryAnimationBoard", () => {
     expect(screen.getByAltText("目前採用")).toHaveAttribute("src", "/current.png");
     expect(screen.getByAltText("候選結果")).toHaveAttribute("src", "/candidate.png");
     expect(screen.getByAltText("下一鏡已採用畫面")).toHaveAttribute("src", "/next.png");
-    expect(screen.getByText("藏寶圖換手但沒有交接")).toBeVisible();
+    expect(screen.getAllByText("藏寶圖換手但沒有交接")).toHaveLength(2);
   });
 
   it("reveals a targeted repair plan without executing paid work", async () => {

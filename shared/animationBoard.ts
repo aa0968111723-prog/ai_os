@@ -88,7 +88,7 @@ export function deriveAnimationShotLifecycle(input: AnimationBoardShotInput): An
 }
 
 export function boardPrimaryAction(
-  rows: readonly Array<{ shotId: string; lifecycle: AnimationShotLifecycle; nextAction: AnimationBoardLifecycleResult["nextAction"] }>,
+  rows: ReadonlyArray<{ shotId: string; lifecycle: AnimationShotLifecycle; nextAction: AnimationBoardLifecycleResult["nextAction"] }>,
 ) {
   const priority: AnimationShotLifecycle[] = [
     "continuity_review",

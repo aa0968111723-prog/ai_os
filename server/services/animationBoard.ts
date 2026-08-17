@@ -5,6 +5,7 @@ import { loadCreativeContextProject } from "./storyEntityBinding";
 import {
   boardPrimaryAction,
   deriveAnimationShotLifecycle,
+  type AnimationBoardLifecycleResult,
   type AnimationShotLifecycle,
 } from "../../shared/animationBoard";
 
@@ -14,7 +15,7 @@ export interface AnimationBoardRow {
   title: string;
   lifecycle: AnimationShotLifecycle;
   needsReview: boolean;
-  nextAction: { kind: string; label: string };
+  nextAction: AnimationBoardLifecycleResult["nextAction"];
   stale: boolean;
   reviewStatus: string | null;
   previous: { shotId: string; title: string; assetId: string; url: string } | null;

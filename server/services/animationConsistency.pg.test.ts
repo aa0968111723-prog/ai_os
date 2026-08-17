@@ -67,7 +67,7 @@ describe.skipIf(!RUN_PG).sequential("Animation temporal/visual consistency (real
       isAiGenerated: true,
     }).returning({ id: schema.assets.id });
     currentImageId = image.id;
-    const rows = Array.from({ length: 300 }, (_, index) => ({
+    const rows: Array<typeof schema.scenes.$inferInsert> = Array.from({ length: 300 }, (_, index) => ({
       projectId,
       title: `鏡 ${index + 1}`,
       orderIndex: index,
