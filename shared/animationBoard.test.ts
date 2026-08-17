@@ -49,7 +49,7 @@ describe("derived animation production lifecycle", () => {
     })).toMatchObject({ lifecycle: "continuity_review", needsReview: true });
     expect(deriveAnimationShotLifecycle({
       ...base,
-      currentKind: "video",
+      currentKind: "image",
       stale: true,
     }).lifecycle).toBe("continuity_review");
   });

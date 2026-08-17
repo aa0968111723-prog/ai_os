@@ -50,6 +50,14 @@ export function deriveAnimationShotLifecycle(input: AnimationBoardShotInput): An
       nextAction: { kind: "generate_keyframe", label: "產生關鍵影格" },
     };
   }
+  const unresolvedFindings = input.reviewStatus === "approved"
+    ? input.findings.filter((row) => row.severity === "blocker")
+    : input.findings;
+  if (input.stale || unresolvedFindings.length) return {
+    lifecycle: "continuity_review",
+    needsReview: true,
+    nextAction: { kind: "review_continuity", label: "檢查前後連貫" },
+  };
   if (input.currentKind === "image") {
     if (input.candidateKind === "video") return {
       lifecycle: "animation_review",
@@ -62,14 +70,6 @@ export function deriveAnimationShotLifecycle(input: AnimationBoardShotInput): An
       nextAction: { kind: "generate_video", label: "讓畫面動起來" },
     };
   }
-  const unresolvedFindings = input.reviewStatus === "approved"
-    ? input.findings.filter((row) => row.severity === "blocker")
-    : input.findings;
-  if (input.stale || unresolvedFindings.length) return {
-    lifecycle: "continuity_review",
-    needsReview: true,
-    nextAction: { kind: "review_continuity", label: "檢查前後連貫" },
-  };
   if (input.reviewStatus && input.reviewStatus !== "approved" && input.reviewStatus !== "ready") return {
     lifecycle: "animation_review",
     needsReview: true,
