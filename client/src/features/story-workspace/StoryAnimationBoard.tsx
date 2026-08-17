@@ -135,7 +135,12 @@ export function StoryAnimationBoard({
                   <Meta as="p">Evidence: {finding.evidenceSourceIds.join("、") || "不足"}</Meta>
                 </details>
               </div>
-            )) : <Hint as="p">這一鏡沒有已記錄的 output finding。</Hint>}
+            )) : openRow.stale ? (
+              <div>
+                <Chip data-status="warning">連戲・需確認</Chip>
+                <Meta as="p">上游角色、造型、場景或道具設定已變更；目前畫面保留，修復只會產生候選。</Meta>
+              </div>
+            ) : <Hint as="p">這一鏡沒有已記錄的 output finding。</Hint>}
           </div>
           {canEdit ? (
             <div className="animation-board__actions">
