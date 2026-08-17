@@ -30,12 +30,32 @@ before adding temporal functionality. Existing records remain authoritative:
 
 ## Stack
 
-- PR-A — Temporal State + Sequence Lock foundation
-- PR-B — Motion/Physics + cross-shot frame propagation
-- PR-C — Style DNA + real Multimodal Visual Judge
-- PR-D — Keyframe-first pipeline + targeted repair
-- PR-E — Animation Production Board + full-sequence acceptance
+- PR-A #777 — Temporal State + Sequence Lock foundation
+- PR-B #778 — Motion/Physics + cross-shot frame propagation
+- PR-C #779 — Style DNA + real Multimodal Visual Judge
+- PR-D #780 — Keyframe-first pipeline + targeted repair
+- PR-E #781 — Animation Production Board + full-sequence acceptance
 
 All branches are stacked Draft PRs. No auto-merge, no force-push, no paid provider
 call in tests, no fake live evaluator success, and no silent Adopt.
+
+## Definition of Done evidence
+
+- Unit/domain: temporal, motion, evaluator, pipeline, board fixtures all pass.
+- Server Vitest: 305 files / 3153 tests passed (31 files / 152 tests explicitly skipped by suite gates).
+- Client Vitest: 231 files / 1944 tests passed.
+- Typecheck, import boundaries, hook order and UI primitive gates passed.
+- Production build passed.
+- Migration 0000→0079 applied to PostgreSQL with `schema drift: none`.
+- Real PostgreSQL suites: 25/25 across Team Canon, Canon pipeline, closure runtime and animation acceptance.
+- Animation PG board query count: 5 at 20, 100 and 300 shots; measured 28–31 ms in the acceptance run.
+- Real ffmpeg end-frame extraction produced one idempotent child asset with `asset_revisions` parent lineage.
+- Expanded animation E2E: 85/85 passed; no visual provider call.
+- Browser/Axe: 390, 430, 768, 1280 and 1440 all show four comparison slots, one primary CTA,
+  no horizontal overflow, and zero serious/critical violations in the board.
+- Manual browser walkthrough video demonstrates opening the continuity-review queue and comparison.
+
+No paid generation/evaluator call was made. Production visual evaluation remains `not_checked`
+without an explicitly configured/confirmed real Gemini call; no fixture is reachable from the
+production adapter selector.
 
