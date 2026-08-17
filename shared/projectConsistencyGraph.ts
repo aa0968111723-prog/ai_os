@@ -99,7 +99,8 @@ export interface WorkspaceProjection {
 /** closure §11：scorecard 維度與狀態 */
 export const SCORECARD_DIMENSIONS = [
   "identity", "look", "scene", "prop", "style",
-  "continuity", "voice", "sound_world", "lineage", "delivery",
+  "continuity", "temporal", "physics", "output_identity", "output_style", "asset_state",
+  "voice", "sound_world", "lineage", "delivery",
 ] as const;
 export type ScorecardDimension = (typeof SCORECARD_DIMENSIONS)[number];
 
@@ -137,6 +138,12 @@ export function buildConsistencyScorecard(input: {
   soundWorldPinned: boolean;
   lineageGapShotIds: string[];                // 現用影片無 parent 紀錄的鏡
   deliveryBlockers: string[];
+  outputEvaluationFindings?: Array<{
+    shotId: string;
+    dimension: "semantic" | "identity" | "look" | "scene" | "prop" | "style" | "temporal" | "physics";
+    severity: "warning" | "blocker" | "unresolved";
+    reason: string;
+  }>;
 }): ScorecardRow[] {
   const rows: ScorecardRow[] = [];
   if (input.charactersMissingReference.length) {
@@ -221,6 +228,31 @@ export function buildConsistencyScorecard(input: {
       status: "warning",
       affectedShotIds: input.lineageGapShotIds,
       reason: "有影片查不到來源畫面的血緣紀錄——建議重新生成以建立可追溯血緣",
+    });
+  }
+  const evaluationRows: Array<{
+    dimension: ScorecardDimension;
+    matches: typeof input.outputEvaluationFindings;
+  }> = [
+    { dimension: "output_identity", matches: input.outputEvaluationFindings?.filter((row) => row.dimension === "identity" || row.dimension === "look") },
+    { dimension: "output_style", matches: input.outputEvaluationFindings?.filter((row) => row.dimension === "style") },
+    { dimension: "asset_state", matches: input.outputEvaluationFindings?.filter((row) => row.dimension === "prop") },
+    { dimension: "temporal", matches: input.outputEvaluationFindings?.filter((row) => row.dimension === "temporal") },
+    { dimension: "physics", matches: input.outputEvaluationFindings?.filter((row) => row.dimension === "physics") },
+  ];
+  for (const group of evaluationRows) {
+    const findings = group.matches ?? [];
+    if (!findings.length) continue;
+    const status: ScorecardStatus = findings.some((row) => row.severity === "blocker")
+      ? "blocker"
+      : findings.some((row) => row.severity === "unresolved")
+        ? "unresolved"
+        : "warning";
+    rows.push({
+      dimension: group.dimension,
+      status,
+      affectedShotIds: [...new Set(findings.map((row) => row.shotId))],
+      reason: findings.map((row) => row.reason).join("；"),
     });
   }
   if (input.deliveryBlockers.length) {

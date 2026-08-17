@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pool } from "../db";
+import { loadMigrationManifest } from "../db/migrationState";
 import { probeDatabaseRuntime } from "./databaseRuntime";
 
 const RUN_PG = Boolean(process.env.DATABASE_URL);
@@ -14,7 +15,7 @@ describe.skipIf(!RUN_PG)("database runtime probe (real PostgreSQL)", () => {
     expect(probe.latencyMs).toBeTypeOf("number");
     expect(probe.schemaCompatible).toBe(true);
     expect(probe.identity.databaseIdentityHash).toMatch(/^[a-f0-9]{16}$/);
-    expect(probe.identity.migrationHead).toBe("0070_agent_live_certification");
+    expect(probe.identity.migrationHead).toBe(loadMigrationManifest().entries.at(-1)?.tag);
     expect(JSON.stringify(probe)).not.toMatch(/password|postgres:\/\//i);
   });
 

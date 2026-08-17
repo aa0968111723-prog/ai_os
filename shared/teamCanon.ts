@@ -155,6 +155,64 @@ export type ProjectCanonKind = (typeof PROJECT_CANON_KINDS)[number];
 export const VOICE_CANON_ROLES = ["character", "narration"] as const;
 export type VoiceCanonRole = (typeof VOICE_CANON_ROLES)[number];
 
+export interface StyleDna {
+  lineTreatment?: string;
+  shadingMode?: string;
+  texture?: string;
+  edgeSoftness?: string;
+  saturationRange?: string;
+  contrastIntent?: string;
+  skinToneTreatment?: string;
+  shadowHue?: string;
+  keyLightPolicy?: string;
+  bloomRimLight?: string;
+  facialProportions?: string;
+  eyeRendering?: string;
+  hairDetail?: string;
+  backgroundDetail?: string;
+  atmosphericPerspective?: string;
+  materialDetail?: string;
+  depthOfField?: string;
+  focalLengthBands?: string;
+  compositionHabits?: string;
+  shotTreatment?: string;
+  cameraMovementVocabulary?: string;
+}
+
+const STYLE_DNA_DESCRIPTOR_KEYS: Record<keyof StyleDna, string> = {
+  lineTreatment: "dna.lineTreatment",
+  shadingMode: "dna.shadingMode",
+  texture: "dna.texture",
+  edgeSoftness: "dna.edgeSoftness",
+  saturationRange: "dna.saturationRange",
+  contrastIntent: "dna.contrastIntent",
+  skinToneTreatment: "dna.skinToneTreatment",
+  shadowHue: "dna.shadowHue",
+  keyLightPolicy: "dna.keyLightPolicy",
+  bloomRimLight: "dna.bloomRimLight",
+  facialProportions: "dna.facialProportions",
+  eyeRendering: "dna.eyeRendering",
+  hairDetail: "dna.hairDetail",
+  backgroundDetail: "dna.backgroundDetail",
+  atmosphericPerspective: "dna.atmosphericPerspective",
+  materialDetail: "dna.materialDetail",
+  depthOfField: "dna.depthOfField",
+  focalLengthBands: "dna.focalLengthBands",
+  compositionHabits: "dna.compositionHabits",
+  shotTreatment: "dna.shotTreatment",
+  cameraMovementVocabulary: "dna.cameraMovementVocabulary",
+};
+
+/** Optional Style DNA fields only exist when supplied; legacy descriptor fingerprints stay unchanged. */
+export function styleDnaFromDescriptor(descriptor: Record<string, string | null>): StyleDna {
+  const out: StyleDna = {};
+  for (const [field, key] of Object.entries(STYLE_DNA_DESCRIPTOR_KEYS) as Array<[keyof StyleDna, string]>) {
+    const value = descriptor[key];
+    if (value) out[field] = value;
+  }
+  return out;
+}
+
 /**
  * 由結構化輸入組 project canon descriptor（pure，service 與測試共用）。
  * descriptor 維持 Record<string,string|null>（與 fingerprint 排序相容）；
@@ -173,8 +231,7 @@ export function buildProjectCanonDescriptor(
     if (!styles.length && !str(input.palette) && !str(input.lighting)) {
       return { descriptor: {}, error: "風格 Canon 至少需要一個風格詞、色盤或光線語彙" };
     }
-    return {
-      descriptor: {
+    const descriptor: Record<string, string | null> = {
         style: styles.length ? styles.join("、") : null,
         palette: str(input.palette),
         lighting: str(input.lighting),
@@ -182,9 +239,15 @@ export function buildProjectCanonDescriptor(
         rendering: str(input.rendering),
         negative: str(input.negative),
         notes: str(input.notes),
-      },
-      error: null,
     };
+    const dna = input.styleDna && typeof input.styleDna === "object"
+      ? input.styleDna as Record<string, unknown>
+      : {};
+    for (const [field, key] of Object.entries(STYLE_DNA_DESCRIPTOR_KEYS)) {
+      const value = str(dna[field]);
+      if (value) descriptor[key] = value;
+    }
+    return { descriptor, error: null };
   }
   if (kind === "voice") {
     const role: VoiceCanonRole = input.role === "narration" ? "narration" : "character";

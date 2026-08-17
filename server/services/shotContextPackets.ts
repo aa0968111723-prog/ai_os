@@ -82,6 +82,7 @@ export async function buildShotContextPacketPayload(input: {
     db.select({
       id: schema.scenes.id,
       orderIndex: schema.scenes.orderIndex,
+      assetId: schema.scenes.assetId,
     }).from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))).orderBy(asc(schema.scenes.orderIndex)),
   ]);
 
@@ -124,6 +125,27 @@ export async function buildShotContextPacketPayload(input: {
     currentStorySceneId: storyScene?.id ?? null,
   });
   const previousEnd = (previousState?.endState as ShotContinuityState | undefined) ?? null;
+  const previousCurrentAssetId = idx > 0 ? shots[idx - 1]?.assetId ?? null : null;
+  const [previousPacketHead] = previousShotId
+    ? await db.select({ stale: schema.shotContextPacketHeads.stale })
+      .from(schema.shotContextPacketHeads)
+      .where(eq(schema.shotContextPacketHeads.shotId, previousShotId))
+    : [];
+  let previousFrameAssetId: string | null = null;
+  if (previousCurrentAssetId && previousPacketHead?.stale !== true) {
+    const [previousAsset] = await db.select({ kind: schema.assets.kind })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, previousCurrentAssetId), isNull(schema.assets.deletedAt)));
+    if (previousAsset?.kind === "image") {
+      previousFrameAssetId = previousCurrentAssetId;
+    } else if (previousAsset?.kind === "video") {
+      const { findDerivedEndFrameAssetId } = await import("./derivedFrames");
+      previousFrameAssetId = await findDerivedEndFrameAssetId({
+        projectId: project.id,
+        parentAssetId: previousCurrentAssetId,
+      });
+    }
+  }
   const currentStart = inheritContinuityState(
     previousEnd,
     {
@@ -297,6 +319,13 @@ export async function buildShotContextPacketPayload(input: {
       })),
       // closure §4：pinned Style Canon 的 rights-ready 參考（mixer 的 style 職責槽）
       ...styleReferences,
+      ...(previousFrameAssetId ? [{
+        assetId: previousFrameAssetId,
+        role: "continuity_previous_end_frame" as const,
+        priority: "SECONDARY" as const,
+        ownerKind: "shot",
+        ownerId: previousShotId,
+      }] : []),
     ],
     continuity: {
       previousShotId,
