@@ -14,6 +14,7 @@
 #   6. 換一套造型 = 系統知道那是「另一個一致性狀態」（指紋改變，身份不變）。
 #   7. 連戲檢查（continuity checker）會抓到：改了角色外觀 → 舊鏡頭全部過時；
 #      改了某一鏡的動作 → 只有那一鏡過時。這正是動畫組要的「不一致會被通知」。
+#      （#753：generateInto 只產 Candidate，必須 Adopt 後畫面才回填，連戲檢查才看得到。）
 #   8. 三視圖模型選擇：純 text-to-video 參考圖 0/N 且發出 multi_reference_unsupported；
 #      多圖 edit 模型才會 attached≥1。這鎖住 SOP 的兩段式建議。
 #
@@ -327,6 +328,10 @@ for sid, gen_id in gen_by_shot.items():
     st = wait_gen_done(admin, gen_id)
     ok(f"生成完成（假模式）：{gen_id[:8]}", isinstance(st, dict) and st.get("status") == "done")
     done_gens[sid] = st
+    # #753：就地生成是 Candidate，不 silent 改 current。連戲檢查比的是「現用畫面」，
+    # 必須明確採用之後分鏡才有 assetId。
+    adopted = call("POST", admin, "creativeContext.adoptGeneration", {"generationId": gen_id})
+    ok(f"明確採用回填分鏡：{sid[:8]}", isinstance(adopted, dict) and "__error__" not in adopted)
 
 # ── 6. 生成後：continuity 指紋跨鏡一致 + 逐鏡動作物理各自不同 ───────────
 fingerprints = []
@@ -377,6 +382,8 @@ call("POST", admin, "scenes.update", {
 gn = call("POST", admin, "scenes.generateInto", {"sceneId": night_shot["id"], "modelId": MODEL})
 night_done = wait_gen_done(admin, gn["generationId"])
 ok("換造型鏡生成完成", night_done.get("status") == "done")
+night_adopted = call("POST", admin, "creativeContext.adoptGeneration", {"generationId": gn["generationId"]})
+ok("換造型鏡明確採用", isinstance(night_adopted, dict) and "__error__" not in night_adopted)
 night_snap = night_done.get("continuitySnapshot") or {}
 night_lian = next((c for c in night_snap.get("characters", []) if c["id"] == lian["id"]), {})
 ok("換造型：造型鎖定變成除夕夜（大紅棉襖）", "大紅棉襖" in (night_lian.get("lookCostume") or ""))
