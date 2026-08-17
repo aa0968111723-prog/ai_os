@@ -14,11 +14,14 @@ import type { ShotReferenceBinding, ShotReferenceRole } from "./shotContextPacke
 const ROLE_ORDER: Record<ShotReferenceRole, number> = {
   identity: 0,
   look: 1,
-  scene: 2,
-  prop: 3,
-  style: 4,
-  composition: 5,
-  continuity: 6,
+  continuity_previous_end_frame: 2,
+  continuity_previous_frame: 3,
+  scene: 4,
+  prop: 5,
+  style: 6,
+  sequence_style_frame: 7,
+  composition: 8,
+  continuity: 9,
 };
 
 const PRIORITY_ORDER: Record<ShotReferenceBinding["priority"], number> = {
@@ -33,7 +36,9 @@ export interface ReferenceMixDowngrade {
     | "identity_adapter_unavailable"
     | "references_truncated"
     | "no_reference_slot"
-    | "scene_reference_unsupported";
+    | "scene_reference_unsupported"
+    | "previous_frame_unsupported"
+    | "previous_frame_untrusted";
   message: string;
 }
 

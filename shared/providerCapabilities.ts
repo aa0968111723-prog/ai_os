@@ -32,6 +32,8 @@ export interface ProviderCapabilities {
   sceneReferenceSupport: boolean;
   styleAdapterSupport: boolean;
   imageToVideo: boolean;
+  /** Previous adopted frame can be consumed as i2v primary source or a real multi-image reference slot. */
+  previousFrameSupport: boolean;
   seedSupport: boolean;
   negativePromptSupport: boolean;
   /** 卡片文字錨點（CARD_ANCHOR_CATEGORIES） */
@@ -71,6 +73,7 @@ export function capabilityForModel(model: ModelEntry): ProviderCapabilities {
     sceneReferenceSupport: maxReferenceImages > 1,
     styleAdapterSupport: identityAdapterSupport,
     imageToVideo: model.kind === "video" && needsImage,
+    previousFrameSupport: (model.kind === "video" && needsImage) || Boolean(referenceField),
     seedSupport: supportsSeed(model),
     negativePromptSupport: supportsNegativePrompt(model),
     cardTextAnchors: CARD_ANCHOR_CATEGORIES.has(model.category),

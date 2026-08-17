@@ -199,6 +199,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.promoteVersion": "採用一致性版本",
   "creativeContext.rollbackVersion": "還原一致性版本",
   "creativeContext.adoptGeneration": "採用生成結果為 current",
+  "creativeContext.extractEndFrame": "從已落地影片抽取結尾影格",
   "canon.createFromEntity": "把設定卡升為 Team Canon",
   "canon.addVersionFromPin": "從專案卡片建立 Canon 新版本",
   "canon.createProjectCanon": "建立風格／聲線／聲音世界設定",
