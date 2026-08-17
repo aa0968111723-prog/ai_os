@@ -89,6 +89,11 @@ export interface WorkspaceProjection {
   deliveryBlockers: string[];
   /** closure §11：server-authoritative 分維度 scorecard（不平均成一個假百分比） */
   scorecard: ScorecardRow[];
+  /**
+   * Animation sequence locks are derived from existing immutable Scene Packages.
+   * They are not a second version/current pointer.
+   */
+  sequenceLocks: import("./animationTemporal").SequenceLockProjection[];
 }
 
 /** closure §11：scorecard 維度與狀態 */

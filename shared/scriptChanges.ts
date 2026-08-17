@@ -156,9 +156,34 @@ export function deriveShotEndState(input: {
   environment: Record<string, unknown> | null;
 }): ShotContinuityState {
   const base: ShotContinuityState = {
-    actors: (input.currentStart?.actors ?? []).map((actor) => ({ ...actor })),
+    actors: (input.currentStart?.actors ?? []).map((actor) => ({
+      ...actor,
+      ...(actor.handOccupancy ? { handOccupancy: { ...actor.handOccupancy } } : {}),
+    })),
     environment: input.currentStart?.environment ?? input.environment ?? null,
     transitionType: input.currentStart?.transitionType ?? null,
+    ...(input.currentStart?.props
+      ? { props: input.currentStart.props.map((prop) => ({ ...prop })) }
+      : {}),
+    ...(input.currentStart?.spatial
+      ? {
+        spatial: {
+          ...input.currentStart.spatial,
+          ...(input.currentStart.spatial.relativeOrdering
+            ? { relativeOrdering: input.currentStart.spatial.relativeOrdering.map((row) => ({ ...row })) }
+            : {}),
+        },
+      }
+      : {}),
+  };
+  const mutableProp = (propId: string) => {
+    const props = base.props ?? (base.props = []);
+    let prop = props.find((row) => row.propId === propId);
+    if (!prop) {
+      prop = { propId };
+      props.push(prop);
+    }
+    return prop;
   };
   for (const change of input.authorizedChanges) {
     if (change.type === "got_wet") {
@@ -174,10 +199,19 @@ export function deriveShotEndState(input: {
       }
       const recipient = base.actors.find((actor) => actor.characterId === change.toCharacterId);
       if (recipient) recipient.heldPropId = change.propId;
+      const prop = mutableProp(change.propId);
+      prop.holderCharacterId = change.toCharacterId;
+      // 腳本只證明「誰拿著」，沒有證明左右手；unknown 不得被猜成 left/right。
+      prop.heldInHand = "unknown";
+      prop.visibility = "visible";
     } else if (change.type === "prop_loss" && change.resolved && change.propId) {
       for (const actor of base.actors) {
         if (actor.heldPropId === change.propId) actor.heldPropId = null;
       }
+      const prop = mutableProp(change.propId);
+      prop.holderCharacterId = null;
+      prop.heldInHand = "unknown";
+      prop.visibility = "lost";
     }
   }
   return base;

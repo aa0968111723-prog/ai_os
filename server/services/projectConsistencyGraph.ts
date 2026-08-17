@@ -18,6 +18,7 @@ import { parseScriptAuthorizedChanges, resolvePropTransfers, unresolvedPropTrans
 import { pinState } from "../../shared/teamCanon";
 import { deliveryBlockers } from "./consistencyAdopt";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
+import { deriveSequenceLock } from "../../shared/animationTemporal";
 
 export async function projectWorkspaceProjection(input: {
   auth: AuthState;
@@ -107,6 +108,25 @@ export async function projectWorkspaceProjection(input: {
       }];
     });
   }
+
+  // Sequence Lock is a bounded derived projection over existing Scene Package heads.
+  // No new current/version table is introduced.
+  const packageHeads = await db.select().from(schema.scenePackageHeads)
+    .where(eq(schema.scenePackageHeads.projectId, project.id));
+  const packageRows = packageHeads.length
+    ? await db.select().from(schema.scenePackages)
+      .where(inArray(schema.scenePackages.id, packageHeads.map((row) => row.packageId)))
+    : [];
+  const packageById = new Map(packageRows.map((row) => [row.id, row]));
+  const sequenceLocks = packageHeads.flatMap((head) => {
+    const row = packageById.get(head.packageId);
+    if (!row) return [];
+    return [deriveSequenceLock({
+      packagePayload: row.payload,
+      packageFingerprint: head.fingerprint,
+      packageStale: head.stale,
+    })];
+  });
 
   const nodes: ConsistencyGraphNode[] = [
     ...characters.map((row) => ({ kind: "character", id: row.id, title: row.name, rev: row.rev })),
@@ -199,6 +219,7 @@ export async function projectWorkspaceProjection(input: {
     staleShotIds: [...stale],
     artifactFindings,
     deliveryBlockers: blockers,
+    sequenceLocks,
     scorecard: buildConsistencyScorecard({
       charactersMissingReference: characters.filter((row) => !row.referenceAssetId).map((row) => row.id),
       charactersBoundShotIds: (() => {

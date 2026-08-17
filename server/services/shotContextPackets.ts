@@ -19,7 +19,12 @@ import {
 } from "../../shared/shotContextPacket";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
 import { buildCharacterSlots } from "../../shared/characterSlots";
-import { detectTransitionType, parseScriptAuthorizedChanges, resolvePropTransfers } from "../../shared/scriptChanges";
+import {
+  deriveShotEndState,
+  detectTransitionType,
+  parseScriptAuthorizedChanges,
+  resolvePropTransfers,
+} from "../../shared/scriptChanges";
 import { inheritContinuityState, type ShotContinuityState } from "../../shared/shotContextPacket";
 import { capabilityForModel } from "../../shared/providerCapabilities";
 import { getModel } from "../../shared/models";
@@ -119,6 +124,24 @@ export async function buildShotContextPacketPayload(input: {
     currentStorySceneId: storyScene?.id ?? null,
   });
   const previousEnd = (previousState?.endState as ShotContinuityState | undefined) ?? null;
+  const currentStart = inheritContinuityState(
+    previousEnd,
+    {
+      actors: characters.map((row) => ({
+        characterId: row.id,
+        lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
+      })),
+      environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+    },
+    previousShotId ? transitionType : null,
+  );
+  // 第一鏡沒有轉場（與既有指紋語意一致，避免無意義的整批 stale）。
+  if (!previousShotId) currentStart.transitionType = null;
+  const currentEnd = deriveShotEndState({
+    currentStart,
+    authorizedChanges,
+    environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+  });
 
   // Character Slots（§8）：canon pin 一併帶上（跨專案追溯＋adapter 來源）
   const slotPins = characterIds.length
@@ -282,22 +305,8 @@ export async function buildShotContextPacketPayload(input: {
       // time_jump／montage 依規則解除濕度／傷勢等延續。
       // 條件性帶欄位：沒有 end-state 時 payload 形狀與 #753 一致，歷史指紋不動
       ...(previousEnd ? { previousEnd } : {}),
-      currentStart: (() => {
-        const inherited = inheritContinuityState(
-          previousEnd,
-          {
-            actors: characters.map((row) => ({
-              characterId: row.id,
-              lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
-            })),
-            environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
-          },
-          previousShotId ? transitionType : null,
-        );
-        // 第一鏡沒有轉場（與 #753 既有指紋語義一致，避免無意義的整批 stale）
-        if (!previousShotId) inherited.transitionType = null;
-        return inherited;
-      })(),
+      currentStart,
+      currentEnd,
     },
     scenePackage: scenePackageHead
       ? { packageId: scenePackageHead.packageId, fingerprint: scenePackageHead.fingerprint }
