@@ -19,7 +19,12 @@ import {
 } from "../../shared/shotContextPacket";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
 import { buildCharacterSlots } from "../../shared/characterSlots";
-import { detectTransitionType, parseScriptAuthorizedChanges } from "../../shared/scriptChanges";
+import {
+  deriveShotEndState,
+  detectTransitionType,
+  parseScriptAuthorizedChanges,
+  resolvePropTransfers,
+} from "../../shared/scriptChanges";
 import { inheritContinuityState, type ShotContinuityState } from "../../shared/shotContextPacket";
 import { capabilityForModel } from "../../shared/providerCapabilities";
 import { getModel } from "../../shared/models";
@@ -103,9 +108,15 @@ export async function buildShotContextPacketPayload(input: {
       .from(schema.scenes).where(eq(schema.scenes.id, previousShotId)))[0]?.storySceneId ?? null
     : null;
   const shotText = [shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n");
-  const authorizedChanges = parseScriptAuthorizedChanges(
-    [shotText, storyScene?.storyExcerpt].filter(Boolean).join("\n"),
-  );
+  const fullChangeText = [shotText, storyScene?.storyExcerpt].filter(Boolean).join("\n");
+  // closure §9：prop_transfer／prop_loss 嘗試結構化解析（唯一匹配才 resolved；歧義＝unresolved 不猜）
+  const authorizedChanges = resolvePropTransfers({
+    changes: parseScriptAuthorizedChanges(fullChangeText),
+    shotText: fullChangeText,
+    // 解析對象＝本鏡綁定的角色與道具（名稱唯一匹配；歧義＝unresolved）
+    characters: characters.map((row) => ({ id: row.id, name: row.name })),
+    props: props.map((row) => ({ id: row.id, name: row.name })),
+  });
   const transitionType = detectTransitionType({
     shotText,
     sceneText: storyScene?.summary ?? null,
@@ -113,6 +124,24 @@ export async function buildShotContextPacketPayload(input: {
     currentStorySceneId: storyScene?.id ?? null,
   });
   const previousEnd = (previousState?.endState as ShotContinuityState | undefined) ?? null;
+  const currentStart = inheritContinuityState(
+    previousEnd,
+    {
+      actors: characters.map((row) => ({
+        characterId: row.id,
+        lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
+      })),
+      environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+    },
+    previousShotId ? transitionType : null,
+  );
+  // 第一鏡沒有轉場（與既有指紋語意一致，避免無意義的整批 stale）。
+  if (!previousShotId) currentStart.transitionType = null;
+  const currentEnd = deriveShotEndState({
+    currentStart,
+    authorizedChanges,
+    environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
+  });
 
   // Character Slots（§8）：canon pin 一併帶上（跨專案追溯＋adapter 來源）
   const slotPins = characterIds.length
@@ -127,7 +156,11 @@ export async function buildShotContextPacketPayload(input: {
   const { resolveProjectCanonDefaults } = await import("./teamCanon");
   const canonDefaults = await resolveProjectCanonDefaults(project.id);
   const styleCanon = canonDefaults.styleCanon;
-  const narrationVoice = canonDefaults.narrationVoice
+  // targeted stale 的關鍵（稽核修正）：聲線／聲音世界只掛在「真的用得到」的鏡上——
+  // 沒有台詞的純視覺鏡不依賴旁白聲線，聲線升級不得 stale 它（§8 不得全專案 stale）
+  const shotHasSpeech = Boolean(shot.voiceover?.trim() || shot.dialogue?.trim());
+  const shotHasSoundIntent = Boolean(shot.ambience?.trim() || shot.music?.trim());
+  const narrationVoice = shotHasSpeech && canonDefaults.narrationVoice
     ? {
       canonId: canonDefaults.narrationVoice.canonId,
       versionId: canonDefaults.narrationVoice.versionId,
@@ -136,8 +169,8 @@ export async function buildShotContextPacketPayload(input: {
       language: canonDefaults.narrationVoice.language,
     }
     : null;
-  const soundWorld = canonDefaults.soundWorld;
-  const voiceByCharacter = canonDefaults.characterVoices;
+  const soundWorld = shotHasSoundIntent ? canonDefaults.soundWorld : null;
+  const voiceByCharacter = shotHasSpeech ? canonDefaults.characterVoices : new Map<string, never>();
   const styleWorldStyle = canonDefaults.styleStyles;
   const styleNegative = canonDefaults.styleNegative;
   const styleReferences = styleCanon
@@ -272,22 +305,8 @@ export async function buildShotContextPacketPayload(input: {
       // time_jump／montage 依規則解除濕度／傷勢等延續。
       // 條件性帶欄位：沒有 end-state 時 payload 形狀與 #753 一致，歷史指紋不動
       ...(previousEnd ? { previousEnd } : {}),
-      currentStart: (() => {
-        const inherited = inheritContinuityState(
-          previousEnd,
-          {
-            actors: characters.map((row) => ({
-              characterId: row.id,
-              lookId: looks.find((look) => look.characterId === row.id)?.id ?? null,
-            })),
-            environment: (storyScene?.environment as Record<string, unknown> | null) ?? null,
-          },
-          previousShotId ? transitionType : null,
-        );
-        // 第一鏡沒有轉場（與 #753 既有指紋語義一致，避免無意義的整批 stale）
-        if (!previousShotId) inherited.transitionType = null;
-        return inherited;
-      })(),
+      currentStart,
+      currentEnd,
     },
     scenePackage: scenePackageHead
       ? { packageId: scenePackageHead.packageId, fingerprint: scenePackageHead.fingerprint }

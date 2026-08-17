@@ -59,9 +59,49 @@ Branch: `agent/closure-pr-a`（base＝最新 default，含 #761–#766）
 
 （結果補記於 PR）
 
-## Closure PR-B — Full media lineage + targeted downstream stale（未開始）
-## Closure PR-C — Prop continuity + routing + Settings/repair UX（未開始）
-## Closure PR-D — PG/browser/golden acceptance hardening（未開始）
+## Closure PR-B — Full media lineage + targeted downstream stale（#768）
+
+- [x] §7 meta.sourceAssetId＋asset_revisions 正式血緣列（完成時寫入，冪等）
+- [x] §7 creativeContext.shotLineage：單鏡四軌血緣＋canon deps＋findings
+- [x] §8 推導式 artifact staleness（video_parent_superseded／voice_version_drift／
+      voice_identity_missing／sound_world_drift）——不落盤，無第二真相
+- [x] workspace projection artifactFindings＋deliveryBlockers 兩類新阻擋
+- [x] 全專案 6 個批次查詢，無 per-shot N+1（#755 邊界）
+
+## Closure PR-C — Prop continuity + routing + Settings/repair UX
+
+- [x] §9 resolvePropTransfers：唯一匹配才 resolved（歧義＝unresolved 不猜）；
+      deriveShotEndState 套 resolved transfer（heldProp 移轉／放手）；
+      unresolved 進 scorecard「需確認」（修復＝更新道具卡主人，既有 props.update 真相）
+- [x] §10 routeMultiCharacterModel 純路由政策：能力誠實（無模型能鎖多人＝不假裝）、
+      建議不 silent 換模型、staged composition 標建議；決策落 generation trace
+- [x] §11 buildConsistencyScorecard：10 維度×6 狀態×真 affectedShotIds＋人話 reason；
+      server projection 唯一計算點（不平均成假百分比）
+- [x] §12 修復流：StoryScorecardRepair（第一層人話＋修復 N 鏡→重生成→Candidate→Adopt）
+- [x] §12A Settings 四大區：基本資料（封面）／作品設定（風格＋定裝＋知識素材，
+      深連結全保留）／團隊與權限（ProjectMembersCard 復用）／進階（回收桶）；
+      無新頂層創作 CTA；contract 測試全綠
+
+### 已知 bounded 限制（誠實）
+
+- staged composition 是「建議策略」非自動執行（不自動呼叫多次付費生成）
+- 道具轉手接收者以「角色名稱在句中唯一匹配」解析；同名／代詞＝unresolved
+- 基本資料區沒有改名（projects router 無 rename 端點——沿現狀，不為 UI 造後端）
+
+## Closure PR-D — PG/browser/golden acceptance hardening
+
+- [x] closureRuntime.pg.test.ts（真 PostgreSQL 16.9，7 情境）：canon→packet 消費／
+      道具轉手→下一鏡 previousEnd／voice canon 升級 targeted stale／rights 撤回
+      execution 前生效／meta 推導 artifact staleness／scorecard server 唯一真相
+- [x] migrations 0000→0077 APPLIED（真 PG，drift none）；既有 pg 套件 15 情境全過
+- [x] 瀏覽器證據 docs/evidence/closure：Settings 四大區（1280/1440 三分頁各截圖）；
+      390/430＝#766 手機 AI-first 殼層（無設定入口，誠實記錄＋殼層截圖）
+- [x] Settings↔workspace 單一真相 E2E：建立 Style Canon 前 scorecard 有「風格」列→
+      建立後同一查詢消失（results.json singleTruth.pass=true）
+- [x] 對抗稽核：3 維度自證式稽核→14 項確認缺陷全修（重點：audio 生成的 rights 重驗
+      涵蓋 meta.voice/soundWorld；聲線/聲音世界只掛有聲鏡＝聲線升級不再全專案 stale；
+      migration 0078 partial unique index 讓 project canon 名稱冪等成為 DB 保證；
+      接過/搶走動詞方向反轉；代理旁白接聲線路由；修復 CTA 分軌；t2v 不誤報 lineage gap）
 
 ## Paid provider
 

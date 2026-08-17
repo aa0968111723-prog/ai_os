@@ -6,14 +6,20 @@
  */
 import { trpc } from "../../api";
 import { StoryContextStatus } from "./StoryContextStatus";
+import { StoryScorecardRepair } from "./StoryScorecardRepair";
 import { canonStatusLine } from "@shared/projectConsistencyGraph";
 
 export function StoryContextStatusBlock({
   projectId,
   showSources = false,
+  canEdit = false,
+  onRepairShots,
 }: {
   projectId: string;
   showSources?: boolean;
+  canEdit?: boolean;
+  /** closure §12：scorecard 修復 CTA（分軌：voice/sound→音訊重生；其餘→視覺批次） */
+  onRepairShots?: (row: import("@shared/projectConsistencyGraph").ScorecardRow) => void;
 }) {
   const storyMeta = trpc.story.get.useQuery({ projectId });
   const characters = trpc.characters.list.useQuery({ projectId });
@@ -38,14 +44,23 @@ export function StoryContextStatusBlock({
     && counts.characters + counts.scenes + counts.props > 0;
 
   return (
-    <StoryContextStatus
-      counts={counts}
-      applied={applied}
-      trainingAvailable={Boolean(trainingAvailability.data?.available)}
-      compactStatus={workspace.data?.compactStatus}
-      nextAction={workspace.data?.nextAction}
-      canonSummary={canonStatusLine(workspace.data?.canonPins ?? [])}
-      showSources={showSources}
-    />
+    <>
+      <StoryContextStatus
+        counts={counts}
+        applied={applied}
+        trainingAvailable={Boolean(trainingAvailability.data?.available)}
+        compactStatus={workspace.data?.compactStatus}
+        nextAction={workspace.data?.nextAction}
+        canonSummary={canonStatusLine(workspace.data?.canonPins ?? [])}
+        showSources={showSources}
+      />
+      {onRepairShots ? (
+        <StoryScorecardRepair
+          rows={workspace.data?.scorecard ?? []}
+          canEdit={canEdit}
+          onRepairShots={onRepairShots}
+        />
+      ) : null}
+    </>
   );
 }

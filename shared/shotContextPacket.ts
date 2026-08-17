@@ -32,6 +32,29 @@ export interface ShotReferenceBinding {
 export const SHOT_TRANSITION_TYPES = ["cut", "scene_change", "montage", "time_jump"] as const;
 export type ShotTransitionType = (typeof SHOT_TRANSITION_TYPES)[number];
 
+export const SCREEN_DIRECTIONS = [
+  "screen-left", "screen-right", "toward-camera", "away", "unknown",
+] as const;
+export type ScreenDirection = (typeof SCREEN_DIRECTIONS)[number];
+
+export const BODY_POSE_CLASSES = [
+  "standing", "walking", "running", "sitting", "kneeling", "lying",
+  "reaching", "holding", "unknown",
+] as const;
+export type BodyPoseClass = (typeof BODY_POSE_CLASSES)[number];
+
+export type ScreenPosition =
+  | "left"
+  | "center"
+  | "right"
+  | "unknown"
+  | { x: number; y: number };
+
+export interface HandOccupancy {
+  left: string | "empty" | "unknown";
+  right: string | "empty" | "unknown";
+}
+
 export interface ShotContinuityActorState {
   characterId: string;
   lookId: string | null;
@@ -40,12 +63,43 @@ export interface ShotContinuityActorState {
   wetness?: string | null;
   injury?: string | null;
   heldPropId?: string | null;
+  /** 動畫 production state：只在腳本／人工／核准 evidence 明確時填；未知不得猜。 */
+  screenPosition?: ScreenPosition;
+  facingDirection?: ScreenDirection;
+  gazeTarget?: string | null;
+  bodyPoseClass?: BodyPoseClass;
+  handOccupancy?: HandOccupancy;
+}
+
+export interface ShotContinuityPropState {
+  propId: string;
+  holderCharacterId?: string | null;
+  heldInHand?: "left" | "right" | "both" | "unknown";
+  visibility?: "visible" | "hidden" | "lost" | "unknown";
+  openness?: "open" | "closed" | "folded" | "unfolded" | "unknown";
+  wetness?: "dry" | "wet" | "unknown";
+  integrity?: "intact" | "damaged" | "torn" | "unknown";
+  screenPosition?: ScreenPosition;
+}
+
+export interface ShotContinuitySpatialState {
+  /** 只有導演明確建立或由已核准 visual evidence 確認後才填。 */
+  axisId?: string | null;
+  screenDirectionRule?: ScreenDirection | null;
+  relativeOrdering?: Array<{
+    subjectId: string;
+    relation: "left_of" | "right_of" | "in_front_of" | "behind";
+    objectId: string;
+  }>;
 }
 
 export interface ShotContinuityState {
   actors: ShotContinuityActorState[];
   environment: Record<string, unknown> | null;
   transitionType?: ShotTransitionType | null;
+  /** Prop identity 仍在既有 Prop/Canon；這裡只放跨鏡可變狀態。 */
+  props?: ShotContinuityPropState[];
+  spatial?: ShotContinuitySpatialState | null;
 }
 
 export interface ShotContextEntityRef {
@@ -233,11 +287,40 @@ export function inheritContinuityState(
   delta: Partial<ShotContinuityState> | null | undefined,
   transitionType: ShotTransitionType | null | undefined,
 ): ShotContinuityState {
+  const mergeById = <T extends object, K extends keyof T>(
+    previous: readonly T[],
+    current: readonly T[],
+    key: K,
+  ): T[] => {
+    const byId = new Map(previous.map((row) => [String(row[key]), { ...row }]));
+    for (const row of current) {
+      const id = String(row[key]);
+      byId.set(id, { ...byId.get(id), ...row } as T);
+    }
+    return [...byId.values()];
+  };
+
   if (transitionType === "time_jump" || transitionType === "montage") {
+    /*
+     * 時間跳躍／蒙太奇只釋放短暫視覺與空間約束，不抹掉角色身份。
+     * Look 可由 delta 明確換掉；沒有腳本授權時仍沿用。姿勢、位置、視線、
+     * 手部接觸、濕度／傷勢與 prop state 都回到 unknown（省略），不得猜。
+     */
+    const persistentActors = (previousEnd?.actors ?? []).map((actor) => ({
+      characterId: actor.characterId,
+      lookId: actor.lookId,
+    }));
+    const actors = mergeById(
+      persistentActors,
+      delta?.actors ?? [],
+      "characterId",
+    );
     return {
-      actors: delta?.actors ?? [],
+      actors,
       environment: delta?.environment ?? null,
       transitionType,
+      ...(delta?.props ? { props: delta.props } : {}),
+      ...(delta?.spatial ? { spatial: delta.spatial } : {}),
     };
   }
   if (!previousEnd) {
@@ -245,15 +328,19 @@ export function inheritContinuityState(
       actors: delta?.actors ?? [],
       environment: delta?.environment ?? null,
       transitionType: transitionType ?? "cut",
+      ...(delta?.props ? { props: delta.props } : {}),
+      ...(delta?.spatial ? { spatial: delta.spatial } : {}),
     };
   }
-  const byId = new Map(previousEnd.actors.map((actor) => [actor.characterId, actor]));
-  for (const actor of delta?.actors ?? []) {
-    byId.set(actor.characterId, { ...byId.get(actor.characterId), ...actor });
-  }
+  const actors = mergeById(previousEnd.actors, delta?.actors ?? [], "characterId");
+  const props = mergeById(previousEnd.props ?? [], delta?.props ?? [], "propId");
   return {
-    actors: [...byId.values()],
+    actors,
     environment: delta?.environment ?? previousEnd.environment,
     transitionType: transitionType ?? "cut",
+    ...(props.length ? { props } : {}),
+    ...((delta?.spatial ?? previousEnd.spatial)
+      ? { spatial: delta?.spatial ?? previousEnd.spatial }
+      : {}),
   };
 }

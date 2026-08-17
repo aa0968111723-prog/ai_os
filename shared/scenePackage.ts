@@ -32,6 +32,8 @@ export interface ScenePackagePayload {
   props: Array<ScenePackageEntityRef & { ownerKind?: string | null; ownerId?: string | null }>;
   /** 專案風格與聲音世界（worldview styles／場景 ambience 預設） */
   style: string[];
+  /** closure：pinned Style Canon 依賴（可選——舊 package 無此欄，歷史指紋穩定） */
+  styleCanon?: { canonId: string; versionId: string } | null;
   /**
    * closure §6：canon 欄位為可選——pinned Sound World canon 時凍結其 identity；
    * 舊 package 沒有這些欄位（undefined 不進 JSON.stringify，歷史指紋穩定）。
@@ -92,9 +94,10 @@ export function scenePackageDependencies(payload: ScenePackagePayload): {
     ...payload.props,
   ];
   const keys = refs.map((ref) => `${ref.kind}:${ref.id}`);
-  // closure §6／§8：canon 依賴——Sound World／場景 canon 換版只 stale 真依賴的場
+  // closure §6／§8：canon 依賴——Sound World／Style／場景 canon 換版只 stale 真依賴的場
   if (payload.sceneCanon) keys.push(`canon:${payload.sceneCanon.canonId}`);
   if (payload.soundWorld.canonId) keys.push(`canon:${payload.soundWorld.canonId}`);
+  if (payload.styleCanon) keys.push(`canon:${payload.styleCanon.canonId}`);
   return {
     storySceneId: payload.storySceneId,
     entityKeys: [...new Set(keys)].sort(),

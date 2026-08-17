@@ -124,6 +124,28 @@ export const creativeContextRouter = router({
       });
     }),
 
+  /**
+   * closure §7：單鏡完整血緣——packet／各軌 asset→generation→parent→canon deps＋
+   * derived findings。回答「這支影片從哪張圖來、這段旁白用的是哪個聲線版本」。
+   */
+  shotLineage: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { projectMediaLineage } = await import("../services/mediaLineage");
+      const result = await projectMediaLineage({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        lineageShotIds: [input.shotId],
+      });
+      return {
+        lineage: result.lineages[0] ?? null,
+        projectFindings: result.findings.length,
+      };
+    }),
+
   listShotPackets: authedProcedure
     .input(z.object({
       projectId: z.string().uuid(),

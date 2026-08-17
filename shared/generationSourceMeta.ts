@@ -68,6 +68,12 @@ export type GenerationSourceMeta = {
   /** Frozen Shot Context Packet used for this generation. Resume/retry must reuse it. */
   shotContextPacketId?: string;
   /**
+   * 來源素材 id（closure §7 lineage）：i2v／i2i 的 parent。過去只能 regex 解析
+   * sourceUrl 反推（外部網址就斷），現在送出當下就把 id 落 meta——
+   * 完成時據此寫 asset_revisions（影片→底圖的正式血緣列）。
+   */
+  sourceAssetId?: string;
+  /**
    * Voice identity（closure §5）：這筆音訊生成綁定的聲線 canon。
    * lineage／targeted stale 靠它回答「這段旁白用的是哪個聲線版本」。
    */
@@ -80,7 +86,7 @@ export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined && !meta.shotContextPacketId && !meta.voice && !meta.soundWorld) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined && !meta.shotContextPacketId && !meta.voice && !meta.soundWorld && !meta.sourceAssetId) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -155,6 +161,7 @@ export function splitGenerationSourceMeta(params: unknown): {
   const metaObj = rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
     ? rawMeta as Record<string, unknown>
     : null;
+  const sourceAssetId = typeof metaObj?.sourceAssetId === "string" ? metaObj.sourceAssetId as string : undefined;
   const voiceRow = metaObj?.voice;
   const voice = voiceRow != null && typeof voiceRow === "object" && !Array.isArray(voiceRow)
     && typeof (voiceRow as Record<string, unknown>).canonId === "string"
@@ -176,5 +183,5 @@ export function splitGenerationSourceMeta(params: unknown): {
       versionId: (soundRow as Record<string, string>).versionId,
     }
     : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit, shotContextPacketId, voice, soundWorld } };
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit, shotContextPacketId, voice, soundWorld, sourceAssetId } };
 }

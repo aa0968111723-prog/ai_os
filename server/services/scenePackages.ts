@@ -138,6 +138,7 @@ export async function buildScenePackagePayload(input: {
     })),
     // closure §4：pinned Style Canon＝專案風格真相（與 shot packet 同一條 single-truth 規則）
     style: packageCanonDefaults.styleStyles ?? worldview.styles,
+    ...(packageCanonDefaults.styleCanon ? { styleCanon: packageCanonDefaults.styleCanon } : {}),
     soundWorld: (() => {
       const shotAmbience = shots.find((shot) => shot.ambience?.trim())?.ambience ?? null;
       // closure §6：pinned Sound World canon＝場的聲音 identity（undefined 欄位不進 JSON，

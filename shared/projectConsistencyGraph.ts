@@ -74,8 +74,164 @@ export interface WorkspaceProjection {
   canonPins: WorkspaceCanonPin[];
   /** 因上游變更而過期的鏡（packet head stale）——「只重做不一致的鏡頭」的依據 */
   staleShotIds: string[];
+  /**
+   * closure §8：downstream artifact 級的不一致（影片舊底圖／聲線版本漂移／聲音世界漂移）。
+   * 推導值不落盤——生成當下依賴 vs 此刻 current/pinned 版本的比較結果。
+   */
+  artifactFindings: Array<{
+    shotId: string;
+    track: "visual" | "narration" | "ambience" | "music";
+    code: string;
+    message: string;
+    assetId: string;
+  }>;
   /** 交付阻擋（人話）；空陣列＝可交付 */
   deliveryBlockers: string[];
+  /** closure §11：server-authoritative 分維度 scorecard（不平均成一個假百分比） */
+  scorecard: ScorecardRow[];
+  /**
+   * Animation sequence locks are derived from existing immutable Scene Packages.
+   * They are not a second version/current pointer.
+   */
+  sequenceLocks: import("./animationTemporal").SequenceLockProjection[];
+}
+
+/** closure §11：scorecard 維度與狀態 */
+export const SCORECARD_DIMENSIONS = [
+  "identity", "look", "scene", "prop", "style",
+  "continuity", "voice", "sound_world", "lineage", "delivery",
+] as const;
+export type ScorecardDimension = (typeof SCORECARD_DIMENSIONS)[number];
+
+export const SCORECARD_STATUSES = [
+  "ok", "warning", "blocker", "stale", "unresolved", "capability_downgrade",
+] as const;
+export type ScorecardStatus = (typeof SCORECARD_STATUSES)[number];
+
+export interface ScorecardRow {
+  dimension: ScorecardDimension;
+  status: ScorecardStatus;
+  /** 真正受影響的鏡（空＝專案級訊號） */
+  affectedShotIds: string[];
+  /** 人話原因＋建議修復（第一層 UI 直接顯示） */
+  reason: string;
+}
+
+/**
+ * 純建構器：所有輸入都是 server 已載入的既有 records 推導值。
+ * 規則：每維度最多一列最重狀態（blocker > unresolved > stale > capability_downgrade > warning > ok）；
+ * ok 的維度不出列（第一層只講需要人看的事）。
+ */
+export function buildConsistencyScorecard(input: {
+  charactersMissingReference: string[];       // character ids
+  charactersBoundShotIds: string[];           // 有綁角色但角色缺參考的鏡
+  looksMissingReference: string[];
+  presetsMissingReference: string[];
+  unresolvedPropShotIds: string[];            // 道具轉手無法解析的鏡
+  styleCanonPinned: boolean;
+  staleShotIds: string[];
+  multiCharacterShotIds: string[];            // >1 角色的鏡（能力降級）
+  voiceFindingShotIds: string[];              // 旁白聲線漂移／缺聲線的鏡
+  charactersSpeakingWithoutVoice: number;     // 有台詞但沒綁聲線的角色數
+  soundFindingShotIds: string[];
+  soundWorldPinned: boolean;
+  lineageGapShotIds: string[];                // 現用影片無 parent 紀錄的鏡
+  deliveryBlockers: string[];
+}): ScorecardRow[] {
+  const rows: ScorecardRow[] = [];
+  if (input.charactersMissingReference.length) {
+    rows.push({
+      dimension: "identity",
+      status: "warning",
+      affectedShotIds: input.charactersBoundShotIds,
+      reason: `${input.charactersMissingReference.length} 位角色沒有定裝參考圖——身份一致性只剩文字錨點`,
+    });
+  }
+  if (input.looksMissingReference.length) {
+    rows.push({
+      dimension: "look",
+      status: "warning",
+      affectedShotIds: [],
+      reason: `${input.looksMissingReference.length} 套造型沒有參考圖`,
+    });
+  }
+  if (input.presetsMissingReference.length) {
+    rows.push({
+      dimension: "scene",
+      status: "warning",
+      affectedShotIds: [],
+      reason: `${input.presetsMissingReference.length} 個場景卡沒有參考圖`,
+    });
+  }
+  if (input.unresolvedPropShotIds.length) {
+    rows.push({
+      dimension: "prop",
+      status: "unresolved",
+      affectedShotIds: input.unresolvedPropShotIds,
+      reason: "腳本有道具轉手但對不出接收者——請確認道具持有者（更新道具卡的主人）",
+    });
+  }
+  if (!input.styleCanonPinned) {
+    rows.push({
+      dimension: "style",
+      status: "warning",
+      affectedShotIds: [],
+      reason: "尚未固定視覺風格設定——各鏡風格靠即時世界觀，跨腳本重用時可能漂移",
+    });
+  }
+  if (input.staleShotIds.length) {
+    rows.push({
+      dimension: "continuity",
+      status: "stale",
+      affectedShotIds: input.staleShotIds,
+      reason: `${input.staleShotIds.length} 鏡因上游變更而過期——只重做這幾鏡即可`,
+    });
+  }
+  if (input.multiCharacterShotIds.length) {
+    rows.push({
+      dimension: "identity",
+      status: "capability_downgrade",
+      affectedShotIds: input.multiCharacterShotIds,
+      reason: "多人鏡目前沒有模型能可靠鎖定多重身份——以參考圖＋文字錨點降級，建議人工確認結果",
+    });
+  }
+  if (input.voiceFindingShotIds.length || input.charactersSpeakingWithoutVoice > 0) {
+    rows.push({
+      dimension: "voice",
+      status: input.voiceFindingShotIds.length ? "stale" : "warning",
+      affectedShotIds: input.voiceFindingShotIds,
+      reason: input.voiceFindingShotIds.length
+        ? `${input.voiceFindingShotIds.length} 段旁白與現行聲線不一致——重新生成即可`
+        : `${input.charactersSpeakingWithoutVoice} 位有台詞的角色還沒綁定聲線`,
+    });
+  }
+  if (input.soundFindingShotIds.length || !input.soundWorldPinned) {
+    rows.push({
+      dimension: "sound_world",
+      status: input.soundFindingShotIds.length ? "stale" : "warning",
+      affectedShotIds: input.soundFindingShotIds,
+      reason: input.soundFindingShotIds.length
+        ? `${input.soundFindingShotIds.length} 段環境音與現行聲音世界不一致`
+        : "尚未設定聲音世界——各鏡環境音各自為政",
+    });
+  }
+  if (input.lineageGapShotIds.length) {
+    rows.push({
+      dimension: "lineage",
+      status: "warning",
+      affectedShotIds: input.lineageGapShotIds,
+      reason: "有影片查不到來源畫面的血緣紀錄——建議重新生成以建立可追溯血緣",
+    });
+  }
+  if (input.deliveryBlockers.length) {
+    rows.push({
+      dimension: "delivery",
+      status: "blocker",
+      affectedShotIds: [],
+      reason: input.deliveryBlockers.join("；"),
+    });
+  }
+  return rows;
 }
 
 /** 第一屏 Canon 摘要行（人話；0 引用回 null 不佔版面） */

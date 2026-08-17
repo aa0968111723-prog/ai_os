@@ -10313,3 +10313,13 @@ body.story-immersive { overflow: hidden; }
   .scene-intent-strip { overflow-x: auto; }
   .scene-intent-strip button { min-height: 44px; white-space: nowrap; }
 }
+
+/* closure §11–§12：一致性修復列（scorecard 第一層人話） */
+.story-scorecard { margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.story-scorecard__row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.story-scorecard__row .chip[data-status="blocker"] { border-color: var(--danger, #c0392b); }
+.story-scorecard__row .chip[data-status="stale"],
+.story-scorecard__row .chip[data-status="unresolved"] { border-color: var(--warn, #b8860b); }
+.story-scorecard__reason { min-width: 0; }
+.story-scorecard__row button { min-height: 44px; }
+.story-scorecard__hint { margin: 2px 0 0; }

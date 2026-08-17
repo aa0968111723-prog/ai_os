@@ -21,6 +21,15 @@ export interface ScriptAuthorizedChange {
   type: AuthorizedChangeType;
   /** 命中的原文片段（provenance——人可以核對這是不是真的腳本要求） */
   excerpt: string;
+  /**
+   * closure §9：道具轉手的結構化解析結果（可選——只有 prop_transfer／prop_loss 用）。
+   * resolved=true 才能改 heldProp state；解析不到＝unresolved，不准猜，
+   * 交由確認流程（更新道具持有者卡片）解決。
+   */
+  propId?: string | null;
+  fromCharacterId?: string | null;
+  toCharacterId?: string | null;
+  resolved?: boolean;
 }
 
 const CHANGE_PATTERNS: Array<{ type: AuthorizedChangeType; pattern: RegExp }> = [
@@ -42,6 +51,67 @@ export function parseScriptAuthorizedChanges(text: string | null | undefined): S
     }
   }
   return found;
+}
+
+/**
+ * closure §9：把 prop_transfer／prop_loss 的 excerpt 解析成結構化轉手。
+ *
+ * 保守規則（不准猜）：
+ * - 在「整句」（excerpt 前後擴到句界）裡找道具名與角色名的唯一匹配
+ * - prop_transfer 需要恰好一個道具＋恰好一個「接收者」（動詞後出現的角色）；
+ *   給予者（動詞前出現的角色）可有可無
+ * - 任何歧義（0 或 >1 匹配）＝unresolved——由確認流程處理，不改 state
+ */
+export function resolvePropTransfers(input: {
+  changes: readonly ScriptAuthorizedChange[];
+  /** 完整 shot 文字（excerpt 只有動詞後 16 字，接收者常在動詞前——要整句才判得到給予者） */
+  shotText: string;
+  characters: ReadonlyArray<{ id: string; name: string }>;
+  props: ReadonlyArray<{ id: string; name: string }>;
+}): ScriptAuthorizedChange[] {
+  return input.changes.map((change) => {
+    if (change.type !== "prop_transfer" && change.type !== "prop_loss") return change;
+    // 找含這個 excerpt 的整句（句號／分號／換行為界）
+    const at = input.shotText.indexOf(change.excerpt);
+    if (at < 0) return { ...change, resolved: false };
+    const start = Math.max(
+      ...["。", "；", ";", "\n"].map((sep) => input.shotText.lastIndexOf(sep, at)),
+      -1,
+    ) + 1;
+    const endCandidates = ["。", "；", ";", "\n"]
+      .map((sep) => input.shotText.indexOf(sep, at))
+      .filter((idx) => idx >= 0);
+    const end = endCandidates.length ? Math.min(...endCandidates) : input.shotText.length;
+    const sentence = input.shotText.slice(start, end);
+    const verbAt = sentence.indexOf(change.excerpt);
+
+    const propsInSentence = input.props.filter((prop) => prop.name && sentence.includes(prop.name));
+    if (propsInSentence.length !== 1) return { ...change, resolved: false };
+    const prop = propsInSentence[0]!;
+
+    if (change.type === "prop_loss") {
+      // 弄丟／遺失：道具唯一即可解析（沒有接收者）
+      return { ...change, propId: prop.id, toCharacterId: null, resolved: true };
+    }
+
+    const before = sentence.slice(0, verbAt);
+    const after = sentence.slice(verbAt);
+    // 動詞方向：交給／遞給／送給＝動詞後是接收者；接過／搶走＝動詞前（主詞）才是接收者
+    const inverted = change.excerpt.startsWith("接過") || change.excerpt.startsWith("搶走");
+    const beforeChars = input.characters.filter((row) => row.name && before.includes(row.name));
+    const afterChars = input.characters.filter((row) =>
+      row.name && after.includes(row.name) && !beforeChars.some((g) => g.id === row.id));
+    const receivers = inverted ? beforeChars : afterChars;
+    const givers = inverted ? afterChars : beforeChars;
+    if (receivers.length !== 1) return { ...change, resolved: false };
+    return {
+      ...change,
+      propId: prop.id,
+      fromCharacterId: givers.length === 1 ? givers[0]!.id : null,
+      toCharacterId: receivers[0]!.id,
+      resolved: true,
+    };
+  });
 }
 
 const TIME_JUMP_PATTERN = /(多年後|數年後|幾年後|隔天|翌日|一週後|一個月後|數月後|多年前|回到過去|閃回|夢中|夢裡)/;
@@ -75,9 +145,10 @@ export function detectTransitionType(input: {
 import type { ShotContinuityState } from "./shotContextPacket";
 
 /**
- * Adopt 當下抽出 end-state（§11）：start-state ＋ 腳本授權的改變 ＝ 這一鏡結束時的狀態。
- * 保守規則：淋濕套用到在場全員（雨是環境事件）；擦乾解除；受傷標記；
- * 道具轉手因無法可靠對到目標角色，不改 heldProp（誠實留白，下一鏡由綁定講話）。
+ * Adopt 當下抽出 end-state（§11＋closure §9）：start-state ＋ 腳本授權的改變 ＝
+ * 這一鏡結束時的狀態。保守規則：淋濕套用到在場全員（雨是環境事件）；擦乾解除；
+ * 受傷標記；道具轉手只在「結構化解析成功（resolved）」時改 heldProp——
+ * 未解析的轉手誠實留白，交確認流程，不准猜。
  */
 export function deriveShotEndState(input: {
   currentStart: ShotContinuityState | null | undefined;
@@ -85,9 +156,34 @@ export function deriveShotEndState(input: {
   environment: Record<string, unknown> | null;
 }): ShotContinuityState {
   const base: ShotContinuityState = {
-    actors: (input.currentStart?.actors ?? []).map((actor) => ({ ...actor })),
+    actors: (input.currentStart?.actors ?? []).map((actor) => ({
+      ...actor,
+      ...(actor.handOccupancy ? { handOccupancy: { ...actor.handOccupancy } } : {}),
+    })),
     environment: input.currentStart?.environment ?? input.environment ?? null,
     transitionType: input.currentStart?.transitionType ?? null,
+    ...(input.currentStart?.props
+      ? { props: input.currentStart.props.map((prop) => ({ ...prop })) }
+      : {}),
+    ...(input.currentStart?.spatial
+      ? {
+        spatial: {
+          ...input.currentStart.spatial,
+          ...(input.currentStart.spatial.relativeOrdering
+            ? { relativeOrdering: input.currentStart.spatial.relativeOrdering.map((row) => ({ ...row })) }
+            : {}),
+        },
+      }
+      : {}),
+  };
+  const mutableProp = (propId: string) => {
+    const props = base.props ?? (base.props = []);
+    let prop = props.find((row) => row.propId === propId);
+    if (!prop) {
+      prop = { propId };
+      props.push(prop);
+    }
+    return prop;
   };
   for (const change of input.authorizedChanges) {
     if (change.type === "got_wet") {
@@ -96,9 +192,38 @@ export function deriveShotEndState(input: {
       for (const actor of base.actors) actor.wetness = undefined;
     } else if (change.type === "injury") {
       for (const actor of base.actors) actor.injury = actor.injury ?? "injured";
+    } else if (change.type === "prop_transfer" && change.resolved && change.propId && change.toCharacterId) {
+      // 藏寶圖 A 交給 B：B 開始持有；任何原持有者放手
+      for (const actor of base.actors) {
+        if (actor.heldPropId === change.propId) actor.heldPropId = null;
+      }
+      const recipient = base.actors.find((actor) => actor.characterId === change.toCharacterId);
+      if (recipient) recipient.heldPropId = change.propId;
+      const prop = mutableProp(change.propId);
+      prop.holderCharacterId = change.toCharacterId;
+      // 腳本只證明「誰拿著」，沒有證明左右手；unknown 不得被猜成 left/right。
+      prop.heldInHand = "unknown";
+      prop.visibility = "visible";
+    } else if (change.type === "prop_loss" && change.resolved && change.propId) {
+      for (const actor of base.actors) {
+        if (actor.heldPropId === change.propId) actor.heldPropId = null;
+      }
+      const prop = mutableProp(change.propId);
+      prop.holderCharacterId = null;
+      prop.heldInHand = "unknown";
+      prop.visibility = "lost";
     }
   }
   return base;
+}
+
+/** closure §9：未解析的道具轉手（要進確認流程的 structured unresolved state） */
+export function unresolvedPropTransfers(
+  changes: readonly ScriptAuthorizedChange[],
+): ScriptAuthorizedChange[] {
+  return changes.filter(
+    (change) => (change.type === "prop_transfer" || change.type === "prop_loss") && change.resolved === false,
+  );
 }
 
 /**

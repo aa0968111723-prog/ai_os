@@ -72,6 +72,8 @@ import { ONE_CLICK_BATCH_KIND } from "../features/story-workspace/oneClickFilm";
 import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
 import { StoryContextStatusBlock } from "../features/story-workspace/StoryContextStatusBlock";
+import { ProjectMembersCard } from "../components/ProjectMembersCard";
+import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { StoryCanonPanel } from "../features/story-workspace/StoryCanonPanel";
 
 import { DeliveryRoom } from "../features/delivery/DeliveryRoom";
@@ -135,7 +137,13 @@ const PROJECT_MOBILE_MQ = PHONE_MQ;
 
 type CtxSectionKey = "worldview" | "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
 type CtxGroupKey = "world" | "sources" | "manage";
-export type ToneSubTab = "story" | "costume" | "sources" | "recycle";
+/**
+ * closure §12A 四大區：基本資料（basic）／作品設定（story|costume|sources 三值都顯示
+ * 同一疊內容，保留全部既有深連結）／團隊與權限（team）／進階（recycle）。
+ */
+export type ToneSubTab = "basic" | "story" | "costume" | "sources" | "team" | "recycle";
+/** 作品設定區的三個深連結值（顯示同一疊內容；CtxGroup 負責區內收合） */
+export const WORK_TONE_TABS: readonly ToneSubTab[] = ["story", "costume", "sources"];
 
 /** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
 function CtxCollapse({
@@ -661,6 +669,11 @@ export function ProjectPage({ id }: { id: string }) {
   const [contextReturnTo, setContextReturnTo] = useState<ProjectContextReturnTo | null>(null);
   /** 專案設定（二層；PE 計畫 §03）：定調拆散後的資料面收納處——非必經，需要微調才打開 */
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** closure §12A 基本資料區：封面挑選對話框 */
+  const [coverPickerOpen, setCoverPickerOpen] = useState(false);
+  /** closure §12 分軌修復：聲線／聲音世界的過期走音訊重生（不打視覺批次） */
+  const repairVoice = trpc.scenes.generateVoiceover.useMutation();
+  const repairAmbience = trpc.scenes.generateAmbience.useMutation();
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(settingsPanelRef, settingsOpen, () => setSettingsOpen(false));
   /** Story-inline：同一時間手機只開一個主要收合區；桌機也先維持單開，避免再長成四段長頁。 */
@@ -1703,7 +1716,31 @@ export function ProjectPage({ id }: { id: string }) {
                   )}
                   {mountedInline.storyboard && (
                     <div hidden={openInline !== "storyboard"}>
-                      <StoryContextStatusBlock projectId={id} showSources />
+                      <StoryContextStatusBlock
+                        projectId={id}
+                        showSources
+                        canEdit={canEdit}
+                        onRepairShots={(row) => {
+                          const shotIds = row.affectedShotIds;
+                          // 分軌修復（稽核修正）：聲線／聲音世界的過期是「音訊」——
+                          // 走對應的音訊重生，不是視覺批次（那修不了聲音還會多扣點）
+                          if (row.dimension === "voice" || row.dimension === "sound_world") {
+                            if (!window.confirm(`重新生成受影響的 ${shotIds.length} 段${row.dimension === "voice" ? "旁白" : "環境音"}（每段直接扣點）。`)) return;
+                            for (const shotId of shotIds) {
+                              if (row.dimension === "voice") {
+                                repairVoice.mutate({ sceneId: shotId, clientRequestId: crypto.randomUUID() });
+                              } else {
+                                repairAmbience.mutate({ sceneId: shotId, clientRequestId: crypto.randomUUID() });
+                              }
+                            }
+                            return;
+                          }
+                          if (!window.confirm(`只重生成受影響的 ${shotIds.length} 鏡。結果會先當候選，由你比較後採用，不會動現有畫面。`)) return;
+                          void oneClick.regenShots(shotIds).then(() => openInlineSection("production")).catch(() => {
+                            openInlineSection("production");
+                          });
+                        }}
+                      />
                       <SectionErrorBoundary title="創作台">
                         <VisibleCreativeWorkspace projectId={id} canEdit={canEdit} />
                       </SectionErrorBoundary>
@@ -1899,13 +1936,23 @@ export function ProjectPage({ id }: { id: string }) {
             </div>
           </div>
 
-          {/* 定調中心 Sub-Tabs 切換列 */}
+          {/* 定調中心 Sub-Tabs 切換列（closure §12A 四大區：低頻治理層，不是第二個工作台） */}
           <div className="tone-studio-nav" role="tablist" aria-label="定調分頁">
             <button
               type="button"
               role="tab"
-              aria-selected={toneTab === "story"}
-              className={`tone-studio-tab ${toneTab === "story" ? "active" : ""}`}
+              aria-selected={toneTab === "basic"}
+              className={`tone-studio-tab ${toneTab === "basic" ? "active" : ""}`}
+              onClick={() => setToneTab("basic")}
+            >
+              <Icon name="Info" size={15} />
+              <span>基本資料</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={WORK_TONE_TABS.includes(toneTab)}
+              className={`tone-studio-tab ${WORK_TONE_TABS.includes(toneTab) ? "active" : ""}`}
               onClick={() => {
                 setToneTab("story");
                 setCtxGroupSectionOpen("world", true);
@@ -1913,22 +1960,8 @@ export function ProjectPage({ id }: { id: string }) {
               }}
             >
               <Icon name="Sparkles" size={15} />
-              <span>整體風格</span>
+              <span>作品設定</span>
               {wvReady && <span className="tone-tab-badge tone-tab-badge--success">✓</span>}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={toneTab === "costume"}
-              className={`tone-studio-tab ${toneTab === "costume" ? "active" : ""}`}
-              onClick={() => {
-                setToneTab("costume");
-                setCtxGroupSectionOpen("world", true);
-                setCostumePackOpen(true);
-              }}
-            >
-              <Icon name="Users" size={15} />
-              <span>角色與定裝</span>
               {((charCount ?? 0) + (presetCount ?? 0) + (propCount ?? 0)) > 0 && (
                 <span className="tone-tab-badge">{(charCount ?? 0) + (presetCount ?? 0) + (propCount ?? 0)}</span>
               )}
@@ -1936,18 +1969,12 @@ export function ProjectPage({ id }: { id: string }) {
             <button
               type="button"
               role="tab"
-              aria-selected={toneTab === "sources"}
-              className={`tone-studio-tab ${toneTab === "sources" ? "active" : ""}`}
-              onClick={() => {
-                setToneTab("sources");
-                setCtxGroupSectionOpen("sources", true);
-              }}
+              aria-selected={toneTab === "team"}
+              className={`tone-studio-tab ${toneTab === "team" ? "active" : ""}`}
+              onClick={() => setToneTab("team")}
             >
-              <Icon name="FolderGit2" size={15} />
-              <span>知識與素材</span>
-              {((knowledgeCount ?? 0) + (assetCount ?? 0)) > 0 && (
-                <span className="tone-tab-badge">{(knowledgeCount ?? 0) + (assetCount ?? 0)}</span>
-              )}
+              <Icon name="Users" size={15} />
+              <span>團隊與權限</span>
             </button>
             <button
               type="button"
@@ -1961,12 +1988,44 @@ export function ProjectPage({ id }: { id: string }) {
               }}
             >
               <Icon name="Trash2" size={15} />
-              <span>回收桶</span>
+              <span>進階</span>
             </button>
           </div>
 
+          {/* ── 基本資料（closure §12A 區塊 1）：低頻 metadata——封面／名稱／格式 ── */}
+          <div style={{ display: toneTab === "basic" ? "block" : "none" }}>
+            <Card as="section" data-fb="專案基本資料">
+              <h3>基本資料</h3>
+              <Meta as="p">{p.title}</Meta>
+              <Hint as="p">名稱與格式在建立時決定；封面可隨時更換（顯示於專案列表）。</Hint>
+              {canEdit && (
+                <Button variant="ghost" size="sm" type="button" onClick={() => setCoverPickerOpen(true)}>
+                  更換封面
+                </Button>
+              )}
+              {coverPickerOpen && (
+                <ProjectCoverPicker
+                  projectId={p.id}
+                  projectTitle={p.title}
+                  coverAssetId={(p as { coverAssetId?: string | null }).coverAssetId ?? null}
+                  coverUrl={(p as { coverUrl?: string | null }).coverUrl ?? null}
+                  onClose={() => setCoverPickerOpen(false)}
+                />
+              )}
+            </Card>
+          </div>
+
+          {/* ── 團隊與權限（closure §12A 區塊 2）：成員／角色／負責人——治理，不是創作 ── */}
+          <div style={{ display: toneTab === "team" ? "block" : "none" }}>
+            <Card as="section" data-fb="專案成員與權限">
+              <h3>團隊與權限</h3>
+              <Hint as="p">誰可以編輯這部作品；重用與生成授權在「作品設定 → 知識與素材 → 團隊設定」。</Hint>
+              <ProjectMembersCard projectId={id} bare />
+            </Card>
+          </div>
+
           {/* ── 定調 1：故事與畫風 ── */}
-          <div style={{ display: toneTab === "story" ? "block" : "none" }}>
+          <div style={{ display: WORK_TONE_TABS.includes(toneTab) ? "block" : "none" }}>
             <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
             <CtxCollapse
               compact={mobileCompact}
@@ -2489,7 +2548,7 @@ export function ProjectPage({ id }: { id: string }) {
           </div>
 
           {/* ── 定調 2：角色與場景定裝 ── */}
-          <div style={{ display: toneTab === "costume" ? "block" : "none" }}>
+          <div style={{ display: WORK_TONE_TABS.includes(toneTab) ? "block" : "none" }}>
             {/* 定裝是「分鏡改完會不會前後不一致」的源頭——SceneList 的 SceneCardBinding 直接吃這些卡，
                 改一張角色卡就等於同時改了所有綁它的分鏡，而這裡原本是全頁唯一沒有協作訊號的區塊。
                 zone 名字全站唯一（一個 zone 一個 CtxCollapse，比照世界觀／素材庫），
@@ -2617,7 +2676,7 @@ export function ProjectPage({ id }: { id: string }) {
           </div>
 
           {/* ── 定調 3：依據與素材（知識庫／資料表／素材庫） ── */}
-          <div style={{ display: toneTab === "sources" ? "block" : "none" }}>
+          <div style={{ display: WORK_TONE_TABS.includes(toneTab) ? "block" : "none" }}>
             <CtxGroup
               groupId="ctx-group-sources"
               title="依據與素材"

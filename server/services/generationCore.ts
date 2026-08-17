@@ -501,7 +501,10 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   let voiceApplied = false;
   if (input.voiceIdentity && model.kind === "audio") {
     const { applyVoiceIdentity } = await import("../../shared/voiceRouting");
-    voiceApplied = applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
+    // 聲線 identity＝model+voice 一對（稽核修正）：模型被覆蓋成別顆時，
+    // voiceId 對那顆模型是非法值——不套、誠實降級，不宣稱「已鎖定聲線」
+    voiceApplied = input.voiceIdentity.modelId === model.id
+      && applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
     if (voiceApplied) {
       warnings.push({
         code: "voice_identity_applied",
@@ -924,6 +927,9 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     preserveScenePointer: input.preserveScenePointer,
     creative: input.creative,
     shotContextPacketId: input.shotContextPacketId,
+    // closure §7：parent 素材 id 落 meta——完成時寫 asset_revisions 正式血緣列，
+    // 不再依賴 sourceUrl regex 反推（外部網址會斷鏈）
+    sourceAssetId: prepared.effectiveSourceAssetId,
     // closure §5／§6：聲線與聲音世界的 canon 依賴落進 meta——lineage 與 targeted stale 的根據
     voice: input.voiceIdentity
       ? {
@@ -1291,6 +1297,19 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
             .update(schema.generations)
             .set({ resultUrl: localUrl, updatedAt: new Date() })
             .where(eq(schema.generations.id, gen.id));
+        }
+        // closure §7：正式血緣列——i2v／i2i 成品連回 parent 素材（送出當下已落 meta）。
+        // asset_revisions 有 assetId unique：與外部剪輯回寫同一張表、同一語義（child→parent）。
+        // 成品素材是這一交易剛插入的，不可能已有 revision 列；onConflictDoNothing 保冪等。
+        const lineageParentId = splitGenerationSourceMeta(gen.params).meta.sourceAssetId;
+        if (lineageParentId && lineageParentId !== asset.id) {
+          await tx.insert(schema.assetRevisions).values({
+            assetId: asset.id,
+            sourceAssetId: lineageParentId,
+            projectId: gen.projectId,
+            groupId: gen.groupId,
+            createdBy: gen.userId,
+          }).onConflictDoNothing();
         }
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
