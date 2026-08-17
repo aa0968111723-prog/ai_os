@@ -42,6 +42,30 @@ export function composeToAssistant(text: string): void {
 }
 
 /**
+ * 「把助手打開，但不要替我說話」。
+ *
+ * 手機 Action-first 的卡片按鈕需要這件事：使用者按「查看並確認」時，該做的是
+ * 把他帶到既有的確認卡前面，**不是**代他再送一句話出去（那會多跑一輪，還可能
+ * 多花一次點數）。compose 事件辦不到——它的 handler 明確要求 `detail.text` 非空，
+ * 而空字串在那條路上代表「沒有人要說話」。
+ *
+ * 只有手機的面板擁有者（MobileNavigation）訂閱這個事件：桌機的助手入口
+ * 一直在頂欄，不需要別人替它開，也不該因為手機新增的東西而改變行為。
+ */
+export const ASSISTANT_OPEN_EVENT = "aios:assistant-open";
+
+export function openAssistantSurface(): void {
+  window.dispatchEvent(new CustomEvent(ASSISTANT_OPEN_EVENT));
+}
+
+export function useAssistantOpenListener(onOpen: () => void): void {
+  useEffect(() => {
+    window.addEventListener(ASSISTANT_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(ASSISTANT_OPEN_EVENT, onOpen);
+  }, [onOpen]);
+}
+
+/**
  * 訂閱「有人要對 Aios 說話」。
  *
  * @param onCompose 收到文字時做什麼（面板擁有者＝打開面板；助手本體＝填進輸入框）

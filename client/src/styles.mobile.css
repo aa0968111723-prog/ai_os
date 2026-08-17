@@ -209,6 +209,181 @@
 
   .m-ai__chip:active { transform: scale(.95); }
 
+  /* ── 上下文膠囊（目前專案／幕／鏡就在輸入框上方）─────────────────── */
+  .m-capsule {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    color: var(--fg-secondary);
+    font-size: 12px;
+  }
+
+  .m-capsule > svg { flex: 0 0 auto; align-self: center; }
+
+  /* 一行放不下就截斷，不換行：膠囊變兩行會把輸入框推出拇指區 */
+  .m-capsule__lines {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .m-capsule__head { font-weight: 700; color: var(--fg); }
+
+  /* 分隔點畫在偽元素上：DOM 不放裝飾字元，讀屏才不會念出「‧」 */
+  .m-capsule__line::before { content: "·"; margin-right: 6px; opacity: .6; }
+
+  /* ── 動作卡（回答／提議／進度／結果／需要決定）───────────────────── */
+  .m-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--bg);
+  }
+
+  .m-card.is-attention { border-color: var(--primary-ink); }
+
+  .m-card__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg-secondary);
+  }
+
+  .m-card__eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+  }
+
+  .m-card__title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+    /* 標題最多兩行——手機的卡片不是文件 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .m-card__lines {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    color: var(--fg-secondary);
+  }
+
+  .m-card__steps {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+  }
+
+  .m-card__step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--fg-secondary);
+  }
+
+  .m-card__step > svg { flex: 0 0 auto; }
+
+  .m-card__step-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .m-card__step-count {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--fg);
+  }
+
+  /* 狀態不只靠顏色：圖示在 DOM 裡，這裡只是加強對比 */
+  .m-card__step.is-done { color: var(--fg); }
+  .m-card__step.is-failed { color: var(--danger, #c0392b); }
+  .m-card__step.is-blocked { color: var(--primary-ink); }
+
+  .m-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* 44px：手機主要動作的最小觸控目標（styles.mobileTouch 契約同一條線） */
+  .m-card__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .m-card__cta--primary {
+    border-color: transparent;
+    background: var(--primary-tint);
+    color: var(--primary-ink);
+  }
+
+  /* 付費標記與按鈕文字同一顆按鈕上——把成本折進圖示或 tooltip 是明確禁止的 */
+  .m-card__paid {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--primary-ink);
+    color: var(--bg);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .m-card__choices {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .m-card__choice {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--popover);
+    color: var(--fg);
+    font-size: 14px;
+    font-weight: 650;
+    text-align: start;
+  }
+
+  .m-card__cta:active,
+  .m-card__choice:active { transform: scale(.98); }
+
   /* ── 清單列（最近專案／次級入口） ───────────────────────────────── */
   .m-recent__list,
   .m-entries {
@@ -387,6 +562,8 @@
 /* 動作偏好：關掉按壓縮放（與 styles.css 的 reduced-motion 區塊同一條契約） */
 @media (max-width: 767.98px) and (prefers-reduced-motion: reduce) {
   .m-ai__chip:active,
+  .m-card__cta:active,
+  .m-card__choice:active,
   .m-recent__row:active,
   .m-entries__row:active { transform: none; }
   .m-sheet { animation: none; }

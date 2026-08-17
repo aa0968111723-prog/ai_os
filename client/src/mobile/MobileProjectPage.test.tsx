@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const projectQuery = vi.fn();
 const assetsQuery = vi.fn();
 const composed: string[] = [];
+/** 「只開面板、不代說話」被按到時會 push 一筆 */
+const opened: string[] = [];
 /** 桌面工作台被真的載進來時會 push 一筆——第一屏絕不該有 */
 const heavyLoads: string[] = [];
 
@@ -16,6 +18,8 @@ vi.mock("../api", () => ({
 vi.mock("../lib/assistantCompose", () => ({
   composeToAssistant: (text: string) => composed.push(text),
   useAssistantComposeListener: () => {},
+  openAssistantSurface: () => opened.push("assistant"),
+  useAssistantOpenListener: () => {},
 }));
 vi.mock("../pages/ProjectPage", () => ({
   ProjectPage: () => {

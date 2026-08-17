@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const homeQuery = vi.fn();
 const composed: string[] = [];
+/** 「只開面板、不代說話」被按到時會 push 一筆 */
+const opened: string[] = [];
 
 vi.mock("../api", () => ({
   trpc: { phone: { home: { useQuery: (...args: unknown[]) => homeQuery(...args) } } },
@@ -10,6 +12,8 @@ vi.mock("../api", () => ({
 vi.mock("../lib/assistantCompose", () => ({
   composeToAssistant: (text: string) => composed.push(text),
   useAssistantComposeListener: () => {},
+  openAssistantSurface: () => opened.push("assistant"),
+  useAssistantOpenListener: () => {},
 }));
 
 const navigate = vi.fn();
@@ -69,7 +73,11 @@ describe("手機首頁", () => {
     fireEvent.change(input, { target: { value: "幫我生成下一個分鏡" } });
     fireEvent.submit(input.closest("form")!);
 
-    expect(composed).toEqual(["幫我生成下一個分鏡"]);
+    // 走的仍是同一條 compose 接縫；差別是那句話被補上了「哪個專案」——
+    // 首頁的路由是 /dashboard，助手拿不到專案身分（線上 pageContext 白名單不帶
+    // projectId），不補的話「下一個分鏡」在伺服器端沒有所指。補上去的字原樣
+    // 進助手輸入框，使用者看得到自己送出了什麼。
+    expect(composed).toEqual(["在「禪心一炷香」：幫我生成下一個分鏡"]);
     // 送出後清空，避免使用者以為沒送出去而再按一次
     expect((input as HTMLInputElement).value).toBe("");
   });

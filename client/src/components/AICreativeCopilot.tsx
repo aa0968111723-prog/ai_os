@@ -1,4 +1,5 @@
 import { useAssistantComposeListener } from "../lib/assistantCompose";
+import { clearPhoneAssistantTurn, publishPhoneAssistantTurn } from "../lib/phoneAssistantBridge";
 import { useState, useRef, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc, type AppRouter } from "../api";
@@ -567,6 +568,22 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       originScrollY: typeof window === "undefined" ? undefined : window.scrollY,
       focusAnchor: pageCtx.entityId,
     });
+    /* 重新整理之後，手機那張卡要接回**伺服器檢查點**的狀態，而不是從零開始。
+       `active: false` 是刻意的：重整不會把在途請求接回來，所以這裡不得顯示
+       「進行中」——真正還在跑的 agent run 由它自己的伺服器控制器續跑。 */
+    publishPhoneAssistantTurn({
+      scope: "group",
+      scopeId: groupId,
+      answer: recovered.messages.at(-1)?.text,
+      events: recovered.events,
+      activeGoal: expireStaleActiveGoal(recovered.activeGoal) ?? undefined,
+      pendingInteraction: recovered.activeGoal?.pendingInteraction?.status === "pending"
+        ? recovered.activeGoal.pendingInteraction
+        : undefined,
+      results: recovered.recentActionResults,
+      running: false,
+      updatedAt: new Date(recovered.updatedAt).getTime(),
+    });
   }, [durableConversation.data, groupId, pageCtx.entityId, pageCtx.route]);
 
   const recordInteractionLifecycle = (
@@ -883,6 +900,11 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     // 底部導覽那顆球與這張卡是同一個助手的兩個身體：卡片在思考時球也要跟著脈動，
     // 否則使用者把 sheet 滑下去之後，畫面上就沒有任何「它還在想」的線索。
     setOrbState("thinking");
+    /* 手機動作卡的投影（Phone UX，<768px）。桌機沒有訂閱者，行為零改變。
+       這裡送的是「這一輪開始了」，事件與結果在 applyDone/applyError 補上。 */
+    publishPhoneAssistantTurn({
+      scope: "group", scopeId: groupId, goalText: text, running: true, updatedAt: Date.now(),
+    });
 
     type AskData = {
       answer: string;
@@ -1007,6 +1029,25 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
             ]
           : undefined,
       });
+      publishPhoneAssistantTurn({
+        scope: "group",
+        scopeId: groupId,
+        goalText: text,
+        answer: data.answer,
+        events: visibleEvents,
+        // 待確認提議只帶標題：手機不重建確認卡，按下去是回到既有那一張。
+        pendingProposals: [
+          ...data.siteActions.map((a, i) => ({ id: `site-${i}`, label: a.label })),
+          ...data.dispatches.map((a, i) => ({ id: `dispatch-${i}`, label: a.label })),
+          ...data.actions.map((a, i) => ({ id: `command-${i}`, label: a.label })),
+        ],
+        activeGoal: data.activeGoal,
+        pendingInteraction: data.interactionRequest,
+        // 已驗證的收據；bridge 會再濾一次 verification（雙保險，見其檔頭不變式 3）
+        results: actionResults,
+        running: false,
+        updatedAt: Date.now(),
+      });
     };
     const applyError = (message: string) => {
       if (!runStillCurrent()) return;
@@ -1022,6 +1063,15 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         // 失敗也要留下已經跑過的事件：使用者最需要知道的正是「卡在哪一步」
         events: liveEventsRef.current.filter(isAgentEvent),
         retryText: text,
+      });
+      publishPhoneAssistantTurn({
+        scope: "group",
+        scopeId: groupId,
+        goalText: text,
+        answer: `執行中斷：${message}`,
+        events: liveEventsRef.current.filter(isAgentEvent),
+        running: false,
+        updatedAt: Date.now(),
       });
     };
 
@@ -1143,6 +1193,16 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       events: liveEventsRef.current.filter(isAgentEvent),
       retryText: activeGoalRef.current || undefined,
     });
+    // 停止之後那張卡必須離開「進行中」，否則手機上會永遠停在一個假的執行狀態。
+    publishPhoneAssistantTurn({
+      scope: "group",
+      scopeId: groupId,
+      goalText: activeGoalRef.current || undefined,
+      answer: "已停止；未開始的步驟不會再執行。",
+      events: liveEventsRef.current.filter(isAgentEvent),
+      running: false,
+      updatedAt: Date.now(),
+    });
     endAssistantRun(groupId, runId, attemptId);
   };
 
@@ -1162,6 +1222,8 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     liveEventsRef.current = [];
     endAssistantRun(groupId, runId, attemptId);
     clearAssistantConversation(groupId);
+    // 清掉對話就要清掉它的投影，否則手機首頁還留著一張已經不存在的結果卡。
+    clearPhoneAssistantTurn("group", groupId);
     setActivePlan(null);
     setOrbState("idle");
     ask.reset();

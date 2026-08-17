@@ -184,6 +184,10 @@ export function MobileProjectPage({ id }: { id: string }) {
           label: "接下來要做什麼？",
           prompt: `「${project.title}」目前${statusLine}。接下來最該做的是什麼？請直接幫我開始。`,
         }}
+        groupId={project.groupId}
+        projectId={id}
+        projectTitle={project.title}
+        statusLine={statusLine}
       />
 
       <section className="m-project__stats" aria-label="目前工作">
