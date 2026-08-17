@@ -47,7 +47,9 @@ const viewports = [
   { name: "desktop-1440", width: 1440, height: 960 },
 ];
 const results = {};
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || "/usr/local/bin/google-chrome",
+});
 try {
   for (const viewport of viewports) {
     const context = await browser.newContext({ viewport });
