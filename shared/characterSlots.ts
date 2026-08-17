@@ -24,6 +24,14 @@ export interface CharacterSlot {
   ownedPropIds: string[];
   /** 參考優先序（1 為主角色——排前面的角色參考先進 mixer 預算） */
   priority: number;
+  /**
+   * 角色聲線（closure §5）：durable voice identity。
+   * 可選欄位——舊 packet 的 slots 沒有這些欄位時指紋不變。
+   */
+  voiceCanonId?: string | null;
+  voiceVersionId?: string | null;
+  voiceModelId?: string | null;
+  voiceId?: string | null;
 }
 
 export interface CharacterSlotIssue {

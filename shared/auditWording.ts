@@ -201,6 +201,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.adoptGeneration": "採用生成結果為 current",
   "canon.createFromEntity": "把設定卡升為 Team Canon",
   "canon.addVersionFromPin": "從專案卡片建立 Canon 新版本",
+  "canon.createProjectCanon": "建立風格／聲線／聲音世界設定",
+  "canon.addProjectCanonVersion": "更新風格／聲線／聲音世界設定版本",
   "canon.addVersionFromTraining": "把訓練成果掛為 Canon 候選版本",
   "canon.promoteVersion": "採用 Canon 版本為 production",
   "canon.rollbackVersion": "退回 Canon production 版本",

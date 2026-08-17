@@ -86,3 +86,46 @@ describe("shot context packets", () => {
     expect(staleShotIdsForEntityChange([rain, interior], { kind: "knowledge", id: "k9" })).toEqual([]);
   });
 });
+
+describe("closure §4–§6 conditional fields", () => {
+  it("keeps historical fingerprints stable when no style/voice/sound canon is pinned", () => {
+    const legacy = packet();
+    const material = canonicalShotContextMaterial(legacy);
+    expect(material).not.toContain("styleCanon");
+    expect(material).not.toContain("narrationVoice");
+    expect(material).not.toContain("soundWorld");
+  });
+
+  it("changes the fingerprint material when a style canon lands or its version moves", () => {
+    const base = canonicalShotContextMaterial(packet());
+    const withStyle = canonicalShotContextMaterial(packet({
+      styleCanon: { canonId: "cs1", versionId: "v1" },
+    }));
+    const upgraded = canonicalShotContextMaterial(packet({
+      styleCanon: { canonId: "cs1", versionId: "v2" },
+    }));
+    expect(withStyle).not.toBe(base);
+    expect(upgraded).not.toBe(withStyle);
+  });
+
+  it("emits canon:<id> dependency keys so canon upgrades stale only dependent shots", () => {
+    const deps = packetDependencies(packet({
+      styleCanon: { canonId: "cs1", versionId: "v1" },
+      narrationVoice: { canonId: "cn1", versionId: "v1", modelId: "m", voiceId: "v", language: null },
+      soundWorld: { canonId: "cw1", versionId: "v1", ambience: null, music: null },
+      characterSlots: [{
+        characterId: "c1", characterRev: 1, characterName: null,
+        canonId: null, canonVersionId: null, lookId: null, lookRev: null,
+        identityReferenceAssetId: null, lookReferenceAssetId: null,
+        ownedPropIds: [], priority: 1,
+        voiceCanonId: "cv1", voiceVersionId: "vv1", voiceModelId: "m", voiceId: "v",
+      }],
+    }));
+    expect(deps.entityKeys).toContain("canon:cs1");
+    expect(deps.entityKeys).toContain("canon:cn1");
+    expect(deps.entityKeys).toContain("canon:cw1");
+    expect(deps.entityKeys).toContain("canon:cv1");
+    expect(staleShotIdsForEntityChange([deps], { kind: "canon", id: "cs1" })).toEqual([deps.shotId]);
+    expect(staleShotIdsForEntityChange([deps], { kind: "canon", id: "unrelated" })).toEqual([]);
+  });
+});

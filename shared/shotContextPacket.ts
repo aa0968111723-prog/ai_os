@@ -99,6 +99,20 @@ export interface ShotContextPacketPayload {
   characterSlots?: CharacterSlot[];
   /** 腳本明確授權的狀態改變（§11）：換裝／淋濕／道具轉手等，不得報 drift */
   scriptAuthorizedChanges?: ScriptAuthorizedChange[];
+  /**
+   * Style Canon（closure §4）：這一鏡凍結時 pinned 的專案風格真相。
+   * 有 pin 時 worldStyle＝canon styles（取代 worldview 即時值）；舊 packet 無此欄。
+   */
+  styleCanon?: { canonId: string; versionId: string } | null;
+  /**
+   * Voice（closure §5）：旁白預設聲線（角色聲線在 characterSlots 上）。
+   * 聲線是 durable identity——不是每次生成靠角色名重選 voice。
+   */
+  narrationVoice?: { canonId: string; versionId: string; modelId: string; voiceId: string; language: string | null } | null;
+  /**
+   * Sound World（closure §6）：專案級聲音世界 canon（scene package 凍結場級的份）。
+   */
+  soundWorld?: { canonId: string; versionId: string; ambience: string | null; music: string | null } | null;
   locks: Array<{ mentionKey: string; entityKind: string; entityId: string }>;
   negativeConstraints: string[];
   worldStyle: string[];
@@ -151,6 +165,10 @@ export function canonicalShotContextMaterial(payload: ShotContextPacketPayload):
     ...(payload.scriptAuthorizedChanges?.length
       ? { scriptAuthorizedChanges: payload.scriptAuthorizedChanges }
       : {}),
+    // closure §4–§6 條件欄位：Style／Voice／Sound World canon 依賴（同樣保護歷史指紋）
+    ...(payload.styleCanon ? { styleCanon: payload.styleCanon } : {}),
+    ...(payload.narrationVoice ? { narrationVoice: payload.narrationVoice } : {}),
+    ...(payload.soundWorld ? { soundWorld: payload.soundWorld } : {}),
   });
 }
 
@@ -166,6 +184,13 @@ export function packetDependencies(payload: ShotContextPacketPayload): ShotDepen
   ];
   if (payload.storyId) refs.push({ kind: "story", id: payload.storyId, rev: payload.storyRev });
   if (payload.storySceneId) refs.push({ kind: "scene", id: payload.storySceneId, rev: payload.storySceneRev });
+  // closure §8：project canon（style／voice／sound world）也是依賴——canon 換版只 stale 真依賴鏡
+  if (payload.styleCanon) refs.push({ kind: "canon", id: payload.styleCanon.canonId, rev: null });
+  if (payload.narrationVoice) refs.push({ kind: "canon", id: payload.narrationVoice.canonId, rev: null });
+  if (payload.soundWorld) refs.push({ kind: "canon", id: payload.soundWorld.canonId, rev: null });
+  for (const slot of payload.characterSlots ?? []) {
+    if (slot.voiceCanonId) refs.push({ kind: "canon", id: slot.voiceCanonId, rev: null });
+  }
   return {
     shotId: payload.shotId,
     entityKeys: [...new Set(refs.map((ref) => `${ref.kind}:${ref.id}`))].sort(),

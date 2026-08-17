@@ -32,7 +32,16 @@ export interface ScenePackagePayload {
   props: Array<ScenePackageEntityRef & { ownerKind?: string | null; ownerId?: string | null }>;
   /** 專案風格與聲音世界（worldview styles／場景 ambience 預設） */
   style: string[];
-  soundWorld: { ambience: string | null };
+  /**
+   * closure §6：canon 欄位為可選——pinned Sound World canon 時凍結其 identity；
+   * 舊 package 沒有這些欄位（undefined 不進 JSON.stringify，歷史指紋穩定）。
+   */
+  soundWorld: {
+    ambience: string | null;
+    canonId?: string;
+    canonVersionId?: string;
+    music?: string | null;
+  };
   /** 鏡頭語言彙總（這場戲各 Shot 的 camera 欄位聯集摘要；provider-independent） */
   cameraLanguage: string[];
   /** 敘事目標（storyScene summary／excerpt） */
@@ -82,8 +91,12 @@ export function scenePackageDependencies(payload: ScenePackagePayload): {
     ...payload.activeLooks,
     ...payload.props,
   ];
+  const keys = refs.map((ref) => `${ref.kind}:${ref.id}`);
+  // closure §6／§8：canon 依賴——Sound World／場景 canon 換版只 stale 真依賴的場
+  if (payload.sceneCanon) keys.push(`canon:${payload.sceneCanon.canonId}`);
+  if (payload.soundWorld.canonId) keys.push(`canon:${payload.soundWorld.canonId}`);
   return {
     storySceneId: payload.storySceneId,
-    entityKeys: [...new Set(refs.map((ref) => `${ref.kind}:${ref.id}`))].sort(),
+    entityKeys: [...new Set(keys)].sort(),
   };
 }

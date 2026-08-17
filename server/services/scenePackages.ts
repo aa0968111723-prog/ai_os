@@ -117,6 +117,11 @@ export async function buildScenePackagePayload(input: {
     return Object.values(camera).filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   }))];
 
+  // closure §4／§6：pinned Style／Sound World canon（消費點同樣守 rights）
+  const { resolveProjectCanonDefaults } = await import("./teamCanon");
+  const packageCanonDefaults = await resolveProjectCanonDefaults(project.id);
+  const soundWorldCanon = packageCanonDefaults.soundWorld;
+
   return {
     schemaVersion: SCENE_PACKAGE_SCHEMA_VERSION,
     projectId: project.id,
@@ -131,8 +136,20 @@ export async function buildScenePackagePayload(input: {
       kind: "prop", id: row.id, rev: row.rev, name: row.name,
       ownerKind: row.ownerKind, ownerId: row.ownerId,
     })),
-    style: worldview.styles,
-    soundWorld: { ambience: shots.find((shot) => shot.ambience?.trim())?.ambience ?? null },
+    // closure §4：pinned Style Canon＝專案風格真相（與 shot packet 同一條 single-truth 規則）
+    style: packageCanonDefaults.styleStyles ?? worldview.styles,
+    soundWorld: (() => {
+      const shotAmbience = shots.find((shot) => shot.ambience?.trim())?.ambience ?? null;
+      // closure §6：pinned Sound World canon＝場的聲音 identity（undefined 欄位不進 JSON，
+      // 沒有 canon 的 package 素材與舊版 bit-for-bit 相同）
+      if (!soundWorldCanon) return { ambience: shotAmbience };
+      return {
+        ambience: shotAmbience ?? soundWorldCanon.ambience,
+        canonId: soundWorldCanon.canonId,
+        canonVersionId: soundWorldCanon.versionId,
+        music: soundWorldCanon.music,
+      };
+    })(),
     cameraLanguage,
     narrativeGoal: storyScene.summary?.trim() || storyScene.storyExcerpt?.trim() || null,
     entryContinuity,

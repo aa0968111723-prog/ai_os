@@ -73,6 +73,23 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
       });
     }
 
+    // Execution-rights revalidation（closure §3）：重用凍結 packet 的路徑
+    //（batch／agent approval resume）——packet 凍結時的 canon 授權可能已被撤回，
+    // 送 provider 前重驗；權限失效直接擋，不 silent fallback、不偷 rebuild packet。
+    if (shotContextPacketId) {
+      const { revalidatePacketCanonRights, formatExecutionRightsError } = await import("./executionRights");
+      const rightsBlockers = await revalidatePacketCanonRights({
+        payload: frozen.payload,
+        projectId: core.projectId,
+      });
+      if (rightsBlockers.length) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: formatExecutionRightsError(rightsBlockers),
+        });
+      }
+    }
+
     // §13：影片一致性血緣——image-to-video 只能由「這一鏡已採用的畫面」或
     // 呼叫端明確指定的 parent 生成；不得退回角色卡湊圖（那正是換臉的來源）。
     const { getModel } = await import("../../shared/models");

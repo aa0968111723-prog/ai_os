@@ -143,6 +143,93 @@ export function canonKindForLocalEntity(kind: CanonLocalEntityKind): CanonKind {
   }
 }
 
+/**
+ * Project canon（closure §4–§6）：沒有本地卡的三種 canon——
+ * Style／Voice／Sound World。真相在 canon version payload；
+ * 專案綁定＝pin（localEntity 為 null）；packet build 直接消費 pin。
+ */
+export const PROJECT_CANON_KINDS = ["style", "voice", "sound_world"] as const;
+export type ProjectCanonKind = (typeof PROJECT_CANON_KINDS)[number];
+
+/** Voice descriptor 的角色定位：綁定角色的聲線，或專案旁白預設 */
+export const VOICE_CANON_ROLES = ["character", "narration"] as const;
+export type VoiceCanonRole = (typeof VOICE_CANON_ROLES)[number];
+
+/**
+ * 由結構化輸入組 project canon descriptor（pure，service 與測試共用）。
+ * descriptor 維持 Record<string,string|null>（與 fingerprint 排序相容）；
+ * 陣列欄位（styles）以「、」canonical join。
+ * 驗證失敗回傳錯誤字串（呼叫端轉 TRPCError）——不 throw，pure 好測。
+ */
+export function buildProjectCanonDescriptor(
+  kind: ProjectCanonKind,
+  input: Record<string, unknown>,
+): { descriptor: Record<string, string | null>; error: string | null } {
+  const str = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
+  if (kind === "style") {
+    const styles = Array.isArray(input.styles)
+      ? (input.styles as unknown[]).filter((row): row is string => typeof row === "string" && Boolean(row.trim()))
+      : [];
+    if (!styles.length && !str(input.palette) && !str(input.lighting)) {
+      return { descriptor: {}, error: "風格 Canon 至少需要一個風格詞、色盤或光線語彙" };
+    }
+    return {
+      descriptor: {
+        style: styles.length ? styles.join("、") : null,
+        palette: str(input.palette),
+        lighting: str(input.lighting),
+        camera: str(input.camera),
+        rendering: str(input.rendering),
+        negative: str(input.negative),
+        notes: str(input.notes),
+      },
+      error: null,
+    };
+  }
+  if (kind === "voice") {
+    const role: VoiceCanonRole = input.role === "narration" ? "narration" : "character";
+    const modelId = str(input.modelId);
+    const voiceId = str(input.voiceId);
+    if (!modelId || !voiceId) {
+      return { descriptor: {}, error: "聲線 Canon 需要指定 TTS 模型與 voice/speaker ID" };
+    }
+    if (role === "character" && !str(input.characterId)) {
+      return { descriptor: {}, error: "角色聲線需要綁定角色；旁白預設請用 role=narration" };
+    }
+    return {
+      descriptor: {
+        provider: "fal",
+        modelId,
+        voiceId,
+        language: str(input.language),
+        role,
+        characterId: role === "character" ? str(input.characterId) : null,
+        notes: str(input.notes),
+      },
+      error: null,
+    };
+  }
+  // sound_world
+  if (!str(input.ambience) && !str(input.music)) {
+    return { descriptor: {}, error: "聲音世界 Canon 至少需要環境音或配樂語彙" };
+  }
+  return {
+    descriptor: {
+      ambience: str(input.ambience),
+      music: str(input.music),
+      sfx: str(input.sfx),
+      mood: str(input.mood),
+      notes: str(input.notes),
+    },
+    error: null,
+  };
+}
+
+/** style descriptor 的 canonical style 詞（「、」join 的反向） */
+export function styleCanonStyles(descriptor: Record<string, string | null>): string[] {
+  return (descriptor.style ?? "").split("、").map((row) => row.trim()).filter(Boolean);
+}
+
 /** Pin 狀態（master plan §4）：Team 出了新版不 silent-update，只標 UPDATE_AVAILABLE */
 export type CanonPinState = "PINNED" | "UPDATE_AVAILABLE";
 
