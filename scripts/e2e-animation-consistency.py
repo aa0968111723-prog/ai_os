@@ -14,6 +14,8 @@
 #   6. 換一套造型 = 系統知道那是「另一個一致性狀態」（指紋改變，身份不變）。
 #   7. 連戲檢查（continuity checker）會抓到：改了角色外觀 → 舊鏡頭全部過時；
 #      改了某一鏡的動作 → 只有那一鏡過時。這正是動畫組要的「不一致會被通知」。
+#   8. 三視圖模型選擇：純 text-to-video 參考圖 0/N 且發出 multi_reference_unsupported；
+#      多圖 edit 模型才會 attached≥1。這鎖住 SOP 的兩段式建議。
 #
 # 前置：E2E_MOCK=1（假生成，免 FAL_KEY）、:3199、SEED_ADMIN_*、全新 DB。
 # 執行：見 scripts/run-animation-consistency.sh（自帶 DB 重置 + 起假生成伺服器）。
@@ -85,6 +87,43 @@ def anchor_tail(positive_prompt):
     marker = "[專案背景]"
     idx = positive_prompt.find(marker)
     return positive_prompt[idx:] if idx >= 0 else positive_prompt
+
+
+def upload_tiny_png(opener, project_id, filename):
+    """multipart 上傳 1×1 PNG（與 e2e-story 同一顆最小合法圖）。"""
+    boundary = "----animconsistency"
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff03000006000557bfabd400000000"
+        "49454e44ae426082"
+    )
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"projectId\"\r\n\r\n{project_id}\r\n".encode(),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode(),
+        png,
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    req = urllib.request.Request(
+        f"{HOST}/api/upload",
+        data=b"".join(parts),
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    if opener.cookie:
+        req.add_header("Cookie", opener.cookie)
+    try:
+        with opener.open(req) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"__error__": e.read().decode()[:200]}
+
+
+def continuity_note(prev):
+    return next((c.get("note") or "" for c in prev.get("context", []) if c.get("type") == "continuity"), "")
+
+
+def warning_codes(prev):
+    return {w.get("code") for w in (prev.get("warnings") or [])}
 
 
 # ── 0. 登入 → 找到「動畫組」 ─────────────────────────────────────────────
@@ -369,7 +408,38 @@ outdated_after = after_design.get("outdated", [])
 ok("改角色外觀後：所有用到小蓮的鏡頭全部被標過時（含換造型鏡=7 鏡）", after_design.get("total") == 7)
 ok("過時原因指出是『外觀』", all("外觀" in o["reason"] for o in outdated_after))
 
-# ── 9. 給人看的證據摘要 ─────────────────────────────────────────────────
+# ── 9. 三視圖模型選擇（SOP 實測）：純影片 0/N；多圖 edit 才 attached≥1 ──
+EDIT_MODEL = os.environ.get("E2E_EDIT_MODEL", "fal-ai/nano-banana-2/edit")
+up = upload_tiny_png(admin, pid, "小蓮三視圖_OK.png")
+ok("定裝參考圖上傳成功", isinstance(up, dict) and (up.get("ok") or up.get("duplicate")))
+ref_id = (up.get("asset") or up.get("duplicate") or {}).get("id")
+bound = call("POST", admin, "characters.update", {"id": lian["id"], "referenceAssetId": ref_id}) if ref_id else {"__error__": "no asset"}
+ok("小蓮綁定定裝參考圖", isinstance(bound, dict) and "__error__" not in bound)
+
+preview_payload = {
+    "projectId": pid,
+    "prompt": SHOTS[0]["prompt"],
+    "characterIds": CHAR_IDS,
+    "scenePresetIds": [street["id"]],
+    "propIds": [lantern["id"]],
+    "continuityMode": True,
+}
+wan_prev = call("POST", admin, "generation.preview", {**preview_payload, "modelId": MODEL})
+edit_prev = call("POST", admin, "generation.preview", {**preview_payload, "modelId": EDIT_MODEL})
+ok("純影片模型仍可預覽（文字錨點弱鎖）", isinstance(wan_prev, dict) and "__error__" not in wan_prev)
+ok("多圖 edit 模型可預覽", isinstance(edit_prev, dict) and "__error__" not in edit_prev)
+ok("純影片模型：參考圖 0/N（三視圖沒被帶進）", "參考圖 0/" in continuity_note(wan_prev))
+ok("純影片模型發出 multi_reference_unsupported", "multi_reference_unsupported" in warning_codes(wan_prev))
+ok("純影片模型建議兩段式（edit＋三視圖 → i2v）", any(
+    "兩段式" in (w.get("suggestion") or "") for w in (wan_prev.get("warnings") or [])
+    if w.get("code") == "multi_reference_unsupported"
+))
+ok("多圖 edit 模型：參考圖帶進去了（attached≥1）",
+   "參考圖 0/" not in continuity_note(edit_prev) and "參考圖 " in continuity_note(edit_prev))
+ok("多圖 edit 模型沒有誤報 multi_reference_unsupported",
+   "multi_reference_unsupported" not in warning_codes(edit_prev))
+
+# ── 10. 給人看的證據摘要 ─────────────────────────────────────────────────
 print("\n──────── 證據摘要（一鏡的完整組裝提示詞）────────")
 if first_preview_pos:
     print(first_preview_pos[:1200])
@@ -378,4 +448,7 @@ for s, sid in zip(SHOTS, shot_ids):
     fp = done_gens[sid]["continuitySnapshot"]["fingerprint"]
     print(f"  {s['title']:<22} fp={fp[:16]}…")
 print(f"  {'鏡5b（除夕夜造型）':<22} fp={(night_snap.get('fingerprint') or '')[:16]}…  ← 造型不同，指紋刻意不同")
+print("\n──────── 三視圖模型選擇 ────────")
+print(f"  {MODEL:<42} {continuity_note(wan_prev)}")
+print(f"  {EDIT_MODEL:<42} {continuity_note(edit_prev)}")
 print("──────────────────────────────────────────\n")

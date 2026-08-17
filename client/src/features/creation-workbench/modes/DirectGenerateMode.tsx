@@ -686,7 +686,7 @@ export function DirectGenerateMode({
                 </button>
                 <Hint as="p" style={{ margin: "8px 0 0" }}>
                   {continuityLocked
-                    ? "會凍結本次角色、場景與素材版本；模型支援時，自動按角色→場景→道具順序送入多張參考圖。"
+                    ? "會凍結本次角色、場景與素材版本。只有宣告 image_urls 的多圖 edit 模型才會把三視圖送進去；純文字生圖／生影片只有文字錨點。動畫實務：edit＋三視圖鎖關鍵影格，再 image-to-video。"
                     : "仍會注入卡片文字，但不附加多張一致性參考圖；之後重試也不視為鎖定版本。"}
                 </Hint>
               </div>

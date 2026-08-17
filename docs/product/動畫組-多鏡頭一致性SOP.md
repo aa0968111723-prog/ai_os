@@ -124,14 +124,17 @@ Aios 把一致性拆成六層，動畫組只要把「聖經」建好，之後每
 ## 機器證明（可重跑）
 
 `scripts/e2e-animation-consistency.py` 用「老街紅燈籠」6 鏡短片把上面每一條都驗一遍
-（63 項斷言）：世界觀注入、角色／場景／道具錨點跨鏡逐字一致、造型鎖定、逐鏡動作物理、
-跨鏡指紋一致、換造型指紋改變、以及連戲檢查對「改動作／改外觀」的過時判定。
+（約 70 項斷言）：世界觀注入、角色／場景／道具錨點跨鏡逐字一致、造型鎖定、逐鏡動作物理、
+跨鏡指紋一致、換造型指紋改變、連戲檢查對「改動作／改外觀」的過時判定，以及
+**三視圖模型選擇**（純影片 `參考圖 0/N`＋`multi_reference_unsupported`；
+`nano-banana-2/edit` 才 attached≥1）。
 
 ```bash
-# 需要本機 Postgres；用獨立 e2e 庫，不動開發資料庫
-sudo -u postgres createdb aios_anim_e2e   # 第一次才需要
+# 獨立庫（不動開發資料庫；第一次先 createdb）
+sudo -u postgres createdb aios_anim_e2e
 bash scripts/run-animation-consistency.sh
+# 或走共用 e2e runner（會重置該次使用的 DB）
+bash scripts/run-e2e-local.sh animation-consistency
 ```
 
-輸出末端會印出「一鏡的完整組裝提示詞」與「跨鏡 continuity 指紋表」，可直接貼進交接說明。
-```
+輸出末端會印出「一鏡的完整組裝提示詞」、「跨鏡 continuity 指紋表」與「三視圖模型選擇對照」。
