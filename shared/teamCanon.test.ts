@@ -10,6 +10,7 @@ import {
   localFieldsForCanonKind,
   pinState,
   styleCanonStyles,
+  styleDnaFromDescriptor,
   type CanonVersionPayload,
 } from "./teamCanon";
 
@@ -126,6 +127,31 @@ describe("project canon descriptors (closure §4–§6)", () => {
     expect(built.descriptor.style).toBe("水彩、吉卜力");
     expect(styleCanonStyles(built.descriptor)).toEqual(["水彩", "吉卜力"]);
     expect(built.descriptor.negative).toBe("不要棚拍打光");
+  });
+
+  it("adds Style DNA conditionally so legacy descriptors remain stable", () => {
+    const legacy = buildProjectCanonDescriptor("style", {
+      styles: ["水彩"], palette: "暖橙",
+    });
+    const emptyDna = buildProjectCanonDescriptor("style", {
+      styles: ["水彩"], palette: "暖橙", styleDna: {},
+    });
+    expect(emptyDna.descriptor).toEqual(legacy.descriptor);
+    expect(Object.keys(legacy.descriptor).some((key) => key.startsWith("dna."))).toBe(false);
+
+    const withDna = buildProjectCanonDescriptor("style", {
+      styles: ["水彩"],
+      styleDna: {
+        lineTreatment: "柔和鉛筆線",
+        shadingMode: "painterly",
+        cameraMovementVocabulary: "慢推、固定鏡",
+      },
+    });
+    expect(styleDnaFromDescriptor(withDna.descriptor)).toEqual({
+      lineTreatment: "柔和鉛筆線",
+      shadingMode: "painterly",
+      cameraMovementVocabulary: "慢推、固定鏡",
+    });
   });
 
   it("voice requires model+voiceId, and a character binding unless it is the narration default", () => {

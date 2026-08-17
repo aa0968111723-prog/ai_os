@@ -2,7 +2,7 @@
  * Server-side Project Consistency Graph + workspace projection.
  * UI must read this; it must not invent completeness from button clicks.
  */
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import {
@@ -176,6 +176,25 @@ export async function projectWorkspaceProjection(input: {
     staleShotIds: [...stale],
     artifactFindings,
   });
+  // One latest immutable evaluation per shot; no per-shot query fan-out and no history payload flood.
+  const latestEvaluations = await db.selectDistinctOn(
+    [schema.generationConsistencyEvaluations.shotId],
+    {
+      shotId: schema.generationConsistencyEvaluations.shotId,
+      result: schema.generationConsistencyEvaluations.result,
+      createdAt: schema.generationConsistencyEvaluations.createdAt,
+    },
+  ).from(schema.generationConsistencyEvaluations)
+    .where(eq(schema.generationConsistencyEvaluations.projectId, project.id))
+    .orderBy(schema.generationConsistencyEvaluations.shotId, desc(schema.generationConsistencyEvaluations.createdAt));
+  const outputEvaluationFindings = latestEvaluations.flatMap((row) =>
+    row.result.findings.map((finding) => ({
+      shotId: row.shotId,
+      dimension: finding.dimension,
+      severity: finding.severity,
+      reason: finding.reason,
+    })),
+  );
   const projection: WorkspaceProjection = {
     projectId: project.id,
     applied: {
@@ -263,6 +282,7 @@ export async function projectWorkspaceProjection(input: {
       soundWorldPinned: Boolean(canonDefaults.soundWorld),
       lineageGapShotIds: lineageResult.lineageGapShotIds,
       deliveryBlockers: blockers,
+      outputEvaluationFindings,
     }),
   };
   return projection;
