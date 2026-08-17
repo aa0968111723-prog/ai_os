@@ -1,4 +1,4 @@
-import { sha256 } from "./sha256";
+import { sha256Hex } from "./sha256";
 import type { MotionFinding } from "./animationMotion";
 import type { ShotContextPacketPayload } from "./shotContextPacket";
 
@@ -144,7 +144,7 @@ export function parseVisualEvaluatorPayload(payload: unknown): Pick<AnimationCon
 }
 
 export function animationEvidenceFingerprint(evidence: AnimationEvaluationEvidence): string {
-  return sha256(JSON.stringify({
+  return sha256Hex(JSON.stringify({
     generationId: evidence.generationId,
     shotId: evidence.shotId,
     packetId: evidence.packetId,
