@@ -7,17 +7,26 @@ import { freezeShotContextPacket } from "../server/services/shotContextPackets";
 const email = process.env.SEED_ADMIN_EMAIL || "admin@aidirector.local";
 const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
 if (!user) throw new Error(`找不到 ${email}`);
-const [membership] = await db.select({
-  groupId: schema.groupMembers.groupId,
-  role: schema.groupMembers.role,
+const [group] = await db.select({
+  groupId: schema.groups.id,
   groupName: schema.groups.name,
   teamId: schema.groups.teamId,
   teamName: schema.teams.name,
-}).from(schema.groupMembers)
-  .innerJoin(schema.groups, eq(schema.groups.id, schema.groupMembers.groupId))
+}).from(schema.groups)
   .innerJoin(schema.teams, eq(schema.teams.id, schema.groups.teamId))
-  .where(and(eq(schema.groupMembers.userId, user.id), eq(schema.groups.name, "動畫組")));
-if (!membership) throw new Error("找不到動畫組 membership");
+  .where(eq(schema.groups.name, "動畫組"));
+if (!group) throw new Error("找不到動畫組");
+const [existingMembership] = await db.select().from(schema.groupMembers).where(and(
+  eq(schema.groupMembers.userId, user.id),
+  eq(schema.groupMembers.groupId, group.groupId),
+));
+if (!existingMembership) {
+  await db.insert(schema.groupMembers).values({
+    userId: user.id,
+    groupId: group.groupId,
+    role: "leader",
+  });
+}
 
 const auth: AuthState = {
   user: {
@@ -28,11 +37,11 @@ const auth: AuthState = {
     mustChangePassword: user.mustChangePassword,
   },
   groups: [{
-    groupId: membership.groupId,
-    groupName: membership.groupName,
-    teamId: membership.teamId,
-    teamName: membership.teamName,
-    role: membership.role,
+    groupId: group.groupId,
+    groupName: group.groupName,
+    teamId: group.teamId,
+    teamName: group.teamName,
+    role: existingMembership?.role ?? "leader",
   }],
   adminTeamIds: [],
 };
@@ -40,7 +49,7 @@ const auth: AuthState = {
 const projectId = randomUUID();
 await db.insert(schema.projects).values({
   id: projectId,
-  groupId: membership.groupId,
+  groupId: group.groupId,
   ownerId: user.id,
   title: `動畫連貫審查證據 ${Date.now() % 100000}`,
   kind: "animation",
@@ -50,14 +59,14 @@ await db.insert(schema.projects).values({
 });
 const [character] = await db.insert(schema.characters).values({
   projectId,
-  groupId: membership.groupId,
+  groupId: group.groupId,
   name: "小蓮",
   appearance: "六歲女孩、齊瀏海黑色短髮、紅色雨衣",
   createdBy: user.id,
 }).returning({ id: schema.characters.id });
 const [prop] = await db.insert(schema.props).values({
   projectId,
-  groupId: membership.groupId,
+  groupId: group.groupId,
   name: "紅燈籠",
   appearance: "紅紙、金色流蘇、正面福字",
   ownerKind: "character",
@@ -69,9 +78,9 @@ const svg = (label: string, color: string) => `data:image/svg+xml,${encodeURICom
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><rect width="640" height="360" fill="${color}"/><circle cx="320" cy="175" r="88" fill="#f7d7b5"/><path d="M250 155h140v130H250z" fill="#b7353b"/><text x="320" y="325" text-anchor="middle" font-size="28" fill="white">${label}</text></svg>`,
 )}`;
 const assets = await db.insert(schema.assets).values([
-  { projectId, groupId: membership.groupId, kind: "image", title: "上一鏡", url: svg("上一鏡", "#24334f"), uploadedBy: user.id },
-  { projectId, groupId: membership.groupId, kind: "image", title: "目前鏡", url: svg("目前鏡", "#5d426e"), uploadedBy: user.id },
-  { projectId, groupId: membership.groupId, kind: "image", title: "下一鏡", url: svg("下一鏡", "#2f6550"), uploadedBy: user.id },
+  { projectId, groupId: group.groupId, kind: "image", title: "上一鏡", url: svg("上一鏡", "#24334f"), uploadedBy: user.id },
+  { projectId, groupId: group.groupId, kind: "image", title: "目前鏡", url: svg("目前鏡", "#5d426e"), uploadedBy: user.id },
+  { projectId, groupId: group.groupId, kind: "image", title: "下一鏡", url: svg("下一鏡", "#2f6550"), uploadedBy: user.id },
 ]).returning({ id: schema.assets.id });
 const shots = await db.insert(schema.scenes).values([
   {
