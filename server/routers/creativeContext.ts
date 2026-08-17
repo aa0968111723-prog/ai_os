@@ -17,6 +17,10 @@ import { projectWorkspaceProjection } from "../services/projectConsistencyGraph"
 import { adoptGenerationCurrent } from "../services/consistencyAdopt";
 import { extractEndFrame } from "../services/derivedFrames";
 import {
+  evaluateGenerationConsistency,
+  listShotConsistencyEvaluations,
+} from "../services/animationEvaluator";
+import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
   listStoryEntityBindings,
@@ -46,6 +50,33 @@ export const creativeContextRouter = router({
     .input(z.object({ videoAssetId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return extractEndFrame({ auth: ctx.auth, videoAssetId: input.videoAssetId });
+    }),
+
+  evaluateGeneration: authedProcedure
+    .input(z.object({
+      generationId: z.string().uuid(),
+      /** Explicit opt-in: a configured evaluator may be an external paid API. */
+      confirmExternalEvaluation: z.literal(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return evaluateGenerationConsistency({
+        auth: ctx.auth,
+        generationId: input.generationId,
+        runVisualCheck: input.confirmExternalEvaluation,
+      });
+    }),
+
+  consistencyEvaluations: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return listShotConsistencyEvaluations({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        shotId: input.shotId,
+      });
     }),
 
   compose: authedProcedure

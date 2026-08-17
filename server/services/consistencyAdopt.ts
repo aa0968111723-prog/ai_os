@@ -1,7 +1,7 @@
 /**
  * Explicit Adopt: the only path that may move a shot's current visual pointer.
  */
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
@@ -51,6 +51,20 @@ export async function adoptGenerationCurrent(input: {
         message: report.issues[0]?.message ?? "一致性不足，不能採用為 current",
       });
     }
+  }
+  const [latestOutputEvaluation] = await db.select({
+    result: schema.generationConsistencyEvaluations.result,
+  }).from(schema.generationConsistencyEvaluations)
+    .where(eq(schema.generationConsistencyEvaluations.generationId, generation.id))
+    .orderBy(desc(schema.generationConsistencyEvaluations.createdAt))
+    .limit(1);
+  if (latestOutputEvaluation?.result.recommendation === "block_adopt") {
+    const blocker = latestOutputEvaluation.result.findings.find((row) =>
+      row.severity === "blocker" && row.confidence === "high");
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: blocker?.reason ?? "成品一致性檢查有高信心阻擋項，請先修復候選",
+    });
   }
 
   const [asset] = generation.resultUrl

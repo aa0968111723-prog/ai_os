@@ -370,4 +370,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0078_project_canon_name_uq": [
     "22ba174a6dd9f1c4af43bfed30484d2335c042aff6064992fd7c1e190da8509c",
   ],
+  "0079_animation_consistency_evaluations": [
+    "d7345fd35e30fe40fed4ecd7b52db99890e7d03a9a8416f83f5916a2f6c0f819",
+  ],
 };
