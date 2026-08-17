@@ -52,6 +52,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const viewport of viewports) {
+    console.log(`▸ ${viewport.name}`);
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     await login(page);
