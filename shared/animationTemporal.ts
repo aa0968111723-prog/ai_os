@@ -119,9 +119,13 @@ export function compileTemporalSequence(
   const contracts: TemporalShotContract[] = [];
   let previousExpectedEnd = adoptedEntryState;
   for (const shot of shots) {
+    const authoredStart = {
+      ...(shot.authoredStart ?? {}),
+      environment: shot.authoredStart?.environment ?? shot.environment,
+    };
     const expectedStart = inheritContinuityState(
       previousExpectedEnd,
-      shot.authoredStart,
+      authoredStart,
       shot.transitionType,
     );
     const changed = deriveShotEndState({
