@@ -90,5 +90,13 @@ describe("assistant execution fast path", () => {
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "prepare_external_generation")).toMatchObject({
       risk: "EXTERNAL", direct: false, executionMode: "DIRECT_TOOL", verificationStrategy: "external_confirmation",
     });
+    expect(classifyAssistantRequest("這一幕還有什麼問題？")).toMatchObject({
+      intent: "ASK", capabilityId: "animation_review_summary",
+    });
+    expect(classifyAssistantRequest("人物跟連戲先修，畫風不要")).toMatchObject({
+      capabilityId: "animation_plan_repair",
+    });
+    expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_execute_repair")?.risk).toBe("COSTFUL");
+    expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_adopt_candidate")?.risk).toBe("SAFE_WRITE");
   });
 });

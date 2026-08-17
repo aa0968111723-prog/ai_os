@@ -110,6 +110,13 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "dispatch_agent", domain: "COLLABORATION", access: "WRITE", label: "派工給專案代理", risk: "COSTFUL", direct: false },
   capability({ id: "orchestrate_group_campaign", domain: "COLLABORATION", access: "WRITE", label: "規劃跨專案活動", risk: "COSTFUL", direct: false, executionMode: "GROUP_CAMPAIGN", handler: "groupAgent.planCampaign", resultType: "generic", verificationStrategy: "read_back" }),
   { id: "read_generations", domain: "GENERATION", access: "READ", label: "讀取生成紀錄與模型", risk: "READ", direct: true },
+  { id: "animation_review_summary", domain: "GENERATION", access: "READ", label: "讀取動畫製作檢查摘要", risk: "READ", direct: true },
+  { id: "animation_list_findings", domain: "GENERATION", access: "READ", label: "列出動畫製作問題", risk: "READ", direct: true },
+  { id: "animation_plan_repair", domain: "GENERATION", access: "READ", label: "規劃動畫 targeted repair", risk: "READ", direct: true },
+  { id: "animation_execute_repair", domain: "GENERATION", access: "WRITE", label: "執行動畫修復階段", risk: "COSTFUL", direct: false },
+  { id: "animation_compare_candidate", domain: "GENERATION", access: "READ", label: "比較動畫修復候選", risk: "READ", direct: true },
+  { id: "animation_adopt_candidate", domain: "GENERATION", access: "WRITE", label: "採用動畫修復候選", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"] },
+  { id: "animation_keep_current", domain: "GENERATION", access: "WRITE", label: "保留動畫現用版本", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"] },
   { id: "generate_media", domain: "GENERATION", access: "WRITE", label: "生成圖片或影片", risk: "COSTFUL", direct: false },
   capability({ id: "prepare_external_generation", domain: "GENERATION", access: "WRITE", label: "開啟外部 AI 生成", risk: "EXTERNAL", direct: false, requiredContextSlots: ["projectId", "shotId"], executionMode: "DIRECT_TOOL", handler: "externalIntake.prepareExternalGeneration", resultType: "generation", verificationStrategy: "external_confirmation" }),
   capability({ id: "prepare_editing_handoff", domain: "ASSET", access: "WRITE", label: "準備外部剪輯交接", risk: "EXTERNAL", direct: false, requiredContextSlots: ["projectId"], executionMode: "DIRECT_TOOL", handler: "externalEditing.prepare", resultType: "generic", verificationStrategy: "read_back" }),
@@ -145,6 +152,13 @@ const CROSS_PROJECT_PLAN_RE = /(?:跨專案|多個專案|所有專案|整個團�
 const PROJECT_AGENT_RE = /(?:完整分鏡|腳本.{0,20}(?:整理|拆).{0,20}分鏡|逐鏡|每一鏡|人物與場景|整支影片|這支影片.{0,20}(?:完成|製作)|多步(?:驟)?)/i;
 
 const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> = [
+  { id: "animation_execute_repair", pattern: /(?:確認執行|照這個計畫執行|開始修復).{0,8}(?:修復|計畫)?/i },
+  { id: "animation_adopt_candidate", pattern: /(?:採用這版|用修好的|採用這一鏡)/i },
+  { id: "animation_keep_current", pattern: /(?:保留現用|原本比較好)/i },
+  { id: "animation_compare_candidate", pattern: /(?:開始檢查|比較候選|看看候選)/i },
+  { id: "animation_plan_repair", pattern: /(?:幫我修|只修|先修|規劃修復).{0,16}(?:人物|連戲|畫風|動作|鏡頭|問題)?/i },
+  { id: "animation_list_findings", pattern: /(?:哪些鏡頭|哪幾鏡).{0,12}(?:不一致|有問題)|人物不一致/i },
+  { id: "animation_review_summary", pattern: /(?:這一幕|這幕|這一場).{0,8}(?:有什麼問題|哪裡有問題|還有什麼問題)|動畫檢查/i },
   { id: "open_browser_runtime", pattern: /(?:開啟|打開|啟動).{0,10}(?:瀏覽器|browser)|(?:瀏覽器|browser).{0,10}(?:開啟|打開|啟動)/i },
   { id: "import_url", pattern: /(?:https?:\/\/[^\s]+).*(?:加入|匯入|帶進|帶入|放進|存到|素材庫)|(?:加入|匯入|帶進|帶入|放進|存到).*(?:https?:\/\/[^\s]+)/i },
   { id: "import_google_drive", pattern: /(?:google\s*drive|雲端硬碟|雲端磁碟).*(?:匯入|帶進|帶入|加入|放進)|(?:匯入|帶進|帶入|加入|放進).*(?:google\s*drive|雲端硬碟|雲端磁碟)/i },
@@ -248,6 +262,7 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
     confidence: text.length >= 4 ? "high" : "medium",
     title,
     steps: ["讀取目前上下文", "查證需要的資料", "整理結論與下一步"],
+    ...(matchedCapability ? { capabilityId: matchedCapability.id, executionMode: matchedCapability.executionMode } : {}),
   };
 }
 

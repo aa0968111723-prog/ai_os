@@ -150,6 +150,8 @@ export async function targetedAnimationRepairPlan(input: {
   auth: AuthState;
   projectId: string;
   shotIds?: string[];
+  dimensions?: AnimationRepairPlan["dimensions"];
+  findingCodes?: string[];
 }): Promise<AnimationRepairPlan> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, false);
   const evaluations = await db.selectDistinctOn(
@@ -187,9 +189,16 @@ export async function targetedAnimationRepairPlan(input: {
     keyframes[shot.id] = kind === "image" ? shot.assetId : null;
     videos[shot.id] = kind === "video" ? shot.assetId : null;
   }
+  const findings = evaluations.flatMap((row) =>
+    row.result.findings
+      .filter((finding) => {
+        if (input.dimensions?.length && !input.dimensions.includes(finding.dimension)) return false;
+        if (input.findingCodes?.length && !input.findingCodes.includes(finding.code)) return false;
+        return true;
+      })
+      .map((finding) => ({ ...finding, shotId: row.shotId })));
   return planTargetedAnimationRepair({
-    findings: evaluations.flatMap((row) =>
-      row.result.findings.map((finding) => ({ ...finding, shotId: row.shotId }))),
+    findings,
     adoptedKeyframeAssetIds: keyframes,
     adoptedVideoAssetIds: videos,
   });

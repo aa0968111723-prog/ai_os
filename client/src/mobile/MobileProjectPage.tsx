@@ -7,6 +7,7 @@ import { Button, EmptyState, Meta, Skeleton } from "../components/ui";
 import { registerAssistantPage } from "../lib/assistantContext";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { MobileAiBar } from "./MobileAiBar";
+import { usePhoneAnimationRepair } from "./usePhoneAnimationRepair";
 import { StageTrack } from "./MobileHome";
 import { anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageSentence } from "./stages";
 
@@ -88,6 +89,10 @@ export function MobileProjectPage({ id }: { id: string }) {
 
   const project = summary.data?.project;
   const stage = summary.data?.stage ?? "story";
+  const animation = usePhoneAnimationRepair({
+    projectId: id,
+    repairResume: summary.data?.repairResume ?? null,
+  });
 
   // 助手頁面感知：報出專案身分，助手的快捷才會是「看進度／繼續製作／找缺漏」
   useEffect(
@@ -208,6 +213,11 @@ export function MobileProjectPage({ id }: { id: string }) {
         projectId={id}
         projectTitle={project.title}
         statusLine={statusLine}
+        animationCard={animation.card}
+        onInterceptSend={animation.tryHandle}
+        onRunCommand={(command) => {
+          void animation.runCommand(command as Parameters<typeof animation.runCommand>[0]);
+        }}
       />
 
       <section className="m-project__stats" aria-label="目前工作">
