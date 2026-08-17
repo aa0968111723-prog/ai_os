@@ -807,6 +807,36 @@ export const generationRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "此模型已不在目錄，無法核准送出" });
       }
 
+      // Execution-rights revalidation（closure §3，P0）：packet 是凍結意圖，授權是活的——
+      // 等待核准期間 Canon generationAllowed／reuseScope 被撤回、送出者被移出組、專案被封存，
+      // 都必須在「扣點與呼叫 provider 之前」擋下。不 silent fallback：
+      // 收斂到 failed（未扣點）＋把 blockers 全文寫進 error（audit 由 mutation 中介層照記）。
+      {
+        const { revalidateExecutionRights, formatExecutionRightsError } = await import("../services/executionRights");
+        const rights = await revalidateExecutionRights({
+          generation: { id: gen.id, projectId: gen.projectId, groupId: gen.groupId, userId: gen.userId, params: gen.params },
+        });
+        if (!rights.ok) {
+          const message = formatExecutionRightsError(rights.blockers);
+          const [blocked] = await db.update(schema.generations)
+            .set({ status: "failed", error: message, updatedAt: new Date() })
+            .where(eq(schema.generations.id, gen.id))
+            .returning();
+          const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+          if (trace) {
+            await recordAiTraceEventSafely({
+              sessionId: trace.id,
+              eventType: "validation",
+              summary: "核准時重驗權限未通過，未送出 provider",
+              payload: { decision: "blocked", blockers: rights.blockers },
+            });
+            await updateAiTraceSession(trace.id, { status: "completed", summary: "執行權限已失效，生成未送出" }).catch(() => undefined);
+          }
+          await postSystemMessage(`⛔ 待核生成無法執行（${model.label}）：${message}`);
+          return { ...blocked, blockers: rights.blockers };
+        }
+      }
+
       // BYOK：核准當下再解析個人 key（與 submit 同口徑）；個人路徑不扣平台點
       const { userFalKey, usedUserKey } = await resolveByokFalKey(gen.userId, model, gen.params);
 

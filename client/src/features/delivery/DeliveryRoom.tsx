@@ -33,8 +33,11 @@ import {
   type ShotCompletionInput,
 } from "@shared/shotCompletion";
 
-/** 批次生成用的預設文生圖模型（與單格工作室、分鏡表同一顆，畫風不分岔） */
-const BATCH_MODEL = "fal-ai/fast-lightning-sdxl";
+import { ONE_CLICK_BATCH_MODEL } from "../story-workspace/oneClickFilm";
+import { ProjectRightsReadiness } from "../../components/AssetRightsChip";
+
+/** 批次生成用的預設文生圖模型（與一鍵生成／單格工作室同一顆，畫風不分岔） */
+const BATCH_MODEL = ONE_CLICK_BATCH_MODEL;
 
 const FILTERS = [
   { key: "all", label: "全部" },
@@ -120,7 +123,7 @@ export function DeliveryRoom({
         <EmptyState
           icon={<Icon name="Clapperboard" size={20} />}
           title="還沒有分鏡可以交付"
-          description="先回到「① 故事」寫故事、產生分鏡，這裡就會自動出現整部片的完成度與待辦。"
+          description="先回到故事寫內容、產生分鏡，這裡就會自動出現整部片的完成度與待辦。"
         />
       </Card>
     );
@@ -183,6 +186,8 @@ export function DeliveryRoom({
           </div>
         ))}
       </div>
+
+      <ProjectRightsReadiness projectId={projectId} />
 
       {issues.length === 0 ? (
         <Hint role="status" style={{ marginTop: 10 }}>

@@ -353,8 +353,22 @@ describe("legacy migration adoption bridge", () => {
     // columns and indexes, certification table/index, and durable Assistant
     // checkpoint table/indexes. One reviewed idempotent owner backfill is omitted
     // from drift because it changes rows, leaving 29 additive DDL statements.
+    // 0071 Project creative context: 2 CREATE TABLE IF NOT EXISTS + 5 guarded
+    // indexes — 7 statements, no data movement.
+    // 0072 Shot context packets: 2 CREATE TABLE IF NOT EXISTS + 4 guarded
+    // indexes — 6 statements, insert-only tables.
+    // 0073 Consistency training: 3 CREATE TABLE IF NOT EXISTS + 6 guarded
+    // indexes — 9 statements, no existing table touched.
+    // 0074 Team canon: 4 CREATE TABLE IF NOT EXISTS + 11 guarded indexes —
+    // 15 statements, all additive; canonical entities stay in their tables.
+    // 0075 Scene packages + continuity: 3 CREATE TABLE IF NOT EXISTS + 5 guarded
+    // indexes — 8 statements, insert-only projections, no data movement.
+    // 0076 Canon hardening: 1 guarded CREATE UNIQUE INDEX on a brand-new table
+    // (no deployed duplicates possible) — 1 statement.
+    // 0077 Commercial rights: 3 CREATE TABLE IF NOT EXISTS + 7 guarded
+    // indexes — 10 statements, one profile per existing asset, no rewrite.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10,
     );
   });
 

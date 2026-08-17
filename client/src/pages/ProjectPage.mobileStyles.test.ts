@@ -21,7 +21,7 @@ describe("mobile project-page contract (batch E)", () => {
     );
     expect(mobileList).not.toBeNull();
     const listRule = declarations.slice(
-      declarations.indexOf("#onboard-worldview", declarations.indexOf("(max-width: 820px)")),
+      declarations.indexOf("#onboard-worldview", declarations.indexOf("(max-width: 767.98px)")),
     );
     for (const id of ["#stage-story", "#stage-board", "#stage-create", "#stage-deliver"]) {
       expect(listRule.slice(0, 600)).toContain(id);
@@ -42,12 +42,14 @@ describe("mobile project-page contract (batch E)", () => {
     expect(declarations).toMatch(/\.token-chips \.chip\s*\{[^}]*overflow-wrap: anywhere/);
   });
 
-  // 手機上「生成」後確認面板落在摺線下看起來像沒反應：須捲進可視帶（gate ≤820 保桌機不變）
+  // 手機上「生成」後確認面板落在摺線下看起來像沒反應：須捲進可視帶（gate <768 保桌機不變）
   it("reveals the confirm panel after tapping 生成 on mobile", () => {
     const i = directMode.indexOf("setConfirming(true)");
     const after = directMode.slice(i, i + 700);
     // ?. guard：jsdom 沒有 matchMedia，裸呼叫會讓 client coverage job 整支 exit 1
-    expect(after).toContain('window.matchMedia?.("(max-width: 820px)")');
+    // 斷點本身不再寫死在這裡——產品切換點只有 lib/viewport.ts 的 PHONE_MQ 一份，
+    // 這條守的是「有 gate 而且有 ?. guard」，不是那串字面值。
+    expect(after).toContain("window.matchMedia?.(PHONE_MQ)");
     expect(after).toContain("scrollIntoViewForChrome");
   });
 });

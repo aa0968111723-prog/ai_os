@@ -1,0 +1,93 @@
+{
+  "sourceHead": "26bc101",
+  "measuredAt": "2026-08-14",
+  "method": "tRPC httpBatchLink GET URL model + per-shot SQL fan-out from story.shotAssetSuggestions",
+  "nodeMaxHttpHeaderBytes": 16384,
+  "rows": [
+    {
+      "shotCount": 20,
+      "before": {
+        "suggestionRequests": 20,
+        "dbQueries": 100,
+        "getUrlBytes": 2497,
+        "headerBytes": 2897,
+        "headerOverflow": false
+      },
+      "after": {
+        "suggestionRequests": 1,
+        "dbQueriesMax": 5,
+        "getUrlBytes": 157,
+        "headerBytes": 557,
+        "headerOverflow": false
+      }
+    },
+    {
+      "shotCount": 100,
+      "before": {
+        "suggestionRequests": 100,
+        "dbQueries": 500,
+        "getUrlBytes": 12417,
+        "headerBytes": 12817,
+        "headerOverflow": false
+      },
+      "after": {
+        "suggestionRequests": 1,
+        "dbQueriesMax": 5,
+        "getUrlBytes": 157,
+        "headerBytes": 557,
+        "headerOverflow": false
+      }
+    },
+    {
+      "shotCount": 130,
+      "before": {
+        "suggestionRequests": 130,
+        "dbQueries": 650,
+        "getUrlBytes": 16167,
+        "headerBytes": 16567,
+        "headerOverflow": true
+      },
+      "after": {
+        "suggestionRequests": 1,
+        "dbQueriesMax": 5,
+        "getUrlBytes": 157,
+        "headerBytes": 557,
+        "headerOverflow": false
+      }
+    },
+    {
+      "shotCount": 200,
+      "before": {
+        "suggestionRequests": 200,
+        "dbQueries": 1000,
+        "getUrlBytes": 24917,
+        "headerBytes": 25317,
+        "headerOverflow": true
+      },
+      "after": {
+        "suggestionRequests": 1,
+        "dbQueriesMax": 5,
+        "getUrlBytes": 157,
+        "headerBytes": 557,
+        "headerOverflow": false
+      }
+    },
+    {
+      "shotCount": 300,
+      "before": {
+        "suggestionRequests": 300,
+        "dbQueries": 1500,
+        "getUrlBytes": 37417,
+        "headerBytes": 37817,
+        "headerOverflow": true
+      },
+      "after": {
+        "suggestionRequests": 1,
+        "dbQueriesMax": 5,
+        "getUrlBytes": 157,
+        "headerBytes": 557,
+        "headerOverflow": false
+      }
+    }
+  ]
+}

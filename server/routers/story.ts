@@ -22,16 +22,17 @@ import {
   undoParseRun,
 } from "../services/storyParse";
 import { checkProjectContinuity } from "../services/continuityCheck";
+import { flushStoryDocNow } from "../services/collabDoc";
 import {
   diffStoryboardPlan,
   summarizeStoryboardDiff,
-  buildShotSearchTerms,
-  suggestAssetsForShot,
   environmentStateSchema,
   STORY_MAX_CHARS,
   STORY_SCENE_TITLE_MAX,
   type StoryParseSummary,
 } from "../../shared/story";
+import { expandShotSuggestions, shotAssetSuggestionsBatchInputSchema } from "../../shared/shotAssetSuggestions";
+import { loadShotAssetSuggestionsForProject } from "../services/shotAssetSuggestions";
 
 async function getProjectChecked(ctx: { auth: NonNullable<Parameters<typeof requireGroup>[0]> }, projectId: string, forEdit: boolean) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -212,6 +213,17 @@ export const storyRouter = router({
       return { id: row.id, rev: row.rev, updatedAt: row.updatedAt, versioned, merged };
     }),
 
+  /**
+   * 一鍵生成前強制把共編 Y.Doc 落到 stories.content。
+   * 成功才回；失敗讓呼叫端中止，避免用舊伺服器文字去解析／生成。
+   */
+  flushCollab: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      return flushStoryDocNow(project.id);
+    }),
+
   /** 版本清單（story 版）：由新到舊，只回摘要不回全文（比照 knowledge.listVersions） */
   listVersions: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
     const project = await getProjectChecked(ctx, input.projectId, false);
@@ -261,7 +273,7 @@ export const storyRouter = router({
   parse: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
-      return runStoryParse({
+      const result = await runStoryParse({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         force: input.force,
@@ -271,6 +283,17 @@ export const storyRouter = router({
           assertProjectNotArchived(project);
         },
       });
+      try {
+        const { resolveStoryEntityBindings } = await import("../services/storyEntityBinding");
+        await resolveStoryEntityBindings({
+          auth: ctx.auth,
+          projectId: input.projectId,
+          persist: true,
+        });
+      } catch (error) {
+        console.warn("[story.parse] entity binding skipped:", error instanceof Error ? error.message : error);
+      }
+      return result;
     }),
 
   /** 確認卡：建立／併入既有／略過（PE 計畫 §06——使用者只處理 AI 真正不確定的事） */
@@ -432,7 +455,7 @@ export const storyRouter = router({
   generateStoryboard: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), runId: z.string().uuid().optional() }))
     .mutation(async ({ ctx, input }) => {
-      return materializeStoryboard({
+      const result = await materializeStoryboard({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         runId: input.runId,
@@ -442,6 +465,28 @@ export const storyRouter = router({
           assertProjectNotArchived(project);
         },
       });
+      try {
+        // §6：先凍結每場戲的 Scene Package，Shot packet 才能繼承（順序刻意）
+        const { freezeScenePackage } = await import("../services/scenePackages");
+        for (const storySceneId of result.storySceneIds ?? []) {
+          await freezeScenePackage({
+            auth: ctx.auth,
+            projectId: input.projectId,
+            storySceneId,
+          });
+        }
+        const { freezeShotContextPacket } = await import("../services/shotContextPackets");
+        for (const shotId of result.sceneIds ?? []) {
+          await freezeShotContextPacket({
+            auth: ctx.auth,
+            projectId: input.projectId,
+            shotId,
+          });
+        }
+      } catch (error) {
+        console.warn("[story.generateStoryboard] packet freeze skipped:", error instanceof Error ? error.message : error);
+      }
+      return result;
     }),
 
   /** 撤銷一次解析（含它轉出的分鏡；Shot 進回收桶可再還原） */
@@ -531,65 +576,33 @@ export const storyRouter = router({
    * 這一鏡的相關素材（PE 計畫 §13／§26）：用這一鏡綁定的角色／場景／道具名字，
    * 去比對素材的標題與標籤。**不是語意檢索**，回傳也帶著命中的詞，
    * 讓 UI 能誠實地說「名稱或標籤對得上」而不是假裝「AI 已分析」（§60）。
+   *
+   * 單鏡相容入口；分鏡板請改走 shotAssetSuggestionsBatch，避免 N 卡 N 請求。
    */
   shotAssetSuggestions: authedProcedure
     .input(z.object({ sceneId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const [shot] = await db
-        .select()
+        .select({ id: schema.scenes.id, projectId: schema.scenes.projectId })
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!shot) throw new TRPCError({ code: "NOT_FOUND" });
       const project = await getProjectChecked(ctx, shot.projectId, false);
+      const batch = await loadShotAssetSuggestionsForProject({ projectId: project.id, shotIds: [shot.id] });
+      const compact = batch.byShotId[shot.id] ?? { terms: [], items: [] };
+      return { terms: compact.terms, items: expandShotSuggestions(batch, shot.id) };
+    }),
 
-      const [chars, locs, props] = await Promise.all([
-        shot.characterIds?.length
-          ? db.select({ name: schema.characters.name }).from(schema.characters).where(inArray(schema.characters.id, shot.characterIds))
-          : Promise.resolve([]),
-        shot.scenePresetIds?.length
-          ? db.select({ name: schema.scenePresets.name }).from(schema.scenePresets).where(inArray(schema.scenePresets.id, shot.scenePresetIds))
-          : Promise.resolve([]),
-        shot.propIds?.length
-          ? db.select({ name: schema.props.name }).from(schema.props).where(inArray(schema.props.id, shot.propIds))
-          : Promise.resolve([]),
-      ]);
-      const terms = buildShotSearchTerms({
-        characterNames: chars.map((c) => c.name),
-        locationNames: locs.map((l) => l.name),
-        propNames: props.map((p) => p.name),
-      });
-      if (!terms.length) return { terms: [], items: [] };
-
-      // 只找「使用者自己上傳的」素材：AI 生成物本來就綁在某一鏡上，
-      // 拿它回頭推薦給另一鏡只會讓畫面互相污染（參考素材要的是原始資料）。
-      const assets = await db
-        .select({
-          id: schema.assets.id,
-          title: schema.assets.title,
-          tags: schema.assets.tags,
-          kind: schema.assets.kind,
-          url: schema.assets.url,
-        })
-        .from(schema.assets)
-        .where(
-          and(
-            eq(schema.assets.projectId, project.id),
-            isNull(schema.assets.deletedAt),
-            eq(schema.assets.isAiGenerated, false),
-          ),
-        )
-        .orderBy(desc(schema.assets.createdAt))
-        .limit(300);
-
-      const suggestions = suggestAssetsForShot(terms, assets);
-      const byId = new Map(assets.map((a) => [a.id, a]));
-      return {
-        terms,
-        items: suggestions.flatMap((s) => {
-          const a = byId.get(s.assetId);
-          return a ? [{ id: a.id, title: a.title, kind: a.kind, url: a.url, matched: s.matched }] : [];
-        }),
-      };
+  /**
+   * 專案範圍一次讀完各鏡相關素材。輸入以 projectId 為主（一個小 GET），
+   * 可選 shotIds 最多 80 個——禁止把 300 個 id 塞進 query string。
+   * Server 端是固定少量 SQL，不是 N 次單鏡查詢的 Promise.all。
+   */
+  shotAssetSuggestionsBatch: authedProcedure
+    .input(shotAssetSuggestionsBatchInputSchema)
+    .query(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, false);
+      return loadShotAssetSuggestionsForProject({ projectId: project.id, shotIds: input.shotIds });
     }),
 
   /**

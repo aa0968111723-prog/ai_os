@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { lockExportDedup } from "../services/locks";
+import { projectDeliveryRights } from "../services/commercialRights";
 
 /**
  * 交付包匯出 job（QA-005）：建 job → exportRunner 背景打包 → 前端輪詢進度 → 完成後走
@@ -33,6 +34,19 @@ export const exportJobsRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId);
+
+      const rights = await projectDeliveryRights({
+        auth: ctx.auth,
+        projectId: project.id,
+        usageContext: "client_delivery",
+        assetIds: input.assetIds,
+      });
+      if (rights.blocked) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `商用權利尚未就緒：${[...rights.blockers, ...rights.warnings].join("；")}`,
+        });
+      }
 
       const key = assetKey(input.assetIds);
       // 防重複（QA-005 ＋ export-job-dedup-not-atomic）：整個「查進行中→無則建」放進交易並取 per-(project,assetKey)

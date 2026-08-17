@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { STORY_INLINE_REVEAL_EVENT, type StoryInlineRevealDetail } from "../story-workspace/storyInlineNav";
 import {
   PROJECT_CONTEXT_REVEAL_EVENT,
   contextTargetFromSelector,
@@ -70,6 +71,17 @@ describe("revealProjectContext", () => {
     });
   });
 
+  it("also opens the story-inline characters section", () => {
+    const seen: StoryInlineRevealDetail[] = [];
+    const handler = (e: Event) => {
+      seen.push((e as CustomEvent<StoryInlineRevealDetail>).detail);
+    };
+    window.addEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    revealProjectContext("characters", { projectId: "p1", scroll: false, highlight: false });
+    window.removeEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    expect(seen[0]).toMatchObject({ projectId: "p1", section: "characters" });
+  });
+
   it("revealProjectContextFromSelector maps chip targets", () => {
     const seen: ProjectContextRevealDetail[] = [];
     const handler = (e: Event) => {
@@ -98,5 +110,16 @@ describe("returnFromContext", () => {
     window.removeEventListener("aios:workbench-reveal", handler);
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[0]).toMatchObject({ projectId: "p1", anchor: "sec-studio" });
+  });
+
+  it("opens the in-place delivery slot instead of scrolling a lower rail", () => {
+    const seen: StoryInlineRevealDetail[] = [];
+    const handler = (e: Event) => {
+      seen.push((e as CustomEvent<StoryInlineRevealDetail>).detail);
+    };
+    window.addEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    returnFromContext("scenes", { projectId: "p1" });
+    window.removeEventListener(STORY_INLINE_REVEAL_EVENT, handler);
+    expect(seen[0]).toMatchObject({ projectId: "p1", section: "delivery" });
   });
 });

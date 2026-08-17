@@ -2,6 +2,15 @@
  * One-shot worker for ci-rate-limit-test.ts. Each invocation is a fresh Node
  * process with its own PostgreSQL pool, simulating an independent app replica.
  */
+const diagnostic = (...args: Parameters<typeof console.error>) => console.error(...args);
+
+// stdout is a strict one-record JSON protocol consumed by ci-rate-limit-test.ts.
+// Imported DB modules can emit startup diagnostics through console.log/info/debug;
+// keep those diagnostics on stderr so they cannot corrupt the JSON result.
+console.log = diagnostic;
+console.info = diagnostic;
+console.debug = diagnostic;
+
 const [action, scope, subject, limitRaw, windowRaw, blockRaw] = process.argv.slice(2);
 
 async function main(): Promise<unknown> {
@@ -39,4 +48,3 @@ main().then(
     process.exit(1);
   },
 );
-

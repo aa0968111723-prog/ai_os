@@ -3,6 +3,7 @@ import { authRouter } from "./auth";
 import { sessionBootRouter } from "./sessionBoot";
 import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
+import { phoneRouter } from "./phone";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 import { scenesRouter } from "./scenes";
@@ -34,6 +35,7 @@ import { databasesRouter } from "./databases";
 import { dataHubRouter } from "./dataHub";
 import { folderImportRouter } from "./folderImport";
 import { projectContextRouter } from "./projectContext";
+import { creativeContextRouter } from "./creativeContext";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
@@ -56,6 +58,8 @@ import { intelligenceRouter } from "./intelligence";
 import { externalIntakeRouter } from "./externalIntake";
 import { externalEditingRouter } from "./externalEditing";
 import { computerRuntimeRouter } from "./computerRuntime";
+import { canonRouter } from "./canon";
+import { commercialRightsRouter } from "./commercialRights";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -63,6 +67,8 @@ export const appRouter = router({
   sessionBoot: sessionBootRouter,
   admin: adminRouter,
   projects: projectsRouter,
+  // 手機首屏專用唯讀彙總（<768px）；桌面沿用既有 procedures，未動一行
+  phone: phoneRouter,
   generation: generationRouter,
   messages: messagesRouter,
   scenes: scenesRouter,
@@ -94,6 +100,9 @@ export const appRouter = router({
   dataHub: dataHubRouter,
   folderImport: folderImportRouter,
   projectContext: projectContextRouter,
+  creativeContext: creativeContextRouter,
+  canon: canonRouter,
+  commercialRights: commercialRightsRouter,
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,

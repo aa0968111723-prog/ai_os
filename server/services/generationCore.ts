@@ -219,11 +219,26 @@ export interface SubmitCoreInput {
    * 只落在 params 的 source meta（送 provider 前會被 split 掉），不需要 migration，重試自動沿用。
    */
   creative?: GenerationCreativeMeta;
+  /** Frozen packet this generation must stay bound to. */
+  shotContextPacketId?: string;
+  /**
+   * §10：凍結 packet 的完整 payload（generationCommand 傳入）。
+   * 有它才會啟用 role-aware reference mixer 與 identity adapter 套用；
+   * 沒有它時走既有 continuitySnapshot 路徑，行為不變。
+   */
+  shotContextPacket?: import("../../shared/shotContextPacket").ShotContextPacketPayload;
   /**
    * 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）、
    * "ambience"＝環境音（回填 ambienceAssetId）；不帶＝visual（回填 assetId）。
    */
   sceneRole?: "visual" | "narration" | "ambience";
+  /**
+   * Voice identity（closure §5）：TTS 生成綁定的聲線 canon。
+   * 支援的模型把 voiceId 真正寫進 provider 參數；不支援＝structured warning，不假裝。
+   */
+  voiceIdentity?: import("../../shared/voiceRouting").VoiceIdentity;
+  /** Sound World（closure §6）：ambience／music 生成依賴的聲音世界 canon（lineage 用） */
+  soundWorldRef?: { canonId: string; versionId: string };
   /** 來源工作流執行 id：runner 帶入，生成列落庫後可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId?: string;
   /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
@@ -278,6 +293,10 @@ export interface PreparedGenerationRequest {
   scenePointerAtSubmit: string | null;
   continuityReferences: ContinuityReferenceResult;
   continuityCoverage: ContinuityCoverage;
+  /** §10：role-aware reference mixer 的計畫與降級（null＝本次沒有 packet） */
+  referenceMix: import("../../shared/referenceMixer").ReferenceMixPlan | null;
+  /** closure §5：voice identity 是否真的寫進 provider 參數（false＝模型不支援，已記 warning） */
+  voiceApplied: boolean;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
   /** 提示詞 token 實測（見 services/promptTokens）；預覽與警告共用同一份量測 */
   promptBudget: PromptBudgetReport;
@@ -430,7 +449,17 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源是測試佔位素材，正式生成無法使用——請上傳真實檔案" });
   }
 
-  const worldview = worldviewSchema.parse(project.worldview ?? {});
+  let worldview = worldviewSchema.parse(project.worldview ?? {});
+  // closure §4：packet＝凍結意圖。有 packet 時，風格與負向約束以凍結值為準——
+  // pinned Style Canon 的 styles／negative 才會真的流進 provider prompt，
+  // 而不是「packet 記了一份、prompt 又臨時抓 live worldview」的兩套真相。
+  if (input.shotContextPacket) {
+    worldview = {
+      ...worldview,
+      styles: input.shotContextPacket.worldStyle,
+      taboos: input.shotContextPacket.negativeConstraints,
+    };
+  }
   const character = continuitySnapshot
     ? formatCharacterAnchor(continuitySnapshot.characters, continuitySnapshot.characters.map((row) => row.id))
     : "";
@@ -466,6 +495,118 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
+
+  // closure §5：voice identity → provider 參數。只有真的支援 voice 參數的模型會套用；
+  // 不支援＝structured warning（誠實降級），提示詞不假裝已鎖定聲線。
+  let voiceApplied = false;
+  if (input.voiceIdentity && model.kind === "audio") {
+    const { applyVoiceIdentity } = await import("../../shared/voiceRouting");
+    voiceApplied = applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
+    if (voiceApplied) {
+      warnings.push({
+        code: "voice_identity_applied",
+        severity: "info",
+        title: "已套用固定聲線",
+        detail: "這段音訊使用專案綁定的聲線 identity 生成，跨鏡不會換聲。",
+      });
+    } else {
+      warnings.push({
+        code: "voice_identity_unsupported",
+        severity: "warning",
+        title: "此模型不支援指定聲線",
+        detail: "已綁定聲線，但這個 TTS 模型沒有 voice/speaker 參數——本次使用模型預設聲音。",
+        suggestion: "換支援聲線的模型（Kokoro／Qwen-TTS／VibeVoice），或接受預設聲音。",
+      });
+    }
+  }
+
+  // §10：packet 存在時啟用 role-aware reference mixer——依 身份→造型→場景→道具→風格
+  // 重排參考順序、依模型真實能力截斷，降級全部明講（不得假稱一致性已鎖定）。
+  let referenceMix: PreparedGenerationRequest["referenceMix"] = null;
+  if (input.shotContextPacket?.references?.length) {
+    const { capabilityForModel } = await import("../../shared/providerCapabilities");
+    const { mixShotReferences } = await import("../../shared/referenceMixer");
+    const capability = capabilityForModel(model);
+    const activeAdapter = input.shotContextPacket.provider.activeAdapter ?? null;
+    referenceMix = mixShotReferences({
+      references: input.shotContextPacket.references,
+      capability,
+      primaryAssetId: effectiveSourceAssetId ?? null,
+      characterCount: input.shotContextPacket.characters.length,
+      activeAdapter,
+    });
+    const mixField = referenceMix.attachedField;
+    if (
+      mixField
+      && referenceMix.orderedAssetIds.length
+      && Array.isArray(providerInput[mixField])
+    ) {
+      const { resolveAssetReferenceUrlsById } = await import("./continuity");
+      const resolved = await resolveAssetReferenceUrlsById(referenceMix.orderedAssetIds, project.groupId);
+      // 誠實回報實際送出的內容：解析階段被過濾掉的素材（已刪除／跨組／非圖片）
+      // 要出現在 dropped，計畫不能宣稱「已附上」它沒附上的東西。
+      const resolvedIds = new Set(resolved.map((row) => row.assetId));
+      const unresolved = referenceMix.orderedAssetIds.filter((id) => !resolvedIds.has(id));
+      if (unresolved.length) {
+        referenceMix = {
+          ...referenceMix,
+          orderedAssetIds: referenceMix.orderedAssetIds.filter((id) => resolvedIds.has(id)),
+          dropped: [
+            ...referenceMix.dropped,
+            ...unresolved.map((assetId) => ({ assetId, role: "identity" as const, reason: "素材已不可用（刪除／非圖片／跨組）" })),
+          ],
+          consistencyMode: "degraded" as const,
+        };
+        warnings.push({
+          code: "reference_mix_assets_unavailable",
+          severity: "warning",
+          title: "部分一致性參考已不可用",
+          detail: `有 ${unresolved.length} 份參考素材無法送出（已刪除、非圖片或不在本組）。`,
+        });
+      }
+      if (resolved.length) {
+        providerInput[mixField] = [...new Set([
+          ...(sourceUrl ? [sourceUrl] : []),
+          ...resolved.map((row) => row.url),
+        ])].slice(0, capability.maxReferenceImages);
+      }
+    }
+    // Canon 訓練成果（identity adapter）：generationCommand 已在 needs gate 前把 adapter
+    // 填進來源槽（lora 模型的來源＝LoRA 檔）；這裡負責誠實回報＋兜底空槽。
+    // 使用者自帶 LoRA 蓋過 adapter 時「不」宣稱已套用一致性模型。
+    if (activeAdapter && capability.identityAdapterSupport && Array.isArray(providerInput.loras)) {
+      const loras = providerInput.loras as Array<{ path?: unknown }>;
+      let adapterLoaded = loras.some((row) => typeof row?.path === "string" && row.path.includes(activeAdapter))
+        || input.sourceUrl === activeAdapter;
+      if (!adapterLoaded && (!loras.length || loras.every((row) => !row?.path))) {
+        providerInput.loras = [{ path: activeAdapter, scale: 1 }];
+        adapterLoaded = true;
+      }
+      if (adapterLoaded) {
+        warnings.push({
+          code: "identity_adapter_applied",
+          severity: "info",
+          title: "已套用角色一致性模型",
+          detail: "這次生成使用 Team Canon 訓練出的角色 adapter 維持身份一致。",
+        });
+      } else {
+        warnings.push({
+          code: "identity_adapter_displaced",
+          severity: "warning",
+          title: "自帶 LoRA 取代了角色一致性模型",
+          detail: "這次生成使用你指定的 LoRA，Team Canon 的角色 adapter 未套用。",
+        });
+      }
+    }
+    for (const downgrade of referenceMix.downgrades) {
+      warnings.push({
+        code: `reference_mix_${downgrade.code}`,
+        severity: "warning",
+        title: "一致性能力降級",
+        detail: downgrade.message,
+      });
+    }
+  }
   const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (effectivePropIds?.length ?? 0);
   if (selectedCards > 0 && !CARD_ANCHOR_CATEGORIES.has(model.category)) warnings.push({
     code: "cards_ignored",
@@ -602,6 +743,8 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     scenePointerAtSubmit,
     continuityReferences,
     continuityCoverage,
+    referenceMix,
+    voiceApplied,
     warnings,
   };
 }
@@ -780,6 +923,17 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     usedUserKey: usedUserKey || undefined,
     preserveScenePointer: input.preserveScenePointer,
     creative: input.creative,
+    shotContextPacketId: input.shotContextPacketId,
+    // closure §5／§6：聲線與聲音世界的 canon 依賴落進 meta——lineage 與 targeted stale 的根據
+    voice: input.voiceIdentity
+      ? {
+        canonId: input.voiceIdentity.canonId,
+        versionId: input.voiceIdentity.versionId,
+        voiceId: input.voiceIdentity.voiceId,
+        applied: prepared.voiceApplied,
+      }
+      : undefined,
+    soundWorld: input.soundWorldRef,
     // 只有「完成後真的會動指標」的生成才需要記基準；候選變體不動指標，記了也用不到。
     scenePointerAtSubmit: input.sceneId && !input.preserveScenePointer
       ? prepared.scenePointerAtSubmit ?? "" // 空字串＝送出時這一鏡沒有畫面（與「沒記錄」區分開）

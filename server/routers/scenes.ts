@@ -27,6 +27,7 @@ import { continuitySnapshotSchema } from "../../shared/continuity";
 import { describeDirectionChange } from "../../shared/story";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
 import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
+import { batchGenerateFingerprint } from "../../shared/projectCreativeContext";
 import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
@@ -974,6 +975,19 @@ export const scenesRouter = router({
         const prompt = await buildShotContextPrompt(scene, model);
         if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
         const cards = resolveSceneCards(scene, null);
+        let packetId: string | undefined;
+        try {
+          const { freezeShotContextPacket } = await import("../services/shotContextPackets");
+          const frozen = await freezeShotContextPacket({
+            auth: ctx.auth,
+            projectId: project.id,
+            shotId: scene.id,
+            modelId: model.id,
+          });
+          packetId = frozen.packetId;
+        } catch (error) {
+          console.warn("[scenes.batchGenerate] packet freeze skipped:", error instanceof Error ? error.message : error);
+        }
         steps.push({
           kind: "generate",
           note: `第 ${i + 1} 鏡「${scene.title}」生成畫面`,
@@ -985,10 +999,44 @@ export const scenesRouter = router({
           characterIds: cards.characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
+          shotContextPacketId: packetId,
         });
       }
       if (!steps.length) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可以批次生成的鏡（都已有畫面、已通過審核，或還沒寫畫面描述）" });
+      }
+
+      const fingerprint = batchGenerateFingerprint({
+        modelId: model.id,
+        sceneIds: steps.map((step) => String(step.sceneNo ?? "")),
+      });
+      const pending = await db
+        .select({
+          id: schema.agentRuns.id,
+          estPoints: schema.agentRuns.estPoints,
+          steps: schema.agentRuns.steps,
+          contextSlots: schema.agentRuns.contextSlots,
+        })
+        .from(schema.agentRuns)
+        .where(and(
+          eq(schema.agentRuns.projectId, project.id),
+          eq(schema.agentRuns.userId, ctx.auth.user.id),
+          eq(schema.agentRuns.status, "awaiting_approval"),
+        ))
+        .orderBy(desc(schema.agentRuns.createdAt))
+        .limit(20);
+      const reused = pending.find((run) => {
+        const slots = run.contextSlots as { batchFingerprint?: string } | null;
+        if (slots?.batchFingerprint === fingerprint) return true;
+        const existingSteps = Array.isArray(run.steps) ? run.steps as Array<{ kind?: string; sceneNo?: number; modelId?: string }> : [];
+        const existingFp = batchGenerateFingerprint({
+          modelId: model.id,
+          sceneIds: existingSteps.filter((step) => step.kind === "generate").map((step) => String(step.sceneNo ?? "")),
+        });
+        return existingFp === fingerprint;
+      });
+      if (reused) {
+        return { runId: reused.id, shots: steps.length, estPoints: reused.estPoints, reused: true as const };
       }
 
       const [run] = await db
@@ -1001,9 +1049,10 @@ export const scenesRouter = router({
           summary: `依分鏡順序逐鏡生成畫面，共 ${steps.length} 鏡。單鏡失敗不影響其他鏡，可隨時停止。`,
           steps,
           estPoints: (model.points ?? 0) * steps.length,
+          contextSlots: { batchFingerprint: fingerprint },
         })
         .returning({ id: schema.agentRuns.id, estPoints: schema.agentRuns.estPoints });
-      return { runId: run.id, shots: steps.length, estPoints: run.estPoints };
+      return { runId: run.id, shots: steps.length, estPoints: run.estPoints, reused: false as const };
     }),
 
   update: authedProcedure
@@ -1388,6 +1437,7 @@ export const scenesRouter = router({
         lookIds: scene.lookIds ?? undefined,
         // 凍結這一鏡當下的鏡頭語言：之後把「中景」改成「特寫」，這張圖就該被標成過時
         shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+        preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
@@ -1629,9 +1679,34 @@ export const scenesRouter = router({
       if (!prompt.trim()) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有旁白或對白，請先在分鏡或文字腳本裡填" });
       }
+      // closure §5：durable voice identity——聲線由 canon pin 決定，不是每次生成重選。
+      // 路由規則（bounded、誠實）：單一說話者且有綁聲線→角色聲線；否則旁白預設；
+      // 多說話者混合＝單一 TTS 呼叫無法各說各話，警示記在生成軌跡，不假裝多聲道。
+      const { resolveProjectCanonDefaults } = await import("../services/teamCanon");
+      const audioCanons = await resolveProjectCanonDefaults(scene.projectId);
+      const speakerNames = [...new Set(
+        speech.filter((line) => line.speaker && line.speaker !== "旁白").map((line) => line.speaker!),
+      )];
+      const voiceByName = new Map<string, import("../../shared/voiceRouting").VoiceIdentity>();
+      if (speakerNames.length && audioCanons.characterVoices.size) {
+        const chars = await db.select({ id: schema.characters.id, name: schema.characters.name })
+          .from(schema.characters)
+          .where(eq(schema.characters.projectId, scene.projectId));
+        for (const row of chars) {
+          const voice = audioCanons.characterVoices.get(row.id);
+          if (voice) voiceByName.set(row.name, voice);
+        }
+      }
+      const { routeSpeechVoice } = await import("../../shared/voiceRouting");
+      const routed = routeSpeechVoice({
+        speakers: speakerNames,
+        characterVoiceByName: voiceByName,
+        narrationVoice: audioCanons.narrationVoice,
+      });
       // 只放行「文字轉語音(TTS)」類：text-to-audio（配樂/音效）雖同為 kind=audio，但會生出音樂而非旁白，
       // 混入 narration 槽＝扣點又拿到錯內容，故以 category 精確把關（不能只看 kind）。
-      const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";
+      // 聲線 canon 指定了模型且呼叫端沒有明確覆蓋時，用聲線的模型（identity 含 model+voice 一對）。
+      const modelId = input.modelId ?? routed.voice?.modelId ?? "fal-ai/kokoro/mandarin-chinese";
       const model = getModel(modelId);
       if (!model || model.category !== "text-to-speech") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "配音需要用語音（TTS）模型" });
@@ -1661,9 +1736,15 @@ export const scenesRouter = router({
         prompt,
         sceneId: scene.id,
         sceneRole: "narration",
+        // 聲線 identity（可能為 null＝專案沒綁聲線，走模型預設，不記 voice meta）
+        voiceIdentity: routed.voice ?? undefined,
         reasonPrefix: "配音生成",
       });
-      return { generationId: gen.id };
+      return {
+        generationId: gen.id,
+        voice: routed.voice ? { canonId: routed.voice.canonId, voiceId: routed.voice.voiceId } : null,
+        unroutedSpeakers: routed.unrouted,
+      };
     }),
 
   /**
@@ -1681,7 +1762,14 @@ export const scenesRouter = router({
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "這一格剛被夥伴刪除了（可到回收桶還原），沒有送出環境音生成，也沒有扣點" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
-      const prompt = scene.ambience ?? "";
+      // closure §6：Sound World canon＝場景聲音的 canonical identity。
+      // 提示詞組合＝「世界的聲音語彙」＋「這一鏡的環境音描述」——每一鏡各自亂生
+      // 互不相關的 ambience 不叫一致；只有鏡描述沒有 canon 時行為與過去完全相同。
+      const { resolveProjectCanonDefaults: resolveDefaults } = await import("../services/teamCanon");
+      const ambienceCanons = await resolveDefaults(scene.projectId);
+      const shotAmbience = (scene.ambience ?? "").trim();
+      const worldAmbience = ambienceCanons.soundWorld?.ambience?.trim() ?? "";
+      const prompt = [worldAmbience, shotAmbience].filter(Boolean).join("，");
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有環境音描述，請先在分鏡或腳本裡填" });
       // 與配音相反的把關：這裡只放行 text-to-audio（音效／配樂）。TTS 同為 kind=audio 但會把
       // 描述「唸出來」——「遠處鐘聲，細微鳥鳴」變成一個人朗讀那八個字，扣了點卻拿到廢音檔。
@@ -1712,6 +1800,10 @@ export const scenesRouter = router({
         prompt,
         sceneId: scene.id,
         sceneRole: "ambience",
+        // Sound World 依賴落 meta（lineage／targeted stale 的根據）
+        soundWorldRef: ambienceCanons.soundWorld
+          ? { canonId: ambienceCanons.soundWorld.canonId, versionId: ambienceCanons.soundWorld.versionId }
+          : undefined,
         reasonPrefix: "環境音生成",
       });
       return { generationId: gen.id };

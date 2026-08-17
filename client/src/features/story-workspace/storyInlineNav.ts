@@ -1,6 +1,9 @@
+import { publishStoryReveal } from "./storyRevealQueue";
+
 /**
- * Story-inline IA: the project page has one primary surface (story) and six
- * on-demand sections. Collapse state is UI-only — no schema change.
+ * Story-inline IA: the project page has one primary surface (story) and
+ * on-demand sections disclosed by the red analysis chips. Collapse state
+ * is UI-only — no schema change.
  *
  * Old four-stage hashes (#stage-board / #stage-create / #stage-deliver) and
  * context anchors (#sec-characters / …) still resolve here so bookmarks,
@@ -11,8 +14,10 @@ export const STORY_INLINE_REVEAL_EVENT = "aios:story-inline-reveal";
 
 export const STORY_INLINE_SECTION_IDS = [
   "characters",
+  "looks",
   "scenes",
   "props",
+  "markers",
   "storyboard",
   "production",
   "delivery",
@@ -37,6 +42,12 @@ export const STORY_INLINE_SECTIONS: readonly StoryInlineSectionDef[] = [
     aliases: ["sec-characters", "story-inline-characters"],
   },
   {
+    id: "looks",
+    label: "造型",
+    anchorId: "sec-looks",
+    aliases: ["sec-looks", "sec-costume", "story-inline-looks"],
+  },
+  {
     id: "scenes",
     label: "場景",
     anchorId: "sec-scenes",
@@ -47,6 +58,12 @@ export const STORY_INLINE_SECTIONS: readonly StoryInlineSectionDef[] = [
     label: "道具",
     anchorId: "sec-props",
     aliases: ["sec-props", "story-inline-props"],
+  },
+  {
+    id: "markers",
+    label: "標記",
+    anchorId: "sec-markers",
+    aliases: ["sec-markers", "story-inline-markers"],
   },
   {
     id: "storyboard",
@@ -73,6 +90,8 @@ export type StoryInlineRevealDetail = {
   section: StoryInlineSectionId;
   highlight?: boolean;
   scroll?: boolean;
+  /** Nested target to apply after the slot's lazy manager mounts. */
+  nestedSelector?: string;
 };
 
 const ALIAS_TO_SECTION = new Map<string, StoryInlineSectionId>();
@@ -128,6 +147,7 @@ export function revealStoryInlineSection(
     projectId?: string;
     highlight?: boolean;
     scroll?: boolean;
+    nestedSelector?: string;
   },
 ): void {
   if (typeof window === "undefined") return;
@@ -136,10 +156,40 @@ export function revealStoryInlineSection(
     section,
     highlight: opts?.highlight !== false,
     scroll: opts?.scroll !== false,
+    nestedSelector: opts?.nestedSelector,
   };
+  publishStoryReveal({
+    section,
+    nestedSelector: opts?.nestedSelector,
+    scroll: detail.scroll,
+  });
   window.dispatchEvent(
     new CustomEvent<StoryInlineRevealDetail>(STORY_INLINE_REVEAL_EVENT, { detail }),
   );
+}
+
+/** Parse-summary chip keys from storyDraft.summaryChips → the section they open. */
+export function sectionForSummaryChip(key: string): StoryInlineSectionId | null {
+  switch (key) {
+    case "characters":
+      return "characters";
+    case "looks":
+      return "looks";
+    case "locations":
+      return "scenes";
+    case "props":
+      return "props";
+    case "shots":
+      return "storyboard";
+    case "markers":
+      return "markers";
+    case "production":
+      return "production";
+    case "delivery":
+      return "delivery";
+    default:
+      return null;
+  }
 }
 
 export function revealStoryInlineFromSelector(
@@ -148,6 +198,7 @@ export function revealStoryInlineFromSelector(
     projectId?: string;
     highlight?: boolean;
     scroll?: boolean;
+    nestedSelector?: string;
   },
 ): StoryInlineSectionId | null {
   const section = sectionFromSelector(selector);
@@ -155,6 +206,13 @@ export function revealStoryInlineFromSelector(
   revealStoryInlineSection(section, opts);
   return section;
 }
+
+/** A video file. Per-shot video is not an assembled project film. */
+export function isPlayableFilmAsset(kind: string | null | undefined): boolean {
+  return kind === "video";
+}
+
+export { isAssembledProjectFilm } from "@shared/projectCreativeContext";
 
 export type StoryReadinessKind = "empty" | "needs_parse" | "ready_for_board" | "ready_to_produce" | "has_result";
 
@@ -174,13 +232,22 @@ export function storyReadiness(input: {
   hasParsed: boolean;
   pendingCount: number;
   sceneCount: number;
-  doneGenerationCount: number;
+  /** Playable assembled video / deliverable — not a still image or generic done generation. */
+  playableResultCount: number;
+  /** Unsaved edits or story that no longer matches the last parse. */
+  isDirty?: boolean;
 }): StoryReadiness {
   if (!input.storyReady) {
     return { kind: "empty", label: "先寫故事", detail: "貼上或寫下故事後，就能解析並產生分鏡。" };
   }
-  if (!input.hasParsed) {
-    return { kind: "needs_parse", label: "可解析", detail: "按「AI 解析」讓角色、場景、道具在背景就位。" };
+  if (!input.hasParsed || input.isDirty) {
+    return {
+      kind: "needs_parse",
+      label: input.isDirty && input.hasParsed ? "故事已改" : "可解析",
+      detail: input.isDirty && input.hasParsed
+        ? "尚未儲存或重新解析，先前的可製作狀態已過期。"
+        : "按「AI 解析」讓角色、場景、道具在背景就位。",
+    };
   }
   if (input.sceneCount <= 0) {
     return {
@@ -191,16 +258,16 @@ export function storyReadiness(input: {
         : "解析已完成。按「產生分鏡」建成可製作的鏡頭。",
     };
   }
-  if (input.doneGenerationCount <= 0) {
+  if (input.playableResultCount <= 0) {
     return {
       kind: "ready_to_produce",
       label: "可製作",
-      detail: `已有 ${input.sceneCount} 鏡。展開製作或從分鏡卡逐鏡生成。`,
+      detail: `已有 ${input.sceneCount} 鏡。按「生成畫面」做第一版，不必先打開製作。`,
     };
   }
   return {
     kind: "has_result",
-    label: "已有成果",
-    detail: `完成 ${input.doneGenerationCount} 次生成。不滿意再展開有問題的部分。`,
+    label: "已有成片",
+    detail: `已有 ${input.playableResultCount} 段可播放成果。不滿意再指出問題鏡。`,
   };
 }

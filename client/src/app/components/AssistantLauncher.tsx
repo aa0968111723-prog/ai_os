@@ -10,7 +10,7 @@ import { useAssistantComposeListener } from "../../lib/assistantCompose";
  *
  * ## 為什麼需要它
  *
- * 助手原本只有一個入口：底部導覽正中央那顆 orb。而 `.mobile-nav` 在 >820px 是
+ * 助手原本只有一個入口：底部導覽正中央那顆 orb。而 `.mobile-nav` 在 ≥768px 是
  * `display: none`——球還在 DOM 裡，但看不見也按不到。也就是說**桌機使用者完全
  * 叫不出助手**，後端那 9 個跨專案工具在桌機上等於不存在。這顆按鈕補上那個洞。
  *

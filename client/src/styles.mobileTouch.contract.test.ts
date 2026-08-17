@@ -16,7 +16,7 @@ describe("mobile batch-B contract", () => {
   });
 
   // 360px 的頂欄徽章總寬可超出視窗，而 html/body 是 overflow-x:clip：
-  // 沒有橫捲逃生門時右端帳號鈕被切掉且捲不到（MenuSurface ≤820 一律 portal，不受此裁切）
+  // 沒有橫捲逃生門時右端帳號鈕被切掉且捲不到（MenuSurface <768 一律 portal，不受此裁切）
   it("keeps the phone topbar horizontal escape hatch", () => {
     expect(declarations).not.toMatch(/\.topbar\s*\{\s*overflow:\s*visible/);
   });

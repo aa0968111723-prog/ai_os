@@ -10,6 +10,11 @@ import { SceneStudio } from "../../components/SceneStudio";
 import { Button, Card, EmptyState, Hint, Meta } from "../../components/ui";
 import { scrollToSelector } from "../creation-workbench/workbenchNav";
 import { revealProjectContext } from "../project-nav/projectContextNav";
+import {
+  EMPTY_SHOT_SUGGESTION_ITEMS,
+  expandShotSuggestions,
+  type ShotAssetSuggestionItem,
+} from "@shared/shotAssetSuggestions";
 import { groupShotsByScene, loadBoardMode, saveBoardMode, type BoardMode } from "./boardPrefs";
 import { SceneGroupHeader, type StorySceneRow } from "./SceneGroupHeader";
 import { ShotCard, type ShotRow } from "./ShotCard";
@@ -23,12 +28,18 @@ export function StoryboardStage({
   charIds,
   sceneIds,
   propIds,
+  hideInspector = false,
+  onSendToWorkbench,
 }: {
   projectId: string;
   canEdit: boolean;
   charIds: string[];
   sceneIds: string[];
   propIds: string[];
+  /** Mobile story sheet already occupies the one visible layer; desktop Inspector stays. */
+  hideInspector?: boolean;
+  /** Selected-shot adapter: reuse the existing CreationWorkbench, do not clone it. */
+  onSendToWorkbench?: (shot: ShotRow) => void;
 }) {
   const utils = trpc.useUtils();
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
@@ -39,6 +50,10 @@ export function StoryboardStage({
   const continuity = trpc.story.continuityCheck.useQuery({ projectId });
   const [mode, setMode] = useState<BoardMode>(() => loadBoardMode(projectId));
   const [studioSceneId, setStudioSceneId] = useState<string | null>(null);
+  const suggestionBatch = trpc.story.shotAssetSuggestionsBatch.useQuery(
+    { projectId },
+    { enabled: mode === "pro", staleTime: 60_000 },
+  );
   const switchMode = (m: BoardMode) => {
     setMode(m);
     saveBoardMode(projectId, m);
@@ -62,6 +77,15 @@ export function StoryboardStage({
     const sorted = [...shotRows].sort((a, b) => a.orderIndex - b.orderIndex);
     return new Map(sorted.map((s, i) => [s.id, i + 1]));
   }, [shotRows]);
+  const hintsByShot = useMemo(() => {
+    const map = new Map<string, ShotAssetSuggestionItem[]>();
+    const payload = suggestionBatch.data;
+    if (!payload) return map;
+    for (const shotId of Object.keys(payload.byShotId)) {
+      map.set(shotId, expandShotSuggestions(payload, shotId));
+    }
+    return map;
+  }, [suggestionBatch.data]);
   const studioShot = studioSceneId ? shotRows.find((s) => s.id === studioSceneId) : null;
   const isEmpty = !shots.isLoading && shotRows.length === 0;
 
@@ -121,12 +145,22 @@ export function StoryboardStage({
               <button type="button" role="tab" aria-selected={mode === "simple"} className={mode === "simple" ? "active" : undefined} onClick={() => switchMode("simple")}>簡單</button>
               <button type="button" role="tab" aria-selected={mode === "pro"} className={mode === "pro" ? "active" : undefined} onClick={() => switchMode("pro")}>專業</button>
             </div>
+            {canEdit && onSendToWorkbench && focusShot && (
+              <Button
+                size="sm"
+                variant="tonal"
+                type="button"
+                onClick={() => onSendToWorkbench(focusShot)}
+              >
+                用此鏡去製作
+              </Button>
+            )}
           </div>
           {isEmpty ? (
             <EmptyState
               icon={<Icon name="Clapperboard" size={20} />}
               title="還沒有分鏡"
-              description="回到「① 故事」貼上故事、按「AI 解析」再「產生分鏡」。"
+              description="回到故事貼上內容，按「AI 解析」再「產生分鏡」。"
               action={<Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>去寫故事</Button>}
             />
           ) : (
@@ -158,7 +192,7 @@ export function StoryboardStage({
                       ) : (
                         <div className="board-shots">
                           {group.shots.map((shot) => (
-                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} />
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
                           ))}
                         </div>
                       )}
@@ -169,7 +203,9 @@ export function StoryboardStage({
             </>
           )}
         </Card>
-        <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} onOpenStudio={setStudioSceneId} />
+        {!hideInspector && (
+          <VisualChoiceTray projectId={projectId} canEdit={canEdit} pickedShotIds={pickedIds} onOpenStudio={setStudioSceneId} />
+        )}
       </div>
       {studioShot && (
         <SceneStudio
@@ -190,7 +226,10 @@ export function StoryboardStage({
           propIds={propIds}
           nav={<ShotNavigator shots={shotRows} currentId={studioShot.id} onGo={(nextId) => setStudioSceneId(nextId)} />}
           onClose={() => setStudioSceneId(null)}
-          onChanged={() => { utils.scenes.listByProject.invalidate({ projectId }); }}
+          onChanged={() => {
+            void utils.scenes.listByProject.invalidate({ projectId });
+            void utils.story.shotAssetSuggestionsBatch.invalidate({ projectId });
+          }}
         />
       )}
     </div>

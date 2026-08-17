@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { PHONE_MQ } from "../lib/viewport";
 import { registerAssistantFocus, registerAssistantPage } from "../lib/assistantContext";
 import { useImmersive } from "../lib/useImmersive";
 import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
@@ -350,7 +351,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
   const [view, setView] = useState<"list" | "calendar">("list");
   const [includePast, setIncludePast] = useState(false);
   // 手機減負：六欄新增表單先收成一顆「＋ 新增行程」，清單優先（桌機維持常駐表單）
-  const compact = useMatchMedia("(max-width: 820px)");
+  const compact = useMatchMedia(PHONE_MQ);
   const [createOpen, setCreateOpen] = useState(false);
   // 手機再減一層：展開後仍有六欄堆成六列，但「排一筆會議」只需要標題＋開始時間。
   // 結束／專案／備註收進「其他欄位」，要用的人再展開。
@@ -708,10 +709,10 @@ function CalendarView({
   const today = new Date();
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // ≤820：點「有行程的日子」只展開下方當日清單，不再直接 prefill 表單
+  // <768：點「有行程的日子」只展開下方當日清單，不再直接 prefill 表單
   //（原行為會展開表單＋smooth 捲走＋聚焦標題，Android 立刻彈鍵盤——
   // 手機上想「看某天行程」被表單搶走視角）。桌機行為不變。
-  const compact = useMatchMedia("(max-width: 820px)");
+  const compact = useMatchMedia(PHONE_MQ);
 
   // 行程依「天」歸位（用開始時間的本地日）
   const byDay = useMemo(() => {
@@ -1305,7 +1306,7 @@ const isMapView = (v: string | null): v is MapView => v === "list" || v === "map
 export function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
   const [, setLocation] = useLocation();
   const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
-  const compact = useMatchMedia("(max-width: 820px)");
+  const compact = useMatchMedia(PHONE_MQ);
   const me = trpc.auth.me.useQuery();
   const meId = me.data?.user.id ?? "";
   const graphQ = trpc.knowledgeMap.graph.useQuery({ groupId });

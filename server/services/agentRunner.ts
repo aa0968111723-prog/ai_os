@@ -153,6 +153,8 @@ export interface AgentStep {
   scenePresetIds?: string[];
   /** 素材設定卡 id（最多 4）：道具外觀／材質錨點 */
   propIds?: string[];
+  /** Frozen packet from batchGenerate. Approval resume must reuse this ID. */
+  shotContextPacketId?: string;
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
   sourceAssetId?: string;
   /** CA-01：外部來源網址（僅無 sourceAssetId 時；仍走 generationCore SSRF／needs） */
@@ -1048,6 +1050,8 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         propIds: step.propIds,
         sourceAssetId: step.sourceAssetId,
         sourceUrl: step.sourceUrl,
+        shotContextPacketId: step.shotContextPacketId,
+        preserveScenePointer: true,
         agentRunId: run.id,
         reasonPrefix: "AI 代理",
       });
@@ -2129,6 +2133,8 @@ async function advanceRun(run: RunRow): Promise<void> {
       propIds: step.propIds,
       sourceAssetId: step.sourceAssetId,
       sourceUrl: step.sourceUrl,
+      shotContextPacketId: step.shotContextPacketId,
+      preserveScenePointer: true,
       agentRunId: run.id, // 生成列回連本次代理執行——生成紀錄可回看「這筆是代理跑出來的」
       reasonPrefix: "AI 代理",
     });

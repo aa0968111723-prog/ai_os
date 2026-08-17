@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "../../components/Icon";
 import { Meta } from "../../components/ui";
+import { StoryContextSheet } from "./StoryContextSheet";
 import type { StoryInlineSectionId } from "./storyInlineNav";
 
 /**
@@ -16,6 +17,7 @@ export function StoryInlineSection({
   warning,
   open,
   onOpenChange,
+  presentation = "inline",
   children,
 }: {
   sectionId: StoryInlineSectionId;
@@ -25,6 +27,8 @@ export function StoryInlineSection({
   warning?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Mobile uses a full-screen sheet so the story scroll position is restored. */
+  presentation?: "inline" | "sheet";
   children: ReactNode;
 }) {
   const [mounted, setMounted] = useState(open);
@@ -61,7 +65,7 @@ export function StoryInlineSection({
       </button>
       {/* Compatibility target: old TocNav / chips / collaboration hashes. */}
       <div id={anchorId} className="story-inline-section__anchor" aria-hidden />
-      {(open || mounted) && (
+      {presentation === "inline" && (open || mounted) && (
         <div
           id={`${anchorId}-body`}
           className="story-inline-section__body"
@@ -71,6 +75,11 @@ export function StoryInlineSection({
         >
           {children}
         </div>
+      )}
+      {presentation === "sheet" && (
+        <StoryContextSheet open={open} title={title} onClose={() => onOpenChange(false)}>
+          {open || mounted ? children : null}
+        </StoryContextSheet>
       )}
     </section>
   );

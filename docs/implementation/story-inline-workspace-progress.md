@@ -1,161 +1,87 @@
 # Story-inline workspace — execution journal
 
-Long-running implementation of the story-inline generation workspace.
+Long-running implementation of PR #742 (chip-driven in-place Story workspace).
 Do not restart from analysis; resume from the first unfinished checkbox.
 
 ## Task goal
 
-Replace the four-stage project page (故事 / 分鏡 / 製作 / 成片) with a single
-story home. Characters, scenes, props, storyboard, production, and delivery
-collapse under Story. Users generate first, then expand only the broken part
-and regenerate affected shots.
+The red Story analysis chips are the only primary disclosure controls. Tapping a chip opens the matching real manager in one reveal slot immediately under the chips. The #731 lower duplicate accordion rail is gone. #733–#736 real capabilities stay.
 
-This is not a UI reskin. Existing Story / Scene / Shot / Character / Look /
-Prop / Generation / Asset data, generation command, queue, quota, approval,
-points, versions, and delivery stay the real source of truth.
+## Git topology (ancestry, not GitHub “merged” alone)
 
-## Spec sources
+| Ref | SHA | Fact |
+| --- | --- | --- |
+| Default `claude/healing-migration-ai-os-erewp2` | `edd45b3e` | Contains #731 + #732 + #737. |
+| Safe merge default → #742 | `ba5bf07a` | No force-push. |
+| Runtime implementation | `93ebe126` | Chip slot + readiness + reveal queue. |
+| Merge-base with default | `edd45b3e` | 0 behind after merge. |
 
-- Merged PR #730 (`docs(product): 計畫故事內嵌生成與按需細修流程`)
-- `docs/plans/PROJECT_WORKSPACE_STORY_INLINE_GENERATION_PLAN.md` (product truth)
-- `docs/plans/PROJECT_WORKSPACE_STORY_FIRST_REFACTOR.md` (data / safety / compatibility baseline; four-stage nav superseded)
+### #731–#740 actual merge topology
 
-## Base
+| PR | Actual base | In default? |
+| --- | --- | --- |
+| #731 | default | **Yes** |
+| #732 | default | **Yes** |
+| #733–#736 | stacked story branches | **No** — live on this head |
+| #737 | default | **Yes** |
+| #738–#740 | stacked nav branches | **No** — not mixed into #742 |
 
-- Default branch: `claude/healing-migration-ai-os-erewp2`
-- Base SHA: `2e411b8ad80870c4f563a751a8111b0e59f768a1` (#730 squash merge)
-- Isolated worktree: `/root/ai_os-story-inline`
-- Original `/root/ai_os` left untouched on `feat/gemini-omni-remote-video`
-- PR #730 was OPEN at first inspection, then MERGED. Implementation starts from latest default, not a local merge of #730.
+## Draft PR
 
-## Current stage
-
-PR 1 — single story home shell (implementing / committing)
+https://github.com/aa0968111723-prog/ai_os/pull/742
+Head: `agent/story-inline-06-chip-workspace`
 
 ## Checklist
 
-### PR 1 — `agent/story-inline-01-shell`
+- [x] Confirm default SHA and #731–#740 ancestry
+- [x] Safe-merge latest default
+- [x] Six primary chips + contextual 製作／交付
+- [x] Single `#story-reveal-slot` under chips
+- [x] Toggle / replace / aria-expanded / 44px
+- [x] Remove ProjectPage second rail
+- [x] Legacy anchors next to Story
+- [x] Lazy mount + `storyRevealQueue`
+- [x] Readiness includes `isDirty`; 成片 = video only
+- [x] Settings modal closes before slot
+- [x] Targeted + repo checks
+- [x] 390 / 430 / 768 / 1280 / 1440 evidence
+- [ ] Keep Draft; human review (do not merge)
 
-- [x] Progress journal created
-- [x] Baseline tests recorded
-- [x] `storyInlineNav` hash / section mapping
-- [x] Six collapsed summary rows under StoryStage
-- [x] ProjectPage no longer uses ①②③④ as primary nav
-- [x] VisualJourney / TocNav four-stage primary chrome removed
-- [x] Old `#stage-*` / `#sec-*` / reveal events still reach real capability
-- [x] Settings sheet, Story autosave, collab, parse, undo preserved
-- [x] Contract tests updated to new IA (not four-stage primary)
-- [x] Targeted + repo checks run; introduced failures fixed
-- [ ] Commit + push + draft PR
+## Preserved
 
-### PR 2 — `agent/story-inline-02-context`
-
-- [ ] Clickable Story chips open the matching collapsed section
-- [ ] Deep edit via drawer / sheet / desktop Inspector
-- [ ] Close restores scroll position
-- [ ] Mobile opens one major section at a time
-- [ ] Heavy managers lazy-mount
-- [ ] Same queries / mutations / IDs / tables
-- [ ] `projectContextNav` reveal opens the correct section
-
-### PR 3 — `agent/story-inline-03-shot-production`
-
-- [ ] Storyboard summary: scenes / shots / ready / warnings
-- [ ] Shot drawer (no third accordion)
-- [ ] CreationWorkbench via selected Shot adapter
-- [ ] Version / approval / retry / cost / current pointer invariants
-
-### PR 4 — `agent/story-inline-04-one-click-generation`
-
-- [ ] Real one-click video orchestration
-- [ ] Incremental parse, missing Scene/Shot drafts, no overwrite of human edits
-- [ ] Existing generation command / queue / quota / approval / points
-- [ ] Trackable batch identity, idempotent retry, reload restore
-
-### PR 5 — `agent/story-inline-05-result-fix-delivery`
-
-- [ ] Single “哪裡需要修改？” entry
-- [ ] Diagnose → proposal → Apply/Adopt
-- [ ] Impact preview + local regenerate
-- [ ] Delivery collapse uses real export / share / review
-
-## Completed
-
-- Isolated worktree created; original workspace not reset.
-- Specs and current ProjectPage / StoryStage / TocNav / contracts read.
-- #730 confirmed merged at `2e411b8`. Implementation branch reset onto that default.
-- PR1 shell implemented: StoryStage is the only primary surface; six collapsed rows host the existing real managers / StoryboardStage / CreationWorkbench / DeliveryRoom / SceneList / ProjectShareCard.
-- Primary CTA remains the existing real parse / 產生分鏡 / 展開製作 / 觀看成果 path. No fake “生成影片” button (that is PR4).
-
-## Incomplete
-
-- PR1 push + draft PR
-- PR2–PR5
-- Mobile Playwright evidence at 390/430/768/1280/1440 (PR1 first-screen measurement pending)
-- Repo-wide `npm test` / `npm run build` (running after PR1 commit)
-
-## Last successful commit SHA
-
-`2e411b8ad80870c4f563a751a8111b0e59f768a1` (base; PR1 commits pending)
-
-## Branches / PRs
-
-| Layer | Branch | Base | PR | Status |
-| --- | --- | --- | --- | --- |
-| Plan | `agent/story-inline-generation-plan` | default | #730 | MERGED |
-| PR1 | `agent/story-inline-01-shell` | `2e411b8` | — | local, implementing |
-| PR2 | — | PR1 head | — | not started |
-| PR3 | — | PR2 head | — | not started |
-| PR4 | — | PR3 head | — | not started |
-| PR5 | — | PR4 head | — | not started |
+Story autosave / Yjs / parse / undo; CharacterCards / ScenePresetCards / PropCards; StoryboardStage / SceneStudio / applyPrompt; single CreationWorkbench; useOneClickFilm; StoryResultFix / regenShots; DeliveryRoom / SceneList / share; projectContextNav; old hashes and `?focus=`.
 
 ## Tests
 
-### Baseline (pre-change)
-
-- Targeted client contracts were attempted with `npx vitest` before `node_modules` existed in the worktree → BLOCKED_BY_ENVIRONMENT (npx fetched vitest 4 + rolldown native binding miss). Not a product failure.
-- `ProjectPage.hookOrder.test.tsx` times out at 15s on **both** this worktree and untouched `/root/ai_os` (`feat/gemini-omni-remote-video`). Classified **BASELINE_EXISTING_FAILURE / BLOCKED_BY_ENVIRONMENT**. Not treated as PR1 regression.
-
-### PR1 targeted
-
 | Check | Result |
 | --- | --- |
-| `ProjectPage.workbenchContract.test.ts` (12) | PASS |
-| `ProjectPage.mobileStyles.test.ts` (4) | PASS |
-| `storyInlineNav.test.ts` (4) | PASS |
-| `StoryInlineSection.test.tsx` (1) | PASS |
-| `projectContextNav.test.ts` (5) | PASS |
-| `CostumePackSection.test.tsx` (4) | PASS |
-| `TocNav.test.tsx` (3) | PASS |
-| `ProjectPage.worldviewSafety.test.ts` (2) | PASS |
-| `styles.mobileInteract.contract.test.ts` (4) | PASS |
-| story-workspace ScriptEditor / Yjs / draft / tools | PASS |
-| `check:hooks` | PASS |
-| `check:boundaries` | PASS |
-| `check:ui-primitives` | PASS |
-| `ProjectPage.hookOrder.test.tsx` | BASELINE_EXISTING_FAILURE (15s timeout; also fails on unmodified repo) |
-| `npm run typecheck` | still running / slow in this environment — will record after commit |
+| Targeted chip / nav / queue / readiness / diagnosis / workbench (42) | PASS |
+| Broader story / board / ProjectPage client (142) | PASS |
+| `npm run typecheck` | PASS |
+| `npm run check:boundaries` | PASS |
+| `npm run check:ui-primitives` | PASS |
+| `npm run check:hooks` | PASS |
+| `npm test` (2934 passed / 119 skipped) | PASS |
+| `npm run test:client` (1866 passed) | PASS |
+| `npm run build` | PASS |
+| Playwright 390/430/768/1280/1440 chip slot | PASS |
+| Paid-provider live generation | BLOCKED_BY_ENVIRONMENT (used E2E_MOCK=1) |
+| Updating GitHub PR body via token | BLOCKED_BY_ENVIRONMENT (403 / not agent-managed) |
 
-### Classification key
+No INTRODUCED_BY_THIS_PR failures. Skipped tests are pre-existing suite skips, not weakened for this PR.
 
-- PASS
-- BASELINE_EXISTING_FAILURE
-- INTRODUCED_BY_THIS_PR
-- BLOCKED_BY_ENVIRONMENT
+## Evidence
 
-## Problems / decisions
+`docs/evidence/story-inline-workspace/pr-742/`
 
-- #730 merged while the long task started. Followed the “if merged, start from latest default” rule. Did not merge #730 locally.
-- Workspace `/root/ai_os` had an unrelated clean branch. Used worktree `/root/ai_os-story-inline` instead of touching it.
-- PR1 will not add a fake “生成影片” button. Primary CTA stays the existing real “產生分鏡” / open-production / watch-result actions until PR4 wires real video orchestration.
-- Settings CostumePackSection uses `omitLegacyAnchors` so `#sec-characters|scenes|props` live on the story-inline rail (one id each). Settings still mounts the same Character/Scene/Prop cards.
-- Collapse children mount on first open and stay mounted (hidden when closed) so CreationWorkbench draft state is not thrown away.
-- Worktree has no its own `node_modules`; tests used a local symlink to `/root/ai_os/node_modules`. Symlink is not committed.
+## Last successful commit SHA
+
+`b3d40bec` (evidence + journal). Runtime: `93ebe126`.
 
 ## Next precise action
 
-Commit PR1 in small commits, push `agent/story-inline-01-shell`, open draft PR, then start PR2.
+Human review of Draft PR #742. Do not merge.
 
 ## Human blockers
 
-None.
+None required for the layout integration. Live paid generation and PR-body overwrite need human/env access.

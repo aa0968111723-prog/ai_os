@@ -70,29 +70,15 @@ export function defaultsFor(type: OptionType): DefaultOption[] {
 
 /* ── 元件級回饋（R23）──────────────────────────── */
 
-export const FEEDBACK_CATEGORIES = [
-  { value: "bug", label: "問題／怪怪的", hint: "壞掉、報錯、跟預期不一樣" },
-  { value: "uiux", label: "介面／操作", hint: "不好按、看不懂、位置怪、太小" },
-  { value: "feature", label: "希望能有", hint: "想要的新功能或選項" },
-  { value: "stuck", label: "卡關／不會用", hint: "找不到、不知道下一步" },
-  { value: "other", label: "其他", hint: "" },
-] as const;
-
-export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number]["value"];
-export const FEEDBACK_CATEGORY_VALUES = FEEDBACK_CATEGORIES.map((c) => c.value) as [FeedbackCategory, ...FeedbackCategory[]];
-
-/** 已知頁面代稱（複選涉及頁面用）；路由對應由前端維護，這裡只存人看得懂的名字 */
-export const FEEDBACK_PAGES = [
-  "登入／邀請",
-  "作業台（首頁）",
-  "專案頁",
-  "團隊管理",
-  "模型指南",
-  "回饋頁",
-] as const;
-
-export const FEEDBACK_STATUS_LABEL: Record<string, string> = {
-  open: "待看",
-  reviewing: "處理中",
-  done: "已處理",
-};
+/**
+ * 回饋選項表已搬到 ./feedbackOptions —— 它們不依賴模型目錄與世界觀，
+ * 住在這裡會讓「只要一張分類表」的呼叫端（例如全站常駐的回饋浮標）
+ * 連帶下載 shared/models 與 shared/worldview。這裡 re-export，呼叫端不受影響。
+ */
+export {
+  FEEDBACK_CATEGORIES,
+  FEEDBACK_CATEGORY_VALUES,
+  FEEDBACK_PAGES,
+  FEEDBACK_STATUS_LABEL,
+  type FeedbackCategory,
+} from "./feedbackOptions";
