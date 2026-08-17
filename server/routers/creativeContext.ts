@@ -25,6 +25,7 @@ import {
   executeAnimationGenerationStage,
   targetedAnimationRepairPlan,
 } from "../services/animationPipeline";
+import { animationProductionBoard } from "../services/animationBoard";
 import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
@@ -116,6 +117,12 @@ export const creativeContextRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       return targetedAnimationRepairPlan({ auth: ctx.auth, ...input });
+    }),
+
+  animationBoard: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return animationProductionBoard({ auth: ctx.auth, projectId: input.projectId });
     }),
 
   compose: authedProcedure
