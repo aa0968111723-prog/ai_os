@@ -124,6 +124,16 @@ describe("migration manifest validation", () => {
     )).toContain("USING gin");
   });
 
+  it("canonicalizes single-table qualification in partial-index predicates", () => {
+    const migration = canonicalMigrationStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "canon_entries_project_kind_name_uq" ON "canon_entries" ("group_id","kind","name") WHERE "source_entity_id" IS NULL;',
+    );
+    const introspected = canonicalMigrationStatement(
+      'CREATE UNIQUE INDEX "canon_entries_project_kind_name_uq" ON "canon_entries" USING btree ("group_id","kind","name") WHERE "canon_entries"."source_entity_id" IS NULL;',
+    );
+    expect(introspected).toBe(migration);
+  });
+
   it("hashes SQL and rejects a non-monotonic journal", () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "aios-migrations-"));
     temporaryDirectories.push(directory);

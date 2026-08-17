@@ -269,6 +269,16 @@ export function canonicalMigrationStatement(statement: string): string {
     // 兩者永遠對不上，於是一句完全等價的 CREATE INDEX 會同時被判成「非預期 drift」與「缺漏」。
     // 這在識別字之間不是語意差異，正規化掉才不會逼每一份手寫 migration 去猜產生器的排版。
     .replace(/,\s+/g, ",")
+    // Partial-index predicate can only reference the indexed table. PostgreSQL/Drizzle
+    // introspection qualifies it (`"table"."column"`), while hand-written migration
+    // SQL commonly uses `"column"`. Removing only that single-table qualification
+    // preserves predicate semantics and lets the legacy adoption proof account for
+    // reviewed additive partial indexes (0078).
+    .replace(
+      /^(CREATE (?:UNIQUE )?INDEX .* WHERE )(.+)$/i,
+      (_whole, prefix: string, predicate: string) =>
+        `${prefix}${predicate.replace(/"[^"]+"\."([^"]+)"/g, '"$1"')}`,
+    )
     .replace(/^CREATE TABLE .*/i, canonicalCreateTablePrimaryKey);
 }
 
