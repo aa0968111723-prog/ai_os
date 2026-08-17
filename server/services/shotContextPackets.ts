@@ -19,7 +19,7 @@ import {
 } from "../../shared/shotContextPacket";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
 import { buildCharacterSlots } from "../../shared/characterSlots";
-import { detectTransitionType, parseScriptAuthorizedChanges } from "../../shared/scriptChanges";
+import { detectTransitionType, parseScriptAuthorizedChanges, resolvePropTransfers } from "../../shared/scriptChanges";
 import { inheritContinuityState, type ShotContinuityState } from "../../shared/shotContextPacket";
 import { capabilityForModel } from "../../shared/providerCapabilities";
 import { getModel } from "../../shared/models";
@@ -103,9 +103,15 @@ export async function buildShotContextPacketPayload(input: {
       .from(schema.scenes).where(eq(schema.scenes.id, previousShotId)))[0]?.storySceneId ?? null
     : null;
   const shotText = [shot.prompt, shot.action, shot.dialogue].filter(Boolean).join("\n");
-  const authorizedChanges = parseScriptAuthorizedChanges(
-    [shotText, storyScene?.storyExcerpt].filter(Boolean).join("\n"),
-  );
+  const fullChangeText = [shotText, storyScene?.storyExcerpt].filter(Boolean).join("\n");
+  // closure §9：prop_transfer／prop_loss 嘗試結構化解析（唯一匹配才 resolved；歧義＝unresolved 不猜）
+  const authorizedChanges = resolvePropTransfers({
+    changes: parseScriptAuthorizedChanges(fullChangeText),
+    shotText: fullChangeText,
+    // 解析對象＝本鏡綁定的角色與道具（名稱唯一匹配；歧義＝unresolved）
+    characters: characters.map((row) => ({ id: row.id, name: row.name })),
+    props: props.map((row) => ({ id: row.id, name: row.name })),
+  });
   const transitionType = detectTransitionType({
     shotText,
     sceneText: storyScene?.summary ?? null,
