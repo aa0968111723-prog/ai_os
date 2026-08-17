@@ -91,6 +91,24 @@ Aios 把一致性拆成六層，動畫組只要把「聖經」建好，之後每
 6. **改設計時看連戲檢查**：改了角色外觀／場景色板／某鏡動作後，到連戲檢查看哪些鏡過時，
    逐一決定要不要花點數重生（系統永遠只提醒、不自動重生）。
 
+## 要讓「三視圖」真的鎖住長相：選對模型（實測）
+
+文字錨點鎖「描述」；要鎖「同一張臉」，得把角色卡的**定裝參考圖**（三視圖）真的餵進生成。
+但**只有支援多圖參考（`image_urls`）的模型才會吃參考圖**。生成前預覽的
+「參考圖 X/Y」就是在告訴你這次帶進去幾張（實測 `generation.preview`）：
+
+| 模型 | 生成前預覽的「參考圖」 | 能不能鎖三視圖 |
+|---|---|---|
+| `fal-ai/nano-banana-2/edit`、`nano-banana-pro/edit` | 2/2 | ✅ 會帶進參考圖 |
+| `fal-ai/bytedance/seedream/v4.5/edit` | 2/2 | ✅ |
+| `fal-ai/qwen-image-edit-plus` | 2/2 | ✅ |
+| `fal-ai/flux-pro/kontext/max`（單圖） | 0/2 | ✖ 只吃單一來源圖 |
+| 純 `text-to-image` / `text-to-video`（flux schnell、wan、kling…） | 0/2 | ✖ 只有文字錨點弱鎖 |
+
+**動畫實務兩段式**：① 用多圖 edit 模型（nano-banana / seedream / qwen-image-edit）＋三視圖
+產「鎖好長相的關鍵影格」；② 再用 image-to-video（wan / kling 影生影）讓關鍵影格動起來。
+最多帶 4 張參考圖（`applyContinuityReferences`）。
+
 ## 一致性的極限（誠實說明，避免動畫組誤會）
 
 - **文字錨點保證「描述一致」，不保證「像素級同一張臉」。** 要更硬的鎖定，靠兩件事：
