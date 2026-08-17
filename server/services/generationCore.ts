@@ -620,7 +620,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     severity: "warning",
     title: "卡片參考圖沒有直接送給模型",
     detail: "本次只有卡片文字錨點進入 prompt；模型沒有來源圖欄位或尚未選定來源圖。",
-    suggestion: "角色身份一致性要求高時，改用需要來源圖的模型並選定裝參考圖。",
+    suggestion: "角色身份一致性要求高時，改用支援多圖參考的 edit 模型（nano-banana / seedream / qwen-image-edit）並選定裝三視圖；純文字生圖／生影片只吃文字錨點。",
   });
   if (continuitySnapshot?.locked && continuityCoverage.totalCards > 0 && continuityCoverage.cardsWithReference === 0) warnings.push({
     code: "continuity_text_only",
@@ -648,7 +648,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     severity: "warning",
     title: "此模型不支援多張一致性參考圖",
     detail: `找到 ${continuityReferences.available} 張可用圖片，但 provider 沒有宣告 image_urls 欄位，系統未猜測未知欄位以避免請求失敗。`,
-    suggestion: "改用支援多圖編輯的模型；本次仍會保留文字錨點與一致性快照。",
+    suggestion: "動畫實務兩段式：先用多圖 edit 模型（nano-banana / seedream / qwen-image-edit）＋三視圖鎖關鍵影格，再用 image-to-video 讓影格動起來。本次仍保留文字錨點與一致性快照。",
   });
   if (continuityReferences.truncated > 0) warnings.push({
     code: "continuity_references_capped",

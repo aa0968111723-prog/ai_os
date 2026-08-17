@@ -155,6 +155,24 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
 describe("generationCore creative override billing", () => {
   const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
 
+  it("multi_reference_unsupported 建議兩段式：edit＋三視圖 → image-to-video", () => {
+    const blockStart = source.indexOf('code: "multi_reference_unsupported"');
+    expect(blockStart).toBeGreaterThan(-1);
+    const block = source.slice(blockStart, blockStart + 900);
+    expect(block).toContain("兩段式");
+    expect(block).toContain("nano-banana");
+    expect(block).toContain("image-to-video");
+    expect(block).toContain("三視圖");
+  });
+
+  it("card_images_not_sent 誠實說明純文字模型只吃錨點", () => {
+    const blockStart = source.indexOf('code: "card_images_not_sent"');
+    expect(blockStart).toBeGreaterThan(-1);
+    const block = source.slice(blockStart, blockStart + 700);
+    expect(block).toContain("三視圖");
+    expect(block).toContain("純文字生圖");
+  });
+
   it("estimates approval and quota from the effective prompt sent to the provider", () => {
     const effectivePromptIdx = source.indexOf("const positivePrompt =");
     const estimateIdx = source.indexOf("promptChars: positivePrompt.length");

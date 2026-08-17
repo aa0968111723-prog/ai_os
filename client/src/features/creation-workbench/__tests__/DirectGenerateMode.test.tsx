@@ -323,6 +323,7 @@ describe("DirectGenerateMode", () => {
     await user.click(within(advanced).getByText(/進階設定/));
     const lock = await screen.findByRole("button", { name: "一致性鎖定：開" });
     expect(lock).toHaveAttribute("aria-pressed", "true");
+    expect(advanced).toHaveTextContent("只有宣告 image_urls 的多圖 edit 模型才會把三視圖送進去");
     await user.click(lock);
     expect(screen.getByRole("button", { name: "一致性鎖定：關" })).toHaveAttribute("aria-pressed", "false");
     await user.click(screen.getByRole("button", { name: /生成（−/ }));
