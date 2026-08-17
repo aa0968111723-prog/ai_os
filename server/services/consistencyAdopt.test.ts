@@ -32,3 +32,26 @@ describe("adopt and delivery gates", () => {
     })).toEqual(["1 份素材目前不建議商用"]);
   });
 });
+
+describe("delivery blockers with artifact findings (closure §8)", () => {
+  it("adds video/audio inconsistency blockers from derived findings", () => {
+    expect(deliveryBlockers({
+      shots: [{ id: "a", assetId: "x", reviewStatus: "approved" }],
+      staleShotIds: [],
+      artifactFindings: [
+        { track: "visual", code: "video_parent_superseded" },
+        { track: "narration", code: "voice_version_drift" },
+      ],
+    })).toEqual([
+      "有影片仍是用舊畫面生成的",
+      "有聲音與現行聲線／聲音世界不一致",
+    ]);
+  });
+
+  it("no findings → no new blockers (backward compatible)", () => {
+    expect(deliveryBlockers({
+      shots: [{ id: "a", assetId: "x", reviewStatus: "approved" }],
+      staleShotIds: [],
+    })).toEqual([]);
+  });
+});

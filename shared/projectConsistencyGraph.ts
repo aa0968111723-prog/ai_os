@@ -74,6 +74,17 @@ export interface WorkspaceProjection {
   canonPins: WorkspaceCanonPin[];
   /** 因上游變更而過期的鏡（packet head stale）——「只重做不一致的鏡頭」的依據 */
   staleShotIds: string[];
+  /**
+   * closure §8：downstream artifact 級的不一致（影片舊底圖／聲線版本漂移／聲音世界漂移）。
+   * 推導值不落盤——生成當下依賴 vs 此刻 current/pinned 版本的比較結果。
+   */
+  artifactFindings: Array<{
+    shotId: string;
+    track: "visual" | "narration" | "ambience" | "music";
+    code: string;
+    message: string;
+    assetId: string;
+  }>;
   /** 交付阻擋（人話）；空陣列＝可交付 */
   deliveryBlockers: string[];
 }
