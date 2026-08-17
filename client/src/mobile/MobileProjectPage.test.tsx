@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const projectQuery = vi.fn();
 const assetsQuery = vi.fn();
 const composed: string[] = [];
+/** 「只開面板、不代說話」被按到時會 push 一筆 */
+const opened: string[] = [];
 /** 桌面工作台被真的載進來時會 push 一筆——第一屏絕不該有 */
 const heavyLoads: string[] = [];
 
@@ -16,6 +18,8 @@ vi.mock("../api", () => ({
 vi.mock("../lib/assistantCompose", () => ({
   composeToAssistant: (text: string) => composed.push(text),
   useAssistantComposeListener: () => {},
+  openAssistantSurface: () => opened.push("assistant"),
+  useAssistantOpenListener: () => {},
 }));
 vi.mock("../pages/ProjectPage", () => ({
   ProjectPage: () => {
@@ -28,6 +32,7 @@ const navigate = vi.fn();
 vi.mock("wouter", () => ({ useLocation: () => ["/p/p1", navigate] }));
 
 import { MobileProjectPage } from "./MobileProjectPage";
+import { publishPhoneAssistantTurn, resetPhoneAssistantBridgeForTest } from "../lib/phoneAssistantBridge";
 
 const SUMMARY = {
   project: {
@@ -60,7 +65,9 @@ afterEach(() => window.history.replaceState(null, "", "/"));
 
 beforeEach(() => {
   composed.length = 0;
+  opened.length = 0;
   heavyLoads.length = 0;
+  resetPhoneAssistantBridgeForTest();
   navigate.mockClear();
   // mockReturnValue 不會清掉呼叫紀錄——不清的話「只有一個 query key」那條
   // 讀到的是跨案例累積的 calls，等於在驗別的測試留下的殘影。
@@ -157,6 +164,40 @@ describe("手機專案頁", () => {
     window.history.replaceState(null, "", "/p/p1#storyboard");
     render(<MobileProjectPage id="p1" />);
     expect(screen.queryByTestId("desktop-workbench")).not.toBeInTheDocument();
+  });
+
+  it("助手結果卡渲染出來，工作台仍然不下載（計畫 §11 的預算紅線）", () => {
+    window.history.replaceState(null, "", "/p/p1");
+    publishPhoneAssistantTurn({
+      scope: "project", scopeId: "p1", running: false, updatedAt: 1,
+      results: [{
+        type: "generation",
+        generationIds: ["0f8fad5b-d9cb-469f-a165-70867728950e"],
+        projectId: "p1",
+        verification: { status: "verified", message: "已註冊 1 筆生成" },
+      }],
+    });
+    render(<MobileProjectPage id="p1" />);
+    expect(screen.getByRole("button", { name: /去裁決候選/ })).toBeInTheDocument();
+    expect(heavyLoads).toEqual([]);
+  });
+
+  it("已經在這一頁時，結果卡的「去裁決候選」仍然打得開工作台", async () => {
+    // wouter 的 navigate 底層是 pushState，不會發 hashchange——只驗「按了有導航」
+    // 的測試會綠著騙人，而使用者按下去畫面完全不動。
+    window.history.replaceState(null, "", "/p/p1");
+    publishPhoneAssistantTurn({
+      scope: "project", scopeId: "p1", running: false, updatedAt: 1,
+      results: [{
+        type: "generation",
+        generationIds: ["0f8fad5b-d9cb-469f-a165-70867728950e"],
+        projectId: "p1",
+        verification: { status: "verified", message: "已註冊 1 筆生成" },
+      }],
+    });
+    render(<MobileProjectPage id="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: /去裁決候選/ }));
+    expect(await screen.findByTestId("desktop-workbench")).toBeInTheDocument();
   });
 
   it("打不開的專案給的是可行動的錯誤，不是空白", () => {

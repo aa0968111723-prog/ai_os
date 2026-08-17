@@ -13,6 +13,7 @@ import { AskSources, type AskSourcesData } from "./AskSources";
 import { requestAssistantStream } from "./assistantStream";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import { useAssistantComposeListener } from "../lib/assistantCompose";
+import { publishPhoneAssistantTurn } from "../lib/phoneAssistantBridge";
 import {
   AGENT_PLANNER_OPTIONS,
   getAgentPlannerOption,
@@ -329,6 +330,33 @@ export function ProjectAssistant({
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
+    /*
+     * 手機動作卡的投影（Phone UX，<768px）。
+     *
+     * 只在 AI 回合發布，且只帶「已經渲染在這張卡上」的東西：事件流、待確認提議的
+     * 標題、已驗證的直接結果。桌機沒有訂閱者，所以這一行對 >=768px 是無作用的。
+     * 為什麼要這條接縫（助手在 sheet 裡、關掉就卸載）記在 lib/phoneAssistantBridge 檔頭。
+     */
+    if (t.role === "you") {
+      // 「送出了，正在跑」——手機那張進度卡要在第一時間出現，不能等回答回來。
+      publishPhoneAssistantTurn({
+        scope: "project", scopeId: projectId, goalText: t.text, running: true, updatedAt: Date.now(),
+      });
+    }
+    if (t.role === "ai") {
+      publishPhoneAssistantTurn({
+        scope: "project",
+        scopeId: projectId,
+        answer: t.text,
+        events: t.agentEvents,
+        pendingProposals: (t.actions ?? []).map((action, index) => ({
+          id: `action-${index}`,
+          label: action.label,
+        })),
+        running: false,
+        updatedAt: Date.now(),
+      });
+    }
   };
   const bumpScroll = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
   // 進行中串流的中止控制：元件卸載、切換專案、送下一題前都 abort，讓伺服器端 res.on('close') 停掉在途 LLM 呼叫（不白燒免費額度）

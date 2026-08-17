@@ -10,6 +10,8 @@
 | `verify-agent.mjs` | AI 代理全生命週期（規劃→核准→背景執行→放棄） |
 | `audit-routes.mjs` | 全路由 × 360／390／768／1280／1440 基線；確認登入、輸出 manifest，任一失敗即非 0 |
 | `audit-breakpoints.mjs` | **MOB-04**：關鍵頁 × 同上 viewport 水平溢出斷言；可選登入 + `/p/:id`；fail-closed |
+| `verify-phone-ai-first.mjs` | **#766**：`<768px` 手機殼層、平板/桌機不外洩、首頁與開專案的 JS/API 預算 |
+| `verify-phone-action-first.mjs` | **Phone v2**：上下文補完、工作卡只反映真實狀態（不得假結果／假百分比）、卡片不拉工作台、桌面零外洩 |
 
 ## 安裝與啟動
 

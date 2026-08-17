@@ -30,8 +30,6 @@ import { MOBILE_STAGES, continueAnchor, continueLabel, stageIndex, stageSentence
  */
 export function MobileHome({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation();
-  // 助手頁面感知：首頁＝全站視角（快捷變成「安排今天／繼續上次／哪裡卡住」）
-  useEffect(() => registerAssistantPage({ pageType: "home" }), []);
 
   /**
    * 「看全部專案」不是導到另一頁，而是把同一支查詢換成大 limit 重打。
@@ -54,6 +52,37 @@ export function MobileHome({ groupId }: { groupId: string }) {
        */
       placeholderData: (previous) => previous,
     },
+  );
+
+  const projects = home.data?.projects ?? [];
+  const current = projects[0];
+  const currentStatus = current
+    ? stageSentence({
+      stage: current.stage,
+      shots: current.shots,
+      shotsWithVisual: current.shotsWithVisual,
+      awaitingGenerations: current.awaitingGenerations,
+    })
+    : undefined;
+
+  /**
+   * 助手頁面感知：首頁＝全站視角，但**帶著目前那個專案的身分**。
+   *
+   * #766 這裡註冊的是 `{ pageType: "home" }`，於是在首頁說「第二幕改成晚上」時，
+   * 助手真的不知道是哪個專案的第二幕——使用者心裡有一個「目前專案」，系統沒有。
+   * 補上 projectId／projectTitle 之後，上下文膠囊看得見它、`composePhoneGoal`
+   * 也補得出「在「百日夢島」：…」。
+   *
+   * 這仍然只是**提示**：線上白名單不送 projectId，伺服器一律重新 requireGroup
+   * 與專案查詢（見 lib/assistantContext 不變式 2），而助手面板的視野仍由路由決定
+   * （`/dashboard` → 組級），所以快捷與視野 chip 的行為與 #766 完全相同。
+   */
+  useEffect(
+    () => registerAssistantPage({
+      pageType: "home",
+      ...(current ? { projectId: current.id, projectTitle: current.title } : {}),
+    }),
+    [current?.id, current?.title],
   );
 
   if (!groupId) {
@@ -93,8 +122,6 @@ export function MobileHome({ groupId }: { groupId: string }) {
     );
   }
 
-  const projects = home.data?.projects ?? [];
-  const current = projects[0];
   // slice(1) 不再另外截斷：伺服器已經只回首屏該有的那幾筆，前端再砍一刀
   // 只會讓「最近」少一個專案，而使用者永遠不知道少的是哪一個。
   const others = projects.slice(1);
@@ -106,14 +133,7 @@ export function MobileHome({ groupId }: { groupId: string }) {
           <div className="m-current__head">
             <Meta as="span" className="m-current__eyebrow">目前專案</Meta>
             <h1 className="m-current__title">{current.title}</h1>
-            <p className="m-current__status">
-              {stageSentence({
-                stage: current.stage,
-                shots: current.shots,
-                shotsWithVisual: current.shotsWithVisual,
-                awaitingGenerations: current.awaitingGenerations,
-              })}
-            </p>
+            <p className="m-current__status">{currentStatus}</p>
           </div>
 
           <StageTrack stage={current.stage} />
@@ -141,8 +161,11 @@ export function MobileHome({ groupId }: { groupId: string }) {
            而專案名就在正上方，重複一次只是把提示詞擠掉 */
         placeholder={current ? "問 Aios 接下來做什麼？" : "想做什麼？直接跟 Aios 說"}
         lead={current
-          ? { label: "接下來做什麼", prompt: `我最近在做「${current.title}」，目前${stageSentence({ stage: current.stage, shots: current.shots, shotsWithVisual: current.shotsWithVisual, awaitingGenerations: current.awaitingGenerations })}。接下來最該做的是什麼？請直接開始。` }
+          ? { label: "接下來做什麼", prompt: `我最近在做「${current.title}」，目前${currentStatus}。接下來最該做的是什麼？請直接開始。` }
           : undefined}
+        groupId={groupId}
+        projectTitle={current?.title}
+        statusLine={currentStatus}
       />
 
       {others.length > 0 && (
