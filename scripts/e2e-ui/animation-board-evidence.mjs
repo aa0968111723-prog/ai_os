@@ -78,7 +78,12 @@ try {
     if (!result.noHorizontalOverflow) throw new Error(`${viewport.name}: horizontal overflow`);
     if (result.primaryButtons !== 1) throw new Error(`${viewport.name}: expected one primary CTA, got ${result.primaryButtons}`);
     if (result.comparisonSlots !== 4) throw new Error(`${viewport.name}: expected four comparison slots, got ${result.comparisonSlots}`);
-    if (serious.length) throw new Error(`${viewport.name}: serious axe violations ${serious.map((row) => row.id).join(",")}`);
+    if (serious.length) throw new Error(`${viewport.name}: serious axe violations ${JSON.stringify(
+      serious.map((row) => ({
+        id: row.id,
+        nodes: row.nodes.map((node) => ({ target: node.target, summary: node.failureSummary })),
+      })),
+    )}`);
     await board.screenshot({ path: `${OUT}/animation_board_${viewport.name}.png` });
     results[viewport.name] = result;
     await context.close();
