@@ -44,6 +44,7 @@ const [image] = await db.insert(schema.assets).values({
 }).returning({ id: schema.assets.id });
 
 await db.delete(schema.generationConsistencyEvaluations).where(eq(schema.generationConsistencyEvaluations.projectId, projectId));
+await db.delete(schema.generations).where(eq(schema.generations.projectId, projectId));
 await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
 
 const shots = await db.insert(schema.scenes).values([

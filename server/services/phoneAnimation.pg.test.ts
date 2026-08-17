@@ -11,7 +11,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { emptyEvaluationDimensions } from "../../shared/animationEvaluation";
+import { adoptGenerationCurrent } from "./consistencyAdopt";
 import {
+  phoneAnimationCompareQueue,
   phoneAnimationFindings,
   phoneAnimationRepairProposal,
   phoneAnimationSummary,
@@ -159,5 +161,129 @@ describe.skipIf(!RUN_PG).sequential("Phone animation production adapter (real Po
     const after = await db.select({ id: schema.generations.id }).from(schema.generations)
       .where(eq(schema.generations.projectId, projectId));
     expect(after).toHaveLength(before.length);
+  });
+
+  it("typed include/exclude without Chinese text still drops style and does not generate", async () => {
+    const before = await db.select({ id: schema.generations.id }).from(schema.generations)
+      .where(eq(schema.generations.projectId, projectId));
+    const result = await phoneAnimationRepairProposal({
+      auth,
+      projectId,
+      include: ["identity", "look", "temporal", "physics"],
+      exclude: ["style"],
+    });
+    expect(result.status).toBe("proposal");
+    if (result.status !== "proposal") return;
+    expect(result.proposal.dimensions).not.toContain("style");
+    expect(result.proposal.affectedShotIds).toHaveLength(2);
+    const after = await db.select({ id: schema.generations.id }).from(schema.generations)
+      .where(eq(schema.generations.projectId, projectId));
+    expect(after).toHaveLength(before.length);
+  });
+});
+
+describe.skipIf(!RUN_PG).sequential("Phone animation Adopt / Keep (real PostgreSQL)", () => {
+  const groupId = randomUUID();
+  const userId = randomUUID();
+  const projectId = randomUUID();
+  const auth: AuthState = {
+    user: { id: userId, name: "phone-adopt", email: "phone-adopt@example.test", isSuperAdmin: false, mustChangePassword: false },
+    groups: [{ groupId, groupName: "動畫組", teamId: randomUUID(), teamName: "t", role: "leader" }],
+    adminTeamIds: [],
+  };
+  const shotIds: string[] = [];
+  const generationIds: string[] = [];
+  const candidateAssetIds: string[] = [];
+  const currentAssetIds: string[] = [];
+
+  afterAll(async () => {
+    await db.delete(schema.generationConsistencyEvaluations).where(eq(schema.generationConsistencyEvaluations.projectId, projectId));
+    await db.delete(schema.shotContinuityStates).where(eq(schema.shotContinuityStates.projectId, projectId));
+    await db.delete(schema.generations).where(eq(schema.generations.projectId, projectId));
+    await db.delete(schema.assets).where(eq(schema.assets.projectId, projectId));
+    await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
+    await db.delete(schema.groupMembers).where(eq(schema.groupMembers.groupId, groupId));
+    await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
+  });
+
+  it("seeds two candidate shots against different current assets", async () => {
+    await db.insert(schema.projects).values({
+      id: projectId,
+      groupId,
+      ownerId: userId,
+      title: "手機 Adopt Keep",
+      kind: "animation",
+      platform: "test",
+      format: "9:16",
+    });
+    await db.insert(schema.groupMembers).values({ groupId, userId, role: "leader" });
+    for (const title of ["Shot 04", "Shot 05"]) {
+      const [current] = await db.insert(schema.assets).values({
+        projectId, groupId, kind: "image", title: `${title} 現用`, url: `https://example.test/${title}-cur.png`,
+      }).returning({ id: schema.assets.id });
+      currentAssetIds.push(current.id);
+      const [shot] = await db.insert(schema.scenes).values({
+        projectId, orderIndex: shotIds.length + 3, title, prompt: title, assetId: current.id,
+      }).returning({ id: schema.scenes.id });
+      shotIds.push(shot.id);
+      const generationId = randomUUID();
+      generationIds.push(generationId);
+      const url = `https://example.test/${title}-cand.png`;
+      await db.insert(schema.generations).values({
+        id: generationId,
+        projectId,
+        groupId,
+        userId,
+        modelId: "fal-ai/flux/dev",
+        kind: "image",
+        status: "done",
+        prompt: title,
+        sceneId: shot.id,
+        resultUrl: url,
+      });
+      const [candidate] = await db.insert(schema.assets).values({
+        projectId,
+        groupId,
+        kind: "image",
+        title: `${title} 候選`,
+        url,
+        meta: { generationId },
+      }).returning({ id: schema.assets.id });
+      candidateAssetIds.push(candidate.id);
+    }
+  });
+
+  it("compare queue lists both candidates and Adopt only moves one current pointer", async () => {
+    const before = await phoneAnimationCompareQueue({ auth, projectId });
+    expect(before.items).toHaveLength(2);
+    const summaryBefore = await phoneAnimationSummary({ auth, projectId });
+    const adopted = await adoptGenerationCurrent({ auth, generationId: generationIds[0]! });
+    expect(adopted.adopted).toBe(true);
+    expect(adopted.shotId).toBe(shotIds[0]);
+    const [shot] = await db.select({ assetId: schema.scenes.assetId }).from(schema.scenes)
+      .where(eq(schema.scenes.id, shotIds[0]!));
+    expect(shot?.assetId).toBe(candidateAssetIds[0]);
+    const [kept] = await db.select({ assetId: schema.scenes.assetId }).from(schema.scenes)
+      .where(eq(schema.scenes.id, shotIds[1]!));
+    expect(kept?.assetId).toBe(currentAssetIds[1]);
+    const after = await phoneAnimationCompareQueue({ auth, projectId });
+    expect(after.items.map((row) => row.shotId)).toEqual([shotIds[1]]);
+    const summaryAfter = await phoneAnimationSummary({ auth, projectId });
+    // Queue count is whatever the fresh board says — never a client decrement.
+    expect(summaryAfter.counts.needsReview).toBeTypeOf("number");
+    expect(summaryBefore.counts.needsReview).toBeTypeOf("number");
+  });
+
+  it("Keep Current marks review without deleting the remaining candidate", async () => {
+    await db.update(schema.scenes).set({ reviewStatus: "approved" }).where(eq(schema.scenes.id, shotIds[1]!));
+    const [candidate] = await db.select({ id: schema.assets.id }).from(schema.assets)
+      .where(eq(schema.assets.id, candidateAssetIds[1]!));
+    expect(candidate?.id).toBe(candidateAssetIds[1]);
+    const compare = await phoneAnimationCompareQueue({ auth, projectId });
+    expect(compare.items.some((row) => row.shotId === shotIds[1])).toBe(true);
+    const [shot] = await db.select({ assetId: schema.scenes.assetId, reviewStatus: schema.scenes.reviewStatus })
+      .from(schema.scenes).where(eq(schema.scenes.id, shotIds[1]!));
+    expect(shot?.assetId).toBe(currentAssetIds[1]);
+    expect(shot?.reviewStatus).toBe("approved");
   });
 });

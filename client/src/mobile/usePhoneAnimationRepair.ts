@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import {
   classifyPhoneAnimationIntent,
+  nextPhoneCompareItem,
   phoneAnimationAdoptCard,
   phoneAnimationClarifyCard,
   phoneAnimationCompareCard,
@@ -45,7 +46,8 @@ export function usePhoneAnimationRepair(input: {
   const proposalRef = useRef<PhoneRepairProposalView | null>(null);
   const costRevealedRef = useRef(false);
   const compareRef = useRef<PhoneCompareItem[]>([]);
-  const compareIndexRef = useRef(0);
+  const currentCompareRef = useRef<PhoneCompareItem | null>(null);
+  const decidedShotIdsRef = useRef<Set<string>>(new Set());
   const queueBeforeRef = useRef<number | null>(null);
   const confirmedRef = useRef(false);
 
@@ -79,12 +81,12 @@ export function usePhoneAnimationRepair(input: {
     });
   }, [input.projectId, selectedShotId, utils.phone.animationFindings]);
 
-  const loadProposal = useCallback(async (command?: Extract<PhoneCommand, { type: "plan_repair" }>, text?: string) => {
+  const loadProposal = useCallback(async (command?: Extract<PhoneCommand, { type: "plan_repair" }>) => {
     if (!input.projectId) return null;
     return utils.phone.animationRepairProposal.fetch({
       projectId: input.projectId,
       selectedShotId,
-      ...(text ? { text } : {}),
+      ...(command?.text ? { text: command.text } : {}),
       ...(command?.shotIds ? { shotIds: command.shotIds } : {}),
       ...(command?.include ? { include: command.include } : {}),
       ...(command?.exclude ? { exclude: command.exclude } : {}),
@@ -97,9 +99,12 @@ export function usePhoneAnimationRepair(input: {
     return utils.phone.animationCompareQueue.fetch({ projectId: input.projectId });
   }, [input.projectId, utils.phone.animationCompareQueue]);
 
-  const showCompareAt = useCallback((index: number) => {
-    const items = compareRef.current;
-    const item = items[index];
+  const showNextCompare = useCallback(() => {
+    const item = nextPhoneCompareItem({
+      items: compareRef.current,
+      decidedShotIds: decidedShotIdsRef.current,
+    });
+    currentCompareRef.current = item;
     if (!item) {
       setCard({
         kind: "result",
@@ -109,7 +114,6 @@ export function usePhoneAnimationRepair(input: {
       });
       return;
     }
-    compareIndexRef.current = index;
     setCard(phoneAnimationCompareCard(item));
     setActive(true);
   }, []);
@@ -131,6 +135,8 @@ export function usePhoneAnimationRepair(input: {
     if (command.type === "plan_repair") {
       costRevealedRef.current = false;
       confirmedRef.current = false;
+      decidedShotIdsRef.current = new Set();
+      currentCompareRef.current = null;
       const data = await loadProposal(command);
       if (!data) return;
       if (data.status === "clarify") {
@@ -246,18 +252,18 @@ export function usePhoneAnimationRepair(input: {
       if (!compareRef.current.length) {
         const compare = await loadCompare();
         compareRef.current = compare?.items ?? [];
-        compareIndexRef.current = 0;
       }
-      showCompareAt(compareIndexRef.current);
+      showNextCompare();
       return;
     }
     if (command.type === "adopt") {
       const before = queueBeforeRef.current;
+      const item = currentCompareRef.current;
+      if (item?.shotId) decidedShotIdsRef.current.add(item.shotId);
       await adoptGeneration.mutateAsync({ generationId: command.generationId });
       const fresh = await loadCompare();
       const summary = await loadSummary();
       const after = summary?.counts.needsReview ?? fresh?.summary.counts.needsReview ?? 0;
-      const item = compareRef.current[compareIndexRef.current];
       compareRef.current = fresh?.items ?? [];
       queueBeforeRef.current = after;
       setCard(phoneAnimationAdoptCard({
@@ -269,11 +275,12 @@ export function usePhoneAnimationRepair(input: {
     }
     if (command.type === "keep") {
       const before = queueBeforeRef.current;
+      const item = currentCompareRef.current;
+      decidedShotIdsRef.current.add(command.shotId);
       await reviewShot.mutateAsync({ sceneId: command.shotId, status: "approved" });
       const fresh = await loadCompare();
       const summary = await loadSummary();
       const after = summary?.counts.needsReview ?? fresh?.summary.counts.needsReview ?? 0;
-      const item = compareRef.current[compareIndexRef.current];
       compareRef.current = fresh?.items ?? [];
       queueBeforeRef.current = after;
       setCard(phoneAnimationAdoptCard({
@@ -288,9 +295,8 @@ export function usePhoneAnimationRepair(input: {
       if (input.repairResume?.state === "review_ready") {
         const compare = await loadCompare();
         compareRef.current = compare?.items ?? [];
-        compareIndexRef.current = 0;
         queueBeforeRef.current = compare?.summary.counts.needsReview ?? null;
-        showCompareAt(0);
+        showNextCompare();
         return;
       }
       if (input.repairResume?.state === "running" || input.repairResume?.state === "awaiting_approval") {
@@ -328,7 +334,7 @@ export function usePhoneAnimationRepair(input: {
     loadProposal,
     loadSummary,
     reviewShot,
-    showCompareAt,
+    showNextCompare,
   ]);
 
   const tryHandle = useCallback((text: string): boolean => {
@@ -377,6 +383,7 @@ export function usePhoneAnimationRepair(input: {
       if (intent.kind === "plan_repair") {
         await runCommand({
           type: "plan_repair",
+          text,
           include: intent.filter.include,
           exclude: intent.filter.exclude,
         });
@@ -391,18 +398,22 @@ export function usePhoneAnimationRepair(input: {
         return;
       }
       if (intent.kind === "adopt") {
-        const item = compareRef.current[compareIndexRef.current];
+        const item = currentCompareRef.current
+          ?? nextPhoneCompareItem({ items: compareRef.current, decidedShotIds: decidedShotIdsRef.current });
         if (!item) {
           setCard(phoneAnimationClarifyCard("要採用哪一鏡的候選？", []));
           setActive(true);
           return;
         }
+        currentCompareRef.current = item;
         await runCommand({ type: "adopt", generationId: item.generationId });
         return;
       }
       if (intent.kind === "keep") {
-        const item = compareRef.current[compareIndexRef.current];
+        const item = currentCompareRef.current
+          ?? nextPhoneCompareItem({ items: compareRef.current, decidedShotIds: decidedShotIdsRef.current });
         if (!item) return;
+        currentCompareRef.current = item;
         await runCommand({ type: "keep", shotId: item.shotId });
         return;
       }

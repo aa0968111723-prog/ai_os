@@ -178,7 +178,7 @@ export interface PhoneRepairResume {
 export type PhoneCommand =
   | { type: "list_findings"; dimension?: AnimationEvaluationDimension }
   | { type: "explain_shot"; shotId: string }
-  | { type: "plan_repair"; include?: AnimationEvaluationDimension[]; exclude?: AnimationEvaluationDimension[]; shotIds?: string[] }
+  | { type: "plan_repair"; include?: AnimationEvaluationDimension[]; exclude?: AnimationEvaluationDimension[]; shotIds?: string[]; text?: string }
   | { type: "confirm_repair" }
   | { type: "adopt"; generationId: string }
   | { type: "keep"; shotId: string }
@@ -393,7 +393,10 @@ export function classifyPhoneAnimationIntent(text: string): PhoneAnimationIntent
     ? (dropOrdinal[0].includes("第二") ? 2 : Number(dropOrdinal[1] || dropOrdinal[2]) || CHINESE_ORDINAL[dropOrdinal[1] ?? ""] || undefined)
     : undefined;
 
-  if (/(?:幫我修|規劃修復|只修|先修|處理掉|修掉|修復計畫|把.*問題.*修|全部規劃|只處理高優先)/u.test(trimmed)) {
+  if (
+    drop
+    || /(?:幫我修|規劃修復|只修|先修|處理掉|修掉|修復計畫|把.*問題.*修|全部規劃|只處理)/u.test(trimmed)
+  ) {
     return { kind: "plan_repair", filter, shotRefs, ...(drop ? { dropOrdinal: drop } : {}) };
   }
   if (/(?:還沒檢查|尚未檢查|沒檢查|幾鏡沒檢查)/u.test(trimmed)) {
@@ -428,11 +431,16 @@ export function resolvePhoneRepairTargets(input: {
   shots: readonly PhoneAnimationBoardShot[];
   selectedShotId?: string;
   previousFindingKeys?: readonly string[];
+  filterOverride?: PhoneDimensionFilter;
 }): PhoneRepairTargetResolution {
   const intent = classifyPhoneAnimationIntent(input.text);
-  const filter = intent.kind === "plan_repair" || intent.kind === "list_findings"
+  const parsedFilter = intent.kind === "plan_repair" || intent.kind === "list_findings"
     ? intent.filter
     : parsePhoneDimensionFilter(input.text);
+  const filter = input.filterOverride
+    && (input.filterOverride.include.length > 0 || input.filterOverride.exclude.length > 0)
+    ? input.filterOverride
+    : parsedFilter;
   let selected = filterPhoneFindings(input.findings, filter);
   const dropOrdinal = (intent.kind === "plan_repair" ? intent.dropOrdinal : undefined)
     ?? dropOrdinalFromText(input.text);
@@ -452,6 +460,9 @@ export function resolvePhoneRepairTargets(input: {
 
   if (/全部規劃/u.test(input.text)) {
     selected = filterPhoneFindings(input.findings, filter);
+  } else if (/這三鏡|這\s*3\s*鏡|只處理這三鏡/u.test(input.text)) {
+    const topIds = [...new Set(selected.map((row) => row.shotId))].slice(0, 3);
+    selected = selected.filter((row) => topIds.includes(row.shotId));
   } else if (/只處理高優先|高優先的/u.test(input.text)) {
     const topIds = [...new Set(input.findings.map((row) => row.shotId))].slice(0, 3);
     selected = input.findings.filter((row) => topIds.includes(row.shotId));
@@ -556,6 +567,16 @@ export function projectPhoneRepairProposal(input: {
     keyframeModelId,
     videoModelId,
   };
+}
+
+export function nextPhoneCompareItem(input: {
+  items: readonly PhoneCompareItem[];
+  decidedShotIds: ReadonlySet<string> | readonly string[];
+}): PhoneCompareItem | null {
+  const decided = input.decidedShotIds instanceof Set
+    ? input.decidedShotIds
+    : new Set(input.decidedShotIds);
+  return input.items.find((item) => !decided.has(item.shotId)) ?? null;
 }
 
 export function sortPhoneCompareQueue(items: readonly PhoneCompareItem[]): PhoneCompareItem[] {
@@ -708,14 +729,30 @@ export function phoneAnimationCostCard(proposal: PhoneRepairProposalView): Phone
   const videoCount = proposal.shots.filter((shot) => shot.stages.includes("video")).length;
   if (keyframeCount) stageLines.push(`${keyframeCount} 次關鍵影格生成`);
   if (videoCount) stageLines.push(`${videoCount} 次影片生成`);
+  const headline = proposal.requiresApproval
+    ? (proposal.approvalLabel ?? `超過核准門檻，需要你確認 ${proposal.estimatedPoints} 點`)
+    : `預估 ${proposal.estimatedPoints} 點`;
   return {
     kind: "proposal",
     title: "執行前確認",
     lines: [
-      ...stageLines,
-      `預估 ${proposal.estimatedPoints} 點`,
+      ...stageLines.slice(0, 1),
+      headline,
+      proposal.untouchedLabel,
     ].slice(0, 3),
-    steps: [],
+    steps: [
+      ...proposal.shots.map((shot) => ({
+        key: shot.shotId,
+        label: `${shot.shotLabel} · ${shot.stageLabel}${shot.reuseLabel ? ` · ${shot.reuseLabel}` : ""}`,
+        state: "pending" as const,
+      })),
+      { key: "candidate-only", label: "目前版本不會被覆蓋，完成後仍只是候選", state: "pending" as const },
+      ...proposal.capabilityDowngrades.map((line, index) => ({
+        key: `downgrade-${index}`,
+        label: line,
+        state: "blocked" as const,
+      })),
+    ],
     primaryAction: commandAction("確認執行", { type: "confirm_repair" }, true),
     attention: true,
   };

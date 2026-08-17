@@ -130,17 +130,21 @@ export async function phoneAnimationRepairProposal(input: {
   const summary = projectPhoneAnimationSummary(board, { selectedShotId: input.selectedShotId });
   const findings = collectPhoneFindings(board.rows);
   const text = input.text
-    ?? (input.include?.length || input.exclude?.length
-      ? `只修${(input.include ?? []).join(" ")}`
-      : input.shotIds?.length
-        ? "只處理這些鏡頭"
+    ?? (input.shotIds?.length
+      ? "只處理這些鏡頭"
+      : input.include?.length || input.exclude?.length
+        ? "規劃修復"
         : "幫我修一下");
+  const filterOverride = (input.include?.length || input.exclude?.length)
+    ? { include: input.include ?? [], exclude: input.exclude ?? [] }
+    : undefined;
   const resolved = resolvePhoneRepairTargets({
     text,
     findings,
     shots: board.rows,
     selectedShotId: input.selectedShotId,
     previousFindingKeys: input.previousFindingKeys,
+    ...(filterOverride ? { filterOverride } : {}),
   });
   if (resolved.status === "clarify") {
     return { status: "clarify", question: resolved.question, options: resolved.options, summary };
