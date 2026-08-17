@@ -136,6 +136,40 @@ export function PhoneAssistantCardView({
         </ol>
       )}
 
+      {card.media && (card.media.current || card.media.candidate) && (
+        <div className="m-card__compare" aria-label="現用版本與修復候選">
+          <figure className="m-card__preview">
+            <figcaption>{card.media.currentLabel ?? "現用版本"}</figcaption>
+            <PhoneMediaThumb media={card.media.current ?? null} label={card.media.currentLabel ?? "現用版本"} />
+          </figure>
+          <span className="m-card__compare-swap" aria-hidden="true">⇄</span>
+          <figure className="m-card__preview">
+            <figcaption>{card.media.candidateLabel ?? "修復候選"}</figcaption>
+            <PhoneMediaThumb media={card.media.candidate ?? null} label={card.media.candidateLabel ?? "修復候選"} />
+          </figure>
+        </div>
+      )}
+
+      {card.choices && card.choices.length > 0 && (
+        <div className="m-card__choices">
+          {card.choices.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              className="m-card__choice"
+              onClick={() => onRun({
+                id: `phone.choice.${choice.id}`,
+                label: choice.label,
+                kind: "compose",
+                prompt: choice.label,
+              })}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {(card.primaryAction || card.secondaryAction) && (
         <div className="m-card__actions">
           {card.primaryAction && <PhoneActionButton action={card.primaryAction} variant="primary" onRun={onRun} />}
@@ -144,6 +178,19 @@ export function PhoneAssistantCardView({
       )}
     </section>
   );
+}
+
+function PhoneMediaThumb({
+  media,
+  label,
+}: {
+  media: { kind: string; url: string } | null;
+  label: string;
+}) {
+  if (!media) return <div className="m-card__placeholder">尚無畫面</div>;
+  return media.kind === "video"
+    ? <video src={media.url} controls preload="metadata" aria-label={label} />
+    : <img src={media.url} alt={label} loading="lazy" />;
 }
 
 /**

@@ -31,6 +31,7 @@ export interface AnimationBoardRow {
     evidenceSourceIds: string[];
     repairHint?: string;
   }>;
+  visualCheckStatus: "completed" | "not_checked" | "failed" | "absent";
 }
 
 /**
@@ -136,7 +137,9 @@ export async function animationProductionBoard(input: {
     const generation = latestGenerationByShot.get(shot.id) ?? null;
     const candidate = generation ? candidateByGeneration.get(generation.id) ?? null : null;
     const isCandidateDifferent = candidate && candidate.id !== current?.id;
-    const findings = evaluationByShot.get(shot.id)?.findings ?? [];
+    const evaluation = evaluationByShot.get(shot.id);
+    const findings = evaluation?.findings ?? [];
+    const visualCheckStatus = evaluation?.visualCheckStatus ?? "absent";
     const stale = staleByShot.get(shot.id) ?? false;
     const lifecycle = deriveAnimationShotLifecycle({
       shotId: shot.id,
@@ -171,6 +174,7 @@ export async function animationProductionBoard(input: {
         : null,
       next: neighbor(index + 1),
       findings,
+      visualCheckStatus,
     };
   });
   const reviewQueue = rows.filter((row) => row.needsReview);

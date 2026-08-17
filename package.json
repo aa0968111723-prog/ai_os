@@ -37,6 +37,7 @@
     "test:e2e:command-center": "node scripts/e2e-ui/verify-command-center.mjs",
     "test:e2e:agent-handoffs": "node scripts/e2e-ui/verify-agent-ui-handoffs.mjs",
     "test:e2e:phone-action-first": "node scripts/e2e-ui/verify-phone-action-first.mjs",
+    "test:e2e:phone-animation-repair": "node scripts/e2e-ui/verify-phone-animation-repair.mjs",
     "verify:agent-live": "python scripts/e2e-agent-live-certification.py",
     "test:e2e:animation-consistency": "bash scripts/run-animation-consistency.sh",
     "verify:agent-db-integrity": "tsx scripts/verify-agent-db-integrity.ts",

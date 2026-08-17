@@ -6,6 +6,7 @@ import {
   derivePhoneContextCapsule,
   resolvePhoneDestructiveTarget,
   type PhoneAssistantAction,
+  type PhoneCard,
   type PhoneTargetCandidate,
 } from "@shared/phoneAssistantProjection";
 import { Icon } from "../components/Icon";
@@ -59,6 +60,12 @@ export function MobileAiBar({
   statusLine,
   /** 專案名（首頁的「目前專案」也算——首頁路由沒有專案，但使用者心裡有） */
   projectTitle,
+  /** 動畫 Production adapter 投影的卡；有的話蓋過一般助手投影，不是第二套助手 */
+  animationCard,
+  /** 回 true 表示這句已由 Production adapter 處理，不再 compose */
+  onInterceptSend,
+  /** phone_command 交給 adapter；寫入仍走既有 execute / adopt / review */
+  onRunCommand,
 }: {
   placeholder?: string;
   lead?: { label: string; prompt: string };
@@ -66,6 +73,9 @@ export function MobileAiBar({
   projectId?: string;
   statusLine?: string;
   projectTitle?: string;
+  animationCard?: PhoneCard | null;
+  onInterceptSend?: (text: string) => boolean;
+  onRunCommand?: (command: NonNullable<PhoneAssistantAction["command"]>) => void;
 }) {
   const ctx = useAssistantContext();
   const [location, navigate] = useLocation();
@@ -132,6 +142,10 @@ export function MobileAiBar({
       return;
     }
     setAmbiguous(null);
+    if (onInterceptSend?.(trimmed)) {
+      setText("");
+      return;
+    }
     composeToAssistant(composePhoneGoal(trimmed, capsule));
     setText("");
   };
@@ -146,7 +160,12 @@ export function MobileAiBar({
    * `navigate` 只導到唯讀畫面——導航成功永遠不會被當成任務成功（計畫 §7）。
    */
   const runAction = (action: PhoneAssistantAction) => {
+    if (action.kind === "phone_command" && action.command && onRunCommand) {
+      onRunCommand(action.command);
+      return;
+    }
     if (action.kind === "compose" && action.prompt) {
+      if (onInterceptSend?.(action.prompt)) return;
       composeToAssistant(composePhoneGoal(action.prompt, capsule));
       return;
     }
@@ -185,8 +204,8 @@ export function MobileAiBar({
           }}
           onCancel={() => setAmbiguous(null)}
         />
-      ) : card ? (
-        <PhoneAssistantCardView card={card} onRun={runAction} />
+      ) : (animationCard ?? card) ? (
+        <PhoneAssistantCardView card={(animationCard ?? card)!} onRun={runAction} />
       ) : null}
 
       <form className="m-ai__form" onSubmit={onSubmit}>

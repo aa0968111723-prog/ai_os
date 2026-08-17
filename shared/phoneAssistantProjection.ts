@@ -259,7 +259,7 @@ export function derivePhoneContextCapsule(input: PhoneContextInput): PhoneContex
  * - `navigate`：只用來看結果（深連結）。**導航成功不等於任務成功**，
  *   所以它永遠不會被拿來當「已完成」的證據。
  */
-export type PhoneActionKind = "compose" | "open_assistant" | "navigate";
+export type PhoneActionKind = "compose" | "open_assistant" | "navigate" | "phone_command";
 
 export interface PhoneAssistantAction {
   id: string;
@@ -273,6 +273,8 @@ export interface PhoneAssistantAction {
   affordance?: PhoneCapabilityAffordance;
   /** 會花點數——按鈕上必須看得到（計畫 §2.5） */
   paid?: boolean;
+  /** kind=phone_command：動畫 Production adapter 的 typed 指令（不含寫入權限） */
+  command?: { type: string } & Record<string, unknown>;
 }
 
 /* ── 手機卡片 ─────────────────────────────────────────────────────── */
@@ -289,6 +291,15 @@ export interface PhoneCard {
   secondaryAction?: PhoneAssistantAction;
   /** 失敗／部分成功時為真，UI 用它決定語氣與 aria 提示（不只靠顏色） */
   attention?: boolean;
+  /** Clarify 選項（人話標籤）。選了才送 typed command，不猜。 */
+  choices?: ReadonlyArray<{ id: string; label: string }>;
+  /** 手機 Compare 用的現用／候選預覽。沒有就不要渲染，避免空框。 */
+  media?: {
+    current?: { kind: string; url: string } | null;
+    candidate?: { kind: string; url: string } | null;
+    currentLabel?: string;
+    candidateLabel?: string;
+  };
 }
 
 export interface PhoneProjectionInput {

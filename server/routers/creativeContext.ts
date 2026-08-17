@@ -114,6 +114,10 @@ export const creativeContextRouter = router({
     .input(z.object({
       projectId: z.string().uuid(),
       shotIds: z.array(z.string().uuid()).max(300).optional(),
+      dimensions: z.array(z.enum([
+        "semantic", "identity", "look", "scene", "prop", "style", "temporal", "physics",
+      ])).max(8).optional(),
+      findingCodes: z.array(z.string().min(1).max(80)).max(50).optional(),
     }))
     .query(async ({ ctx, input }) => {
       return targetedAnimationRepairPlan({ auth: ctx.auth, ...input });

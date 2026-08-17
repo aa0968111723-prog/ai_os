@@ -32,6 +32,19 @@ import { db, schema } from "../db";
 import { visibleProjectsWhere } from "../services/projectInventory";
 // 階段字彙與推導是前後端共用的單一出處（見 shared/phoneStages.ts 檔頭）
 import { inferPhoneStage } from "../../shared/phoneStages";
+import {
+  phoneAnimationCompareQueue,
+  phoneAnimationFindings,
+  phoneAnimationRepairProposal,
+  phoneAnimationResume,
+  phoneAnimationSummary,
+  phoneProjectRepairCounts,
+} from "../services/phoneAnimation";
+import { derivePhoneRepairResume } from "../../shared/phoneAnimationProjection";
+
+const ANIMATION_DIMENSIONS = [
+  "semantic", "identity", "look", "scene", "prop", "style", "temporal", "physics",
+] as const;
 
 /** 手機首屏最多列幾個專案——「最近／目前」是一個很短的清單，不是專案總表 */
 const HOME_PROJECT_LIMIT = 5;
@@ -218,6 +231,14 @@ export const phoneRouter = router({
       const shots = n(shot?.shots);
       const shotsWithVisual = n(shot?.withVisual);
       const generationsDone = n(gen?.done);
+      const awaitingGenerations = n(gen?.awaiting);
+      const runningGenerations = n(gen?.running);
+      const { candidateShots } = await phoneProjectRepairCounts({ projectId: input.projectId });
+      const repairResume = derivePhoneRepairResume({
+        awaitingGenerations,
+        runningGenerations,
+        compareCount: candidateShots,
+      });
       return {
         project: {
           id: project.id,
@@ -234,8 +255,8 @@ export const phoneRouter = router({
           shotsWithNarration: n(shot?.withNarration),
           storyChars: n(story?.length),
           assets: n(assetCount?.total),
-          awaitingGenerations: n(gen?.awaiting),
-          runningGenerations: n(gen?.running),
+          awaitingGenerations,
+          runningGenerations,
           generationsDone,
         },
         stage: inferPhoneStage({
@@ -246,6 +267,57 @@ export const phoneRouter = router({
           archived: project.status === "archived",
         }),
         recentAssets,
+        ...(repairResume ? { repairResume } : {}),
       };
+    }),
+
+  /**
+   * Compact animation Production Board projection. On-demand only — not part of
+   * phone.home. Reuses the existing board query set (bounded, no per-shot N+1).
+   */
+  animationSummary: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      selectedShotId: z.string().uuid().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return phoneAnimationSummary({ auth: ctx.auth, ...input });
+    }),
+
+  animationFindings: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      selectedShotId: z.string().uuid().optional(),
+      include: z.array(z.enum(ANIMATION_DIMENSIONS)).max(8).optional(),
+      exclude: z.array(z.enum(ANIMATION_DIMENSIONS)).max(8).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return phoneAnimationFindings({ auth: ctx.auth, ...input });
+    }),
+
+  animationRepairProposal: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      text: z.string().trim().max(500).optional(),
+      selectedShotId: z.string().uuid().optional(),
+      shotIds: z.array(z.string().uuid()).max(300).optional(),
+      include: z.array(z.enum(ANIMATION_DIMENSIONS)).max(8).optional(),
+      exclude: z.array(z.enum(ANIMATION_DIMENSIONS)).max(8).optional(),
+      previousFindingKeys: z.array(z.string().min(1).max(200)).max(50).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return phoneAnimationRepairProposal({ auth: ctx.auth, ...input });
+    }),
+
+  animationCompareQueue: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return phoneAnimationCompareQueue({ auth: ctx.auth, ...input });
+    }),
+
+  animationResume: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return phoneAnimationResume({ auth: ctx.auth, projectId: input.projectId });
     }),
 });

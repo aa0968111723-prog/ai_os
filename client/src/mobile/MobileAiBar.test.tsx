@@ -67,6 +67,29 @@ describe("手機 AI 控制面：送出仍走既有接縫", () => {
     // 沒有任何 mutation、沒有直接執行：這個元件只會 compose
     expect(opened).toEqual([]);
   });
+
+  it("動畫 Production 語句可由 adapter 攔截，一般句子仍走 compose", () => {
+    const intercepted: string[] = [];
+    render(
+      <MobileAiBar
+        groupId="g1"
+        projectId="p1"
+        projectTitle="百日夢島"
+        onInterceptSend={(text) => {
+          if (text.includes("有什麼問題")) {
+            intercepted.push(text);
+            return true;
+          }
+          return false;
+        }}
+      />,
+    );
+    send("這一幕還有什麼問題？");
+    expect(intercepted).toEqual(["這一幕還有什麼問題？"]);
+    expect(composed).toEqual([]);
+    send("把第二幕改成晚上");
+    expect(composed).toEqual(["在「百日夢島」：把第二幕改成晚上"]);
+  });
 });
 
 describe("手機 AI 控制面：模糊刪除目標不准猜（Flow F）", () => {
