@@ -25,6 +25,12 @@ export E2E_MOCK_DELAY_MS="${E2E_MOCK_DELAY_MS:-300}"
 export SEED_ADMIN_EMAIL="${SEED_ADMIN_EMAIL:-admin@aidirector.local}"
 export SEED_ADMIN_PASSWORD="${SEED_ADMIN_PASSWORD:-test-admin-123}"
 export RATE_LIMIT_SECRET="${RATE_LIMIT_SECRET:-anim-e2e-rate-limit-secret-0000000000000000000000000000}"
+export ASSET_SIGN_SECRET="${ASSET_SIGN_SECRET:-anim-e2e-asset-sign-secret-0000000000000000000000000000}"
+# 獨立 e2e 走本機磁碟。雲端／部署環境若殘留 S3_ENDPOINT=minio.*.internal，
+# /api/ready 的 storage 探針會 503，整套測不下去。
+unset S3_ENDPOINT MINIO_ENDPOINT S3_BUCKET MINIO_BUCKET \
+      S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY MINIO_ACCESS_KEY MINIO_SECRET_KEY \
+      MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 
 echo "[anim-e2e] DB=$(echo "$DATABASE_URL" | sed 's#^.*@#***@#')  PORT=$PORT"
 
