@@ -142,13 +142,22 @@ def main():
                 gid = g["id"]
     assert gid, "找不到『動畫組』"
 
+    TITLE = "佛傳動畫・九龍浴太子"
+    existing = call("GET", admin, "projects.list", {"groupId": gid})
+    found = next((p for p in (existing or []) if p.get("title") == TITLE), None)
+    if found and os.environ.get("FORCE_REBUILD") != "1":
+        print(f"專案已存在 id={found['id'][:8]} — 沿用，不重複建立。設 FORCE_REBUILD=1 會再建一個。")
+        print(f"開啟：{HOST.replace(':3000', ':5173')}/p/{found['id']}")
+        print(f"PROJECT_ID={found['id']}")
+        return
+
     proj = call("POST", admin, "projects.create", {
-        "groupId": gid, "title": "佛傳動畫・九龍浴太子", "kind": "佛傳動畫",
+        "groupId": gid, "title": TITLE, "kind": "佛傳動畫",
         "platform": "youtube", "format": "16:9",
     })
     assert proj.get("id"), f"建專案失敗：{proj}"
     pid = proj["id"]
-    print(f"建立專案：佛傳動畫・九龍浴太子（16:9）  id={pid[:8]}")
+    print(f"建立專案：{TITLE}（16:9）  id={pid[:8]}")
 
     call("POST", admin, "projects.updateWorldview", {"id": pid, "worldview": {
         "logline": "難陀與優波難陀龍王於虛空吐一溫一涼二水，灌浴初生的悉達多太子。",
@@ -310,7 +319,27 @@ def main():
             print("  預覽失敗：", prev["__error__"]); continue
         cont = next((c for c in prev.get("context", []) if c["type"] == "continuity"), {})
         print("  一致性：", cont.get("note", "—"), "｜預估點數：", prev.get("estimatedPoints"))
+        for w in prev.get("warnings") or []:
+            print(f"  ⚠ {w.get('title')}: {w.get('suggestion') or w.get('detail')}")
         print(prev["request"]["positivePrompt"])
+
+    # 對照：同一鏡用純影片模型預覽，證明三視圖不會被帶進（參考圖 0/N）
+    contrast = call("POST", admin, "generation.preview", {
+        "projectId": pid,
+        "modelId": "fal-ai/wan/v2.2-a14b/text-to-video",
+        "prompt": SHOTS[0]["prompt"],
+        "characterIds": SHOTS[0]["chars"],
+        "scenePresetIds": [scene["id"]],
+        "propIds": SHOTS[0].get("props", []),
+        "continuityMode": True,
+    })
+    if "__error__" not in contrast:
+        cont = next((c for c in contrast.get("context", []) if c["type"] == "continuity"), {})
+        print(f"\n──── 對照・鏡1・純影片模型（應為參考圖 0/N）────")
+        print("  一致性：", cont.get("note", "—"))
+        for w in contrast.get("warnings") or []:
+            if w.get("code") in ("multi_reference_unsupported", "card_images_not_sent"):
+                print(f"  ⚠ {w.get('title')}: {w.get('suggestion') or w.get('detail')}")
 
     print(f"\n專案已建好：{HOST.replace(':3000', ':5173')}  →  動畫組 →「佛傳動畫・九龍浴太子」")
     print("沒有 FAL_KEY 時，站上按生成會回明確錯誤並退點；填入 FAL_KEY 後即可直接出圖/出片。")
