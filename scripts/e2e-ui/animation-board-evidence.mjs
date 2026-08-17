@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 
-const BASE = process.env.E2E_UI_BASE ?? "http://127.0.0.1:5173";
+const BASE = process.env.E2E_UI_BASE ?? "http://localhost:5173";
 const PROJECT_ID = process.env.ANIMATION_EVIDENCE_PROJECT_ID;
 const OUT = process.env.ANIMATION_EVIDENCE_OUT ?? "/opt/cursor/artifacts";
 if (!PROJECT_ID) throw new Error("ANIMATION_EVIDENCE_PROJECT_ID is required");
