@@ -275,7 +275,7 @@ export interface PreparedGenerationRequest {
   sourceUrl?: string;
   secondarySourceUrl?: string;
   effectiveSourceAssetId?: string;
-  usedCardReference: "character" | "scene" | "prop" | null;
+  usedCardReference: "character" | "scene" | "prop" | "continuity" | null;
   userPrompt: string;
   positivePrompt: string;
   negativePrompt: string;
@@ -309,9 +309,12 @@ export interface PreparedGenerationRequest {
 export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<PreparedGenerationRequest> {
   const model = resolveModel(input.modelId) ?? getModel(input.modelId);
   if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
+  const packetContinuitySourceAssetId = input.shotContextPacket?.references?.find((ref) =>
+    ref.role === "continuity_previous_end_frame" || ref.role === "continuity_previous_frame")?.assetId;
   // 自動帶入的物件也算「有卡片」：只掛在角色底下的紅傘也該能當來源圖（展開在下面，這裡先看勾選）
   const mayFillFromCards = model.needs === "image" && !!(input.characterIds?.length || input.scenePresetIds?.length || input.propIds?.length);
-  if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
+  const mayFillFromContinuity = model.needs === "image" && Boolean(packetContinuitySourceAssetId);
+  if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards && !mayFillFromContinuity) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
   if (model.secondaryNeeds && !input.secondarySourceUrl && !input.secondarySourceAssetId) {
@@ -343,7 +346,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     characterIds: input.continuitySnapshot ? undefined : input.characterIds,
     scenePresetIds: input.continuitySnapshot ? undefined : input.scenePresetIds,
     propIds: input.continuitySnapshot ? undefined : effectivePropIds,
-    sourceAssetId: input.sourceAssetId,
+    sourceAssetId: input.sourceAssetId ?? packetContinuitySourceAssetId,
     secondarySourceAssetId: input.secondarySourceAssetId,
   });
 
@@ -378,8 +381,9 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     scenePointerAtSubmit = row?.assetId ?? null;
   }
 
-  let effectiveSourceAssetId = input.sourceAssetId;
-  let usedCardReference: "character" | "scene" | "prop" | null = null;
+  let effectiveSourceAssetId = input.sourceAssetId ?? packetContinuitySourceAssetId;
+  let usedCardReference: "character" | "scene" | "prop" | "continuity" | null =
+    !input.sourceAssetId && packetContinuitySourceAssetId ? "continuity" : null;
   if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
     const candidates = [
       ...(continuitySnapshot?.characters ?? []).map((row) => ({ assetId: row.referenceAssetId, from: "character" as const })),
@@ -495,6 +499,14 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
+  if (usedCardReference === "continuity") {
+    warnings.push({
+      code: "previous_frame_source_applied",
+      severity: "info",
+      title: "已使用上一鏡結尾影格",
+      detail: "這個影生影片／編輯模型以先前明確採用的畫面血緣作為來源；新結果仍是 Candidate，不會自動採用。",
+    });
+  }
 
   // closure §5：voice identity → provider 參數。只有真的支援 voice 參數的模型會套用；
   // 不支援＝structured warning（誠實降級），提示詞不假裝已鎖定聲線。

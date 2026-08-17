@@ -13,6 +13,7 @@ function cap(over: Partial<ProviderCapabilities> = {}): ProviderCapabilities {
     sceneReferenceSupport: true,
     styleAdapterSupport: false,
     imageToVideo: false,
+    previousFrameSupport: true,
     seedSupport: false,
     negativePromptSupport: false,
     cardTextAnchors: true,

@@ -554,6 +554,13 @@
       "when": 1789676400000,
       "tag": "0078_project_canon_name_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789680000000,
+      "tag": "0079_animation_consistency_evaluations",
+      "breakpoints": true
     }
   ]
 }

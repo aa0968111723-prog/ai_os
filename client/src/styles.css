@@ -10323,3 +10323,42 @@ body.story-immersive { overflow: hidden; }
 .story-scorecard__reason { min-width: 0; }
 .story-scorecard__row button { min-height: 44px; }
 .story-scorecard__hint { margin: 2px 0 0; }
+
+.animation-board { margin-top: 12px; display: grid; gap: 10px; }
+.animation-board__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.animation-board__header p { margin: 4px 0 0; }
+.animation-board__queue { display: grid; gap: 6px; }
+.animation-board__queue-row {
+  width: 100%; min-height: 48px; display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(180px, 2fr);
+  align-items: center; gap: 10px; padding: 8px 10px; text-align: left;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-subtle);
+}
+.animation-board__queue-row > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.animation-board__detail { display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+.animation-board__comparison { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.animation-board__preview { margin: 0; min-width: 0; }
+.animation-board__preview figcaption { margin-bottom: 4px; font-size: 12px; color: var(--muted-ink, #57534e); }
+.animation-board__preview img,
+.animation-board__preview video,
+.animation-board__placeholder {
+  width: 100%; aspect-ratio: 16 / 9; display: block; object-fit: cover;
+  border-radius: var(--radius-sm); background: var(--surface-subtle);
+}
+.animation-board__placeholder { display: grid; place-items: center; color: var(--muted-ink, #57534e); font-size: 12px; }
+.animation-board__findings { display: grid; gap: 8px; }
+.animation-board__findings p { margin: 4px 0; }
+.animation-board__findings summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.animation-board__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.animation-board__actions button { min-height: 44px; }
+.animation-board__repair-plan { padding: 10px; border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.animation-board__repair-plan p { margin: 4px 0; }
+
+@media (max-width: 767.98px) {
+  .animation-board__header { align-items: stretch; flex-direction: column; }
+  .animation-board__queue-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .animation-board__queue-row > span:last-child { grid-column: 1 / -1; }
+  .animation-board__comparison {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: clip;
+  }
+}

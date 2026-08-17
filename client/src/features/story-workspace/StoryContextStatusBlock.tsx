@@ -7,6 +7,7 @@
 import { trpc } from "../../api";
 import { StoryContextStatus } from "./StoryContextStatus";
 import { StoryScorecardRepair } from "./StoryScorecardRepair";
+import { StoryAnimationBoard } from "./StoryAnimationBoard";
 import { canonStatusLine } from "@shared/projectConsistencyGraph";
 
 export function StoryContextStatusBlock({
@@ -55,11 +56,14 @@ export function StoryContextStatusBlock({
         showSources={showSources}
       />
       {onRepairShots ? (
-        <StoryScorecardRepair
-          rows={workspace.data?.scorecard ?? []}
-          canEdit={canEdit}
-          onRepairShots={onRepairShots}
-        />
+        <>
+          <StoryScorecardRepair
+            rows={workspace.data?.scorecard ?? []}
+            canEdit={canEdit}
+            onRepairShots={onRepairShots}
+          />
+          <StoryAnimationBoard projectId={projectId} canEdit={canEdit} />
+        </>
       ) : null}
     </>
   );

@@ -28,3 +28,4 @@ export * from "./assistantConversation";
 export * from "./creativeContext";
 export * from "./canon";
 export * from "./commercialRights";
+export * from "./animationConsistency";

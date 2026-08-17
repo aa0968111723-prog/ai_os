@@ -157,7 +157,16 @@ export const generationRouter = router({
           { type: "scene", label: `場景設定 ${input.scenePresetIds?.length ?? 0}`, included: !!prepared.anchors.scene, chars: prepared.anchors.scene.length },
           { type: "prop", label: `素材設定 ${input.propIds?.length ?? 0}`, included: !!prepared.anchors.prop, chars: prepared.anchors.prop.length },
           { type: "continuity", label: prepared.continuitySnapshot?.locked ? "一致性快照已鎖定" : "一致性快照未鎖定", included: !!prepared.continuitySnapshot?.locked, note: prepared.continuitySnapshot ? `版本 ${prepared.continuitySnapshot.fingerprint.slice(0, 8)}・參考圖 ${prepared.continuityReferences.attached}/${prepared.continuityReferences.available}` : undefined },
-          { type: "source", label: prepared.sourceUrl ? "來源素材已送入" : "沒有來源素材", included: !!prepared.sourceUrl, note: prepared.usedCardReference ? `自動採用 ${prepared.usedCardReference} 卡片參考圖` : undefined },
+          {
+            type: "source",
+            label: prepared.sourceUrl ? "來源素材已送入" : "沒有來源素材",
+            included: !!prepared.sourceUrl,
+            note: prepared.usedCardReference === "continuity"
+              ? "自動採用上一鏡已核准的結尾影格"
+              : prepared.usedCardReference
+                ? `自動採用 ${prepared.usedCardReference} 卡片參考圖`
+                : undefined,
+          },
         ],
         request: safe.payload,
         warnings: prepared.warnings,
