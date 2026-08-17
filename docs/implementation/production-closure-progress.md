@@ -88,7 +88,20 @@ Branch: `agent/closure-pr-a`（base＝最新 default，含 #761–#766）
 - 道具轉手接收者以「角色名稱在句中唯一匹配」解析；同名／代詞＝unresolved
 - 基本資料區沒有改名（projects router 無 rename 端點——沿現狀，不為 UI 造後端）
 
-## Closure PR-D — PG/browser/golden acceptance hardening（未開始）
+## Closure PR-D — PG/browser/golden acceptance hardening
+
+- [x] closureRuntime.pg.test.ts（真 PostgreSQL 16.9，7 情境）：canon→packet 消費／
+      道具轉手→下一鏡 previousEnd／voice canon 升級 targeted stale／rights 撤回
+      execution 前生效／meta 推導 artifact staleness／scorecard server 唯一真相
+- [x] migrations 0000→0077 APPLIED（真 PG，drift none）；既有 pg 套件 15 情境全過
+- [x] 瀏覽器證據 docs/evidence/closure：Settings 四大區（1280/1440 三分頁各截圖）；
+      390/430＝#766 手機 AI-first 殼層（無設定入口，誠實記錄＋殼層截圖）
+- [x] Settings↔workspace 單一真相 E2E：建立 Style Canon 前 scorecard 有「風格」列→
+      建立後同一查詢消失（results.json singleTruth.pass=true）
+- [x] 對抗稽核：3 維度自證式稽核→14 項確認缺陷全修（重點：audio 生成的 rights 重驗
+      涵蓋 meta.voice/soundWorld；聲線/聲音世界只掛有聲鏡＝聲線升級不再全專案 stale；
+      migration 0078 partial unique index 讓 project canon 名稱冪等成為 DB 保證；
+      接過/搶走動詞方向反轉；代理旁白接聲線路由；修復 CTA 分軌；t2v 不誤報 lineage gap）
 
 ## Paid provider
 

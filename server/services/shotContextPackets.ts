@@ -133,7 +133,11 @@ export async function buildShotContextPacketPayload(input: {
   const { resolveProjectCanonDefaults } = await import("./teamCanon");
   const canonDefaults = await resolveProjectCanonDefaults(project.id);
   const styleCanon = canonDefaults.styleCanon;
-  const narrationVoice = canonDefaults.narrationVoice
+  // targeted stale 的關鍵（稽核修正）：聲線／聲音世界只掛在「真的用得到」的鏡上——
+  // 沒有台詞的純視覺鏡不依賴旁白聲線，聲線升級不得 stale 它（§8 不得全專案 stale）
+  const shotHasSpeech = Boolean(shot.voiceover?.trim() || shot.dialogue?.trim());
+  const shotHasSoundIntent = Boolean(shot.ambience?.trim() || shot.music?.trim());
+  const narrationVoice = shotHasSpeech && canonDefaults.narrationVoice
     ? {
       canonId: canonDefaults.narrationVoice.canonId,
       versionId: canonDefaults.narrationVoice.versionId,
@@ -142,8 +146,8 @@ export async function buildShotContextPacketPayload(input: {
       language: canonDefaults.narrationVoice.language,
     }
     : null;
-  const soundWorld = canonDefaults.soundWorld;
-  const voiceByCharacter = canonDefaults.characterVoices;
+  const soundWorld = shotHasSoundIntent ? canonDefaults.soundWorld : null;
+  const voiceByCharacter = shotHasSpeech ? canonDefaults.characterVoices : new Map<string, never>();
   const styleWorldStyle = canonDefaults.styleStyles;
   const styleNegative = canonDefaults.styleNegative;
   const styleReferences = styleCanon

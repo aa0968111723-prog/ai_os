@@ -96,9 +96,13 @@ export function resolvePropTransfers(input: {
 
     const before = sentence.slice(0, verbAt);
     const after = sentence.slice(verbAt);
-    const givers = input.characters.filter((row) => row.name && before.includes(row.name));
-    const receivers = input.characters.filter((row) =>
-      row.name && after.includes(row.name) && !givers.some((g) => g.id === row.id));
+    // 動詞方向：交給／遞給／送給＝動詞後是接收者；接過／搶走＝動詞前（主詞）才是接收者
+    const inverted = change.excerpt.startsWith("接過") || change.excerpt.startsWith("搶走");
+    const beforeChars = input.characters.filter((row) => row.name && before.includes(row.name));
+    const afterChars = input.characters.filter((row) =>
+      row.name && after.includes(row.name) && !beforeChars.some((g) => g.id === row.id));
+    const receivers = inverted ? beforeChars : afterChars;
+    const givers = inverted ? afterChars : beforeChars;
     if (receivers.length !== 1) return { ...change, resolved: false };
     return {
       ...change,

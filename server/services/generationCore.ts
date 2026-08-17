@@ -501,7 +501,10 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   let voiceApplied = false;
   if (input.voiceIdentity && model.kind === "audio") {
     const { applyVoiceIdentity } = await import("../../shared/voiceRouting");
-    voiceApplied = applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
+    // 聲線 identity＝model+voice 一對（稽核修正）：模型被覆蓋成別顆時，
+    // voiceId 對那顆模型是非法值——不套、誠實降級，不宣稱「已鎖定聲線」
+    voiceApplied = input.voiceIdentity.modelId === model.id
+      && applyVoiceIdentity(model.id, providerInput, input.voiceIdentity);
     if (voiceApplied) {
       warnings.push({
         code: "voice_identity_applied",

@@ -18,8 +18,8 @@ export function StoryContextStatusBlock({
   projectId: string;
   showSources?: boolean;
   canEdit?: boolean;
-  /** closure §12：scorecard 修復 CTA（受影響鏡→重生成→Candidate→明確 Adopt） */
-  onRepairShots?: (shotIds: string[]) => void;
+  /** closure §12：scorecard 修復 CTA（分軌：voice/sound→音訊重生；其餘→視覺批次） */
+  onRepairShots?: (row: import("@shared/projectConsistencyGraph").ScorecardRow) => void;
 }) {
   const storyMeta = trpc.story.get.useQuery({ projectId });
   const characters = trpc.characters.list.useQuery({ projectId });

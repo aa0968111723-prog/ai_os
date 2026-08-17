@@ -1736,8 +1736,9 @@ export const scenesRouter = router({
         prompt,
         sceneId: scene.id,
         sceneRole: "narration",
-        // 聲線 identity（可能為 null＝專案沒綁聲線，走模型預設，不記 voice meta）
-        voiceIdentity: routed.voice ?? undefined,
+        // 聲線 identity（可能為 null＝專案沒綁聲線，走模型預設，不記 voice meta）。
+        // 呼叫端明確覆蓋成別顆模型時不傳——voiceId 對那顆模型是非法值（稽核修正）
+        voiceIdentity: routed.voice && modelId === routed.voice.modelId ? routed.voice : undefined,
         reasonPrefix: "配音生成",
       });
       return {

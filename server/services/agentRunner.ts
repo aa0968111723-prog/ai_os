@@ -2035,6 +2035,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let prompt: string;
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
+  let stepVoiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
@@ -2042,7 +2043,31 @@ async function advanceRun(run: RunRow): Promise<void> {
     // 只寫了對白的鏡也要能配音，不能整條 run 判失敗說「還沒有配音詞」。
     const text = speechForTts(sceneSpeechLines(scene)).map((l) => l.text).join("\n").trim();
     if (!text) return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡還沒有旁白或對白——先填內容或把這步移除重新規劃`);
-    const voiceModel = resolveModel(step.modelId ?? AGENT_TTS_MODEL);
+    // closure §5（稽核修正）：代理旁白與 scenes.generateVoiceover 同一套聲線路由——
+    // 聲線是 canonical dependency，代理批次不得繞過 canon 用模型預設聲音出整批旁白
+    const { resolveProjectCanonDefaults } = await import("./teamCanon");
+    const { routeSpeechVoice } = await import("../../shared/voiceRouting");
+    const agentAudioCanons = await resolveProjectCanonDefaults(run.projectId).catch(() => null);
+    let agentRoutedVoice: import("../../shared/voiceRouting").VoiceIdentity | null = null;
+    if (agentAudioCanons) {
+      const lines = sceneSpeechLines(scene);
+      const speakerNames = [...new Set(lines.filter((l) => l.speaker && l.speaker !== "旁白").map((l) => l.speaker))];
+      const voiceByName = new Map<string, import("../../shared/voiceRouting").VoiceIdentity>();
+      if (speakerNames.length && agentAudioCanons.characterVoices.size) {
+        const chars = await db.select({ id: schema.characters.id, name: schema.characters.name })
+          .from(schema.characters).where(eq(schema.characters.projectId, run.projectId));
+        for (const row of chars) {
+          const voice = agentAudioCanons.characterVoices.get(row.id);
+          if (voice) voiceByName.set(row.name, voice);
+        }
+      }
+      agentRoutedVoice = routeSpeechVoice({
+        speakers: speakerNames,
+        characterVoiceByName: voiceByName,
+        narrationVoice: agentAudioCanons.narrationVoice,
+      }).voice;
+    }
+    const voiceModel = resolveModel(step.modelId ?? agentRoutedVoice?.modelId ?? AGENT_TTS_MODEL);
     if (!voiceModel || voiceModel.category !== "text-to-speech" || voiceModel.needs || !modelIsOperationallyReady(voiceModel)) {
       return failRun(run, steps, idx, "計畫裡的旁白模型無效或尚未通過正式生成驗證，請重新規劃");
     }
@@ -2050,6 +2075,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     prompt = text;
     sceneId = scene.id;
     sceneRole = "narration";
+    stepVoiceIdentity = agentRoutedVoice && agentRoutedVoice.modelId === voiceModel.id ? agentRoutedVoice : undefined;
   } else {
     // generate：模型已在規劃端過白名單，這裡再驗一次（防資料庫被手動改壞）
     // CA-01：needs 模型在「有來源素材／網址」時可放行（對齊直接生成／工作流）
@@ -2127,6 +2153,8 @@ async function advanceRun(run: RunRow): Promise<void> {
       prompt,
       sceneId,
       sceneRole,
+      // closure §5（稽核修正）：代理旁白帶聲線 identity（與 generateVoiceover 同一路由）
+      voiceIdentity: stepVoiceIdentity,
       // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／素材／來源素材
       characterIds: step.characterIds,
       scenePresetIds: step.scenePresetIds,
