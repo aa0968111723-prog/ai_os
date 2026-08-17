@@ -201,6 +201,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "creativeContext.adoptGeneration": "採用生成結果為 current",
   "creativeContext.extractEndFrame": "從已落地影片抽取結尾影格",
   "creativeContext.evaluateGeneration": "執行生成結果視覺一致性檢查",
+  "creativeContext.executeAnimationStage": "執行動畫製作單一生成階段",
   "canon.createFromEntity": "把設定卡升為 Team Canon",
   "canon.addVersionFromPin": "從專案卡片建立 Canon 新版本",
   "canon.createProjectCanon": "建立風格／聲線／聲音世界設定",

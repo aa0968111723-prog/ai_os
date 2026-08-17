@@ -21,6 +21,11 @@ import {
   listShotConsistencyEvaluations,
 } from "../services/animationEvaluator";
 import {
+  animationPipelinePlan,
+  executeAnimationGenerationStage,
+  targetedAnimationRepairPlan,
+} from "../services/animationPipeline";
+import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
   listStoryEntityBindings,
@@ -77,6 +82,40 @@ export const creativeContextRouter = router({
         projectId: input.projectId,
         shotId: input.shotId,
       });
+    }),
+
+  animationPlan: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid(),
+      keyframeModelId: z.string().min(1),
+      videoModelId: z.string().min(1),
+    }))
+    .query(async ({ ctx, input }) => {
+      return animationPipelinePlan({ auth: ctx.auth, ...input });
+    }),
+
+  executeAnimationStage: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotId: z.string().uuid(),
+      stage: z.enum(["keyframe_generation", "video_generation"]),
+      modelId: z.string().min(1),
+      clientRequestId: z.string().uuid(),
+      prompt: z.string().trim().max(20_000).optional(),
+      sourceAssetId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return executeAnimationGenerationStage({ auth: ctx.auth, ...input });
+    }),
+
+  animationRepairPlan: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      shotIds: z.array(z.string().uuid()).max(300).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return targetedAnimationRepairPlan({ auth: ctx.auth, ...input });
     }),
 
   compose: authedProcedure
