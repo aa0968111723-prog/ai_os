@@ -11,6 +11,7 @@ import {
   phoneFindingKey,
   phoneShotLabel,
   projectPhoneAnimationSummary,
+  nextPhoneCompareItem,
   projectPhoneCompareQueue,
   projectPhoneRepairProposal,
   resolvePhoneRepairTargets,
@@ -125,6 +126,8 @@ describe("classifyPhoneAnimationIntent", () => {
 
   it("maps repair / confirm / adopt language without guessing generate_media", () => {
     expect(classifyPhoneAnimationIntent("人物跟連戲先修，畫風不要").kind).toBe("plan_repair");
+    expect(classifyPhoneAnimationIntent("第二個不要").kind).toBe("plan_repair");
+    expect(classifyPhoneAnimationIntent("只處理這三鏡").kind).toBe("plan_repair");
     expect(classifyPhoneAnimationIntent("照這個計畫執行")).toEqual({ kind: "confirm_execute" });
     expect(classifyPhoneAnimationIntent("採用這版")).toEqual({ kind: "adopt" });
     expect(classifyPhoneAnimationIntent("原本比較好")).toEqual({ kind: "keep" });
@@ -196,6 +199,36 @@ describe("parsePhoneDimensionFilter + resolvePhoneRepairTargets", () => {
     }
   });
 
+  it("typed filterOverride drops style even when the reconstructed text has no 不要", () => {
+    const resolved = resolvePhoneRepairTargets({
+      text: "規劃修復",
+      findings,
+      shots,
+      filterOverride: {
+        include: ["identity", "look", "temporal", "physics"],
+        exclude: ["style"],
+      },
+    });
+    expect(resolved.status).toBe("resolved");
+    if (resolved.status === "resolved") {
+      expect(resolved.dimensions).toEqual(expect.arrayContaining(["identity", "physics"]));
+      expect(resolved.dimensions).not.toContain("style");
+      expect(resolved.shotIds).toEqual(["s4", "s5"]);
+    }
+  });
+
+  it("只處理這三鏡 keeps the current review set and does not invent extra shots", () => {
+    const resolved = resolvePhoneRepairTargets({
+      text: "只處理這三鏡",
+      findings,
+      shots,
+    });
+    expect(resolved.status).toBe("resolved");
+    if (resolved.status === "resolved") {
+      expect(resolved.shotIds).toHaveLength(3);
+    }
+  });
+
   it("selected shot scopes 幫我修一下 to that shot", () => {
     const resolved = resolvePhoneRepairTargets({
       text: "幫我修一下",
@@ -243,6 +276,8 @@ describe("projectPhoneRepairProposal", () => {
     const card = phoneAnimationCostCard(view);
     expect(card.primaryAction?.paid).toBe(true);
     expect(card.lines.some((line) => line.includes("點"))).toBe(true);
+    expect(card.lines).toContain("其他 17 鏡不動");
+    expect(card.steps.some((step) => step.label.includes("仍只是候選"))).toBe(true);
   });
 });
 
@@ -262,6 +297,16 @@ describe("compare queue + resume", () => {
     expect(queue).toHaveLength(1);
     expect(queue[0]?.notChecked).toBe(true);
     expect(queue[0]?.generationId).toBe("g1");
+  });
+
+  it("next compare skips shots the user already Adopted or Kept, without decrementing server queue", () => {
+    const items = [
+      { shotId: "s4", shotLabel: "Shot 04", generationId: "g4", candidate: { kind: "image", url: "/4.png" }, goals: [], notChecked: false },
+      { shotId: "s5", shotLabel: "Shot 05", generationId: "g5", candidate: { kind: "image", url: "/5.png" }, goals: [], notChecked: false },
+    ];
+    expect(nextPhoneCompareItem({ items, decidedShotIds: [] })?.shotId).toBe("s4");
+    expect(nextPhoneCompareItem({ items, decidedShotIds: ["s4"] })?.shotId).toBe("s5");
+    expect(nextPhoneCompareItem({ items, decidedShotIds: ["s4", "s5"] })).toBeNull();
   });
 
   it("resume state is derived from existing generation / candidate counts", () => {

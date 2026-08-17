@@ -64,6 +64,8 @@ describe("Phone animation production cards", () => {
     })} onRun={onRun} />);
     expect(screen.getByText("執行前確認")).toBeInTheDocument();
     expect(screen.getByText("需點數")).toBeInTheDocument();
+    expect(screen.getByText("其他 17 鏡不動")).toBeInTheDocument();
+    expect(screen.getByText(/仍只是候選/)).toBeInTheDocument();
 
     render(<PhoneAssistantCardView card={phoneAnimationCompareCard({
       shotId: "s5",
