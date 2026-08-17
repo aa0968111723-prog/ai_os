@@ -15,6 +15,14 @@ vi.mock("../api", () => ({
     projects: { assets: { useQuery: (...args: unknown[]) => assetsQuery(...args) } },
   },
 }));
+vi.mock("./usePhoneAnimationRepair", () => ({
+  usePhoneAnimationRepair: () => ({
+    card: null,
+    tryHandle: () => false,
+    runCommand: async () => {},
+    active: false,
+  }),
+}));
 vi.mock("../lib/assistantCompose", () => ({
   composeToAssistant: (text: string) => composed.push(text),
   useAssistantComposeListener: () => {},

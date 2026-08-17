@@ -94,6 +94,13 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   inspect_computer_runtime: { base: "你現在可以用真實瀏覽器嗎？" },
   open_browser_runtime: { base: "幫我在目前專案開啟瀏覽器。" },
   read_generations: { base: "這個專案生成過哪些圖片和影片？用了哪些模型？" },
+  animation_review_summary: { base: "這一幕還有什麼問題？", focused: "{it}這一幕還有什麼問題？" },
+  animation_list_findings: { base: "哪些鏡頭人物不一致？", focused: "{it}為什麼需要修？" },
+  animation_plan_repair: { base: "人物跟連戲先修，畫風不要。" },
+  animation_execute_repair: { base: "照這個計畫執行。" },
+  animation_compare_candidate: { base: "開始檢查修復候選。" },
+  animation_adopt_candidate: { base: "採用這版。", focused: "採用{it}的修復候選。" },
+  animation_keep_current: { base: "保留現用版本。", focused: "{it}原本比較好，先留現用。" },
 
   create_task: { base: "幫我在這個專案建一件待辦：明天以前把旁白稿定稿。", focused: "針對{it}幫我建一件待辦，明天以前完成。" },
   add_note: { base: "幫我記一則筆記：這支片的主色調改成暖橘。", focused: "把{it}目前的討論結論記成一則筆記。" },
@@ -162,6 +169,14 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   return_editing_result: { pages: ["production", "final", "assets"], entities: ["shot"] },
   review_editing_result: { pages: ["production", "final", "studio"], entities: ["shot", "asset"] },
   read_generations: { pages: ["production", "final", "studio"] },
+  // 只在製作／工作室頁推修復閉環，避免分鏡頁盯某一鏡時把 read_storyboard 擠出前五
+  animation_review_summary: { pages: ["production", "studio", "project"] },
+  animation_list_findings: { pages: ["production", "studio"] },
+  animation_plan_repair: { pages: ["production", "studio"] },
+  animation_execute_repair: { pages: ["production", "studio"] },
+  animation_compare_candidate: { pages: ["production", "studio"] },
+  animation_adopt_candidate: { pages: ["production", "studio"] },
+  animation_keep_current: { pages: ["production", "studio"] },
 };
 
 function impactOf(capability: AssistantCapability): CapabilityImpact {
