@@ -446,7 +446,33 @@ ok("多圖 edit 模型：參考圖帶進去了（attached≥1）",
 ok("多圖 edit 模型沒有誤報 multi_reference_unsupported",
    "multi_reference_unsupported" not in warning_codes(edit_prev))
 
-# ── 10. 給人看的證據摘要 ─────────────────────────────────────────────────
+# ── 10. Temporal/Board/Pipeline：只讀投影，不打 evaluator/provider ──────────
+packets = call("GET", admin, "creativeContext.listShotPackets", {"projectId": pid})
+ok("每鏡都有 server-authoritative Shot Packet", len(packets) >= 7)
+ok("Shot Packet 同時凍結 expected start/end（不是只驗 prompt）",
+   all(p.get("packet", {}).get("continuity", {}).get("currentStart") is not None
+       and p.get("packet", {}).get("continuity", {}).get("currentEnd") is not None
+       for p in packets))
+
+board = call("GET", admin, "creativeContext.animationBoard", {"projectId": pid})
+ok("動畫製作看板由既有鏡頭/素材投影", board.get("summary", {}).get("total") == 7)
+ok("看板只回一個主要下一步", board.get("primaryAction") is None or (
+   board["primaryAction"].get("shotId") and board["primaryAction"].get("label")))
+
+plan = call("GET", admin, "creativeContext.animationPlan", {
+    "projectId": pid,
+    "shotId": shot_ids[0],
+    "keyframeModelId": "fal-ai/nano-banana-2/edit",
+    "videoModelId": "fal-ai/wan/v2.2-a14b/image-to-video",
+})
+ok("Keyframe-first 計畫明列 6 階段與成本、不自動執行",
+   len(plan.get("stages", [])) == 6
+   and all("estimatedPoints" in stage for stage in plan.get("stages", [])))
+ok("兩個 Adopt 都是獨立人工階段", {
+   stage["kind"] for stage in plan.get("stages", []) if stage.get("kind", "").endswith("_adopt")
+} == {"keyframe_adopt", "video_adopt"})
+
+# ── 11. 給人看的證據摘要 ─────────────────────────────────────────────────
 print("\n──────── 證據摘要（一鏡的完整組裝提示詞）────────")
 if first_preview_pos:
     print(first_preview_pos[:1200])
