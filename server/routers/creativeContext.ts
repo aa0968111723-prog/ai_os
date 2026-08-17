@@ -15,6 +15,7 @@ import {
 } from "../services/consistencyTraining";
 import { projectWorkspaceProjection } from "../services/projectConsistencyGraph";
 import { adoptGenerationCurrent } from "../services/consistencyAdopt";
+import { extractEndFrame } from "../services/derivedFrames";
 import {
   confirmStoryEntityProposal,
   dismissStoryEntityProposal,
@@ -39,6 +40,12 @@ export const creativeContextRouter = router({
     .input(z.object({ generationId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return adoptGenerationCurrent({ auth: ctx.auth, generationId: input.generationId });
+    }),
+
+  extractEndFrame: authedProcedure
+    .input(z.object({ videoAssetId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return extractEndFrame({ auth: ctx.auth, videoAssetId: input.videoAssetId });
     }),
 
   compose: authedProcedure

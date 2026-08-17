@@ -16,6 +16,9 @@ export const SHOT_REFERENCE_ROLES = [
   "scene",
   "prop",
   "style",
+  "continuity_previous_frame",
+  "continuity_previous_end_frame",
+  "sequence_style_frame",
   "composition",
   "continuity",
 ] as const;
