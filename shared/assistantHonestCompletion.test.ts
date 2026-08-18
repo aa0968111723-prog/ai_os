@@ -38,13 +38,13 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
 
   it("read-only answers with no write claim may emit agent.completed", () => {
     const settled = settleAssistantAskCompletion({
-      answer: "目前有 7 個分鏡，第 4 鏡才出現禪定龜龜。",
+      answer: "目前有 6 個分鏡，第 4 鏡才出現禪定龜龜。",
       actions: [],
     });
     expect(settled.emitCompleted).toBe(true);
     expect(settled.claimedUnexecutedWrite).toBe(false);
     expect(settled.cannotVerify).toBe(false);
-    expect(settled.answer).toBe("目前有 7 個分鏡，第 4 鏡才出現禪定龜龜。");
+    expect(settled.answer).toBe("目前有 6 個分鏡，第 4 鏡才出現禪定龜龜。");
   });
 
   it("forbids 已完成盤點 when the body says it cannot see the saved story", () => {
@@ -68,7 +68,7 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
 
   it("read-only inventory chip is 已讀取 N 個來源, never 已完成盤點", () => {
     const settled = settleAssistantAskCompletion({
-      answer: "目前有 7 個分鏡。",
+      answer: "目前有 6 個分鏡。",
       actions: [],
       userMessage: "現在有幾鏡？",
     });

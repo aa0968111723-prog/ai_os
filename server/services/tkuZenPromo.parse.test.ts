@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TKU_ZEN_PROMO_SCRIPT,
+  TKU_ZEN_SHOTLIST_FIRST_PARSE,
   TKU_ZEN_SHOTLIST_LINES,
   tkuZenHasForbidden,
   tkuZenSpokenDialogue,
@@ -16,6 +17,7 @@ describe("淡江禪學社 parse 150s fallback", () => {
     expect(plan.characters[0]?.appearance).not.toContain("年輕男性");
     expect(plan.characters[0]?.costume ?? "").toMatch(/白帽T|短髮/);
     expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["校門口", "夕陽"]));
+    expect(plan.scenes).toHaveLength(6);
     const spoken = plan.scenes
       .flatMap((scene) => scene.shots)
       .map((shot) => tkuZenSpokenDialogue(`${shot.dialogue ?? ""}\n${shot.voiceover ?? ""}\n${shot.prompt ?? ""}`))
@@ -27,5 +29,11 @@ describe("淡江禪學社 parse 150s fallback", () => {
     const blob = JSON.stringify(plan);
     for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
     expect(blob).not.toMatch(/克難坡|走上克難坡|七幕|針織外套|安倢|媽媽/);
+  });
+
+  it("mock parse of the A–F paste is 6 scenes, never 7", () => {
+    const plan = mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE);
+    expect(plan.scenes).toHaveLength(6);
+    expect(plan.scenes).not.toHaveLength(7);
   });
 });

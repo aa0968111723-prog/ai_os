@@ -10,7 +10,7 @@ describe("小華 A–F SHOTLIST parse → scene → shot（E2E_MOCK，不打 liv
     expect(storyParseModelSchema.safeParse(plan).success).toBe(true);
     expect(plan.characters.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
     expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["校門口", "夕陽"]));
-    expect(plan.scenes.length).toBeGreaterThanOrEqual(6);
+    expect(plan.scenes).toHaveLength(6);
     const blob = JSON.stringify(plan);
     for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
     expect(blob).not.toMatch(/第七幕|安倢|媽媽叫醒|針織外套/);

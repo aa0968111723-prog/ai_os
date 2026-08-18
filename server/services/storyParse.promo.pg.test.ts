@@ -91,7 +91,7 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     expect(elapsed).toBeLessThan(15_000);
     expect(result.skipped).not.toBe(true);
     expect(result.mock).toBe(false);
-    expect(result.stats.scenes).toBeGreaterThan(0);
+    expect(result.stats.scenes).toBe(6);
     expect(result.stats.shots).toBeGreaterThan(0);
     expect(complete).toHaveBeenCalledOnce();
 
