@@ -85,6 +85,14 @@ describe("animation shot writes stay consistent", () => {
     expect(exec.split("verifySceneWriteReadBack").length).toBeGreaterThan(3);
     expect(exec).toContain("durationSec: Math.round(a.durationSec)");
   });
+
+  it("assistant add_character writes read back the character row", () => {
+    const exec = assistant.slice(assistant.indexOf("async function applyAssistantScenePatch"));
+    expect(assistant).toContain('type: z.literal("add_character")');
+    expect(exec).toContain('if (a.type === "add_character")');
+    expect(exec).toContain("authoritative_character_row_read_back");
+    expect(exec).toContain("MAX_PROJECT_CHARACTERS");
+  });
 });
 
 describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => {

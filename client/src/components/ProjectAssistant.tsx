@@ -65,7 +65,8 @@ type Action =
   | { type: "prepare_external_generation"; label: string; sceneId: string; sceneNo: number; externalTool: string; prompt: string }
   // 套用世界觀 chips（確認後寫入專案基調）
   | { type: "apply_worldview_chips"; label: string; themes?: string[]; tones?: string[]; styles?: string[] }
-  | { type: "add_database_row"; label: string; tableId: string; tableName: string; data: Record<string, string>; preview: string };
+  | { type: "add_database_row"; label: string; tableId: string; tableName: string; data: Record<string, string>; preview: string }
+  | { type: "add_character"; label: string; name: string; appearance: string; notes?: string };
 
 /**
  * SSE 串流的安全活動事件：只描述「正在讀哪類資料／執行哪個查詢／完成哪一步」，
@@ -205,6 +206,7 @@ function toPayload(a: Action) {
   // changes/label 是給人看的預覽，不回送——伺服器會用「現值」重新合併並重算差異
   if (a.type === "direct_shot") return { type: "direct_shot" as const, sceneId: a.sceneId, camera: a.camera, performance: a.performance };
   if (a.type === "add_database_row") return { type: "add_database_row" as const, tableId: a.tableId, data: a.data };
+  if (a.type === "add_character") return { type: "add_character" as const, name: a.name, appearance: a.appearance, notes: a.notes };
   return {
     type: "apply_worldview_chips" as const,
     themes: a.themes,
@@ -1062,6 +1064,9 @@ export function ProjectAssistant({
                                 if (result.kind === "add_database_row") {
                                   utils.databases.list.invalidate();
                                 }
+                                if (result.kind === "add_character") {
+                                  utils.characters.list.invalidate({ projectId: actionProjectId });
+                                }
                                 if (!actionIsCurrent()) return;
                                 const verification = "verification" in result ? result.verification : undefined;
                                 const verified = result.ok !== false && verification?.status !== "unverified";
@@ -1098,6 +1103,7 @@ export function ProjectAssistant({
                                           : payloadAct.type === "apply_worldview_chips" ? "Palette"
                                             : payloadAct.type === "direct_shot" ? "Camera"
                                               : payloadAct.type === "add_database_row" ? "Database"
+                                                : payloadAct.type === "add_character" ? "User"
                                               : "Pencil"
                               }
                               size={13}

@@ -28,6 +28,8 @@ export interface BatchSummary {
   costly: number;
   /** 會改動專案層設定（世界觀基調）的動作數 */
   projectLevel: number;
+  /** 會新增角色卡的動作數 */
+  addsCharacters: number;
 }
 
 export function summarizeActionBatch(actions: BatchAction[]): BatchSummary {
@@ -35,13 +37,15 @@ export function summarizeActionBatch(actions: BatchAction[]): BatchSummary {
   let editsShots = 0;
   let costly = 0;
   let projectLevel = 0;
+  let addsCharacters = 0;
   for (const a of actions) {
     if (a.type === "create_scene" || a.type === "split_script") addsShots += 1;
     if (a.type === "update_scene" || a.type === "direct_shot") editsShots += 1;
     if (a.type === "apply_worldview_chips") projectLevel += 1;
+    if (a.type === "add_character") addsCharacters += 1;
     if (COSTS_POINTS.has(a.type)) costly += 1;
   }
-  return { total: actions.length, addsShots, editsShots, costly, projectLevel };
+  return { total: actions.length, addsShots, editsShots, costly, projectLevel, addsCharacters };
 }
 
 /**
@@ -57,6 +61,7 @@ export function batchSummaryText(actions: BatchAction[]): string | null {
   if (s.addsShots) parts.push(`新增分鏡 ${s.addsShots}`);
   if (s.editsShots) parts.push(`修改分鏡 ${s.editsShots}`);
   if (s.projectLevel) parts.push(`調整專案基調 ${s.projectLevel}`);
+  if (s.addsCharacters) parts.push(`新增角色卡 ${s.addsCharacters}`);
   const head = `這批 ${s.total} 個建議${parts.length ? `：${parts.join("・")}` : ""}`;
   const cost = s.costly
     ? `其中 ${s.costly} 個會花點數`

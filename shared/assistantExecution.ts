@@ -85,6 +85,7 @@ const ASSISTANT_CAPABILITY_DEFINITIONS = [
   { id: "create_watch", domain: "COLLABORATION", access: "WRITE", label: "建立持久專案監看", risk: "SAFE_WRITE", direct: false },
   { id: "read_storyboard", domain: "STORYBOARD", access: "READ", label: "讀取分鏡", risk: "READ", direct: true },
   { id: "split_script", domain: "STORYBOARD", access: "WRITE", label: "將目前腳本拆成持久化分鏡", risk: "SAFE_WRITE", direct: true },
+  { id: "add_character", domain: "STORYBOARD", access: "WRITE", label: "新增角色定裝卡", risk: "SAFE_WRITE", direct: false },
   { id: "read_script", domain: "SCRIPT", access: "READ", label: "讀取目前腳本", risk: "READ", direct: true },
   { id: "read_assets", domain: "ASSET", access: "READ", label: "讀取素材庫", risk: "READ", direct: true },
   capability({ id: "import_local_file", domain: "INTAKE", access: "WRITE", label: "加入檔案", risk: "SAFE_WRITE", direct: true, requiredContextSlots: ["projectId"], handler: "universalIntake.ingestTmpAsset", resultType: "import", verificationStrategy: "job_registered" }),
@@ -171,6 +172,7 @@ const CAPABILITY_GOAL_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp }> =
   { id: "create_project", pattern: /(?:新增|建立|創建|開).{0,16}(?:專案|project)/i },
   { id: "attach_asset_to_shot", pattern: /(?:素材|圖片|影片).*(?:綁定|放進|加入).*(?:鏡|shot)|(?:鏡|shot).*(?:綁定|放進|加入).*(?:素材|圖片|影片)/i },
   { id: "split_script", pattern: /(?:腳本|故事).{0,12}(?:拆成|切成).{0,8}分鏡/i },
+  { id: "add_character", pattern: /(?:新增|建立|加).{0,12}(?:角色|定裝)(?:卡)?|(?:角色卡|定裝卡).{0,12}(?:新增|建立|加入)/i },
   { id: "dispatch_agent", pattern: /(?:做到|交付|交件).{0,16}(?:今天|今日|可以交)|(?:把).{0,12}專案.{0,20}(?:可以交|交付|完成)/i },
 ];
 

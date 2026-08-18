@@ -16,6 +16,7 @@ describe("assistant execution fast path", () => {
     ["查看組員有誰", "ASK"],
     ["你可以用瀏覽器嗎？", "ASK"],
     ["幫我開啟瀏覽器", "DIRECT"],
+    ["幫我加一張角色卡", "DIRECT"],
     ["幫我規劃六鏡腳本", "AGENT"],
     ["持續監控失敗的生成並提醒我", "WATCH"],
   ] as const)("classifies %s as %s", (message, expected) => {

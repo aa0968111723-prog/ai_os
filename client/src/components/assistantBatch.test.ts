@@ -16,7 +16,7 @@ describe("summarizeActionBatch", () => {
         { type: "apply_worldview_chips" },
         { type: "generate" },
       ]),
-    ).toEqual({ total: 6, addsShots: 2, editsShots: 2, costly: 1, projectLevel: 1 });
+    ).toEqual({ total: 6, addsShots: 2, editsShots: 2, costly: 1, projectLevel: 1, addsCharacters: 0 });
   });
 
   it("plan_agent 與 run_workflow 都算會花錢", () => {

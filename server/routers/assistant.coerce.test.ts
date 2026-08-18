@@ -61,6 +61,18 @@ describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
     expect(coerceActionToolCall({ tool: "direct_shot", sceneNo: -2, camera: { shotSize: "特寫" } })).toBeNull();
   });
 
+  it("把 add_character 畸形工具呼叫救回", () => {
+    const r = coerceActionToolCall({
+      tool: "add_character",
+      args: { name: "小華", appearance: "粉橘短髮鮑伯、米白針織外套" },
+    });
+    expect(r?.actions?.[0]).toMatchObject({
+      type: "add_character",
+      name: "小華",
+      appearance: "粉橘短髮鮑伯、米白針織外套",
+    });
+  });
+
   it("把 add_database_row 畸形工具呼叫救回", () => {
     const r = coerceActionToolCall({
       tool: "add_database_row",
