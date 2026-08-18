@@ -1068,6 +1068,12 @@ export async function materializeStoryboard(input: {
 
 /** generateStoryboard reuse leaves existing 他 titles; rewrite the whole project. */
 async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<void> {
+  const xiaohuaNamed = await db
+    .select({ id: schema.characters.id, name: schema.characters.name })
+    .from(schema.characters)
+    .where(eq(schema.characters.projectId, projectId));
+  const boundIds = new Set(xiaohuaNamed.filter((row) => /小華/.test(row.name ?? "")).map((row) => row.id));
+
   const rows = await db
     .select({
       id: schema.scenes.id,
@@ -1076,10 +1082,11 @@ async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<v
       action: schema.scenes.action,
       dialogue: schema.scenes.dialogue,
       voiceover: schema.scenes.voiceover,
+      characterIds: schema.scenes.characterIds,
     })
     .from(schema.scenes)
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
-  await persistXiaohuaShotRewrites(rows);
+  await persistXiaohuaShotRewrites(rows, boundIds);
 
   const storyScenes = await db
     .select({
@@ -1118,10 +1125,13 @@ async function persistXiaohuaShotRewrites(
     action: string | null;
     dialogue: string | null;
     voiceover: string | null;
+    characterIds?: string[] | null;
   }>,
+  xiaohuaIds: Set<string> = new Set(),
 ): Promise<void> {
   for (const row of rows) {
-    const next = rewritePersistedXiaohuaShotCopy(row);
+    const bound = (row.characterIds ?? []).some((id) => xiaohuaIds.has(id));
+    const next = rewritePersistedXiaohuaShotCopy(row, bound);
     if (
       next.title === row.title
       && next.prompt === row.prompt

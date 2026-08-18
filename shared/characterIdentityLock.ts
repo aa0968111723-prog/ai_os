@@ -95,17 +95,70 @@ type LockableScene<S extends LockableShot> = {
   title?: string | null;
   summary?: string | null;
   excerpt?: string | null;
+  locationRef?: string | null;
   shots: S[];
 };
 
+function shouldLockXiaohuaAct1Gate(script: string): boolean {
+  return /小華/.test(script) && /校門口/.test(script);
+}
+
+function rewriteAct1Kenanpo(text: string | null | undefined): string | null | undefined {
+  if (text == null) return text;
+  return text.replace(/克難坡/g, "淡大校門口");
+}
+
+/**
+ * SHOTLIST A is 淡大校門口（校名牌、暖色光）. 克難坡 is B-roll only.
+ * EXTRACT sometimes parks act 1 on 克難坡 because the library map mentions it.
+ */
+export function lockXiaohuaAct1Location<
+  T extends {
+    locations?: Array<{ name?: string | null }>;
+    scenes: Array<{
+      title?: string | null;
+      summary?: string | null;
+      excerpt?: string | null;
+      locationRef?: string | null;
+      shots: Array<{ title?: string | null; prompt: string; action?: string | null; dialogue?: string | null; voiceover?: string | null }>;
+    }>;
+  },
+>(plan: T, script: string): T {
+  if (!shouldLockXiaohuaAct1Gate(script)) return plan;
+  const locations = (plan.locations ?? []).map((loc, i) => {
+    if (i !== 0 || !/克難坡/.test(loc.name ?? "")) return loc;
+    return { ...loc, name: "校門口" };
+  });
+  const scenes = plan.scenes.map((scene, i) => {
+    if (i !== 0) return scene;
+    const locationRef = /克難坡/.test(scene.locationRef ?? "") ? "校門口" : scene.locationRef;
+    return {
+      ...scene,
+      locationRef,
+      title: rewriteAct1Kenanpo(scene.title) ?? scene.title,
+      summary: rewriteAct1Kenanpo(scene.summary),
+      excerpt: rewriteAct1Kenanpo(scene.excerpt),
+      shots: scene.shots.map((shot) => ({
+        ...shot,
+        title: rewriteAct1Kenanpo(shot.title),
+        prompt: rewriteAct1Kenanpo(shot.prompt) ?? shot.prompt,
+        action: rewriteAct1Kenanpo(shot.action),
+        dialogue: rewriteAct1Kenanpo(shot.dialogue),
+        voiceover: rewriteAct1Kenanpo(shot.voiceover),
+      })),
+    };
+  });
+  return { ...plan, ...(plan.locations ? { locations } : {}), scenes };
+}
+
 /** Lock 小華 cards and rewrite 他→她 in scene/shot copy that names or refs her. */
-export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string | null; appearance?: string | null; costume?: string | null }>; scenes: LockableScene<LockableShot>[] }>(
+export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string | null; appearance?: string | null; costume?: string | null }>; locations?: Array<{ name?: string | null }>; scenes: LockableScene<LockableShot>[] }>(
   plan: T,
   script: string,
 ): T {
   const characters = lockXiaohuaCharacters(plan.characters, script);
   if (scriptExplicitlyMaleXiaohua(script)) {
-    return { ...plan, characters, scenes: plan.scenes };
+    return lockXiaohuaAct1Location({ ...plan, characters, scenes: plan.scenes }, script);
   }
   const scenes = plan.scenes.map((scene) => {
     const sceneForce =
@@ -131,7 +184,7 @@ export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string |
       }),
     };
   });
-  return { ...plan, characters, scenes };
+  return lockXiaohuaAct1Location({ ...plan, characters, scenes }, script);
 }
 
 function shotBlob(shot: LockableShot): string {
@@ -171,8 +224,8 @@ export function rewritePersistedXiaohuaShotCopy<
     dialogue?: string | null;
     voiceover?: string | null;
   },
->(row: T): T {
-  return lockXiaohuaCopyFields(row);
+>(row: T, boundToXiaohua = false): T {
+  return lockXiaohuaCopyFields(row, boundToXiaohua ? "小華" : "");
 }
 
 /**

@@ -142,6 +142,41 @@ describe("小華 identity lock", () => {
       prompt: "禪定龜龜站在校門口",
     });
     expect(turtle.title).toBe("禪定龜龜低頭");
+    const bound = rewritePersistedXiaohuaShotCopy({
+      title: "夕陽光照在他身上",
+      prompt: "夕陽光照在他身上",
+    }, true);
+    expect(bound.title).toBe("夕陽光照在她身上");
+    expect(bound.prompt).not.toContain("他身上");
+  });
+
+  it("moves EXTRACT act 1 off 克難坡 onto 校門口 when the script is 小華 A–F", () => {
+    const plan = lockXiaohuaPlan(
+      {
+        characters: [{ name: "小華", appearance: "粉橘短髮女孩" }],
+        locations: [{ name: "克難坡" }, { name: "夕陽" }],
+        scenes: [
+          {
+            title: "走上克難坡",
+            summary: "小華走上克難坡",
+            locationRef: "克難坡",
+            shots: [{ title: "克難坡自我介紹", prompt: "小華站在克難坡", characterRefs: ["小華"] }],
+          },
+          {
+            title: "夕陽",
+            locationRef: "夕陽",
+            shots: [{ title: "宇宙呀", prompt: "夕陽", characterRefs: ["小華"] }],
+          },
+        ],
+      },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(plan.locations[0]?.name).toBe("校門口");
+    expect(plan.scenes[0]?.locationRef).toBe("校門口");
+    expect(plan.scenes[0]?.title).not.toContain("克難坡");
+    expect(plan.scenes[0]?.shots[0]?.prompt).toContain("淡大校門口");
+    expect(plan.scenes[0]?.shots[0]?.prompt).not.toContain("克難坡");
+    expect(plan.scenes[1]?.locationRef).toBe("夕陽");
   });
 
   it("locks generateInto prompts so 小華 cannot stay a boy", () => {
