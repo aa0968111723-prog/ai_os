@@ -5,6 +5,7 @@ import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
+import { assertGenerationEntityIds } from "../services/generationCore";
 
 /**
  * 提示詞字數上限：generation.submit 與 prompts.save 同口徑。
@@ -58,6 +59,11 @@ export async function savePromptCore(
 ) {
   const text = rawText.trim();
   if (!text || text.length > MAX_PROMPT_CHARS) return null;
+  await assertGenerationEntityIds(project.id, {
+    characterIds: settings.characterIds,
+    scenePresetIds: settings.scenePresetIds,
+    propIds: settings.propIds,
+  });
   // 併發自動存同一咒語會 select-then-insert 競態（重複列/漏加 useCount）。
   // 用交易＋per-(專案,文字) advisory lock 序列化——不加唯一索引（text 可達 MAX_PROMPT_CHARS 字、
   // 超過 btree 索引位元上限，索引建立會失敗）。

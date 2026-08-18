@@ -1357,6 +1357,7 @@ export const scenesRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
+        lookIds: input.lookIds,
       });
       // 只覆寫真的送上來的那幾排（空陣列→null 的正規化仍由 sceneCardColumns 統一做）
       const columns = sceneCardColumns({

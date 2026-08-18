@@ -53,8 +53,8 @@ export const charactersRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
-      // 跨組引用驗證：referenceAssetId 必須同組且是圖片，否則能把別組定裝圖綁進本組角色
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
+      // 跨專案引用驗證：referenceAssetId 必須同專案且是圖片（同組兩個「小華」不能互綁定裝圖）
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId, project.id);
 
       // 冪等重送：若 clientRequestId 已存在本專案卡，直接回既有（不佔新上限名額）
       if (input.clientRequestId) {
@@ -123,8 +123,8 @@ export const charactersRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-      // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組且是圖片（null＝清除引用，免驗）
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
+      // 跨專案引用驗證：改綁 referenceAssetId 時同樣要同專案且是圖片（null＝清除引用，免驗）
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
       // partial update：只 set 有傳入的欄位，避免 A 改 name、B 改 appearance 時讀後寫互相覆蓋
       const patch: {

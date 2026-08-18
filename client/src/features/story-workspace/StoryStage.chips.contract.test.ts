@@ -27,4 +27,12 @@ describe("StoryStage parse chips", () => {
     expect(src).toMatch(/gateRef\.current\?\.dispatch\(live\)/);
     expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
   });
+
+  it("onBlur flushes through the same gate so expectedRev is always sent", () => {
+    expect(src).toMatch(/onBlur=\{\(\) => \{[\s\S]*gateRef\.current\?\.dispatch\(content\)/);
+    expect(src).not.toMatch(/save\.(mutate|mutateAsync)\(\{\s*projectId,\s*content\s*\}\)/);
+    expect(src).toMatch(/expectedRev: req\.expectedRev/);
+    expect(src).toMatch(/<ConflictNotice/);
+    expect(src).toMatch(/setSaveState\("conflict"\)/);
+  });
 });

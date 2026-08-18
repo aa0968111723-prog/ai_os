@@ -28,6 +28,7 @@ import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { adoptGenerationCurrent } from "./consistencyAdopt";
 import { refreshShotContextStalenessSafely } from "./shotContextPackets";
+import { assertReferenceImage } from "./referenceAsset";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -759,6 +760,9 @@ export async function runMcpWriteExpansion(
     const nameStr = String(args.name ?? "").trim();
     const appearance = String(args.appearance ?? "").trim();
     if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
+    if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, project.groupId, project.id);
+    }
     const [row] = await db
       .insert(schema.characters)
       .values({
@@ -796,7 +800,10 @@ export async function runMcpWriteExpansion(
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, row.groupId, row.projectId);
+      patch.referenceAssetId = args.referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return mcpUnchanged({ characterId: row.id, name: row.name });
     const [updated] = await db.update(schema.characters).set(patch).where(eq(schema.characters.id, id)).returning();
     await refreshShotContextStalenessSafely({
@@ -816,6 +823,9 @@ export async function runMcpWriteExpansion(
     const nameStr = String(args.name ?? "").trim();
     const palette = String(args.palette ?? "").trim();
     if (!nameStr || !palette) throw new TRPCError({ code: "BAD_REQUEST", message: "請填場景名與色板" });
+    if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, project.groupId, project.id);
+    }
     const [row] = await db
       .insert(schema.scenePresets)
       .values({
@@ -843,7 +853,10 @@ export async function runMcpWriteExpansion(
     if (typeof args.palette === "string" && args.palette.trim()) patch.palette = args.palette.trim().slice(0, 500);
     if (typeof args.lighting === "string") patch.lighting = args.lighting.slice(0, 500);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, row.groupId, row.projectId);
+      patch.referenceAssetId = args.referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return mcpUnchanged({ presetId: row.id, name: row.name });
     const [updated] = await db.update(schema.scenePresets).set(patch).where(eq(schema.scenePresets.id, id)).returning();
     await refreshShotContextStalenessSafely({
@@ -863,6 +876,9 @@ export async function runMcpWriteExpansion(
     const nameStr = String(args.name ?? "").trim();
     const appearance = String(args.appearance ?? "").trim();
     if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填素材名與外觀" });
+    if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, project.groupId, project.id);
+    }
     const [row] = await db
       .insert(schema.props)
       .values({
@@ -890,7 +906,10 @@ export async function runMcpWriteExpansion(
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
-    else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
+    else if (typeof args.referenceAssetId === "string") {
+      await assertReferenceImage(args.referenceAssetId, row.groupId, row.projectId);
+      patch.referenceAssetId = args.referenceAssetId;
+    }
     if (Object.keys(patch).length === 0) return mcpUnchanged({ propId: row.id, name: row.name });
     const [updated] = await db.update(schema.props).set(patch).where(eq(schema.props.id, id)).returning();
     await refreshShotContextStalenessSafely({

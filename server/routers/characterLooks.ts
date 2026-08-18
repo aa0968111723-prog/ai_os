@@ -44,7 +44,7 @@ export const characterLooksRouter = router({
       if (!owner) throw new TRPCError({ code: "NOT_FOUND", message: "找不到角色" });
       requireGroup(ctx.auth, owner.groupId);
       await assertProjectEditable(ctx.auth, { id: owner.projectId, groupId: owner.groupId });
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId, owner.projectId);
 
       const [{ n }] = await db
         .select({ n: count() })
@@ -90,7 +90,7 @@ export const characterLooksRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId });
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
       const patch: { name?: string; costume?: string | null; notes?: string | null; referenceAssetId?: string | null } = {};
       if (input.name !== undefined) patch.name = input.name;

@@ -15,8 +15,8 @@
  * 持久化（快照即壓實）：防抖 1.5s 後把 encodeStateAsUpdate 的完整快照 upsert 進
  * collab_documents——每次寫入都是壓實後的最新狀態，沒有 update log 要清。
  * 同一節拍把 Y.Text 內容 materialize 回 stories.content（走 applyWithRevision，
- * rev 照樣 +1）——story parser／AI／export／版本歷史／搜尋全部繼續工作，
- * Story-first 管線一寸都不動。
+ * **帶 expectedRev**，衝突不覆蓋）——story parser／AI／export／版本歷史／搜尋
+ * 全部繼續工作，Story-first 管線一寸都不動。
  *
  * Authentication 完全重用 /ws 的那一套（authorizeRealtimeConn：session cookie →
  * 使用者 → 專案屬於使用者的組）——沒有第二套帳號或 token。
@@ -29,7 +29,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { parseDocKey } from "../../shared/textSync";
 import { authorizeRealtimeConn } from "./realtime";
-import { applyWithRevision } from "./revisionGuard";
+import { applyWithRevision, isRevisionConflictError } from "./revisionGuard";
 import { isShuttingDown, onShutdown } from "./shutdown";
 
 export const COLLAB_DOC_PATH = "/ws-doc";
@@ -65,6 +65,13 @@ interface DocRoom {
   /** 落盤進行中時又有新改動：完成後再排一輪，不遺漏最後一筆 */
   dirty: boolean;
   persisting: boolean;
+  /**
+   * 上次成功 materialize 進 stories.content 的 rev／正文。
+   * persist 必須帶這組 expectedRev——否則 Yjs 落盤會把 Tab B 的 blur 存檔靜默蓋掉。
+   * 進房時從現有 stories 列種初值。
+   */
+  lastMaterializedRev?: number;
+  lastMaterializedContent?: string;
 }
 
 const docRooms = new Map<string, DocRoom>();
@@ -104,14 +111,28 @@ export async function loadStoryDoc(projectId: string): Promise<Y.Doc> {
   return doc;
 }
 
+export type PersistStoryDocResult = {
+  materialized: boolean;
+  conflict: boolean;
+  rev: number | null;
+  content: string;
+};
+
 /**
  * 快照落盤＋materialize 回 stories.content。
  *
- * materialize 走 applyWithRevision（不帶 expectedRev）：rev 照樣 +1，
- * 所以還在用舊 autosave 路徑的客戶端下一次儲存**會**撞到並看到衝突卡，
- * 而不是把共編的內容整份蓋掉——兩條寫入路徑之間的防線就是 P0 那套。
+ * materialize **必須**帶 expectedRev：兩分頁 blur／Yjs+autosave 同時寫時，
+ * 後到的那一發要撞衝突而不是靜默 last-write-wins。衝突時不覆蓋 stories.content
+ * （Yjs 快照仍落下——共編房間的真相還在），也不丟錯讓 flushRoom 用新 rev 重試
+ * （那會變成延遲的 LWW）。
  */
-export async function persistStoryDoc(projectId: string, groupId: string, doc: Y.Doc, editorId: string | null): Promise<void> {
+export async function persistStoryDoc(
+  projectId: string,
+  groupId: string,
+  doc: Y.Doc,
+  editorId: string | null,
+  opts?: { expectedRev?: number; baselineContent?: string },
+): Promise<PersistStoryDocResult> {
   const snapshot = Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
   const text = doc.getText(STORY_TEXT_KEY).toString();
 
@@ -125,23 +146,38 @@ export async function persistStoryDoc(projectId: string, groupId: string, doc: Y
 
   const [existing] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
   if (!existing) {
-    await db.insert(schema.stories).values({ projectId, groupId, content: text, updatedBy: editorId });
-    return;
+    const [row] = await db.insert(schema.stories).values({ projectId, groupId, content: text, updatedBy: editorId }).returning();
+    return { materialized: true, conflict: false, rev: row.rev, content: row.content };
   }
-  if (existing.content === text) return;
-  await applyWithRevision({
-    entity: "story",
-    table: schema.stories,
-    idColumn: schema.stories.id,
-    revColumn: schema.stories.rev,
-    row: existing,
-    patch: { content: text },
-    bookkeeping: { updatedBy: editorId ?? existing.updatedBy, updatedAt: new Date() },
-    reload: async () => {
-      const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, existing.id));
-      return fresh;
-    },
-  });
+  if (existing.content === text) {
+    return { materialized: false, conflict: false, rev: existing.rev, content: existing.content };
+  }
+  try {
+    const { row } = await applyWithRevision({
+      entity: "story",
+      table: schema.stories,
+      idColumn: schema.stories.id,
+      revColumn: schema.stories.rev,
+      row: existing,
+      patch: { content: text },
+      bookkeeping: { updatedBy: editorId ?? existing.updatedBy, updatedAt: new Date() },
+      expectedRev: opts?.expectedRev ?? existing.rev,
+      baseline: { content: opts?.baselineContent ?? existing.content },
+      reload: async () => {
+        const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, existing.id));
+        return fresh;
+      },
+      updatedByField: "updatedBy",
+      updatedAtField: "updatedAt",
+    });
+    return { materialized: true, conflict: false, rev: row.rev, content: row.content };
+  } catch (err) {
+    if (isRevisionConflictError(err)) {
+      console.warn("[collabDoc] materialize 撞到故事 rev 衝突，不覆蓋 stories.content");
+      return { materialized: false, conflict: true, rev: existing.rev, content: existing.content };
+    }
+    throw err;
+  }
 }
 
 /* ── 房間管理 ─────────────────────────────────────────── */
@@ -188,7 +224,17 @@ async function flushRoom(docKey: string, room: DocRoom): Promise<void> {
   room.persisting = true;
   room.dirty = false;
   try {
-    await persistStoryDoc(room.projectId, room.groupId, room.doc, room.lastEditor);
+    const result = await persistStoryDoc(room.projectId, room.groupId, room.doc, room.lastEditor, {
+      expectedRev: room.lastMaterializedRev,
+      baselineContent: room.lastMaterializedContent,
+    });
+    if (result.conflict) {
+      // 不重試：用新 rev 再寫就變成延遲的 last-write-wins，會蓋掉 Tab B 剛存進去的字。
+      console.warn("[collabDoc] stories.content 與共編文件衝突，保留已存正文、不重試 materialize");
+      return;
+    }
+    if (typeof result.rev === "number") room.lastMaterializedRev = result.rev;
+    room.lastMaterializedContent = result.content;
   } catch (err) {
     room.dirty = true; // 失敗不吞：留旗等下一輪（或下一筆改動）再試
     console.warn("[collabDoc] 落盤失敗（稍後重試）：", err instanceof Error ? err.message : err);
@@ -215,6 +261,7 @@ async function joinDoc(ws: WebSocket, docKey: string, projectId: string, ctx: { 
     // 載入期間可能已有另一個 join 佔了位：以先佔位者為準，本次載入丟棄
     room = docRooms.get(docKey);
     if (!room) {
+      const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
       room = {
         doc,
         conns: new Set(),
@@ -224,6 +271,8 @@ async function joinDoc(ws: WebSocket, docKey: string, projectId: string, ctx: { 
         persistTimer: null,
         dirty: false,
         persisting: false,
+        lastMaterializedRev: story?.rev,
+        lastMaterializedContent: story?.content ?? doc.getText(STORY_TEXT_KEY).toString(),
       };
       docRooms.set(docKey, room);
     }

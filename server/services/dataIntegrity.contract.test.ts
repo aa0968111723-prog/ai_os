@@ -1,0 +1,58 @@
+/**
+ * Data-integrity P0 source locks: OCC on story persist, project-scoped
+ * reference images, and assertGenerationEntityIds on import / director / prompts.
+ */
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+describe("P0-1 story persist always sends expectedRev", () => {
+  const persist = readFileSync(new URL("./collabDoc.ts", import.meta.url), "utf8");
+
+  it("persistStoryDoc materialize 帶 expectedRev，衝突不覆蓋", () => {
+    expect(persist).toContain("expectedRev: opts?.expectedRev ?? existing.rev");
+    expect(persist).toContain("isRevisionConflictError");
+    expect(persist).toContain("不覆蓋 stories.content");
+    expect(persist).toContain("baseline: { content: opts?.baselineContent ?? existing.content }");
+  });
+
+  it("Yjs flushRoom 用 lastMaterializedRev，衝突不重試（避免延遲 LWW）", () => {
+    expect(persist).toContain("lastMaterializedRev");
+    expect(persist).toContain("expectedRev: room.lastMaterializedRev");
+    expect(persist).toContain("不重試 materialize");
+  });
+});
+
+describe("P0-2 assertReferenceImage is project-scoped", () => {
+  it("helper requires asset.projectId === projectId", () => {
+    const src = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");
+    expect(src).toContain("asset.projectId !== projectId");
+    expect(src).toContain("同組其他專案的圖不能當定裝");
+  });
+});
+
+describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", () => {
+  it("director splitScriptCore asserts before insert", () => {
+    const src = readFileSync(new URL("../routers/director.ts", import.meta.url), "utf8");
+    expect(src).toContain("await assertGenerationEntityIds(project.id");
+    expect(src.indexOf("await assertGenerationEntityIds")).toBeLessThan(src.indexOf(".insert(schema.scenes)"));
+  });
+
+  it("storyParse materialize asserts before insert", () => {
+    const src = readFileSync(new URL("./storyParse.ts", import.meta.url), "utf8");
+    expect(src).toContain("await assertGenerationEntityIds(project.id");
+    expect(src.indexOf("await assertGenerationEntityIds")).toBeLessThan(src.lastIndexOf(".insert(schema.scenes)"));
+  });
+
+  it("prompts.savePromptCore asserts card ids belong to the project", () => {
+    const src = readFileSync(new URL("../routers/prompts.ts", import.meta.url), "utf8");
+    expect(src).toContain("await assertGenerationEntityIds(project.id");
+  });
+
+  it("assertGenerationEntityIds also covers lookIds and storySceneId", () => {
+    const src = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+    expect(src).toContain("lookIds?: string[]");
+    expect(src).toContain("storySceneId?: string");
+    expect(src).toContain("造型不屬於本專案或不存在");
+    expect(src).toContain("場次不屬於本專案或不存在");
+  });
+});

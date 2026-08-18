@@ -557,14 +557,7 @@ export const projectsRouter = router({
       requireGroup(ctx.auth, project.groupId);
       await assertProjectEditable(ctx.auth, project);
       if (input.assetId) {
-        await assertReferenceImage(input.assetId, project.groupId);
-        const [asset] = await db
-          .select({ projectId: schema.assets.projectId })
-          .from(schema.assets)
-          .where(eq(schema.assets.id, input.assetId));
-        if (asset?.projectId !== project.id) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "封面圖要選這個專案素材庫裡的圖片" });
-        }
+        await assertReferenceImage(input.assetId, project.groupId, project.id);
       }
       // 不動 updatedAt：換封面是外觀調整，不該把專案頂到「最近更新」最前面蓋掉真的有進度的案子
       const [updated] = await db

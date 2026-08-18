@@ -123,4 +123,29 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     expect(flushed.content).toBe("尚未落盤前＋已改");
     expect(flushed.rev).toBeGreaterThan(0);
   });
+
+  it("overlapping persist with a stale expectedRev does not clobber a newer blur save", async () => {
+    const projectId = await newProject("起點");
+    const [before] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    await db
+      .update(schema.stories)
+      .set({ content: "blur 存檔", rev: before.rev + 1, updatedBy: editor, updatedAt: new Date() })
+      .where(eq(schema.stories.id, before.id));
+
+    const doc = await loadStoryDoc(projectId);
+    const live = doc.getText(STORY_TEXT_KEY);
+    live.delete(0, live.length);
+    live.insert(0, "Yjs 想蓋過去的字");
+
+    const result = await persistStoryDoc(projectId, groupId, doc, editor, {
+      expectedRev: before.rev,
+      baselineContent: "起點",
+    });
+    expect(result.conflict).toBe(true);
+    expect(result.materialized).toBe(false);
+
+    const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    expect(after.content).toBe("blur 存檔");
+    expect(after.rev).toBe(before.rev + 1);
+  });
 });

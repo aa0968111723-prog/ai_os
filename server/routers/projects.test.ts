@@ -44,9 +44,8 @@ describe("setCover（專案封面圖）契約", () => {
     expect(body).toContain("assertProjectEditable(ctx.auth, project)");
   });
 
-  it("綁圖時沿用 assertReferenceImage（同組＋是圖片＋不在回收桶），並限本專案素材", () => {
-    expect(body).toContain("assertReferenceImage(input.assetId, project.groupId)");
-    expect(body).toContain("封面圖要選這個專案素材庫裡的圖片");
+  it("綁圖時沿用 assertReferenceImage（同組＋同專案＋是圖片＋不在回收桶）", () => {
+    expect(body).toContain("assertReferenceImage(input.assetId, project.groupId, project.id)");
   });
 
   it("assetId 可為 null（清除封面，退回色塊）", () => {

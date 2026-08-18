@@ -22,6 +22,10 @@ describe("shouldAdoptRemote", () => {
     expect(shouldAdoptRemote("saving", "打到一半", "遠端")).toBe(false);
     expect(shouldAdoptRemote("error", "沒存成功的內容", "遠端")).toBe(false);
   });
+  it("衝突態絕不收養——ConflictNotice 還在問人，不能自動選遠端", () => {
+    expect(shouldAdoptRemote("conflict", "我剛打的字", "夥伴那一版")).toBe(false);
+    expect(shouldAdoptRemote("conflict", "我剛打的字", "我剛打的字")).toBe(false);
+  });
 });
 
 describe("summaryChips", () => {

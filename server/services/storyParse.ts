@@ -36,6 +36,7 @@ import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
 import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL, isNimTimeoutError } from "./nvidia-nim";
 import { loadProjectCardAliases, type ProjectCardAliases } from "./sceneCards";
+import { assertGenerationEntityIds } from "./generationCore";
 import { lockSceneOrder } from "./locks";
 import {
   consumeRateLimit,
@@ -248,7 +249,7 @@ function resolveExistingRef(
   return pool.find((a) => a.ref.toLowerCase() === key)?.id ?? null;
 }
 
-function matchByName<T extends { id: string; name: string }>(rows: T[], name: string): T | null {
+export function matchByName<T extends { id: string; name: string }>(rows: T[], name: string): T | null {
   const key = nameKey(name);
   if (!key) return null;
   return rows.find((r) => nameKey(r.name) === key) ?? null;
@@ -844,44 +845,46 @@ export async function materializeStoryboard(input: {
       }
 
       const locationPresetIds = storyScene.locationId ? [storyScene.locationId] : [];
+      const shotValues = sc.shots.map((shot) => {
+        const characterIds = (shot.characterRefs ?? [])
+          .map(resolveCharRef)
+          .filter((id): id is string => Boolean(id))
+          .slice(0, MAX_GENERATE_CHARACTERS);
+        const propIds = (shot.propRefs ?? [])
+          .map(resolvePropRef)
+          .filter((id): id is string => Boolean(id))
+          .slice(0, MAX_GENERATE_PROPS);
+        const lookIds = [...new Set(characterIds)]
+          .map(soleLookOf)
+          .filter((id): id is string => Boolean(id));
+        return {
+          projectId: project.id,
+          orderIndex: ++shotOrder,
+          title: (shot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
+          durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
+          status: "todo" as const,
+          prompt: shot.prompt,
+          action: shot.action ?? null,
+          dialogue: shot.dialogue ?? null,
+          voiceover: shot.voiceover ?? null,
+          storySceneId: storyScene.id,
+          camera: shot.shotSize ? { shotSize: shot.shotSize } : null,
+          performance: shot.emotion ? { emotion: shot.emotion } : null,
+          characterIds: characterIds.length ? [...new Set(characterIds)] : null,
+          scenePresetIds: locationPresetIds.length ? locationPresetIds : null,
+          propIds: propIds.length ? [...new Set(propIds)] : null,
+          lookIds: lookIds.length ? lookIds : null,
+        };
+      });
+      await assertGenerationEntityIds(project.id, {
+        characterIds: [...new Set(shotValues.flatMap((row) => row.characterIds ?? []))],
+        scenePresetIds: [...new Set(shotValues.flatMap((row) => row.scenePresetIds ?? []))],
+        propIds: [...new Set(shotValues.flatMap((row) => row.propIds ?? []))],
+        lookIds: [...new Set(shotValues.flatMap((row) => row.lookIds ?? []))],
+      });
       const rows = await tx
         .insert(schema.scenes)
-        .values(
-          sc.shots.map((shot) => {
-            const characterIds = (shot.characterRefs ?? [])
-              .map(resolveCharRef)
-              .filter((id): id is string => Boolean(id))
-              .slice(0, MAX_GENERATE_CHARACTERS);
-            const propIds = (shot.propRefs ?? [])
-              .map(resolvePropRef)
-              .filter((id): id is string => Boolean(id))
-              .slice(0, MAX_GENERATE_PROPS);
-            return {
-              projectId: project.id,
-              orderIndex: ++shotOrder,
-              title: (shot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
-              durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
-              status: "todo",
-              prompt: shot.prompt,
-              action: shot.action ?? null,
-              dialogue: shot.dialogue ?? null,
-              voiceover: shot.voiceover ?? null,
-              storySceneId: storyScene.id,
-              camera: shot.shotSize ? { shotSize: shot.shotSize } : null,
-              performance: shot.emotion ? { emotion: shot.emotion } : null,
-              characterIds: characterIds.length ? [...new Set(characterIds)] : null,
-              scenePresetIds: locationPresetIds.length ? locationPresetIds : null,
-              propIds: propIds.length ? [...new Set(propIds)] : null,
-              // 出場角色若只有一套造型，直接鎖上（見上方 soleLookOf 的取捨）
-              lookIds: (() => {
-                const ids = [...new Set(characterIds)]
-                  .map(soleLookOf)
-                  .filter((id): id is string => Boolean(id));
-                return ids.length ? ids : null;
-              })(),
-            };
-          }),
-        )
+        .values(shotValues)
         .returning({ id: schema.scenes.id });
       sceneIds.push(...rows.map((r) => r.id));
     }

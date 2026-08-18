@@ -54,7 +54,7 @@ export const scenePresetsRouter = router({
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       // 跨組引用驗證：referenceAssetId 必須同組且是圖片（比照 characters）
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId, project.id);
 
       if (input.clientRequestId) {
         const [existing] = await db
@@ -123,7 +123,7 @@ export const scenePresetsRouter = router({
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組且是圖片（null＝清除引用，免驗）
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
       // partial update：只 set 有傳入的欄位（與角色定裝同口徑，防 lost update）
       const patch: {

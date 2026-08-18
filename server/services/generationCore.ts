@@ -814,6 +814,8 @@ export async function assertGenerationEntityIds(
     characterIds?: string[];
     scenePresetIds?: string[];
     propIds?: string[];
+    lookIds?: string[];
+    storySceneId?: string;
     sourceAssetId?: string;
     secondarySourceAssetId?: string;
   },
@@ -846,6 +848,25 @@ export async function assertGenerationEntityIds(
       .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, ids)));
     if (rows.length !== ids.length) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "素材設定卡不屬於本專案或不存在" });
+    }
+  }
+  if (opts.lookIds?.length) {
+    const ids = [...new Set(opts.lookIds)];
+    const rows = await db
+      .select({ id: schema.characterLooks.id })
+      .from(schema.characterLooks)
+      .where(and(eq(schema.characterLooks.projectId, projectId), inArray(schema.characterLooks.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "造型不屬於本專案或不存在" });
+    }
+  }
+  if (opts.storySceneId) {
+    const [row] = await db
+      .select({ id: schema.storyScenes.id })
+      .from(schema.storyScenes)
+      .where(and(eq(schema.storyScenes.id, opts.storySceneId), eq(schema.storyScenes.projectId, projectId)));
+    if (!row) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "場次不屬於本專案或不存在" });
     }
   }
   if (opts.sourceAssetId) {

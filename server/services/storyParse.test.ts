@@ -4,7 +4,7 @@
  * 標記行契約：「角色：」「場景：」「道具：」（0.95）＋「疑似道具：」（0.6→確認卡）。
  */
 import { describe, it, expect } from "vitest";
-import { mockStoryExtract, sha256Hex } from "./storyParse";
+import { matchByName, mockStoryExtract, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
 
@@ -106,5 +106,19 @@ describe("sha256Hex", () => {
     expect(sha256Hex("abc")).toBe(sha256Hex("abc"));
     expect(sha256Hex("abc")).not.toBe(sha256Hex("abd"));
     expect(sha256Hex("abc")).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("matchByName", () => {
+  it("兩個同名角色取先寫入的那一張（first-wins，不合併、不擲骰）", () => {
+    const first = { id: "char-a", name: "小華" };
+    const second = { id: "char-b", name: "小華" };
+    expect(matchByName([first, second], "小華")?.id).toBe("char-a");
+    expect(matchByName([first, second], "「小華」")?.id).toBe("char-a");
+  });
+
+  it("找不到就回 null——不跨專案猜一張同名卡", () => {
+    expect(matchByName([{ id: "char-a", name: "小華" }], "禪定龜龜")).toBeNull();
+    expect(matchByName([], "小華")).toBeNull();
   });
 });

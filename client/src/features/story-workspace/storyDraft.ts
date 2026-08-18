@@ -118,6 +118,8 @@ export function createStorySaveGate(opts: {
 export function shouldAdoptRemote(state: StorySaveState, local: string | null, remote: string): boolean {
   if (local === null) return true; // 尚未種初值：一律採用伺服器內容
   if (local === remote) return false;
+  // conflict 絕不能收養：那就是「遠端有另一份合法內容，等人選」——一收養等於自動選了對方。
+  if (state === "conflict" || state === "dirty" || state === "saving" || state === "error") return false;
   return state === "idle" || state === "saved";
 }
 

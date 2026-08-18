@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { loadProjectCardAliases, resolveSceneCardRefs, sceneCardColumns } from "../services/sceneCards";
+import { assertGenerationEntityIds } from "../services/generationCore";
 import { worldviewSchema, formatWorldviewForAi, formatActsOutline, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
@@ -264,6 +265,11 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
           });
         }
       }
+      await assertGenerationEntityIds(project.id, {
+        characterIds: [...new Set(scenesData.flatMap((s) => s.characterIds ?? []))],
+        scenePresetIds: [...new Set(scenesData.flatMap((s) => s.scenePresetIds ?? []))],
+        propIds: [...new Set(scenesData.flatMap((s) => s.propIds ?? []))],
+      });
       const [{ maxOrder }] = await tx
         .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
         .from(schema.scenes)
