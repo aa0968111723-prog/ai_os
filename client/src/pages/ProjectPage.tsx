@@ -36,6 +36,7 @@ import {
 } from "@shared/worldview";
 import { createWorldviewSaveGate } from "@shared/worldviewSaveGate";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
 import { ProjectShareCard } from "../components/ProjectShareCard";
@@ -481,8 +482,11 @@ export function ProjectPage({ id }: { id: string }) {
     {
       retry: (count, err) => {
         const code = err.data?.code;
-        return code !== "FORBIDDEN" && code !== "NOT_FOUND" && count < 2;
+        if (code === "FORBIDDEN" || code === "NOT_FOUND") return false;
+        if (isBootNotReadyError(err)) return count < BOOT_NOT_READY_RETRY_LIMIT;
+        return count < 2;
       },
+      retryDelay: queryRetryDelay,
       // 保底輪詢：協作廣播是「更快知道」，不是唯一的知道方式。
       // 全域 refetchOnWindowFocus 是 false（main.tsx），所以少了這一條，
       // 只要那則 invalidate 沒送到（WS 斷線、跨實例而沒開 Redis），世界觀可以整場停在舊值。

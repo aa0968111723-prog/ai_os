@@ -36,6 +36,7 @@ import type { NewShotKind } from "./NewShotMenu";
 import type { SketchPreview } from "./sketchReplay";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
+import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -81,7 +82,11 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const utils = trpc.useUtils();
   const scenes = trpc.scenes.listByProject.useQuery(
     { projectId },
-    { refetchOnMount: "always" },
+    {
+      refetchOnMount: "always",
+      retry: (count, err) => (isBootNotReadyError(err) ? count < BOOT_NOT_READY_RETRY_LIMIT : count < 1),
+      retryDelay: queryRetryDelay,
+    },
   );
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
   const shotsLoading = scenes.isLoading && !scenes.data;

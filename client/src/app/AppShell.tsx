@@ -13,6 +13,7 @@ import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { safeInternalPath } from "../lib/safePath";
+import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import posthog from "../posthog";
 
 /**
@@ -112,7 +113,8 @@ export function AppShell() {
   const boot = trpc.sessionBoot.bootstrap.useQuery(undefined, {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-    retry: 1,
+    retry: (count, err) => (isBootNotReadyError(err) ? count < BOOT_NOT_READY_RETRY_LIMIT : count < 1),
+    retryDelay: queryRetryDelay,
     refetchInterval: (q) => (q.state.data?.me ? 60_000 : false),
   });
   // 有舊資料時不把整站當 loading（背景 refetch 不應擋住路由）
