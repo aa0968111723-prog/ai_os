@@ -41,6 +41,12 @@ const UA = {
   chromeIos:
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1",
   linuxFirefox: "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+  deepinChrome:
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Deepin/25 AiosDeepin/1.0",
+  uosChrome:
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 UOS AiosDeepin/1.0",
+  cutosLwa:
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CUTOS AiosCutos/1.0",
 };
 
 describe("osFamily", () => {
@@ -59,6 +65,19 @@ describe("osFamily", () => {
   it("UA-CH 的平台優先於 UA 字串（Chrome 正在精簡 UA）", () => {
     expect(osFamily("Mozilla/5.0 (Unknown)", { detailPlatform: "Android" })).toBe("Android");
     expect(osFamily("Mozilla/5.0 (Unknown)", { detailPlatform: "Chrome OS" })).toBe("ChromeOS");
+  });
+
+  it("深度與 CUTOS 不被泛用 Linux 吃掉（兩者 UA 都寫著 Linux）", () => {
+    expect(osFamily(UA.deepinChrome)).toBe("Deepin");
+    expect(osFamily(UA.uosChrome)).toBe("Deepin");
+    expect(osFamily(UA.cutosLwa)).toBe("CUTOS");
+    expect(osFamily(UA.linuxFirefox)).toBe("Linux");
+  });
+
+  it("UA-CH 的 Deepin／UOS／CUTOS 平台優先於精簡後的 Linux UA", () => {
+    expect(osFamily("Mozilla/5.0 (X11; Linux x86_64)", { detailPlatform: "Deepin" })).toBe("Deepin");
+    expect(osFamily("Mozilla/5.0 (X11; Linux x86_64)", { detailPlatform: "UOS" })).toBe("Deepin");
+    expect(osFamily("Mozilla/5.0 (X11; Linux x86_64)", { detailPlatform: "CUTOS" })).toBe("CUTOS");
   });
 });
 
@@ -119,6 +138,12 @@ describe("osDescription", () => {
 
   it("macOS 用 UA-CH 版本（UA 字串停在 10_15_7 不再更新）", () => {
     expect(osDescription(UA.macSafari, { detailOsVersion: "15.3.1" })).toBe("macOS 15.3.1");
+  });
+
+  it("深度顯示 Deepin／UOS；CUTOS 帶版本", () => {
+    expect(osDescription(UA.deepinChrome, { detailOsVersion: "25.0.0" })).toBe("Deepin 25");
+    expect(osDescription(UA.uosChrome, { detailOsVersion: "20.0.0" })).toBe("UOS 20");
+    expect(osDescription(UA.cutosLwa, { detailOsVersion: "1.2.0" })).toBe("CUTOS 1.2");
   });
 });
 
@@ -182,6 +207,8 @@ describe("deviceKindFrom", () => {
     expect(deviceKindFrom(UA.ipadSafari)).toBe("tablet");
     expect(deviceKindFrom(UA.winChrome)).toBe("desktop");
     expect(deviceKindFrom(UA.linuxFirefox)).toBe("desktop");
+    expect(deviceKindFrom(UA.deepinChrome)).toBe("desktop");
+    expect(deviceKindFrom(UA.cutosLwa)).toBe("desktop");
   });
 });
 
@@ -228,6 +255,8 @@ describe("kindFromLabel", () => {
     expect(kindFromLabel("Samsung Galaxy Tab S9・Chrome 131")).toBe("tablet");
     expect(kindFromLabel("iPad・Safari")).toBe("tablet");
     expect(kindFromLabel("Windows 11・Chrome 131")).toBe("desktop");
+    expect(kindFromLabel("Deepin 25・Chrome 125")).toBe("desktop");
+    expect(kindFromLabel("CUTOS・Chrome 120")).toBe("desktop");
     expect(kindFromLabel(null)).toBe("unknown");
   });
 });

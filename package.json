@@ -53,6 +53,7 @@
     "soak:agent": "tsx scripts/agent-soak-harness.ts",
     "soak:agent-db": "tsx scripts/agent-db-soak.ts",
     "test:watch": "vitest",
+    "sentinel": "tsx scripts/run-sentinel.ts",
     "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "desktop:dev": "npx --yes @tauri-apps/cli@2 dev",
