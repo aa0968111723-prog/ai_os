@@ -34,6 +34,8 @@ import { completeText, LlmServiceError, type LlmProvider } from "../services/llm
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
 import { settleAssistantAskCompletion, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
+import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
+import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
@@ -49,7 +51,7 @@ import { planAgentCore } from "../services/agentCore";
 import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
-import type { DataField } from "../../shared/databaseFields";
+import type { DataField, DataRowData } from "../../shared/databaseFields";
 import {
   consumeProjectAssistantRate,
   RateLimitConfigurationError,
@@ -75,6 +77,7 @@ import {
   type AssistantReadableDatabase,
 } from "../services/assistantDatabaseEvidence";
 import { executeDatabaseWriteCommand } from "../services/databaseCommand";
+import { canonicalRowValuesEqual } from "../services/databaseResourceResolver";
 import { getAgentReadableTable } from "../services/databaseMcp";
 import {
   createAiTraceSession,
@@ -371,20 +374,17 @@ async function applyAssistantScenePatch(
   return row;
 }
 
-async function readBackScene(projectId: string, sceneId: string) {
-  const [fresh] = await db
-    .select()
-    .from(schema.scenes)
-    .where(and(eq(schema.scenes.id, sceneId), eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
-  return fresh;
-}
-
 function writeResult<T extends Record<string, unknown>>(
   body: T,
   verification: AssistantWriteVerification,
   verifiedMessage: string,
-): T & { ok: boolean; verification: AssistantWriteVerification; message: string } {
-  return { ...body, ...formatAssistantWriteResult(verification, verifiedMessage) };
+  verificationMethod?: string,
+): T & { ok: boolean; verification: AssistantWriteVerification; message: string; verificationMethod?: string } {
+  return {
+    ...body,
+    ...formatAssistantWriteResult(verification, verifiedMessage),
+    ...(verificationMethod ? { verificationMethod } : {}),
+  };
 }
 
 /* ── 多步工具調用（W4）：唯讀查詢工具 ── */
@@ -1920,20 +1920,22 @@ export const assistantRouter = router({
           if (!v) throw new TRPCError({ code: "BAD_REQUEST", message: `${FIELD_LABEL[a.field]}不能是空白` });
           await applyAssistantScenePatch(scene, { [a.field]: v }, "助手已更新分鏡");
         }
-        const expected = a.field === "durationSec"
-          ? String(Math.max(1, Math.min(60, Math.round(Number(a.value)))))
+        const expectedValue = a.field === "durationSec"
+          ? Math.max(1, Math.min(60, Math.round(Number(a.value))))
           : a.value.trim();
         let verification: AssistantWriteVerification;
         try {
-          const fresh = await readBackScene(project.id, scene.id);
-          const actual = a.field === "durationSec" ? String(fresh?.durationSec ?? "") : String(fresh?.[a.field] ?? "");
-          verification = fresh && actual === expected
-            ? { status: "verified", message: `已重新讀取並確認${FIELD_LABEL[a.field]}` }
-            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+          const readBack = await verifySceneWriteReadBack({
+            projectId: project.id,
+            sceneId: scene.id,
+            expected: { [a.field]: expectedValue },
+            verifiedMessage: `已重新讀取並確認${FIELD_LABEL[a.field]}`,
+          });
+          verification = readBack.verification;
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        return writeResult({ kind: "update_scene" as const }, verification, "已更新分鏡");
+        return writeResult({ kind: "update_scene" as const }, verification, "已更新分鏡", ASSISTANT_SCENE_READ_BACK_METHOD);
       }
 
       if (a.type === "direct_shot") {
@@ -1961,17 +1963,17 @@ export const assistantRouter = router({
         await applyAssistantScenePatch(scene, { camera, performance }, "助手已調整鏡頭語言");
         let verification: AssistantWriteVerification;
         try {
-          const fresh = await readBackScene(project.id, scene.id);
-          const match = fresh
-            && JSON.stringify(fresh.camera ?? null) === JSON.stringify(camera ?? null)
-            && JSON.stringify(fresh.performance ?? null) === JSON.stringify(performance ?? null);
-          verification = match
-            ? { status: "verified", message: `已重新讀取並確認「${scene.title}」鏡頭語言` }
-            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+          const readBack = await verifySceneWriteReadBack({
+            projectId: project.id,
+            sceneId: scene.id,
+            expected: { camera, performance },
+            verifiedMessage: `已重新讀取並確認「${scene.title}」鏡頭語言`,
+          });
+          verification = readBack.verification;
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        return writeResult({ kind: "direct_shot" as const }, verification, `已調整「${scene.title}」：${changes.join("、")}`);
+        return writeResult({ kind: "direct_shot" as const }, verification, `已調整「${scene.title}」：${changes.join("、")}`, ASSISTANT_SCENE_READ_BACK_METHOD);
       }
 
       if (a.type === "create_scene") {
@@ -2003,14 +2005,22 @@ export const assistantRouter = router({
         publishToProject(project.id, { kind: "scene", id: scene.id }, "助手已新增分鏡");
         let verification: AssistantWriteVerification;
         try {
-          const fresh = await readBackScene(project.id, scene.id);
-          verification = fresh && fresh.title === title
-            ? { status: "verified", message: "已重新讀取並確認新增分鏡" }
-            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+          const readBack = await verifySceneWriteReadBack({
+            projectId: project.id,
+            sceneId: scene.id,
+            expected: {
+              title,
+              ...(voiceover ? { voiceover } : {}),
+              ...(a.prompt?.trim() ? { prompt: a.prompt.trim() } : {}),
+              ...(a.durationSec ? { durationSec: Math.round(a.durationSec) } : {}),
+            },
+            verifiedMessage: "已重新讀取並確認新增分鏡",
+          });
+          verification = readBack.verification;
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        return writeResult({ kind: "create_scene" as const, sceneId: scene.id }, verification, "已新增分鏡");
+        return writeResult({ kind: "create_scene" as const, sceneId: scene.id }, verification, "已新增分鏡", ASSISTANT_SCENE_READ_BACK_METHOD);
       }
 
       if (a.type === "run_workflow") {
@@ -2149,6 +2159,7 @@ export const assistantRouter = router({
             .from(schema.dataRows)
             .where(eq(schema.dataRows.id, row.id));
           verification = found && found.tableId === a.tableId
+            && canonicalRowValuesEqual(found.data as DataRowData, a.data)
             ? { status: "verified", message: `已重新讀取並確認寫入「${hit.table.name}」` }
             : { status: "unverified", message: "操作已送出，但驗證未通過" };
         } catch {
@@ -2158,7 +2169,7 @@ export const assistantRouter = router({
           kind: "add_database_row" as const,
           rowId: row.id,
           tableName: hit.table.name,
-        }, verification, `已寫入資料庫「${hit.table.name}」一列`);
+        }, verification, `已寫入資料庫「${hit.table.name}」一列`, "authoritative_database_row_read_back");
       }
 
       throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });

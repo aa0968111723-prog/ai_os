@@ -13,6 +13,18 @@ describe("agentRunner PR-4 revision-safe edit steps", () => {
     expect(source).toContain("formatRevisionConflictMessage");
   });
 
+  it("create_scene / update_scene read the scene row back before marking done", () => {
+    expect(source).toContain("verifySceneWriteReadBack");
+    expect(source).toContain("寫入後驗證未通過，未標記完成");
+    const create = source.slice(source.indexOf('if (step.kind === "create_scene")'), source.indexOf('if (step.kind === "update_scene")'));
+    const update = source.slice(source.indexOf('if (step.kind === "update_scene")'), source.indexOf('if (step.kind === "record_to_database")'));
+    expect(create).toContain("verifySceneWriteReadBack");
+    expect(create).toContain("if (!readBack.verified)");
+    expect(update).toContain("verifySceneWriteReadBack");
+    expect(update).toContain("if (!readBack.verified)");
+    expect(update).not.toMatch(/step\.status = "done";[\s\S]{0,80}verifySceneWriteReadBack/);
+  });
+
   it("reorder_scenes validates exact set and order fingerprint", () => {
     expect(source).toContain("validateReorderSceneIds");
     expect(source).toContain("sceneOrderFingerprint");

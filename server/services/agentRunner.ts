@@ -20,6 +20,7 @@ import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
 import { executeDatabaseWriteCommand } from "./databaseCommand";
+import { verifySceneWriteReadBack } from "./assistantSceneReadBack";
 import { canonicalRowValuesEqual } from "./databaseResourceResolver";
 import { validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
@@ -1523,9 +1524,23 @@ async function advanceRun(run: RunRow): Promise<void> {
         voiceover: step.voiceover?.trim() || undefined,
       });
     });
+    const createdTitle = title.slice(0, 60);
+    const readBack = await verifySceneWriteReadBack({
+      projectId: run.projectId,
+      sceneId: effectId,
+      expected: {
+        title: createdTitle,
+        ...(step.durationSec ? { durationSec: Math.max(1, Math.min(60, Math.round(step.durationSec))) } : {}),
+        ...(step.scenePrompt?.trim() ? { prompt: step.scenePrompt.trim() } : {}),
+        ...(step.voiceover?.trim() ? { voiceover: step.voiceover.trim() } : {}),
+      },
+    });
+    if (!readBack.verified) {
+      return failRun(run, steps, idx, "寫入後驗證未通過，未標記完成");
+    }
     step.status = "done";
-    addOutputRef(step, "scene", effectId, title);
-    step.detail = `已新增「${title.slice(0, 30)}」`;
+    addOutputRef(step, "scene", effectId, createdTitle);
+    step.detail = `已新增「${createdTitle.slice(0, 30)}」`;
     auditAgentStep(run, step, idx, true);
     await saveDagProgress(run, steps);
     return;
@@ -1675,7 +1690,6 @@ async function advanceRun(run: RunRow): Promise<void> {
           idempotencyKey: effectId,
           compensatable: true,
         };
-        step.status = "done";
         step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}${result.merged ? "（已與夥伴修改合併）" : ""}`;
         addOutputRef(step, "scene", scene.id, result.row.title ?? scene.title);
       } else {
@@ -1690,10 +1704,18 @@ async function advanceRun(run: RunRow): Promise<void> {
           idempotencyKey: effectId,
           compensatable: true,
         };
-        step.status = "done";
         step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}`;
         addOutputRef(step, "scene", scene.id, (patch.title as string | undefined) ?? scene.title);
       }
+      const readBack = await verifySceneWriteReadBack({
+        projectId: run.projectId,
+        sceneId: scene.id,
+        expected: patch,
+      });
+      if (!readBack.verified) {
+        return failRun(run, steps, idx, "寫入後驗證未通過，未標記完成");
+      }
+      step.status = "done";
     } catch (err) {
       if (isRevisionConflictError(err)) {
         return failRun(

@@ -149,6 +149,8 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
       action: { type: "update_scene", sceneId: shot.id, field: "title", value: "助手改過的標題" },
     });
     expect(result.ok).toBe(true);
+    expect("verification" in result && result.verification?.status).toBe("verified");
+    expect("verificationMethod" in result && result.verificationMethod).toBe("authoritative_scene_row_read_back");
     const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, shot.id));
     expect(fresh.title).toBe("助手改過的標題");
     expect(fresh.rev).toBeGreaterThan(shot.rev);
@@ -178,6 +180,7 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     expect(fresh.deletedAt).toBeNull();
     expect(result.ok).toBe(true);
     expect("verification" in result && result.verification?.status).toBe("verified");
+    expect("verificationMethod" in result && result.verificationMethod).toBe("authoritative_scene_row_read_back");
   });
 
   it("assistant update_scene / direct_shot without read-back match → ok:false", async () => {
