@@ -243,7 +243,17 @@ describe("DeliveryRoom picked batch matches eligible-shot filter", () => {
 describe("one-click does not batch-generate on an empty board", () => {
   it("refuses batchGenerate when listByProject is still 0 shots", () => {
     expect(oneClickHook).toContain("listByProject.fetch");
-    expect(oneClickHook).toContain("先解析／產生分鏡");
+    expect(oneClickHook).toContain("ONE_CLICK_NEED_SHOTS");
+    const oneClick = readFileSync(join(process.cwd(), "client/src/features/story-workspace/oneClickFilm.ts"), "utf8");
+    expect(oneClick).toContain('export const ONE_CLICK_NEED_SHOTS = "先解析出分鏡"');
+    expect(oneClick).toContain("export function revealAfterOneClick");
+    const page = readFileSync(join(process.cwd(), "client/src/pages/ProjectPage.tsx"), "utf8");
+    expect(page).toContain("error={oneClick.error}");
+    expect(page).toContain("revealAfterOneClick");
+    expect(page).not.toMatch(/oneClick\.run\(\)[\s\S]{0,240}catch \(\(\) => \{\s*openInlineSection\("production"\);/);
+    const bar = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryReadinessBar.tsx"), "utf8");
+    expect(bar).toContain("story-readiness__error");
+    expect(bar).toContain('role="alert"');
   });
 });
 

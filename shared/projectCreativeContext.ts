@@ -215,7 +215,7 @@ export function oneClickPrimaryLabel(opts: {
   sceneCount?: number;
 }): string {
   if (opts.pending) return "準備生成中…";
-  if ((opts.sceneCount ?? 1) <= 0) return "先解析／產生分鏡";
+  if ((opts.sceneCount ?? 1) <= 0) return "先解析出分鏡";
   const unit = oneClickOutputUnit(opts.modelKind);
   return opts.hasBatch ? `繼續生成${unit}` : `生成${unit}`;
 }

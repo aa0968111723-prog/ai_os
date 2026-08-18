@@ -69,7 +69,7 @@ import {
 } from "../features/story-workspace/storyInlineNav";
 import { consumeNestedReveal, peekStoryReveal, subscribeStoryReveal } from "../features/story-workspace/storyRevealQueue";
 import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
-import { ONE_CLICK_BATCH_KIND } from "../features/story-workspace/oneClickFilm";
+import { ONE_CLICK_BATCH_KIND, revealAfterOneClick } from "../features/story-workspace/oneClickFilm";
 import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
 import { StoryContextStatusBlock } from "../features/story-workspace/StoryContextStatusBlock";
@@ -1762,9 +1762,9 @@ export function ProjectPage({ id }: { id: string }) {
                             return;
                           }
                           if (!window.confirm(`只重生成受影響的 ${shotIds.length} 鏡。結果會先當候選，由你比較後採用，不會動現有畫面。`)) return;
-                          void oneClick.regenShots(shotIds).then(() => openInlineSection("production")).catch(() => {
-                            openInlineSection("production");
-                          });
+                          void oneClick.regenShots(shotIds)
+                            .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
+                            .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
                         }}
                       />
                       <SectionErrorBoundary title="創作台">
@@ -1858,26 +1858,25 @@ export function ProjectPage({ id }: { id: string }) {
                   })
             }
             primaryDisabled={oneClick.pending || readiness.kind === "empty" || sceneCount === 0}
+            error={oneClick.error}
             onPrimary={
               readiness.kind === "empty"
                 ? undefined
                 : () => {
                     if (!window.confirm("會先儲存並解析故事、補齊缺少的分鏡，再建立批次生成計畫。估點後由你核准才扣點；已細修或已通過審核的鏡不會被覆蓋。開始？")) return;
-                    void oneClick.run().then(() => openInlineSection("production")).catch(() => {
-                      openInlineSection("production");
-                    });
+                    void oneClick.run()
+                      .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
+                      .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
                   }
             }
             latestLabel={
-              oneClick.error
-                ? oneClick.error
-                : oneClick.result
-                  ? `已建立 ${oneClick.result.shots} 鏡批次（約 ${oneClick.result.estPoints} 點，核准後才扣點）`
-                  : hasDeliverable
-                    ? "已有成片，展開交付"
-                    : doneGenCount
-                      ? `已完成 ${doneGenCount} 次生成`
-                      : undefined
+              oneClick.result
+                ? `已建立 ${oneClick.result.shots} 鏡批次（約 ${oneClick.result.estPoints} 點，核准後才扣點）`
+                : hasDeliverable
+                  ? "已有成片，展開交付"
+                  : doneGenCount
+                    ? `已完成 ${doneGenCount} 次生成`
+                    : undefined
             }
             onOpenLatest={
               oneClick.result || doneGenCount
@@ -1902,9 +1901,9 @@ export function ProjectPage({ id }: { id: string }) {
               }))}
               onRegenerateShots={(shotIds) => {
                 if (!window.confirm(`只重生成選取的 ${shotIds.length} 鏡。會建立批次計畫，核准後才扣點，不會重做整部影片。`)) return;
-                void oneClick.regenShots(shotIds).then(() => openInlineSection("production")).catch(() => {
-                  openInlineSection("production");
-                });
+                void oneClick.regenShots(shotIds)
+                  .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
+                  .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
               }}
             />
           ) : null}

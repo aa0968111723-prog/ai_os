@@ -2,6 +2,7 @@ import { useState } from "react";
 import { trpc } from "../../api";
 import {
   ONE_CLICK_BATCH_MODEL,
+  ONE_CLICK_NEED_SHOTS,
   requestStoryFlush,
   runOneClickFilm,
   type OneClickFilmResult,
@@ -19,16 +20,22 @@ export function useOneClickFilm(projectId: string) {
 
   const regenShots = async (sceneIds: string[]) => {
     setError(null);
-    const r = await batch.mutateAsync({
-      projectId,
-      modelId: ONE_CLICK_BATCH_MODEL,
-      sceneIds,
-    });
-    const next = { runId: r.runId, shots: r.shots, estPoints: r.estPoints ?? 0 };
-    setResult(next);
-    utils.agents.listByProject.invalidate({ projectId });
-    utils.scenes.listByProject.invalidate({ projectId });
-    return next;
+    try {
+      const r = await batch.mutateAsync({
+        projectId,
+        modelId: ONE_CLICK_BATCH_MODEL,
+        sceneIds,
+      });
+      const next = { runId: r.runId, shots: r.shots, estPoints: r.estPoints ?? 0 };
+      setResult(next);
+      utils.agents.listByProject.invalidate({ projectId });
+      utils.scenes.listByProject.invalidate({ projectId });
+      return next;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "生成失敗";
+      setError(message);
+      throw err;
+    }
   };
 
   const run = async () => {
@@ -45,7 +52,7 @@ export function useOneClickFilm(projectId: string) {
         batchGenerate: async () => {
           const shots = await utils.scenes.listByProject.fetch({ projectId });
           if (!shots?.length) {
-            throw new Error("先解析／產生分鏡");
+            throw new Error(ONE_CLICK_NEED_SHOTS);
           }
           const r = await batch.mutateAsync({ projectId, modelId: ONE_CLICK_BATCH_MODEL });
           return { runId: r.runId, shots: r.shots, estPoints: r.estPoints ?? 0 };

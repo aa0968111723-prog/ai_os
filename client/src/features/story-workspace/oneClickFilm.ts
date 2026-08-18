@@ -31,6 +31,17 @@ export async function runOneClickFilm(ops: {
   return ops.batchGenerate();
 }
 
+export const ONE_CLICK_NEED_SHOTS = "先解析出分鏡";
+
+/**
+ * Success opens production. Failure stays on the readiness CTA so
+ * `oneClick.error` can render as red text. Switching tab on catch
+ * swallows the only user-visible error.
+ */
+export function revealAfterOneClick(ok: boolean, revealProduction: () => void): void {
+  if (ok) revealProduction();
+}
+
 export function requestStoryFlush(opts?: { timeoutMs?: number }): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   return new Promise((resolve, reject) => {

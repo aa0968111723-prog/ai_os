@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { ONE_CLICK_BATCH_KIND, ONE_CLICK_BATCH_MODEL, requestStoryFlush, runOneClickFilm } from "./oneClickFilm";
+import { describe, expect, it, vi } from "vitest";
+import {
+  ONE_CLICK_BATCH_KIND,
+  ONE_CLICK_BATCH_MODEL,
+  ONE_CLICK_NEED_SHOTS,
+  requestStoryFlush,
+  revealAfterOneClick,
+  runOneClickFilm,
+} from "./oneClickFilm";
 
 describe("runOneClickFilm", () => {
   it("runs save → parse → storyboard → batch in order", async () => {
@@ -40,17 +47,25 @@ describe("runOneClickFilm", () => {
     await expect(fail).rejects.toThrow("故事有衝突尚未處理");
   });
 
-  it("batch step can refuse 0 shots with 先解析／產生分鏡", async () => {
+  it("batch step can refuse 0 shots with 先解析出分鏡", async () => {
     await expect(
       runOneClickFilm({
         flushStory: async () => undefined,
         parse: async () => undefined,
         generateStoryboard: async () => undefined,
         batchGenerate: async () => {
-          throw new Error("先解析／產生分鏡");
+          throw new Error(ONE_CLICK_NEED_SHOTS);
         },
       }),
-    ).rejects.toThrow("先解析／產生分鏡");
+    ).rejects.toThrow(ONE_CLICK_NEED_SHOTS);
+  });
+
+  it("revealAfterOneClick opens production only on success", () => {
+    const reveal = vi.fn();
+    revealAfterOneClick(false, reveal);
+    expect(reveal).not.toHaveBeenCalled();
+    revealAfterOneClick(true, reveal);
+    expect(reveal).toHaveBeenCalledTimes(1);
   });
 
   it("stops before batch if parse throws", async () => {

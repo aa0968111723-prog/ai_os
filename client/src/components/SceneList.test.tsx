@@ -262,6 +262,17 @@ describe("SceneList 流程引導（C）", () => {
 });
 
 describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動作", () => {
+  it("空列表只顯示還沒有分鏡，沒有列表層生成 CTA", () => {
+    scenesQuery.mockReturnValue({
+      data: [],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(screen.getByText(/還沒有分鏡/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^生成這一格/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /生成畫面/ })).not.toBeInTheDocument();
+  });
+
   it("無畫面有提示詞→生成這一格；有畫面就只剩單格工作室（沒有送審這種東西了）", () => {
     scenesQuery.mockReturnValue({
       data: [scene({ id: "s1", hasAsset: false }), scene({ id: "s2" })],

@@ -709,6 +709,7 @@ const SceneRow = memo(function SceneRow({
                 <>
                 <ConfirmButton
                   triggerClassName="primary btn-sm"
+                  disabled={!hasPrompt || !canEdit}
                   triggerTitle="用這一格的提示詞快速出圖，完成後自動回填縮圖；要換模型請開單格工作室"
                   message={`即將生成這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                   confirmLabel="確認生成"

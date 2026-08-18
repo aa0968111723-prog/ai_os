@@ -8783,6 +8783,11 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 .story-readiness__label { display: block; font-size: var(--fs-15); }
 .story-readiness__detail { margin: 4px 0 0; }
 .story-readiness__cta { min-height: 44px; flex: 0 0 auto; }
+.story-readiness__error {
+  margin: 0;
+  color: var(--danger-ink);
+  font-size: var(--fs-13, 13px);
+}
 .story-readiness__latest { margin: 8px 0 0; }
 .story-context-status { margin: 8px 0 0; }
 .story-context-status__states { display: flex; flex-wrap: wrap; gap: 6px; }
