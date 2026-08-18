@@ -1660,53 +1660,36 @@ async function advanceRun(run: RunRow): Promise<void> {
 
     const effectId = await persistStepEffectId(run, steps, step);
     try {
-      if (revisionGate) {
-        const expectedRev = Number(step.baseRevision);
-        const result = await applyWithRevision({
-          entity: "scene",
-          table: schema.scenes,
-          idColumn: schema.scenes.id,
-          revColumn: schema.scenes.rev,
-          row: scene,
-          patch,
-          expectedRev: Number.isFinite(expectedRev) ? expectedRev : undefined,
-          baseline: step.editBaseline ?? before,
-          extraWhere: isNull(schema.scenes.deletedAt),
-          reload: async () => {
-            const [fresh] = await db.select().from(schema.scenes)
-              .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
-            return fresh;
-          },
-        });
-        step.editAudit = {
-          operation: "update_scene",
-          entityType: "scene",
-          entityId: scene.id,
-          baseRevision: step.baseRevision,
-          resultingRevision: String(result.row.rev),
-          changedFields: Object.keys(patch),
-          before,
-          after,
-          idempotencyKey: effectId,
-          compensatable: true,
-        };
-        step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}${result.merged ? "（已與夥伴修改合併）" : ""}`;
-        addOutputRef(step, "scene", scene.id, result.row.title ?? scene.title);
-      } else {
-        await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
-        step.editAudit = {
-          operation: "update_scene",
-          entityType: "scene",
-          entityId: scene.id,
-          changedFields: Object.keys(patch),
-          before,
-          after,
-          idempotencyKey: effectId,
-          compensatable: true,
-        };
-        step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}`;
-        addOutputRef(step, "scene", scene.id, (patch.title as string | undefined) ?? scene.title);
-      }
+      const expectedRev = revisionGate ? Number(step.baseRevision) : undefined;
+      const result = await applyWithRevision({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: scene,
+        patch,
+        expectedRev: Number.isFinite(expectedRev) ? expectedRev : undefined,
+        baseline: revisionGate ? (step.editBaseline ?? before) : undefined,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.scenes)
+            .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
+      step.editAudit = {
+        operation: "update_scene",
+        entityType: "scene",
+        entityId: scene.id,
+        ...(revisionGate ? { baseRevision: step.baseRevision, resultingRevision: String(result.row.rev) } : {}),
+        changedFields: Object.keys(patch),
+        before,
+        after,
+        idempotencyKey: effectId,
+        compensatable: true,
+      };
+      step.detail = `已更新第 ${step.sceneNo} 鏡：${changed.join("、")}${result.merged ? "（已與夥伴修改合併）" : ""}`;
+      addOutputRef(step, "scene", scene.id, result.row.title ?? scene.title);
       const readBack = await verifySceneWriteReadBack({
         projectId: run.projectId,
         sceneId: scene.id,

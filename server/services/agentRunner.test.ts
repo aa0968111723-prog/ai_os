@@ -11,6 +11,9 @@ describe("agentRunner PR-4 revision-safe edit steps", () => {
     expect(source).toContain("baseRevision");
     expect(source).toContain("editAudit");
     expect(source).toContain("formatRevisionConflictMessage");
+    const update = source.slice(source.indexOf('if (step.kind === "update_scene")'), source.indexOf('if (step.kind === "record_to_database")'));
+    expect(update).toContain("applyWithRevision");
+    expect(update).not.toContain("db.update(schema.scenes).set(patch)");
   });
 
   it("create_scene / update_scene read the scene row back before marking done", () => {
