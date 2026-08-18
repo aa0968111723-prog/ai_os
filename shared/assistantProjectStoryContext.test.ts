@@ -4,6 +4,8 @@ import {
   buildAssistantProjectStatusContext,
   formatPersistedStoryForAssistant,
   formatTeamInventoryStoryFlag,
+  isAssistantStoryReadIntent,
+  lockAssistantStoryAnswer,
   slicePersistedStoryContent,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
@@ -18,6 +20,10 @@ describe("assistant persisted story context", () => {
     expect(block).toContain("我是大二化工系的小華");
     expect(block).toContain("校門口");
     expect(block).toContain("已儲存");
+    expect(block).toContain("僅本專案 stories.content");
+    expect(block).toContain("宇宙呀");
+    expect(block).not.toContain("從疲憊中找到力量");
+    expect(block).not.toContain("躺在床上");
 
     const context = buildAssistantProjectStatusContext({
       title: "overnight-test-xiaohua-20260818",
@@ -51,6 +57,20 @@ describe("assistant persisted story context", () => {
     expect(block).toContain("尚未儲存稿");
     expect(block).not.toContain("請貼上");
     expect(slicePersistedStoryContent("   ")).toBeNull();
+  });
+
+  it("story-read intent matches the live 05:15 ask and locks 她 / no 已完成盤點", () => {
+    const live = "請讀已存故事，兩句摘要小華在講什麼並列出角色名";
+    expect(isAssistantStoryReadIntent(live)).toBe(true);
+    expect(isAssistantStoryReadIntent("現在有幾鏡？")).toBe(false);
+    const locked = lockAssistantStoryAnswer({
+      answer: "已完成盤點。小華在講述他的故事，提到他如何從疲憊中找到力量。角色名有小華和禪定龜龜。",
+      storyContent: XIAOHUA_SEVEN_ACT_SCRIPT,
+      characterNames: ["小華", "禪定龜龜"],
+    });
+    expect(locked).not.toContain("已完成盤點");
+    expect(locked).toContain("她的故事");
+    expect(locked).not.toMatch(/講述他的故事/);
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {

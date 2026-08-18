@@ -66,6 +66,24 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.title).toContain("尚未核對");
   });
 
+  it("story-read ask is not a write and chip is never 已完成盤點", () => {
+    expect(userAskedForWrite("請讀已存故事，兩句摘要小華在講什麼並列出角色名")).toBe(false);
+    const settled = settleAssistantAskCompletion({
+      answer: "小華在校門口自我介紹，夕陽下問宇宙呀。角色有小華和禪定龜龜。",
+      actions: [],
+      userMessage: "請讀已存故事，兩句摘要小華在講什麼並列出角色名",
+    });
+    expect(settled.emitCompleted).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 2,
+    });
+    expect(chip.title).toBe("已讀取 2 個來源");
+    expect(chip.title).not.toMatch(/已完成盤點/);
+  });
+
   it("read-only inventory chip is 已讀取 N 個來源, never 已完成盤點", () => {
     const settled = settleAssistantAskCompletion({
       answer: "目前有 6 個分鏡。",

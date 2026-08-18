@@ -3,7 +3,31 @@
  * Page context stays pointer-only; this block is the server-read truth.
  */
 
+import { isXiaohuaName, rewriteXiaohuaMaleCopy } from "./characterIdentityLock";
+
 export const ASSISTANT_STORY_CONTEXT_BUDGET = 4_000;
+
+/** 「請讀已存故事／摘要小華在講什麼」— do not retrieve another project's 小華稿. */
+export function isAssistantStoryReadIntent(message: string): boolean {
+  const text = (message ?? "").trim();
+  if (!text) return false;
+  return /(?:讀|看|摘要|總結|概述|列出).{0,24}(?:已存|目前|這個|專案)?(?:故事|腳本)|(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)|小華在講|並列出角色/u.test(text);
+}
+
+/** Answer lock: this project's 小華 is 她; never leave 已完成盤點 on a story-read. */
+export function lockAssistantStoryAnswer(input: {
+  answer: string;
+  storyContent?: string | null;
+  characterNames?: readonly string[];
+}): string {
+  let answer = (input.answer ?? "").replace(/已完成盤點/g, "已讀取本專案故事");
+  const hasXiaohua =
+    /小華/.test(input.storyContent ?? "")
+    || /小華/.test(answer)
+    || (input.characterNames ?? []).some((name) => isXiaohuaName(name));
+  if (hasXiaohua) answer = rewriteXiaohuaMaleCopy(answer, true);
+  return answer;
+}
 
 /** Same 4k slice MCP / studio / planner use so truncation does not fork. */
 export function slicePersistedStoryContent(content?: string | null): string | null {
@@ -30,7 +54,7 @@ export function formatPersistedStoryForAssistant(input: {
   const parsed = input.lastParsedAt
     ? `（已解析過 ${typeof input.lastParsedAt === "string" ? input.lastParsedAt : input.lastParsedAt.toISOString()}）`
     : "（已儲存、尚未解析成分鏡）";
-  return `故事全文${parsed}：\n${sliced}`;
+  return `故事全文${parsed}（僅本專案 stories.content；禁止引用其他專案的小華故事）：\n${sliced}`;
 }
 
 export function buildAssistantProjectStatusContext(input: {
