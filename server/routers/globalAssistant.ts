@@ -24,6 +24,15 @@ import {
   type TeamAskContext,
 } from "./teamAssistant";
 import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
+import { formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStoryContext";
+import {
+  addCharacterConfirmLabel,
+  PENDING_CHARACTER_APPEARANCE,
+  proposeAddCharacterActions,
+} from "../../shared/assistantCharacterPropose";
+import { isXiaohuaName, XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { nameKey } from "../../shared/story";
+import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import {
   ASSISTANT_ASK_TIMEOUT_MESSAGE,
   assistantAskTimedOut,
@@ -211,7 +220,7 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("add_character"),
-    projectRef: z.string().max(8),
+    projectRef: z.string().max(8).optional(),
     name: z.string().min(1).max(40),
     appearance: z.string().min(1).max(500).optional(),
     notes: z.string().max(500).optional(),
@@ -251,6 +260,45 @@ export function siteActionProposalsForPlan(
   if (!plan.capabilityId) return [...proposals];
   if (!WRITE_SITE_ACTION_TYPES.has(plan.capabilityId)) return [...proposals];
   return proposals.filter((proposal) => proposal.type === plan.capabilityId);
+}
+
+/**
+ * Deterministic 角色定裝卡 — never 素材清單.
+ * Works on unparsed projects (no story / no scenes). Same-name still emits a card.
+ */
+export function injectAddCharacterSiteProposals(
+  message: string,
+  projectRef: string | undefined,
+  existing: readonly SiteActionProposal[],
+): SiteActionProposal[] {
+  const filled = existing.map((action) => {
+    if (action.type !== "add_character") return action;
+    return { ...action, projectRef: action.projectRef?.trim() || projectRef };
+  });
+  const extra = proposeAddCharacterActions(message).flatMap((row): SiteActionProposal[] => {
+    const ref = (projectRef ?? "").trim();
+    if (!ref) return [];
+    return [{
+      type: "add_character",
+      projectRef: ref,
+      name: row.name,
+      appearance: row.appearance,
+      ...(row.notes ? { notes: row.notes } : {}),
+    }];
+  });
+  const extraKeys = new Set(
+    extra.flatMap((action) => action.type === "add_character" ? [nameKey(action.name)] : []),
+  );
+  const merged = extra.length
+    ? [
+        ...extra,
+        ...filled.filter((action) => action.type !== "add_character" || !extraKeys.has(nameKey(action.name))),
+      ]
+    : filled;
+  if (merged.some((action) => action.type === "add_character")) {
+    return merged.filter((action) => action.type !== "add_database_row");
+  }
+  return merged;
 }
 
 /** 全站回覆＝組回覆＋站級動作提議 */
@@ -364,6 +412,8 @@ export interface SiteActionRefs {
   kinds: string[];
   /** dbN → 資料庫（與 <組現況> 的代號同一套） */
   databases: Map<string, SiteDbRef>;
+  /** 本頁專案代號：add_character 省略 projectRef 時預設寫這裡 */
+  defaultProjectRef?: string;
 }
 
 /**
@@ -513,6 +563,27 @@ export function resolveSiteActions(
         kind: p.kind,
         watchLabel: p.label?.trim() || undefined,
         label: `持續監看「${project.title}」：${p.label?.trim() || p.kind}`,
+      });
+      continue;
+    }
+
+    if (p.type === "add_character") {
+      const project = refs.projects.get((p.projectRef ?? refs.defaultProjectRef ?? "").trim());
+      if (!project) continue;
+      const name = p.name.trim();
+      if (!name) continue;
+      const appearance = isXiaohuaName(name)
+        ? XIAOHUA_LOCKED_APPEARANCE
+        : (p.appearance?.trim() || PENDING_CHARACTER_APPEARANCE);
+      out.push({
+        type: "add_character",
+        groupId: refs.groupId,
+        projectId: project.id,
+        projectTitle: project.title,
+        name,
+        appearance,
+        notes: p.notes?.trim() || undefined,
+        label: addCharacterConfirmLabel(name, appearance),
       });
       continue;
     }
@@ -872,6 +943,7 @@ export async function runGlobalAsk(
       // 提議面收得比執行面緊：只有 agentAccess="write" 的庫才進提議白名單（執行端仍會再全套驗一次）
       writable: agentAccessById.get(t.id) === "write",
     }])),
+    defaultProjectRef: currentProjectRef,
   };
   // ── 現況讀完：把「真的讀到什麼」報出去（計數全部來自剛剛那幾條查詢的回傳值） ──
   const overviewSummary: AgentResultSummary = [
@@ -1591,7 +1663,14 @@ export async function runGlobalAsk(
     }
     const proposedSiteActions = resolveSiteActions(
       siteRefs,
-      siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
+      siteActionProposalsForPlan(
+        executionPlan,
+        injectAddCharacterSiteProposals(
+          input.message,
+          currentProjectRef,
+          [...deterministicUrlProposal, ...mockProposals],
+        ),
+      ),
     );
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
@@ -1656,10 +1735,11 @@ export async function runGlobalAsk(
 - {"type":"create_task","projectRef":"p2","title":"任務標題","assigneeRef":"m1","dueAt":"可省略","priority":"low|normal|high|urgent 可省略"}——建立人員任務（projectRef 必填）。
 - {"type":"send_dm","memberRef":"m2","body":"訊息內容"}——私訊同組夥伴（不能私訊自己）。
 - {"type":"import_url","projectRef":"p2","url":"https://..."}——把使用者貼出的公開檔案連結交給既有 Universal Intake；projectRef 必須是明確目前專案或使用者點名且唯一對應的專案。沒有明確專案時不要猜，應先詢問使用者。
+- {"type":"add_character","projectRef":"p2","name":"小華","appearance":"可省略"}——寫入該專案「角色定裝卡」（characters），不是素材清單／資料庫。未解析、沒有分鏡也可以。只給名字時 appearance 用「待補外觀描述」。小華外觀鎖定「大二化工、粉橘短髮女孩、白帽T」。禁止用 add_database_row 假裝建角色。
 ${(() => {
     const writable = [...siteRefs.databases.entries()].filter(([, d]) => d.writable);
     return writable.length
-      ? `- {"type":"add_database_row","dbRef":"db1","values":{"欄位標籤":"值"}}——在資料庫新增一列。只有這些庫可寫：${writable.map(([ref, d]) => `${ref}(${d.name})`).join("、")}；values 的鍵用該庫的欄位標籤，對不上的欄會被丟棄。`
+      ? `- {"type":"add_database_row","dbRef":"db1","values":{"欄位標籤":"值"}}——在資料庫新增一列。只有這些庫可寫：${writable.map(([ref, d]) => `${ref}(${d.name})`).join("、")}；values 的鍵用該庫的欄位標籤，對不上的欄會被丟棄。角色定裝卡請用 add_character，不要寫進素材清單。`
       : `（目前沒有 AI 可寫的資料庫，不要提議 add_database_row。）`;
   })()}
 一次最多 ${SITE_ACTION_LIMIT} 筆。只在使用者明確想動手時才提議；純詢問時 siteActions 給 [] 或省略。代號（pN／mN／dbN）只能抄清單，抄不到就不要提議。`;
@@ -1676,11 +1756,17 @@ ${(() => {
     ? `
 ${formatAssistantPageContext(input.pageContext)}`
     : "";
+  const currentProjectTitle = currentProjectRef
+    ? projByRef.get(currentProjectRef)?.title
+    : undefined;
+  const currentStoryPointer = currentProjectRef
+    ? `本頁「${currentProjectTitle ?? "目前專案"}」${formatTeamInventoryStoryFlag(currentStoryBlock)}。完整正文請用 project_detail 讀取；組現況不貼故事全文，也不可把本頁故事套到其他專案。`
+    : "";
   const currentProjectBlock = [
     currentProjectRef
       ? `使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
       : "",
-    currentStoryBlock,
+    currentStoryPointer,
   ].filter(Boolean).map((line) => `\n${line}`).join("");
   const selectedIds = new Set(input.pageContext?.selectedEntityIds ?? []);
   const selectedSceneLabels = currentScenePointers
@@ -1877,10 +1963,14 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     }
 
     const reply = outcome.reply;
-    const proposedSiteActions = resolveSiteActions(siteRefs, siteActionProposalsForPlan(executionPlan, [
-      ...deterministicUrlProposal,
-      ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
-    ]));
+    const proposedSiteActions = resolveSiteActions(siteRefs, siteActionProposalsForPlan(executionPlan, injectAddCharacterSiteProposals(
+      input.message,
+      currentProjectRef,
+      [
+        ...deterministicUrlProposal,
+        ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
+      ],
+    )));
     const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
@@ -2135,6 +2225,14 @@ const siteActionInputSchema = z.discriminatedUnion("type", [
     data: z.record(z.string().min(1).max(80), z.string().min(1).max(2000)),
   }),
   z.object({
+    type: z.literal("add_character"),
+    groupId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    name: z.string().trim().min(1).max(40),
+    appearance: z.string().trim().min(1).max(500),
+    notes: z.string().trim().max(500).optional(),
+  }),
+  z.object({
     type: z.literal("import_url"),
     groupId: z.string().uuid(),
     projectId: z.string().uuid(),
@@ -2153,6 +2251,7 @@ export type SiteActionResult =
   | { type: "create_task"; taskId: string; title: string }
   | { type: "send_dm"; messageId: string }
   | { type: "add_database_row"; rowId: string; tableName: string }
+  | { type: "add_character"; characterId: string; projectId: string; name: string; reused: boolean }
   | ImportActionResult;
 
 export type VerifiedSiteActionResult = SiteActionResult & {
@@ -2196,6 +2295,15 @@ function resolvedSiteActionInput(action: ResolvedSiteAction): SiteActionInput {
       return { type: action.type, peerId: action.peerId, body: action.body };
     case "add_database_row":
       return { type: action.type, tableId: action.tableId, data: action.data };
+    case "add_character":
+      return {
+        type: action.type,
+        groupId: action.groupId,
+        projectId: action.projectId,
+        name: action.name,
+        appearance: action.appearance,
+        notes: action.notes,
+      };
     case "import_url":
       return { type: action.type, groupId: action.groupId, projectId: action.projectId, url: action.url };
   }
@@ -2445,6 +2553,24 @@ export async function runSiteActionCore(auth: AuthState, input: SiteActionInput)
         return Object.entries(input.data).every(([key, value]) => String(actual[key] ?? "") === String(value));
       });
       return { type: "add_database_row", rowId: row.id, tableName: hit.table.name, verification };
+    }
+    case "add_character": {
+      const row = await upsertProjectCharacterCore({
+        auth,
+        groupId: input.groupId,
+        projectId: input.projectId,
+        name: input.name,
+        appearance: input.appearance,
+        notes: input.notes,
+      });
+      return {
+        type: "add_character",
+        characterId: row.characterId,
+        projectId: input.projectId,
+        name: row.name,
+        reused: row.reused,
+        verification: row.verification,
+      };
     }
   }
 }

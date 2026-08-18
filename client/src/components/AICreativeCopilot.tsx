@@ -200,6 +200,8 @@ export function toSiteActionInput(a: SiteAction) {
       return { type: a.type, peerId: a.peerId, body: a.body } as const;
     case "add_database_row":
       return { type: a.type, tableId: a.tableId, data: a.data } as const;
+    case "add_character":
+      return { type: a.type, groupId: a.groupId, projectId: a.projectId, name: a.name, appearance: a.appearance, notes: a.notes } as const;
     case "import_url":
       return { type: a.type, groupId: a.groupId, projectId: a.projectId, url: a.url } as const;
   }
@@ -214,6 +216,7 @@ export function siteActionDoneLink(a: SiteAction, result: { type: string; projec
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
   if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
+  if (a.type === "add_character") return { href: `/p/${a.projectId}`, label: "查看角色" };
   if (a.type === "import_url" && result.projectId) return { href: `/p/${result.projectId}#sec-assets`, label: "查看資料" };
   return null;
 }
@@ -280,6 +283,7 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
     action.type === "send_dm" ? action.body
     : action.type === "add_note" ? action.content
     : action.type === "add_database_row" ? action.preview
+    : action.type === "add_character" ? action.appearance
     : null;
   return (
     <div className="ai-copilot-action-card" data-fb="站級動作卡">

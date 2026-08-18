@@ -9,10 +9,13 @@ import {
   readBackVerification,
   referencedShotOrdinal,
   resolveMentionedProjectRef,
+  injectAddCharacterSiteProposals,
   resolveSiteActions,
   siteActionProposalsForPlan,
   type SiteActionRefs,
 } from "./globalAssistant";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { PENDING_CHARACTER_APPEARANCE } from "../../shared/assistantCharacterPropose";
 
 describe("DIRECT -> VERIFY -> COMPLETE", () => {
   it("only reports verified after a successful matching read-back", async () => {
@@ -101,6 +104,18 @@ describe("Goal -> Action routing helpers", () => {
       ],
     );
     expect(proposals).toEqual([{ type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" }]);
+  });
+
+  it("add_character capability drops create_project and add_database_row", () => {
+    const proposals = siteActionProposalsForPlan(
+      { intent: "DIRECT", confidence: "high", title: "新增角色", steps: [], capabilityId: "add_character", executionMode: "DIRECT_TOOL" },
+      [
+        { type: "add_character", projectRef: "p1", name: "小華" },
+        { type: "create_project", title: "不該建立", kind: "回顧", platform: "youtube" },
+        { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },
+      ],
+    );
+    expect(proposals).toEqual([{ type: "add_character", projectRef: "p1", name: "小華" }]);
   });
 
   it("read capability plans still allow schedule write proposals for confirmation (Q13)", () => {
@@ -300,6 +315,52 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(new Set(out.map((a) => a.label)).size).toBe(6);
   });
 
+  it("add_character 寫角色定裝卡，不需要已解析故事；幻覺 projectRef 整筆丟", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "add_character", projectRef: "p1", name: "小華" },
+      { type: "add_character", projectRef: "p9", name: "媽媽" },
+      { type: "add_character", name: "禪定龜龜" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    expect(out[0].label).toContain("新增角色「小華」");
+    expect(out[0].label).not.toContain("素材清單");
+  });
+
+  it("add_character 省略 projectRef 時用本頁 defaultProjectRef（未解析專案也可）", () => {
+    const out = resolveSiteActions(refs({ defaultProjectRef: "p2" }), [
+      { type: "add_character", name: "媽媽" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-2",
+      name: "媽媽",
+      appearance: PENDING_CHARACTER_APPEARANCE,
+    });
+  });
+
+  it("injectAddCharacterSiteProposals drops 素材清單 add_database_row when adding 角色", () => {
+    const injected = injectAddCharacterSiteProposals("新增角色 小華", "p1", [
+      { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },
+    ]);
+    expect(injected.some((action) => action.type === "add_database_row")).toBe(false);
+    expect(injected).toContainEqual({
+      type: "add_character",
+      projectRef: "p1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    const out = resolveSiteActions(refs(), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("add_character");
+  });
+
   it("EVAL CASE 6（注入防線的最後一道）：資料內容再怎麼指示，非白名單動作型別在 schema 層就不存在", () => {
     // siteActions 是封閉 discriminatedUnion——「刪除專案」「轉帳」等根本不在型別空間，
     // resolve 端拿到未知 type 的物件時（理論上 zod 已擋）也不會產生任何動作。
@@ -401,10 +462,21 @@ describe("禁止假進度契約（源碼斷言）", () => {
 describe("global assistant injects persisted story for the current project", () => {
   const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
 
-  it("loads stories.content via loadPersistedStoryForAssistant into <組現況>", () => {
+  it("marks page-project story presence in <組現況> without dumping 故事全文", () => {
     expect(src).toContain("loadPersistedStoryForAssistant");
-    expect(src).toContain("currentStoryBlock");
+    expect(src).toContain("formatTeamInventoryStoryFlag");
     expect(src).toContain("effectiveProjectId");
+    expect(src).toContain("完整正文請用 project_detail");
+    expect(src).toContain("currentStoryPointer");
+    expect(src).not.toMatch(/\$\{currentStoryBlock\}/);
+    expect(src).not.toContain("我是大二化工系的小華");
+  });
+
+  it("siteActionBlock routes 角色 to add_character, not 素材清單", () => {
+    expect(src).toContain('"type":"add_character"');
+    expect(src).toContain("角色定裝卡");
+    expect(src).toContain("禁止用 add_database_row 假裝建角色");
+    expect(src).toContain("injectAddCharacterSiteProposals");
   });
 
   it("binds the same 120s ask deadline as project assistant", () => {
