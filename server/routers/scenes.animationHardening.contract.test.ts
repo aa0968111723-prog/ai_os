@@ -19,6 +19,8 @@ const creative = readFileSync(join(process.cwd(), "server/routers/creativeContex
 const dataHub = readFileSync(join(process.cwd(), "server/routers/dataHub.ts"), "utf8");
 const trpc = readFileSync(join(process.cwd(), "server/trpc.ts"), "utf8");
 const bindings = readFileSync(join(process.cwd(), "server/services/projectDataBindings.ts"), "utf8");
+const siteAssistant = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
+const repairExecute = readFileSync(join(process.cwd(), "server/services/animationRepairExecute.ts"), "utf8");
 
 describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
@@ -89,6 +91,20 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("expectedRev: project.rev");
     expect(assistant).toContain("bindAssistantAskDeadline");
     expect(assistant).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
+  });
+
+  it("site assistant animation writes have real handlers (not capability-only)", () => {
+    expect(siteAssistant).toContain('capabilityId === "animation_adopt_candidate"');
+    expect(siteAssistant).toContain('capabilityId === "animation_keep_current"');
+    expect(siteAssistant).toContain('capabilityId === "animation_execute_repair"');
+    expect(siteAssistant).toContain("adoptGenerationVerified");
+    expect(siteAssistant).toContain("reviewShotVerified");
+    expect(siteAssistant).toContain("executeAnimationRepairVerified");
+    expect(siteAssistant).toContain("pickAnimationCompareItem");
+    expect(siteAssistant).toContain("我不會把「執行修復」說成已完成");
+    expect(siteAssistant).toContain("message: input.message");
+    expect(repairExecute).toContain("applyWithRevisionTrpc");
+    expect(repairExecute).not.toContain("db.update(schema.scenes)");
   });
 
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {

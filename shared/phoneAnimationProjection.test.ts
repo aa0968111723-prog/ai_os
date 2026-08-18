@@ -15,6 +15,8 @@ import {
   projectPhoneCompareQueue,
   projectPhoneRepairProposal,
   resolvePhoneRepairTargets,
+  animationRepairJobsFromProposal,
+  pickAnimationCompareItem,
   type PhoneAnimationBoardInput,
   type PhoneAnimationBoardShot,
   type PhoneAnimationFinding,
@@ -338,6 +340,47 @@ describe("phone cards", () => {
     expect(card.primaryAction?.label).toBe("查看問題");
     expect(card.lines.join("")).not.toMatch(/fingerprint|uuid/i);
     expect(phoneShotLabel({ orderIndex: 4, title: "" })).toBe("第 05 鏡");
+  });
+});
+
+describe("animation assistant compare / repair jobs", () => {
+  it("does not silently pick the first candidate when several shots wait", () => {
+    const items = [
+      { shotId: "s4", shotLabel: "第 04 鏡", generationId: "g4", candidate: { kind: "image", url: "/4.png" }, goals: [], notChecked: false },
+      { shotId: "s5", shotLabel: "第 05 鏡", generationId: "g5", candidate: { kind: "image", url: "/5.png" }, goals: [], notChecked: false },
+    ];
+    expect(pickAnimationCompareItem([])).toEqual({ status: "none" });
+    expect(pickAnimationCompareItem(items)).toEqual({ status: "ambiguous", items });
+    expect(pickAnimationCompareItem(items, "s5")).toEqual({ status: "picked", item: items[1] });
+    expect(pickAnimationCompareItem([items[0]!])).toEqual({ status: "picked", item: items[0] });
+  });
+
+  it("repair jobs skip evaluation and keep the disclosed model ids", () => {
+    const jobs = animationRepairJobsFromProposal({
+      affectedShotIds: ["s4"],
+      findingKeys: ["s4::identity_drift"],
+      dimensions: ["identity"],
+      shots: [{
+        shotId: "s4",
+        shotLabel: "第 04 鏡",
+        stageLabel: "關鍵影格與影片",
+        stages: ["keyframe", "evaluation", "video"],
+        reason: "人物外觀偏移",
+      }],
+      untouchedCount: 0,
+      untouchedLabel: "",
+      projectedPaidOperations: 2,
+      estimatedPoints: 7,
+      requiresApproval: false,
+      capabilityDowngrades: [],
+      notes: [],
+      keyframeModelId: "fal-ai/flux/dev",
+      videoModelId: "fal-ai/wan/v2.2-a14b/image-to-video",
+    });
+    expect(jobs).toEqual([
+      { shotId: "s4", shotLabel: "第 04 鏡", stage: "keyframe_generation", modelId: "fal-ai/flux/dev" },
+      { shotId: "s4", shotLabel: "第 04 鏡", stage: "video_generation", modelId: "fal-ai/wan/v2.2-a14b/image-to-video" },
+    ]);
   });
 });
 
