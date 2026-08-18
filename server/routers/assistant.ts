@@ -1703,7 +1703,11 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         }
         const reply = outcome.reply;
         const actions = resolve(reply.rawActions);
-        const settled = settleAssistantAskCompletion({ answer: reply.answer, actions });
+        const settled = settleAssistantAskCompletion({
+          answer: reply.answer,
+          actions,
+          userMessage: input.message,
+        });
         const summary =
           reply.source === "reply" ? "回答與建議動作已整理完成"
           : reply.source === "coerced" ? "已修正模型格式並完成回答"
@@ -1712,7 +1716,8 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
         // 完成事件必須在快照之前發（快照＝回傳當下的事件流）。
         // Project assistant proposes write actions but does not execute them here.
-        // With pending confirmation, emit waiting — never "Aios 已完成" / 「已完成盤點」 for unverified writes or "I cannot see the story".
+        // With pending confirmation or unverified write intent, emit waiting —
+        // never a completed-inventory chip for reads that did not write.
         const okAgentSources = stream.snapshotSources().filter((s) => s.status === "ok");
         const chip = assistantAskCompletionChip({
           settled,

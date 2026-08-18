@@ -81,6 +81,7 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("shotIdFromPageContext");
     expect(assistant).toContain("shotId: shotIdFromPageContext(input.pageContext)");
     expect(assistant).toContain("assistantAskCompletionChip");
+    expect(assistant).toContain("userMessage: input.message");
     expect(assistant).toContain("allowPaidFallback");
     expect(assistant).toContain("if (!a.sceneNo) continue");
     expect(assistant).toContain("請指定要生成的分鏡");

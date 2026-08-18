@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   assistantAskCompletionChip,
@@ -6,6 +8,7 @@ import {
   formatAssistantWriteResult,
   rewriteCompletedTenseToProposal,
   settleAssistantAskCompletion,
+  userAskedForWrite,
   writeVerificationOk,
 } from "./assistantHonestCompletion";
 
@@ -61,6 +64,52 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.type).toBe("waiting.user_input");
     expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
     expect(chip.title).toContain("尚未核對");
+  });
+
+  it("read-only inventory chip is 已讀取 N 個來源, never 已完成盤點", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "目前有 7 個分鏡。",
+      actions: [],
+      userMessage: "現在有幾鏡？",
+    });
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 3,
+      okSourceItems: 12,
+    });
+    expect(chip.type).toBe("agent.completed");
+    expect(chip.title).toBe("已讀取 3 個來源");
+    expect(chip.title).not.toMatch(/已完成盤點/);
+  });
+
+  it("write intent with no verified write waits — 尚未寫入，請確認", () => {
+    expect(userAskedForWrite("幫我把你的故事儲存起來")).toBe(true);
+    expect(userAskedForWrite("修改第 3 鏡頭的對白")).toBe(true);
+    expect(userAskedForWrite("現在有幾鏡？")).toBe(false);
+    const settled = settleAssistantAskCompletion({
+      answer: "好，故事已經在專案裡。",
+      actions: [],
+      userMessage: "請儲存故事",
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.unverifiedWriteIntent).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 8,
+    });
+    expect(chip.type).toBe("waiting.user_input");
+    expect(chip.title).toBe("尚未寫入，請確認");
+    expect(chip.title).not.toMatch(/已完成盤點/);
+  });
+
+  it("chip source never emits 已完成盤點", () => {
+    const src = readFileSync(join(process.cwd(), "shared/assistantHonestCompletion.ts"), "utf8");
+    expect(src).not.toContain("已完成盤點");
+    const globalSrc = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
+    expect(globalSrc).not.toContain("已完成盤點");
   });
 });
 

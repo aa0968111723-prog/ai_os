@@ -1676,7 +1676,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
     const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
     emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
-      completedTitle: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+      completedTitle: okSources.length ? `已讀取 ${okSources.length} 個來源` : "已回答（沒有讀取站內資料）",
       completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
       resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
       resultSummary: [

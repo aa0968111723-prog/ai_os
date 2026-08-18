@@ -14,12 +14,20 @@ const COMPLETED_WRITE_RE =
 const CANNOT_VERIFY_RE =
   /無法(?:看到|讀到|取得|檢查|確認)|看不到.{0,16}(?:故事|腳本|你的故事)|看不見.{0,16}(?:故事|腳本)|沒有看到.{0,16}(?:故事|腳本)|請(?:你)?(?:先)?貼(?:上|過來)|我沒有(?:看到|讀到|辦法看到)/;
 
+/** User asked to persist story / edit a shot — read sources are not a write. */
+const WRITE_INTENT_RE =
+  /(?:儲存|寫入|存檔|更新|修改|編輯|改寫|套用).{0,16}(?:故事|腳本|分鏡|鏡頭|你的故事)|(?:故事|腳本|分鏡|鏡頭|你的故事).{0,12}(?:儲存|寫入|存檔|更新|修改|編輯)/;
+
 export function claimsCompletedWrite(answer: string): boolean {
   return COMPLETED_WRITE_RE.test(answer);
 }
 
 export function claimsInabilityToCheck(answer: string): boolean {
   return CANNOT_VERIFY_RE.test(answer);
+}
+
+export function userAskedForWrite(message: string): boolean {
+  return WRITE_INTENT_RE.test(message);
 }
 
 export function rewriteCompletedTenseToProposal(answer: string): string {
@@ -51,8 +59,10 @@ export interface AssistantAskSettlement {
   /** Only true when the model did not claim an unexecuted / unverified write. */
   emitCompleted: boolean;
   claimedUnexecutedWrite: boolean;
-  /** True when the body says it cannot see/check project data — never「已完成盤點」. */
+  /** True when the body says it cannot see/check project data — never a completed inventory chip. */
   cannotVerify: boolean;
+  /** User asked to write, but this turn has no verified write. */
+  unverifiedWriteIntent: boolean;
 }
 
 /**
@@ -63,16 +73,20 @@ export interface AssistantAskSettlement {
 export function settleAssistantAskCompletion(input: {
   answer: string;
   actions: readonly unknown[];
+  userMessage?: string;
+  hasVerifiedWrite?: boolean;
 }): AssistantAskSettlement {
   const pendingActions = input.actions.length > 0;
   const claimed = claimsCompletedWrite(input.answer);
   const cannotVerify = claimsInabilityToCheck(input.answer);
+  const unverifiedWriteIntent = userAskedForWrite(input.userMessage ?? "") && !input.hasVerifiedWrite;
   if (pendingActions) {
     return {
       answer: claimed ? rewriteCompletedTenseToProposal(input.answer) : input.answer,
       emitCompleted: false,
       claimedUnexecutedWrite: claimed,
       cannotVerify,
+      unverifiedWriteIntent,
     };
   }
   if (claimed) {
@@ -81,6 +95,7 @@ export function settleAssistantAskCompletion(input: {
       emitCompleted: false,
       claimedUnexecutedWrite: true,
       cannotVerify,
+      unverifiedWriteIntent,
     };
   }
   if (cannotVerify) {
@@ -89,9 +104,25 @@ export function settleAssistantAskCompletion(input: {
       emitCompleted: false,
       claimedUnexecutedWrite: false,
       cannotVerify: true,
+      unverifiedWriteIntent,
     };
   }
-  return { answer: input.answer, emitCompleted: true, claimedUnexecutedWrite: false, cannotVerify: false };
+  if (unverifiedWriteIntent) {
+    return {
+      answer: input.answer,
+      emitCompleted: false,
+      claimedUnexecutedWrite: false,
+      cannotVerify: false,
+      unverifiedWriteIntent: true,
+    };
+  }
+  return {
+    answer: input.answer,
+    emitCompleted: true,
+    claimedUnexecutedWrite: false,
+    cannotVerify: false,
+    unverifiedWriteIntent: false,
+  };
 }
 
 export function assistantAskCompletionChip(input: {
@@ -114,6 +145,14 @@ export function assistantAskCompletionChip(input: {
       resultCount: input.actionCount,
     };
   }
+  if (input.settled.unverifiedWriteIntent) {
+    return {
+      type: "waiting.user_input",
+      title: "尚未寫入，請確認",
+      description: "這次沒有可驗證的寫入，專案資料沒有變更",
+      status: "waiting",
+    };
+  }
   if (input.settled.cannotVerify || !input.settled.emitCompleted) {
     return {
       type: "waiting.user_input",
@@ -126,7 +165,7 @@ export function assistantAskCompletionChip(input: {
   }
   return {
     type: "agent.completed",
-    title: input.okSourceCount ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+    title: input.okSourceCount ? `已讀取 ${input.okSourceCount} 個來源` : "已回答（沒有讀取站內資料）",
     description: input.okSourceCount ? `依據 ${input.okSourceCount} 個來源` : undefined,
     status: "ok",
     resultCount: input.okSourceItems,
