@@ -104,15 +104,31 @@ export function ShotInspector({
       </header>
 
       <div className="studio-inspector__tabs" role="tablist" aria-label="Shot 屬性分頁">
-        {TABS.map((t) => (
+        {TABS.map((t, i) => (
           <button
             key={t.id}
             type="button"
+            id={`studio-inspector-tab-${t.id}`}
             role="tab"
             aria-selected={tab === t.id}
+            aria-controls="studio-inspector-tabpanel"
+            tabIndex={tab === t.id ? 0 : -1}
             className={`studio-inspector__tab${tab === t.id ? " is-active" : ""}`}
             title={t.label}
             onClick={() => onTabChange(t.id)}
+            onKeyDown={(e) => {
+              let next = i;
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (i + 1) % TABS.length;
+              else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (i - 1 + TABS.length) % TABS.length;
+              else if (e.key === "Home") next = 0;
+              else if (e.key === "End") next = TABS.length - 1;
+              else return;
+              e.preventDefault();
+              onTabChange(TABS[next].id);
+              requestAnimationFrame(() => {
+                document.getElementById(`studio-inspector-tab-${TABS[next].id}`)?.focus();
+              });
+            }}
           >
             <Icon name={t.icon} size={14} />
             <span>{t.label}</span>
@@ -120,7 +136,12 @@ export function ShotInspector({
         ))}
       </div>
 
-      <div className="studio-inspector__body" role="tabpanel">
+      <div
+        className="studio-inspector__body"
+        role="tabpanel"
+        id="studio-inspector-tabpanel"
+        aria-labelledby={`studio-inspector-tab-${tab}`}
+      >
         {tab === "ai" ? (
           <AiCopilotActions {...ai} />
         ) : !shot ? (

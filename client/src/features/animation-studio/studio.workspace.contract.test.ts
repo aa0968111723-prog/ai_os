@@ -127,6 +127,16 @@ describe("面板降級（1280 也要能用）", () => {
     expect(rule).toContain("border-bottom: 2px solid transparent");
   });
 
+  it("Inspector 分頁是真正的 tablist：方向鍵可切、有 controls／labelledby", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain('role="tablist"');
+    expect(inspector).toContain('aria-controls="studio-inspector-tabpanel"');
+    expect(inspector).toContain("ArrowRight");
+    expect(inspector).toContain("ArrowLeft");
+    expect(inspector).toContain('id="studio-inspector-tabpanel"');
+    expect(inspector).toContain("aria-labelledby={`studio-inspector-tab-${tab}`}");
+  });
+
   it("Inspector 可收合，收合後只剩一條展開鈕", () => {
     expect(ruleFor(".studio-inspector.is-collapsed")).toContain("width: 40px");
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
