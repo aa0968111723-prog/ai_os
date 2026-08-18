@@ -126,6 +126,22 @@ export function collectAddCharacterProposals(
   return mergeAddCharacterProposals(fromModel, message, existingCards);
 }
 
+/** Confirm-card copy when the model refuses「沒有角色資料庫」on an unparsed project. */
+export const ADD_CHARACTER_CONFIRM_PROSE =
+  "我幫你準備了角色定裝卡，確認下方就寫入「角色」（characters）。未解析、沒有分鏡也可以。同名會沿用並更新外觀，不會寫進素材清單。";
+
+const CHARACTER_REFUSE_RE =
+  /沒有可直接寫入|角色資料庫|不會把.{0,20}寫進素材清單|請先提供或建立角色資料庫|無法直接建立角色|目前無法建立角色|我也不會把/;
+
+/** When a confirm card exists, never leave the 05:29 refuse prose as the answer. */
+export function lockAddCharacterAnswer(answer: string, hasCharacterCard: boolean): string {
+  if (!hasCharacterCard) return answer;
+  const text = (answer ?? "").trim();
+  if (!text || CHARACTER_REFUSE_RE.test(text)) return ADD_CHARACTER_CONFIRM_PROSE;
+  if (/確認下方|確認卡/.test(text)) return text;
+  return `${text}\n請用下方確認卡寫入角色定裝，不會寫進素材清單。`.slice(0, 4000);
+}
+
 export function addCharacterConfirmLabel(
   name: string,
   appearance: string,
@@ -152,14 +168,20 @@ export function extractCharacterNames(
   const matched = message.match(
     /(?:新增|建立|加|更新|改定裝|改外觀)\s*(?:角色|定裝)(?:卡)?[：:\s]*(.+)$/u,
   );
-  const rest = (matched?.[1] ?? "").replace(/[。．.！!？?]+$/u, "").trim();
+  const rest = (matched?.[1] ?? "")
+    .replace(/[。．.！!？?]+$/u, "")
+    .replace(/[，,]?\s*(?:寫入|不要|別|不是|而非).*$/u, "")
+    .trim();
   const seen = new Set<string>();
   const names: string[] = [];
   const push = (raw: string) => {
     const stripped = raw.replace(/[「」『』《》【】"'“”]/g, " ").trim();
-    const beforeLook = stripped.split(/[／/]/)[0]?.trim() ?? "";
+    // 「建立角色小華（粉橘短髮女孩／白帽T）」→ name is 小華, not 小華（粉橘短髮女孩
+    const beforeParen = stripped.split(/[（(]/)[0]?.trim() ?? "";
+    const beforeLook = beforeParen.split(/[／/]/)[0]?.trim() ?? "";
     const name = beforeLook.split(/[：:]/)[0]?.trim().split(/\s+/)[0]?.trim() ?? "";
     if (!name || name.length > CHAR_NAME_MAX || isAppearancePhrase(name)) return;
+    if (/寫入|不要|素材清單|資料庫/.test(name)) return;
     const key = nameKey(name);
     if (!key || seen.has(key)) return;
     seen.add(key);

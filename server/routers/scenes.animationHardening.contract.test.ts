@@ -90,7 +90,9 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("assistantAskCompletionChip");
     expect(assistant).toContain("userMessage: input.message");
     expect(assistant).toContain("allowPaidFallback");
-    expect(assistant).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(assistant).toContain("assertFreeOnlyCompletion");
+    expect(assistant).toContain("lockAddCharacterAnswer");
+    expect(assistant).not.toContain("settleUsagePoints");
     expect(assistant).toContain("dropMisroutedCharacterDatabaseActions");
     expect(assistant).toContain("禁止把角色／定裝／小華寫進「素材清單」");
     expect(assistant).toContain("if (!a.sceneNo) continue");

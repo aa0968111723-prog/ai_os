@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
-import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { reserveQuota, refund } from "../services/points";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import {
@@ -21,6 +21,7 @@ import {
   type ChatTurn,
   type ResolvedCommand,
   type ResolvedDispatch,
+  type ProjRow,
   type TeamAskContext,
 } from "./teamAssistant";
 import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
@@ -28,6 +29,7 @@ import { formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStory
 import {
   addCharacterConfirmLabel,
   dropMisroutedCharacterDatabaseActions,
+  lockAddCharacterAnswer,
   PENDING_CHARACTER_APPEARANCE,
   proposeAddCharacterActions,
 } from "../../shared/assistantCharacterPropose";
@@ -267,6 +269,21 @@ export function siteActionProposalsForPlan(
  * Deterministic 角色定裝卡 — never 素材清單.
  * Works on unparsed projects (no story / no scenes). Same-name still emits a card.
  */
+/**
+ * Scope「這個專案」must stay addressable even when inventory truncated it.
+ * Unparsed overnight projects still need a pN so add_character can resolve.
+ */
+export function pinProjectIntoRefMap<T extends { id: string }>(
+  projByRef: Map<string, T>,
+  project: T | undefined | null,
+): string | undefined {
+  if (!project) return undefined;
+  const existing = [...projByRef.entries()].find(([, row]) => row.id === project.id)?.[0];
+  if (existing) return existing;
+  projByRef.set("p0", project);
+  return "p0";
+}
+
 export function injectAddCharacterSiteProposals(
   message: string,
   projectRef: string | undefined,
@@ -809,6 +826,14 @@ export async function runGlobalAsk(
     throw error;
   }
   const { commandLevel, canDispatch, canSupervise, projByRef, dbByRef, commandRefs, degraded, context } = teamCtx;
+  if (input.projectId && ![...projByRef.values()].some((project) => project.id === input.projectId)) {
+    const [scoped] = await db
+      .select()
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.groupId, groupId)))
+      .limit(1);
+    if (scoped && scoped.status !== "archived") pinProjectIntoRefMap(projByRef, scoped as ProjRow);
+  }
   // ── Assistant Brain v2: UNDERSTAND → GROUND → RESOLVE ───────────────────
   const semantic = deriveDeterministicGoalFrame(input.message, input.activeGoal);
   let goalFrame = semantic.frame;
@@ -1695,7 +1720,14 @@ export async function runGlobalAsk(
       }
     }
     return withTrace({
-      answer: answerWithVerifiedActions(answer, direct.executed), dispatches: [], actions: [], siteActions, executedSiteActions: direct.executed,
+      answer: answerWithVerifiedActions(
+        lockAddCharacterAnswer(
+          answer,
+          siteActions.some((action) => action.type === "add_character")
+            || direct.executed.some((item) => item.action.type === "add_character"),
+        ),
+        direct.executed,
+      ), dispatches: [], actions: [], siteActions, executedSiteActions: direct.executed,
       steps: verifiedExecuted.map((item) => `已完成並驗證：${item.action.label}`),
       mock: true, rationale: undefined, contextUsed: [], ...base,
     });
@@ -1837,13 +1869,13 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
           input.message,
         );
         const isPaidMode = qualityMode !== "nim";
-        const completion = await completeText({
+        const completion = assertFreeOnlyCompletion(qualityMode, await completeText({
           prompt,
           mode: qualityMode,
           timeoutMs: isPaidMode ? 120_000 : 60_000,
           signal: askSignal,
           allowPaidFallback: qualityMode === "auto",
-        });
+        }));
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;
@@ -1993,7 +2025,14 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       ],
     }, { requiresVerifiedWrite });
     const result: GlobalAskResult = withTrace({
-      answer: answerWithVerifiedActions(reply.answer, direct.executed),
+      answer: answerWithVerifiedActions(
+        lockAddCharacterAnswer(
+          reply.answer,
+          pendingConfirmation.some((action) => action.type === "add_character")
+            || direct.executed.some((item) => item.action.type === "add_character"),
+        ),
+        direct.executed,
+      ),
       dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], routeAllowsDispatch),
       actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
       siteActions: pendingConfirmation,

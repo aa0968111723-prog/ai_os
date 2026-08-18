@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADD_CHARACTER_CONFIRM_PROSE,
   PENDING_CHARACTER_APPEARANCE,
   addCharacterConfirmLabel,
   collectAddCharacterProposals,
   dropMisroutedCharacterDatabaseActions,
   extractCharacterNames,
+  lockAddCharacterAnswer,
   proposeAddCharacterActions,
 } from "./assistantCharacterPropose";
 import { XIAOHUA_LOCKED_APPEARANCE } from "./characterIdentityLock";
@@ -114,6 +116,32 @@ describe("proposeAddCharacterActions", () => {
     );
     expect(kept.map((row) => row.type)).toEqual(["add_character", "create_scene"]);
     expect(kept.some((row) => row.type === "add_database_row")).toBe(false);
+  });
+
+  it("parses live「建立角色小華（粉橘…／白帽T），寫入角色不要素材清單」as 小華", () => {
+    const live = "建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    expect(proposeAddCharacterActions(live)).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    const merged = collectAddCharacterProposals(live, [], []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual({
+      type: "add_character",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    expect(dropMisroutedCharacterDatabaseActions(live, [
+      { type: "add_database_row", tableName: "素材清單" },
+    ])).toEqual([]);
+  });
+
+  it("rewrites the 05:29 角色資料庫 refuse when a confirm card exists", () => {
+    const refuse =
+      "目前沒有可直接寫入「角色資料」的角色資料庫；我也不會把小華寫進素材清單。請先提供或建立角色資料庫後，我才能記錄…";
+    expect(lockAddCharacterAnswer(refuse, true)).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(lockAddCharacterAnswer(refuse, true)).not.toContain("角色資料庫");
+    expect(lockAddCharacterAnswer(refuse, false)).toBe(refuse);
   });
 
   it("locks 年輕男性 from the model to 粉橘短髮女孩", () => {

@@ -32,7 +32,7 @@ import { MAX_PROJECT_CHARACTERS } from "../../shared/cardLimits";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
-import { completeText, FREE_MODEL_TIMEOUT_MESSAGE, LlmServiceError, type LlmProvider } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
 import { settleAssistantAskCompletion, assistantAskCompletionChip, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
@@ -40,7 +40,7 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, i
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
-import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, lockAddCharacterAnswer, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
@@ -823,17 +823,14 @@ async function callLlm(
 ): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
   const qualityMode = resolveFreeOnlyLlmMode(mode, utterance);
   const isPaidMode = qualityMode !== "nim";
-  const result = await completeText({
+  const result = assertFreeOnlyCompletion(qualityMode, await completeText({
     prompt,
     mode: qualityMode,
     timeoutMs: isPaidMode ? 120_000 : 60_000,
     signal,
     // mode=nim is UI「只用免費」— never auto-switch to paid gpt-5.6-luna / deepseek.
     allowPaidFallback: qualityMode === "auto",
-  });
-  if (qualityMode === "nim" && (result.fellBack || result.provider !== "nvidia-nim")) {
-    throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE);
-  }
+  }));
   return {
     text: result.text,
     provider: result.provider,
@@ -1752,11 +1749,14 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         const characterActions = resolve(characterProposals);
         const actions = [...characterActions, ...otherActions].slice(0, 6);
         const injectedCharacters = characterProposals.length > 0 && !modelHadCharacter;
-        const answer = injectedCharacters
-          ? (reply.rawActions.length === 0
-            ? "我幫你準備了角色定裝卡，確認下方就寫入。同名卡會沿用並更新外觀，不會再建一張。"
-            : `${reply.answer.trim()}\n請用下方確認卡：同名沿用並更新外觀，不會再建一張。`.slice(0, 4000))
-          : reply.answer;
+        const answer = lockAddCharacterAnswer(
+          injectedCharacters
+            ? (reply.rawActions.length === 0
+              ? "我幫你準備了角色定裝卡，確認下方就寫入。同名卡會沿用並更新外觀，不會再建一張。"
+              : `${reply.answer.trim()}\n請用下方確認卡：同名沿用並更新外觀，不會再建一張。`.slice(0, 4000))
+            : reply.answer,
+          characterActions.length > 0,
+        );
         const settled = settleAssistantAskCompletion({
           answer,
           actions,

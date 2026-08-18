@@ -10,10 +10,16 @@ import {
   referencedShotOrdinal,
   resolveMentionedProjectRef,
   injectAddCharacterSiteProposals,
+  pinProjectIntoRefMap,
   resolveSiteActions,
   siteActionProposalsForPlan,
   type SiteActionRefs,
 } from "./globalAssistant";
+import {
+  deriveDeterministicGoalFrame,
+  executionPlanFromGoal,
+  matchAssistantCapabilityForGoal,
+} from "../../shared/assistantSemanticResolution";
 import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
 import { PENDING_CHARACTER_APPEARANCE } from "../../shared/assistantCharacterPropose";
 
@@ -345,6 +351,41 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     });
   });
 
+  it("live 05:29 建立角色小華（…）injects add_character even when the model refused", () => {
+    const live = "建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.";
+    const { frame } = deriveDeterministicGoalFrame(live);
+    const match = matchAssistantCapabilityForGoal(frame, { message: live });
+    const plan = executionPlanFromGoal(frame, match, live);
+    expect(match.capabilityId).toBe("add_character");
+    const injected = injectAddCharacterSiteProposals(live, "p1", []);
+    expect(injected).toEqual([{
+      type: "add_character",
+      projectRef: "p1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    }]);
+    const kept = siteActionProposalsForPlan(plan, injected);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.type).toBe("add_character");
+    const out = resolveSiteActions(refs(), kept);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+  });
+
+  it("pinProjectIntoRefMap keeps a scoped unlisted project addressable as p0", () => {
+    const map = new Map<string, { id: string; title: string }>([
+      ["p1", { id: "listed", title: "listed" }],
+    ]);
+    expect(pinProjectIntoRefMap(map, { id: "scoped", title: "overnight-xiaohua" })).toBe("p0");
+    expect(map.get("p0")).toEqual({ id: "scoped", title: "overnight-xiaohua" });
+    expect(pinProjectIntoRefMap(map, { id: "listed", title: "listed" })).toBe("p1");
+  });
+
   it("injectAddCharacterSiteProposals drops 素材清單 add_database_row when adding 角色", () => {
     const injected = injectAddCharacterSiteProposals("新增角色 小華", "p1", [
       { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },
@@ -477,6 +518,10 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).toContain("角色定裝卡");
     expect(src).toContain("禁止用 add_database_row 假裝建角色");
     expect(src).toContain("injectAddCharacterSiteProposals");
+    expect(src).toContain("pinProjectIntoRefMap");
+    expect(src).toContain("assertFreeOnlyCompletion");
+    expect(src).toContain("lockAddCharacterAnswer");
+    expect(src).not.toContain("settleUsagePoints");
   });
 
   it("binds the same 120s ask deadline as project assistant", () => {

@@ -121,5 +121,6 @@ describe("assistant execution fast path", () => {
     expect(classifyAssistantRequest("幫我加一張角色卡").capabilityId).toBe("add_character");
     expect(classifyAssistantRequest("把小華改成粉橘短髮女孩、大二化工").capabilityId).toBe("add_character");
     expect(classifyAssistantRequest("小華是女生，不要年輕男性").capabilityId).toBe("add_character");
+    expect(classifyAssistantRequest("建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.").capabilityId).toBe("add_character");
   });
 });
