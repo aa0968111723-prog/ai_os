@@ -5,7 +5,7 @@
  * 3. 交付中心——就緒度講清楚、單檔收進進階摺疊。
  * 隔離 trpc mock；SceneStudio／StoryboardPlayer 用 stub（各自有獨立測試）。
  */
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SceneList } from "./SceneList";
@@ -24,6 +24,9 @@ const invalidateMessages = vi.fn();
 const invalidateDeleted = vi.fn();
 const lastUpdateSuccess = { current: undefined as undefined | ((row?: { id?: string; projectId?: string; rev?: number }) => void) };
 const lastInsertAfterSuccess = { current: undefined as undefined | ((row: { id: string; projectId: string }) => void) };
+const insertAfterHold = { current: false };
+const insertAfterPending: Array<() => void> = [];
+const insertAfterFailNext = { current: false };
 const lastRemoveSuccess = { current: undefined as undefined | (() => void) };
 /** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
 const cardLists: {
@@ -53,9 +56,23 @@ vi.mock("../api", () => ({
         useMutation: (opts?: { onSuccess?: (row: { id: string; projectId: string }) => void }) => {
           lastInsertAfterSuccess.current = opts?.onSuccess;
           return {
-          mutate: (input: { sceneId: string; duplicate?: boolean }) => {
+          mutate: (
+            input: { sceneId: string; duplicate?: boolean },
+            callOpts?: { onSuccess?: (row: { id: string; projectId: string }) => void; onError?: (err: Error) => void },
+          ) => {
             insertAfterMutate(input);
-            opts?.onSuccess?.({ id: `new-from-${input.sceneId}`, projectId: "p-1" });
+            const created = { id: `new-from-${input.sceneId}`, projectId: "p-1" };
+            const finish = () => {
+              if (insertAfterFailNext.current) {
+                insertAfterFailNext.current = false;
+                callOpts?.onError?.(new Error("insertAfter failed"));
+                return;
+              }
+              callOpts?.onSuccess?.(created);
+              opts?.onSuccess?.(created);
+            };
+            if (insertAfterHold.current) insertAfterPending.push(finish);
+            else finish();
           },
           mutateAsync: async (input: { sceneId: string; duplicate?: boolean }) => {
             insertAfterMutate(input);
@@ -181,6 +198,9 @@ const rowOf = (id: string) => {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  insertAfterHold.current = false;
+  insertAfterFailNext.current = false;
+  insertAfterPending.length = 0;
   meQuery.mockReturnValue({ isLoading: false, data: { id: "u-1" } });
   scenesQuery.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
   cardLists.characters = [];
@@ -358,6 +378,98 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+  });
+
+  it("連點 10 次插入：ACK 未回前只送出第一發，之後串新 id（點擊順序，不是 LIFO）", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    expect(btn).not.toBeDisabled();
+    for (let n = 0; n < 10; n++) fireEvent.click(btn);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
+
+    const expected = ["s1"];
+    let prev = "s1";
+    for (let n = 0; n < 10; n++) {
+      expect(insertAfterPending).toHaveLength(1);
+      insertAfterPending.shift()!();
+      if (n < 9) {
+        prev = `new-from-${prev}`;
+        expected.push(prev);
+        expect(insertAfterMutate).toHaveBeenCalledTimes(n + 2);
+      }
+    }
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual(expected.map((sceneId) => ({ sceneId })));
+    expect(insertAfterPending).toHaveLength(0);
+  });
+
+  it("插入與複製各走一條佇列，互不串 tail", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    fireEvent.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    fireEvent.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1", duplicate: true },
+    ]);
+    insertAfterPending.shift()!();
+    insertAfterPending.shift()!();
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1", duplicate: true },
+    ]);
+  });
+
+  it("insertAfter 失敗：清佇列、tail 回到這一格，下一發仍送 s.id", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    insertAfterFailNext.current = true;
+    insertAfterPending.shift()!();
+    expect(insertAfterPending).toHaveLength(0);
+    insertAfterHold.current = false;
+    fireEvent.click(btn);
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1" },
+    ]);
+  });
+
+  it("複製鈕不因 insertAfter pending 被 disabled，連點可進佇列", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const dup = rowOf("s1").getByRole("button", { name: "複製這一鏡" });
+    expect(dup).not.toBeDisabled();
+    fireEvent.click(dup);
+    fireEvent.click(dup);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+    insertAfterPending.shift()!();
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1", duplicate: true },
+      { sceneId: "new-from-s1", duplicate: true },
+    ]);
   });
 
   it("generateInto 完成後列出採用這一版，按下走 adoptGeneration", async () => {

@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 import { trpc } from "../api";
 import { SceneCardBinding, type SceneCardLookup } from "./SceneCardBinding";
 import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
-import { createInsertAfterQueue } from "../lib/insertAfterQueue";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { pendingAdoptGenerationId } from "@shared/sceneAdopt";
@@ -456,7 +455,9 @@ const SceneRow = memo(function SceneRow({
     onSuccess: () => { invalidate(); },
   });
   const adoptGenId = pendingAdoptGenerationId(s);
-  // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
+  // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）。
+  // insertAfter 永遠插在 sceneId 正後方。連點若都送 s.id，後到的會把先到的往下推
+  // （LIFO）。插入／複製各一條佇列：tail 跟著剛建立的 id 走，點擊順序就是列順序。
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created) => {
       const ack = shouldApplySceneWriteAck({
@@ -466,12 +467,54 @@ const SceneRow = memo(function SceneRow({
       if (ack.applyInvalidate) invalidate();
     },
   });
-  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
-  insertAfterMutateRef.current = insertAfter.mutateAsync;
-  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
-  if (!insertQueueRef.current) {
-    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
-  }
+  const insertAfterMutateRef = useRef(insertAfter.mutate);
+  insertAfterMutateRef.current = insertAfter.mutate;
+  const sourceIdRef = useRef(s.id);
+  sourceIdRef.current = s.id;
+  const insertTailRef = useRef(s.id);
+  const insertQueuedRef = useRef(0);
+  const insertInFlightRef = useRef(false);
+  const dupTailRef = useRef(s.id);
+  const dupQueuedRef = useRef(0);
+  const dupInFlightRef = useRef(false);
+  useEffect(() => {
+    insertTailRef.current = s.id;
+    insertQueuedRef.current = 0;
+    insertInFlightRef.current = false;
+    dupTailRef.current = s.id;
+    dupQueuedRef.current = 0;
+    dupInFlightRef.current = false;
+  }, [s.id]);
+  const pumpInsertAfter = (kind: "insert" | "duplicate") => {
+    const tailRef = kind === "insert" ? insertTailRef : dupTailRef;
+    const queuedRef = kind === "insert" ? insertQueuedRef : dupQueuedRef;
+    const inFlightRef = kind === "insert" ? insertInFlightRef : dupInFlightRef;
+    if (inFlightRef.current || queuedRef.current <= 0) return;
+    inFlightRef.current = true;
+    insertAfterMutateRef.current(
+      { sceneId: tailRef.current, ...(kind === "duplicate" ? { duplicate: true as const } : {}) },
+      {
+        onSuccess: (created) => {
+          inFlightRef.current = false;
+          if (queuedRef.current <= 0) return;
+          tailRef.current = created.id;
+          queuedRef.current -= 1;
+          if (queuedRef.current > 0) pumpInsertAfter(kind);
+        },
+        onError: () => {
+          queuedRef.current = 0;
+          inFlightRef.current = false;
+          tailRef.current = sourceIdRef.current;
+        },
+      },
+    );
+  };
+  const enqueueInsertAfter = (kind: "insert" | "duplicate") => {
+    const queuedRef = kind === "insert" ? insertQueuedRef : dupQueuedRef;
+    const inFlightRef = kind === "insert" ? insertInFlightRef : dupInFlightRef;
+    queuedRef.current += 1;
+    if (!inFlightRef.current) pumpInsertAfter(kind);
+  };
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   const isAwaitingApproval = s.pendingGenStatus === "awaiting_approval";
@@ -765,16 +808,16 @@ const SceneRow = memo(function SceneRow({
             aria-busy={insertAfter.isPending || undefined}
             aria-label="在這之後插入一鏡"
             title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
-            onClick={() => insertQueueRef.current?.enqueue(s.id)}
+            onClick={() => enqueueInsertAfter("insert")}
           >
             <Icon name="Plus" size={16} />
           </button>
           <button
             style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
-            disabled={insertAfter.isPending}
+            aria-busy={insertAfter.isPending || undefined}
             aria-label="複製這一鏡"
             title="照這一鏡再拍一顆：複製標題／秒數／提示詞／旁白與設定卡綁定（不複製成品）"
-            onClick={() => insertQueueRef.current?.enqueue(s.id, { duplicate: true })}
+            onClick={() => enqueueInsertAfter("duplicate")}
           >
             <Icon name="Copy" size={16} />
           </button>
