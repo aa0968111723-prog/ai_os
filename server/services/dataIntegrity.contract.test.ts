@@ -28,6 +28,13 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(src).toContain("asset.projectId !== projectId");
     expect(src).toContain("同組其他專案的圖不能當定裝");
   });
+
+  it("Team Canon reference images also require the same project", () => {
+    const src = readFileSync(new URL("./teamCanon.ts", import.meta.url), "utf8");
+    expect(src).toContain("projectId: string");
+    expect(src).toContain("asset.projectId !== input.projectId");
+    expect(src).toContain("projectId: project.id");
+  });
 });
 
 describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", () => {
@@ -35,6 +42,13 @@ describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", (
     const src = readFileSync(new URL("../routers/director.ts", import.meta.url), "utf8");
     expect(src).toContain("await assertGenerationEntityIds(project.id");
     expect(src.indexOf("await assertGenerationEntityIds")).toBeLessThan(src.indexOf(".insert(schema.scenes)"));
+  });
+
+  it("splitScriptCore reads stories.content before knowledge when script is omitted", () => {
+    const src = readFileSync(new URL("../routers/director.ts", import.meta.url), "utf8");
+    expect(src).toContain("schema.stories.content");
+    expect(src).toContain("pickSplitScriptSource");
+    expect(src.indexOf("schema.stories.content")).toBeLessThan(src.indexOf("mode: \"script_only\""));
   });
 
   it("storyParse materialize asserts before insert", () => {

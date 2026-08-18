@@ -218,7 +218,7 @@ const proposalSchema = z.discriminatedUnion("type", [
     camera: shotCameraSchema.optional(),
     performance: shotPerformanceSchema.optional(),
   }),
-  // script 省略＝由 splitScriptCore 讀目前專案的腳本知識；使用者貼全文時才原樣帶入。
+  // script 省略＝由 splitScriptCore 讀 stories.content（再退知識庫）；使用者貼全文時才原樣帶入。
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000).optional() }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
   z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),

@@ -645,7 +645,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onMove={(id, direction) => move.mutate({ sceneId: id, direction })}
           onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
           onNewShot={createShot}
-          onDuplicate={(id) => insertAfter.mutate({ sceneId: id, duplicate: true })}
+          onDuplicate={(id) => insertQueueRef.current?.enqueue(id, { duplicate: true })}
           onDelete={(id) => removeShot.mutate({ sceneId: id })}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />

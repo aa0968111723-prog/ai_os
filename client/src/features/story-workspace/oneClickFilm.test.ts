@@ -40,6 +40,19 @@ describe("runOneClickFilm", () => {
     await expect(fail).rejects.toThrow("故事有衝突尚未處理");
   });
 
+  it("batch step can refuse 0 shots with 先解析／產生分鏡", async () => {
+    await expect(
+      runOneClickFilm({
+        flushStory: async () => undefined,
+        parse: async () => undefined,
+        generateStoryboard: async () => undefined,
+        batchGenerate: async () => {
+          throw new Error("先解析／產生分鏡");
+        },
+      }),
+    ).rejects.toThrow("先解析／產生分鏡");
+  });
+
   it("stops before batch if parse throws", async () => {
     const order: string[] = [];
     await expect(

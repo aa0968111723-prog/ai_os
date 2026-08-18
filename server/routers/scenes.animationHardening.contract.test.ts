@@ -125,7 +125,15 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
   });
 });
 
+const oneClickHook = readFileSync(join(process.cwd(), "client/src/features/story-workspace/useOneClickFilm.ts"), "utf8");
 const overnightRealGen = readFileSync(join(process.cwd(), "scripts/overnight-real-gen-adopt.py"), "utf8");
+
+describe("one-click does not batch-generate on an empty board", () => {
+  it("refuses batchGenerate when listByProject is still 0 shots", () => {
+    expect(oneClickHook).toContain("listByProject.fetch");
+    expect(oneClickHook).toContain("先解析／產生分鏡");
+  });
+});
 
 describe("overnight real generateInto + adopt rails", () => {
   it("only writes overnight-test-* into 動畫組, uses cheap image, and adopts after generateInto", () => {

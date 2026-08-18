@@ -29,6 +29,7 @@ describe("storyboard order / isolation contracts", () => {
   it("SceneList queues blank insertAfter so repeated clicks chain the new id", () => {
     expect(sceneList).toContain("createInsertAfterQueue");
     expect(sceneList).toContain("insertQueueRef.current?.enqueue(s.id)");
+    expect(sceneList).toContain("enqueue(s.id, { duplicate: true })");
     expect(sceneList).toMatch(/disabled=\{i === 0 \|\| move\.isPending\}/);
     expect(animStudio).toContain("insertQueueRef.current?.enqueue(shot.id)");
   });

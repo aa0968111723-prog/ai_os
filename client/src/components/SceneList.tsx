@@ -756,7 +756,7 @@ const SceneRow = memo(function SceneRow({
             disabled={insertAfter.isPending}
             aria-label="複製這一鏡"
             title="照這一鏡再拍一顆：複製標題／秒數／提示詞／旁白與設定卡綁定（不複製成品）"
-            onClick={() => insertAfter.mutate({ sceneId: s.id, duplicate: true })}
+            onClick={() => insertQueueRef.current?.enqueue(s.id, { duplicate: true })}
           >
             <Icon name="Copy" size={16} />
           </button>

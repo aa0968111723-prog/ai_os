@@ -43,6 +43,10 @@ export function useOneClickFilm(projectId: string) {
           await board.mutateAsync({ projectId });
         },
         batchGenerate: async () => {
+          const shots = await utils.scenes.listByProject.fetch({ projectId });
+          if (!shots?.length) {
+            throw new Error("先解析／產生分鏡");
+          }
           const r = await batch.mutateAsync({ projectId, modelId: ONE_CLICK_BATCH_MODEL });
           return { runId: r.runId, shots: r.shots, estPoints: r.estPoints ?? 0 };
         },
