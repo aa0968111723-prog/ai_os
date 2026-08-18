@@ -408,6 +408,22 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(pinProjectIntoRefMap(map, { id: "listed", title: "listed" })).toBe("p1");
   });
 
+  it("does not propose 新增角色「不要寫素材清單」and keeps 淡江大二化工", () => {
+    const live = "新增角色小華，淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    const injected = injectAddCharacterSiteProposals(live, "p1", [
+      { type: "add_character", projectRef: "p1", name: "不要寫素材清單" },
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: "淡江大二化工" },
+    ]);
+    expect(injected.every((action) => action.type !== "add_character" || action.name !== "不要寫素材清單")).toBe(true);
+    expect(injected.filter((action) => action.type === "add_character")).toHaveLength(1);
+    const out = resolveSiteActions(refs(), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "add_character", name: "小華" });
+    expect(out[0].type === "add_character" && out[0].appearance).toContain("淡江大二化工");
+    expect(out[0].type === "add_character" && out[0].label).toBe("新增角色「小華」");
+    expect(out[0].type === "add_character" && out[0].label).not.toContain("不要寫素材清單");
+  });
+
   it("injectAddCharacterSiteProposals drops 素材清單 add_database_row when adding 角色", () => {
     const injected = injectAddCharacterSiteProposals("新增角色 小華", "p1", [
       { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },

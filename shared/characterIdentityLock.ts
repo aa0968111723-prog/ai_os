@@ -6,6 +6,18 @@
 export const XIAOHUA_LOCKED_APPEARANCE = "大二化工、粉橘短髮女孩、白帽T";
 export const XIAOHUA_LOCKED_COSTUME = "白帽T、休閒日常";
 
+/** Live ask「淡江大二化工」must not be stored as bare 大二化工. */
+export function withTamkangSophomore(appearance: string, source = ""): string {
+  if (!/淡江|淡大/.test(`${appearance} ${source}`)) return appearance;
+  if (/淡江大二化工/.test(appearance)) return appearance;
+  if (/大二化工/.test(appearance)) return appearance.replace(/大二化工/g, "淡江大二化工");
+  return appearance;
+}
+
+export function xiaohuaLockedAppearance(source = ""): string {
+  return withTamkangSophomore(XIAOHUA_LOCKED_APPEARANCE, source);
+}
+
 const MALE_FLIP = /年輕男性|男性|男生|男孩|男大生|黑長直髮/;
 const FEMALE_LOOK = /女孩|女大生|粉橘|短髮女孩|她/;
 
@@ -29,11 +41,14 @@ export function applyXiaohuaIdentityLock<
   const costume = character.costume ?? "";
   const flipped = MALE_FLIP.test(`${appearance} ${costume}`);
   const missingFemale = !FEMALE_LOOK.test(appearance);
-  if (!flipped && !missingFemale && appearance.trim()) return character;
+  const source = `${appearance} ${script}`;
+  if (!flipped && !missingFemale && appearance.trim()) {
+    return { ...character, appearance: withTamkangSophomore(appearance, source) };
+  }
   const keepCostume = /白帽/.test(costume) && !MALE_FLIP.test(costume);
   return {
     ...character,
-    appearance: XIAOHUA_LOCKED_APPEARANCE,
+    appearance: xiaohuaLockedAppearance(source),
     costume: keepCostume ? costume : XIAOHUA_LOCKED_COSTUME,
   };
 }

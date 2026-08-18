@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import { MAX_PROJECT_CHARACTERS } from "../../shared/cardLimits";
-import { PENDING_CHARACTER_APPEARANCE } from "../../shared/assistantCharacterPropose";
+import { isInstructionCharacterName, PENDING_CHARACTER_APPEARANCE } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { nameKey } from "../../shared/story";
 import { publishToProject } from "./realtime";
@@ -45,6 +45,9 @@ export async function upsertProjectCharacterCore(input: {
   await assertProjectEditable(input.auth, project);
 
   const name = input.name.trim();
+  if (isInstructionCharacterName(name)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+  }
   const [storyRow] = await db
     .select({ content: schema.stories.content })
     .from(schema.stories)

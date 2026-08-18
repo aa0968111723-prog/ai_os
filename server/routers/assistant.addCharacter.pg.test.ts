@@ -159,4 +159,35 @@ d("project assistant add_character (real PostgreSQL)", () => {
     expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
     expect(xiaohua?.appearance).not.toContain("年輕男性");
   });
+
+  it("stores 淡江大二化工 and refuses 不要寫素材清單 as a name", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "Tamkang", email: `tamkang-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-add-character-tamkang", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+    const assistant = assistantRouter.createCaller({ auth: authFor(userId, groupId) } as never);
+    await expect(assistant.runAction({
+      projectId: project.id,
+      action: { type: "add_character", name: "不要寫素材清單", appearance: "待補外觀描述" },
+    })).rejects.toMatchObject({ message: expect.stringMatching(/指示句/) });
+    expect(await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id))).toHaveLength(0);
+
+    const result = await assistant.runAction({
+      projectId: project.id,
+      action: { type: "add_character", name: "小華", appearance: "淡江大二化工、粉橘短髮女孩、白帽T" },
+    });
+    expect(result.ok).toBe(true);
+    const rows = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("小華");
+    expect(rows[0]!.appearance).toContain("淡江大二化工");
+    expect(rows[0]!.appearance).toContain("粉橘短髮女孩");
+    expect(rows[0]!.appearance).not.toContain("年輕男性");
+  });
 });

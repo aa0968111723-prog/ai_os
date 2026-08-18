@@ -39,7 +39,7 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, i
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
-import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, lockAddCharacterAnswer, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, isInstructionCharacterName, lockAddCharacterAnswer, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
@@ -1467,6 +1467,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
             });
           } else if (a.type === "add_character") {
             const name = a.name.trim();
+            if (isInstructionCharacterName(name)) continue;
             const appearance = a.appearance.trim();
             const existing = characterRows.find((row) => nameKey(row.name) === nameKey(name));
             out.push({

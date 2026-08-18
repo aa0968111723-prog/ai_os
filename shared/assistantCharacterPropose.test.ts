@@ -6,6 +6,7 @@ import {
   collectAddCharacterProposals,
   dropMisroutedCharacterDatabaseActions,
   extractCharacterNames,
+  isInstructionCharacterName,
   lockAddCharacterAnswer,
   proposeAddCharacterActions,
 } from "./assistantCharacterPropose";
@@ -151,5 +152,37 @@ describe("proposeAddCharacterActions", () => {
       [],
     );
     expect(merged[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("does not turn「不要寫素材清單」into a second character name", () => {
+    expect(isInstructionCharacterName("不要寫素材清單")).toBe(true);
+    expect(isInstructionCharacterName("寫入角色")).toBe(true);
+    expect(isInstructionCharacterName("小華")).toBe(false);
+    const live = "新增角色小華，淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const merged = collectAddCharacterProposals(
+      live,
+      [
+        { type: "add_character", name: "小華", appearance: "淡江大二化工" },
+        { type: "add_character", name: "不要寫素材清單", appearance: PENDING_CHARACTER_APPEARANCE },
+      ],
+      [],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.name).toBe("小華");
+    expect(merged.map((row) => row.name)).not.toContain("不要寫素材清單");
+    expect(merged[0]!.appearance).toContain("淡江大二化工");
+  });
+
+  it("keeps 淡江大二化工 on 小華 when the ask names 淡江", () => {
+    const live = "新增角色「小華」淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    const actions = proposeAddCharacterActions(live);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.name).toBe("小華");
+    expect(actions[0]!.appearance).toContain("淡江大二化工");
+    expect(actions[0]!.appearance).toContain("粉橘短髮女孩");
+    expect(actions[0]!.appearance).toContain("白帽T");
+    expect(actions[0]!.appearance).not.toContain("年輕男性");
+    expect(addCharacterConfirmLabel("小華", actions[0]!.appearance)).toBe("新增角色「小華」");
   });
 });

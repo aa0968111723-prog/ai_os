@@ -29,11 +29,12 @@ import { formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStory
 import {
   addCharacterConfirmLabel,
   dropMisroutedCharacterDatabaseActions,
+  isInstructionCharacterName,
   lockAddCharacterAnswer,
   PENDING_CHARACTER_APPEARANCE,
   proposeAddCharacterActions,
 } from "../../shared/assistantCharacterPropose";
-import { isXiaohuaName, XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { isXiaohuaName, xiaohuaLockedAppearance } from "../../shared/characterIdentityLock";
 import { nameKey } from "../../shared/story";
 import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import {
@@ -289,9 +290,10 @@ export function injectAddCharacterSiteProposals(
   projectRef: string | undefined,
   existing: readonly SiteActionProposal[],
 ): SiteActionProposal[] {
-  const filled = existing.map((action) => {
-    if (action.type !== "add_character") return action;
-    return { ...action, projectRef: action.projectRef?.trim() || projectRef };
+  const filled = existing.flatMap((action): SiteActionProposal[] => {
+    if (action.type !== "add_character") return [action];
+    if (isInstructionCharacterName(action.name)) return [];
+    return [{ ...action, projectRef: action.projectRef?.trim() || projectRef }];
   });
   const extra = proposeAddCharacterActions(message).flatMap((row): SiteActionProposal[] => {
     const ref = (projectRef ?? "").trim();
@@ -591,9 +593,9 @@ export function resolveSiteActions(
       const project = refs.projects.get((p.projectRef ?? refs.defaultProjectRef ?? "").trim());
       if (!project) continue;
       const name = p.name.trim();
-      if (!name) continue;
+      if (!name || isInstructionCharacterName(name)) continue;
       const appearance = isXiaohuaName(name)
-        ? XIAOHUA_LOCKED_APPEARANCE
+        ? xiaohuaLockedAppearance(p.appearance ?? "")
         : (p.appearance?.trim() || PENDING_CHARACTER_APPEARANCE);
       const existing = (project.characters ?? []).find((row) => nameKey(row.name) === nameKey(name));
       out.push({

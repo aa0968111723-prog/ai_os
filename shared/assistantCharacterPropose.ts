@@ -1,6 +1,6 @@
 import { CHAR_NAME_MAX } from "./cardLimits";
 import { isAddCharacterIntent } from "./assistantExecution";
-import { isXiaohuaName, XIAOHUA_LOCKED_APPEARANCE } from "./characterIdentityLock";
+import { isXiaohuaName, xiaohuaLockedAppearance } from "./characterIdentityLock";
 import { nameKey } from "./story";
 
 /** Name-only create: confirm card still writes; appearance can be filled later. */
@@ -22,10 +22,20 @@ export type ExistingCharacterCard = {
   appearance?: string | null;
 };
 
-function lockAppearance(name: string, appearance: string): string {
-  if (isXiaohuaName(name)) return XIAOHUA_LOCKED_APPEARANCE;
+function lockAppearance(name: string, appearance: string, source = ""): string {
+  if (isXiaohuaName(name)) return xiaohuaLockedAppearance(`${appearance} ${source}`);
   const trimmed = appearance.trim();
   return trimmed || PENDING_CHARACTER_APPEARANCE;
+}
+
+/** 「不要寫素材清單」is an instruction, never a character name. */
+export function isInstructionCharacterName(name: string): boolean {
+  const n = name.replace(/[「」『』《》【】"'“”]/g, "").trim();
+  if (!n) return true;
+  if (/^(?:不要|別|勿|禁止|不准|並非|并非|而非|不是)/.test(n)) return true;
+  if (/不要寫|別寫|勿寫|不要素材|寫入角色|寫進素材|素材清單|資料庫/.test(n)) return true;
+  if (/^寫入/.test(n)) return true;
+  return false;
 }
 
 /**
@@ -52,13 +62,13 @@ export function proposeAddCharacterActions(
     return [{
       type: "add_character" as const,
       name: xiaohua.name,
-      appearance: lockAppearance(xiaohua.name, ""),
+      appearance: lockAppearance(xiaohua.name, "", message),
     }];
   }
   return extractCharacterNames(message, existingCards).slice(0, 6).map((name) => ({
     type: "add_character" as const,
     name,
-    appearance: lockAppearance(name, ""),
+    appearance: lockAppearance(name, "", message),
   }));
 }
 
@@ -75,11 +85,11 @@ export function mergeAddCharacterProposals(
   const byName = new Map<string, ProposedAddCharacter>();
   const put = (row: ProposedAddCharacter) => {
     const name = row.name.trim();
-    if (!name) return;
+    if (!name || isInstructionCharacterName(name)) return;
     byName.set(nameKey(name), {
       type: "add_character",
       name,
-      appearance: lockAppearance(name, row.appearance ?? ""),
+      appearance: lockAppearance(name, row.appearance ?? "", message),
       ...(row.notes?.trim() ? { notes: row.notes.trim() } : {}),
     });
   };
@@ -88,7 +98,9 @@ export function mergeAddCharacterProposals(
     const key = nameKey(row.name);
     const prev = byName.get(key);
     if (!prev) put(row);
-    else if (isXiaohuaName(row.name)) put({ ...prev, appearance: XIAOHUA_LOCKED_APPEARANCE });
+    else if (isXiaohuaName(row.name)) {
+      put({ ...prev, appearance: lockAppearance(row.name, prev.appearance, message) });
+    }
   }
   return [...byName.values()].slice(0, 6);
 }
@@ -147,7 +159,7 @@ export function addCharacterConfirmLabel(
   appearance: string,
   existing?: ExistingCharacterCard | null,
 ): string {
-  const locked = lockAppearance(name, appearance);
+  const locked = lockAppearance(name, appearance, appearance);
   if (existing && nameKey(existing.name) === nameKey(name)) {
     const from = (existing.appearance ?? "").trim() || "（空）";
     if (from !== locked) return `更新角色「${name}」外觀：${from} → ${locked}`;
@@ -169,8 +181,9 @@ export function extractCharacterNames(
     /(?:新增|建立|加|更新|改定裝|改外觀)\s*(?:角色|定裝)(?:卡)?[：:\s]*(.+)$/u,
   );
   const rest = (matched?.[1] ?? "")
+    .replace(/[「『"](?:不要|別|勿|禁止|不准)[^」』"]*[」』"]/gu, " ")
     .replace(/[。．.！!？?]+$/u, "")
-    .replace(/[，,]?\s*(?:寫入|不要|別|不是|而非).*$/u, "")
+    .replace(/[，,]?\s*(?:寫入|不要|別|勿|禁止|不准|不是|而非).*$/u, "")
     .trim();
   const seen = new Set<string>();
   const names: string[] = [];
@@ -181,7 +194,7 @@ export function extractCharacterNames(
     const beforeLook = beforeParen.split(/[／/]/)[0]?.trim() ?? "";
     const name = beforeLook.split(/[：:]/)[0]?.trim().split(/\s+/)[0]?.trim() ?? "";
     if (!name || name.length > CHAR_NAME_MAX || isAppearancePhrase(name)) return;
-    if (/寫入|不要|素材清單|資料庫/.test(name)) return;
+    if (isInstructionCharacterName(name)) return;
     const key = nameKey(name);
     if (!key || seen.has(key)) return;
     seen.add(key);

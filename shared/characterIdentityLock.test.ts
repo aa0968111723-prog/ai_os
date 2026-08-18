@@ -25,6 +25,22 @@ describe("小華 identity lock", () => {
     expect(locked.costume).toContain("白帽T");
   });
 
+  it("keeps 淡江大二化工 when the ask or look already names 淡江", () => {
+    const asked = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "淡江大二化工、年輕男性", costume: "" },
+      "新增角色小華 淡江大二化工",
+    );
+    expect(asked.appearance).toContain("淡江大二化工");
+    expect(asked.appearance).toContain("粉橘短髮女孩");
+    expect(asked.appearance).toContain("白帽T");
+    expect(asked.appearance).not.toContain("年輕男性");
+    const keep = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "淡江大二化工、粉橘短髮女孩、白帽T", costume: "白帽T" },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(keep.appearance).toBe("淡江大二化工、粉橘短髮女孩、白帽T");
+  });
+
   it("fills a missing female look on an empty 小華 card", () => {
     const locked = applyXiaohuaIdentityLock({ name: "小華", appearance: "", costume: "" }, TKU_ZEN_SHOTLIST_FIRST_PARSE);
     expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
