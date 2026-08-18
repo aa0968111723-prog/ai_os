@@ -47,7 +47,7 @@ import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
@@ -377,24 +377,35 @@ async function applyAssistantScenePatch(
   patch: Partial<typeof schema.scenes.$inferInsert>,
   label: string,
 ) {
-  const { row } = await applyWithRevision({
-    entity: "scene",
-    table: schema.scenes,
-    idColumn: schema.scenes.id,
-    revColumn: schema.scenes.rev,
-    row: scene,
-    patch,
-    extraWhere: isNull(schema.scenes.deletedAt),
-    reload: async () => {
-      const [fresh] = await db
-        .select()
-        .from(schema.scenes)
-        .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
-      return fresh;
-    },
-  });
-  publishToProject(scene.projectId, { kind: "scene", id: scene.id }, label);
-  return row;
+  const baseline: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    baseline[key] = (scene as Record<string, unknown>)[key];
+  }
+  try {
+    const { row } = await applyWithRevision({
+      entity: "scene",
+      table: schema.scenes,
+      idColumn: schema.scenes.id,
+      revColumn: schema.scenes.rev,
+      row: scene,
+      patch,
+      expectedRev: scene.rev,
+      baseline,
+      extraWhere: isNull(schema.scenes.deletedAt),
+      reload: async () => {
+        const [fresh] = await db
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+        return fresh;
+      },
+    });
+    publishToProject(scene.projectId, { kind: "scene", id: scene.id }, label);
+    return row;
+  } catch (err) {
+    if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+    throw err;
+  }
 }
 
 function writeResult<T extends Record<string, unknown>>(
@@ -1319,8 +1330,8 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         const out: ResolvedAction[] = [];
         for (const a of actions) {
           if (a.type === "generate") {
-            // 0 鏡時未指 sceneNo＝素材庫生成，專案頁看起來像按下沒反應卻扣點。
-            if (!a.sceneNo && scenes.length === 0) continue;
+            // 未指 sceneNo＝素材庫生成。空板或有鏡都像按下沒反應卻扣點，一律略過。
+            if (!a.sceneNo) continue;
             const scene = a.sceneNo ? findSceneByDisplayNo(scenes, a.sceneNo) : undefined;
             if (a.sceneNo && !scene) continue; // 指了不存在的鏡＝幻覺編號，整筆提議略過
             const model = pickGenerateModel(a.modelId); // 白名單不過就退回預設圖像模型
@@ -2166,20 +2177,27 @@ export const assistantRouter = router({
         }
         const current = worldviewSchema.parse(project.worldview ?? {});
         const merged = worldviewSchema.parse({ ...current, ...patch });
-        await applyWithRevision({
-          entity: "project",
-          table: schema.projects,
-          idColumn: schema.projects.id,
-          revColumn: schema.projects.rev,
-          row: project,
-          patch: { worldview: merged },
-          bookkeeping: { updatedAt: new Date() },
-          reload: async () => {
-            const [fresh] = await db.select().from(schema.projects).where(eq(schema.projects.id, project.id));
-            return fresh;
-          },
-          updatedAtField: "updatedAt",
-        });
+        try {
+          await applyWithRevision({
+            entity: "project",
+            table: schema.projects,
+            idColumn: schema.projects.id,
+            revColumn: schema.projects.rev,
+            row: project,
+            patch: { worldview: merged },
+            bookkeeping: { updatedAt: new Date() },
+            expectedRev: project.rev,
+            baseline: { worldview: current },
+            reload: async () => {
+              const [fresh] = await db.select().from(schema.projects).where(eq(schema.projects.id, project.id));
+              return fresh;
+            },
+            updatedAtField: "updatedAt",
+          });
+        } catch (err) {
+          if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+          throw err;
+        }
         const summary = summarizeWorldviewChipsPatch(patch);
         let verification: AssistantWriteVerification;
         try {
