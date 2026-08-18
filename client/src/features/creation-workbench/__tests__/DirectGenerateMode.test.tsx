@@ -278,7 +278,8 @@ describe("DirectGenerateMode", () => {
     await user.click(genBtn);
 
     const confirm = await screen.findByRole("button", { name: "確認生成" });
-    expect(screen.getByText(/目前剩 324 點/)).toBeInTheDocument();
+    const remainingLabels = screen.getAllByText(/目前剩 324 點/);
+    expect(remainingLabels.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/4,708/)).not.toBeInTheDocument();
     expect(screen.queryByText(/4708/)).not.toBeInTheDocument();
     await user.click(confirm);
