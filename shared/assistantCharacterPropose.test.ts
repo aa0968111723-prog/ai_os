@@ -3,6 +3,7 @@ import {
   PENDING_CHARACTER_APPEARANCE,
   addCharacterConfirmLabel,
   collectAddCharacterProposals,
+  dropMisroutedCharacterDatabaseActions,
   extractCharacterNames,
   proposeAddCharacterActions,
 } from "./assistantCharacterPropose";
@@ -88,6 +89,31 @@ describe("proposeAddCharacterActions", () => {
     expect(merged).toEqual([
       { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
     ]);
+  });
+
+  it("parses live「新增角色「小華」粉橘…／白帽T」as name 小華, not the look blob", () => {
+    const live = "新增角色「小華」粉橘短髮女孩／白帽T／大二化工";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const existing = [{ name: "小華", appearance: "年輕男性" }];
+    const actions = proposeAddCharacterActions(live, existing);
+    expect(actions).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("更新角色「小華」外觀");
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("年輕男性");
+  });
+
+  it("drops 素材清單 add_database_row when the ask is 新增角色", () => {
+    const kept = dropMisroutedCharacterDatabaseActions(
+      "新增角色「小華」粉橘短髮女孩／白帽T／大二化工",
+      [
+        { type: "add_database_row", tableName: "素材清單" },
+        { type: "add_character", name: "小華" },
+        { type: "create_scene", title: "校門口" },
+      ],
+    );
+    expect(kept.map((row) => row.type)).toEqual(["add_character", "create_scene"]);
+    expect(kept.some((row) => row.type === "add_database_row")).toBe(false);
   });
 
   it("locks 年輕男性 from the model to 粉橘短髮女孩", () => {

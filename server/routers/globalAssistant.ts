@@ -27,6 +27,7 @@ import { loadPersistedStoryForAssistant } from "../services/assistantProjectStor
 import { formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStoryContext";
 import {
   addCharacterConfirmLabel,
+  dropMisroutedCharacterDatabaseActions,
   PENDING_CHARACTER_APPEARANCE,
   proposeAddCharacterActions,
 } from "../../shared/assistantCharacterPropose";
@@ -295,10 +296,7 @@ export function injectAddCharacterSiteProposals(
         ...filled.filter((action) => action.type !== "add_character" || !extraKeys.has(nameKey(action.name))),
       ]
     : filled;
-  if (merged.some((action) => action.type === "add_character")) {
-    return merged.filter((action) => action.type !== "add_database_row");
-  }
-  return merged;
+  return dropMisroutedCharacterDatabaseActions(message, merged);
 }
 
 /** 全站回覆＝組回覆＋站級動作提議 */

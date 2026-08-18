@@ -93,6 +93,22 @@ export function mergeAddCharacterProposals(
   return [...byName.values()].slice(0, 6);
 }
 
+/**
+ * 「新增角色」must never become an append to 素材清單 / add_database_row.
+ * Project assistant currently keeps both; live then shows only the DB card.
+ */
+export function dropMisroutedCharacterDatabaseActions<T extends { type: string }>(
+  message: string,
+  actions: readonly T[],
+): T[] {
+  const wantsCharacter =
+    isAddCharacterIntent(message)
+    || actions.some((action) => action.type === "add_character")
+    || proposeAddCharacterActions(message).length > 0;
+  if (!wantsCharacter) return [...actions];
+  return actions.filter((action) => action.type !== "add_database_row");
+}
+
 export function collectAddCharacterProposals(
   message: string,
   rawActions: ReadonlyArray<{ type: string; name?: string; appearance?: string; notes?: string }>,
@@ -140,7 +156,9 @@ export function extractCharacterNames(
   const seen = new Set<string>();
   const names: string[] = [];
   const push = (raw: string) => {
-    const name = raw.split(/[：:]/)[0]?.trim().split(/\s+/)[0]?.trim() ?? "";
+    const stripped = raw.replace(/[「」『』《》【】"'“”]/g, " ").trim();
+    const beforeLook = stripped.split(/[／/]/)[0]?.trim() ?? "";
+    const name = beforeLook.split(/[：:]/)[0]?.trim().split(/\s+/)[0]?.trim() ?? "";
     if (!name || name.length > CHAR_NAME_MAX || isAppearancePhrase(name)) return;
     const key = nameKey(name);
     if (!key || seen.has(key)) return;
@@ -148,7 +166,7 @@ export function extractCharacterNames(
     names.push(name);
   };
   if (rest) {
-    for (const raw of rest.split(/[,，、]/)) push(raw.trim());
+    for (const raw of rest.split(/[,，、／/]/)) push(raw.trim());
   }
   if (/小華/.test(message)) push("小華");
   for (const card of existingCards) {

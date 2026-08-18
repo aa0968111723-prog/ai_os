@@ -32,7 +32,7 @@ import { MAX_PROJECT_CHARACTERS } from "../../shared/cardLimits";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
-import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
+import { completeText, FREE_MODEL_TIMEOUT_MESSAGE, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
 import { settleAssistantAskCompletion, assistantAskCompletionChip, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
@@ -40,7 +40,7 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext } 
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
-import { addCharacterConfirmLabel, collectAddCharacterProposals, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
@@ -831,7 +831,15 @@ async function callLlm(
     // mode=nim is UI「只用免費」— never auto-switch to paid gpt-5.6-luna / deepseek.
     allowPaidFallback: qualityMode === "auto",
   });
-  return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
+  if (qualityMode === "nim" && (result.fellBack || result.provider !== "nvidia-nim")) {
+    throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE);
+  }
+  return {
+    text: result.text,
+    provider: result.provider,
+    model: result.model,
+    fellBack: qualityMode === "nim" ? false : !!result.fellBack,
+  };
 }
 
 /** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
@@ -1524,8 +1532,8 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→逐鏡配音」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
 - prepare_external_generation：替某一鏡建立外部 AI 生成工作階段（sceneNo；externalTool 可用 flow/runway/kling/chatgpt/gemini/midjourney/elevenlabs/suno，未填預設 flow）。Prompt 必須從該分鏡的實際 prompt／動作／對白／旁白整理，不得自行假裝已生成；確認後複製 Prompt 並開啟外部工具，不扣 AI OS 點數。使用者說「幫我準備 Scene 8 去 Flow」或想用外部工具時用這個。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
-- add_database_row：在 AI 可寫的自訂資料庫新增一列（dbRef 只能抄 <可讀資料庫> 標了「AI 代理可寫」的代號；values 的鍵用欄位標籤或 key）。使用者說「記進資料庫／加一列／寫進名單」時用這個。不可寫的庫不要提議。
-- add_character：新增或更新角色定裝卡（name＋appearance 必填，notes 可選）。使用者說「建角色／加定裝卡」或改外觀時用。**同名卡已存在也必須 emit add_character 確認卡**（沿用 vs 更新外觀）——禁止只寫散文問要不要改寫或另取一名、且 actions=[]。確認後沿用那一列、不另建。小華外觀鎖定「大二化工、粉橘短髮女孩、白帽T」，禁止寫成年輕男性。**只給名字、沒寫外觀時不要拒絕**——appearance 填「待補外觀描述」，每個名字各一張 add_character（最多 6）。禁止只回「我目前無法建立角色」卻讓 actions=[]。
+- add_database_row：在 AI 可寫的自訂資料庫新增一列（dbRef 只能抄 <可讀資料庫> 標了「AI 代理可寫」的代號；values 的鍵用欄位標籤或 key）。使用者說「記進資料庫／加一列／寫進名單」時用這個。不可寫的庫不要提議。**禁止把角色／定裝／小華寫進「素材清單」或其他資料庫**——那是 add_character。
+- add_character：新增或更新角色定裝卡（name＋appearance 必填，notes 可選）。使用者說「建角色／加定裝卡」或改外觀時用。**同名卡已存在也必須 emit add_character 確認卡**（沿用 vs 更新外觀）——禁止只寫散文問要不要改寫或另取一名、且 actions=[]。確認後沿用那一列、不另建。小華外觀鎖定「大二化工、粉橘短髮女孩、白帽T」，禁止寫成年輕男性。**只給名字、沒寫外觀時不要拒絕**——appearance 填「待補外觀描述」，每個名字各一張 add_character（最多 6）。禁止只回「我目前無法建立角色」卻讓 actions=[]。禁止改用 add_database_row／素材清單假裝建角色。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/add_database_row/add_character/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
@@ -1639,7 +1647,9 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             // 記下最後一次實際用到的供應商——auto 模式可能中途轉備援，UI 要能誠實顯示
             usedProvider = completion.provider;
             usedModel = completion.model;
-            fellBackToPaid = fellBackToPaid || completion.fellBack;
+            fellBackToPaid = resolveFreeOnlyLlmMode(input.mode, input.message) === "nim"
+              ? false
+              : fellBackToPaid || completion.fellBack;
             return completion.text;
           },
           tryToolCall: (json) => {
@@ -1729,11 +1739,14 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           };
         }
         const reply = outcome.reply;
+        const rawActions = allowWrite
+          ? dropMisroutedCharacterDatabaseActions(input.message, reply.rawActions)
+          : reply.rawActions;
         const characterProposals = allowWrite
-          ? collectAddCharacterProposals(input.message, reply.rawActions, characterRows)
+          ? collectAddCharacterProposals(input.message, rawActions, characterRows)
           : [];
-        const modelHadCharacter = reply.rawActions.some((action) => action.type === "add_character");
-        const otherActions = resolve(reply.rawActions.filter((action) => action.type !== "add_character"));
+        const modelHadCharacter = rawActions.some((action) => action.type === "add_character");
+        const otherActions = resolve(rawActions.filter((action) => action.type !== "add_character"));
         const characterActions = resolve(characterProposals);
         const actions = [...characterActions, ...otherActions].slice(0, 6);
         const injectedCharacters = characterProposals.length > 0 && !modelHadCharacter;
