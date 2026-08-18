@@ -98,6 +98,7 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("button", { name: "更多" })).toHaveClass("active");
     await user.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("complementary", { name: "更多功能" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /建立專案/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /今日/ })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveAttribute("href", "/planner");
     expect(screen.getByRole("link", { name: /筆記排程/ })).toHaveClass("active");

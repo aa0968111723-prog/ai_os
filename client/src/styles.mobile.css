@@ -43,6 +43,27 @@
     gap: 10px;
   }
 
+  .m-current__head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .m-current__create {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 11px;
+    background: var(--muted);
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
   .m-current__eyebrow {
     font-size: 11px;
     font-weight: 700;

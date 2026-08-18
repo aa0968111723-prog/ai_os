@@ -6179,6 +6179,15 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .mobile-more-sheet__head > span { display: grid; }
   .mobile-more-sheet__head strong { font-size: var(--fs-15); }
   .mobile-more-sheet__head small { color: var(--fg-secondary); font-size: var(--fs-11); }
+  .mobile-more-sheet__create {
+    min-width: 0; min-height: 54px; width: 100%;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+    gap: 9px; margin-top: 10px; padding: 7px 8px; border: 0; border-radius: 12px;
+    background: var(--primary-tint); color: var(--primary-ink); text-align: left;
+  }
+  .mobile-more-sheet__create strong { font-size: var(--fs-13); }
+  .mobile-more-sheet__create small { color: var(--fg-secondary); font-size: var(--fs-11); }
+  .mobile-more-sheet__create > span:nth-child(2) { min-width: 0; display: grid; }
   .mobile-more-sheet__grid { display: grid; gap: 5px; margin-top: 10px; }
   /* 分組標題：面板收全站頁面後清單變長，分組讓它仍然一眼可掃（與 .menu-label 同語彙） */
   .mobile-more-sheet__label {

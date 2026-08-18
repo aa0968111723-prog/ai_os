@@ -16,6 +16,7 @@ describe("phone animation P0/P1 wiring", () => {
     expect(home).toContain("trpc.projects.create.useMutation");
     expect(home).toContain("跟 Aios 說它會建起來");
     expect(home).toContain("建立專案");
+    expect(home).toContain("m-current__create");
     expect(sheet).toContain("publishNewProjectIdea");
     expect(sheet).toContain("useIsPhone");
     expect(sheet).toContain("if (isPhone)");

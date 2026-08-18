@@ -6,6 +6,7 @@ import { useSheetSwipeDismiss } from "../../lib/useSheetSwipeDismiss";
 import { useAssistantComposeListener, useAssistantOpenListener } from "../../lib/assistantCompose";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { DESTINATIONS, destinationMatch, mobileMoreGroups, type Destination } from "../navigation/navigationItems";
+import { publishNewProjectIdea } from "../../lib/newProjectIdea";
 import { GlobalAssistantSheet } from "./GlobalAssistantSheet";
 import { useIsPhone } from "../../lib/viewport";
 
@@ -165,6 +166,19 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
                 <Icon name="X" size={16} />
               </Button>
             </div>
+            <button
+              type="button"
+              className="mobile-more-sheet__create"
+              onClick={() => {
+                setMoreOpen(false);
+                publishNewProjectIdea("");
+                navigate("/dashboard");
+              }}
+            >
+              <span className="mobile-more-sheet__icon"><Icon name="Plus" size={19} /></span>
+              <span><strong>建立專案</strong><small>開一個新案子，不走桌面 Launchpad</small></span>
+              <Icon name="ChevronRight" size={16} />
+            </button>
             <div className="mobile-more-sheet__grid">
               {groups.map((group) => (
                 <Fragment key={group.label}>
