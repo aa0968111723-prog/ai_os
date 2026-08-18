@@ -52,6 +52,44 @@ describe("header 剩 is the scoped wallet, never leftover 4708", () => {
     })).toBe(324);
   });
 
+  it("falPointsCap === leftover with only 週已用 7 still cannot paint 4704", () => {
+    expect(tightRemainingPoints({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4704,
+      falPointsCap: 4704,
+      weeklyQuota: null,
+      weeklyUsed: 7,
+    })).toBe(null);
+    expect(scopedTightRemaining({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4704,
+      falPointsCap: 4704,
+      weeklyQuota: null,
+      weeklyUsed: 7,
+    }, "g1", 324)).toBe(324);
+  });
+
+  it("falPointsCap === leftover never wins over weekly remaining", () => {
+    const twin = {
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4704,
+      falPointsCap: 4704,
+      weeklyQuota: 331,
+      weeklyUsed: 7,
+    };
+    expect(twin.falPointsCap).toBe(twin.totalRemaining);
+    expect(tightRemainingPoints(twin)).toBe(324);
+    expect(tightRemainingPoints(twin)).not.toBe(4704);
+    expect(scopedTightRemaining(twin, "g1")).toBe(324);
+    expect(scopedWalletRemainingLabel(twin, "g1")).toBe("目前剩 324 點・本週 7/331");
+  });
+
   it("uses Fal cap as the ~320 wallet when member/group caps are missing", () => {
     expect(tightRemainingPoints({
       groupId: "g1",

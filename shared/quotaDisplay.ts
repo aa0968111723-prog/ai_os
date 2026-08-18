@@ -39,7 +39,9 @@ function weeklyRemainingPoints(data: QuotaMyView): number | null {
 export function scopedWalletCaps(data: QuotaMyView): number[] {
   // Leftover-scale Fal (~4704) is the same 站內總預算 leftover, not the ~320 wallet.
   // Live after #790: 剩 4,704・週已用 7 — weekly remaining is the scoped family.
-  const fal = isSiteLeftoverScale(data.falPointsCap) ? null : (data.falPointsCap ?? null);
+  // falPointsCap === leftover is the same 4708 pool even when the number dips.
+  const leftoverTwin = data.falPointsCap != null && data.falPointsCap === data.totalRemaining;
+  const fal = leftoverTwin || isSiteLeftoverScale(data.falPointsCap) ? null : (data.falPointsCap ?? null);
   return [data.memberBudgetRemaining, data.groupBudgetRemaining, weeklyRemainingPoints(data), fal].filter(
     (value): value is number => value != null && !isSiteLeftoverScale(value),
   );
@@ -53,7 +55,8 @@ export function tightRemainingPoints(data: QuotaMyView): number | null {
   const scoped = scopedWalletCaps(data);
   // Leftover-only (member/group/Fal all null) is the 4,708 flash — not a wallet.
   if (scoped.length === 0) return null;
-  const leftover = data.totalRemaining;
+  // Leftover-scale 站內總預算 must not win via Math.min when falPointsCap === leftover.
+  const leftover = isSiteLeftoverScale(data.totalRemaining) ? null : data.totalRemaining;
   return leftover != null ? Math.min(...scoped, leftover) : Math.min(...scoped);
 }
 

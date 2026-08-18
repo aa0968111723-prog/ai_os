@@ -58,6 +58,14 @@ function stubViewport(compact: boolean) {
 describe("AccountMenu", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("paints scoped 324, not leftover 4704, when falPointsCap === leftover", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu {...props} />);
+    await user.click(screen.getByRole("button", { name: /Bruce/ }));
+    expect(screen.getByText("剩 324 點")).toBeInTheDocument();
+    expect(screen.queryByText(/剩 4,704/)).toBeNull();
+  });
+
   it("moves focus into the menu and returns it on Escape", async () => {
     const user = userEvent.setup();
     render(<AccountMenu {...props} />);

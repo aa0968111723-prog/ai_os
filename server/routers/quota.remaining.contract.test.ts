@@ -23,6 +23,7 @@ describe("quota.my remaining is ledger, not Fal USD", () => {
     expect(header).toContain("不是組員錢包");
     expect(display).toContain("Never paint 站內總預算 leftover");
     expect(display).toContain("SITE_LEFTOVER_FAMILY_MIN");
+    expect(display).toContain("falPointsCap === leftover");
     expect(generate).toContain("scopedWalletRemainingLabel");
     expect(generate).not.toContain("quota.data.totalRemaining");
   });
