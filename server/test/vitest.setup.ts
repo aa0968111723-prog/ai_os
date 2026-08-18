@@ -9,12 +9,19 @@
  * DATABASE_URL is only remapped when it clearly points at an internal/cloud
  * leftover. CI's test job leaves it unset (pg suites skip). A genuine
  * localhost / 127.0.0.1 URL is left alone.
+ *
+ * After loadLocalEnv(), pin E2E_MOCK/MOCK_BILLING as "" so later loadEnv()
+ * calls in individual files cannot refill "1" from `.env` (isMockMode is
+ * true only when E2E_MOCK==="1"). Re-unset APP_URL/PUBLIC_DOMAIN/S3 leftovers
+ * that `.env` may put back.
  */
+import { loadLocalEnv } from "../bootstrap/loadEnv";
+
 function unset(...keys: string[]) {
   for (const key of keys) delete process.env[key];
 }
 
-unset(
+const LEFTOVER_KEYS = [
   "S3_ENDPOINT",
   "S3_BUCKET",
   "S3_ACCESS_KEY_ID",
@@ -39,7 +46,10 @@ unset(
   "GEMINI_API_KEY",
   "GEMINI_LIVE_CERT_ON_BOOT",
   "E2E_MOCK",
-);
+  "MOCK_BILLING",
+] as const;
+
+unset(...LEFTOVER_KEYS);
 
 const raw = process.env.DATABASE_URL?.trim() ?? "";
 if (raw) {
@@ -54,3 +64,26 @@ if (raw) {
     /* leave malformed URLs for the suite that asserts on them */
   }
 }
+
+loadLocalEnv();
+
+unset(
+  "S3_ENDPOINT",
+  "S3_BUCKET",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+  "S3_ACCESS_KEY",
+  "S3_SECRET_KEY",
+  "MINIO_ENDPOINT",
+  "MINIO_BUCKET",
+  "MINIO_ACCESS_KEY",
+  "MINIO_SECRET_KEY",
+  "FAL_KEY",
+  "FAL_ADMIN_KEY",
+  "GEMINI_API_KEY",
+  "APP_URL",
+  "PUBLIC_DOMAIN",
+  "RAILWAY_PUBLIC_DOMAIN",
+);
+process.env.E2E_MOCK = "";
+process.env.MOCK_BILLING = "";
