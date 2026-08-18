@@ -24,13 +24,70 @@ export type { AppRouter };
  *
  * `sessionBoot.bootstrap` 實測應約 200ms 量級，多一個 HTTP 往返可忽略；換來的是**頂欄與主內容不再跟慢外呼共命運**。
  */
+/**
+ * story.parse / generateStoryboard 走獨立連結＋客戶端逾時。
+ * 伺服器短稿預算 ~65s、長稿 ~105s；閘道曾在 150s 切斷且 UI 無限等。
+ * 120s 高於伺服器預算、低於閘道，逾時當可恢復錯誤而不是掛死。
+ */
+export const STORY_MUTATION_CLIENT_TIMEOUT_MS = 120_000;
+
+export function isTimedStoryProcedure(path: string): boolean {
+  return path === "story.parse" || path === "story.generateStoryboard";
+}
+
+export function storyMutationTimeoutMessage(path: string): string {
+  return path === "story.generateStoryboard"
+    ? "產生分鏡逾時（已中止）。請再試一次。"
+    : "解析逾時（已中止，沒有寫入）。請再試一次，或把稿再短一點。";
+}
+
+export function isAbortOrTimeoutError(err: unknown): boolean {
+  if (err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError")) return true;
+  if (!(err instanceof Error)) return false;
+  return /aborted|abort|timeout|逾時/i.test(err.message);
+}
+
 function shouldUseStandaloneLink(path: string): boolean {
   return (
     path.startsWith("auth.") ||
     path.startsWith("sessionBoot.") ||
     path.startsWith("generation.status") ||
-    path.startsWith("quota.")
+    path.startsWith("quota.") ||
+    isTimedStoryProcedure(path)
   );
+}
+
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const any = (AbortSignal as typeof AbortSignal & {
+    any?: (input: AbortSignal[]) => AbortSignal;
+  }).any;
+  if (typeof any === "function") return any(signals);
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      ctrl.abort();
+      break;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  return ctrl.signal;
+}
+
+export async function fetchWithStoryTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = init?.signal ? mergeAbortSignals([init.signal, timeout]) : timeout;
+  try {
+    return await fetch(input, { ...init, signal });
+  } catch (err) {
+    if (isAbortOrTimeoutError(err)) throw new Error(timeoutMessage);
+    throw err;
+  }
 }
 
 export function createTrpcClient() {
@@ -38,9 +95,28 @@ export function createTrpcClient() {
   return trpc.createClient({
     links: [
       splitLink({
-        condition: (op) => shouldUseStandaloneLink(op.path),
-        true: httpLink({ url, transformer: superjson }),
-        false: httpBatchLink({ url, transformer: superjson }),
+        condition: (op) => isTimedStoryProcedure(op.path),
+        true: httpLink({
+          url,
+          transformer: superjson,
+          fetch: (input, init) => {
+            const href = String(input instanceof Request ? input.url : input);
+            const path = href.includes("story.generateStoryboard")
+              ? "story.generateStoryboard"
+              : "story.parse";
+            return fetchWithStoryTimeout(
+              input,
+              init,
+              STORY_MUTATION_CLIENT_TIMEOUT_MS,
+              storyMutationTimeoutMessage(path),
+            );
+          },
+        }),
+        false: splitLink({
+          condition: (op) => shouldUseStandaloneLink(op.path),
+          true: httpLink({ url, transformer: superjson }),
+          false: httpBatchLink({ url, transformer: superjson }),
+        }),
       }),
     ],
   });
