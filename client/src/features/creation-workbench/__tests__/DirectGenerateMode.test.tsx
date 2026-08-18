@@ -43,10 +43,10 @@ vi.mock("../../../api", () => ({
         useQuery: () => ({
           data: {
             groupId: "group-1",
-            totalRemaining: 4708,
-            falPointsCap: 324,
-            weeklyQuota: 50,
-            weeklyUsed: 3,
+            totalRemaining: 4704,
+            falPointsCap: 4704,
+            weeklyQuota: 331,
+            weeklyUsed: 7,
             dailyQuota: null,
             dailyUsed: 0,
             memberBudgetRemaining: null,

@@ -40,6 +40,18 @@ describe("header 剩 is the scoped wallet, never leftover 4708", () => {
     }, "g1", 325)).toBe(324);
   });
 
+  it("uses weekly remaining as the ~320 wallet when leftover and Fal are 4704-scale", () => {
+    expect(tightRemainingPoints({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4704,
+      falPointsCap: 4704,
+      weeklyQuota: 331,
+      weeklyUsed: 7,
+    })).toBe(324);
+  });
+
   it("uses Fal cap as the ~320 wallet when member/group caps are missing", () => {
     expect(tightRemainingPoints({
       groupId: "g1",
@@ -126,11 +138,11 @@ describe("header 剩 is the scoped wallet, never leftover 4708", () => {
       groupId: "g1",
       memberBudgetRemaining: null,
       groupBudgetRemaining: null,
-      totalRemaining: 4705,
-      falPointsCap: 324,
-      weeklyQuota: 50,
-      weeklyUsed: 3,
-    }, "g1")).toBe("目前剩 324 點・本週 3/50");
+      totalRemaining: 4704,
+      falPointsCap: 4704,
+      weeklyQuota: 331,
+      weeklyUsed: 7,
+    }, "g1")).toBe("目前剩 324 點・本週 7/331");
   });
 
   it("persists last scoped remaining and refuses leftover-scale poison", () => {

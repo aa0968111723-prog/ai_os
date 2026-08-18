@@ -31,9 +31,17 @@ export function isSiteLeftoverScale(value: number | null | undefined): boolean {
   return value != null && Number.isFinite(value) && value >= SITE_LEFTOVER_FAMILY_MIN;
 }
 
+function weeklyRemainingPoints(data: QuotaMyView): number | null {
+  if (data.weeklyQuota == null) return null;
+  return Math.max(0, data.weeklyQuota - (data.weeklyUsed ?? 0));
+}
+
 export function scopedWalletCaps(data: QuotaMyView): number[] {
-  return [data.memberBudgetRemaining, data.groupBudgetRemaining, data.falPointsCap ?? null].filter(
-    (value): value is number => value != null,
+  // Leftover-scale Fal (~4704) is the same 站內總預算 leftover, not the ~320 wallet.
+  // Live after #790: 剩 4,704・週已用 7 — weekly remaining is the scoped family.
+  const fal = isSiteLeftoverScale(data.falPointsCap) ? null : (data.falPointsCap ?? null);
+  return [data.memberBudgetRemaining, data.groupBudgetRemaining, weeklyRemainingPoints(data), fal].filter(
+    (value): value is number => value != null && !isSiteLeftoverScale(value),
   );
 }
 
