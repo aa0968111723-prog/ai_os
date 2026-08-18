@@ -191,4 +191,8 @@ describe("Inspector 不新增資料格式", () => {
     expect(studio).not.toContain("insertQueueOriginRef");
     expect(studio).not.toMatch(/insertQueueRef\.current\?\.reset\(\)/);
   });
+
+  it("queue 完成時只跟著目前還停在 origin 的那一鏡，不搶走已切走的選取", () => {
+    expect(studio).toContain("activeShotIdRef.current === variables.sceneId");
+  });
 });

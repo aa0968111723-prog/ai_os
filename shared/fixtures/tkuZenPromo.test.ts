@@ -1,4 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { CHAR_APPEARANCE_MAX, CHAR_NOTES_MAX } from "../cardLimits";
+import {
+  SCRIPT_ACTION_MAX,
+  SCRIPT_DIALOGUE_MAX,
+  SCRIPT_PROMPT_MAX,
+  SCRIPT_TITLE_MAX,
+} from "../storyboardScript";
 import {
   TKU_ZEN_ACTS,
   TKU_ZEN_CHARACTERS,
@@ -53,6 +60,20 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     ].join("\n");
     expect(tkuZenHasForbidden(blob)).toEqual([]);
     expect(TKU_ZEN_FORBIDDEN).toContain("白帽T");
+  });
+
+  it("keeps seeded fields inside character / script write limits", () => {
+    for (const card of TKU_ZEN_CHARACTERS) {
+      expect(card.appearance.length, card.name).toBeLessThanOrEqual(CHAR_APPEARANCE_MAX);
+      expect(card.notes.length, card.name).toBeLessThanOrEqual(CHAR_NOTES_MAX);
+    }
+    for (const shot of TKU_ZEN_SHOTS) {
+      expect(shot.title.length, shot.title).toBeLessThanOrEqual(SCRIPT_TITLE_MAX);
+      expect(shot.prompt.length, shot.title).toBeLessThanOrEqual(SCRIPT_PROMPT_MAX);
+      expect(shot.dialogue.length, shot.title).toBeLessThanOrEqual(SCRIPT_DIALOGUE_MAX);
+      expect(shot.action.length, shot.title).toBeLessThanOrEqual(SCRIPT_ACTION_MAX);
+    }
+    expect(TKU_ZEN_LOOKS[0]?.costume.length).toBeGreaterThan(10);
   });
 
   it("pins the lock-sheet library paths", () => {

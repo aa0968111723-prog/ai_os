@@ -87,6 +87,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   // 白板本體、切鏡與存檔都在 useBoardSession（會弄丟畫作的邏輯集中在那裡，並有測試盯著）
   const { board, activeShotId, draftIds, storageFull, switchTo, pushStroke, undo, redo, clear, markSaved } =
     useBoardSession(projectId, boardSize, layout);
+  const activeShotIdRef = useRef(activeShotId);
+  activeShotIdRef.current = activeShotId;
   const shot = shots.find((s) => s.id === activeShotId) ?? null;
   const shotIndex = shot ? shots.findIndex((s) => s.id === shot.id) : -1;
 
@@ -247,9 +249,13 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const reorder = trpc.scenes.reorder.useMutation({ onSuccess: invalidateScenes });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
   const insertAfter = trpc.scenes.insertAfter.useMutation({
-    onSuccess: (created) => {
+    onSuccess: (created, variables) => {
       invalidateScenes();
-      if (created?.id) switchTo(created.id);
+      // Follow the new row only if the user is still on the shot we inserted
+      // after. Queued A's ACK must not steal selection after they moved to B.
+      if (created?.id && activeShotIdRef.current === variables.sceneId) {
+        switchTo(created.id);
+      }
     },
   });
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);

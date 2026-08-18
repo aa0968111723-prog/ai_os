@@ -3,7 +3,7 @@ import { createShotFieldSaveGate } from "./shotFieldSaveGate";
 
 describe("createShotFieldSaveGate", () => {
   it("queues the second field until the first ACK, then sends with the new rev", () => {
-    const sent: Array<{ keys: string[]; expectedRev: number }> = [];
+    const sent: Array<{ keys: string[]; expectedRev: number | undefined }> = [];
     let serverRev = 4;
     const gate = createShotFieldSaveGate({
       send: (req) => sent.push({ keys: Object.keys(req.patch), expectedRev: req.expectedRev }),
