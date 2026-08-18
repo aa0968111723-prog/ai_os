@@ -21,4 +21,10 @@ describe("StoryStage parse chips", () => {
     expect(src).not.toMatch(/scrollToSelector\("#stage-board"\)/);
     expect(src).not.toMatch(/<StoryInlineSection\b/);
   });
+
+  it("serializes autosave through createStorySaveGate (no overlapping expectedRev)", () => {
+    expect(src).toMatch(/createStorySaveGate/);
+    expect(src).toMatch(/gateRef\.current\?\.dispatch\(live\)/);
+    expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
+  });
 });

@@ -11,6 +11,7 @@ import { markBootReady } from "../services/boot";
 import type { AuthState } from "../services/auth";
 import { scenesRouter } from "./scenes";
 import { assistantRouter } from "./assistant";
+import { storyRouter } from "./story";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 const d = RUN_PG ? describe : describe.skip;
@@ -30,6 +31,7 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
   afterAll(async () => {
     for (const projectId of leftovers.projects) {
       await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
+      await db.delete(schema.stories).where(eq(schema.stories.projectId, projectId));
       await db.delete(schema.characterLooks).where(eq(schema.characterLooks.projectId, projectId));
       await db.delete(schema.characters).where(eq(schema.characters.projectId, projectId));
       await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
@@ -131,5 +133,65 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, shot.id));
     expect(fresh.title).toBe("助手改過的標題");
     expect(fresh.rev).toBeGreaterThan(shot.rev);
+  });
+
+  it("assistant create_scene inserts a real shot and returns its id", async () => {
+    const { project, ctx } = await seed("助手新增分鏡");
+    const assistant = assistantRouter.createCaller(ctx as never);
+    const result = await assistant.runAction({
+      projectId: project.id,
+      action: {
+        type: "create_scene",
+        title: "助手新加的一鏡",
+        voiceover: "燈籠還在手上",
+        prompt: "小蓮停在街口",
+        durationSec: 4,
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("create_scene");
+    if (result.kind !== "create_scene") return;
+    const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, result.sceneId));
+    expect(fresh.title).toBe("助手新加的一鏡");
+    expect(fresh.voiceover).toBe("燈籠還在手上");
+    expect(fresh.prompt).toBe("小蓮停在街口");
+    expect(fresh.durationSec).toBe(4);
+    expect(fresh.deletedAt).toBeNull();
+  });
+
+  it("overlapping story.save with the same expectedRev: one wins, latest retry persists", async () => {
+    const { project, ctx } = await seed("故事重疊存檔");
+    const story = storyRouter.createCaller(ctx as never);
+    const first = await story.save({ projectId: project.id, content: "起點" });
+    const [a, b] = await Promise.allSettled([
+      story.save({
+        projectId: project.id,
+        content: "A較短",
+        expectedRev: first.rev,
+        baseline: "起點",
+      }),
+      story.save({
+        projectId: project.id,
+        content: "B這一份比較長而且是最新草稿",
+        expectedRev: first.rev,
+        baseline: "起點",
+      }),
+    ]);
+    const fulfilled = [a, b].filter((row) => row.status === "fulfilled");
+    const rejected = [a, b].filter((row) => row.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const got = await story.get({ projectId: project.id });
+    expect(["A較短", "B這一份比較長而且是最新草稿"]).toContain(got.story?.content);
+    const latest = "B這一份比較長而且是最新草稿";
+    const saved = await story.save({
+      projectId: project.id,
+      content: latest,
+      expectedRev: got.story?.rev,
+      baseline: got.story?.content,
+    });
+    expect(saved.rev).toBeGreaterThan(got.story?.rev ?? 0);
+    const again = await story.get({ projectId: project.id });
+    expect(again.story?.content).toBe(latest);
   });
 });

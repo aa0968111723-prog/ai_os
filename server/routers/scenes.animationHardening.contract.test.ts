@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 const scenes = readFileSync(join(process.cwd(), "server/routers/scenes.ts"), "utf8");
 const assistant = readFileSync(join(process.cwd(), "server/routers/assistant.ts"), "utf8");
 const inspector = readFileSync(join(process.cwd(), "client/src/features/animation-studio/ShotInspector.tsx"), "utf8");
+const storyStage = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryStage.tsx"), "utf8");
 
 describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
@@ -46,5 +47,13 @@ describe("animation shot writes stay consistent", () => {
 
   it("Shot Inspector sends lookIds when toggling a character", () => {
     expect(inspector).toContain("setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks })");
+  });
+
+  it("story autosave serializes in-flight saves and does not baseline from live editor", () => {
+    expect(storyStage).toContain("createStorySaveGate");
+    expect(storyStage).toContain("gateRef.current?.dispatch(live)");
+    expect(storyStage).not.toContain("baselineRef.current = contentRef.current");
+    expect(assistant).toContain('if (a.type === "create_scene")');
+    expect(assistant).toContain("publishToProject(project.id");
   });
 });

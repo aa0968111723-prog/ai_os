@@ -3,7 +3,7 @@
  * 比畫面壞更難發現，必須逐狀態鎖行為。
  */
 import { describe, it, expect } from "vitest";
-import { shouldAdoptRemote, summaryChips } from "./storyDraft";
+import { createStorySaveGate, shouldAdoptRemote, summaryChips } from "./storyDraft";
 
 describe("shouldAdoptRemote", () => {
   it("尚未種初值（local=null）一律採用伺服器內容", () => {
@@ -48,5 +48,72 @@ describe("summaryChips", () => {
       pending: 2,
     });
     expect(withMarks.some((c) => c.label === "標記 3")).toBe(true);
+  });
+});
+
+describe("createStorySaveGate", () => {
+  function setup() {
+    const sent: Array<{ content: string; expectedRev: number | undefined; baseline: string | undefined }> = [];
+    let rev: number | undefined = 0;
+    let baseline: string | undefined = "起點";
+    const gate = createStorySaveGate({
+      send: (req) => sent.push(req),
+      getRev: () => rev,
+      getBaseline: () => baseline,
+      setRev: (next) => {
+        rev = next;
+      },
+      setBaseline: (next) => {
+        baseline = next;
+      },
+    });
+    return { gate, sent, getRev: () => rev, getBaseline: () => baseline };
+  }
+
+  it("in-flight 時把更新的草稿排隊，ACK 後用新 rev 只送最新一份", () => {
+    const { gate, sent, getRev, getBaseline } = setup();
+    expect(gate.dispatch("第一版")).toBe("dispatched");
+    expect(gate.dispatch("第二版")).toBe("queued");
+    expect(gate.dispatch("第三版・最新")).toBe("queued");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ content: "第一版", expectedRev: 0, baseline: "起點" });
+    expect(gate.peekQueue()).toBe("第三版・最新");
+
+    expect(gate.onAck("第一版", 1)).toBe("dispatched");
+    expect(getRev()).toBe(1);
+    expect(getBaseline()).toBe("第一版");
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual({ content: "第三版・最新", expectedRev: 1, baseline: "第一版" });
+  });
+
+  it("排隊內容與剛存進去的相同就結束，不再連打一發空轉", () => {
+    const { gate, sent } = setup();
+    gate.dispatch("同一份");
+    gate.dispatch("同一份");
+    expect(gate.onAck("同一份", 1)).toBe("idle");
+    expect(sent).toHaveLength(1);
+    expect(gate.peekQueue()).toBeNull();
+  });
+
+  it("衝突時丟掉排隊，避免每 800ms 再撞同一面牆", () => {
+    const { gate } = setup();
+    gate.dispatch("第一版");
+    gate.dispatch("第二版");
+    expect(gate.onFail("conflict")).toBe("conflict");
+    expect(gate.isInFlight()).toBe(false);
+    expect(gate.peekQueue()).toBeNull();
+  });
+
+  it("whenIdle 等 in-flight 與排隊都清完才回，給一鍵生成前的 flush 用", () => {
+    const { gate } = setup();
+    const results: Array<string> = [];
+    gate.dispatch("第一版");
+    gate.dispatch("第二版");
+    gate.whenIdle((r) => results.push(r.ok ? "idle" : r.reason));
+    expect(results).toEqual([]);
+    gate.onAck("第一版", 1);
+    expect(results).toEqual([]);
+    gate.onAck("第二版", 2);
+    expect(results).toEqual(["idle"]);
   });
 });

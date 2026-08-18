@@ -21,12 +21,15 @@
 # 前置：E2E_MOCK=1（假生成，免 FAL_KEY）、:3199、SEED_ADMIN_*、全新 DB。
 # 執行：見 scripts/run-animation-consistency.sh（自帶 DB 重置 + 起假生成伺服器）。
 # ─────────────────────────────────────────────────────────────────────────────
+import io
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 from e2e_lib import ok
 
@@ -564,7 +567,114 @@ shot3 = next(s for s in call("GET", admin, "scenes.listByProject", {"projectId":
 ok("助手改標題真的寫進 DB", shot3["title"] == "鏡3・特寫・道具物理・已由助手改名")
 ok("助手寫入推進了 rev（不是 raw UPDATE）", shot3["rev"] > rev_before)
 
-# ── 12. 給人看的證據摘要 ─────────────────────────────────────────────────
+# 11f. 助手 create_scene 必須真的插入分鏡（假完成守門）
+created = call("POST", admin, "assistant.runAction", {
+    "projectId": pid,
+    "action": {
+        "type": "create_scene",
+        "title": "助手新加的收尾之後",
+        "voiceover": "燈籠還在手上",
+        "prompt": "小蓮停在家門前",
+        "durationSec": 4,
+    },
+})
+ok("助手 create_scene 回 ok", isinstance(created, dict) and created.get("ok") and created.get("sceneId"))
+created_id = created.get("sceneId")
+listed_after_create = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+created_row = next((s for s in listed_after_create if s["id"] == created_id), None)
+ok("助手新增的分鏡在 DB／清單裡", created_row is not None)
+ok("助手新增分鏡的標題／旁白／提示詞都寫進去了",
+   created_row is not None
+   and created_row.get("title") == "助手新加的收尾之後"
+   and created_row.get("voiceover") == "燈籠還在手上"
+   and created_row.get("prompt") == "小蓮停在家門前")
+
+# 11g. 助手 generate（E2E_MOCK）不得回 ok 卻沒有 generation 列
+gen_act = call("POST", admin, "assistant.runAction", {
+    "projectId": pid,
+    "action": {
+        "type": "generate",
+        "prompt": "小蓮停在家門前，燈籠暖光",
+        "modelId": "fal-ai/flux/schnell",
+        "sceneId": created_id,
+    },
+})
+ok("助手 generate 回 ok 且有 generationId", isinstance(gen_act, dict) and gen_act.get("ok") and gen_act.get("generationId"))
+gen_st = wait_gen_done(admin, gen_act["generationId"]) if gen_act.get("generationId") else {}
+ok("助手 generate 的任務真的跑完（不是口頭完成）", isinstance(gen_st, dict) and gen_st.get("status") == "done")
+
+# ── 12. 故事存檔／重疊 expectedRev／save→reopen→export ──────────────
+STORY_V1 = "除夕夜，小蓮提著紅燈籠走在老街上。阿福跟在腳邊。"
+STORY_A = "除夕夜，小蓮提著紅燈籠走在老街上。阿福跟在腳邊。第一發較短。"
+STORY_B = "除夕夜，小蓮提著紅燈籠走在老街上。阿福跟在腳邊。第二發才是最新草稿，要留下來。"
+saved_story = call("POST", admin, "story.save", {"projectId": pid, "content": STORY_V1})
+ok("故事第一次存檔成功", isinstance(saved_story, dict) and "rev" in saved_story)
+reopen = call("GET", admin, "story.get", {"projectId": pid})
+ok("reopen 讀回剛才存的故事", ((reopen.get("story") or {}).get("content") == STORY_V1))
+
+overlap = [None, None]
+
+
+def _save_overlap(idx, text):
+    overlap[idx] = call("POST", admin, "story.save", {
+        "projectId": pid,
+        "content": text,
+        "expectedRev": saved_story.get("rev"),
+        "baseline": STORY_V1,
+    })
+
+
+t_a = threading.Thread(target=_save_overlap, args=(0, STORY_A))
+t_b = threading.Thread(target=_save_overlap, args=(1, STORY_B))
+t_a.start()
+t_b.start()
+t_a.join()
+t_b.join()
+ok_a = isinstance(overlap[0], dict) and "__error__" not in overlap[0]
+ok_b = isinstance(overlap[1], dict) and "__error__" not in overlap[1]
+ok("同一 expectedRev 重疊存檔不會兩發都成功", (ok_a ^ ok_b) or (ok_a and ok_b and overlap[0].get("rev") != overlap[1].get("rev")))
+after_overlap = call("GET", admin, "story.get", {"projectId": pid})
+overlap_text = (after_overlap.get("story") or {}).get("content")
+ok("重疊後故事是完整的一版（不是空白、不是兩份絞在一起）", overlap_text in (STORY_A, STORY_B, STORY_V1))
+retry = call("POST", admin, "story.save", {
+    "projectId": pid,
+    "content": STORY_B,
+    "expectedRev": (after_overlap.get("story") or {}).get("rev"),
+    "baseline": overlap_text,
+})
+ok("用當前 rev 重送最新草稿成功", isinstance(retry, dict) and "__error__" not in retry)
+reopen2 = call("GET", admin, "story.get", {"projectId": pid})
+ok("save→reopen 最新故事仍在", ((reopen2.get("story") or {}).get("content") == STORY_B))
+
+# 同步交付包（與 scripts/e2e-export.py 同一條 /api/export/:id，不另起 harness）
+export_req = urllib.request.Request(f"{HOST}/api/export/{pid}")
+if admin.cookie:
+    export_req.add_header("Cookie", admin.cookie)
+export_code, export_bytes = 0, b""
+try:
+    with urllib.request.urlopen(export_req, timeout=180) as export_res:
+        export_code = export_res.status
+        export_bytes = export_res.read()
+except urllib.error.HTTPError as e:
+    export_code = e.code
+    export_bytes = e.read() if e.fp else b""
+    print(f"  交付包 HTTP {export_code}: {export_bytes[:240]!r}")
+ok("交付包下載 200", export_code == 200)
+ok("交付包是合法 zip", export_bytes[:2] == b"PK")
+export_names = set()
+script_md = ""
+if export_bytes[:2] == b"PK":
+    zf = zipfile.ZipFile(io.BytesIO(export_bytes))
+    export_names = set(zf.namelist())
+    if "05_文件/腳本與鏡頭表.md" in export_names:
+        script_md = zf.read("05_文件/腳本與鏡頭表.md").decode("utf-8")
+ok("交付包含腳本與鏡頭表", "05_文件/腳本與鏡頭表.md" in export_names)
+ok("鏡頭表寫進了鏡1標題", "鏡1・大遠景・出發" in script_md)
+ok("鏡頭表寫進了助手改過的鏡3標題", "鏡3・特寫・道具物理・已由助手改名" in script_md)
+ok("鏡頭表寫進了鏡1動作（不是空表）", "小蓮邁開腳步往前走" in script_md)
+ok("鏡頭表寫進了助手新加的分鏡", "助手新加的收尾之後" in script_md)
+
+# ── 13. 給人看的證據摘要 ─────────────────────────────────────────────────
 print("\n──────── 證據摘要（一鏡的完整組裝提示詞）────────")
 if first_preview_pos:
     print(first_preview_pos[:1200])
