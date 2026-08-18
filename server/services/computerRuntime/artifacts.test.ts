@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { scanArtifactBytes, sniffMime } from "./artifacts";
+
+const source = readFileSync(new URL("./artifacts.ts", import.meta.url), "utf8");
 
 describe("artifact scan / mime", () => {
   it("sniffs png and jpeg", () => {
@@ -19,5 +22,9 @@ describe("artifact scan / mime", () => {
 
   it("rejects empty", () => {
     expect(scanArtifactBytes(Buffer.alloc(0)).status).toBe("failed");
+  });
+
+  it("soft-linking an imported artifact onto a shot bumps scene.rev", () => {
+    expect(source).toContain("rev: sql`${schema.scenes.rev} + 1`");
   });
 });
