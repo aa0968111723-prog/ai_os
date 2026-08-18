@@ -76,15 +76,14 @@ describe("animation shot writes stay consistent", () => {
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {
     expect(assistant).toContain("verifySceneWriteReadBack");
     expect(assistant).toContain("ASSISTANT_SCENE_READ_BACK_METHOD");
-    expect(assistant).toContain("authoritative_scene_row_read_back");
-    const updateStart = assistant.indexOf('if (a.type === "update_scene")');
-    const createStart = assistant.indexOf('if (a.type === "create_scene")');
-    const updateBlock = assistant.slice(updateStart, assistant.indexOf('if (a.type === "direct_shot")', updateStart));
-    const createBlock = assistant.slice(createStart, assistant.indexOf('if (a.type === "run_workflow")', createStart));
-    expect(updateBlock).toContain("verifySceneWriteReadBack");
-    expect(createBlock).toContain("verifySceneWriteReadBack");
-    expect(createBlock).toContain("voiceover");
-    expect(createBlock).toContain("durationSec");
+    expect(readFileSync(join(process.cwd(), "shared/assistantSceneReadBack.ts"), "utf8"))
+      .toContain('authoritative_scene_row_read_back');
+    const exec = assistant.slice(assistant.indexOf("async function applyAssistantScenePatch"));
+    expect(exec).toContain('if (a.type === "update_scene")');
+    expect(exec).toContain('if (a.type === "direct_shot")');
+    expect(exec).toContain('if (a.type === "create_scene")');
+    expect(exec.split("verifySceneWriteReadBack").length).toBeGreaterThan(3);
+    expect(exec).toContain("durationSec: Math.round(a.durationSec)");
   });
 });
 
