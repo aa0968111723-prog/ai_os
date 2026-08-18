@@ -48,6 +48,11 @@ import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
+import {
+  ASSISTANT_ASK_TIMEOUT_MESSAGE,
+  assistantAskTimedOut,
+  bindAssistantAskDeadline,
+} from "../services/assistantAskBudget";
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
@@ -1009,6 +1014,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
    * preview 這類專案助手特有的欄位仍走 emit 疊加，兩者共存不衝突。
    */
   const stream = new AgentEventStream(input.runId, (event) => onEvent?.(event));
+  const { signal: askSignal, deadline: askDeadline, dispose: disposeAskDeadline } = bindAssistantAskDeadline(input.signal);
   const emit = (
     phase: AskStreamEvent["phase"],
     text: string,
@@ -1027,7 +1033,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
     }
     throw error;
   }
-  {
+  try {
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       if (!input.auth.groups.some((g) => g.groupId === project.groupId)) throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
@@ -1570,7 +1576,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         type ProjectAskReply = { source: "reply" | "coerced" | "fallback"; answer: string; rawActions: z.infer<typeof proposalSchema>[] };
         const outcome = await runToolLoop<z.infer<typeof toolCallSchema>, ProjectAskReply, Awaited<ReturnType<typeof runLookupTool>>>({
           maxToolRounds: MAX_TOOL_ROUNDS,
-          signal: input.signal,
+          signal: askSignal,
           buildPrompt,
           /** 「思考中…」換成可理解的工作摘要：列出**已經取得**的來源（真實資料，非模型自述）。
               標題帶上使用者問的那句話（roundThinkingTitle），不同查詢的工作過程不再長得一模一樣（#669 U7）。 */
@@ -1594,7 +1600,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
               summary: `送出第 ${round + 1} 輪模型請求`,
               payload: { prompt, mode: input.mode ?? "nim", forceFinal },
             });
-            const completion = await callLlm(prompt, input.signal, input.mode);
+            const completion = await callLlm(prompt, askSignal, input.mode);
             await recordAiTraceEventSafely({
               sessionId: traceSessionId,
               eventType: "provider_response",
@@ -1681,6 +1687,13 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         });
         // 用戶端已斷線（SSE close）：提早收工不白燒免費額度。回傳值不會被寫回（sse 對已關閉連線是 no-op）。
         if (outcome.aborted || !outcome.reply) {
+          if (assistantAskTimedOut(askDeadline, input.signal)) {
+            stream.emit({ type: "agent.failed", title: "已停止（逾時）", status: "failed" });
+            return {
+              answer: ASSISTANT_ASK_TIMEOUT_MESSAGE, actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport,
+              runId: stream.runId, agentEvents: stream.snapshotEvents(), agentSources: stream.snapshotSources(),
+            };
+          }
           stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
           return {
             answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport,
@@ -1738,9 +1751,11 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
-        const answer = err instanceof NimServiceError || err instanceof LlmServiceError
-          ? err.message
-          : "AI 助手暫時沒回應，請稍後再問一次。";
+        const answer = assistantAskTimedOut(askDeadline, input.signal)
+          ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+          : err instanceof NimServiceError || err instanceof LlmServiceError
+            ? err.message
+            : "AI 助手暫時沒回應，請稍後再問一次。";
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "failed", summary: "專案助手呼叫失敗", payload: { error: err instanceof Error ? err.message : String(err) } });
         await updateAiTraceSession(traceSessionId, { status: "failed" }).catch(() => undefined);
         // 卡住的那一步要留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
@@ -1765,6 +1780,8 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           runId: stream.runId, agentEvents: stream.snapshotEvents(), agentSources: stream.snapshotSources(),
         };
       }
+  } finally {
+    disposeAskDeadline();
   }
 }
 
@@ -1948,6 +1965,12 @@ export const assistantRouter = router({
         }
         // 綁分鏡回填前，先比照 update_scene 驗證 sceneId 歸屬（同專案、未軟刪）——否則生成完成時
         // advanceGeneration 會以無範圍的 sceneId 把 assetId 寫進他專案／已軟刪分鏡（與姊妹分支不一致的漏檢）
+        if (!a.sceneId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "請指定要生成的分鏡（第 N 鏡）。沒有綁分鏡的生成只會進素材庫，專案頁看起來像沒反應。",
+          });
+        }
         if (a.sceneId) {
           const [scene] = await db
             .select({ id: schema.scenes.id })

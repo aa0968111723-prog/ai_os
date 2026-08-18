@@ -78,8 +78,11 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("assistantAskCompletionChip");
     expect(assistant).toContain("allowPaidFallback");
     expect(assistant).toContain("if (!a.sceneNo) continue");
+    expect(assistant).toContain("請指定要生成的分鏡");
     expect(assistant).toContain("expectedRev: scene.rev");
     expect(assistant).toContain("expectedRev: project.rev");
+    expect(assistant).toContain("bindAssistantAskDeadline");
+    expect(assistant).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
   });
 
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {

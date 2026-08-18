@@ -24,6 +24,11 @@ import {
   type TeamAskContext,
 } from "./teamAssistant";
 import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
+import {
+  ASSISTANT_ASK_TIMEOUT_MESSAGE,
+  assistantAskTimedOut,
+  bindAssistantAskDeadline,
+} from "../services/assistantAskBudget";
 import { createProjectCore, listProjectCreationOptions } from "../services/projectCore";
 import { getAgentReadableTable } from "../services/databaseMcp";
 import { executeDatabaseWriteCommand } from "../services/databaseCommand";
@@ -679,6 +684,8 @@ export async function runGlobalAsk(
    * 每一則事件都在對應的工作真的發生時才發出（見 services/agentEventStream 檔頭）。
    */
   const stream = new AgentEventStream(input.runId, onEvent);
+  const { signal: askSignal, deadline: askDeadline, dispose: disposeAskDeadline } = bindAssistantAskDeadline(input.signal);
+  try {
   stream.emit({
     type: "agent.started",
     title: "開始處理你的請求",
@@ -1376,7 +1383,7 @@ export async function runGlobalAsk(
       siteRefs,
       siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
     );
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
     const terminalStatus = executionTerminalStatus(
@@ -1518,7 +1525,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
   try {
     const outcome = await runToolLoop({
       maxToolRounds: MAX_TOOL_ROUNDS,
-      signal: input.signal,
+      signal: askSignal,
       buildPrompt,
       llm: async (prompt, round, forceFinal) => {
         if (traceSessionId) {
@@ -1533,7 +1540,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         const budget = parseGoalBudgetConstraints(goalFrame.constraints ?? []);
         const qualityMode: AgentPlannerMode = budget.freeOnly ? "nim" : (input.mode ?? "nim");
         const isPaidMode = qualityMode !== "nim";
-        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: input.signal });
+        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: askSignal });
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;
@@ -1636,6 +1643,13 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     });
 
     if (outcome.aborted || !outcome.reply) {
+      if (assistantAskTimedOut(askDeadline, input.signal)) {
+        stream.emit({ type: "agent.failed", title: "已停止（逾時）", status: "failed" });
+        if (traceSessionId) {
+          await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "failed", summary: ASSISTANT_ASK_TIMEOUT_MESSAGE }).catch(() => undefined);
+        }
+        return withTrace({ answer: ASSISTANT_ASK_TIMEOUT_MESSAGE, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: outcome.steps, mock: false, rationale: undefined, contextUsed: [], ...base });
+      }
       stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
       if (traceSessionId) {
         await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "stopped", summary: "用戶端中斷連線，提早收工" }).catch(() => undefined);
@@ -1648,7 +1662,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
     ]));
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
     const terminalStatus = executionTerminalStatus(
@@ -1710,12 +1724,17 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     await refund(auth.user.id, groupId, ASK_COST_POINTS, "全站助手失敗退回");
     // 用戶端斷線時 completeText 以「已取消」拋出——那是使用者走了，不是助手壞了：
     // trace 記 stopped 而非 failed，也不用把「已取消」當回答塞回死連線
-    const aborted = input.signal?.aborted === true;
+    const timedOut = assistantAskTimedOut(askDeadline, input.signal);
+    const aborted = askSignal.aborted === true && !timedOut;
     if (traceSessionId) {
       await finalizeSiteTraceSession({
         sessionId: traceSessionId,
         status: aborted ? "stopped" : "failed",
-        summary: aborted ? "用戶端中斷連線，提早收工" : err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
+        summary: aborted
+          ? "用戶端中斷連線，提早收工"
+          : timedOut
+            ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+            : err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
       }).catch(() => undefined);
     }
     if (aborted) {
@@ -1724,7 +1743,9 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     }
     // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功。
     // steps 用迴圈外收集的那份：中途炸掉不該讓「查過什麼」從回覆裡消失。
-    const answer = err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
+    const answer = timedOut
+      ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+      : err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
     // 卡住的那一步要在軌跡上留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
     if (pendingToolStep) {
       stream.finishStep(pendingToolStep, {
@@ -1743,6 +1764,9 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       description: collectedSteps.length ? `中斷前已完成 ${collectedSteps.length} 次查詢` : undefined,
     });
     return withTrace({ answer, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base });
+  }
+  } finally {
+    disposeAskDeadline();
   }
 }
 

@@ -406,4 +406,10 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).toContain("currentStoryBlock");
     expect(src).toContain("effectiveProjectId");
   });
+
+  it("binds the same 120s ask deadline as project assistant", () => {
+    expect(src).toContain("bindAssistantAskDeadline");
+    expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
+    expect(src).toContain("已停止（逾時）");
+  });
 });
