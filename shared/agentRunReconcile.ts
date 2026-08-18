@@ -62,5 +62,23 @@ export function applyIndependentGenerateToSteps(
     changed = true;
     return next;
   });
+  // Independent generateInto already reserved this shot. Leave the other
+  // unbilled generate steps pending and the leftover 6-step runner keeps
+  // starting Fal jobs — quoted 1, wallet −3, 週/日 +1.
+  if (waitForAdopt) {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      if (step.kind !== "generate") continue;
+      if (stepMatchesScene(step, input.sceneId, input.sceneNo)) continue;
+      if (step.generationId) continue;
+      if (step.status !== "pending" && step.status !== "running") continue;
+      steps[i] = {
+        ...step,
+        status: "waiting",
+        detail: "單格工作室已先生成一鏡，其餘鏡先暫停以免重複扣點",
+      };
+      changed = true;
+    }
+  }
   return { steps, changed, waitForAdopt };
 }

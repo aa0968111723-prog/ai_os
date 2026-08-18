@@ -18,7 +18,7 @@ function PointsBadge({ groupId }: { groupId: string }) {
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
   if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
-  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining } = my.data;
+  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining, falPointsCap } = my.data;
   // 徽章主數字＝最緊的「累計剩餘」：個人分配 → 組預算 → 全域總預算（任一為 null 即該層不限）
   const caps = [memberBudgetRemaining, groupBudgetRemaining, totalRemaining].filter((v): v is number => v != null);
   const label = caps.length > 0 ? `剩 ${Math.min(...caps).toLocaleString()}` : "不限";
@@ -47,6 +47,7 @@ function PointsBadge({ groupId }: { groupId: string }) {
     `本週已用 ${weeklyUsed}${weeklyQuota != null ? `／週額 ${weeklyQuota}` : ""}`,
     memberBudgetRemaining != null ? `個人預算剩 ${memberBudgetRemaining}` : null,
     groupBudgetRemaining != null ? `組預算剩 ${groupBudgetRemaining}` : null,
+    falPointsCap != null ? `平台 Fal 上限 ${falPointsCap}（守門用，不是週／日已用）` : null,
     "單位：站內點數",
   ].filter(Boolean);
   return (

@@ -25,7 +25,8 @@ describe("applyIndependentGenerateToSteps", () => {
       targetSceneId: "shot-1",
       note: "待你採用 · 第 1 鏡「鏡1」生成畫面",
     });
-    expect(out.steps.slice(1).every((s) => s.status === "pending" && !s.generationId)).toBe(true);
+    expect(out.steps.slice(1).every((s) => s.status === "waiting" && !s.generationId)).toBe(true);
+    expect(out.steps.slice(1).every((s) => s.detail?.includes("以免重複扣點"))).toBe(true);
   });
 
   it("marks the matching step done when the pointer already moved (auto-adopt / explicit Adopt)", () => {
