@@ -32,6 +32,7 @@ import {
   type ExistingStoryScene,
 } from "../../shared/story";
 import {
+  lockXiaohuaCopyFields,
   lockXiaohuaPlan,
   rewritePersistedXiaohuaShotCopy,
   scriptExplicitlyMaleXiaohua,
@@ -903,10 +904,11 @@ export async function materializeStoryboard(input: {
   const script = storyRow?.content ?? "";
 
   // 冪等：這個 run 已經轉過分鏡→直接回同一批（重按不重複建）
-  // Still rewrite 小華 他→她 on existing rows so a cached male plan cannot keep 他身上.
+  // Always rewrite 小華 他→她 on *all* project shots. reuse skips inserts,
+  // so a cached male plan would keep 他身上 without a project-wide pass.
   if (run.applied?.storyboard) {
     if (!scriptExplicitlyMaleXiaohua(script)) {
-      await rewriteExistingXiaohuaStoryboardCopy(run.applied.storyboard.sceneIds);
+      await rewriteProjectXiaohuaStoryboardCopy(project.id);
     }
     return { ...run.applied.storyboard, reused: true };
   }
@@ -1014,16 +1016,23 @@ export async function materializeStoryboard(input: {
         const lookIds = [...new Set(characterIds)]
           .map(soleLookOf)
           .filter((id): id is string => Boolean(id));
-        return {
-          projectId: project.id,
-          orderIndex: ++shotOrder,
+        const lockedShot = lockXiaohuaCopyFields({
           title: (shot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
-          durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
-          status: "todo" as const,
           prompt: shot.prompt,
           action: shot.action ?? null,
           dialogue: shot.dialogue ?? null,
           voiceover: shot.voiceover ?? null,
+        }, script);
+        return {
+          projectId: project.id,
+          orderIndex: ++shotOrder,
+          title: (lockedShot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
+          durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
+          status: "todo" as const,
+          prompt: lockedShot.prompt ?? shot.prompt,
+          action: lockedShot.action ?? null,
+          dialogue: lockedShot.dialogue ?? null,
+          voiceover: lockedShot.voiceover ?? null,
           storySceneId: storyScene.id,
           camera: shot.shotSize ? { shotSize: shot.shotSize } : null,
           performance: shot.emotion ? { emotion: shot.emotion } : null,
@@ -1049,11 +1058,16 @@ export async function materializeStoryboard(input: {
     const applied: ParseRunApplied = { ...(run.applied ?? {}), storyboard: { storySceneIds, sceneIds } };
     await tx.update(schema.parseRuns).set({ applied, updatedAt: new Date() }).where(eq(schema.parseRuns.id, run.id));
     return { storySceneIds, sceneIds, reused: false };
+  }).then(async (result) => {
+    if (!scriptExplicitlyMaleXiaohua(script)) {
+      await rewriteProjectXiaohuaStoryboardCopy(project.id);
+    }
+    return result;
   });
 }
 
-async function rewriteExistingXiaohuaStoryboardCopy(sceneIds: string[]): Promise<void> {
-  if (!sceneIds.length) return;
+/** generateStoryboard reuse leaves existing 他 titles; rewrite the whole project. */
+async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<void> {
   const rows = await db
     .select({
       id: schema.scenes.id,
@@ -1064,7 +1078,48 @@ async function rewriteExistingXiaohuaStoryboardCopy(sceneIds: string[]): Promise
       voiceover: schema.scenes.voiceover,
     })
     .from(schema.scenes)
-    .where(and(inArray(schema.scenes.id, sceneIds), isNull(schema.scenes.deletedAt)));
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
+  await persistXiaohuaShotRewrites(rows);
+
+  const storyScenes = await db
+    .select({
+      id: schema.storyScenes.id,
+      title: schema.storyScenes.title,
+      summary: schema.storyScenes.summary,
+      storyExcerpt: schema.storyScenes.storyExcerpt,
+    })
+    .from(schema.storyScenes)
+    .where(eq(schema.storyScenes.projectId, projectId));
+  for (const row of storyScenes) {
+    const next = lockXiaohuaCopyFields({
+      title: row.title,
+      prompt: row.summary ?? "",
+      action: row.storyExcerpt,
+    });
+    if (next.title === row.title && next.prompt === (row.summary ?? "") && next.action === row.storyExcerpt) {
+      continue;
+    }
+    await db
+      .update(schema.storyScenes)
+      .set({
+        title: next.title ?? row.title,
+        summary: next.prompt || null,
+        storyExcerpt: next.action ?? null,
+      })
+      .where(eq(schema.storyScenes.id, row.id));
+  }
+}
+
+async function persistXiaohuaShotRewrites(
+  rows: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    action: string | null;
+    dialogue: string | null;
+    voiceover: string | null;
+  }>,
+): Promise<void> {
   for (const row of rows) {
     const next = rewritePersistedXiaohuaShotCopy(row);
     if (
