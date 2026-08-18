@@ -31,6 +31,7 @@ import {
   type ParsedShot,
   type ExistingStoryScene,
 } from "../../shared/story";
+import { lockXiaohuaCharacters } from "../../shared/characterIdentityLock";
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
@@ -44,8 +45,8 @@ import {
 
 /**
  * Live cold-parse bracket on 405B/150s:
- *   21 字 OK ≤40s; 66 字 A-line OK ~35s; 301 字 full SHOTLIST FAIL 150s.
- * Threshold is between 66 and 301. A 60s promo must parse — 70B first under ~2000 chars.
+ *   21 字 OK ≤40s; 66 字 A-line OK ~35s; 161 字 A–D OK-but-slow ~2min; 301 字 A–F FAIL 150s.
+ * 161 sat on 405B. 70B first under ~2000 chars so 161 does not wait 2 min and 301 can finish.
  * First attempt ~45s so a 6-beat extract can finish (21/66 字 already take ~35–40s).
  * Do not rely on parsedContentHash cache.
  */
@@ -240,7 +241,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     };
   });
 
-  return { characters, locations, props, scenes };
+  return { characters: lockXiaohuaCharacters(characters, content), locations, props, scenes };
 }
 
 /* ── EXTRACT（真模式）：LLM 結構化抽取 ───────────────────────── */
@@ -261,6 +262,7 @@ function buildParsePrompt(input: {
 - 代名詞（她/他/那把傘）一律歸併到同一實體，不得拆成兩筆；把代名詞放進 aliases。
 - <既有卡> 已存在的實體：填 existingRef 用代號，不要重複建立；不確定是否同一人時 confidence 給低於 0.7。
 - appearance 是固定身份（Identity），costume 是本故事的可變造型（Look）——分開填，不可混寫。
+- 名字是「小華」且故事沒有寫她是男生時：appearance 必須是女性（大二化工、粉橘短髮女孩、白帽T）。禁止發明「年輕男性／男生／男孩」，禁止改成黑長直髮。既有卡已是女孩時一律沿用，不得改性別。
 - confidence 0～1：你有多確定「這是一個應該建卡的實體」。順帶一提的路人/背景物 confidence 給低。
 - scenes 最多 12 場、每場最多 8 鏡；durationSec 3～8。
 - 只准用名字或列出的代號，禁止輸出任何 UUID。
@@ -429,7 +431,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     }
     try {
       // Live/base L353 sent every cache-miss to flagship with a 150s hang.
-      // Bracket: 21 字 OK; 66 字 A-line OK ~35s; 301 字 SHOTLIST FAIL 150s. Hash cache is not a parse.
+      // Bracket: 21 OK; 66 A-line ~35s OK; 161 A–D ~2min OK-but-slow on 405B; 301 FAIL 150s. Hash cache is not a parse.
       // ≤2000 chars: 70B 45s then leftover 70B 25s. Do not restore an unbounded flagship first attempt.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
@@ -472,6 +474,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: cause ? `解析失敗，請重試（${cause}）` : "解析失敗，請重試" });
     }
   }
+
+  // Live A–D extracted 小華 as「年輕男性」. Name + script lock wins over model gender flip.
+  plan = { ...plan, characters: lockXiaohuaCharacters(plan.characters, sentStory) };
 
   /* ── NORMALIZE＋RESOLVE＋CONFIDENCE＋DIFF＋SAVE（單一交易） ── */
   const applied: ParseRunApplied = { createdCharacterIds: [], createdLocationIds: [], createdPropIds: [], createdLookIds: [], updated: [] };

@@ -6,7 +6,8 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
+import { TKU_ZEN_SHOTLIST_AD_PARSE, TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
 import { db, schema } from "../db";
 import { markBootReady } from "./boot";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
@@ -106,5 +107,61 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     expect(forced.skipped).not.toBe(true);
     expect(complete).toHaveBeenCalledOnce();
     expect(complete.mock.calls[0]?.[1]?.model).toBe(NIM_DEFAULT_MODEL);
+  });
+
+  it("161-char A–D cache-miss stays on 70B and refuses 年輕男性 for 小華", async () => {
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE.length).toBe(161);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
+
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "AdParse", email: `ad-parse-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-test-ad-first-parse", kind: "video", platform: "test", format: "9:16",
+    }).returning();
+    leftovers.projects.push(project.id);
+    await db.insert(schema.stories).values({
+      projectId: project.id,
+      groupId,
+      content: TKU_ZEN_SHOTLIST_AD_PARSE,
+    });
+
+    const flipped = mockStoryExtract(TKU_ZEN_SHOTLIST_AD_PARSE);
+    const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number }) => {
+      expect(opts.model).toBe(NIM_DEFAULT_MODEL);
+      expect(opts.model).not.toBe(NIM_REASONING_MODEL);
+      expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
+      return {
+        output: JSON.stringify({
+          ...flipped,
+          characters: [
+            { name: "小華", appearance: "年輕男性", costume: "黑長直髮", confidence: 0.95 },
+            { name: "禪定龜龜", appearance: "吉祥物龜龜", costume: "圓殼", confidence: 0.95 },
+          ],
+        }),
+        model: NIM_DEFAULT_MODEL,
+        downgraded: false,
+      };
+    });
+
+    const result = await runStoryParse({
+      userId,
+      projectId: project.id,
+      force: true,
+      assertAccess: () => undefined,
+      complete,
+    });
+    expect(result.skipped).not.toBe(true);
+    expect(complete).toHaveBeenCalledOnce();
+
+    const cards = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+    const xiaohua = cards.find((c) => c.name === "小華");
+    expect(xiaohua?.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
+    expect(xiaohua?.appearance).not.toContain("年輕男性");
+    expect(cards.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
   });
 });

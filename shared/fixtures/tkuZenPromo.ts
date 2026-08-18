@@ -1,6 +1,6 @@
 /**
  * The ONLY 小華 fixture: lip-sync SHOTLIST A–F (~60s).
- * Characters: 小華（大二化工、白帽T、短髮）+ 禪定龜龜.
+ * Characters: 小華（大二化工、白帽T、粉橘短髮女孩）+ 禪定龜龜.
  * D:\淡大劇本 七幕 is 安倢/慕恩 — not 小華. Do not mix. No 媽媽. No 茶會字卡 as a 幕.
  * B-roll 教室/超商 and 真人禪坐 are NOT lip-sync acts.
  */
@@ -24,11 +24,22 @@ export const TKU_ZEN_SHOTLIST_LINES = [
 ] as const;
 
 /**
- * Live A-line only (~66 字): 405B finished in ~35s.
- * Full A–F SHOTLIST (~301 字) still dies at 150s. Threshold is between these two.
+ * Live cold-parse bracket on 405B/150s (do not treat hash cache as a parse):
+ *   66 字 A-line ~35s OK
+ *   161 字 A–D ~2min OK-but-slow (sat on 405B)
+ *   301 字 A–F FAIL 150s
+ * 70B first-pass under ~2000 chars so 161 does not sit on 405B and 301 can finish.
  */
 export const TKU_ZEN_SHOTLIST_A_LINE =
   "A 校門口自我介紹。小華穿白帽T、短髮面向鏡頭她輕聲對鏡頭說出口了。我是大二化工系的小華。回想起大一的時光，說真的，有好多的不習慣。";
+
+/** Live overnight-test-ad A–D paste (~161 字). Must stay on 70B first-pass. */
+export const TKU_ZEN_SHOTLIST_AD_PARSE = [
+  "A 校門口自我介紹。小華，大二化工、白帽T、粉橘短髮女孩，面向鏡頭說：我是大二化工系的小華。回想起大一的時光，說真的，有好多的不習慣。",
+  "B 校園夕陽下。小華望向天空：宇宙呀，我能怎麼做？怎麼才能真正認識自己呢？",
+  "C 小華遇見禪定龜龜：咦？你是誰？",
+  "D 禪定龜龜：小華，我聽到你的困擾了。我是禪學社的禪定龜龜，我來拯救你了！",
+].join("\n");
 
 /**
  * Locked A–F SHOTLIST as a ~300-char / 6-paragraph first-parse paste.
@@ -53,17 +64,19 @@ export const TKU_ZEN_FORBIDDEN = [
   "針織外套",
   "粉橘短鮑伯",
   "宿舍夜",
+  "年輕男性",
+  "黑長直髮",
 ] as const;
 
-export const TKU_ZEN_XIAOHUA_COSTUME = "白帽T、短髮，腳本未換裝";
+export const TKU_ZEN_XIAOHUA_COSTUME = "白帽T、粉橘短髮，腳本未換裝";
 
-export const TKU_ZEN_XIAOHUA_IDENTITY = "大二化工、白帽T、短髮";
+export const TKU_ZEN_XIAOHUA_IDENTITY = "大二化工、粉橘短髮女孩、白帽T";
 
 export const TKU_ZEN_XIAOHUA_SHEETS = {
   costume: {
     file: "SHOTLIST.md",
     role: "costume-lock" as const,
-    description: "小華定裝鎖定：大二化工、白帽T、短髮。來源 lip-sync/SHOTLIST.md A–F。不換裝。",
+    description: "小華定裝鎖定：大二化工、白帽T、粉橘短髮女孩。來源 lip-sync/SHOTLIST.md A–F。不換裝。",
   },
 } as const;
 
@@ -308,7 +321,7 @@ export function tkuZenLibraryMapContent(): string {
     .join("\n");
   return [
     `本機素材庫（此 VM 讀不到磁碟時只鎖定路徑與定裝描述，不呼叫付費 FAL）：${TKU_ZEN_LIBRARY_ROOT}`,
-    "六句 SHOTLIST A–F。不是那條長稿。龜龜從第三句登場。小華白帽T、短髮，不換裝。",
+    "六句 SHOTLIST A–F。不是那條長稿。龜龜從第三句登場。小華白帽T、粉橘短髮女孩，不換裝。",
     "D:\\淡大劇本 那條長稿不是小華。不要寫進動畫組小華專案。",
     "",
     `小華 visual lock = ${TKU_ZEN_XIAOHUA_IDENTITY}／${TKU_ZEN_XIAOHUA_COSTUME}`,
@@ -326,13 +339,13 @@ export function tkuZenLibraryMapContent(): string {
 }
 
 export const TKU_ZEN_WORLDVIEW = {
-  logline: "大二化工、白帽T、短髮的小華，在第三句遇見禪學社的禪定龜龜。",
+  logline: "大二化工、白帽T、粉橘短髮女孩的小華，在第三句遇見禪學社的禪定龜龜。",
   message: "真正認識自己。",
   audience: "淡江大學同學",
   themes: ["自我認識", "禪學社"],
   tones: ["溫暖", "輕喜"],
   styles: ["2D 手繪動畫"],
-  people: ["小華：大二化工、白帽T、短髮", "禪定龜龜：吉祥物龜龜"],
+  people: ["小華：大二化工、白帽T、粉橘短髮女孩", "禪定龜龜：吉祥物龜龜"],
   taboos: ["不要寫進總會短影音／卉庭正式專案", "不要呼叫付費 FAL", "不要把那條長稿寫進小華", "不要改小華白帽T定裝"],
 };
 

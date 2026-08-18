@@ -263,11 +263,11 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   const xiaohua = snap.characters.find((c) => c.name === "小華");
   const turtle = snap.characters.find((c) => c.name === "禪定龜龜");
   if (!xiaohua || !turtle) throw new Error("core cards missing");
-  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("白帽T") || !xiaohua.appearance.includes("短髮")) {
-    throw new Error("小華 appearance lost 白帽T／短髮 lock");
+  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("白帽T") || !xiaohua.appearance.includes("粉橘短髮女孩")) {
+    throw new Error("小華 appearance lost 白帽T／粉橘短髮女孩 lock");
   }
-  if (xiaohua.appearance.includes("針織外套") || xiaohua.appearance.includes("粉橘") || xiaohua.appearance.includes("安倢")) {
-    throw new Error("小華 appearance mixed 七幕／針織外套 lock");
+  if (xiaohua.appearance.includes("針織外套") || xiaohua.appearance.includes("年輕男性") || xiaohua.appearance.includes("黑長直髮") || xiaohua.appearance.includes("安倢")) {
+    throw new Error("小華 appearance flipped gender or mixed 七幕 lock");
   }
   if (!turtle.appearance.includes("吉祥物龜龜")) throw new Error("龜龜 appearance lost 吉祥物龜龜 lock");
   if (!snap.presets.some((p) => p.name === "校門口")) throw new Error("校門口 preset missing");

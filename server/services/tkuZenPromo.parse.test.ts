@@ -12,6 +12,8 @@ describe("淡江禪學社 parse 150s fallback", () => {
     const plan = mockStoryExtract(TKU_ZEN_PROMO_SCRIPT);
     expect(plan.characters.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
     expect(plan.characters[0]?.appearance).toContain("大二化工");
+    expect(plan.characters[0]?.appearance).toContain("粉橘短髮女孩");
+    expect(plan.characters[0]?.appearance).not.toContain("年輕男性");
     expect(plan.characters[0]?.costume ?? "").toMatch(/白帽T|短髮/);
     expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["校門口", "夕陽"]));
     const spoken = plan.scenes

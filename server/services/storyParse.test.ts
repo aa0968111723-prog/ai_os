@@ -69,6 +69,15 @@ describe("mockStoryExtract", () => {
     expect(JSON.stringify(mockStoryExtract(SAMPLE))).toBe(JSON.stringify(mockStoryExtract(SAMPLE)));
   });
 
+  it("does not keep 年輕男性 when the script names 小華 as a 短髮女孩", () => {
+    const plan = mockStoryExtract("角色：小華（年輕男性）、禪定龜龜（吉祥物龜龜）\n造型：小華＝黑長直髮\n\n小華，大二化工、白帽T、粉橘短髮女孩，對鏡頭自我介紹。");
+    const xiaohua = plan.characters.find((c) => c.name === "小華");
+    expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
+    expect(xiaohua?.appearance).not.toContain("年輕男性");
+    expect(xiaohua?.costume).not.toContain("黑長直髮");
+    expect(xiaohua?.costume).toContain("白帽T");
+  });
+
   it("parse-fail 產生分鏡 reuses the same story-text plan (not a second product)", () => {
     expect(planStoryboardFromStoryText(SAMPLE)).toEqual(mockStoryExtract(SAMPLE));
     expect(planStoryboardFromStoryText("只有一句話").scenes.length).toBeGreaterThan(0);

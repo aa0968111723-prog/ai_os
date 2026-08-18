@@ -63,8 +63,9 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     expect(reloaded.acts).toHaveLength(6);
     expect(reloaded.characters.map((c) => c.name).sort()).toEqual(["小華", "禪定龜龜"]);
     expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("白帽T");
-    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("短髮");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("粉橘短髮女孩");
     expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("針織外套");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("年輕男性");
     expect(reloaded.characters.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
     expect(reloaded.presets.some((p) => p.name === "校門口")).toBe(true);
     expect(reloaded.presets.some((p) => p.name === "夕陽")).toBe(true);

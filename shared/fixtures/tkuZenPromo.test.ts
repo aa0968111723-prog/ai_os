@@ -17,6 +17,7 @@ import {
   TKU_ZEN_LOOKS,
   TKU_ZEN_PROMO_SCRIPT,
   TKU_ZEN_SHOTLIST_A_LINE,
+  TKU_ZEN_SHOTLIST_AD_PARSE,
   TKU_ZEN_SHOTLIST_FIRST_PARSE,
   TKU_ZEN_SHOTLIST_LINES,
   TKU_ZEN_SHOTS,
@@ -52,14 +53,26 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_SHOTLIST_A_LINE.length).toBeLessThan(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
   });
 
-  it("locks 小華 to 白帽T／短髮 A–F and keeps one unchanging look", () => {
+  it("A–D paste is the live 161-char OK-but-slow side of the 405B cliff", () => {
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE.length).toBe(161);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE.split("\n")).toHaveLength(4);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE).toContain(TKU_ZEN_SHOTLIST_LINES[3]);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE).toContain("粉橘短髮女孩");
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE).not.toContain("年輕男性");
+    expect(TKU_ZEN_SHOTLIST_A_LINE.length).toBeLessThan(TKU_ZEN_SHOTLIST_AD_PARSE.length);
+    expect(TKU_ZEN_SHOTLIST_AD_PARSE.length).toBeLessThan(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
+  });
+
+  it("locks 小華 to 白帽T／粉橘短髮女孩 A–F and keeps one unchanging look", () => {
     const xiaohua = TKU_ZEN_CHARACTERS.find((c) => c.key === "xiaohua");
     expect(xiaohua?.appearance).toBe(TKU_ZEN_XIAOHUA_APPEARANCE);
     expect(xiaohua?.appearance).toContain("大二化工");
     expect(xiaohua?.appearance).toContain("白帽T");
-    expect(xiaohua?.appearance).toContain("短髮");
+    expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
     expect(xiaohua?.appearance).not.toContain("針織外套");
-    expect(xiaohua?.appearance).not.toContain("粉橘");
+    expect(xiaohua?.appearance).not.toContain("年輕男性");
+    expect(xiaohua?.appearance).not.toContain("黑長直髮");
     expect(TKU_ZEN_LOOKS.filter((look) => look.character === "xiaohua")).toHaveLength(1);
     expect(TKU_ZEN_LOOKS.find((look) => look.character === "xiaohua")?.costume).toBe(TKU_ZEN_XIAOHUA_COSTUME);
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.name).toBe("校門口");
@@ -80,6 +93,8 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_FORBIDDEN).toContain("安倢");
     expect(TKU_ZEN_FORBIDDEN).toContain("七幕");
     expect(TKU_ZEN_FORBIDDEN).toContain("針織外套");
+    expect(TKU_ZEN_FORBIDDEN).toContain("年輕男性");
+    expect(TKU_ZEN_FORBIDDEN).toContain("黑長直髮");
     expect(TKU_ZEN_SHOTS.every((s) => s.dialogue.trim().length > 0)).toBe(true);
     expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/走上克難坡|茶會社課擺攤|收尾|第七幕/);
     expect(TKU_ZEN_ACTS[0]?.title).toContain("校門口");
@@ -114,7 +129,9 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(map).not.toContain("慕恩");
     expect(map).not.toContain("A1-S01");
     expect(map).not.toContain("成片稿");
-    expect(map).not.toContain("粉橘");
+    expect(map).toContain("粉橘短髮女孩");
+    expect(map).not.toContain("年輕男性");
+    expect(map).not.toContain("黑長直髮");
     expect(TKU_ZEN_LIBRARY.boards.files.join("\n")).not.toMatch(/A[1-4]-S/);
     expect(TKU_ZEN_LIBRARY.scripts.files.join("\n")).toContain("SHOTLIST.md");
   });
