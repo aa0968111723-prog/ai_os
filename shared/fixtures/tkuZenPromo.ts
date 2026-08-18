@@ -24,6 +24,13 @@ export const TKU_ZEN_SHOTLIST_LINES = [
 ] as const;
 
 /**
+ * Live A-line only (~66 字): 405B finished in ~35s.
+ * Full A–F SHOTLIST (~301 字) still dies at 150s. Threshold is between these two.
+ */
+export const TKU_ZEN_SHOTLIST_A_LINE =
+  "A 宿舍夜。小華坐在床沿，面向鏡頭她微笑。台燈把粉橘短鮑伯照得很軟。我是大二化工系的小華。回想起大一的時光，說真的，有好多的不習慣。";
+
+/**
  * Locked A–F SHOTLIST as a ~300-char / 6-paragraph first-parse paste.
  * Live overnight-test-shotlist-20260819 hung 150s on this size (not the 119-char cache hit).
  */

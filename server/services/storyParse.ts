@@ -43,9 +43,10 @@ import {
 } from "./nvidia-nim";
 
 /**
- * Live cold-parse bracket: 21 字 405B succeeded ≤40s; 301 字 SHOTLIST 405B died at 150s.
- * 70B first-pass under ~2000 chars. Give the first attempt ~45s so a 6-beat promo can
- * finish (a 20s fail-fast is too short — 21 字 already took up to 40s on 405B).
+ * Live cold-parse bracket on 405B/150s:
+ *   21 字 OK ≤40s; 66 字 A-line OK ~35s; 301 字 full SHOTLIST FAIL 150s.
+ * Threshold is between 66 and 301. A 60s promo must parse — 70B first under ~2000 chars.
+ * First attempt ~45s so a 6-beat extract can finish (21/66 字 already take ~35–40s).
  * Do not rely on parsedContentHash cache.
  */
 export const STORY_PARSE_SHORT_CHARS = 2_000;
@@ -428,7 +429,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     }
     try {
       // Live/base L353 sent every cache-miss to flagship with a 150s hang.
-      // Bracket: 21 字 405B ≤40s OK; 301 字 SHOTLIST 405B 150s FAIL. Hash cache is not a parse.
+      // Bracket: 21 字 OK; 66 字 A-line OK ~35s; 301 字 SHOTLIST FAIL 150s. Hash cache is not a parse.
       // ≤2000 chars: 70B 45s then leftover 70B 25s. Do not restore an unbounded flagship first attempt.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {

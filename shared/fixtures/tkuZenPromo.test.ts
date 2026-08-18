@@ -16,6 +16,7 @@ import {
   TKU_ZEN_LOCATIONS,
   TKU_ZEN_LOOKS,
   TKU_ZEN_PROMO_SCRIPT,
+  TKU_ZEN_SHOTLIST_A_LINE,
   TKU_ZEN_SHOTLIST_FIRST_PARSE,
   TKU_ZEN_SHOTLIST_LINES,
   TKU_ZEN_SHOTS,
@@ -43,6 +44,12 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(500);
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.split(/\n\n/).length).toBe(6);
     for (const line of TKU_ZEN_SHOTLIST_LINES) expect(TKU_ZEN_SHOTLIST_FIRST_PARSE).toContain(line);
+  });
+
+  it("A-line only is the live 66-char success side of the 405B cliff", () => {
+    expect(TKU_ZEN_SHOTLIST_A_LINE.length).toBe(66);
+    expect(TKU_ZEN_SHOTLIST_A_LINE).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
+    expect(TKU_ZEN_SHOTLIST_A_LINE.length).toBeLessThan(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
   });
 
   it("locks 小華 to the pink-bob cardigan sheets and keeps one unchanging look", () => {

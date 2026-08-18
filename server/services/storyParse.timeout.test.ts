@@ -13,15 +13,19 @@ import {
   STORY_PARSE_SHORT_PRIMARY_MS,
 } from "./storyParse";
 import { NIM_DEFAULT_MODEL, NIM_FIRST_ATTEMPT_MAX_MS, NIM_REASONING_MODEL } from "./nvidia-nim";
-import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
+import { TKU_ZEN_SHOTLIST_A_LINE, TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 
 describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
   it("a ~300-char Chinese SHOTLIST uses 70B first with time to finish, not 405B/150s", () => {
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(280);
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
+    expect(TKU_ZEN_SHOTLIST_A_LINE.length).toBe(66);
     const tiny = resolveStoryExtractStrategy(21);
+    const aLine = resolveStoryExtractStrategy(TKU_ZEN_SHOTLIST_A_LINE.length);
     const strategy = resolveStoryExtractStrategy(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
     expect(tiny.primaryModel).toBe(strategy.primaryModel);
+    expect(aLine.primaryModel).toBe(strategy.primaryModel);
+    expect(aLine.primaryModel).not.toBe(NIM_REASONING_MODEL);
     expect(strategy.primaryModel).toContain("70b");
     expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
@@ -87,6 +91,19 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(seen[1]?.timeoutMs).toBeLessThan(150_000);
     expect(seen[1]?.fallbackTimeoutMs).toBe(STORY_PARSE_LONG_FALLBACK_MS);
     expect(seen.every((call) => (call.timeoutMs ?? 150_000) < 150_000)).toBe(true);
+  });
+
+  it("66-char A-line and 301-char SHOTLIST share the 70B first-pass (live 405B cliff)", async () => {
+    const seen: string[] = [];
+    const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number }) => {
+      seen.push(opts.model);
+      expect(opts.model).toBe(NIM_DEFAULT_MODEL);
+      expect(opts.timeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
+      return { output: "{\"ok\":1}", model: opts.model, downgraded: false };
+    });
+    await extractStoryPlanFromProvider("sys", TKU_ZEN_SHOTLIST_A_LINE.length, complete);
+    await extractStoryPlanFromProvider("sys", TKU_ZEN_SHOTLIST_FIRST_PARSE.length, complete);
+    expect(seen).toEqual([NIM_DEFAULT_MODEL, NIM_DEFAULT_MODEL]);
   });
 
   it("~300-char Chinese first parse completes in mock without a 150s timeout", async () => {
@@ -177,9 +194,11 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
       expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     }
     const tiny = resolveStoryExtractStrategy(21);
+    const aLine = resolveStoryExtractStrategy(66);
     const shotlist = resolveStoryExtractStrategy(301);
     const mid = resolveStoryExtractStrategy(2_000);
     expect(tiny.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(aLine.primaryModel).toBe(NIM_DEFAULT_MODEL);
     expect(shotlist.primaryModel).toBe(NIM_DEFAULT_MODEL);
     expect(mid.primaryModel).toBe(NIM_DEFAULT_MODEL);
     expect(shotlist.primaryModel).not.toBe(NIM_REASONING_MODEL);

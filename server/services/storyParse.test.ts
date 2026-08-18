@@ -105,8 +105,8 @@ describe("解析模型檔位", () => {
     expect(NIM_REASONING_MODEL).not.toBe(NIM_DEFAULT_MODEL);
   });
 
-  it("21 字與 301 字都先走 70B（live 21 字 405B 能過、301 字 405B 掛 150s）", () => {
-    for (const n of [21, 301, 1_167, 2_000]) {
+  it("21 / 66 / 301 字都先走 70B（live 405B 崖在 66 與 301 之間）", () => {
+    for (const n of [21, 66, 301, 1_167, 2_000]) {
       const short = resolveStoryExtractStrategy(n);
       expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
       expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);
