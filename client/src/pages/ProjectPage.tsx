@@ -1828,9 +1828,10 @@ export function ProjectPage({ id }: { id: string }) {
                     pending: oneClick.pending,
                     hasBatch: Boolean(oneClick.result),
                     modelKind: ONE_CLICK_BATCH_KIND,
+                    sceneCount,
                   })
             }
-            primaryDisabled={oneClick.pending || readiness.kind === "empty"}
+            primaryDisabled={oneClick.pending || readiness.kind === "empty" || sceneCount === 0}
             onPrimary={
               readiness.kind === "empty"
                 ? undefined

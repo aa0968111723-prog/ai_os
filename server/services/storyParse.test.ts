@@ -4,7 +4,7 @@
  * 標記行契約：「角色：」「場景：」「道具：」（0.95）＋「疑似道具：」（0.6→確認卡）。
  */
 import { describe, it, expect } from "vitest";
-import { matchByName, mockStoryExtract, sha256Hex } from "./storyParse";
+import { matchByName, mockStoryExtract, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
 
@@ -95,9 +95,18 @@ describe("作者備註行不進解析", () => {
 });
 
 describe("解析模型檔位", () => {
-  it("劇本解析用高階（旗艦）模型，不是日常主力", () => {
+  it("旗艦與日常主力仍是兩顆不同的模型", () => {
     expect(NIM_REASONING_MODEL).toBe(NVIDIA_MODELS.llama3_405b);
     expect(NIM_REASONING_MODEL).not.toBe(NIM_DEFAULT_MODEL);
+  });
+
+  it("~1k 短稿先走 70B，長稿才以旗艦為主", () => {
+    const short = resolveStoryExtractStrategy(1_167);
+    expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(short.fallbackModel).toBe(NIM_REASONING_MODEL);
+    const long = resolveStoryExtractStrategy(8_000);
+    expect(long.primaryModel).toBe(NIM_REASONING_MODEL);
+    expect(long.fallbackModel).toBe(NIM_DEFAULT_MODEL);
   });
 });
 

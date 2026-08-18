@@ -73,6 +73,10 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("settleAssistantAskCompletion");
     expect(assistant).toContain("ASSISTANT_VIEWER_NO_WRITE_RULE");
     expect(assistant).toContain("formatStudioShotContext");
+    expect(assistant).toContain("formatPersistedStoryForAssistant");
+    expect(assistant).toContain("buildAssistantProjectStatusContext");
+    expect(assistant).toContain("assistantAskCompletionChip");
+    expect(assistant).toContain("allowPaidFallback");
   });
 
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {

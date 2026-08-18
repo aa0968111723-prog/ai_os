@@ -40,7 +40,8 @@ import { NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
-import { settleAssistantAskCompletion, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
+import { settleAssistantAskCompletion, assistantAskCompletionChip, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
+import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext } from "../../shared/assistantProjectStoryContext";
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
@@ -806,7 +807,14 @@ async function callLlm(
   mode: AgentPlannerMode = "nim",
 ): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
   const isPaidMode = mode !== "nim";
-  const result = await completeText({ prompt, mode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal });
+  const result = await completeText({
+    prompt,
+    mode,
+    timeoutMs: isPaidMode ? 120_000 : 60_000,
+    signal,
+    // mode=nim is UI「只用免費」— never auto-switch to paid deepseek-v4-flash.
+    allowPaidFallback: mode === "auto",
+  });
   return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
 }
 
@@ -1048,12 +1056,18 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
-      const [scenes, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, projectContext] = await Promise.all([
+      const [scenes, storyRow, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, projectContext] = await Promise.all([
         db
           .select()
           .from(schema.scenes)
           .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
           .orderBy(schema.scenes.orderIndex),
+        db
+          .select({ content: schema.stories.content, lastParsedAt: schema.stories.lastParsedAt })
+          .from(schema.stories)
+          .where(eq(schema.stories.projectId, project.id))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
         buildProjectIntelligence(project.id).catch(() => ({
           assets: { total: 0, byKind: {}, sourceReady: { image: 0, video: 0, audio: 0, zip: 0 } },
           generations: { total: 0, done: 0, active: 0, failed: 0, successRate: null, recentFailures: [] },
@@ -1272,6 +1286,10 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           .from(schema.characters)
           .where(and(eq(schema.characters.projectId, project.id), inArray(schema.characters.id, studioCharIds)))
         : [];
+      const storyBlock = formatPersistedStoryForAssistant({
+        content: storyRow?.content,
+        lastParsedAt: storyRow?.lastParsedAt,
+      });
       const context = studioShot
         ? formatStudioShotContext({
           projectTitle: project.title,
@@ -1280,12 +1298,20 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           displayNo: displayShotNo(scenes, studioShot.id) ?? 1,
           shot: studioShot,
           characters: studioCharacters,
+          storyText: storyRow?.content,
         })
-        : `標題：${project.title}（${project.kind}，${project.format}）
-世界觀｜${formatWorldviewForAi(wv, "brief")}
-${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
-${sceneLines}
-生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}`;
+        : `${buildAssistantProjectStatusContext({
+          title: project.title,
+          kind: project.kind,
+          format: project.format,
+          worldviewBlock: formatWorldviewForAi(wv, "director"),
+          storyBlock,
+          sceneCount: scenes.length,
+          sceneLines,
+          genDone,
+          genRunning,
+          genFailed,
+        })}${chipGuide ? `\n${chipGuide}` : ""}`;
 
       /** 把 LLM 的代號提議（sceneNo／modelId／presetId）解析成可執行動作；無效代號（幻覺）一律略過或退回預設 */
       const resolve = (actions: z.infer<typeof proposalSchema>[]): ResolvedAction[] => {
@@ -1659,30 +1685,29 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
         // 完成事件必須在快照之前發（快照＝回傳當下的事件流）。
         // Project assistant proposes write actions but does not execute them here.
-        // With pending confirmation, emit waiting — never "Aios 已完成" for unverified writes.
+        // With pending confirmation, emit waiting — never "Aios 已完成" / 「已完成盤點」 for unverified writes or "I cannot see the story".
         const okAgentSources = stream.snapshotSources().filter((s) => s.status === "ok");
+        const chip = assistantAskCompletionChip({
+          settled,
+          actionCount: actions.length,
+          okSourceCount: okAgentSources.length,
+          okSourceItems: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
+        });
         if (actions.length > 0) {
           stream.emit({
-            type: "waiting.user_input",
-            title: `有 ${actions.length} 件動作需要你確認`,
+            type: chip.type,
+            title: chip.title,
             description: actions.map((action) => action.label).join("；").slice(0, 400),
-            status: "waiting",
+            status: chip.status,
             resultCount: actions.length,
-          });
-        } else if (settled.emitCompleted) {
-          stream.emit({
-            type: "agent.completed",
-            title: okAgentSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
-            description: okAgentSources.length ? `依據 ${okAgentSources.length} 個來源` : undefined,
-            status: "ok",
-            resultCount: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
           });
         } else {
           stream.emit({
-            type: "waiting.user_input",
-            title: "尚未寫入（沒有可確認的動作）",
-            description: "回答提到寫入，但專案資料沒有變更",
-            status: "waiting",
+            type: chip.type,
+            title: chip.title,
+            description: chip.description,
+            status: chip.status,
+            resultCount: chip.resultCount,
           });
         }
         return {

@@ -1460,15 +1460,26 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       return { id: row.id, title: row.title, chars: row.content.length, createdAt: row.createdAt };
     }
 
-    // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦）
-    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+    // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦／故事全文）
+    const [scenes, storyRows] = await Promise.all([
+      db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))),
+      db.select({ content: schema.stories.content, lastParsedAt: schema.stories.lastParsedAt }).from(schema.stories).where(eq(schema.stories.projectId, project.id)).limit(1),
+    ]);
     const gens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, project.id)).orderBy(desc(schema.generations.createdAt)).limit(50);
     const runs = await listAgentRunsForProject(auth, project.id);
     const { items: sched } = await listScheduleForGroup(auth, project.groupId, false, project.id);
     const now = new Date();
     const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
+    const story = storyRows[0];
     return {
       project: { title: project.title, kind: project.kind, format: project.format, status: project.status },
+      story: story
+        ? {
+          chars: story.content.length,
+          lastParsedAt: story.lastParsedAt,
+          content: story.content.length > 2_500 ? `${story.content.slice(0, 2_500)}…[truncated]` : story.content,
+        }
+        : null,
       scenes: { total: scenes.length, byStatus: tally(scenes.map((s) => s.status)) },
       generations: {
         recent: gens.length,
@@ -1496,8 +1507,21 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});
-    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-    return { title: project.title, kind: project.kind, format: project.format, worldview: wv, scenes: scenes.map((s) => ({ title: s.title, status: s.status })) };
+    const [scenes, storyRows] = await Promise.all([
+      db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))),
+      db.select({ content: schema.stories.content }).from(schema.stories).where(eq(schema.stories.projectId, project.id)).limit(1),
+    ]);
+    const storyContent = storyRows[0]?.content ?? "";
+    return {
+      title: project.title,
+      kind: project.kind,
+      format: project.format,
+      worldview: wv,
+      story: storyContent
+        ? { chars: storyContent.length, content: storyContent.length > 4_000 ? `${storyContent.slice(0, 4_000)}…[truncated]` : storyContent }
+        : null,
+      scenes: scenes.map((s) => ({ title: s.title, status: s.status })),
+    };
   }
 
   if (name === "list_generations") {

@@ -10,8 +10,16 @@
 const COMPLETED_WRITE_RE =
   /已(?:建立|新增|更新|調整|套用|拆出|寫入|送出|完成|標記|加入|改為|生成|掛上|鎖定|重排)/;
 
+/** Body says it cannot see / check the saved story — not a completed inventory. */
+const CANNOT_VERIFY_RE =
+  /無法(?:看到|讀到|取得|檢查|確認)|看不到.{0,16}(?:故事|腳本|你的故事)|看不見.{0,16}(?:故事|腳本)|沒有看到.{0,16}(?:故事|腳本)|請(?:你)?(?:先)?貼(?:上|過來)|我沒有(?:看到|讀到|辦法看到)/;
+
 export function claimsCompletedWrite(answer: string): boolean {
   return COMPLETED_WRITE_RE.test(answer);
+}
+
+export function claimsInabilityToCheck(answer: string): boolean {
+  return CANNOT_VERIFY_RE.test(answer);
 }
 
 export function rewriteCompletedTenseToProposal(answer: string): string {
@@ -43,6 +51,8 @@ export interface AssistantAskSettlement {
   /** Only true when the model did not claim an unexecuted / unverified write. */
   emitCompleted: boolean;
   claimedUnexecutedWrite: boolean;
+  /** True when the body says it cannot see/check project data — never「已完成盤點」. */
+  cannotVerify: boolean;
 }
 
 /**
@@ -56,11 +66,13 @@ export function settleAssistantAskCompletion(input: {
 }): AssistantAskSettlement {
   const pendingActions = input.actions.length > 0;
   const claimed = claimsCompletedWrite(input.answer);
+  const cannotVerify = claimsInabilityToCheck(input.answer);
   if (pendingActions) {
     return {
       answer: claimed ? rewriteCompletedTenseToProposal(input.answer) : input.answer,
       emitCompleted: false,
       claimedUnexecutedWrite: claimed,
+      cannotVerify,
     };
   }
   if (claimed) {
@@ -68,9 +80,57 @@ export function settleAssistantAskCompletion(input: {
       answer: rewriteCompletedTenseToProposal(input.answer),
       emitCompleted: false,
       claimedUnexecutedWrite: true,
+      cannotVerify,
     };
   }
-  return { answer: input.answer, emitCompleted: true, claimedUnexecutedWrite: false };
+  if (cannotVerify) {
+    return {
+      answer: input.answer,
+      emitCompleted: false,
+      claimedUnexecutedWrite: false,
+      cannotVerify: true,
+    };
+  }
+  return { answer: input.answer, emitCompleted: true, claimedUnexecutedWrite: false, cannotVerify: false };
+}
+
+export function assistantAskCompletionChip(input: {
+  settled: AssistantAskSettlement;
+  actionCount: number;
+  okSourceCount: number;
+  okSourceItems: number;
+}): {
+  type: "agent.completed" | "waiting.user_input";
+  title: string;
+  description?: string;
+  status: "ok" | "waiting";
+  resultCount?: number;
+} {
+  if (input.actionCount > 0) {
+    return {
+      type: "waiting.user_input",
+      title: `有 ${input.actionCount} 件動作需要你確認`,
+      status: "waiting",
+      resultCount: input.actionCount,
+    };
+  }
+  if (input.settled.cannotVerify || !input.settled.emitCompleted) {
+    return {
+      type: "waiting.user_input",
+      title: input.settled.cannotVerify ? "尚未核對（沒有寫入）" : "尚未寫入（沒有可確認的動作）",
+      description: input.settled.cannotVerify
+        ? "回答表示看不到或無法檢查儲存的故事，專案資料沒有變更"
+        : "回答提到寫入，但專案資料沒有變更",
+      status: "waiting",
+    };
+  }
+  return {
+    type: "agent.completed",
+    title: input.okSourceCount ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+    description: input.okSourceCount ? `依據 ${input.okSourceCount} 個來源` : undefined,
+    status: "ok",
+    resultCount: input.okSourceItems,
+  };
 }
 
 export type AssistantWriteVerification = { status: "verified" | "unverified"; message: string };

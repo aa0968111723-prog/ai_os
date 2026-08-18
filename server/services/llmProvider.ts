@@ -196,6 +196,12 @@ export interface CompleteTextParams {
   timeoutMs?: number;
   signal?: AbortSignal;
   /**
+   * When false, nim/auto never call fal. Default: true only for `auto`
+   * (UI「免費優先・自動備援」). `nim` is UI「只用免費」and must not silently
+   * switch to paid deepseek-v4-flash.
+   */
+  allowPaidFallback?: boolean;
+  /**
    * 要不要一併取回供應商揭露的推理摘要與逐 token 信心。
    * 預設關：主線路徑（助手回答、規劃）不需要，開了只是多花 token 與風險。
    */
@@ -297,11 +303,9 @@ async function completeFal(params: CompleteTextParams, mode: FalAgentMode): Prom
 /**
  * 依模式取得一次文字補全。
  *
- * - `nim`：NVIDIA NIM 免費額度優先（站內 0 點），但 NIM 只給「快速偵測」預算
- *   （NIM_DEGRADE_PROBE_MS）——逾時/慢回/暫時性失敗自動降級 fal 經濟檔（DeepSeek V4 Flash，
- *   依 token 計點），並標 `fellBack`；金鑰/設定錯誤則照樣拋出。降級目標 fal_economy 本身
- *   壅塞時（見 FAL_DEGRADE 區塊）也只給較短偵測逾時、逾時二次降級 fal_balanced，壅塞冷卻
- *   期間直接走 fal_balanced。
+ * - `nim`（UI「只用免費」）：只用 NVIDIA NIM。逾時/失敗直接拋出，**不**自動切
+ *   fal_economy（deepseek-v4-flash）。要付費備援請選 `auto` 或明確 fal 檔位。
+ *   `allowPaidFallback: true` 才恢復舊的 nim→fal 降級（測試／明確同意）。
  * - `fal_economy` / `fal_balanced` / `fal_quality`：走 fal openrouter，平台實付 USD。
  *   明確選的檔位絕不自動切換（改檔位會多花錢且違反「明確選擇」語意）。
  * - `auto`：免費優先，同樣只給 NIM 快速偵測預算——逾時即轉 fal 均衡並標 `fellBack`，讓 UI
@@ -320,9 +324,9 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
   }
 
   if (mode === "nim" || mode === "auto") {
-    // NIM 免費優先，但只給快速偵測預算：逾時/慢回/暫時性失敗立刻降級 fal
-    // （nim→fal_economy 低成本、auto→fal_balanced 均衡），並標 fellBack 讓 UI 誠實顯示。
-    // nim 的降級目標 fal_economy 本身也可能壅塞——見上方 FAL_DEGRADE 區塊的自適應邏輯。
+    const allowPaidFallback = params.allowPaidFallback ?? mode === "auto";
+    // auto＝免費優先、同意備援：NIM 只給快速偵測，逾時降級 fal。
+    // nim＝只用免費：走完整 timeoutMs，失敗就失敗，不偷偷切 deepseek-v4-flash。
     const fallback = async (nimError: unknown): Promise<LlmCompletion> => {
       // nim 降級：fal_economy（省成本）；fal_economy 判定壅塞時直接 fal_balanced。
       // auto 維持 fal_balanced（複驗證明穩定 4.2–12.5s，不需二次降級）。
@@ -358,6 +362,13 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
         throw sanitize(error, "fal-openrouter");
       }
     };
+    if (!allowPaidFallback) {
+      try {
+        return await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
+      } catch (nimError) {
+        throw sanitize(nimError, "nvidia-nim");
+      }
+    }
     // NIM 降級冷卻期間直接走備援、不再試 NIM——並行負載下 NIM 劣化更劇，冷卻避免乾等。
     if (isNimDegraded()) return await fallback(undefined);
     try {

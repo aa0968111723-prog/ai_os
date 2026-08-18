@@ -34,7 +34,72 @@ import {
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL, isNimTimeoutError } from "./nvidia-nim";
+import {
+  nimCompleteWithFallback,
+  NimServiceError,
+  NIM_DEFAULT_MODEL,
+  NIM_REASONING_MODEL,
+  isNimTimeoutError,
+} from "./nvidia-nim";
+
+/** ~1k scripts do not need 405B or a 150s hang. Live 1167-char 小華稿 3/3 timed out at 150s. */
+export const STORY_PARSE_SHORT_CHARS = 2_000;
+export const STORY_PARSE_SHORT_PRIMARY_MS = 40_000;
+export const STORY_PARSE_SHORT_FALLBACK_MS = 20_000;
+export const STORY_PARSE_LONG_PRIMARY_MS = 60_000;
+export const STORY_PARSE_LONG_FALLBACK_MS = 40_000;
+
+export interface StoryExtractStrategy {
+  primaryModel: string;
+  fallbackModel: string;
+  primaryTimeoutMs: number;
+  fallbackTimeoutMs: number;
+  /** Wall-clock budget for primary + fallback. Tests assert a hang fails under this, not 150s×2. */
+  budgetMs: number;
+}
+
+export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStrategy {
+  if (storyChars <= STORY_PARSE_SHORT_CHARS) {
+    return {
+      primaryModel: NIM_DEFAULT_MODEL,
+      fallbackModel: NIM_REASONING_MODEL,
+      primaryTimeoutMs: STORY_PARSE_SHORT_PRIMARY_MS,
+      fallbackTimeoutMs: STORY_PARSE_SHORT_FALLBACK_MS,
+      budgetMs: STORY_PARSE_SHORT_PRIMARY_MS + STORY_PARSE_SHORT_FALLBACK_MS + 5_000,
+    };
+  }
+  return {
+    primaryModel: NIM_REASONING_MODEL,
+    fallbackModel: NIM_DEFAULT_MODEL,
+    primaryTimeoutMs: STORY_PARSE_LONG_PRIMARY_MS,
+    fallbackTimeoutMs: STORY_PARSE_LONG_FALLBACK_MS,
+    budgetMs: STORY_PARSE_LONG_PRIMARY_MS + STORY_PARSE_LONG_FALLBACK_MS + 5_000,
+  };
+}
+
+export type StoryExtractComplete = (
+  prompt: string,
+  opts: { model: string; fallbackModel?: string; timeoutMs?: number; fallbackTimeoutMs?: number },
+) => Promise<{ output: string; model: string; downgraded: boolean }>;
+
+/**
+ * Bounded EXTRACT: short scripts start on 70B; flagship is a short probe, not a 150s hang.
+ * A hanging provider must fail with a recoverable error inside budgetMs.
+ */
+export async function extractStoryPlanFromProvider(
+  sys: string,
+  storyChars: number,
+  complete: StoryExtractComplete = nimCompleteWithFallback,
+): Promise<{ output: string; model: string; downgraded: boolean; strategy: StoryExtractStrategy }> {
+  const strategy = resolveStoryExtractStrategy(storyChars);
+  const completion = await complete(sys, {
+    model: strategy.primaryModel,
+    fallbackModel: strategy.fallbackModel,
+    timeoutMs: strategy.primaryTimeoutMs,
+    fallbackTimeoutMs: strategy.fallbackTimeoutMs,
+  });
+  return { ...completion, strategy };
+}
 import { loadProjectCardAliases, type ProjectCardAliases } from "./sceneCards";
 import { assertGenerationEntityIds } from "./generationCore";
 import { lockSceneOrder } from "./locks";
@@ -334,30 +399,33 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       aliasText: cardAliases.text,
       story: sentStory,
     });
+    const extractStrategy = resolveStoryExtractStrategy(sentStory.length);
     if (trace) {
       await recordAiTraceEventSafely({
         sessionId: trace.id,
         eventType: "prepared",
-        summary: `組裝解析提示詞（${NIM_REASONING_MODEL}）`,
+        summary: `組裝解析提示詞（${extractStrategy.primaryModel}）`,
         payload: {
           promptChars: sys.length,
           storyChars: content.length,
           sentChars: sentStory.length,
-          model: NIM_REASONING_MODEL,
+          model: extractStrategy.primaryModel,
+          fallbackModel: extractStrategy.fallbackModel,
+          primaryTimeoutMs: extractStrategy.primaryTimeoutMs,
+          fallbackTimeoutMs: extractStrategy.fallbackTimeoutMs,
         },
       });
     }
     try {
-      // 劇本解析走高階模型：一次要同時做代名詞歸併、既有卡比對、分場分鏡與信心評分，
-      // 這是整條製作鏈的源頭——這裡漏一個角色，後面每一顆鏡都少一個錨點。
-      // 逾時放寬到 150 秒：旗艦模型比日常主力慢，用 90 秒會把成功的解析判成逾時。
-      const completion = await nimCompleteWithFallback(sys, { model: NIM_REASONING_MODEL, timeoutMs: 150_000 });
+      // 短稿先走日常 70B（1k 字不該乾等 405B 150 秒）；長稿才以旗艦為主、70B 作短備援。
+      // 兩段逾時加總仍遠低於舊的 150s×2，失敗必須是可恢復錯誤，不是掛死。
+      const completion = await extractStoryPlanFromProvider(sys, sentStory.length);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({
           sessionId: trace.id,
           eventType: "provider_response",
-          summary: `高階模型無法使用，已降級為 ${completion.model}`,
-          payload: { requested: NIM_REASONING_MODEL, used: completion.model },
+          summary: `主模型無法使用，已改為 ${completion.model}`,
+          payload: { requested: extractStrategy.primaryModel, used: completion.model },
         });
       }
       const output = completion.output;
@@ -380,7 +448,11 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       if (err instanceof TRPCError) throw err;
       if (trace) await updateAiTraceSession(trace.id, { status: "failed", summary: "provider 失敗" }).catch(() => undefined);
       if (isProviderTimeout(err)) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 模型回應逾時（150 秒）——上游服務忙碌，稍後重試即可" });
+        const seconds = Math.round(extractStrategy.budgetMs / 1000);
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `AI 模型回應逾時（超過 ${seconds} 秒無回應）——上游服務忙碌，請稍後重試或把稿子分段解析`,
+        });
       }
       if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
       const cause = err instanceof Error ? err.message.replace(/\s+/g, " ").slice(0, 100) : "";

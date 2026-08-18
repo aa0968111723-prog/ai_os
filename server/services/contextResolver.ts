@@ -268,7 +268,10 @@ export async function resolveContext(input: ResolveContextInput): Promise<Resolv
     worldview.message ? `關鍵訊息：${worldview.message}` : "",
     worldview.tones.length ? `調性：${worldview.tones.join("、")}` : "",
     worldview.styles.length ? `風格：${worldview.styles.join("、")}` : "",
+    worldview.taboos.length ? `禁忌：${worldview.taboos.join("、")}` : "",
   ].filter(Boolean).join("\n"));
+  const storyContent = story[0]?.content?.trim() ?? "";
+  if (storyContent) push(`【故事全文】\n${storyContent}`);
   if (scriptText) push(`【腳本】\n${scriptText}`);
 
   for (const entry of resolved) {

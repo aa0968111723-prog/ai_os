@@ -61,7 +61,16 @@ export function isNimTimeoutError(err: unknown): boolean {
 
 export async function nimCompleteWithFallback(
   prompt: string,
-  opts: { model: string; fallbackModel?: string; temperature?: number; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal },
+  opts: {
+    model: string;
+    fallbackModel?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    /** Second attempt budget. Defaults to timeoutMs — callers with a short primary must set this or the fallback re-hangs for the same long wait. */
+    fallbackTimeoutMs?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<{ output: string; model: string; downgraded: boolean }> {
   const fallback = opts.fallbackModel ?? NIM_DEFAULT_MODEL;
   try {
@@ -71,7 +80,15 @@ export async function nimCompleteWithFallback(
     // 401/402/403／429：帳號層級，換 70B 一樣會死。旗艦逾時（301 字短稿也曾在 live 卡死）才降級。
     if (err instanceof NimServiceError && !isNimTimeoutError(err)) throw err;
     console.warn(`[nim] 旗艦模型 ${opts.model} 失敗，降級為 ${fallback}：`, err);
-    return { output: await nimComplete(prompt, { ...opts, model: fallback }), model: fallback, downgraded: true };
+    return {
+      output: await nimComplete(prompt, {
+        ...opts,
+        model: fallback,
+        timeoutMs: opts.fallbackTimeoutMs ?? opts.timeoutMs,
+      }),
+      model: fallback,
+      downgraded: true,
+    };
   }
 }
 

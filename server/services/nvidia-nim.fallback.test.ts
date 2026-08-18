@@ -61,6 +61,19 @@ describe("nimCompleteWithFallback", () => {
     expect(modelsUsed()).toEqual([FLAGSHIP]);
   });
 
+  it("fallbackTimeoutMs 傳給第二次嘗試——短備援不必再吃同一個長逾時", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new DOMException("timed out", "TimeoutError")))
+      .mockResolvedValueOnce(ok("fast-70b"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "fast-70b", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
   it("旗艦模型逾時 → 降級到日常 70B，短稿仍能解析", async () => {
     fetchMock.mockImplementationOnce(
       (_url: string, init: { timeoutMs?: number }) =>

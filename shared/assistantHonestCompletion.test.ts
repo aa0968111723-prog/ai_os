@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  assistantAskCompletionChip,
   claimsCompletedWrite,
+  claimsInabilityToCheck,
   formatAssistantWriteResult,
   rewriteCompletedTenseToProposal,
   settleAssistantAskCompletion,
@@ -38,7 +40,27 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     });
     expect(settled.emitCompleted).toBe(true);
     expect(settled.claimedUnexecutedWrite).toBe(false);
+    expect(settled.cannotVerify).toBe(false);
     expect(settled.answer).toBe("目前有 7 個分鏡，第 4 鏡才出現禪定龜龜。");
+  });
+
+  it("forbids 已完成盤點 when the body says it cannot see the saved story", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "我看不到你的故事，請貼上腳本我才能拆分鏡。",
+      actions: [],
+    });
+    expect(claimsInabilityToCheck(settled.answer)).toBe(true);
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.cannotVerify).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 1,
+      okSourceItems: 4,
+    });
+    expect(chip.type).toBe("waiting.user_input");
+    expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
+    expect(chip.title).toContain("尚未核對");
   });
 });
 
