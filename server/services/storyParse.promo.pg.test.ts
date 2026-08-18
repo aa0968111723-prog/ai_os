@@ -13,8 +13,8 @@ import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
 import {
   mockStoryExtract,
   runStoryParse,
-  STORY_PARSE_PROMO_CHARS,
-  STORY_PARSE_PROMO_PRIMARY_MS,
+  STORY_PARSE_SHORT_CHARS,
+  STORY_PARSE_SHORT_PRIMARY_MS,
 } from "./storyParse";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
@@ -40,9 +40,9 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     }
   });
 
-  it("completes first parse without a 150s timeout and writes counters", async () => {
+  it("force cache-miss first parse succeeds on 70B well under 150s and writes counters", async () => {
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(280);
-    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_PROMO_CHARS);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
 
     const userId = randomUUID();
     const groupId = randomUUID();
@@ -63,7 +63,7 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number; fallbackTimeoutMs?: number }) => {
       expect(opts.model).toBe(NIM_DEFAULT_MODEL);
       expect(opts.model).not.toBe(NIM_REASONING_MODEL);
-      expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
+      expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
       expect(opts.timeoutMs ?? 150_000).toBeLessThan(150_000);
       expect(String(opts.timeoutMs ?? "")).not.toMatch(/150000/);
       return {
@@ -77,6 +77,7 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     const result = await runStoryParse({
       userId,
       projectId: project.id,
+      force: true,
       assertAccess: () => undefined,
       complete,
     });
@@ -93,16 +94,17 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     expect(run?.status).toBe("done");
     expect(run?.stats).toMatchObject({ scenes: result.stats.scenes, shots: result.stats.shots });
 
-    // Same text, force default false → cache (the 119-char live “success”), not another 405B/150s call.
+    // Hash cache is not the success path. force:true must parse again on 70B.
     complete.mockClear();
-    const cached = await runStoryParse({
+    const forced = await runStoryParse({
       userId,
       projectId: project.id,
+      force: true,
       assertAccess: () => undefined,
       complete,
     });
-    expect(cached.skipped).toBe(true);
-    expect(cached.stats).toMatchObject({ scenes: result.stats.scenes, shots: result.stats.shots });
-    expect(complete).not.toHaveBeenCalled();
+    expect(forced.skipped).not.toBe(true);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete.mock.calls[0]?.[1]?.model).toBe(NIM_DEFAULT_MODEL);
   });
 });

@@ -150,4 +150,18 @@ describe("nimCompleteWithFallback", () => {
     ).rejects.toThrow(/404/);
     expect(modelsUsed()).toEqual([NIM_DEFAULT_MODEL]);
   });
+
+  it("same-model 70B first-pass still uses fallbackTimeoutMs after a degradable timeout", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 45 秒無回應）")))
+      .mockResolvedValueOnce(ok("70b-second-attempt"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: NIM_DEFAULT_MODEL,
+      fallbackModel: NIM_DEFAULT_MODEL,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-second-attempt", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([NIM_DEFAULT_MODEL, NIM_DEFAULT_MODEL]);
+  });
 });

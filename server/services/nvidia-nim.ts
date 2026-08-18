@@ -96,7 +96,11 @@ export async function nimCompleteWithFallback(
       downgraded: false,
     };
   } catch (err) {
-    if (opts.signal?.aborted || opts.model === fallback) throw err;
+    if (opts.signal?.aborted) throw err;
+    // Same-model 70B first-pass (short scripts) still needs the leftover budget.
+    // `model === fallback` used to throw immediately — split fallbackTimeoutMs never ran.
+    const splitBudget = typeof opts.fallbackTimeoutMs === "number" && opts.fallbackTimeoutMs > 0;
+    if (opts.model === fallback && !splitBudget) throw err;
     // 只擋非降級（401/402/403、沒金鑰）。逾時／429／5xx 換 70B 還有機會——
     // 舊寫法 `instanceof NimServiceError` 一律再拋，live 的「超過 150 秒無回應」永遠到不了備援。
     if (err instanceof NimServiceError && !nimErrorDegradable(err)) throw err;

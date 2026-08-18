@@ -8,28 +8,28 @@ import {
   resolveStoryExtractStrategy,
   STORY_PARSE_LONG_FALLBACK_MS,
   STORY_PARSE_LONG_PRIMARY_MS,
-  STORY_PARSE_PROMO_CHARS,
-  STORY_PARSE_PROMO_FALLBACK_MS,
-  STORY_PARSE_PROMO_PRIMARY_MS,
   STORY_PARSE_SHORT_CHARS,
+  STORY_PARSE_SHORT_FALLBACK_MS,
   STORY_PARSE_SHORT_PRIMARY_MS,
 } from "./storyParse";
 import { NIM_DEFAULT_MODEL, NIM_FIRST_ATTEMPT_MAX_MS, NIM_REASONING_MODEL } from "./nvidia-nim";
 import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 
 describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
-  it("a ~300-char Chinese SHOTLIST uses the promo 70B budget so a 60s first-parse can finish", () => {
+  it("a ~300-char Chinese SHOTLIST uses 70B first with time to finish, not 405B/150s", () => {
     expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(280);
-    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_PROMO_CHARS);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
+    const tiny = resolveStoryExtractStrategy(21);
     const strategy = resolveStoryExtractStrategy(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
+    expect(tiny.primaryModel).toBe(strategy.primaryModel);
     expect(strategy.primaryModel).toContain("70b");
     expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
-    expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
-    expect(strategy.fallbackTimeoutMs).toBe(STORY_PARSE_PROMO_FALLBACK_MS);
-    expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(25_000);
+    expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
+    expect(strategy.fallbackTimeoutMs).toBe(STORY_PARSE_SHORT_FALLBACK_MS);
+    expect(strategy.primaryTimeoutMs).toBeGreaterThanOrEqual(40_000);
     expect(strategy.primaryTimeoutMs).toBeLessThan(NIM_FIRST_ATTEMPT_MAX_MS);
-    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(60_000);
-    expect(strategy.budgetMs).toBeLessThan(60_000);
+    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(90_000);
+    expect(strategy.budgetMs).toBeLessThan(90_000);
     expect(String(strategy.primaryTimeoutMs)).not.toMatch(/150000/);
   });
 
@@ -90,10 +90,11 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
   });
 
   it("~300-char Chinese first parse completes in mock without a 150s timeout", async () => {
-    const complete = vi.fn(async (_prompt: string, opts: { timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+    const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+      expect(opts.model).toBe(NIM_DEFAULT_MODEL);
+      expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
       expect(opts.timeoutMs ?? 150_000).toBeLessThan(150_000);
-      expect(opts.timeoutMs ?? 150_000).toBeLessThanOrEqual(25_000);
-      expect(opts.fallbackTimeoutMs ?? 150_000).toBeLessThan(150_000);
+      expect(opts.fallbackTimeoutMs ?? 150_000).toBe(STORY_PARSE_SHORT_FALLBACK_MS);
       return {
         output: JSON.stringify(mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE)),
         model: NIM_DEFAULT_MODEL,
@@ -104,8 +105,8 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     const result = await extractStoryPlanFromProvider("sys", TKU_ZEN_SHOTLIST_FIRST_PARSE.length, complete);
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(result.output).toContain("小華");
-    expect(result.strategy.primaryTimeoutMs).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
-    expect(result.strategy.budgetMs).toBeLessThan(60_000);
+    expect(result.strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
+    expect(result.strategy.budgetMs).toBeLessThan(90_000);
     expect(complete).toHaveBeenCalledOnce();
   });
 
@@ -175,11 +176,13 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
       expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(150_000);
       expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     }
-    const promo = resolveStoryExtractStrategy(301);
+    const tiny = resolveStoryExtractStrategy(21);
+    const shotlist = resolveStoryExtractStrategy(301);
     const mid = resolveStoryExtractStrategy(2_000);
-    expect(promo.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(tiny.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(shotlist.primaryModel).toBe(NIM_DEFAULT_MODEL);
     expect(mid.primaryModel).toBe(NIM_DEFAULT_MODEL);
-    expect(promo.primaryModel).not.toBe(NIM_REASONING_MODEL);
+    expect(shotlist.primaryModel).not.toBe(NIM_REASONING_MODEL);
     expect(mid.primaryModel).not.toBe(NIM_REASONING_MODEL);
     const long = resolveStoryExtractStrategy(12_000);
     expect(long.primaryModel).toBe(NIM_REASONING_MODEL);

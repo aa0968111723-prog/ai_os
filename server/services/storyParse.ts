@@ -42,14 +42,15 @@ import {
   isNimTimeoutError,
 } from "./nvidia-nim";
 
-/** Live 301-char A–F SHOTLIST first-parse hung 150s. Promo scripts must finish inside a 60s wall. */
-export const STORY_PARSE_PROMO_CHARS = 500;
-export const STORY_PARSE_PROMO_PRIMARY_MS = 20_000;
-export const STORY_PARSE_PROMO_FALLBACK_MS = 18_000;
-/** ~1k scripts do not need 405B or a 150s hang. Live 1167-char 小華稿 3/3 timed out at 150s. */
-export const STORY_PARSE_SHORT_CHARS = 4_000;
-export const STORY_PARSE_SHORT_PRIMARY_MS = 40_000;
-export const STORY_PARSE_SHORT_FALLBACK_MS = 20_000;
+/**
+ * Live cold-parse bracket: 21 字 405B succeeded ≤40s; 301 字 SHOTLIST 405B died at 150s.
+ * 70B first-pass under ~2000 chars. Give the first attempt ~45s so a 6-beat promo can
+ * finish (a 20s fail-fast is too short — 21 字 already took up to 40s on 405B).
+ * Do not rely on parsedContentHash cache.
+ */
+export const STORY_PARSE_SHORT_CHARS = 2_000;
+export const STORY_PARSE_SHORT_PRIMARY_MS = 45_000;
+export const STORY_PARSE_SHORT_FALLBACK_MS = 25_000;
 /** 405B 45–60s；70B 再 50–60s。合計 ≤ ~120s，不讓 3×405B 重試吃掉整段 150s。 */
 export const STORY_PARSE_LONG_PRIMARY_MS = 55_000;
 export const STORY_PARSE_LONG_FALLBACK_MS = 55_000;
@@ -64,15 +65,6 @@ export interface StoryExtractStrategy {
 }
 
 export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStrategy {
-  if (storyChars <= STORY_PARSE_PROMO_CHARS) {
-    return {
-      primaryModel: NIM_DEFAULT_MODEL,
-      fallbackModel: NIM_DEFAULT_MODEL,
-      primaryTimeoutMs: STORY_PARSE_PROMO_PRIMARY_MS,
-      fallbackTimeoutMs: STORY_PARSE_PROMO_FALLBACK_MS,
-      budgetMs: STORY_PARSE_PROMO_PRIMARY_MS + STORY_PARSE_PROMO_FALLBACK_MS + 5_000,
-    };
-  }
   if (storyChars <= STORY_PARSE_SHORT_CHARS) {
     return {
       primaryModel: NIM_DEFAULT_MODEL,
@@ -435,9 +427,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       });
     }
     try {
-      // Live/base L353 sent every cache-miss (301 or 12k chars) to flagship with a 150s hang.
-      // STORY_PARSE_BUDGET only truncates. Do not restore an unbounded flagship first attempt.
-      // Short/SHOTLIST first-parse starts on 70B with a split budget; timeout must reach 70B before 150s.
+      // Live/base L353 sent every cache-miss to flagship with a 150s hang.
+      // Bracket: 21 字 405B ≤40s OK; 301 字 SHOTLIST 405B 150s FAIL. Hash cache is not a parse.
+      // ≤2000 chars: 70B 45s then leftover 70B 25s. Do not restore an unbounded flagship first attempt.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({
