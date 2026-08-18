@@ -101,7 +101,18 @@ describe("animation shot writes stay consistent", () => {
   });
 });
 
+const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
+
 describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => {
+  it("listByProject projects latestDoneVisualGenId; SceneList Adopt calls adoptGeneration", () => {
+    const list = scenes.slice(scenes.indexOf("listByProject:"), scenes.indexOf("addFromGeneration:"));
+    expect(list).toContain("latestDoneVisualGenId");
+    expect(list).toContain("g.status = 'done'");
+    expect(sceneList).toContain("pendingAdoptGenerationId");
+    expect(sceneList).toContain("creativeContext.adoptGeneration");
+    expect(sceneList).toContain("採用這一版");
+  });
+
   it("generateInto keeps the scene pointer; Adopt is the only writer of assetId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("executeGenerationCommand");

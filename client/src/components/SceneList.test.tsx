@@ -14,6 +14,7 @@ const scenesQuery = vi.fn();
 const meQuery = vi.fn();
 const updateMutate = vi.fn();
 const generateMutate = vi.fn();
+const adoptMutate = vi.fn();
 const insertAfterMutate = vi.fn();
 const moveMutate = vi.fn();
 const removeMutate = vi.fn();
@@ -75,6 +76,9 @@ vi.mock("../api", () => ({
         },
       },
     },
+    creativeContext: {
+      adoptGeneration: { useMutation: () => ({ mutate: adoptMutate, isPending: false, error: null }) },
+    },
     // 未改好的標注數（分鏡格的「⚑ N」角標）——本檔不測角標，另有專屬情境；這裡回空清單
     messages: { openCountsByScene: { useQuery: () => ({ data: [], isLoading: false }) } },
     // 文字腳本的卡片三行要讀這三份清單才翻得出名字（SceneList 自己查，不能靠 stub 子元件躲掉）
@@ -129,6 +133,8 @@ type SceneOver = {
   assetKind?: string | null;
   assetUrl?: string | null;
   pendingGenStatus?: string | null;
+  generationId?: string | null;
+  latestDoneVisualGenId?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -144,7 +150,8 @@ function scene(over: SceneOver) {
     voiceover: over.voiceover ?? null,
     assetUrl: hasAsset ? (over.assetUrl ?? `https://example.test/${over.id}.png`) : null,
     assetKind: hasAsset ? (over.assetKind ?? "image") : null,
-    generationId: null,
+    generationId: over.generationId ?? null,
+    latestDoneVisualGenId: over.latestDoneVisualGenId ?? null,
     pendingGenStatus: over.pendingGenStatus ?? null,
     narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
@@ -351,6 +358,26 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+  });
+
+  it("generateInto 完成後列出採用這一版，按下走 adoptGeneration", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", hasAsset: false, latestDoneVisualGenId: "gen-done" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: /採用這一版/ }));
+    expect(adoptMutate).toHaveBeenCalledWith({ generationId: "gen-done" });
+  });
+
+  it("已經是 current 的生成不顯示採用", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", generationId: "gen-1", latestDoneVisualGenId: "gen-1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(rowOf("s1").queryByRole("button", { name: /採用這一版|採用新的一版/ })).toBeNull();
   });
 
   it("行內改標題帶 expectedRev，避免連改秒數自己跟自己衝突", async () => {

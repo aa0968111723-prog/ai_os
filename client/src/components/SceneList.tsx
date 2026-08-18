@@ -5,6 +5,7 @@ import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { createInsertAfterQueue } from "../lib/insertAfterQueue";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
+import { pendingAdoptGenerationId } from "@shared/sceneAdopt";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -90,6 +91,8 @@ type Scene = {
   generationId: string | null;
   /** 該格若有進行中的「畫面」生成，回 queued/running；無則 null（後端已排除 narration）。 */
   pendingGenStatus?: string | null;
+  /** 最新一筆已完成的畫面生成（generateInto 不移動 current；Adopt 用這個 id）。 */
+  latestDoneVisualGenId?: string | null;
   /** 已生成且未軟刪的旁白音檔網址——判斷「這格有沒有旁白」的唯一依據。 */
   narrationUrl?: string | null;
   /** 該格若有進行中的「配音」生成，回 queued/running；無則 null。 */
@@ -449,6 +452,10 @@ const SceneRow = memo(function SceneRow({
   const generate = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
   });
+  const adopt = trpc.creativeContext.adoptGeneration.useMutation({
+    onSuccess: () => { invalidate(); },
+  });
+  const adoptGenId = pendingAdoptGenerationId(s);
   // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created) => {
@@ -477,7 +484,7 @@ const SceneRow = memo(function SceneRow({
   const hasPrompt = (s.prompt ?? "").trim() !== "";
   // 這一鏡實際會用的卡片（有綁用它、沒綁沿用生成台勾選）——預覽與出圖看的是同一份
   const effectiveCards = resolveSceneCards(s, { characterIds: charIds, scenePresetIds: sceneIds, propIds });
-  const rowError = update.error ?? generate.error ?? insertAfter.error;
+  const rowError = update.error ?? generate.error ?? insertAfter.error ?? adopt.error;
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
@@ -638,6 +645,17 @@ const SceneRow = memo(function SceneRow({
         {/* 動作列：一顆依狀態決定的主要動作＋固定的次要入口（單格工作室／下載／討論）。
             扣點動作先確認（顯示預估點數）；檢視者只看得到工作室（唯讀）、下載與討論（2.3） */}
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {canEdit && adoptGenId && (
+            <Button
+              size="sm"
+              variant={s.assetId ? "tonal" : "primary"}
+              disabled={adopt.isPending}
+              title="generateInto 只產出候選，採用才會寫入這一鏡的畫面"
+              onClick={() => adopt.mutate({ generationId: adoptGenId })}
+            >
+              <Icon name="Check" size={13} /> {adopt.isPending ? "採用中…" : s.assetId ? "採用新的一版" : "採用這一版"}
+            </Button>
+          )}
           {canEdit && (
             isGenerating || generate.isPending ? (
               <Button size="sm" variant="primary" disabled>生成中…</Button>
