@@ -238,19 +238,26 @@ export function ShotCard({
     setDropBusy(false);
   };
 
+  const saveField = (patch: Record<string, unknown>) => {
+    const { sceneId: _sceneId, ...fields } = patch;
+    const field = Object.keys(fields)[0]!;
+    update.mutate({
+      sceneId: shot.id,
+      ...fields,
+      expectedRev: shot.rev,
+      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
+    } as Parameters<typeof update.mutate>[0]);
+  };
   const saveFields = (patch: Record<string, unknown>) => {
-    const baseline: Record<string, unknown> = {};
-    const live = shotRef.current as unknown as Record<string, unknown>;
-    for (const key of Object.keys(patch)) baseline[key] = live[key] ?? null;
-    gateRef.current?.save(patch, baseline);
+    saveField(patch);
   };
   const saveCamera = (field: keyof ShotCamera, value: string) => {
     const next: ShotCamera = { ...(shot.camera ?? {}), [field]: value.trim() || undefined };
-    saveFields({ camera: next });
+    saveField({ camera: Object.values(next).some((v) => v) ? next : null });
   };
   const savePerformance = (field: keyof ShotPerformance, value: string) => {
     const next: ShotPerformance = { ...(shot.performance ?? {}), [field]: value.trim() || undefined };
-    saveFields({ performance: next });
+    saveField({ performance: Object.values(next).some((v) => v) ? next : null });
   };
 
   /** 本鏡可選造型＝綁定角色名下的造型；沒綁角色就沒得選（造型跟人走） */
@@ -258,7 +265,7 @@ export function ShotCard({
   const toggleLook = (lookId: string) => {
     const cur = shot.lookIds ?? [];
     const next = cur.includes(lookId) ? cur.filter((x) => x !== lookId) : [...cur, lookId];
-    saveFields({ lookIds: next });
+    saveField({ lookIds: next });
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";

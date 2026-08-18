@@ -578,7 +578,7 @@ const SceneRow = memo(function SceneRow({
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
             maxLength={60}
-            onCommit={(v) => saveFields({ title: String(v) })}
+            onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v), expectedRev: s.rev, baseline: { title: s.title } })}
             style={{ flex: 1, minWidth: 0 }}
           />
         </div>
@@ -589,7 +589,7 @@ const SceneRow = memo(function SceneRow({
               kind="number"
               pending={update.isPending || !canEdit}
               ariaLabel={`第 ${i + 1} 鏡秒數`}
-              onCommit={(v) => saveFields({ durationSec: Number(v) })}
+              onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v), expectedRev: s.rev, baseline: { durationSec: s.durationSec } })}
               style={{ width: 56, textAlign: "center" }}
             />
             秒
@@ -601,7 +601,7 @@ const SceneRow = memo(function SceneRow({
               scene={s}
               index={i}
               disabled={update.isPending || !canEdit}
-              onCommit={(patch) => saveFields(patch)}
+              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch, expectedRev: s.rev, baseline: { trimStartMs: s.trimStartMs ?? null, trimEndMs: s.trimEndMs ?? null } })}
             />
           )}
           {isGenerating && <Pill status="running">生成中…</Pill>}

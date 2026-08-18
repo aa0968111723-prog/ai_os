@@ -21,6 +21,7 @@ const trpc = readFileSync(join(process.cwd(), "server/trpc.ts"), "utf8");
 const bindings = readFileSync(join(process.cwd(), "server/services/projectDataBindings.ts"), "utf8");
 const siteAssistant = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
 const repairExecute = readFileSync(join(process.cwd(), "server/services/animationRepairExecute.ts"), "utf8");
+const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
 
 describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
@@ -120,6 +121,16 @@ describe("animation shot writes stay consistent", () => {
     expect(exec).toContain("durationSec: Math.round(a.durationSec)");
   });
 
+  it("SceneList and ShotCard send expectedRev on inline edits", () => {
+    expect(sceneList).toContain("expectedRev: s.rev");
+    expect(sceneList).toContain("baseline: { title: s.title }");
+    expect(sceneList).toContain("baseline: { durationSec: s.durationSec }");
+    expect(sceneList).toContain("trimStartMs: s.trimStartMs ?? null");
+    const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
+    expect(shotCard).toContain("expectedRev: shot.rev");
+    expect(shotCard).toContain("baseline: { [field]:");
+  });
+
   it("assistant add_character writes read back the character row", () => {
     const exec = assistant.slice(assistant.indexOf("async function applyAssistantScenePatch"));
     expect(assistant).toContain('type: z.literal("add_character")');
@@ -139,8 +150,6 @@ describe("animation shot writes stay consistent", () => {
     expect(block).toContain("已產生分鏡");
   });
 });
-
-const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
 
 describe("SceneList insertAfter queue (do not invent a /p/ button)", () => {
   it("SceneRow already queues「在這之後插入」in click order", () => {
