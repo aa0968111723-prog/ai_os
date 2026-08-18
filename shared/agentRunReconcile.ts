@@ -82,3 +82,52 @@ export function applyIndependentGenerateToSteps(
   }
   return { steps, changed, waitForAdopt };
 }
+
+const LEFTOVER_DISCARD_DETAIL = "單格工作室已先生成，未開拍的批次計畫已取消以免重複扣點";
+
+export interface DiscardUnstartedAwaitingApprovalInput {
+  status: string;
+  steps: ReconcileAgentStep[];
+  /** generateInto already reserved this project — leftover 0/N 待你過目 must hide. */
+  independentGenerateLanded: boolean;
+}
+
+export interface DiscardUnstartedAwaitingApprovalResult {
+  status: string;
+  steps: ReconcileAgentStep[];
+  discarded: boolean;
+}
+
+function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
+  return steps.filter((step) => step.kind === "generate");
+}
+
+function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep[]): boolean {
+  if (status !== "awaiting_approval") return false;
+  return generateSteps(steps).length >= 2;
+}
+
+/**
+ * Studio generateInto already billed. An unstarted leftover 6-step plan must
+ * not stay HUD-active as「待你過目 · 第 1 鏡… 0/6 步」.
+ */
+export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
+  input: DiscardUnstartedAwaitingApprovalInput,
+): DiscardUnstartedAwaitingApprovalResult {
+  if (!input.independentGenerateLanded) {
+    return { status: input.status, steps: input.steps, discarded: false };
+  }
+  if (!leftoverAwaitingApprovalBatch(input.status, input.steps)) {
+    return { status: input.status, steps: input.steps, discarded: false };
+  }
+  const steps = input.steps.map((step) => {
+    if (step.kind !== "generate") return step;
+    if (step.status === "done" || step.status === "failed" || step.status === "stopped") return step;
+    return {
+      ...step,
+      status: "stopped",
+      detail: step.detail || LEFTOVER_DISCARD_DETAIL,
+    };
+  });
+  return { status: "discarded", steps, discarded: true };
+}

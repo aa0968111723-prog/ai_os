@@ -5,7 +5,10 @@
  */
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
-import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
+import {
+  applyIndependentGenerateToSteps,
+  discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+} from "../../shared/agentRunReconcile";
 
 const ACTIVE_RUN_STATUSES = [
   "awaiting_approval",
@@ -70,13 +73,19 @@ export async function reconcileAgentRunsAfterSceneGenerate(input: {
       generationId: input.generationId,
       adopted,
     });
-    if (!result.changed) continue;
-    // Keep run.status as-is. Flipping a running plan to waiting_confirmation
-    // would make the next tick stopPendingDagSteps the remaining 5 shots.
+    const leftover = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: run.status,
+      steps: result.steps,
+      independentGenerateLanded: true,
+    });
+    if (!result.changed && !leftover.discarded) continue;
+    // Keep a running leftover plan's status. Only unstarted awaiting_approval
+    // 6-steps are discarded so HUD cannot stay 「待你過目 · 0/6 步」.
     await db
       .update(schema.agentRuns)
       .set({
-        steps: result.steps,
+        steps: leftover.steps,
+        ...(leftover.discarded ? { status: "discarded" as const } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.agentRuns.id, run.id));

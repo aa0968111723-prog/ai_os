@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyIndependentGenerateToSteps, type ReconcileAgentStep } from "./agentRunReconcile";
+import {
+  applyIndependentGenerateToSteps,
+  discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  type ReconcileAgentStep,
+} from "./agentRunReconcile";
 
 const six: ReconcileAgentStep[] = [1, 2, 3, 4, 5, 6].map((n) => ({
   kind: "generate",
@@ -68,5 +72,45 @@ describe("applyIndependentGenerateToSteps", () => {
     });
     expect(out.changed).toBe(false);
     expect(out.steps[1]?.generationId).toBe("old");
+  });
+});
+
+describe("discardUnstartedAwaitingApprovalAfterIndependentGenerate", () => {
+  it("hides leftover 0/6 待你過目 after studio generateInto", () => {
+    const parked = applyIndependentGenerateToSteps({
+      steps: six,
+      sceneId: "shot-1",
+      sceneNo: 1,
+      generationId: "gen-qwen",
+      adopted: false,
+    });
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: parked.steps,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.status).toBe("discarded");
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
+  it("discards even when scene matching missed, as long as the 6-step never started", () => {
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: six,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.status).toBe("discarded");
+  });
+
+  it("leaves a running leftover plan alone", () => {
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "running",
+      steps: six,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(false);
+    expect(out.status).toBe("running");
   });
 });

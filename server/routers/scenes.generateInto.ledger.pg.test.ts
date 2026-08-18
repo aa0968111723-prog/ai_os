@@ -99,6 +99,14 @@ d("generateInto debit matches version.points and 週/日 meter (real PostgreSQL)
       status: "running",
       steps: leftoverSteps,
     });
+    await db.insert(schema.agentRuns).values({
+      projectId: project.id,
+      groupId,
+      userId,
+      goal: "六鏡出圖待過目",
+      status: "awaiting_approval",
+      steps: leftoverSteps,
+    });
 
     const weekBefore = await usedThisWeek(userId, groupId);
     const dayBefore = await usedToday(userId);
@@ -166,10 +174,13 @@ d("generateInto debit matches version.points and 週/日 meter (real PostgreSQL)
     const net = ledger.reduce((s, row) => s + row.delta, 0);
     expect(-net).toBe(points);
 
-    const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.projectId, project.id));
-    const steps = (run?.steps ?? []) as Array<{ status: string; generationId?: string; sceneNo?: number }>;
+    const runs = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.projectId, project.id));
+    const running = runs.find((r) => r.goal === "六鏡出圖");
+    const leftover = runs.find((r) => r.goal === "六鏡出圖待過目");
+    const steps = (running?.steps ?? []) as Array<{ status: string; generationId?: string; sceneNo?: number }>;
     expect(steps[0]?.generationId).toBe(genId);
     expect(steps[0]?.status).toBe("waiting");
     expect(steps.slice(1).every((s) => s.status === "waiting" && !s.generationId)).toBe(true);
+    expect(leftover?.status).toBe("discarded");
   });
 });
