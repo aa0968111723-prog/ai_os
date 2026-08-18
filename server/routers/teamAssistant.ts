@@ -48,6 +48,7 @@ import {
   formatProjectInventoryTotals,
   loadGroupProjectInventory,
 } from "../services/projectInventory";
+import { formatPersistedStoryForAssistant } from "../../shared/assistantProjectStoryContext";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
@@ -754,7 +755,16 @@ export async function runTeamTool(
     const sceneLines = scenes.length
       ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」｜畫面${s.assetId ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
       : "（尚無分鏡）";
-    const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}`;
+    const [storyRow] = await db
+      .select({ content: schema.stories.content, lastParsedAt: schema.stories.lastParsedAt })
+      .from(schema.stories)
+      .where(eq(schema.stories.projectId, project.id))
+      .limit(1);
+    const storyBlock = formatPersistedStoryForAssistant({
+      content: storyRow?.content,
+      lastParsedAt: storyRow?.lastParsedAt,
+    });
+    const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}\n${storyBlock}`;
     const withVisual = scenes.filter((s) => s.assetId).length;
     return {
       step: `讀了「${project.title}」的分鏡(${scenes.length})`,

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildHistoryBlock,
@@ -746,3 +747,14 @@ describe("buildSelfCheckClarification（自查釐清：本組組名寫給 LLM �
     expect(note).not.toContain("「  剪輯組」");
   });
 });
+
+describe("project_detail injects persisted story", () => {
+  it("reads stories.content through formatPersistedStoryForAssistant", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    const block = src.slice(src.indexOf('if (call.tool === "project_detail")'), src.indexOf('if (call.tool === "read_scene")'));
+    expect(block).toContain("formatPersistedStoryForAssistant");
+    expect(block).toContain("schema.stories.content");
+    expect(block).toContain("storyBlock");
+  });
+});
+
