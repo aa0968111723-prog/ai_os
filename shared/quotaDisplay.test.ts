@@ -1,25 +1,73 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasScopedWallet,
+  isSiteLeftoverScale,
   readPersistedScopedRemaining,
   scopedTightRemaining,
+  scopedWalletRemainingLabel,
   tightRemainingPoints,
   writePersistedScopedRemaining,
 } from "./quotaDisplay";
 
-describe("header 剩 rejects unscoped global leftover", () => {
-  it("mins member / group / total when the payload is for this group", () => {
+function memoryStorage() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
+describe("header 剩 is the scoped wallet, never leftover 4708", () => {
+  it("mins member / group / Fal when the payload is for this group", () => {
     expect(tightRemainingPoints({
       groupId: "g1",
       memberBudgetRemaining: 324,
       groupBudgetRemaining: 800,
       totalRemaining: 4708,
+      falPointsCap: 400,
     })).toBe(324);
     expect(scopedTightRemaining({
       groupId: "g1",
       memberBudgetRemaining: 324,
       groupBudgetRemaining: 800,
       totalRemaining: 4708,
+      falPointsCap: 400,
     }, "g1", 325)).toBe(324);
+  });
+
+  it("uses Fal cap as the ~320 wallet when member/group caps are missing", () => {
+    expect(tightRemainingPoints({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4705,
+      falPointsCap: 324,
+    })).toBe(324);
+    expect(hasScopedWallet({
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4705,
+      falPointsCap: 324,
+    })).toBe(true);
+  });
+
+  it("never paints leftover-only 4,708 as first truth or last-good", () => {
+    const leftoverOnly = {
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4708,
+    };
+    expect(tightRemainingPoints(leftoverOnly)).toBe(null);
+    expect(hasScopedWallet(leftoverOnly)).toBe(false);
+    expect(scopedTightRemaining(leftoverOnly, "g1")).toBe(null);
+    expect(scopedTightRemaining(leftoverOnly, "g1", 324)).toBe(324);
+    expect(scopedTightRemaining(leftoverOnly, "g1", 4705)).toBe(null);
   });
 
   it("does not paint 剩 4,708 from an unscoped refetch while the last scoped wallet was 324", () => {
@@ -29,7 +77,7 @@ describe("header 剩 rejects unscoped global leftover", () => {
       groupBudgetRemaining: null,
       totalRemaining: 4708,
     };
-    expect(tightRemainingPoints(unscoped)).toBe(4708);
+    expect(tightRemainingPoints(unscoped)).toBe(null);
     expect(scopedTightRemaining(unscoped, "g1", 324)).toBe(324);
     expect(scopedTightRemaining(undefined, "g1", 324)).toBe(324);
     expect(scopedTightRemaining(unscoped, "g1")).toBe(null);
@@ -41,6 +89,7 @@ describe("header 剩 rejects unscoped global leftover", () => {
       memberBudgetRemaining: 12,
       groupBudgetRemaining: null,
       totalRemaining: 4708,
+      falPointsCap: 12,
     }, "g1", 324)).toBe(324);
   });
 
@@ -62,13 +111,30 @@ describe("header 剩 rejects unscoped global leftover", () => {
     }, "g1", 324)).toBe(324);
   });
 
-  it("persists last scoped remaining so closing studio cannot flash 4708", () => {
-    const store = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => { store.set(key, value); },
-      removeItem: (key: string) => { store.delete(key); },
-    };
+  it("lets leftover win only when it is tighter than a real scoped cap", () => {
+    expect(tightRemainingPoints({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 100,
+      falPointsCap: 324,
+    })).toBe(100);
+  });
+
+  it("generate confirm labels the scoped wallet, not leftover", () => {
+    expect(scopedWalletRemainingLabel({
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4705,
+      falPointsCap: 324,
+      weeklyQuota: 50,
+      weeklyUsed: 3,
+    }, "g1")).toBe("目前剩 324 點・本週 3/50");
+  });
+
+  it("persists last scoped remaining and refuses leftover-scale poison", () => {
+    const storage = memoryStorage();
     expect(readPersistedScopedRemaining("g1", storage)).toBe(null);
     writePersistedScopedRemaining("g1", 324, storage);
     expect(readPersistedScopedRemaining("g1", storage)).toBe(324);
@@ -78,5 +144,18 @@ describe("header 剩 rejects unscoped global leftover", () => {
       groupBudgetRemaining: null,
       totalRemaining: 4708,
     }, "g1", readPersistedScopedRemaining("g1", storage))).toBe(324);
+
+    writePersistedScopedRemaining("g1", 4705, storage);
+    expect(readPersistedScopedRemaining("g1", storage)).toBe(null);
+    expect(isSiteLeftoverScale(4705)).toBe(true);
+    expect(isSiteLeftoverScale(324)).toBe(false);
+  });
+
+  it("ignores a legacy sessionStorage leftover so remount cannot lock 4705", () => {
+    const storage = memoryStorage();
+    storage.setItem("aios.quota.scopedRemaining.g1", "4705");
+    expect(readPersistedScopedRemaining("g1", storage)).toBe(null);
+    storage.setItem("aios.quota.scopedRemaining.g1", "324");
+    expect(readPersistedScopedRemaining("g1", storage)).toBe(324);
   });
 });

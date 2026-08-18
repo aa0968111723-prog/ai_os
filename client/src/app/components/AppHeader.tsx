@@ -26,11 +26,10 @@ function PointsBadge({ groupId }: { groupId: string }) {
   if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
   const { weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining, falPointsCap } = my.data;
-  // Unscoped refetch / remount after closing 單格工作室 must not flash 剩 4,708.
+  // Leftover-only 4,708 is not the wallet. Scoped remaining is member/group/Fal (~320).
   const remaining = scopedTightRemaining(my.data, groupId, lastScopedRemaining.current);
   lastScopedRemaining.current = remaining;
   writePersistedScopedRemaining(groupId, remaining, storage);
-  const caps = [memberBudgetRemaining, groupBudgetRemaining, my.data.totalRemaining].filter((v): v is number => v != null);
   const label = remaining != null ? `剩 ${remaining.toLocaleString()}` : "不限";
   // 有額度顯示 used/quota；無週額仍顯示「週已用 N」讓用量可見
   const weekly =
@@ -45,19 +44,22 @@ function PointsBadge({ groupId }: { groupId: string }) {
       : dailyUsed > 0
         ? `・日已用 ${dailyUsed}`
         : "";
-  // 標題點明「剩」指的是哪一層，避免組長/組員把個人分配誤讀成全系統剩餘
-  const source = memberBudgetRemaining != null && memberBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
+  // 標題點明「剩」指的是哪一層——站內總預算 leftover 不是組員錢包
+  const source = memberBudgetRemaining != null && memberBudgetRemaining === remaining
     ? "你的個人分配"
-    : groupBudgetRemaining != null && groupBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
+    : groupBudgetRemaining != null && groupBudgetRemaining === remaining
     ? "本組組預算"
-    : "全系統總預算";
+    : falPointsCap != null && falPointsCap === remaining
+    ? "平台 Fal 可花上限"
+    : "最緊作用額度";
   const detailParts = [
-    caps.length > 0 ? `最緊剩餘（${source}）` : "累計不限",
+    remaining != null ? `最緊剩餘（${source}）` : "累計不限",
     `今日已用 ${dailyUsed}${dailyQuota != null ? `／日額 ${dailyQuota}` : ""}`,
     `本週已用 ${weeklyUsed}${weeklyQuota != null ? `／週額 ${weeklyQuota}` : ""}`,
     memberBudgetRemaining != null ? `個人預算剩 ${memberBudgetRemaining}` : null,
     groupBudgetRemaining != null ? `組預算剩 ${groupBudgetRemaining}` : null,
-    falPointsCap != null ? `平台 Fal 上限 ${falPointsCap}（守門用，不是週／日已用）` : null,
+    falPointsCap != null ? `平台 Fal 可花上限 ${falPointsCap}` : null,
+    my.data.totalRemaining != null ? `站內總預算剩 ${my.data.totalRemaining}（不是組員錢包）` : null,
     "單位：站內點數",
   ].filter(Boolean);
   return (

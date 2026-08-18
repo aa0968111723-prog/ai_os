@@ -32,6 +32,7 @@ import { AiUnderstandingPanel } from "../AiUnderstandingPanel";
 import { RecentGenerationsStrip } from "../RecentGenerationsStrip";
 import posthog from "../../../posthog";
 import { PHONE_MQ } from "../../../lib/viewport";
+import { scopedWalletRemainingLabel } from "@shared/quotaDisplay";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -348,21 +349,10 @@ export function DirectGenerateMode({
   });
 
   // Remaining quota only after confirm starts (avoids a second large quota block on the main path).
+  // Scoped wallet (member/group/Fal), never 站內總預算 leftover ~4708.
   const remainingLabel =
     confirming && quota.data
-      ? [
-          quota.data.totalRemaining != null
-            ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點`
-            : "額度不限",
-          quota.data.weeklyQuota != null
-            ? `本週 ${quota.data.weeklyUsed}/${quota.data.weeklyQuota}`
-            : "",
-          quota.data.dailyQuota != null
-            ? `今日 ${quota.data.dailyUsed}/${quota.data.dailyQuota}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("・")
+      ? scopedWalletRemainingLabel(quota.data, groupId)
       : undefined;
 
   const advancedSummarySuffix = (() => {
@@ -562,15 +552,7 @@ export function DirectGenerateMode({
             )}
             {quota.data && (
               <Meta style={{ marginLeft: 8 }}>
-                {quota.data.totalRemaining != null
-                  ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點`
-                  : "額度不限"}
-                {quota.data.weeklyQuota != null
-                  ? `・本週 ${quota.data.weeklyUsed}/${quota.data.weeklyQuota}`
-                  : ""}
-                {quota.data.dailyQuota != null
-                  ? `・今日 ${quota.data.dailyUsed}/${quota.data.dailyQuota}`
-                  : ""}
+                {scopedWalletRemainingLabel(quota.data, groupId)}
               </Meta>
             )}
           </p>
