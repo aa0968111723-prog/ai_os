@@ -16,7 +16,7 @@ const CANNOT_VERIFY_RE =
 
 /** User asked to persist story / edit a shot — read sources are not a write. */
 const WRITE_INTENT_RE =
-  /(?:儲存|寫入|存檔|更新|修改|編輯|改寫|套用).{0,16}(?:故事|腳本|分鏡|鏡頭|你的故事)|(?:故事|腳本|分鏡|鏡頭|你的故事).{0,12}(?:儲存|寫入|存檔|更新|修改|編輯)/;
+  /(?:儲存|寫入|存檔|更新|修改|編輯|改寫|套用|新增|建立|加).{0,16}(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝)|(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝).{0,12}(?:儲存|寫入|存檔|更新|修改|編輯|新增|建立)/;
 
 export function claimsCompletedWrite(answer: string): boolean {
   return COMPLETED_WRITE_RE.test(answer);

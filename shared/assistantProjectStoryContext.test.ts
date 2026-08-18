@@ -27,6 +27,7 @@ describe("assistant persisted story context", () => {
       storyBlock: block,
       sceneCount: 0,
       sceneLines: "（尚無分鏡）",
+      characterLine: "角色定裝（0）：尚無——編輯者可用 add_character 建立（確認卡；只給名字亦可）",
       genDone: 0,
       genRunning: 0,
       genFailed: 0,
@@ -35,6 +36,7 @@ describe("assistant persisted story context", () => {
     expect(context).toContain("我是大二化工系的小華");
     expect(context).toContain("世界觀｜療癒、校園");
     expect(context).toContain("分鏡（共 0）");
+    expect(context).toContain("add_character");
   });
 
   it("team inventory only flags presence — never injects the 4k body", () => {

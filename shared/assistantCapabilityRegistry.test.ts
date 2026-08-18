@@ -60,6 +60,20 @@ describe("assistant capability registry", () => {
     }
   });
 
+  it("story / project / studio PAGE_TERMS all expose add_character", () => {
+    for (const pageType of ["story", "project", "studio"] as const) {
+      const names = selectAssistantCapabilities({
+        intent: "ASK",
+        pageContext: { pageType, entityType: pageType === "studio" ? "shot" : "script" },
+        allowWrite: true,
+      }).map((tool) => tool.name);
+      expect(names, pageType).toContain("add_character");
+    }
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "assistantCapabilityRegistry.ts"), "utf8");
+    expect(src).toContain('story: ["knowledge", "worldview", "scene", "character"]');
+    expect(src).toContain('project: ["project", "status", "knowledge", "decision", "note", "task", "character"]');
+  });
+
   it("can expose relevant writes for an authorized DIRECT request without bypassing catalog policy", () => {
     const tools = selectAssistantCapabilities({
       intent: "DIRECT",

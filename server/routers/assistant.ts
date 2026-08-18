@@ -45,6 +45,7 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext } 
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
+import { proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
@@ -1073,7 +1074,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
-      const [scenes, storyRow, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, projectContext] = await Promise.all([
+      const [scenes, storyRow, intelligence, knowledgeMeta, readableDbs, resourceResolution, projectRole, projectContext, characterRows] = await Promise.all([
         db
           .select()
           .from(schema.scenes)
@@ -1133,6 +1134,11 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           allowGlobalRetrieval: !input.onlyKnowledgeIds?.length,
           shotId: shotIdFromPageContext(input.pageContext),
         }).catch(() => null),
+        db
+          .select({ name: schema.characters.name })
+          .from(schema.characters)
+          .where(eq(schema.characters.projectId, project.id))
+          .limit(40),
       ]);
       const libraryRetrieval = {
         context: projectContext?.contextText ?? "",
@@ -1308,6 +1314,9 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         content: storyRow?.content,
         lastParsedAt: storyRow?.lastParsedAt,
       });
+      const characterLine = characterRows.length
+        ? `角色定裝（${characterRows.length}）：${characterRows.map((row) => row.name).join("、")}`
+        : "角色定裝（0）：尚無——編輯者可用 add_character 建立（確認卡；只給名字亦可）";
       const context = studioShot
         ? formatStudioShotContext({
           projectTitle: project.title,
@@ -1324,6 +1333,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           format: project.format,
           worldviewBlock: formatWorldviewForAi(wv, "director"),
           storyBlock,
+          characterLine,
           sceneCount: scenes.length,
           sceneLines,
           genDone,
@@ -1463,7 +1473,10 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       if (isMockMode()) {
         emit("thinking", "（測試模式）整理專案現況…");
         const goal = input.message.trim();
-        const mockActions: ResolvedAction[] = goal.length >= 5
+        const characterActions = allowWrite ? resolve(proposeAddCharacterActions(input.message)) : [];
+        const mockActions: ResolvedAction[] = characterActions.length
+          ? characterActions
+          : goal.length >= 5
           ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` }]
           : [];
         const evidenceSummary = databaseEvidence.length
@@ -1498,7 +1511,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
 - prepare_external_generation：替某一鏡建立外部 AI 生成工作階段（sceneNo；externalTool 可用 flow/runway/kling/chatgpt/gemini/midjourney/elevenlabs/suno，未填預設 flow）。Prompt 必須從該分鏡的實際 prompt／動作／對白／旁白整理，不得自行假裝已生成；確認後複製 Prompt 並開啟外部工具，不扣 AI OS 點數。使用者說「幫我準備 Scene 8 去 Flow」或想用外部工具時用這個。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 - add_database_row：在 AI 可寫的自訂資料庫新增一列（dbRef 只能抄 <可讀資料庫> 標了「AI 代理可寫」的代號；values 的鍵用欄位標籤或 key）。使用者說「記進資料庫／加一列／寫進名單」時用這個。不可寫的庫不要提議。
-- add_character：新增角色定裝卡（name 必填 ${CHAR_NAME_MAX} 字內；appearance 必填 ${CHAR_APPEARANCE_MAX} 字內；可選 notes）。使用者說「加角色／建角色卡／小華定裝」時用這個。同名卡已存在就回那張，不重複建。
+- add_character：新增角色定裝卡（name 必填 ${CHAR_NAME_MAX} 字內；appearance 必填 ${CHAR_APPEARANCE_MAX} 字內；可選 notes）。使用者說「加角色／建角色卡／小華定裝」時用這個。同名卡已存在就回那張，不重複建。**只給名字、沒寫外觀時不要拒絕**——appearance 填「待補外觀描述」，每個名字各一張 add_character（最多 6）。禁止只回「我目前無法建立角色」卻讓 actions=[]。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/add_database_row/add_character/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
@@ -1702,9 +1715,15 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           };
         }
         const reply = outcome.reply;
-        const actions = resolve(reply.rawActions);
+        const fromModel = resolve(reply.rawActions);
+        const fallbackCharacters = allowWrite && fromModel.length === 0
+          ? resolve(proposeAddCharacterActions(input.message))
+          : [];
+        const actions = fromModel.length ? fromModel : fallbackCharacters;
         const settled = settleAssistantAskCompletion({
-          answer: reply.answer,
+          answer: fallbackCharacters.length
+            ? "我幫你準備了角色定裝卡，確認下方就加入。外觀先標「待補外觀描述」，確認後可再改。"
+            : reply.answer,
           actions,
           userMessage: input.message,
         });

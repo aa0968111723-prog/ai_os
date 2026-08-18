@@ -31,5 +31,6 @@ ${storyBlock}目前鏡頭：第 ${input.displayNo} 鏡「${input.shot.title}」�
 動作：${input.shot.action || "（未填）"}
 綁定角色：
 ${chars}
+專案角色卡可用 add_character 新增（確認後才寫入；只給名字時外觀先標「待補外觀描述」）。
 分鏡編號 sceneNo 一律用上面的顯示鏡號（orderIndex 排序後的第 N 鏡），不要用陣列下標。不要呼叫 get_project_context 重倒全專案。需要其他鏡時用 read_scene。不要說看不到「你的故事」——故事全文若在上面就直接用。`;
 }

@@ -27,6 +27,7 @@ describe("formatStudioShotContext", () => {
     expect(text).toContain("禪定龜龜");
     expect(text).toContain("不要呼叫 get_project_context");
     expect(text).toContain("尚未儲存稿");
+    expect(text).toContain("add_character");
     expect(text).not.toContain("第一幕");
   });
 

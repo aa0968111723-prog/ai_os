@@ -44,11 +44,14 @@ export function buildAssistantProjectStatusContext(input: {
   genDone: number;
   genRunning: number;
   genFailed: number;
+  /** Compact roster — story / studio PAGE_TERMS include character. */
+  characterLine?: string;
 }): string {
   return [
     `標題：${input.title}（${input.kind}，${input.format}）`,
     `世界觀｜${input.worldviewBlock}`,
     input.storyBlock,
+    input.characterLine,
     `分鏡（共 ${input.sceneCount}）：`,
     input.sceneLines,
     `生成：完成 ${input.genDone}／生成中 ${input.genRunning}／失敗 ${input.genFailed}`,

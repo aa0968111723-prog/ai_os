@@ -94,4 +94,13 @@ describe("formatAssistantPageContext（提示詞區塊：只給指標不給資�
   it("有 entityType 但沒有顯示名時退回型別中文名", () => {
     expect(formatAssistantPageContext({ pageType: "assets", entityType: "asset" })).toContain("正在看：素材");
   });
+
+  it("studio / story / project contextText mentions add_character", () => {
+    for (const pageType of ["studio", "story", "project"] as const) {
+      const out = formatAssistantPageContext({ pageType });
+      expect(out).toContain("add_character");
+      expect(out).toContain("待補外觀描述");
+    }
+    expect(formatAssistantPageContext({ pageType: "storyboard" })).not.toContain("add_character");
+  });
 });

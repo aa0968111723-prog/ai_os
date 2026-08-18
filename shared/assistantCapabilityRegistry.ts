@@ -10,8 +10,8 @@ export interface AssistantCapabilitySelection {
 }
 
 const PAGE_TERMS: Partial<Record<AssistantWirePageContext["pageType"], string[]>> = {
-  project: ["project", "status", "knowledge", "decision", "note", "task"],
-  story: ["knowledge", "worldview", "scene"],
+  project: ["project", "status", "knowledge", "decision", "note", "task", "character"],
+  story: ["knowledge", "worldview", "scene", "character"],
   storyboard: ["scene", "asset", "generation", "character", "prop"],
   production: ["generation", "asset", "scene", "model"],
   final: ["generation", "asset", "project"],
@@ -57,6 +57,10 @@ export function selectAssistantCapabilities(input: AssistantCapabilitySelection)
   const scoped = input.pageContext?.pageType === "studio"
     ? relevant.filter((tool) => !STUDIO_EXCLUDED_TOOLS.has(tool.name))
     : relevant;
+  const pinAddCharacter = input.allowWrite && pageTerms.includes("character");
   const readFirst = scoped.sort((a, b) => Number(a.access === "write") - Number(b.access === "write"));
-  return readFirst.slice(0, maxTools);
+  const pinned = pinAddCharacter ? readFirst.filter((tool) => tool.name === "add_character") : [];
+  const rest = readFirst.filter((tool) => tool.name !== "add_character");
+  const room = Math.max(0, maxTools - pinned.length);
+  return [...rest.slice(0, room), ...pinned].slice(0, maxTools);
 }
