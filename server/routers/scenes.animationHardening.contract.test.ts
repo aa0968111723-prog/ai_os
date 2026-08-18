@@ -318,3 +318,60 @@ describe("overnight real generateInto + adopt rails", () => {
   });
 });
 
+describe("#790 overnight pins (do not reopen)", () => {
+  it("generateStoryboard materializes through lockXiaohuaPlan so titles cannot say 他", () => {
+    const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
+    const parse = readFileSync(join(process.cwd(), "server/services/storyParse.ts"), "utf8");
+    const lock = readFileSync(join(process.cwd(), "shared/characterIdentityLock.ts"), "utf8");
+    const board = story.slice(story.indexOf("generateStoryboard:"), story.indexOf("undoRun:"));
+    expect(board).toContain("materializeStoryboard");
+    expect(parse).toContain("lockXiaohuaPlan(run.plan");
+    expect(parse).toContain("rewriteExistingXiaohuaStoryboardCopy");
+    expect(lock).toContain("rewriteXiaohuaMaleCopy");
+    expect(lock).toContain("lockXiaohuaCopyFields");
+    const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
+    expect(director).toContain("lockXiaohuaCopyFields");
+  });
+
+  it("StoryStage onBlur and persistStoryDoc both require expectedRev", () => {
+    expect(storyStage).toContain("dispatchStorySave(live)");
+    expect(storyStage).toContain("expectedRev: req.expectedRev");
+    const blur = storyStage.slice(storyStage.indexOf("onBlur={() => {"), storyStage.indexOf("footer="));
+    expect(blur).toContain("dispatchStorySave(live)");
+    expect(blur).not.toMatch(/saveRef\(\{\s*projectId,\s*content/);
+    const persist = readFileSync(join(process.cwd(), "server/services/collabDoc.ts"), "utf8");
+    expect(persist).toContain("opts?.expectedRev === undefined");
+    expect(persist).toContain("omitted expectedRev");
+    expect(persist).toContain("expectedRev: opts.expectedRev");
+    expect(persist).not.toContain("expectedRev: opts?.expectedRev ?? existing.rev");
+  });
+
+  it("phone create sheet lives on MobileHome; PhoneRoute does not mount Launchpad on phone", () => {
+    const home = readFileSync(join(process.cwd(), "client/src/mobile/MobileHome.tsx"), "utf8");
+    const route = readFileSync(join(process.cwd(), "client/src/mobile/PhoneRoute.tsx"), "utf8");
+    expect(home).toContain("trpc.projects.create.useMutation");
+    expect(home).toContain("MobileCreateProjectSheet");
+    expect(route).toContain("{phone ? <MobileHome groupId={groupId} /> : <Launchpad groupId={groupId} />}");
+  });
+
+  it("quota 剩 is cost-ledger remaining, not 週已用; leftover 6-step is discarded after generateInto", () => {
+    const quota = readFileSync(join(process.cwd(), "server/routers/quota.ts"), "utf8");
+    expect(quota).toContain("站內總預算剩餘（cost_ledger 淨消耗）");
+    expect(quota).toContain("徽章「剩」會少 3、週已用只加 1");
+    const header = readFileSync(join(process.cwd(), "client/src/app/components/AppHeader.tsx"), "utf8");
+    expect(header).toContain("剩 ${Math.min(...caps).toLocaleString()}");
+    expect(header).toContain("本週已用 ${weeklyUsed}");
+    const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
+    expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");
+    expect(reconcile).toContain("待你過目");
+  });
+
+  it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {
+    expect(sceneList).toContain("enqueueInsertAfter");
+    expect(sceneList).toContain("shouldApplySceneWriteAck");
+    const ack = readFileSync(join(process.cwd(), "shared/sceneWriteAck.ts"), "utf8");
+    expect(ack).toContain("applyInvalidate");
+    expect(ack).toContain("writeProjectId");
+  });
+});
+
