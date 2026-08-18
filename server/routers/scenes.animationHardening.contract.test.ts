@@ -143,6 +143,17 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(bindings).toContain("個人資料表不能提供給專案");
     expect(bindings).toContain("table.groupId === project.groupId");
   });
+
+  it("inheritFromPrevious goes through applySceneRevision and conflict is formatted before 500 rewrite", () => {
+    const inherit = scenes.slice(scenes.indexOf("inheritFromPrevious:"), scenes.indexOf("batchGenerate:"));
+    expect(inherit).toContain("applySceneRevision");
+    expect(inherit).toContain("expectedRev: input.expectedRev ?? cur.rev");
+    expect(inherit).not.toContain("db.update(schema.scenes).set(patch)");
+    const conflictIdx = trpc.indexOf("isRevisionConflictError(error.cause)");
+    const internalIdx = trpc.indexOf('error.code === "INTERNAL_SERVER_ERROR"');
+    expect(conflictIdx).toBeGreaterThan(-1);
+    expect(conflictIdx).toBeLessThan(internalIdx);
+  });
 });
 
 describe("worldview OCC uses projects.rev", () => {
@@ -169,6 +180,7 @@ describe("storyboard board blur sends expectedRev", () => {
     expect(sceneList).toContain("expectedRev: row?.rev");
     expect(shotCard).toContain("createShotFieldSaveGate");
     expect(shotCard).toContain("expectedRev: req.expectedRev");
+    expect(shotCard).toContain("expectedRev: shot.rev");
     expect(header).toContain("expectedRev: scene.rev");
     expect(header).not.toContain("update.mutate({ id: scene.id, title: v })");
     expect(shotCard).toContain("rev: shot.rev");

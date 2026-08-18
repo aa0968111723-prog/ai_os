@@ -62,7 +62,7 @@ import {
 } from "../../shared/sceneVersions";
 import { lockSceneOrder } from "../services/locks";
 import { restoreOrderPlan } from "../../shared/sceneRestoreOrder";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { softDeleteScenesCore } from "../services/sceneWriteCore";
@@ -155,6 +155,17 @@ async function assertNoPendingVisual(sceneId: string): Promise<void> {
     ))
     .limit(1);
   if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成或待核准中，請稍候再生成" });
+}
+
+async function applySceneRevision<TRow extends { id: string; rev: number }>(
+  args: Parameters<typeof applyWithRevision<TRow>>[0],
+) {
+  try {
+    return await applyWithRevision(args);
+  } catch (err) {
+    if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+    throw err;
+  }
 }
 
 /**
@@ -945,6 +956,7 @@ export const scenesRouter = router({
       z.object({
         sceneId: z.string().uuid(),
         aspects: z.array(z.enum(CONTINUITY_ASPECTS)).min(1),
+        expectedRev: z.number().int().min(0).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -971,7 +983,26 @@ export const scenesRouter = router({
 
       const { patch, changes } = buildContinuityPatch(prev, cur, input.aspects);
       if (!changes.length) return { ok: true as const, changed: false, changes: [] as string[] };
-      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, cur.id));
+      const baseline: Record<string, unknown> = {};
+      for (const key of Object.keys(patch)) baseline[key] = (cur as Record<string, unknown>)[key];
+      await applySceneRevision({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: cur,
+        patch,
+        expectedRev: input.expectedRev ?? cur.rev,
+        baseline,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db
+            .select()
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.id, cur.id), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
       return { ok: true as const, changed: true, changes };
     }),
 
@@ -1195,7 +1226,7 @@ export const scenesRouter = router({
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       // 條件寫入：rev 撞了就先試逐欄合併，真的撞同一欄才丟結構化 CONFLICT（見 revisionGuard）。
       // 不帶 expectedRev 的呼叫端行為與過去相同，只是 rev 仍會遞增。
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applySceneRevision({
         entity: "scene",
         table: schema.scenes,
         idColumn: schema.scenes.id,
@@ -1431,7 +1462,7 @@ export const scenesRouter = router({
         patch.lookIds = nextLookIds;
       }
       if (Object.keys(patch).length === 0) return scene; // 什麼都沒送＝沒事可做
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applySceneRevision({
         entity: "scene",
         table: schema.scenes,
         idColumn: schema.scenes.id,

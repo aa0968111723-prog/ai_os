@@ -36,6 +36,13 @@ const t = initTRPC.context<Context>().create({
     // 注意（QA-001）：不得把所有 500 一律歸咎「資料庫」——provider 逾時/上游失敗走
     // SERVICE_UNAVAILABLE 等專屬 code 帶自己的訊息，這裡只兜「真正未分類」的內部錯誤，
     // 訊息保持中性、不指向特定元件（/api/ready 已分項回報，管理員可自行對照）。
+    // 樂觀併發衝突必須排在通用 500 改寫前面：scenes.update / setCards 等邊界
+    // 若直接丟 RevisionConflictError，tRPC 會先包成 INTERNAL_SERVER_ERROR，
+    // 舊順序會把衝突卡吃掉、畫面只剩「系統暫時無法處理」。
+    if (isRevisionConflictError(error.cause)) {
+      const stripped = strip(shape);
+      return { ...stripped, message: "夥伴剛剛更新了這筆資料", data: { ...stripped.data, conflict: error.cause.conflict } } as typeof shape;
+    }
     if (error.code === "INTERNAL_SERVER_ERROR") {
       console.error("[trpc]", error.cause ?? error);
       // 同步進錯誤環形緩衝，讓 /api/selftest「近期錯誤」看得到（errlog 零專案相依，直接 import 不會循環）
@@ -45,13 +52,6 @@ const t = initTRPC.context<Context>().create({
     // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
     if (error.cause instanceof ZodError) {
       return strip({ ...shape, message: error.cause.issues[0]?.message ?? shape.message });
-    }
-    // 樂觀併發衝突：把結構化 payload 掛進 data.conflict，讓前端畫得出
-    // 「韋澔剛剛更新了這一鏡 ／ 查看新版 ／ 重新套用我的修改」而不是一句「儲存失敗」。
-    // 只帶實體 id、版本號、現值與撞到的欄位——都是呼叫者本來就有權讀的那一筆資料。
-    if (isRevisionConflictError(error.cause)) {
-      const stripped = strip(shape);
-      return { ...stripped, data: { ...stripped.data, conflict: error.cause.conflict } } as typeof shape;
     }
     return strip(shape);
   },

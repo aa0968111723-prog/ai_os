@@ -465,7 +465,11 @@ export function ShotCard({
               confirmLabel="承接"
               disabled={inherit.isPending}
               onConfirm={() =>
-                inherit.mutate({ sceneId: shot.id, aspects: ["characters", "looks", "location", "camera"] })
+                inherit.mutate({
+                  sceneId: shot.id,
+                  aspects: ["characters", "looks", "location", "camera"],
+                  expectedRev: shot.rev,
+                })
               }
             >
               <Icon name="Copy" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
