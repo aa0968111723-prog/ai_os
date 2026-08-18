@@ -87,12 +87,14 @@ describe("api — story.parse / generateStoryboard 獨立逾時（避免 UI 乾�
   it("only those two procedures are timed, under the 150s gateway", () => {
     expect(isTimedStoryProcedure("story.parse")).toBe(true);
     expect(isTimedStoryProcedure("story.generateStoryboard")).toBe(true);
+    expect(isTimedStoryProcedure("director.splitScript")).toBe(true);
     expect(isTimedStoryProcedure("scenes.generateInto")).toBe(false);
     expect(isTimedStoryProcedure("auth.me")).toBe(false);
     expect(STORY_MUTATION_CLIENT_TIMEOUT_MS).toBeLessThan(150_000);
     expect(STORY_MUTATION_CLIENT_TIMEOUT_MS).toBeGreaterThan(105_000);
     expect(storyMutationTimeoutMessage("story.parse")).toMatch(/解析逾時/);
     expect(storyMutationTimeoutMessage("story.generateStoryboard")).toMatch(/產生分鏡逾時/);
+    expect(storyMutationTimeoutMessage("director.splitScript")).toMatch(/拆分鏡逾時/);
   });
 
   it("maps abort/timeout to a recoverable Chinese error", async () => {

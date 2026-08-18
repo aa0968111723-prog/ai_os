@@ -32,13 +32,13 @@ export type { AppRouter };
 export const STORY_MUTATION_CLIENT_TIMEOUT_MS = 120_000;
 
 export function isTimedStoryProcedure(path: string): boolean {
-  return path === "story.parse" || path === "story.generateStoryboard";
+  return path === "story.parse" || path === "story.generateStoryboard" || path === "director.splitScript";
 }
 
 export function storyMutationTimeoutMessage(path: string): string {
-  return path === "story.generateStoryboard"
-    ? "產生分鏡逾時（已中止）。請再試一次。"
-    : "解析逾時（已中止，沒有寫入）。請再試一次，或把稿再短一點。";
+  if (path === "story.generateStoryboard") return "產生分鏡逾時（已中止）。請再試一次。";
+  if (path === "director.splitScript") return "拆分鏡逾時（已中止）。請再試一次。";
+  return "解析逾時（已中止，沒有寫入）。請再試一次，或把稿再短一點。";
 }
 
 export function isAbortOrTimeoutError(err: unknown): boolean {
@@ -103,7 +103,9 @@ export function createTrpcClient() {
             const href = String(input instanceof Request ? input.url : input);
             const path = href.includes("story.generateStoryboard")
               ? "story.generateStoryboard"
-              : "story.parse";
+              : href.includes("director.splitScript")
+                ? "director.splitScript"
+                : "story.parse";
             return fetchWithStoryTimeout(
               input,
               init,
