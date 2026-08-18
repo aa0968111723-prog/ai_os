@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -28,7 +28,6 @@ import {
   type ShotCamera,
   type ShotPerformance,
 } from "../../shared/story";
-import { MAX_PROJECT_CHARACTERS } from "../../shared/cardLimits";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
@@ -40,8 +39,8 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, i
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
-import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, lockAddCharacterAnswer, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
-import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
+import { addCharacterConfirmLabel, collectAddCharacterProposals, dropMisroutedCharacterDatabaseActions, lockAddCharacterAnswer, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
@@ -2349,93 +2348,20 @@ export const assistantRouter = router({
       }
 
       if (a.type === "add_character") {
-        const name = a.name.trim();
-        const [storyRow] = await db
-          .select({ content: schema.stories.content })
-          .from(schema.stories)
-          .where(eq(schema.stories.projectId, project.id))
-          .limit(1);
-        const locked = applyXiaohuaIdentityLock(
-          { name, appearance: a.appearance.trim(), costume: null },
-          storyRow?.content ?? "",
-        );
-        const appearance = (locked.appearance ?? a.appearance).trim();
-        const notes = a.notes?.trim() || null;
-        if (!name || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
-        const existing = await db
-          .select()
-          .from(schema.characters)
-          .where(eq(schema.characters.projectId, project.id));
-        const reused = existing.find((row) => nameKey(row.name) === nameKey(name));
-        let appearanceChanged = false;
-        if (reused) {
-          const requested = applyXiaohuaIdentityLock(
-            { name, appearance, costume: null },
-            storyRow?.content ?? "",
-          );
-          const nextAppearance = (requested.appearance ?? appearance).trim();
-          const keepPending = nextAppearance === PENDING_CHARACTER_APPEARANCE && reused.appearance.trim();
-          const writeAppearance = keepPending ? reused.appearance : nextAppearance;
-          if (writeAppearance && writeAppearance !== reused.appearance) {
-            await db
-              .update(schema.characters)
-              .set({ appearance: writeAppearance, rev: sql`${schema.characters.rev} + 1` })
-              .where(eq(schema.characters.id, reused.id));
-            reused.appearance = writeAppearance;
-            appearanceChanged = true;
-          }
-        }
-        const row = reused ?? await (async () => {
-          const [{ n }] = await db
-            .select({ n: count() })
-            .from(schema.characters)
-            .where(eq(schema.characters.projectId, project.id));
-          if (Number(n) >= MAX_PROJECT_CHARACTERS) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `此專案角色定裝已達上限（${MAX_PROJECT_CHARACTERS} 張）——先刪不用的再新增`,
-            });
-          }
-          const [created] = await db.insert(schema.characters).values({
-            projectId: project.id,
-            groupId: project.groupId,
-            name,
-            appearance,
-            notes,
-            createdBy: ctx.auth.user.id,
-          }).returning();
-          return created;
-        })();
-        let verification: AssistantWriteVerification;
-        try {
-          const [found] = await db
-            .select({
-              id: schema.characters.id,
-              projectId: schema.characters.projectId,
-              appearance: schema.characters.appearance,
-            })
-            .from(schema.characters)
-            .where(and(eq(schema.characters.id, row.id), eq(schema.characters.projectId, project.id)));
-          const expectedAppearance = reused ? reused.appearance : appearance;
-          verification = found && found.appearance === expectedAppearance
-            ? { status: "verified", message: appearanceChanged
-              ? `已重新讀取並確認角色「${row.name}」外觀`
-              : reused
-                ? `已重新讀取並確認角色「${row.name}」已存在`
-                : `已重新讀取並確認角色「${row.name}」` }
-            : { status: "unverified", message: "操作已送出，但驗證未通過" };
-        } catch {
-          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
-        }
-        if (!reused || appearanceChanged) {
-          publishToProject(project.id, { kind: "character", id: row.id }, appearanceChanged ? "助手已更新角色外觀" : "助手已新增角色");
-        }
+        const row = await upsertProjectCharacterCore({
+          auth: ctx.auth,
+          groupId: project.groupId,
+          projectId: project.id,
+          name: a.name,
+          appearance: a.appearance,
+          notes: a.notes,
+        });
         return writeResult(
-          { kind: "add_character" as const, characterId: row.id, name: row.name, reused: Boolean(reused) },
-          verification,
-          appearanceChanged
+          { kind: "add_character" as const, characterId: row.characterId, name: row.name, reused: row.reused },
+          row.verification,
+          row.appearanceChanged
             ? `已更新角色「${row.name}」外觀`
-            : reused
+            : row.reused
               ? `角色「${row.name}」已在專案裡`
               : `已新增角色「${row.name}」`,
           "authoritative_character_row_read_back",

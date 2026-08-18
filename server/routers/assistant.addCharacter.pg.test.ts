@@ -4,7 +4,7 @@
  * RUN_PG_INTEGRATION=1 DATABASE_URL=postgres://… npx vitest run server/routers/assistant.addCharacter.pg.test.ts
  */
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import { markBootReady } from "../services/boot";
@@ -16,6 +16,19 @@ import { assistantRouter } from "./assistant";
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 const d = RUN_PG ? describe : describe.skip;
 if (RUN_PG) markBootReady();
+
+async function countGroupDataRows(groupId: string): Promise<number> {
+  const tables = await db
+    .select({ id: schema.dataTables.id })
+    .from(schema.dataTables)
+    .where(eq(schema.dataTables.groupId, groupId));
+  if (!tables.length) return 0;
+  const rows = await db
+    .select({ id: schema.dataRows.id })
+    .from(schema.dataRows)
+    .where(inArray(schema.dataRows.tableId, tables.map((table) => table.id)));
+  return rows.length;
+}
 
 function authFor(userId: string, groupId: string): AuthState {
   return {
@@ -49,6 +62,10 @@ d("project assistant add_character (real PostgreSQL)", () => {
       groupId, ownerId: userId, title: "overnight-add-character", kind: "video", platform: "test", format: "16:9",
     }).returning();
     leftovers.projects.push(project.id);
+    const stories = await db.select().from(schema.stories).where(eq(schema.stories.projectId, project.id));
+    expect(stories).toHaveLength(0);
+    const dbRowsBefore = await countGroupDataRows(groupId);
+    expect(dbRowsBefore).toBe(0);
 
     const cards = proposeAddCharacterActions("新增角色 小華");
     expect(cards).toEqual([
@@ -77,6 +94,7 @@ d("project assistant add_character (real PostgreSQL)", () => {
     expect(rows[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
     expect(rows[0]!.appearance).toContain("粉橘短髮女孩");
     expect(rows[0]!.id).toBe(result.characterId);
+    expect(await countGroupDataRows(groupId)).toBe(0);
 
     const maleWrite = await assistant.runAction({
       projectId: project.id,

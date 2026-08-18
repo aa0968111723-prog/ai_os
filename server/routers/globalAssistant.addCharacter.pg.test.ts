@@ -4,7 +4,7 @@
  * RUN_PG_INTEGRATION=1 DATABASE_URL=postgres://… npx vitest run server/routers/globalAssistant.addCharacter.pg.test.ts
  */
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import { markBootReady } from "../services/boot";
@@ -16,6 +16,19 @@ import { runSiteActionCore } from "./globalAssistant";
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 const d = RUN_PG ? describe : describe.skip;
 if (RUN_PG) markBootReady();
+
+async function countGroupDataRows(groupId: string): Promise<number> {
+  const tables = await db
+    .select({ id: schema.dataTables.id })
+    .from(schema.dataTables)
+    .where(eq(schema.dataTables.groupId, groupId));
+  if (!tables.length) return 0;
+  const rows = await db
+    .select({ id: schema.dataRows.id })
+    .from(schema.dataRows)
+    .where(inArray(schema.dataRows.tableId, tables.map((table) => table.id)));
+  return rows.length;
+}
 
 function authFor(userId: string, groupId: string): AuthState {
   return {
@@ -54,6 +67,7 @@ d("global assistant add_character (real PostgreSQL)", () => {
     expect(stories).toHaveLength(0);
     const beforeChars = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
     expect(beforeChars).toHaveLength(0);
+    expect(await countGroupDataRows(groupId)).toBe(0);
 
     const result = await runSiteActionCore(authFor(userId, groupId), {
       type: "add_character",
@@ -74,5 +88,6 @@ d("global assistant add_character (real PostgreSQL)", () => {
     expect(rows[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
     expect(rows[0]!.appearance).toContain("粉橘短髮女孩");
     expect(rows[0]!.id).toBe(result.characterId);
+    expect(await countGroupDataRows(groupId)).toBe(0);
   });
 });

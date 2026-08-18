@@ -421,7 +421,12 @@ export interface SiteActionRefs {
   groupId: string;
   /** 發問者本人（send_dm 不可指向自己） */
   selfId: string;
-  projects: Map<string, { id: string; title: string }>;
+  projects: Map<string, {
+    id: string;
+    title: string;
+    /** Existing 角色 cards — same-name confirm says 更新外觀, not 新增 */
+    characters?: Array<{ name: string; appearance?: string | null }>;
+  }>;
   members: SiteMemberRef[];
   platforms: Array<{ value: string; format: string }>;
   kinds: string[];
@@ -590,6 +595,7 @@ export function resolveSiteActions(
       const appearance = isXiaohuaName(name)
         ? XIAOHUA_LOCKED_APPEARANCE
         : (p.appearance?.trim() || PENDING_CHARACTER_APPEARANCE);
+      const existing = (project.characters ?? []).find((row) => nameKey(row.name) === nameKey(name));
       out.push({
         type: "add_character",
         groupId: refs.groupId,
@@ -598,7 +604,7 @@ export function resolveSiteActions(
         name,
         appearance,
         notes: p.notes?.trim() || undefined,
-        label: addCharacterConfirmLabel(name, appearance),
+        label: addCharacterConfirmLabel(name, appearance, existing),
       });
       continue;
     }
@@ -923,7 +929,8 @@ export async function runGlobalAsk(
 
   // 站級動作的解析素材：成員（mN）＋該組啟用中的專案類型/平台＋可寫資料庫（dbN 的 agentAccess）
   const dbIds = [...dbByRef.values()].map((t) => t.id);
-  const [memberRows, creationOptions, dbAccessRows, currentScenePointers, currentStoryBlock] = await Promise.all([
+  const listedProjectIds = [...projByRef.values()].map((p) => p.id);
+  const [memberRows, creationOptions, dbAccessRows, currentScenePointers, currentStoryBlock, characterRows] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.groupMembers)
@@ -949,13 +956,33 @@ export async function runGlobalAsk(
     effectiveProjectId
       ? loadPersistedStoryForAssistant(effectiveProjectId)
       : Promise.resolve(""),
+    listedProjectIds.length
+      ? db
+          .select({
+            projectId: schema.characters.projectId,
+            name: schema.characters.name,
+            appearance: schema.characters.appearance,
+          })
+          .from(schema.characters)
+          .where(inArray(schema.characters.projectId, listedProjectIds))
+      : Promise.resolve([] as Array<{ projectId: string; name: string; appearance: string }>),
   ]);
   const members: SiteMemberRef[] = memberRows.map((m, i) => ({ ref: `m${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
   const agentAccessById = new Map(dbAccessRows.map((r) => [r.id, r.agentAccess]));
+  const charactersByProjectId = new Map<string, Array<{ name: string; appearance: string }>>();
+  for (const row of characterRows) {
+    const list = charactersByProjectId.get(row.projectId) ?? [];
+    list.push({ name: row.name, appearance: row.appearance });
+    charactersByProjectId.set(row.projectId, list);
+  }
   const siteRefs: SiteActionRefs = {
     groupId,
     selfId: auth.user.id,
-    projects: new Map([...projByRef.entries()].map(([ref, p]) => [ref, { id: p.id, title: p.title }])),
+    projects: new Map([...projByRef.entries()].map(([ref, p]) => [ref, {
+      id: p.id,
+      title: p.title,
+      characters: charactersByProjectId.get(p.id) ?? [],
+    }])),
     members,
     platforms: creationOptions.platforms,
     kinds: creationOptions.kinds,

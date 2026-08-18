@@ -351,6 +351,28 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     });
   });
 
+  it("same-name 小華 confirm says 更新外觀, never 素材清單", () => {
+    const out = resolveSiteActions(refs({
+      projects: new Map([
+        ["p1", {
+          id: "proj-1",
+          title: "招生短片",
+          characters: [{ name: "小華", appearance: "年輕男性" }],
+        }],
+        ["p2", { id: "proj-2", title: "社課回顧" }],
+      ]),
+    }), [
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: "粉橘短髮女孩" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("add_character");
+    expect(out[0].label).toContain("更新角色「小華」外觀");
+    expect(out[0].label).toContain("年輕男性");
+    expect(out[0].label).toContain(XIAOHUA_LOCKED_APPEARANCE);
+    expect(out[0].label).not.toContain("新增角色");
+    expect(out[0].label).not.toContain("素材清單");
+  });
+
   it("live 05:29 建立角色小華（…）injects add_character even when the model refused", () => {
     const live = "建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.";
     const { frame } = deriveDeterministicGoalFrame(live);
@@ -521,6 +543,8 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).toContain("pinProjectIntoRefMap");
     expect(src).toContain("assertFreeOnlyCompletion");
     expect(src).toContain("lockAddCharacterAnswer");
+    expect(src).toContain("addCharacterConfirmLabel(name, appearance, existing)");
+    expect(src).toContain("charactersByProjectId");
     expect(src).not.toContain("settleUsagePoints");
   });
 
