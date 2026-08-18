@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../../api";
-import { scopedTightRemaining } from "../../../shared/quotaDisplay";
+import { scopedTightRemaining } from "@shared/quotaDisplay";
 import { Icon } from "../../components/Icon";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";

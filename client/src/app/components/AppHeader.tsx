@@ -4,7 +4,7 @@ import { trpc } from "../../api";
 import type { MeWithCapabilities } from "../../capabilities";
 import { BrandLogo } from "../../components/BrandLogo";
 import { Icon } from "../../components/Icon";
-import { scopedTightRemaining } from "../../../shared/quotaDisplay";
+import { scopedTightRemaining } from "@shared/quotaDisplay";
 import { AccountMenu } from "./AccountMenu";
 import { AssistantLauncher } from "./AssistantLauncher";
 import { OnlinePresenceMenu } from "./OnlinePresenceMenu";
