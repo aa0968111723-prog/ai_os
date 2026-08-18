@@ -22,6 +22,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof StoryboardTimeline
     onReorder: vi.fn(),
     onNewShot: vi.fn(),
     onDuplicate: vi.fn(),
+    onInsertAfter: vi.fn(),
     onDelete: vi.fn(),
     ...overrides,
   } satisfies React.ComponentProps<typeof StoryboardTimeline>;
@@ -39,5 +40,26 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     expect(props.onDuplicate).toHaveBeenCalledTimes(1);
     expect(props.onDuplicate).toHaveBeenCalledWith("s2");
     expect(props.onDelete).not.toHaveBeenCalled();
+  });
+
+  it("menu is portaled as position:fixed so 1024px height can still reach 複製", async () => {
+    const user = userEvent.setup();
+    setup();
+    const shot04 = screen.getAllByRole("listitem")[1]!;
+    await user.click(within(shot04).getByRole("button", { name: /更多操作/ }));
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("studio-menu--fixed");
+    expect(document.body.contains(menu)).toBe(true);
+    expect(shot04.contains(menu)).toBe(false);
+  });
+
+  it("menu 在這之後插入一鏡 calls onInsertAfter with the source shot id", async () => {
+    const user = userEvent.setup();
+    const props = setup();
+    const shot04 = screen.getAllByRole("listitem")[1]!;
+    await user.click(within(shot04).getByRole("button", { name: /更多操作/ }));
+    await user.click(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ }));
+    expect(props.onInsertAfter).toHaveBeenCalledWith("s2");
+    expect(props.onDuplicate).not.toHaveBeenCalled();
   });
 });

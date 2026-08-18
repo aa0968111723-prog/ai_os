@@ -218,8 +218,12 @@ describe("Inspector 不新增資料格式", () => {
     expect(studio).toContain("setShotActionError");
     const timeline = readFileSync(resolve(dir, "StoryboardTimeline.tsx"), "utf8");
     expect(timeline).toContain("複製這一鏡");
-    expect(timeline).toContain("onDuplicate(shot.id)");
-    expect(declarations).toContain(".studio-tlshot:has(.studio-menu)");
+    expect(timeline).toContain("onDuplicate()");
+    expect(timeline).toContain("createPortal");
+    expect(timeline).toContain("studio-menu--fixed");
+    expect(declarations).toContain(".studio-menu--fixed");
+    expect(studio).toContain("onInsertAfter={insertBlankAfter}");
+    expect(timeline).toContain("在這之後插入一鏡");
   });
 
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {

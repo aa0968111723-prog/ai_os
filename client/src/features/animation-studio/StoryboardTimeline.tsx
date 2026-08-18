@@ -7,7 +7,8 @@
  * 兩種排序操作並存是刻意的（沿用 ShotStrip 的既有決定）：桌機可以拖，但每一格
  * 永遠也有前／後按鈕——拖曳對鍵盤與讀屏使用者不成立，那是加速捷徑不是唯一的路。
  */
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { AssetImg } from "../../components/MediaFallback";
 import { Button, Meta } from "../../components/ui";
@@ -36,6 +37,8 @@ export interface StoryboardTimelineProps {
   onReorder: (orderedIds: string[]) => void;
   onNewShot: (kind: NewShotKind) => void;
   onDuplicate: (id: string) => void;
+  /** Blank row immediately after this shot (not append-at-end). */
+  onInsertAfter?: (id: string) => void;
   onDelete: (id: string) => void;
   newShotBusy?: boolean;
 }
@@ -53,6 +56,7 @@ export function StoryboardTimeline({
   onReorder,
   onNewShot,
   onDuplicate,
+  onInsertAfter,
   onDelete,
   newShotBusy,
 }: StoryboardTimelineProps) {
@@ -60,6 +64,7 @@ export function StoryboardTimeline({
   const [overId, setOverId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const listRef = useRef<HTMLOListElement | null>(null);
+  const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const drop = (targetId: string) => {
     setOverId(null);
@@ -171,8 +176,12 @@ export function StoryboardTimeline({
                     </button>
                     <button
                       type="button"
+                      ref={(el) => {
+                        if (el) moreBtnRefs.current.set(shot.id, el);
+                        else moreBtnRefs.current.delete(shot.id);
+                      }}
                       aria-label={`「${shot.title}」的更多操作`}
-                      title="更多（複製、刪除）"
+                      title="更多（插入、複製、刪除）"
                       aria-haspopup="menu"
                       aria-expanded={menuId === shot.id}
                       onClick={() => setMenuId((cur) => (cur === shot.id ? null : shot.id))}
@@ -192,36 +201,13 @@ export function StoryboardTimeline({
                 )}
 
                 {menuId === shot.id && (
-                  <>
-                    <button
-                      type="button"
-                      className="studio-menu__scrim"
-                      aria-label="關閉選單"
-                      onClick={() => setMenuId(null)}
-                    />
-                    <div className="studio-menu studio-menu--shot" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuId(null);
-                          onDuplicate(shot.id);
-                        }}
-                      >
-                        <Icon name="Copy" size={13} /> 複製這一鏡
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="is-danger"
-                        onClick={() => { setMenuId(null); onDelete(shot.id); }}
-                      >
-                        <Icon name="Trash2" size={13} /> 刪除（進回收桶）
-                      </button>
-                    </div>
-                  </>
+                  <ShotMoreMenu
+                    trigger={moreBtnRefs.current.get(shot.id) ?? null}
+                    onClose={() => setMenuId(null)}
+                    onDuplicate={() => { setMenuId(null); onDuplicate(shot.id); }}
+                    onInsertAfter={onInsertAfter ? () => { setMenuId(null); onInsertAfter(shot.id); } : undefined}
+                    onDelete={() => { setMenuId(null); onDelete(shot.id); }}
+                  />
                 )}
               </li>
             );
@@ -234,5 +220,109 @@ export function StoryboardTimeline({
         </Meta>
       )}
     </section>
+  );
+}
+
+/**
+ * Portal + position:fixed so the shot menu stays on-screen at 1024px
+ * viewport height. Opening upward inside `.studio-timeline__list`
+ * (overflow-y: hidden) clips the menu; the transparent scrim then
+ * eats the 複製 click.
+ */
+function ShotMoreMenu({
+  trigger,
+  onClose,
+  onDuplicate,
+  onInsertAfter,
+  onDelete,
+}: {
+  trigger: HTMLButtonElement | null;
+  onClose: () => void;
+  onDuplicate: () => void;
+  onInsertAfter?: () => void;
+  onDelete: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const menuH = menuRef.current?.offsetHeight ?? 120;
+      const menuW = menuRef.current?.offsetWidth ?? 190;
+      const rect = trigger?.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const gap = 4;
+      if (!rect) {
+        setBox({ top: Math.max(8, vh - menuH - 8), left: 8 });
+        return;
+      }
+      const above = rect.top - gap - menuH;
+      const below = rect.bottom + gap;
+      const top = above >= 8 ? above : Math.min(below, Math.max(8, vh - menuH - 8));
+      let left = rect.left;
+      if (left + menuW > vw - 8) left = vw - menuW - 8;
+      if (left < 8) left = 8;
+      setBox({ top, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [trigger]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <>
+      <button
+        type="button"
+        className="studio-menu__scrim"
+        aria-label="關閉選單"
+        onClick={onClose}
+      />
+      <div
+        ref={menuRef}
+        className="studio-menu studio-menu--shot studio-menu--fixed"
+        role="menu"
+        style={box ? { top: box.top, left: box.left } : { visibility: "hidden", top: 0, left: 0 }}
+      >
+        {onInsertAfter && (
+          <button
+            type="button"
+            role="menuitem"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onInsertAfter();
+            }}
+          >
+            <Icon name="Plus" size={13} /> 在這之後插入一鏡
+          </button>
+        )}
+        <button
+          type="button"
+          role="menuitem"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDuplicate();
+          }}
+        >
+          <Icon name="Copy" size={13} /> 複製這一鏡
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="is-danger"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Icon name="Trash2" size={13} /> 刪除（進回收桶）
+        </button>
+      </div>
+    </>,
+    document.body,
   );
 }

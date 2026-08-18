@@ -315,6 +315,14 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       setShotActionError(message);
     });
   };
+  /** After-row blank insert from the shot menu (not append-at-end). */
+  const insertBlankAfter = (sceneId: string) => {
+    setShotActionError(null);
+    void insertAfter.mutateAsync({ sceneId }).catch((err: unknown) => {
+      const message = err instanceof Error && err.message ? err.message : "插入分鏡失敗";
+      setShotActionError(message);
+    });
+  };
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -677,6 +685,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
           onNewShot={createShot}
           onDuplicate={duplicateShot}
+          onInsertAfter={insertBlankAfter}
           onDelete={(id) => removeShot.mutate({ sceneId: id })}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />
