@@ -132,6 +132,7 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(adopt).toContain("export async function adoptGenerationCurrent");
     expect(adopt).toContain("export async function adoptGenerationVerified");
     expect(adopt).toMatch(/assetId:\s*asset\.id/);
+    expect(adopt).toContain("rev: sql`${schema.scenes.rev} + 1`");
     expect(adopt).toContain("scene?.assetId === adopted.assetId");
   });
 
