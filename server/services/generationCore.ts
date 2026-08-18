@@ -996,7 +996,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             projectId: project.id,
             groupId: project.groupId,
             userId: input.userId,
-            modelId: model.id,
+            modelId: input.modelId,
             kind: model.kind,
             prompt: input.prompt,
             sceneId: input.sceneId ?? null,
@@ -1078,7 +1078,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         projectId: project.id,
         groupId: project.groupId,
         userId: input.userId,
-        modelId: model.id,
+        modelId: input.modelId,
         kind: model.kind,
         prompt: input.prompt,
         sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）

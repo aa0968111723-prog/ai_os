@@ -22,6 +22,7 @@ const bindings = readFileSync(join(process.cwd(), "server/services/projectDataBi
 const siteAssistant = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
 const repairExecute = readFileSync(join(process.cwd(), "server/services/animationRepairExecute.ts"), "utf8");
 const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
+const sceneStudio = readFileSync(join(process.cwd(), "client/src/components/SceneStudio.tsx"), "utf8");
 
 describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
@@ -173,11 +174,17 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(sceneList).toContain("pendingAdoptGenerationId");
     expect(sceneList).toContain("creativeContext.adoptGeneration");
     expect(sceneList).toContain("採用這一版");
+    expect(sceneStudio).toContain("採用這一版");
+    expect(sceneStudio).toContain("latestVisualCandidate");
   });
 
   it("generateInto keeps the scene pointer; Adopt is the only writer of assetId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("executeGenerationCommand");
+    expect(into).toContain("modelId: input.modelId");
+    expect(into).toContain("modelId: gen.modelId");
+    expect(into).toContain("reconcileAgentRunsAfterSceneGenerate");
+    expect(into).not.toContain("fast-lightning-sdxl");
     expect(into).toContain("preserveScenePointer: true");
     expect(generationCommand).toContain("const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core)");
     expect(generationCore).toContain("if (!gen.sceneId || meta.preserveScenePointer === true) return null");

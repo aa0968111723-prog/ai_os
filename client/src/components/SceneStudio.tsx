@@ -535,8 +535,14 @@ export function SceneStudio({
   /** 修正的底圖：指定的那一版，或這一格現用畫面 */
   const baseVersion = baseAssetId ? list.find((v) => v.assetId === baseAssetId) : currentVisual;
   const baseUsable = !!baseVersion?.canRefineFrom;
-  /** 舞台上顯示的那一版（預覽某一版時用它，否則現用） */
-  const stageVersion = previewAssetId ? list.find((v) => v.assetId === previewAssetId) ?? currentVisual : currentVisual;
+  /** 還沒採用的最新畫面候選／生成中版本——第一張圖不得因為現用指標仍空就整舞台空白 */
+  const latestVisualCandidate = visualVersions.find((v) => v.canSetCurrent)
+    ?? visualVersions.find((v) => v.state === "generating" || v.state === "awaiting_approval")
+    ?? null;
+  /** 舞台上顯示的那一版（預覽某一版時用它，否則現用；沒有現用就秀最新候選） */
+  const stageVersion = previewAssetId
+    ? list.find((v) => v.assetId === previewAssetId) ?? currentVisual ?? latestVisualCandidate
+    : currentVisual ?? latestVisualCandidate;
 
   const stageAssetId = stageVersion?.assetId ?? null;
   const stageDots = useMemo(
@@ -720,7 +726,7 @@ export function SceneStudio({
                   disabled={setCurrent.isPending}
                   onClick={() => setCurrentVersion("visual", stageVersion.assetId!)}
                 >
-                  <Icon name="Check" size={13} /> 用這一版
+                  <Icon name="Check" size={13} /> 採用這一版
                 </Button>
               )}
             </div>
@@ -1551,7 +1557,7 @@ export function SceneStudio({
                                   <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                                     {v.canSetCurrent && (
                                       <Button size="sm" disabled={setCurrent.isPending} onClick={() => setCurrentVersion(section.role, v.assetId!)}>
-                                        <Icon name="Check" size={13} /> 設為現用
+                                        <Icon name="Check" size={13} /> 採用這一版
                                       </Button>
                                     )}
                                     {v.canRefineFrom && (

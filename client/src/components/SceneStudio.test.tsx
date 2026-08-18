@@ -226,6 +226,45 @@ describe("SceneStudio", () => {
     expect(regenMutate.mock.calls[0]![0]).toMatchObject({ sceneId: "s-1", prompt: "黃昏的海邊" });
   });
 
+  it("選 經濟・Qwen Image 2.0 後確認重畫送出的是 Qwen，不是預設 SDXL Lightning", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /用哪個模型重畫/ }),
+      "fal-ai/qwen-image-2/text-to-image",
+    );
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    expect(screen.getByText(/即將重畫這一格（Qwen Image 2.0/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    expect(regenMutate.mock.calls[0]![0]).toMatchObject({
+      sceneId: "s-1",
+      modelId: "fal-ai/qwen-image-2/text-to-image",
+    });
+  });
+
+  it("第一張候選（尚未現用）舞台顯示該版模型並給採用，不標成 SDXL / 現用", () => {
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [genRow({
+          generationId: "g-qwen",
+          createdAt: "2026-08-18T00:00:00.000Z",
+          modelId: "fal-ai/qwen-image-2/text-to-image",
+        })],
+        currentAssetId: null,
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    expect(screen.getByText(/Qwen Image 2.0/)).toBeInTheDocument();
+    expect(screen.queryByText(/SDXL Lightning/)).not.toBeInTheDocument();
+    expect(screen.getByText("可切回")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /採用這一版/ })).toBeInTheDocument();
+    expect(screen.queryByText("現用")).not.toBeInTheDocument();
+  });
+
   it("產生方向：每個 slot 一把冪等鍵＋一個真的不同的方向", async () => {
     const user = userEvent.setup();
     mountStudio();
@@ -288,7 +327,7 @@ describe("SceneStudio", () => {
     });
   });
 
-  it("版本頁列出每一版，現用的那版不給「設為現用」，舊版可以切回", async () => {
+  it("版本頁列出每一版，現用的那版不給「採用這一版」，舊版可以切回", async () => {
     const user = userEvent.setup();
     versionsQuery.mockReturnValue({
       data: serverData({
@@ -308,8 +347,8 @@ describe("SceneStudio", () => {
     expect(items).toHaveLength(2);
     // 新到舊：第一筆是現用的第 2 版
     expect(within(items[0]!).getByText("畫面第 2 版")).toBeInTheDocument();
-    expect(within(items[0]!).queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
-    await user.click(within(items[1]!).getByRole("button", { name: /設為現用/ }));
+    expect(within(items[0]!).queryByRole("button", { name: /採用這一版/ })).not.toBeInTheDocument();
+    await user.click(within(items[1]!).getByRole("button", { name: /採用這一版/ }));
     /*
      * 單格工作室是「人正看著這一鏡」的地方，所以兩個旗標都帶：
      *  - acknowledgeApproved：已通過的鏡在這裡換得掉畫面（伺服器會把審核狀態退回「需要修改」）；
@@ -443,7 +482,7 @@ describe("SceneStudio", () => {
     mountStudio();
     await user.click(screen.getByRole("tab", { name: /版本/ }));
     expect(screen.getByText(/供應商逾時（已退點）/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /採用這一版/ })).not.toBeInTheDocument();
   });
 
   it("配音頁：旁白與對白都空→生成鈕鎖住並指路；填了要先儲存", async () => {
@@ -614,7 +653,7 @@ describe("SceneStudio", () => {
     expect(screen.queryByRole("button", { name: /儲存提示詞/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /版本/ }));
     expect(screen.getByText("畫面第 1 版")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /採用這一版/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /以這版為底圖/ })).not.toBeInTheDocument();
   });
 

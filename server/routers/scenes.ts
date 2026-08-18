@@ -1548,7 +1548,21 @@ export const scenesRouter = router({
         preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
-      return { generationId: gen.id };
+      void import("../services/agentRunReconcile")
+        .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
+          reconcileAgentRunsAfterSceneGenerate({
+            projectId: scene.projectId,
+            sceneId: scene.id,
+            generationId: gen.id,
+          }),
+        )
+        .catch((err) =>
+          console.warn(
+            "[scenes.generateInto] agent-run reconcile failed:",
+            err instanceof Error ? err.message : err,
+          ),
+        );
+      return { generationId: gen.id, modelId: gen.modelId };
     }),
 
   /**

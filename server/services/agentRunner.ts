@@ -5,7 +5,7 @@
  * 且步驟種類除了生成還有建分鏡／拆分鏡／配音（重用各自的 core，守門不分岔）。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { advanceGeneration, type GenerationRow } from "./generationCore";
@@ -17,6 +17,7 @@ import { pushToUsers } from "./webPush";
 import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
 import { executeDatabaseWriteCommand } from "./databaseCommand";
@@ -445,6 +446,21 @@ async function advanceWithGuard(run: RunRow): Promise<void> {
  * 兩段 UPDATE 非原子：中間死亡＝steps 已更新、status 留在 running，下一輪 tick 會自我收斂
  * （越界→done、失敗步→重驗或重試），不會卡死。
  */
+async function scenePointerIsGeneration(sceneId: string | null | undefined, generationId: string): Promise<boolean> {
+  if (!sceneId) return false;
+  const [scene] = await db
+    .select({ assetId: schema.scenes.assetId })
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.id, sceneId), isNull(schema.scenes.deletedAt)));
+  if (!scene?.assetId) return false;
+  const [asset] = await db
+    .select({ meta: schema.assets.meta })
+    .from(schema.assets)
+    .where(and(eq(schema.assets.id, scene.assetId), isNull(schema.assets.deletedAt)));
+  const meta = (asset?.meta ?? null) as { generationId?: string } | null;
+  return meta?.generationId === generationId;
+}
+
 async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$inferInsert>): Promise<void> {
   const { status, ...rest } = patch;
   if (status === "done" || status === "failed") {
@@ -1112,6 +1128,18 @@ async function advanceRun(run: RunRow): Promise<void> {
     // 不在此 return：同一 tick 繼續結算其它 in-flight
   }
   if (ghostCleared) await saveRun(run.id, { steps });
+
+  let adoptedWaiting = false;
+  for (const waiting of steps) {
+    if (waiting.kind !== "generate" || waiting.status !== "waiting" || !waiting.generationId) continue;
+    const adopted = await scenePointerIsGeneration(waiting.targetSceneId, waiting.generationId);
+    if (!adopted) continue;
+    waiting.status = "done";
+    if (waiting.note.startsWith("待你採用 · ")) waiting.note = waiting.note.slice("待你採用 · ".length);
+    waiting.detail = waiting.detail || "已採用";
+    adoptedWaiting = true;
+  }
+  if (adoptedWaiting) await saveRun(run.id, { steps });
 
   // 使用者已按停：沒有新生成要送時收停 pending
   {
@@ -2110,6 +2138,33 @@ async function advanceRun(run: RunRow): Promise<void> {
     prompt = step.prompt;
   }
 
+  if (step.kind === "generate" && sceneId && !step.generationId) {
+    const [latest] = await db
+      .select({ id: schema.generations.id })
+      .from(schema.generations)
+      .where(and(
+        eq(schema.generations.sceneId, sceneId),
+        or(isNull(schema.generations.sceneRole), eq(schema.generations.sceneRole, "visual")),
+        eq(schema.generations.status, "done"),
+      ))
+      .orderBy(desc(schema.generations.createdAt))
+      .limit(1);
+    if (latest) {
+      const applied = applyIndependentGenerateToSteps({
+        steps,
+        sceneId,
+        sceneNo: step.sceneNo ?? 0,
+        generationId: latest.id,
+        adopted: await scenePointerIsGeneration(sceneId, latest.id),
+      });
+      if (applied.changed) {
+        steps.splice(0, steps.length, ...(applied.steps as AgentStep[]));
+        await saveRun(run.id, { steps });
+      }
+      return;
+    }
+  }
+
   // 送出前再讀一次狀態：使用者若剛按停就不要再扣點送出
   const [fresh] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
   if (!fresh || fresh.status !== "running") return;
@@ -2186,6 +2241,16 @@ async function advanceRun(run: RunRow): Promise<void> {
 /** 生成步驟已有生成列：看結果決定前進、收尾或等下一輪 */
 async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, step: AgentStep, gen: GenerationRow): Promise<void> {
   if (gen.status === "done") {
+    const visual = !gen.sceneRole || gen.sceneRole === "visual";
+    if (visual && gen.sceneId && !(await scenePointerIsGeneration(gen.sceneId, gen.id))) {
+      step.status = "waiting";
+      step.targetSceneId = step.targetSceneId || gen.sceneId;
+      if (!step.note.startsWith("待你採用 · ")) step.note = `待你採用 · ${step.note}`;
+      step.detail = "畫面已落地，等你採用後才會換成現用";
+      addOutputRef(step, "generation", gen.id, step.title ?? step.note);
+      await saveRun(run.id, { steps });
+      return;
+    }
     step.status = "done";
     addOutputRef(step, "generation", gen.id, step.title ?? step.note);
     step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";

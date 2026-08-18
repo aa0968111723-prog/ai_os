@@ -233,7 +233,7 @@ export function currentStepNote(steps: unknown): string | null {
   const list = steps as Array<{ status?: string; note?: string; title?: string } | null>;
   const pick = (status: string) =>
     list.find((s) => s?.status === status);
-  const step = pick("running") ?? pick("waiting") ?? pick("pending") ?? list[list.length - 1];
+  const step = pick("running") ?? pick("waiting") ?? pick("waiting_confirmation") ?? pick("pending") ?? list[list.length - 1];
   if (!step) return null;
   const text = (step.note ?? step.title ?? "").trim();
   if (!text) return null;

@@ -216,7 +216,7 @@ describe("formatAgentRunLine（代理動態一行摘要）", () => {
 });
 
 describe("currentStepNote（組儀表當前步驟）", () => {
-  it("優先 running，其次 waiting，再 pending", () => {
+  it("優先 running，其次 waiting / waiting_confirmation，再 pending", () => {
     expect(
       currentStepNote([
         { status: "done", note: "已完成" },
@@ -230,6 +230,12 @@ describe("currentStepNote（組儀表當前步驟）", () => {
         { status: "pending", note: "後面" },
       ]),
     ).toBe("等人審");
+    expect(
+      currentStepNote([
+        { status: "pending", note: "第 2 鏡" },
+        { status: "waiting", note: "待你採用 · 第 1 鏡「鏡1」生成畫面" },
+      ]),
+    ).toBe("待你採用 · 第 1 鏡「鏡1」生成畫面");
   });
 
   it("空／非陣列回 null；過長截斷", () => {
