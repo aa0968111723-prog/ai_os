@@ -2,6 +2,7 @@
 # 本機複刻 CI 的 e2e 流程（每套重置 DB → 顯式 migrate/check → 重啟伺服器）。
 # 用法：bash scripts/run-e2e-local.sh [suite ...]；不帶參數＝跑全部套件。
 # 動畫組多鏡頭一致性也可點名：animation-consistency（獨立庫跑法見 run-animation-consistency.sh）。
+# CI e2e job 已納入 animation-consistency（與本腳本一樣每套重置 DB + E2E_MOCK=1）。
 #
 # 可覆寫：DATABASE_URL、PORT、E2E_PORT（預設跟 PORT）。
 # 無本機 psql 時，若設 E2E_PSQL_DOCKER=stress-pg（或任意容器名）則用 docker exec 下 SQL。
