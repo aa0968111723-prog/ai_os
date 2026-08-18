@@ -33,8 +33,12 @@ unset(
   "REDIS_PRIVATE_URL",
   "APP_URL",
   "PUBLIC_DOMAIN",
+  "RAILWAY_PUBLIC_DOMAIN",
   "FAL_KEY",
   "FAL_ADMIN_KEY",
+  "GEMINI_API_KEY",
+  "GEMINI_LIVE_CERT_ON_BOOT",
+  "E2E_MOCK",
 );
 
 const raw = process.env.DATABASE_URL?.trim() ?? "";

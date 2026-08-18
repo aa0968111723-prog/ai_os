@@ -51,7 +51,14 @@ const MIN_FREE_BYTES = 64 * 1024 * 1024;
 export function publicBaseUrl(): string {
   const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
   const fallback = platformDomain ? `https://${platformDomain}` : "";
-  return process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
+  const appUrl = process.env.APP_URL?.replace(/\/$/, "");
+  if (appUrl) return appUrl;
+  if (fallback) return fallback;
+  // Cloud/agent leftovers sometimes set PORT to a named service, not a TCP port.
+  // `http://localhost:tcp://…` is not a URL — signed asset / dbfile links then throw.
+  const parsed = Number(process.env.PORT);
+  const port = Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : 3000;
+  return `http://localhost:${port}`;
 }
 
 export function ensureStorageDirs(): void {
