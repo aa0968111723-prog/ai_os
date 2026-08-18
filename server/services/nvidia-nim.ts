@@ -53,6 +53,12 @@ export const NIM_REASONING_MODEL =
  * 使用者要的是把劇本變成分鏡，不是特定一顆模型。所以降級一次到日常主力模型，
  * 並把實際用了哪一顆回報給呼叫端（要寫進 AI 軌跡，不能讓人以為跑的是旗艦）。
  */
+/** 旗艦逾時可以換 70B 再試；金鑰／429 換模型救不了。 */
+export function isNimTimeoutError(err: unknown): boolean {
+  if (err instanceof NimServiceError) return /逾時/.test(err.message);
+  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
 export async function nimCompleteWithFallback(
   prompt: string,
   opts: { model: string; fallbackModel?: string; temperature?: number; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal },
@@ -61,8 +67,9 @@ export async function nimCompleteWithFallback(
   try {
     return { output: await nimComplete(prompt, opts), model: opts.model, downgraded: false };
   } catch (err) {
-    // 金鑰無效／點數用完（NimServiceError）換模型也救不了；用戶端中止要尊重
-    if (err instanceof NimServiceError || opts.signal?.aborted || opts.model === fallback) throw err;
+    if (opts.signal?.aborted || opts.model === fallback) throw err;
+    // 401/402/403／429：帳號層級，換 70B 一樣會死。旗艦逾時（301 字短稿也曾在 live 卡死）才降級。
+    if (err instanceof NimServiceError && !isNimTimeoutError(err)) throw err;
     console.warn(`[nim] 旗艦模型 ${opts.model} 失敗，降級為 ${fallback}：`, err);
     return { output: await nimComplete(prompt, { ...opts, model: fallback }), model: fallback, downgraded: true };
   }

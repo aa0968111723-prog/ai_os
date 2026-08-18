@@ -34,7 +34,7 @@ import {
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL } from "./nvidia-nim";
+import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL, isNimTimeoutError } from "./nvidia-nim";
 import { loadProjectCardAliases, type ProjectCardAliases } from "./sceneCards";
 import { lockSceneOrder } from "./locks";
 import {
@@ -50,9 +50,9 @@ export function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-/** provider 逾時判斷（與 director 同款）：與 DB 錯誤明確區分 */
+/** provider 逾時判斷（與 director 同款）：含 NIM 人話逾時，與 DB 錯誤明確區分 */
 function isProviderTimeout(err: unknown): boolean {
-  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+  return isNimTimeoutError(err);
 }
 
 async function overParseLimit(userId: string): Promise<boolean> {

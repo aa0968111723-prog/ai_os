@@ -61,6 +61,19 @@ describe("nimCompleteWithFallback", () => {
     expect(modelsUsed()).toEqual([FLAGSHIP]);
   });
 
+  it("旗艦模型逾時 → 降級到日常 70B，短稿仍能解析", async () => {
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: { timeoutMs?: number }) =>
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new DOMException("timed out", "TimeoutError")), init?.timeoutMs ?? 0);
+        }),
+    );
+    fetchMock.mockResolvedValueOnce(ok("70b-parse"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP, timeoutMs: 1_200 });
+    expect(r).toMatchObject({ output: "70b-parse", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
   it("降級目標就是自己時不無限繞（同一顆失敗就是失敗）", async () => {
     fetchMock.mockResolvedValue(fail(404));
     await expect(
