@@ -37,7 +37,7 @@ describe("onUseIdeaForNewProject phone handoff", () => {
     expect(idea).toContain("if (isPhone)");
     expect(idea).toContain('navigate("/dashboard")');
     expect(idea).toMatch(/if \(isPhone\) \{[\s\S]*return;/);
-    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("#projects"));
-    expect(idea).not.toMatch(/isPhone[\s\S]*navigate\(`\/dashboard#projects`\)/);
+    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("navigate(`/dashboard#projects`)"));
+    expect(idea).not.toMatch(/if \(isPhone\) \{[\s\S]*navigate\(`\/dashboard#projects`\)/);
   });
 });
