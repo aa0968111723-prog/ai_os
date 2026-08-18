@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { Button, Hint } from "../components/ui";
@@ -10,19 +9,24 @@ import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, normalizeProjectFormat, type P
 /**
  * Phone-safe create-project sheet. Launchpad's desktop modal is not mounted
  * below 768px (PhoneRoute only renders MobileHome), so assistant
- * `aios:new-project-idea` has to land here.
+ * `aios:new-project-idea` has to land here. The write lives on MobileHome;
+ * this sheet only confirms.
  */
 export function MobileCreateProjectSheet({
   groupId,
   initialTitle = "",
+  creating = false,
+  errorMessage,
   onClose,
+  onConfirm,
 }: {
   groupId: string;
   initialTitle?: string;
+  creating?: boolean;
+  errorMessage?: string;
   onClose: () => void;
+  onConfirm: (fields: { title: string; kind: string; platform: string; format: ProjectFormat }) => void;
 }) {
-  const [, navigate] = useLocation();
-  const utils = trpc.useUtils();
   const sheetRef = useRef<HTMLElement | null>(null);
   useSheetSwipeDismiss(sheetRef, onClose, true);
 
@@ -49,16 +53,7 @@ export function MobileCreateProjectSheet({
     if (pickedPlatform?.format) setFormat(normalizeProjectFormat(pickedPlatform.format));
   }, [pickedPlatform?.format]);
 
-  const create = trpc.projects.create.useMutation({
-    onSuccess: (project) => {
-      void utils.phone.home.invalidate();
-      void utils.projects.list.invalidate();
-      onClose();
-      navigate(`/p/${project.id}`);
-    },
-  });
-
-  const canCreate = !!title.trim() && !!groupId && !!kind && !!platform && !create.isPending;
+  const canCreate = !!title.trim() && !!groupId && !!kind && !!platform && !creating;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -84,7 +79,7 @@ export function MobileCreateProjectSheet({
           className="m-create"
           onSubmit={(event) => {
             event.preventDefault();
-            if (canCreate) create.mutate({ groupId, title: title.trim(), kind, platform, format });
+            if (canCreate) onConfirm({ title: title.trim(), kind, platform, format });
           }}
         >
           <label htmlFor="m-np-title">專案名稱</label>
@@ -130,12 +125,12 @@ export function MobileCreateProjectSheet({
           {!kindOptions.length && !options.isLoading && (
             <Hint>這個組還沒有內容類型——請組長先加一個，才能建專案。</Hint>
           )}
-          {create.error && <p className="error" role="alert">{create.error.message}</p>}
+          {errorMessage && <p className="error" role="alert">{errorMessage}</p>}
 
           <div className="m-create__actions">
             <Button type="button" onClick={onClose}>取消</Button>
             <Button variant="primary" type="submit" disabled={!canCreate}>
-              {create.isPending ? "建立中…" : "建立專案"}
+              {creating ? "建立中…" : "建立專案"}
             </Button>
           </div>
         </form>

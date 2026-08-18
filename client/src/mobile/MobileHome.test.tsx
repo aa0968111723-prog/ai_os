@@ -184,6 +184,7 @@ describe("手機首頁", () => {
     });
     render(<MobileHome groupId="g1" />);
     expect(screen.getByText("還沒有專案")).toBeInTheDocument();
+    expect(screen.getByText("跟 Aios 說它會建起來")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /建立專案/ }).length).toBeGreaterThan(0);
   });
 
@@ -192,6 +193,14 @@ describe("手機首頁", () => {
     render(<MobileHome groupId="g1" />);
     expect(screen.getByLabelText("建立新專案")).toBeInTheDocument();
     expect(screen.getByDisplayValue("從助手來的標題")).toBeInTheDocument();
+  });
+
+  it("aios:new-project-idea 打開手機建立表單，確認前不送出", async () => {
+    render(<MobileHome groupId="g1" />);
+    publishNewProjectIdea("只預填不建立");
+    expect(await screen.findByLabelText("建立新專案")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("只預填不建立")).toBeInTheDocument();
+    expect(createMutate).not.toHaveBeenCalled();
   });
 
   it("aios:new-project-idea 打開手機建立表單，不走 Launchpad modal", async () => {

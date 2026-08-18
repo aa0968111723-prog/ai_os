@@ -32,6 +32,7 @@ import { MOBILE_STAGES, continueAnchor, continueLabel, stageIndex, stageSentence
  */
 export function MobileHome({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
 
   /**
    * 「看全部專案」不是導到另一頁，而是把同一支查詢換成大 limit 重打。
@@ -41,6 +42,14 @@ export function MobileHome({ groupId }: { groupId: string }) {
   const [showAll, setShowAll] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
+  const create = trpc.projects.create.useMutation({
+    onSuccess: (project) => {
+      void utils.projects.list.invalidate();
+      void utils.phone.home.invalidate();
+      setCreateOpen(false);
+      navigate(`/p/${project.id}`);
+    },
+  });
   const home = trpc.phone.home.useQuery(
     { groupId, ...(showAll ? { limit: 100 } : {}) },
     {
@@ -172,7 +181,7 @@ export function MobileHome({ groupId }: { groupId: string }) {
         <EmptyState
           icon={<Icon name="Package" size={28} />}
           title="還沒有專案"
-          description="填名稱就能開第一案；也可以跟下面的 Aios 說你想做什麼。"
+          description="跟 Aios 說它會建起來"
           action={(
             <Button variant="primary" onClick={() => openCreate()}>
               <Icon name="Plus" size={16} />
@@ -237,7 +246,10 @@ export function MobileHome({ groupId }: { groupId: string }) {
         <MobileCreateProjectSheet
           groupId={groupId}
           initialTitle={createTitle}
+          creating={create.isPending}
+          errorMessage={create.error?.message}
           onClose={() => setCreateOpen(false)}
+          onConfirm={(fields) => create.mutate({ groupId, ...fields })}
         />
       )}
     </div>

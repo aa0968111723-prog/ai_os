@@ -1,5 +1,10 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { projectIdFromRoute } from "./GlobalAssistantSheet";
+
+const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "GlobalAssistantSheet.tsx"), "utf8");
 
 const UUID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
 
@@ -21,5 +26,18 @@ describe("projectIdFromRoute（scope 路由是 deterministic 的：route 說了�
     expect(projectIdFromRoute("/p/new")).toBeNull();
     expect(projectIdFromRoute("/p/12345")).toBeNull();
     expect(projectIdFromRoute("/preview/abc")).toBeNull();
+  });
+});
+
+describe("onUseIdeaForNewProject phone handoff", () => {
+  it("keeps aios:new-project-idea and does not send the phone to Launchpad #projects", () => {
+    const idea = src.slice(src.indexOf("onUseIdeaForNewProject"), src.indexOf("</AICreativeCopilot>"));
+    expect(idea).toContain("publishNewProjectIdea");
+    expect(src).toContain("const isPhone = useIsPhone()");
+    expect(idea).toContain("if (isPhone)");
+    expect(idea).toContain('navigate("/dashboard")');
+    expect(idea).toMatch(/if \(isPhone\) \{[\s\S]*return;/);
+    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("#projects"));
+    expect(idea).not.toMatch(/isPhone[\s\S]*navigate\(`\/dashboard#projects`\)/);
   });
 });

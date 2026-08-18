@@ -13,9 +13,17 @@ describe("phone animation P0/P1 wiring", () => {
   it("phone home listens for the assistant create-project idea", () => {
     expect(home).toContain("NEW_PROJECT_IDEA_EVENT");
     expect(home).toContain("MobileCreateProjectSheet");
+    expect(home).toContain("trpc.projects.create.useMutation");
+    expect(home).toContain("跟 Aios 說它會建起來");
     expect(home).toContain("建立專案");
     expect(sheet).toContain("publishNewProjectIdea");
+    expect(sheet).toContain("useIsPhone");
+    expect(sheet).toContain("if (isPhone)");
     expect(sheet).not.toContain("真正的建立仍在 Launchpad");
+    const idea = sheet.slice(sheet.indexOf("onUseIdeaForNewProject"), sheet.indexOf("</AICreativeCopilot>"));
+    expect(idea).toContain("if (isPhone)");
+    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("#projects"));
+    expect(idea).toMatch(/if \(isPhone\) \{[\s\S]*return;/);
     expect(launchpad).toContain("NEW_PROJECT_IDEA_EVENT");
   });
 
