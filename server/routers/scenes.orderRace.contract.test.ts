@@ -7,6 +7,7 @@ const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneL
 const appRoutes = readFileSync(join(process.cwd(), "client/src/app/AppRoutes.tsx"), "utf8");
 const phoneRoute = readFileSync(join(process.cwd(), "client/src/mobile/PhoneRoute.tsx"), "utf8");
 const storyboard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/StoryboardStage.tsx"), "utf8");
+const animStudio = readFileSync(join(process.cwd(), "client/src/features/animation-studio/AnimationStudio.tsx"), "utf8");
 
 function block(src: string, startNeedle: string, endNeedle: string) {
   const start = src.indexOf(startNeedle);
@@ -29,6 +30,7 @@ describe("storyboard order / isolation contracts", () => {
     expect(sceneList).toContain("createInsertAfterQueue");
     expect(sceneList).toContain("insertQueueRef.current?.enqueue(s.id)");
     expect(sceneList).toMatch(/disabled=\{i === 0 \|\| move\.isPending\}/);
+    expect(animStudio).toContain("insertQueueRef.current?.enqueue(shot.id)");
   });
 
   it("/p/:id and /studio/:id remount on project switch; studio is keyed by shot", () => {

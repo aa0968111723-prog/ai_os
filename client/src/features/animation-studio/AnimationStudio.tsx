@@ -34,6 +34,7 @@ import {
 } from "./studioTools";
 import type { NewShotKind } from "./NewShotMenu";
 import type { SketchPreview } from "./sketchReplay";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -251,6 +252,13 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       if (created?.id) switchTo(created.id);
     },
   });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  const insertQueueOriginRef = useRef<string | null>(null);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -263,9 +271,17 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       return;
     }
     if (kind === "continue") {
-      // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白
-      if (shot) insertAfter.mutate({ sceneId: shot.id });
-      else addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白。
+      // 連點同一鏡要串新 id，否則同一 sceneId 連打是 LIFO（與 SceneList 同一條）。
+      if (shot) {
+        if (insertQueueOriginRef.current !== shot.id) {
+          insertQueueRef.current?.reset();
+          insertQueueOriginRef.current = shot.id;
+        }
+        insertQueueRef.current?.enqueue(shot.id);
+      } else {
+        addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      }
       return;
     }
     // AI 兩條：切到 Inspector 的 AI 分頁，動作本身在那裡（帶著這一鏡的上下文）
