@@ -384,6 +384,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(scenes).toContain("scheduleReconcileAfterVisualAdopt");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
+    expect(overview).toContain("assertFreeOnlyCompletion");
+    expect(overview).toContain("allowPaidFallback: quality === \"auto\"");
     const agentCore = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
     expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
