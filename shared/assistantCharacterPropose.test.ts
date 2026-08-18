@@ -44,6 +44,15 @@ describe("proposeAddCharacterActions", () => {
     ]);
   });
 
+  it("emits confirm when same-name 小華 is 年輕男性 and the ask only names her look", () => {
+    const existing = [{ name: "小華", appearance: "年輕男性" }];
+    const actions = proposeAddCharacterActions("小華是女生，不要年輕男性", existing);
+    expect(actions).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("更新角色「小華」外觀");
+  });
+
   it("does not invent cards for a non-character write", () => {
     expect(proposeAddCharacterActions("幫我開一個新專案 小華短片")).toEqual([]);
     expect(proposeAddCharacterActions("今天天氣如何")).toEqual([]);

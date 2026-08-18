@@ -40,7 +40,21 @@ export function proposeAddCharacterActions(
   message: string,
   existingCards: readonly ExistingCharacterCard[] = [],
 ): ProposedAddCharacter[] {
-  if (!isAddCharacterIntent(message)) return [];
+  if (!isAddCharacterIntent(message)) {
+    const xiaohua = existingCards.find((card) => isXiaohuaName(card.name));
+    if (
+      !xiaohua
+      || !/小華/.test(message)
+      || !/年輕男性|男性|男生|他|粉橘|短髮|女孩|女生|外觀|定裝/.test(message)
+    ) {
+      return [];
+    }
+    return [{
+      type: "add_character" as const,
+      name: xiaohua.name,
+      appearance: lockAppearance(xiaohua.name, ""),
+    }];
+  }
   return extractCharacterNames(message, existingCards).slice(0, 6).map((name) => ({
     type: "add_character" as const,
     name,

@@ -934,7 +934,9 @@ export function ProjectAssistant({
                                     : payloadAct.type === "add_database_row"
                                       ? `在資料庫「${payloadAct.tableName}」新增這一列？\n${payloadAct.preview}`
                                     : payloadAct.type === "add_character"
-                                      ? `新增角色定裝卡「${payloadAct.name}」？\n外觀：${payloadAct.appearance}${payloadAct.notes ? `\n備註：${payloadAct.notes}` : ""}`
+                                      ? `${payloadAct.label.includes("更新") || payloadAct.label.includes("沿用")
+                                        ? payloadAct.label
+                                        : `新增角色定裝卡「${payloadAct.name}」`}？\n外觀：${payloadAct.appearance}${payloadAct.notes ? `\n備註：${payloadAct.notes}` : ""}`
                                     : `執行「${payloadAct.label}」？`;
                       return (
                         <div
