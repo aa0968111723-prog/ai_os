@@ -81,10 +81,8 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
     expect(http).not.toMatch(/AbortSignal\.timeout\(\s*(150_000|300_000)/);
 
     const nim = readFileSync(join(process.cwd(), "server/services/nvidia-nim.ts"), "utf8");
-    const chat = nim.slice(
-      nim.indexOf("export async function chatCompletion"),
-      nim.indexOf("export async function nimComplete"),
-    );
+    const chatStart = nim.indexOf("export async function chatCompletion");
+    const chat = nim.slice(chatStart, nim.indexOf("export async function nimComplete(", chatStart));
     expect(chat).toContain("const timeoutMs = options.timeoutMs ?? 60_000");
     expect(chat).toContain("timeoutMs: Math.max(1_000, deadline - Date.now())");
 
