@@ -1,47 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
-  TKU_ZEN_ACTS,
   TKU_ZEN_CHARACTERS,
+  TKU_ZEN_FALLBACK_DURATION_SEC,
+  TKU_ZEN_FORBIDDEN,
+  TKU_ZEN_LIBRARY,
+  TKU_ZEN_LIBRARY_ROOT,
+  TKU_ZEN_LOCATIONS,
+  TKU_ZEN_LOOKS,
   TKU_ZEN_PROMO_SCRIPT,
-  TKU_ZEN_PROPS,
-  TKU_ZEN_REQUIRED_BEATS,
+  TKU_ZEN_SHOTLIST_LINES,
   TKU_ZEN_SHOTS,
-  tkuZenCoveredBeats,
-  tkuZenMissingBeats,
-  tkuZenTimeOrderOk,
-  tkuZenTurtleActs,
+  tkuZenDialogueLines,
+  tkuZenHasForbidden,
+  tkuZenLibraryMapContent,
+  tkuZenLibraryPath,
 } from "./tkuZenPromo";
 
-describe("淡江禪學社 小華 60s fixture（user-specified, not a generic story）", () => {
-  it("keeps the seven acts, three characters, and required props", () => {
-    expect(TKU_ZEN_ACTS).toHaveLength(7);
-    expect(TKU_ZEN_CHARACTERS.map((c) => c.name)).toEqual(["小華", "媽媽", "禪定龜龜"]);
-    expect(TKU_ZEN_PROPS.map((p) => p.name)).toEqual(["行李箱", "手機", "床", "坡"]);
-    expect(TKU_ZEN_PROMO_SCRIPT).toContain("小華——！起床啦！");
-    expect(TKU_ZEN_PROMO_SCRIPT).toContain("禪定龜龜");
-    expect(TKU_ZEN_PROMO_SCRIPT).toContain("茶會");
+describe("淡江禪學社 小華 SHOTLIST fixture", () => {
+  it("keeps only 小華 + 禪定龜龜 and the six SHOTLIST lines", () => {
+    expect(TKU_ZEN_CHARACTERS.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
+    expect(TKU_ZEN_SHOTS).toHaveLength(6);
+    expect(tkuZenDialogueLines(TKU_ZEN_SHOTS)).toEqual([...TKU_ZEN_SHOTLIST_LINES]);
+    expect(TKU_ZEN_SHOTS.reduce((sum, shot) => sum + shot.durationSec, 0)).toBe(TKU_ZEN_FALLBACK_DURATION_SEC);
+    expect(TKU_ZEN_PROMO_SCRIPT).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
+    expect(TKU_ZEN_PROMO_SCRIPT).toContain(TKU_ZEN_SHOTLIST_LINES[5]);
   });
 
-  it("does not drop required script→shot beats", () => {
-    expect(tkuZenMissingBeats()).toEqual([]);
-    expect(tkuZenCoveredBeats()).toEqual(expect.arrayContaining([...TKU_ZEN_REQUIRED_BEATS]));
+  it("locks 小華 to 大二化工、白帽T、短髮 and 龜龜 to 吉祥物龜龜", () => {
+    const xiaohua = TKU_ZEN_CHARACTERS.find((c) => c.key === "xiaohua");
+    const turtle = TKU_ZEN_CHARACTERS.find((c) => c.key === "turtle");
+    expect(xiaohua?.appearance).toContain("大二化工");
+    expect(xiaohua?.appearance).toContain("白帽T");
+    expect(xiaohua?.appearance).toContain("短髮");
+    expect(xiaohua?.appearance).toContain("粉橘短髮");
+    expect(xiaohua?.libraryFolder).toBe(TKU_ZEN_LIBRARY.xiaohua.folder);
+    expect(turtle?.appearance).toContain("吉祥物龜龜");
+    expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "slope")?.name).toBe("克難坡");
+    expect(TKU_ZEN_LOOKS.map((look) => look.notes).join("\n")).toContain("pink_bob_girl_threeview_v01.png");
   });
 
-  it("locks 小華 across dorm/campus/slope/fair/night and keeps 龜龜 off until act 4", () => {
-    const xiaohuaActs = [...new Set(TKU_ZEN_SHOTS.filter((s) => s.characters.includes("xiaohua")).map((s) => s.act))];
-    expect(xiaohuaActs).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 7]));
-    expect(tkuZenTurtleActs().every((act) => act >= 4)).toBe(true);
-    expect(TKU_ZEN_SHOTS.filter((s) => s.act < 4).every((s) => !s.characters.includes("turtle"))).toBe(true);
+  it("does not keep 媽媽, the 11 old beats, 黑長直髮, or a third-character template", () => {
+    const blob = [
+      TKU_ZEN_PROMO_SCRIPT,
+      ...TKU_ZEN_CHARACTERS.map((c) => `${c.name}\n${c.appearance}\n${c.notes}`),
+      ...TKU_ZEN_SHOTS.map((s) => `${s.title}\n${s.prompt}\n${s.dialogue}\n${s.action}`),
+    ].join("\n");
+    expect(tkuZenHasForbidden(blob)).toEqual([]);
+    expect(TKU_ZEN_FORBIDDEN).toContain("媽媽");
+    expect(TKU_ZEN_FORBIDDEN).toContain("大一新生");
+    expect(TKU_ZEN_FORBIDDEN).toContain("黑長直髮");
   });
 
-  it("keeps 行李箱 on act 2 and 手機 on acts 1 and 3", () => {
-    const suitcaseActs = [...new Set(TKU_ZEN_SHOTS.filter((s) => s.props.includes("suitcase")).map((s) => s.act))];
-    const phoneActs = [...new Set(TKU_ZEN_SHOTS.filter((s) => s.props.includes("phone")).map((s) => s.act))];
-    expect(suitcaseActs).toEqual([2]);
-    expect(phoneActs).toEqual(expect.arrayContaining([1, 3]));
-  });
-
-  it("does not invert morning → day campus → night dorm without plot", () => {
-    expect(tkuZenTimeOrderOk()).toBe(true);
+  it("pins the local library paths without turning 素材 boards into the story", () => {
+    expect(TKU_ZEN_LIBRARY_ROOT).toBe(String.raw`D:\淡大劇本`);
+    expect(tkuZenLibraryPath(TKU_ZEN_LIBRARY.xiaohua.folder, "pink_bob_girl_threeview_v01.png"))
+      .toBe(String.raw`D:\淡大劇本\角色圖\粉橘短髮女孩\pink_bob_girl_threeview_v01.png`);
+    const map = tkuZenLibraryMapContent();
+    expect(map).toContain("pink_bob_girl_expression_sheet_v01.png");
+    expect(map).toContain("pink_bob_girl_action_sheet_v01.png");
+    expect(map).toContain("master_cast_v02.png");
+    expect(map).toContain(String.raw`角色圖\吉祥物龜龜`);
+    expect(map).toContain(String.raw`場景\克難坡`);
+    expect(map).toContain("第一幕 成片稿");
+    expect(map).toContain("不是七幕結構");
   });
 });

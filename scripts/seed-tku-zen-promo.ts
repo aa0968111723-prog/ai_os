@@ -1,16 +1,18 @@
 /**
- * Disposable LOCAL test project for the user-specified 60s 淡江禪學社 promo.
+ * Disposable LOCAL test project for the 淡江禪學社 小華 SHOTLIST.
  * Only writes into 動畫組. Never production / never 總會短影音／動畫／卉庭.
- * No paid FAL. Asset files from D:\淡大劇本 are a follow-up if absent.
+ * No paid FAL. Asset files from D:\淡大劇本 are path notes only.
  *
  *   npx tsx scripts/seed-tku-zen-promo.ts
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema, pool } from "../server/db";
 import {
   TKU_ZEN_PROMO_KIND,
   TKU_ZEN_PROMO_PLATFORM,
+  TKU_ZEN_PROMO_STALE_TITLES,
   TKU_ZEN_PROMO_TITLE,
+  TKU_ZEN_SHOTLIST_LINES,
 } from "../shared/fixtures/tkuZenPromo";
 import {
   assertTkuZenPromoSnapshot,
@@ -55,12 +57,13 @@ if (!existingMembership) {
 
 const stale = await db.select({ id: schema.projects.id }).from(schema.projects).where(and(
   eq(schema.projects.groupId, group.groupId),
-  eq(schema.projects.title, TKU_ZEN_PROMO_TITLE),
+  inArray(schema.projects.title, [TKU_ZEN_PROMO_TITLE, ...TKU_ZEN_PROMO_STALE_TITLES]),
 ));
 for (const row of stale) {
   await db.delete(schema.scenes).where(eq(schema.scenes.projectId, row.id));
   await db.delete(schema.storyScenes).where(eq(schema.storyScenes.projectId, row.id));
   await db.delete(schema.stories).where(eq(schema.stories.projectId, row.id));
+  await db.delete(schema.knowledge).where(eq(schema.knowledge.projectId, row.id));
   await db.delete(schema.characterLooks).where(eq(schema.characterLooks.projectId, row.id));
   await db.delete(schema.characters).where(eq(schema.characters.projectId, row.id));
   await db.delete(schema.props).where(eq(schema.props.projectId, row.id));
@@ -93,11 +96,15 @@ console.log(JSON.stringify({
   projectId: project.id,
   title: TKU_ZEN_PROMO_TITLE,
   group: group.groupName,
-  characters: snap.characters.map((c) => c.name),
-  props: snap.props.map((p) => p.name),
-  acts: snap.acts.length,
+  characters: snap.characters.map((c) => ({ name: c.name, appearance: c.appearance })),
+  looks: snap.looks.map((look) => look.name),
+  presets: snap.presets.map((p) => p.name),
+  knowledge: snap.knowledge.map((row) => row.title),
   shots: snap.shots.length,
-  assetImport: "follow-up — D:\\\\淡大劇本 not required on this VM",
+  durationSec: snap.shots.reduce((sum, shot) => sum + shot.durationSec, 0),
+  dialogue: TKU_ZEN_SHOTLIST_LINES,
+  visualLock: "大二化工、白帽T、短髮／粉橘短髮女孩 / 吉祥物龜龜 / 克難坡",
+  assetImport: "path notes only — D:\\\\淡大劇本 binaries not required on this VM",
 }, null, 2));
 
 await pool.end();
