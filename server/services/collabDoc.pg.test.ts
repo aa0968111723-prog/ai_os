@@ -126,16 +126,16 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
 
   it("overlapping persist with a stale expectedRev does not clobber a newer blur save", async () => {
     const projectId = await newProject("起點");
+    const seed = await loadStoryDoc(projectId);
+    await persistStoryDoc(projectId, groupId, seed, editor);
     const [before] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
     await db
       .update(schema.stories)
       .set({ content: "blur 存檔", rev: before.rev + 1, updatedBy: editor, updatedAt: new Date() })
       .where(eq(schema.stories.id, before.id));
 
-    const doc = await loadStoryDoc(projectId);
-    const live = doc.getText(STORY_TEXT_KEY);
-    live.delete(0, live.length);
-    live.insert(0, "Yjs 想蓋過去的字");
+    const doc = new Y.Doc();
+    doc.getText(STORY_TEXT_KEY).insert(0, "Yjs 想蓋過去的字");
 
     const result = await persistStoryDoc(projectId, groupId, doc, editor, {
       expectedRev: before.rev,
@@ -147,5 +147,48 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
     expect(after.content).toBe("blur 存檔");
     expect(after.rev).toBe(before.rev + 1);
+
+    // 重開房間不可靠衝突快照把 blur 蓋回去（延遲 LWW）
+    const reloaded = await loadStoryDoc(projectId);
+    expect(reloaded.getText(STORY_TEXT_KEY).toString()).toBe("blur 存檔");
+  });
+
+  it("two concurrent persistStoryDoc cannot silently drop the other side", async () => {
+    const projectId = await newProject("起點");
+    const [before] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+
+    const docA = await loadStoryDoc(projectId);
+    const docB = await loadStoryDoc(projectId);
+    const textA = docA.getText(STORY_TEXT_KEY);
+    textA.delete(0, textA.length);
+    textA.insert(0, "A 分頁的字");
+    const textB = docB.getText(STORY_TEXT_KEY);
+    textB.delete(0, textB.length);
+    textB.insert(0, "B 分頁的字");
+
+    const [resA, resB] = await Promise.all([
+      persistStoryDoc(projectId, groupId, docA, editor),
+      persistStoryDoc(projectId, groupId, docB, editor),
+    ]);
+
+    const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    expect(["A 分頁的字", "B 分頁的字"]).toContain(after.content);
+    expect(after.rev).toBeGreaterThan(before.rev);
+
+    if (resA.conflict !== resB.conflict) {
+      const winner = resA.conflict ? resB : resA;
+      expect(winner.materialized).toBe(true);
+      expect(resA.conflict ? resA.materialized : resB.materialized).toBe(false);
+      expect(after.content).toBe(winner.content);
+      expect(after.content).not.toBe(resA.conflict ? "A 分頁的字" : "B 分頁的字");
+    } else {
+      // 序列化成兩次成功 CAS：後寫者讀到新 rev，不是靜默跳過 OCC
+      expect(resA.conflict).toBe(false);
+      expect(resB.conflict).toBe(false);
+      expect(resA.materialized || resB.materialized).toBe(true);
+    }
+
+    const reloaded = await loadStoryDoc(projectId);
+    expect(reloaded.getText(STORY_TEXT_KEY).toString()).toBe(after.content);
   });
 });

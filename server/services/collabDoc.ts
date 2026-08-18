@@ -15,8 +15,8 @@
  * 持久化（快照即壓實）：防抖 1.5s 後把 encodeStateAsUpdate 的完整快照 upsert 進
  * collab_documents——每次寫入都是壓實後的最新狀態，沒有 update log 要清。
  * 同一節拍把 Y.Text 內容 materialize 回 stories.content（走 applyWithRevision，
- * **帶 expectedRev**，衝突不覆蓋）——story parser／AI／export／版本歷史／搜尋
- * 全部繼續工作，Story-first 管線一寸都不動。
+ * **帶 expectedRev**，衝突不覆蓋、也不把衝突快照落盤）——story parser／AI／
+ * export／版本歷史／搜尋全部繼續工作，Story-first 管線一寸都不動。
  *
  * Authentication 完全重用 /ws 的那一套（authorizeRealtimeConn：session cookie →
  * 使用者 → 專案屬於使用者的組）——沒有第二套帳號或 token。
@@ -88,10 +88,33 @@ function colorFor(userId: string): string {
 
 /* ── 持久化（獨立函式：pg 測試直接打，不必開 WebSocket） ─────────── */
 
+function replaceStoryText(doc: Y.Doc, next: string): void {
+  const t = doc.getText(STORY_TEXT_KEY);
+  const cur = t.toString();
+  if (cur === next) return;
+  if (cur.length) t.delete(0, cur.length);
+  if (next) t.insert(0, next);
+}
+
+async function persistStorySnapshot(projectId: string, groupId: string, doc: Y.Doc): Promise<void> {
+  const snapshot = Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
+  await db
+    .insert(schema.collabDocuments)
+    .values({ groupId, projectId, kind: "story", refId: projectId, snapshot, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [schema.collabDocuments.kind, schema.collabDocuments.refId],
+      set: { snapshot, updatedAt: new Date() },
+    });
+}
+
 /**
  * 載入（或初始化）某專案的故事 Y.Doc。
  * 有快照就還原快照；沒有就從 stories.content 種初值——既有專案第一次開共編時，
  * 夥伴看到的必須是現在的故事，不是一片空白。
+ *
+ * 快照與 stories.content 分叉時（典型：Yjs materialize 撞上另一分頁的 blur 存檔），
+ * **以 SQL 為準**。若照快照開房，下一輪 persist 會帶著 SQL 的新 rev 把 blur 蓋回
+ * 衝突快照——延遲的 last-write-wins。
  */
 export async function loadStoryDoc(projectId: string): Promise<Y.Doc> {
   const doc = new Y.Doc();
@@ -102,14 +125,16 @@ export async function loadStoryDoc(projectId: string): Promise<Y.Doc> {
   if (row) {
     try {
       Y.applyUpdate(doc, Buffer.from(row.snapshot, "base64"));
-      return doc;
     } catch (err) {
       // 壞快照：寧可退回 stories.content 重種，也不要讓整個共編開不起來
       console.warn("[collabDoc] 快照還原失敗，改由 stories.content 重種：", err instanceof Error ? err.message : err);
     }
   }
   const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
-  if (story?.content) doc.getText(STORY_TEXT_KEY).insert(0, story.content);
+  // 有 stories 列且與快照分叉：以 SQL 為準（blur／OCC 贏家）。沒有 stories 列才留快照。
+  if (story && story.content !== doc.getText(STORY_TEXT_KEY).toString()) {
+    replaceStoryText(doc, story.content);
+  }
   return doc;
 }
 
@@ -124,9 +149,11 @@ export type PersistStoryDocResult = {
  * 快照落盤＋materialize 回 stories.content。
  *
  * materialize **必須**帶 expectedRev：兩分頁 blur／Yjs+autosave 同時寫時，
- * 後到的那一發要撞衝突而不是靜默 last-write-wins。衝突時不覆蓋 stories.content
- * （Yjs 快照仍落下——共編房間的真相還在），也不丟錯讓 flushRoom 用新 rev 重試
- * （那會變成延遲的 LWW）。
+ * 後到的那一發要撞衝突而不是靜默 last-write-wins。省略 opts 時仍用剛讀到的
+ * `existing.rev` 做 CAS——兩次併發 persistStoryDoc 會有一方 conflict，不會
+ * 兩筆都靜默落地。衝突時不覆蓋 stories.content，也**不**把衝突快照落盤
+ * （否則下一個人進房 loadStoryDoc 會拿到輸家的字，再帶著 SQL 新 rev persist
+ * 就把贏家蓋掉＝延遲 LWW）。也不丟錯讓 flushRoom 用新 rev 重試。
  */
 export async function persistStoryDoc(
   projectId: string,
@@ -135,23 +162,17 @@ export async function persistStoryDoc(
   editorId: string | null,
   opts?: { expectedRev?: number; baselineContent?: string },
 ): Promise<PersistStoryDocResult> {
-  const snapshot = Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
   const text = doc.getText(STORY_TEXT_KEY).toString();
-
-  await db
-    .insert(schema.collabDocuments)
-    .values({ groupId, projectId, kind: "story", refId: projectId, snapshot, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [schema.collabDocuments.kind, schema.collabDocuments.refId],
-      set: { snapshot, updatedAt: new Date() },
-    });
 
   const [existing] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
   if (!existing) {
     const [row] = await db.insert(schema.stories).values({ projectId, groupId, content: text, updatedBy: editorId }).returning();
+    await persistStorySnapshot(projectId, groupId, doc);
     return { materialized: true, conflict: false, rev: row.rev, content: row.content };
   }
   if (existing.content === text) {
+    // 正文沒變：仍壓實快照（CRDT metadata），不動 stories.rev
+    await persistStorySnapshot(projectId, groupId, doc);
     return { materialized: false, conflict: false, rev: existing.rev, content: existing.content };
   }
   try {
@@ -172,10 +193,11 @@ export async function persistStoryDoc(
       updatedByField: "updatedBy",
       updatedAtField: "updatedAt",
     });
+    await persistStorySnapshot(projectId, groupId, doc);
     return { materialized: true, conflict: false, rev: row.rev, content: row.content };
   } catch (err) {
     if (isRevisionConflictError(err)) {
-      console.warn("[collabDoc] materialize 撞到故事 rev 衝突，不覆蓋 stories.content");
+      console.warn("[collabDoc] materialize 撞到故事 rev 衝突，不覆蓋 stories.content、不落衝突快照");
       return { materialized: false, conflict: true, rev: existing.rev, content: existing.content };
     }
     throw err;

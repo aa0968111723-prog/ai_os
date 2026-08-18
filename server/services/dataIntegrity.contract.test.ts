@@ -13,6 +13,15 @@ describe("P0-1 story persist always sends expectedRev", () => {
     expect(persist).toContain("isRevisionConflictError");
     expect(persist).toContain("不覆蓋 stories.content");
     expect(persist).toContain("baseline: { content: opts?.baselineContent ?? existing.content }");
+    expect(persist).toContain("不落衝突快照");
+    expect(persist).toContain("以 SQL 為準");
+    const applyBlock = persist.slice(
+      persist.indexOf("const { row } = await applyWithRevision"),
+      persist.indexOf("isRevisionConflictError"),
+    );
+    expect(applyBlock).toContain("await persistStorySnapshot");
+    const conflictBlock = persist.slice(persist.indexOf("isRevisionConflictError"), persist.indexOf("throw err;"));
+    expect(conflictBlock).not.toContain("persistStorySnapshot");
   });
 
   it("Yjs flushRoom 用 lastMaterializedRev，衝突不重試（避免延遲 LWW）", () => {
