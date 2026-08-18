@@ -3,6 +3,7 @@ import {
   canStopAgentRunStatus,
   canonicalizeAgentQuestionAnswer,
   isAgentRunActiveForHud,
+  isLeftoverUnstartedHudRun,
   resolveAgentQuestionOption,
   resolveOrAskAgentQuestion,
   type AgentQuestionDefinition,
@@ -112,5 +113,26 @@ describe("HUD 停 persists leftover awaiting_approval", () => {
     expect(canStopAgentRunStatus("stopped")).toBe(false);
     expect(canStopAgentRunStatus("discarded")).toBe(false);
     expect(canStopAgentRunStatus("done")).toBe(false);
+  });
+
+  it("treats 0/6 第 N 鏡生成畫面 as leftover even if status drifted", () => {
+    expect(isLeftoverUnstartedHudRun({
+      status: "awaiting_approval",
+      doneSteps: 0,
+      totalSteps: 6,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+    })).toBe(true);
+    expect(isLeftoverUnstartedHudRun({
+      status: "waiting",
+      doneSteps: 0,
+      totalSteps: 6,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+    })).toBe(true);
+    expect(isLeftoverUnstartedHudRun({
+      status: "running",
+      doneSteps: 2,
+      totalSteps: 6,
+      currentStepNote: "為第 3 鏡生成畫面",
+    })).toBe(false);
   });
 });

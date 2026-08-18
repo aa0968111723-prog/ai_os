@@ -379,7 +379,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
     expect(hud).toContain("Authoritative overview omitted this run");
-    expect(hud).toContain('lead.status === "awaiting_approval"');
+    expect(hud).toContain("isLeftoverUnstartedHudRun");
     expect(hud).toContain("discard.mutate");
     const stopFn = agentCore.slice(agentCore.indexOf("export async function stopAgentCore"), agentCore.indexOf("export async function listAgentRunsForProject"));
     expect(stopFn).toContain("canStopAgentRunStatus");

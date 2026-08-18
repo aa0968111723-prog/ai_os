@@ -300,6 +300,23 @@ export function canStopAgentRunStatus(status: string): boolean {
   return isAgentRunActiveForHud(status);
 }
 
+/**
+ * HUD 停 on leftover 0/N「待你過目」must call discard (not stop).
+ * awaiting_approval is always discard. A 0/N 生成畫面 toast with a
+ * drifted status still discards so reload cannot resurrect it.
+ */
+export function isLeftoverUnstartedHudRun(run: {
+  status: string;
+  doneSteps?: number;
+  totalSteps?: number;
+  currentStepNote?: string | null;
+}): boolean {
+  if (run.status === "awaiting_approval") return true;
+  if ((run.doneSteps ?? 0) !== 0) return false;
+  if ((run.totalSteps ?? 0) < 2) return false;
+  return /第\s*\d+\s*鏡|生成畫面/.test(run.currentStepNote ?? "");
+}
+
 /** Presentation label for HUD / pills — never drop waiting_* into a black hole. */
 export function agentRunHudLabel(status: string): string {
   if (status === "awaiting_approval") return "待你過目";

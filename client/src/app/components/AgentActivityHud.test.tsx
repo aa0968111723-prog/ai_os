@@ -177,16 +177,27 @@ describe("AgentActivityHud", () => {
       currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
       projectTitle: "overnight-test-short-100w-20260818",
     })];
-    const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
+    const { container } = render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText("待你過目")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /停/ }));
     expect(discardMutate).toHaveBeenCalledWith({ runId: "run-1" });
     expect(stopMutate).not.toHaveBeenCalled();
-    overviewRuns = [];
-    rerender(<AgentActivityHud groupId="g1" />);
-    await waitFor(() => {
-      expect(container).toBeEmptyDOMElement();
-    });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("停 on leftover 0/6 with drifted waiting status still calls discard", async () => {
+    const user = userEvent.setup();
+    overviewRuns = [run({
+      status: "waiting",
+      doneSteps: 0,
+      totalSteps: 6,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+      projectTitle: "overnight-test-short-100w-20260818",
+    })];
+    render(<AgentActivityHud groupId="g1" />);
+    await user.click(screen.getByRole("button", { name: /停/ }));
+    expect(discardMutate).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(stopMutate).not.toHaveBeenCalled();
   });
 
   it("discards leftover 0/6 待你過目 from the HUD cache when overview omits it", async () => {

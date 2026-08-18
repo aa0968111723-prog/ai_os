@@ -48,6 +48,7 @@ import {
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "../../shared/agentDag";
 import { canStopAgentRunStatus, isAgentRunActiveForHud } from "../../shared/agentQuestions";
+import { isLeftoverUnstartedApprovalBatch } from "../../shared/agentRunReconcile";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
@@ -104,6 +105,17 @@ async function persistHudCancel(input: {
   if (!cancelled) {
     const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
     if (current && !isAgentRunActiveForHud(current.status)) return current;
+    const leftoverSteps = Array.isArray(current?.steps)
+      ? (current.steps as Array<{ kind: string; status: string; note: string }>)
+      : [];
+    if (current && isLeftoverUnstartedApprovalBatch(current.status, leftoverSteps)) {
+      const [forced] = await db
+        .update(schema.agentRuns)
+        .set({ status: "discarded", activeQuestionId: null, updatedAt: new Date() })
+        .where(eq(schema.agentRuns.id, run.id))
+        .returning();
+      if (forced) return forced;
+    }
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
   }
   if (run.activeQuestionId) {

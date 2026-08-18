@@ -102,17 +102,36 @@ function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
   return steps.filter((step) => step.kind === "generate");
 }
 
-function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep[]): boolean {
+function leftoverShotNote(note: string | undefined): boolean {
+  return /第\s*\d+\s*鏡|生成畫面/.test(note ?? "");
+}
+
+function stepIsParked(status: string | undefined): boolean {
+  return !status || status === "pending" || status === "waiting" || status === "stopped";
+}
+
+/**
+ * Leftover 0/N「待你過目」: unstarted awaiting_approval batch.
+ * Live rows sometimes use kind "" / "generate_image" instead of "generate".
+ */
+export function isLeftoverUnstartedApprovalBatch(
+  status: string,
+  steps: ReconcileAgentStep[],
+): boolean {
   if (status !== "awaiting_approval") return false;
+  if (steps.some((step) => step.status === "done" || step.status === "running")) return false;
   if (generateSteps(steps).length >= 2) return true;
-  // Live leftover 0/N sometimes stored without kind: "generate".
   if (steps.length < 2) return false;
-  if (steps.some((step) => step.status === "done")) return false;
+  const visualish = steps.filter((step) => leftoverShotNote(step.note));
+  if (visualish.length >= 2) return visualish.every((step) => stepIsParked(step.status));
   return steps.every((step) => {
     if (step.kind && step.kind !== "generate") return false;
-    const parked = step.status === "pending" || step.status === "waiting" || step.status === "stopped";
-    return parked && /第\s*\d+\s*鏡|生成畫面/.test(step.note ?? "");
+    return stepIsParked(step.status) && leftoverShotNote(step.note);
   });
+}
+
+function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep[]): boolean {
+  return isLeftoverUnstartedApprovalBatch(status, steps);
 }
 
 /**
