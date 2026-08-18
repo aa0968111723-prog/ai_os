@@ -2397,11 +2397,7 @@ export const assistantRouter = router({
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
         if (!reused || appearanceChanged) {
-          publishToProject(
-            project.id,
-            { kind: "character", id: row.id },
-            appearanceChanged ? "助手已更新角色外觀" : "助手已新增角色",
-          );
+          publishToProject(project.id, { kind: "character", id: row.id }, appearanceChanged ? "助手已更新角色外觀" : "助手已新增角色");
         }
         return writeResult(
           { kind: "add_character" as const, characterId: row.id, name: row.name, reused: Boolean(reused) },
