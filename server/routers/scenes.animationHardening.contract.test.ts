@@ -118,3 +118,20 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(bindings).toContain("table.groupId === project.groupId");
   });
 });
+
+const overnightRealGen = readFileSync(join(process.cwd(), "scripts/overnight-real-gen-adopt.py"), "utf8");
+
+describe("overnight real generateInto + adopt rails", () => {
+  it("only writes overnight-test-* into 動畫組, uses cheap image, and adopts after generateInto", () => {
+    expect(overnightRealGen).toContain('if group.get("name") == "動畫組"');
+    expect(overnightRealGen).toContain("總會短影音");
+    expect(overnightRealGen).toContain("overnight-test-");
+    expect(overnightRealGen).toContain("fal-ai/flux/schnell");
+    expect(overnightRealGen).toContain("scenes.generateInto");
+    expect(overnightRealGen).toContain("creativeContext.adoptGeneration");
+    expect(overnightRealGen).toContain("preserveScenePointer");
+    expect(overnightRealGen).toContain("REAL_GEN_SHOTS>3 refused");
+    expect(overnightRealGen).not.toContain("veo");
+  });
+});
+
