@@ -779,5 +779,12 @@ describe("project_detail injects persisted story", () => {
     expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
     expect(src).toContain("signal: askSignal");
   });
+
+  it("只用免費 never calls luna: assertFreeOnlyCompletion wraps completeText", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    expect(src).toContain("assertFreeOnlyCompletion");
+    expect(src).toContain("allowPaidFallback: quality === \"auto\"");
+    expect(src).toContain("resolveFreeOnlyLlmMode");
+  });
 });
 

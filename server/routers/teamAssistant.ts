@@ -6,7 +6,7 @@ import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
-import { completeText, LlmServiceError } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, LlmServiceError } from "../services/llmProvider";
 import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
@@ -1524,7 +1524,7 @@ ${historyBlock}使用者的問題：${input.message}`;
               timeoutMs: quality !== "nim" ? 120_000 : 60_000,
               signal: askSignal,
               allowPaidFallback: quality === "auto",
-            }).then(r => r.text);
+            }).then((r) => assertFreeOnlyCompletion(quality, r).text);
           },
           tryToolCall: (json) => {
             const parsed = teamToolSchema.safeParse(json);
