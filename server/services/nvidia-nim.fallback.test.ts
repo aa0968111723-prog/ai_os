@@ -62,6 +62,17 @@ describe("nimCompleteWithFallback", () => {
     expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
   });
 
+  it("5xx 暫時性失敗用盡旗艦重試後必須落到 70B", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fail(503))
+      .mockResolvedValueOnce(fail(502))
+      .mockResolvedValueOnce(fail(500))
+      .mockResolvedValueOnce(ok("70b-after-5xx"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP, timeoutMs: 8_000 });
+    expect(r).toMatchObject({ output: "70b-after-5xx", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, FLAGSHIP, FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
   it("旗艦 NimServiceError 逾時（含「超過 150 秒無回應」、不必帶「逾時」二字）→ 70B 備援真的會跑", async () => {
     fetchMock
       .mockImplementationOnce(() => Promise.reject(new NimServiceError("超過 150 秒無回應")))
