@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   TKU_ZEN_PROMO_SCRIPT,
-  TKU_ZEN_SHOTLIST_LINES,
   tkuZenHasForbidden,
   tkuZenSpokenDialogue,
 } from "../../shared/fixtures/tkuZenPromo";
@@ -18,8 +17,9 @@ describe("淡江禪學社 parse 150s fallback", () => {
       .flatMap((scene) => scene.shots)
       .map((shot) => tkuZenSpokenDialogue(`${shot.dialogue ?? ""}\n${shot.voiceover ?? ""}\n${shot.prompt ?? ""}`))
       .join("\n");
-    expect(spoken).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
-    expect(spoken).toContain(TKU_ZEN_SHOTLIST_LINES[5]);
+    expect(spoken).toContain("我是大二化工系的小華");
+    expect(spoken).toContain("真的真的");
+    expect(spoken).toContain("禪定龜龜");
     expect(tkuZenHasForbidden(JSON.stringify(plan))).toEqual([]);
   });
 });
