@@ -53,6 +53,7 @@ const SHOT: StudioShot = {
   prompt: "晨光禪堂，長鏡",
   voiceover: "把心交給佛。",
   ambience: "遠處鐘聲",
+  rev: 2,
 };
 
 const SKETCH = {
@@ -122,6 +123,14 @@ describe("StudioAiPanel・這一鏡", () => {
       prompt: "晨光禪堂，長鏡",
       voiceover: "把心交給佛。阿彌陀佛。",
       ambience: "遠處鐘聲",
+      expectedRev: 2,
+      baseline: {
+        title: "開場",
+        durationSec: 5,
+        prompt: "晨光禪堂，長鏡",
+        voiceover: "把心交給佛。",
+        ambience: "遠處鐘聲",
+      },
     });
   });
 

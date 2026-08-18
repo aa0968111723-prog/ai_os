@@ -111,13 +111,18 @@ export const quotaRouter = router({
       ? Math.max(0, settings.totalBudgetPoints - total)
       : null;
     return {
+      /** Which group this row was minted for. null＝unscoped global leftover — header must not paint that as 剩. */
+      groupId: gid,
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
-      /** 站內預算剩餘與 Fal 台幣等值上限取小；兩者皆 null＝不限 */
-      totalRemaining: budgetRemaining != null && falPointsCap != null
-        ? Math.min(budgetRemaining, falPointsCap)
-        : budgetRemaining ?? falPointsCap,
-      /** null＝Fal 未設定或查詢失敗（不套硬上限） */
+      /**
+       * 站內總預算剩餘（cost_ledger 淨消耗）。不要跟 Fal 台幣等值上限取小——
+       * 那是平台守門（reserveQuota / falCeilingReason），不是使用者的週／日已用。
+       * 一次 1 點 generateInto 若重試打了 3 次 Fal，徽章「剩」會少 3、週已用只加 1。
+       * null＝站內總預算不限（頂欄再跟個人／組預算取最緊）。
+       */
+      totalRemaining: budgetRemaining,
+      /** null＝Fal 未設定或查詢失敗（不套硬上限；守門仍看這欄，不進「剩」） */
       falPointsCap,
       weeklyQuota: quota, // null＝不限
       weeklyUsed: weekly,

@@ -49,7 +49,7 @@ describe("手機製作階段", () => {
     }
   });
 
-  it("次級入口（分鏡／角色／知識）的錨點也是真的 anchorId", () => {
+  it("次級入口（分鏡／角色／場景）的錨點也是真的 anchorId", () => {
     // 這幾顆原本直接把 key 當錨點傳（characters／knowledge），同一種錯：
     // DOM 上沒有那些 id，點下去工作台會開但不會捲到該去的地方。
     const rendered = new Set([...STORY_INLINE_SECTIONS.map((s) => s.anchorId), "stage-story"]);

@@ -139,9 +139,12 @@ export function routeAssistantResources(
   if (DATABASE_QUERY_RE.test(text)) wanted.add("database");
 
   switch (pageContext?.pageType) {
+    case "project":
+    case "studio":
     case "story":
       wanted.add("decisions");
       wanted.add("knowledge");
+      wanted.add("storyboard");
       break;
     case "storyboard":
       wanted.add("storyboard");

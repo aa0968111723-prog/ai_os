@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildHistoryBlock,
@@ -215,7 +216,7 @@ describe("formatAgentRunLine（代理動態一行摘要）", () => {
 });
 
 describe("currentStepNote（組儀表當前步驟）", () => {
-  it("優先 running，其次 waiting，再 pending", () => {
+  it("優先 running，其次 waiting / waiting_confirmation，再 pending", () => {
     expect(
       currentStepNote([
         { status: "done", note: "已完成" },
@@ -229,6 +230,12 @@ describe("currentStepNote（組儀表當前步驟）", () => {
         { status: "pending", note: "後面" },
       ]),
     ).toBe("等人審");
+    expect(
+      currentStepNote([
+        { status: "pending", note: "第 2 鏡" },
+        { status: "waiting", note: "待你採用 · 第 1 鏡「鏡1」生成畫面" },
+      ]),
+    ).toBe("待你採用 · 第 1 鏡「鏡1」生成畫面");
   });
 
   it("空／非陣列回 null；過長截斷", () => {
@@ -517,8 +524,8 @@ describe("formatGroupBlockerDigest（S5：ask 的阻塞上下文）", () => {
 
 describe("sanitizeContextUsed／sanitizeRationale（S5：決策軌跡的守門）", () => {
   it("只留白名單內的標籤，去重且限量", () => {
-    expect(sanitizeContextUsed(["專案現況", "阻塞與人員負荷", "專案現況"]))
-      .toEqual(["專案現況", "阻塞與人員負荷"]);
+    expect(sanitizeContextUsed(["專案現況", "故事全文", "阻塞與人員負荷", "專案現況"]))
+      .toEqual(["專案現況", "故事全文", "阻塞與人員負荷"]);
   });
 
   it("編造的來源一律丟掉——不設限的話它會編出看起來很專業卻沒讀過的名稱", () => {
@@ -746,3 +753,31 @@ describe("buildSelfCheckClarification（自查釐清：本組組名寫給 LLM �
     expect(note).not.toContain("「  剪輯組」");
   });
 });
+
+describe("project_detail injects persisted story", () => {
+  it("reads stories.content through formatPersistedStoryForAssistant", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    const block = src.slice(src.indexOf('if (call.tool === "project_detail")'), src.indexOf('if (call.tool === "read_scene")'));
+    expect(block).toContain("formatPersistedStoryForAssistant");
+    expect(block).toContain("schema.stories.content");
+    expect(block).toContain("storyBlock");
+    expect(TEAM_CONTEXT_LABELS).toContain("故事全文");
+  });
+
+  it("組現況 lists 有故事稿／尚未儲存稿 without dumping 故事全文", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    const inventory = src.slice(src.indexOf("let storyRows"), src.indexOf("const hidden = totalProjects"));
+    expect(inventory).toContain("formatTeamInventoryStoryFlag");
+    expect(inventory).toContain("schema.stories");
+    expect(inventory).toContain("${storyFlag}");
+    expect(inventory).not.toContain("formatPersistedStoryForAssistant");
+  });
+
+  it("team ask binds the same 120s wall-clock as project/site assistant", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    expect(src).toContain("bindAssistantAskDeadline");
+    expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
+    expect(src).toContain("signal: askSignal");
+  });
+});
+

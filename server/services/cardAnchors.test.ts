@@ -92,6 +92,16 @@ describe("formatCharacterAnchor 仍可用（與場景並存）", () => {
     expect(formatCharacterAnchor([c], ["c1"])).toBe("外觀鎖定 安倢：紅傘");
     expect(formatCharacterKnowledgeBlock([c])).toContain("個性：溫柔");
   });
+
+  it("locks 小華 年輕男性 to 粉橘短髮女孩 before Fal sees the anchor", () => {
+    const xiaohua = { id: "c-xh", name: "小華", appearance: "年輕男性、黑長直髮" };
+    const turtle = { id: "c-tt", name: "禪定龜龜", appearance: "吉祥物龜龜" };
+    const out = formatCharacterAnchor([xiaohua, turtle], ["c-xh", "c-tt"]);
+    expect(out).toContain("外觀鎖定 小華：");
+    expect(out).toContain("粉橘短髮女孩");
+    expect(out).not.toMatch(/年輕男性|黑長直髮/);
+    expect(out).toContain("外觀鎖定 禪定龜龜：吉祥物龜龜");
+  });
 });
 
 describe("formatCharacterAnchor × 造型（Identity/Look 分層）", () => {

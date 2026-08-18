@@ -3,8 +3,8 @@
  * sniffMime 認得常見二進位簽名；resolveUploadMime 對「宣稱與內容不符」的檔案
  * 依內容校正（.jpg 內容其實是 WebP）或拒絕（宣稱圖片但簽名辨識不出）。
  */
-import { describe, expect, it } from "vitest";
-import { isAllowedUploadMime, mimeFromPath, publicBaseUrl, resolveUploadMime, sniffMime } from "./storage";
+import { afterEach, describe, expect, it } from "vitest";
+import { isAllowedUploadMime, mimeFromPath, publicBaseUrl, resolveUploadMime, rewriteMockAssetFetchUrl, sniffMime } from "./storage";
 
 const pad = (b: number[]) => Buffer.concat([Buffer.from(b), Buffer.alloc(16)]);
 
@@ -98,24 +98,54 @@ describe("resolveUploadMime", () => {
 });
 
 describe("publicBaseUrl", () => {
-  it("ignores a named-service PORT leftover and falls back to 3000", () => {
-    const prev = {
-      APP_URL: process.env.APP_URL,
-      PUBLIC_DOMAIN: process.env.PUBLIC_DOMAIN,
-      RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
-      PORT: process.env.PORT,
-    };
+  const prev = {
+    APP_URL: process.env.APP_URL,
+    PUBLIC_DOMAIN: process.env.PUBLIC_DOMAIN,
+    RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
+    PORT: process.env.PORT,
+  };
+  afterEach(() => {
+    for (const [key, value] of Object.entries(prev)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("ignores a non-numeric PORT leftover instead of emitting an invalid localhost URL", () => {
     delete process.env.APP_URL;
     delete process.env.PUBLIC_DOMAIN;
     delete process.env.RAILWAY_PUBLIC_DOMAIN;
-    process.env.PORT = "tcp://postgres:5432";
-    try {
-      expect(publicBaseUrl()).toBe("http://localhost:3000");
-    } finally {
-      for (const [key, value] of Object.entries(prev)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
+    process.env.PORT = "tcp://db:5432";
+    expect(publicBaseUrl()).toBe("http://localhost:3000");
+    expect(() => new URL(`${publicBaseUrl()}/api/databases/files/f-123/file`)).not.toThrow();
+  });
+
+  it("uses a real TCP PORT when APP_URL is unset", () => {
+    delete process.env.APP_URL;
+    delete process.env.PUBLIC_DOMAIN;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    process.env.PORT = "4173";
+    expect(publicBaseUrl()).toBe("http://localhost:4173");
+  });
+});
+
+describe("rewriteMockAssetFetchUrl", () => {
+  const prevPort = process.env.PORT;
+  afterEach(() => {
+    if (prevPort === undefined) delete process.env.PORT;
+    else process.env.PORT = prevPort;
+  });
+
+  it("rewrites leftover APP_URL mock-asset links to loopback", () => {
+    process.env.PORT = "3299";
+    expect(rewriteMockAssetFetchUrl("https://prod.example.internal/api/mock-asset/video"))
+      .toBe("http://127.0.0.1:3299/api/mock-asset/video");
+    expect(rewriteMockAssetFetchUrl("https://minio.zeabur.internal/api/mock-asset/image"))
+      .toBe("http://127.0.0.1:3299/api/mock-asset/image");
+  });
+
+  it("does not rewrite unrelated URLs (no SSRF via localhost)", () => {
+    expect(rewriteMockAssetFetchUrl("https://cdn.fal.ai/out.mp4")).toBe("https://cdn.fal.ai/out.mp4");
+    expect(rewriteMockAssetFetchUrl("https://evil.test/api/assets/abc/file")).toBe("https://evil.test/api/assets/abc/file");
   });
 });

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { assertMcpProjectScope, mcpUnchanged } from "./mcpWriteExpansion";
@@ -26,5 +27,34 @@ describe("MCP write honesty helpers", () => {
       expect((error as TRPCError).code).toBe("FORBIDDEN");
       expect((error as TRPCError).message).toContain("角色卡不屬於這個專案");
     }
+  });
+
+  it("MCP update_scene and update_worldview go through applyWithRevision", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const scene = source.slice(source.indexOf('if (name === "update_scene")'), source.indexOf('if (name === "reorder_scenes")'));
+    const wv = source.slice(source.indexOf('if (name === "update_worldview")'), source.indexOf('if (name === "rename_asset")'));
+    expect(scene).toContain("applyWithRevision");
+    expect(scene).toContain("expectedRev: scene.rev");
+    expect(scene).not.toContain("db.update(schema.scenes).set(patch)");
+    expect(wv).toContain("applyWithRevision");
+    expect(wv).toContain("expectedRev: project.rev");
+    expect(wv).not.toContain("db.update(schema.projects).set({ worldview");
+  });
+
+  it("submit_generation can bind sceneNo through findSceneByDisplayNo", () => {
+    const source = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf('if (name === "submit_generation")'), source.indexOf('if (name === "post_message")'));
+    expect(block).toContain("findSceneByDisplayNo");
+    expect(block).toContain("sceneId");
+    expect(block).toContain("args.sceneNo");
+    expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
+  });
+
+  it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    expect(source).toContain('import { assertReferenceImage } from "./referenceAsset"');
+    expect(source.match(/await assertReferenceImage\(/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(source).toContain("project.groupId, project.id");
+    expect(source).toContain("row.groupId, row.projectId");
   });
 });

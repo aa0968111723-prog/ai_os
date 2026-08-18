@@ -184,10 +184,11 @@ async function loadLocalEntity(
   }
 }
 
-/** 參考圖要真的存在、同組、未刪除，才能進 Canon reference */
+/** 參考圖要真的存在、同組、同專案、未刪除，才能進 Canon reference */
 async function referenceEntryForAsset(input: {
   assetId: string;
   groupId: string;
+  projectId: string;
   role: CanonReferenceEntry["role"];
   rightsReady: boolean;
 }): Promise<CanonReferenceEntry | null> {
@@ -196,8 +197,11 @@ async function referenceEntryForAsset(input: {
     projectId: schema.assets.projectId,
     groupId: schema.assets.groupId,
     deletedAt: schema.assets.deletedAt,
+    kind: schema.assets.kind,
   }).from(schema.assets).where(eq(schema.assets.id, input.assetId));
   if (!asset || asset.deletedAt || asset.groupId !== input.groupId) return null;
+  if (asset.projectId !== input.projectId) return null;
+  if (asset.kind !== "image") return null;
   return {
     assetId: asset.id,
     role: input.role,
@@ -223,6 +227,7 @@ async function buildPayloadFromLocalEntity(input: {
   name: string;
   entity: LocalEntityRow;
   groupId: string;
+  projectId: string;
   rightsConfirmed: boolean;
 }): Promise<CanonVersionPayload> {
   const references: CanonReferenceEntry[] = [];
@@ -230,6 +235,7 @@ async function buildPayloadFromLocalEntity(input: {
     const entry = await referenceEntryForAsset({
       assetId: input.entity.referenceAssetId,
       groupId: input.groupId,
+      projectId: input.projectId,
       role: referenceRoleForKind(input.kind),
       rightsReady: input.rightsConfirmed,
     });
@@ -309,6 +315,7 @@ export async function createCanonFromEntity(input: {
     name: entity.name,
     entity,
     groupId: project.groupId,
+    projectId: project.id,
     rightsConfirmed: input.confirmRights,
   });
   const fingerprint = canonVersionFingerprint(payload);
@@ -447,6 +454,7 @@ export async function createProjectCanon(input: {
     const entry = await referenceEntryForAsset({
       assetId: input.referenceAssetId,
       groupId: project.groupId,
+      projectId: project.id,
       role: referenceRoleForKind(input.kind),
       rightsReady: input.confirmRights,
     });
@@ -570,6 +578,7 @@ export async function addProjectCanonVersion(input: {
     const entry = await referenceEntryForAsset({
       assetId: input.referenceAssetId,
       groupId: project.groupId,
+      projectId: project.id,
       role: referenceRoleForKind(canon.kind),
       rightsReady: canon.reuseScope === "team",
     });
@@ -706,6 +715,7 @@ export async function addCanonVersionFromPin(input: {
     name: entity.name,
     entity,
     groupId: canon.groupId,
+    projectId: project.id,
     // 從已確認 rights 的 Canon 更新版本時沿用其開放狀態；private 的維持未確認
     rightsConfirmed: canon.reuseScope === "team",
   });

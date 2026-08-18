@@ -320,6 +320,7 @@ export function AgentCard({
     utils.tasks.listByProject.invalidate({ projectId });
     utils.agents.eventsByProject.invalidate({ projectId });
     utils.agents.insights.invalidate({ projectId });
+    utils.scenes?.listByProject?.invalidate?.({ projectId });
   };
   const preview = trpc.agents.preview?.useMutation?.() ?? {
     data: undefined,
@@ -356,6 +357,11 @@ export function AgentCard({
   };
   const completeTask = trpc.tasks.complete.useMutation({ onSuccess: invalidateAll });
   const decideApproval = trpc.tasks.decideApproval.useMutation({ onSuccess: invalidateAll });
+  const adoptGeneration = trpc.creativeContext?.adoptGeneration?.useMutation?.({ onSuccess: invalidateAll }) ?? {
+    mutate: (_input: unknown) => undefined,
+    isPending: false,
+    error: null,
+  };
 
   const runList = runs.data ?? [];
   const meId = me.data?.user.id;
@@ -986,6 +992,19 @@ export function AgentCard({
                     <button type="button" className="chip pick" title="捲動到對應的人類任務" onClick={() => flashAnchor(`task-${s.taskId}`)}>
                       人類任務
                     </button>
+                  )}
+                  {s.kind === "generate" && s.status === "waiting" && s.generationId && canEdit && (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={adoptGeneration.isPending}
+                      onClick={() => {
+                        const generationId = s.generationId;
+                        if (generationId) adoptGeneration.mutate({ generationId });
+                      }}
+                    >
+                      採用這一版
+                    </Button>
                   )}
                   {s.generationId && !(s.outputRefs ?? []).some((ref) => ref.type === "generation") && (
                     <button type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${s.generationId}`)}>

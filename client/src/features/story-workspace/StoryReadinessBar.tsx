@@ -12,6 +12,7 @@ export function StoryReadinessBar({
   primaryLabel,
   primaryDisabled,
   onPrimary,
+  error,
   latestLabel,
   onOpenLatest,
   contextStatus,
@@ -21,6 +22,8 @@ export function StoryReadinessBar({
   primaryLabel?: string;
   primaryDisabled?: boolean;
   onPrimary?: () => void;
+  /** oneClick.error — must render even when latest has no open handler. */
+  error?: string | null;
   latestLabel?: string;
   onOpenLatest?: () => void;
   contextStatus?: ReactNode;
@@ -37,11 +40,15 @@ export function StoryReadinessBar({
             variant="primary"
             className="story-readiness__cta"
             disabled={primaryDisabled}
+            title={primaryDisabled && primaryLabel ? primaryLabel : undefined}
             onClick={onPrimary}
           >
             {primaryLabel}
           </Button>
         )}
+        {error ? (
+          <p className="story-readiness__error" role="alert">{error}</p>
+        ) : null}
       </div>
       {contextStatus}
       {latestLabel && onOpenLatest && (

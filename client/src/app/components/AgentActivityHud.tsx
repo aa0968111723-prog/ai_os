@@ -80,6 +80,25 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     },
   );
 
+  const discard = trpc.agents.discard.useMutation({
+    onSuccess: (_data, variables) => {
+      const runId = variables?.runId;
+      const old = runId ? runCacheRef.current.get(runId) : undefined;
+      if (old && runId) {
+        runCacheRef.current.set(runId, {
+          ...old,
+          status: "discarded",
+          revision: runRevision(old) + 1,
+        });
+      }
+      void utils.teamAssistant.agentOverview.invalidate({ groupId });
+    },
+    onError: () => {
+      setStoppingId(null);
+      stopClickedAtRef.current = null;
+    },
+  });
+
   const stop = trpc.agents.stop.useMutation({
     onSuccess: () => {
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
@@ -103,12 +122,13 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
       cache.set(r.id, { ...r, revision: rev });
     }
     if (overview.data) {
-      for (const [id, row] of cache) {
+      for (const [id] of cache) {
         if (seen.has(id)) continue;
         if (id === stoppingId) continue;
-        if (!isAgentRunActiveForHud(row.status) || isAgentRunTerminalStatus(row.status)) {
-          cache.delete(id);
-        }
+        // Authoritative overview omitted this run (discarded leftover
+        // 0/N「待你過目」, finished, or filtered). Keep only the row we
+        // just asked to stop so acknowledgement can settle.
+        cache.delete(id);
       }
     }
     return [...cache.values()];
@@ -236,7 +256,14 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
             clearPendingTheaterSuggest();
             setStoppingId(lead.id);
             stopClickedAtRef.current = Date.now();
-            stop.mutate({ runId: lead.id });
+            // Leftover 0/N「待你過目」is awaiting_approval. 停 used to call
+            // stop, which rejected as already-ended — toast survived reload.
+            // discard already persists discarded (overview omits it).
+            if (lead.status === "awaiting_approval") {
+              discard.mutate({ runId: lead.id });
+            } else {
+              stop.mutate({ runId: lead.id });
+            }
           }}
         >
           <Icon name="CircleStop" size={13} />

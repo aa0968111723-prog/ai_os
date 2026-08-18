@@ -1,13 +1,34 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const homeQuery = vi.fn();
+const optionsQuery = vi.fn();
+const createMutate = vi.fn();
 const composed: string[] = [];
 /** 「只開面板、不代說話」被按到時會 push 一筆 */
 const opened: string[] = [];
 
 vi.mock("../api", () => ({
-  trpc: { phone: { home: { useQuery: (...args: unknown[]) => homeQuery(...args) } } },
+  trpc: {
+    useUtils: () => ({
+      phone: { home: { invalidate: vi.fn() } },
+      projects: { list: { invalidate: vi.fn() } },
+    }),
+    phone: { home: { useQuery: (...args: unknown[]) => homeQuery(...args) } },
+    options: { byGroup: { useQuery: (...args: unknown[]) => optionsQuery(...args) } },
+    projects: {
+      create: {
+        useMutation: (opts?: { onSuccess?: (project: { id: string }) => void }) => ({
+          mutate: (input: unknown) => {
+            createMutate(input);
+            opts?.onSuccess?.({ id: "new-project" });
+          },
+          isPending: false,
+          error: null,
+        }),
+      },
+    },
+  },
 }));
 vi.mock("../lib/assistantCompose", () => ({
   composeToAssistant: (text: string) => composed.push(text),
@@ -21,6 +42,7 @@ vi.mock("wouter", () => ({ useLocation: () => ["/dashboard", navigate] }));
 
 import { MobileHome } from "./MobileHome";
 import { continueAnchor } from "./stages";
+import { publishNewProjectIdea } from "../lib/newProjectIdea";
 
 const project = (over: Record<string, unknown> = {}) => ({
   id: "11111111-1111-4111-8111-111111111111",
@@ -40,10 +62,19 @@ const project = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   composed.length = 0;
   navigate.mockClear();
+  createMutate.mockClear();
+  sessionStorage.clear();
   homeQuery.mockReturnValue({
     data: { projects: [project()], totalAwaiting: 0 },
     isLoading: false,
     isFetching: false,
+  });
+  optionsQuery.mockReturnValue({
+    data: [
+      { id: "k1", type: "kind", value: "short", label: "短影音", active: true },
+      { id: "p1", type: "platform", value: "shorts", label: "Shorts", active: true, format: "9:16" },
+    ],
+    isLoading: false,
   });
 });
 
@@ -143,5 +174,50 @@ describe("手機首頁", () => {
   it("沒有組別時給的是指路，不是空白畫面", () => {
     render(<MobileHome groupId="" />);
     expect(screen.getByText("還沒有組別")).toBeInTheDocument();
+  });
+
+  it("空狀態有建立專案按鈕，不是只能跟 Aios 說", () => {
+    homeQuery.mockReturnValue({
+      data: { projects: [], totalAwaiting: 0 },
+      isLoading: false,
+      isFetching: false,
+    });
+    render(<MobileHome groupId="g1" />);
+    expect(screen.getByText("還沒有專案")).toBeInTheDocument();
+    expect(screen.getByText("跟 Aios 說它會建起來")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /建立專案/ }).length).toBeGreaterThan(0);
+  });
+
+  it("導航後才掛上的 MobileHome 仍能從 sessionStorage 打開建立表單", () => {
+    sessionStorage.setItem("aios.pendingNewProjectIdea", "從助手來的標題");
+    render(<MobileHome groupId="g1" />);
+    expect(screen.getByLabelText("建立新專案")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("從助手來的標題")).toBeInTheDocument();
+  });
+
+  it("aios:new-project-idea 打開手機建立表單，確認前不送出", async () => {
+    render(<MobileHome groupId="g1" />);
+    publishNewProjectIdea("只預填不建立");
+    expect(await screen.findByLabelText("建立新專案")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("只預填不建立")).toBeInTheDocument();
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+
+  it("aios:new-project-idea 打開手機建立表單，不走 Launchpad modal", async () => {
+    render(<MobileHome groupId="g1" />);
+    fireEvent.click(screen.getByRole("button", { name: "建立專案" }));
+    expect(await screen.findByLabelText("建立新專案")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByLabelText("建立新專案")).getByRole("button", { name: "關閉建立專案" }));
+    publishNewProjectIdea("淡江禪學社・小華");
+    const sheet = await screen.findByLabelText("建立新專案");
+    expect(screen.getByDisplayValue("淡江禪學社・小華")).toBeInTheDocument();
+    const submit = within(sheet).getByRole("button", { name: "建立專案" });
+    await waitFor(() => expect(submit).not.toBeDisabled());
+    fireEvent.click(submit);
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({
+      groupId: "g1",
+      title: "淡江禪學社・小華",
+    }));
+    expect(navigate).toHaveBeenCalledWith("/p/new-project");
   });
 });

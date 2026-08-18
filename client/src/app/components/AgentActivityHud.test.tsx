@@ -1,12 +1,15 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentActivityHud } from "./AgentActivityHud";
 
 const stopMutate = vi.fn();
+const discardMutate = vi.fn();
 let overviewRuns: unknown[] = [];
 let stopPending = false;
-let stopOnSuccess: (() => void) | undefined;
+let stopOnSuccess: ((data: unknown, input: { runId: string }) => void) | undefined;
+let stopOnError: ((err: Error, input: { runId: string }) => void) | undefined;
+let stopShouldFail = false;
 
 vi.mock("../../api", () => ({
   trpc: {
@@ -16,17 +19,35 @@ vi.mock("../../api", () => ({
     },
     agents: {
       stop: {
-        useMutation: (opts?: { onSuccess?: () => void; onError?: () => void }) => {
+        useMutation: (opts?: {
+          onSuccess?: (data: unknown, input: { runId: string }) => void;
+          onError?: (err: Error, input: { runId: string }) => void;
+        }) => {
           stopOnSuccess = opts?.onSuccess;
+          stopOnError = opts?.onError;
           return {
             mutate: (input: { runId: string }) => {
               stopMutate(input);
-              stopOnSuccess?.();
+              if (stopShouldFail) {
+                stopOnError?.(new Error("這個代理已經結束，不需要停止"), input);
+                return;
+              }
+              stopOnSuccess?.(undefined, input);
             },
             isPending: stopPending,
             error: null,
           };
         },
+      },
+      discard: {
+        useMutation: (opts?: { onSuccess?: (data: unknown, input: { runId: string }) => void }) => ({
+          mutate: (input: { runId: string }) => {
+            discardMutate(input);
+            opts?.onSuccess?.(undefined, input);
+          },
+          isPending: false,
+          error: null,
+        }),
       },
     },
   },
@@ -52,6 +73,14 @@ function run(partial: Record<string, unknown> = {}) {
  * AgentCard——離開那頁就完全失去線索。這支測試守的是「跨頁看得見＋隨時停得掉」。
  */
 describe("AgentActivityHud", () => {
+  beforeEach(() => {
+    stopMutate.mockClear();
+    discardMutate.mockClear();
+    stopShouldFail = false;
+    stopPending = false;
+    overviewRuns = [];
+  });
+
   it("沒有在跑的代理時完全不渲染——常駐 UI 只在有話要說時才值得佔畫面", () => {
     overviewRuns = [run({ status: "done" }), run({ id: "r2", status: "failed" })];
     const { container } = render(<AgentActivityHud groupId="g1" />);
@@ -137,6 +166,43 @@ describe("AgentActivityHud", () => {
     })];
     render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText(/需要你補充資訊/)).toBeVisible();
+  });
+
+  it("停 on leftover 0/6 待你過目 calls discard (not stop) so reload cannot resurrect the toast", async () => {
+    const user = userEvent.setup();
+    overviewRuns = [run({
+      status: "awaiting_approval",
+      doneSteps: 0,
+      totalSteps: 6,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+      projectTitle: "overnight-test-short-100w-20260818",
+    })];
+    const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
+    expect(screen.getByText("待你過目")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /停/ }));
+    expect(discardMutate).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(stopMutate).not.toHaveBeenCalled();
+    overviewRuns = [];
+    rerender(<AgentActivityHud groupId="g1" />);
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
+  });
+
+  it("discards leftover 0/6 待你過目 from the HUD cache when overview omits it", async () => {
+    overviewRuns = [run({
+      status: "awaiting_approval",
+      doneSteps: 0,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+    })];
+    const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
+    expect(screen.getByText("待你過目")).toBeVisible();
+    expect(screen.getByText("第 1 鏡「小華躺在床上」生成畫面")).toBeVisible();
+    overviewRuns = [];
+    rerender(<AgentActivityHud groupId="g1" />);
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
   });
 });
 

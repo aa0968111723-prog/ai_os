@@ -11,7 +11,7 @@ import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { LOOK_COSTUME_MAX, LOOK_NAME_MAX, MAX_PROJECT_LOOKS } from "../../shared/story";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 
 export const characterLooksRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -44,7 +44,7 @@ export const characterLooksRouter = router({
       if (!owner) throw new TRPCError({ code: "NOT_FOUND", message: "找不到角色" });
       requireGroup(ctx.auth, owner.groupId);
       await assertProjectEditable(ctx.auth, { id: owner.projectId, groupId: owner.groupId });
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, owner.groupId, owner.projectId);
 
       const [{ n }] = await db
         .select({ n: count() })
@@ -90,7 +90,7 @@ export const characterLooksRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId });
-      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
       const patch: { name?: string; costume?: string | null; notes?: string | null; referenceAssetId?: string | null } = {};
       if (input.name !== undefined) patch.name = input.name;
@@ -99,7 +99,7 @@ export const characterLooksRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "characterLook",
         table: schema.characterLooks,
         idColumn: schema.characterLooks.id,

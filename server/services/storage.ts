@@ -47,6 +47,12 @@ export const MAX_AI_RESULT_BYTES = (Number(process.env.ASSET_AI_MAX_MB) || 2000)
 /** 磁碟保留水位：低於此可用空間就拒收新檔，避免整站因滿碟故障 */
 const MIN_FREE_BYTES = 64 * 1024 * 1024;
 
+function listenPort(): number {
+  // Cloud/agent leftovers sometimes set PORT to a named service, not a TCP port.
+  const parsed = Number(process.env.PORT);
+  return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : 3000;
+}
+
 /** 對外公開 base URL（簽名網址／假素材用）：APP_URL → PUBLIC_DOMAIN → RAILWAY_PUBLIC_DOMAIN → localhost */
 export function publicBaseUrl(): string {
   const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
@@ -54,11 +60,22 @@ export function publicBaseUrl(): string {
   const appUrl = process.env.APP_URL?.replace(/\/$/, "");
   if (appUrl) return appUrl;
   if (fallback) return fallback;
-  // Cloud/agent leftovers sometimes set PORT to a named service, not a TCP port.
-  // `http://localhost:tcp://…` is not a URL — signed asset / dbfile links then throw.
-  const parsed = Number(process.env.PORT);
-  const port = Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : 3000;
-  return `http://localhost:${port}`;
+  return `http://localhost:${listenPort()}`;
+}
+
+/**
+ * 假素材抓取位址。路徑是 /api/mock-asset/* 時一律改抓本機——成品 URL 若被
+ * 殘留 APP_URL／PUBLIC_DOMAIN 寫成外網或 *.internal，persist 會 404，畫面與連戲一起空。
+ * 只改這條路徑，避免把任意 URL 轉進 localhost（SSRF）。
+ */
+export function rewriteMockAssetFetchUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!/^\/api\/mock-asset\/[a-z0-9-]+$/.test(parsed.pathname)) return url;
+    return `http://127.0.0.1:${listenPort()}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 export function ensureStorageDirs(): void {
@@ -800,7 +817,7 @@ export async function persistRemote(url: string): Promise<{ storagePath: string;
   const already = parseStoredResultUrl(url);
   if (already) return already;
   try {
-    const res = await proxyFetch(url, { timeoutMs: PERSIST_FETCH_TIMEOUT_MS });
+    const res = await proxyFetch(rewriteMockAssetFetchUrl(url), { timeoutMs: PERSIST_FETCH_TIMEOUT_MS });
     if (!res.ok) {
       console.warn(`[storage] 抓取成品失敗 ${res.status}：${url}`);
       void res.body?.cancel().catch(() => {});

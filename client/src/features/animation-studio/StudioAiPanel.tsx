@@ -360,7 +360,22 @@ export function StudioAiPanel({
                 variant="primary"
                 disabled={!canEdit || !dirty || update.isPending}
                 onClick={() =>
-                  update.mutate({ sceneId: shot.id, title: title.trim() || shot.title, durationSec, prompt, voiceover, ambience })
+                  update.mutate({
+                    sceneId: shot.id,
+                    title: title.trim() || shot.title,
+                    durationSec,
+                    prompt,
+                    voiceover,
+                    ambience,
+                    expectedRev: shot.rev,
+                    baseline: {
+                      title: shot.title,
+                      durationSec: shot.durationSec,
+                      prompt: shot.prompt ?? null,
+                      voiceover: shot.voiceover ?? null,
+                      ambience: shot.ambience ?? null,
+                    },
+                  })
                 }
               >
                 {update.isPending ? "儲存中…" : dirty ? "儲存這一鏡" : "已儲存 ✓"}

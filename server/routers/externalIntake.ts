@@ -85,7 +85,10 @@ async function confirmImportedAsset(input: {
   const externalSessionId = ((intake.provenance as Record<string, unknown> | undefined)?.externalSessionId);
   const updated = await db.transaction(async (tx) => {
     if (scene && scenePatch) {
-      await tx.update(schema.scenes).set(scenePatch).where(eq(schema.scenes.id, scene.id));
+      await tx.update(schema.scenes).set({
+        ...scenePatch,
+        rev: sql`${schema.scenes.rev} + 1`,
+      }).where(eq(schema.scenes.id, scene.id));
     }
     if (input.bindingId) {
       const [confirmed] = await tx.update(schema.contextBindings).set({

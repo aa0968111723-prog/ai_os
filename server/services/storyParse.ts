@@ -31,11 +31,90 @@ import {
   type ParsedShot,
   type ExistingStoryScene,
 } from "../../shared/story";
+import {
+  lockXiaohuaCopyFields,
+  lockXiaohuaPlan,
+  rewritePersistedXiaohuaShotCopy,
+  scriptExplicitlyMaleXiaohua,
+} from "../../shared/characterIdentityLock";
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { nimCompleteWithFallback, NimServiceError, NIM_REASONING_MODEL } from "./nvidia-nim";
+import {
+  nimCompleteWithFallback,
+  NimServiceError,
+  NIM_DEFAULT_MODEL,
+  NIM_REASONING_MODEL,
+  isNimTimeoutError,
+} from "./nvidia-nim";
+
+/**
+ * Live cold-parse bracket on 405B/150s:
+ *   21 字 OK ≤40s; 66 字 A-line OK ~35s; 161 字 A–D OK-but-slow ~2min; 301 字 A–F FAIL 150s.
+ * 161 sat on 405B. 70B first under ~2000 chars so 161 does not wait 2 min and 301 can finish.
+ * First attempt ~45s so a 6-beat extract can finish (21/66 字 already take ~35–40s).
+ * Do not rely on parsedContentHash cache.
+ */
+export const STORY_PARSE_SHORT_CHARS = 2_000;
+export const STORY_PARSE_SHORT_PRIMARY_MS = 45_000;
+export const STORY_PARSE_SHORT_FALLBACK_MS = 25_000;
+/** 405B 45–60s；70B 再 50–60s。合計 ≤ ~120s，不讓 3×405B 重試吃掉整段 150s。 */
+export const STORY_PARSE_LONG_PRIMARY_MS = 55_000;
+export const STORY_PARSE_LONG_FALLBACK_MS = 55_000;
+
+export interface StoryExtractStrategy {
+  primaryModel: string;
+  fallbackModel: string;
+  primaryTimeoutMs: number;
+  fallbackTimeoutMs: number;
+  /** Wall-clock budget for primary + fallback. Tests assert a hang fails under this, not 150s×2. */
+  budgetMs: number;
+}
+
+export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStrategy {
+  if (storyChars <= STORY_PARSE_SHORT_CHARS) {
+    return {
+      primaryModel: NIM_DEFAULT_MODEL,
+      fallbackModel: NIM_DEFAULT_MODEL,
+      primaryTimeoutMs: STORY_PARSE_SHORT_PRIMARY_MS,
+      fallbackTimeoutMs: STORY_PARSE_SHORT_FALLBACK_MS,
+      budgetMs: STORY_PARSE_SHORT_PRIMARY_MS + STORY_PARSE_SHORT_FALLBACK_MS + 5_000,
+    };
+  }
+  return {
+    primaryModel: NIM_REASONING_MODEL,
+    fallbackModel: NIM_DEFAULT_MODEL,
+    primaryTimeoutMs: STORY_PARSE_LONG_PRIMARY_MS,
+    fallbackTimeoutMs: STORY_PARSE_LONG_FALLBACK_MS,
+    budgetMs: STORY_PARSE_LONG_PRIMARY_MS + STORY_PARSE_LONG_FALLBACK_MS + 5_000,
+  };
+}
+
+export type StoryExtractComplete = (
+  prompt: string,
+  opts: { model: string; fallbackModel?: string; timeoutMs?: number; fallbackTimeoutMs?: number },
+) => Promise<{ output: string; model: string; downgraded: boolean }>;
+
+/**
+ * Bounded EXTRACT: short scripts start on 70B; flagship is a short probe, not a 150s hang.
+ * A hanging provider must fail with a recoverable error inside budgetMs.
+ */
+export async function extractStoryPlanFromProvider(
+  sys: string,
+  storyChars: number,
+  complete: StoryExtractComplete = nimCompleteWithFallback,
+): Promise<{ output: string; model: string; downgraded: boolean; strategy: StoryExtractStrategy }> {
+  const strategy = resolveStoryExtractStrategy(storyChars);
+  const completion = await complete(sys, {
+    model: strategy.primaryModel,
+    fallbackModel: strategy.fallbackModel,
+    timeoutMs: strategy.primaryTimeoutMs,
+    fallbackTimeoutMs: strategy.fallbackTimeoutMs,
+  });
+  return { ...completion, strategy };
+}
 import { loadProjectCardAliases, type ProjectCardAliases } from "./sceneCards";
+import { assertGenerationEntityIds } from "./generationCore";
 import { lockSceneOrder } from "./locks";
 import {
   consumeRateLimit,
@@ -50,9 +129,9 @@ export function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-/** provider 逾時判斷（與 director 同款）：與 DB 錯誤明確區分 */
+/** provider 逾時判斷（與 director 同款）：含 NIM 人話逾時，與 DB 錯誤明確區分 */
 function isProviderTimeout(err: unknown): boolean {
-  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+  return isNimTimeoutError(err);
 }
 
 async function overParseLimit(userId: string): Promise<boolean> {
@@ -167,7 +246,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     };
   });
 
-  return { characters, locations, props, scenes };
+  return lockXiaohuaPlan({ characters, locations, props, scenes }, content);
 }
 
 /* ── EXTRACT（真模式）：LLM 結構化抽取 ───────────────────────── */
@@ -188,6 +267,7 @@ function buildParsePrompt(input: {
 - 代名詞（她/他/那把傘）一律歸併到同一實體，不得拆成兩筆；把代名詞放進 aliases。
 - <既有卡> 已存在的實體：填 existingRef 用代號，不要重複建立；不確定是否同一人時 confidence 給低於 0.7。
 - appearance 是固定身份（Identity），costume 是本故事的可變造型（Look）——分開填，不可混寫。
+- 名字是「小華」且故事沒有寫她是男生時：appearance 必須是女性（大二化工、粉橘短髮女孩、白帽T）。禁止發明「年輕男性／男生／男孩」，禁止改成黑長直髮。既有卡已是女孩時一律沿用，不得改性別。
 - confidence 0～1：你有多確定「這是一個應該建卡的實體」。順帶一提的路人/背景物 confidence 給低。
 - scenes 最多 12 場、每場最多 8 鏡；durationSec 3～8。
 - 只准用名字或列出的代號，禁止輸出任何 UUID。
@@ -248,7 +328,7 @@ function resolveExistingRef(
   return pool.find((a) => a.ref.toLowerCase() === key)?.id ?? null;
 }
 
-function matchByName<T extends { id: string; name: string }>(rows: T[], name: string): T | null {
+export function matchByName<T extends { id: string; name: string }>(rows: T[], name: string): T | null {
   const key = nameKey(name);
   if (!key) return null;
   return rows.find((r) => nameKey(r.name) === key) ?? null;
@@ -262,6 +342,8 @@ export interface StoryParseCoreInput {
   /** 內容沒變時是否仍強制重解（預設 false：hash 相同直接短路，Cost Control） */
   force?: boolean;
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
+  /** Test hook: inject EXTRACT. Production leaves this unset (nimCompleteWithFallback). */
+  complete?: StoryExtractComplete;
 }
 
 export interface StoryParseResult {
@@ -284,7 +366,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
   }
 
   const contentHash = sha256Hex(content);
-  // Idempotency 短路：內容沒變就不重跑（重按「AI 解析」不會燒模型也不會建重複資料）
+  // Idempotency 短路：內容沒變就不重跑（重按「AI 解析」不會燒模型也不會建重複資料）。
+  // Live 119-char「成功」was this cache (skipped:true), not a first parse.
+  // force 預設 false——同一份稿再按一次不會打 NIM。
   if (!input.force && story.parsedContentHash === contentHash) {
     const [lastRun] = await db
       .select()
@@ -333,30 +417,34 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       aliasText: cardAliases.text,
       story: sentStory,
     });
+    const extractStrategy = resolveStoryExtractStrategy(sentStory.length);
     if (trace) {
       await recordAiTraceEventSafely({
         sessionId: trace.id,
         eventType: "prepared",
-        summary: `組裝解析提示詞（${NIM_REASONING_MODEL}）`,
+        summary: `組裝解析提示詞（${extractStrategy.primaryModel}）`,
         payload: {
           promptChars: sys.length,
           storyChars: content.length,
           sentChars: sentStory.length,
-          model: NIM_REASONING_MODEL,
+          model: extractStrategy.primaryModel,
+          fallbackModel: extractStrategy.fallbackModel,
+          primaryTimeoutMs: extractStrategy.primaryTimeoutMs,
+          fallbackTimeoutMs: extractStrategy.fallbackTimeoutMs,
         },
       });
     }
     try {
-      // 劇本解析走高階模型：一次要同時做代名詞歸併、既有卡比對、分場分鏡與信心評分，
-      // 這是整條製作鏈的源頭——這裡漏一個角色，後面每一顆鏡都少一個錨點。
-      // 逾時放寬到 150 秒：旗艦模型比日常主力慢，用 90 秒會把成功的解析判成逾時。
-      const completion = await nimCompleteWithFallback(sys, { model: NIM_REASONING_MODEL, timeoutMs: 150_000 });
+      // Live/base L353 sent every cache-miss to flagship with a 150s hang.
+      // Bracket: 21 OK; 66 A-line ~35s OK; 161 A–D ~2min OK-but-slow on 405B; 301 FAIL 150s. Hash cache is not a parse.
+      // ≤2000 chars: 70B 45s then leftover 70B 25s. Do not restore an unbounded flagship first attempt.
+      const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({
           sessionId: trace.id,
           eventType: "provider_response",
-          summary: `高階模型無法使用，已降級為 ${completion.model}`,
-          payload: { requested: NIM_REASONING_MODEL, used: completion.model },
+          summary: `主模型無法使用，已改為 ${completion.model}`,
+          payload: { requested: extractStrategy.primaryModel, used: completion.model },
         });
       }
       const output = completion.output;
@@ -379,7 +467,11 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       if (err instanceof TRPCError) throw err;
       if (trace) await updateAiTraceSession(trace.id, { status: "failed", summary: "provider 失敗" }).catch(() => undefined);
       if (isProviderTimeout(err)) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 模型回應逾時（150 秒）——上游服務忙碌，稍後重試即可" });
+        const seconds = Math.round(extractStrategy.budgetMs / 1000);
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `AI 模型回應逾時（超過 ${seconds} 秒無回應）——上游服務忙碌，請稍後重試或把稿子分段解析`,
+        });
       }
       if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
       const cause = err instanceof Error ? err.message.replace(/\s+/g, " ").slice(0, 100) : "";
@@ -387,6 +479,10 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: cause ? `解析失敗，請重試（${cause}）` : "解析失敗，請重試" });
     }
   }
+
+  // Live A–D extracted 小華 as「年輕男性」and shot titles「夕陽光照在他身上」.
+  // Name + script lock wins over model gender flip in cards and storyboard copy.
+  plan = lockXiaohuaPlan(plan, sentStory);
 
   /* ── NORMALIZE＋RESOLVE＋CONFIDENCE＋DIFF＋SAVE（單一交易） ── */
   const applied: ParseRunApplied = { createdCharacterIds: [], createdLocationIds: [], createdPropIds: [], createdLookIds: [], updated: [] };
@@ -722,6 +818,52 @@ export async function loadExistingStoryScenes(
   return rows.map((r) => ({ id: r.id, title: r.title, liveShots: liveByScene.get(r.id) ?? 0 }));
 }
 
+/**
+ * Parse timed out / never succeeded: still allow 產生分鏡 from the story text.
+ * Same paragraph / sentence split as the E2E extractor — not a second product.
+ */
+export function planStoryboardFromStoryText(content: string): StoryParsePlan {
+  return storyParseModelSchema.parse(mockStoryExtract(content));
+}
+
+async function buildHeuristicParseRun(input: {
+  userId: string;
+  projectId: string;
+}): Promise<typeof schema.parseRuns.$inferSelect> {
+  const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, input.projectId));
+  const content = (story?.content ?? "").trim();
+  if (!story || !content) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "還沒有可用的解析結果——先按「AI 解析」，或先在故事裡寫下內容",
+    });
+  }
+  const plan = planStoryboardFromStoryText(content);
+  const stats: ParseRunStats = {
+    characters: { created: 0, linked: 0, pending: 0 },
+    locations: { created: 0, linked: 0, pending: 0 },
+    props: { created: 0, linked: 0, pending: 0 },
+    looks: { created: 0 },
+    scenes: plan.scenes.length,
+    shots: plan.scenes.reduce((n, s) => n + s.shots.length, 0),
+    truncation: null,
+    mock: true,
+  };
+  const [created] = await db
+    .insert(schema.parseRuns)
+    .values({
+      projectId: input.projectId,
+      storyId: story.id,
+      status: "done",
+      contentHash: sha256Hex(content),
+      plan,
+      stats,
+      createdBy: input.userId,
+    })
+    .returning();
+  return created;
+}
+
 export async function materializeStoryboard(input: {
   userId: string;
   projectId: string;
@@ -732,7 +874,7 @@ export async function materializeStoryboard(input: {
   if (!project) throw new TRPCError({ code: "NOT_FOUND" });
   await input.assertAccess(project);
 
-  const run = input.runId
+  let run = input.runId
     ? (await db.select().from(schema.parseRuns).where(eq(schema.parseRuns.id, input.runId)))[0]
     : (
         await db
@@ -742,18 +884,36 @@ export async function materializeStoryboard(input: {
           .orderBy(sql`${schema.parseRuns.createdAt} desc`)
           .limit(1)
       )[0];
+  if (!run || run.projectId !== project.id || run.status !== "done" || !run.plan) {
+    run = await buildHeuristicParseRun({
+      userId: input.userId,
+      projectId: project.id,
+    });
+  }
   if (!run || run.projectId !== project.id) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "還沒有可用的解析結果——先按「AI 解析」" });
+    throw new TRPCError({ code: "BAD_REQUEST", message: "還沒有可用的解析結果——先按「AI 解析」，或先在故事裡寫下內容" });
   }
   if (run.status !== "done" || !run.plan) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這次解析沒有可轉的分鏡計畫" });
   }
+  const [storyRow] = await db
+    .select({ content: schema.stories.content })
+    .from(schema.stories)
+    .where(eq(schema.stories.projectId, project.id))
+    .limit(1);
+  const script = storyRow?.content ?? "";
+
   // 冪等：這個 run 已經轉過分鏡→直接回同一批（重按不重複建）
+  // Always rewrite 小華 他→她 on *all* project shots. reuse skips inserts,
+  // so a cached male plan would keep 他身上 without a project-wide pass.
   if (run.applied?.storyboard) {
+    if (!scriptExplicitlyMaleXiaohua(script)) {
+      await rewriteProjectXiaohuaStoryboardCopy(project.id, script);
+    }
     return { ...run.applied.storyboard, reused: true };
   }
 
-  const plan = run.plan;
+  const plan = lockXiaohuaPlan(run.plan, script);
   const existing = await loadExistingEntities(project.id);
   const aliases = await loadProjectCardAliases(project.id);
 
@@ -844,44 +1004,53 @@ export async function materializeStoryboard(input: {
       }
 
       const locationPresetIds = storyScene.locationId ? [storyScene.locationId] : [];
+      const shotValues = sc.shots.map((shot) => {
+        const characterIds = (shot.characterRefs ?? [])
+          .map(resolveCharRef)
+          .filter((id): id is string => Boolean(id))
+          .slice(0, MAX_GENERATE_CHARACTERS);
+        const propIds = (shot.propRefs ?? [])
+          .map(resolvePropRef)
+          .filter((id): id is string => Boolean(id))
+          .slice(0, MAX_GENERATE_PROPS);
+        const lookIds = [...new Set(characterIds)]
+          .map(soleLookOf)
+          .filter((id): id is string => Boolean(id));
+        const lockedShot = lockXiaohuaCopyFields({
+          title: (shot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
+          prompt: shot.prompt,
+          action: shot.action ?? null,
+          dialogue: shot.dialogue ?? null,
+          voiceover: shot.voiceover ?? null,
+        }, script);
+        return {
+          projectId: project.id,
+          orderIndex: ++shotOrder,
+          title: (lockedShot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
+          durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
+          status: "todo" as const,
+          prompt: lockedShot.prompt ?? shot.prompt,
+          action: lockedShot.action ?? null,
+          dialogue: lockedShot.dialogue ?? null,
+          voiceover: lockedShot.voiceover ?? null,
+          storySceneId: storyScene.id,
+          camera: shot.shotSize ? { shotSize: shot.shotSize } : null,
+          performance: shot.emotion ? { emotion: shot.emotion } : null,
+          characterIds: characterIds.length ? [...new Set(characterIds)] : null,
+          scenePresetIds: locationPresetIds.length ? locationPresetIds : null,
+          propIds: propIds.length ? [...new Set(propIds)] : null,
+          lookIds: lookIds.length ? lookIds : null,
+        };
+      });
+      await assertGenerationEntityIds(project.id, {
+        characterIds: [...new Set(shotValues.flatMap((row) => row.characterIds ?? []))],
+        scenePresetIds: [...new Set(shotValues.flatMap((row) => row.scenePresetIds ?? []))],
+        propIds: [...new Set(shotValues.flatMap((row) => row.propIds ?? []))],
+        lookIds: [...new Set(shotValues.flatMap((row) => row.lookIds ?? []))],
+      });
       const rows = await tx
         .insert(schema.scenes)
-        .values(
-          sc.shots.map((shot) => {
-            const characterIds = (shot.characterRefs ?? [])
-              .map(resolveCharRef)
-              .filter((id): id is string => Boolean(id))
-              .slice(0, MAX_GENERATE_CHARACTERS);
-            const propIds = (shot.propRefs ?? [])
-              .map(resolvePropRef)
-              .filter((id): id is string => Boolean(id))
-              .slice(0, MAX_GENERATE_PROPS);
-            return {
-              projectId: project.id,
-              orderIndex: ++shotOrder,
-              title: (shot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
-              durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
-              status: "todo",
-              prompt: shot.prompt,
-              action: shot.action ?? null,
-              dialogue: shot.dialogue ?? null,
-              voiceover: shot.voiceover ?? null,
-              storySceneId: storyScene.id,
-              camera: shot.shotSize ? { shotSize: shot.shotSize } : null,
-              performance: shot.emotion ? { emotion: shot.emotion } : null,
-              characterIds: characterIds.length ? [...new Set(characterIds)] : null,
-              scenePresetIds: locationPresetIds.length ? locationPresetIds : null,
-              propIds: propIds.length ? [...new Set(propIds)] : null,
-              // 出場角色若只有一套造型，直接鎖上（見上方 soleLookOf 的取捨）
-              lookIds: (() => {
-                const ids = [...new Set(characterIds)]
-                  .map(soleLookOf)
-                  .filter((id): id is string => Boolean(id));
-                return ids.length ? ids : null;
-              })(),
-            };
-          }),
-        )
+        .values(shotValues)
         .returning({ id: schema.scenes.id });
       sceneIds.push(...rows.map((r) => r.id));
     }
@@ -889,7 +1058,103 @@ export async function materializeStoryboard(input: {
     const applied: ParseRunApplied = { ...(run.applied ?? {}), storyboard: { storySceneIds, sceneIds } };
     await tx.update(schema.parseRuns).set({ applied, updatedAt: new Date() }).where(eq(schema.parseRuns.id, run.id));
     return { storySceneIds, sceneIds, reused: false };
+  }).then(async (result) => {
+    if (!scriptExplicitlyMaleXiaohua(script)) {
+      await rewriteProjectXiaohuaStoryboardCopy(project.id, script);
+    }
+    return result;
   });
+}
+
+/** generateStoryboard reuse leaves existing 他 titles; rewrite the whole project. */
+async function rewriteProjectXiaohuaStoryboardCopy(projectId: string, script = ""): Promise<void> {
+  const xiaohuaNamed = await db
+    .select({ id: schema.characters.id, name: schema.characters.name })
+    .from(schema.characters)
+    .where(eq(schema.characters.projectId, projectId));
+  const boundIds = new Set(xiaohuaNamed.filter((row) => /小華/.test(row.name ?? "")).map((row) => row.id));
+  const forceXiaohua = boundIds.size > 0 || /小華/.test(script);
+
+  const rows = await db
+    .select({
+      id: schema.scenes.id,
+      title: schema.scenes.title,
+      prompt: schema.scenes.prompt,
+      action: schema.scenes.action,
+      dialogue: schema.scenes.dialogue,
+      voiceover: schema.scenes.voiceover,
+      characterIds: schema.scenes.characterIds,
+    })
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
+  await persistXiaohuaShotRewrites(rows, boundIds, forceXiaohua);
+
+  const storyScenes = await db
+    .select({
+      id: schema.storyScenes.id,
+      title: schema.storyScenes.title,
+      summary: schema.storyScenes.summary,
+      storyExcerpt: schema.storyScenes.storyExcerpt,
+    })
+    .from(schema.storyScenes)
+    .where(eq(schema.storyScenes.projectId, projectId));
+  for (const row of storyScenes) {
+    const next = lockXiaohuaCopyFields({
+      title: row.title,
+      prompt: row.summary ?? "",
+      action: row.storyExcerpt,
+    }, forceXiaohua ? "小華" : "");
+    if (next.title === row.title && next.prompt === (row.summary ?? "") && next.action === row.storyExcerpt) {
+      continue;
+    }
+    await db
+      .update(schema.storyScenes)
+      .set({
+        title: next.title ?? row.title,
+        summary: next.prompt || null,
+        storyExcerpt: next.action ?? null,
+      })
+      .where(eq(schema.storyScenes.id, row.id));
+  }
+}
+
+async function persistXiaohuaShotRewrites(
+  rows: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    action: string | null;
+    dialogue: string | null;
+    voiceover: string | null;
+    characterIds?: string[] | null;
+  }>,
+  xiaohuaIds: Set<string> = new Set(),
+  forceXiaohua = false,
+): Promise<void> {
+  for (const row of rows) {
+    const bound = (row.characterIds ?? []).some((id) => xiaohuaIds.has(id));
+    // Script or a 小華 card: force 他→她 even when the title omits her name.
+    const next = rewritePersistedXiaohuaShotCopy(row, bound || forceXiaohua || xiaohuaIds.size > 0);
+    if (
+      next.title === row.title
+      && next.prompt === row.prompt
+      && next.action === row.action
+      && next.dialogue === row.dialogue
+      && next.voiceover === row.voiceover
+    ) {
+      continue;
+    }
+    await db
+      .update(schema.scenes)
+      .set({
+        title: next.title ?? row.title,
+        prompt: next.prompt,
+        action: next.action,
+        dialogue: next.dialogue,
+        voiceover: next.voiceover,
+      })
+      .where(eq(schema.scenes.id, row.id));
+  }
 }
 
 /* ── Undo：撤銷一次解析（含它轉出的分鏡） ───────────── */

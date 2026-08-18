@@ -6,7 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../../db";
 import { requireGroup } from "../../trpc";
@@ -434,6 +434,7 @@ export async function importArtifactToProject(input: {
     try {
       await db.update(schema.scenes).set({
         assetId: assetId,
+        rev: sql`${schema.scenes.rev} + 1`,
       }).where(and(
         eq(schema.scenes.id, updated.sceneId),
         eq(schema.scenes.projectId, project.id),

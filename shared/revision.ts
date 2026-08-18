@@ -37,6 +37,7 @@ export const REVISION_ENTITIES = [
   "characterLook",
   "scenePreset",
   "prop",
+  "project",
 ] as const;
 
 export type RevisionEntity = (typeof REVISION_ENTITIES)[number];
@@ -71,6 +72,7 @@ const ENTITY_LABEL: Record<RevisionEntity, string> = {
   characterLook: "這個造型",
   scenePreset: "這個場景卡",
   prop: "這個道具",
+  project: "這個專案世界觀",
 };
 
 export function revisionEntityLabel(entity: RevisionEntity): string {
@@ -94,6 +96,7 @@ const FIELD_LABEL: Record<string, string> = {
   notes: "備註",
   name: "名稱",
   environment: "環境狀態",
+  worldview: "世界觀",
 };
 
 export function revisionFieldLabel(field: string): string {

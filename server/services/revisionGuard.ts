@@ -43,6 +43,18 @@ export function revisionConflictTrpcError(conflict: RevisionConflict): TRPCError
   });
 }
 
+/** tRPC 邊界用：RevisionConflictError → CONFLICT，ConflictNotice 才畫得出來。 */
+export async function applyWithRevisionTrpc<TRow extends { id: string; rev: number }>(
+  args: ApplyRevisionArgs<TRow>,
+): Promise<ApplyRevisionResult<TRow>> {
+  try {
+    return await applyWithRevision(args);
+  } catch (err) {
+    if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+    throw err;
+  }
+}
+
 export interface ApplyRevisionArgs<TRow extends { id: string; rev: number }> {
   entity: RevisionEntity;
   table: PgTable;

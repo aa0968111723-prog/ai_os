@@ -44,6 +44,11 @@ export function deriveAnimationShotLifecycle(input: AnimationBoardShotInput): An
       needsReview: true,
       nextAction: { kind: "review_keyframe", label: "檢查關鍵影格" },
     };
+    if (input.candidateKind === "video") return {
+      lifecycle: "animation_review",
+      needsReview: true,
+      nextAction: { kind: "review_video", label: "檢查動畫候選" },
+    };
     return {
       lifecycle: "needs_keyframe",
       needsReview: false,

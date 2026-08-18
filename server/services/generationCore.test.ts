@@ -180,4 +180,11 @@ describe("generationCore creative override billing", () => {
     expect(estimateIdx).toBeGreaterThan(effectivePromptIdx);
     expect(source).not.toContain("promptChars: input.prompt.length");
   });
+
+  it("locks 小華 female on the prompt Fal actually receives", () => {
+    expect(source).toContain("lockXiaohuaGenerationPrompt");
+    const promptIdx = source.indexOf("lockXiaohuaGenerationPrompt(input.prompt");
+    expect(promptIdx).toBeGreaterThan(-1);
+    expect(source.indexOf("const positivePrompt =")).toBeGreaterThan(promptIdx);
+  });
 });

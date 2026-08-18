@@ -9,6 +9,7 @@ vi.mock("../../api", () => ({
       my: {
         useQuery: () => ({
           data: {
+            groupId: "00000000-0000-4000-8000-000000000001",
             totalRemaining: 100,
             weeklyQuota: 300,
             weeklyUsed: 12,

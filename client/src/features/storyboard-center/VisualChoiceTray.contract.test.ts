@@ -31,6 +31,7 @@ describe("Visual Creative UX 的結構約束（行為見上方檔案清單）", 
     expect(tray).toContain("trpc.projects.updateWorldview.useMutation");
     expect(tray).toContain("selectWorldviewStyle(worldview.styles, pending.preset.label)");
     expect(tray).toContain("worldview: { styles }");
+    expect(tray).toContain("expectedRev: typeof project.data?.rev === \"number\" ? project.data.rev : undefined");
     expect(tray).not.toContain("client-side Gemini");
     expect(tray).not.toMatch(/fetch\([^)]*google/i);
   });

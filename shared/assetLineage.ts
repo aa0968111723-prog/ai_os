@@ -86,6 +86,17 @@ export function listDirectRevisions<T extends AssetLike>(assets: readonly T[], p
     });
 }
 
+/** One pass over the library: parent id → direct child count (grid cards must not .find per row). */
+export function listDirectRevisionCounts(assets: readonly AssetLike[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const a of assets) {
+    const parent = parseAssetLineageMeta(a.meta).sourceAssetId;
+    if (!parent) continue;
+    counts.set(parent, (counts.get(parent) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export function lineageChain(
   assets: readonly AssetLike[],
   assetId: string,

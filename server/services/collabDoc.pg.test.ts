@@ -11,9 +11,22 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { db, schema } from "../db";
+import { markBootReady } from "./boot";
+import type { AuthState } from "./auth";
+import { storyRouter } from "../routers/story";
 import { flushStoryDocNow, loadStoryDoc, persistStoryDoc, STORY_TEXT_KEY } from "./collabDoc";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
+if (RUN_PG) markBootReady();
+
+function storyCaller(userId: string, groupId: string) {
+  const auth: AuthState = {
+    user: { id: userId, name: "共編", email: `${userId}@t.local`, isSuperAdmin: false, mustChangePassword: false },
+    groups: [{ groupId, groupName: "g", teamId: randomUUID(), teamName: "t", role: "leader" }],
+    adminTeamIds: [],
+  };
+  return storyRouter.createCaller({ auth } as never);
+}
 
 describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", () => {
   const groupId = randomUUID();
@@ -30,6 +43,21 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
       await db.insert(schema.stories).values({ projectId: id, groupId, content, updatedBy: editor });
     }
     return id;
+  }
+
+  async function storyRow(projectId: string) {
+    const [row] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    return row;
+  }
+
+  /** Production flush always passes lastMaterializedRev. Tests that mean "I loaded this story" must too. */
+  async function persistKnown(projectId: string, doc: Y.Doc) {
+    const row = await storyRow(projectId);
+    if (!row) return persistStoryDoc(projectId, groupId, doc, editor);
+    return persistStoryDoc(projectId, groupId, doc, editor, {
+      expectedRev: row.rev,
+      baselineContent: row.content,
+    });
   }
 
   beforeAll(async () => {
@@ -55,7 +83,7 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     const projectId = await newProject("起點");
     const doc = await loadStoryDoc(projectId);
     doc.getText(STORY_TEXT_KEY).insert(2, "——韋澔加的一段");
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
 
     const reloaded = await loadStoryDoc(projectId);
     expect(reloaded.getText(STORY_TEXT_KEY).toString()).toBe("起點——韋澔加的一段");
@@ -74,7 +102,7 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
 
     const doc = await loadStoryDoc(projectId);
     doc.getText(STORY_TEXT_KEY).insert(2, "，經過共編");
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
 
     const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
     // 一致性：parser／AI／export／搜尋讀到的就是共編的最新內容
@@ -88,9 +116,9 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
   it("P2. 內容沒變的落盤不動 stories（不空轉 rev——否則純快照心跳會讓別人一直撞假衝突）", async () => {
     const projectId = await newProject("穩定內容");
     const doc = await loadStoryDoc(projectId);
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
     const [first] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
     const [second] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
     expect(second.rev).toBe(first.rev);
   });
@@ -100,7 +128,7 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     const doc = await loadStoryDoc(projectId);
     expect(doc.getText(STORY_TEXT_KEY).toString()).toBe("");
     doc.getText(STORY_TEXT_KEY).insert(0, "從零開始的故事");
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
     const [row] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
     expect(row.content).toBe("從零開始的故事");
   });
@@ -118,9 +146,173 @@ describe.skipIf(!RUN_PG).sequential("collabDoc 持久化（真 PostgreSQL）", (
     const projectId = await newProject("尚未落盤前");
     const doc = await loadStoryDoc(projectId);
     doc.getText(STORY_TEXT_KEY).insert(doc.getText(STORY_TEXT_KEY).length, "＋已改");
-    await persistStoryDoc(projectId, groupId, doc, editor);
+    await persistKnown(projectId, doc);
     const flushed = await flushStoryDocNow(projectId);
     expect(flushed.content).toBe("尚未落盤前＋已改");
     expect(flushed.rev).toBeGreaterThan(0);
+  });
+
+  it("overlapping persist with a stale expectedRev does not clobber a newer blur save", async () => {
+    const projectId = await newProject("起點");
+    const seed = await loadStoryDoc(projectId);
+    await persistKnown(projectId, seed);
+    const [before] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    await db
+      .update(schema.stories)
+      .set({ content: "blur 存檔", rev: before.rev + 1, updatedBy: editor, updatedAt: new Date() })
+      .where(eq(schema.stories.id, before.id));
+
+    const doc = new Y.Doc();
+    doc.getText(STORY_TEXT_KEY).insert(0, "Yjs 想蓋過去的字");
+
+    const result = await persistStoryDoc(projectId, groupId, doc, editor, {
+      expectedRev: before.rev,
+      baselineContent: "起點",
+    });
+    expect(result.conflict).toBe(true);
+    expect(result.materialized).toBe(false);
+
+    const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    expect(after.content).toBe("blur 存檔");
+    expect(after.rev).toBe(before.rev + 1);
+
+    // 重開房間不可靠衝突快照把 blur 蓋回去（延遲 LWW）
+    const reloaded = await loadStoryDoc(projectId);
+    expect(reloaded.getText(STORY_TEXT_KEY).toString()).toBe("blur 存檔");
+  });
+
+  it("two concurrent persistStoryDoc cannot silently drop the other side", async () => {
+    const projectId = await newProject("起點");
+    const [before] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+
+    const docA = await loadStoryDoc(projectId);
+    const docB = await loadStoryDoc(projectId);
+    const textA = docA.getText(STORY_TEXT_KEY);
+    textA.delete(0, textA.length);
+    textA.insert(0, "A 分頁的字");
+    const textB = docB.getText(STORY_TEXT_KEY);
+    textB.delete(0, textB.length);
+    textB.insert(0, "B 分頁的字");
+
+    const [resA, resB] = await Promise.all([
+      persistStoryDoc(projectId, groupId, docA, editor, {
+        expectedRev: before.rev,
+        baselineContent: before.content,
+      }),
+      persistStoryDoc(projectId, groupId, docB, editor, {
+        expectedRev: before.rev,
+        baselineContent: before.content,
+      }),
+    ]);
+
+    const [after] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
+    expect(["A 分頁的字", "B 分頁的字"]).toContain(after.content);
+    expect(after.rev).toBeGreaterThan(before.rev);
+
+    if (resA.conflict !== resB.conflict) {
+      const winner = resA.conflict ? resB : resA;
+      expect(winner.materialized).toBe(true);
+      expect(resA.conflict ? resA.materialized : resB.materialized).toBe(false);
+      expect(after.content).toBe(winner.content);
+      expect(after.content).not.toBe(resA.conflict ? "A 分頁的字" : "B 分頁的字");
+    } else {
+      // 序列化成兩次成功 CAS：後寫者讀到新 rev，不是靜默跳過 OCC
+      expect(resA.conflict).toBe(false);
+      expect(resB.conflict).toBe(false);
+      expect(resA.materialized || resB.materialized).toBe(true);
+    }
+
+    const reloaded = await loadStoryDoc(projectId);
+    expect(reloaded.getText(STORY_TEXT_KEY).toString()).toBe(after.content);
+  });
+
+  it("story.save OCC then persistStoryDoc without expectedRev cannot silent-LWW", async () => {
+    const projectId = await newProject("起點");
+    const story = storyCaller(editor, groupId);
+    const first = await story.get({ projectId });
+    const saved = await story.save({
+      projectId,
+      content: "OCC 已存",
+      expectedRev: first.story?.rev,
+      baseline: "起點",
+    });
+    expect(saved.rev).toBeGreaterThan(first.story?.rev ?? -1);
+
+    const doc = new Y.Doc();
+    doc.getText(STORY_TEXT_KEY).insert(0, "Yjs 想蓋過去");
+    const result = await persistStoryDoc(projectId, groupId, doc, editor);
+    expect(result.conflict).toBe(true);
+    expect(result.materialized).toBe(false);
+
+    const after = await story.get({ projectId });
+    expect(after.story?.content).toBe("OCC 已存");
+    expect(after.story?.rev).toBe(saved.rev);
+
+    await expect(story.save({
+      projectId,
+      content: "OCC 再存一次",
+      expectedRev: saved.rev,
+      baseline: "OCC 已存",
+    })).resolves.toMatchObject({ rev: saved.rev + 1 });
+  });
+
+  it("persistStoryDoc with last-known rev after OCC story.save conflicts; losing client is told", async () => {
+    const projectId = await newProject("起點");
+    const before = await storyRow(projectId);
+    const story = storyCaller(editor, groupId);
+    const saved = await story.save({
+      projectId,
+      content: "OCC 已存",
+      expectedRev: before!.rev,
+      baseline: "起點",
+    });
+
+    const doc = new Y.Doc();
+    doc.getText(STORY_TEXT_KEY).insert(0, "Yjs 舊視圖");
+    const result = await persistStoryDoc(projectId, groupId, doc, editor, {
+      expectedRev: before!.rev,
+      baselineContent: "起點",
+    });
+    expect(result.conflict).toBe(true);
+    expect(result.materialized).toBe(false);
+
+    const after = await story.get({ projectId });
+    expect(after.story?.content).toBe("OCC 已存");
+    expect(after.story?.rev).toBe(saved.rev);
+
+    await expect(story.save({
+      projectId,
+      content: "失焦舊稿",
+      expectedRev: before!.rev,
+      baseline: "起點",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("Yjs persist first, then stale story.save is told (reverse two-writer)", async () => {
+    const projectId = await newProject("起點");
+    const before = await storyRow(projectId);
+    const doc = await loadStoryDoc(projectId);
+    const text = doc.getText(STORY_TEXT_KEY);
+    text.delete(0, text.length);
+    text.insert(0, "共編已落盤");
+    const persisted = await persistStoryDoc(projectId, groupId, doc, editor, {
+      expectedRev: before!.rev,
+      baselineContent: "起點",
+    });
+    expect(persisted.conflict).toBe(false);
+    expect(persisted.materialized).toBe(true);
+    expect(persisted.rev).toBeGreaterThan(before!.rev);
+
+    const story = storyCaller(editor, groupId);
+    await expect(story.save({
+      projectId,
+      content: "失焦舊稿",
+      expectedRev: before!.rev,
+      baseline: "起點",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const after = await story.get({ projectId });
+    expect(after.story?.content).toBe("共編已落盤");
+    expect(after.story?.rev).toBe(persisted.rev);
   });
 });

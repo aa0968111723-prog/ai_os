@@ -62,6 +62,10 @@ describe("generation honesty helpers", () => {
     expect(oneClickPrimaryLabel({ pending: false, hasBatch: true, modelKind: "image" })).toBe("繼續生成畫面");
     expect(oneClickPrimaryLabel({ pending: true, hasBatch: false, modelKind: "image" })).toBe("準備生成中…");
     expect(oneClickPrimaryLabel({ pending: false, hasBatch: false, modelKind: "video" })).toBe("生成影片");
+    expect(oneClickPrimaryLabel({ pending: false, hasBatch: false, modelKind: "image", sceneCount: 0 }))
+      .toBe("先解析出分鏡");
+    expect(oneClickPrimaryLabel({ pending: false, hasBatch: false, modelKind: "image", sceneCount: 3 }))
+      .toBe("生成畫面");
   });
 
   it("does not treat a single shot video as an assembled project film", () => {

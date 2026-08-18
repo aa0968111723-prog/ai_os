@@ -13,7 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
   materializeStoryboard,
@@ -33,6 +33,7 @@ import {
 } from "../../shared/story";
 import { expandShotSuggestions, shotAssetSuggestionsBatchInputSchema } from "../../shared/shotAssetSuggestions";
 import { loadShotAssetSuggestionsForProject } from "../services/shotAssetSuggestions";
+import { publishToProject } from "../services/realtime";
 
 async function getProjectChecked(ctx: { auth: NonNullable<Parameters<typeof requireGroup>[0]> }, projectId: string, forEdit: boolean) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -193,7 +194,7 @@ export const storyRouter = router({
       // 條件寫入。故事只有 content 一欄會撞，所以「可合併」在這裡等同於
       // 「別人根本沒動過內文」——真的兩人同時打字時一律走衝突路徑交給人決定，
       // 不做文字層的自動三方合併（那是 Yjs 的工作，猜錯會把兩段話絞在一起）。
-      const { row, merged } = await applyWithRevision({
+      const { row, merged } = await applyWithRevisionTrpc({
         entity: "story",
         table: schema.stories,
         idColumn: schema.stories.id,
@@ -221,7 +222,14 @@ export const storyRouter = router({
     .input(z.object({ projectId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const project = await getProjectChecked(ctx, input.projectId, true);
-      return flushStoryDocNow(project.id);
+      const flushed = await flushStoryDocNow(project.id);
+      if (flushed.conflict) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "故事有衝突尚未處理，沒有用共編裡還沒存進去的字去解析",
+        });
+      }
+      return flushed;
     }),
 
   /** 版本清單（story 版）：由新到舊，只回摘要不回全文（比照 knowledge.listVersions） */
@@ -261,15 +269,27 @@ export const storyRouter = router({
         );
       if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個版本" });
       await snapshotStory(story, ctx.auth.user.id);
-      const [row] = await db
-        .update(schema.stories)
-        .set({ content: version.content, updatedBy: ctx.auth.user.id, updatedAt: new Date() })
-        .where(eq(schema.stories.id, story.id))
-        .returning();
-      return { id: row.id, updatedAt: row.updatedAt };
+      const { row } = await applyWithRevisionTrpc({
+        entity: "story",
+        table: schema.stories,
+        idColumn: schema.stories.id,
+        revColumn: schema.stories.rev,
+        row: story,
+        patch: { content: version.content },
+        bookkeeping: { updatedBy: ctx.auth.user.id, updatedAt: new Date() },
+        expectedRev: story.rev,
+        baseline: { content: story.content },
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, story.id));
+          return fresh;
+        },
+        updatedByField: "updatedBy",
+        updatedAtField: "updatedAt",
+      });
+      return { id: row.id, rev: row.rev, updatedAt: row.updatedAt };
     }),
 
-  /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式最長 90 秒） */
+  /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式旗艦約 55s + 70B 約 55s，合計不超過約 120s） */
   parse: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
@@ -486,6 +506,10 @@ export const storyRouter = router({
       } catch (error) {
         console.warn("[story.generateStoryboard] packet freeze skipped:", error instanceof Error ? error.message : error);
       }
+      // Same projectId as /p/ and /studio/:id. Without this, an open studio tab
+      // keeps the cached empty list (refetchOnWindowFocus is false).
+      const firstShotId = result.sceneIds?.[0] ?? null;
+      publishToProject(input.projectId, { kind: "scene", id: firstShotId }, result.reused ? "分鏡已就緒" : "已產生分鏡");
       return result;
     }),
 
@@ -661,7 +685,7 @@ export const storyRouter = router({
       if (Object.keys(patch).length === 0) return row;
       // updatedAt 走 bookkeeping 而不是 patch：它每次都變，混進逐欄比對會讓
       // 這一列在第一次被改過之後，往後每一次儲存都跳假衝突。
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "storyScene",
         table: schema.storyScenes,
         idColumn: schema.storyScenes.id,

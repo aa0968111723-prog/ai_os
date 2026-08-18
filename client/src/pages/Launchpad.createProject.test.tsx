@@ -115,6 +115,7 @@ describe("建立新專案：畫面尺寸", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
+    sessionStorage.clear();
   });
 
   it("尺寸選單列出模型支援的全部比例，預設跟著平台走", async () => {
@@ -140,6 +141,7 @@ describe("建立新專案：選項就地新增", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
+    sessionStorage.clear();
   });
 
   it("組長可以在表單裡直接加內容類型與發布平台", async () => {

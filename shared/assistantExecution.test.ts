@@ -16,6 +16,7 @@ describe("assistant execution fast path", () => {
     ["查看組員有誰", "ASK"],
     ["你可以用瀏覽器嗎？", "ASK"],
     ["幫我開啟瀏覽器", "DIRECT"],
+    ["幫我加一張角色卡", "DIRECT"],
     ["幫我規劃六鏡腳本", "AGENT"],
     ["持續監控失敗的生成並提醒我", "WATCH"],
   ] as const)("classifies %s as %s", (message, expected) => {
@@ -111,5 +112,13 @@ describe("assistant execution fast path", () => {
     });
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_execute_repair")?.handler)
       .toBe("creativeContext.executeAnimationStage");
+    expect(classifyAssistantRequest("照這個計畫執行修復")).toMatchObject({
+      capabilityId: "animation_execute_repair",
+    });
+    expect(classifyAssistantRequest("保留現用版本")).toMatchObject({
+      capabilityId: "animation_keep_current",
+    });
+    expect(classifyAssistantRequest("幫我加一張角色卡").capabilityId).toBe("add_character");
+    expect(classifyAssistantRequest("把小華改成粉橘短髮女孩、大二化工").capabilityId).toBe("add_character");
   });
 });

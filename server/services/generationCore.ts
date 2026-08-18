@@ -33,6 +33,7 @@ import { failStaleGenerationTx, reserveQuota } from "./points";
 import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
 import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import type { ContinuitySnapshot, ContinuityShotDirection } from "../../shared/continuity";
@@ -473,9 +474,16 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const prop = continuitySnapshot
     ? formatPropAnchor(continuitySnapshot.props, continuitySnapshot.props.map((row) => row.id))
     : "";
-  const parts = effectivePromptParts(model, input.prompt, worldview);
-  const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
-  const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
+  const xiaohuaNames = (continuitySnapshot?.characters ?? []).map((row) => row.name);
+  const parts = effectivePromptParts(model, lockXiaohuaGenerationPrompt(input.prompt, xiaohuaNames), worldview);
+  const autoPositive = lockXiaohuaGenerationPrompt(
+    withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop),
+    xiaohuaNames,
+  );
+  const positivePrompt = lockXiaohuaGenerationPrompt(
+    input.promptOverride?.positive?.trim() || autoPositive,
+    xiaohuaNames,
+  );
   const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
   // Cost approval, quota reservation and persisted charge must all use the prompt actually sent.
   const { getUsdToTwd } = await import("./fxRate");
@@ -814,6 +822,8 @@ export async function assertGenerationEntityIds(
     characterIds?: string[];
     scenePresetIds?: string[];
     propIds?: string[];
+    lookIds?: string[];
+    storySceneId?: string;
     sourceAssetId?: string;
     secondarySourceAssetId?: string;
   },
@@ -846,6 +856,25 @@ export async function assertGenerationEntityIds(
       .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, ids)));
     if (rows.length !== ids.length) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "素材設定卡不屬於本專案或不存在" });
+    }
+  }
+  if (opts.lookIds?.length) {
+    const ids = [...new Set(opts.lookIds)];
+    const rows = await db
+      .select({ id: schema.characterLooks.id })
+      .from(schema.characterLooks)
+      .where(and(eq(schema.characterLooks.projectId, projectId), inArray(schema.characterLooks.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "造型不屬於本專案或不存在" });
+    }
+  }
+  if (opts.storySceneId) {
+    const [row] = await db
+      .select({ id: schema.storyScenes.id })
+      .from(schema.storyScenes)
+      .where(and(eq(schema.storyScenes.id, opts.storySceneId), eq(schema.storyScenes.projectId, projectId)));
+    if (!row) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "場次不屬於本專案或不存在" });
     }
   }
   if (opts.sourceAssetId) {
@@ -975,7 +1004,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             projectId: project.id,
             groupId: project.groupId,
             userId: input.userId,
-            modelId: model.id,
+            modelId: input.modelId,
             kind: model.kind,
             prompt: input.prompt,
             sceneId: input.sceneId ?? null,
@@ -1057,7 +1086,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         projectId: project.id,
         groupId: project.groupId,
         userId: input.userId,
-        modelId: model.id,
+        modelId: input.modelId,
         kind: model.kind,
         prompt: input.prompt,
         sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）

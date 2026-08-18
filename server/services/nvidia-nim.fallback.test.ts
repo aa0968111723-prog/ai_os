@@ -11,7 +11,14 @@ const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock("./http", () => ({ proxyFetch: fetchMock }));
 
 process.env.NVIDIA_NIM_API_KEY = "test-key";
-const { nimCompleteWithFallback, NimServiceError, NIM_DEFAULT_MODEL } = await import("./nvidia-nim");
+const {
+  nimCompleteWithFallback,
+  NimServiceError,
+  NIM_DEFAULT_MODEL,
+  NIM_FIRST_ATTEMPT_DEFAULT_MS,
+  NIM_FIRST_ATTEMPT_MAX_MS,
+  clampNimAttemptMs,
+} = await import("./nvidia-nim");
 
 const FLAGSHIP = "meta/llama-3.1-405b-instruct";
 
@@ -55,10 +62,85 @@ describe("nimCompleteWithFallback", () => {
     expect(modelsUsed()).toEqual([FLAGSHIP]);
   });
 
-  it("流量達上限（429）同樣不降級：那是帳號層級的限制，不是這顆模型的問題", async () => {
-    fetchMock.mockResolvedValue(fail(429));
-    await expect(nimCompleteWithFallback("prompt", { model: FLAGSHIP })).rejects.toBeInstanceOf(NimServiceError);
-    expect(modelsUsed()).toEqual([FLAGSHIP]);
+  it("流量達上限（429）可降級：換 70B 還有機會，不再當成非降級直接拋", async () => {
+    fetchMock.mockResolvedValueOnce(fail(429)).mockResolvedValueOnce(ok("70b-after-429"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP });
+    expect(r).toMatchObject({ output: "70b-after-429", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("5xx 暫時性失敗用盡旗艦重試後必須落到 70B", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fail(503))
+      .mockResolvedValueOnce(fail(502))
+      .mockResolvedValueOnce(fail(500))
+      .mockResolvedValueOnce(ok("70b-after-5xx"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP, timeoutMs: 8_000 });
+    expect(r).toMatchObject({ output: "70b-after-5xx", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, FLAGSHIP, FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("clamp: omitted timeout is a short probe; 150s is capped so first attempt cannot eat 150s", () => {
+    expect(clampNimAttemptMs(undefined)).toBe(NIM_FIRST_ATTEMPT_DEFAULT_MS);
+    expect(clampNimAttemptMs(150_000)).toBe(NIM_FIRST_ATTEMPT_MAX_MS);
+    expect(clampNimAttemptMs(150_000)).toBeLessThan(150_000);
+    expect(clampNimAttemptMs(20_000)).toBe(20_000);
+  });
+
+  it("timeoutMs=150000 still falls to 70B after a flagship NimServiceError timeout", async () => {
+    fetchMock
+      .mockImplementationOnce((_url: string, init: { timeoutMs?: number }) => {
+        expect(init.timeoutMs ?? 150_000).toBeLessThan(150_000);
+        expect(init.timeoutMs ?? 150_000).toBeLessThanOrEqual(NIM_FIRST_ATTEMPT_MAX_MS);
+        return Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 150 秒無回應）"));
+      })
+      .mockResolvedValueOnce(ok("70b-after-capped-150s"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 150_000,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-after-capped-150s", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("旗艦 NimServiceError 逾時（含「超過 150 秒無回應」、不必帶「逾時」二字）→ 70B 備援真的會跑", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("超過 150 秒無回應")))
+      .mockResolvedValueOnce(ok("70b-after-timeout"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-after-timeout", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("fallbackTimeoutMs 傳給第二次嘗試——短備援不必再吃同一個長逾時", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 1 秒無回應）")))
+      .mockResolvedValueOnce(ok("fast-70b"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "fast-70b", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("旗艦模型逾時 → 降級到日常 70B，短稿仍能解析", async () => {
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: { timeoutMs?: number }) =>
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new DOMException("timed out", "TimeoutError")), init?.timeoutMs ?? 0);
+        }),
+    );
+    fetchMock.mockResolvedValueOnce(ok("70b-parse"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP, timeoutMs: 1_200 });
+    expect(r).toMatchObject({ output: "70b-parse", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
   });
 
   it("降級目標就是自己時不無限繞（同一顆失敗就是失敗）", async () => {
@@ -67,5 +149,19 @@ describe("nimCompleteWithFallback", () => {
       nimCompleteWithFallback("prompt", { model: NIM_DEFAULT_MODEL }),
     ).rejects.toThrow(/404/);
     expect(modelsUsed()).toEqual([NIM_DEFAULT_MODEL]);
+  });
+
+  it("same-model 70B first-pass still uses fallbackTimeoutMs after a degradable timeout", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 45 秒無回應）")))
+      .mockResolvedValueOnce(ok("70b-second-attempt"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: NIM_DEFAULT_MODEL,
+      fallbackModel: NIM_DEFAULT_MODEL,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-second-attempt", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([NIM_DEFAULT_MODEL, NIM_DEFAULT_MODEL]);
   });
 });

@@ -274,7 +274,11 @@ export function VisualChoiceTray({
           : selectWorldviewStyle(worldview.styles, pending.preset.label);
         const styles = nextStyles.length === 0 && worldview.styles.length > 0 ? worldview.styles : nextStyles;
         if (styles.join("\u0000") !== worldview.styles.join("\u0000")) {
-          await updateWorldview.mutateAsync({ id: projectId, worldview: { styles } });
+          await updateWorldview.mutateAsync({
+            id: projectId,
+            worldview: { styles },
+            expectedRev: typeof project.data?.rev === "number" ? project.data.rev : undefined,
+          });
           applied = 1;
         }
         await utils.projects.get.invalidate({ id: projectId });

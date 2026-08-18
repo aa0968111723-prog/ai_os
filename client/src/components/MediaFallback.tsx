@@ -50,13 +50,14 @@ export function MissingMediaBox({
 
 type FallbackProps = { fallbackLabel?: string; fallbackHeight?: number | string; fallbackIconSize?: number; fallbackStyle?: CSSProperties; fallbackClassName?: string };
 
-/** <img> 包裝：載入失敗改渲染「素材遺失」佔位；src 更換（重生成）時自動重試 */
+/** <img> 包裝：載入失敗改渲染「素材遺失」佔位；src 更換（重生成）時自動重試。
+ *  列表預設 lazy／async；燈箱或單格播放可覆寫 loading="eager"。 */
 export function AssetImg(props: ImgHTMLAttributes<HTMLImageElement> & FallbackProps) {
   const { fallbackLabel, fallbackHeight, fallbackIconSize, fallbackStyle, fallbackClassName, ...img } = props;
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [img.src]);
   if (failed) return <MissingMediaBox label={fallbackLabel} height={fallbackHeight} iconSize={fallbackIconSize} style={fallbackStyle} className={fallbackClassName} />;
-  return <img {...img} onError={() => setFailed(true)} />;
+  return <img loading="lazy" decoding="async" {...img} onError={() => setFailed(true)} />;
 }
 
 /** <video> 包裝：同上（controls 播放器載不到檔時原生只顯示灰底錯誤，難以理解） */

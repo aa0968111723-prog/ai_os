@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { registerAssistantPage } from "../lib/assistantContext";
+import { NEW_PROJECT_IDEA_EVENT, takePendingNewProjectIdea } from "../lib/newProjectIdea";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
@@ -327,6 +328,23 @@ export function Launchpad({ groupId }: { groupId: string }) {
       window.removeEventListener("aios:assistant-opened", closePageModal);
       window.removeEventListener("aios:assistant-closed", markAssistantClosed);
     };
+  }, []);
+
+  useEffect(() => {
+    const applyIdea = (ideaTitle: string) => {
+      if (ideaTitle.trim()) setTitle(ideaTitle.trim().slice(0, 80));
+      setCreateOpen(true);
+      requestAnimationFrame(() => document.getElementById("np-title")?.focus({ preventScroll: true }));
+    };
+    const pending = takePendingNewProjectIdea();
+    if (pending) applyIdea(pending);
+    const onIdea = (event: Event) => {
+      const idea = (event as CustomEvent<{ ideaTitle?: string }>).detail?.ideaTitle?.trim() ?? "";
+      takePendingNewProjectIdea();
+      applyIdea(idea);
+    };
+    window.addEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
+    return () => window.removeEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
   }, []);
 
   return (

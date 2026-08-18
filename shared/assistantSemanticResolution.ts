@@ -1,5 +1,6 @@
 import {
   ASSISTANT_CAPABILITIES,
+  capabilityForAssistantGoal,
   type AssistantCapability,
   type AssistantExecutionPlan,
 } from "./assistantExecution";
@@ -348,13 +349,17 @@ export function evidenceScopeForGoal(frame: AssistantGoalFrame): AssistantEviden
 /** Single source of truth: GoalFrame -> ASSISTANT_CAPABILITIES. */
 export function matchAssistantCapabilityForGoal(
   frame: AssistantGoalFrame,
-  runtime?: { blockedCapabilityIds?: readonly string[] },
+  runtime?: { blockedCapabilityIds?: readonly string[]; message?: string },
 ): AssistantCapabilityMatch {
   const missing = [...frame.missingSlots];
   const source = frame.source?.type;
   let capabilityId: string | undefined;
-
-  if (frame.operation === "IMPORT") {
+  // Phrase-specific registry (動畫採用／修復、瀏覽器…) must beat generic READ/GENERATE.
+  // 「採用這版」otherwise becomes read_context and the assistant talks without writing.
+  const phrase = runtime?.message ? capabilityForAssistantGoal(runtime.message) : undefined;
+  if (phrase) {
+    capabilityId = phrase.id;
+  } else if (frame.operation === "IMPORT") {
     if (source === "GOOGLE_DRIVE") capabilityId = "import_google_drive";
     else if (source === "LOCAL_FILE") capabilityId = "import_local_file";
     else if (source === "LOCAL_FOLDER") capabilityId = "import_folder";

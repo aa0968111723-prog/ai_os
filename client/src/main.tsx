@@ -26,6 +26,7 @@ import "./splash.css";
 void import("./fonts.css");
 // board 字族（Latin 子集）非阻塞載入：手機 token 引用，桌機無規則指向（MOB-T）
 void import("./fonts.brand.css");
+import { queryRetryDelay, shouldRetryQuery } from "@shared/bootRetry";
 import { EmptyState } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { buildCrashReport, isChunkLoadError, type CrashReport } from "./lib/crashReport";
@@ -117,7 +118,8 @@ function Root() {
       new QueryClient({
         defaultOptions: {
           queries: {
-            retry: 1,
+            retry: shouldRetryQuery,
+            retryDelay: queryRetryDelay,
             refetchOnWindowFocus: false,
           },
         },

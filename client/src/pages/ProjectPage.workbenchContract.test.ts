@@ -128,11 +128,15 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/revealSlot=/);
     expect(src).toMatch(/activeSection=\{openInline\}/);
     expect(src).toMatch(/<StoryReadinessBar\b/);
+    expect(src).toMatch(/error=\{oneClick\.error\}/);
+    expect(src).toMatch(/revealAfterOneClick/);
+    expect(src).not.toMatch(/oneClick\.run\(\)[\s\S]{0,240}catch \(\(\) => \{\s*openInlineSection\("production"\);/);
     // PR-C 瘦身後脈絡摘要由自足的 Block 元件負責（頁面不再自己拼 counts）
     expect(src).toMatch(/<StoryContextStatusBlock\b/);
     expect(src).toMatch(/<StoryCanonPanel\b/);
     expect(src).toMatch(/useOneClickFilm/);
     expect(src).toMatch(/oneClickPrimaryLabel/);
+    expect(src).toMatch(/sceneCount/);
     expect(src).toMatch(/ONE_CLICK_BATCH_KIND/);
     expect(src).not.toMatch(/: "生成影片"/);
     expect(src).toMatch(/<StoryResultFix\b/);

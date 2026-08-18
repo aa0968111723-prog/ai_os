@@ -18,6 +18,7 @@ import { ScriptEditor } from "./ScriptEditor";
 import { useStoryYDoc } from "./useStoryYDoc";
 import { RemoteCarets } from "./RemoteCarets";
 import {
+  createStorySaveGate,
   shouldAdoptRemote,
   summaryChips,
   STORY_AUTOSAVE_DEBOUNCE_MS,
@@ -166,7 +167,42 @@ export function StoryStage({
    */
   const revRef = useRef<number | undefined>(undefined);
   const baselineRef = useRef<string | undefined>(undefined);
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   const [conflict, setConflict] = useState<RevisionConflict | null>(null);
+  const saveMutateRef = useRef<(input: {
+    projectId: string;
+    content: string;
+    expectedRev?: number;
+    baseline?: string;
+  }) => void>(() => {});
+  const gateRef = useRef<ReturnType<typeof createStorySaveGate> | null>(null);
+  if (!gateRef.current) {
+    gateRef.current = createStorySaveGate({
+      send: (req) => {
+        setSaveState("saving");
+        saveMutateRef.current({
+          projectId: projectIdRef.current,
+          content: req.content,
+          expectedRev: req.expectedRev,
+          baseline: req.baseline,
+        });
+      },
+      getRev: () => revRef.current,
+      getBaseline: () => baselineRef.current,
+      setRev: (rev) => {
+        revRef.current = rev;
+      },
+      setBaseline: (next) => {
+        baselineRef.current = next;
+      },
+    });
+  }
+  /** debounce／flush／onBlur 共用：gate 一定帶 expectedRev + baseline。
+   *  預設分支 onBlur 曾走 `saveRef({ projectId, content })` 不帶 rev，兩分頁失焦會靜默 LWW。 */
+  const dispatchStorySave = (next: string) => {
+    gateRef.current?.dispatch(next);
+  };
 
   /* ── Story 共編（Yjs；/ws-doc）───────────────────────────
      連上＝真共編（字元級合併、雙 caret；autosave 停用，落盤由伺服器 materialize）。
@@ -214,16 +250,17 @@ export function StoryStage({
   }, [ydoc.active, ydoc.sendCaret, ydoc]);
 
   const save = trpc.story.save.useMutation({
-    onSuccess: (r) => {
-      setSaveState("saved");
+    onSuccess: (r, variables) => {
       setConflict(null);
-      // 存成功＝我這份就是新的基準；下一次編輯以它為 baseline，rev 也往前
-      if (typeof r?.rev === "number") revRef.current = r.rev;
-      baselineRef.current = contentRef.current ?? baselineRef.current;
-      utils.story.get.invalidate({ projectId });
+      const outcome = gateRef.current?.onAck(variables.content, typeof r?.rev === "number" ? r.rev : undefined);
+      if (outcome === "idle") {
+        setSaveState("saved");
+        utils.story.get.invalidate({ projectId: variables.projectId });
+      }
     },
     onError: (err) => {
       const c = conflictFromError(err);
+      gateRef.current?.onFail(c ? "conflict" : "error");
       if (c) {
         // 夥伴也改了。**不覆蓋、不自動選邊**——把兩份都留著交給人決定。
         setConflict(c);
@@ -233,8 +270,7 @@ export function StoryStage({
       setSaveState("error");
     },
   });
-  const saveRef = useRef(save.mutate);
-  saveRef.current = save.mutate;
+  saveMutateRef.current = save.mutate;
 
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
@@ -243,11 +279,17 @@ export function StoryStage({
   // typeof 守衛：測試環境以泛用 stub 餵 query，content 可能不是字串
   const rawRemote = storyQ.data?.story?.content;
   const remote = typeof rawRemote === "string" ? rawRemote : storyQ.data ? "" : null;
-  // rev 一律跟著查詢走（連衝突期間也是）：使用者按「重新套用我的修改」時，
-  // 要送的是**對方那一版**的 rev，否則必然再撞一次，而且是撞在同一個地方。
+  // 乾淨時 rev 跟著查詢走。衝突卡「重新套用」改送對方那一版的 rev（見 onReapply）。
   const rawRev = storyQ.data?.story?.rev;
+  const remoteRef = useRef<string | null>(null);
+  remoteRef.current = remote;
   useEffect(() => {
-    if (typeof rawRev === "number") revRef.current = rawRev;
+    // 存檔途中／本地未存時，查詢回來的舊 rev 不得蓋掉閘門剛推進的數字——
+    // 否則排隊中的下一發會帶著過期 expectedRev，自己跟自己衝突。
+    if (typeof rawRev !== "number") return;
+    if (gateRef.current?.isInFlight()) return;
+    if (saveStateRef.current === "dirty" || saveStateRef.current === "saving") return;
+    revRef.current = rawRev;
   }, [rawRev]);
   useEffect(() => {
     if (remote === null) return;
@@ -266,7 +308,8 @@ export function StoryStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remote]);
 
-  // autosave：去抖 800ms；卸載時 flush（未存的內容不可默默丟掉）
+  // autosave：去抖 800ms；同一時間只准一發在路上（createStorySaveGate）。
+  // 卸載時立刻送出未存草稿，不可因為清掉 timer 就默默丟掉。
   useEffect(() => {
     if (content === null || remote === null || content === remote) return;
     // 共編連線中：儲存由伺服器 materialize（快照落盤時寫回 stories.content），
@@ -279,13 +322,9 @@ export function StoryStage({
     setSaveState("dirty");
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      setSaveState("saving");
-      saveRef.current({
-        projectId,
-        content,
-        expectedRev: revRef.current,
-        baseline: baselineRef.current,
-      });
+      const live = contentRef.current;
+      if (live === null) return;
+      dispatchStorySave(live);
     }, STORY_AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -293,6 +332,25 @@ export function StoryStage({
     // remote 變動不重觸發（收養 effect 已處理）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, projectId]);
+
+  // 離開畫面時把未存草稿送出。不能放在上面那個 effect 的 cleanup——
+  // content 每變一次都會跑 cleanup，會變成每個字立刻存一次。
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      const live = contentRef.current;
+      const remoteNow = remoteRef.current;
+      if (
+        live !== null &&
+        remoteNow !== null &&
+        live !== remoteNow &&
+        saveStateRef.current !== "conflict" &&
+        !yActiveRef.current
+      ) {
+        dispatchStorySave(live);
+      }
+    };
+  }, [projectId]);
 
   const flushCollab = trpc.story.flushCollab.useMutation();
   const flushCollabRef = useRef(flushCollab.mutateAsync);
@@ -317,22 +375,26 @@ export function StoryStage({
       }
       const live = contentRef.current;
       if (live === null || remote === null || live === remote) {
+        if (gateRef.current?.isInFlight()) {
+          gateRef.current.whenIdle((result) => {
+            if (result.ok) window.dispatchEvent(new Event(STORY_FLUSHED_EVENT));
+            else fail(result.reason === "conflict" ? "故事有衝突尚未處理" : "故事儲存失敗，請先修好再生成");
+          });
+          return;
+        }
         window.dispatchEvent(new Event(STORY_FLUSHED_EVENT));
         return;
       }
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      setSaveState("saving");
-      save.mutate(
-        { projectId, content: live, expectedRev: revRef.current, baseline: baselineRef.current },
-        {
-          onSuccess: () => window.dispatchEvent(new Event(STORY_FLUSHED_EVENT)),
-          onError: (err) => fail(err.message || "故事儲存失敗"),
-        },
-      );
+      dispatchStorySave(live);
+      gateRef.current?.whenIdle((result) => {
+        if (result.ok) window.dispatchEvent(new Event(STORY_FLUSHED_EVENT));
+        else fail(result.reason === "conflict" ? "故事有衝突尚未處理" : "故事儲存失敗，請先修好再生成");
+      });
     };
     window.addEventListener(STORY_FLUSH_EVENT, onFlush);
     return () => window.removeEventListener(STORY_FLUSH_EVENT, onFlush);
-  }, [projectId, remote, save]);
+  }, [projectId, remote]);
 
   const parse = trpc.story.parse.useMutation({
     onSuccess: (r) => {
@@ -421,6 +483,9 @@ export function StoryStage({
     revealStoryInlineSection(section, { projectId, scroll: false });
   };
   const lastRun = data?.lastRun;
+  const parseReady = Boolean(lastRun && lastRun.status === "done");
+  /** Parse timeout / never-done: still allow 產生分鏡 from story text (xiaohua stuck). */
+  const canBoardFromStory = !isBlank;
 
   /**
    * §33 變更預覽：專案已經有分鏡時，「產生分鏡」是會動到既有內容的批次操作，
@@ -428,7 +493,7 @@ export function StoryStage({
    */
   const boardPreview = trpc.story.storyboardPreview.useQuery(
     { projectId },
-    { enabled: Boolean(lastRun && lastRun.status === "done") },
+    { enabled: parseReady },
   );
   const boardPlan = boardPreview.data?.ready ? boardPreview.data : null;
   const boardSummary = boardPlan?.summary;
@@ -487,7 +552,7 @@ export function StoryStage({
               baselineRef.current = String((conflict.currentData as { content?: unknown }).content ?? "");
               setConflict(null);
               setSaveState("saving");
-              save.mutate({ projectId, content: mine, expectedRev: conflict.currentRev, baseline: baselineRef.current });
+              dispatchStorySave(mine);
             }}
           />
         )}
@@ -556,11 +621,12 @@ export function StoryStage({
           onBlur={() => {
             // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）。
             // 共編中不 flush：儲存由伺服器 materialize，這裡的整份寫回會蓋掉夥伴的字。
+            // 與 debounce／一鍵生成 flush 同一條 dispatchStorySave：帶 expectedRev + baseline。
             if (yActiveRef.current) return;
-            if (content !== null && remote !== null && content !== remote && !save.isPending) {
+            const live = contentRef.current;
+            if (live !== null && remote !== null && live !== remote) {
               if (debounceRef.current) clearTimeout(debounceRef.current);
-              setSaveState("saving");
-              saveRef.current({ projectId, content });
+              dispatchStorySave(live);
             }
           }}
           /* 解析摘要、主 CTA 與解析結果一起進全螢幕：
@@ -641,7 +707,7 @@ export function StoryStage({
                         triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
                         message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
                         confirmLabel="套用"
-                        disabled={board.isPending}
+                        disabled={board.isPending || !canBoardFromStory}
                         onConfirm={() => board.mutate({ projectId })}
                       >
                         {board.isPending ? "建立中…" : "產生分鏡"}
@@ -649,9 +715,11 @@ export function StoryStage({
                     ) : (
                       <Button
                         variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                        disabled={board.isPending || !lastRun || lastRun.status !== "done"}
+                        disabled={board.isPending || !canBoardFromStory}
                         onClick={() => board.mutate({ projectId })}
-                        title="把解析出的場與鏡建成可編輯的分鏡卡"
+                        title={parseReady
+                          ? "把解析出的場與鏡建成可編輯的分鏡卡"
+                          : "解析未完成時，仍可依故事原文拆場拆鏡"}
                       >
                         {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
                       </Button>

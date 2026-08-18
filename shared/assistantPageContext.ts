@@ -134,6 +134,9 @@ export function formatAssistantPageContext(ctx: AssistantWirePageContext | null 
   if (n > 0) lines.push(`已選取：${n} 個${entityName ?? "項目"}`);
   if (ctx.activeTab) lines.push(`顯示模式：${ctx.activeTab}`);
   if (ctx.recentAction) lines.push(`剛剛做了：${ctx.recentAction}`);
+  if (ctx.pageType === "studio" || ctx.pageType === "story" || ctx.pageType === "project") {
+    lines.push("此頁可建立角色定裝卡（add_character）。只給名字也可以，外觀可先寫「待補外觀描述」，確認後才寫入。");
+  }
   if (!lines.length) return "";
   return [
     "<使用者目前位置>",

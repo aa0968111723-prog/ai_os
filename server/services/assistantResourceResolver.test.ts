@@ -25,6 +25,15 @@ describe("assistant resource resolver", () => {
     expect(routeAssistantResources("搜尋所有資料庫裡面的書法")).toContain("database");
   });
 
+  it("project / studio / story pages include knowledge so saved 故事 can be read", () => {
+    expect(routeAssistantResources("依儲存的故事拆分鏡", { pageType: "project" }))
+      .toEqual(expect.arrayContaining(["project_status", "knowledge", "storyboard"]));
+    expect(routeAssistantResources("依儲存的故事拆分鏡", { pageType: "studio" }))
+      .toEqual(expect.arrayContaining(["project_status", "knowledge", "storyboard"]));
+    expect(routeAssistantResources("依儲存的故事拆分鏡", { pageType: "story" }))
+      .toEqual(expect.arrayContaining(["knowledge", "storyboard"]));
+  });
+
   it("uses page/entity context to expose only relevant capabilities", () => {
     const routed = routeAssistantResources("改善這三鏡", {
       pageType: "storyboard",

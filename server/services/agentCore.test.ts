@@ -96,6 +96,13 @@ describe("agentCore CA-01 planner context (source-lock)", () => {
     expect(source).toContain("sourceAssetRef?");
     expect(source).toContain("sourceUrl?");
   });
+
+  it("planner <專案現況> includes persisted 故事全文, not only knowledge", () => {
+    expect(source).toContain("loadPersistedStoryForAssistant");
+    expect(source).toContain("${storyBlock}");
+    expect(source).toContain("故事全文");
+    expect(source).toContain("優先從故事全文拆分鏡");
+  });
 });
 
 describe("PR-E2 buildPickedSourceBlock（使用者指定來源優先注入）", () => {

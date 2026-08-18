@@ -15,6 +15,11 @@ export const projects = pgTable("projects", {
   format: text("format").notNull(),
   worldview: jsonb("worldview").notNull().default({}),
   /**
+   * 樂觀併發版本號（見 shared/revision.ts）。世界觀是整包 jsonb merge，
+   * 兩分頁 blur 同一欄時沒有 rev 就會靜默 last-write-wins。
+   */
+  rev: integer("rev").notNull().default(0),
+  /**
    * 專案封面圖（可選）：綁一張本專案素材庫的圖片素材，作業台卡片就顯示它而不是首字色塊。
    * null＝沿用以 id 雜湊出的色塊封面。素材進回收桶時不清綁定（比照角色定裝卡），
    * 列出時以 isNull(assets.deletedAt) 左接——縮圖自動退回色塊，還原素材後又接回來。

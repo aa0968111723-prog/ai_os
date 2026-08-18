@@ -48,6 +48,7 @@ const {
   modeCostsMoney,
   FAL_AGENT_PROFILES,
   LlmServiceError,
+  FREE_MODEL_TIMEOUT_MESSAGE,
   NIM_DEGRADE_PROBE_MS,
   isFalEconomyCongested,
   __resetNimDegradation,
@@ -106,10 +107,17 @@ describe("nim 模式 — 免費路徑", () => {
     expect(falSubmit).not.toHaveBeenCalled();
   });
 
-  it("NIM 逾時/暫時性失敗自動降級 fal 經濟檔，且標 fellBack 讓 UI 誠實顯示", async () => {
+  it("只用免費（nim）逾時不自動切付費 deepseek，讓呼叫端誠實失敗", async () => {
     chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
     falOk("來自 fal 的回答");
-    const r = await completeText({ prompt: "你好", mode: "nim" });
+    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow(FREE_MODEL_TIMEOUT_MESSAGE);
+    expect(falSubmit).not.toHaveBeenCalled();
+  });
+
+  it("nim + allowPaidFallback 才降級 fal 經濟檔，且標 fellBack", async () => {
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falOk("來自 fal 的回答");
+    const r = await completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     expect(r.provider).toBe("fal-openrouter");
     expect(r.model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
     expect(r.fellBack).toBe(true);
@@ -124,9 +132,16 @@ describe("nim 模式 — 免費路徑", () => {
     expect(falSubmit).not.toHaveBeenCalled();
   });
 
-  it("nim 嘗試 NIM 只用快速偵測預算，不讓免費路徑獨吞 60s", async () => {
+  it("nim（只用免費）用完整 timeoutMs，不是 8s 探測後偷切付費", async () => {
     nimOk();
-    await completeText({ prompt: "你好", mode: "nim" });
+    await completeText({ prompt: "你好", mode: "nim", timeoutMs: 60_000 });
+    expect(chatCompletion.mock.calls[0][0].timeoutMs).toBe(60_000);
+    expect(falSubmit).not.toHaveBeenCalled();
+  });
+
+  it("nim + allowPaidFallback 才改用快速偵測預算", async () => {
+    nimOk();
+    await completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     expect(chatCompletion.mock.calls[0][0].timeoutMs).toBe(NIM_DEGRADE_PROBE_MS);
   });
 
@@ -264,7 +279,7 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
   it("降級目標 fal_economy 壅塞（一直 running）時，逾時後自動二次降級 fal_balanced 且標 fellBack", async () => {
     vi.useFakeTimers();
     nimFailsThenFalCongestedThenBalancedOk();
-    const promise = completeText({ prompt: "你好", mode: "nim" });
+    const promise = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     // 推過 FAL_DEGRADE_PROBE_MS（測試設 25ms）：fal_economy 偵測逾時 → 二次降級
     await vi.advanceTimersByTimeAsync(2_000);
     const r = await promise;
@@ -279,10 +294,10 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
     vi.useFakeTimers();
     nimFailsThenFalCongestedThenBalancedOk();
     // 第一次、第二次：fal_economy 各逾時 1 次 → 第二次達門檻，壅塞冷卻啟動
-    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    const p1 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     await p1;
-    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    const p2 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     await p2;
     expect(isFalEconomyCongested()).toBe(true);
@@ -291,7 +306,7 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
     falSubmit.mockClear();
     falStatus.mockReset();
     falStatus.mockResolvedValue({ status: "done", resultText: "第三次" });
-    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    const p3 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     const r3 = await p3;
     expect(r3.model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced);
@@ -311,15 +326,15 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
       .mockResolvedValue({ status: "done", resultText: "備援二" });
 
     // 第一次：fal_economy 逾時（fail 1）→ 二次降級 fal_balanced
-    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    const p1 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     await p1;
     // 第二次：fal_economy 成功 → 重置（fail 歸 0）
-    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    const p2 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     expect((await p2).model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
     // 第三次：fal_economy 再逾時（fail 1，未達門檻 2）→ 不進冷卻
-    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    const p3 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     expect((await p3).model).toBe(AGENT_LLM_MODEL_IDS.fal_balanced);
     expect(isFalEconomyCongested()).toBe(false);
@@ -329,10 +344,10 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
     vi.useFakeTimers();
     nimFailsThenFalCongestedThenBalancedOk();
     // 連續兩次 fal_economy 逾時 → 壅塞冷卻啟動
-    const p1 = completeText({ prompt: "你好", mode: "nim" });
+    const p1 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     await p1;
-    const p2 = completeText({ prompt: "你好", mode: "nim" });
+    const p2 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     await p2;
     expect(isFalEconomyCongested()).toBe(true);
@@ -342,7 +357,7 @@ describe("nim 降級目標壅塞自適應（fal_economy 本身壅塞 → 動態�
     // 壅塞解除後 nim 降級 → 重新試 fal_economy（直接成功）
     falStatus.mockReset();
     falStatus.mockResolvedValue({ status: "done", resultText: "經濟檔恢復" });
-    const p3 = completeText({ prompt: "你好", mode: "nim" });
+    const p3 = completeText({ prompt: "你好", mode: "nim", allowPaidFallback: true });
     await vi.advanceTimersByTimeAsync(2_000);
     expect((await p3).model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
   });

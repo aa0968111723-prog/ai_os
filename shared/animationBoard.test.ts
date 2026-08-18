@@ -18,6 +18,11 @@ describe("derived animation production lifecycle", () => {
     expect(deriveAnimationShotLifecycle({ ...base, hasPrompt: false }).lifecycle).toBe("storyboard");
     expect(deriveAnimationShotLifecycle(base).lifecycle).toBe("needs_keyframe");
     expect(deriveAnimationShotLifecycle({ ...base, candidateKind: "image" }).lifecycle).toBe("keyframe_review");
+    expect(deriveAnimationShotLifecycle({ ...base, candidateKind: "video" })).toMatchObject({
+      lifecycle: "animation_review",
+      needsReview: true,
+      nextAction: { kind: "review_video", label: "檢查動畫候選" },
+    });
     expect(deriveAnimationShotLifecycle({ ...base, currentKind: "image" }).lifecycle).toBe("animation_generation");
     expect(deriveAnimationShotLifecycle({ ...base, currentKind: "image", candidateKind: "video" }).lifecycle).toBe("animation_review");
     expect(deriveAnimationShotLifecycle({

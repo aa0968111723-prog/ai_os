@@ -291,6 +291,15 @@ export function isAgentRunActiveForHud(status: string): boolean {
     || isAgentRunWaitingForHuman(status);
 }
 
+/**
+ * HUD 停 is shown for every HUD-active run, including leftover
+ * awaiting_approval 0/N「待你過目」. stopAgentCore must persist all of these
+ * — rejecting awaiting_approval as「已經結束」leaves the toast after reload.
+ */
+export function canStopAgentRunStatus(status: string): boolean {
+  return isAgentRunActiveForHud(status);
+}
+
 /** Presentation label for HUD / pills — never drop waiting_* into a black hole. */
 export function agentRunHudLabel(status: string): string {
   if (status === "awaiting_approval") return "待你過目";

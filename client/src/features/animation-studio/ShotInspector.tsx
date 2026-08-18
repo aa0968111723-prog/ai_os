@@ -9,8 +9,10 @@
  * 存檔一律帶 `expectedRev`＋`baseline`（樂觀併發，見 shared/revision.ts），
  * 撞版本時顯示衝突卡而不是靜默覆蓋夥伴的字。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../../api";
+import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
+import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
@@ -103,15 +105,31 @@ export function ShotInspector({
       </header>
 
       <div className="studio-inspector__tabs" role="tablist" aria-label="Shot 屬性分頁">
-        {TABS.map((t) => (
+        {TABS.map((t, i) => (
           <button
             key={t.id}
             type="button"
+            id={`studio-inspector-tab-${t.id}`}
             role="tab"
             aria-selected={tab === t.id}
+            aria-controls="studio-inspector-tabpanel"
+            tabIndex={tab === t.id ? 0 : -1}
             className={`studio-inspector__tab${tab === t.id ? " is-active" : ""}`}
             title={t.label}
             onClick={() => onTabChange(t.id)}
+            onKeyDown={(e) => {
+              let next = i;
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (i + 1) % TABS.length;
+              else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (i - 1 + TABS.length) % TABS.length;
+              else if (e.key === "Home") next = 0;
+              else if (e.key === "End") next = TABS.length - 1;
+              else return;
+              e.preventDefault();
+              onTabChange(TABS[next].id);
+              requestAnimationFrame(() => {
+                document.getElementById(`studio-inspector-tab-${TABS[next].id}`)?.focus();
+              });
+            }}
           >
             <Icon name={t.icon} size={14} />
             <span>{t.label}</span>
@@ -119,7 +137,12 @@ export function ShotInspector({
         ))}
       </div>
 
-      <div className="studio-inspector__body" role="tabpanel">
+      <div
+        className="studio-inspector__body"
+        role="tabpanel"
+        id="studio-inspector-tabpanel"
+        aria-labelledby={`studio-inspector-tab-${tab}`}
+      >
         {tab === "ai" ? (
           <AiCopilotActions {...ai} />
         ) : !shot ? (
@@ -165,23 +188,52 @@ function ShotFields({
   const invalidate = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
 
   const update = trpc.scenes.update.useMutation({
-    onSuccess: () => { setConflict(null); invalidate(); },
-    onError: (err) => setConflict(conflictFromError(err)),
+    onSuccess: (row) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectId,
+        writeProjectId: row.projectId,
+        mountedShotId: shot.id,
+        writeShotId: row.id,
+      });
+      if (!ack.applyFieldAck) return;
+      setConflict(null);
+      gateRef.current?.onAck(row.rev);
+      if (ack.applyInvalidate) invalidate();
+    },
+    onError: (err) => {
+      gateRef.current?.reset();
+      setConflict(conflictFromError(err));
+    },
   });
   const setCards = trpc.scenes.setCards.useMutation({ onSuccess: invalidate });
+  const updateMutateRef = useRef(update.mutate);
+  updateMutateRef.current = update.mutate;
+  const shotRef = useRef(shot);
+  shotRef.current = shot;
+  const boundSceneId = shot.id;
+  const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
+  if (!gateRef.current) {
+    gateRef.current = createShotFieldSaveGate({
+      send: (req) => {
+        updateMutateRef.current({
+          sceneId: boundSceneId,
+          ...req.patch,
+          expectedRev: req.expectedRev,
+          baseline: req.baseline,
+        } as Parameters<typeof update.mutate>[0]);
+      },
+      getRev: () => shotRef.current.rev,
+    });
+  }
 
   /**
    * 存一個欄位。expectedRev＋baseline 讓伺服器分得出「我們改了同一欄」（問人）
    * 與「各改各的」（自動合併）——見 shared/revision.ts。
+   * 連續改兩個欄位不得共用同一個 shot.rev：閘門等 ACK 再用新 rev。
    */
   const saveField = (patch: Record<string, unknown>) => {
     const field = Object.keys(patch)[0]!;
-    update.mutate({
-      sceneId: shot.id,
-      ...patch,
-      expectedRev: shot.rev,
-      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
-    } as Parameters<typeof update.mutate>[0]);
+    gateRef.current?.save(patch, { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null });
   };
 
   const saveCamera = (field: keyof ShotCamera, value: string) => {
@@ -326,7 +378,16 @@ function CastTab({
       const look = (looks.data ?? []).find((row: { id: string; characterId: string }) => row.id === lookId);
       return look ? next.includes(look.characterId) : false;
     });
-    setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks });
+    setCards.mutate({
+      sceneId: shot.id,
+      characterIds: next,
+      lookIds: nextLooks,
+      expectedRev: shot.rev,
+      baseline: {
+        characterIds: shot.characterIds ?? [],
+        lookIds: shot.lookIds ?? [],
+      },
+    });
   };
   const toggleLook = (id: string) => {
     const next = boundLooks.includes(id) ? boundLooks.filter((x) => x !== id) : [...boundLooks, id];

@@ -1,7 +1,7 @@
 /**
  * Explicit Adopt: the only path that may move a shot's current visual pointer.
  */
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
@@ -81,6 +81,7 @@ export async function adoptGenerationCurrent(input: {
   const updated = await db.transaction(async (tx) => {
     const [row] = await tx.update(schema.scenes).set({
       assetId: asset.id,
+      rev: sql`${schema.scenes.rev} + 1`,
     }).where(and(
       eq(schema.scenes.id, generation.sceneId!),
       isNull(schema.scenes.deletedAt),
@@ -155,6 +156,12 @@ export async function adoptGenerationCurrent(input: {
       console.warn("[adopt] next-shot staleness skipped:", error instanceof Error ? error.message : error);
     }
   }
+  const { scheduleReconcileAfterVisualAdopt } = await import("./agentRunReconcile");
+  scheduleReconcileAfterVisualAdopt({
+    projectId: generation.projectId,
+    sceneId: updated.id,
+    generationId: generation.id,
+  });
   return { shotId: updated.id, assetId: asset.id, adopted: true };
 }
 

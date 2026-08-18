@@ -44,6 +44,13 @@ export function StoryboardStage({
   const utils = trpc.useUtils();
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
   const shots = trpc.scenes.listByProject.useQuery({ projectId });
+  const addShot = trpc.scenes.addDraft.useMutation({
+    onSuccess: () => {
+      void utils.scenes.listByProject.invalidate({ projectId });
+      void utils.story.get.invalidate({ projectId });
+      void utils.story.scenesList.invalidate({ projectId });
+    },
+  });
   const characters = trpc.characters.list.useQuery({ projectId });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const looks = trpc.characterLooks.list.useQuery({ projectId });
@@ -145,6 +152,18 @@ export function StoryboardStage({
               <button type="button" role="tab" aria-selected={mode === "simple"} className={mode === "simple" ? "active" : undefined} onClick={() => switchMode("simple")}>簡單</button>
               <button type="button" role="tab" aria-selected={mode === "pro"} className={mode === "pro" ? "active" : undefined} onClick={() => switchMode("pro")}>專業</button>
             </div>
+            {canEdit && (
+              <Button
+                size="sm"
+                variant="primary"
+                type="button"
+                disabled={addShot.isPending}
+                title="解析逾時時不必卡住：先開一格空白鏡，或回故事按產生分鏡"
+                onClick={() => addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` })}
+              >
+                <Icon name="Plus" size={13} /> {addShot.isPending ? "建立中…" : "新增鏡"}
+              </Button>
+            )}
             {canEdit && onSendToWorkbench && focusShot && (
               <Button
                 size="sm"
@@ -160,8 +179,21 @@ export function StoryboardStage({
             <EmptyState
               icon={<Icon name="Clapperboard" size={20} />}
               title="還沒有分鏡"
-              description="回到故事貼上內容，按「AI 解析」再「產生分鏡」。"
-              action={<Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>去寫故事</Button>}
+              description="回到故事按「產生分鏡」（解析未完成也能依原文拆鏡），或用右上「＋新增鏡」先開一格。"
+              action={(
+                <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+                  <Button variant="primary" onClick={() => scrollToSelector("#stage-story")}>去寫故事／產生分鏡</Button>
+                  {canEdit ? (
+                    <Button
+                      variant="ghost"
+                      disabled={addShot.isPending}
+                      onClick={() => addShot.mutate({ projectId, title: "第 1 鏡" })}
+                    >
+                      新增鏡
+                    </Button>
+                  ) : null}
+                </span>
+              )}
             />
           ) : (
             <>

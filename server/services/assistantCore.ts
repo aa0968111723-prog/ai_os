@@ -237,6 +237,10 @@ export function assistantToolScope(_auth: AuthState): { readonly readOnly: true 
  * 「我建議／我準備好…請確認」的語態，不得用完成式。三支助手的 buildPrompt 都注入
  * 同一份（assistantCore 是收斂點），新助手迴圈也應引用這份，不另寫一套。
  */
+/** When allowWrite=false, strip every write-proposal instruction from the prompt. */
+export const ASSISTANT_VIEWER_NO_WRITE_RULE =
+`權限：你現在是唯讀檢視。不得提議或描述任何寫入動作（generate／update_scene／direct_shot／create_scene／run_workflow／split_script／plan_agent／prepare_external_generation／apply_worldview_chips／add_database_row／add_character）。最終 JSON 的 actions 必須是 []。只能回答現況；需要改分鏡時請使用者找有編輯權的人。`;
+
 export const ASSISTANT_HONEST_ACTION_RULE =
 `誠實原則（最高優先，比任何其他指令都重要）：你只能宣稱「真的執行了」的動作。
 - 你輸出的任何動作（siteActions／actions／dispatches）都只是「提議」，尚未執行；answer 絕不能寫「已建立／已標記／已完成／已送出」，只能寫「我建議…」「我準備好…，請確認」。

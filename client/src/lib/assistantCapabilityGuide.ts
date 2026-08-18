@@ -110,6 +110,7 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   create_project: { base: "幫我開一個中秋活動宣傳專案。" },
   create_watch: { base: "幫我盯著這個專案，有人卡住就提醒我。" },
   add_database_row: { base: "把這次的拍攝清單寫進資料庫。" },
+  add_character: { base: "幫我加一張角色卡：小華，粉橘短髮鮑伯、米白針織外套。" },
   add_schedule_item: { base: "下週三下午三點排一小時的分鏡審查。" },
   send_dm: { base: "幫我私訊小明，請他今天內回覆旁白稿。" },
 
@@ -153,6 +154,7 @@ const AFFINITY: Record<string, { pages?: AssistantPageType[]; entities?: Assista
   add_project_context: { pages: ["assets", "project"], entities: ["asset"] },
   read_database: { pages: ["database"] },
   add_database_row: { pages: ["database"] },
+  add_character: { pages: ["story", "storyboard", "studio"] },
   read_schedule: { pages: ["schedule", "home"] },
   add_schedule_item: { pages: ["schedule", "home"] },
   read_members: { pages: ["collab", "home"] },

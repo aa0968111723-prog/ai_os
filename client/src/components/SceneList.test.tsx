@@ -5,7 +5,7 @@
  * 3. 交付中心——就緒度講清楚、單檔收進進階摺疊。
  * 隔離 trpc mock；SceneStudio／StoryboardPlayer 用 stub（各自有獨立測試）。
  */
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SceneList } from "./SceneList";
@@ -14,11 +14,20 @@ const scenesQuery = vi.fn();
 const meQuery = vi.fn();
 const updateMutate = vi.fn();
 const generateMutate = vi.fn();
+const adoptMutate = vi.fn();
 const insertAfterMutate = vi.fn();
 const moveMutate = vi.fn();
 const removeMutate = vi.fn();
 const exportCreateMutate = vi.fn();
-const invalidate = vi.fn();
+const invalidateScenes = vi.fn();
+const invalidateMessages = vi.fn();
+const invalidateDeleted = vi.fn();
+const lastUpdateSuccess = { current: undefined as undefined | ((row?: { id?: string; projectId?: string; rev?: number }) => void) };
+const lastInsertAfterSuccess = { current: undefined as undefined | ((row: { id: string; projectId: string }) => void) };
+const insertAfterHold = { current: false };
+const insertAfterPending: Array<() => void> = [];
+const insertAfterFailNext = { current: false };
+const lastRemoveSuccess = { current: undefined as undefined | (() => void) };
 /** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
 const cardLists: {
   characters: Array<{ id: string; name: string }>;
@@ -29,18 +38,63 @@ const cardLists: {
 vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({
-      scenes: { listByProject: { invalidate } },
-      messages: { list: { invalidate }, openCountsByScene: { invalidate } },
-      projects: { listDeleted: { invalidate } },
+      scenes: { listByProject: { invalidate: invalidateScenes } },
+      messages: { list: { invalidate: invalidateMessages }, openCountsByScene: { invalidate: vi.fn() } },
+      projects: { listDeleted: { invalidate: invalidateDeleted } },
     }),
     auth: { me: { useQuery: (...args: unknown[]) => meQuery(...args) } },
     scenes: {
       listByProject: { useQuery: (...args: unknown[]) => scenesQuery(...args) },
-      update: { useMutation: () => ({ mutate: updateMutate, isPending: false, error: null }) },
+      update: {
+        useMutation: (opts?: { onSuccess?: (row?: { id?: string; projectId?: string; rev?: number }) => void }) => {
+          lastUpdateSuccess.current = opts?.onSuccess;
+          return { mutate: updateMutate, isPending: false, error: null };
+        },
+      },
       generateInto: { useMutation: () => ({ mutate: generateMutate, isPending: false, error: null }) },
-      insertAfter: { useMutation: () => ({ mutate: insertAfterMutate, isPending: false, error: null }) },
+      insertAfter: {
+        useMutation: (opts?: { onSuccess?: (row: { id: string; projectId: string }) => void }) => {
+          lastInsertAfterSuccess.current = opts?.onSuccess;
+          return {
+          mutate: (
+            input: { sceneId: string; duplicate?: boolean },
+            callOpts?: { onSuccess?: (row: { id: string; projectId: string }) => void; onError?: (err: Error) => void },
+          ) => {
+            insertAfterMutate(input);
+            const created = { id: `new-from-${input.sceneId}`, projectId: "p-1" };
+            const finish = () => {
+              if (insertAfterFailNext.current) {
+                insertAfterFailNext.current = false;
+                callOpts?.onError?.(new Error("insertAfter failed"));
+                return;
+              }
+              callOpts?.onSuccess?.(created);
+              opts?.onSuccess?.(created);
+            };
+            if (insertAfterHold.current) insertAfterPending.push(finish);
+            else finish();
+          },
+          mutateAsync: async (input: { sceneId: string; duplicate?: boolean }) => {
+            insertAfterMutate(input);
+            const created = { id: `new-from-${input.sceneId}`, projectId: "p-1" };
+            opts?.onSuccess?.(created);
+            return created;
+          },
+          isPending: false,
+          error: null,
+        };
+        },
+      },
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
-      remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
+      remove: {
+        useMutation: (opts?: { onSuccess?: () => void }) => {
+          lastRemoveSuccess.current = opts?.onSuccess;
+          return { mutate: removeMutate, isPending: false, error: null };
+        },
+      },
+    },
+    creativeContext: {
+      adoptGeneration: { useMutation: () => ({ mutate: adoptMutate, isPending: false, error: null }) },
     },
     // 未改好的標注數（分鏡格的「⚑ N」角標）——本檔不測角標，另有專屬情境；這裡回空清單
     messages: { openCountsByScene: { useQuery: () => ({ data: [], isLoading: false }) } },
@@ -93,6 +147,11 @@ type SceneOver = {
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
+  assetKind?: string | null;
+  assetUrl?: string | null;
+  pendingGenStatus?: string | null;
+  generationId?: string | null;
+  latestDoneVisualGenId?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -106,10 +165,11 @@ function scene(over: SceneOver) {
     assetId: hasAsset ? `asset-${over.id}` : null,
     prompt: over.prompt === undefined ? "海邊遠景" : over.prompt,
     voiceover: over.voiceover ?? null,
-    assetUrl: hasAsset ? `https://example.test/${over.id}.png` : null,
-    assetKind: hasAsset ? "image" : null,
-    generationId: null,
-    pendingGenStatus: null,
+    assetUrl: hasAsset ? (over.assetUrl ?? `https://example.test/${over.id}.png`) : null,
+    assetKind: hasAsset ? (over.assetKind ?? "image") : null,
+    generationId: over.generationId ?? null,
+    latestDoneVisualGenId: over.latestDoneVisualGenId ?? null,
+    pendingGenStatus: over.pendingGenStatus ?? null,
     narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
     ambience: over.ambience ?? null,
@@ -121,6 +181,7 @@ function scene(over: SceneOver) {
     characterIds: over.characterIds ?? null,
     scenePresetIds: over.scenePresetIds ?? null,
     propIds: over.propIds ?? null,
+    rev: 1,
   };
 }
 
@@ -137,6 +198,9 @@ const rowOf = (id: string) => {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  insertAfterHold.current = false;
+  insertAfterFailNext.current = false;
+  insertAfterPending.length = 0;
   meQuery.mockReturnValue({ isLoading: false, data: { id: "u-1" } });
   scenesQuery.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
   cardLists.characters = [];
@@ -198,6 +262,17 @@ describe("SceneList 流程引導（C）", () => {
 });
 
 describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動作", () => {
+  it("空列表只顯示還沒有分鏡，沒有列表層生成 CTA", () => {
+    scenesQuery.mockReturnValue({
+      data: [],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(screen.getAllByText(/還沒有分鏡/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /^生成這一格/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /生成畫面/ })).not.toBeInTheDocument();
+  });
+
   it("無畫面有提示詞→生成這一格；有畫面就只剩單格工作室（沒有送審這種東西了）", () => {
     scenesQuery.mockReturnValue({
       data: [scene({ id: "s1", hasAsset: false }), scene({ id: "s2" })],
@@ -246,6 +321,19 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     expect(screen.getByRole("dialog", { name: /單格工作室 stub 第 1 鏡/ })).toBeInTheDocument();
   });
 
+  it("insertAfter ACK from another project does not refresh this list", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    invalidateScenes.mockClear();
+    lastInsertAfterSuccess.current?.({ id: "foreign-shot", projectId: "other-project" });
+    expect(invalidateScenes).not.toHaveBeenCalled();
+    lastInsertAfterSuccess.current?.({ id: "local-shot", projectId: "p-1" });
+    expect(invalidateScenes).toHaveBeenCalled();
+  });
+
   it("整理分鏡：在這之後插入一鏡（不必加到最後再一路搬上來）", async () => {
     const user = userEvent.setup();
     scenesQuery.mockReturnValue({
@@ -257,6 +345,41 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
   });
 
+  it("同一格連點插入：第二次起用上一格新 id，避免 LIFO", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" }), scene({ id: "s2" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    await user.click(btn);
+    await user.click(btn);
+    await user.click(btn);
+    await vi.waitFor(() => expect(insertAfterMutate).toHaveBeenCalledTimes(3));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "new-from-s1" },
+      { sceneId: "new-from-new-from-s1" },
+    ]);
+  });
+
+  it("不同列插入各走自己的 tail，B 不會插到 A 的新格後面", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" }), scene({ id: "s2" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    await user.click(rowOf("s2").getByRole("button", { name: "在這之後插入一鏡" }));
+    await vi.waitFor(() => expect(insertAfterMutate).toHaveBeenCalledTimes(2));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s2" },
+    ]);
+  });
+
   it("複製這一鏡：帶 duplicate 旗標（設定跟著走，成品不跟）", async () => {
     const user = userEvent.setup();
     scenesQuery.mockReturnValue({
@@ -266,6 +389,156 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+  });
+
+  it("連點 10 次插入：ACK 未回前只送出第一發，之後串新 id（點擊順序，不是 LIFO）", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    expect(btn).not.toBeDisabled();
+    for (let n = 0; n < 10; n++) fireEvent.click(btn);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
+
+    const expected = ["s1"];
+    let prev = "s1";
+    for (let n = 0; n < 10; n++) {
+      expect(insertAfterPending).toHaveLength(1);
+      insertAfterPending.shift()!();
+      if (n < 9) {
+        prev = `new-from-${prev}`;
+        expected.push(prev);
+        expect(insertAfterMutate).toHaveBeenCalledTimes(n + 2);
+      }
+    }
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual(expected.map((sceneId) => ({ sceneId })));
+    expect(insertAfterPending).toHaveLength(0);
+  });
+
+  it("插入與複製各走一條佇列，互不串 tail", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    fireEvent.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    fireEvent.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1", duplicate: true },
+    ]);
+    insertAfterPending.shift()!();
+    insertAfterPending.shift()!();
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1", duplicate: true },
+    ]);
+  });
+
+  it("insertAfter 失敗：清佇列、tail 回到這一格，下一發仍送 s.id", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    insertAfterFailNext.current = true;
+    insertAfterPending.shift()!();
+    expect(insertAfterPending).toHaveLength(0);
+    insertAfterHold.current = false;
+    fireEvent.click(btn);
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s1" },
+    ]);
+  });
+
+  it("複製鈕不因 insertAfter pending 被 disabled，連點可進佇列", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    insertAfterHold.current = true;
+    mount();
+    const dup = rowOf("s1").getByRole("button", { name: "複製這一鏡" });
+    expect(dup).not.toBeDisabled();
+    fireEvent.click(dup);
+    fireEvent.click(dup);
+    expect(insertAfterMutate).toHaveBeenCalledTimes(1);
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+    insertAfterPending.shift()!();
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1", duplicate: true },
+      { sceneId: "new-from-s1", duplicate: true },
+    ]);
+  });
+
+  it("生成這一格 quotes and sends aios.scenegen Qwen, not DEFAULT SDXL", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("aios.scenegen.p-1", "fal-ai/qwen-image-2/text-to-image");
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", hasAsset: false, prompt: "小華躺在床上" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(rowOf("s1").getByRole("button", { name: /生成這一格.*−1 點/ })).toBeInTheDocument();
+    await user.click(rowOf("s1").getByRole("button", { name: /^生成這一格/ }));
+    expect(screen.getByText(/Qwen Image 2\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/約 −1 點/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "確認生成" }));
+    expect(generateMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sceneId: "s1",
+      modelId: "fal-ai/qwen-image-2/text-to-image",
+    }));
+    expect(generateMutate.mock.calls[0][0].modelId).not.toBe("fal-ai/fast-lightning-sdxl");
+  });
+
+  it("generateInto 完成後列出採用這一版，按下走 adoptGeneration", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", hasAsset: false, latestDoneVisualGenId: "gen-done" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: /採用這一版/ }));
+    expect(adoptMutate).toHaveBeenCalledWith({ generationId: "gen-done" });
+  });
+
+  it("已經是 current 的生成不顯示採用", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", generationId: "gen-1", latestDoneVisualGenId: "gen-1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(rowOf("s1").queryByRole("button", { name: /採用這一版|採用新的一版/ })).toBeNull();
+  });
+
+  it("行內改標題帶 expectedRev，避免連改秒數自己跟自己衝突", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    const title = rowOf("s1").getByRole("textbox", { name: "第 1 鏡標題" });
+    await user.clear(title);
+    await user.type(title, "新標題");
+    await user.tab();
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sceneId: "s1",
+      title: "新標題",
+      expectedRev: 1,
+    }));
   });
 
   it("檢視者看不到插入／複製（整理分鏡是寫入動作）", () => {
@@ -381,5 +654,65 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
     mount();
     const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
     expect(rows[0]!.characterNames).toEqual(["安倢"]);
+  });
+});
+
+describe("SceneList 長分鏡效能", () => {
+  function refetchIntervalOf() {
+    const opts = scenesQuery.mock.calls.at(-1)?.[1] as {
+      refetchInterval?: (q: { state: { data: unknown } }) => number;
+    };
+    expect(typeof opts?.refetchInterval).toBe("function");
+    return opts.refetchInterval!;
+  }
+
+  it("沒有進行中生成時用 45 秒心跳，有 queued/running 才 10 秒", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    const interval = refetchIntervalOf();
+    expect(interval({ state: { data: [scene({ id: "s1" })] } })).toBe(45_000);
+    expect(interval({ state: { data: [scene({ id: "s1", pendingGenStatus: "running" })] } })).toBe(10_000);
+  });
+
+  it("影片鏡列用靜態縮圖，不掛 <video>", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", assetKind: "video", assetUrl: "https://example.test/s1.mp4" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    const row = document.getElementById("scene-s1");
+    expect(row?.querySelector("video")).toBeNull();
+    expect(rowOf("s1").getByRole("img", { name: /影片/ })).toBeInTheDocument();
+  });
+
+  it("改標題只刷新分鏡清單；刪除才連帶訊息與回收桶", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    lastUpdateSuccess.current?.({ id: "s1", projectId: "p-1", rev: 1 });
+    expect(invalidateScenes).toHaveBeenCalled();
+    expect(invalidateMessages).not.toHaveBeenCalled();
+    expect(invalidateDeleted).not.toHaveBeenCalled();
+
+    invalidateScenes.mockClear();
+    lastUpdateSuccess.current?.({ id: "s1", projectId: "other-project", rev: 2 });
+    expect(invalidateScenes).not.toHaveBeenCalled();
+
+    invalidateScenes.mockClear();
+    lastRemoveSuccess.current?.();
+    expect(invalidateScenes).toHaveBeenCalled();
+    expect(invalidateMessages).toHaveBeenCalled();
+    expect(invalidateDeleted).toHaveBeenCalled();
   });
 });

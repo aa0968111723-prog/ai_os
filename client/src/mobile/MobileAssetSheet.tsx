@@ -6,6 +6,7 @@ import { AssetImg } from "../components/MediaFallback";
 import { Button, Meta, Skeleton } from "../components/ui";
 import { useSheetSwipeDismiss } from "../lib/useSheetSwipeDismiss";
 import { registerAssistantFocus } from "../lib/assistantContext";
+import { AddDataSheet } from "../components/AddDataSheet";
 import { MobileAiBar } from "./MobileAiBar";
 
 /** 一次抓幾張。24 張在 390px 上約四螢，足夠翻但不會一次拖垮弱網。 */
@@ -30,6 +31,8 @@ const PAGE = 24;
  */
 export function MobileAssetSheet({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const [limit, setLimit] = useState(PAGE);
+  const [addOpen, setAddOpen] = useState(false);
+  const utils = trpc.useUtils();
   const sheetRef = useRef<HTMLElement | null>(null);
   useSheetSwipeDismiss(sheetRef, onClose, true);
   // 抽屜開著時助手的視野就是素材（關閉時 cleanup 自動歸零）
@@ -68,9 +71,15 @@ export function MobileAssetSheet({ projectId, onClose }: { projectId: string; on
         <div className="menu-surface__grip" aria-hidden />
         <div className="m-sheet__head">
           <strong>素材</strong>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="關閉素材">
-            <Icon name="X" size={16} />
-          </Button>
+          <div className="m-sheet__head-actions">
+            <Button variant="tonal" size="sm" onClick={() => setAddOpen(true)}>
+              <Icon name="Upload" size={16} />
+              加入素材
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onClose} aria-label="關閉素材">
+              <Icon name="X" size={16} />
+            </Button>
+          </div>
         </div>
 
         <MobileAiBar placeholder="問 Aios：這些素材可以怎麼用？" />
@@ -80,7 +89,7 @@ export function MobileAssetSheet({ projectId, onClose }: { projectId: string; on
             {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={0} className="m-thumbs__skeleton" />)}
           </div>
         ) : rows.length === 0 ? (
-          <Meta as="p">這個專案還沒有素材。</Meta>
+          <Meta as="p">這個專案還沒有素材。按「加入素材」上傳。</Meta>
         ) : (
           <>
             <ul className="m-thumbs m-thumbs--grid">
@@ -109,6 +118,15 @@ export function MobileAssetSheet({ projectId, onClose }: { projectId: string; on
           </>
         )}
       </aside>
+      <AddDataSheet
+        open={addOpen}
+        destination={{ kind: "project", projectId }}
+        onClose={() => setAddOpen(false)}
+        onAdded={() => {
+          void utils.projects.assets.invalidate({ projectId });
+          setAddOpen(false);
+        }}
+      />
     </>,
     document.body,
   );

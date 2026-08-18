@@ -93,6 +93,18 @@ describe("右下 FAB 軌道與底部分頁列", () => {
     );
   });
 
+  it("agent-hud sits above the 回饋 FAB so 停 is not an overlapped hit target", () => {
+    const styles = read("client/src/styles.css");
+    const at = styles.indexOf(".agent-hud {");
+    expect(at).toBeGreaterThan(-1);
+    const block = styles.slice(at, styles.indexOf("}", at));
+    expect(block).toMatch(/z-index:\s*46/);
+    expect(block).toContain("--fab-slot");
+    const desktop = styles.slice(styles.indexOf("@media (min-width: 768px)", at));
+    const hud = desktop.slice(desktop.indexOf(".agent-hud"));
+    expect(hud.slice(0, 280)).toContain("--fab-slot");
+  });
+
   it("styles.css 的同名避讓值與軌道基準一致（有人只改一邊時不會靜默分岔）", () => {
     const styles = read("client/src/styles.css");
     const at = styles.indexOf(".fb-fab-root { bottom:");

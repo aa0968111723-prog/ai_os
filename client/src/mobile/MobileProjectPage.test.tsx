@@ -208,6 +208,20 @@ describe("手機專案頁", () => {
     expect(await screen.findByTestId("desktop-workbench")).toBeInTheDocument();
   });
 
+  it("次級入口有場景，不再把「知識」指到 sec-scenes", () => {
+    render(<MobileProjectPage id="p1" />);
+    expect(screen.getByRole("button", { name: /場景/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /知識/ })).not.toBeInTheDocument();
+  });
+
+  it("點場景會寫 hash 並打開工作台，而不是只捲收合列", async () => {
+    window.history.replaceState(null, "", "/p/p1");
+    render(<MobileProjectPage id="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: /場景/ }));
+    expect(window.location.hash).toBe("#sec-scenes");
+    expect(await screen.findByTestId("desktop-workbench")).toBeInTheDocument();
+  });
+
   it("打不開的專案給的是可行動的錯誤，不是空白", () => {
     projectQuery.mockReturnValue({
       data: undefined,

@@ -83,18 +83,30 @@ export async function contextBindableDenyReason(
 ): Promise<string | null> {
   const groupIds = new Set(auth.groups.map((group) => group.groupId));
   if (input.resourceKind === "asset") {
-    const [asset] = await db.select({ groupId: schema.assets.groupId, deletedAt: schema.assets.deletedAt })
+    const [asset] = await db.select({
+      groupId: schema.assets.groupId,
+      projectId: schema.assets.projectId,
+      deletedAt: schema.assets.deletedAt,
+    })
       .from(schema.assets).where(eq(schema.assets.id, input.resourceId));
     if (!asset || asset.deletedAt) return "找不到這份素材";
     if (!groupIds.has(asset.groupId)) return "找不到這份素材";
-    return asset.groupId === input.project.groupId ? null : "這份素材屬於別的組，不能加入這個專案的脈絡";
+    if (asset.groupId !== input.project.groupId) return "這份素材屬於別的組，不能加入這個專案的脈絡";
+    if (asset.projectId !== input.project.id) return "這份素材不屬於本專案（同組其他專案的圖不能當定裝）";
+    return null;
   }
   if (input.resourceKind === "knowledge") {
-    const [row] = await db.select({ groupId: schema.knowledge.groupId, deletedAt: schema.knowledge.deletedAt })
+    const [row] = await db.select({
+      groupId: schema.knowledge.groupId,
+      projectId: schema.knowledge.projectId,
+      deletedAt: schema.knowledge.deletedAt,
+    })
       .from(schema.knowledge).where(eq(schema.knowledge.id, input.resourceId));
     if (!row || row.deletedAt) return "找不到這份資料";
     if (!groupIds.has(row.groupId)) return "找不到這份資料";
-    return row.groupId === input.project.groupId ? null : "這份資料屬於別的組，不能加入這個專案的脈絡";
+    if (row.groupId !== input.project.groupId) return "這份資料屬於別的組，不能加入這個專案的脈絡";
+    if (row.projectId !== input.project.id) return "這份資料不屬於本專案";
+    return null;
   }
   // document / table：權限一律由 databaseAcl 解析；personal 永遠不可綁
   const tableId = input.resourceKind === "table"

@@ -4,7 +4,7 @@
  * 標記行契約：「角色：」「場景：」「道具：」（0.95）＋「疑似道具：」（0.6→確認卡）。
  */
 import { describe, it, expect } from "vitest";
-import { mockStoryExtract, sha256Hex } from "./storyParse";
+import { matchByName, mockStoryExtract, planStoryboardFromStoryText, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
 
@@ -68,6 +68,20 @@ describe("mockStoryExtract", () => {
   it("同輸入同輸出（確定性；e2e 斷言的前提）", () => {
     expect(JSON.stringify(mockStoryExtract(SAMPLE))).toBe(JSON.stringify(mockStoryExtract(SAMPLE)));
   });
+
+  it("does not keep 年輕男性 when the script names 小華 as a 短髮女孩", () => {
+    const plan = mockStoryExtract("角色：小華（年輕男性）、禪定龜龜（吉祥物龜龜）\n造型：小華＝黑長直髮\n\n小華，大二化工、白帽T、粉橘短髮女孩，對鏡頭自我介紹。");
+    const xiaohua = plan.characters.find((c) => c.name === "小華");
+    expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
+    expect(xiaohua?.appearance).not.toContain("年輕男性");
+    expect(xiaohua?.costume).not.toContain("黑長直髮");
+    expect(xiaohua?.costume).toContain("白帽T");
+  });
+
+  it("parse-fail 產生分鏡 reuses the same story-text plan (not a second product)", () => {
+    expect(planStoryboardFromStoryText(SAMPLE)).toEqual(mockStoryExtract(SAMPLE));
+    expect(planStoryboardFromStoryText("只有一句話").scenes.length).toBeGreaterThan(0);
+  });
 });
 
 describe("作者備註行不進解析", () => {
@@ -95,9 +109,21 @@ describe("作者備註行不進解析", () => {
 });
 
 describe("解析模型檔位", () => {
-  it("劇本解析用高階（旗艦）模型，不是日常主力", () => {
+  it("旗艦與日常主力仍是兩顆不同的模型", () => {
     expect(NIM_REASONING_MODEL).toBe(NVIDIA_MODELS.llama3_405b);
     expect(NIM_REASONING_MODEL).not.toBe(NIM_DEFAULT_MODEL);
+  });
+
+  it("21 / 66 / 301 字都先走 70B（live 405B 崖在 66 與 301 之間）", () => {
+    for (const n of [21, 66, 301, 1_167, 2_000]) {
+      const short = resolveStoryExtractStrategy(n);
+      expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
+      expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+      expect(short.primaryTimeoutMs + short.fallbackTimeoutMs).toBeLessThan(150_000);
+    }
+    const long = resolveStoryExtractStrategy(8_000);
+    expect(long.primaryModel).toBe(NIM_REASONING_MODEL);
+    expect(long.fallbackModel).toBe(NIM_DEFAULT_MODEL);
   });
 });
 
@@ -106,5 +132,19 @@ describe("sha256Hex", () => {
     expect(sha256Hex("abc")).toBe(sha256Hex("abc"));
     expect(sha256Hex("abc")).not.toBe(sha256Hex("abd"));
     expect(sha256Hex("abc")).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("matchByName", () => {
+  it("兩個同名角色取先寫入的那一張（first-wins，不合併、不擲骰）", () => {
+    const first = { id: "char-a", name: "小華" };
+    const second = { id: "char-b", name: "小華" };
+    expect(matchByName([first, second], "小華")?.id).toBe("char-a");
+    expect(matchByName([first, second], "「小華」")?.id).toBe("char-a");
+  });
+
+  it("找不到就回 null——不跨專案猜一張同名卡", () => {
+    expect(matchByName([{ id: "char-a", name: "小華" }], "禪定龜龜")).toBeNull();
+    expect(matchByName([], "小華")).toBeNull();
   });
 });

@@ -381,8 +381,9 @@ describe("legacy migration adoption bridge", () => {
     // (source_entity_id IS NULL rows only) — 1 statement.
     // 0079 Animation consistency evaluations: 1 immutable evidence table +
     // 3 guarded indexes — 4 additive statements, no Canon/current rewrite.
+    // 0080 Project rev: 1 ADD COLUMN IF NOT EXISTS on projects — 1 statement.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4 + 1,
     );
   });
 

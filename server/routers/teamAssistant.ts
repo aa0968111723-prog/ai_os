@@ -48,6 +48,12 @@ import {
   formatProjectInventoryTotals,
   loadGroupProjectInventory,
 } from "../services/projectInventory";
+import { formatPersistedStoryForAssistant, formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStoryContext";
+import {
+  ASSISTANT_ASK_TIMEOUT_MESSAGE,
+  assistantAskTimedOut,
+  bindAssistantAskDeadline,
+} from "../services/assistantAskBudget";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
@@ -227,7 +233,7 @@ export function currentStepNote(steps: unknown): string | null {
   const list = steps as Array<{ status?: string; note?: string; title?: string } | null>;
   const pick = (status: string) =>
     list.find((s) => s?.status === status);
-  const step = pick("running") ?? pick("waiting") ?? pick("pending") ?? list[list.length - 1];
+  const step = pick("running") ?? pick("waiting") ?? pick("waiting_confirmation") ?? pick("pending") ?? list[list.length - 1];
   if (!step) return null;
   const text = (step.note ?? step.title ?? "").trim();
   if (!text) return null;
@@ -516,7 +522,7 @@ export function formatGroupBlockerDigest(insight: GroupBlockerDigestInput): stri
  * 因為使用者會據此相信答案。只認得這幾個標籤，其餘一律丟掉。
  */
 export const TEAM_CONTEXT_LABELS = [
-  "專案現況", "組花費", "資料庫快照", "阻塞與人員負荷",
+  "專案現況", "故事全文", "組花費", "資料庫快照", "阻塞與人員負荷",
   "分鏡明細", "生成紀錄", "模型目錄", "資料庫搜尋", "代理動態", "人員任務", "專案營運快照",
 ] as const;
 const TEAM_CONTEXT_LABEL_SET = new Set<string>(TEAM_CONTEXT_LABELS);
@@ -754,7 +760,16 @@ export async function runTeamTool(
     const sceneLines = scenes.length
       ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」｜畫面${s.assetId ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
       : "（尚無分鏡）";
-    const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}`;
+    const [storyRow] = await db
+      .select({ content: schema.stories.content, lastParsedAt: schema.stories.lastParsedAt })
+      .from(schema.stories)
+      .where(eq(schema.stories.projectId, project.id))
+      .limit(1);
+    const storyBlock = formatPersistedStoryForAssistant({
+      content: storyRow?.content,
+      lastParsedAt: storyRow?.lastParsedAt,
+    });
+    const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}\n${storyBlock}`;
     const withVisual = scenes.filter((s) => s.assetId).length;
     return {
       step: `讀了「${project.title}」的分鏡(${scenes.length})`,
@@ -1063,8 +1078,9 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
   let genAgg: Array<{ projectId: string; status: string; n: number; last: Date | string | null }> = [];
   let costAgg: Array<{ projectId: string; spent: number }> = [];
+  let storyRows: Array<{ projectId: string; content: string }> = [];
   if (projectIds.length) {
-    [sceneAgg, genAgg, costAgg] = await Promise.all([
+    [sceneAgg, genAgg, costAgg, storyRows] = await Promise.all([
       // 分鏡按狀態計數（軟刪不算）
       db
         .select({ projectId: schema.scenes.projectId, status: schema.scenes.status, n: sql<number>`count(*)` })
@@ -1089,6 +1105,10 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
         .innerJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
         .where(and(eq(schema.costLedger.groupId, groupId), inArray(schema.generations.projectId, projectIds)))
         .groupBy(schema.generations.projectId),
+      db
+        .select({ projectId: schema.stories.projectId, content: schema.stories.content })
+        .from(schema.stories)
+        .where(inArray(schema.stories.projectId, projectIds)),
     ]);
   }
 
@@ -1112,13 +1132,15 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     gensBy.set(r.projectId, cur);
   }
   const spentBy = new Map<string, number>(costAgg.map((r) => [r.projectId, Number(r.spent)]));
+  const storyBy = new Map<string, string>(storyRows.map((r) => [r.projectId, r.content]));
 
-  // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜最後活動
+  // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜故事稿有無｜最後活動
   const lines = projRows.map((p, i) => {
     const sc = scenesBy.get(p.id) ?? { total: 0 };
     const g = gensBy.get(p.id) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null as Date | null };
     const lastActive = g.last && g.last.getTime() > new Date(p.updatedAt).getTime() ? g.last : new Date(p.updatedAt);
-    return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
+    const storyFlag = formatTeamInventoryStoryFlag(storyBy.get(p.id));
+    return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜${storyFlag}｜最後活動 ${fmtTaipei(lastActive)}`;
   });
   const hidden = totalProjects - projRows.length;
   // 被隱藏專案一行：名稱(類型)｜最後活動（用 updatedAt 當 lastActive 底，被 hiddenRows 撈回）
@@ -1486,14 +1508,16 @@ ${historyBlock}使用者的問題：${input.message}`;
       // 全程 0 點（NIM 免費）。與舊內嵌迴圈唯一的行為差異是「壞回覆的 fallback 不再
       // 把純工具 JSON 原文亮給使用者」（assistantCore 檔頭記載，全站助手同款）。
       const steps: string[] = [];
+      const { signal: askSignal, deadline: askDeadline, dispose: disposeAskDeadline } = bindAssistantAskDeadline();
       try {
         type TeamReply = z.infer<typeof teamReplySchema>;
         const outcome = await runToolLoop<z.infer<typeof teamToolSchema>, TeamReply>({
           maxToolRounds: MAX_TOOL_ROUNDS,
+          signal: askSignal,
           buildPrompt,
           llm: (prompt) => {
             const quality = input.mode ?? "nim";
-            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000 }).then(r => r.text);
+            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000, signal: askSignal }).then(r => r.text);
           },
           tryToolCall: (json) => {
             const parsed = teamToolSchema.safeParse(json);
@@ -1512,7 +1536,15 @@ ${historyBlock}使用者的問題：${input.message}`;
           // 解析失敗：LLM 已計費不退點（0 點），至少把純文字當回答（不提議派工）
           fallback: (text) => ({ answer: (text || "我不太確定，可以換個問法再問一次。").slice(0, 4000) }),
         });
-        const reply = outcome.reply!; // 無 signal，不會 aborted
+        if (outcome.aborted || !outcome.reply) {
+          return {
+            answer: assistantAskTimedOut(askDeadline) ? ASSISTANT_ASK_TIMEOUT_MESSAGE : "已停止。",
+            dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
+            steps, canDispatch, commandLevel, mock: false,
+            rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
+          };
+        }
+        const reply = outcome.reply;
         if (outcome.usedFallback) {
           return {
             answer: reply.answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
@@ -1534,14 +1566,18 @@ ${historyBlock}使用者的問題：${input.message}`;
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦。
         // completeText 會把 NimServiceError 包成 LlmServiceError 拋出（見 llmProvider.sanitize），
         // 逾時/上限兩者都要顯示人話原因，不能只認 NimServiceError。
-        const answer = err instanceof NimServiceError || err instanceof LlmServiceError
-          ? err.message
-          : "AI 彙總助手暫時沒回應，請稍後再問一次。";
+        const answer = assistantAskTimedOut(askDeadline)
+          ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+          : err instanceof NimServiceError || err instanceof LlmServiceError
+            ? err.message
+            : "AI 彙總助手暫時沒回應，請稍後再問一次。";
         return {
           answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps,
           canDispatch, commandLevel, mock: false,
           rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
         };
+      } finally {
+        disposeAskDeadline();
       }
     }),
 
@@ -1554,6 +1590,10 @@ ${historyBlock}使用者的問題：${input.message}`;
     .input(z.object({ groupId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
+      // Leftover 0/N「待你過目」survives reload unless we discard on read.
+      // generateInto already reconciles that project; HUD is group-wide.
+      const { reconcileLeftoverAwaitingApprovalOnRead } = await import("../services/agentRunReconcile");
+      await reconcileLeftoverAwaitingApprovalOnRead({ groupId: input.groupId });
       const recentCutoff = new Date(Date.now() - GROUP_AGENT_RECENT_MS);
       const notDiscarded = and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded"));
       const [rows, statusAgg, activeProjectsAgg] = await Promise.all([

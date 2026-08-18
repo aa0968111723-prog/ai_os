@@ -127,6 +127,16 @@ describe("面板降級（1280 也要能用）", () => {
     expect(rule).toContain("border-bottom: 2px solid transparent");
   });
 
+  it("Inspector 分頁是真正的 tablist：方向鍵可切、有 controls／labelledby", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain('role="tablist"');
+    expect(inspector).toContain('aria-controls="studio-inspector-tabpanel"');
+    expect(inspector).toContain("ArrowRight");
+    expect(inspector).toContain("ArrowLeft");
+    expect(inspector).toContain('id="studio-inspector-tabpanel"');
+    expect(inspector).toContain("aria-labelledby={`studio-inspector-tab-${tab}`}");
+  });
+
   it("Inspector 可收合，收合後只剩一條展開鈕", () => {
     expect(ruleFor(".studio-inspector.is-collapsed")).toContain("width: 40px");
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
@@ -178,10 +188,48 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).not.toMatch(/trpc\.\w+\.create\w*Shot/);
   });
 
+  it("AI panel save and apply-prompt send expectedRev", () => {
+    const panel = readFileSync(resolve(dir, "StudioAiPanel.tsx"), "utf8");
+    expect(panel).toContain("expectedRev: shot.rev");
+    expect(panel).toContain("baseline:");
+    expect(studio).toContain("expectedRev: shot.rev");
+    expect(studio).toContain("baseline: { prompt: shot.prompt ?? null }");
+  });
+
   it("編輯框一律帶樂觀併發欄位——夥伴同時改不會靜默吃字", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("expectedRev: req.expectedRev");
     expect(inspector).toContain("expectedRev: shot.rev");
+    expect(inspector).toContain("createShotFieldSaveGate");
     expect(inspector).toContain("baseline:");
     expect(inspector).toContain("ConflictNotice");
+  });
+
+  it("studio listByProject always remounts so /p/ 產生分鏡 rows appear on the timeline", () => {
+    expect(studio).toContain("refetchOnMount: \"always\"");
+    expect(studio).toContain("trpc.scenes.listByProject.useQuery");
+  });
+
+  it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
+    expect(studio).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(studio).not.toContain("insertQueueOriginRef");
+    expect(studio).not.toMatch(/insertQueueRef\.current\?\.reset\(\)/);
+  });
+
+  it("queue 完成時只跟著目前還停在 origin 的那一鏡，不搶走已切走的選取", () => {
+    expect(studio).toContain("shouldApplySceneWriteAck");
+    expect(studio).toContain("followCreated");
+    expect(studio).toContain("originShotId: variables.sceneId");
+    expect(studio).not.toContain("activeShotIdRef.current === variables.sceneId");
+  });
+
+  it("late insertAfter/move ACK from project A does not invalidate or write into project B", () => {
+    expect(studio).toContain("writeProjectId: created?.projectId");
+    expect(studio).toContain("writeProjectId: result.projectId");
+    expect(studio).toContain("applyInvalidate");
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("shouldApplySceneWriteAck");
+    expect(inspector).toContain("sceneId: boundSceneId");
+    expect(inspector).not.toContain("sceneId: shotRef.current.id");
   });
 });

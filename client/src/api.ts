@@ -24,13 +24,93 @@ export type { AppRouter };
  *
  * `sessionBoot.bootstrap` 實測應約 200ms 量級，多一個 HTTP 往返可忽略；換來的是**頂欄與主內容不再跟慢外呼共命運**。
  */
+/**
+ * story.parse / generateStoryboard / splitScript / assistant.ask 走獨立連結＋客戶端逾時。
+ * 伺服器短稿預算 ~65s、長稿 ~115s、問答牆鐘 120s。硬上限是 NIM `timeoutMs`
+ *（chatCompletion 把剩餘預算傳給 proxyFetch），不是 Zeabur/Vercel 閘道。
+ * 客戶端 120s 高於伺服器預算，逾時當可恢復錯誤而不是掛死。
+ */
+export const STORY_MUTATION_CLIENT_TIMEOUT_MS = 120_000;
+/** Same wall-clock as server `ASSISTANT_ASK_WALL_MS` — above the server extract budget. */
+export const ASSISTANT_ASK_CLIENT_TIMEOUT_MS = 120_000;
+
+export function isTimedStoryProcedure(path: string): boolean {
+  return path === "story.parse" || path === "story.generateStoryboard" || path === "director.splitScript";
+}
+
+export function isTimedAskProcedure(path: string): boolean {
+  return path === "assistant.ask" || path === "teamAssistant.ask" || path === "globalAssistant.ask";
+}
+
+export function isClientTimedProcedure(path: string): boolean {
+  return isTimedStoryProcedure(path) || isTimedAskProcedure(path);
+}
+
+export function storyMutationTimeoutMessage(path: string): string {
+  if (path === "story.generateStoryboard") return "產生分鏡逾時（已中止）。請再試一次。";
+  if (path === "director.splitScript") return "拆分鏡逾時（已中止）。請再試一次。";
+  return "解析逾時（已中止，沒有寫入）。請再試一次，或把稿再短一點。";
+}
+
+export function askMutationTimeoutMessage(): string {
+  return "這次問答超過兩分鐘還沒答完。請縮短問題或再問一次，不要乾等到閘道切斷。";
+}
+
+export function clientTimedProcedureMessage(path: string): string {
+  return isTimedAskProcedure(path) ? askMutationTimeoutMessage() : storyMutationTimeoutMessage(path);
+}
+
+export function clientTimedProcedureTimeoutMs(path: string): number {
+  return isTimedAskProcedure(path) ? ASSISTANT_ASK_CLIENT_TIMEOUT_MS : STORY_MUTATION_CLIENT_TIMEOUT_MS;
+}
+
+export function isAbortOrTimeoutError(err: unknown): boolean {
+  if (err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError")) return true;
+  if (!(err instanceof Error)) return false;
+  return /aborted|abort|timeout|逾時/i.test(err.message);
+}
+
 function shouldUseStandaloneLink(path: string): boolean {
   return (
     path.startsWith("auth.") ||
     path.startsWith("sessionBoot.") ||
     path.startsWith("generation.status") ||
-    path.startsWith("quota.")
+    path.startsWith("quota.") ||
+    isClientTimedProcedure(path)
   );
+}
+
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const any = (AbortSignal as typeof AbortSignal & {
+    any?: (input: AbortSignal[]) => AbortSignal;
+  }).any;
+  if (typeof any === "function") return any(signals);
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      ctrl.abort();
+      break;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  return ctrl.signal;
+}
+
+export async function fetchWithStoryTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = init?.signal ? mergeAbortSignals([init.signal, timeout]) : timeout;
+  try {
+    return await fetch(input, { ...init, signal });
+  } catch (err) {
+    if (isAbortOrTimeoutError(err)) throw new Error(timeoutMessage);
+    throw err;
+  }
 }
 
 export function createTrpcClient() {
@@ -38,9 +118,36 @@ export function createTrpcClient() {
   return trpc.createClient({
     links: [
       splitLink({
-        condition: (op) => shouldUseStandaloneLink(op.path),
-        true: httpLink({ url, transformer: superjson }),
-        false: httpBatchLink({ url, transformer: superjson }),
+        condition: (op) => isClientTimedProcedure(op.path),
+        true: httpLink({
+          url,
+          transformer: superjson,
+          fetch: (input, init) => {
+            const href = String(input instanceof Request ? input.url : input);
+            const path = href.includes("story.generateStoryboard")
+              ? "story.generateStoryboard"
+              : href.includes("director.splitScript")
+                ? "director.splitScript"
+                : href.includes("teamAssistant.ask")
+                  ? "teamAssistant.ask"
+                  : href.includes("globalAssistant.ask")
+                    ? "globalAssistant.ask"
+                    : href.includes("assistant.ask")
+                      ? "assistant.ask"
+                      : "story.parse";
+            return fetchWithStoryTimeout(
+              input,
+              init,
+              clientTimedProcedureTimeoutMs(path),
+              clientTimedProcedureMessage(path),
+            );
+          },
+        }),
+        false: splitLink({
+          condition: (op) => shouldUseStandaloneLink(op.path),
+          true: httpLink({ url, transformer: superjson }),
+          false: httpBatchLink({ url, transformer: superjson }),
+        }),
       }),
     ],
   });

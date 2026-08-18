@@ -12,6 +12,8 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { carriedPropIdsFor, formatPropDisplayName, type PropOwnerKind } from "../../shared/propOwnership";
+import { applyXiaohuaIdentityLock, isXiaohuaName } from "../../shared/characterIdentityLock";
+import { MAX_GENERATE_CHARACTERS } from "../../shared/cardLimits";
 
 /** 視覺／知識共用的主欄位截短上限（與 agentCore 別名摘要一致） */
 export const CARD_FIELD_MAX = 160;
@@ -85,11 +87,36 @@ export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: s
   if (ordered.length === 0) return "";
   return ordered
     .map((c) => {
-      const base = `外觀鎖定 ${c.name}：${clipCardField(c.appearance)}`;
-      const costume = c.lookCostume?.trim() || c.lookName?.trim() || "";
+      const locked = applyXiaohuaIdentityLock(
+        { name: c.name, appearance: c.appearance, costume: c.lookCostume ?? "" },
+        c.name ?? "",
+      );
+      const appearance = locked.appearance ?? c.appearance;
+      const base = `外觀鎖定 ${c.name}：${clipCardField(appearance)}`;
+      const costume = c.lookCostume?.trim()
+        ? (locked.costume?.trim() || c.lookCostume.trim())
+        : (c.lookName?.trim() || "");
       return costume ? `${base}，造型鎖定：${clipCardField(costume)}` : base;
     })
     .join("；");
+}
+
+/** Bind 小華's card when the shot names her but characterIds omitted her. */
+export async function ensureXiaohuaCharacterIds(
+  projectId: string,
+  characterIds: string[] | undefined,
+  texts: Array<string | null | undefined>,
+): Promise<string[] | undefined> {
+  const blob = texts.filter((text): text is string => Boolean(text)).join("");
+  if (!/小華/.test(blob)) return characterIds;
+  const rows = await db
+    .select({ id: schema.characters.id, name: schema.characters.name })
+    .from(schema.characters)
+    .where(eq(schema.characters.projectId, projectId));
+  const extra = rows.filter((row) => isXiaohuaName(row.name)).map((row) => row.id);
+  if (extra.length === 0) return characterIds;
+  const merged = [...new Set([...(characterIds ?? []), ...extra])].slice(0, MAX_GENERATE_CHARACTERS);
+  return merged;
 }
 
 /** 視覺生成：場景設定錨點（色板＋可選光線；「光影鎖定」指令提高跨鏡光影一致性） */

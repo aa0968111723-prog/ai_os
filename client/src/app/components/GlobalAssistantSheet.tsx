@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useState, type RefObject } 
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
+import { publishNewProjectIdea } from "../../lib/newProjectIdea";
+import { useIsPhone } from "../../lib/viewport";
 
 /**
  * 助手本體延後載入。
@@ -96,6 +98,7 @@ export function GlobalAssistantSheet({
   triggerRef: RefObject<HTMLElement | null>;
 }) {
   const [location, navigate] = useLocation();
+  const isPhone = useIsPhone();
   const projectId = projectIdFromRoute(location);
   // 使用者手動切過的視野；換到另一個專案（或離開專案頁）就回到 route 的預設
   const [scopeOverride, setScopeOverride] = useState<"project" | "group" | null>(null);
@@ -171,12 +174,15 @@ export function GlobalAssistantSheet({
                   onNavigate={goTo}
                   onUseIdeaForNewProject={(ideaTitle) => {
                     // 建專案是寫入動作——這裡只把想法帶到建立流程，不代按確認。
-                    // 真正的建立仍在 Launchpad 的建立專案表單，由使用者自己送出。
+                    // 手機掛的是 MobileHome，不是 Launchpad；#projects 是桌面錨點，
+                    // 導過去會重掛首頁、把剛打開的確認表單卸掉。手機留在 /dashboard。
+                    publishNewProjectIdea(ideaTitle);
                     onClose();
+                    if (isPhone) {
+                      if (location !== "/dashboard") navigate("/dashboard");
+                      return;
+                    }
                     navigate(`/dashboard#projects`);
-                    window.setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("aios:new-project-idea", { detail: { ideaTitle } }));
-                    }, 0);
                   }}
                 />
               </>

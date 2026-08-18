@@ -36,4 +36,9 @@ describe("characters router 契約", () => {
   it("生成帶入上限與 cardLimits 對齊", () => {
     expect(MAX_GENERATE_CHARACTERS).toBe(6);
   });
+
+  it("綁定裝參考圖必須過 assertReferenceImage（同組＋同專案）", () => {
+    expect(source).toContain("assertReferenceImage(input.referenceAssetId, project.groupId, project.id)");
+    expect(source).toContain("assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId)");
+  });
 });

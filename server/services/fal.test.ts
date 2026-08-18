@@ -209,6 +209,26 @@ describe("isMockMode / billingBypassed 真值表(重載模組驗 import 時常�
     expect(m.billingBypassed()).toBe(false);
   });
 
+  it("E2E_MOCK 假素材網址忽略殘留 APP_URL／PUBLIC_DOMAIN，只走本機埠", async () => {
+    vi.stubEnv("E2E_MOCK", "1");
+    vi.stubEnv("APP_URL", "https://prod.example.internal");
+    vi.stubEnv("PUBLIC_DOMAIN", "minio.zeabur.internal");
+    vi.stubEnv("RAILWAY_PUBLIC_DOMAIN", "dead.internal");
+    vi.stubEnv("PORT", "3299");
+    vi.resetModules();
+    const m = await import("./fal");
+    expect(m.resolveMockResultUrl("video")).toBe("http://127.0.0.1:3299/api/mock-asset/video");
+    expect(m.resolveMockResultUrl("image")).toBe("http://127.0.0.1:3299/api/mock-asset/image");
+  });
+
+  it("E2E_MOCK 遇到非 TCP PORT 時退 3000，不拼出壞網址", async () => {
+    vi.stubEnv("E2E_MOCK", "1");
+    vi.stubEnv("PORT", "tcp://named-service");
+    vi.resetModules();
+    const m = await import("./fal");
+    expect(m.resolveMockResultUrl("audio")).toBe("http://127.0.0.1:3000/api/mock-asset/audio");
+  });
+
   it("正式模式拒絕收尾跨環境殘留的 mock request", async () => {
     const m = await load({ FAL_KEY: "key_test" });
     await expect(m.falStatus("fal-ai/flux/dev", "image", "mock_stale")).resolves.toMatchObject({

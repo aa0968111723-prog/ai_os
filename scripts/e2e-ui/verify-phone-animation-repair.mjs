@@ -97,13 +97,56 @@ const main = async () => {
     const net = recordNetwork(page);
     await login(page);
     net.reset();
-    const href = PROJECT_ID ? `${TARGET}/p/${PROJECT_ID}` : `${TARGET}/dashboard`;
-    await page.goto(href, { waitUntil: "domcontentloaded" });
-    await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
     if (!PROJECT_ID) {
-      const projectLink = page.locator("a[href^='/p/']").first();
-      if (await projectLink.count()) await projectLink.click();
+      await page.goto(`${TARGET}/dashboard`, { waitUntil: "domcontentloaded" });
       await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
+      const createBtn = page.getByRole("button", { name: /建立專案/ }).first();
+      check(await createBtn.count() > 0, `${vp.name}: 首頁有建立專案入口`);
+      if (await createBtn.count()) {
+        await createBtn.click();
+        const createSheet = page.getByLabel("建立新專案");
+        check(await createSheet.isVisible().catch(() => false), `${vp.name}: 手機建立表單打開`);
+        if (await createSheet.count()) {
+          await page.screenshot({ path: path.join(OUT, `${vp.name}-create.png`) });
+          await createSheet.getByRole("button", { name: "取消" }).click();
+        }
+      }
+      const projectLink = page.locator("a[href^='/p/']").first();
+      const continueBtn = page.getByRole("button", { name: /繼續|開始寫故事|繼續排分鏡|開始做畫面|繼續生成/ }).first();
+      if (await projectLink.count()) {
+        await projectLink.click();
+      } else if (await continueBtn.count()) {
+        await continueBtn.click();
+      } else {
+        await createBtn.click();
+        const createSheet = page.getByLabel("建立新專案");
+        await createSheet.waitFor({ state: "visible", timeout: 10_000 });
+        await createSheet.getByLabel("專案名稱").fill("overnight-test-phone-repair");
+        await createSheet.getByRole("button", { name: "建立專案" }).click();
+      }
+      await page.waitForURL((u) => u.pathname.startsWith("/p/"), { timeout: 30_000 });
+      // Continue uses a hash, so openFull mounts the workbench. Production cards
+      // and 場景 live on the summary — go back if we landed in the full page.
+      const backToSummary = page.getByRole("button", { name: /回專案摘要/ });
+      if (await backToSummary.waitFor({ state: "visible", timeout: 3_000 }).then(() => true).catch(() => false)) {
+        await backToSummary.click();
+      }
+      await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
+    } else {
+      await page.goto(`${TARGET}/p/${PROJECT_ID}`, { waitUntil: "domcontentloaded" });
+      await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
+    }
+    const scenesEntry = page.getByRole("button", { name: /場景/ });
+    check(await scenesEntry.count() > 0, `${vp.name}: 專案頁有場景入口`);
+    await page.screenshot({ path: path.join(OUT, `${vp.name}-summary.png`) });
+    const assetsEntry = page.getByRole("button", { name: /^素材/ });
+    if (await assetsEntry.count()) {
+      await assetsEntry.click();
+      const uploadBtn = page.getByRole("button", { name: /加入素材/ });
+      check(await uploadBtn.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false), `${vp.name}: 素材抽屜有加入素材`);
+      await page.screenshot({ path: path.join(OUT, `${vp.name}-assets.png`) });
+      const closeAssets = page.getByRole("button", { name: "關閉素材" });
+      if (await closeAssets.count()) await closeAssets.click();
     }
     const projectNav = net.snapshot();
     metrics[vp.name] = { project: projectNav };

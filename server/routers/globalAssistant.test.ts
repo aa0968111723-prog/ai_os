@@ -397,3 +397,19 @@ describe("禁止假進度契約（源碼斷言）", () => {
     expect(replySection).not.toContain("addSource");
   });
 });
+
+describe("global assistant injects persisted story for the current project", () => {
+  const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
+
+  it("loads stories.content via loadPersistedStoryForAssistant into <組現況>", () => {
+    expect(src).toContain("loadPersistedStoryForAssistant");
+    expect(src).toContain("currentStoryBlock");
+    expect(src).toContain("effectiveProjectId");
+  });
+
+  it("binds the same 120s ask deadline as project assistant", () => {
+    expect(src).toContain("bindAssistantAskDeadline");
+    expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
+    expect(src).toContain("已停止（逾時）");
+  });
+});

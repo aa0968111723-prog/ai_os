@@ -23,6 +23,12 @@ import {
   type ResolvedDispatch,
   type TeamAskContext,
 } from "./teamAssistant";
+import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
+import {
+  ASSISTANT_ASK_TIMEOUT_MESSAGE,
+  assistantAskTimedOut,
+  bindAssistantAskDeadline,
+} from "../services/assistantAskBudget";
 import { createProjectCore, listProjectCreationOptions } from "../services/projectCore";
 import { getAgentReadableTable } from "../services/databaseMcp";
 import { executeDatabaseWriteCommand } from "../services/databaseCommand";
@@ -82,7 +88,9 @@ import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
 import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
 import { adoptGenerationVerified } from "../services/consistencyAdopt";
+import { executeAnimationRepairVerified, reviewShotVerified } from "../services/animationRepairExecute";
 import { phoneAnimationCompareQueue } from "../services/phoneAnimation";
+import { pickAnimationCompareItem } from "../../shared/phoneAnimationProjection";
 import { randomUUID } from "node:crypto";
 import { listIntegrations } from "../services/integrations";
 import { createAssistantInteraction, recordAssistantInteractionLifecycle, submitAssistantInteraction } from "../services/assistantInteractionCore";
@@ -678,6 +686,8 @@ export async function runGlobalAsk(
    * 每一則事件都在對應的工作真的發生時才發出（見 services/agentEventStream 檔頭）。
    */
   const stream = new AgentEventStream(input.runId, onEvent);
+  const { signal: askSignal, deadline: askDeadline, dispose: disposeAskDeadline } = bindAssistantAskDeadline(input.signal);
+  try {
   stream.emit({
     type: "agent.started",
     title: "開始處理你的請求",
@@ -737,6 +747,7 @@ export async function runGlobalAsk(
   const backendRuntime = await getCachedBackendRuntime();
   let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame, {
     blockedCapabilityIds: blockedCapabilityIds(backendRuntime),
+    message: input.message,
   });
   executionPlan = executionPlanFromGoal(goalFrame, capabilityMatch, input.message);
   const goalId = semantic.continuation === "NEW_GOAL" || !input.activeGoal ? randomUUID() : input.activeGoal.goalId;
@@ -807,7 +818,7 @@ export async function runGlobalAsk(
 
   // 站級動作的解析素材：成員（mN）＋該組啟用中的專案類型/平台＋可寫資料庫（dbN 的 agentAccess）
   const dbIds = [...dbByRef.values()].map((t) => t.id);
-  const [memberRows, creationOptions, dbAccessRows, currentScenePointers] = await Promise.all([
+  const [memberRows, creationOptions, dbAccessRows, currentScenePointers, currentStoryBlock] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.groupMembers)
@@ -830,6 +841,9 @@ export async function runGlobalAsk(
           .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
           .orderBy(asc(schema.scenes.orderIndex))
       : Promise.resolve([] as Array<{ id: string; title: string }>),
+    effectiveProjectId
+      ? loadPersistedStoryForAssistant(effectiveProjectId)
+      : Promise.resolve(""),
   ]);
   const members: SiteMemberRef[] = memberRows.map((m, i) => ({ ref: `m${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
   const agentAccessById = new Map(dbAccessRows.map((r) => [r.id, r.agentAccess]));
@@ -1104,7 +1118,41 @@ export async function runGlobalAsk(
 
   if (capabilityMatch.capabilityId === "animation_adopt_candidate" && effectiveProjectId) {
     const compare = await phoneAnimationCompareQueue({ auth, projectId: effectiveProjectId });
-    const generationId = compare.items[0]?.generationId;
+    const preferredShotId = typeof activeGoal.resolvedSlots.shotId === "string"
+      ? activeGoal.resolvedSlots.shotId
+      : undefined;
+    const pick = pickAnimationCompareItem(compare.items, preferredShotId);
+    if (pick.status === "none") {
+      return earlySemanticResult("現在沒有可採用的修復候選。請先產生候選，我不會把「採用」說成已完成。");
+    }
+    if (pick.status === "ambiguous") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "SHOT_PICKER",
+        title: "選擇要採用的鏡頭",
+        description: "有多個修復候選。請指定一鏡，我不會默默採用第一個。",
+        capabilityId: capabilityMatch.capabilityId,
+        missingSlot: "shotId",
+        targetProjectId: effectiveProjectId,
+        options: pick.items.map((item) => ({
+          id: item.shotId,
+          label: item.shotLabel,
+          subtitle: "修復候選",
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting" });
+      return earlySemanticResult(interactionRequest.description ?? interactionRequest.title, { interactionRequest });
+    }
+    const generationId = pick.item.generationId;
     if (!generationId) {
       return earlySemanticResult("現在沒有可採用的修復候選。請先產生候選，我不會把「採用」說成已完成。");
     }
@@ -1112,7 +1160,7 @@ export async function runGlobalAsk(
       type: "action.started",
       title: "正在採用動畫修復候選",
       toolName: "animation_adopt_candidate",
-      target: compare.items[0]?.shotLabel,
+      target: pick.item.shotLabel,
     });
     const adopted = await adoptGenerationVerified({ auth, generationId });
     const verified = adopted.verification.status === "verified";
@@ -1121,7 +1169,7 @@ export async function runGlobalAsk(
       title: adopted.verification.message,
       status: verified ? "ok" : "failed",
       toolName: "animation_adopt_candidate",
-      target: compare.items[0]?.shotLabel,
+      target: pick.item.shotLabel,
     });
     stream.finishStep(stepId, {
       type: verified ? "action.completed" : "action.failed",
@@ -1147,6 +1195,168 @@ export async function runGlobalAsk(
       verified
         ? `✓ ${adopted.verification.message}`
         : "採用已送出，但重新讀取未確認分鏡畫面，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.capabilityId === "animation_keep_current" && effectiveProjectId) {
+    const compare = await phoneAnimationCompareQueue({ auth, projectId: effectiveProjectId });
+    const preferredShotId = typeof activeGoal.resolvedSlots.shotId === "string"
+      ? activeGoal.resolvedSlots.shotId
+      : undefined;
+    const pick = pickAnimationCompareItem(compare.items, preferredShotId);
+    if (pick.status === "none") {
+      return earlySemanticResult("現在沒有要比對的修復候選。請先產生候選，我不會把「保留現用」說成已完成。");
+    }
+    if (pick.status === "ambiguous") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "SHOT_PICKER",
+        title: "選擇要保留現用版本的鏡頭",
+        description: "有多個候選。請指定一鏡，我不會默默保留第一個。",
+        capabilityId: capabilityMatch.capabilityId,
+        missingSlot: "shotId",
+        targetProjectId: effectiveProjectId,
+        options: pick.items.map((item) => ({
+          id: item.shotId,
+          label: item.shotLabel,
+          subtitle: "保留現用",
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting" });
+      return earlySemanticResult(interactionRequest.description ?? interactionRequest.title, { interactionRequest });
+    }
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: "正在保留現用版本",
+      toolName: "animation_keep_current",
+      target: pick.item.shotLabel,
+    });
+    const kept = await reviewShotVerified({ auth, sceneId: pick.item.shotId, status: "approved" });
+    const verified = kept.verification.status === "verified";
+    stream.emit({
+      type: "verification.completed",
+      title: kept.verification.message,
+      status: verified ? "ok" : "failed",
+      toolName: "animation_keep_current",
+      target: pick.item.shotLabel,
+    });
+    stream.finishStep(stepId, {
+      type: verified ? "action.completed" : "action.failed",
+      title: verified ? "已保留並重新讀取確認" : "保留未通過驗證",
+      status: verified ? "ok" : "failed",
+      toolName: "animation_keep_current",
+    });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "animation_keep_current",
+      handler: "scenes.review",
+      targetType: "shot",
+      targetIds: [kept.shotId],
+      databaseRecordIds: [kept.shotId],
+      verificationMethod: "read_back",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: kept.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ ${kept.verification.message}`
+        : "保留已送出，但重新讀取未確認審核狀態，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.capabilityId === "animation_execute_repair" && effectiveProjectId) {
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: "正在執行動畫修復階段",
+      toolName: "animation_execute_repair",
+    });
+    const executed = await executeAnimationRepairVerified({ auth, projectId: effectiveProjectId });
+    if (executed.status === "empty") {
+      stream.finishStep(stepId, {
+        type: "action.failed",
+        title: "沒有可執行的修復計畫",
+        status: "failed",
+        toolName: "animation_execute_repair",
+      });
+      return earlySemanticResult(`${executed.reason} 我不會把「執行修復」說成已完成。`);
+    }
+    if (executed.status === "clarify") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "HUMAN_INPUT_FORM",
+        title: "還需要確認修復範圍",
+        description: executed.question,
+        capabilityId: capabilityMatch.capabilityId,
+        targetProjectId: effectiveProjectId,
+        options: executed.options.map((option) => ({
+          id: option.id,
+          label: option.label,
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.finishStep(stepId, {
+        type: "action.failed",
+        title: "修復範圍還不清楚",
+        status: "waiting",
+        toolName: "animation_execute_repair",
+      });
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      return earlySemanticResult(executed.question, { interactionRequest });
+    }
+    const verified = executed.verification.status === "verified";
+    stream.emit({
+      type: "verification.completed",
+      title: executed.verification.message,
+      status: verified ? "ok" : "failed",
+      toolName: "animation_execute_repair",
+      resultCount: executed.generationIds.length,
+    });
+    stream.finishStep(stepId, {
+      type: verified ? "action.completed" : "action.failed",
+      title: verified ? "已登記修復生成" : "修復未通過驗證",
+      status: verified ? "ok" : "failed",
+      toolName: "animation_execute_repair",
+      resultCount: executed.generationIds.length,
+    });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "animation_execute_repair",
+      handler: "creativeContext.executeAnimationStage",
+      targetType: "shot",
+      targetIds: executed.proposal.affectedShotIds,
+      databaseRecordIds: executed.generationIds,
+      verificationMethod: "job_registered",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: executed.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ ${executed.verification.message}${executed.failed > 0 ? `；另有 ${executed.failed} 段失敗` : ""}`
+        : executed.verification.message,
       { executionReceipts: [receipt] },
     );
   }
@@ -1372,7 +1582,7 @@ export async function runGlobalAsk(
       siteRefs,
       siteActionProposalsForPlan(executionPlan, [...deterministicUrlProposal, ...mockProposals]),
     );
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const siteActions = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
     const terminalStatus = executionTerminalStatus(
@@ -1455,9 +1665,12 @@ ${(() => {
     ? `
 ${formatAssistantPageContext(input.pageContext)}`
     : "";
-  const currentProjectBlock = currentProjectRef
-    ? `\n使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
-    : "";
+  const currentProjectBlock = [
+    currentProjectRef
+      ? `使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
+      : "",
+    currentStoryBlock,
+  ].filter(Boolean).map((line) => `\n${line}`).join("");
   const selectedIds = new Set(input.pageContext?.selectedEntityIds ?? []);
   const selectedSceneLabels = currentScenePointers
     .map((scene, index) => ({ scene, sceneNo: index + 1 }))
@@ -1511,7 +1724,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
   try {
     const outcome = await runToolLoop({
       maxToolRounds: MAX_TOOL_ROUNDS,
-      signal: input.signal,
+      signal: askSignal,
       buildPrompt,
       llm: async (prompt, round, forceFinal) => {
         if (traceSessionId) {
@@ -1526,7 +1739,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         const budget = parseGoalBudgetConstraints(goalFrame.constraints ?? []);
         const qualityMode: AgentPlannerMode = budget.freeOnly ? "nim" : (input.mode ?? "nim");
         const isPaidMode = qualityMode !== "nim";
-        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: input.signal });
+        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: askSignal });
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;
@@ -1629,6 +1842,13 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     });
 
     if (outcome.aborted || !outcome.reply) {
+      if (assistantAskTimedOut(askDeadline, input.signal)) {
+        stream.emit({ type: "agent.failed", title: "已停止（逾時）", status: "failed" });
+        if (traceSessionId) {
+          await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "failed", summary: ASSISTANT_ASK_TIMEOUT_MESSAGE }).catch(() => undefined);
+        }
+        return withTrace({ answer: ASSISTANT_ASK_TIMEOUT_MESSAGE, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: outcome.steps, mock: false, rationale: undefined, contextUsed: [], ...base });
+      }
       stream.emit({ type: "agent.failed", title: "已停止（連線中斷）", status: "skipped" });
       if (traceSessionId) {
         await finalizeSiteTraceSession({ sessionId: traceSessionId, status: "stopped", summary: "用戶端中斷連線，提早收工" }).catch(() => undefined);
@@ -1641,7 +1861,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       ...deterministicUrlProposal,
       ...(outcome.usedFallback ? [] : reply.siteActions ?? []),
     ]));
-    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, input.signal);
+    const direct = await executeDirectSiteActions(auth, executionPlan, proposedSiteActions, stream, askSignal);
     const pendingConfirmation = proposedSiteActions.filter((action) => !direct.executedActions.has(action));
     const requiresVerifiedWrite = goalRequiresVerifiedExecution(goalFrame.desiredOutcome);
     const terminalStatus = executionTerminalStatus(
@@ -1655,7 +1875,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
     const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
     emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
-      completedTitle: okSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
+      completedTitle: okSources.length ? `已讀取 ${okSources.length} 個來源` : "已回答（沒有讀取站內資料）",
       completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
       resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
       resultSummary: [
@@ -1703,12 +1923,17 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     await refund(auth.user.id, groupId, ASK_COST_POINTS, "全站助手失敗退回");
     // 用戶端斷線時 completeText 以「已取消」拋出——那是使用者走了，不是助手壞了：
     // trace 記 stopped 而非 failed，也不用把「已取消」當回答塞回死連線
-    const aborted = input.signal?.aborted === true;
+    const timedOut = assistantAskTimedOut(askDeadline, input.signal);
+    const aborted = askSignal.aborted === true && !timedOut;
     if (traceSessionId) {
       await finalizeSiteTraceSession({
         sessionId: traceSessionId,
         status: aborted ? "stopped" : "failed",
-        summary: aborted ? "用戶端中斷連線，提早收工" : err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
+        summary: aborted
+          ? "用戶端中斷連線，提早收工"
+          : timedOut
+            ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+            : err instanceof Error ? err.message.slice(0, 500) : "未知錯誤",
       }).catch(() => undefined);
     }
     if (aborted) {
@@ -1717,7 +1942,9 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     }
     // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功。
     // steps 用迴圈外收集的那份：中途炸掉不該讓「查過什麼」從回覆裡消失。
-    const answer = err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
+    const answer = timedOut
+      ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+      : err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
     // 卡住的那一步要在軌跡上留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
     if (pendingToolStep) {
       stream.finishStep(pendingToolStep, {
@@ -1736,6 +1963,9 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
       description: collectedSteps.length ? `中斷前已完成 ${collectedSteps.length} 次查詢` : undefined,
     });
     return withTrace({ answer, dispatches: [], actions: [], siteActions: [], executedSiteActions: [], steps: collectedSteps, mock: false, rationale: undefined, contextUsed: [], ...base });
+  }
+  } finally {
+    disposeAskDeadline();
   }
 }
 

@@ -211,8 +211,11 @@ export function oneClickPrimaryLabel(opts: {
   pending: boolean;
   hasBatch: boolean;
   modelKind?: OutputKind | null;
+  /** 0 shots: do not advertise generate — that path silently no-ops. */
+  sceneCount?: number;
 }): string {
   if (opts.pending) return "準備生成中…";
+  if ((opts.sceneCount ?? 1) <= 0) return "先解析出分鏡";
   const unit = oneClickOutputUnit(opts.modelKind);
   return opts.hasBatch ? `繼續生成${unit}` : `生成${unit}`;
 }

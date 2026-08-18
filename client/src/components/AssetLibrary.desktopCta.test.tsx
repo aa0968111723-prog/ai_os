@@ -259,6 +259,28 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
     });
   });
 
+  it("does not mount <video> in the grid; play opens the lightbox", async () => {
+    hasDesktopBridge.mockReturnValue(false);
+    const user = userEvent.setup();
+    render(<AssetLibrary projectId={PROJECT_ID} />);
+    expect(document.querySelector(".asset-grid video")).toBeNull();
+    expect(screen.queryByTestId("asset-video")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "播放 scene-cut" }));
+    expect(screen.getByRole("dialog", { name: /scene-cut/ })).toBeInTheDocument();
+    expect(screen.getByTestId("asset-video")).toBeInTheDocument();
+  });
+
+  it("keeps the previous asset page while raising limit", () => {
+    hasDesktopBridge.mockReturnValue(false);
+    render(<AssetLibrary projectId={PROJECT_ID} />);
+    const opts = assetsQuery.mock.calls.at(-1)?.[1] as {
+      staleTime?: number;
+      placeholderData?: (previous: unknown) => unknown;
+    };
+    expect(opts.staleTime).toBe(30_000);
+    expect(opts.placeholderData?.("prev")).toBe("prev");
+  });
+
   it("passes the selected editorId from the desktop picker", async () => {
     hasDesktopBridge.mockReturnValue(true);
     detectDesktopEditors.mockResolvedValue([

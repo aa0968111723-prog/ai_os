@@ -15,16 +15,26 @@ const MOCK_DELAY_MS = Number(process.env.E2E_MOCK_DELAY_MS ?? 8000);
 
 const mockJobs = new Map<string, { doneAt: number; kind: OutputKind; prompt: string }>();
 
-/** 測試假素材由自家伺服器供應(/api/mock-asset/*):e2e 完全離線可測、交付包也抓得到 */
-function mockResultUrl(kind: OutputKind): string {
-  // 對外 base 平台中立：APP_URL 沒設時退「平台注入的公開網域」，再退 localhost——避免把
-  // localhost 存進 DB 變永久壞連結。通用變數 PUBLIC_DOMAIN 優先，相容舊的 RAILWAY_PUBLIC_DOMAIN
-  // 後備（未設 PUBLIC_DOMAIN 時自動沿用），不再寫死任何特定平台。
+function listenPort(): number {
+  const parsed = Number(process.env.PORT);
+  return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : 3000;
+}
+
+/**
+ * 假生成成品網址。E2E_MOCK 必須走本機 loopback，忽略殘留的 APP_URL／PUBLIC_DOMAIN——
+ * 那些在雲端 VM 常指向外網或 minio.*.internal，persist 一抓就 404，分鏡沒畫面、連戲全空。
+ */
+export function resolveMockResultUrl(kind: OutputKind): string {
+  const path = kind === "video" ? "video" : kind === "audio" ? "audio" : "image";
+  if (MOCK) return `http://127.0.0.1:${listenPort()}/api/mock-asset/${path}`;
   const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
   const fallback = platformDomain ? `https://${platformDomain}` : "";
-  const base = process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
-  const path = kind === "video" ? "video" : kind === "audio" ? "audio" : "image";
+  const base = process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${listenPort()}`;
   return `${base}/api/mock-asset/${path}`;
+}
+
+function mockResultUrl(kind: OutputKind): string {
+  return resolveMockResultUrl(kind);
 }
 
 export function isMockMode(): boolean {

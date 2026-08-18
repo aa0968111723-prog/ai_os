@@ -34,6 +34,9 @@ import {
 } from "./studioTools";
 import type { NewShotKind } from "./NewShotMenu";
 import type { SketchPreview } from "./sketchReplay";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
+import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
+import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -77,8 +80,16 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const layout = useStudioLayout();
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-  const scenes = trpc.scenes.listByProject.useQuery({ projectId });
+  const scenes = trpc.scenes.listByProject.useQuery(
+    { projectId },
+    {
+      refetchOnMount: "always",
+      retry: (count, err) => (isBootNotReadyError(err) ? count < BOOT_NOT_READY_RETRY_LIMIT : count < 1),
+      retryDelay: queryRetryDelay,
+    },
+  );
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
+  const shotsLoading = scenes.isLoading && !scenes.data;
   // 場（story_scenes）：Top Bar 的麵包屑要顯示「這一鏡屬於哪一場」
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
 
@@ -86,6 +97,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   // 白板本體、切鏡與存檔都在 useBoardSession（會弄丟畫作的邏輯集中在那裡，並有測試盯著）
   const { board, activeShotId, draftIds, storageFull, switchTo, pushStroke, undo, redo, clear, markSaved } =
     useBoardSession(projectId, boardSize, layout);
+  const activeShotIdRef = useRef(activeShotId);
+  activeShotIdRef.current = activeShotId;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   const shot = shots.find((s) => s.id === activeShotId) ?? null;
   const shotIndex = shot ? shots.findIndex((s) => s.id === shot.id) : -1;
 
@@ -235,22 +250,59 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   pickToolRef.current = pickTool;
 
   // ── 分鏡表操作 ────────────────────────────────────────────
-  const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
+  const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId: projectIdRef.current }); };
   const addShot = trpc.scenes.addDraft.useMutation({
     onSuccess: (created) => {
-      invalidateScenes();
-      if (created?.id) switchTo(created.id);
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: created?.projectId,
+        followSelection: true,
+        mountedShotId: activeShotIdRef.current,
+        originShotId: activeShotIdRef.current,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+      if (ack.followCreated && created?.id) switchTo(created.id);
     },
   });
-  const move = trpc.scenes.move.useMutation({ onSuccess: invalidateScenes });
-  const reorder = trpc.scenes.reorder.useMutation({ onSuccess: invalidateScenes });
+  const move = trpc.scenes.move.useMutation({
+    onSuccess: (result) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: result.projectId,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+    },
+  });
+  const reorder = trpc.scenes.reorder.useMutation({
+    onSuccess: (_result, variables) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: variables.projectId,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+    },
+  });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
   const insertAfter = trpc.scenes.insertAfter.useMutation({
-    onSuccess: (created) => {
-      invalidateScenes();
-      if (created?.id) switchTo(created.id);
+    onSuccess: (created, variables) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: created?.projectId,
+        mountedShotId: activeShotIdRef.current,
+        originShotId: variables.sceneId,
+        followSelection: true,
+      });
+      // Same-project list refresh is fine; follow the new row only if still on origin.
+      if (ack.applyInvalidate) invalidateScenes();
+      if (ack.followCreated && created?.id) switchTo(created.id);
     },
   });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -263,9 +315,15 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       return;
     }
     if (kind === "continue") {
-      // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白
-      if (shot) insertAfter.mutate({ sceneId: shot.id });
-      else addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白。
+      // 連點同一鏡要串新 id，否則同一 sceneId 連打是 LIFO（與 SceneList 同一條）。
+      if (shot) {
+        // Per-origin tails: switching the selected shot must not reset A's
+        // chain. Resetting here used to make remaining A clicks LIFO again.
+        insertQueueRef.current?.enqueue(shot.id);
+      } else {
+        addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });
+      }
       return;
     }
     // AI 兩條：切到 Inspector 的 AI 分頁，動作本身在那裡（帶著這一鏡的上下文）
@@ -382,6 +440,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     <ShotStrip
       layout={layout}
       shots={shots}
+      loading={shotsLoading}
       activeId={activeShotId}
       draftIds={draftIds}
       canEdit={canEdit}
@@ -578,7 +637,12 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
               sketch: sketchBridge,
               onApplyPrompt: (text: string) => {
                 if (!shot) return;
-                updateShot.mutate({ sceneId: shot.id, prompt: text });
+                updateShot.mutate({
+                  sceneId: shot.id,
+                  prompt: text,
+                  expectedRev: shot.rev,
+                  baseline: { prompt: shot.prompt ?? null },
+                });
                 setInspectorTab("frame");
               },
             }}
@@ -587,6 +651,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
 
         <StoryboardTimeline
           shots={shots}
+          loading={shotsLoading}
           activeId={activeShotId}
           draftIds={draftIds}
           canEdit={canEdit}
@@ -596,7 +661,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onMove={(id, direction) => move.mutate({ sceneId: id, direction })}
           onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
           onNewShot={createShot}
-          onDuplicate={(id) => insertAfter.mutate({ sceneId: id, duplicate: true })}
+          onDuplicate={(id) => insertQueueRef.current?.enqueue(id, { duplicate: true })}
           onDelete={(id) => removeShot.mutate({ sceneId: id })}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />
@@ -658,7 +723,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         <div className="studio__bar-group studio__panel-tabs">
           <Button size="sm" variant={sheet === "shots" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "shots" ? "none" : "shots"))}>
             <Icon name="Film" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            分鏡{shots.length ? `（${shots.length}）` : ""}
+            分鏡{shotsLoading ? "（載入中）" : shots.length ? `（${shots.length}）` : ""}
           </Button>
           <Button size="sm" variant={sheet === "ai" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "ai" ? "none" : "ai"))}>
             <Icon name="Sparkles" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />

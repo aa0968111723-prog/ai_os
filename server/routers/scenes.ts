@@ -61,7 +61,8 @@ import {
   type SceneVersionGenerationRow,
 } from "../../shared/sceneVersions";
 import { lockSceneOrder } from "../services/locks";
-import { applyWithRevision } from "../services/revisionGuard";
+import { restoreOrderPlan } from "../../shared/sceneRestoreOrder";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { softDeleteScenesCore } from "../services/sceneWriteCore";
@@ -72,6 +73,8 @@ import {
   shotCameraSchema,
   shotPerformanceSchema,
 } from "../../shared/story";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
@@ -166,6 +169,34 @@ async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Cont
   requireGroup(ctx.auth, project.groupId);
   if (forEdit) await assertProjectEditable(ctx.auth, project);
   return project;
+}
+
+async function applySceneVisualPatch(
+  scene: typeof schema.scenes.$inferSelect,
+  patch: Record<string, unknown>,
+) {
+  delete patch.rev;
+  const baseline: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) baseline[key] = (scene as Record<string, unknown>)[key];
+  const { row } = await applyWithRevisionTrpc({
+    entity: "scene",
+    table: schema.scenes,
+    idColumn: schema.scenes.id,
+    revColumn: schema.scenes.rev,
+    row: scene,
+    patch,
+    expectedRev: scene.rev,
+    baseline,
+    extraWhere: isNull(schema.scenes.deletedAt),
+    reload: async () => {
+      const [fresh] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+      return fresh;
+    },
+  });
+  return row;
 }
 
 /**
@@ -283,6 +314,20 @@ export const scenesRouter = router({
         narrationUrl: narrationAssets.url,
         // 來源生成 id：前端「已加入分鏡」用穩定鍵比對（assetUrl 會在成品落地時被改寫，比 URL 會誤判）
         generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
+        /**
+         * 這一鏡最新一筆已完成的畫面生成。generateInto 不移動 current 指標，
+         * 所以 assetId 可能仍是空／舊圖——SceneList 用它畫「採用這一版」。
+         * 只查 generations（scene_id 有索引），不掃 assets.meta。
+         */
+        latestDoneVisualGenId: sql<string | null>`(
+          select g.id from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id}
+            and (g.scene_role is null or g.scene_role = 'visual')
+            and g.status = 'done'
+            and g.result_url is not null
+          order by g.created_at desc, g.id desc
+          limit 1
+        )`,
         // 該格是否有進行中的就地生成（草稿→出圖進度指示）。用純量子查詢而非 join，避免同格多筆
         // 進行中生成把分鏡列乘開成重複列；兩個子查詢用相同排序取同一筆，pendingGenId 與 status 一致。
         // 只看「畫面(visual)」生成——排除 narration，否則配音生成中會誤把主畫面標成生成中、鎖住重生鈕
@@ -669,32 +714,19 @@ export const scenesRouter = router({
               patch.camera = frozen.camera ?? null;
               patch.performance = frozen.performance ?? null;
               patch.action = frozen.action ?? null;
-              // 動到 rev-protected 的欄位就要推進 rev，否則同時在編這一鏡的夥伴
-              // 帶著舊 expectedRev 存檔仍會成功，樂觀併發守衛形同虛設。
-              patch.rev = scene.rev + 1;
             }
           }
         }
       }
 
-      /*
-       * patch.rev 只有在「同步採用版本的鏡頭語言」真的動到 camera/performance/action
-       * 時才會設定。那些是 rev-protected 欄位，所以那一路必須是真正的 CAS：
-       * 只帶 set(rev: scene.rev + 1) 而 where 只比對 id，等於用一個讀取當下的舊值去寫，
-       * 夥伴若在讀與寫之間存過檔，他的修改會被這次覆蓋掉，而且 rev 停在同一個數字——
-       * 樂觀併發守衛在它唯一該生效的地方失效。加上 rev 條件後，撞車就是 0 列，
-       * 明確回 CONFLICT 讓呼叫端重讀，而不是靜默蓋掉別人的字。
-       */
-      const guarded = patch.rev !== undefined
-        ? and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt), eq(schema.scenes.rev, scene.rev))
-        : and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt));
-      const [updated] = await db.update(schema.scenes).set(patch).where(guarded).returning();
-      if (!updated) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: patch.rev !== undefined
-            ? "夥伴剛改過這一鏡的鏡頭語言，請重新整理後再採用這一版"
-            : "這一鏡剛被夥伴刪除了，沒有切換版本",
+      const updated = await applySceneVisualPatch(scene, patch);
+      if (target === "assetId") {
+        const genId = (asset.meta as { generationId?: unknown } | null)?.generationId;
+        const { scheduleReconcileAfterVisualAdopt } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterVisualAdopt({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: typeof genId === "string" ? genId : null,
         });
       }
       return { ...updated, adoptedDirection };
@@ -737,7 +769,15 @@ export const scenesRouter = router({
               // 舊資料沒有 sceneRole（那時只有旁白一條音訊路徑），維持原本的落點
               ? { narrationAssetId: asset.id }
               : { assetId: asset.id };
-      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
+      const updated = await applySceneVisualPatch(scene, patch);
+      if (!("narrationAssetId" in patch) && !("ambienceAssetId" in patch)) {
+        const { scheduleReconcileAfterVisualAdopt } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterVisualAdopt({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: gen.id,
+        });
+      }
       return updated;
     }),
 
@@ -765,10 +805,10 @@ export const scenesRouter = router({
         // 以鎖內重讀的列為準（入口讀到的 scene 可能已被並發 move 換位）
         const cur = all[idx];
         const swapWith = input.direction === "up" ? all[idx - 1] : all[idx + 1];
-        if (!cur || !swapWith) return { ok: true }; // 已在頂/底（或已被並發刪除）
+        if (!cur || !swapWith) return { ok: true, projectId: scene.projectId }; // 已在頂/底（或已被並發刪除）
         await tx.update(schema.scenes).set({ orderIndex: swapWith.orderIndex }).where(eq(schema.scenes.id, cur.id));
         await tx.update(schema.scenes).set({ orderIndex: cur.orderIndex }).where(eq(schema.scenes.id, swapWith.id));
-        return { ok: true };
+        return { ok: true, projectId: scene.projectId };
       });
     }),
 
@@ -776,6 +816,8 @@ export const scenesRouter = router({
    * 在某一鏡之後插入一格（整理分鏡用）。
    *
    * 先前只有「加到最後」＋↑↓ 一路搬——想在第 3 鏡後面補一格，要按十幾次箭頭。
+   * 同一 sceneId 連打 N 次＝每次都插在錨點正後方，先插入的會被後來的往下推（LIFO）。
+   * 產品要的「點擊順序」由前端 insertAfterQueue 串新 id；這裡只保證鎖內不撞 orderIndex。
    * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定；
    * **不複製成品**（assetId／narrationAssetId）：那是花過點數的產物，複製一份引用
    * 會讓兩格指向同一素材，刪一格就互相影響。新格一律從 todo 開始。
@@ -829,6 +871,7 @@ export const scenesRouter = router({
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
             propIds: dup ? cur.propIds : null,
+            // 造型／鏡頭語言／所屬場同屬設定：漏複製的話複本會用角色預設外觀、丟運鏡，連戲直接分岔
             lookIds: dup ? cur.lookIds : null,
             camera: dup ? cur.camera : null,
             performance: dup ? cur.performance : null,
@@ -852,15 +895,31 @@ export const scenesRouter = router({
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "回收桶裡找不到這一格了（可能已被夥伴永久刪除）" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能還原分鏡
-    // 修 R3-BINV-01：還原時把 orderIndex 重排到尾端，別沿用被刪當下的舊序號——否則與現有分鏡撞出
-    // 重複 orderIndex，破壞排序唯一性（move/reorder 交換失準）。交易＋lockSceneOrder 序列化同專案建格。
+    // 還原回被刪當下的 orderIndex。空槽直接坐下；槽已被後來插入佔走時，
+    // 與 insertAfter 同一套由後往前 +1，避免重複序號。交易＋lockSceneOrder。
     await db.transaction(async (tx) => {
       await lockSceneOrder(tx, scene.projectId);
-      const [{ maxOrder }] = await tx
-        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), -1)` })
+      const active = await tx
+        .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)));
-      await tx.update(schema.scenes).set({ deletedAt: null, orderIndex: Number(maxOrder) + 1 }).where(eq(schema.scenes.id, input.sceneId));
+        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const plan = restoreOrderPlan({
+        originalOrderIndex: scene.orderIndex,
+        activeOrderIndexes: active.map((row) => row.orderIndex),
+      });
+      if (plan.shiftFrom != null) {
+        for (const later of active.filter((row) => row.orderIndex >= plan.shiftFrom!).reverse()) {
+          await tx
+            .update(schema.scenes)
+            .set({ orderIndex: later.orderIndex + 1 })
+            .where(eq(schema.scenes.id, later.id));
+        }
+      }
+      await tx
+        .update(schema.scenes)
+        .set({ deletedAt: null, orderIndex: plan.orderIndex })
+        .where(eq(schema.scenes.id, input.sceneId));
     });
     return { ok: true };
   }),
@@ -891,12 +950,8 @@ export const scenesRouter = router({
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
       await getProjectChecked(ctx, scene.projectId, true);
-      const [row] = await db
-        .update(schema.scenes)
-        .set({ reviewStatus: input.status })
-        .where(eq(schema.scenes.id, scene.id))
-        .returning({ id: schema.scenes.id, reviewStatus: schema.scenes.reviewStatus });
-      return row;
+      const row = await applySceneVisualPatch(scene, { reviewStatus: input.status });
+      return { id: row.id, reviewStatus: row.reviewStatus };
     }),
 
   /**
@@ -911,6 +966,7 @@ export const scenesRouter = router({
       z.object({
         sceneId: z.string().uuid(),
         aspects: z.array(z.enum(CONTINUITY_ASPECTS)).min(1),
+        expectedRev: z.number().int().min(0).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -937,7 +993,26 @@ export const scenesRouter = router({
 
       const { patch, changes } = buildContinuityPatch(prev, cur, input.aspects);
       if (!changes.length) return { ok: true as const, changed: false, changes: [] as string[] };
-      await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, cur.id));
+      const baseline: Record<string, unknown> = {};
+      for (const key of Object.keys(patch)) baseline[key] = (cur as Record<string, unknown>)[key];
+      await applyWithRevisionTrpc({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: cur,
+        patch,
+        expectedRev: input.expectedRev ?? cur.rev,
+        baseline,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db
+            .select()
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.id, cur.id), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
       return { ok: true as const, changed: true, changes };
     }),
 
@@ -1161,7 +1236,7 @@ export const scenesRouter = router({
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       // 條件寫入：rev 撞了就先試逐欄合併，真的撞同一欄才丟結構化 CONFLICT（見 revisionGuard）。
       // 不帶 expectedRev 的呼叫端行為與過去相同，只是 rev 仍會遞增。
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "scene",
         table: schema.scenes,
         idColumn: schema.scenes.id,
@@ -1299,7 +1374,17 @@ export const scenesRouter = router({
           }
           Object.assign(patch, cardPatch);
           if (Object.keys(patch).length === 0) continue;
-          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
+          const [wrote] = await tx
+            .update(schema.scenes)
+            .set({ ...patch, rev: sql`${schema.scenes.rev} + 1` })
+            .where(and(eq(schema.scenes.id, row.id), eq(schema.scenes.rev, row.rev), isNull(schema.scenes.deletedAt)))
+            .returning({ id: schema.scenes.id });
+          if (!wrote) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "分鏡在你編輯期間被夥伴改過內容，這次沒有寫回。請取消編輯、重新打開全文再改一次",
+            });
+          }
           updated += 1;
         }
 
@@ -1354,6 +1439,7 @@ export const scenesRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
+        lookIds: input.lookIds,
       });
       // 只覆寫真的送上來的那幾排（空陣列→null 的正規化仍由 sceneCardColumns 統一做）
       const columns = sceneCardColumns({
@@ -1391,11 +1477,12 @@ export const scenesRouter = router({
       if (input.characterIds !== undefined) patch.characterIds = columns.characterIds;
       if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
       if (input.propIds !== undefined) patch.propIds = columns.propIds;
+      // 只送 characterIds 的路徑（Shot Inspector / 分鏡表）也必須清掉孤兒造型
       if (input.lookIds !== undefined || looksChanged(scene.lookIds, nextLookIds)) {
         patch.lookIds = nextLookIds;
       }
       if (Object.keys(patch).length === 0) return scene; // 什麼都沒送＝沒事可做
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "scene",
         table: schema.scenes,
         idColumn: schema.scenes.id,
@@ -1453,7 +1540,7 @@ export const scenesRouter = router({
       // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
       // 表演（表情/視線）。Project 風格、角色/場景/道具錨點與本鏡造型（lookIds）
       // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的文字上下文。
-      const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
+      const prompt = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(scene, model)));
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
@@ -1462,6 +1549,11 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      const characterIds = await ensureXiaohuaCharacterIds(
+        scene.projectId,
+        cards.characterIds,
+        [scene.title, prompt, scene.action, scene.dialogue],
+      );
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -1471,7 +1563,7 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
-        characterIds: cards.characterIds,
+        characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         // 本鏡造型：進錨點層與角色身份同句同強度（Identity 不變、Look 逐鏡換）
@@ -1481,7 +1573,21 @@ export const scenesRouter = router({
         preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
-      return { generationId: gen.id };
+      void import("../services/agentRunReconcile")
+        .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
+          reconcileAgentRunsAfterSceneGenerate({
+            projectId: scene.projectId,
+            sceneId: scene.id,
+            generationId: gen.id,
+          }),
+        )
+        .catch((err) =>
+          console.warn(
+            "[scenes.generateInto] agent-run reconcile failed:",
+            err instanceof Error ? err.message : err,
+          ),
+        );
+      return { generationId: gen.id, modelId: gen.modelId };
     }),
 
   /**
@@ -1535,6 +1641,11 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      const characterIds = await ensureXiaohuaCharacterIds(
+        scene.projectId,
+        cards.characterIds,
+        [scene.title, input.prompt, scene.action, scene.dialogue],
+      );
       // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
       if (input.parentAssetId) {
         const [parent] = await db
@@ -1558,8 +1669,10 @@ export const scenesRouter = router({
         const virtualScene = compiled
           ? { ...scene, camera: compiled.camera, performance: compiled.performance, action: compiled.action }
           : scene;
-        const base = input.prompt ?? (await buildShotContextPrompt(virtualScene, model));
-        const prompt = compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base;
+        const base = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(virtualScene, model)));
+        const prompt = lockXiaohuaGenerationPrompt(
+          compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base,
+        );
         return { row, compiled, prompt };
       }));
       const empty = slots.find((slot) => !slot.prompt.trim());
@@ -1587,7 +1700,7 @@ export const scenesRouter = router({
           ...(slot.compiled?.direction.keep?.length ? { keep: slot.compiled.direction.keep } : {}),
           ...(input.parentAssetId ? { parentAssetId: input.parentAssetId } : {}),
         },
-        characterIds: cards.characterIds,
+        characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         lookIds: scene.lookIds ?? undefined,

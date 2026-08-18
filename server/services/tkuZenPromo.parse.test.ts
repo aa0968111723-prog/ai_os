@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+import {
+  TKU_ZEN_PROMO_SCRIPT,
+  TKU_ZEN_SHOTLIST_FIRST_PARSE,
+  TKU_ZEN_SHOTLIST_LINES,
+  tkuZenHasForbidden,
+  tkuZenSpokenDialogue,
+} from "../../shared/fixtures/tkuZenPromo";
+import { mockStoryExtract } from "./storyParse";
+
+describe("淡江禪學社 parse 150s fallback", () => {
+  it("extracts only 小華 and 禪定龜龜 from the SHOTLIST script", () => {
+    const plan = mockStoryExtract(TKU_ZEN_PROMO_SCRIPT);
+    expect(plan.characters.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
+    expect(plan.characters[0]?.appearance).toContain("大二化工");
+    expect(plan.characters[0]?.appearance).toContain("粉橘短髮女孩");
+    expect(plan.characters[0]?.appearance).not.toContain("年輕男性");
+    expect(plan.characters[0]?.costume ?? "").toMatch(/白帽T|短髮/);
+    expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["校門口", "夕陽"]));
+    expect(plan.scenes).toHaveLength(6);
+    const spoken = plan.scenes
+      .flatMap((scene) => scene.shots)
+      .map((shot) => tkuZenSpokenDialogue(`${shot.dialogue ?? ""}\n${shot.voiceover ?? ""}\n${shot.prompt ?? ""}`))
+      .join("\n");
+    expect(spoken).toContain("我是大二化工系的小華");
+    expect(spoken).toContain("真的真的");
+    expect(spoken).toContain("禪定龜龜");
+    expect(tkuZenHasForbidden(JSON.stringify(plan))).toEqual([]);
+    const blob = JSON.stringify(plan);
+    for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
+    expect(blob).not.toMatch(/克難坡|走上克難坡|七幕|針織外套|安倢|媽媽/);
+  });
+
+  it("mock parse of the A–F paste is 6 scenes, never 7", () => {
+    const plan = mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE);
+    expect(plan.scenes).toHaveLength(6);
+    expect(plan.scenes).not.toHaveLength(7);
+  });
+});

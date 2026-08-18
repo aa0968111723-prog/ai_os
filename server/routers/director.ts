@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { loadProjectCardAliases, resolveSceneCardRefs, sceneCardColumns } from "../services/sceneCards";
+import { assertGenerationEntityIds } from "../services/generationCore";
 import { worldviewSchema, formatWorldviewForAi, formatActsOutline, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
@@ -18,6 +19,7 @@ import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
+import { lockXiaohuaCopyFields } from "../../shared/characterIdentityLock";
 import {
   expandSketch,
   sketchBoardStateBlock,
@@ -171,7 +173,7 @@ function mockSuggestions(wv: Worldview, _kind: string): DirectorSuggestion[] {
 export interface SplitScriptCoreInput {
   userId: string;
   projectId: string;
-  /** 要拆的腳本全文；不給（或全空白）就退回知識庫（腳本／開示稿）全文 */
+  /** 要拆的腳本全文；不給（或全空白）先讀 stories.content，再退知識庫 */
   scriptText?: string;
   /**
    * 用世界觀的三幕大綱當腳本來源（分鏡區「用大綱拆分鏡」）。
@@ -190,9 +192,35 @@ export interface SplitScriptCoreInput {
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
+export type SplitScriptSourceKind = "paste" | "outline" | "story" | "knowledge";
+
+/**
+ * 拆分鏡來源：貼上 > 大綱旗標 > 已儲存故事 > 知識庫。
+ * 「把目前腳本拆成分鏡」必須吃 stories.content，不能只看知識庫。
+ */
+export function pickSplitScriptSource(input: {
+  pasted?: string | null;
+  fromOutline?: boolean;
+  outlineText?: string | null;
+  storyContent?: string | null;
+  knowledgeText?: string | null;
+}): { script: string; source: SplitScriptSourceKind } | { script: ""; source: null } {
+  if (input.fromOutline) {
+    const script = (input.outlineText ?? "").trim();
+    return script ? { script, source: "outline" } : { script: "", source: null };
+  }
+  const pasted = input.pasted?.trim() ?? "";
+  if (pasted) return { script: pasted, source: "paste" };
+  const story = input.storyContent?.trim() ?? "";
+  if (story) return { script: story, source: "story" };
+  const knowledge = input.knowledgeText?.trim() ?? "";
+  if (knowledge) return { script: knowledge, source: "knowledge" };
+  return { script: "", source: null };
+}
+
 /**
  * 導演 AI 拆分鏡核心（自 splitScript mutation 原樣抽出，行為不變）：
- * 節流 → 專案存在＋組隔離 → 取腳本（參數優先，否則知識庫）→ 假模式確定性切幕／真模式扣點＋LLM 切幕 → 建 todo 分鏡。
+ * 節流 → 專案存在＋組隔離 → 取腳本（貼上／大綱／已存故事／知識庫）→ 假模式確定性切幕／真模式扣點＋LLM 切幕 → 建 todo 分鏡。
  * 為什麼抽函式：AI 專案助手（assistant.runAction 的 split_script）要以登入者本人身分重用同一套
  * 守門與建分鏡行為——邏輯若複製兩份，節流／扣點退點／切幕規則遲早分岔（比照 workflows 的 startWorkflowCore）。
  * 回傳帶 count（本次建立幾幕），呼叫端可直接拿去組「已拆出 N 個分鏡」的訊息。
@@ -226,6 +254,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
         : { ...s, ...resolveSceneCardRefs(cardAliases, s) },
     );
 
+  let copyLockScript = "";
   const suppliedSceneIds = input.sceneIds ?? [];
   if (suppliedSceneIds.length > 12 || new Set(suppliedSceneIds).size !== suppliedSceneIds.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼重複或超過 12 筆" });
@@ -264,6 +293,11 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
           });
         }
       }
+      await assertGenerationEntityIds(project.id, {
+        characterIds: [...new Set(scenesData.flatMap((s) => s.characterIds ?? []))],
+        scenePresetIds: [...new Set(scenesData.flatMap((s) => s.scenePresetIds ?? []))],
+        propIds: [...new Set(scenesData.flatMap((s) => s.propIds ?? []))],
+      });
       const [{ maxOrder }] = await tx
         .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
         .from(schema.scenes)
@@ -272,22 +306,25 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
       const rows = await tx
         .insert(schema.scenes)
         .values(
-          scenesData.map((s, index) => ({
+          scenesData.map((s, index) => {
+            const locked = lockXiaohuaCopyFields(s, copyLockScript);
+            return {
             ...(targetIds[index] ? { id: targetIds[index] } : {}),
             projectId: project.id,
             orderIndex: ++order,
-            title: s.title.slice(0, 60),
+            title: (locked.title ?? s.title).slice(0, 60),
             durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
             status: "todo",
-            prompt: s.prompt,
-            action: s.action,
-            voiceover: s.voiceover,
+            prompt: locked.prompt,
+            action: locked.action,
+            voiceover: locked.voiceover,
             ...sceneCardColumns({
               characterIds: s.characterIds ?? [],
               scenePresetIds: s.scenePresetIds ?? [],
               propIds: s.propIds ?? [],
             }),
-          })),
+            };
+          }),
         )
         .returning();
       return rows;
@@ -295,38 +332,54 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
 
   // 已保存結果的恢復路徑不可再碰節流、額度或 provider；固定 id 讓 commit 前後重播都收斂到同一批 rows。
   if (preparedResult?.success) {
+    const [storyForLock] = await db
+      .select({ content: schema.stories.content })
+      .from(schema.stories)
+      .where(eq(schema.stories.projectId, project.id))
+      .limit(1);
+    copyLockScript = storyForLock?.content ?? "";
     const rows = await createScenes(freezeCards(preparedResult.data));
     return { scenes: rows, count: rows.length, mock: isMockMode(), truncation: null };
   }
 
-  // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸。
-  // 從知識庫取時一併拿截斷中繼：知識庫在 INJECT_BUDGET(8k) 處就先被截，尾段鏡頭會消失，須透明回報。
+  // 腳本來源：貼上 > 大綱旗標 > 已儲存故事 > 知識庫。
+  // 「省略 script」必須拆 stories.content（專案助手／StoryboardScript 都這樣講），不能只看知識庫。
   let script: string;
   let knowledgeMeta: Awaited<ReturnType<typeof buildKnowledgeContextWithMeta>> | null = null;
   const pasted = input.scriptText?.trim();
   if (input.fromOutline) {
-    // 大綱路徑：三幕就是全部來源，不退回知識庫——按「用大綱拆分鏡」卻拆到別的東西比報錯更難查
-    script = formatActsOutline(wv.acts);
-    if (!script) {
+    const picked = pickSplitScriptSource({ fromOutline: true, outlineText: formatActsOutline(wv.acts) });
+    if (!picked.script) {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "三幕大綱是空的——先在分鏡上方寫幾句大綱，或改用「貼腳本拆分鏡」",
       });
     }
+    script = picked.script;
   } else if (pasted) {
     script = pasted;
   } else {
-    // 拆分鏡：優先腳本類（script_only）、不含卡片雜訊；預算略放寬讓長腳本尾段較不易在知識層被砍
-    knowledgeMeta = await buildKnowledgeContextWithMeta(project.id, {
-      mode: "script_only",
-      includeCards: false,
-      budgetChars: 12_000,
-    });
-    script = knowledgeMeta.text.trim();
+    const [storyRow] = await db
+      .select({ content: schema.stories.content })
+      .from(schema.stories)
+      .where(eq(schema.stories.projectId, project.id))
+      .limit(1);
+    const story = storyRow?.content?.trim() ?? "";
+    if (story) {
+      script = story;
+    } else {
+      knowledgeMeta = await buildKnowledgeContextWithMeta(project.id, {
+        mode: "script_only",
+        includeCards: false,
+        budgetChars: 12_000,
+      });
+      script = knowledgeMeta.text.trim();
+    }
   }
   if (!script) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，或先在知識庫加入腳本/開示稿" });
+    throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，先在故事區寫稿，或在知識庫加入腳本/開示稿" });
   }
+  copyLockScript = script;
 
   // 假模式：確定性切幕（依段落）——不花錢可測
   if (isMockMode()) {
