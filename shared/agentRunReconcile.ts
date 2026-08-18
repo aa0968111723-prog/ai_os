@@ -159,11 +159,6 @@ export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
   return { status: "discarded", steps, discarded: true };
 }
 
-function timeMs(value: Date | string | number): number {
-  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : Number.NaN;
-}
-
 /**
  * Reload / HUD read must hide leftover 0/N「待你過目」when studio already
  * billed a visual or the shot is already 現用. Only unstarted
