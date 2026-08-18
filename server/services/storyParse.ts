@@ -435,8 +435,8 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       });
     }
     try {
-      // Live/base L353 was: nimCompleteWithFallback(sys, { model: NIM_REASONING_MODEL, timeoutMs: 150_000 })
-      // for ANY length (301 or 12_000). STORY_PARSE_BUDGET only truncates. Do not restore that one-liner.
+      // Live/base L353 sent every cache-miss (301 or 12k chars) to flagship with a 150s hang.
+      // STORY_PARSE_BUDGET only truncates. Do not restore an unbounded flagship first attempt.
       // Short/SHOTLIST first-parse starts on 70B with a split budget; timeout must reach 70B before 150s.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {

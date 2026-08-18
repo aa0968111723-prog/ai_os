@@ -159,8 +159,12 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
     expect(parse).toContain("fallbackTimeoutMs: strategy.fallbackTimeoutMs");
     expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length, input.complete)");
     // Teammate live audit: cache-miss of any length called 405B / 150s. That one-liner must stay gone.
-    expect(parse).not.toMatch(/nimCompleteWithFallback\(\s*sys,\s*\{\s*model:\s*NIM_REASONING_MODEL,\s*timeoutMs:\s*150_000\s*\}\)/);
-    expect(parse).not.toMatch(/timeoutMs:\s*150_000/);
+    const codeOnly = parse
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"))
+      .join("\n");
+    expect(codeOnly).not.toMatch(/nimCompleteWithFallback\(\s*sys,/);
+    expect(codeOnly).not.toMatch(/timeoutMs:\s*150_000/);
   });
 
   it("cache-miss of 301, ~2k, or 12k never uses 405B/150s; short scripts start on 70B", () => {
