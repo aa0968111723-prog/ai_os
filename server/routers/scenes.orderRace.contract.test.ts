@@ -34,7 +34,7 @@ describe("storyboard order / isolation contracts", () => {
   it("/p/:id and /studio/:id remount on project switch; studio is keyed by shot", () => {
     expect(appRoutes).toContain("<ProjectRoute key={params.id} id={params.id} />");
     expect(appRoutes).toContain("<AnimationStudioPage key={params.projectId}");
-    expect(phoneRoute).toContain("key={id} 由呼叫端（AppRoutes）保留");
+    expect(phoneRoute).toContain("`key={id}` 由呼叫端（AppRoutes）保留");
     expect(storyboard).toContain("key={studioShot.id}");
   });
 
