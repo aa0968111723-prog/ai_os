@@ -65,6 +65,8 @@ interface DocRoom {
   /** 落盤進行中時又有新改動：完成後再排一輪，不遺漏最後一筆 */
   dirty: boolean;
   persisting: boolean;
+  /** 進行中的落盤：flushStoryDocNow 要等它結束，不能讀到半套 stories.content */
+  persistInFlight: Promise<{ conflict: boolean }> | null;
   /**
    * 上次成功 materialize 進 stories.content 的 rev／正文。
    * persist 必須帶這組 expectedRev——否則 Yjs 落盤會把 Tab B 的 blur 存檔靜默蓋掉。
@@ -201,47 +203,61 @@ export async function flushStoryDocNow(projectId: string): Promise<{
   content: string;
   rev: number | null;
   liveRoom: boolean;
+  conflict: boolean;
 }> {
   const docKey = `story:${projectId}`;
   const room = docRooms.get(docKey);
+  let conflict = false;
   if (room) {
     if (room.persistTimer) {
       clearTimeout(room.persistTimer);
       room.persistTimer = null;
     }
-    await flushRoom(docKey, room);
+    const flushed = await flushRoom(docKey, room);
+    conflict = flushed.conflict;
   }
   const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, projectId));
   return {
     content: story?.content ?? (room ? room.doc.getText(STORY_TEXT_KEY).toString() : ""),
     rev: story?.rev ?? null,
     liveRoom: Boolean(room),
+    conflict,
   };
 }
 
-async function flushRoom(docKey: string, room: DocRoom): Promise<void> {
-  if (room.persisting) return; // 進行中：dirty 已立旗，完成後的補排會接手
+async function flushRoom(docKey: string, room: DocRoom): Promise<{ conflict: boolean }> {
+  if (room.persistInFlight) {
+    const inFlight = await room.persistInFlight;
+    if (!room.dirty) return inFlight;
+  }
   room.persisting = true;
   room.dirty = false;
-  try {
-    const result = await persistStoryDoc(room.projectId, room.groupId, room.doc, room.lastEditor, {
-      expectedRev: room.lastMaterializedRev,
-      baselineContent: room.lastMaterializedContent,
-    });
-    if (result.conflict) {
-      // 不重試：用新 rev 再寫就變成延遲的 last-write-wins，會蓋掉 Tab B 剛存進去的字。
-      console.warn("[collabDoc] stories.content 與共編文件衝突，保留已存正文、不重試 materialize");
-      return;
+  const work = (async (): Promise<{ conflict: boolean }> => {
+    try {
+      const result = await persistStoryDoc(room.projectId, room.groupId, room.doc, room.lastEditor, {
+        expectedRev: room.lastMaterializedRev,
+        baselineContent: room.lastMaterializedContent,
+      });
+      if (result.conflict) {
+        // 不重試：用新 rev 再寫就變成延遲的 last-write-wins，會蓋掉 Tab B 剛存進去的字。
+        console.warn("[collabDoc] stories.content 與共編文件衝突，保留已存正文、不重試 materialize");
+        return { conflict: true };
+      }
+      if (typeof result.rev === "number") room.lastMaterializedRev = result.rev;
+      room.lastMaterializedContent = result.content;
+      return { conflict: false };
+    } catch (err) {
+      room.dirty = true; // 失敗不吞：留旗等下一輪（或下一筆改動）再試
+      console.warn("[collabDoc] 落盤失敗（稍後重試）：", err instanceof Error ? err.message : err);
+      return { conflict: false };
+    } finally {
+      room.persisting = false;
+      room.persistInFlight = null;
+      if (room.dirty && room.conns.size > 0) schedulePersist(docKey, room);
     }
-    if (typeof result.rev === "number") room.lastMaterializedRev = result.rev;
-    room.lastMaterializedContent = result.content;
-  } catch (err) {
-    room.dirty = true; // 失敗不吞：留旗等下一輪（或下一筆改動）再試
-    console.warn("[collabDoc] 落盤失敗（稍後重試）：", err instanceof Error ? err.message : err);
-  } finally {
-    room.persisting = false;
-    if (room.dirty && room.conns.size > 0) schedulePersist(docKey, room);
-  }
+  })();
+  room.persistInFlight = work;
+  return work;
 }
 
 function sendJson(ws: WebSocket, msg: unknown): void {
@@ -271,6 +287,7 @@ async function joinDoc(ws: WebSocket, docKey: string, projectId: string, ctx: { 
         persistTimer: null,
         dirty: false,
         persisting: false,
+        persistInFlight: null,
         lastMaterializedRev: story?.rev,
         lastMaterializedContent: story?.content ?? doc.getText(STORY_TEXT_KEY).toString(),
       };

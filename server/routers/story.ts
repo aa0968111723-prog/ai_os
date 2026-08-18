@@ -221,7 +221,14 @@ export const storyRouter = router({
     .input(z.object({ projectId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const project = await getProjectChecked(ctx, input.projectId, true);
-      return flushStoryDocNow(project.id);
+      const flushed = await flushStoryDocNow(project.id);
+      if (flushed.conflict) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "故事有衝突尚未處理，沒有用共編裡還沒存進去的字去解析",
+        });
+      }
+      return flushed;
     }),
 
   /** 版本清單（story 版）：由新到舊，只回摘要不回全文（比照 knowledge.listVersions） */
@@ -261,12 +268,24 @@ export const storyRouter = router({
         );
       if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個版本" });
       await snapshotStory(story, ctx.auth.user.id);
-      const [row] = await db
-        .update(schema.stories)
-        .set({ content: version.content, updatedBy: ctx.auth.user.id, updatedAt: new Date() })
-        .where(eq(schema.stories.id, story.id))
-        .returning();
-      return { id: row.id, updatedAt: row.updatedAt };
+      const { row } = await applyWithRevision({
+        entity: "story",
+        table: schema.stories,
+        idColumn: schema.stories.id,
+        revColumn: schema.stories.rev,
+        row: story,
+        patch: { content: version.content },
+        bookkeeping: { updatedBy: ctx.auth.user.id, updatedAt: new Date() },
+        expectedRev: story.rev,
+        baseline: { content: story.content },
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, story.id));
+          return fresh;
+        },
+        updatedByField: "updatedBy",
+        updatedAtField: "updatedAt",
+      });
+      return { id: row.id, rev: row.rev, updatedAt: row.updatedAt };
     }),
 
   /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式最長 90 秒） */

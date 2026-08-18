@@ -19,6 +19,24 @@ describe("P0-1 story persist always sends expectedRev", () => {
     expect(persist).toContain("lastMaterializedRev");
     expect(persist).toContain("expectedRev: room.lastMaterializedRev");
     expect(persist).toContain("不重試 materialize");
+    expect(persist).toContain("persistInFlight");
+    expect(persist).toContain("conflict: true");
+  });
+
+  it("flushCollab throws CONFLICT when materialize hits a rev clash", () => {
+    const story = readFileSync(new URL("../routers/story.ts", import.meta.url), "utf8");
+    const flush = story.slice(story.indexOf("flushCollab:"), story.indexOf("listVersions:"));
+    expect(flush).toContain('code: "CONFLICT"');
+    expect(flush).toContain("flushed.conflict");
+    expect(flush).toContain("沒有用共編裡還沒存進去的字去解析");
+  });
+
+  it("restoreVersion bumps rev through applyWithRevision", () => {
+    const story = readFileSync(new URL("../routers/story.ts", import.meta.url), "utf8");
+    const restore = story.slice(story.indexOf("restoreVersion:"), story.indexOf("parse:"));
+    expect(restore).toContain("applyWithRevision");
+    expect(restore).toContain("expectedRev: story.rev");
+    expect(restore).not.toContain(".update(schema.stories)");
   });
 });
 
