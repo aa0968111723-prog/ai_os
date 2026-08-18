@@ -1354,7 +1354,17 @@ export const scenesRouter = router({
           }
           Object.assign(patch, cardPatch);
           if (Object.keys(patch).length === 0) continue;
-          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
+          const [wrote] = await tx
+            .update(schema.scenes)
+            .set({ ...patch, rev: sql`${schema.scenes.rev} + 1` })
+            .where(and(eq(schema.scenes.id, row.id), eq(schema.scenes.rev, row.rev), isNull(schema.scenes.deletedAt)))
+            .returning({ id: schema.scenes.id });
+          if (!wrote) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "分鏡在你編輯期間被夥伴改過內容，這次沒有寫回。請取消編輯、重新打開全文再改一次",
+            });
+          }
           updated += 1;
         }
 

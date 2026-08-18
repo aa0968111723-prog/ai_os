@@ -56,6 +56,8 @@ describe("storyboard order / isolation contracts", () => {
     const apply = block(scenes, "applyScript:", "setCards:");
     expect(apply).toContain('code: "CONFLICT"');
     expect(apply).toContain("expectedSceneIds");
+    expect(apply).toContain("eq(schema.scenes.rev, row.rev)");
+    expect(apply).toContain("rev: sql`${schema.scenes.rev} + 1`");
     expect(scenes).toContain("永不刪除");
   });
 });
