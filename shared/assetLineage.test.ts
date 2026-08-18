@@ -4,6 +4,7 @@ import {
   formatLineageSummary,
   isDesktopRevision,
   lineageChain,
+  listDirectRevisionCounts,
   listDirectRevisions,
   parseAssetLineageMeta,
 } from "./assetLineage";
@@ -47,6 +48,13 @@ describe("assetLineage", () => {
     const all = [ROOT, REV1, REV2];
     expect(listDirectRevisions(all, ROOT.id).map((k) => k.id)).toEqual([REV1.id]);
     expect(lineageChain(all, REV2.id).map((a) => a.id)).toEqual([ROOT.id, REV1.id, REV2.id]);
+  });
+
+  it("counts direct children in one pass", () => {
+    const counts = listDirectRevisionCounts([ROOT, REV1, REV2]);
+    expect(counts.get(ROOT.id)).toBe(1);
+    expect(counts.get(REV1.id)).toBe(1);
+    expect(counts.get(REV2.id)).toBeUndefined();
   });
 
   it("labels known editors", () => {

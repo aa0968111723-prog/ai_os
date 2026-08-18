@@ -16,6 +16,13 @@ type Binding = {
   propIds?: string[] | null;
 };
 
+/** Parent-owned card lists so BoundSummary does not attach 3 queries per row. */
+export type SceneCardLookup = {
+  characters: Array<{ id: string; name: string }>;
+  scenePresets: Array<{ id: string; name: string }>;
+  props: Array<{ id: string; name: string; ownerName?: string | null }>;
+};
+
 /**
  * 逐鏡卡片綁定（分鏡表每格一列）：這一鏡要用哪些角色／場景／素材卡。
  *
@@ -28,11 +35,14 @@ export function SceneCardBinding({
   scene,
   canEdit,
   onSaved,
+  cardLookup,
 }: {
   projectId: string;
   scene: Binding & { id: string };
   canEdit: boolean;
   onSaved: () => void;
+  /** SceneList already fetches these; omit on ShotCard so the expanded panel still owns the lists. */
+  cardLookup?: SceneCardLookup;
 }) {
   const [open, setOpen] = useState(false);
   const characters = trpc.characters.list.useQuery({ projectId }, { enabled: open });
@@ -68,6 +78,7 @@ export function SceneCardBinding({
             charIds={charIds}
             sceneIds={sceneIds}
             propIds={propIds}
+            cardLookup={cardLookup}
           />
         ) : (
           <span title="這一鏡沒指定卡片，出圖時沿用生成台當下的勾選">這一鏡：沿用生成台勾選</span>
@@ -138,33 +149,84 @@ export function SceneCardBinding({
   );
 }
 
+function boundSummaryNames(
+  lookup: SceneCardLookup,
+  charIds: string[],
+  sceneIds: string[],
+  propIds: string[],
+): string[] {
+  return [
+    ...charIds.map((id) => lookup.characters.find((c) => c.id === id)?.name),
+    ...sceneIds.map((id) => lookup.scenePresets.find((s) => s.id === id)?.name),
+    ...propIds.map((id) => {
+      const row = lookup.props.find((p) => p.id === id);
+      return row ? formatPropDisplayName(row.name, row.ownerName) : undefined;
+    }),
+  ].filter((n): n is string => !!n);
+}
+
+function BoundSummaryLabel({ names, total }: { names: string[]; total: number }) {
+  // 名字還沒載到就先顯示張數，不要空白一片
+  return <span title="這一鏡指定的設定卡（出圖時只用這些）">這一鏡：{names.join("・") || `${total} 張卡`}</span>;
+}
+
 /** 已綁定時的一行摘要：直接寫出名字，看得到才知道這鏡會出什麼 */
 function BoundSummary({
   projectId,
   charIds,
   sceneIds,
   propIds,
+  cardLookup,
 }: {
   projectId: string;
   charIds: string[];
   sceneIds: string[];
   propIds: string[];
+  cardLookup?: SceneCardLookup;
 }) {
-  // 摘要要顯示名字就得讀清單；面板收合時也要（否則只看得到數量）——與專案頁同快取鍵，不額外打 API
+  const total = charIds.length + sceneIds.length + propIds.length;
+  if (cardLookup) {
+    return <BoundSummaryLabel names={boundSummaryNames(cardLookup, charIds, sceneIds, propIds)} total={total} />;
+  }
+  return (
+    <BoundSummaryFromQueries
+      projectId={projectId}
+      charIds={charIds}
+      sceneIds={sceneIds}
+      propIds={propIds}
+      total={total}
+    />
+  );
+}
+
+function BoundSummaryFromQueries({
+  projectId,
+  charIds,
+  sceneIds,
+  propIds,
+  total,
+}: {
+  projectId: string;
+  charIds: string[];
+  sceneIds: string[];
+  propIds: string[];
+  total: number;
+}) {
+  // ShotCard 等沒有父層清單時才掛這三支；與專案頁同快取鍵，不額外打 API
   const characters = trpc.characters.list.useQuery({ projectId });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const props = trpc.props.list.useQuery({ projectId });
-  const names = [
-    ...charIds.map((id) => characters.data?.find((c) => c.id === id)?.name),
-    ...sceneIds.map((id) => scenePresets.data?.find((s) => s.id === id)?.name),
-    ...propIds.map((id) => {
-      const row = props.data?.find((p) => p.id === id);
-      return row ? formatPropDisplayName(row.name, row.ownerName) : undefined;
-    }),
-  ].filter((n): n is string => !!n);
-  const total = charIds.length + sceneIds.length + propIds.length;
-  // 名字還沒載到就先顯示張數，不要空白一片
-  return <span title="這一鏡指定的設定卡（出圖時只用這些）">這一鏡：{names.join("・") || `${total} 張卡`}</span>;
+  const names = boundSummaryNames(
+    {
+      characters: characters.data ?? [],
+      scenePresets: scenePresets.data ?? [],
+      props: props.data ?? [],
+    },
+    charIds,
+    sceneIds,
+    propIds,
+  );
+  return <BoundSummaryLabel names={names} total={total} />;
 }
 
 function PickRow({

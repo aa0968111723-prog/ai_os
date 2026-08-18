@@ -18,7 +18,11 @@ const insertAfterMutate = vi.fn();
 const moveMutate = vi.fn();
 const removeMutate = vi.fn();
 const exportCreateMutate = vi.fn();
-const invalidate = vi.fn();
+const invalidateScenes = vi.fn();
+const invalidateMessages = vi.fn();
+const invalidateDeleted = vi.fn();
+const lastUpdateSuccess = { current: undefined as undefined | (() => void) };
+const lastRemoveSuccess = { current: undefined as undefined | (() => void) };
 /** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
 const cardLists: {
   characters: Array<{ id: string; name: string }>;
@@ -29,18 +33,28 @@ const cardLists: {
 vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({
-      scenes: { listByProject: { invalidate } },
-      messages: { list: { invalidate }, openCountsByScene: { invalidate } },
-      projects: { listDeleted: { invalidate } },
+      scenes: { listByProject: { invalidate: invalidateScenes } },
+      messages: { list: { invalidate: invalidateMessages }, openCountsByScene: { invalidate: vi.fn() } },
+      projects: { listDeleted: { invalidate: invalidateDeleted } },
     }),
     auth: { me: { useQuery: (...args: unknown[]) => meQuery(...args) } },
     scenes: {
       listByProject: { useQuery: (...args: unknown[]) => scenesQuery(...args) },
-      update: { useMutation: () => ({ mutate: updateMutate, isPending: false, error: null }) },
+      update: {
+        useMutation: (opts?: { onSuccess?: () => void }) => {
+          lastUpdateSuccess.current = opts?.onSuccess;
+          return { mutate: updateMutate, isPending: false, error: null };
+        },
+      },
       generateInto: { useMutation: () => ({ mutate: generateMutate, isPending: false, error: null }) },
       insertAfter: { useMutation: () => ({ mutate: insertAfterMutate, isPending: false, error: null }) },
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
-      remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
+      remove: {
+        useMutation: (opts?: { onSuccess?: () => void }) => {
+          lastRemoveSuccess.current = opts?.onSuccess;
+          return { mutate: removeMutate, isPending: false, error: null };
+        },
+      },
     },
     // 未改好的標注數（分鏡格的「⚑ N」角標）——本檔不測角標，另有專屬情境；這裡回空清單
     messages: { openCountsByScene: { useQuery: () => ({ data: [], isLoading: false }) } },
@@ -93,6 +107,9 @@ type SceneOver = {
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
+  assetKind?: string | null;
+  assetUrl?: string | null;
+  pendingGenStatus?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -106,10 +123,10 @@ function scene(over: SceneOver) {
     assetId: hasAsset ? `asset-${over.id}` : null,
     prompt: over.prompt === undefined ? "海邊遠景" : over.prompt,
     voiceover: over.voiceover ?? null,
-    assetUrl: hasAsset ? `https://example.test/${over.id}.png` : null,
-    assetKind: hasAsset ? "image" : null,
+    assetUrl: hasAsset ? (over.assetUrl ?? `https://example.test/${over.id}.png`) : null,
+    assetKind: hasAsset ? (over.assetKind ?? "image") : null,
     generationId: null,
-    pendingGenStatus: null,
+    pendingGenStatus: over.pendingGenStatus ?? null,
     narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
     ambience: over.ambience ?? null,
@@ -381,5 +398,61 @@ describe("SceneList → 文字腳本：整份鏡規格都要傳進去", () => {
     mount();
     const rows = storyboardRows.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
     expect(rows[0]!.characterNames).toEqual(["安倢"]);
+  });
+});
+
+describe("SceneList 長分鏡效能", () => {
+  function refetchIntervalOf() {
+    const opts = scenesQuery.mock.calls.at(-1)?.[1] as {
+      refetchInterval?: (q: { state: { data: unknown } }) => number;
+    };
+    expect(typeof opts?.refetchInterval).toBe("function");
+    return opts.refetchInterval!;
+  }
+
+  it("沒有進行中生成時用 45 秒心跳，有 queued/running 才 10 秒", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    const interval = refetchIntervalOf();
+    expect(interval({ state: { data: [scene({ id: "s1" })] } })).toBe(45_000);
+    expect(interval({ state: { data: [scene({ id: "s1", pendingGenStatus: "running" })] } })).toBe(10_000);
+  });
+
+  it("影片鏡列用靜態縮圖，不掛 <video>", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", assetKind: "video", assetUrl: "https://example.test/s1.mp4" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    const row = document.getElementById("scene-s1");
+    expect(row?.querySelector("video")).toBeNull();
+    expect(rowOf("s1").getByRole("img", { name: /影片/ })).toBeInTheDocument();
+  });
+
+  it("改標題只刷新分鏡清單；刪除才連帶訊息與回收桶", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mount();
+    lastUpdateSuccess.current?.();
+    expect(invalidateScenes).toHaveBeenCalled();
+    expect(invalidateMessages).not.toHaveBeenCalled();
+    expect(invalidateDeleted).not.toHaveBeenCalled();
+
+    invalidateScenes.mockClear();
+    lastRemoveSuccess.current?.();
+    expect(invalidateScenes).toHaveBeenCalled();
+    expect(invalidateMessages).toHaveBeenCalled();
+    expect(invalidateDeleted).toHaveBeenCalled();
   });
 });

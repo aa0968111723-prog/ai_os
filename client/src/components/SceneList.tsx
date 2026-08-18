@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
-import { SceneCardBinding } from "./SceneCardBinding";
+import { SceneCardBinding, type SceneCardLookup } from "./SceneCardBinding";
+import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -13,7 +14,7 @@ import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
-import { AssetImg, AssetVideo } from "./MediaFallback";
+import { AssetImg } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import type { CollabAnchorPeer } from "../realtime";
 import { revealProjectContext } from "../features/project-nav/projectContextNav";
@@ -30,6 +31,18 @@ const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && 
 // 沒人在這一格時共用同一個空陣列：每列各寫一次 [] 會讓每次 render 都換一個新身分，
 // 白白讓所有分鏡格的 props 每秒都「看起來變了」
 const EMPTY_WATCHERS: CollabAnchorPeer[] = [];
+const EMPTY_NAMED: Array<{ id: string; name: string }> = [];
+const EMPTY_PROPS: Array<{ id: string; name: string; ownerName?: string | null }> = [];
+
+function namesFromIds(ids: string[] | null | undefined, names: Map<string, string>): string[] {
+  if (!ids?.length) return [];
+  const out: string[] = [];
+  for (const id of ids) {
+    const n = names.get(id);
+    if (n) out.push(n);
+  }
+  return out;
+}
 
 // 目標剪輯軟體 → 可直接匯入的檔案（需求 #8＋直連強化）：每套軟體列出「最能直接組好時間軸」的
 // 格式優先（Premiere 吃 xmeml 時間軸、FCP/Resolve/剪映專業版吃 fcpxml），字幕 SRT 當通用備援；
@@ -330,7 +343,7 @@ function SceneWatchers({ watchers }: { watchers: CollabAnchorPeer[] }) {
 
 /** 單格分鏡（精簡版）：縮圖、標題/秒數、狀態，加「一顆依狀態決定的主要動作」。
  *  深改（提示詞、配音、換模型、版本）都收進單格工作室——列表回歸排順序與總覽。 */
-function SceneRow({
+const SceneRow = memo(function SceneRow({
   s,
   i,
   total,
@@ -343,6 +356,7 @@ function SceneRow({
   charIds,
   sceneIds,
   propIds,
+  cardLookup,
   watchers,
   openAnnotations,
   invalidate,
@@ -359,13 +373,14 @@ function SceneRow({
   genModelId: string;
   /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
    *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
-  onOpenStudio: () => void;
+  onOpenStudio: (id: string, number: number) => void;
   /** 逐鏡卡片綁定面板要用（讀本專案的卡片清單） */
   projectId: string;
   /** 生成台勾選的角色/場景/素材卡：只在「這一鏡沒指定自己的卡片」時當 fallback 用 */
   charIds?: string[];
   sceneIds?: string[];
   propIds?: string[];
+  cardLookup: SceneCardLookup;
   /** 現在把游標停在這一格的人（不含自己）；沒連上協作或沒人在這格時是空陣列 */
   watchers: CollabAnchorPeer[];
   /** 這一格還沒改好的標注數（0＝不顯示角標） */
@@ -374,6 +389,7 @@ function SceneRow({
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
 }) {
+  const openThisStudio = () => onOpenStudio(s.id, i + 1);
   // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
   const [savedFlash, setSavedFlash] = useState(false);
@@ -430,11 +446,13 @@ function SceneRow({
         className="scene-thumb-btn"
         title="開單格工作室：細修畫面、配音、版本"
         aria-label={`第 ${i + 1} 鏡縮圖，開單格工作室`}
-        onClick={onOpenStudio}
+        onClick={openThisStudio}
       >
         {s.assetUrl ? (
           s.assetKind === "video" ? (
-            <AssetVideo className="gen-thumb" src={s.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
+            <span className="gen-thumb scene-thumb-video-static" role="img" aria-label={`${s.title}（影片）`}>
+              <Icon name="Clapperboard" size={20} />
+            </span>
           ) : (
             <AssetImg className="gen-thumb" src={s.assetUrl} alt={s.title} fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
           )
@@ -520,7 +538,7 @@ function SceneRow({
           ) : null}
         </div>
         {/* 逐鏡卡片綁定：這一鏡用誰、在哪、拿什麼——沒指定就沿用生成台勾選 */}
-        <SceneCardBinding projectId={projectId} scene={s} canEdit={canEdit} onSaved={invalidate} />
+        <SceneCardBinding projectId={projectId} scene={s} canEdit={canEdit} onSaved={invalidate} cardLookup={cardLookup} />
 
         {/* C2.4：明示與專案定裝同源，可點揭示 ①（避免以為分鏡是另一套設定） */}
         <Meta
@@ -612,7 +630,7 @@ function SceneRow({
                 />
                 </>
               ) : (
-                <Button size="sm" variant="primary" title="這一格還沒有提示詞——開單格工作室寫提示詞、出第一版畫面" onClick={onOpenStudio}>
+                <Button size="sm" variant="primary" title="這一格還沒有提示詞——開單格工作室寫提示詞、出第一版畫面" onClick={openThisStudio}>
                   <Icon name="Sparkles" size={13} /> 寫提示詞出圖
                 </Button>
               )
@@ -625,7 +643,7 @@ function SceneRow({
               size="sm"
               variant="tonal"
               title="把這一格拉出來單獨修：改畫面（換模型/以底圖修）、編配音詞生成旁白、回看並切換版本"
-              onClick={onOpenStudio}
+              onClick={openThisStudio}
             >
               <Icon name="SlidersHorizontal" size={13} /> 單格工作室
             </Button>
@@ -658,7 +676,7 @@ function SceneRow({
             <button
               style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)" }}
               title={`這一格有 ${openAnnotations} 則還沒改好的標注——點開單格工作室看是哪裡`}
-              onClick={onOpenStudio}
+              onClick={openThisStudio}
             >
               <Icon name="Highlighter" size={13} /> {openAnnotations}
             </button>
@@ -700,7 +718,7 @@ function SceneRow({
       )}
     </div>
   );
-}
+});
 
 /** 製作流程五階段：給「現在該做什麼」一個明確答案（C 流程引導）。 */
 type StageKey = "board" | "asset" | "voice" | "deliver";
@@ -728,7 +746,10 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
-  const scenes = trpc.scenes.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
+  const scenes = trpc.scenes.listByProject.useQuery(
+    { projectId },
+    { refetchInterval: (q) => sceneListRefetchIntervalMs(q.state.data as Scene[] | undefined) },
+  );
   // 整個專案每一格的未改好標注數，一支查完（不逐格 N+1——十幾格就是十幾支查詢，
   // 而這個數字是每次開專案頁都要的）
   const openAnnotations = trpc.messages.openCountsByScene.useQuery({ projectId }, { refetchInterval: 30_000 });
@@ -736,17 +757,24 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
     () => new Map((openAnnotations.data ?? []).map((r) => [r.refId, r.n])),
     [openAnnotations.data],
   );
-  const invalidate = () => {
+  const invalidateList = useCallback(() => {
+    utils.scenes.listByProject.invalidate({ projectId });
+  }, [utils, projectId]);
+  const invalidateAfterDelete = useCallback(() => {
     utils.scenes.listByProject.invalidate({ projectId });
     utils.messages.list.invalidate({ projectId });
     // 同類缺陷一併修：分鏡軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
     utils.projects.listDeleted.invalidate({ projectId });
-  };
-  const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
-  const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
+  }, [utils, projectId]);
+  const move = trpc.scenes.move.useMutation({ onSuccess: invalidateList });
+  const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidateAfterDelete });
   // 預覽台的 I／O 寫回修剪：SceneRow 的 update 在各列自己的 scope 裡，播放器搆不到，
   // 所以這裡另起一支（同一個 procedure、同一套 invalidate，行為一致）。
-  const trimFromPlayer = trpc.scenes.update.useMutation({ onSuccess: invalidate });
+  const trimFromPlayer = trpc.scenes.update.useMutation({ onSuccess: invalidateList });
+  const [studioScene, setStudioScene] = useState<{ id: string; number: number } | null>(null);
+  const openStudio = useCallback((id: string, number: number) => {
+    setStudioScene({ id, number });
+  }, []);
   // 統一小紅字：這兩個共用 mutation 失敗時（排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
   const actionError = move.error ?? remove.error;
 
@@ -755,9 +783,26 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const characterCards = trpc.characters.list.useQuery({ projectId });
   const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
   const propCards = trpc.props.list.useQuery({ projectId });
-  /** id → 卡片名（查不到的丟掉：卡片被刪掉時，文字裡不該出現一個回不去的名字） */
-  const cardNamesOf = (ids: string[] | null | undefined, cards: Array<{ id: string; name: string }> | undefined) =>
-    (ids ?? []).map((id) => cards?.find((c) => c.id === id)?.name).filter((n): n is string => !!n);
+  const characterNameById = useMemo(
+    () => new Map((characterCards.data ?? []).map((c) => [c.id, c.name])),
+    [characterCards.data],
+  );
+  const sceneNameById = useMemo(
+    () => new Map((sceneCards.data ?? []).map((c) => [c.id, c.name])),
+    [sceneCards.data],
+  );
+  const propById = useMemo(
+    () => new Map((propCards.data ?? []).map((p) => [p.id, p])),
+    [propCards.data],
+  );
+  const cardLookup = useMemo<SceneCardLookup>(
+    () => ({
+      characters: characterCards.data ?? EMPTY_NAMED,
+      scenePresets: sceneCards.data ?? EMPTY_NAMED,
+      props: propCards.data ?? EMPTY_PROPS,
+    }),
+    [characterCards.data, sceneCards.data, propCards.data],
+  );
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
   type SceneFilter = "all" | "ready" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
@@ -821,9 +866,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   };
 
   const [showPreview, setShowPreview] = useState(false);
-  // 單格工作室（全螢幕）：哪一格被拉出來修。與粗剪預覽一樣掛在分鏡卡層級，不掛在分鏡列內
-  // （`.gen-row` 的 content-visibility 會成為 fixed 的包含區塊）。檢視者也能開，內部依 canEdit 唯讀。
-  const [studioScene, setStudioScene] = useState<{ id: string; number: number } | null>(null);
+  // 單格工作室 state 在上面與 openStudio 一起宣告——列內只收穩定 callback，避免每列每拍換身分。
   // 目標剪輯軟體（決定「進階單檔」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
   const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
     try {
@@ -915,15 +958,15 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
             music: s.music,
             // 卡片三行是可寫回的：名字要與伺服器名冊對得上，順序也要與綁定順序一致
             // （順序決定提示詞裡卡片的組裝順序，比對時不能當成無序集合）
-            characterNames: cardNamesOf(s.characterIds, characterCards.data),
-            scenePresetNames: cardNamesOf(s.scenePresetIds, sceneCards.data),
+            characterNames: namesFromIds(s.characterIds, characterNameById),
+            scenePresetNames: namesFromIds(s.scenePresetIds, sceneNameById),
             propNames: (s.propIds ?? [])
-              .map((id) => propCards.data?.find((p) => p.id === id))
+              .map((id) => propById.get(id))
               .filter((p): p is NonNullable<typeof p> => !!p)
               .map((p) => formatPropDisplayName(p.name, p.ownerName)),
           }))}
           canEdit={canEdit}
-          onApplied={invalidate}
+          onApplied={invalidateList}
         />
       )}
       {!scenes.isError && list.length > 0 && (
@@ -981,7 +1024,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   s={s}
                   i={i}
                   total={list.length}
-                  onOpenStudio={() => setStudioScene({ id: s.id, number: i + 1 })}
+                  onOpenStudio={openStudio}
                   rowClassName={sceneFilter === "all" && visibleIndex >= 4 ? "is-mobile-overflow" : undefined}
                   canEdit={canEdit}
                   meLoading={me.isLoading}
@@ -990,10 +1033,11 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   charIds={charIds}
                   sceneIds={sceneIds}
                   propIds={propIds}
+                  cardLookup={cardLookup}
                   // 錨點格式與 realtime.tsx 的 collabAnchorFromElement 對齊：這一格的 id 就是 `scene-<id>`
                   watchers={anchorPeers?.get(`#scene-${s.id}`) ?? EMPTY_WATCHERS}
                   openAnnotations={openAnnotationBySceneId.get(s.id) ?? 0}
-                  invalidate={invalidate}
+                  invalidate={invalidateList}
                   move={move}
                   remove={remove}
                 />
@@ -1128,7 +1172,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                 // 在工作室換過「重畫」模型的話，列表的「生成這一格」跟著用（同一把鑰匙）
                 setGenModelId(readGenModel());
               }}
-              onChanged={invalidate}
+              onChanged={invalidateList}
             />
           )}
         </>

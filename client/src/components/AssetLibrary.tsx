@@ -18,6 +18,7 @@ import {
 import type { DesktopHandoffStatusEvent } from "../platform/tauriDesktop";
 import {
   formatLineageSummary,
+  listDirectRevisionCounts,
   listDirectRevisions,
   parseAssetLineageMeta,
 } from "@shared/assetLineage";
@@ -68,7 +69,10 @@ export function AssetLibrary({
   const me = trpc.auth.me.useQuery();
   // QA-013：素材上限不再硬卡 100——預設載 100，「載入更多」逐次加大 limit 取回全部
   const [assetLimit, setAssetLimit] = useState(100);
-  const assets = trpc.projects.assets.useQuery({ projectId, limit: assetLimit });
+  const assets = trpc.projects.assets.useQuery(
+    { projectId, limit: assetLimit },
+    { staleTime: 30_000, placeholderData: (previous) => previous },
+  );
   const rightsBoard = trpc.commercialRights.project.useQuery({ projectId }, { staleTime: 30_000 });
   const rightsByAsset = useMemo(
     () => new Map((rightsBoard.data?.items ?? []).map((item) => [item.assetId, item.profile])),
@@ -132,7 +136,7 @@ export function AssetLibrary({
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [lightbox, setLightbox] = useState<{ url: string; title: string } | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; title: string; kind: "image" | "video" } | null>(null);
   // 多選打包：勾選的素材 id 集合——有勾選時工具列出現「打包所選」，只打包這些素材的媒體檔
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) =>
@@ -300,6 +304,14 @@ export function AssetLibrary({
   };
 
   const allAssets = assets.data;
+  const assetTitleById = useMemo(
+    () => new Map((allAssets ?? []).map((a) => [a.id, a.title])),
+    [allAssets],
+  );
+  const revisionChildCounts = useMemo(
+    () => listDirectRevisionCounts(allAssets ?? []),
+    [allAssets],
+  );
 
   // 各種類數量統計（給 chips 顯示數字，也用來決定哪些 chip 要出現）
   const kindCounts = useMemo(() => {
@@ -348,9 +360,7 @@ export function AssetLibrary({
   const total = allAssets?.length ?? 0;
   const filterActive =
     kindFilter !== "all" || onlySourceable || search.trim() !== "" || !!revisionOfId;
-  const revisionParentTitle = revisionOfId
-    ? (allAssets ?? []).find((a) => a.id === revisionOfId)?.title
-    : undefined;
+  const revisionParentTitle = revisionOfId ? assetTitleById.get(revisionOfId) : undefined;
   const smallBtn = { padding: "2px 10px", fontSize: 11 } as const;
 
   // radiogroup 的正規鍵盤模式（roving tabindex）：方向鍵在群組內漫遊、只有選中項進 Tab 序——
@@ -419,7 +429,7 @@ export function AssetLibrary({
         onChanged={() => { void utils.projects.assets.invalidate({ projectId }); }}
       />
 
-      {assets.isLoading ? (
+      {assets.isLoading && !assets.data ? (
         <div className="asset-grid">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="asset-cell" height={132} />
@@ -578,19 +588,26 @@ export function AssetLibrary({
                         aria-label={`放大檢視 ${a.title}`}
                         title="點一下放大檢視"
                         style={{ cursor: "zoom-in", display: "block" }}
-                        onClick={() => setLightbox({ url: a.url!, title: a.title })}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLightbox({ url: a.url!, title: a.title }); } }}
+                        onClick={() => setLightbox({ url: a.url!, title: a.title, kind: "image" })}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLightbox({ url: a.url!, title: a.title, kind: "image" }); } }}
                       >
-                        <AssetImg src={a.url} alt={a.title} loading="lazy" fallbackHeight={96} />
+                        <AssetImg src={a.url} alt={a.title} fallbackHeight={96} />
                       </div>
                     ) : a.kind === "video" && a.url ? (
-                      <AssetVideo
-                        src={a.url}
-                        controls
-                        preload="metadata"
-                        style={{ width: "100%", height: 96, objectFit: "cover", display: "block", background: "var(--muted)" }}
-                        fallbackHeight={96}
-                      />
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`播放 ${a.title}`}
+                        title="點一下播放"
+                        style={{ cursor: "zoom-in", display: "block" }}
+                        onClick={() => setLightbox({ url: a.url!, title: a.title, kind: "video" })}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLightbox({ url: a.url!, title: a.title, kind: "video" }); } }}
+                      >
+                        <div className="asset-thumb-static" role="img">
+                          <Icon name="Clapperboard" size={28} />
+                          <span className="asset-thumb-static__play" aria-hidden="true">▶</span>
+                        </div>
+                      </div>
                     ) : (
                       <div className="asset-icon"><Icon name={KIND_ICON[a.kind] ?? "Package"} size={32} /></div>
                     )}
@@ -622,11 +639,9 @@ export function AssetLibrary({
                       <AssetRightsChip assetId={a.id} canEdit={Boolean(me.data)} profile={rightsByAsset.get(a.id) ?? null} />
                       {/* AUTH-03／asset_revisions：來源 + 編輯器；可篩子版本 */}
                       {(() => {
-                        const lineage = formatLineageSummary(a.meta, (id) =>
-                          (allAssets ?? []).find((x) => x.id === id)?.title,
-                        );
+                        const lineage = formatLineageSummary(a.meta, (id) => assetTitleById.get(id));
                         const m = parseAssetLineageMeta(a.meta);
-                        const childCount = listDirectRevisions(allAssets ?? [], a.id).length;
+                        const childCount = revisionChildCounts.get(a.id) ?? 0;
                         if (!lineage && childCount === 0) return null;
                         return (
                           <div className="asset-lineage" style={{ marginTop: 4 }}>
@@ -973,16 +988,31 @@ export function AssetLibrary({
           }}
         >
           <div style={{ position: "relative", maxWidth: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <AssetImg
-              src={lightbox.url}
-              alt={lightbox.title}
-              onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: "92vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 12, boxShadow: "var(--e4)" }}
-              fallbackLabel="此素材檔已遺失（可能是伺服器重啟前的舊素材）"
-              fallbackHeight={220}
-              fallbackIconSize={32}
-              fallbackStyle={{ minWidth: 280 }}
-            />
+            {lightbox.kind === "video" ? (
+              <AssetVideo
+                src={lightbox.url}
+                controls
+                autoPlay
+                onClick={(e) => e.stopPropagation()}
+                style={{ maxWidth: "92vw", maxHeight: "80vh", borderRadius: 12, boxShadow: "var(--e4)", background: "#000" }}
+                fallbackLabel="此素材檔已遺失（可能是伺服器重啟前的舊素材）"
+                fallbackHeight={220}
+                fallbackIconSize={32}
+                fallbackStyle={{ minWidth: 280 }}
+              />
+            ) : (
+              <AssetImg
+                src={lightbox.url}
+                alt={lightbox.title}
+                loading="eager"
+                onClick={(e) => e.stopPropagation()}
+                style={{ maxWidth: "92vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 12, boxShadow: "var(--e4)" }}
+                fallbackLabel="此素材檔已遺失（可能是伺服器重啟前的舊素材）"
+                fallbackHeight={220}
+                fallbackIconSize={32}
+                fallbackStyle={{ minWidth: 280 }}
+              />
+            )}
             <div style={{ color: "#fff", fontSize: 13, textAlign: "center", maxWidth: "80vw" }}>{lightbox.title}</div>
             <button
               type="button"

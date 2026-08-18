@@ -853,6 +853,28 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 .gen-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 12px; align-items: center;
   border: 1px solid var(--border-soft); border-radius: var(--r-12); padding: 12px; background: var(--card2); margin-top: 8px; }
 .gen-thumb { width: 84px; height: 52px; border-radius: 8px; object-fit: cover; background: var(--muted); }
+.scene-thumb-video-static {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--soft);
+}
+.asset-thumb-static {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 96px;
+  color: var(--soft);
+  background: var(--muted);
+}
+.asset-thumb-static__play {
+  position: absolute;
+  inset: auto 10px 8px auto;
+  font-size: 12px;
+  opacity: 0.85;
+}
 .pill { font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
   border: 1px solid currentColor; font-weight: 600; letter-spacing: 0.02em; }
 .pill.queued, .pill.running { color: var(--gold-ink); border-color: var(--gold); background: var(--gold-soft); }
