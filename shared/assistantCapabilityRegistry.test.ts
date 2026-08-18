@@ -31,6 +31,18 @@ describe("assistant capability registry", () => {
     expect(names).not.toEqual([
       "get_project_context", "get_project_status", "list_knowledge", "list_notes", "list_tasks",
     ]);
+    expect(names).not.toContain("get_project_context");
+  });
+
+  it("studio ASK / PLAN / AGENT never expose get_project_context", () => {
+    for (const intent of ["ASK", "PLAN", "AGENT"] as const) {
+      const names = selectAssistantCapabilities({
+        intent,
+        pageContext: { pageType: "studio", entityType: "shot" },
+        allowWrite: true,
+      }).map((tool) => tool.name);
+      expect(names).not.toContain("get_project_context");
+    }
   });
 
   it("can expose relevant writes for an authorized DIRECT request without bypassing catalog policy", () => {

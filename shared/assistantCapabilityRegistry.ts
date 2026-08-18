@@ -24,8 +24,11 @@ const PAGE_TERMS: Partial<Record<AssistantWirePageContext["pageType"], string[]>
   collab: ["agent", "task", "message", "dm", "approval"],
   chat: ["message", "dm"],
   /** Animation Studio shares the project assistant (pageType=studio, entityType=shot). */
-  studio: ["scene", "shot", "character", "generation", "asset"],
+  studio: ["scene", "shot", "character", "generation", "asset", "story"],
 };
+
+/** Studio already injects story + current shot; this tool just re-dumps the project. */
+const STUDIO_EXCLUDED_TOOLS = new Set(["get_project_context"]);
 
 function isRelevant(tool: McpToolInfo, terms: string[]): boolean {
   const haystack = `${tool.name} ${tool.title} ${tool.blurb}`.toLowerCase();
@@ -51,6 +54,9 @@ export function selectAssistantCapabilities(input: AssistantCapabilitySelection)
   const relevant = terms.length ? visible.filter((tool) => isRelevant(tool, terms)) : visible.filter((tool) => [
     "get_project_context", "get_project_status", "list_knowledge", "list_notes", "list_tasks",
   ].includes(tool.name));
-  const readFirst = relevant.sort((a, b) => Number(a.access === "write") - Number(b.access === "write"));
+  const scoped = input.pageContext?.pageType === "studio"
+    ? relevant.filter((tool) => !STUDIO_EXCLUDED_TOOLS.has(tool.name))
+    : relevant;
+  const readFirst = scoped.sort((a, b) => Number(a.access === "write") - Number(b.access === "write"));
   return readFirst.slice(0, maxTools);
 }
