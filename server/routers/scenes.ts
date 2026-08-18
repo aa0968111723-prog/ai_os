@@ -27,6 +27,12 @@ import { continuitySnapshotSchema } from "../../shared/continuity";
 import { describeDirectionChange } from "../../shared/story";
 import { REVIEW_STATES } from "../../shared/shotCompletion";
 import { CONTINUITY_ASPECTS, buildContinuityPatch } from "../../shared/shotContinuity";
+import {
+  keepLooksOwnedByCharacters,
+  lookOwnerMap,
+  looksChanged,
+  unboundLookIds,
+} from "../../shared/shotLooks";
 import { batchGenerateFingerprint } from "../../shared/projectCreativeContext";
 import {
   MAX_SCRIPT_SCENES,
@@ -823,6 +829,11 @@ export const scenesRouter = router({
             characterIds: dup ? cur.characterIds : null,
             scenePresetIds: dup ? cur.scenePresetIds : null,
             propIds: dup ? cur.propIds : null,
+            // 造型／鏡頭語言／所屬場同屬設定：漏複製的話複本會用角色預設外觀、丟運鏡，連戲直接分岔
+            lookIds: dup ? cur.lookIds : null,
+            camera: dup ? cur.camera : null,
+            performance: dup ? cur.performance : null,
+            storySceneId: dup ? cur.storySceneId : null,
           })
           .returning();
         return created;
@@ -1106,11 +1117,19 @@ export const scenesRouter = router({
       }
       if (input.lookIds?.length) {
         const rows = await db
-          .select({ id: schema.characterLooks.id, projectId: schema.characterLooks.projectId })
+          .select({
+            id: schema.characterLooks.id,
+            projectId: schema.characterLooks.projectId,
+            characterId: schema.characterLooks.characterId,
+          })
           .from(schema.characterLooks)
           .where(inArray(schema.characterLooks.id, input.lookIds));
         if (rows.length !== new Set(input.lookIds).size || rows.some((r) => r.projectId !== scene.projectId)) {
           throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
+        }
+        const owners = lookOwnerMap(rows);
+        if (unboundLookIds(input.lookIds, owners, scene.characterIds).length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "造型不屬於這一鏡已綁定的角色" });
         }
       }
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
@@ -1337,27 +1356,46 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
-      // 造型同樣 fail-closed（與 scenes.update 同一道關）：不屬於本專案就不寫進外鍵
-      if (input.lookIds?.length) {
-        const lookRows = await db
-          .select({ id: schema.characterLooks.id, projectId: schema.characterLooks.projectId })
-          .from(schema.characterLooks)
-          .where(inArray(schema.characterLooks.id, input.lookIds));
-        if (lookRows.length !== new Set(input.lookIds).size || lookRows.some((r) => r.projectId !== scene.projectId)) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
-        }
-      }
       // 只覆寫真的送上來的那幾排（空陣列→null 的正規化仍由 sceneCardColumns 統一做）
       const columns = sceneCardColumns({
         characterIds: input.characterIds ?? [],
         scenePresetIds: input.scenePresetIds ?? [],
         propIds: input.propIds ?? [],
       });
+      const nextCharacterIds = input.characterIds !== undefined
+        ? (columns.characterIds ?? [])
+        : (scene.characterIds ?? []);
+      const incomingLookIds = input.lookIds !== undefined ? input.lookIds : (scene.lookIds ?? []);
+      const lookIdsToLoad = [...new Set([...incomingLookIds, ...(scene.lookIds ?? [])])];
+      const lookRows = lookIdsToLoad.length
+        ? await db
+          .select({
+            id: schema.characterLooks.id,
+            projectId: schema.characterLooks.projectId,
+            characterId: schema.characterLooks.characterId,
+          })
+          .from(schema.characterLooks)
+          .where(inArray(schema.characterLooks.id, lookIdsToLoad))
+        : [];
+      const owners = lookOwnerMap(lookRows.filter((row) => row.projectId === scene.projectId));
+      if (input.lookIds !== undefined && input.lookIds.length) {
+        const found = lookRows.filter((row) => input.lookIds!.includes(row.id));
+        if (found.length !== new Set(input.lookIds).size || found.some((row) => row.projectId !== scene.projectId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
+        }
+        if (unboundLookIds(input.lookIds, owners, nextCharacterIds).length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "造型不屬於這一鏡已綁定的角色" });
+        }
+      }
+      const nextLookIds = keepLooksOwnedByCharacters(incomingLookIds, owners, nextCharacterIds);
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
       if (input.characterIds !== undefined) patch.characterIds = columns.characterIds;
       if (input.scenePresetIds !== undefined) patch.scenePresetIds = columns.scenePresetIds;
       if (input.propIds !== undefined) patch.propIds = columns.propIds;
-      if (input.lookIds !== undefined) patch.lookIds = input.lookIds.length ? [...new Set(input.lookIds)] : null;
+      // 只送 characterIds 的路徑（Shot Inspector / 分鏡表）也必須清掉孤兒造型
+      if (input.lookIds !== undefined || looksChanged(scene.lookIds, nextLookIds)) {
+        patch.lookIds = nextLookIds;
+      }
       if (Object.keys(patch).length === 0) return scene; // 什麼都沒送＝沒事可做
       const { row: updated, merged } = await applyWithRevision({
         entity: "scene",

@@ -472,7 +472,99 @@ ok("兩個 Adopt 都是獨立人工階段", {
    stage["kind"] for stage in plan.get("stages", []) if stage.get("kind", "").endswith("_adopt")
 } == {"keyframe_adopt", "video_adopt"})
 
-# ── 11. 給人看的證據摘要 ─────────────────────────────────────────────────
+# ── 11. 硬化：孤兒造型／複本連戲／兩專案同名「小華」隔離／快拆快排 ──
+# 11a. 只送 characterIds 拿掉角色 → 伺服器必須清掉該角色的造型（Shot Inspector 舊路徑）
+call("POST", admin, "scenes.setCards", {
+    "sceneId": shot_ids[0],
+    "characterIds": [afu["id"]],
+    "scenePresetIds": [street["id"]],
+    "propIds": [lantern["id"]],
+})
+after_drop = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+shot0 = next(s for s in after_drop if s["id"] == shot_ids[0])
+ok("拿掉小蓮（不送 lookIds）：孤兒日常造型被清掉", look_day["id"] not in (shot0.get("lookIds") or []))
+ok("拿掉小蓮後阿福仍在這一鏡", afu["id"] in (shot0.get("characterIds") or []))
+
+# 還原鏡1 綁定，後面複本／隔離測試才有完整卡片
+bind_and_dress(shot_ids[0], [look_day["id"]])
+
+# 11b. 複本必須帶造型＋鏡頭語言，否則「照這一鏡再拍」會用預設外觀、丟運鏡
+dup = call("POST", admin, "scenes.insertAfter", {"sceneId": shot_ids[4], "duplicate": True})
+ok("複本建立成功", isinstance(dup, dict) and dup.get("id"))
+ok("複本帶著除夕夜前的日常造型", look_day["id"] in (dup.get("lookIds") or []))
+ok("複本帶著角色卡（小蓮／阿福）", set(dup.get("characterIds") or []) == set(CHAR_IDS))
+ok("複本帶著鏡頭語言（仰角）", (dup.get("camera") or {}).get("angle") == "仰角")
+ok("複本帶著表演（驚喜）", "驚喜" in ((dup.get("performance") or {}).get("emotion") or ""))
+
+# 11c. 兩個專案都叫角色「小華」：預覽錨點不得串台
+proj_b = call("POST", admin, "projects.create", {
+    "groupId": gid,
+    "title": "動畫短片・小華專案B",
+    "kind": "療癒動畫",
+    "platform": "shorts",
+})
+ok("第二個專案建立（同名角色隔離）", isinstance(proj_b, dict) and proj_b.get("id"))
+pid_b = proj_b["id"]
+hua_a = call("POST", admin, "characters.add", {
+    "projectId": pid, "name": "小華",
+    "appearance": "專案A的小華・紅圍巾白襯衫",
+})
+hua_b = call("POST", admin, "characters.add", {
+    "projectId": pid_b, "name": "小華",
+    "appearance": "專案B的小華・藍外套黑框眼鏡",
+})
+ok("兩個專案都有名叫小華的角色、id 不同", hua_a.get("id") and hua_b.get("id") and hua_a["id"] != hua_b["id"])
+shot_b = call("POST", admin, "scenes.addDraft", {
+    "projectId": pid_b, "title": "鏡1・小華出場",
+    "prompt": "小華站在校門口",
+})
+call("POST", admin, "scenes.setCards", {"sceneId": shot_b["id"], "characterIds": [hua_b["id"]]})
+prev_b = call("POST", admin, "generation.preview", {
+    "projectId": pid_b, "modelId": MODEL, "prompt": "小華站在校門口",
+    "characterIds": [hua_b["id"]], "continuityMode": True,
+})
+pos_b = (prev_b.get("request") or {}).get("positivePrompt") or ""
+ok("專案B 預覽鎖的是藍外套小華", "藍外套黑框眼鏡" in pos_b)
+ok("專案B 預覽沒有專案A 小華的紅圍巾", "紅圍巾白襯衫" not in pos_b)
+cross = call("POST", admin, "scenes.setCards", {
+    "sceneId": shot_ids[0], "characterIds": [hua_b["id"]],
+})
+ok("不能把專案B 的小華綁進專案A 的鏡頭", isinstance(cross, dict) and "__error__" in cross)
+
+# 11d. 快刪／快加／重排：順序是呼叫端給的那一份，沒有重複 id、沒有漏鏡
+extra_ids = []
+for i in range(3):
+    row = call("POST", admin, "scenes.addDraft", {
+        "projectId": pid, "title": f"硬化加鏡 {i+1}", "prompt": f"加鏡 {i+1}",
+    })
+    extra_ids.append(row["id"])
+gone = extra_ids.pop()
+call("POST", admin, "scenes.remove", {"sceneId": gone})
+listed = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+live_ids = [s["id"] for s in listed]
+ok("軟刪的加鏡不在現用清單", gone not in live_ids)
+ok("其餘加鏡還在", all(i in live_ids for i in extra_ids))
+# 把現用清單倒過來重排
+reversed_ids = list(reversed(live_ids))
+re = call("POST", admin, "scenes.reorder", {"projectId": pid, "orderedIds": reversed_ids})
+ok("倒序重排成功", isinstance(re, dict) and re.get("ok"))
+after_re = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+ok("重排後順序與送出清單一致", [s["id"] for s in after_re] == reversed_ids)
+# 還原成原本時間線，避免後面證據摘要對錯 shot_ids 順序
+call("POST", admin, "scenes.reorder", {"projectId": pid, "orderedIds": shot_ids + extra_ids + ([dup["id"]] if dup.get("id") else [])})
+
+# 11e. 助手 update_scene 必須真的改 DB 且推進 rev（假完成守門）
+rev_before = next(s["rev"] for s in call("GET", admin, "scenes.listByProject", {"projectId": pid}) if s["id"] == shot_ids[2])
+acted = call("POST", admin, "assistant.runAction", {
+    "projectId": pid,
+    "action": {"type": "update_scene", "sceneId": shot_ids[2], "field": "title", "value": "鏡3・特寫・道具物理・已由助手改名"},
+})
+ok("助手 update_scene 回 ok", isinstance(acted, dict) and acted.get("ok"))
+shot3 = next(s for s in call("GET", admin, "scenes.listByProject", {"projectId": pid}) if s["id"] == shot_ids[2])
+ok("助手改標題真的寫進 DB", shot3["title"] == "鏡3・特寫・道具物理・已由助手改名")
+ok("助手寫入推進了 rev（不是 raw UPDATE）", shot3["rev"] > rev_before)
+
+# ── 12. 給人看的證據摘要 ─────────────────────────────────────────────────
 print("\n──────── 證據摘要（一鏡的完整組裝提示詞）────────")
 if first_preview_pos:
     print(first_preview_pos[:1200])
