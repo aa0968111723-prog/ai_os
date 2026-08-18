@@ -61,6 +61,7 @@ import {
   type SceneVersionGenerationRow,
 } from "../../shared/sceneVersions";
 import { lockSceneOrder } from "../services/locks";
+import { restoreOrderPlan } from "../../shared/sceneRestoreOrder";
 import { applyWithRevision } from "../services/revisionGuard";
 import { publishToProject } from "../services/realtime";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
@@ -283,6 +284,20 @@ export const scenesRouter = router({
         narrationUrl: narrationAssets.url,
         // 來源生成 id：前端「已加入分鏡」用穩定鍵比對（assetUrl 會在成品落地時被改寫，比 URL 會誤判）
         generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
+        /**
+         * 這一鏡最新一筆已完成的畫面生成。generateInto 不移動 current 指標，
+         * 所以 assetId 可能仍是空／舊圖——SceneList 用它畫「採用這一版」。
+         * 只查 generations（scene_id 有索引），不掃 assets.meta。
+         */
+        latestDoneVisualGenId: sql<string | null>`(
+          select g.id from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id}
+            and (g.scene_role is null or g.scene_role = 'visual')
+            and g.status = 'done'
+            and g.result_url is not null
+          order by g.created_at desc, g.id desc
+          limit 1
+        )`,
         // 該格是否有進行中的就地生成（草稿→出圖進度指示）。用純量子查詢而非 join，避免同格多筆
         // 進行中生成把分鏡列乘開成重複列；兩個子查詢用相同排序取同一筆，pendingGenId 與 status 一致。
         // 只看「畫面(visual)」生成——排除 narration，否則配音生成中會誤把主畫面標成生成中、鎖住重生鈕
@@ -855,15 +870,31 @@ export const scenesRouter = router({
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "回收桶裡找不到這一格了（可能已被夥伴永久刪除）" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能還原分鏡
-    // 修 R3-BINV-01：還原時把 orderIndex 重排到尾端，別沿用被刪當下的舊序號——否則與現有分鏡撞出
-    // 重複 orderIndex，破壞排序唯一性（move/reorder 交換失準）。交易＋lockSceneOrder 序列化同專案建格。
+    // 還原回被刪當下的 orderIndex。空槽直接坐下；槽已被後來插入佔走時，
+    // 與 insertAfter 同一套由後往前 +1，避免重複序號。交易＋lockSceneOrder。
     await db.transaction(async (tx) => {
       await lockSceneOrder(tx, scene.projectId);
-      const [{ maxOrder }] = await tx
-        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), -1)` })
+      const active = await tx
+        .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
         .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)));
-      await tx.update(schema.scenes).set({ deletedAt: null, orderIndex: Number(maxOrder) + 1 }).where(eq(schema.scenes.id, input.sceneId));
+        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const plan = restoreOrderPlan({
+        originalOrderIndex: scene.orderIndex,
+        activeOrderIndexes: active.map((row) => row.orderIndex),
+      });
+      if (plan.shiftFrom != null) {
+        for (const later of active.filter((row) => row.orderIndex >= plan.shiftFrom!).reverse()) {
+          await tx
+            .update(schema.scenes)
+            .set({ orderIndex: later.orderIndex + 1 })
+            .where(eq(schema.scenes.id, later.id));
+        }
+      }
+      await tx
+        .update(schema.scenes)
+        .set({ deletedAt: null, orderIndex: plan.orderIndex })
+        .where(eq(schema.scenes.id, input.sceneId));
     });
     return { ok: true };
   }),

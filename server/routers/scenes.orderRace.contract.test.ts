@@ -23,7 +23,9 @@ describe("storyboard order / isolation contracts", () => {
     expect(insert).toContain("isNull(schema.scenes.deletedAt)");
     const restore = block(scenes, "restore:", "purge:");
     expect(restore).toContain("lockSceneOrder");
-    expect(restore).toContain("orderIndex: Number(maxOrder) + 1");
+    expect(restore).toContain("restoreOrderPlan");
+    expect(restore).toContain("shiftFrom");
+    expect(restore).not.toContain("orderIndex: Number(maxOrder) + 1");
   });
 
   it("SceneList queues blank insertAfter so repeated clicks chain the new id", () => {

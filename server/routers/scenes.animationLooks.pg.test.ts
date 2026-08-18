@@ -316,8 +316,8 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     });
   });
 
-  it("restore appends to the end (does not reuse the old orderIndex)", async () => {
-    const { project, scenes } = await seed("還原接尾");
+  it("restore puts the shot back at its original orderIndex", async () => {
+    const { project, scenes } = await seed("還原原位");
     const [first] = await db.insert(schema.scenes).values({
       projectId: project.id, orderIndex: 0, title: "第一",
     }).returning();
@@ -327,7 +327,25 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     await scenes.remove({ sceneId: first.id });
     await scenes.restore({ sceneId: first.id });
     const listed = await scenes.listByProject({ projectId: project.id });
-    expect(listed.map((s) => s.id)).toEqual([second.id, first.id]);
-    expect(listed[1]?.orderIndex).toBeGreaterThan(listed[0]?.orderIndex ?? 0);
+    expect(listed.map((s) => s.id)).toEqual([first.id, second.id]);
+    expect(listed[0]?.orderIndex).toBe(0);
+  });
+
+  it("restore shifts later shots when the original slot is occupied", async () => {
+    const { project, scenes } = await seed("還原讓位");
+    const [first] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "第一",
+    }).returning();
+    const [mid] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "中間",
+    }).returning();
+    const [last] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 2, title: "最後",
+    }).returning();
+    await scenes.remove({ sceneId: mid.id });
+    const inserted = await scenes.insertAfter({ sceneId: first.id });
+    await scenes.restore({ sceneId: mid.id });
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed.map((s) => s.id)).toEqual([first.id, mid.id, inserted.id, last.id]);
   });
 });
