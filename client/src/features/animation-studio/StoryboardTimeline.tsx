@@ -22,6 +22,8 @@ import { NewShotMenu, type NewShotKind } from "./NewShotMenu";
 
 export interface StoryboardTimelineProps {
   shots: readonly StudioShot[];
+  /** True while listByProject has no data yet — do not show「0 鏡」. */
+  loading?: boolean;
   activeId: string | null;
   /** 有本機手稿還沒存成畫面的鏡 */
   draftIds: ReadonlySet<string>;
@@ -40,6 +42,7 @@ export interface StoryboardTimelineProps {
 
 export function StoryboardTimeline({
   shots,
+  loading,
   activeId,
   draftIds,
   canEdit,
@@ -80,13 +83,15 @@ export function StoryboardTimeline({
           分鏡
         </strong>
         <Meta as="span" className="studio-timeline__count">
-          {shots.length} 鏡・{totalSec}s
+          {loading ? "載入中" : `${shots.length} 鏡・${totalSec}s`}
         </Meta>
         <span style={{ flex: "1 1 auto" }} />
         {canEdit && <NewShotMenu onPick={onNewShot} busy={newShotBusy} />}
       </header>
 
-      {shots.length === 0 ? (
+      {loading ? (
+        <p className="studio-timeline__empty">正在載入分鏡…</p>
+      ) : shots.length === 0 ? (
         <p className="studio-timeline__empty">
           還沒有分鏡。用右上的「＋ 新增鏡」開一格，或到 AI 分頁貼腳本一次拆成整份。
         </p>

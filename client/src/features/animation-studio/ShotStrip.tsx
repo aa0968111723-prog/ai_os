@@ -22,6 +22,8 @@ export interface StudioShot {
 export interface ShotStripProps {
   layout: StudioLayout;
   shots: readonly StudioShot[];
+  /** True while listByProject has no data yet — do not show「0 鏡」. */
+  loading?: boolean;
   activeId: string | null;
   /** 有本機手稿的分鏡（畫過但還沒存成畫面） */
   draftIds: ReadonlySet<string>;
@@ -44,6 +46,7 @@ export interface ShotStripProps {
 export function ShotStrip({
   layout,
   shots,
+  loading,
   activeId,
   draftIds,
   canEdit,
@@ -80,7 +83,7 @@ export function ShotStrip({
           分鏡順序
         </strong>
         <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
-          {shots.length} 鏡・約 {totalSec} 秒
+          {loading ? "載入中" : `${shots.length} 鏡・約 ${totalSec} 秒`}
         </Meta>
         {canEdit && (
           <Button size="sm" variant="tonal" onClick={onAdd} disabled={busy}>
@@ -90,7 +93,9 @@ export function ShotStrip({
         )}
       </header>
 
-      {shots.length === 0 ? (
+      {loading ? (
+        <p className="studio-strip__empty">正在載入分鏡…</p>
+      ) : shots.length === 0 ? (
         <p className="studio-strip__empty">
           還沒有分鏡。按「加一鏡」開一格空的，或用右邊的 AI 貼腳本一次拆成整份分鏡。
         </p>

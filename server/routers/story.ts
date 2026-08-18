@@ -33,6 +33,7 @@ import {
 } from "../../shared/story";
 import { expandShotSuggestions, shotAssetSuggestionsBatchInputSchema } from "../../shared/shotAssetSuggestions";
 import { loadShotAssetSuggestionsForProject } from "../services/shotAssetSuggestions";
+import { publishToProject } from "../services/realtime";
 
 async function getProjectChecked(ctx: { auth: NonNullable<Parameters<typeof requireGroup>[0]> }, projectId: string, forEdit: boolean) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -505,6 +506,10 @@ export const storyRouter = router({
       } catch (error) {
         console.warn("[story.generateStoryboard] packet freeze skipped:", error instanceof Error ? error.message : error);
       }
+      // Same projectId as /p/ and /studio/:id. Without this, an open studio tab
+      // keeps the cached empty list (refetchOnWindowFocus is false).
+      const firstShotId = result.sceneIds?.[0] ?? null;
+      publishToProject(input.projectId, { kind: "scene", id: firstShotId }, result.reused ? "分鏡已就緒" : "已產生分鏡");
       return result;
     }),
 

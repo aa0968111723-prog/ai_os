@@ -205,6 +205,11 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).toContain("ConflictNotice");
   });
 
+  it("studio listByProject always remounts so /p/ 產生分鏡 rows appear on the timeline", () => {
+    expect(studio).toContain("refetchOnMount: \"always\"");
+    expect(studio).toContain("trpc.scenes.listByProject.useQuery");
+  });
+
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
     expect(studio).toContain("insertQueueRef.current?.enqueue(shot.id)");
     expect(studio).not.toContain("insertQueueOriginRef");

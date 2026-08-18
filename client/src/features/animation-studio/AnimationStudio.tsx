@@ -79,8 +79,12 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const layout = useStudioLayout();
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-  const scenes = trpc.scenes.listByProject.useQuery({ projectId });
+  const scenes = trpc.scenes.listByProject.useQuery(
+    { projectId },
+    { refetchOnMount: "always" },
+  );
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
+  const shotsLoading = scenes.isLoading && !scenes.data;
   // 場（story_scenes）：Top Bar 的麵包屑要顯示「這一鏡屬於哪一場」
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
 
@@ -431,6 +435,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     <ShotStrip
       layout={layout}
       shots={shots}
+      loading={shotsLoading}
       activeId={activeShotId}
       draftIds={draftIds}
       canEdit={canEdit}
@@ -641,6 +646,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
 
         <StoryboardTimeline
           shots={shots}
+          loading={shotsLoading}
           activeId={activeShotId}
           draftIds={draftIds}
           canEdit={canEdit}
@@ -712,7 +718,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         <div className="studio__bar-group studio__panel-tabs">
           <Button size="sm" variant={sheet === "shots" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "shots" ? "none" : "shots"))}>
             <Icon name="Film" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            分鏡{shots.length ? `（${shots.length}）` : ""}
+            分鏡{shotsLoading ? "（載入中）" : shots.length ? `（${shots.length}）` : ""}
           </Button>
           <Button size="sm" variant={sheet === "ai" ? "tonal" : "ghost"} onClick={() => setSheet((s) => (s === "ai" ? "none" : "ai"))}>
             <Icon name="Sparkles" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />

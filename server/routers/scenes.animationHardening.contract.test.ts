@@ -126,10 +126,31 @@ describe("animation shot writes stay consistent", () => {
     expect(exec).toContain('if (a.type === "add_character")');
     expect(exec).toContain("authoritative_character_row_read_back");
     expect(exec).toContain("MAX_PROJECT_CHARACTERS");
+    expect(assistant).toContain("proposeAddCharacterActions");
+    expect(assistant).toContain("待補外觀描述");
+  });
+
+  it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {
+    const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
+    const start = story.indexOf("generateStoryboard:");
+    const block = story.slice(start, story.indexOf("undoRun:", start));
+    expect(block).toContain("publishToProject(input.projectId");
+    expect(block).toContain('kind: "scene"');
+    expect(block).toContain("已產生分鏡");
   });
 });
 
 const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
+
+describe("SceneList insertAfter queue (do not invent a /p/ button)", () => {
+  it("SceneRow already queues「在這之後插入」in click order", () => {
+    expect(sceneList).toContain('aria-label="在這之後插入一鏡"');
+    expect(sceneList).toContain("enqueueInsertAfter");
+    expect(sceneList).toContain("pumpInsertAfter");
+    expect(sceneList).toContain("insertTailRef");
+    expect(sceneList).not.toContain("在這格之後插入");
+  });
+});
 
 describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => {
   it("listByProject projects latestDoneVisualGenId; SceneList Adopt calls adoptGeneration", () => {
