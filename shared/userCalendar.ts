@@ -27,5 +27,5 @@ export function formatDashboardDateChip(
     day: "numeric",
     weekday: "long",
     timeZone,
-  }).format(now);
+  }).format(now).replace(/\s+/g, "");
 }

@@ -12,6 +12,7 @@ describe("dashboard date chip uses user TZ, not UTC leftover", () => {
     expect(resolveUserTimeZone("")).toBe(PRODUCT_USER_TIME_ZONE);
     const afterMidnightTaipei = new Date("2026-08-18T16:00:00.000Z");
     expect(formatDashboardDateChip(afterMidnightTaipei, resolveUserTimeZone("UTC"))).toBe("8月19日星期三");
+    expect(formatDashboardDateChip(afterMidnightTaipei, resolveUserTimeZone("UTC"))).not.toMatch(/\s/);
   });
 
   it("keeps a real user TZ (not UTC leftover)", () => {
