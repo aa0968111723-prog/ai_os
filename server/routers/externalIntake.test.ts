@@ -30,6 +30,10 @@ describe("Agent intake reuses the canonical Universal Intake pipeline", () => {
     expect(driveBlock).not.toMatch(/callLlm|invokeLlm|chatCompletion|responses\.create/);
   });
 
+  it("confirming an intake onto a shot bumps scene.rev", () => {
+    expect(routerSource).toContain("rev: sql`${schema.scenes.rev} + 1`");
+  });
+
   it("registers durable Intelligence jobs without running provider analysis in the request", () => {
     expect(serviceSource).toContain("registerIntelligenceResource");
     expect(serviceSource).not.toContain("claimAndProcessIntelligenceJob");
