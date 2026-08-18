@@ -2357,6 +2357,7 @@ export const assistantRouter = router({
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
+        if (!reused) publishToProject(project.id, { kind: "character", id: row.id }, "助手已新增角色");
         return writeResult(
           { kind: "add_character" as const, characterId: row.id, name: row.name, reused: Boolean(reused) },
           verification,

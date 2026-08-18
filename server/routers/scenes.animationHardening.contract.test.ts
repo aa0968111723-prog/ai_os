@@ -139,6 +139,10 @@ describe("animation shot writes stay consistent", () => {
     expect(exec).toContain("MAX_PROJECT_CHARACTERS");
     expect(assistant).toContain("proposeAddCharacterActions");
     expect(assistant).toContain("待補外觀描述");
+    expect(assistant).toContain('type: z.literal("add_character")');
+    expect(assistant).toContain('"add_character"');
+    expect(assistant).toContain("publishToProject(project.id, { kind: \"character\"");
+    expect(assistant).toContain("authoritative_character_row_read_back");
   });
 
   it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {

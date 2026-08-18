@@ -6,6 +6,12 @@ import {
 } from "./assistantCharacterPropose";
 
 describe("proposeAddCharacterActions", () => {
+  it("「新增角色 小華」emits one add_character confirm card", () => {
+    expect(proposeAddCharacterActions("新增角色 小華")).toEqual([
+      { type: "add_character", name: "小華", appearance: PENDING_CHARACTER_APPEARANCE },
+    ]);
+  });
+
   it("turns「幫我新增角色 小華、媽媽、禪定龜龜」into 3 confirm cards", () => {
     const actions = proposeAddCharacterActions("幫我新增角色 小華、媽媽、禪定龜龜");
     expect(actions).toEqual([
