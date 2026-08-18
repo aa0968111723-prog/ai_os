@@ -750,7 +750,7 @@ const SceneRow = memo(function SceneRow({
                 {/* 先預覽：出圖前看實際會送出什麼（不扣點）——與送出走同一支組裝器，預覽不會說謊 */}
                 <ScenePromptPreview
                   projectId={projectId}
-                  modelId={genModel?.id ?? DEFAULT_MODEL}
+                  modelId={liveGenModelId}
                   prompt={s.prompt ?? ""}
                   characterIds={effectiveCards.characterIds}
                   scenePresetIds={effectiveCards.scenePresetIds}

@@ -328,8 +328,10 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
+    expect(parse).toContain("rewritePersistedXiaohuaShotCopy(row, bound)");
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
+    expect(lock).toContain("lockXiaohuaAct1Location");
     const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
     expect(director).toContain("lockXiaohuaCopyFields");
   });
@@ -379,6 +381,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(stopFn).toContain("canStopAgentRunStatus");
     expect(stopFn).toContain("awaiting_approval");
     expect(stopFn).toContain('status: "stopped"');
+    expect(stopFn).toContain("Never return the pre-update row");
+    expect(stopFn).not.toContain("return stopped ?? run");
+    expect(hud).toContain("discard.mutate");
   });
 
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {

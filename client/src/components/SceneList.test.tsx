@@ -483,6 +483,26 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     ]);
   });
 
+  it("生成這一格 quotes and sends aios.scenegen Qwen, not DEFAULT SDXL", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("aios.scenegen.p-1", "fal-ai/qwen-image-2/text-to-image");
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", hasAsset: false, prompt: "小華躺在床上" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(rowOf("s1").getByRole("button", { name: /生成這一格.*−1 點/ })).toBeInTheDocument();
+    await user.click(rowOf("s1").getByRole("button", { name: /^生成這一格/ }));
+    expect(screen.getByText(/Qwen Image 2\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/約 −1 點/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "確認生成" }));
+    expect(generateMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sceneId: "s1",
+      modelId: "fal-ai/qwen-image-2/text-to-image",
+    }));
+    expect(generateMutate.mock.calls[0][0].modelId).not.toBe("fal-ai/fast-lightning-sdxl");
+  });
+
   it("generateInto 完成後列出採用這一版，按下走 adoptGeneration", async () => {
     const user = userEvent.setup();
     scenesQuery.mockReturnValue({
