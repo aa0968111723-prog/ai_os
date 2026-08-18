@@ -373,4 +373,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0079_animation_consistency_evaluations": [
     "d7345fd35e30fe40fed4ecd7b52db99890e7d03a9a8416f83f5916a2f6c0f819",
   ],
+  "0080_project_rev": [
+    "d70f2058229cb6da52436d29f31eaf9dbc564cad19f1e0b4516a78ab12732240",
+  ],
 };

@@ -136,6 +136,20 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
   });
 });
 
+describe("worldview OCC uses projects.rev", () => {
+  it("schema, updateWorldview, and blur saves share expectedRev", () => {
+    const schemaSrc = readFileSync(join(process.cwd(), "server/db/schema/projects.ts"), "utf8");
+    const projectTable = schemaSrc.slice(schemaSrc.indexOf("export const projects = pgTable"), schemaSrc.indexOf("export const knowledge"));
+    expect(projectTable).toContain('rev: integer("rev")');
+    const projects = readFileSync(join(process.cwd(), "server/routers/projects.ts"), "utf8");
+    expect(projects).toContain("updateWorldview:");
+    expect(projects).toContain("applyWithRevision");
+    const page = readFileSync(join(process.cwd(), "client/src/pages/ProjectPage.tsx"), "utf8");
+    expect(page).toContain("saveWorldviewOcc");
+    expect(page).toContain("expectedRev: typeof project.data?.rev === \"number\" ? project.data.rev : undefined");
+  });
+});
+
 const oneClickHook = readFileSync(join(process.cwd(), "client/src/features/story-workspace/useOneClickFilm.ts"), "utf8");
 const overnightRealGen = readFileSync(join(process.cwd(), "scripts/overnight-real-gen-adopt.py"), "utf8");
 

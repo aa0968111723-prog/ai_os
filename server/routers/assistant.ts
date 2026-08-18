@@ -2164,10 +2164,20 @@ export const assistantRouter = router({
         }
         const current = worldviewSchema.parse(project.worldview ?? {});
         const merged = worldviewSchema.parse({ ...current, ...patch });
-        await db
-          .update(schema.projects)
-          .set({ worldview: merged, updatedAt: new Date() })
-          .where(eq(schema.projects.id, project.id));
+        await applyWithRevision({
+          entity: "project",
+          table: schema.projects,
+          idColumn: schema.projects.id,
+          revColumn: schema.projects.rev,
+          row: project,
+          patch: { worldview: merged },
+          bookkeeping: { updatedAt: new Date() },
+          reload: async () => {
+            const [fresh] = await db.select().from(schema.projects).where(eq(schema.projects.id, project.id));
+            return fresh;
+          },
+          updatedAtField: "updatedAt",
+        });
         const summary = summarizeWorldviewChipsPatch(patch);
         let verification: AssistantWriteVerification;
         try {

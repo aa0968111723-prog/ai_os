@@ -802,6 +802,14 @@ export function ProjectPage({ id }: { id: string }) {
       wvTimers.current = [setTimeout(() => setWvSaved("fading"), 2000), setTimeout(() => setWvSaved("idle"), 2600)];
     },
   });
+  /** blur／長文欄才帶 expectedRev。chips 連點仍走樂觀合併、不帶 rev，避免自己跟自己衝突。 */
+  const saveWorldviewOcc = (worldview: Parameters<typeof updateWv.mutate>[0]["worldview"]) => {
+    updateWv.mutate({
+      id,
+      worldview,
+      expectedRev: typeof project.data?.rev === "number" ? project.data.rev : undefined,
+    });
+  };
 
   /** 生成時要帶入的角色定裝卡（跨鏡一致）——持久化，重整不歸零 */
   const [charIds, setCharIds] = usePersistedIds(`aios.pick.chars.${id}`);
@@ -2151,7 +2159,7 @@ export function ProjectPage({ id }: { id: string }) {
                 readOnly={!canEdit}
                 maxLength={500}
                 placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
-                onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
+                onBlur={(e) => canEdit && e.target.value !== wv.logline && saveWorldviewOcc({ logline: e.target.value })}
               />
               <label htmlFor="wv-message">
                 看完要記得哪一句？
@@ -2165,7 +2173,7 @@ export function ProjectPage({ id }: { id: string }) {
                 readOnly={!canEdit}
                 maxLength={500}
                 placeholder="例：把心交給佛，煩惱就交給了光"
-                onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
+                onBlur={(e) => canEdit && e.target.value !== wv.message && saveWorldviewOcc({ message: e.target.value })}
               />
               <label id="wv-tones">
                 氣氛調性
@@ -2380,14 +2388,14 @@ export function ProjectPage({ id }: { id: string }) {
                       readOnly={!canEdit}
                       maxLength={500}
                       placeholder="例：想在忙碌生活裡找片刻安定的年輕人與家庭"
-                      onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
+                      onBlur={(e) => canEdit && e.target.value !== wv.audience && saveWorldviewOcc({ audience: e.target.value })}
                     />
 
                     <ThreeActStoryArc
                       acts={wv.acts}
                       canEdit={canEdit}
                       onChange={(field, value) => {
-                        updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: value } } });
+                        saveWorldviewOcc({ acts: { ...wv.acts, [field]: value } });
                       }}
                       sceneCount={scenes.data?.length ?? 0}
                       onSplitFromOutline={

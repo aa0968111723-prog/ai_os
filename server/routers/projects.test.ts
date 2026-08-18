@@ -34,6 +34,18 @@ describe("continuity reference deletion guard", () => {
   });
 });
 
+describe("updateWorldview OCC", () => {
+  it("writes through applyWithRevision and accepts expectedRev", () => {
+    const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
+    const body = source.slice(source.indexOf("updateWorldview:"));
+    expect(body).toContain("applyWithRevision");
+    expect(body).toContain('entity: "project"');
+    expect(body).toContain("expectedRev: input.expectedRev");
+    expect(body).toContain("revColumn: schema.projects.rev");
+    expect(body).toContain("patch: { worldview: merged }");
+  });
+});
+
 describe("setCover（專案封面圖）契約", () => {
   const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
   /** 只取 setCover 這一條 procedure 的本文（下一條是 assets），避免比對到隔壁 procedure */

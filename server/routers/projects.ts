@@ -21,6 +21,7 @@ import {
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
+import { applyWithRevision } from "../services/revisionGuard";
 import { createProjectCore } from "../services/projectCore";
 import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
 import { visibleProjectsWhere } from "../services/projectInventory";
@@ -932,7 +933,11 @@ export const projectsRouter = router({
   updateWorldview: authedProcedure
     // partial patch：只送有改的欄位，伺服器端與現值合併。
     // 舊版前端送整包 {...wv, field}，快速連改不同欄位時後一次會用「上一次 render 的舊 wv」覆蓋掉前一次的變更（資料遺失）。
-    .input(z.object({ id: z.string().uuid(), worldview: worldviewSchema.partial() }))
+    .input(z.object({
+      id: z.string().uuid(),
+      worldview: worldviewSchema.partial(),
+      expectedRev: z.number().int().min(0).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
@@ -940,11 +945,22 @@ export const projectsRouter = router({
       await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改世界觀
       const current = worldviewSchema.parse(project.worldview ?? {});
       const merged = worldviewSchema.parse({ ...current, ...input.worldview });
-      const [updated] = await db
-        .update(schema.projects)
-        .set({ worldview: merged, updatedAt: new Date() })
-        .where(eq(schema.projects.id, input.id))
-        .returning();
+      const { row: updated } = await applyWithRevision({
+        entity: "project",
+        table: schema.projects,
+        idColumn: schema.projects.id,
+        revColumn: schema.projects.rev,
+        row: project,
+        patch: { worldview: merged },
+        bookkeeping: { updatedAt: new Date() },
+        expectedRev: input.expectedRev,
+        baseline: input.expectedRev === undefined ? null : { worldview: current },
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
+          return fresh;
+        },
+        updatedAtField: "updatedAt",
+      });
       return updated;
     }),
 });
