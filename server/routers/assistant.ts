@@ -34,6 +34,8 @@ import { completeText, LlmServiceError, type LlmProvider } from "../services/llm
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
+import { applyWithRevision } from "../services/revisionGuard";
+import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
@@ -335,6 +337,36 @@ const actionInputSchema = z.discriminatedUnion("type", [
 ]);
 
 const FIELD_LABEL: Record<string, string> = { title: "標題", voiceover: "旁白", durationSec: "秒數" };
+
+/**
+ * 助手寫分鏡必須走與工作台同一套條件寫入：推進 rev、可合併、並廣播讓 UI 立刻重取。
+ * 舊路徑 raw UPDATE 不碰 rev —— 助手回「已更新」，創作室帶舊 expectedRev 再存就靜默蓋掉，
+ * 畫面上也因為沒 invalidate 而繼續顯示舊值（假完成）。
+ */
+async function applyAssistantScenePatch(
+  scene: typeof schema.scenes.$inferSelect,
+  patch: Partial<typeof schema.scenes.$inferInsert>,
+  label: string,
+) {
+  const { row } = await applyWithRevision({
+    entity: "scene",
+    table: schema.scenes,
+    idColumn: schema.scenes.id,
+    revColumn: schema.scenes.rev,
+    row: scene,
+    patch,
+    extraWhere: isNull(schema.scenes.deletedAt),
+    reload: async () => {
+      const [fresh] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+      return fresh;
+    },
+  });
+  publishToProject(scene.projectId, { kind: "scene", id: scene.id }, label);
+  return row;
+}
 
 /* ── 多步工具調用（W4）：唯讀查詢工具 ── */
 
@@ -1827,12 +1859,12 @@ export const assistantRouter = router({
           // 為什麼：非數字（NaN）／0 舊版會靜默沿用原值卻回報「已更新」＝對使用者謊報成功；改為明確擋下
           const n = Number(a.value);
           if (!Number.isFinite(n)) throw new TRPCError({ code: "BAD_REQUEST", message: "秒數需為數字" });
-          await db.update(schema.scenes).set({ durationSec: Math.max(1, Math.min(60, Math.round(n))) }).where(eq(schema.scenes.id, scene.id));
+          await applyAssistantScenePatch(scene, { durationSec: Math.max(1, Math.min(60, Math.round(n))) }, "助手已更新分鏡");
         } else {
           // 為什麼：schema 的 min(1) 擋不掉純空白；trim 後為空就拒絕，避免標題／旁白被清成空白
           const v = a.value.trim();
           if (!v) throw new TRPCError({ code: "BAD_REQUEST", message: `${FIELD_LABEL[a.field]}不能是空白` });
-          await db.update(schema.scenes).set({ [a.field]: v }).where(eq(schema.scenes.id, scene.id));
+          await applyAssistantScenePatch(scene, { [a.field]: v }, "助手已更新分鏡");
         }
         return { ok: true, kind: "update_scene" as const, message: "已更新分鏡" };
       }
@@ -1854,7 +1886,7 @@ export const assistantRouter = router({
         if (!changes.length) {
           return { ok: true, kind: "direct_shot" as const, message: "這一鏡已經是這個設定了，沒有變更" };
         }
-        await db.update(schema.scenes).set({ camera, performance }).where(eq(schema.scenes.id, scene.id));
+        await applyAssistantScenePatch(scene, { camera, performance }, "助手已調整鏡頭語言");
         // 用標題不用 orderIndex＋1：orderIndex 不保證是連續的顯示鏡次（軟刪與插入會留洞），報錯鏡次比不報還糟
         return { ok: true, kind: "direct_shot" as const, message: `已調整「${scene.title}」：${changes.join("、")}` };
       }
@@ -1885,6 +1917,7 @@ export const assistantRouter = router({
             .returning();
           return row;
         });
+        publishToProject(project.id, { kind: "scene", id: scene.id }, "助手已新增分鏡");
         return { ok: true, kind: "create_scene" as const, sceneId: scene.id, message: "已新增分鏡" };
       }
 
