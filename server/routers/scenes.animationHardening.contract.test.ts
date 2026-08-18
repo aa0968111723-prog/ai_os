@@ -163,6 +163,7 @@ describe("storyboard board blur sends expectedRev", () => {
   it("ShotCard and SceneGroupHeader no longer raw-mutate without rev", () => {
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     const header = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/SceneGroupHeader.tsx"), "utf8");
+    expect(sceneList).toContain("expectedRev: row?.rev");
     expect(shotCard).toContain("createShotFieldSaveGate");
     expect(shotCard).toContain("expectedRev: req.expectedRev");
     expect(header).toContain("expectedRev: scene.rev");

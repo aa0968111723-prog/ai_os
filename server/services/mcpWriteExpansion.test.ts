@@ -29,6 +29,18 @@ describe("MCP write honesty helpers", () => {
     }
   });
 
+  it("MCP update_scene and update_worldview go through applyWithRevision", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const scene = source.slice(source.indexOf('if (name === "update_scene")'), source.indexOf('if (name === "reorder_scenes")'));
+    const wv = source.slice(source.indexOf('if (name === "update_worldview")'), source.indexOf('if (name === "rename_asset")'));
+    expect(scene).toContain("applyWithRevision");
+    expect(scene).toContain("expectedRev: scene.rev");
+    expect(scene).not.toContain("db.update(schema.scenes).set(patch)");
+    expect(wv).toContain("applyWithRevision");
+    expect(wv).toContain("expectedRev: project.rev");
+    expect(wv).not.toContain("db.update(schema.projects).set({ worldview");
+  });
+
   it("submit_generation can bind sceneNo through findSceneByDisplayNo", () => {
     const source = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
     const block = source.slice(source.indexOf('if (name === "submit_generation")'), source.indexOf('if (name === "post_message")'));

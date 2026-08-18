@@ -627,7 +627,12 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
               sketch: sketchBridge,
               onApplyPrompt: (text: string) => {
                 if (!shot) return;
-                updateShot.mutate({ sceneId: shot.id, prompt: text });
+                updateShot.mutate({
+                  sceneId: shot.id,
+                  prompt: text,
+                  expectedRev: shot.rev,
+                  baseline: { prompt: shot.prompt ?? null },
+                });
                 setInspectorTab("frame");
               },
             }}

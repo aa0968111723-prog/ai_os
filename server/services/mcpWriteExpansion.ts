@@ -29,6 +29,7 @@ import { resolveSceneCards } from "../../shared/sceneCards";
 import { adoptGenerationCurrent } from "./consistencyAdopt";
 import { refreshShotContextStalenessSafely } from "./shotContextPackets";
 import { assertReferenceImage } from "./referenceAsset";
+import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "./revisionGuard";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -530,8 +531,32 @@ export async function runMcpWriteExpansion(
       if (typeof args.trimEndMs === "number") patch.trimEndMs = nextEnd;
     }
     if (Object.keys(patch).length === 0) return mcpUnchanged({ sceneId: scene.id, title: scene.title });
-    const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, sceneId)).returning();
-    return { sceneId: updated.id, title: updated.title };
+    const baseline: Record<string, unknown> = {};
+    for (const key of Object.keys(patch)) baseline[key] = (scene as Record<string, unknown>)[key];
+    try {
+      const { row: updated } = await applyWithRevision({
+        entity: "scene",
+        table: schema.scenes,
+        idColumn: schema.scenes.id,
+        revColumn: schema.scenes.rev,
+        row: scene,
+        patch,
+        expectedRev: scene.rev,
+        baseline,
+        extraWhere: isNull(schema.scenes.deletedAt),
+        reload: async () => {
+          const [fresh] = await db
+            .select()
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.id, sceneId), isNull(schema.scenes.deletedAt)));
+          return fresh;
+        },
+      });
+      return { sceneId: updated.id, title: updated.title };
+    } catch (err) {
+      if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+      throw err;
+    }
   }
 
   if (name === "reorder_scenes") {
@@ -708,7 +733,27 @@ export async function runMcpWriteExpansion(
       ...(Array.isArray(args.references) ? { references: args.references.map(String).slice(0, 30) } : {}),
     };
     const parsed = worldviewSchema.parse(merged);
-    await db.update(schema.projects).set({ worldview: parsed, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    try {
+      await applyWithRevision({
+        entity: "project",
+        table: schema.projects,
+        idColumn: schema.projects.id,
+        revColumn: schema.projects.rev,
+        row: project,
+        patch: { worldview: parsed },
+        bookkeeping: { updatedAt: new Date() },
+        expectedRev: project.rev,
+        baseline: { worldview: current },
+        reload: async () => {
+          const [fresh] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+          return fresh;
+        },
+        updatedAtField: "updatedAt",
+      });
+    } catch (err) {
+      if (isRevisionConflictError(err)) throw revisionConflictTrpcError(err.conflict);
+      throw err;
+    }
     return { projectId, worldview: parsed, note: "世界觀已更新——之後生成會自動注入。" };
   }
 

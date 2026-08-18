@@ -1234,7 +1234,18 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                 onClose={() => setShowPreview(false)}
                 // 預覽台的 I／O 直接寫回修剪欄位：播到想要的地方按兩下鍵，初稿就剪好了。
                 // 沒有編輯權就不給，維持與分鏡卡同一套權限口徑。
-                onTrim={canEdit ? (sceneId, patch) => trimFromPlayer.mutate({ sceneId, ...patch }) : undefined}
+                onTrim={canEdit ? (sceneId, patch) => {
+                  const row = list.find((s) => s.id === sceneId);
+                  trimFromPlayer.mutate({
+                    sceneId,
+                    ...patch,
+                    expectedRev: row?.rev,
+                    baseline: {
+                      ...(patch.trimStartMs !== undefined ? { trimStartMs: row?.trimStartMs ?? null } : {}),
+                      ...(patch.trimEndMs !== undefined ? { trimEndMs: row?.trimEndMs ?? null } : {}),
+                    },
+                  });
+                } : undefined}
               />
             </div>
           )}

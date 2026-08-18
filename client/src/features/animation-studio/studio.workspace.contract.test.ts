@@ -188,6 +188,14 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).not.toMatch(/trpc\.\w+\.create\w*Shot/);
   });
 
+  it("AI panel save and apply-prompt send expectedRev", () => {
+    const panel = readFileSync(resolve(dir, "StudioAiPanel.tsx"), "utf8");
+    expect(panel).toContain("expectedRev: shot.rev");
+    expect(panel).toContain("baseline:");
+    expect(studio).toContain("expectedRev: shot.rev");
+    expect(studio).toContain("baseline: { prompt: shot.prompt ?? null }");
+  });
+
   it("編輯框一律帶樂觀併發欄位——夥伴同時改不會靜默吃字", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
     expect(inspector).toContain("expectedRev: req.expectedRev");
