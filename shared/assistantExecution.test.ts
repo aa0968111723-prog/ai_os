@@ -118,5 +118,7 @@ describe("assistant execution fast path", () => {
     expect(classifyAssistantRequest("保留現用版本")).toMatchObject({
       capabilityId: "animation_keep_current",
     });
+    expect(classifyAssistantRequest("幫我加一張角色卡").capabilityId).toBe("add_character");
+    expect(classifyAssistantRequest("把小華改成粉橘短髮女孩、大二化工").capabilityId).toBe("add_character");
   });
 });

@@ -90,4 +90,55 @@ d("project assistant add_character (real PostgreSQL)", () => {
     expect(after[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
     expect(after[0]!.appearance).not.toContain("年輕男性");
   });
+
+  it("same-name 年輕男性 card still gets a confirm; confirm updates that row to 粉橘短髮女孩", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "CharReuse", email: `char-reuse-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-add-character-reuse", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+    await db.insert(schema.characters).values({
+      projectId: project.id,
+      groupId,
+      name: "小華",
+      appearance: "年輕男性",
+      createdBy: userId,
+    });
+    await db.insert(schema.characters).values({
+      projectId: project.id,
+      groupId,
+      name: "禪定龜龜",
+      appearance: "綠色烏龜",
+      createdBy: userId,
+    });
+
+    const message = "新增角色 小華 粉橘短髮女孩、大二化工";
+    const existing = [{ name: "小華", appearance: "年輕男性" }, { name: "禪定龜龜", appearance: "綠色烏龜" }];
+    const cards = proposeAddCharacterActions(message, existing);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.name).toBe("小華");
+    expect(cards[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+
+    const assistant = assistantRouter.createCaller({ auth: authFor(userId, groupId) } as never);
+    const result = await assistant.runAction({
+      projectId: project.id,
+      action: { type: "add_character", name: "小華", appearance: "年輕男性" },
+    });
+    expect(result.ok).toBe(true);
+    if (result.kind !== "add_character") return;
+    expect(result.reused).toBe(true);
+    expect(result.message).toContain("已更新角色");
+
+    const rows = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+    expect(rows).toHaveLength(2);
+    const xiaohua = rows.find((row) => row.name === "小華");
+    expect(xiaohua?.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
+    expect(xiaohua?.appearance).not.toContain("年輕男性");
+  });
 });

@@ -40,7 +40,7 @@ import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext } 
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
-import { proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { addCharacterConfirmLabel, collectAddCharacterProposals, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
@@ -1131,7 +1131,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           shotId: shotIdFromPageContext(input.pageContext),
         }).catch(() => null),
         db
-          .select({ name: schema.characters.name })
+          .select({ name: schema.characters.name, appearance: schema.characters.appearance })
           .from(schema.characters)
           .where(eq(schema.characters.projectId, project.id))
           .limit(40),
@@ -1311,7 +1311,9 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         lastParsedAt: storyRow?.lastParsedAt,
       });
       const characterLine = characterRows.length
-        ? `角色定裝（${characterRows.length}）：${characterRows.map((row) => row.name).join("、")}`
+        ? `角色定裝（${characterRows.length}）：${characterRows.map((row) => (
+          row.appearance ? `${row.name}（${row.appearance.slice(0, 32)}）` : row.name
+        )).join("、")}`
         : "角色定裝（0）：尚無——編輯者可用 add_character 建立（確認卡；只給名字亦可）";
       const context = studioShot
         ? formatStudioShotContext({
@@ -1448,12 +1450,15 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
               label: `在資料庫「${target.name}」新增一列（${Object.keys(data).length} 欄）`,
             });
           } else if (a.type === "add_character") {
+            const name = a.name.trim();
+            const appearance = a.appearance.trim();
+            const existing = characterRows.find((row) => nameKey(row.name) === nameKey(name));
             out.push({
               type: "add_character",
-              name: a.name.trim(),
-              appearance: a.appearance.trim(),
+              name,
+              appearance,
               notes: a.notes?.trim(),
-              label: `新增角色「${a.name.trim()}」`,
+              label: addCharacterConfirmLabel(name, appearance, existing),
             });
           } else {
             const scene = findSceneByDisplayNo(scenes, a.sceneNo);
@@ -1469,7 +1474,9 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       if (isMockMode()) {
         emit("thinking", "（測試模式）整理專案現況…");
         const goal = input.message.trim();
-        const characterActions = allowWrite ? resolve(proposeAddCharacterActions(input.message)) : [];
+        const characterActions = allowWrite
+          ? resolve(proposeAddCharacterActions(input.message, characterRows))
+          : [];
         const mockActions: ResolvedAction[] = characterActions.length
           ? characterActions
           : goal.length >= 5
@@ -1507,7 +1514,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
 - prepare_external_generation：替某一鏡建立外部 AI 生成工作階段（sceneNo；externalTool 可用 flow/runway/kling/chatgpt/gemini/midjourney/elevenlabs/suno，未填預設 flow）。Prompt 必須從該分鏡的實際 prompt／動作／對白／旁白整理，不得自行假裝已生成；確認後複製 Prompt 並開啟外部工具，不扣 AI OS 點數。使用者說「幫我準備 Scene 8 去 Flow」或想用外部工具時用這個。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 - add_database_row：在 AI 可寫的自訂資料庫新增一列（dbRef 只能抄 <可讀資料庫> 標了「AI 代理可寫」的代號；values 的鍵用欄位標籤或 key）。使用者說「記進資料庫／加一列／寫進名單」時用這個。不可寫的庫不要提議。
-- add_character：新增角色定裝卡（name＋appearance 必填，notes 可選）。使用者說「建角色／加定裝卡」時用。同名卡已存在就回那張，不重複建。**只給名字、沒寫外觀時不要拒絕**——appearance 填「待補外觀描述」，每個名字各一張 add_character（最多 6）。禁止只回「我目前無法建立角色」卻讓 actions=[]。
+- add_character：新增或更新角色定裝卡（name＋appearance 必填，notes 可選）。使用者說「建角色／加定裝卡」或改外觀時用。**同名卡已存在也必須 emit add_character 確認卡**（沿用 vs 更新外觀）——禁止只寫散文問要不要改寫或另取一名、且 actions=[]。確認後沿用那一列、不另建。小華外觀鎖定「大二化工、粉橘短髮女孩、白帽T」，禁止寫成年輕男性。**只給名字、沒寫外觀時不要拒絕**——appearance 填「待補外觀描述」，每個名字各一張 add_character（最多 6）。禁止只回「我目前無法建立角色」卻讓 actions=[]。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/add_database_row/add_character/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
@@ -1711,17 +1718,24 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           };
         }
         const reply = outcome.reply;
-        const fromModel = resolve(reply.rawActions);
-        const fallbackCharacters = allowWrite && fromModel.length === 0
-          ? resolve(proposeAddCharacterActions(input.message))
+        const characterProposals = allowWrite
+          ? collectAddCharacterProposals(input.message, reply.rawActions, characterRows)
           : [];
-        const actions = fromModel.length ? fromModel : fallbackCharacters;
+        const modelHadCharacter = reply.rawActions.some((action) => action.type === "add_character");
+        const otherActions = resolve(reply.rawActions.filter((action) => action.type !== "add_character"));
+        const characterActions = resolve(characterProposals);
+        const actions = [...characterActions, ...otherActions].slice(0, 6);
+        const injectedCharacters = characterProposals.length > 0 && !modelHadCharacter;
+        const answer = injectedCharacters
+          ? (reply.rawActions.length === 0
+            ? "我幫你準備了角色定裝卡，確認下方就寫入。同名卡會沿用並更新外觀，不會再建一張。"
+            : `${reply.answer.trim()}\n請用下方確認卡：同名沿用並更新外觀，不會再建一張。`.slice(0, 4000))
+          : reply.answer;
         const settled = settleAssistantAskCompletion({
-          answer: fallbackCharacters.length
-            ? "我幫你準備了角色定裝卡，確認下方就寫入。外觀先標「待補外觀描述」，確認後可再改。"
-            : reply.answer,
+          answer,
           actions,
           userMessage: input.message,
+          hasVerifiedWrite: false,
         });
         const summary =
           reply.source === "reply" ? "回答與建議動作已整理完成"
@@ -2322,17 +2336,22 @@ export const assistantRouter = router({
           .from(schema.characters)
           .where(eq(schema.characters.projectId, project.id));
         const reused = existing.find((row) => nameKey(row.name) === nameKey(name));
+        let appearanceChanged = false;
         if (reused) {
-          const reusedLock = applyXiaohuaIdentityLock(
-            { name: reused.name, appearance: reused.appearance, costume: null },
+          const requested = applyXiaohuaIdentityLock(
+            { name, appearance, costume: null },
             storyRow?.content ?? "",
           );
-          if (reusedLock.appearance && reusedLock.appearance !== reused.appearance) {
+          const nextAppearance = (requested.appearance ?? appearance).trim();
+          const keepPending = nextAppearance === PENDING_CHARACTER_APPEARANCE && reused.appearance.trim();
+          const writeAppearance = keepPending ? reused.appearance : nextAppearance;
+          if (writeAppearance && writeAppearance !== reused.appearance) {
             await db
               .update(schema.characters)
-              .set({ appearance: reusedLock.appearance })
+              .set({ appearance: writeAppearance, rev: sql`${schema.characters.rev} + 1` })
               .where(eq(schema.characters.id, reused.id));
-            reused.appearance = reusedLock.appearance;
+            reused.appearance = writeAppearance;
+            appearanceChanged = true;
           }
         }
         const row = reused ?? await (async () => {
@@ -2362,20 +2381,36 @@ export const assistantRouter = router({
             .select({
               id: schema.characters.id,
               projectId: schema.characters.projectId,
+              appearance: schema.characters.appearance,
             })
             .from(schema.characters)
             .where(and(eq(schema.characters.id, row.id), eq(schema.characters.projectId, project.id)));
-          verification = found
-            ? { status: "verified", message: reused ? `已重新讀取並確認角色「${row.name}」已存在` : `已重新讀取並確認角色「${row.name}」` }
+          const expectedAppearance = reused ? reused.appearance : appearance;
+          verification = found && found.appearance === expectedAppearance
+            ? { status: "verified", message: appearanceChanged
+              ? `已重新讀取並確認角色「${row.name}」外觀`
+              : reused
+                ? `已重新讀取並確認角色「${row.name}」已存在`
+                : `已重新讀取並確認角色「${row.name}」` }
             : { status: "unverified", message: "操作已送出，但驗證未通過" };
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        if (!reused) publishToProject(project.id, { kind: "character", id: row.id }, "助手已新增角色");
+        if (!reused || appearanceChanged) {
+          publishToProject(
+            project.id,
+            { kind: "character", id: row.id },
+            appearanceChanged ? "助手已更新角色外觀" : "助手已新增角色",
+          );
+        }
         return writeResult(
           { kind: "add_character" as const, characterId: row.id, name: row.name, reused: Boolean(reused) },
           verification,
-          reused ? `角色「${row.name}」已在專案裡` : `已新增角色「${row.name}」`,
+          appearanceChanged
+            ? `已更新角色「${row.name}」外觀`
+            : reused
+              ? `角色「${row.name}」已在專案裡`
+              : `已新增角色「${row.name}」`,
           "authoritative_character_row_read_back",
         );
       }

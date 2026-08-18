@@ -105,9 +105,32 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.title).not.toMatch(/已完成盤點/);
   });
 
-  it("chip source never emits 已完成盤點", () => {
+  it("bans 已完成盤點 on write intent with no verified write — even with 2 sources", () => {
+    expect(userAskedForWrite("新增角色 小華 粉橘短髮女孩、大二化工")).toBe(true);
+    expect(userAskedForWrite("把小華改成粉橘短髮女孩")).toBe(true);
+    const settled = settleAssistantAskCompletion({
+      answer: "已完成盤點。現有卡「小華：年輕男性」與「粉橘短髮女孩、大二化工」衝突，要改寫還是另取一名？",
+      actions: [],
+      userMessage: "新增角色 小華 粉橘短髮女孩、大二化工",
+      hasVerifiedWrite: false,
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.answer).not.toMatch(/已完成盤點/);
+    expect(settled.claimedUnexecutedWrite || settled.unverifiedWriteIntent).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 2,
+    });
+    expect(chip.type).toBe("waiting.user_input");
+    expect(chip.title).toBe("尚未寫入，請確認");
+    expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
+  });
+
+  it("chip titles never emit 已完成盤點", () => {
     const src = readFileSync(join(process.cwd(), "shared/assistantHonestCompletion.ts"), "utf8");
-    expect(src).not.toContain("已完成盤點");
+    expect(src).not.toMatch(/title:\s*[`'"][^`'"]*已完成盤點/);
     const globalSrc = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
     expect(globalSrc).not.toContain("已完成盤點");
   });

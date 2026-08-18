@@ -14,9 +14,9 @@ const COMPLETED_WRITE_RE =
 const CANNOT_VERIFY_RE =
   /無法(?:看到|讀到|取得|檢查|確認)|看不到.{0,16}(?:故事|腳本|你的故事)|看不見.{0,16}(?:故事|腳本)|沒有看到.{0,16}(?:故事|腳本)|請(?:你)?(?:先)?貼(?:上|過來)|我沒有(?:看到|讀到|辦法看到)/;
 
-/** User asked to persist story / edit a shot — read sources are not a write. */
+/** User asked to persist story / edit a shot / rewrite a character look — read sources are not a write. */
 const WRITE_INTENT_RE =
-  /(?:儲存|寫入|存檔|更新|修改|編輯|改寫|套用|新增|建立|加).{0,16}(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝)|(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝).{0,12}(?:儲存|寫入|存檔|更新|修改|編輯|新增|建立)/;
+  /(?:儲存|寫入|存檔|更新|修改|編輯|改寫|套用|新增|建立|加|改定裝|改外觀).{0,16}(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝|小華|外觀)|(?:故事|腳本|分鏡|鏡頭|你的故事|角色|定裝|小華|外觀).{0,12}(?:儲存|寫入|存檔|更新|修改|編輯|新增|建立|改定裝)|(?:小華).{0,24}(?:粉橘|短髮|外觀|定裝|年輕男性|女孩)|(?:粉橘短髮|年輕男性).{0,16}(?:小華|角色)/;
 
 export function claimsCompletedWrite(answer: string): boolean {
   return COMPLETED_WRITE_RE.test(answer);
@@ -32,6 +32,7 @@ export function userAskedForWrite(message: string): boolean {
 
 export function rewriteCompletedTenseToProposal(answer: string): string {
   const rewritten = answer
+    .replace(/已完成盤點/g, "尚未核對來源")
     .replace(/已建立/g, "建議建立")
     .replace(/已新增/g, "建議新增")
     .replace(/已更新/g, "建議更新")
