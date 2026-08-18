@@ -30,6 +30,16 @@ function setup(overrides: Partial<React.ComponentProps<typeof StoryboardTimeline
   return props;
 }
 
+describe("StoryboardTimeline empty vs loading", () => {
+  it("loading + 0 shots shows 載入中, not 0 鏡 / 還沒有分鏡", () => {
+    setup({ shots: [], loading: true, activeId: null });
+    expect(screen.getByText("載入中")).toBeInTheDocument();
+    expect(screen.getByText("正在載入分鏡…")).toBeInTheDocument();
+    expect(screen.queryByText(/還沒有分鏡/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 鏡/)).not.toBeInTheDocument();
+  });
+});
+
 describe("StoryboardTimeline 複製這一鏡", () => {
   it("menu 複製 calls onDuplicate with the source shot id (not a no-op)", async () => {
     const user = userEvent.setup();

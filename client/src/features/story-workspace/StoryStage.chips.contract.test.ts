@@ -28,6 +28,14 @@ describe("StoryStage parse chips", () => {
     expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
   });
 
+  it("generateStoryboard success refreshes studio listByProject so /studio first paint is not 0 鏡", () => {
+    expect(src).toContain("refreshStudioShotList");
+    expect(src).toContain("trpc.story.generateStoryboard.useMutation");
+    const start = src.indexOf("trpc.story.generateStoryboard.useMutation");
+    const block = src.slice(start, src.indexOf("undoRun", start));
+    expect(block).toContain("refreshStudioShotList(utils, projectId)");
+  });
+
   it("產生分鏡 stays available from story text when parse never finished", () => {
     expect(src).toContain("canBoardFromStory");
     expect(src).toContain("解析未完成時，仍可依故事原文拆場拆鏡");

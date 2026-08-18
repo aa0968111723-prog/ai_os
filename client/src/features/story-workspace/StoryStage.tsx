@@ -24,6 +24,7 @@ import {
   STORY_AUTOSAVE_DEBOUNCE_MS,
   type StorySaveState,
 } from "./storyDraft";
+import { refreshStudioShotList } from "../../lib/studioShotList";
 
 const SAVE_LABEL: Record<StorySaveState, string> = {
   idle: "",
@@ -428,8 +429,7 @@ export function StoryStage({
       setParseNotice(
         r.reused ? "這次解析已經轉過分鏡了——直接看下方「分鏡」" : `已建立 ${r.storySceneIds.length} 場、${r.sceneIds.length} 個分鏡`,
       );
-      utils.scenes.listByProject.invalidate({ projectId });
-      utils.story.scenesList.invalidate({ projectId });
+      void refreshStudioShotList(utils, projectId);
       utils.story.get.invalidate({ projectId });
       utils.story.storyboardPreview.invalidate({ projectId });
       onRevealSection?.("storyboard");

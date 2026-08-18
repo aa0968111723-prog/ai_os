@@ -208,6 +208,8 @@ describe("Inspector 不新增資料格式", () => {
   it("studio listByProject always remounts so /p/ 產生分鏡 rows appear on the timeline", () => {
     expect(studio).toContain("refetchOnMount: \"always\"");
     expect(studio).toContain("trpc.scenes.listByProject.useQuery");
+    expect(studio).toContain("studioShotListIsLoading");
+    expect(studio).not.toContain("scenes.isLoading && !scenes.data");
   });
 
   it("創作室 複製這一鏡 走 insertAfter(duplicate) 且失敗要出 error，不是 silent queue", () => {

@@ -37,6 +37,7 @@ import type { SketchPreview } from "./sketchReplay";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
+import { studioShotListIsLoading } from "../../lib/studioShotList";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -89,7 +90,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     },
   );
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
-  const shotsLoading = scenes.isLoading && !scenes.data;
+  const shotsLoading = studioShotListIsLoading(scenes);
   // 場（story_scenes）：Top Bar 的麵包屑要顯示「這一鏡屬於哪一場」
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
 
