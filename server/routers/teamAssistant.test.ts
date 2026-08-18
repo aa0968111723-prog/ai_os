@@ -757,5 +757,12 @@ describe("project_detail injects persisted story", () => {
     expect(block).toContain("storyBlock");
     expect(TEAM_CONTEXT_LABELS).toContain("故事全文");
   });
+
+  it("team ask binds the same 120s wall-clock as project/site assistant", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    expect(src).toContain("bindAssistantAskDeadline");
+    expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
+    expect(src).toContain("signal: askSignal");
+  });
 });
 

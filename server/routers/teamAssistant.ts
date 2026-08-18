@@ -50,6 +50,11 @@ import {
 } from "../services/projectInventory";
 import { formatPersistedStoryForAssistant } from "../../shared/assistantProjectStoryContext";
 import {
+  ASSISTANT_ASK_TIMEOUT_MESSAGE,
+  assistantAskTimedOut,
+  bindAssistantAskDeadline,
+} from "../services/assistantAskBudget";
+import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
   retrieveAssistantDatabaseEvidence,
@@ -1496,14 +1501,16 @@ ${historyBlock}使用者的問題：${input.message}`;
       // 全程 0 點（NIM 免費）。與舊內嵌迴圈唯一的行為差異是「壞回覆的 fallback 不再
       // 把純工具 JSON 原文亮給使用者」（assistantCore 檔頭記載，全站助手同款）。
       const steps: string[] = [];
+      const { signal: askSignal, deadline: askDeadline, dispose: disposeAskDeadline } = bindAssistantAskDeadline();
       try {
         type TeamReply = z.infer<typeof teamReplySchema>;
         const outcome = await runToolLoop<z.infer<typeof teamToolSchema>, TeamReply>({
           maxToolRounds: MAX_TOOL_ROUNDS,
+          signal: askSignal,
           buildPrompt,
           llm: (prompt) => {
             const quality = input.mode ?? "nim";
-            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000 }).then(r => r.text);
+            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000, signal: askSignal }).then(r => r.text);
           },
           tryToolCall: (json) => {
             const parsed = teamToolSchema.safeParse(json);
@@ -1522,7 +1529,15 @@ ${historyBlock}使用者的問題：${input.message}`;
           // 解析失敗：LLM 已計費不退點（0 點），至少把純文字當回答（不提議派工）
           fallback: (text) => ({ answer: (text || "我不太確定，可以換個問法再問一次。").slice(0, 4000) }),
         });
-        const reply = outcome.reply!; // 無 signal，不會 aborted
+        if (outcome.aborted || !outcome.reply) {
+          return {
+            answer: assistantAskTimedOut(askDeadline) ? ASSISTANT_ASK_TIMEOUT_MESSAGE : "已停止。",
+            dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
+            steps, canDispatch, commandLevel, mock: false,
+            rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
+          };
+        }
+        const reply = outcome.reply;
         if (outcome.usedFallback) {
           return {
             answer: reply.answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
@@ -1544,14 +1559,18 @@ ${historyBlock}使用者的問題：${input.message}`;
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦。
         // completeText 會把 NimServiceError 包成 LlmServiceError 拋出（見 llmProvider.sanitize），
         // 逾時/上限兩者都要顯示人話原因，不能只認 NimServiceError。
-        const answer = err instanceof NimServiceError || err instanceof LlmServiceError
-          ? err.message
-          : "AI 彙總助手暫時沒回應，請稍後再問一次。";
+        const answer = assistantAskTimedOut(askDeadline)
+          ? ASSISTANT_ASK_TIMEOUT_MESSAGE
+          : err instanceof NimServiceError || err instanceof LlmServiceError
+            ? err.message
+            : "AI 彙總助手暫時沒回應，請稍後再問一次。";
         return {
           answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps,
           canDispatch, commandLevel, mock: false,
           rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
         };
+      } finally {
+        disposeAskDeadline();
       }
     }),
 
