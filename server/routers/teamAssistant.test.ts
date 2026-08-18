@@ -758,6 +758,15 @@ describe("project_detail injects persisted story", () => {
     expect(TEAM_CONTEXT_LABELS).toContain("故事全文");
   });
 
+  it("組現況 lists 有故事稿／尚未儲存稿 without dumping 故事全文", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    const inventory = src.slice(src.indexOf("let storyRows"), src.indexOf("const hidden = totalProjects"));
+    expect(inventory).toContain("formatTeamInventoryStoryFlag");
+    expect(inventory).toContain("schema.stories");
+    expect(inventory).toContain("${storyFlag}");
+    expect(inventory).not.toContain("formatPersistedStoryForAssistant");
+  });
+
   it("team ask binds the same 120s wall-clock as project/site assistant", () => {
     const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
     expect(src).toContain("bindAssistantAskDeadline");

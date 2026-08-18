@@ -48,7 +48,7 @@ import {
   formatProjectInventoryTotals,
   loadGroupProjectInventory,
 } from "../services/projectInventory";
-import { formatPersistedStoryForAssistant } from "../../shared/assistantProjectStoryContext";
+import { formatPersistedStoryForAssistant, formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStoryContext";
 import {
   ASSISTANT_ASK_TIMEOUT_MESSAGE,
   assistantAskTimedOut,
@@ -1078,8 +1078,9 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
   let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
   let genAgg: Array<{ projectId: string; status: string; n: number; last: Date | string | null }> = [];
   let costAgg: Array<{ projectId: string; spent: number }> = [];
+  let storyRows: Array<{ projectId: string; content: string }> = [];
   if (projectIds.length) {
-    [sceneAgg, genAgg, costAgg] = await Promise.all([
+    [sceneAgg, genAgg, costAgg, storyRows] = await Promise.all([
       // 分鏡按狀態計數（軟刪不算）
       db
         .select({ projectId: schema.scenes.projectId, status: schema.scenes.status, n: sql<number>`count(*)` })
@@ -1104,6 +1105,10 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
         .innerJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
         .where(and(eq(schema.costLedger.groupId, groupId), inArray(schema.generations.projectId, projectIds)))
         .groupBy(schema.generations.projectId),
+      db
+        .select({ projectId: schema.stories.projectId, content: schema.stories.content })
+        .from(schema.stories)
+        .where(inArray(schema.stories.projectId, projectIds)),
     ]);
   }
 
@@ -1127,13 +1132,15 @@ export async function buildTeamAskContext(auth: AuthState, groupId: string): Pro
     gensBy.set(r.projectId, cur);
   }
   const spentBy = new Map<string, number>(costAgg.map((r) => [r.projectId, Number(r.spent)]));
+  const storyBy = new Map<string, string>(storyRows.map((r) => [r.projectId, r.content]));
 
-  // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜最後活動
+  // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜故事稿有無｜最後活動
   const lines = projRows.map((p, i) => {
     const sc = scenesBy.get(p.id) ?? { total: 0 };
     const g = gensBy.get(p.id) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null as Date | null };
     const lastActive = g.last && g.last.getTime() > new Date(p.updatedAt).getTime() ? g.last : new Date(p.updatedAt);
-    return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
+    const storyFlag = formatTeamInventoryStoryFlag(storyBy.get(p.id));
+    return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜${storyFlag}｜最後活動 ${fmtTaipei(lastActive)}`;
   });
   const hidden = totalProjects - projRows.length;
   // 被隱藏專案一行：名稱(類型)｜最後活動（用 updatedAt 當 lastActive 底，被 hiddenRows 撈回）

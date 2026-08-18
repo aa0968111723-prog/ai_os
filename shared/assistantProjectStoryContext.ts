@@ -14,6 +14,11 @@ export function slicePersistedStoryContent(content?: string | null): string | nu
     : text;
 }
 
+/** One inventory token — never dump 4k of 故事全文 into team `<組現況>`. */
+export function formatTeamInventoryStoryFlag(content?: string | null): string {
+  return slicePersistedStoryContent(content) ? "有故事稿" : "尚未儲存稿";
+}
+
 export function formatPersistedStoryForAssistant(input: {
   content?: string | null;
   lastParsedAt?: Date | string | null;

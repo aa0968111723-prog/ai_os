@@ -3,6 +3,7 @@ import {
   ASSISTANT_STORY_CONTEXT_BUDGET,
   buildAssistantProjectStatusContext,
   formatPersistedStoryForAssistant,
+  formatTeamInventoryStoryFlag,
   slicePersistedStoryContent,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
@@ -34,6 +35,13 @@ describe("assistant persisted story context", () => {
     expect(context).toContain("我是大二化工系的小華");
     expect(context).toContain("世界觀｜療癒、校園");
     expect(context).toContain("分鏡（共 0）");
+  });
+
+  it("team inventory only flags presence — never injects the 4k body", () => {
+    expect(formatTeamInventoryStoryFlag(XIAOHUA_SEVEN_ACT_SCRIPT)).toBe("有故事稿");
+    expect(formatTeamInventoryStoryFlag("   ")).toBe("尚未儲存稿");
+    expect(formatTeamInventoryStoryFlag(null)).toBe("尚未儲存稿");
+    expect(formatTeamInventoryStoryFlag(XIAOHUA_SEVEN_ACT_SCRIPT)).not.toContain("我是大二化工系的小華");
   });
 
   it("empty story is explicit — still not 'please paste'", () => {
