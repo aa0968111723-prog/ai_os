@@ -111,5 +111,11 @@ describe("assistant execution fast path", () => {
     });
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_execute_repair")?.handler)
       .toBe("creativeContext.executeAnimationStage");
+    expect(classifyAssistantRequest("照這個計畫執行修復")).toMatchObject({
+      capabilityId: "animation_execute_repair",
+    });
+    expect(classifyAssistantRequest("保留現用版本")).toMatchObject({
+      capabilityId: "animation_keep_current",
+    });
   });
 });

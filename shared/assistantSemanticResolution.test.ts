@@ -314,4 +314,19 @@ describe("assistantSemanticResolution", () => {
     expect(confirmed.continuation).toBe("CONFIRM");
     expect(confirmed.frame.continuationOfGoalId).toBe(previous.goalId);
   });
+
+  it("animation adopt / keep / repair phrases beat generic READ", () => {
+    const adopt = deriveDeterministicGoalFrame("採用這版");
+    expect(matchAssistantCapabilityForGoal(adopt.frame).capabilityId).toBe("read_context");
+    expect(matchAssistantCapabilityForGoal(adopt.frame, { message: "採用這版" }).capabilityId)
+      .toBe("animation_adopt_candidate");
+    expect(matchAssistantCapabilityForGoal(
+      deriveDeterministicGoalFrame("保留現用版本").frame,
+      { message: "保留現用版本" },
+    ).capabilityId).toBe("animation_keep_current");
+    expect(matchAssistantCapabilityForGoal(
+      deriveDeterministicGoalFrame("照這個計畫執行修復").frame,
+      { message: "照這個計畫執行修復" },
+    ).capabilityId).toBe("animation_execute_repair");
+  });
 });

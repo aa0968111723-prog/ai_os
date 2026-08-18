@@ -53,6 +53,8 @@ export interface ShotRow {
   performance: ShotPerformance | null;
   lookIds: string[] | null;
   pendingGenStatus: "queued" | "running" | "awaiting_approval" | null;
+  /** 樂觀併發版本（listByProject 已回傳）。卡片存檔必須原樣送回 expectedRev。 */
+  rev?: number;
   /** 完成度五軌所需（其餘欄位上面都有）；後端 listByProject 已回傳 */
   narrationUrl?: string | null;
   ambienceUrl?: string | null;
@@ -211,14 +213,23 @@ export function ShotCard({
     setDropBusy(false);
   };
 
-  const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const saveField = (patch: Record<string, unknown>) => {
+    const { sceneId: _sceneId, ...fields } = patch;
+    const field = Object.keys(fields)[0]!;
+    update.mutate({
+      sceneId: shot.id,
+      ...fields,
+      expectedRev: shot.rev,
+      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
+    } as Parameters<typeof update.mutate>[0]);
+  };
   const saveCamera = (field: keyof ShotCamera, value: string) => {
     const next: ShotCamera = { ...(shot.camera ?? {}), [field]: value.trim() || undefined };
-    update.mutate({ sceneId: shot.id, camera: next });
+    saveField({ camera: Object.values(next).some((v) => v) ? next : null });
   };
   const savePerformance = (field: keyof ShotPerformance, value: string) => {
     const next: ShotPerformance = { ...(shot.performance ?? {}), [field]: value.trim() || undefined };
-    update.mutate({ sceneId: shot.id, performance: next });
+    saveField({ performance: Object.values(next).some((v) => v) ? next : null });
   };
 
   /** 本鏡可選造型＝綁定角色名下的造型；沒綁角色就沒得選（造型跟人走） */
@@ -226,7 +237,7 @@ export function ShotCard({
   const toggleLook = (lookId: string) => {
     const cur = shot.lookIds ?? [];
     const next = cur.includes(lookId) ? cur.filter((x) => x !== lookId) : [...cur, lookId];
-    update.mutate({ sceneId: shot.id, lookIds: next });
+    saveField({ lookIds: next });
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";

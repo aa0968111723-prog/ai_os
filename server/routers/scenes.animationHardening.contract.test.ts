@@ -11,6 +11,9 @@ import { describe, expect, it } from "vitest";
 const scenes = readFileSync(join(process.cwd(), "server/routers/scenes.ts"), "utf8");
 const assistant = readFileSync(join(process.cwd(), "server/routers/assistant.ts"), "utf8");
 const inspector = readFileSync(join(process.cwd(), "client/src/features/animation-studio/ShotInspector.tsx"), "utf8");
+const siteAssistant = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
+const sceneList = readFileSync(join(process.cwd(), "client/src/components/SceneList.tsx"), "utf8");
+const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
 
 describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
@@ -46,5 +49,25 @@ describe("animation shot writes stay consistent", () => {
 
   it("Shot Inspector sends lookIds when toggling a character", () => {
     expect(inspector).toContain("setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks })");
+  });
+
+  it("site assistant animation writes have real handlers (not capability-only)", () => {
+    expect(siteAssistant).toContain('capabilityId === "animation_adopt_candidate"');
+    expect(siteAssistant).toContain('capabilityId === "animation_keep_current"');
+    expect(siteAssistant).toContain('capabilityId === "animation_execute_repair"');
+    expect(siteAssistant).toContain("adoptGenerationVerified");
+    expect(siteAssistant).toContain("reviewShotVerified");
+    expect(siteAssistant).toContain("executeAnimationRepairVerified");
+    expect(siteAssistant).toContain("pickAnimationCompareItem");
+    expect(siteAssistant).toContain("我不會把「執行修復」說成已完成");
+    expect(siteAssistant).toContain("message: input.message");
+  });
+
+  it("SceneList and ShotCard send expectedRev on inline edits", () => {
+    expect(sceneList).toContain("expectedRev: s.rev");
+    expect(sceneList).toContain("baseline: { title: s.title }");
+    expect(sceneList).toContain("baseline: { durationSec: s.durationSec }");
+    expect(shotCard).toContain("expectedRev: shot.rev");
+    expect(shotCard).toContain("baseline: { [field]:");
   });
 });

@@ -82,7 +82,9 @@ import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
 import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
 import { adoptGenerationVerified } from "../services/consistencyAdopt";
+import { executeAnimationRepairVerified, reviewShotVerified } from "../services/animationRepairExecute";
 import { phoneAnimationCompareQueue } from "../services/phoneAnimation";
+import { pickAnimationCompareItem } from "../../shared/phoneAnimationProjection";
 import { randomUUID } from "node:crypto";
 import { listIntegrations } from "../services/integrations";
 import { createAssistantInteraction, recordAssistantInteractionLifecycle, submitAssistantInteraction } from "../services/assistantInteractionCore";
@@ -737,6 +739,7 @@ export async function runGlobalAsk(
   const backendRuntime = await getCachedBackendRuntime();
   let capabilityMatch = matchAssistantCapabilityForGoal(goalFrame, {
     blockedCapabilityIds: blockedCapabilityIds(backendRuntime),
+    message: input.message,
   });
   executionPlan = executionPlanFromGoal(goalFrame, capabilityMatch, input.message);
   const goalId = semantic.continuation === "NEW_GOAL" || !input.activeGoal ? randomUUID() : input.activeGoal.goalId;
@@ -1104,7 +1107,41 @@ export async function runGlobalAsk(
 
   if (capabilityMatch.capabilityId === "animation_adopt_candidate" && effectiveProjectId) {
     const compare = await phoneAnimationCompareQueue({ auth, projectId: effectiveProjectId });
-    const generationId = compare.items[0]?.generationId;
+    const preferredShotId = typeof activeGoal.resolvedSlots.shotId === "string"
+      ? activeGoal.resolvedSlots.shotId
+      : undefined;
+    const pick = pickAnimationCompareItem(compare.items, preferredShotId);
+    if (pick.status === "none") {
+      return earlySemanticResult("現在沒有可採用的修復候選。請先產生候選，我不會把「採用」說成已完成。");
+    }
+    if (pick.status === "ambiguous") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "SHOT_PICKER",
+        title: "選擇要採用的鏡頭",
+        description: "有多個修復候選。請指定一鏡，我不會默默採用第一個。",
+        capabilityId: capabilityMatch.capabilityId,
+        missingSlot: "shotId",
+        targetProjectId: effectiveProjectId,
+        options: pick.items.map((item) => ({
+          id: item.shotId,
+          label: item.shotLabel,
+          subtitle: "修復候選",
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting" });
+      return earlySemanticResult(interactionRequest.description ?? interactionRequest.title, { interactionRequest });
+    }
+    const generationId = pick.item.generationId;
     if (!generationId) {
       return earlySemanticResult("現在沒有可採用的修復候選。請先產生候選，我不會把「採用」說成已完成。");
     }
@@ -1112,7 +1149,7 @@ export async function runGlobalAsk(
       type: "action.started",
       title: "正在採用動畫修復候選",
       toolName: "animation_adopt_candidate",
-      target: compare.items[0]?.shotLabel,
+      target: pick.item.shotLabel,
     });
     const adopted = await adoptGenerationVerified({ auth, generationId });
     const verified = adopted.verification.status === "verified";
@@ -1121,7 +1158,7 @@ export async function runGlobalAsk(
       title: adopted.verification.message,
       status: verified ? "ok" : "failed",
       toolName: "animation_adopt_candidate",
-      target: compare.items[0]?.shotLabel,
+      target: pick.item.shotLabel,
     });
     stream.finishStep(stepId, {
       type: verified ? "action.completed" : "action.failed",
@@ -1147,6 +1184,168 @@ export async function runGlobalAsk(
       verified
         ? `✓ ${adopted.verification.message}`
         : "採用已送出，但重新讀取未確認分鏡畫面，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.capabilityId === "animation_keep_current" && effectiveProjectId) {
+    const compare = await phoneAnimationCompareQueue({ auth, projectId: effectiveProjectId });
+    const preferredShotId = typeof activeGoal.resolvedSlots.shotId === "string"
+      ? activeGoal.resolvedSlots.shotId
+      : undefined;
+    const pick = pickAnimationCompareItem(compare.items, preferredShotId);
+    if (pick.status === "none") {
+      return earlySemanticResult("現在沒有要比對的修復候選。請先產生候選，我不會把「保留現用」說成已完成。");
+    }
+    if (pick.status === "ambiguous") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "SHOT_PICKER",
+        title: "選擇要保留現用版本的鏡頭",
+        description: "有多個候選。請指定一鏡，我不會默默保留第一個。",
+        capabilityId: capabilityMatch.capabilityId,
+        missingSlot: "shotId",
+        targetProjectId: effectiveProjectId,
+        options: pick.items.map((item) => ({
+          id: item.shotId,
+          label: item.shotLabel,
+          subtitle: "保留現用",
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      stream.emit({ type: "waiting.user_input", title: interactionRequest.title, description: interactionRequest.description, status: "waiting" });
+      return earlySemanticResult(interactionRequest.description ?? interactionRequest.title, { interactionRequest });
+    }
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: "正在保留現用版本",
+      toolName: "animation_keep_current",
+      target: pick.item.shotLabel,
+    });
+    const kept = await reviewShotVerified({ auth, sceneId: pick.item.shotId, status: "approved" });
+    const verified = kept.verification.status === "verified";
+    stream.emit({
+      type: "verification.completed",
+      title: kept.verification.message,
+      status: verified ? "ok" : "failed",
+      toolName: "animation_keep_current",
+      target: pick.item.shotLabel,
+    });
+    stream.finishStep(stepId, {
+      type: verified ? "action.completed" : "action.failed",
+      title: verified ? "已保留並重新讀取確認" : "保留未通過驗證",
+      status: verified ? "ok" : "failed",
+      toolName: "animation_keep_current",
+    });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "animation_keep_current",
+      handler: "scenes.review",
+      targetType: "shot",
+      targetIds: [kept.shotId],
+      databaseRecordIds: [kept.shotId],
+      verificationMethod: "read_back",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: kept.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ ${kept.verification.message}`
+        : "保留已送出，但重新讀取未確認審核狀態，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.capabilityId === "animation_execute_repair" && effectiveProjectId) {
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: "正在執行動畫修復階段",
+      toolName: "animation_execute_repair",
+    });
+    const executed = await executeAnimationRepairVerified({ auth, projectId: effectiveProjectId });
+    if (executed.status === "empty") {
+      stream.finishStep(stepId, {
+        type: "action.failed",
+        title: "沒有可執行的修復計畫",
+        status: "failed",
+        toolName: "animation_execute_repair",
+      });
+      return earlySemanticResult(`${executed.reason} 我不會把「執行修復」說成已完成。`);
+    }
+    if (executed.status === "clarify") {
+      const interactionRequest = createAssistantInteraction({
+        runId: stream.runId,
+        goalId,
+        type: "HUMAN_INPUT_FORM",
+        title: "還需要確認修復範圍",
+        description: executed.question,
+        capabilityId: capabilityMatch.capabilityId,
+        targetProjectId: effectiveProjectId,
+        options: executed.options.map((option) => ({
+          id: option.id,
+          label: option.label,
+          availability: "AVAILABLE" as const,
+        })),
+      });
+      activeGoal = {
+        ...activeGoal,
+        status: "waiting_user_input",
+        missingSlots: ["shotId"],
+        pendingInteraction: interactionRequest,
+      };
+      stream.finishStep(stepId, {
+        type: "action.failed",
+        title: "修復範圍還不清楚",
+        status: "waiting",
+        toolName: "animation_execute_repair",
+      });
+      stream.emit({ type: "interaction.requested", title: interactionRequest.title, description: interactionRequest.description, status: "waiting", metadata: { interactionType: interactionRequest.type } });
+      return earlySemanticResult(executed.question, { interactionRequest });
+    }
+    const verified = executed.verification.status === "verified";
+    stream.emit({
+      type: "verification.completed",
+      title: executed.verification.message,
+      status: verified ? "ok" : "failed",
+      toolName: "animation_execute_repair",
+      resultCount: executed.generationIds.length,
+    });
+    stream.finishStep(stepId, {
+      type: verified ? "action.completed" : "action.failed",
+      title: verified ? "已登記修復生成" : "修復未通過驗證",
+      status: verified ? "ok" : "failed",
+      toolName: "animation_execute_repair",
+      resultCount: executed.generationIds.length,
+    });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "animation_execute_repair",
+      handler: "creativeContext.executeAnimationStage",
+      targetType: "shot",
+      targetIds: executed.proposal.affectedShotIds,
+      databaseRecordIds: executed.generationIds,
+      verificationMethod: "job_registered",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: executed.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ ${executed.verification.message}${executed.failed > 0 ? `；另有 ${executed.failed} 段失敗` : ""}`
+        : executed.verification.message,
       { executionReceipts: [receipt] },
     );
   }

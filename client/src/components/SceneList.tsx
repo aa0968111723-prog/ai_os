@@ -98,6 +98,8 @@ type Scene = {
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
+  /** 樂觀併發版本（listByProject 已回傳）。行內存檔必須原樣送回 expectedRev。 */
+  rev?: number;
 };
 
 /** 毫秒 → 秒（顯示用，一位小數；剛好整秒不留 .0） */
@@ -455,7 +457,7 @@ function SceneRow({
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
             maxLength={60}
-            onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v) })}
+            onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v), expectedRev: s.rev, baseline: { title: s.title } })}
             style={{ flex: 1, minWidth: 0 }}
           />
         </div>
@@ -466,7 +468,7 @@ function SceneRow({
               kind="number"
               pending={update.isPending || !canEdit}
               ariaLabel={`第 ${i + 1} 鏡秒數`}
-              onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v) })}
+              onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v), expectedRev: s.rev, baseline: { durationSec: s.durationSec } })}
               style={{ width: 56, textAlign: "center" }}
             />
             秒
@@ -478,7 +480,7 @@ function SceneRow({
               scene={s}
               index={i}
               disabled={update.isPending || !canEdit}
-              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch })}
+              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch, expectedRev: s.rev, baseline: { trimStartMs: s.trimStartMs ?? null, trimEndMs: s.trimEndMs ?? null } })}
             />
           )}
           {isGenerating && <Pill status="running">生成中…</Pill>}

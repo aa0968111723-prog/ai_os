@@ -857,3 +857,49 @@ export function shouldResetPhoneAnimationRepair(
 export function shouldUnlockPhoneRepairConfirm(failedCount: number): boolean {
   return failedCount > 0;
 }
+
+export type AnimationRepairJob = {
+  shotId: string;
+  shotLabel: string;
+  stage: "keyframe_generation" | "video_generation";
+  modelId: string;
+};
+
+/** Same stage loop the phone hook uses — site assistant must not invent extra jobs. */
+export function animationRepairJobsFromProposal(proposal: PhoneRepairProposalView): AnimationRepairJob[] {
+  const jobs: AnimationRepairJob[] = [];
+  for (const shot of proposal.shots) {
+    for (const stage of shot.stages) {
+      if (stage === "evaluation") continue;
+      jobs.push({
+        shotId: shot.shotId,
+        shotLabel: shot.shotLabel,
+        stage: stage === "keyframe" ? "keyframe_generation" : "video_generation",
+        modelId: stage === "keyframe" ? proposal.keyframeModelId : proposal.videoModelId,
+      });
+    }
+  }
+  return jobs;
+}
+
+export type AnimationComparePick =
+  | { status: "none" }
+  | { status: "picked"; item: PhoneCompareItem }
+  | { status: "ambiguous"; items: PhoneCompareItem[] };
+
+/**
+ * Adopt / Keep must not silently pick the first queue item when several shots
+ * are waiting. A preferred shotId (picker / focused shot) still wins.
+ */
+export function pickAnimationCompareItem(
+  items: readonly PhoneCompareItem[],
+  preferredShotId?: string,
+): AnimationComparePick {
+  if (items.length === 0) return { status: "none" };
+  if (preferredShotId) {
+    const hit = items.find((row) => row.shotId === preferredShotId);
+    if (hit) return { status: "picked", item: hit };
+  }
+  if (items.length === 1) return { status: "picked", item: items[0]! };
+  return { status: "ambiguous", items: [...items] };
+}

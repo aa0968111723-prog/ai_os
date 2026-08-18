@@ -110,7 +110,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "add_scene", title: "新增分鏡", access: "write", blurb: "在專案新增一格分鏡草稿（標題／提示詞／旁白／秒數）。" },
   { name: "update_scene", title: "更新分鏡", access: "write", idempotent: true, blurb: "更新分鏡標題、提示詞、旁白、環境音或剪輯（秒數與素材入出點）。" },
   { name: "reorder_scenes", title: "重排分鏡順序", access: "write", idempotent: true, blurb: "依指定順序重排專案分鏡；清單漏掉的分鏡依原相對順序補到尾端。" },
-  { name: "set_scene_visual", title: "掛上分鏡畫面", access: "write", blurb: "把生成結果或素材庫項目設為分鏡畫面（二選一：generationId 走正式 Adopt，assetId 直掛且已通過的鏡要 acknowledgeApproved）。" },
+  { name: "set_scene_visual", title: "掛上分鏡畫面", access: "write", blurb: "把生成結果或素材庫項目設為分鏡畫面（二選一：generationId 走正式採用路徑；assetId 直掛，已通過的鏡需帶確認旗標）。" },
   { name: "generate_into_scene", title: "在分鏡格生成", access: "write", openWorld: true, blurb: "在指定分鏡格送出生成（世界觀自動注入、扣點、走核准門檻）；完成後可再 set_scene_visual。" },
   { name: "update_worldview", title: "更新世界觀", access: "write", idempotent: true, blurb: "更新專案世界觀（logline／調性／禁語等）；需專案可編輯權限。" },
   { name: "rename_asset", title: "重新命名素材", access: "write", idempotent: true, blurb: "重新命名專案素材庫中的一筆素材。" },
