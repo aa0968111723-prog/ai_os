@@ -133,7 +133,7 @@ export const TKU_ZEN_LIBRARY = {
   sunset: { folder: String.raw`場景\夕陽`, files: [] as string[] },
   broll: {
     folder: String.raw`場景`,
-    files: ["教室", "超商", "真人禪坐"],
+    files: ["教室", "超商", "真人禪坐", "克難坡"],
   },
   boards: {
     folder: String.raw`腳本`,
@@ -199,7 +199,7 @@ export const TKU_ZEN_LOOKS = [
 ] as const;
 
 export const TKU_ZEN_LOCATIONS = [
-  { key: "gate", name: "校門口", palette: "淡江校門口、白天", lighting: "日間陽光", timeOfDay: "day" as const, libraryFolder: TKU_ZEN_LIBRARY.gate.folder },
+  { key: "gate", name: "校門口", palette: "淡大校門口、校名牌、暖色光", lighting: "暖色光", timeOfDay: "day" as const, libraryFolder: TKU_ZEN_LIBRARY.gate.folder },
   { key: "sunset", name: "夕陽", palette: "校園夕陽橘色", lighting: "黃昏逆光", timeOfDay: "day" as const, libraryFolder: TKU_ZEN_LIBRARY.sunset.folder },
 ] as const;
 
@@ -238,7 +238,7 @@ export const TKU_ZEN_ACTS: TkuZenActSpec[] = [
     shots: [
       {
         act: 1, index: 1, title: "A 校門口自我介紹", durationSec: TKU_ZEN_SHOT_DURATION_SEC,
-        prompt: `${LOCK}站在校門口正面。白帽T、短髮。`,
+        prompt: `${LOCK}站在淡大校門口校名牌前。暖色光。白帽T、短髮。`,
         dialogue: `@小華：${TKU_ZEN_SHOTLIST_LINES[0]}`,
         speaker: "xiaohua",
         action: "小華面向鏡頭，平靜微笑",
@@ -353,7 +353,7 @@ export function tkuZenLibraryMapContent(): string {
     `禪定龜龜 = ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.turtle.folder)}（第三句）`,
     `校門口 = ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.gate.folder)}`,
     `夕陽 = ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.sunset.folder)}`,
-    "B-roll（不是對白幕）：",
+    "B-roll（不是對白幕；克難坡只在這裡，不是 A 校門口自我介紹）：",
     ...TKU_ZEN_LIBRARY.broll.files.map((folder) => `  - ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.broll.folder, folder)}（非 lip-sync 幕）`),
     "",
     "腳本\\SHOTLIST.md（A–F only）：",

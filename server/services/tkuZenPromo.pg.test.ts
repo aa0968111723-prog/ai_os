@@ -69,6 +69,15 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     expect(reloaded.characters.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
     expect(reloaded.presets.some((p) => p.name === "校門口")).toBe(true);
     expect(reloaded.presets.some((p) => p.name === "夕陽")).toBe(true);
+    expect(reloaded.presets.some((p) => p.name.includes("克難坡"))).toBe(false);
+    const act1 = [...reloaded.acts].sort((a, b) => a.orderIndex - b.orderIndex)[0];
+    const gate = reloaded.presets.find((p) => p.name === "校門口");
+    expect(act1?.locationId).toBe(gate?.id);
+    const shot1 = [...reloaded.shots].sort((a, b) => a.orderIndex - b.orderIndex)[0];
+    expect(shot1?.prompt).toContain("淡大校門口");
+    expect(shot1?.prompt).toContain("校名牌");
+    expect(shot1?.prompt).toContain("暖色光");
+    expect(shot1?.prompt).not.toContain("克難坡");
     expect(reloaded.presets.some((p) => p.name.includes("茶會"))).toBe(false);
     expect(reloaded.characters.some((c) => c.name === "安倢")).toBe(false);
     expect(reloaded.looks).toHaveLength(2);

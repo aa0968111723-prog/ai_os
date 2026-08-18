@@ -80,8 +80,10 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_LOOKS.filter((look) => look.character === "xiaohua")).toHaveLength(1);
     expect(TKU_ZEN_LOOKS.find((look) => look.character === "xiaohua")?.costume).toBe(TKU_ZEN_XIAOHUA_COSTUME);
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.name).toBe("校門口");
+    expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.palette).toContain("校名牌");
+    expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.lighting).toContain("暖色光");
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "sunset")?.name).toBe("夕陽");
-    expect(TKU_ZEN_LOCATIONS.some((loc) => loc.name === "茶會" || loc.name.includes("茶會"))).toBe(false);
+    expect(TKU_ZEN_LOCATIONS.some((loc) => loc.name === "茶會" || loc.name.includes("茶會") || loc.name.includes("克難坡"))).toBe(false);
   });
 
   it("keeps 龜龜 off until the third spoken line and drops the invented 媽媽 beats", () => {
@@ -106,7 +108,14 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_ACTS.map((a) => a.title).join("\n")).not.toMatch(/七幕|走上克難坡|茶會社課擺攤|收尾/);
     expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/七幕|走上克難坡|茶會社課擺攤|收尾/);
     expect(TKU_ZEN_ACTS[0]?.title).toContain("校門口");
+    expect(TKU_ZEN_ACTS[0]?.location).toBe("gate");
+    expect(TKU_ZEN_ACTS[0]?.shots[0]?.location).toBe("gate");
+    expect(TKU_ZEN_ACTS[0]?.shots[0]?.prompt).toContain("淡大校門口");
+    expect(TKU_ZEN_ACTS[0]?.shots[0]?.prompt).toContain("校名牌");
+    expect(TKU_ZEN_ACTS[0]?.shots[0]?.prompt).toContain("暖色光");
+    expect(TKU_ZEN_ACTS[0]?.shots[0]?.prompt).not.toContain("克難坡");
     expect(TKU_ZEN_ACTS[1]?.title).toContain("夕陽");
+    expect(TKU_ZEN_ACTS.map((a) => `${a.title}\n${a.shots.map((s) => s.prompt).join("\n")}`).join("\n")).not.toContain("克難坡");
   });
 
   it("keeps seeded fields inside character / script write limits", () => {
@@ -142,6 +151,8 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(map).not.toContain("年輕男性");
     expect(map).not.toContain("黑長直髮");
     expect(map).not.toContain("走上克難坡");
+    expect(map).toContain("克難坡只在這裡，不是 A 校門口自我介紹");
+    expect(map).toContain(String.raw`場景\克難坡`);
     expect(map).not.toContain("七幕");
     expect(map).not.toContain("各幕腳本");
     expect(TKU_ZEN_LIBRARY.scripts.folder).toBe(String.raw`腳本`);
@@ -162,6 +173,7 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(acts).not.toMatch(/act:\s*7/);
     expect(acts).not.toContain("七幕");
     expect(acts).not.toContain("走上克難坡");
+    expect(acts).not.toContain("克難坡");
     expect(acts).not.toContain("茶會社課擺攤");
     expect(mapFn).not.toContain("七幕");
     expect(library).not.toContain("各幕腳本");

@@ -26,6 +26,6 @@ describe("淡江禪學社 parse 150s fallback", () => {
     expect(tkuZenHasForbidden(JSON.stringify(plan))).toEqual([]);
     const blob = JSON.stringify(plan);
     for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
-    expect(blob).not.toMatch(/走上克難坡|七幕|針織外套|安倢|媽媽/);
+    expect(blob).not.toMatch(/克難坡|走上克難坡|七幕|針織外套|安倢|媽媽/);
   });
 });

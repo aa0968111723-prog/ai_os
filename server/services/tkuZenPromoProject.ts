@@ -272,7 +272,16 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   if (!turtle.appearance.includes("吉祥物龜龜")) throw new Error("龜龜 appearance lost 吉祥物龜龜 lock");
   if (!snap.presets.some((p) => p.name === "校門口")) throw new Error("校門口 preset missing");
   if (!snap.presets.some((p) => p.name === "夕陽")) throw new Error("夕陽 preset missing");
+  if (snap.presets.some((p) => p.name.includes("克難坡"))) throw new Error("克難坡 is B-roll only, not a spoken-act preset");
   if (snap.presets.some((p) => p.name.includes("茶會"))) throw new Error("茶會 must not be a lip-sync act/preset");
+  const act1 = [...snap.acts].sort((a, b) => a.orderIndex - b.orderIndex)[0];
+  const gate = snap.presets.find((p) => p.name === "校門口");
+  if (!act1 || !gate || act1.locationId !== gate.id) {
+    throw new Error("act 1 location must be 校門口 (淡大校門口／校名牌／暖色光), not 克難坡");
+  }
+  if (/克難坡/.test(`${act1.title}\n${act1.summary ?? ""}`)) {
+    throw new Error("act 1 spoken beat must not name 克難坡");
+  }
   if (snap.looks.length !== TKU_ZEN_LOOKS.length) {
     throw new Error(`expected ${TKU_ZEN_LOOKS.length} looks, got ${snap.looks.length}`);
   }
@@ -289,6 +298,13 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   }
 
   const orderedShots = [...snap.shots].sort((a, b) => a.orderIndex - b.orderIndex);
+  const shot1 = orderedShots[0];
+  if (!shot1?.prompt?.includes("淡大校門口") || !shot1.prompt.includes("校名牌") || !shot1.prompt.includes("暖色光")) {
+    throw new Error("act 1 prompt must be 淡大校門口（校名牌、暖色光）");
+  }
+  if (orderedShots.some((s) => /克難坡/.test(`${s.title}\n${s.prompt ?? ""}\n${s.dialogue ?? ""}\n${s.action ?? ""}`))) {
+    throw new Error("spoken shots must not use 克難坡; keep it as a B-roll note only");
+  }
   const spoken = tkuZenDialogueLines(orderedShots.map((s) => ({ dialogue: s.dialogue ?? "" })));
   if (spoken.join("\n") !== [...TKU_ZEN_SHOTLIST_LINES].join("\n")) {
     throw new Error(`dialogue drifted from SHOTLIST: ${spoken.join(" | ")}`);
