@@ -9,8 +9,9 @@
  * 存檔一律帶 `expectedRev`＋`baseline`（樂觀併發，見 shared/revision.ts），
  * 撞版本時顯示衝突卡而不是靜默覆蓋夥伴的字。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../../api";
+import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
@@ -165,23 +166,44 @@ function ShotFields({
   const invalidate = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
 
   const update = trpc.scenes.update.useMutation({
-    onSuccess: () => { setConflict(null); invalidate(); },
-    onError: (err) => setConflict(conflictFromError(err)),
+    onSuccess: (row) => {
+      setConflict(null);
+      gateRef.current?.onAck(row.rev);
+      invalidate();
+    },
+    onError: (err) => {
+      gateRef.current?.reset();
+      setConflict(conflictFromError(err));
+    },
   });
   const setCards = trpc.scenes.setCards.useMutation({ onSuccess: invalidate });
+  const updateMutateRef = useRef(update.mutate);
+  updateMutateRef.current = update.mutate;
+  const shotRef = useRef(shot);
+  shotRef.current = shot;
+  const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
+  if (!gateRef.current) {
+    gateRef.current = createShotFieldSaveGate({
+      send: (req) => {
+        updateMutateRef.current({
+          sceneId: shotRef.current.id,
+          ...req.patch,
+          expectedRev: req.expectedRev,
+          baseline: req.baseline,
+        } as Parameters<typeof update.mutate>[0]);
+      },
+      getRev: () => shotRef.current.rev,
+    });
+  }
 
   /**
    * 存一個欄位。expectedRev＋baseline 讓伺服器分得出「我們改了同一欄」（問人）
    * 與「各改各的」（自動合併）——見 shared/revision.ts。
+   * 連續改兩個欄位不得共用同一個 shot.rev：閘門等 ACK 再用新 rev。
    */
   const saveField = (patch: Record<string, unknown>) => {
     const field = Object.keys(patch)[0]!;
-    update.mutate({
-      sceneId: shot.id,
-      ...patch,
-      expectedRev: shot.rev,
-      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
-    } as Parameters<typeof update.mutate>[0]);
+    gateRef.current?.save(patch, { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null });
   };
 
   const saveCamera = (field: keyof ShotCamera, value: string) => {

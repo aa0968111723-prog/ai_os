@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { SceneCardBinding, type SceneCardLookup } from "./SceneCardBinding";
 import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { createInsertAfterQueue } from "../lib/insertAfterQueue";
+import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -112,6 +113,8 @@ type Scene = {
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
   propIds?: string[] | null;
+  /** 樂觀併發版本（listByProject 已投影）。行內標題／秒數／修剪要原樣送回。 */
+  rev?: number;
 };
 
 /** 毫秒 → 秒（顯示用，一位小數；剛好整秒不留 .0） */
@@ -397,13 +400,41 @@ const SceneRow = memo(function SceneRow({
   const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(savedTimer.current), []);
   const update = trpc.scenes.update.useMutation({
-    onSuccess: () => {
+    onSuccess: (row) => {
+      gateRef.current?.onAck(row?.rev);
       invalidate();
       setSavedFlash(true);
       clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
+    onError: () => {
+      gateRef.current?.reset();
+    },
   });
+  const updateMutateRef = useRef(update.mutate);
+  updateMutateRef.current = update.mutate;
+  const sceneRef = useRef(s);
+  sceneRef.current = s;
+  const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
+  if (!gateRef.current) {
+    gateRef.current = createShotFieldSaveGate({
+      send: (req) => {
+        updateMutateRef.current({
+          sceneId: sceneRef.current.id,
+          ...req.patch,
+          expectedRev: req.expectedRev,
+          baseline: req.baseline,
+        } as Parameters<typeof update.mutate>[0]);
+      },
+      getRev: () => sceneRef.current.rev,
+    });
+  }
+  const saveFields = (patch: Record<string, unknown>) => {
+    const baseline: Record<string, unknown> = {};
+    const live = sceneRef.current as unknown as Record<string, unknown>;
+    for (const key of Object.keys(patch)) baseline[key] = live[key] ?? null;
+    gateRef.current?.save(patch, baseline);
+  };
   // 冪等鍵（QA-007）：同一格「還沒成功」的生成重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const genRequestId = useRef<string>(crypto.randomUUID());
   const generate = trpc.scenes.generateInto.useMutation({
@@ -480,7 +511,7 @@ const SceneRow = memo(function SceneRow({
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
             maxLength={60}
-            onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v) })}
+            onCommit={(v) => saveFields({ title: String(v) })}
             style={{ flex: 1, minWidth: 0 }}
           />
         </div>
@@ -491,7 +522,7 @@ const SceneRow = memo(function SceneRow({
               kind="number"
               pending={update.isPending || !canEdit}
               ariaLabel={`第 ${i + 1} 鏡秒數`}
-              onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v) })}
+              onCommit={(v) => saveFields({ durationSec: Number(v) })}
               style={{ width: 56, textAlign: "center" }}
             />
             秒
@@ -503,7 +534,7 @@ const SceneRow = memo(function SceneRow({
               scene={s}
               index={i}
               disabled={update.isPending || !canEdit}
-              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch })}
+              onCommit={(patch) => saveFields(patch)}
             />
           )}
           {isGenerating && <Pill status="running">生成中…</Pill>}

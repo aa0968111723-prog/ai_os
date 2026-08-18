@@ -180,8 +180,15 @@ describe("Inspector 不新增資料格式", () => {
 
   it("編輯框一律帶樂觀併發欄位——夥伴同時改不會靜默吃字", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
-    expect(inspector).toContain("expectedRev: shot.rev");
+    expect(inspector).toContain("expectedRev: req.expectedRev");
+    expect(inspector).toContain("createShotFieldSaveGate");
     expect(inspector).toContain("baseline:");
     expect(inspector).toContain("ConflictNotice");
+  });
+
+  it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
+    expect(studio).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(studio).not.toContain("insertQueueOriginRef");
+    expect(studio).not.toMatch(/insertQueueRef\.current\?\.reset\(\)/);
   });
 });

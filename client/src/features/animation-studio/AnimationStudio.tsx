@@ -255,7 +255,6 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
   insertAfterMutateRef.current = insertAfter.mutateAsync;
   const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
-  const insertQueueOriginRef = useRef<string | null>(null);
   if (!insertQueueRef.current) {
     insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
   }
@@ -274,10 +273,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       // 延續＝在這一鏡後面插一格（insertAfter 會帶走卡片綁定與鏡頭語言）；沒選鏡就退回開空白。
       // 連點同一鏡要串新 id，否則同一 sceneId 連打是 LIFO（與 SceneList 同一條）。
       if (shot) {
-        if (insertQueueOriginRef.current !== shot.id) {
-          insertQueueRef.current?.reset();
-          insertQueueOriginRef.current = shot.id;
-        }
+        // Per-origin tails: switching the selected shot must not reset A's
+        // chain. Resetting here used to make remaining A clicks LIFO again.
         insertQueueRef.current?.enqueue(shot.id);
       } else {
         addShot.mutate({ projectId, title: `第 ${shots.length + 1} 鏡` });

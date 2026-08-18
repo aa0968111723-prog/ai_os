@@ -29,4 +29,20 @@ describe("createInsertAfterQueue", () => {
       { sceneId: "origin", duplicate: true },
     ]);
   });
+
+  it("keeps a tail per origin so A then B does not insert B after A's newest", async () => {
+    const calls: string[] = [];
+    let n = 0;
+    const q = createInsertAfterQueue(async ({ sceneId }) => {
+      calls.push(sceneId);
+      n += 1;
+      return { id: `n${n}` };
+    });
+    q.enqueue("A");
+    q.enqueue("A");
+    q.enqueue("B");
+    q.enqueue("B");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toEqual(["A", "n1", "B", "n3"]);
+  });
 });

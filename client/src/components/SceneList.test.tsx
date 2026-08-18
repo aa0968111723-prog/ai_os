@@ -21,7 +21,7 @@ const exportCreateMutate = vi.fn();
 const invalidateScenes = vi.fn();
 const invalidateMessages = vi.fn();
 const invalidateDeleted = vi.fn();
-const lastUpdateSuccess = { current: undefined as undefined | (() => void) };
+const lastUpdateSuccess = { current: undefined as undefined | ((row?: { rev?: number }) => void) };
 const lastRemoveSuccess = { current: undefined as undefined | (() => void) };
 /** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
 const cardLists: {
@@ -41,7 +41,7 @@ vi.mock("../api", () => ({
     scenes: {
       listByProject: { useQuery: (...args: unknown[]) => scenesQuery(...args) },
       update: {
-        useMutation: (opts?: { onSuccess?: () => void }) => {
+        useMutation: (opts?: { onSuccess?: (row?: { rev?: number }) => void }) => {
           lastUpdateSuccess.current = opts?.onSuccess;
           return { mutate: updateMutate, isPending: false, error: null };
         },
@@ -153,6 +153,7 @@ function scene(over: SceneOver) {
     characterIds: over.characterIds ?? null,
     scenePresetIds: over.scenePresetIds ?? null,
     propIds: over.propIds ?? null,
+    rev: 1,
   };
 }
 
@@ -308,6 +309,22 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     ]);
   });
 
+  it("不同列插入各走自己的 tail，B 不會插到 A 的新格後面", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" }), scene({ id: "s2" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    await user.click(rowOf("s2").getByRole("button", { name: "在這之後插入一鏡" }));
+    await vi.waitFor(() => expect(insertAfterMutate).toHaveBeenCalledTimes(2));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "s2" },
+    ]);
+  });
+
   it("複製這一鏡：帶 duplicate 旗標（設定跟著走，成品不跟）", async () => {
     const user = userEvent.setup();
     scenesQuery.mockReturnValue({
@@ -317,6 +334,24 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+  });
+
+  it("行內改標題帶 expectedRev，避免連改秒數自己跟自己衝突", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    const title = rowOf("s1").getByRole("textbox", { name: "第 1 鏡標題" });
+    await user.clear(title);
+    await user.type(title, "新標題");
+    await user.tab();
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sceneId: "s1",
+      title: "新標題",
+      expectedRev: 1,
+    }));
   });
 
   it("檢視者看不到插入／複製（整理分鏡是寫入動作）", () => {
