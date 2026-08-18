@@ -11,7 +11,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildSceneAnchor } from "../services/cardAnchors";
@@ -138,7 +138,7 @@ export const scenePresetsRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "scenePreset",
         table: schema.scenePresets,
         idColumn: schema.scenePresets.id,

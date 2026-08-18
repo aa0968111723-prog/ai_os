@@ -11,7 +11,7 @@ import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { LOOK_COSTUME_MAX, LOOK_NAME_MAX, MAX_PROJECT_LOOKS } from "../../shared/story";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 
 export const characterLooksRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -99,7 +99,7 @@ export const characterLooksRouter = router({
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
 
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "characterLook",
         table: schema.characterLooks,
         idColumn: schema.characterLooks.id,

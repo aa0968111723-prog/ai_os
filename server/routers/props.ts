@@ -12,7 +12,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 
 export { MAX_PROJECT_PROPS };
 
@@ -208,7 +208,7 @@ export const propsRouter = router({
       }
       if (Object.keys(patch).length === 0) return row;
 
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "prop",
         table: schema.props,
         idColumn: schema.props.id,

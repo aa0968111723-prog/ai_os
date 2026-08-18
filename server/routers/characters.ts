@@ -11,7 +11,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
@@ -141,7 +141,7 @@ export const charactersRouter = router({
 
       // 條件寫入（見 services/revisionGuard）：partial patch 已避免「整份寫回」，
       // 但兩人同時改**同一欄**仍會靜默覆蓋——rev 這一關才擋得住那一種。
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "character",
         table: schema.characters,
         idColumn: schema.characters.id,
