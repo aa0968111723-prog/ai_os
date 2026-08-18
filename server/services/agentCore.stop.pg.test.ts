@@ -1,5 +1,5 @@
 /**
- * HUD 停 on leftover 0/N awaiting_approval must persist stopped
+ * HUD 停 on leftover 0/N awaiting_approval must persist discarded
  * so reload cannot resurrect「待你過目」.
  *
  * RUN_PG_INTEGRATION=1 DATABASE_URL=postgres://… npx vitest run server/services/agentCore.stop.pg.test.ts
@@ -47,7 +47,7 @@ d("stopAgentCore persists leftover 0/N 待你過目 (real PostgreSQL)", () => {
     }
   });
 
-  it("stop a 0/6 awaiting_approval run → row status stopped (cancelled) → not HUD-active", async () => {
+  it("stop a 0/6 awaiting_approval run → row status discarded (cancelled) → not HUD-active", async () => {
     const userId = randomUUID();
     const groupId = randomUUID();
     const teamId = randomUUID();
@@ -85,13 +85,13 @@ d("stopAgentCore persists leftover 0/N 待你過目 (real PostgreSQL)", () => {
     expect(isAgentRunActiveForHud(run.status)).toBe(true);
 
     const stopped = await stopAgentCore({ auth: authFor(userId, groupId), runId: run.id });
-    expect(stopped.status).toBe("stopped");
+    expect(stopped.status).toBe("discarded");
 
     const [reloaded] = await db
       .select({ status: schema.agentRuns.status, steps: schema.agentRuns.steps })
       .from(schema.agentRuns)
       .where(eq(schema.agentRuns.id, run.id));
-    expect(reloaded?.status).toBe("stopped");
+    expect(reloaded?.status).toBe("discarded");
     expect(isAgentRunActiveForHud(reloaded!.status)).toBe(false);
     const reloadedSteps = (reloaded?.steps ?? []) as Array<{ status: string }>;
     expect(reloadedSteps.every((step) => step.status === "stopped")).toBe(true);

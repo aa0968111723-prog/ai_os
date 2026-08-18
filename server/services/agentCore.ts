@@ -47,7 +47,7 @@ import {
 } from "./agentPlannerProvider";
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "../../shared/agentDag";
-import { canStopAgentRunStatus } from "../../shared/agentQuestions";
+import { canStopAgentRunStatus, isAgentRunActiveForHud } from "../../shared/agentQuestions";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
@@ -77,6 +77,60 @@ const HUMAN_WAITING_RUN_STATUSES = [
 ] as const;
 
 const ACTIVE_AGENT_RUN_STATUSES = ["running", ...HUMAN_WAITING_RUN_STATUSES] as const;
+const HUD_CANCEL_STATUSES = ["awaiting_approval", "running", ...HUMAN_WAITING_RUN_STATUSES] as const;
+
+/**
+ * Persist cancel for HUD 停. Status write is first and must not share a
+ * transaction with steps JSON — a fat/malformed plan must not roll back
+ * the cancel, or leftover 0/N「待你過目」survives reload.
+ * awaiting_approval → discarded (overview omits the row).
+ * running / waiting_* → stopped.
+ */
+async function persistHudCancel(input: {
+  auth: AuthState;
+  run: AgentRunRow;
+  terminal: "stopped" | "discarded";
+  summary: string;
+}): Promise<AgentRunRow> {
+  const { auth, run, terminal, summary } = input;
+  const [cancelled] = await db
+    .update(schema.agentRuns)
+    .set({ status: terminal, activeQuestionId: null, updatedAt: new Date() })
+    .where(and(
+      eq(schema.agentRuns.id, run.id),
+      inArray(schema.agentRuns.status, [...HUD_CANCEL_STATUSES]),
+    ))
+    .returning();
+  if (!cancelled) {
+    const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (current && !isAgentRunActiveForHud(current.status)) return current;
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
+  }
+  if (run.activeQuestionId) {
+    await db.update(schema.agentQuestions).set({ status: "cancelled", updatedAt: new Date() })
+      .where(and(eq(schema.agentQuestions.id, run.activeQuestionId), eq(schema.agentQuestions.status, "pending")))
+      .catch(() => undefined);
+  }
+  try {
+    const steps = Array.isArray(run.steps) ? [...(run.steps as AgentStep[])] : [];
+    stopPendingDagSteps(steps);
+    await db.update(schema.agentRuns).set({ steps, updatedAt: new Date() }).where(eq(schema.agentRuns.id, run.id));
+    cancelled.steps = steps;
+  } catch {
+    // Status already persisted. Reload cannot resurrect the toast.
+  }
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: terminal === "discarded" ? "run:discarded" : "run:stopped",
+    eventType: terminal === "discarded" ? "discarded" : "stopped",
+    actorType: "human",
+    actorId: auth.user.id,
+    summary,
+  });
+  return cancelled;
+}
 
 /**
  * MCP 入口無 router zod：非法 UUID 進 DB 會變 500。core 入口先擋成 BAD_REQUEST（中文）。
@@ -1417,23 +1471,15 @@ export async function discardAgentCore(input: { auth: AuthState; runId: string }
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以放棄" });
   }
-  const updated = await db
-    .update(schema.agentRuns)
-    .set({ status: "discarded", updatedAt: new Date() })
-    .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "awaiting_approval")))
-    .returning();
-  if (updated.length === 0) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
-  await recordAgentEventSafely({
-    runId: run.id,
-    groupId: run.groupId,
-    projectId: run.projectId,
-    eventKey: "run:discarded",
-    eventType: "discarded",
-    actorType: "human",
-    actorId: auth.user.id,
+  if (!canStopAgentRunStatus(run.status)) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
+  }
+  return persistHudCancel({
+    auth,
+    run,
+    terminal: run.status === "running" ? "stopped" : "discarded",
     summary: "使用者放棄了尚未執行的計畫",
   });
-  return updated[0];
 }
 
 /** 停止後續步驟：正在生成的那一步讓它自然完成（runner 收尾），未送出的標 stopped 不扣點 */
@@ -1449,68 +1495,16 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   if (!canStopAgentRunStatus(run.status)) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
   }
-  // awaiting_approval leftover 0/N「待你過目」is HUD-active. 停 must persist
-  // stopped so reload cannot resurrect the toast. waiting_* same path.
-  // Never return the pre-update row: that looks like success while the
-  // toast still reloads as awaiting_approval.
-  const stopInPlace = run.status !== "running";
-  if (stopInPlace) {
-    const steps = Array.isArray(run.steps) ? [...(run.steps as AgentStep[])] : [];
-    try {
-      stopPendingDagSteps(steps);
-    } catch {
-      // Status persist is the contract. Step rewrite is best-effort.
-    }
-    const [stopped] = await db.transaction(async (tx) => {
-      if (run.activeQuestionId) {
-        await tx.update(schema.agentQuestions).set({ status: "cancelled", updatedAt: new Date() })
-          .where(and(eq(schema.agentQuestions.id, run.activeQuestionId), eq(schema.agentQuestions.status, "pending")));
-      }
-      return tx
-        .update(schema.agentRuns)
-        .set({ status: "stopped", steps, activeQuestionId: null, updatedAt: new Date() })
-        .where(and(
-          eq(schema.agentRuns.id, run.id),
-          inArray(schema.agentRuns.status, ["awaiting_approval", ...HUMAN_WAITING_RUN_STATUSES]),
-        ))
-        .returning();
-    });
-    if (!stopped) {
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
-    }
-    await recordAgentEventSafely({
-      runId: run.id,
-      groupId: run.groupId,
-      projectId: run.projectId,
-      eventKey: "run:stopped",
-      eventType: "stopped",
-      actorType: "human",
-      actorId: auth.user.id,
-      summary: "使用者停止了等待中的代理計畫",
-    });
-    return stopped;
-  }
-  const updated = await db
-    .update(schema.agentRuns)
-    .set({ status: "stopped", updatedAt: new Date() })
-    .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "running")))
-    .returning();
-  if (updated.length === 0) {
-    const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆代理執行" });
-    return current;
-  }
-  await recordAgentEventSafely({
-    runId: run.id,
-    groupId: run.groupId,
-    projectId: run.projectId,
-    eventKey: "run:stopped",
-    eventType: "stopped",
-    actorType: "human",
-    actorId: auth.user.id,
-    summary: "使用者要求停止後續代理步驟",
+  // Leftover 0/N「待你過目」must persist discarded so agentOverview omits
+  // the row after /dashboard reload. running / waiting_* persist stopped.
+  return persistHudCancel({
+    auth,
+    run,
+    terminal: run.status === "awaiting_approval" ? "discarded" : "stopped",
+    summary: run.status === "awaiting_approval"
+      ? "使用者停止了等待核准的代理計畫"
+      : "使用者要求停止後續代理步驟",
   });
-  return updated[0];
 }
 
 /** 讀取：待核准＋執行中全列＋最近 5 筆終局（放棄的不列）。帶組隔離。 */

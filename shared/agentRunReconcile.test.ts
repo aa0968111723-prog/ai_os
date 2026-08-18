@@ -152,6 +152,21 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
     })).toBe(false);
   });
 
+  it("hides leftover 0/6 even when steps omit kind: generate", () => {
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: kindless,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+  });
+
   it("clears leftover 0/6 after auto-現用 even when the batch is newer than the gen", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "awaiting_approval",

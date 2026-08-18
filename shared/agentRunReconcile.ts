@@ -104,7 +104,15 @@ function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
 
 function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep[]): boolean {
   if (status !== "awaiting_approval") return false;
-  return generateSteps(steps).length >= 2;
+  if (generateSteps(steps).length >= 2) return true;
+  // Live leftover 0/N sometimes stored without kind: "generate".
+  if (steps.length < 2) return false;
+  if (steps.some((step) => step.status === "done")) return false;
+  return steps.every((step) => {
+    if (step.kind && step.kind !== "generate") return false;
+    const parked = step.status === "pending" || step.status === "waiting" || step.status === "stopped";
+    return parked && /第\s*\d+\s*鏡|生成畫面/.test(step.note ?? "");
+  });
 }
 
 /**

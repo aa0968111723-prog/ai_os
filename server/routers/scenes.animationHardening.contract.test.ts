@@ -328,7 +328,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
-    expect(parse).toContain("rewritePersistedXiaohuaShotCopy(row, bound || xiaohuaIds.size > 0)");
+    expect(parse).toContain("rewritePersistedXiaohuaShotCopy(row, bound || forceXiaohua || xiaohuaIds.size > 0)");
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
     expect(lock).toContain("lockXiaohuaAct1Location");
@@ -382,8 +382,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     const stopFn = agentCore.slice(agentCore.indexOf("export async function stopAgentCore"), agentCore.indexOf("export async function listAgentRunsForProject"));
     expect(stopFn).toContain("canStopAgentRunStatus");
     expect(stopFn).toContain("awaiting_approval");
-    expect(stopFn).toContain('status: "stopped"');
-    expect(stopFn).toContain("Never return the pre-update row");
+    expect(stopFn).toContain('terminal: run.status === "awaiting_approval" ? "discarded"');
+    expect(agentCore).toContain("persistHudCancel");
+    expect(agentCore).toContain("Status write is first");
     expect(stopFn).not.toContain("return stopped ?? run");
   });
 
