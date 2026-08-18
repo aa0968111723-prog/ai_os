@@ -42,6 +42,24 @@ import {
 export const CONTEXT_BUDGET_DEFAULT = 12_000;
 const CONTEXT_BUDGET_MAX = 40_000;
 
+/**
+ * Saved `stories.content` for resolver `contextText` (〈專案脈絡〉).
+ * The assistant only eats contextText — SELECT into `story` is not enough.
+ */
+export function formatResolvedStoryContextBlock(content: string | null | undefined): string | null {
+  const text = content?.trim() ?? "";
+  if (!text) return null;
+  return `【你的故事】\n${text}`;
+}
+
+/** Studio / storyboard pageContext: entityType=shot → resolver shot scope. */
+export function shotIdFromPageContext(
+  pageContext?: { entityType?: string; entityId?: string } | null,
+): string | undefined {
+  if (pageContext?.entityType === "shot" && pageContext.entityId) return pageContext.entityId;
+  return undefined;
+}
+
 export interface ResolveContextInput {
   auth: AuthState;
   projectId: string;
@@ -270,8 +288,8 @@ export async function resolveContext(input: ResolveContextInput): Promise<Resolv
     worldview.styles.length ? `風格：${worldview.styles.join("、")}` : "",
     worldview.taboos.length ? `禁忌：${worldview.taboos.join("、")}` : "",
   ].filter(Boolean).join("\n"));
-  const storyContent = story[0]?.content?.trim() ?? "";
-  if (storyContent) push(`【故事全文】\n${storyContent}`);
+  const storyBlock = formatResolvedStoryContextBlock(story[0]?.content);
+  if (storyBlock) push(storyBlock);
   if (scriptText) push(`【腳本】\n${scriptText}`);
 
   for (const entry of resolved) {

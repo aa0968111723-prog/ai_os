@@ -80,7 +80,7 @@ import {
 import { callTool } from "../services/mcp";
 import { resolveModel } from "../services/modelResolve";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
-import { resolveContext } from "../services/contextResolver";
+import { resolveContext, shotIdFromPageContext } from "../services/contextResolver";
 import {
   ASSISTANT_DATABASE_EVIDENCE_BUDGET,
   formatAssistantDatabaseEvidence,
@@ -1131,6 +1131,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           query: input.message,
           budgetChars: 10_000,
           allowGlobalRetrieval: !input.onlyKnowledgeIds?.length,
+          shotId: shotIdFromPageContext(input.pageContext),
         }).catch(() => null),
       ]);
       const libraryRetrieval = {

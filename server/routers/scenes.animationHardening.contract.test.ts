@@ -78,6 +78,8 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("formatStudioShotContext");
     expect(assistant).toContain("formatPersistedStoryForAssistant");
     expect(assistant).toContain("buildAssistantProjectStatusContext");
+    expect(assistant).toContain("shotIdFromPageContext");
+    expect(assistant).toContain("shotId: shotIdFromPageContext(input.pageContext)");
     expect(assistant).toContain("assistantAskCompletionChip");
     expect(assistant).toContain("allowPaidFallback");
     expect(assistant).toContain("if (!a.sceneNo) continue");
