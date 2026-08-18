@@ -143,17 +143,21 @@ describe("animation shot writes stay consistent", () => {
 
   it("assistant add_character writes read back the character row", () => {
     const exec = assistant.slice(assistant.indexOf("async function applyAssistantScenePatch"));
+    const writeCore = readFileSync(join(process.cwd(), "server/services/characterWriteCore.ts"), "utf8");
     expect(assistant).toContain('type: z.literal("add_character")');
     expect(exec).toContain('if (a.type === "add_character")');
+    expect(exec).toContain("upsertProjectCharacterCore");
     expect(exec).toContain("authoritative_character_row_read_back");
-    expect(exec).toContain("MAX_PROJECT_CHARACTERS");
+    expect(writeCore).toContain("MAX_PROJECT_CHARACTERS");
+    expect(writeCore).toContain("never 素材清單 / dataRows");
+    expect(writeCore).toContain("publishToProject(");
+    expect(writeCore).toContain("{ kind: \"character\"");
     expect(assistant).toContain("proposeAddCharacterActions");
     expect(assistant).toContain("待補外觀描述");
     expect(assistant).toContain("建角色／加定裝卡");
     expect(assistant).toContain("確認下方就寫入");
     expect(assistant).toContain('type: z.literal("add_character")');
     expect(assistant).toContain('"add_character"');
-    expect(assistant).toContain("publishToProject(project.id, { kind: \"character\"");
     expect(assistant).toContain("authoritative_character_row_read_back");
     const client = readFileSync(join(process.cwd(), "client/src/components/ProjectAssistant.tsx"), "utf8");
     expect(client).toContain('type: "add_character"');
