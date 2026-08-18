@@ -12,6 +12,7 @@ import {
   STORY_PARSE_PROMO_FALLBACK_MS,
   STORY_PARSE_PROMO_PRIMARY_MS,
   STORY_PARSE_SHORT_CHARS,
+  STORY_PARSE_SHORT_PRIMARY_MS,
 } from "./storyParse";
 import { NIM_DEFAULT_MODEL, NIM_FIRST_ATTEMPT_MAX_MS, NIM_REASONING_MODEL } from "./nvidia-nim";
 import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
@@ -70,6 +71,22 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(complete).toHaveBeenCalled();
     const firstTimeout = complete.mock.calls[0]?.[1]?.timeoutMs ?? 0;
     expect(firstTimeout).toBeLessThanOrEqual(45_000);
+  });
+
+  it("cache-miss EXTRACT for 2k and 12k never forwards 405B/150s to the provider", async () => {
+    const seen: Array<{ model: string; timeoutMs?: number; fallbackTimeoutMs?: number }> = [];
+    const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+      seen.push(opts);
+      return { output: "{\"ok\":1}", model: opts.model, downgraded: false };
+    });
+    await extractStoryPlanFromProvider("sys", 2_000, complete);
+    await extractStoryPlanFromProvider("sys", 12_000, complete);
+    expect(seen[0]).toMatchObject({ model: NIM_DEFAULT_MODEL, timeoutMs: STORY_PARSE_SHORT_PRIMARY_MS });
+    expect(seen[0]?.model).not.toBe(NIM_REASONING_MODEL);
+    expect(seen[1]).toMatchObject({ model: NIM_REASONING_MODEL, timeoutMs: STORY_PARSE_LONG_PRIMARY_MS });
+    expect(seen[1]?.timeoutMs).toBeLessThan(150_000);
+    expect(seen[1]?.fallbackTimeoutMs).toBe(STORY_PARSE_LONG_FALLBACK_MS);
+    expect(seen.every((call) => (call.timeoutMs ?? 150_000) < 150_000)).toBe(true);
   });
 
   it("~300-char Chinese first parse completes in mock without a 150s timeout", async () => {
@@ -141,6 +158,29 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
     expect(parse).toContain("timeoutMs: strategy.primaryTimeoutMs");
     expect(parse).toContain("fallbackTimeoutMs: strategy.fallbackTimeoutMs");
     expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length, input.complete)");
+    // Teammate live audit: cache-miss of any length called 405B / 150s. That one-liner must stay gone.
+    expect(parse).not.toMatch(/nimCompleteWithFallback\(\s*sys,\s*\{\s*model:\s*NIM_REASONING_MODEL,\s*timeoutMs:\s*150_000\s*\}\)/);
+    expect(parse).not.toMatch(/timeoutMs:\s*150_000/);
+  });
+
+  it("cache-miss of 301, ~2k, or 12k never uses 405B/150s; short scripts start on 70B", () => {
+    for (const n of [301, 1_167, 2_000, 12_000]) {
+      const strategy = resolveStoryExtractStrategy(n);
+      expect(strategy.primaryTimeoutMs).toBeLessThan(150_000);
+      expect(strategy.fallbackTimeoutMs).toBeLessThan(150_000);
+      expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(150_000);
+      expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    }
+    const promo = resolveStoryExtractStrategy(301);
+    const mid = resolveStoryExtractStrategy(2_000);
+    expect(promo.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(mid.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(promo.primaryModel).not.toBe(NIM_REASONING_MODEL);
+    expect(mid.primaryModel).not.toBe(NIM_REASONING_MODEL);
+    const long = resolveStoryExtractStrategy(12_000);
+    expect(long.primaryModel).toBe(NIM_REASONING_MODEL);
+    expect(long.primaryTimeoutMs).toBeLessThanOrEqual(60_000);
+    expect(long.fallbackModel).toBe(NIM_DEFAULT_MODEL);
   });
 
   it("repo has no zeabur.toml / vercel.json / nginx / maxDuration cap", () => {

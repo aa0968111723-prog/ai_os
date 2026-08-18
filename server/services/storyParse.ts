@@ -366,7 +366,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
   }
 
   const contentHash = sha256Hex(content);
-  // Idempotency 短路：內容沒變就不重跑（重按「AI 解析」不會燒模型也不會建重複資料）
+  // Idempotency 短路：內容沒變就不重跑（重按「AI 解析」不會燒模型也不會建重複資料）。
+  // Live 119-char「成功」was this cache (skipped:true), not a first parse.
+  // force 預設 false——同一份稿再按一次不會打 NIM。
   if (!input.force && story.parsedContentHash === contentHash) {
     const [lastRun] = await db
       .select()
@@ -433,8 +435,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       });
     }
     try {
-      // 短稿先走日常 70B（1k 字不該乾等 405B 150 秒）；長稿才以旗艦為主、70B 作短備援。
-      // 兩段逾時加總仍遠低於舊的 150s×2，失敗必須是可恢復錯誤，不是掛死。
+      // Live/base L353 was: nimCompleteWithFallback(sys, { model: NIM_REASONING_MODEL, timeoutMs: 150_000 })
+      // for ANY length (301 or 12_000). STORY_PARSE_BUDGET only truncates. Do not restore that one-liner.
+      // Short/SHOTLIST first-parse starts on 70B with a split budget; timeout must reach 70B before 150s.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({

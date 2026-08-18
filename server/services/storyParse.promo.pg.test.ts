@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 import { db, schema } from "../db";
 import { markBootReady } from "./boot";
-import { NIM_DEFAULT_MODEL } from "./nvidia-nim";
+import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
 import {
   mockStoryExtract,
   runStoryParse,
@@ -60,7 +60,9 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
       content: TKU_ZEN_SHOTLIST_FIRST_PARSE,
     });
 
-    const complete = vi.fn(async (_prompt: string, opts: { timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+    const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+      expect(opts.model).toBe(NIM_DEFAULT_MODEL);
+      expect(opts.model).not.toBe(NIM_REASONING_MODEL);
       expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
       expect(opts.timeoutMs ?? 150_000).toBeLessThan(150_000);
       expect(String(opts.timeoutMs ?? "")).not.toMatch(/150000/);
@@ -90,5 +92,17 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     const [run] = await db.select().from(schema.parseRuns).where(eq(schema.parseRuns.id, result.runId));
     expect(run?.status).toBe("done");
     expect(run?.stats).toMatchObject({ scenes: result.stats.scenes, shots: result.stats.shots });
+
+    // Same text, force default false → cache (the 119-char live “success”), not another 405B/150s call.
+    complete.mockClear();
+    const cached = await runStoryParse({
+      userId,
+      projectId: project.id,
+      assertAccess: () => undefined,
+      complete,
+    });
+    expect(cached.skipped).toBe(true);
+    expect(cached.stats).toMatchObject({ scenes: result.stats.scenes, shots: result.stats.shots });
+    expect(complete).not.toHaveBeenCalled();
   });
 });
