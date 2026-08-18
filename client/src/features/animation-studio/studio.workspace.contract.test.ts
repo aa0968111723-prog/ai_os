@@ -214,7 +214,8 @@ describe("Inspector 不新增資料格式", () => {
 
   it("創作室 複製這一鏡 走 insertAfter(duplicate) 且失敗要出 error，不是 silent queue", () => {
     expect(studio).toContain("const duplicateShot = (sceneId: string)");
-    expect(studio).toContain("mutateAsync({ sceneId, duplicate: true })");
+    expect(studio).toContain("{ sceneId, duplicate: true }");
+    expect(studio).toContain("refreshStudioShotList");
     expect(studio).toContain("onDuplicate={duplicateShot}");
     expect(studio).not.toContain("enqueue(id, { duplicate: true })");
     expect(studio).toContain("setShotActionError");
@@ -223,6 +224,7 @@ describe("Inspector 不新增資料格式", () => {
     expect(timeline).toContain("onDuplicate()");
     expect(timeline).toContain("createPortal");
     expect(timeline).toContain("studio-menu--fixed");
+    expect(timeline).not.toContain("studio-menu__scrim");
     expect(declarations).toContain(".studio-menu--fixed");
     expect(studio).toContain("onInsertAfter={insertBlankAfter}");
     expect(timeline).toContain("在這之後插入一鏡");

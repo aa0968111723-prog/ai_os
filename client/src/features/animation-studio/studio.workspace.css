@@ -733,12 +733,13 @@ body.studio-workspace { overflow: hidden; }
 /* New Shot 的選單往上開（它在 Timeline 頂端，往下會超出視窗） */
 .studio-menu--newshot { bottom: calc(100% + 5px); right: 0; }
 .studio-menu--shot { bottom: calc(100% + 4px); left: 0; min-width: 190px; }
-/* Portal + fixed: stay on-screen at 1024px height; overflow list cannot clip. */
+/* Portal + fixed: stay on-screen at 1024px height; overflow list cannot clip.
+   z-index above immersive studio (60) and the old scrim (50). No scrim on this menu. */
 .studio-menu--fixed {
   position: fixed;
   bottom: auto;
   left: auto;
-  z-index: 80;
+  z-index: 200;
 }
 .studio-menu--more { top: calc(var(--ws-header) - 2px); right: 10px; }
 

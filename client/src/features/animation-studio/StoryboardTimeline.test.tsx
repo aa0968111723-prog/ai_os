@@ -61,6 +61,9 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     expect(menu.className).toContain("studio-menu--fixed");
     expect(document.body.contains(menu)).toBe(true);
     expect(shot04.contains(menu)).toBe(false);
+    expect(screen.queryByRole("button", { name: "關閉選單" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /複製這一鏡/ })).toBeInTheDocument();
   });
 
   it("menu 在這之後插入一鏡 calls onInsertAfter with the source shot id", async () => {

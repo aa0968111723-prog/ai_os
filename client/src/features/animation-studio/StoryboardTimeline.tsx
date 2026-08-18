@@ -7,7 +7,7 @@
  * 兩種排序操作並存是刻意的（沿用 ShotStrip 的既有決定）：桌機可以拖，但每一格
  * 永遠也有前／後按鈕——拖曳對鍵盤與讀屏使用者不成立，那是加速捷徑不是唯一的路。
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { AssetImg } from "../../components/MediaFallback";
@@ -38,7 +38,7 @@ export interface StoryboardTimelineProps {
   onNewShot: (kind: NewShotKind) => void;
   onDuplicate: (id: string) => void;
   /** Blank row immediately after this shot (not append-at-end). */
-  onInsertAfter?: (id: string) => void;
+  onInsertAfter: (id: string) => void;
   onDelete: (id: string) => void;
   newShotBusy?: boolean;
 }
@@ -205,7 +205,7 @@ export function StoryboardTimeline({
                     trigger={moreBtnRefs.current.get(shot.id) ?? null}
                     onClose={() => setMenuId(null)}
                     onDuplicate={() => { setMenuId(null); onDuplicate(shot.id); }}
-                    onInsertAfter={onInsertAfter ? () => { setMenuId(null); onInsertAfter(shot.id); } : undefined}
+                    onInsertAfter={() => { setMenuId(null); onInsertAfter(shot.id); }}
                     onDelete={() => { setMenuId(null); onDelete(shot.id); }}
                   />
                 )}
@@ -225,9 +225,9 @@ export function StoryboardTimeline({
 
 /**
  * Portal + position:fixed so the shot menu stays on-screen at 1024px
- * viewport height. Opening upward inside `.studio-timeline__list`
- * (overflow-y: hidden) clips the menu; the transparent scrim then
- * eats the 複製 click.
+ * viewport height. Do NOT use the full-viewport transparent scrim here:
+ * that button sits at z-50 and ate 複製 on live (#790) — click only
+ * closed the menu (7→7, silent no-op). Close on outside pointerdown.
  */
 function ShotMoreMenu({
   trigger,
@@ -239,7 +239,7 @@ function ShotMoreMenu({
   trigger: HTMLButtonElement | null;
   onClose: () => void;
   onDuplicate: () => void;
-  onInsertAfter?: () => void;
+  onInsertAfter: () => void;
   onDelete: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -270,59 +270,64 @@ function ShotMoreMenu({
     return () => window.removeEventListener("resize", place);
   }, [trigger]);
 
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const node = event.target;
+      if (!(node instanceof Node)) return;
+      if (menuRef.current?.contains(node)) return;
+      if (trigger?.contains(node)) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [trigger, onClose]);
+
   if (typeof document === "undefined") return null;
   return createPortal(
-    <>
+    <div
+      ref={menuRef}
+      className="studio-menu studio-menu--shot studio-menu--fixed"
+      role="menu"
+      style={box ? { top: box.top, left: box.left } : { visibility: "hidden", top: 0, left: 0 }}
+    >
       <button
         type="button"
-        className="studio-menu__scrim"
-        aria-label="關閉選單"
-        onClick={onClose}
-      />
-      <div
-        ref={menuRef}
-        className="studio-menu studio-menu--shot studio-menu--fixed"
-        role="menu"
-        style={box ? { top: box.top, left: box.left } : { visibility: "hidden", top: 0, left: 0 }}
+        role="menuitem"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onInsertAfter();
+        }}
       >
-        {onInsertAfter && (
-          <button
-            type="button"
-            role="menuitem"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onInsertAfter();
-            }}
-          >
-            <Icon name="Plus" size={13} /> 在這之後插入一鏡
-          </button>
-        )}
-        <button
-          type="button"
-          role="menuitem"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicate();
-          }}
-        >
-          <Icon name="Copy" size={13} /> 複製這一鏡
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="is-danger"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <Icon name="Trash2" size={13} /> 刪除（進回收桶）
-        </button>
-      </div>
-    </>,
+        <Icon name="Plus" size={13} /> 在這之後插入一鏡
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDuplicate();
+        }}
+      >
+        <Icon name="Copy" size={13} /> 複製這一鏡
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="is-danger"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <Icon name="Trash2" size={13} /> 刪除（進回收桶）
+      </button>
+    </div>,
     document.body,
   );
 }

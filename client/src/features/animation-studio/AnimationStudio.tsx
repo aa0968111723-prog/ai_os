@@ -37,7 +37,7 @@ import type { SketchPreview } from "./sketchReplay";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
-import { studioShotListIsLoading } from "../../lib/studioShotList";
+import { refreshStudioShotList, studioShotListIsLoading } from "../../lib/studioShotList";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -308,21 +308,28 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   if (!insertQueueRef.current) {
     insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
   }
+  const runShotInsert = (sceneId: string, duplicate: boolean) => {
+    setShotActionError(null);
+    void insertAfter
+      .mutateAsync(duplicate ? { sceneId, duplicate: true } : { sceneId })
+      .then(async (created) => {
+        // Do not depend on ACK-only invalidate: live 複製 closed the menu
+        // and left 7→7 until reload. Fetch the list so the new row appears.
+        await refreshStudioShotList(utils, projectIdRef.current);
+        if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error && err.message ? err.message : duplicate ? "複製這一鏡失敗" : "插入分鏡失敗";
+        setShotActionError(message);
+      });
+  };
   /** Studio timeline 複製：不走 insertAfterQueue 的 silent catch。失敗要出 error。 */
   const duplicateShot = (sceneId: string) => {
-    setShotActionError(null);
-    void insertAfter.mutateAsync({ sceneId, duplicate: true }).catch((err: unknown) => {
-      const message = err instanceof Error && err.message ? err.message : "複製這一鏡失敗";
-      setShotActionError(message);
-    });
+    runShotInsert(sceneId, true);
   };
   /** After-row blank insert from the shot menu (not append-at-end). */
   const insertBlankAfter = (sceneId: string) => {
-    setShotActionError(null);
-    void insertAfter.mutateAsync({ sceneId }).catch((err: unknown) => {
-      const message = err instanceof Error && err.message ? err.message : "插入分鏡失敗";
-      setShotActionError(message);
-    });
+    runShotInsert(sceneId, false);
   };
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
