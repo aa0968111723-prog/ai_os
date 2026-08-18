@@ -25,7 +25,7 @@ describe("visual choice 寫入路徑的結構約束（行為見 *.pg.test.ts）"
     const block = source.slice(start, source.indexOf("generateInto:", start));
     expect(block).toContain("expectedRev:");
     expect(block).toContain("baseline:");
-    expect(block).toContain("applySceneRevision({");
+    expect(block).toContain("applyWithRevisionTrpc({");
     expect(block).toContain("expectedRev: input.expectedRev");
     expect(block).toContain('entity: "scene"');
   });

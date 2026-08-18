@@ -21,7 +21,7 @@ import {
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import { createProjectCore } from "../services/projectCore";
 import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
 import { visibleProjectsWhere } from "../services/projectInventory";
@@ -945,7 +945,7 @@ export const projectsRouter = router({
       await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改世界觀
       const current = worldviewSchema.parse(project.worldview ?? {});
       const merged = worldviewSchema.parse({ ...current, ...input.worldview });
-      const { row: updated } = await applyWithRevision({
+      const { row: updated } = await applyWithRevisionTrpc({
         entity: "project",
         table: schema.projects,
         idColumn: schema.projects.id,

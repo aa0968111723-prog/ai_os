@@ -13,7 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
-import { applyWithRevision } from "../services/revisionGuard";
+import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
   materializeStoryboard,
@@ -193,7 +193,7 @@ export const storyRouter = router({
       // 條件寫入。故事只有 content 一欄會撞，所以「可合併」在這裡等同於
       // 「別人根本沒動過內文」——真的兩人同時打字時一律走衝突路徑交給人決定，
       // 不做文字層的自動三方合併（那是 Yjs 的工作，猜錯會把兩段話絞在一起）。
-      const { row, merged } = await applyWithRevision({
+      const { row, merged } = await applyWithRevisionTrpc({
         entity: "story",
         table: schema.stories,
         idColumn: schema.stories.id,
@@ -268,7 +268,7 @@ export const storyRouter = router({
         );
       if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個版本" });
       await snapshotStory(story, ctx.auth.user.id);
-      const { row } = await applyWithRevision({
+      const { row } = await applyWithRevisionTrpc({
         entity: "story",
         table: schema.stories,
         idColumn: schema.stories.id,
@@ -680,7 +680,7 @@ export const storyRouter = router({
       if (Object.keys(patch).length === 0) return row;
       // updatedAt 走 bookkeeping 而不是 patch：它每次都變，混進逐欄比對會讓
       // 這一列在第一次被改過之後，往後每一次儲存都跳假衝突。
-      const { row: updated, merged } = await applyWithRevision({
+      const { row: updated, merged } = await applyWithRevisionTrpc({
         entity: "storyScene",
         table: schema.storyScenes,
         idColumn: schema.storyScenes.id,

@@ -144,9 +144,9 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(bindings).toContain("table.groupId === project.groupId");
   });
 
-  it("inheritFromPrevious goes through applySceneRevision and conflict is formatted before 500 rewrite", () => {
+  it("inheritFromPrevious goes through applyWithRevisionTrpc and conflict is formatted before 500 rewrite", () => {
     const inherit = scenes.slice(scenes.indexOf("inheritFromPrevious:"), scenes.indexOf("batchGenerate:"));
-    expect(inherit).toContain("applySceneRevision");
+    expect(inherit).toContain("applyWithRevisionTrpc");
     expect(inherit).toContain("expectedRev: input.expectedRev ?? cur.rev");
     expect(inherit).not.toContain("db.update(schema.scenes).set(patch)");
     const conflictIdx = trpc.indexOf("isRevisionConflictError(error.cause)");
