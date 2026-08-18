@@ -326,7 +326,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     const board = story.slice(story.indexOf("generateStoryboard:"), story.indexOf("undoRun:"));
     expect(board).toContain("materializeStoryboard");
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
-    expect(parse).toContain("rewriteExistingXiaohuaStoryboardCopy");
+    expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
+    expect(parse).toContain("lockXiaohuaCopyFields");
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
     const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
@@ -364,7 +365,10 @@ describe("#790 overnight pins (do not reopen)", () => {
     const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
     expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");
     expect(reconcile).toContain("shouldDiscardLeftoverAwaitingApprovalOnRead");
+    expect(reconcile).toContain("hasCurrentVisual");
     expect(reconcile).toContain("待你過目");
+    expect(adopt).toContain("scheduleReconcileAfterVisualAdopt");
+    expect(scenes).toContain("scheduleReconcileAfterVisualAdopt");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const agentCore = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
@@ -380,7 +384,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(into).toContain("modelId: input.modelId");
     expect(generationCore).toContain("lockXiaohuaGenerationPrompt");
     expect(sceneList).toContain("resolveGenModel");
-    expect(sceneList).toContain("modelId: resolveGenModel()");
+    expect(sceneList).toContain("liveGenModelId");
+    expect(sceneList).toContain("modelId: liveGenModelId");
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 

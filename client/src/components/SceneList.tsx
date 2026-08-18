@@ -537,7 +537,10 @@ const SceneRow = memo(function SceneRow({
   const effectiveCards = resolveSceneCards(s, { characterIds: charIds, scenePresetIds: sceneIds, propIds });
   const rowError = update.error ?? generate.error ?? insertAfter.error ?? adopt.error;
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
-  const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
+  // Quote and send must use the same model. Stale genModelId (SDXL) with
+  // Qwen in aios.scenegen was quoted 1 / deducted 3 on short-100w.
+  const liveGenModelId = resolveGenModel();
+  const genModel = getModel(liveGenModelId) ?? getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
   // 主要動作已經是「開單格工作室」時（沒提示詞要先寫），就不再重複列 tonal 版工作室鈕
   const primaryOpensStudio = canEdit && !s.assetId && !hasPrompt && !isGenerating;
@@ -719,12 +722,12 @@ const SceneRow = memo(function SceneRow({
                   triggerClassName="primary btn-sm"
                   disabled={!hasPrompt || !canEdit}
                   triggerTitle="用這一格的提示詞快速出圖，完成後自動回填縮圖；要換模型請開單格工作室"
-                  message={`即將生成這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
+                  message={`即將生成這一格（${genModel?.label ?? liveGenModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                   confirmLabel="確認生成"
                   onConfirm={() =>
                     generate.mutate({
                       sceneId: s.id,
-                      modelId: resolveGenModel(),
+                      modelId: liveGenModelId,
                       clientRequestId: genRequestId.current,
                       // 送畫面上顯示的那一份（與預覽同源）；伺服器仍會再解析一次當守門
                       // 上限與 generation.submit 同一份 shared 常數：超勾取前幾張，不讓逐格生成整個被 zod 擋下
