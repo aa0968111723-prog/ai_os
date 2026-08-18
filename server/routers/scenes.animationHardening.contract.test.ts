@@ -60,7 +60,7 @@ describe("animation shot writes stay consistent", () => {
 
   it("story autosave serializes in-flight saves and does not baseline from live editor", () => {
     expect(storyStage).toContain("createStorySaveGate");
-    expect(storyStage).toContain("gateRef.current?.dispatch(live)");
+    expect(storyStage).toContain("dispatchStorySave(live)");
     expect(storyStage).not.toContain("baselineRef.current = contentRef.current");
     expect(assistant).toContain('if (a.type === "create_scene")');
     expect(assistant).toContain("publishToProject(project.id");

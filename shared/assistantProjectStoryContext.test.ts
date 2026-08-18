@@ -36,7 +36,7 @@ describe("assistant persisted story context", () => {
 
   it("empty story is explicit — still not 'please paste'", () => {
     const block = formatPersistedStoryForAssistant({ content: "   " });
-    expect(block).toContain("尚未寫入");
-    expect(block).not.toContain("請貼上你的故事");
+    expect(block).toContain("尚未儲存稿");
+    expect(block).not.toContain("請貼上");
   });
 });

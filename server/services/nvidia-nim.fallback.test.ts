@@ -63,7 +63,7 @@ describe("nimCompleteWithFallback", () => {
 
   it("fallbackTimeoutMs 傳給第二次嘗試——短備援不必再吃同一個長逾時", async () => {
     fetchMock
-      .mockImplementationOnce(() => Promise.reject(new DOMException("timed out", "TimeoutError")))
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 1 秒無回應）")))
       .mockResolvedValueOnce(ok("fast-70b"));
     const r = await nimCompleteWithFallback("prompt", {
       model: FLAGSHIP,

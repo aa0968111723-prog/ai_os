@@ -11,7 +11,7 @@ export function formatPersistedStoryForAssistant(input: {
 }): string {
   const text = (input.content ?? "").trim();
   if (!text) {
-    return "故事全文：（尚未寫入。不要說「請貼上你的故事」——先講目前沒有儲存稿，再問要不要用對話發想。）";
+    return "故事全文：（專案尚未儲存稿。先據實說明目前沒有故事正文，再問要不要用對話發想。不要向使用者索取已存在於伺服器的稿。）";
   }
   const sliced = text.length > ASSISTANT_STORY_CONTEXT_BUDGET
     ? `${text.slice(0, ASSISTANT_STORY_CONTEXT_BUDGET)}…[truncated]`
