@@ -68,6 +68,7 @@ for (const row of stale) {
   await db.delete(schema.characters).where(eq(schema.characters.projectId, row.id));
   await db.delete(schema.props).where(eq(schema.props.projectId, row.id));
   await db.delete(schema.scenePresets).where(eq(schema.scenePresets.projectId, row.id));
+  await db.delete(schema.assets).where(eq(schema.assets.projectId, row.id));
   await db.delete(schema.projects).where(eq(schema.projects.id, row.id));
 }
 
@@ -100,11 +101,16 @@ console.log(JSON.stringify({
   looks: snap.looks.map((look) => look.name),
   presets: snap.presets.map((p) => p.name),
   knowledge: snap.knowledge.map((row) => row.title),
+  acts: snap.acts.length,
   shots: snap.shots.length,
   durationSec: snap.shots.reduce((sum, shot) => sum + shot.durationSec, 0),
   dialogue: TKU_ZEN_SHOTLIST_LINES,
-  visualLock: "大二化工、白帽T、短髮／粉橘短髮女孩 / 吉祥物龜龜 / 克難坡",
-  assetImport: "path notes only — D:\\\\淡大劇本 binaries not required on this VM",
+  visualLock: "粉橘短髮鮑伯／米白針織外套／橘色百褶裙",
+  referenceAssetId: snap.characters.find((c) => c.name === "小華")?.referenceAssetId ?? null,
+  lockSheets: snap.assets.map((asset) => asset.title),
+  assetImport: snap.assets.length
+    ? "uploaded lock sheets as referenceAssetId"
+    : "path notes + sheet descriptions — binaries not on this VM",
 }, null, 2));
 
 await pool.end();

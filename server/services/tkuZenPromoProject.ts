@@ -1,11 +1,17 @@
 /**
  * Disposable LOCAL 淡江禪學社 fixture — 動畫組 only.
- * Six SHOTLIST lines. 小華 + 禪定龜龜 only. No paid FAL. No live groups.
- * Uses canonical tables directly (services must not import routers).
+ * Seven acts. Six SHOTLIST lines. 小華 lock sheets + 龜龜 from act 4.
+ * No paid FAL. No live groups. Services must not import routers.
  */
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { and, eq, isNull } from "drizzle-orm";
 import {
+  TKU_ZEN_ACTS,
   TKU_ZEN_CHARACTERS,
+  TKU_ZEN_LIBRARY,
   TKU_ZEN_LOCATIONS,
   TKU_ZEN_LOOKS,
   TKU_ZEN_PROMO_SCRIPT,
@@ -13,14 +19,63 @@ import {
   TKU_ZEN_SHOTLIST_LINES,
   TKU_ZEN_SHOTS,
   TKU_ZEN_WORLDVIEW,
+  TKU_ZEN_XIAOHUA_SHEETS,
   tkuZenDialogueLines,
   tkuZenHasForbidden,
   tkuZenLibraryMapContent,
+  tkuZenLibraryPath,
 } from "../../shared/fixtures/tkuZenPromo";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import { saveBuffer, signAssetPath } from "./storage";
 
 export { TKU_ZEN_PROMO_TITLE };
+
+export function tkuZenLockSheetSearchDirs(): string[] {
+  return [
+    process.env.TKU_ZEN_LOCK_SHEET_DIR,
+    path.join(process.cwd(), "shared/fixtures/tkuZenLockSheets"),
+    tkuZenLibraryPath(TKU_ZEN_LIBRARY.xiaohua.folder),
+  ].filter((dir): dir is string => Boolean(dir));
+}
+
+export function resolveTkuZenLockSheet(file: string): string | null {
+  for (const dir of tkuZenLockSheetSearchDirs()) {
+    const full = path.join(dir, file);
+    if (existsSync(full)) return full;
+  }
+  return null;
+}
+
+async function attachLockSheet(input: {
+  userId: string;
+  projectId: string;
+  groupId: string;
+  file: string;
+  title: string;
+}): Promise<string | null> {
+  const full = resolveTkuZenLockSheet(input.file);
+  if (!full) return null;
+  const buf = await readFile(full);
+  const stored = await saveBuffer(buf, "image/png");
+  const [created] = await db.insert(schema.assets).values({
+    projectId: input.projectId,
+    groupId: input.groupId,
+    kind: "image",
+    title: input.title,
+    url: "",
+    isAiGenerated: false,
+    storagePath: stored.storagePath,
+    mime: "image/png",
+    sizeBytes: stored.sizeBytes,
+    uploadedBy: input.userId,
+    sha256: createHash("sha256").update(buf).digest("hex"),
+    landState: "landed",
+    meta: { lockSheet: input.file, source: "tku-zen-lock", noFal: true },
+  }).returning({ id: schema.assets.id });
+  await db.update(schema.assets).set({ url: signAssetPath(created.id) }).where(eq(schema.assets.id, created.id));
+  return created.id;
+}
 
 export async function materializeTkuZenPromoContent(input: {
   userId: string;
@@ -49,6 +104,18 @@ export async function materializeTkuZenPromoContent(input: {
     });
   }
 
+  const sheetAssetIds: Record<string, string> = {};
+  for (const [key, sheet] of Object.entries(TKU_ZEN_XIAOHUA_SHEETS)) {
+    const assetId = await attachLockSheet({
+      userId: input.userId,
+      projectId: input.projectId,
+      groupId: input.groupId,
+      file: sheet.file,
+      title: `小華 ${sheet.file}`,
+    });
+    if (assetId) sheetAssetIds[key] = assetId;
+  }
+
   const characterIds: Record<string, string> = {};
   for (const card of TKU_ZEN_CHARACTERS) {
     const [row] = await db.insert(schema.characters).values({
@@ -57,6 +124,7 @@ export async function materializeTkuZenPromoContent(input: {
       name: card.name,
       appearance: card.appearance,
       notes: card.notes,
+      referenceAssetId: card.key === "xiaohua" ? (sheetAssetIds.threeview ?? null) : null,
       createdBy: input.userId,
     }).returning({ id: schema.characters.id });
     characterIds[card.key] = row.id;
@@ -73,6 +141,7 @@ export async function materializeTkuZenPromoContent(input: {
       name: look.name,
       costume: look.costume,
       notes: look.notes,
+      referenceAssetId: look.sheet ? (sheetAssetIds[look.sheet] ?? null) : null,
       source: "manual",
       createdBy: input.userId,
     }).returning({ id: schema.characterLooks.id });
@@ -93,7 +162,7 @@ export async function materializeTkuZenPromoContent(input: {
       projectId: input.projectId,
       groupId: input.groupId,
       kind: "note",
-      title: "D:\\淡大劇本 素材對照（本機路徑，不呼叫付費 FAL）",
+      title: "粉橘短髮女孩 lock sheets",
       content: tkuZenLibraryMapContent(),
       pinned: true,
       createdBy: input.userId,
@@ -113,15 +182,19 @@ export async function materializeTkuZenPromoContent(input: {
     locationIds[loc.key] = row.id;
   }
 
-  const [act] = await db.insert(schema.storyScenes).values({
-    projectId: input.projectId,
-    orderIndex: 1,
-    title: "淡江禪學社・小華",
-    summary: "150s SHOTLIST fallback",
-    storyExcerpt: TKU_ZEN_SHOTLIST_LINES.join("\n"),
-    locationId: locationIds.slope,
-    environment: { timeOfDay: "day", notes: "SHOTLIST" },
-  }).returning({ id: schema.storyScenes.id });
+  const actIds: Record<number, string> = {};
+  for (const act of TKU_ZEN_ACTS) {
+    const [row] = await db.insert(schema.storyScenes).values({
+      projectId: input.projectId,
+      orderIndex: act.act,
+      title: act.title,
+      summary: `${act.timeOfDay}`,
+      storyExcerpt: act.shots.map((s) => s.dialogue || s.action).filter(Boolean).join("\n"),
+      locationId: locationIds[act.location],
+      environment: { timeOfDay: act.timeOfDay, notes: act.title },
+    }).returning({ id: schema.storyScenes.id });
+    actIds[act.act] = row.id;
+  }
 
   const shotIds: string[] = [];
   for (const spec of TKU_ZEN_SHOTS) {
@@ -137,9 +210,9 @@ export async function materializeTkuZenPromoContent(input: {
       durationSec: spec.durationSec,
       status: "todo",
       prompt: spec.prompt,
-      dialogue: spec.dialogue,
+      dialogue: spec.dialogue || undefined,
       action: spec.action,
-      storySceneId: act.id,
+      storySceneId: actIds[spec.act],
       characterIds: boundChars,
       scenePresetIds: locationId ? [locationId] : [],
       lookIds: boundLooks.length ? boundLooks : null,
@@ -147,7 +220,7 @@ export async function materializeTkuZenPromoContent(input: {
     shotIds.push(row.id);
   }
 
-  return { characterIds, locationIds, actId: act.id, shotIds };
+  return { characterIds, locationIds, actIds, shotIds, sheetAssetIds };
 }
 
 export async function loadTkuZenPromoSnapshot(projectId: string) {
@@ -166,7 +239,11 @@ export async function loadTkuZenPromoSnapshot(projectId: string) {
     eq(schema.knowledge.projectId, projectId),
     isNull(schema.knowledge.deletedAt),
   ));
-  return { project, story, characters, props, presets, acts, shots, looks, knowledge };
+  const assets = await db.select().from(schema.assets).where(and(
+    eq(schema.assets.projectId, projectId),
+    isNull(schema.assets.deletedAt),
+  ));
+  return { project, story, characters, props, presets, acts, shots, looks, knowledge, assets };
 }
 
 export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTkuZenPromoSnapshot>>) {
@@ -178,29 +255,30 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   }
   if (snap.characters.length !== 2) throw new Error("only 小華 + 禪定龜龜 allowed");
   if (snap.props.length !== 0) throw new Error("fixture must not invent props");
-  if (snap.acts.length !== 1) throw new Error(`expected 1 scene, got ${snap.acts.length}`);
-  if (snap.shots.length !== 6) throw new Error(`expected 6 SHOTLIST shots, got ${snap.shots.length}`);
+  if (snap.acts.length !== 7) throw new Error(`expected 7 acts, got ${snap.acts.length}`);
+  if (snap.shots.length !== TKU_ZEN_SHOTS.length) {
+    throw new Error(`expected ${TKU_ZEN_SHOTS.length} shots, got ${snap.shots.length}`);
+  }
 
   const xiaohua = snap.characters.find((c) => c.name === "小華");
   const turtle = snap.characters.find((c) => c.name === "禪定龜龜");
   if (!xiaohua || !turtle) throw new Error("core cards missing");
-  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("白帽T") || !xiaohua.appearance.includes("短髮")) {
-    throw new Error("小華 appearance lost 大二化工／白帽T／短髮");
+  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("粉橘") || !xiaohua.appearance.includes("針織外套")) {
+    throw new Error("小華 appearance lost pink-bob cardigan lock");
   }
-  if (!xiaohua.appearance.includes("粉橘短髮")) throw new Error("小華 appearance lost 粉橘短髮 visual lock");
+  if (xiaohua.appearance.includes("白帽T")) throw new Error("小華 appearance still has 白帽T");
   if (!turtle.appearance.includes("吉祥物龜龜")) throw new Error("龜龜 appearance lost 吉祥物龜龜 lock");
   if (!snap.presets.some((p) => p.name === "克難坡")) throw new Error("克難坡 preset missing");
   if (snap.looks.length !== TKU_ZEN_LOOKS.length) {
     throw new Error(`expected ${TKU_ZEN_LOOKS.length} looks, got ${snap.looks.length}`);
   }
-  if (!snap.looks.some((look) => (look.notes ?? "").includes("pink_bob_girl_threeview_v01.png"))) {
-    throw new Error("小華 threeview library path not pinned on a look");
+  const xiaohuaLook = snap.looks.find((look) => look.characterId === xiaohua.id);
+  if (!xiaohuaLook?.costume?.includes("針織外套")) throw new Error("小華 look lost costume lock");
+  if (snap.looks.filter((look) => look.characterId === xiaohua.id).length !== 1) {
+    throw new Error("小華 must have exactly one look — script does not change costume");
   }
-  if (!snap.knowledge.some((row) => row.kind === "script" && row.content.includes(TKU_ZEN_SHOTLIST_LINES[0]))) {
-    throw new Error("script knowledge missing");
-  }
-  if (!snap.knowledge.some((row) => (row.content ?? "").includes(String.raw`角色圖\粉橘短髮女孩`))) {
-    throw new Error("library map knowledge missing");
+  if (!snap.knowledge.some((row) => row.content.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
+    throw new Error("lock sheet paths missing from knowledge");
   }
 
   const orderedShots = [...snap.shots].sort((a, b) => a.orderIndex - b.orderIndex);
@@ -230,7 +308,12 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
     }
   }
 
-  if (orderedShots.slice(0, 2).some((s) => (s.characterIds ?? []).includes(turtle.id))) {
-    throw new Error("龜龜 bound before SHOTLIST line 3");
+  const turtleShotActs = orderedShots
+    .filter((s) => (s.characterIds ?? []).includes(turtle.id))
+    .map((s) => snap.acts.find((a) => a.id === s.storySceneId)?.orderIndex ?? 0);
+  if (turtleShotActs.some((act) => act < 4)) throw new Error("龜龜 bound before act 4");
+
+  if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
+    if (xiaohua.referenceAssetId == null) throw new Error("lock sheet uploaded but character.referenceAssetId empty");
   }
 }

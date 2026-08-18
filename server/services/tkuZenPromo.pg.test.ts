@@ -31,6 +31,7 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
       await db.delete(schema.characters).where(eq(schema.characters.projectId, projectId));
       await db.delete(schema.props).where(eq(schema.props.projectId, projectId));
       await db.delete(schema.scenePresets).where(eq(schema.scenePresets.projectId, projectId));
+      await db.delete(schema.assets).where(eq(schema.assets.projectId, projectId));
       await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
     }
     for (const userId of leftovers.users) {
@@ -38,7 +39,7 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     }
   });
 
-  it("materializes 小華 + 禪定龜龜 / 6 SHOTLIST shots and survives reload", async () => {
+  it("materializes 7 acts / pink-bob lock / 6 SHOTLIST lines and survives reload", async () => {
     const userId = randomUUID();
     const groupId = randomUUID();
     leftovers.users.push(userId);
@@ -59,14 +60,13 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     assertTkuZenPromoSnapshot(first);
     const reloaded = await loadTkuZenPromoSnapshot(project.id);
     assertTkuZenPromoSnapshot(reloaded);
-    expect(reloaded.shots).toHaveLength(6);
-    expect(reloaded.acts).toHaveLength(1);
+    expect(reloaded.acts).toHaveLength(7);
     expect(reloaded.characters.map((c) => c.name).sort()).toEqual(["小華", "禪定龜龜"]);
-    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("大二化工");
-    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("白帽T");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("針織外套");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("白帽T");
     expect(reloaded.characters.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
     expect(reloaded.presets.some((p) => p.name === "克難坡")).toBe(true);
-    expect(reloaded.looks).toHaveLength(4);
+    expect(reloaded.looks).toHaveLength(2);
     expect(reloaded.story?.content).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
     expect(reloaded.characters.some((c) => c.name === "媽媽")).toBe(false);
   });
