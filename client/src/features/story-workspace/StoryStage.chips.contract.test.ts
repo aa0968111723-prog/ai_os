@@ -24,14 +24,18 @@ describe("StoryStage parse chips", () => {
 
   it("serializes autosave through createStorySaveGate (no overlapping expectedRev)", () => {
     expect(src).toMatch(/createStorySaveGate/);
-    expect(src).toMatch(/gateRef\.current\?\.dispatch\(live\)/);
+    expect(src).toMatch(/dispatchStorySave\(live\)/);
     expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
   });
 
-  it("onBlur flushes through the same gate so expectedRev is always sent", () => {
-    expect(src).toMatch(/onBlur=\{\(\) => \{[\s\S]*gateRef\.current\?\.dispatch\(content\)/);
+  it("onBlur sends the same expectedRev/baseline as debounce/flush (no rev-less saveRef)", () => {
+    // default branch: saveRef.current({ projectId, content }) — silent LWW
+    expect(src).not.toMatch(/saveRef\.current\(\{\s*projectId,\s*content\s*\}\)/);
     expect(src).not.toMatch(/save\.(mutate|mutateAsync)\(\{\s*projectId,\s*content\s*\}\)/);
+    expect(src).toMatch(/onBlur=\{\(\) => \{[\s\S]*dispatchStorySave\(live\)/);
+    expect(src).toMatch(/debounceRef\.current = setTimeout\(\(\) => \{[\s\S]*dispatchStorySave\(live\)/);
     expect(src).toMatch(/expectedRev: req\.expectedRev/);
+    expect(src).toMatch(/baseline: req\.baseline/);
     expect(src).toMatch(/<ConflictNotice/);
     expect(src).toMatch(/setSaveState\("conflict"\)/);
   });

@@ -198,6 +198,11 @@ export function StoryStage({
       },
     });
   }
+  /** debounce／flush／onBlur 共用：gate 一定帶 expectedRev + baseline。
+   *  預設分支 onBlur 曾走 `saveRef({ projectId, content })` 不帶 rev，兩分頁失焦會靜默 LWW。 */
+  const dispatchStorySave = (next: string) => {
+    gateRef.current?.dispatch(next);
+  };
 
   /* ── Story 共編（Yjs；/ws-doc）───────────────────────────
      連上＝真共編（字元級合併、雙 caret；autosave 停用，落盤由伺服器 materialize）。
@@ -319,7 +324,7 @@ export function StoryStage({
     debounceRef.current = setTimeout(() => {
       const live = contentRef.current;
       if (live === null) return;
-      gateRef.current?.dispatch(live);
+      dispatchStorySave(live);
     }, STORY_AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -342,7 +347,7 @@ export function StoryStage({
         saveStateRef.current !== "conflict" &&
         !yActiveRef.current
       ) {
-        gateRef.current?.dispatch(live);
+        dispatchStorySave(live);
       }
     };
   }, [projectId]);
@@ -381,7 +386,7 @@ export function StoryStage({
         return;
       }
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      gateRef.current?.dispatch(live);
+      dispatchStorySave(live);
       gateRef.current?.whenIdle((result) => {
         if (result.ok) window.dispatchEvent(new Event(STORY_FLUSHED_EVENT));
         else fail(result.reason === "conflict" ? "故事有衝突尚未處理" : "故事儲存失敗，請先修好再生成");
@@ -544,7 +549,7 @@ export function StoryStage({
               baselineRef.current = String((conflict.currentData as { content?: unknown }).content ?? "");
               setConflict(null);
               setSaveState("saving");
-              gateRef.current?.dispatch(mine);
+              dispatchStorySave(mine);
             }}
           />
         )}
@@ -613,10 +618,12 @@ export function StoryStage({
           onBlur={() => {
             // 失焦立即 flush（去抖未到期的那次存檔提前做，避免切走遺失）。
             // 共編中不 flush：儲存由伺服器 materialize，這裡的整份寫回會蓋掉夥伴的字。
+            // 與 debounce／一鍵生成 flush 同一條 dispatchStorySave：帶 expectedRev + baseline。
             if (yActiveRef.current) return;
-            if (content !== null && remote !== null && content !== remote) {
+            const live = contentRef.current;
+            if (live !== null && remote !== null && live !== remote) {
               if (debounceRef.current) clearTimeout(debounceRef.current);
-              gateRef.current?.dispatch(content);
+              dispatchStorySave(live);
             }
           }}
           /* 解析摘要、主 CTA 與解析結果一起進全螢幕：
