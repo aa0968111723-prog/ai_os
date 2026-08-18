@@ -99,6 +99,9 @@ export function osFamily(ua: string, hint?: DeviceHint): string {
     if (platform === "macos") return "macOS";
     if (platform === "chrome os" || platform === "chromeos") return "ChromeOS";
     if (platform === "ios") return "iOS";
+    // 深度／CUTOS 必須在泛用 Linux 之前：兩者 UA 都帶 Linux，被吃掉就分不出夥伴殼。
+    if (platform === "deepin" || platform === "uos") return "Deepin";
+    if (platform === "cutos") return "CUTOS";
     if (platform === "linux") return "Linux";
   }
   if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
@@ -106,6 +109,8 @@ export function osFamily(ua: string, hint?: DeviceHint): string {
   if (/Windows/i.test(ua)) return "Windows";
   if (/Macintosh|Mac OS X/i.test(ua)) return "macOS";
   if (/CrOS/i.test(ua)) return "ChromeOS";
+  if (/\bAiosDeepin\/|\bDeepin\/|\bUOS\b/i.test(ua)) return "Deepin";
+  if (/\bAiosCutos\/|\bCUTOS\b/i.test(ua)) return "CUTOS";
   if (/Linux/i.test(ua)) return "Linux";
   return "未知系統";
 }
@@ -155,6 +160,12 @@ export function osDescription(ua: string, hint?: DeviceHint): string {
     return v ? `macOS ${v}` : "macOS";
   }
   if (family === "ChromeOS") return version ? `ChromeOS ${version}` : "ChromeOS";
+  if (family === "Deepin") {
+    const uos = /\bUOS\b/i.test(ua);
+    const name = uos ? "UOS" : "Deepin";
+    return version ? `${name} ${version}` : name;
+  }
+  if (family === "CUTOS") return version ? `CUTOS ${version}` : "CUTOS";
   return family;
 }
 
@@ -333,7 +344,7 @@ export function deviceKindFrom(ua: string, hint?: DeviceHint): DeviceKind {
   if (/Android/i.test(ua)) return /Mobile/i.test(ua) ? "phone" : "tablet";
 
   const family = osFamily(ua, hint);
-  if (family === "Windows" || family === "macOS" || family === "Linux" || family === "ChromeOS") return "desktop";
+  if (family === "Windows" || family === "macOS" || family === "Linux" || family === "ChromeOS" || family === "Deepin" || family === "CUTOS") return "desktop";
   if (family === "iOS") return "phone";
   return (hint?.touchPoints ?? 0) > 1 ? "tablet" : "unknown";
 }
@@ -348,7 +359,7 @@ export function kindFromLabel(label: string | null | undefined): DeviceKind {
   if (!label) return "unknown";
   if (/iPad|平板|Tablet|Galaxy Tab|SM-[XT]/i.test(label)) return "tablet";
   if (/iPhone|Android|Galaxy|Pixel|Redmi|POCO|moto/i.test(label)) return "phone";
-  if (/Windows|Mac|Linux|ChromeOS|桌面/i.test(label)) return "desktop";
+  if (/Windows|Mac|Linux|ChromeOS|Deepin|UOS|CUTOS|深度|桌面/i.test(label)) return "desktop";
   return "unknown";
 }
 

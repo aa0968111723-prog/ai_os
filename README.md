@@ -109,6 +109,9 @@ npm run assets:styles
 - [x] **多模態生成環境**：圖像/影片/音訊/文字四種輸出、來源輸入（素材庫成品或網址）、
       工作流一鍵串鏈（LLM→圖→影→音）；假生成模式覆蓋全部模態（e2e 20 項：scripts/e2e-models.py）
 - [x] 系統自檢：`/api/ready`（資料庫診斷）＋`/api/selftest`（管理頁一鍵驗證七大子系統）
+- [x] **深度／CUTOS／Aios_b 連結**：裝置辨識認 Deepin／UOS／CUTOS；公開握手 `/api/os-partners`；
+      `npm run sentinel` 呼叫姊妹倉 [Aios Sentinel](https://github.com/aa0968111723-prog/Aios_b)。
+      契約見 `docs/product/os-partner-aios-b-link.md`
 - [x] 真瀏覽器旅程測試（Playwright 11 步全過：登入→自檢→邀請→專案→生成→審批→交付→工作流）
 - [x] **自訂資料庫系統**（個人→組→團隊→全站 四層範圍）：欄位自訂的輕量資料表（九型別，
       含專案/排程連結），工作台「資料庫」頁格線編輯；權限沿用組織模型（databaseAcl 單一真相）

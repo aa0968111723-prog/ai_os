@@ -373,6 +373,15 @@ export const adminRouter = router({
    * 背景執行器與本進程資源快照（提高伺服器使用率／可觀測性）。
    * 純記憶體指標，不打重查；多實例各自回報本進程狀態。
    */
+  /**
+   * 深度／CUTOS／Aios_b 連結狀態（管理頁）。
+   * 公開握手在 GET /api/os-partners；這裡多回最近一份 Sentinel 報告摘要。
+   */
+  osPartnerStatus: adminProcedure.query(async () => {
+    const { osPartnerAdminView } = await import("../services/osPartnerLink");
+    return osPartnerAdminView();
+  }),
+
   runnerStatus: adminProcedure.query(async () => {
     const { listRunnerSnapshots, processResourceSnapshot } = await import("../services/runnerMetrics");
     const now = Date.now();

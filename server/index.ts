@@ -307,6 +307,16 @@ app.get("/api/ready", async (_req, res) => {
     components.agentDbIntegrity = { ok: false, note: `integrity scan failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 
+  // 深度／CUTOS／Aios_b：預設觀察、不擋就緒；設 OS_PARTNER_GATE=1 才把未連結當失敗。
+  let osPartnersHandshake: unknown = undefined;
+  try {
+    const { osPartnerHandshake, osPartnerReadyNote } = await import("./services/osPartnerLink");
+    components.osPartners = await osPartnerReadyNote();
+    osPartnersHandshake = await osPartnerHandshake();
+  } catch (error) {
+    components.osPartners = { ok: true, note: `observe（連結狀態讀取失敗：${error instanceof Error ? error.message : String(error)}）` };
+  }
+
   const requiredOk = Object.values(components).every((c) => c.ok);
   const ok = requiredOk && backend.ready;
   // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
@@ -359,8 +369,19 @@ app.get("/api/ready", async (_req, res) => {
     components,
     runners,
     resources,
+    osPartners: osPartnersHandshake,
     time: new Date().toISOString(),
   });
+});
+
+/** 深度／CUTOS／Aios_b 公開握手：只回契約與「有沒有連」，不回網址與本機路徑。 */
+app.get("/api/os-partners", async (_req, res) => {
+  try {
+    const { osPartnerHandshake } = await import("./services/osPartnerLink");
+    res.json(await osPartnerHandshake());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 // 佔位素材端點：專案免費佔位縮圖（projects.ts）與 e2e 測試假素材共用；離線可用，交付包也抓得到
@@ -2275,6 +2296,12 @@ app.get("/api/selftest", async (req, res) => {
         ? "暖身中（monitor：記錄並自動信任新裝置，不阻擋）"
         : "強制（enforce：陌生裝置需信箱驗證碼）";
     return `${label}｜信箱機制${isEmailConfigured() ? "已就緒" : "未設定"}`;
+  });
+  await run("深度／CUTOS／Aios_b", async () => {
+    const { osPartnerAdminView } = await import("./services/osPartnerLink");
+    const view = await osPartnerAdminView();
+    if (view.gateFails) throw new Error(view.ready.note);
+    return view.ready.note;
   });
   const allOk = checks.every((c) => c.ok);
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });

@@ -668,6 +668,53 @@ function CreateTeamCard() {
   );
 }
 
+const OS_PARTNER_STATE_LABEL: Record<string, string> = {
+  linked: "已連結",
+  unconfigured: "未設定",
+  invalid: "網址無效",
+};
+
+/** 深度／CUTOS／Aios_b 連結狀態：公開握手不回網址，這裡只顯示有沒有連上。 */
+function OsPartnerCard() {
+  const status = trpc.admin.osPartnerStatus.useQuery();
+  return (
+    <Card>
+      <h2>深度／CUTOS／Aios_b</h2>
+      <Hint>姊妹檢測倉與兩套夥伴作業系統的連結。沒設是選用，不擋就緒。</Hint>
+      {status.error ? (
+        <p className="error" role="alert">
+          讀不到連結狀態——
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => status.refetch()}>再試一次</Button>
+        </p>
+      ) : !status.data ? (
+        <Skeleton style={{ height: 72 }} />
+      ) : (
+        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+            <b style={{ minWidth: 88 }}>Aios_b</b>
+            <Meta>{OS_PARTNER_STATE_LABEL[status.data.aiosB.state] ?? status.data.aiosB.state}　{status.data.aiosB.note}</Meta>
+          </div>
+          {status.data.partners.map((item) => (
+            <div key={item.id} style={{ display: "flex", gap: 8, fontSize: 13 }}>
+              <b style={{ minWidth: 88 }}>{item.label}</b>
+              <Meta>{OS_PARTNER_STATE_LABEL[item.state] ?? item.state}　{item.note}</Meta>
+            </div>
+          ))}
+          {status.data.report && (
+            <Meta>
+              最近 Sentinel：最重 {status.data.report.worst ?? "無"}；完成 {status.data.report.completed}、跳過 {status.data.report.skipped}
+            </Meta>
+          )}
+          <Meta as="p">
+            公開握手 <code>/api/os-partners</code>
+            {status.data.aiosB.github ? `　${status.data.aiosB.github}` : ""}
+          </Meta>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /** 系統自檢卡：一鍵驗證資料庫/目錄/點數/邀請/生成模式/交付引擎 */
 function SelfTestCard() {
   const [result, setResult] = useState<{ ok: boolean; checks: Array<{ name: string; ok: boolean; note: string }> } | null>(null);
@@ -2261,6 +2308,7 @@ export function AdminPage() {
         <aside className="stack">
         {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
+        {isSuperAdmin && <OsPartnerCard />}
         <ConsumptionMonitorCard />
         <InsightsCard />
         <AuditLogCard />
