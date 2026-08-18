@@ -36,8 +36,9 @@ describe("onUseIdeaForNewProject phone handoff", () => {
     expect(src).toContain("const isPhone = useIsPhone()");
     expect(idea).toContain("if (isPhone)");
     expect(idea).toContain('navigate("/dashboard")');
-    expect(idea).toMatch(/if \(isPhone\) \{[\s\S]*return;/);
-    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("navigate(`/dashboard#projects`)"));
-    expect(idea).not.toMatch(/if \(isPhone\) \{[\s\S]*navigate\(`\/dashboard#projects`\)/);
+    const phoneBranch = idea.slice(idea.indexOf("if (isPhone)"), idea.indexOf("navigate(`/dashboard#projects`)"));
+    expect(phoneBranch).toContain("return");
+    expect(phoneBranch).toContain('navigate("/dashboard")');
+    expect(phoneBranch).not.toContain("navigate(`/dashboard#projects`)");
   });
 });

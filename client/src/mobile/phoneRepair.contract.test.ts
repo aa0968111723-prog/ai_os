@@ -22,9 +22,9 @@ describe("phone animation P0/P1 wiring", () => {
     expect(sheet).not.toContain("真正的建立仍在 Launchpad");
     const idea = sheet.slice(sheet.indexOf("onUseIdeaForNewProject"), sheet.indexOf("</AICreativeCopilot>"));
     expect(idea).toContain("if (isPhone)");
-    expect(idea.indexOf("if (isPhone)")).toBeLessThan(idea.indexOf("navigate(`/dashboard#projects`)"));
-    expect(idea).toMatch(/if \(isPhone\) \{[\s\S]*return;/);
-    expect(idea).not.toMatch(/if \(isPhone\) \{[\s\S]*navigate\(`\/dashboard#projects`\)/);
+    const phoneBranch = idea.slice(idea.indexOf("if (isPhone)"), idea.indexOf("navigate(`/dashboard#projects`)"));
+    expect(phoneBranch).toContain("return");
+    expect(phoneBranch).not.toContain("navigate(`/dashboard#projects`)");
     expect(launchpad).toContain("NEW_PROJECT_IDEA_EVENT");
   });
 
