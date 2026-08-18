@@ -188,6 +188,8 @@ describe("小華 identity lock", () => {
     expect(unnamed).toContain("她身上");
     expect(unnamed).toMatch(/粉橘短髮女孩|女孩/);
     expect(lockXiaohuaGenerationPrompt("禪定龜龜低頭")).toBe("禪定龜龜低頭");
+    const boyTurtle = lockXiaohuaGenerationPrompt("a young boy sitting with a zen turtle", ["小華"]);
+    expect(boyTurtle).toContain(XIAOHUA_LOCKED_APPEARANCE);
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {

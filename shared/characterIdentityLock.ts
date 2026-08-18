@@ -241,8 +241,10 @@ export function lockXiaohuaGenerationPrompt(prompt: string, characterNames: stri
   // 「小華…年輕男性」within 24 chars, which is not an explicit male clause.
   const rewritten = rewriteXiaohuaMaleCopy(prompt, true)
     .replace(/年輕男性/g, "粉橘短髮女孩")
-    .replace(/黑長直髮/g, "粉橘短髮");
-  // 她 is a pronoun lock, not a look. Fal still draws a boy without 粉橘短髮女孩.
-  if (/女孩|女大生|粉橘/.test(rewritten)) return rewritten;
+    .replace(/黑長直髮/g, "粉橘短髮")
+    .replace(/男孩/g, "女孩")
+    .replace(/男生/g, "女生");
+  // 她 is a pronoun lock, not a look. Fal still draws a boy+turtle without 粉橘短髮女孩.
+  if (/粉橘短髮女孩/.test(rewritten) && !/年輕男性|男孩|男生/.test(rewritten)) return rewritten;
   return `${rewritten}\n\n外觀鎖定 小華：${XIAOHUA_LOCKED_APPEARANCE}`;
 }
