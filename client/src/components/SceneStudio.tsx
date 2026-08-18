@@ -325,9 +325,16 @@ export function SceneStudio({
   const voiceRequestId = useRef(crypto.randomUUID());
   const ambienceRequestId = useRef(crypto.randomUUID());
   const regen = trpc.scenes.generateInto.useMutation({
-    onSuccess: () => { regenRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
+    meta: { ...sceneScope, collabLabel: "重畫了這一鏡" },
+    onSuccess: () => {
+      regenRequestId.current = crypto.randomUUID();
+      setTab("versions");
+      refresh();
+      utils.quota.my.invalidate();
+    },
   });
   const generateVariants = trpc.scenes.generateVariants.useMutation({
+    meta: { ...sceneScope, collabLabel: "產了這一鏡的變體" },
     onSuccess: (result) => {
       // 成功送出的 slot 不必記在前端——它們的 batchId 已經落在 generations 裡，
       // 版本清單自己湊得回來。這裡只留下「連生成列都沒建起來」的那幾個 slot 的原因，
@@ -353,10 +360,17 @@ export function SceneStudio({
       }
       setTab("versions");
       refresh();
+      utils.quota.my.invalidate();
     },
   });
   const refine = trpc.scenes.refine.useMutation({
-    onSuccess: () => { refineRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
+    meta: { ...sceneScope, collabLabel: "修正了這一鏡" },
+    onSuccess: () => {
+      refineRequestId.current = crypto.randomUUID();
+      setTab("versions");
+      refresh();
+      utils.quota.my.invalidate();
+    },
   });
   // 完成後留在配音頁（試聽就在同一頁出現），不像重畫/修正要跳到版本頁看進度
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({

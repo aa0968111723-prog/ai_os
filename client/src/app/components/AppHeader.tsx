@@ -1,8 +1,10 @@
+import { useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../../api";
 import type { MeWithCapabilities } from "../../capabilities";
 import { BrandLogo } from "../../components/BrandLogo";
 import { Icon } from "../../components/Icon";
+import { scopedTightRemaining } from "../../../shared/quotaDisplay";
 import { AccountMenu } from "./AccountMenu";
 import { AssistantLauncher } from "./AssistantLauncher";
 import { OnlinePresenceMenu } from "./OnlinePresenceMenu";
@@ -15,13 +17,19 @@ import { Badge } from "../../components/ui";
  *  強化展示：週／日已用與額度寫入 title；無週額時仍顯示本週已用（站內點，非 Fal USD）。 */
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
-  const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
+  const my = trpc.quota.my.useQuery(
+    { groupId },
+    { refetchInterval: 60_000, enabled: !!groupId, placeholderData: (previous) => previous },
+  );
+  const lastScopedRemaining = useRef<number | null>(null);
   if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
-  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining, falPointsCap } = my.data;
-  // 徽章主數字＝最緊的「累計剩餘」：個人分配 → 組預算 → 全域總預算（任一為 null 即該層不限）
-  const caps = [memberBudgetRemaining, groupBudgetRemaining, totalRemaining].filter((v): v is number => v != null);
-  const label = caps.length > 0 ? `剩 ${Math.min(...caps).toLocaleString()}` : "不限";
+  const { weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining, falPointsCap } = my.data;
+  // Unscoped refetch (groupId null, totalRemaining＝站內總預算剩) must not flash 剩 4,708.
+  const remaining = scopedTightRemaining(my.data, groupId, lastScopedRemaining.current);
+  lastScopedRemaining.current = remaining;
+  const caps = [memberBudgetRemaining, groupBudgetRemaining, my.data.totalRemaining].filter((v): v is number => v != null);
+  const label = remaining != null ? `剩 ${remaining.toLocaleString()}` : "不限";
   // 有額度顯示 used/quota；無週額仍顯示「週已用 N」讓用量可見
   const weekly =
     weeklyQuota != null

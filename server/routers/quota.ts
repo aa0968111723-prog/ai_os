@@ -111,6 +111,8 @@ export const quotaRouter = router({
       ? Math.max(0, settings.totalBudgetPoints - total)
       : null;
     return {
+      /** Which group this row was minted for. null＝unscoped global leftover — header must not paint that as 剩. */
+      groupId: gid,
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
       /**

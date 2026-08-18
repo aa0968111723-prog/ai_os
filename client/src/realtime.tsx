@@ -845,6 +845,9 @@ export function useCollab(
             // 五人同房就是五次全專案掃描，而其中四次什麼都不會變
             void utilsRef.current.scenes.invalidate();
             void utilsRef.current.messages.invalidate();
+          } else if (scope?.kind === "character") {
+            void utilsRef.current.characters.invalidate();
+            void utilsRef.current.scenes.invalidate();
           } else if (scope?.kind) {
             // 已知 kind 但沒有專屬處理：仍走全域失效（保守，寧可多抓一次）
             void utilsRef.current.invalidate();

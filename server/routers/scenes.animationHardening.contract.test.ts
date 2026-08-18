@@ -362,8 +362,10 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(quota).toContain("站內總預算剩餘（cost_ledger 淨消耗）");
     expect(quota).toContain("徽章「剩」會少 3、週已用只加 1");
     const header = readFileSync(join(process.cwd(), "client/src/app/components/AppHeader.tsx"), "utf8");
-    expect(header).toContain("剩 ${Math.min(...caps).toLocaleString()}");
+    expect(header).toContain("scopedTightRemaining");
+    expect(header).toContain("剩 ${remaining.toLocaleString()}");
     expect(header).toContain("本週已用 ${weeklyUsed}");
+    expect(header).toContain("placeholderData: (previous) => previous");
     const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
     expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");
     expect(reconcile).toContain("shouldDiscardLeftoverAwaitingApprovalOnRead");
