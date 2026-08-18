@@ -154,4 +154,16 @@ describe("generateAgentPlanDraft", () => {
       .rejects.toBeInstanceOf(AgentPlannerServiceError);
     expect(providers.completeFal).not.toHaveBeenCalled();
   });
+
+  it("nim requested but a paid provider (gpt-5.6-luna) comes back is refused and not billed", async () => {
+    const providers = deps({
+      completeNim: vi.fn().mockResolvedValue(completion("fal-openrouter", validPlan, { totalTokens: 80, costUsd: 0.01 })),
+    });
+    await expect(generateAgentPlanDraft("PROMPT", "nim", providers)).rejects.toMatchObject({
+      name: "AgentPlannerServiceError",
+      message: expect.stringContaining("只用免費"),
+      billing: [],
+    });
+    expect(providers.completeFal).not.toHaveBeenCalled();
+  });
 });
