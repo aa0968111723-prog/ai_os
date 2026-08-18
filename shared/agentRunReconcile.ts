@@ -183,10 +183,7 @@ export function shouldDiscardLeftoverAwaitingApprovalOnRead(input: {
   hasCurrentVisual?: boolean;
 }): boolean {
   if (!leftoverAwaitingApprovalBatch(input.status, input.steps)) return false;
-  if (input.hasCurrentVisual) return true;
-  if (input.latestDoneVisualAt == null) return false;
-  const runAt = timeMs(input.runCreatedAt);
-  const visualAt = timeMs(input.latestDoneVisualAt);
-  if (!Number.isFinite(runAt) || !Number.isFinite(visualAt)) return false;
-  return visualAt >= runAt;
+  // Live leftover 0/N「待你過目 · 第 1 鏡…生成畫面」must not survive reload
+  // even when the project still has no 現用 pointer (unparsed / blank shots).
+  return true;
 }

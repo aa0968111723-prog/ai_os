@@ -128,16 +128,16 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
     })).toBe(true);
   });
 
-  it("keeps a newer batch queued after existing images so it stays approvable", () => {
+  it("hides leftover 0/6 even when the batch is newer than existing images", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "awaiting_approval",
       steps: six,
       runCreatedAt: "2026-08-18T14:00:00.000Z",
       latestDoneVisualAt: created,
-    })).toBe(false);
+    })).toBe(true);
   });
 
-  it("leaves a running leftover plan and a plan with no visual alone", () => {
+  it("leaves a running leftover plan alone; unstarted 0/6 with no visual still hides", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "running",
       steps: six,
@@ -149,7 +149,7 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       steps: six,
       runCreatedAt: created,
       latestDoneVisualAt: null,
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("hides leftover 0/6 even when steps omit kind: generate", () => {
