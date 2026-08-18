@@ -41,6 +41,7 @@ import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneRea
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
@@ -2304,7 +2305,16 @@ export const assistantRouter = router({
 
       if (a.type === "add_character") {
         const name = a.name.trim();
-        const appearance = a.appearance.trim();
+        const [storyRow] = await db
+          .select({ content: schema.stories.content })
+          .from(schema.stories)
+          .where(eq(schema.stories.projectId, project.id))
+          .limit(1);
+        const locked = applyXiaohuaIdentityLock(
+          { name, appearance: a.appearance.trim(), costume: null },
+          storyRow?.content ?? "",
+        );
+        const appearance = (locked.appearance ?? a.appearance).trim();
         const notes = a.notes?.trim() || null;
         if (!name || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
         const existing = await db
@@ -2312,6 +2322,19 @@ export const assistantRouter = router({
           .from(schema.characters)
           .where(eq(schema.characters.projectId, project.id));
         const reused = existing.find((row) => nameKey(row.name) === nameKey(name));
+        if (reused) {
+          const reusedLock = applyXiaohuaIdentityLock(
+            { name: reused.name, appearance: reused.appearance, costume: null },
+            storyRow?.content ?? "",
+          );
+          if (reusedLock.appearance && reusedLock.appearance !== reused.appearance) {
+            await db
+              .update(schema.characters)
+              .set({ appearance: reusedLock.appearance })
+              .where(eq(schema.characters.id, reused.id));
+            reused.appearance = reusedLock.appearance;
+          }
+        }
         const row = reused ?? await (async () => {
           const [{ n }] = await db
             .select({ n: count() })

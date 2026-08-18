@@ -12,11 +12,13 @@ import { db, schema } from "../db";
 import { markBootReady } from "./boot";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
 import {
+  materializeStoryboard,
   mockStoryExtract,
   runStoryParse,
   STORY_PARSE_SHORT_CHARS,
   STORY_PARSE_SHORT_PRIMARY_MS,
 } from "./storyParse";
+import type { StoryParsePlan } from "../../shared/story";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
 const d = RUN_PG ? describe : describe.skip;
@@ -29,6 +31,8 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     for (const projectId of leftovers.projects) {
       await db.delete(schema.parseCandidates).where(eq(schema.parseCandidates.projectId, projectId));
       await db.delete(schema.parseRuns).where(eq(schema.parseRuns.projectId, projectId));
+      await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
+      await db.delete(schema.storyScenes).where(eq(schema.storyScenes.projectId, projectId));
       await db.delete(schema.characterLooks).where(eq(schema.characterLooks.projectId, projectId));
       await db.delete(schema.characters).where(eq(schema.characters.projectId, projectId));
       await db.delete(schema.props).where(eq(schema.props.projectId, projectId));
@@ -130,18 +134,32 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     });
 
     const flipped = mockStoryExtract(TKU_ZEN_SHOTLIST_AD_PARSE);
+    const poisoned: StoryParsePlan = {
+      ...flipped,
+      characters: [
+        { name: "小華", appearance: "年輕男性", costume: "黑長直髮", confidence: 0.95 },
+        { name: "禪定龜龜", appearance: "吉祥物龜龜", costume: "圓殼", confidence: 0.95 },
+      ],
+      scenes: flipped.scenes.map((scene, i) => ({
+        ...scene,
+        shots: scene.shots.map((shot) => (
+          i === 0
+            ? {
+                ...shot,
+                title: "小華站在校門口，夕陽光照在他身上",
+                prompt: "小華站在校門口，夕陽光照在他身上",
+                characterRefs: ["小華"],
+              }
+            : shot
+        )),
+      })),
+    };
     const complete = vi.fn(async (_prompt: string, opts: { model: string; timeoutMs?: number }) => {
       expect(opts.model).toBe(NIM_DEFAULT_MODEL);
       expect(opts.model).not.toBe(NIM_REASONING_MODEL);
       expect(opts.timeoutMs ?? 150_000).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
       return {
-        output: JSON.stringify({
-          ...flipped,
-          characters: [
-            { name: "小華", appearance: "年輕男性", costume: "黑長直髮", confidence: 0.95 },
-            { name: "禪定龜龜", appearance: "吉祥物龜龜", costume: "圓殼", confidence: 0.95 },
-          ],
-        }),
+        output: JSON.stringify(poisoned),
         model: NIM_DEFAULT_MODEL,
         downgraded: false,
       };
@@ -163,5 +181,22 @@ d("~300-char Chinese first-parse runStoryParse (mock EXTRACT, real PostgreSQL)",
     expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
     expect(xiaohua?.appearance).not.toContain("年輕男性");
     expect(cards.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
+
+    const [parseRun] = await db.select().from(schema.parseRuns).where(eq(schema.parseRuns.id, result.runId));
+    const plan = parseRun?.plan as StoryParsePlan | null;
+    const copy = JSON.stringify(plan?.scenes ?? []);
+    expect(copy).toContain("她身上");
+    expect(copy).not.toMatch(/他身上/);
+
+    const board = await materializeStoryboard({
+      userId,
+      projectId: project.id,
+      runId: result.runId,
+      assertAccess: () => undefined,
+    });
+    expect(board.reused).toBe(false);
+    const shots = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, project.id));
+    expect(shots.some((s) => (s.title ?? "").includes("她身上") || (s.prompt ?? "").includes("她身上"))).toBe(true);
+    expect(shots.some((s) => (s.title ?? "").includes("他身上") || (s.prompt ?? "").includes("他身上"))).toBe(false);
   });
 });

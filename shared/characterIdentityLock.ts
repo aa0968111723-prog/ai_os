@@ -43,3 +43,119 @@ export function lockXiaohuaCharacters<
 >(characters: T[] | undefined, script: string): T[] {
   return (characters ?? []).map((c) => applyXiaohuaIdentityLock(c, script));
 }
+
+/**
+ * EXTRACT often writes「夕陽光照在他身上」for 小華. She is female.
+ * Never turn 其他 → 其她. Keep 他們 / 他家.
+ */
+export function rewriteXiaohuaMaleCopy(text: string, force = false): string {
+  if (!text) return text;
+  if (!force && !/小華/.test(text)) return text;
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch !== "他") {
+      out += ch;
+      continue;
+    }
+    const prev = text[i - 1] ?? "";
+    const next = text[i + 1] ?? "";
+    if (prev === "其" || next === "們" || next === "家") {
+      out += "他";
+    } else {
+      out += "她";
+    }
+  }
+  return out;
+}
+
+function mentionsXiaohua(text: string | null | undefined): boolean {
+  return Boolean(text && /小華/.test(text));
+}
+
+function refsXiaohua(refs: string[] | null | undefined): boolean {
+  return (refs ?? []).some((name) => isXiaohuaName(name));
+}
+
+function rewriteMaybe(text: string | null | undefined, force: boolean): string | null | undefined {
+  if (text == null) return text;
+  return rewriteXiaohuaMaleCopy(text, force);
+}
+
+type LockableShot = {
+  title?: string | null;
+  prompt: string;
+  action?: string | null;
+  dialogue?: string | null;
+  voiceover?: string | null;
+  characterRefs?: string[] | null;
+};
+
+type LockableScene<S extends LockableShot> = {
+  title?: string | null;
+  summary?: string | null;
+  excerpt?: string | null;
+  shots: S[];
+};
+
+/** Lock 小華 cards and rewrite 他→她 in scene/shot copy that names or refs her. */
+export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string | null; appearance?: string | null; costume?: string | null }>; scenes: LockableScene<LockableShot>[] }>(
+  plan: T,
+  script: string,
+): T {
+  const characters = lockXiaohuaCharacters(plan.characters, script);
+  if (scriptExplicitlyMaleXiaohua(script)) {
+    return { ...plan, characters, scenes: plan.scenes };
+  }
+  const scenes = plan.scenes.map((scene) => {
+    const sceneForce =
+      mentionsXiaohua(scene.title) ||
+      mentionsXiaohua(scene.summary) ||
+      mentionsXiaohua(scene.excerpt) ||
+      scene.shots.some((shot) => refsXiaohua(shot.characterRefs) || mentionsXiaohua(shotBlob(shot)));
+    return {
+      ...scene,
+      title: rewriteMaybe(scene.title, sceneForce || mentionsXiaohua(scene.title)) ?? scene.title,
+      summary: rewriteMaybe(scene.summary, sceneForce),
+      excerpt: rewriteMaybe(scene.excerpt, sceneForce),
+      shots: scene.shots.map((shot) => {
+        const force = sceneForce || refsXiaohua(shot.characterRefs) || mentionsXiaohua(shotBlob(shot));
+        return {
+          ...shot,
+          title: rewriteMaybe(shot.title, force),
+          prompt: rewriteXiaohuaMaleCopy(shot.prompt, force),
+          action: rewriteMaybe(shot.action, force),
+          dialogue: rewriteMaybe(shot.dialogue, force),
+          voiceover: rewriteMaybe(shot.voiceover, force),
+        };
+      }),
+    };
+  });
+  return { ...plan, characters, scenes };
+}
+
+function shotBlob(shot: LockableShot): string {
+  return [shot.title, shot.prompt, shot.action, shot.dialogue, shot.voiceover].filter(Boolean).join("");
+}
+
+/** Persist-time rewrite for already-materialized 小華 shot rows (no delete). */
+export function rewritePersistedXiaohuaShotCopy<
+  T extends {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+>(row: T): T {
+  const blob = [row.title, row.prompt, row.action, row.dialogue, row.voiceover].filter(Boolean).join("");
+  if (!mentionsXiaohua(blob)) return row;
+  return {
+    ...row,
+    title: row.title != null ? rewriteXiaohuaMaleCopy(row.title, true) : row.title,
+    prompt: row.prompt != null ? rewriteXiaohuaMaleCopy(row.prompt, true) : row.prompt,
+    action: row.action != null ? rewriteXiaohuaMaleCopy(row.action, true) : row.action,
+    dialogue: row.dialogue != null ? rewriteXiaohuaMaleCopy(row.dialogue, true) : row.dialogue,
+    voiceover: row.voiceover != null ? rewriteXiaohuaMaleCopy(row.voiceover, true) : row.voiceover,
+  };
+}

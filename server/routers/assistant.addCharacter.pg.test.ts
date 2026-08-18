@@ -10,6 +10,7 @@ import { db, schema } from "../db";
 import { markBootReady } from "../services/boot";
 import type { AuthState } from "../services/auth";
 import { PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
 import { assistantRouter } from "./assistant";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
@@ -51,7 +52,7 @@ d("project assistant add_character (real PostgreSQL)", () => {
 
     const cards = proposeAddCharacterActions("新增角色 小華");
     expect(cards).toEqual([
-      { type: "add_character", name: "小華", appearance: PENDING_CHARACTER_APPEARANCE },
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
     ]);
 
     const assistant = assistantRouter.createCaller({ auth: authFor(userId, groupId) } as never);
@@ -60,7 +61,7 @@ d("project assistant add_character (real PostgreSQL)", () => {
 
     const result = await assistant.runAction({
       projectId: project.id,
-      action: { type: "add_character", name: cards[0]!.name, appearance: cards[0]!.appearance },
+      action: { type: "add_character", name: cards[0]!.name, appearance: PENDING_CHARACTER_APPEARANCE },
     });
     expect(result.ok).toBe(true);
     expect(result.kind).toBe("add_character");
@@ -73,7 +74,20 @@ d("project assistant add_character (real PostgreSQL)", () => {
     const rows = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.name).toBe("小華");
-    expect(rows[0]!.appearance).toBe(PENDING_CHARACTER_APPEARANCE);
+    expect(rows[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(rows[0]!.appearance).toContain("粉橘短髮女孩");
     expect(rows[0]!.id).toBe(result.characterId);
+
+    const maleWrite = await assistant.runAction({
+      projectId: project.id,
+      action: { type: "add_character", name: "小華", appearance: "年輕男性" },
+    });
+    expect(maleWrite.ok).toBe(true);
+    if (maleWrite.kind !== "add_character") return;
+    expect(maleWrite.reused).toBe(true);
+    const after = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+    expect(after).toHaveLength(1);
+    expect(after[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(after[0]!.appearance).not.toContain("年輕男性");
   });
 });

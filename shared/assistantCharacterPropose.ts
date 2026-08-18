@@ -1,5 +1,6 @@
 import { CHAR_NAME_MAX } from "./cardLimits";
 import { classifyAssistantRequest } from "./assistantExecution";
+import { isXiaohuaName, XIAOHUA_LOCKED_APPEARANCE } from "./characterIdentityLock";
 
 /** Name-only create: confirm card still writes; appearance can be filled later. */
 export const PENDING_CHARACTER_APPEARANCE = "待補外觀描述";
@@ -20,7 +21,7 @@ export function proposeAddCharacterActions(message: string): ProposedAddCharacte
   return extractCharacterNames(message).slice(0, 6).map((name) => ({
     type: "add_character" as const,
     name,
-    appearance: PENDING_CHARACTER_APPEARANCE,
+    appearance: isXiaohuaName(name) ? XIAOHUA_LOCKED_APPEARANCE : PENDING_CHARACTER_APPEARANCE,
   }));
 }
 

@@ -181,7 +181,7 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
     expect(parse).toContain("timeoutMs: strategy.primaryTimeoutMs");
     expect(parse).toContain("fallbackTimeoutMs: strategy.fallbackTimeoutMs");
     expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length, input.complete)");
-    expect(parse).toContain("lockXiaohuaCharacters");
+    expect(parse).toContain("lockXiaohuaPlan");
     expect(parse).toContain("禁止發明「年輕男性");
     // Teammate live audit: cache-miss of any length called 405B / 150s. That one-liner must stay gone.
     const codeOnly = parse

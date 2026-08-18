@@ -31,7 +31,11 @@ import {
   type ParsedShot,
   type ExistingStoryScene,
 } from "../../shared/story";
-import { lockXiaohuaCharacters } from "../../shared/characterIdentityLock";
+import {
+  lockXiaohuaPlan,
+  rewritePersistedXiaohuaShotCopy,
+  scriptExplicitlyMaleXiaohua,
+} from "../../shared/characterIdentityLock";
 import { MAX_PROJECT_CHARACTERS, MAX_PROJECT_PROPS, MAX_PROJECT_SCENE_PRESETS, MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
@@ -241,7 +245,7 @@ export function mockStoryExtract(content: string): StoryParsePlan {
     };
   });
 
-  return { characters: lockXiaohuaCharacters(characters, content), locations, props, scenes };
+  return lockXiaohuaPlan({ characters, locations, props, scenes }, content);
 }
 
 /* ── EXTRACT（真模式）：LLM 結構化抽取 ───────────────────────── */
@@ -475,8 +479,9 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     }
   }
 
-  // Live A–D extracted 小華 as「年輕男性」. Name + script lock wins over model gender flip.
-  plan = { ...plan, characters: lockXiaohuaCharacters(plan.characters, sentStory) };
+  // Live A–D extracted 小華 as「年輕男性」and shot titles「夕陽光照在他身上」.
+  // Name + script lock wins over model gender flip in cards and storyboard copy.
+  plan = lockXiaohuaPlan(plan, sentStory);
 
   /* ── NORMALIZE＋RESOLVE＋CONFIDENCE＋DIFF＋SAVE（單一交易） ── */
   const applied: ParseRunApplied = { createdCharacterIds: [], createdLocationIds: [], createdPropIds: [], createdLookIds: [], updated: [] };
@@ -890,12 +895,23 @@ export async function materializeStoryboard(input: {
   if (run.status !== "done" || !run.plan) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這次解析沒有可轉的分鏡計畫" });
   }
+  const [storyRow] = await db
+    .select({ content: schema.stories.content })
+    .from(schema.stories)
+    .where(eq(schema.stories.projectId, project.id))
+    .limit(1);
+  const script = storyRow?.content ?? "";
+
   // 冪等：這個 run 已經轉過分鏡→直接回同一批（重按不重複建）
+  // Still rewrite 小華 他→她 on existing rows so a cached male plan cannot keep 他身上.
   if (run.applied?.storyboard) {
+    if (!scriptExplicitlyMaleXiaohua(script)) {
+      await rewriteExistingXiaohuaStoryboardCopy(run.applied.storyboard.sceneIds);
+    }
     return { ...run.applied.storyboard, reused: true };
   }
 
-  const plan = run.plan;
+  const plan = lockXiaohuaPlan(run.plan, script);
   const existing = await loadExistingEntities(project.id);
   const aliases = await loadProjectCardAliases(project.id);
 
@@ -1034,6 +1050,43 @@ export async function materializeStoryboard(input: {
     await tx.update(schema.parseRuns).set({ applied, updatedAt: new Date() }).where(eq(schema.parseRuns.id, run.id));
     return { storySceneIds, sceneIds, reused: false };
   });
+}
+
+async function rewriteExistingXiaohuaStoryboardCopy(sceneIds: string[]): Promise<void> {
+  if (!sceneIds.length) return;
+  const rows = await db
+    .select({
+      id: schema.scenes.id,
+      title: schema.scenes.title,
+      prompt: schema.scenes.prompt,
+      action: schema.scenes.action,
+      dialogue: schema.scenes.dialogue,
+      voiceover: schema.scenes.voiceover,
+    })
+    .from(schema.scenes)
+    .where(and(inArray(schema.scenes.id, sceneIds), isNull(schema.scenes.deletedAt)));
+  for (const row of rows) {
+    const next = rewritePersistedXiaohuaShotCopy(row);
+    if (
+      next.title === row.title
+      && next.prompt === row.prompt
+      && next.action === row.action
+      && next.dialogue === row.dialogue
+      && next.voiceover === row.voiceover
+    ) {
+      continue;
+    }
+    await db
+      .update(schema.scenes)
+      .set({
+        title: next.title ?? row.title,
+        prompt: next.prompt,
+        action: next.action,
+        dialogue: next.dialogue,
+        voiceover: next.voiceover,
+      })
+      .where(eq(schema.scenes.id, row.id));
+  }
 }
 
 /* ── Undo：撤銷一次解析（含它轉出的分鏡） ───────────── */
