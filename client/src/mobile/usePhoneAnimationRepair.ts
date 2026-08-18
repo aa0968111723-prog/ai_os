@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import {
   classifyPhoneAnimationIntent,
   nextPhoneCompareItem,
+  shouldUnlockPhoneRepairConfirm,
   phoneAnimationAdoptCard,
   phoneAnimationClarifyCard,
   phoneAnimationCompareCard,
@@ -52,6 +53,18 @@ export function usePhoneAnimationRepair(input: {
   const confirmedRef = useRef(false);
 
   const selectedShotId = ctx.entityType === "shot" ? ctx.entityId : undefined;
+
+  useEffect(() => {
+    proposalRef.current = null;
+    costRevealedRef.current = false;
+    compareRef.current = [];
+    currentCompareRef.current = null;
+    decidedShotIdsRef.current = new Set();
+    queueBeforeRef.current = null;
+    confirmedRef.current = false;
+    setCard(null);
+    setActive(false);
+  }, [input.projectId]);
 
   const showResume = useCallback(() => {
     if (!input.repairResume) return false;
@@ -246,6 +259,7 @@ export function usePhoneAnimationRepair(input: {
           ...(failed > 0 ? { attention: true } : {}),
         });
       }
+      if (shouldUnlockPhoneRepairConfirm(failed)) confirmedRef.current = false;
       return;
     }
     if (command.type === "next_compare") {

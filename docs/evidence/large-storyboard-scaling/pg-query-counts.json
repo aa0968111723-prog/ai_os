@@ -1,0 +1,27 @@
+{
+  "after": {
+    "100": {
+      "dbQueries": 5,
+      "shotCount": 100,
+      "assetCount": 1,
+      "payloadBytes": 18156
+    },
+    "200": {
+      "dbQueries": 5,
+      "shotCount": 200,
+      "assetCount": 1,
+      "payloadBytes": 36056
+    },
+    "300": {
+      "dbQueries": 5,
+      "shotCount": 300,
+      "assetCount": 1,
+      "payloadBytes": 53956
+    }
+  },
+  "projectScoped": {
+    "shotCount": 300,
+    "assetCount": 1,
+    "dbQueries": 5
+  }
+}

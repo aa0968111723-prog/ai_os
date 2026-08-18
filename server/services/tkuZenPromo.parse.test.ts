@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TKU_ZEN_PROMO_SCRIPT,
+  TKU_ZEN_SHOTLIST_LINES,
   tkuZenHasForbidden,
   tkuZenSpokenDialogue,
 } from "../../shared/fixtures/tkuZenPromo";
@@ -21,5 +22,8 @@ describe("淡江禪學社 parse 150s fallback", () => {
     expect(spoken).toContain("真的真的");
     expect(spoken).toContain("禪定龜龜");
     expect(tkuZenHasForbidden(JSON.stringify(plan))).toEqual([]);
+    const blob = JSON.stringify(plan);
+    for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
+    expect(blob).not.toMatch(/走上克難坡|七幕|白帽T|安倢/);
   });
 });

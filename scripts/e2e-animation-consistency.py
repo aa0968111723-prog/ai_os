@@ -702,3 +702,55 @@ print("\n──────── 三視圖模型選擇 ────────
 print(f"  {MODEL:<42} {continuity_note(wan_prev)}")
 print(f"  {EDIT_MODEL:<42} {continuity_note(edit_prev)}")
 print("──────────────────────────────────────────\n")
+
+# ── 12. 跨專案隔離：兩個專案都叫「小華」，A 的連戲／preview 不得吃到 B ──
+proj_b = call("POST", admin, "projects.create", {
+    "groupId": gid,
+    "title": "動畫短片・另一個小華",
+    "kind": "療癒動畫",
+    "platform": "shorts",
+})
+ok("同組再建一個專案（隔離對照）", isinstance(proj_b, dict) and proj_b.get("id") and proj_b["id"] != pid)
+hua_a = call("POST", admin, "characters.add", {
+    "projectId": pid,
+    "name": "小華",
+    "appearance": "專案A小華、藍布棉襖、齊瀏海",
+})
+hua_b = call("POST", admin, "characters.add", {
+    "projectId": proj_b["id"],
+    "name": "小華",
+    "appearance": "專案B小華、紅旗袍、盤髮",
+})
+ok("兩個專案都能建立同名角色小華", hua_a.get("id") and hua_b.get("id") and hua_a["id"] != hua_b["id"])
+preview_a = call("POST", admin, "generation.preview", {
+    "projectId": pid,
+    "modelId": MODEL,
+    "prompt": "小華提燈走在老街",
+    "characterIds": [hua_a["id"]],
+    "continuityMode": True,
+})
+preview_b = call("POST", admin, "generation.preview", {
+    "projectId": proj_b["id"],
+    "modelId": MODEL,
+    "prompt": "小華站在祠堂門口",
+    "characterIds": [hua_b["id"]],
+    "continuityMode": True,
+})
+pos_a = (preview_a.get("request") or {}).get("positivePrompt") or ""
+pos_b = (preview_b.get("request") or {}).get("positivePrompt") or ""
+ok("專案 A preview 鎖的是 A 的小華外觀", "藍布棉襖" in pos_a and "紅旗袍" not in pos_a)
+ok("專案 B preview 鎖的是 B 的小華外觀", "紅旗袍" in pos_b and "藍布棉襖" not in pos_b)
+ok("跨專案同名小華不會共用錨點文字", pos_a != pos_b)
+board_a = call("GET", admin, "creativeContext.animationBoard", {"projectId": pid})
+board_b = call("GET", admin, "creativeContext.animationBoard", {"projectId": proj_b["id"]})
+ok("A 看板鏡頭數不含 B 的空專案鏡頭", board_a.get("summary", {}).get("total") == 7)
+ok("B 空專案看板 total=0", board_b.get("summary", {}).get("total") == 0)
+cross = call("POST", admin, "generation.preview", {
+    "projectId": pid,
+    "modelId": MODEL,
+    "prompt": "誤綁",
+    "characterIds": [hua_b["id"]],
+    "continuityMode": True,
+})
+ok("用 B 的小華 id 在 A 專案 preview 被拒（跨專案綁卡）",
+   isinstance(cross, dict) and "__error__" in cross)

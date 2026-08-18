@@ -30,4 +30,10 @@ describe("Storyboard suggestion query consolidation", () => {
     expect(stage).not.toContain("maxHeaderSize");
     expect(card).not.toContain("maxHeaderSize");
   });
+
+  it("does not add a visible-window second query (Phase E) on top of the project batch", () => {
+    // 300-shot assemble stays 5 DB queries / compact payload — no IntersectionObserver prefetch.
+    expect(stage).not.toContain("IntersectionObserver");
+    expect(stage.match(/shotAssetSuggestionsBatch/g)?.length).toBe(2);
+  });
 });

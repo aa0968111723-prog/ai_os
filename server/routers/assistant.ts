@@ -409,6 +409,7 @@ function writeResult<T extends Record<string, unknown>>(
   };
 }
 
+
 /* ── 多步工具調用（W4）：唯讀查詢工具 ── */
 
 /** LLM 的工具呼叫格式：{"tool":"...","args":{...}}（與最終回答的 {"answer":...} 互斥,以 tool 鍵區分） */

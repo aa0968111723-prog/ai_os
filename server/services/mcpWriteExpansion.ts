@@ -25,6 +25,21 @@ import {
 } from "./adobe";
 import { exportAdobeTimelineFormats } from "./adobe/timelineExport";
 import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
+import { resolveSceneCards } from "../../shared/sceneCards";
+import { adoptGenerationCurrent } from "./consistencyAdopt";
+import { refreshShotContextStalenessSafely } from "./shotContextPackets";
+
+/** Empty MCP patches must not look like a successful write. */
+export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
+  return { ...payload, unchanged: true };
+}
+
+/** Optional projectId on update_* tools must match the row, or same-group cross-project writes leak. */
+export function assertMcpProjectScope(rowProjectId: string, requestedProjectId: unknown, label: string): void {
+  if (typeof requestedProjectId === "string" && requestedProjectId.trim() && requestedProjectId !== rowProjectId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: `${label}不屬於這個專案` });
+  }
+}
 
 const MAX_KNOWLEDGE = 200_000;
 const MAX_PROMPT = 8_000;
@@ -107,13 +122,14 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
   },
   {
     name: "set_scene_visual",
-    description: "把生成結果或素材設為分鏡畫面（二選一：generationId 或 assetId）。",
+    description: "把生成結果或素材設為分鏡畫面（二選一：generationId 或 assetId）。generationId 走正式 Adopt（連戲／packet／審核守門），不是直接改 assetId。",
     inputSchema: {
       type: "object",
       properties: {
         sceneId: { type: "string" },
         generationId: { type: "string" },
         assetId: { type: "string" },
+        acknowledgeApproved: { type: "boolean" },
       },
       required: ["sceneId"],
     },
@@ -192,6 +208,7 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
       type: "object",
       properties: {
         characterId: { type: "string" },
+        projectId: { type: "string" },
         name: { type: "string" },
         appearance: { type: "string" },
         notes: { type: "string" },
@@ -222,6 +239,7 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
       type: "object",
       properties: {
         presetId: { type: "string" },
+        projectId: { type: "string" },
         name: { type: "string" },
         palette: { type: "string" },
         lighting: { type: "string" },
@@ -252,6 +270,7 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
       type: "object",
       properties: {
         propId: { type: "string" },
+        projectId: { type: "string" },
         name: { type: "string" },
         appearance: { type: "string" },
         notes: { type: "string" },
@@ -445,7 +464,7 @@ export async function runMcpWriteExpansion(
     }
     if (["transcript", "testimony", "script", "note"].includes(String(args.kind))) patch.kind = String(args.kind);
     if (typeof args.pinned === "boolean") patch.pinned = args.pinned;
-    if (Object.keys(patch).length === 0) return { knowledgeId: row.id, title: row.title, kind: row.kind, pinned: row.pinned };
+    if (Object.keys(patch).length === 0) return mcpUnchanged({ knowledgeId: row.id, title: row.title, kind: row.kind, pinned: row.pinned });
     const [updated] = await db.update(schema.knowledge).set(patch).where(eq(schema.knowledge.id, id)).returning();
     return { knowledgeId: updated.id, title: updated.title, kind: updated.kind, pinned: updated.pinned };
   }
@@ -509,7 +528,7 @@ export async function runMcpWriteExpansion(
       if (typeof args.trimStartMs === "number") patch.trimStartMs = nextStart;
       if (typeof args.trimEndMs === "number") patch.trimEndMs = nextEnd;
     }
-    if (Object.keys(patch).length === 0) return { sceneId: scene.id, title: scene.title };
+    if (Object.keys(patch).length === 0) return mcpUnchanged({ sceneId: scene.id, title: scene.title });
     const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, sceneId)).returning();
     return { sceneId: updated.id, title: updated.title };
   }
@@ -582,37 +601,46 @@ export async function runMcpWriteExpansion(
     if (!visProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, visProject.groupId);
     await assertProjectEditable(auth, visProject);
-    let finalAssetId = assetId;
     if (generationId) {
       const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, generationId));
       if (!gen || gen.status !== "done") throw new TRPCError({ code: "BAD_REQUEST", message: "生成尚未完成或不存在" });
       if (gen.projectId !== scene.projectId) throw new TRPCError({ code: "BAD_REQUEST", message: "生成與分鏡不在同一專案" });
-      const [fromGen] = await db
-        .select()
-        .from(schema.assets)
-        .where(and(
-          eq(schema.assets.projectId, scene.projectId),
-          isNull(schema.assets.deletedAt),
-          sql`${schema.assets.meta}->>'generationId' = ${generationId}`,
-        ))
-        .limit(1);
-      finalAssetId = fromGen?.id ?? null;
-      if (!finalAssetId) throw new TRPCError({ code: "BAD_REQUEST", message: "此生成尚無入庫素材，請稍後再掛" });
-    } else if (assetId) {
-      const [asset] = await db
-        .select()
-        .from(schema.assets)
-        .where(and(eq(schema.assets.id, assetId), isNull(schema.assets.deletedAt)));
-      if (!asset || asset.projectId !== scene.projectId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "素材不存在或不在同一專案" });
-      }
+      if (gen.sceneId !== scene.id) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成沒有綁這一鏡，不能 Adopt" });
+      const adopted = await adoptGenerationCurrent({ auth, generationId });
+      const [verified] = await db.select({
+        id: schema.scenes.id,
+        assetId: schema.scenes.assetId,
+      }).from(schema.scenes).where(eq(schema.scenes.id, adopted.shotId));
+      return {
+        sceneId: adopted.shotId,
+        assetId: adopted.assetId,
+        adopted: true,
+        verified: verified?.assetId === adopted.assetId,
+      };
+    }
+    const [asset] = await db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, assetId!), isNull(schema.assets.deletedAt)));
+    if (!asset || asset.projectId !== scene.projectId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "素材不存在或不在同一專案" });
+    }
+    const replacesApprovedVisual = scene.reviewStatus === "approved" && scene.assetId !== asset.id;
+    if (replacesApprovedVisual && args.acknowledgeApproved !== true) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "這一鏡已通過審核，不會被外部工具直接換掉畫面。請帶 acknowledgeApproved=true 或走單格工作室。",
+      });
     }
     const [updated] = await db
       .update(schema.scenes)
-      .set({ assetId: finalAssetId })
+      .set({
+        assetId: asset.id,
+        ...(replacesApprovedVisual ? { reviewStatus: "changes" } : {}),
+      })
       .where(eq(schema.scenes.id, sceneId))
       .returning();
-    return { sceneId: updated.id, assetId: updated.assetId };
+    return { sceneId: updated.id, assetId: updated.assetId, adopted: false };
   }
 
   if (name === "generate_into_scene") {
@@ -632,6 +660,7 @@ export async function runMcpWriteExpansion(
       ? args.prompt
       : scene.prompt ?? scene.title ?? "").trim();
     if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
+    const cards = resolveSceneCards(scene, null);
     const gen = await executeGenerationCommand({
       auth,
       source: "mcp",
@@ -640,6 +669,12 @@ export async function runMcpWriteExpansion(
       modelId,
       prompt: prompt.slice(0, MAX_PROMPT),
       sceneId: scene.id,
+      characterIds: cards.characterIds,
+      scenePresetIds: cards.scenePresetIds,
+      propIds: cards.propIds,
+      lookIds: scene.lookIds ?? undefined,
+      shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+      preserveScenePointer: true,
       reasonPrefix: "MCP 分鏡格生成",
     });
     return {
@@ -736,7 +771,17 @@ export async function runMcpWriteExpansion(
         createdBy: auth.user.id,
       })
       .returning();
-    return { characterId: row.id, name: row.name };
+    const [verified] = await db.select({
+      id: schema.characters.id,
+      name: schema.characters.name,
+      projectId: schema.characters.projectId,
+    }).from(schema.characters).where(eq(schema.characters.id, row.id));
+    return {
+      characterId: verified?.id ?? row.id,
+      name: verified?.name ?? row.name,
+      projectId: verified?.projectId ?? project.id,
+      verified: Boolean(verified && verified.projectId === project.id && verified.name === nameStr.slice(0, 80)),
+    };
   }
 
   if (name === "update_character") {
@@ -745,14 +790,20 @@ export async function runMcpWriteExpansion(
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到角色卡" });
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
+    assertMcpProjectScope(row.projectId, args.projectId, "角色卡");
     const patch: Record<string, unknown> = {};
     if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
     else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
-    if (Object.keys(patch).length === 0) return { characterId: row.id, name: row.name };
+    if (Object.keys(patch).length === 0) return mcpUnchanged({ characterId: row.id, name: row.name });
     const [updated] = await db.update(schema.characters).set(patch).where(eq(schema.characters.id, id)).returning();
+    await refreshShotContextStalenessSafely({
+      auth,
+      projectId: row.projectId,
+      changed: { kind: "character", id: row.id },
+    });
     return { characterId: updated.id, name: updated.name };
   }
 
@@ -786,14 +837,20 @@ export async function runMcpWriteExpansion(
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到場景設定卡" });
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
+    assertMcpProjectScope(row.projectId, args.projectId, "場景設定卡");
     const patch: Record<string, unknown> = {};
     if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
     if (typeof args.palette === "string" && args.palette.trim()) patch.palette = args.palette.trim().slice(0, 500);
     if (typeof args.lighting === "string") patch.lighting = args.lighting.slice(0, 500);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
     else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
-    if (Object.keys(patch).length === 0) return { presetId: row.id, name: row.name };
+    if (Object.keys(patch).length === 0) return mcpUnchanged({ presetId: row.id, name: row.name });
     const [updated] = await db.update(schema.scenePresets).set(patch).where(eq(schema.scenePresets.id, id)).returning();
+    await refreshShotContextStalenessSafely({
+      auth,
+      projectId: row.projectId,
+      changed: { kind: "scene_preset", id: row.id },
+    });
     return { presetId: updated.id, name: updated.name };
   }
 
@@ -827,14 +884,20 @@ export async function runMcpWriteExpansion(
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材設定卡" });
     requireGroup(auth, row.groupId);
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
+    assertMcpProjectScope(row.projectId, args.projectId, "素材設定卡");
     const patch: Record<string, unknown> = {};
     if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
     else if (typeof args.referenceAssetId === "string") patch.referenceAssetId = args.referenceAssetId;
-    if (Object.keys(patch).length === 0) return { propId: row.id, name: row.name };
+    if (Object.keys(patch).length === 0) return mcpUnchanged({ propId: row.id, name: row.name });
     const [updated] = await db.update(schema.props).set(patch).where(eq(schema.props.id, id)).returning();
+    await refreshShotContextStalenessSafely({
+      auth,
+      projectId: row.projectId,
+      changed: { kind: "prop", id: row.id },
+    });
     return { propId: updated.id, name: updated.name };
   }
 

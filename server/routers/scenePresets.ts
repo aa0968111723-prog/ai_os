@@ -152,6 +152,11 @@ export const scenePresetsRouter = router({
           return fresh;
         },
       });
+      await (await import("../services/shotContextPackets")).refreshShotContextStalenessSafely({
+        auth: ctx.auth,
+        projectId: row.projectId,
+        changed: { kind: "scene_preset", id: row.id },
+      });
       return { ...updated, merged };
     }),
 

@@ -1415,6 +1415,11 @@ export const scenesRouter = router({
         },
       });
       if (merged) publishToProject(scene.projectId, { kind: "scene", id: scene.id }, "合併了卡片綁定");
+      await (await import("../services/shotContextPackets")).refreshShotContextStalenessSafely({
+        auth: ctx.auth,
+        projectId: scene.projectId,
+        shotIds: [scene.id],
+      });
       return updated;
     }),
 

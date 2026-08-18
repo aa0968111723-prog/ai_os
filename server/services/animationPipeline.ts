@@ -179,7 +179,10 @@ export async function targetedAnimationRepairPlan(input: {
   const assetIds = shots.map((row) => row.assetId).filter((id): id is string => Boolean(id));
   const assets = assetIds.length
     ? await db.select({ id: schema.assets.id, kind: schema.assets.kind })
-      .from(schema.assets).where(inArray(schema.assets.id, assetIds))
+      .from(schema.assets).where(and(
+        inArray(schema.assets.id, assetIds),
+        eq(schema.assets.projectId, project.id),
+      ))
     : [];
   const kindByAsset = new Map(assets.map((row) => [row.id, row.kind]));
   const keyframes: Record<string, string | null> = {};

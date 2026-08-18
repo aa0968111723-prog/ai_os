@@ -106,7 +106,9 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(generationCore).toContain("if (!gen.sceneId || meta.preserveScenePointer === true) return null");
     expect(creative).toContain("adoptGenerationCurrent");
     expect(adopt).toContain("export async function adoptGenerationCurrent");
+    expect(adopt).toContain("export async function adoptGenerationVerified");
     expect(adopt).toMatch(/assetId:\s*asset\.id/);
+    expect(adopt).toContain("scene?.assetId === adopted.assetId");
   });
 
   it("cross-group requireGroup and personal bind stay deny-by-default", () => {
