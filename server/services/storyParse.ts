@@ -796,6 +796,52 @@ export async function loadExistingStoryScenes(
   return rows.map((r) => ({ id: r.id, title: r.title, liveShots: liveByScene.get(r.id) ?? 0 }));
 }
 
+/**
+ * Parse timed out / never succeeded: still allow 產生分鏡 from the story text.
+ * Same paragraph / sentence split as the E2E extractor — not a second product.
+ */
+export function planStoryboardFromStoryText(content: string): StoryParsePlan {
+  return storyParseModelSchema.parse(mockStoryExtract(content));
+}
+
+async function buildHeuristicParseRun(input: {
+  userId: string;
+  projectId: string;
+}): Promise<typeof schema.parseRuns.$inferSelect> {
+  const [story] = await db.select().from(schema.stories).where(eq(schema.stories.projectId, input.projectId));
+  const content = (story?.content ?? "").trim();
+  if (!story || !content) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "還沒有可用的解析結果——先按「AI 解析」，或先在故事裡寫下內容",
+    });
+  }
+  const plan = planStoryboardFromStoryText(content);
+  const stats: ParseRunStats = {
+    characters: { created: 0, linked: 0, pending: 0 },
+    locations: { created: 0, linked: 0, pending: 0 },
+    props: { created: 0, linked: 0, pending: 0 },
+    looks: { created: 0 },
+    scenes: plan.scenes.length,
+    shots: plan.scenes.reduce((n, s) => n + s.shots.length, 0),
+    truncation: null,
+    mock: true,
+  };
+  const [created] = await db
+    .insert(schema.parseRuns)
+    .values({
+      projectId: input.projectId,
+      storyId: story.id,
+      status: "done",
+      contentHash: sha256Hex(content),
+      plan,
+      stats,
+      createdBy: input.userId,
+    })
+    .returning();
+  return created;
+}
+
 export async function materializeStoryboard(input: {
   userId: string;
   projectId: string;
@@ -806,7 +852,7 @@ export async function materializeStoryboard(input: {
   if (!project) throw new TRPCError({ code: "NOT_FOUND" });
   await input.assertAccess(project);
 
-  const run = input.runId
+  let run = input.runId
     ? (await db.select().from(schema.parseRuns).where(eq(schema.parseRuns.id, input.runId)))[0]
     : (
         await db
@@ -816,8 +862,14 @@ export async function materializeStoryboard(input: {
           .orderBy(sql`${schema.parseRuns.createdAt} desc`)
           .limit(1)
       )[0];
+  if (!run || run.projectId !== project.id || run.status !== "done" || !run.plan) {
+    run = await buildHeuristicParseRun({
+      userId: input.userId,
+      projectId: project.id,
+    });
+  }
   if (!run || run.projectId !== project.id) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "還沒有可用的解析結果——先按「AI 解析」" });
+    throw new TRPCError({ code: "BAD_REQUEST", message: "還沒有可用的解析結果——先按「AI 解析」，或先在故事裡寫下內容" });
   }
   if (run.status !== "done" || !run.plan) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "這次解析沒有可轉的分鏡計畫" });

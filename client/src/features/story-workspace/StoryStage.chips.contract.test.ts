@@ -28,6 +28,12 @@ describe("StoryStage parse chips", () => {
     expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
   });
 
+  it("產生分鏡 stays available from story text when parse never finished", () => {
+    expect(src).toContain("canBoardFromStory");
+    expect(src).toContain("解析未完成時，仍可依故事原文拆場拆鏡");
+    expect(src).not.toMatch(/disabled=\{board\.isPending \|\| !lastRun \|\| lastRun\.status !== "done"\}/);
+  });
+
   it("onBlur sends the same expectedRev/baseline as debounce/flush (no rev-less saveRef)", () => {
     // default branch: saveRef.current({ projectId, content }) — silent LWW
     expect(src).not.toMatch(/saveRef\.current\(\{\s*projectId,\s*content\s*\}\)/);

@@ -483,6 +483,9 @@ export function StoryStage({
     revealStoryInlineSection(section, { projectId, scroll: false });
   };
   const lastRun = data?.lastRun;
+  const parseReady = Boolean(lastRun && lastRun.status === "done");
+  /** Parse timeout / never-done: still allow 產生分鏡 from story text (xiaohua stuck). */
+  const canBoardFromStory = !isBlank;
 
   /**
    * §33 變更預覽：專案已經有分鏡時，「產生分鏡」是會動到既有內容的批次操作，
@@ -490,7 +493,7 @@ export function StoryStage({
    */
   const boardPreview = trpc.story.storyboardPreview.useQuery(
     { projectId },
-    { enabled: Boolean(lastRun && lastRun.status === "done") },
+    { enabled: parseReady },
   );
   const boardPlan = boardPreview.data?.ready ? boardPreview.data : null;
   const boardSummary = boardPlan?.summary;
@@ -704,7 +707,7 @@ export function StoryStage({
                         triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
                         message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
                         confirmLabel="套用"
-                        disabled={board.isPending}
+                        disabled={board.isPending || !canBoardFromStory}
                         onConfirm={() => board.mutate({ projectId })}
                       >
                         {board.isPending ? "建立中…" : "產生分鏡"}
@@ -712,9 +715,11 @@ export function StoryStage({
                     ) : (
                       <Button
                         variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                        disabled={board.isPending || !lastRun || lastRun.status !== "done"}
+                        disabled={board.isPending || !canBoardFromStory}
                         onClick={() => board.mutate({ projectId })}
-                        title="把解析出的場與鏡建成可編輯的分鏡卡"
+                        title={parseReady
+                          ? "把解析出的場與鏡建成可編輯的分鏡卡"
+                          : "解析未完成時，仍可依故事原文拆場拆鏡"}
                       >
                         {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
                       </Button>

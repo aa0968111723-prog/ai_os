@@ -4,7 +4,7 @@
  * 標記行契約：「角色：」「場景：」「道具：」（0.95）＋「疑似道具：」（0.6→確認卡）。
  */
 import { describe, it, expect } from "vitest";
-import { matchByName, mockStoryExtract, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
+import { matchByName, mockStoryExtract, planStoryboardFromStoryText, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
 
@@ -67,6 +67,11 @@ describe("mockStoryExtract", () => {
 
   it("同輸入同輸出（確定性；e2e 斷言的前提）", () => {
     expect(JSON.stringify(mockStoryExtract(SAMPLE))).toBe(JSON.stringify(mockStoryExtract(SAMPLE)));
+  });
+
+  it("parse-fail 產生分鏡 reuses the same story-text plan (not a second product)", () => {
+    expect(planStoryboardFromStoryText(SAMPLE)).toEqual(mockStoryExtract(SAMPLE));
+    expect(planStoryboardFromStoryText("只有一句話").scenes.length).toBeGreaterThan(0);
   });
 });
 

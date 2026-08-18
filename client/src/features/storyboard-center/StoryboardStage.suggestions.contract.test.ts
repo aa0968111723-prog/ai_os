@@ -31,6 +31,12 @@ describe("Storyboard suggestion query consolidation", () => {
     expect(card).not.toContain("maxHeaderSize");
   });
 
+  it("exposes Studio-style ＋新增鏡 so a parse-timeout project is not stuck", () => {
+    expect(stage).toContain("scenes.addDraft.useMutation");
+    expect(stage).toContain("新增鏡");
+    expect(stage).toContain("解析未完成也能依原文拆鏡");
+  });
+
   it("does not add a visible-window second query (Phase E) on top of the project batch", () => {
     // 300-shot assemble stays 5 DB queries / compact payload — no IntersectionObserver prefetch.
     expect(stage).not.toContain("IntersectionObserver");
