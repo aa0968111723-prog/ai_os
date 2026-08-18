@@ -46,8 +46,9 @@ import {
 export const STORY_PARSE_SHORT_CHARS = 2_000;
 export const STORY_PARSE_SHORT_PRIMARY_MS = 40_000;
 export const STORY_PARSE_SHORT_FALLBACK_MS = 20_000;
-export const STORY_PARSE_LONG_PRIMARY_MS = 60_000;
-export const STORY_PARSE_LONG_FALLBACK_MS = 40_000;
+/** 405B 45–60s；70B 再 50–60s。合計 ≤ ~120s，不讓 3×405B 重試吃掉整段 150s。 */
+export const STORY_PARSE_LONG_PRIMARY_MS = 55_000;
+export const STORY_PARSE_LONG_FALLBACK_MS = 55_000;
 
 export interface StoryExtractStrategy {
   primaryModel: string;

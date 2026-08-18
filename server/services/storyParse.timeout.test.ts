@@ -3,8 +3,11 @@ import { NimServiceError } from "./nvidia-nim";
 import {
   extractStoryPlanFromProvider,
   resolveStoryExtractStrategy,
+  STORY_PARSE_LONG_FALLBACK_MS,
+  STORY_PARSE_LONG_PRIMARY_MS,
   STORY_PARSE_SHORT_CHARS,
 } from "./storyParse";
+import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
 
 describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
   it("a ~1167-char script uses 70B first with a short budget, not 405B/150s", () => {
@@ -43,5 +46,20 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(complete).toHaveBeenCalled();
     const firstTimeout = complete.mock.calls[0]?.[1]?.timeoutMs ?? 0;
     expect(firstTimeout).toBeLessThanOrEqual(45_000);
+  });
+
+  it("long parse splits 405B / 70B so one model cannot spend 150s", () => {
+    const strategy = resolveStoryExtractStrategy(8_000);
+    expect(strategy.primaryModel).toBe(NIM_REASONING_MODEL);
+    expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_LONG_PRIMARY_MS);
+    expect(strategy.fallbackTimeoutMs).toBe(STORY_PARSE_LONG_FALLBACK_MS);
+    expect(strategy.primaryTimeoutMs).toBeGreaterThanOrEqual(45_000);
+    expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(60_000);
+    expect(strategy.fallbackTimeoutMs).toBeGreaterThanOrEqual(50_000);
+    expect(strategy.fallbackTimeoutMs).toBeLessThanOrEqual(60_000);
+    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThanOrEqual(120_000);
+    expect(strategy.primaryTimeoutMs).toBeLessThan(150_000);
+    expect(strategy.fallbackTimeoutMs).toBeLessThan(150_000);
   });
 });

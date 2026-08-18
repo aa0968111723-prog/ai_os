@@ -55,10 +55,24 @@ describe("nimCompleteWithFallback", () => {
     expect(modelsUsed()).toEqual([FLAGSHIP]);
   });
 
-  it("流量達上限（429）同樣不降級：那是帳號層級的限制，不是這顆模型的問題", async () => {
-    fetchMock.mockResolvedValue(fail(429));
-    await expect(nimCompleteWithFallback("prompt", { model: FLAGSHIP })).rejects.toBeInstanceOf(NimServiceError);
-    expect(modelsUsed()).toEqual([FLAGSHIP]);
+  it("流量達上限（429）可降級：換 70B 還有機會，不再當成非降級直接拋", async () => {
+    fetchMock.mockResolvedValueOnce(fail(429)).mockResolvedValueOnce(ok("70b-after-429"));
+    const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP });
+    expect(r).toMatchObject({ output: "70b-after-429", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("旗艦 NimServiceError 逾時（含「超過 150 秒無回應」、不必帶「逾時」二字）→ 70B 備援真的會跑", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new NimServiceError("超過 150 秒無回應")))
+      .mockResolvedValueOnce(ok("70b-after-timeout"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 1_200,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-after-timeout", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
   });
 
   it("fallbackTimeoutMs 傳給第二次嘗試——短備援不必再吃同一個長逾時", async () => {

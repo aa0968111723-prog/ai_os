@@ -53,9 +53,9 @@ export const NIM_REASONING_MODEL =
  * 使用者要的是把劇本變成分鏡，不是特定一顆模型。所以降級一次到日常主力模型，
  * 並把實際用了哪一顆回報給呼叫端（要寫進 AI 軌跡，不能讓人以為跑的是旗艦）。
  */
-/** 旗艦逾時可以換 70B 再試；金鑰／429 換模型救不了。 */
+/** 旗艦逾時可以換 70B 再試；金鑰／帳號錯誤換模型救不了。 */
 export function isNimTimeoutError(err: unknown): boolean {
-  if (err instanceof NimServiceError) return /逾時/.test(err.message);
+  if (err instanceof NimServiceError) return err.degradable && /逾時|無回應/.test(err.message);
   return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
 }
 
@@ -77,8 +77,9 @@ export async function nimCompleteWithFallback(
     return { output: await nimComplete(prompt, opts), model: opts.model, downgraded: false };
   } catch (err) {
     if (opts.signal?.aborted || opts.model === fallback) throw err;
-    // 401/402/403／429：帳號層級，換 70B 一樣會死。旗艦逾時（301 字短稿也曾在 live 卡死）才降級。
-    if (err instanceof NimServiceError && !isNimTimeoutError(err)) throw err;
+    // 只擋非降級（401/402/403、沒金鑰）。逾時／429／5xx 換 70B 還有機會——
+    // 舊寫法 `instanceof NimServiceError` 一律再拋，live 的「超過 150 秒無回應」永遠到不了備援。
+    if (err instanceof NimServiceError && !nimErrorDegradable(err)) throw err;
     console.warn(`[nim] 旗艦模型 ${opts.model} 失敗，降級為 ${fallback}：`, err);
     return {
       output: await nimComplete(prompt, {

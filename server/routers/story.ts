@@ -288,7 +288,7 @@ export const storyRouter = router({
       return { id: row.id, rev: row.rev, updatedAt: row.updatedAt };
     }),
 
-  /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式最長 90 秒） */
+  /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式旗艦約 55s + 70B 約 55s，合計不超過約 120s） */
   parse: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
