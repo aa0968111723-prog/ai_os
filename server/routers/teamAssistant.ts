@@ -1590,6 +1590,10 @@ ${historyBlock}使用者的問題：${input.message}`;
     .input(z.object({ groupId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
+      // Leftover 0/N「待你過目」survives reload unless we discard on read.
+      // generateInto already reconciles that project; HUD is group-wide.
+      const { reconcileLeftoverAwaitingApprovalOnRead } = await import("../services/agentRunReconcile");
+      await reconcileLeftoverAwaitingApprovalOnRead({ groupId: input.groupId });
       const recentCutoff = new Date(Date.now() - GROUP_AGENT_RECENT_MS);
       const notDiscarded = and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded"));
       const [rows, statusAgg, activeProjectsAgg] = await Promise.all([

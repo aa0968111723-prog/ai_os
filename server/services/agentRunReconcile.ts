@@ -3,11 +3,12 @@
  * batch/agent plan for the same shot so the HUD cannot stay 「0/6 步」with a
  * 停 button and no Adopt control.
  */
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import {
   applyIndependentGenerateToSteps,
   discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  shouldDiscardLeftoverAwaitingApprovalOnRead,
 } from "../../shared/agentRunReconcile";
 
 const ACTIVE_RUN_STATUSES = [
@@ -86,6 +87,72 @@ export async function reconcileAgentRunsAfterSceneGenerate(input: {
       .set({
         steps: leftover.steps,
         ...(leftover.discarded ? { status: "discarded" as const } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.agentRuns.id, run.id));
+  }
+}
+
+/**
+ * HUD / agentOverview / listByProject read path. A leftover 6-step
+ * awaiting_approval plan that never started must not resurrect
+ * 「待你過目 · 第 1 鏡… 0/6 步」after reload when studio already billed
+ * a visual on that project.
+ */
+export async function reconcileLeftoverAwaitingApprovalOnRead(input: {
+  groupId?: string;
+  projectId?: string;
+}): Promise<void> {
+  if (!input.groupId && !input.projectId) return;
+  const scope = input.projectId
+    ? eq(schema.agentRuns.projectId, input.projectId)
+    : eq(schema.agentRuns.groupId, input.groupId!);
+  const runs = await db
+    .select({
+      id: schema.agentRuns.id,
+      projectId: schema.agentRuns.projectId,
+      status: schema.agentRuns.status,
+      steps: schema.agentRuns.steps,
+      createdAt: schema.agentRuns.createdAt,
+    })
+    .from(schema.agentRuns)
+    .where(and(scope, eq(schema.agentRuns.status, "awaiting_approval")));
+  if (runs.length === 0) return;
+
+  const projectIds = [...new Set(runs.map((run) => run.projectId))];
+  const latestVisuals = await db
+    .select({
+      projectId: schema.generations.projectId,
+      latest: sql<Date>`max(${schema.generations.createdAt})`,
+    })
+    .from(schema.generations)
+    .where(and(
+      inArray(schema.generations.projectId, projectIds),
+      eq(schema.generations.status, "done"),
+      or(isNull(schema.generations.sceneRole), eq(schema.generations.sceneRole, "visual")),
+    ))
+    .groupBy(schema.generations.projectId);
+  const latestByProject = new Map(latestVisuals.map((row) => [row.projectId, row.latest]));
+
+  for (const run of runs) {
+    const steps = Array.isArray(run.steps) ? run.steps : [];
+    if (!shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: run.status,
+      steps,
+      runCreatedAt: run.createdAt,
+      latestDoneVisualAt: latestByProject.get(run.projectId) ?? null,
+    })) continue;
+    const leftover = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: run.status,
+      steps,
+      independentGenerateLanded: true,
+    });
+    if (!leftover.discarded) continue;
+    await db
+      .update(schema.agentRuns)
+      .set({
+        steps: leftover.steps,
+        status: "discarded",
         updatedAt: new Date(),
       })
       .where(eq(schema.agentRuns.id, run.id));

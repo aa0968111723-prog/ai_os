@@ -103,12 +103,13 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
       cache.set(r.id, { ...r, revision: rev });
     }
     if (overview.data) {
-      for (const [id, row] of cache) {
+      for (const [id] of cache) {
         if (seen.has(id)) continue;
         if (id === stoppingId) continue;
-        if (!isAgentRunActiveForHud(row.status) || isAgentRunTerminalStatus(row.status)) {
-          cache.delete(id);
-        }
+        // Authoritative overview omitted this run (discarded leftover
+        // 0/N「待你過目」, finished, or filtered). Keep only the row we
+        // just asked to stop so acknowledgement can settle.
+        cache.delete(id);
       }
     }
     return [...cache.values()];

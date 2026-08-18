@@ -1505,6 +1505,8 @@ export async function listAgentRunsForProject(auth: AuthState, projectId: string
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
+  const { reconcileLeftoverAwaitingApprovalOnRead } = await import("./agentRunReconcile");
+  await reconcileLeftoverAwaitingApprovalOnRead({ projectId });
   const active = await db
     .select()
     .from(schema.agentRuns)

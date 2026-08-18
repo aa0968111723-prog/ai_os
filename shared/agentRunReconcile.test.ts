@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyIndependentGenerateToSteps,
   discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  shouldDiscardLeftoverAwaitingApprovalOnRead,
   type ReconcileAgentStep,
 } from "./agentRunReconcile";
 
@@ -112,5 +113,42 @@ describe("discardUnstartedAwaitingApprovalAfterIndependentGenerate", () => {
     });
     expect(out.discarded).toBe(false);
     expect(out.status).toBe("running");
+  });
+});
+
+describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
+  const created = "2026-08-18T12:00:00.000Z";
+
+  it("hides leftover 0/6 待你過目 on reload after a later studio visual", () => {
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: six,
+      runCreatedAt: created,
+      latestDoneVisualAt: "2026-08-18T13:00:00.000Z",
+    })).toBe(true);
+  });
+
+  it("keeps a newer batch queued after existing images so it stays approvable", () => {
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: six,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+    })).toBe(false);
+  });
+
+  it("leaves a running leftover plan and a plan with no visual alone", () => {
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "running",
+      steps: six,
+      runCreatedAt: created,
+      latestDoneVisualAt: "2026-08-18T13:00:00.000Z",
+    })).toBe(false);
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: six,
+      runCreatedAt: created,
+      latestDoneVisualAt: null,
+    })).toBe(false);
   });
 });

@@ -138,6 +138,22 @@ describe("AgentActivityHud", () => {
     render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText(/需要你補充資訊/)).toBeVisible();
   });
+
+  it("discards leftover 0/6 待你過目 from the HUD cache when overview omits it", async () => {
+    overviewRuns = [run({
+      status: "awaiting_approval",
+      doneSteps: 0,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+    })];
+    const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
+    expect(screen.getByText("待你過目")).toBeVisible();
+    expect(screen.getByText("第 1 鏡「小華躺在床上」生成畫面")).toBeVisible();
+    overviewRuns = [];
+    rerender(<AgentActivityHud groupId="g1" />);
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
+  });
 });
 
 // Theater stop is unit-tested in client/src/lib/agentTheater.test.ts

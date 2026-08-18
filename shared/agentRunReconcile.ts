@@ -131,3 +131,31 @@ export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
   });
   return { status: "discarded", steps, discarded: true };
 }
+
+function timeMs(value: Date | string | number): number {
+  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : Number.NaN;
+}
+
+/**
+ * Reload / HUD read must hide leftover 0/N「待你過目」when studio already
+ * billed a visual. Only unstarted awaiting_approval batches (≥2 generate
+ * steps). A running leftover plan stays parked.
+ *
+ * Timestamp: discard when a done visual landed at or after the leftover
+ * plan was created. A newer batch queued after existing images stays
+ * approvable.
+ */
+export function shouldDiscardLeftoverAwaitingApprovalOnRead(input: {
+  status: string;
+  steps: ReconcileAgentStep[];
+  runCreatedAt: Date | string | number;
+  latestDoneVisualAt: Date | string | number | null;
+}): boolean {
+  if (input.latestDoneVisualAt == null) return false;
+  if (!leftoverAwaitingApprovalBatch(input.status, input.steps)) return false;
+  const runAt = timeMs(input.runCreatedAt);
+  const visualAt = timeMs(input.latestDoneVisualAt);
+  if (!Number.isFinite(runAt) || !Number.isFinite(visualAt)) return false;
+  return visualAt >= runAt;
+}
