@@ -81,6 +81,8 @@ import {
 import { importUrlIntoProject } from "../services/universalIntake";
 import { publicUrlIntakeCapability } from "../../shared/universalIntake";
 import { attachAssetsToShotVerified } from "../services/assistantAssetBinding";
+import { adoptGenerationVerified } from "../services/consistencyAdopt";
+import { phoneAnimationCompareQueue } from "../services/phoneAnimation";
 import { randomUUID } from "node:crypto";
 import { listIntegrations } from "../services/integrations";
 import { createAssistantInteraction, recordAssistantInteractionLifecycle, submitAssistantInteraction } from "../services/assistantInteractionCore";
@@ -1096,6 +1098,55 @@ export async function runGlobalAsk(
       verified
         ? `✓ 已把 ${bound.assetIds.length} 項素材加入「${projectResolution.projectTitle ?? "目前專案"}」第 ${ordinal! + 1} 鏡，並重新讀取確認。`
         : "操作已送出，但重新讀取未確認全部素材綁定，因此沒有標示為完成。",
+      { executionReceipts: [receipt] },
+    );
+  }
+
+  if (capabilityMatch.capabilityId === "animation_adopt_candidate" && effectiveProjectId) {
+    const compare = await phoneAnimationCompareQueue({ auth, projectId: effectiveProjectId });
+    const generationId = compare.items[0]?.generationId;
+    if (!generationId) {
+      return earlySemanticResult("現在沒有可採用的修復候選。請先產生候選，我不會把「採用」說成已完成。");
+    }
+    const stepId = stream.startStep({
+      type: "action.started",
+      title: "正在採用動畫修復候選",
+      toolName: "animation_adopt_candidate",
+      target: compare.items[0]?.shotLabel,
+    });
+    const adopted = await adoptGenerationVerified({ auth, generationId });
+    const verified = adopted.verification.status === "verified";
+    stream.emit({
+      type: "verification.completed",
+      title: adopted.verification.message,
+      status: verified ? "ok" : "failed",
+      toolName: "animation_adopt_candidate",
+      target: compare.items[0]?.shotLabel,
+    });
+    stream.finishStep(stepId, {
+      type: verified ? "action.completed" : "action.failed",
+      title: verified ? "已採用並重新讀取確認" : "採用未通過驗證",
+      status: verified ? "ok" : "failed",
+      toolName: "animation_adopt_candidate",
+    });
+    const receipt = buildExecutionReceipt({
+      runId: stream.runId,
+      stepId,
+      capabilityId: "animation_adopt_candidate",
+      handler: "consistencyAdopt.adoptGenerationCurrent",
+      targetType: "shot",
+      targetIds: [adopted.shotId],
+      databaseRecordIds: [adopted.assetId],
+      verificationMethod: "read_back",
+      verificationStatus: verified ? "verified" : "unverified",
+      verificationMessage: adopted.verification.message,
+      executedAt: new Date().toISOString(),
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+    });
+    return earlySemanticResult(
+      verified
+        ? `✓ ${adopted.verification.message}`
+        : "採用已送出，但重新讀取未確認分鏡畫面，因此沒有標示為完成。",
       { executionReceipts: [receipt] },
     );
   }

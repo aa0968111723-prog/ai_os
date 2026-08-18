@@ -158,6 +158,30 @@ export async function adoptGenerationCurrent(input: {
   return { shotId: updated.id, assetId: asset.id, adopted: true };
 }
 
+export async function adoptGenerationVerified(input: {
+  auth: AuthState;
+  generationId: string;
+}): Promise<{
+  shotId: string;
+  assetId: string;
+  adopted: true;
+  verification: { status: "verified" | "unverified"; message: string };
+}> {
+  const adopted = await adoptGenerationCurrent(input);
+  const [scene] = await db.select({
+    id: schema.scenes.id,
+    assetId: schema.scenes.assetId,
+  }).from(schema.scenes).where(eq(schema.scenes.id, adopted.shotId));
+  const verified = scene?.assetId === adopted.assetId;
+  return {
+    ...adopted,
+    verification: {
+      status: verified ? "verified" : "unverified",
+      message: verified ? "已採用並重新讀取確認分鏡畫面" : "採用已寫入，但重新讀取未確認分鏡畫面",
+    },
+  };
+}
+
 export function deliveryBlockers(input: {
   shots: Array<{ id: string; assetId: string | null; reviewStatus: string | null }>;
   staleShotIds: readonly string[];

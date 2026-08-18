@@ -98,5 +98,18 @@ describe("assistant execution fast path", () => {
     });
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_execute_repair")?.risk).toBe("COSTFUL");
     expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_adopt_candidate")?.risk).toBe("SAFE_WRITE");
+    const adopt = ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_adopt_candidate");
+    expect(adopt).toMatchObject({
+      handler: "consistencyAdopt.adoptGenerationCurrent",
+      verificationStrategy: "read_back",
+      direct: true,
+    });
+    const keep = ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_keep_current");
+    expect(keep).toMatchObject({
+      handler: "scenes.review",
+      verificationStrategy: "read_back",
+    });
+    expect(ASSISTANT_CAPABILITIES.find((item) => item.id === "animation_execute_repair")?.handler)
+      .toBe("creativeContext.executeAnimationStage");
   });
 });

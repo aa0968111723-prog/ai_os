@@ -155,6 +155,11 @@ export const charactersRouter = router({
           return fresh;
         },
       });
+      await (await import("../services/shotContextPackets")).refreshShotContextStalenessSafely({
+        auth: ctx.auth,
+        projectId: row.projectId,
+        changed: { kind: "character", id: row.id },
+      });
       return { ...updated, merged };
     }),
 

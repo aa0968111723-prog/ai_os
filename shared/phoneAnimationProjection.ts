@@ -844,3 +844,16 @@ export function phoneAnimationResumeCard(resume: PhoneRepairResume): PhoneCard {
 export function assertNoTechnicalLeak(text: string): boolean {
   return !/(?:fingerprint|packet|evaluator|uuid|generation_consistency|0f8fad5b)/i.test(text);
 }
+
+/** Switching projects must drop in-memory repair session (compare queue / confirm lock). */
+export function shouldResetPhoneAnimationRepair(
+  previousProjectId: string | undefined,
+  nextProjectId: string | undefined,
+): boolean {
+  return previousProjectId !== nextProjectId;
+}
+
+/** A failed repair round must not keep the confirm lock; the user can retry. */
+export function shouldUnlockPhoneRepairConfirm(failedCount: number): boolean {
+  return failedCount > 0;
+}

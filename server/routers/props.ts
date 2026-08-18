@@ -222,6 +222,11 @@ export const propsRouter = router({
           return fresh;
         },
       });
+      await (await import("../services/shotContextPackets")).refreshShotContextStalenessSafely({
+        auth: ctx.auth,
+        projectId: row.projectId,
+        changed: { kind: "prop", id: row.id },
+      });
       return { ...updated, merged };
     }),
 
