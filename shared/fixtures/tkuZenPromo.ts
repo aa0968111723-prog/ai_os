@@ -1,7 +1,7 @@
 /**
- * The ONLY 小華 fixture: lip-sync SHOTLIST A–F (~60s).
+ * The ONLY 小華 fixture: lip-sync SHOTLIST A–F (~60s), 6 acts / 6 shots.
  * Characters: 小華（大二化工、白帽T、粉橘短髮女孩）+ 禪定龜龜.
- * D:\淡大劇本 七幕 is 安倢/慕恩 — not 小華. Do not mix. No 媽媽. No 茶會字卡 as a 幕.
+ * D:\淡大劇本 安倢／慕恩 long script is not 小華. Do not mix. No 媽媽. No 茶會字卡 as a 幕.
  * B-roll 教室/超商 and 真人禪坐 are NOT lip-sync acts.
  */
 
@@ -43,7 +43,7 @@ export const TKU_ZEN_SHOTLIST_AD_PARSE = [
 
 /**
  * Locked A–F SHOTLIST as a ~300-char / 6-paragraph first-parse paste.
- * A 校門口 / B 夕陽 / C–F 對白. No 宿舍夜, no 七幕, no 安倢.
+ * A 校門口 / B 夕陽 / C–F 對白. No 宿舍夜, no 安倢.
  */
 export const TKU_ZEN_SHOTLIST_FIRST_PARSE = [
   "A 校門口自我介紹。小華穿白帽T、短髮站在校門口面向鏡頭，平靜微笑。我是大二化工系的小華。回想起大一的時光，說真的，有好多的不習慣。風從校門吹過來，她把瀏海撥開。",
@@ -60,8 +60,6 @@ export const TKU_ZEN_FORBIDDEN = [
   "茶會字卡",
   "安倢",
   "慕恩",
-  "七幕",
-  "第七幕",
   "走上克難坡",
   "茶會社課擺攤",
   "針織外套",
@@ -344,8 +342,8 @@ export function tkuZenLibraryMapContent(): string {
     .join("\n");
   return [
     `本機素材庫（此 VM 讀不到磁碟時只鎖定路徑與定裝描述，不呼叫付費 FAL）：${TKU_ZEN_LIBRARY_ROOT}`,
-    "六句 SHOTLIST A–F。不是那條長稿。龜龜從第三句登場。小華白帽T、粉橘短髮女孩，不換裝。",
-    "D:\\淡大劇本 那條長稿不是小華。不要寫進動畫組小華專案。",
+    "六句 SHOTLIST A–F。龜龜從第三句登場。小華白帽T、粉橘短髮女孩，不換裝。",
+    "D:\\淡大劇本 那條 long script 不是小華。不要寫進動畫組小華專案。",
     "",
     `小華 visual lock = ${TKU_ZEN_XIAOHUA_IDENTITY}／${TKU_ZEN_XIAOHUA_COSTUME}`,
     `operator PNG（粉橘短髮女孩，knit+skirt on disk；身份文字仍是白帽T）：`,
@@ -381,3 +379,10 @@ export function tkuZenHasForbidden(text: string): string[] {
 export function tkuZenTurtleFirstAct(shots: TkuZenShotSpec[] = TKU_ZEN_SHOTS): number {
   return Math.min(...shots.filter((s) => s.characters.includes("turtle")).map((s) => s.act));
 }
+
+/*
+ * unused — 安倢／慕恩 only. Do not import into TKU_ZEN_LIBRARY / ACTS / seed.
+ *   各幕腳本\第一幕 成片稿、第一幕 分鏡規劃、第一幕 6格預覽
+ *   各幕腳本\第二幕 … 第四幕 同名三件
+ *   A1-S01 … A4-S06, master_cast_v02.png
+ */

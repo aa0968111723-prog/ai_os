@@ -267,7 +267,7 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
     throw new Error("小華 appearance lost 白帽T／粉橘短髮女孩 lock");
   }
   if (xiaohua.appearance.includes("針織外套") || xiaohua.appearance.includes("年輕男性") || xiaohua.appearance.includes("黑長直髮") || xiaohua.appearance.includes("安倢")) {
-    throw new Error("小華 appearance flipped gender or mixed 七幕 lock");
+    throw new Error("小華 appearance flipped gender or mixed 安倢 lock");
   }
   if (!turtle.appearance.includes("吉祥物龜龜")) throw new Error("龜龜 appearance lost 吉祥物龜龜 lock");
   if (!snap.presets.some((p) => p.name === "校門口")) throw new Error("校門口 preset missing");

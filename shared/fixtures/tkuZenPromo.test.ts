@@ -94,9 +94,8 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     ].join("\n");
     expect(tkuZenHasForbidden(blob)).toEqual([]);
     expect(TKU_ZEN_FORBIDDEN).not.toContain("白帽T");
+    expect(TKU_ZEN_FORBIDDEN).not.toContain("七幕");
     expect(TKU_ZEN_FORBIDDEN).toContain("安倢");
-    expect(TKU_ZEN_FORBIDDEN).toContain("七幕");
-    expect(TKU_ZEN_FORBIDDEN).toContain("第七幕");
     expect(TKU_ZEN_FORBIDDEN).toContain("走上克難坡");
     expect(TKU_ZEN_FORBIDDEN).toContain("茶會社課擺攤");
     expect(TKU_ZEN_FORBIDDEN).toContain("針織外套");
@@ -104,7 +103,8 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_FORBIDDEN).toContain("黑長直髮");
     expect(TKU_ZEN_SHOTS).toHaveLength(6);
     expect(TKU_ZEN_SHOTS.every((s) => s.dialogue.trim().length > 0)).toBe(true);
-    expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/走上克難坡|茶會社課擺攤|收尾|第七幕/);
+    expect(TKU_ZEN_ACTS.map((a) => a.title).join("\n")).not.toMatch(/七幕|走上克難坡|茶會社課擺攤|收尾/);
+    expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/七幕|走上克難坡|茶會社課擺攤|收尾/);
     expect(TKU_ZEN_ACTS[0]?.title).toContain("校門口");
     expect(TKU_ZEN_ACTS[1]?.title).toContain("夕陽");
   });
@@ -142,21 +142,33 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(map).not.toContain("年輕男性");
     expect(map).not.toContain("黑長直髮");
     expect(map).not.toContain("走上克難坡");
-    expect(map).not.toContain("第七幕");
+    expect(map).not.toContain("七幕");
+    expect(map).not.toContain("各幕腳本");
+    expect(TKU_ZEN_LIBRARY.scripts.folder).toBe(String.raw`腳本`);
+    expect([...TKU_ZEN_LIBRARY.scripts.files]).toEqual(["SHOTLIST.md"]);
+    expect([...TKU_ZEN_LIBRARY.boards.files]).toEqual(["SHOTLIST.md"]);
     expect(TKU_ZEN_LIBRARY.boards.files.join("\n")).not.toMatch(/A[1-4]-S/);
-    expect(TKU_ZEN_LIBRARY.scripts.files.join("\n")).toContain("SHOTLIST.md");
+    expect(TKU_ZEN_LIBRARY.scripts.files.join("\n")).not.toContain("成片稿");
   });
 
-  it("source lock: 6 spoken A–F only; FORBIDDEN never lists 白帽T", () => {
+  it("source lock: 6 spoken A–F only; FORBIDDEN never lists 白帽T; library does not seed 安倢 boards", () => {
     const src = readFileSync(join(process.cwd(), "shared/fixtures/tkuZenPromo.ts"), "utf8");
     const forbidden = src.slice(src.indexOf("export const TKU_ZEN_FORBIDDEN"), src.indexOf("] as const;", src.indexOf("export const TKU_ZEN_FORBIDDEN")));
     const acts = src.slice(src.indexOf("export const TKU_ZEN_ACTS"), src.indexOf("export const TKU_ZEN_SHOTS"));
+    const library = src.slice(src.indexOf("export const TKU_ZEN_LIBRARY"), src.indexOf("export function tkuZenLibraryPath"));
+    const mapFn = src.slice(src.indexOf("export function tkuZenLibraryMapContent"), src.indexOf("export const TKU_ZEN_WORLDVIEW"));
     expect(forbidden).not.toContain("白帽T");
+    expect(forbidden).not.toContain("七幕");
     expect(acts).not.toMatch(/act:\s*7/);
+    expect(acts).not.toContain("七幕");
     expect(acts).not.toContain("走上克難坡");
     expect(acts).not.toContain("茶會社課擺攤");
-    expect(acts).not.toContain("第七幕");
+    expect(mapFn).not.toContain("七幕");
+    expect(library).not.toContain("各幕腳本");
+    expect(library).not.toContain("成片稿");
+    expect(library).not.toMatch(/A[1-4]-S/);
     expect(TKU_ZEN_ACTS).toHaveLength(6);
+    expect(TKU_ZEN_SHOTS).toHaveLength(6);
     expect(TKU_ZEN_XIAOHUA_IDENTITY).toContain("白帽T");
     expect(TKU_ZEN_XIAOHUA_IDENTITY).toContain("短髮");
   });
