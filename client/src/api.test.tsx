@@ -3,9 +3,13 @@ import { render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEffect } from "react";
 import {
+  ASSISTANT_ASK_CLIENT_TIMEOUT_MS,
+  askMutationTimeoutMessage,
   createTrpcClient,
   fetchWithStoryTimeout,
   isAbortOrTimeoutError,
+  isClientTimedProcedure,
+  isTimedAskProcedure,
   isTimedStoryProcedure,
   STORY_MUTATION_CLIENT_TIMEOUT_MS,
   storyMutationTimeoutMessage,
@@ -90,11 +94,19 @@ describe("api — story.parse / generateStoryboard 獨立逾時（避免 UI 乾�
     expect(isTimedStoryProcedure("director.splitScript")).toBe(true);
     expect(isTimedStoryProcedure("scenes.generateInto")).toBe(false);
     expect(isTimedStoryProcedure("auth.me")).toBe(false);
+    expect(isTimedAskProcedure("assistant.ask")).toBe(true);
+    expect(isTimedAskProcedure("teamAssistant.ask")).toBe(true);
+    expect(isTimedAskProcedure("globalAssistant.ask")).toBe(true);
+    expect(isTimedAskProcedure("assistant.runAction")).toBe(false);
+    expect(isClientTimedProcedure("assistant.ask")).toBe(true);
+    expect(isClientTimedProcedure("auth.me")).toBe(false);
     expect(STORY_MUTATION_CLIENT_TIMEOUT_MS).toBeLessThan(150_000);
     expect(STORY_MUTATION_CLIENT_TIMEOUT_MS).toBeGreaterThan(105_000);
+    expect(ASSISTANT_ASK_CLIENT_TIMEOUT_MS).toBe(STORY_MUTATION_CLIENT_TIMEOUT_MS);
     expect(storyMutationTimeoutMessage("story.parse")).toMatch(/解析逾時/);
     expect(storyMutationTimeoutMessage("story.generateStoryboard")).toMatch(/產生分鏡逾時/);
     expect(storyMutationTimeoutMessage("director.splitScript")).toMatch(/拆分鏡逾時/);
+    expect(askMutationTimeoutMessage()).toMatch(/兩分鐘|閘道/);
   });
 
   it("maps abort/timeout to a recoverable Chinese error", async () => {
