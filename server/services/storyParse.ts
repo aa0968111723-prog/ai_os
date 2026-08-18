@@ -908,7 +908,7 @@ export async function materializeStoryboard(input: {
   // so a cached male plan would keep 他身上 without a project-wide pass.
   if (run.applied?.storyboard) {
     if (!scriptExplicitlyMaleXiaohua(script)) {
-      await rewriteProjectXiaohuaStoryboardCopy(project.id);
+      await rewriteProjectXiaohuaStoryboardCopy(project.id, script);
     }
     return { ...run.applied.storyboard, reused: true };
   }
@@ -1060,19 +1060,20 @@ export async function materializeStoryboard(input: {
     return { storySceneIds, sceneIds, reused: false };
   }).then(async (result) => {
     if (!scriptExplicitlyMaleXiaohua(script)) {
-      await rewriteProjectXiaohuaStoryboardCopy(project.id);
+      await rewriteProjectXiaohuaStoryboardCopy(project.id, script);
     }
     return result;
   });
 }
 
 /** generateStoryboard reuse leaves existing 他 titles; rewrite the whole project. */
-async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<void> {
+async function rewriteProjectXiaohuaStoryboardCopy(projectId: string, script = ""): Promise<void> {
   const xiaohuaNamed = await db
     .select({ id: schema.characters.id, name: schema.characters.name })
     .from(schema.characters)
     .where(eq(schema.characters.projectId, projectId));
   const boundIds = new Set(xiaohuaNamed.filter((row) => /小華/.test(row.name ?? "")).map((row) => row.id));
+  const forceXiaohua = boundIds.size > 0 || /小華/.test(script);
 
   const rows = await db
     .select({
@@ -1086,7 +1087,7 @@ async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<v
     })
     .from(schema.scenes)
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
-  await persistXiaohuaShotRewrites(rows, boundIds);
+  await persistXiaohuaShotRewrites(rows, boundIds, forceXiaohua);
 
   const storyScenes = await db
     .select({
@@ -1102,7 +1103,7 @@ async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<v
       title: row.title,
       prompt: row.summary ?? "",
       action: row.storyExcerpt,
-    }, boundIds.size > 0 ? "小華" : "");
+    }, forceXiaohua ? "小華" : "");
     if (next.title === row.title && next.prompt === (row.summary ?? "") && next.action === row.storyExcerpt) {
       continue;
     }
@@ -1128,12 +1129,12 @@ async function persistXiaohuaShotRewrites(
     characterIds?: string[] | null;
   }>,
   xiaohuaIds: Set<string> = new Set(),
+  forceXiaohua = false,
 ): Promise<void> {
   for (const row of rows) {
     const bound = (row.characterIds ?? []).some((id) => xiaohuaIds.has(id));
-    // Project has a 小華 card: force 他→她 on every shot, even titles that
-    // omit her name (EXTRACT「夕陽光照在他身上」+ characterRefs drifted).
-    const next = rewritePersistedXiaohuaShotCopy(row, bound || xiaohuaIds.size > 0);
+    // Script or a 小華 card: force 他→她 even when the title omits her name.
+    const next = rewritePersistedXiaohuaShotCopy(row, bound || forceXiaohua || xiaohuaIds.size > 0);
     if (
       next.title === row.title
       && next.prompt === row.prompt
