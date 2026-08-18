@@ -8736,12 +8736,12 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
 
 /* ── 代理動態列（跨頁常駐，只在有代理在跑時渲染） ── */
 .agent-hud {
-  position: fixed; left: 0; right: 0; z-index: 43;
-  /* 疊在分頁列之上、之下：分頁列 z44 蓋住它才對——HUD 是資訊列，不該遮住主導覽。
-     bottom 吃 --chrome-bottom（分頁列高度的單一契約）＋鍵盤 inset。 */
+  position: fixed; left: 0; right: 0; z-index: 46;
+  /* Above 回饋 FAB (z45) so 停 is not an overlapped hit target.
+     分頁列 z44 仍蓋住主導覽熱區時，HUD 讓出右下 FAB 槽。 */
   bottom: calc(var(--chrome-bottom, 48px) + var(--kb-inset, 0px));
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; margin: 0 8px;
+  padding: 6px 10px; margin: 0 calc(8px + var(--fab-slot, 58px)) 0 8px;
   border: 1px solid var(--border-soft); border-radius: var(--r-12);
   background: var(--card); box-shadow: var(--e3);
 }
@@ -8755,8 +8755,14 @@ button.menu-surface__scrim:has(+ .global-assistant):hover {
   font-size: var(--fs-13);
 }
 @media (min-width: 768px) {
-  /* 桌機沒有底部分頁列：貼右下角，不橫跨整個視窗 */
-  .agent-hud { left: auto; right: 16px; bottom: 16px; max-width: 420px; margin: 0; }
+  /* 桌機：坐在回饋 FAB 上方，停不與 FAB 疊在同一顆右下角 */
+  .agent-hud {
+    left: auto;
+    right: 16px;
+    bottom: calc(16px + var(--fab-slot, 58px));
+    max-width: 420px;
+    margin: 0;
+  }
 }
 
 
