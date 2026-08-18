@@ -122,6 +122,7 @@ import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentSourceRecord, AgentSourceType } from "../../shared/agentEvents";
 import { roundThinkingTitle } from "../../shared/agentEvents";
 import { classifyAssistantRequest } from "../../shared/assistantExecution";
+import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { selectAssistantCapabilities } from "../../shared/assistantCapabilityRegistry";
 import { BUILT_IN_EXTERNAL_TOOLS } from "../../shared/externalTools";
 
@@ -304,7 +305,7 @@ type ResolvedAction =
   // direct_shot：changes＝已算好的 before→after 差異行（§14 變更預覽，前端直接顯示不必重算）
   | { type: "direct_shot"; label: string; sceneId: string; camera?: ShotCamera; performance?: ShotPerformance; changes: string[] }
   | { type: "split_script"; label: string; script?: string }
-  | { type: "plan_agent"; label: string; goal: string }
+  | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
   | { type: "prepare_external_generation"; label: string; sceneId: string; sceneNo: number; externalTool: string; prompt: string }
   | {
       type: "apply_worldview_chips";
@@ -818,15 +819,17 @@ async function callLlm(
   prompt: string,
   signal?: AbortSignal,
   mode: AgentPlannerMode = "nim",
+  utterance?: string,
 ): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
-  const isPaidMode = mode !== "nim";
+  const qualityMode = resolveFreeOnlyLlmMode(mode, utterance);
+  const isPaidMode = qualityMode !== "nim";
   const result = await completeText({
     prompt,
-    mode,
+    mode: qualityMode,
     timeoutMs: isPaidMode ? 120_000 : 60_000,
     signal,
-    // mode=nim is UI「只用免費」— never auto-switch to paid deepseek-v4-flash.
-    allowPaidFallback: mode === "auto",
+    // mode=nim is UI「只用免費」— never auto-switch to paid gpt-5.6-luna / deepseek.
+    allowPaidFallback: qualityMode === "auto",
   });
   return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
 }
@@ -1367,7 +1370,15 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
               label: a.prompt ? `存成分鏡草稿「${a.title}」（帶畫面提示詞）` : `新增分鏡「${a.title}」`,
             });
           } else if (a.type === "plan_agent") {
-            out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` });
+            const plannerMode = resolveFreeOnlyLlmMode(input.mode, input.message);
+            out.push({
+              type: "plan_agent",
+              goal: a.goal,
+              ...(plannerMode === "nim" ? { plannerMode } : {}),
+              label: plannerMode === "nim"
+                ? `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（只用免費・0 點規劃）`
+                : `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）`,
+            });
           } else if (a.type === "prepare_external_generation") {
             const scene = findSceneByDisplayNo(scenes, a.sceneNo);
             if (!scene) continue;
@@ -1617,7 +1628,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
               summary: `送出第 ${round + 1} 輪模型請求`,
               payload: { prompt, mode: input.mode ?? "nim", forceFinal },
             });
-            const completion = await callLlm(prompt, askSignal, input.mode);
+            const completion = await callLlm(prompt, askSignal, input.mode, input.message);
             await recordAiTraceEventSafely({
               sessionId: traceSessionId,
               eventType: "provider_response",
@@ -2173,7 +2184,7 @@ export const assistantRouter = router({
           auth: ctx.auth,
           projectId: project.id,
           goal: a.goal,
-          plannerMode: a.plannerMode,
+          plannerMode: resolveFreeOnlyLlmMode(a.plannerMode, a.goal),
         });
         const stepCount = Array.isArray(run.steps) ? (run.steps as unknown[]).length : 0;
         return {

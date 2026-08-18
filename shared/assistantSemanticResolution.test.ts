@@ -4,7 +4,9 @@ import {
   deriveDeterministicGoalFrame,
   executionPlanFromGoal,
   matchAssistantCapabilityForGoal,
+  resolveFreeOnlyLlmMode,
   resolveWorkingProject,
+  utteranceHasFreeOnly,
 } from "./assistantSemanticResolution";
 
 const P1 = "11111111-1111-4111-8111-111111111111";
@@ -169,6 +171,18 @@ describe("assistantSemanticResolution", () => {
 
     const b = deriveDeterministicGoalFrame("只用免費模型，不要付費 fallback");
     expect(b.frame.constraints).toContain("free_only");
+
+    const c = deriveDeterministicGoalFrame("只用免費，幫我排計畫");
+    expect(c.frame.constraints).toContain("free_only");
+  });
+
+  it("resolveFreeOnlyLlmMode never returns a paid fal mode for 只用免費", () => {
+    expect(utteranceHasFreeOnly("只用免費")).toBe(true);
+    expect(resolveFreeOnlyLlmMode("fal_balanced", "只用免費")).toBe("nim");
+    expect(resolveFreeOnlyLlmMode("auto", "不要付費 fallback")).toBe("nim");
+    expect(resolveFreeOnlyLlmMode("nim", "隨便問一句")).toBe("nim");
+    expect(resolveFreeOnlyLlmMode("fal_quality", "幫我排步驟")).toBe("fal_quality");
+    expect(resolveFreeOnlyLlmMode(undefined, undefined)).toBe("nim");
   });
 
   it("delivery language on a project becomes dispatch_agent, not create_project", () => {

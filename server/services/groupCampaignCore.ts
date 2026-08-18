@@ -22,6 +22,7 @@ import {
   type AgentPlannerMode,
 } from "../../shared/agentPlanner";
 import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
+import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import {
   CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_NEW_PROJECTS,
@@ -305,7 +306,10 @@ export async function planGroupCampaign(input: {
   plannerMode?: AgentPlannerMode;
 }): Promise<GroupCampaignRow> {
   const { auth, groupId } = input;
-  const plannerMode = input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE;
+  const plannerMode = resolveFreeOnlyLlmMode(
+    input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE,
+    input.goal,
+  );
   requireGroup(auth, groupId);
   // 發起 campaign＝要求組代理在無人盯著時自己下令，所以要最高等級（command）
   await assertCampaignAuthority(auth, groupId);
@@ -371,7 +375,11 @@ export async function planGroupCampaign(input: {
         // 實扣就會超過剛才守門過的預留，差額走事後補扣＝繞過額度閘。
         maxTokens: campaignOutputTokenCeiling(plannerMode),
         timeoutMs: CAMPAIGN_PLAN_TIMEOUT_MS,
+        allowPaidFallback: plannerMode === "auto",
       });
+      if (plannerMode === "nim" && completion.provider !== "nvidia-nim") {
+        throw new LlmServiceError("只用免費模型不可呼叫付費規劃（gpt-5.6-luna）");
+      }
     } catch (err) {
       await refund(auth.user.id, groupId, reservedPoints, "組代理調度規劃失敗退回");
       throw new TRPCError({
@@ -384,7 +392,9 @@ export async function planGroupCampaign(input: {
       userId: auth.user.id,
       groupId,
       reserved: reservedPoints,
-      actual: llmPointsForUsageEntries([{ model: completion.model, usage: completion.usage }]) ?? reservedPoints,
+      actual: plannerMode === "nim"
+        ? 0
+        : llmPointsForUsageEntries([{ model: completion.model, usage: completion.usage }]) ?? reservedPoints,
       reason: `組代理調度規劃（${plannerLabel}）`,
     });
     const raw = completion.text;

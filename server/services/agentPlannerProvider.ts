@@ -224,19 +224,24 @@ export async function generateAgentPlanDraft(
     }
   };
 
-  const finish = (draft: CompletePlanDraft, completion: PlannerCompletion): AgentPlanProviderResult => ({
-    draft,
-    telemetry: {
-      requestedMode,
-      provider: completion.provider,
-      model: completion.model,
-      attemptCount,
-      fallbackFrom,
-      fallbackReason,
-      ...usage,
-    },
-    billing,
-  });
+  const finish = (draft: CompletePlanDraft, completion: PlannerCompletion): AgentPlanProviderResult => {
+    if (requestedMode === "nim" && completion.provider !== "nvidia-nim") {
+      throw new AgentPlannerServiceError("只用免費模型不可呼叫付費規劃（gpt-5.6-luna）", { billing: [] });
+    }
+    return {
+      draft,
+      telemetry: {
+        requestedMode,
+        provider: completion.provider,
+        model: completion.model,
+        attemptCount,
+        fallbackFrom,
+        fallbackReason,
+        ...usage,
+      },
+      billing,
+    };
+  };
 
   if (requestedMode === "auto") {
     try {

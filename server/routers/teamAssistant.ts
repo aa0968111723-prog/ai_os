@@ -7,6 +7,7 @@ import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError } from "../services/llmProvider";
+import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
@@ -1516,8 +1517,14 @@ ${historyBlock}使用者的問題：${input.message}`;
           signal: askSignal,
           buildPrompt,
           llm: (prompt) => {
-            const quality = input.mode ?? "nim";
-            return completeText({ prompt, mode: quality, timeoutMs: quality !== "nim" ? 120_000 : 60_000, signal: askSignal }).then(r => r.text);
+            const quality = resolveFreeOnlyLlmMode(input.mode ?? "nim", input.message);
+            return completeText({
+              prompt,
+              mode: quality,
+              timeoutMs: quality !== "nim" ? 120_000 : 60_000,
+              signal: askSignal,
+              allowPaidFallback: quality === "auto",
+            }).then(r => r.text);
           },
           tryToolCall: (json) => {
             const parsed = teamToolSchema.safeParse(json);

@@ -902,7 +902,8 @@ export function ProjectAssistant({
                       const isRunning = pendingKey === actKey;
                       // generate 動作套上使用者可能換過的模型；其餘動作照原樣
                       const gen = act.type === "generate" ? effectiveGenerate(act, actKey) : null;
-                      const chosenPlannerMode = plannerModeOverride[actKey] ?? defaultPlannerMode;
+                      const chosenPlannerMode = plannerModeOverride[actKey]
+                        ?? (answerMode === "nim" ? "nim" : defaultPlannerMode);
                       const payloadAct = gen
                         ? gen.action
                         : act.type === "plan_agent"

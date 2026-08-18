@@ -107,6 +107,7 @@ import {
   executionPlanFromGoal,
   matchAssistantCapabilityForGoal,
   parseGoalBudgetConstraints,
+  resolveFreeOnlyLlmMode,
   resolveWorkingProject,
   type AssistantCapabilityMatch,
 } from "../../shared/assistantSemanticResolution";
@@ -209,6 +210,13 @@ const siteActionProposalSchema = z.discriminatedUnion("type", [
     values: z.record(z.string().max(80), z.string().max(2000)),
   }),
   z.object({
+    type: z.literal("add_character"),
+    projectRef: z.string().max(8),
+    name: z.string().min(1).max(40),
+    appearance: z.string().min(1).max(500).optional(),
+    notes: z.string().max(500).optional(),
+  }),
+  z.object({
     type: z.literal("import_url"),
     projectRef: z.string().max(8),
     url: z.string().url().max(4_000),
@@ -232,6 +240,8 @@ const WRITE_SITE_ACTION_TYPES = new Set([
   "create_task",
   "send_dm",
   "import_url",
+  "add_character",
+  "add_database_row",
 ]);
 
 export function siteActionProposalsForPlan(
@@ -330,6 +340,7 @@ export type ResolvedSiteAction =
   | { type: "create_task"; groupId: string; projectId: string; projectTitle: string; title: string; description?: string; assigneeId?: string; assigneeName?: string; dueAt?: string; priority?: z.infer<typeof taskPrioritySchema>; label: string }
   | { type: "send_dm"; peerId: string; peerName: string; body: string; label: string }
   | { type: "add_database_row"; tableId: string; tableName: string; data: Record<string, string>; preview: string; label: string }
+  | { type: "add_character"; groupId: string; projectId: string; projectTitle: string; name: string; appearance: string; notes?: string; label: string }
   | { type: "import_url"; groupId: string; projectId: string; projectTitle: string; url: string; label: string };
 
 /** 可私訊／可指派的成員（代號 mN；與監督用的 uN 分開命名空間，兩者可同時存在） */
@@ -1737,9 +1748,18 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         }
         // Utterance constraints are execution authority: free_only never pays.
         const budget = parseGoalBudgetConstraints(goalFrame.constraints ?? []);
-        const qualityMode: AgentPlannerMode = budget.freeOnly ? "nim" : (input.mode ?? "nim");
+        const qualityMode: AgentPlannerMode = resolveFreeOnlyLlmMode(
+          budget.freeOnly ? "nim" : (input.mode ?? "nim"),
+          input.message,
+        );
         const isPaidMode = qualityMode !== "nim";
-        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: askSignal });
+        const completion = await completeText({
+          prompt,
+          mode: qualityMode,
+          timeoutMs: isPaidMode ? 120_000 : 60_000,
+          signal: askSignal,
+          allowPaidFallback: qualityMode === "auto",
+        });
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;

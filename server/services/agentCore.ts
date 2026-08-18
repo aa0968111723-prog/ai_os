@@ -35,6 +35,7 @@ import {
   type AgentPlannerTelemetry,
 } from "../../shared/agentPlanner";
 import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
+import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
@@ -661,7 +662,10 @@ export async function planAgentCore(input: {
   const { auth } = input;
   // 沒指定就用高品質檔（DEFAULT_AGENT_PLANNER_MODE）：規劃品質決定後面執行要燒多少點，
   // 這一步省錢往往是最貴的省法。花費逐次進帳本，額度不足會在下面被擋。
-  const plannerMode = input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE;
+  const plannerMode = resolveFreeOnlyLlmMode(
+    input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE,
+    input.goal,
+  );
   assertUuid(input.projectId, "專案編號");
   try {
     if (await overLimit(auth.user.id)) {
@@ -942,7 +946,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     userId: auth.user.id,
     groupId: project.groupId,
     reserved: reservedPoints,
-    actual: usagePoints ?? reservedPoints,
+    actual: plannerMode === "nim" ? 0 : (usagePoints ?? reservedPoints),
     reason: `AI 代理規劃（${plannerLabel}）`,
   });
 
@@ -1075,8 +1079,11 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
   const clarifications = (run.contextSlots?.planningClarifications ?? "").trim();
   const round = run.contextSlots?.planningClarificationRound ?? 1;
   const goal = run.goal;
-  const plannerMode = (run.plannerTelemetry as AgentPlannerTelemetry | null)?.requestedMode
-    ?? DEFAULT_AGENT_PLANNER_MODE;
+  const plannerMode = resolveFreeOnlyLlmMode(
+    (run.plannerTelemetry as AgentPlannerTelemetry | null)?.requestedMode
+      ?? DEFAULT_AGENT_PLANNER_MODE,
+    goal,
+  );
 
   // Mock / e2e：不清真 LLM，用固定計畫清掉 blocking 後進 awaiting_approval
   if (isMockMode()) {
@@ -1211,7 +1218,7 @@ ${clarifications || "（無額外文字）"}
     userId: auth.user.id,
     groupId: project.groupId,
     reserved: reservedPoints,
-    actual: usagePoints ?? reservedPoints,
+    actual: plannerMode === "nim" ? 0 : (usagePoints ?? reservedPoints),
     reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
   });
 
