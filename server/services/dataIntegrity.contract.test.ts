@@ -15,12 +15,13 @@ describe("P0-1 story persist always sends expectedRev", () => {
     expect(persist).toContain("baseline: { content: opts?.baselineContent ?? existing.content }");
     expect(persist).toContain("不落衝突快照");
     expect(persist).toContain("以 SQL 為準");
-    const applyBlock = persist.slice(
-      persist.indexOf("const { row } = await applyWithRevision"),
-      persist.indexOf("isRevisionConflictError"),
+    const persistFn = persist.slice(persist.indexOf("export async function persistStoryDoc"));
+    const applyBlock = persistFn.slice(
+      persistFn.indexOf("await applyWithRevision"),
+      persistFn.indexOf("isRevisionConflictError"),
     );
     expect(applyBlock).toContain("await persistStorySnapshot");
-    const conflictBlock = persist.slice(persist.indexOf("isRevisionConflictError"), persist.indexOf("throw err;"));
+    const conflictBlock = persistFn.slice(persistFn.indexOf("isRevisionConflictError"), persistFn.indexOf("throw err;"));
     expect(conflictBlock).not.toContain("persistStorySnapshot");
   });
 
