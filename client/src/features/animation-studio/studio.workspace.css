@@ -582,6 +582,12 @@ body.studio-workspace { overflow: hidden; }
   scroll-snap-align: start;
   overflow: visible;
 }
+/* Open shot menu: keep the fixed scrim inside this card's stacking
+   context so 複製/刪除 stay above the transparent overlay. Without
+   this, the scrim (fixed z-50) covers the menu — click only closes it. */
+.studio-tlshot:has(.studio-menu) {
+  z-index: 60;
+}
 .studio-tlshot.is-active {
   border-color: var(--primary-solid);
   box-shadow: 0 0 0 1px var(--primary-solid);

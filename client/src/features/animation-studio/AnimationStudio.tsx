@@ -283,11 +283,12 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     },
   });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
+  const [shotActionError, setShotActionError] = useState<string | null>(null);
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created, variables) => {
       const ack = shouldApplySceneWriteAck({
         mountedProjectId: projectIdRef.current,
-        writeProjectId: created?.projectId,
+        writeProjectId: created?.projectId ?? projectIdRef.current,
         mountedShotId: activeShotIdRef.current,
         originShotId: variables.sceneId,
         followSelection: true,
@@ -296,6 +297,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       if (ack.applyInvalidate) invalidateScenes();
       if (ack.followCreated && created?.id) switchTo(created.id);
     },
+    onError: (err) => {
+      setShotActionError(err.message || "複製這一鏡失敗");
+    },
   });
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
   insertAfterMutateRef.current = insertAfter.mutateAsync;
@@ -303,6 +307,14 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   if (!insertQueueRef.current) {
     insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
   }
+  /** Studio timeline 複製：不走 insertAfterQueue 的 silent catch。失敗要出 error。 */
+  const duplicateShot = (sceneId: string) => {
+    setShotActionError(null);
+    void insertAfter.mutateAsync({ sceneId, duplicate: true }).catch((err: unknown) => {
+      const message = err instanceof Error && err.message ? err.message : "複製這一鏡失敗";
+      setShotActionError(message);
+    });
+  };
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -559,6 +571,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           </>
         )}
 
+        {shotActionError && (
+          <p className="error studio__alert" role="alert">{shotActionError}</p>
+        )}
         {storageFull && (
           <p className="error studio__alert" role="alert">
             本機草稿空間已滿，這張白板沒有存起來——請先把手稿「存成這一鏡的畫面」，或清掉其他鏡的草稿。
@@ -661,7 +676,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onMove={(id, direction) => move.mutate({ sceneId: id, direction })}
           onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
           onNewShot={createShot}
-          onDuplicate={(id) => insertQueueRef.current?.enqueue(id, { duplicate: true })}
+          onDuplicate={duplicateShot}
           onDelete={(id) => removeShot.mutate({ sceneId: id })}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />

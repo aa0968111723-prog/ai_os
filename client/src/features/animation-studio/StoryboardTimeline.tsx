@@ -203,7 +203,12 @@ export function StoryboardTimeline({
                       <button
                         type="button"
                         role="menuitem"
-                        onClick={() => { setMenuId(null); onDuplicate(shot.id); }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuId(null);
+                          onDuplicate(shot.id);
+                        }}
                       >
                         <Icon name="Copy" size={13} /> 複製這一鏡
                       </button>

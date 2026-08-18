@@ -210,6 +210,18 @@ describe("Inspector 不新增資料格式", () => {
     expect(studio).toContain("trpc.scenes.listByProject.useQuery");
   });
 
+  it("創作室 複製這一鏡 走 insertAfter(duplicate) 且失敗要出 error，不是 silent queue", () => {
+    expect(studio).toContain("const duplicateShot = (sceneId: string)");
+    expect(studio).toContain("mutateAsync({ sceneId, duplicate: true })");
+    expect(studio).toContain("onDuplicate={duplicateShot}");
+    expect(studio).not.toContain("enqueue(id, { duplicate: true })");
+    expect(studio).toContain("setShotActionError");
+    const timeline = readFileSync(resolve(dir, "StoryboardTimeline.tsx"), "utf8");
+    expect(timeline).toContain("複製這一鏡");
+    expect(timeline).toContain("onDuplicate(shot.id)");
+    expect(declarations).toContain(".studio-tlshot:has(.studio-menu)");
+  });
+
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
     expect(studio).toContain("insertQueueRef.current?.enqueue(shot.id)");
     expect(studio).not.toContain("insertQueueOriginRef");

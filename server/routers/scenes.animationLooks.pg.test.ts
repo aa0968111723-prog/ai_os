@@ -34,6 +34,7 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
       await db.delete(schema.stories).where(eq(schema.stories.projectId, projectId));
       await db.delete(schema.characterLooks).where(eq(schema.characterLooks.projectId, projectId));
       await db.delete(schema.characters).where(eq(schema.characters.projectId, projectId));
+      await db.delete(schema.assets).where(eq(schema.assets.projectId, projectId));
       await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
     }
     for (const userId of leftovers.users) {
@@ -75,6 +76,54 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const updated = await scenes.setCards({ sceneId: shot.id, characterIds: [afu.id] });
     expect(updated.characterIds).toEqual([afu.id]);
     expect(updated.lookIds).toBeNull();
+  });
+
+  it("複製 increases listByProject by 1 and the new row sits after the source", async () => {
+    const { project, userId, groupId, scenes } = await seed("創作室複製這一鏡");
+    const [lian] = await db.insert(schema.characters).values({
+      projectId: project.id, groupId, name: "小蓮", appearance: "圓臉", createdBy: userId,
+    }).returning();
+    const [look] = await db.insert(schema.characterLooks).values({
+      projectId: project.id, groupId, characterId: lian.id, name: "除夕夜", costume: "大紅棉襖", createdBy: userId,
+    }).returning();
+    const assetId = randomUUID();
+    await db.insert(schema.assets).values({
+      id: assetId,
+      projectId: project.id,
+      groupId,
+      kind: "image",
+      title: "第04鏡畫面",
+      url: `/api/assets/${assetId}/file`,
+    });
+    const [before] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "第03鏡",
+    }).returning();
+    const [source] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "第04鏡",
+      characterIds: [lian.id], lookIds: [look.id], assetId,
+      camera: { shotSize: "近景" },
+    }).returning();
+    const [after] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 2, title: "第05鏡",
+    }).returning();
+
+    const listedBefore = await scenes.listByProject({ projectId: project.id });
+    expect(listedBefore).toHaveLength(3);
+
+    const dup = await scenes.insertAfter({ sceneId: source.id, duplicate: true });
+    expect(dup.projectId).toBe(project.id);
+    expect(dup.lookIds).toEqual([look.id]);
+    expect(dup.assetId).toBe(assetId);
+    expect(dup.characterIds).toEqual([lian.id]);
+
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(listedBefore.length + 1);
+    const sourceIdx = listed.findIndex((row) => row.id === source.id);
+    expect(sourceIdx).toBe(1);
+    expect(listed[sourceIdx + 1]?.id).toBe(dup.id);
+    expect(listed.map((row) => row.id)).toEqual([before.id, source.id, dup.id, after.id]);
+    expect(listed[sourceIdx + 1]?.lookIds).toEqual([look.id]);
+    expect(listed[sourceIdx + 1]?.assetId).toBe(assetId);
   });
 
   it("duplicate copies look, camera, and performance", async () => {

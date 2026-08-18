@@ -32,6 +32,7 @@ describe("animation shot writes stay consistent", () => {
     expect(block).toContain("camera: dup ? cur.camera : null");
     expect(block).toContain("performance: dup ? cur.performance : null");
     expect(block).toContain("storySceneId: dup ? cur.storySceneId : null");
+    expect(block).toContain("assetId: dup ? cur.assetId : null");
   });
 
   it("setCards auto-strips orphan looks when only characterIds is sent", () => {
