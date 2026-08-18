@@ -124,7 +124,7 @@ export async function materializeTkuZenPromoContent(input: {
       name: card.name,
       appearance: card.appearance,
       notes: card.notes,
-      referenceAssetId: card.key === "xiaohua" ? (sheetAssetIds.costume ?? null) : null,
+      referenceAssetId: card.key === "xiaohua" ? (sheetAssetIds.threeview ?? null) : null,
       createdBy: input.userId,
     }).returning({ id: schema.characters.id });
     characterIds[card.key] = row.id;
@@ -320,7 +320,7 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
     .map((s) => snap.acts.find((a) => a.id === s.storySceneId)?.orderIndex ?? 0);
   if (turtleShotActs.some((act) => act < 3)) throw new Error("龜龜 bound before the third spoken line");
 
-  if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.costume.file))) {
+  if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
     if (xiaohua.referenceAssetId == null) throw new Error("lock sheet uploaded but character.referenceAssetId empty");
   }
 }

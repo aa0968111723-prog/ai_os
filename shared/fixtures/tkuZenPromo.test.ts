@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHAR_APPEARANCE_MAX, CHAR_NOTES_MAX } from "../cardLimits";
 import {
@@ -23,6 +25,7 @@ import {
   TKU_ZEN_SHOTS,
   TKU_ZEN_XIAOHUA_APPEARANCE,
   TKU_ZEN_XIAOHUA_COSTUME,
+  TKU_ZEN_XIAOHUA_IDENTITY,
   TKU_ZEN_XIAOHUA_SHEETS,
   tkuZenDialogueLines,
   tkuZenHasForbidden,
@@ -69,6 +72,7 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(xiaohua?.appearance).toBe(TKU_ZEN_XIAOHUA_APPEARANCE);
     expect(xiaohua?.appearance).toContain("大二化工");
     expect(xiaohua?.appearance).toContain("白帽T");
+    expect(xiaohua?.appearance).toContain("短髮");
     expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
     expect(xiaohua?.appearance).not.toContain("針織外套");
     expect(xiaohua?.appearance).not.toContain("年輕男性");
@@ -92,9 +96,13 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_FORBIDDEN).not.toContain("白帽T");
     expect(TKU_ZEN_FORBIDDEN).toContain("安倢");
     expect(TKU_ZEN_FORBIDDEN).toContain("七幕");
+    expect(TKU_ZEN_FORBIDDEN).toContain("第七幕");
+    expect(TKU_ZEN_FORBIDDEN).toContain("走上克難坡");
+    expect(TKU_ZEN_FORBIDDEN).toContain("茶會社課擺攤");
     expect(TKU_ZEN_FORBIDDEN).toContain("針織外套");
     expect(TKU_ZEN_FORBIDDEN).toContain("年輕男性");
     expect(TKU_ZEN_FORBIDDEN).toContain("黑長直髮");
+    expect(TKU_ZEN_SHOTS).toHaveLength(6);
     expect(TKU_ZEN_SHOTS.every((s) => s.dialogue.trim().length > 0)).toBe(true);
     expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/走上克難坡|茶會社課擺攤|收尾|第七幕/);
     expect(TKU_ZEN_ACTS[0]?.title).toContain("校門口");
@@ -130,9 +138,26 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(map).not.toContain("A1-S01");
     expect(map).not.toContain("成片稿");
     expect(map).toContain("粉橘短髮女孩");
+    expect(map).toContain("pink_bob_girl_threeview_v01.png");
     expect(map).not.toContain("年輕男性");
     expect(map).not.toContain("黑長直髮");
+    expect(map).not.toContain("走上克難坡");
+    expect(map).not.toContain("第七幕");
     expect(TKU_ZEN_LIBRARY.boards.files.join("\n")).not.toMatch(/A[1-4]-S/);
     expect(TKU_ZEN_LIBRARY.scripts.files.join("\n")).toContain("SHOTLIST.md");
+  });
+
+  it("source lock: 6 spoken A–F only; FORBIDDEN never lists 白帽T", () => {
+    const src = readFileSync(join(process.cwd(), "shared/fixtures/tkuZenPromo.ts"), "utf8");
+    const forbidden = src.slice(src.indexOf("export const TKU_ZEN_FORBIDDEN"), src.indexOf("] as const;", src.indexOf("export const TKU_ZEN_FORBIDDEN")));
+    const acts = src.slice(src.indexOf("export const TKU_ZEN_ACTS"), src.indexOf("export const TKU_ZEN_SHOTS"));
+    expect(forbidden).not.toContain("白帽T");
+    expect(acts).not.toMatch(/act:\s*7/);
+    expect(acts).not.toContain("走上克難坡");
+    expect(acts).not.toContain("茶會社課擺攤");
+    expect(acts).not.toContain("第七幕");
+    expect(TKU_ZEN_ACTS).toHaveLength(6);
+    expect(TKU_ZEN_XIAOHUA_IDENTITY).toContain("白帽T");
+    expect(TKU_ZEN_XIAOHUA_IDENTITY).toContain("短髮");
   });
 });

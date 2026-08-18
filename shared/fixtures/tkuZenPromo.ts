@@ -61,6 +61,9 @@ export const TKU_ZEN_FORBIDDEN = [
   "安倢",
   "慕恩",
   "七幕",
+  "第七幕",
+  "走上克難坡",
+  "茶會社課擺攤",
   "針織外套",
   "粉橘短鮑伯",
   "宿舍夜",
@@ -68,20 +71,35 @@ export const TKU_ZEN_FORBIDDEN = [
   "黑長直髮",
 ] as const;
 
-export const TKU_ZEN_XIAOHUA_COSTUME = "白帽T、粉橘短髮，腳本未換裝";
+/** SHOTLIST spoken identity. 白帽T is the script lock — never put it in FORBIDDEN. */
+export const TKU_ZEN_XIAOHUA_COSTUME = "白帽T、短髮，腳本未換裝";
 
-export const TKU_ZEN_XIAOHUA_IDENTITY = "大二化工、粉橘短髮女孩、白帽T";
+export const TKU_ZEN_XIAOHUA_IDENTITY = "大二化工、白帽T、短髮";
 
+/**
+ * Operator visual lock PNGs (粉橘短髮女孩, knit + skirt on disk).
+ * Identity text stays 白帽T／短髮. Do not copy knit/skirt into appearance.
+ */
 export const TKU_ZEN_XIAOHUA_SHEETS = {
-  costume: {
-    file: "SHOTLIST.md",
+  threeview: {
+    file: "pink_bob_girl_threeview_v01.png",
     role: "costume-lock" as const,
-    description: "小華定裝鎖定：大二化工、白帽T、粉橘短髮女孩。來源 lip-sync/SHOTLIST.md A–F。不換裝。",
+    description: "operator lock PNG：角色圖\\粉橘短髮女孩 threeview。腳本身份仍是大二化工、白帽T、短髮。不換裝。",
+  },
+  expression: {
+    file: "pink_bob_girl_expression_sheet_v01.png",
+    role: "expression" as const,
+    description: "operator lock PNG：粉橘短髮女孩表情表。同一張臉，腳本不換裝。",
+  },
+  action: {
+    file: "pink_bob_girl_action_sheet_v01.png",
+    role: "action" as const,
+    description: "operator lock PNG：粉橘短髮女孩動作表。同一身體比例，腳本不換裝。",
   },
 } as const;
 
 export const TKU_ZEN_XIAOHUA_APPEARANCE =
-  `${TKU_ZEN_XIAOHUA_IDENTITY}。定裝：${TKU_ZEN_XIAOHUA_COSTUME}。視覺鎖定腳本\\SHOTLIST.md。腳本未換裝。`;
+  `${TKU_ZEN_XIAOHUA_IDENTITY}。定裝：${TKU_ZEN_XIAOHUA_COSTUME}。視覺鎖定角色圖\\粉橘短髮女孩（${TKU_ZEN_XIAOHUA_SHEETS.threeview.file}）。腳本未換裝。`;
 
 export const TKU_ZEN_PROMO_SCRIPT = `角色：小華（${TKU_ZEN_XIAOHUA_IDENTITY}）、禪定龜龜（吉祥物龜龜）
 場景：校門口、夕陽
@@ -105,8 +123,12 @@ export const TKU_ZEN_LIBRARY_ROOT = String.raw`D:\淡大劇本`;
 
 export const TKU_ZEN_LIBRARY = {
   xiaohua: {
-    folder: String.raw`腳本`,
-    files: [TKU_ZEN_XIAOHUA_SHEETS.costume.file],
+    folder: String.raw`角色圖\粉橘短髮女孩`,
+    files: [
+      TKU_ZEN_XIAOHUA_SHEETS.threeview.file,
+      TKU_ZEN_XIAOHUA_SHEETS.expression.file,
+      TKU_ZEN_XIAOHUA_SHEETS.action.file,
+    ],
   },
   turtle: { folder: String.raw`角色圖\吉祥物龜龜`, files: [] as string[] },
   gate: { folder: String.raw`場景\校門口`, files: [] as string[] },
@@ -117,7 +139,7 @@ export const TKU_ZEN_LIBRARY = {
   },
   boards: {
     folder: String.raw`腳本`,
-    files: [TKU_ZEN_XIAOHUA_SHEETS.costume.file],
+    files: ["SHOTLIST.md"],
   },
   scripts: {
     folder: String.raw`腳本`,
@@ -143,8 +165,9 @@ export const TKU_ZEN_CHARACTERS = [
     name: "小華",
     appearance: TKU_ZEN_XIAOHUA_APPEARANCE,
     notes: [
-      TKU_ZEN_XIAOHUA_SHEETS.costume.description,
-      `路徑：${tkuZenLibraryPath(TKU_ZEN_LIBRARY.scripts.folder, "SHOTLIST.md")}`,
+      TKU_ZEN_XIAOHUA_SHEETS.threeview.description,
+      `路徑：${tkuZenLibraryPath(TKU_ZEN_LIBRARY.xiaohua.folder, TKU_ZEN_XIAOHUA_SHEETS.threeview.file)}`,
+      `對白鎖：${tkuZenLibraryPath(TKU_ZEN_LIBRARY.scripts.folder, "SHOTLIST.md")}`,
     ].join(" "),
     firstAct: 1,
     libraryFolder: TKU_ZEN_LIBRARY.xiaohua.folder,
@@ -165,8 +188,8 @@ export const TKU_ZEN_LOOKS = [
     character: "xiaohua" as const,
     name: "定裝",
     costume: TKU_ZEN_XIAOHUA_COSTUME,
-    sheet: "costume" as const,
-    notes: tkuZenLibraryPath(TKU_ZEN_LIBRARY.scripts.folder, "SHOTLIST.md"),
+    sheet: "threeview" as const,
+    notes: tkuZenLibraryPath(TKU_ZEN_LIBRARY.xiaohua.folder, TKU_ZEN_XIAOHUA_SHEETS.threeview.file),
   },
   {
     character: "turtle" as const,
@@ -325,7 +348,9 @@ export function tkuZenLibraryMapContent(): string {
     "D:\\淡大劇本 那條長稿不是小華。不要寫進動畫組小華專案。",
     "",
     `小華 visual lock = ${TKU_ZEN_XIAOHUA_IDENTITY}／${TKU_ZEN_XIAOHUA_COSTUME}`,
-    TKU_ZEN_XIAOHUA_SHEETS.costume.description,
+    `operator PNG（粉橘短髮女孩，knit+skirt on disk；身份文字仍是白帽T）：`,
+    ...TKU_ZEN_LIBRARY.xiaohua.files.map((file) => `  - ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.xiaohua.folder, file)}`),
+    TKU_ZEN_XIAOHUA_SHEETS.threeview.description,
     "",
     `禪定龜龜 = ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.turtle.folder)}（第三句）`,
     `校門口 = ${tkuZenLibraryPath(TKU_ZEN_LIBRARY.gate.folder)}`,
