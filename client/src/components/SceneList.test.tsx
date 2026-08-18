@@ -47,7 +47,22 @@ vi.mock("../api", () => ({
         },
       },
       generateInto: { useMutation: () => ({ mutate: generateMutate, isPending: false, error: null }) },
-      insertAfter: { useMutation: () => ({ mutate: insertAfterMutate, isPending: false, error: null }) },
+      insertAfter: {
+        useMutation: (opts?: { onSuccess?: (row: { id: string }) => void }) => ({
+          mutate: (input: { sceneId: string; duplicate?: boolean }) => {
+            insertAfterMutate(input);
+            opts?.onSuccess?.({ id: `new-from-${input.sceneId}` });
+          },
+          mutateAsync: async (input: { sceneId: string; duplicate?: boolean }) => {
+            insertAfterMutate(input);
+            const created = { id: `new-from-${input.sceneId}` };
+            opts?.onSuccess?.(created);
+            return created;
+          },
+          isPending: false,
+          error: null,
+        }),
+      },
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: {
         useMutation: (opts?: { onSuccess?: () => void }) => {
@@ -272,6 +287,25 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
+  });
+
+  it("同一格連點插入：第二次起用上一格新 id，避免 LIFO", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" }), scene({ id: "s2" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    const btn = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    await user.click(btn);
+    await user.click(btn);
+    await user.click(btn);
+    await vi.waitFor(() => expect(insertAfterMutate).toHaveBeenCalledTimes(3));
+    expect(insertAfterMutate.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "s1" },
+      { sceneId: "new-from-s1" },
+      { sceneId: "new-from-new-from-s1" },
+    ]);
   });
 
   it("複製這一鏡：帶 duplicate 旗標（設定跟著走，成品不跟）", async () => {

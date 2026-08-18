@@ -213,4 +213,91 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const again = await story.get({ projectId: project.id });
     expect(again.story?.content).toBe(latest);
   });
+
+  it("repeated insertAfter on the same sceneId is LIFO; concurrent same-id still yields 10 distinct UUIDs", async () => {
+    const { project, scenes } = await seed("併發插入");
+    const [anchor] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "錨點",
+    }).returning();
+    const [tail] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "原本下一鏡",
+    }).returning();
+
+    const sequential: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      sequential.push((await scenes.insertAfter({ sceneId: anchor.id })).id);
+    }
+    const afterSeq = await scenes.listByProject({ projectId: project.id });
+    expect(afterSeq.map((s) => s.id)).toEqual([anchor.id, ...[...sequential].reverse(), tail.id]);
+
+    const created = await Promise.all(
+      Array.from({ length: 10 }, () => scenes.insertAfter({ sceneId: anchor.id })),
+    );
+    const newIds = created.map((row) => row.id);
+    expect(new Set(newIds).size).toBe(10);
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(17);
+    expect(listed[0]?.id).toBe(anchor.id);
+    expect(listed.at(-1)?.id).toBe(tail.id);
+    expect(new Set(listed.map((s) => s.orderIndex)).size).toBe(listed.length);
+    expect(new Set(listed.map((s) => s.id))).toEqual(new Set([anchor.id, tail.id, ...sequential, ...newIds]));
+  });
+
+  it("chained insertAfter (next target = created.id) keeps click order after the row", async () => {
+    const { project, scenes } = await seed("串接插入");
+    const [anchor] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "錨點",
+    }).returning();
+    const [tail] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "原本下一鏡",
+    }).returning();
+
+    const clickOrder: string[] = [];
+    let after = anchor.id;
+    for (let i = 0; i < 10; i++) {
+      const row = await scenes.insertAfter({ sceneId: after });
+      clickOrder.push(row.id);
+      after = row.id;
+    }
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed.map((s) => s.id)).toEqual([anchor.id, ...clickOrder, tail.id]);
+  });
+
+  it("project B list is unchanged while A insertAfter runs; B cannot restore-into A's order", async () => {
+    const a = await seed("專案A");
+    const b = await seed("專案B");
+    const [shotA] = await db.insert(schema.scenes).values({
+      projectId: a.project.id, orderIndex: 0, title: "A-1",
+    }).returning();
+    const [shotB] = await db.insert(schema.scenes).values({
+      projectId: b.project.id, orderIndex: 0, title: "B-1",
+    }).returning();
+
+    const inserted = await a.scenes.insertAfter({ sceneId: shotA.id });
+    const listB = await b.scenes.listByProject({ projectId: b.project.id });
+    expect(listB.map((s) => s.id)).toEqual([shotB.id]);
+    expect(listB.some((s) => s.id === inserted.id)).toBe(false);
+
+    const listA = await a.scenes.listByProject({ projectId: a.project.id });
+    expect(listA.map((s) => s.id)).toEqual([shotA.id, inserted.id]);
+
+    await expect(b.scenes.insertAfter({ sceneId: shotA.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("restore appends to the end (does not reuse the old orderIndex)", async () => {
+    const { project, scenes } = await seed("還原接尾");
+    const [first] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "第一",
+    }).returning();
+    const [second] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "第二",
+    }).returning();
+    await scenes.remove({ sceneId: first.id });
+    await scenes.restore({ sceneId: first.id });
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed.map((s) => s.id)).toEqual([second.id, first.id]);
+    expect(listed[1]?.orderIndex).toBeGreaterThan(listed[0]?.orderIndex ?? 0);
+  });
 });

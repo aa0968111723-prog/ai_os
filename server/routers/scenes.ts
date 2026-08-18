@@ -776,6 +776,8 @@ export const scenesRouter = router({
    * 在某一鏡之後插入一格（整理分鏡用）。
    *
    * 先前只有「加到最後」＋↑↓ 一路搬——想在第 3 鏡後面補一格，要按十幾次箭頭。
+   * 同一 sceneId 連打 N 次＝每次都插在錨點正後方，先插入的會被後來的往下推（LIFO）。
+   * 產品要的「點擊順序」由前端 insertAfterQueue 串新 id；這裡只保證鎖內不撞 orderIndex。
    * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定；
    * **不複製成品**（assetId／narrationAssetId）：那是花過點數的產物，複製一份引用
    * 會讓兩格指向同一素材，刪一格就互相影響。新格一律從 todo 開始。

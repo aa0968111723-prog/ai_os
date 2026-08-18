@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 import { trpc } from "../api";
 import { SceneCardBinding, type SceneCardLookup } from "./SceneCardBinding";
 import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
+import { createInsertAfterQueue } from "../lib/insertAfterQueue";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -410,6 +411,12 @@ const SceneRow = memo(function SceneRow({
   });
   // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
   const insertAfter = trpc.scenes.insertAfter.useMutation({ onSuccess: () => invalidate() });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   const isAwaitingApproval = s.pendingGenStatus === "awaiting_approval";
@@ -689,10 +696,10 @@ const SceneRow = memo(function SceneRow({
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
           <button
             style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
-            disabled={insertAfter.isPending}
+            aria-busy={insertAfter.isPending || undefined}
             aria-label="在這之後插入一鏡"
             title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
-            onClick={() => insertAfter.mutate({ sceneId: s.id })}
+            onClick={() => insertQueueRef.current?.enqueue(s.id)}
           >
             <Icon name="Plus" size={16} />
           </button>
