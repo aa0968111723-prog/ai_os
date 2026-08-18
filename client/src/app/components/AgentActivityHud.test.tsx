@@ -40,10 +40,10 @@ vi.mock("../../api", () => ({
         },
       },
       discard: {
-        useMutation: (opts?: { onSuccess?: () => void }) => ({
+        useMutation: (opts?: { onSuccess?: (data: unknown, input: { runId: string }) => void }) => ({
           mutate: (input: { runId: string }) => {
             discardMutate(input);
-            opts?.onSuccess?.();
+            opts?.onSuccess?.(undefined, input);
           },
           isPending: false,
           error: null,
@@ -168,23 +168,7 @@ describe("AgentActivityHud", () => {
     expect(screen.getByText(/需要你補充資訊/)).toBeVisible();
   });
 
-  it("停 on leftover 0/6 falls back to discard when stop is rejected as already-ended", async () => {
-    const user = userEvent.setup();
-    stopShouldFail = true;
-    overviewRuns = [run({
-      status: "awaiting_approval",
-      doneSteps: 0,
-      totalSteps: 6,
-      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
-    })];
-    render(<AgentActivityHud groupId="g1" />);
-    await user.click(screen.getByRole("button", { name: /停/ }));
-    expect(stopMutate).toHaveBeenCalledWith({ runId: "run-1" });
-    expect(discardMutate).toHaveBeenCalledWith({ runId: "run-1" });
-    stopShouldFail = false;
-  });
-
-  it("停 on leftover 0/6 待你過目 persists stopped and hides the toast after reload", async () => {
+  it("停 on leftover 0/6 待你過目 calls discard (not stop) so reload cannot resurrect the toast", async () => {
     const user = userEvent.setup();
     overviewRuns = [run({
       status: "awaiting_approval",
@@ -196,14 +180,9 @@ describe("AgentActivityHud", () => {
     const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText("待你過目")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /停/ }));
-    expect(stopMutate).toHaveBeenCalledWith({ runId: "run-1" });
-    overviewRuns = [run({
-      status: "stopped",
-      doneSteps: 0,
-      totalSteps: 6,
-      revision: 2_000,
-      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
-    })];
+    expect(discardMutate).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(stopMutate).not.toHaveBeenCalled();
+    overviewRuns = [];
     rerender(<AgentActivityHud groupId="g1" />);
     await waitFor(() => {
       expect(container).toBeEmptyDOMElement();

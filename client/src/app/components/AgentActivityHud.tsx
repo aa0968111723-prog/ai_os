@@ -81,7 +81,16 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
   );
 
   const discard = trpc.agents.discard.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      const runId = variables?.runId;
+      const old = runId ? runCacheRef.current.get(runId) : undefined;
+      if (old && runId) {
+        runCacheRef.current.set(runId, {
+          ...old,
+          status: "discarded",
+          revision: runRevision(old) + 1,
+        });
+      }
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
     },
     onError: () => {
@@ -94,15 +103,7 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     onSuccess: () => {
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
     },
-    onError: (_err, variables) => {
-      const runId = variables?.runId;
-      const row = runId ? runCacheRef.current.get(runId) : undefined;
-      // Leftover 0/N「待你過目」used to reject stop as already-ended.
-      // discard already persists awaiting_approval → discarded (HUD-hidden).
-      if (runId && row?.status === "awaiting_approval") {
-        discard.mutate({ runId });
-        return;
-      }
+    onError: () => {
       setStoppingId(null);
       stopClickedAtRef.current = null;
     },
@@ -255,7 +256,14 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
             clearPendingTheaterSuggest();
             setStoppingId(lead.id);
             stopClickedAtRef.current = Date.now();
-            stop.mutate({ runId: lead.id });
+            // Leftover 0/N「待你過目」is awaiting_approval. 停 used to call
+            // stop, which rejected as already-ended — toast survived reload.
+            // discard already persists discarded (overview omits it).
+            if (lead.status === "awaiting_approval") {
+              discard.mutate({ runId: lead.id });
+            } else {
+              stop.mutate({ runId: lead.id });
+            }
           }}
         >
           <Icon name="CircleStop" size={13} />

@@ -328,7 +328,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
-    expect(parse).toContain("rewritePersistedXiaohuaShotCopy(row, bound)");
+    expect(parse).toContain("rewritePersistedXiaohuaShotCopy(row, bound || xiaohuaIds.size > 0)");
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
     expect(lock).toContain("lockXiaohuaAct1Location");
@@ -377,13 +377,14 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
     expect(hud).toContain("Authoritative overview omitted this run");
+    expect(hud).toContain('lead.status === "awaiting_approval"');
+    expect(hud).toContain("discard.mutate");
     const stopFn = agentCore.slice(agentCore.indexOf("export async function stopAgentCore"), agentCore.indexOf("export async function listAgentRunsForProject"));
     expect(stopFn).toContain("canStopAgentRunStatus");
     expect(stopFn).toContain("awaiting_approval");
     expect(stopFn).toContain('status: "stopped"');
     expect(stopFn).toContain("Never return the pre-update row");
     expect(stopFn).not.toContain("return stopped ?? run");
-    expect(hud).toContain("discard.mutate");
   });
 
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
