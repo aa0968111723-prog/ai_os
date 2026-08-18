@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { TKU_ZEN_SHOTLIST_LINES } from "./tkuZenPromo";
 import {
   XIAOHUA_SEVEN_ACT_SCRIPT,
   XIAOHUA_SEVEN_ACTS,
   xiaohuaSevenActCharCount,
 } from "./xiaohuaSevenAct";
 
-describe("小華七幕 local ingest fixture", () => {
-  it("is a ~1k 7-act script, not the 6-beat SHOTLIST rewrite", () => {
-    expect(XIAOHUA_SEVEN_ACTS).toHaveLength(7);
-    const chars = xiaohuaSevenActCharCount();
-    expect(chars).toBeGreaterThan(800);
-    expect(chars).toBeLessThan(2_000);
-    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain("第七幕");
-    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain("小華");
-    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain("禪定龜龜");
-    expect(XIAOHUA_SEVEN_ACT_SCRIPT).not.toMatch(/媽媽叫醒|安倢|白帽T/);
+describe("retired 小華七幕 alias → A–F SHOTLIST", () => {
+  it("is the 6-beat 白帽T SHOTLIST, not 安倢／慕恩 七幕", () => {
+    expect(XIAOHUA_SEVEN_ACTS).toHaveLength(6);
+    expect(xiaohuaSevenActCharCount()).toBe(XIAOHUA_SEVEN_ACT_SCRIPT.length);
+    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain("白帽T");
+    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain("校門口");
+    expect(XIAOHUA_SEVEN_ACT_SCRIPT).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
+    expect(XIAOHUA_SEVEN_ACT_SCRIPT).not.toMatch(/第七幕|安倢|慕恩|媽媽|針織外套|茶會字卡/);
   });
 });

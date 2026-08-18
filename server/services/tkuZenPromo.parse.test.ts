@@ -12,8 +12,8 @@ describe("淡江禪學社 parse 150s fallback", () => {
     const plan = mockStoryExtract(TKU_ZEN_PROMO_SCRIPT);
     expect(plan.characters.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
     expect(plan.characters[0]?.appearance).toContain("大二化工");
-    expect(plan.characters[0]?.costume ?? "").toMatch(/針織外套|粉橘/);
-    expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["克難坡"]));
+    expect(plan.characters[0]?.costume ?? "").toMatch(/白帽T|短髮/);
+    expect(plan.locations.map((l) => l.name)).toEqual(expect.arrayContaining(["校門口", "夕陽"]));
     const spoken = plan.scenes
       .flatMap((scene) => scene.shots)
       .map((shot) => tkuZenSpokenDialogue(`${shot.dialogue ?? ""}\n${shot.voiceover ?? ""}\n${shot.prompt ?? ""}`))
@@ -24,6 +24,6 @@ describe("淡江禪學社 parse 150s fallback", () => {
     expect(tkuZenHasForbidden(JSON.stringify(plan))).toEqual([]);
     const blob = JSON.stringify(plan);
     for (const line of TKU_ZEN_SHOTLIST_LINES) expect(blob).toContain(line);
-    expect(blob).not.toMatch(/走上克難坡|七幕|白帽T|安倢/);
+    expect(blob).not.toMatch(/走上克難坡|七幕|針織外套|安倢|媽媽/);
   });
 });

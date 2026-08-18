@@ -16,7 +16,7 @@ describe("assistant persisted story context", () => {
     });
     expect(block).toContain("故事全文");
     expect(block).toContain("我是大二化工系的小華");
-    expect(block).toContain("第七幕");
+    expect(block).toContain("校門口");
     expect(block).toContain("已儲存");
 
     const context = buildAssistantProjectStatusContext({

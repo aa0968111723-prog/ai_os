@@ -124,7 +124,7 @@ export async function materializeTkuZenPromoContent(input: {
       name: card.name,
       appearance: card.appearance,
       notes: card.notes,
-      referenceAssetId: card.key === "xiaohua" ? (sheetAssetIds.threeview ?? null) : null,
+      referenceAssetId: card.key === "xiaohua" ? (sheetAssetIds.costume ?? null) : null,
       createdBy: input.userId,
     }).returning({ id: schema.characters.id });
     characterIds[card.key] = row.id;
@@ -162,7 +162,7 @@ export async function materializeTkuZenPromoContent(input: {
       projectId: input.projectId,
       groupId: input.groupId,
       kind: "note",
-      title: "粉橘短髮女孩 lock sheets",
+      title: "SHOTLIST A–F 白帽T lock",
       content: tkuZenLibraryMapContent(),
       pinned: true,
       createdBy: input.userId,
@@ -263,22 +263,29 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   const xiaohua = snap.characters.find((c) => c.name === "小華");
   const turtle = snap.characters.find((c) => c.name === "禪定龜龜");
   if (!xiaohua || !turtle) throw new Error("core cards missing");
-  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("粉橘") || !xiaohua.appearance.includes("針織外套")) {
-    throw new Error("小華 appearance lost pink-bob cardigan lock");
+  if (!xiaohua.appearance.includes("大二化工") || !xiaohua.appearance.includes("白帽T") || !xiaohua.appearance.includes("短髮")) {
+    throw new Error("小華 appearance lost 白帽T／短髮 lock");
   }
-  if (xiaohua.appearance.includes("白帽T")) throw new Error("小華 appearance still has 白帽T");
+  if (xiaohua.appearance.includes("針織外套") || xiaohua.appearance.includes("粉橘") || xiaohua.appearance.includes("安倢")) {
+    throw new Error("小華 appearance mixed 七幕／針織外套 lock");
+  }
   if (!turtle.appearance.includes("吉祥物龜龜")) throw new Error("龜龜 appearance lost 吉祥物龜龜 lock");
-  if (!snap.presets.some((p) => p.name === "克難坡")) throw new Error("克難坡 preset missing");
+  if (!snap.presets.some((p) => p.name === "校門口")) throw new Error("校門口 preset missing");
+  if (!snap.presets.some((p) => p.name === "夕陽")) throw new Error("夕陽 preset missing");
+  if (snap.presets.some((p) => p.name.includes("茶會"))) throw new Error("茶會 must not be a lip-sync act/preset");
   if (snap.looks.length !== TKU_ZEN_LOOKS.length) {
     throw new Error(`expected ${TKU_ZEN_LOOKS.length} looks, got ${snap.looks.length}`);
   }
   const xiaohuaLook = snap.looks.find((look) => look.characterId === xiaohua.id);
-  if (!xiaohuaLook?.costume?.includes("針織外套")) throw new Error("小華 look lost costume lock");
+  if (!xiaohuaLook?.costume?.includes("白帽T")) throw new Error("小華 look lost 白帽T costume lock");
   if (snap.looks.filter((look) => look.characterId === xiaohua.id).length !== 1) {
     throw new Error("小華 must have exactly one look — script does not change costume");
   }
-  if (!snap.knowledge.some((row) => row.content.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
-    throw new Error("lock sheet paths missing from knowledge");
+  if (!snap.knowledge.some((row) => row.content.includes("SHOTLIST.md"))) {
+    throw new Error("SHOTLIST.md path missing from knowledge");
+  }
+  if (snap.knowledge.some((row) => row.content.includes("安倢") || row.content.includes("慕恩"))) {
+    throw new Error("do not seed 安倢／慕恩 into 動畫組 小華");
   }
 
   const orderedShots = [...snap.shots].sort((a, b) => a.orderIndex - b.orderIndex);
@@ -313,7 +320,7 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
     .map((s) => snap.acts.find((a) => a.id === s.storySceneId)?.orderIndex ?? 0);
   if (turtleShotActs.some((act) => act < 3)) throw new Error("龜龜 bound before the third spoken line");
 
-  if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
+  if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.costume.file))) {
     if (xiaohua.referenceAssetId == null) throw new Error("lock sheet uploaded but character.referenceAssetId empty");
   }
 }

@@ -9,7 +9,7 @@ describe("pickSplitScriptSource", () => {
       knowledgeText: "知識庫裡的另一份開示稿，不該被拆。",
     });
     expect(picked.source).toBe("story");
-    expect(picked.script).toContain("第七幕");
+    expect(picked.script).toContain("校門口");
     expect(picked.script).not.toContain("開示稿");
   });
 

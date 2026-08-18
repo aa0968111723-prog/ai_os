@@ -15,7 +15,7 @@ describe("messageAssistant saved story", () => {
       question: "依儲存的故事拆分鏡",
     });
     expect(prompt).toContain("我是大二化工系的小華");
-    expect(prompt).toContain("第七幕");
+    expect(prompt).toContain("校門口");
     expect(prompt).toContain("不要說看不到");
   });
 });

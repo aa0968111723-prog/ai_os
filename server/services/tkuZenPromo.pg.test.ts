@@ -39,7 +39,7 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     }
   });
 
-  it("materializes 6 spoken SHOTLIST beats / pink-bob lock and survives reload", async () => {
+  it("materializes 6 spoken SHOTLIST beats / 白帽T lock and survives reload", async () => {
     const userId = randomUUID();
     const groupId = randomUUID();
     leftovers.users.push(userId);
@@ -62,10 +62,14 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     assertTkuZenPromoSnapshot(reloaded);
     expect(reloaded.acts).toHaveLength(6);
     expect(reloaded.characters.map((c) => c.name).sort()).toEqual(["小華", "禪定龜龜"]);
-    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("針織外套");
-    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("白帽T");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("白帽T");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("短髮");
+    expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("針織外套");
     expect(reloaded.characters.find((c) => c.name === "禪定龜龜")?.appearance).toContain("吉祥物龜龜");
-    expect(reloaded.presets.some((p) => p.name === "克難坡")).toBe(true);
+    expect(reloaded.presets.some((p) => p.name === "校門口")).toBe(true);
+    expect(reloaded.presets.some((p) => p.name === "夕陽")).toBe(true);
+    expect(reloaded.presets.some((p) => p.name.includes("茶會"))).toBe(false);
+    expect(reloaded.characters.some((c) => c.name === "安倢")).toBe(false);
     expect(reloaded.looks).toHaveLength(2);
     expect(reloaded.story?.content).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
     expect(reloaded.characters.some((c) => c.name === "媽媽")).toBe(false);

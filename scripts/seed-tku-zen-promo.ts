@@ -105,7 +105,7 @@ console.log(JSON.stringify({
   shots: snap.shots.length,
   durationSec: snap.shots.reduce((sum, shot) => sum + shot.durationSec, 0),
   dialogue: TKU_ZEN_SHOTLIST_LINES,
-  visualLock: "粉橘短髮鮑伯／米白針織外套／橘色百褶裙",
+  visualLock: "大二化工／白帽T／短髮",
   referenceAssetId: snap.characters.find((c) => c.name === "小華")?.referenceAssetId ?? null,
   lockSheets: snap.assets.map((asset) => asset.title),
   assetImport: snap.assets.length
