@@ -21,7 +21,7 @@ vi.mock("../../api", () => ({
           return {
             mutate: (input: { runId: string }) => {
               stopMutate(input);
-              stopOnSuccess?.();
+              stopOnSuccess?.(undefined, input);
             },
             isPending: stopPending,
             error: null,
@@ -137,6 +137,32 @@ describe("AgentActivityHud", () => {
     })];
     render(<AgentActivityHud groupId="g1" />);
     expect(screen.getByText(/需要你補充資訊/)).toBeVisible();
+  });
+
+  it("停 on leftover 0/6 待你過目 persists stopped and hides the toast after reload", async () => {
+    const user = userEvent.setup();
+    overviewRuns = [run({
+      status: "awaiting_approval",
+      doneSteps: 0,
+      totalSteps: 6,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+      projectTitle: "overnight-test-short-100w-20260818",
+    })];
+    const { rerender, container } = render(<AgentActivityHud groupId="g1" />);
+    expect(screen.getByText("待你過目")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /停/ }));
+    expect(stopMutate).toHaveBeenCalledWith({ runId: "run-1" });
+    overviewRuns = [run({
+      status: "stopped",
+      doneSteps: 0,
+      totalSteps: 6,
+      revision: 2_000,
+      currentStepNote: "第 1 鏡「小華躺在床上」生成畫面",
+    })];
+    rerender(<AgentActivityHud groupId="g1" />);
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
   });
 
   it("discards leftover 0/6 待你過目 from the HUD cache when overview omits it", async () => {

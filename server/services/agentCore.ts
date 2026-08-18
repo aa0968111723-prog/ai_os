@@ -47,6 +47,7 @@ import {
 } from "./agentPlannerProvider";
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "../../shared/agentDag";
+import { canStopAgentRunStatus } from "../../shared/agentQuestions";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
@@ -1445,10 +1446,13 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以停止" });
   }
-  if (run.status !== "running" && !HUMAN_WAITING_RUN_STATUSES.includes(run.status as (typeof HUMAN_WAITING_RUN_STATUSES)[number])) {
+  if (!canStopAgentRunStatus(run.status)) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
   }
-  if (HUMAN_WAITING_RUN_STATUSES.includes(run.status as (typeof HUMAN_WAITING_RUN_STATUSES)[number])) {
+  // awaiting_approval leftover 0/N「待你過目」is HUD-active. 停 must persist
+  // stopped so reload cannot resurrect the toast. waiting_* same path.
+  const stopInPlace = run.status !== "running";
+  if (stopInPlace) {
     const steps = run.steps as AgentStep[];
     stopPendingDagSteps(steps);
     const [stopped] = await db.transaction(async (tx) => {
@@ -1459,7 +1463,10 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
       return tx
         .update(schema.agentRuns)
         .set({ status: "stopped", steps, activeQuestionId: null, updatedAt: new Date() })
-        .where(and(eq(schema.agentRuns.id, run.id), inArray(schema.agentRuns.status, [...HUMAN_WAITING_RUN_STATUSES])))
+        .where(and(
+          eq(schema.agentRuns.id, run.id),
+          inArray(schema.agentRuns.status, ["awaiting_approval", ...HUMAN_WAITING_RUN_STATUSES]),
+        ))
         .returning();
     });
     if (stopped) {

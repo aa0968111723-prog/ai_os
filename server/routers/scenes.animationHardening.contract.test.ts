@@ -375,6 +375,10 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
     expect(hud).toContain("Authoritative overview omitted this run");
+    const stopFn = agentCore.slice(agentCore.indexOf("export async function stopAgentCore"), agentCore.indexOf("export async function listAgentRunsForProject"));
+    expect(stopFn).toContain("canStopAgentRunStatus");
+    expect(stopFn).toContain("awaiting_approval");
+    expect(stopFn).toContain('status: "stopped"');
   });
 
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {

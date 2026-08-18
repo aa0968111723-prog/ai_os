@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  canStopAgentRunStatus,
   canonicalizeAgentQuestionAnswer,
+  isAgentRunActiveForHud,
   resolveAgentQuestionOption,
   resolveOrAskAgentQuestion,
   type AgentQuestionDefinition,
@@ -98,5 +100,17 @@ describe("answer validation", () => {
     const id = "123e4567-e89b-42d3-a456-426614174000";
     expect(canonicalizeAgentQuestionAnswer(file, [id, id]).value).toEqual([id]);
     expect(() => canonicalizeAgentQuestionAnswer(file, ["movie.mp4"])).toThrow("尚未安全保存");
+  });
+});
+
+describe("HUD 停 persists leftover awaiting_approval", () => {
+  it("can stop every HUD-active status, including leftover 0/N 待你過目", () => {
+    expect(canStopAgentRunStatus("awaiting_approval")).toBe(true);
+    expect(isAgentRunActiveForHud("awaiting_approval")).toBe(true);
+    expect(canStopAgentRunStatus("running")).toBe(true);
+    expect(canStopAgentRunStatus("waiting")).toBe(true);
+    expect(canStopAgentRunStatus("stopped")).toBe(false);
+    expect(canStopAgentRunStatus("discarded")).toBe(false);
+    expect(canStopAgentRunStatus("done")).toBe(false);
   });
 });
