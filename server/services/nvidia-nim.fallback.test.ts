@@ -11,7 +11,14 @@ const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock("./http", () => ({ proxyFetch: fetchMock }));
 
 process.env.NVIDIA_NIM_API_KEY = "test-key";
-const { nimCompleteWithFallback, NimServiceError, NIM_DEFAULT_MODEL } = await import("./nvidia-nim");
+const {
+  nimCompleteWithFallback,
+  NimServiceError,
+  NIM_DEFAULT_MODEL,
+  NIM_FIRST_ATTEMPT_DEFAULT_MS,
+  NIM_FIRST_ATTEMPT_MAX_MS,
+  clampNimAttemptMs,
+} = await import("./nvidia-nim");
 
 const FLAGSHIP = "meta/llama-3.1-405b-instruct";
 
@@ -71,6 +78,30 @@ describe("nimCompleteWithFallback", () => {
     const r = await nimCompleteWithFallback("prompt", { model: FLAGSHIP, timeoutMs: 8_000 });
     expect(r).toMatchObject({ output: "70b-after-5xx", model: NIM_DEFAULT_MODEL, downgraded: true });
     expect(modelsUsed()).toEqual([FLAGSHIP, FLAGSHIP, FLAGSHIP, NIM_DEFAULT_MODEL]);
+  });
+
+  it("clamp: omitted timeout is a short probe; 150s is capped so first attempt cannot eat 150s", () => {
+    expect(clampNimAttemptMs(undefined)).toBe(NIM_FIRST_ATTEMPT_DEFAULT_MS);
+    expect(clampNimAttemptMs(150_000)).toBe(NIM_FIRST_ATTEMPT_MAX_MS);
+    expect(clampNimAttemptMs(150_000)).toBeLessThan(150_000);
+    expect(clampNimAttemptMs(20_000)).toBe(20_000);
+  });
+
+  it("timeoutMs=150000 still falls to 70B after a flagship NimServiceError timeout", async () => {
+    fetchMock
+      .mockImplementationOnce((_url: string, init: { timeoutMs?: number }) => {
+        expect(init.timeoutMs ?? 150_000).toBeLessThan(150_000);
+        expect(init.timeoutMs ?? 150_000).toBeLessThanOrEqual(NIM_FIRST_ATTEMPT_MAX_MS);
+        return Promise.reject(new NimServiceError("AI 文字服務回應逾時（超過 150 秒無回應）"));
+      })
+      .mockResolvedValueOnce(ok("70b-after-capped-150s"));
+    const r = await nimCompleteWithFallback("prompt", {
+      model: FLAGSHIP,
+      timeoutMs: 150_000,
+      fallbackTimeoutMs: 1_000,
+    });
+    expect(r).toMatchObject({ output: "70b-after-capped-150s", model: NIM_DEFAULT_MODEL, downgraded: true });
+    expect(modelsUsed()).toEqual([FLAGSHIP, NIM_DEFAULT_MODEL]);
   });
 
   it("旗艦 NimServiceError 逾時（含「超過 150 秒無回應」、不必帶「逾時」二字）→ 70B 備援真的會跑", async () => {

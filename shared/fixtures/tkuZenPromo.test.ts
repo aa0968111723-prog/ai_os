@@ -16,6 +16,7 @@ import {
   TKU_ZEN_LOCATIONS,
   TKU_ZEN_LOOKS,
   TKU_ZEN_PROMO_SCRIPT,
+  TKU_ZEN_SHOTLIST_FIRST_PARSE,
   TKU_ZEN_SHOTLIST_LINES,
   TKU_ZEN_SHOTS,
   TKU_ZEN_XIAOHUA_APPEARANCE,
@@ -35,6 +36,13 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(tkuZenDialogueLines(TKU_ZEN_SHOTS)).toEqual([...TKU_ZEN_SHOTLIST_LINES]);
     expect(TKU_ZEN_SHOTS.reduce((sum, shot) => sum + shot.durationSec, 0)).toBe(TKU_ZEN_FALLBACK_DURATION_SEC);
     expect(TKU_ZEN_PROMO_SCRIPT).toContain(TKU_ZEN_SHOTLIST_LINES[0]);
+  });
+
+  it("first-parse paste is ~300 Chinese chars / 6 paragraphs (not the 119-char cache hit)", () => {
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(280);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(500);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.split(/\n\n/).length).toBe(6);
+    for (const line of TKU_ZEN_SHOTLIST_LINES) expect(TKU_ZEN_SHOTLIST_FIRST_PARSE).toContain(line);
   });
 
   it("locks 小華 to the pink-bob cardigan sheets and keeps one unchanging look", () => {

@@ -105,7 +105,11 @@ describe("解析模型檔位", () => {
     expect(NIM_REASONING_MODEL).not.toBe(NIM_DEFAULT_MODEL);
   });
 
-  it("~1k 短稿先走 70B，長稿才以旗艦為主", () => {
+  it("~1k 短稿先走 70B，長稿才以旗艦為主；促銷短稿更短", () => {
+    const promo = resolveStoryExtractStrategy(301);
+    expect(promo.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(promo.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    expect(promo.primaryTimeoutMs + promo.fallbackTimeoutMs).toBeLessThan(60_000);
     const short = resolveStoryExtractStrategy(1_167);
     expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
     expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);

@@ -59,6 +59,20 @@ export function isNimTimeoutError(err: unknown): boolean {
   return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
 }
 
+/**
+ * First attempt must never inherit the old 150s hang.
+ * Live Zeabur still toasted「超過 150 秒無回應」when timeoutMs was omitted
+ * or a caller forwarded the historic default — fallback never got a turn.
+ */
+export const NIM_FIRST_ATTEMPT_MAX_MS = 60_000;
+/** When callers forget timeoutMs, probe quickly then fall to 70B. */
+export const NIM_FIRST_ATTEMPT_DEFAULT_MS = 25_000;
+
+export function clampNimAttemptMs(timeoutMs?: number): number {
+  const raw = timeoutMs ?? NIM_FIRST_ATTEMPT_DEFAULT_MS;
+  return Math.min(Math.max(1_000, raw), NIM_FIRST_ATTEMPT_MAX_MS);
+}
+
 export async function nimCompleteWithFallback(
   prompt: string,
   opts: {
@@ -73,8 +87,14 @@ export async function nimCompleteWithFallback(
   },
 ): Promise<{ output: string; model: string; downgraded: boolean }> {
   const fallback = opts.fallbackModel ?? NIM_DEFAULT_MODEL;
+  const primaryTimeoutMs = clampNimAttemptMs(opts.timeoutMs);
+  const fallbackTimeoutMs = clampNimAttemptMs(opts.fallbackTimeoutMs ?? opts.timeoutMs);
   try {
-    return { output: await nimComplete(prompt, opts), model: opts.model, downgraded: false };
+    return {
+      output: await nimComplete(prompt, { ...opts, timeoutMs: primaryTimeoutMs }),
+      model: opts.model,
+      downgraded: false,
+    };
   } catch (err) {
     if (opts.signal?.aborted || opts.model === fallback) throw err;
     // 只擋非降級（401/402/403、沒金鑰）。逾時／429／5xx 換 70B 還有機會——
@@ -85,7 +105,7 @@ export async function nimCompleteWithFallback(
       output: await nimComplete(prompt, {
         ...opts,
         model: fallback,
-        timeoutMs: opts.fallbackTimeoutMs ?? opts.timeoutMs,
+        timeoutMs: fallbackTimeoutMs,
       }),
       model: fallback,
       downgraded: true,

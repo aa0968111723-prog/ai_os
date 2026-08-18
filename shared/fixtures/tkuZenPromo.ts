@@ -23,6 +23,19 @@ export const TKU_ZEN_SHOTLIST_LINES = [
   "真的真的！",
 ] as const;
 
+/**
+ * Locked A–F SHOTLIST as a ~300-char / 6-paragraph first-parse paste.
+ * Live overnight-test-shotlist-20260819 hung 150s on this size (not the 119-char cache hit).
+ */
+export const TKU_ZEN_SHOTLIST_FIRST_PARSE = [
+  "A 宿舍夜。小華坐在床沿面向鏡頭，台燈把粉橘短鮑伯照得很軟。我是大二化工系的小華。回想起大一的時光，說真的，有好多的不習慣。",
+  "B 窗邊。她走到窗邊看夜色，校園路燈遠遠成一排。宇宙呀，我能怎麼做？怎麼才能真正認識自己呢？",
+  "C 異響。門邊傳來窸窣聲，好像有誰從書包裡翻出來。咦？你是誰？",
+  "D 龜龜登場。禪定龜龜從書包旁探出頭，殼上帶一點禪學社的圓標。小華，我聽到你的困擾了。我是禪學社的禪定龜龜，我來拯救你了！",
+  "E 答應。小華眼睛亮起來，雙手握著裙襬。真的嗎？帶我去！",
+  "F 克難坡。兩人走在克難坡石階，老樹影子被路燈拉長，風從老樹間穿過。然後小華把米白外套扣好跟上了。真的真的！",
+].join("\n\n");
+
 export const TKU_ZEN_FORBIDDEN = [
   "媽媽",
   "媽媽叫醒",

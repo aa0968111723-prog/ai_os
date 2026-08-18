@@ -42,6 +42,10 @@ import {
   isNimTimeoutError,
 } from "./nvidia-nim";
 
+/** Live 301-char A–F SHOTLIST first-parse hung 150s. Promo scripts must finish inside a 60s wall. */
+export const STORY_PARSE_PROMO_CHARS = 500;
+export const STORY_PARSE_PROMO_PRIMARY_MS = 20_000;
+export const STORY_PARSE_PROMO_FALLBACK_MS = 18_000;
 /** ~1k scripts do not need 405B or a 150s hang. Live 1167-char 小華稿 3/3 timed out at 150s. */
 export const STORY_PARSE_SHORT_CHARS = 4_000;
 export const STORY_PARSE_SHORT_PRIMARY_MS = 40_000;
@@ -60,6 +64,15 @@ export interface StoryExtractStrategy {
 }
 
 export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStrategy {
+  if (storyChars <= STORY_PARSE_PROMO_CHARS) {
+    return {
+      primaryModel: NIM_DEFAULT_MODEL,
+      fallbackModel: NIM_DEFAULT_MODEL,
+      primaryTimeoutMs: STORY_PARSE_PROMO_PRIMARY_MS,
+      fallbackTimeoutMs: STORY_PARSE_PROMO_FALLBACK_MS,
+      budgetMs: STORY_PARSE_PROMO_PRIMARY_MS + STORY_PARSE_PROMO_FALLBACK_MS + 5_000,
+    };
+  }
   if (storyChars <= STORY_PARSE_SHORT_CHARS) {
     return {
       primaryModel: NIM_DEFAULT_MODEL,
@@ -329,6 +342,8 @@ export interface StoryParseCoreInput {
   /** 內容沒變時是否仍強制重解（預設 false：hash 相同直接短路，Cost Control） */
   force?: boolean;
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
+  /** Test hook: inject EXTRACT. Production leaves this unset (nimCompleteWithFallback). */
+  complete?: StoryExtractComplete;
 }
 
 export interface StoryParseResult {
@@ -420,7 +435,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     try {
       // 短稿先走日常 70B（1k 字不該乾等 405B 150 秒）；長稿才以旗艦為主、70B 作短備援。
       // 兩段逾時加總仍遠低於舊的 150s×2，失敗必須是可恢復錯誤，不是掛死。
-      const completion = await extractStoryPlanFromProvider(sys, sentStory.length);
+      const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({
           sessionId: trace.id,

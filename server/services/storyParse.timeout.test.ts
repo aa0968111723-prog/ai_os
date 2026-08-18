@@ -4,14 +4,34 @@ import { describe, expect, it, vi } from "vitest";
 import { NimServiceError } from "./nvidia-nim";
 import {
   extractStoryPlanFromProvider,
+  mockStoryExtract,
   resolveStoryExtractStrategy,
   STORY_PARSE_LONG_FALLBACK_MS,
   STORY_PARSE_LONG_PRIMARY_MS,
+  STORY_PARSE_PROMO_CHARS,
+  STORY_PARSE_PROMO_FALLBACK_MS,
+  STORY_PARSE_PROMO_PRIMARY_MS,
   STORY_PARSE_SHORT_CHARS,
 } from "./storyParse";
-import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL } from "./nvidia-nim";
+import { NIM_DEFAULT_MODEL, NIM_FIRST_ATTEMPT_MAX_MS, NIM_REASONING_MODEL } from "./nvidia-nim";
+import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 
 describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
+  it("a ~300-char Chinese SHOTLIST uses the promo 70B budget so a 60s first-parse can finish", () => {
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(280);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(STORY_PARSE_PROMO_CHARS);
+    const strategy = resolveStoryExtractStrategy(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
+    expect(strategy.primaryModel).toContain("70b");
+    expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
+    expect(strategy.fallbackTimeoutMs).toBe(STORY_PARSE_PROMO_FALLBACK_MS);
+    expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(25_000);
+    expect(strategy.primaryTimeoutMs).toBeLessThan(NIM_FIRST_ATTEMPT_MAX_MS);
+    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(60_000);
+    expect(strategy.budgetMs).toBeLessThan(60_000);
+    expect(String(strategy.primaryTimeoutMs)).not.toMatch(/150000/);
+  });
+
   it("a ~1167-char script uses 70B first with a short budget, not 405B/150s", () => {
     const strategy = resolveStoryExtractStrategy(1_167);
     expect(1_167).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
@@ -52,6 +72,26 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(firstTimeout).toBeLessThanOrEqual(45_000);
   });
 
+  it("~300-char Chinese first parse completes in mock without a 150s timeout", async () => {
+    const complete = vi.fn(async (_prompt: string, opts: { timeoutMs?: number; fallbackTimeoutMs?: number }) => {
+      expect(opts.timeoutMs ?? 150_000).toBeLessThan(150_000);
+      expect(opts.timeoutMs ?? 150_000).toBeLessThanOrEqual(25_000);
+      expect(opts.fallbackTimeoutMs ?? 150_000).toBeLessThan(150_000);
+      return {
+        output: JSON.stringify(mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE)),
+        model: NIM_DEFAULT_MODEL,
+        downgraded: false,
+      };
+    });
+    const started = Date.now();
+    const result = await extractStoryPlanFromProvider("sys", TKU_ZEN_SHOTLIST_FIRST_PARSE.length, complete);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result.output).toContain("小華");
+    expect(result.strategy.primaryTimeoutMs).toBe(STORY_PARSE_PROMO_PRIMARY_MS);
+    expect(result.strategy.budgetMs).toBeLessThan(60_000);
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it("long parse splits 405B / 70B so one model cannot spend 150s", () => {
     const strategy = resolveStoryExtractStrategy(8_000);
     expect(strategy.primaryModel).toBe(NIM_REASONING_MODEL);
@@ -89,17 +129,18 @@ describe("parse hang is NIM timeout, not a platform gateway", () => {
     expect(chat).toContain("timeoutMs: Math.max(1_000, deadline - Date.now())");
 
     const fallback = nim.slice(
-      nim.indexOf("export async function nimCompleteWithFallback"),
+      nim.indexOf("export const NIM_FIRST_ATTEMPT_MAX_MS"),
       nim.indexOf("export interface ChatMessage"),
     );
-    expect(fallback).toContain("timeoutMs: opts.fallbackTimeoutMs ?? opts.timeoutMs");
+    expect(fallback).toContain("clampNimAttemptMs");
+    expect(fallback).toContain("NIM_FIRST_ATTEMPT_MAX_MS");
     expect(fallback).toContain("nimErrorDegradable");
 
     const parse = readFileSync(join(process.cwd(), "server/services/storyParse.ts"), "utf8");
     expect(parse).toContain("complete: StoryExtractComplete = nimCompleteWithFallback");
     expect(parse).toContain("timeoutMs: strategy.primaryTimeoutMs");
     expect(parse).toContain("fallbackTimeoutMs: strategy.fallbackTimeoutMs");
-    expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length)");
+    expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length, input.complete)");
   });
 
   it("repo has no zeabur.toml / vercel.json / nginx / maxDuration cap", () => {
