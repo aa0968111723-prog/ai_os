@@ -17,6 +17,7 @@ import { DESKTOP_MQ } from "../lib/viewport";
 import { useCollab, CursorOverlay } from "../realtime";
 import { CollabPanel } from "../features/collaboration/CollabPanel";
 import { DEFAULT_PROJECT_FORMAT, normalizeProjectFormat, type ProjectFormat } from "../../../shared/models";
+import { formatDashboardDateChip } from "../../../shared/userCalendar";
 import posthog from "../posthog";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
@@ -249,11 +250,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const waitingRuns = (agentSummary?.waiting ?? 0) + (agentSummary?.awaitingApproval ?? 0);
   const completedRuns = agentSummary?.doneRecent ?? 0;
   const pendingTotal = pendingSummary.data?.totalAwaitingGenerations ?? 0;
-  const todayLabel = new Intl.DateTimeFormat("zh-TW", {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  }).format(new Date());
+  const todayLabel = formatDashboardDateChip();
   const focusProject = recentProjects[0] ?? null;
   const focusState = pendingTotal > 0
     ? {

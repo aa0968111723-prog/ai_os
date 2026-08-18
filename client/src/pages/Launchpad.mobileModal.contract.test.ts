@@ -27,6 +27,12 @@ describe("mobile new-project modal contract", () => {
 
   // a 包 a：React validateDOMNesting 會噴 console 警告，且內層 ?focus=pending
   // 深連結被外層卡片的 navigate 蓋掉——「N 待處理」角標不得再用 Link 巢在 continue-card 裡
+  it("date chip uses user TZ helper, not a raw UTC leftover format", () => {
+    expect(launchpad).toContain("formatDashboardDateChip");
+    expect(launchpad).toContain("daily-date");
+    expect(launchpad).not.toMatch(/new Intl\.DateTimeFormat\("zh-TW"/);
+  });
+
   it("never nests a Link inside the continue-card Link", () => {
     expect(launchpad).not.toMatch(/focus=pending`}\s*style/);
     expect(launchpad).toMatch(/role="link"[\s\S]{0,400}focus=pending/);
