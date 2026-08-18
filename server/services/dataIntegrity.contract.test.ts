@@ -34,7 +34,7 @@ describe("P0-1 story persist always sends expectedRev", () => {
   it("restoreVersion bumps rev through applyWithRevision", () => {
     const story = readFileSync(new URL("../routers/story.ts", import.meta.url), "utf8");
     const restore = story.slice(story.indexOf("restoreVersion:"), story.indexOf("parse:"));
-    expect(restore).toContain("applyWithRevision");
+    expect(restore).toContain("applyWithRevisionTrpc");
     expect(restore).toContain("expectedRev: story.rev");
     expect(restore).not.toContain(".update(schema.stories)");
   });
