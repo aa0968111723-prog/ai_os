@@ -29,6 +29,15 @@ describe("MCP write honesty helpers", () => {
     }
   });
 
+  it("submit_generation can bind sceneNo through findSceneByDisplayNo", () => {
+    const source = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf('if (name === "submit_generation")'), source.indexOf('if (name === "post_message")'));
+    expect(block).toContain("findSceneByDisplayNo");
+    expect(block).toContain("sceneId");
+    expect(block).toContain("args.sceneNo");
+    expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
+  });
+
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
     expect(source).toContain('import { assertReferenceImage } from "./referenceAsset"');

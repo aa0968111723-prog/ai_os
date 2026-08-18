@@ -24,7 +24,7 @@
  *     tools/list 附 shared/mcpCatalog 推導的 annotations（readOnly/destructive/idempotent/openWorld）
  */
 import type { Request, Response } from "express";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -39,6 +39,7 @@ import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
 import { advanceGeneration } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
+import { findSceneByDisplayNo } from "../../shared/assistantSceneLookup";
 import { signAssetUrl, signDbFileUrl } from "./storage";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
@@ -153,13 +154,14 @@ export const TOOLS = [
   },
   {
     name: "submit_generation",
-    description: "提交生成(世界觀自動注入)。先用 find_model 找合適的 modelId;需要來源的模型請帶 source_url(圖/音訊/影片網址)。",
+    description: "提交生成(世界觀自動注入)。先用 find_model 找合適的 modelId;需要來源的模型請帶 source_url(圖/音訊/影片網址)。要寫進第 N 鏡請帶 sceneNo；不帶＝只進素材庫，分鏡表不會變。",
     inputSchema: {
       type: "object",
       properties: {
         projectId: { type: "string" },
         modelId: { type: "string" },
         prompt: { type: "string" },
+        sceneNo: { type: "number", description: "顯示鏡號（1 起算，與 list_scenes / 創作室同一套）。寫進該鏡；省略＝只進素材庫" },
         source_url: { type: "string", description: "來源網址(圖生圖底圖/待轉錄音訊等,依模型而定)" },
         client_request_id: { type: "string", description: "冪等鍵(UUID,可選):逾時重送同一鍵回既有生成、不重複扣點" },
       },
@@ -1590,6 +1592,18 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const userPrompt = String(args.prompt ?? "").trim();
     if (!userPrompt) throw new Error("prompt 不可為空");
     const sourceUrl = args.source_url ? String(args.source_url) : undefined;
+    let sceneId: string | undefined;
+    if (args.sceneNo !== undefined && args.sceneNo !== null && args.sceneNo !== "") {
+      const sceneNo = Number(args.sceneNo);
+      const shots = await db
+        .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+        .orderBy(asc(schema.scenes.orderIndex));
+      const shot = findSceneByDisplayNo(shots, sceneNo);
+      if (!shot) throw new Error(`找不到第 ${sceneNo} 鏡——該案目前共 ${shots.length} 個分鏡`);
+      sceneId = shot.id;
+    }
     // TD-02：MCP 與網頁端同一 Command（政策／狀態機／ACL／扣點／門檻）
     // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他。
     const gen = await executeGenerationCommand({
@@ -1600,6 +1614,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: project.id,
       modelId: String(args.modelId ?? ""),
       prompt: userPrompt,
+      sceneId,
       sourceUrl,
       reasonPrefix: "MCP 生成",
     });
