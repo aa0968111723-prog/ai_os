@@ -1,7 +1,7 @@
 /**
  * Wall-clock budget for project / site assistant ask.
  * Per-round LLM timeouts are 60s (nim) / 120s (paid). Multiple tool rounds
- * can still blow past the 150s gateway; abort first and return Chinese.
+ * can still exceed the NIM call budget; abort first and return Chinese.
  */
 export const ASSISTANT_ASK_WALL_MS = 120_000;
 

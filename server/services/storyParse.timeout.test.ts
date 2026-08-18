@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { NimServiceError } from "./nvidia-nim";
 import {
@@ -61,5 +63,49 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThanOrEqual(120_000);
     expect(strategy.primaryTimeoutMs).toBeLessThan(150_000);
     expect(strategy.fallbackTimeoutMs).toBeLessThan(150_000);
+  });
+});
+
+/**
+ * Teammate mapped the 150s hang: proxyFetch only hits undici ~300s when
+ * timeoutMs is omitted. chatCompletion always passes remaining budget.
+ * Hard cap is the NIM timeout (old default 150s), not a Zeabur/Vercel gateway.
+ * Do not add a default in http.ts — keep the fix in nimCompleteWithFallback
+ * + runStoryParse budget split only.
+ */
+describe("parse hang is NIM timeout, not a platform gateway", () => {
+  it("chatCompletion always forwards remaining budget; http.ts has no default timeoutMs", () => {
+    const http = readFileSync(join(process.cwd(), "server/services/http.ts"), "utf8");
+    expect(http).toContain("if (timeoutMs && timeoutMs > 0)");
+    expect(http).not.toMatch(/timeoutMs\s*=\s*[^\n]*\?\?\s*\d+/);
+    expect(http).not.toMatch(/AbortSignal\.timeout\(\s*(150_000|300_000)/);
+
+    const nim = readFileSync(join(process.cwd(), "server/services/nvidia-nim.ts"), "utf8");
+    const chat = nim.slice(
+      nim.indexOf("export async function chatCompletion"),
+      nim.indexOf("export async function nimComplete"),
+    );
+    expect(chat).toContain("const timeoutMs = options.timeoutMs ?? 60_000");
+    expect(chat).toContain("timeoutMs: Math.max(1_000, deadline - Date.now())");
+
+    const fallback = nim.slice(
+      nim.indexOf("export async function nimCompleteWithFallback"),
+      nim.indexOf("export interface ChatMessage"),
+    );
+    expect(fallback).toContain("timeoutMs: opts.fallbackTimeoutMs ?? opts.timeoutMs");
+    expect(fallback).toContain("nimErrorDegradable");
+
+    const parse = readFileSync(join(process.cwd(), "server/services/storyParse.ts"), "utf8");
+    expect(parse).toContain("complete: StoryExtractComplete = nimCompleteWithFallback");
+    expect(parse).toContain("timeoutMs: strategy.primaryTimeoutMs");
+    expect(parse).toContain("fallbackTimeoutMs: strategy.fallbackTimeoutMs");
+    expect(parse).toContain("extractStoryPlanFromProvider(sys, sentStory.length)");
+  });
+
+  it("repo has no zeabur.toml / vercel.json / nginx / maxDuration cap", () => {
+    expect(existsSync(join(process.cwd(), "zeabur.toml"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "vercel.json"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "nginx.conf"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "nginx"))).toBe(false);
   });
 });

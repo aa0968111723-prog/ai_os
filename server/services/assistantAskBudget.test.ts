@@ -7,7 +7,7 @@ import {
 } from "./assistantAskBudget";
 
 describe("assistant ask wall-clock budget", () => {
-  it("is 120s — under the 150s gateway, same as client parse abort", () => {
+  it("is 120s — same wall-clock as the client parse abort", () => {
     expect(ASSISTANT_ASK_WALL_MS).toBe(120_000);
     expect(ASSISTANT_ASK_TIMEOUT_MESSAGE).toContain("兩分鐘");
     expect(ASSISTANT_ASK_TIMEOUT_MESSAGE).toContain("閘道");

@@ -26,11 +26,12 @@ export type { AppRouter };
  */
 /**
  * story.parse / generateStoryboard / splitScript / assistant.ask 走獨立連結＋客戶端逾時。
- * 伺服器短稿預算 ~65s、長稿 ~105s、問答牆鐘 120s；閘道曾在 150s 切斷且 UI 無限等。
- * 120s 高於伺服器預算、低於閘道，逾時當可恢復錯誤而不是掛死。
+ * 伺服器短稿預算 ~65s、長稿 ~115s、問答牆鐘 120s。硬上限是 NIM `timeoutMs`
+ *（chatCompletion 把剩餘預算傳給 proxyFetch），不是 Zeabur/Vercel 閘道。
+ * 客戶端 120s 高於伺服器預算，逾時當可恢復錯誤而不是掛死。
  */
 export const STORY_MUTATION_CLIENT_TIMEOUT_MS = 120_000;
-/** Same wall-clock as server `ASSISTANT_ASK_WALL_MS` — under the 150s gateway. */
+/** Same wall-clock as server `ASSISTANT_ASK_WALL_MS` — above the server extract budget. */
 export const ASSISTANT_ASK_CLIENT_TIMEOUT_MS = 120_000;
 
 export function isTimedStoryProcedure(path: string): boolean {

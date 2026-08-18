@@ -88,7 +88,7 @@ describe("api — story.parse / generateStoryboard 獨立逾時（避免 UI 乾�
     vi.unstubAllGlobals();
   });
 
-  it("only those two procedures are timed, under the 150s gateway", () => {
+  it("times parse/board/ask on the client above the server extract budget", () => {
     expect(isTimedStoryProcedure("story.parse")).toBe(true);
     expect(isTimedStoryProcedure("story.generateStoryboard")).toBe(true);
     expect(isTimedStoryProcedure("director.splitScript")).toBe(true);
