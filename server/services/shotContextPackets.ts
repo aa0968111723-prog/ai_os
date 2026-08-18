@@ -486,6 +486,7 @@ export async function refreshShotContextStaleness(input: {
   auth: AuthState;
   projectId: string;
   changed?: { kind: string; id: string };
+  shotIds?: string[];
 }): Promise<{ staleShotIds: string[] }> {
   const project = await loadCreativeContextProject(input.auth, input.projectId, true);
   const heads = await db.select().from(schema.shotContextPacketHeads).where(eq(schema.shotContextPacketHeads.projectId, project.id));
@@ -499,9 +500,11 @@ export async function refreshShotContextStaleness(input: {
     const packet = byId.get(head.packetId)?.packet;
     return packet ? packetDependencies(packet) : { shotId: head.shotId, entityKeys: [] };
   });
-  const targetIds = input.changed
-    ? staleShotIdsForEntityChange(graphs, input.changed)
-    : heads.map((head) => head.shotId);
+  const targetIds = input.shotIds
+    ? input.shotIds
+    : input.changed
+      ? staleShotIdsForEntityChange(graphs, input.changed)
+      : heads.map((head) => head.shotId);
   const staleShotIds: string[] = [];
   for (const shotId of targetIds) {
     const current = await buildShotContextPacketPayload({
@@ -522,4 +525,18 @@ export async function refreshShotContextStaleness(input: {
     }).where(eq(schema.shotContextPacketHeads.shotId, shotId));
   }
   return { staleShotIds };
+}
+
+/** Card / look / binding writes must stale dependent packets. Failures never roll back the write. */
+export async function refreshShotContextStalenessSafely(input: {
+  auth: AuthState;
+  projectId: string;
+  changed?: { kind: string; id: string };
+  shotIds?: string[];
+}): Promise<void> {
+  try {
+    await refreshShotContextStaleness(input);
+  } catch (error) {
+    console.warn("[packets] staleness refresh skipped:", error instanceof Error ? error.message : error);
+  }
 }

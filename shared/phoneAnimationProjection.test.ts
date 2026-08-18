@@ -340,3 +340,13 @@ describe("phone cards", () => {
     expect(phoneShotLabel({ orderIndex: 4, title: "" })).toBe("第 05 鏡");
   });
 });
+
+describe("phone repair session isolation", () => {
+  it("resets in-memory session when the project changes", async () => {
+    const { shouldResetPhoneAnimationRepair, shouldUnlockPhoneRepairConfirm } = await import("./phoneAnimationProjection");
+    expect(shouldResetPhoneAnimationRepair("proj-a", "proj-b")).toBe(true);
+    expect(shouldResetPhoneAnimationRepair("proj-a", "proj-a")).toBe(false);
+    expect(shouldUnlockPhoneRepairConfirm(1)).toBe(true);
+    expect(shouldUnlockPhoneRepairConfirm(0)).toBe(false);
+  });
+});

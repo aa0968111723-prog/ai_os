@@ -77,6 +77,7 @@ export async function animationProductionBoard(input: {
       url: schema.assets.url,
     }).from(schema.assets).where(and(
       inArray(schema.assets.id, currentAssetIds),
+      eq(schema.assets.projectId, project.id),
       isNull(schema.assets.deletedAt),
     )))
     : [];

@@ -4,7 +4,7 @@
  * 依內容校正（.jpg 內容其實是 WebP）或拒絕（宣稱圖片但簽名辨識不出）。
  */
 import { describe, expect, it } from "vitest";
-import { isAllowedUploadMime, mimeFromPath, resolveUploadMime, sniffMime } from "./storage";
+import { isAllowedUploadMime, mimeFromPath, publicBaseUrl, resolveUploadMime, sniffMime } from "./storage";
 
 const pad = (b: number[]) => Buffer.concat([Buffer.from(b), Buffer.alloc(16)]);
 
@@ -94,5 +94,28 @@ describe("resolveUploadMime", () => {
 
   it("文字類（無簽名）沿用宣稱", () => {
     expect(resolveUploadMime("text/markdown", TEXT)).toEqual({ mime: "text/markdown", corrected: false });
+  });
+});
+
+describe("publicBaseUrl", () => {
+  it("ignores a named-service PORT leftover and falls back to 3000", () => {
+    const prev = {
+      APP_URL: process.env.APP_URL,
+      PUBLIC_DOMAIN: process.env.PUBLIC_DOMAIN,
+      RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
+      PORT: process.env.PORT,
+    };
+    delete process.env.APP_URL;
+    delete process.env.PUBLIC_DOMAIN;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    process.env.PORT = "tcp://postgres:5432";
+    try {
+      expect(publicBaseUrl()).toBe("http://localhost:3000");
+    } finally {
+      for (const [key, value] of Object.entries(prev)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });

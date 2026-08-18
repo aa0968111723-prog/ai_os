@@ -55,7 +55,7 @@ export function SceneCardBinding({
   // 只送真的動到的那一排（setCards 對沒送的欄位維持原值）。
   // 拿 scene props 把另外兩排補齊送出＝讀-改-寫：那份快照最舊是 10 秒前的（listByProject 的
   // refetchInterval），夥伴剛在同一格綁上的卡會被這一次覆寫靜默清掉，兩邊都沒有提示。
-  const save = (next: Partial<Record<"characterIds" | "scenePresetIds" | "propIds", string[]>>) =>
+  const save = (next: Partial<Record<"characterIds" | "scenePresetIds" | "propIds" | "lookIds", string[]>>) =>
     setCards.mutate({ sceneId: scene.id, ...next });
 
   return (
@@ -121,7 +121,7 @@ export function SceneCardBinding({
                 size="sm"
                 style={{ fontSize: "var(--fs-11)" }}
                 disabled={setCards.isPending}
-                onClick={() => save({ characterIds: [], scenePresetIds: [], propIds: [] })}
+                onClick={() => save({ characterIds: [], scenePresetIds: [], propIds: [], lookIds: [] })}
               >
                 清除這一鏡的指定
               </Button>

@@ -296,6 +296,35 @@ g, r = call("post_message", {"projectId": PID, "body": "MCP 自動化留言測�
 g, r = call("get_project_status", {"projectId": PID}, FULL)
 ok("23. get_project_status（統整快照）", g and r["generations"]["recent"] >= 1 and len(r["upcomingSchedule"]) >= 1)
 
+# ══════════ 動畫組寫入：建卡必須真的落 DB；空 patch 不得假裝成功；跨專案擋 ══════════
+print("\n######## 動畫組 MCP 寫入（角色卡／空 patch／跨專案） ########")
+g, r = call("add_character", {"projectId": PID, "name": "小華", "appearance": "專案A的小華、藍衣短髮"}, FULL)
+CHAR_A = r.get("characterId") if g and isinstance(r, dict) else None
+ok("add_character 回 verified 且有 characterId", g and CHAR_A and r.get("verified") is True, r if isinstance(r, dict) else r)
+db_name = _psql(f"select name from characters where id = '{CHAR_A}';") if CHAR_A else ""
+ok("add_character 後 DB 真的有小華", db_name == "小華", db_name)
+g, empty = call("update_character", {"characterId": CHAR_A}, FULL)
+ok("update_character 空 patch 標 unchanged，不是假裝寫入",
+   g and isinstance(empty, dict) and empty.get("unchanged") is True and empty.get("characterId") == CHAR_A)
+proj_b = admin.call("projects.create", {"groupId": G_A, "title": "MCP 隔離片 B", "kind": "故事", "platform": "shorts"})
+PID_B = proj_b["id"]
+g, r = call("add_character", {"projectId": PID_B, "name": "小華", "appearance": "專案B的小華、紅衣長髮"}, FULL)
+CHAR_B = r.get("characterId") if g and isinstance(r, dict) else None
+ok("同組另一專案也可建同名小華", g and CHAR_B and CHAR_B != CHAR_A)
+g, leak = call("update_character", {
+    "characterId": CHAR_B, "projectId": PID, "appearance": "不該被 A 改到",
+}, FULL)
+ok("update_character 用 A 的 projectId 改 B 的卡被拒",
+   (not g) and "不屬於這個專案" in str(leak), leak)
+b_appearance = _psql(f"select appearance from characters where id = '{CHAR_B}';") if CHAR_B else ""
+ok("被拒後專案 B 的小華外觀沒變", "專案B的小華" in b_appearance, b_appearance)
+g, r = call("add_scene", {"projectId": PID, "title": "鏡1・小華出場", "prompt": "小華站在門口"}, FULL)
+SCENE_A = r.get("sceneId") if g and isinstance(r, dict) else None
+ok("add_scene 建出分鏡", g and SCENE_A)
+g, empty_scene = call("update_scene", {"sceneId": SCENE_A}, FULL)
+ok("update_scene 空 patch 標 unchanged",
+   g and isinstance(empty_scene, dict) and empty_scene.get("unchanged") is True)
+
 # ══════════ 資料庫 AI 存取等級閘門 ══════════
 print("\n######## 資料庫 AI 存取等級（none/read）閘門 ########")
 g, r = call("query_database", {"tableId": TID_NONE}, FULL); ok("none 級資料庫：連讀都當作不存在", (not g) and "找不到" in r)

@@ -321,7 +321,12 @@ function CastTab({
 
   const toggleChar = (id: string) => {
     const next = bound.includes(id) ? bound.filter((x) => x !== id) : [...bound, id];
-    setCards.mutate({ sceneId: shot.id, characterIds: next });
+    // 伺服器會再清一次孤兒造型；這裡一併送 lookIds，避免分頁關掉時只寫到角色列。
+    const nextLooks = boundLooks.filter((lookId) => {
+      const look = (looks.data ?? []).find((row: { id: string; characterId: string }) => row.id === lookId);
+      return look ? next.includes(look.characterId) : false;
+    });
+    setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks });
   };
   const toggleLook = (id: string) => {
     const next = boundLooks.includes(id) ? boundLooks.filter((x) => x !== id) : [...boundLooks, id];

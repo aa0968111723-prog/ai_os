@@ -287,7 +287,7 @@ export async function evaluateGenerationConsistency(input: {
     }
   }
 
-  await db.insert(schema.generationConsistencyEvaluations).values({
+  const inserted = await db.insert(schema.generationConsistencyEvaluations).values({
     projectId: generation.projectId,
     groupId: generation.groupId,
     shotId: generation.sceneId,
@@ -300,8 +300,20 @@ export async function evaluateGenerationConsistency(input: {
     evidenceFingerprint: fingerprint,
     result: evaluation,
     createdBy: input.auth.user.id,
-  }).onConflictDoNothing();
-  return { evaluation, reused: false, providerAvailable };
+  }).onConflictDoNothing().returning({ id: schema.generationConsistencyEvaluations.id });
+  const [stored] = await db.select().from(schema.generationConsistencyEvaluations).where(and(
+    eq(schema.generationConsistencyEvaluations.generationId, generation.id),
+    eq(schema.generationConsistencyEvaluations.evaluatorVersion, evaluatorVersion),
+    eq(schema.generationConsistencyEvaluations.evidenceFingerprint, fingerprint),
+  ));
+  if (stored && inserted.length === 0) {
+    return {
+      evaluation: stored.result,
+      reused: true,
+      providerAvailable: stored.result.visualCheckStatus === "completed",
+    };
+  }
+  return { evaluation: stored?.result ?? evaluation, reused: false, providerAvailable };
 }
 
 export async function listShotConsistencyEvaluations(input: {

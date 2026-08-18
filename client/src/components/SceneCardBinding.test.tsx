@@ -82,6 +82,7 @@ describe("SceneCardBinding", () => {
       characterIds: [],
       scenePresetIds: [],
       propIds: [],
+      lookIds: [],
     });
   });
 
