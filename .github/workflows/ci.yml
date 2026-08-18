@@ -115,12 +115,15 @@ jobs:
           retention-days: 30
 
   # 每套 e2e 都從「全新資料庫」起跑：
-  # 重置 public+ledger → 明確 migrate/check → 啟動伺服器(seed) → 跑套件。
+  # 重置 public+ledger → 明確 migrate/check → 啟動伺服器(seed「動畫組」等) → 跑套件。
   # 環境與本機驗證口徑一致:E2E_MOCK=1(測試專用假生成,不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
+  # animation-consistency 本機用獨立庫 aios_anim_e2e（防誤 DROP 開發庫）；CI 這份
+  # postgres service 每套都 DROP SCHEMA，等價。Python 腳本走 /api/trpc，不需 Vite／Chrome。
+  # phone-animation-repair 不進矩陣：要 Vite :5173、TEST_EMAIL/TEST_PW、Chrome、已種子專案。
   # 注意:正式部署一律真實模式(示範模式已移除),E2E_MOCK 只在這裡與本機測試設定。
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -135,11 +138,13 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       PORT: "3199"
+      E2E_PORT: "3199"
       E2E_MOCK: "1"
       MOCK_BILLING: "1"
       SEED_ADMIN_EMAIL: admin@aidirector.local
       SEED_ADMIN_PASSWORD: test-admin-123
       RATE_LIMIT_SECRET: ci-only-rate-limit-secret-00000000000000000000000000000000
+      ASSET_SIGN_SECRET: ci-only-asset-sign-secret-00000000000000000000000000000000
       MCP_API_KEY: test-mcp-key
       ALLOW_LEGACY_MCP_ADMIN_KEY: "1"
     steps:
@@ -152,7 +157,15 @@ jobs:
       - name: 依序跑各套 e2e(每套全新 DB + 重啟伺服器)
         run: |
           set -eu
-          for suite in auth models phase2 phase3 phase4 story messages databases agent mcp push export; do
+          # 與 run-e2e-local.sh／run-animation-consistency.sh 同口徑：殘留 APP_URL／
+          # PUBLIC_DOMAIN 會讓 E2E_MOCK 成品指到抓不到的 /api/mock-asset（persist 404）；
+          # 殘留 S3_* 會讓 /api/ready 的 storage 探針打內網 MinIO 而 503。
+          unset S3_ENDPOINT MINIO_ENDPOINT S3_BUCKET MINIO_BUCKET \
+                S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY MINIO_ACCESS_KEY MINIO_SECRET_KEY \
+                MINIO_ROOT_USER MINIO_ROOT_PASSWORD \
+                APP_URL PUBLIC_DOMAIN RAILWAY_PUBLIC_DOMAIN
+          export E2E_PORT="${E2E_PORT:-$PORT}"
+          for suite in auth models phase2 phase3 phase4 story messages databases agent mcp push export animation-consistency; do
             echo "::group::e2e-$suite"
             # 全新資料庫：public 與 migration ledger 必須一起重置，避免 ledger 假稱已套用。
             PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
