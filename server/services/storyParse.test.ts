@@ -103,7 +103,7 @@ describe("解析模型檔位", () => {
   it("~1k 短稿先走 70B，長稿才以旗艦為主", () => {
     const short = resolveStoryExtractStrategy(1_167);
     expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
-    expect(short.fallbackModel).toBe(NIM_REASONING_MODEL);
+    expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     const long = resolveStoryExtractStrategy(8_000);
     expect(long.primaryModel).toBe(NIM_REASONING_MODEL);
     expect(long.fallbackModel).toBe(NIM_DEFAULT_MODEL);

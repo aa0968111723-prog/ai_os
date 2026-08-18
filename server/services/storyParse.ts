@@ -43,7 +43,7 @@ import {
 } from "./nvidia-nim";
 
 /** ~1k scripts do not need 405B or a 150s hang. Live 1167-char 小華稿 3/3 timed out at 150s. */
-export const STORY_PARSE_SHORT_CHARS = 2_000;
+export const STORY_PARSE_SHORT_CHARS = 4_000;
 export const STORY_PARSE_SHORT_PRIMARY_MS = 40_000;
 export const STORY_PARSE_SHORT_FALLBACK_MS = 20_000;
 /** 405B 45–60s；70B 再 50–60s。合計 ≤ ~120s，不讓 3×405B 重試吃掉整段 150s。 */
@@ -63,7 +63,7 @@ export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStr
   if (storyChars <= STORY_PARSE_SHORT_CHARS) {
     return {
       primaryModel: NIM_DEFAULT_MODEL,
-      fallbackModel: NIM_REASONING_MODEL,
+      fallbackModel: NIM_DEFAULT_MODEL,
       primaryTimeoutMs: STORY_PARSE_SHORT_PRIMARY_MS,
       fallbackTimeoutMs: STORY_PARSE_SHORT_FALLBACK_MS,
       budgetMs: STORY_PARSE_SHORT_PRIMARY_MS + STORY_PARSE_SHORT_FALLBACK_MS + 5_000,

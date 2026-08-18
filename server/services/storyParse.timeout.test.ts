@@ -16,6 +16,8 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     const strategy = resolveStoryExtractStrategy(1_167);
     expect(1_167).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
     expect(strategy.primaryModel).toContain("70b");
+    expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.fallbackModel).not.toBe(NIM_REASONING_MODEL);
     expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(45_000);
     expect(strategy.budgetMs).toBeLessThanOrEqual(80_000);
     expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(150_000);
