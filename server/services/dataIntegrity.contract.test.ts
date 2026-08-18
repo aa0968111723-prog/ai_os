@@ -9,10 +9,12 @@ describe("P0-1 story persist always sends expectedRev", () => {
   const persist = readFileSync(new URL("./collabDoc.ts", import.meta.url), "utf8");
 
   it("persistStoryDoc materialize 帶 expectedRev，衝突不覆蓋", () => {
-    expect(persist).toContain("expectedRev: opts?.expectedRev ?? existing.rev");
+    expect(persist).not.toContain("expectedRev: opts?.expectedRev ?? existing.rev");
+    expect(persist).toContain("expectedRev: opts.expectedRev");
+    expect(persist).toContain("omitted expectedRev");
     expect(persist).toContain("isRevisionConflictError");
     expect(persist).toContain("不覆蓋 stories.content");
-    expect(persist).toContain("baseline: { content: opts?.baselineContent ?? existing.content }");
+    expect(persist).toContain("baseline: { content: opts.baselineContent ?? existing.content }");
     expect(persist).toContain("不落衝突快照");
     expect(persist).toContain("以 SQL 為準");
     const persistFn = persist.slice(persist.indexOf("export async function persistStoryDoc"));

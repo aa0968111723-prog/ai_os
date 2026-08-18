@@ -148,12 +148,11 @@ export type PersistStoryDocResult = {
 /**
  * 快照落盤＋materialize 回 stories.content。
  *
- * materialize **必須**帶 expectedRev：兩分頁 blur／Yjs+autosave 同時寫時，
- * 後到的那一發要撞衝突而不是靜默 last-write-wins。省略 opts 時仍用剛讀到的
- * `existing.rev` 做 CAS——兩次併發 persistStoryDoc 會有一方 conflict，不會
- * 兩筆都靜默落地。衝突時不覆蓋 stories.content，也**不**把衝突快照落盤
- * （否則下一個人進房 loadStoryDoc 會拿到輸家的字，再帶著 SQL 新 rev persist
- * 就把贏家蓋掉＝延遲 LWW）。也不丟錯讓 flushRoom 用新 rev 重試。
+ * materialize **必須**帶 expectedRev（房間的 lastMaterializedRev）。
+ * 省略時若改用剛讀到的 `existing.rev` 做 CAS，會在 OCC `story.save`
+ * 之後「讀到新 rev → 條件寫入成功」把已存正文靜默蓋掉。
+ * 內容有變且沒帶 expectedRev：當衝突拒絕，不覆蓋、不落衝突快照。
+ * 衝突時也不丟錯讓 flushRoom 用新 rev 重試（那是延遲 LWW）。
  */
 export async function persistStoryDoc(
   projectId: string,
@@ -175,6 +174,11 @@ export async function persistStoryDoc(
     await persistStorySnapshot(projectId, groupId, doc);
     return { materialized: false, conflict: false, rev: existing.rev, content: existing.content };
   }
+  if (opts?.expectedRev === undefined) {
+    // 省略 expectedRev 若改用 existing.rev，OCC story.save 之後會靜默 LWW。
+    console.warn("[collabDoc] persistStoryDoc omitted expectedRev — refuse silent LWW over stories.content");
+    return { materialized: false, conflict: true, rev: existing.rev, content: existing.content };
+  }
   try {
     const { row } = await applyWithRevision({
       entity: "story",
@@ -184,8 +188,8 @@ export async function persistStoryDoc(
       row: existing,
       patch: { content: text },
       bookkeeping: { updatedBy: editorId ?? existing.updatedBy, updatedAt: new Date() },
-      expectedRev: opts?.expectedRev ?? existing.rev,
-      baseline: { content: opts?.baselineContent ?? existing.content },
+      expectedRev: opts.expectedRev,
+      baseline: { content: opts.baselineContent ?? existing.content },
       reload: async () => {
         const [fresh] = await db.select().from(schema.stories).where(eq(schema.stories.id, existing.id));
         return fresh;
