@@ -32,5 +32,38 @@ export function scopedTightRemaining(
 ): number | null {
   if (!requestedGroupId) return previous;
   if (!data || data.groupId !== requestedGroupId) return previous;
-  return tightRemainingPoints(data);
+  const next = tightRemainingPoints(data);
+  // Studio close can remount the badge and briefly mint a scoped-looking
+  // row with member/group caps missing — only totalRemaining＝站內總預算剩
+  // (e.g. 4,708). Keep the last tighter wallet until caps come back.
+  const globalOnly = data.memberBudgetRemaining == null && data.groupBudgetRemaining == null;
+  if (previous != null && next != null && globalOnly && next > previous) return previous;
+  return next;
+}
+
+export const SCOPED_REMAINING_STORAGE_PREFIX = "aios.quota.scopedRemaining.";
+
+export function readPersistedScopedRemaining(
+  groupId: string,
+  storage?: Pick<Storage, "getItem"> | null,
+): number | null {
+  if (!groupId || !storage) return null;
+  const raw = storage.getItem(`${SCOPED_REMAINING_STORAGE_PREFIX}${groupId}`);
+  if (raw == null || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function writePersistedScopedRemaining(
+  groupId: string,
+  remaining: number | null,
+  storage?: Pick<Storage, "setItem" | "removeItem"> | null,
+): void {
+  if (!groupId || !storage) return;
+  const key = `${SCOPED_REMAINING_STORAGE_PREFIX}${groupId}`;
+  if (remaining == null) {
+    storage.removeItem(key);
+    return;
+  }
+  storage.setItem(key, String(remaining));
 }

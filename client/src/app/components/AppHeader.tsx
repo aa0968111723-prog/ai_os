@@ -4,7 +4,7 @@ import { trpc } from "../../api";
 import type { MeWithCapabilities } from "../../capabilities";
 import { BrandLogo } from "../../components/BrandLogo";
 import { Icon } from "../../components/Icon";
-import { scopedTightRemaining } from "@shared/quotaDisplay";
+import { readPersistedScopedRemaining, scopedTightRemaining, writePersistedScopedRemaining } from "@shared/quotaDisplay";
 import { AccountMenu } from "./AccountMenu";
 import { AssistantLauncher } from "./AssistantLauncher";
 import { OnlinePresenceMenu } from "./OnlinePresenceMenu";
@@ -21,13 +21,15 @@ function PointsBadge({ groupId }: { groupId: string }) {
     { groupId },
     { refetchInterval: 60_000, enabled: !!groupId, placeholderData: (previous) => previous },
   );
-  const lastScopedRemaining = useRef<number | null>(null);
+  const storage = typeof sessionStorage === "undefined" ? null : sessionStorage;
+  const lastScopedRemaining = useRef<number | null>(readPersistedScopedRemaining(groupId, storage));
   if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
   const { weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining, falPointsCap } = my.data;
-  // Unscoped refetch (groupId null, totalRemaining＝站內總預算剩) must not flash 剩 4,708.
+  // Unscoped refetch / remount after closing 單格工作室 must not flash 剩 4,708.
   const remaining = scopedTightRemaining(my.data, groupId, lastScopedRemaining.current);
   lastScopedRemaining.current = remaining;
+  writePersistedScopedRemaining(groupId, remaining, storage);
   const caps = [memberBudgetRemaining, groupBudgetRemaining, my.data.totalRemaining].filter((v): v is number => v != null);
   const label = remaining != null ? `剩 ${remaining.toLocaleString()}` : "不限";
   // 有額度顯示 used/quota；無週額仍顯示「週已用 N」讓用量可見

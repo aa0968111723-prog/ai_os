@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../../api";
-import { scopedTightRemaining } from "@shared/quotaDisplay";
+import { readPersistedScopedRemaining, scopedTightRemaining, writePersistedScopedRemaining } from "@shared/quotaDisplay";
 import { Icon } from "../../components/Icon";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
@@ -82,7 +82,8 @@ function QuotaBar({
  * 今日已用、本週已用、週／日額度、個人／組預算剩餘——與頂欄徽章互補、單位皆為站內點。
  */
 function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; enabled: boolean }) {
-  const lastScopedRemaining = useRef<number | null>(null);
+  const storage = typeof sessionStorage === "undefined" ? null : sessionStorage;
+  const lastScopedRemaining = useRef<number | null>(readPersistedScopedRemaining(groupId ?? "", storage));
   const my = trpc.quota.my.useQuery(
     { groupId: groupId ?? "" },
     { enabled: enabled && !!groupId, staleTime: 30_000, placeholderData: (previous) => previous },
@@ -112,6 +113,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   const d = my.data;
   const tightRemaining = scopedTightRemaining(d, groupId ?? undefined, lastScopedRemaining.current);
   lastScopedRemaining.current = tightRemaining;
+  if (groupId) writePersistedScopedRemaining(groupId, tightRemaining, storage);
 
   return (
     <div
