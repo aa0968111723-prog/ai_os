@@ -115,7 +115,8 @@ app.use(
   }),
 );
 
-const port = Number(process.env.PORT ?? 3000);
+const parsedPort = Number(process.env.PORT);
+const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65536 ? parsedPort : 3000;
 const isProd = process.env.NODE_ENV === "production";
 // TD-07 / TD-07b：Web／Worker 邊界（預設 all；worker 仍 listen HTTP 但不掛 SPA）
 const processRole = readProcessRole();
