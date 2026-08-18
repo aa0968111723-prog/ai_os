@@ -1102,7 +1102,7 @@ async function rewriteProjectXiaohuaStoryboardCopy(projectId: string): Promise<v
       title: row.title,
       prompt: row.summary ?? "",
       action: row.storyExcerpt,
-    });
+    }, boundIds.size > 0 ? "小華" : "");
     if (next.title === row.title && next.prompt === (row.summary ?? "") && next.action === row.storyExcerpt) {
       continue;
     }
@@ -1131,7 +1131,9 @@ async function persistXiaohuaShotRewrites(
 ): Promise<void> {
   for (const row of rows) {
     const bound = (row.characterIds ?? []).some((id) => xiaohuaIds.has(id));
-    const next = rewritePersistedXiaohuaShotCopy(row, bound);
+    // Project has a 小華 card: force 他→她 on every shot, even titles that
+    // omit her name (EXTRACT「夕陽光照在他身上」+ characterRefs drifted).
+    const next = rewritePersistedXiaohuaShotCopy(row, bound || xiaohuaIds.size > 0);
     if (
       next.title === row.title
       && next.prompt === row.prompt
