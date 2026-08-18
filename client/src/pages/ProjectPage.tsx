@@ -34,6 +34,7 @@ import {
   type StyleMediaFamily,
   type Worldview,
 } from "@shared/worldview";
+import { createWorldviewSaveGate } from "@shared/worldviewSaveGate";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
@@ -794,21 +795,38 @@ export function ProjectPage({ id }: { id: string }) {
       );
     },
     // 失敗或成功都以伺服器現值對齊（失敗時等同回滾樂觀值）
-    onError: () => utils.projects.get.invalidate({ id }),
-    onSuccess: () => {
+    onError: () => {
+      wvGateRef.current?.reset();
+      utils.projects.get.invalidate({ id });
+    },
+    onSuccess: (row) => {
+      wvGateRef.current?.onAck(row.rev);
       utils.projects.get.invalidate({ id });
       wvTimers.current.forEach(clearTimeout);
       setWvSaved("shown");
       wvTimers.current = [setTimeout(() => setWvSaved("fading"), 2000), setTimeout(() => setWvSaved("idle"), 2600)];
     },
   });
-  /** blur／長文欄才帶 expectedRev。chips 連點仍走樂觀合併、不帶 rev，避免自己跟自己衝突。 */
-  const saveWorldviewOcc = (worldview: Parameters<typeof updateWv.mutate>[0]["worldview"]) => {
-    updateWv.mutate({
-      id,
-      worldview,
-      expectedRev: typeof project.data?.rev === "number" ? project.data.rev : undefined,
+  const updateWvMutateRef = useRef(updateWv.mutate);
+  updateWvMutateRef.current = updateWv.mutate;
+  const projectRevRef = useRef(project.data?.rev);
+  projectRevRef.current = project.data?.rev;
+  const wvGateRef = useRef<ReturnType<typeof createWorldviewSaveGate> | undefined>(undefined);
+  if (!wvGateRef.current) {
+    wvGateRef.current = createWorldviewSaveGate({
+      send: (req) => {
+        updateWvMutateRef.current({
+          id,
+          worldview: req.worldview,
+          expectedRev: req.expectedRev,
+        });
+      },
+      getRev: () => (typeof projectRevRef.current === "number" ? projectRevRef.current : undefined),
     });
+  }
+  /** chips 與 blur 共用閘門：排隊後帶 ACK 的 rev，避免連點自撞、也不再跟長文欄 LWW。 */
+  const saveWorldviewOcc = (worldview: Parameters<typeof updateWv.mutate>[0]["worldview"]) => {
+    wvGateRef.current?.save(worldview as Record<string, unknown>);
   };
 
   /** 生成時要帶入的角色定裝卡（跨鏡一致）——持久化，重整不歸零 */
@@ -1287,19 +1305,19 @@ export function ProjectPage({ id }: { id: string }) {
     const next =
       field === "styles" ? selectWorldviewStyle(wv.styles, value) : toggleWorldviewChip(wv[field], value);
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
-    updateWv.mutate({ id, worldview: { [field]: next } });
+    saveWorldviewOcc({ [field]: next });
   };
 
   /** 已選 chip 提到第一位＝主要（主軸／調性）；風格走 select 規則 */
   const promote = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return;
     if (field === "styles") {
-      updateWv.mutate({ id, worldview: { styles: selectWorldviewStyle(wv.styles, value) } });
+      saveWorldviewOcc({ styles: selectWorldviewStyle(wv.styles, value) });
       return;
     }
     const cur = wv[field];
     if (cur[0] === value) return;
-    updateWv.mutate({ id, worldview: { [field]: promoteWorldviewChip(cur, value) } });
+    saveWorldviewOcc({ [field]: promoteWorldviewChip(cur, value) });
   };
 
   /** 舊多選／跨家族一鍵收斂為可注入 look(+質感) */
@@ -1307,7 +1325,7 @@ export function ProjectPage({ id }: { id: string }) {
     if (!canEdit) return;
     const next = keepPrimaryWorldviewStyle(wv.styles);
     if (next.length === wv.styles.length && next.every((v, i) => v === wv.styles[i])) return;
-    updateWv.mutate({ id, worldview: { styles: next } });
+    saveWorldviewOcc({ styles: next });
   };
 
   const pickStyleFamily = (family: StyleMediaFamily) => {
@@ -1318,7 +1336,7 @@ export function ProjectPage({ id }: { id: string }) {
     setStyleFamilyTab(family);
     const slots = parseWorldviewStyleSlots(wv.styles);
     if (slots.family === family && slots.look) return; // 已在此家族，只切分頁
-    updateWv.mutate({ id, worldview: { styles: selectWorldviewStyleFamily(wv.styles, family) } });
+    saveWorldviewOcc({ styles: selectWorldviewStyleFamily(wv.styles, family) });
   };
 
   /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
@@ -2119,10 +2137,10 @@ export function ProjectPage({ id }: { id: string }) {
                   wv={wv}
                   kind={p.kind}
                   canEdit={canEdit}
-                  onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
+                  onApply={(patch) => saveWorldviewOcc(patch)}
                   onApplyAndGoStudio={(patch) => {
                     // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal；設定 sheet 先關）
-                    updateWv.mutate({ id, worldview: patch });
+                    saveWorldviewOcc(patch);
                     setSettingsOpen(false);
                     openInlineSection("production");
                     revealWorkbenchAnchor("#sec-studio", { projectId: id });
@@ -2250,7 +2268,7 @@ export function ProjectPage({ id }: { id: string }) {
                             );
                             if (!ok) return;
                           }
-                          updateWv.mutate({ id, worldview: { taboos: next } });
+                          saveWorldviewOcc({ taboos: next });
                         }}
                       />
                     </div>
@@ -2271,7 +2289,7 @@ export function ProjectPage({ id }: { id: string }) {
                         );
                         if (!ok) return;
                       }
-                      updateWv.mutate({ id, worldview: { taboos: next } });
+                      saveWorldviewOcc({ taboos: next });
                     }}
                   />
                 )}
@@ -2346,7 +2364,7 @@ export function ProjectPage({ id }: { id: string }) {
                           onClick={() => {
                             const patch = applyWorldviewAdvancedExample(wv, p.kind, true);
                             if (!Object.keys(patch).length) return;
-                            updateWv.mutate({ id, worldview: patch });
+                            saveWorldviewOcc(patch);
                           }}
                         >
                           空白欄帶入範例
@@ -2367,7 +2385,7 @@ export function ProjectPage({ id }: { id: string }) {
                           onClick={() => {
                             if (!window.confirm("要用範例覆寫目前的觀眾、三幕與敘事人物嗎？（禁忌與參考連結不動）")) return;
                             const patch = applyWorldviewAdvancedExample(wv, p.kind, false);
-                            updateWv.mutate({ id, worldview: patch });
+                            saveWorldviewOcc(patch);
                           }}
                         >
                           整段換成範例
@@ -2487,7 +2505,7 @@ export function ProjectPage({ id }: { id: string }) {
                                   className="tag-remove"
                                   aria-label={`移除「${token}」`}
                                   title="移除"
-                                  onClick={() => updateWv.mutate({ id, worldview: { people: wv.people.filter((x) => x !== token) } })}
+                                  onClick={() => saveWorldviewOcc({ people: wv.people.filter((x) => x !== token) })}
                                 >
                                   <Icon name="X" size={12} />
                                 </button>
@@ -2501,7 +2519,7 @@ export function ProjectPage({ id }: { id: string }) {
                         <NarrativePersonAdd
                           onAdd={(token) => {
                             if (wv.people.includes(token) || wv.people.length >= 30) return;
-                            updateWv.mutate({ id, worldview: { people: [...wv.people, token] } });
+                            saveWorldviewOcc({ people: [...wv.people, token] });
                           }}
                           disabled={wv.people.length >= 30}
                         />
@@ -2544,7 +2562,7 @@ export function ProjectPage({ id }: { id: string }) {
                       values={wv.references}
                       placeholder="貼上參考影片/文章網址（Enter 加入）"
                       readOnly={!canEdit}
-                      onChange={(next) => updateWv.mutate({ id, worldview: { references: next } })}
+                      onChange={(next) => saveWorldviewOcc({ references: next })}
                     />
                   </div>
                 </div>

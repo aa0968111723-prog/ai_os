@@ -166,7 +166,9 @@ describe("worldview OCC uses projects.rev", () => {
     expect(projects).toContain("applyWithRevision");
     const page = readFileSync(join(process.cwd(), "client/src/pages/ProjectPage.tsx"), "utf8");
     expect(page).toContain("saveWorldviewOcc");
-    expect(page).toContain("expectedRev: typeof project.data?.rev === \"number\" ? project.data.rev : undefined");
+    expect(page).toContain("createWorldviewSaveGate");
+    expect(page).toContain("expectedRev: req.expectedRev");
+    expect(page).not.toContain("updateWv.mutate({ id, worldview:");
   });
 });
 
