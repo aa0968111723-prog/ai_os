@@ -80,11 +80,29 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     },
   );
 
-  const stop = trpc.agents.stop.useMutation({
+  const discard = trpc.agents.discard.useMutation({
     onSuccess: () => {
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
     },
     onError: () => {
+      setStoppingId(null);
+      stopClickedAtRef.current = null;
+    },
+  });
+
+  const stop = trpc.agents.stop.useMutation({
+    onSuccess: () => {
+      void utils.teamAssistant.agentOverview.invalidate({ groupId });
+    },
+    onError: (_err, variables) => {
+      const runId = variables?.runId;
+      const row = runId ? runCacheRef.current.get(runId) : undefined;
+      // Leftover 0/N「待你過目」used to reject stop as already-ended.
+      // discard already persists awaiting_approval → discarded (HUD-hidden).
+      if (runId && row?.status === "awaiting_approval") {
+        discard.mutate({ runId });
+        return;
+      }
       setStoppingId(null);
       stopClickedAtRef.current = null;
     },

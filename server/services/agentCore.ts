@@ -1451,10 +1451,16 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   }
   // awaiting_approval leftover 0/N「待你過目」is HUD-active. 停 must persist
   // stopped so reload cannot resurrect the toast. waiting_* same path.
+  // Never return the pre-update row: that looks like success while the
+  // toast still reloads as awaiting_approval.
   const stopInPlace = run.status !== "running";
   if (stopInPlace) {
-    const steps = run.steps as AgentStep[];
-    stopPendingDagSteps(steps);
+    const steps = Array.isArray(run.steps) ? [...(run.steps as AgentStep[])] : [];
+    try {
+      stopPendingDagSteps(steps);
+    } catch {
+      // Status persist is the contract. Step rewrite is best-effort.
+    }
     const [stopped] = await db.transaction(async (tx) => {
       if (run.activeQuestionId) {
         await tx.update(schema.agentQuestions).set({ status: "cancelled", updatedAt: new Date() })
@@ -1469,19 +1475,20 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
         ))
         .returning();
     });
-    if (stopped) {
-      await recordAgentEventSafely({
-        runId: run.id,
-        groupId: run.groupId,
-        projectId: run.projectId,
-        eventKey: "run:stopped",
-        eventType: "stopped",
-        actorType: "human",
-        actorId: auth.user.id,
-        summary: "使用者停止了等待中的代理計畫",
-      });
+    if (!stopped) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
     }
-    return stopped ?? run;
+    await recordAgentEventSafely({
+      runId: run.id,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      eventKey: "run:stopped",
+      eventType: "stopped",
+      actorType: "human",
+      actorId: auth.user.id,
+      summary: "使用者停止了等待中的代理計畫",
+    });
+    return stopped;
   }
   const updated = await db
     .update(schema.agentRuns)
