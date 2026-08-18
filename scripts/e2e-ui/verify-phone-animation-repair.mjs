@@ -107,7 +107,8 @@ const main = async () => {
         const createSheet = page.getByLabel("建立新專案");
         check(await createSheet.isVisible().catch(() => false), `${vp.name}: 手機建立表單打開`);
         if (await createSheet.count()) {
-          await page.getByRole("button", { name: "取消" }).click();
+          await page.screenshot({ path: path.join(OUT, `${vp.name}-create.png`) });
+          await createSheet.getByRole("button", { name: "取消" }).click();
         }
       }
       const projectLink = page.locator("a[href^='/p/']").first();
@@ -122,7 +123,13 @@ const main = async () => {
         await createSheet.waitFor({ state: "visible", timeout: 10_000 });
         await createSheet.getByLabel("專案名稱").fill("overnight-test-phone-repair");
         await createSheet.getByRole("button", { name: "建立專案" }).click();
-        await page.waitForURL((u) => u.pathname.startsWith("/p/"), { timeout: 30_000 });
+      }
+      await page.waitForURL((u) => u.pathname.startsWith("/p/"), { timeout: 30_000 });
+      // Continue uses a hash, so openFull mounts the workbench. Production cards
+      // and 場景 live on the summary — go back if we landed in the full page.
+      const backToSummary = page.getByRole("button", { name: /回專案摘要/ });
+      if (await backToSummary.waitFor({ state: "visible", timeout: 3_000 }).then(() => true).catch(() => false)) {
+        await backToSummary.click();
       }
       await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
     } else {
@@ -131,6 +138,16 @@ const main = async () => {
     }
     const scenesEntry = page.getByRole("button", { name: /場景/ });
     check(await scenesEntry.count() > 0, `${vp.name}: 專案頁有場景入口`);
+    await page.screenshot({ path: path.join(OUT, `${vp.name}-summary.png`) });
+    const assetsEntry = page.getByRole("button", { name: /^素材/ });
+    if (await assetsEntry.count()) {
+      await assetsEntry.click();
+      const uploadBtn = page.getByRole("button", { name: /加入素材/ });
+      check(await uploadBtn.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false), `${vp.name}: 素材抽屜有加入素材`);
+      await page.screenshot({ path: path.join(OUT, `${vp.name}-assets.png`) });
+      const closeAssets = page.getByRole("button", { name: "關閉素材" });
+      if (await closeAssets.count()) await closeAssets.click();
+    }
     const projectNav = net.snapshot();
     metrics[vp.name] = { project: projectNav };
 
