@@ -933,6 +933,8 @@ export function ProjectAssistant({
                                     ? `套用這一鏡的調整？${payloadAct.changes?.length ? `會改：${payloadAct.changes.join("、")}。` : ""}沒列到的欄位不動，免費。`
                                     : payloadAct.type === "add_database_row"
                                       ? `在資料庫「${payloadAct.tableName}」新增這一列？\n${payloadAct.preview}`
+                                    : payloadAct.type === "add_character"
+                                      ? `新增角色定裝卡「${payloadAct.name}」？\n外觀：${payloadAct.appearance}${payloadAct.notes ? `\n備註：${payloadAct.notes}` : ""}`
                                     : `執行「${payloadAct.label}」？`;
                       return (
                         <div

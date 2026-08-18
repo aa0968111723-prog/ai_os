@@ -140,10 +140,16 @@ describe("animation shot writes stay consistent", () => {
     expect(exec).toContain("MAX_PROJECT_CHARACTERS");
     expect(assistant).toContain("proposeAddCharacterActions");
     expect(assistant).toContain("待補外觀描述");
+    expect(assistant).toContain("建角色／加定裝卡");
+    expect(assistant).toContain("確認下方就寫入");
     expect(assistant).toContain('type: z.literal("add_character")');
     expect(assistant).toContain('"add_character"');
     expect(assistant).toContain("publishToProject(project.id, { kind: \"character\"");
     expect(assistant).toContain("authoritative_character_row_read_back");
+    const client = readFileSync(join(process.cwd(), "client/src/components/ProjectAssistant.tsx"), "utf8");
+    expect(client).toContain('type: "add_character"');
+    expect(client).toContain("新增角色定裝卡");
+    expect(client).toContain("if (a.type === \"add_character\") return { type: \"add_character\"");
   });
 
   it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {

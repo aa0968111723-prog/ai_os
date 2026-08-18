@@ -66,6 +66,7 @@ describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
       tool: "add_character",
       args: { name: "小華", appearance: "粉橘短髮鮑伯、米白針織外套" },
     });
+    expect(r?.answer).toBe("我幫你準備了角色定裝卡，確認下方就寫入。");
     expect(r?.actions?.[0]).toMatchObject({
       type: "add_character",
       name: "小華",
