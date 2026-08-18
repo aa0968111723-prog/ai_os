@@ -14,13 +14,42 @@ export function isAssistantStoryReadIntent(message: string): boolean {
   return /(?:讀|看|摘要|總結|概述|列出).{0,24}(?:已存|目前|這個|專案)?(?:故事|腳本)|(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)|小華在講|並列出角色/u.test(text);
 }
 
-/** Answer lock: this project's 小華 is 她; never leave 已完成盤點 on a story-read. */
+/**
+ * Cross-project library bleed seen on live A–D story-reads.
+ * Strip only when this project's stories.content does not contain the phrase.
+ */
+const FOREIGN_STORY_BLEED_PHRASES = [
+  "從疲憊中找到力量",
+  "躺在床上",
+  "疲憊",
+] as const;
+
+function stripForeignStoryBleed(answer: string, storyContent?: string | null): string {
+  const story = storyContent ?? "";
+  let out = answer;
+  for (const phrase of FOREIGN_STORY_BLEED_PHRASES) {
+    if (story.includes(phrase)) continue;
+    out = out.split(phrase).join("");
+  }
+  return out
+    .replace(/，?\s*提到[他她]如何\s*/g, "")
+    .replace(/如何(?=[。，]|$)/g, "")
+    .replace(/[，、]{2,}/g, "，")
+    .replace(/。{2,}/g, "。")
+    .replace(/，。/g, "。")
+    .replace(/\s+。/g, "。")
+    .replace(/^\s*[，。]+/, "")
+    .trim();
+}
+
+/** Answer lock: this project's 小華 is 她; never leave 已完成盤點 or foreign 疲憊 on a story-read. */
 export function lockAssistantStoryAnswer(input: {
   answer: string;
   storyContent?: string | null;
   characterNames?: readonly string[];
 }): string {
   let answer = (input.answer ?? "").replace(/已完成盤點/g, "已讀取本專案故事");
+  answer = stripForeignStoryBleed(answer, input.storyContent);
   const hasXiaohua =
     /小華/.test(input.storyContent ?? "")
     || /小華/.test(answer)

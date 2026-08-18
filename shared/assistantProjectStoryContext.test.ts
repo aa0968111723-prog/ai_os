@@ -71,6 +71,21 @@ describe("assistant persisted story context", () => {
     expect(locked).not.toContain("已完成盤點");
     expect(locked).toContain("她的故事");
     expect(locked).not.toMatch(/講述他的故事/);
+    expect(locked).not.toContain("疲憊");
+    expect(locked).not.toContain("從疲憊中找到力量");
+    expect(locked).not.toContain("躺在床上");
+    expect(locked).toContain("角色名有小華和禪定龜龜");
+  });
+
+  it("keeps 疲憊 only when this project's stories.content actually says it", () => {
+    const story = "小華躺在床上，從疲憊中找到力量。";
+    const locked = lockAssistantStoryAnswer({
+      answer: "小華躺在床上，從疲憊中找到力量。",
+      storyContent: story,
+      characterNames: ["小華"],
+    });
+    expect(locked).toContain("躺在床上");
+    expect(locked).toContain("從疲憊中找到力量");
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {
