@@ -38,5 +38,9 @@ describe("StoryStage parse chips", () => {
     expect(src).toMatch(/baseline: req\.baseline/);
     expect(src).toMatch(/<ConflictNotice/);
     expect(src).toMatch(/setSaveState\("conflict"\)/);
+    const blur = src.slice(src.indexOf("onBlur={() => {"), src.indexOf("footer="));
+    expect(blur).toContain("dispatchStorySave(live)");
+    expect(blur).not.toContain("saveRef");
+    expect(blur).not.toMatch(/save\.mutate\(\{\s*projectId,\s*content\s*\}\)/);
   });
 });

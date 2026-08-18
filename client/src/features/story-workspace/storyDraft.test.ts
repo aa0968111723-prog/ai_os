@@ -108,6 +108,20 @@ describe("createStorySaveGate", () => {
     expect(gate.peekQueue()).toBeNull();
   });
 
+  it("blur flush sends the same expectedRev/baseline as debounce — never a two-field LWW save", () => {
+    const { gate, sent } = setup();
+    expect(gate.dispatch("debounce 草稿")).toBe("dispatched");
+    expect(sent[0]).toEqual({ content: "debounce 草稿", expectedRev: 0, baseline: "起點" });
+    expect(gate.onAck("debounce 草稿", 1)).toBe("idle");
+
+    // Tab A still holds rev=1 after Tab B saved on the server. Blur must
+    // resend that stale rev so story.save can conflict — default HEAD
+    // onBlur was `saveRef({ projectId, content })` and silent-LWW'd.
+    expect(gate.dispatch("失焦舊稿")).toBe("dispatched");
+    expect(sent[1]).toEqual({ content: "失焦舊稿", expectedRev: 1, baseline: "debounce 草稿" });
+    expect(Object.keys(sent[1]!).sort()).toEqual(["baseline", "content", "expectedRev"]);
+  });
+
   it("whenIdle 等 in-flight 與排隊都清完才回，給一鍵生成前的 flush 用", () => {
     const { gate } = setup();
     const results: Array<string> = [];
