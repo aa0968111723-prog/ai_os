@@ -53,7 +53,10 @@ describe("animation shot writes stay consistent", () => {
   });
 
   it("Shot Inspector sends lookIds when toggling a character", () => {
-    expect(inspector).toContain("setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks })");
+    expect(inspector).toContain("setCards.mutate({");
+    expect(inspector).toContain("characterIds: next");
+    expect(inspector).toContain("lookIds: nextLooks");
+    expect(inspector).toContain("expectedRev: shot.rev");
     expect(inspector).toContain("shouldApplySceneWriteAck");
     expect(inspector).toContain("sceneId: boundSceneId");
   });
@@ -168,6 +171,13 @@ describe("storyboard board blur sends expectedRev", () => {
     expect(shotCard).toContain("expectedRev: req.expectedRev");
     expect(header).toContain("expectedRev: scene.rev");
     expect(header).not.toContain("update.mutate({ id: scene.id, title: v })");
+    expect(shotCard).toContain("rev: shot.rev");
+    const binding = readFileSync(join(process.cwd(), "client/src/components/SceneCardBinding.tsx"), "utf8");
+    const dock = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ResourceDock.tsx"), "utf8");
+    expect(binding).toContain("expectedRev: scene.rev");
+    expect(binding).toContain("baseline");
+    expect(dock).toContain("expectedRev: binding.rev");
+    expect(dock).toContain("baseline: { [kind]: current }");
   });
 });
 

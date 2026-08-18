@@ -378,7 +378,16 @@ function CastTab({
       const look = (looks.data ?? []).find((row: { id: string; characterId: string }) => row.id === lookId);
       return look ? next.includes(look.characterId) : false;
     });
-    setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks });
+    setCards.mutate({
+      sceneId: shot.id,
+      characterIds: next,
+      lookIds: nextLooks,
+      expectedRev: shot.rev,
+      baseline: {
+        characterIds: shot.characterIds ?? [],
+        lookIds: shot.lookIds ?? [],
+      },
+    });
   };
   const toggleLook = (id: string) => {
     const next = boundLooks.includes(id) ? boundLooks.filter((x) => x !== id) : [...boundLooks, id];

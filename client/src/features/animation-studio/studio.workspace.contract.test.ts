@@ -199,6 +199,7 @@ describe("Inspector 不新增資料格式", () => {
   it("編輯框一律帶樂觀併發欄位——夥伴同時改不會靜默吃字", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
     expect(inspector).toContain("expectedRev: req.expectedRev");
+    expect(inspector).toContain("expectedRev: shot.rev");
     expect(inspector).toContain("createShotFieldSaveGate");
     expect(inspector).toContain("baseline:");
     expect(inspector).toContain("ConflictNotice");

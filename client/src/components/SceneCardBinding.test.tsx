@@ -62,7 +62,7 @@ describe("SceneCardBinding", () => {
   // 補齊另外兩排等於拿最舊 10 秒前的快照覆寫回去：夥伴剛在同一格綁上的場景卡會被靜默清掉。
   it("勾一張卡只送動到的那一排（沒送的欄位維持原值，不會蓋掉夥伴剛綁的卡）", async () => {
     const user = userEvent.setup();
-    render(<SceneCardBinding projectId="p1" scene={{ id: "s1" }} canEdit onSaved={vi.fn()} />);
+    render(<SceneCardBinding projectId="p1" scene={{ id: "s1", rev: 3 }} canEdit onSaved={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "指定" }));
     await user.click(screen.getByRole("button", { name: "安倢" }));
@@ -71,6 +71,8 @@ describe("SceneCardBinding", () => {
     expect(setCardsMutate.mock.calls[0][0]).toEqual({
       sceneId: "s1",
       characterIds: ["char-1"],
+      expectedRev: 3,
+      baseline: { characterIds: [] },
     });
   });
 
@@ -79,7 +81,7 @@ describe("SceneCardBinding", () => {
     render(
       <SceneCardBinding
         projectId="p1"
-        scene={{ id: "s1", characterIds: ["char-1"] }}
+        scene={{ id: "s1", characterIds: ["char-1"], lookIds: ["look-1"], rev: 4 }}
         canEdit
         onSaved={vi.fn()}
       />,
@@ -95,6 +97,13 @@ describe("SceneCardBinding", () => {
       scenePresetIds: [],
       propIds: [],
       lookIds: [],
+      expectedRev: 4,
+      baseline: {
+        characterIds: ["char-1"],
+        scenePresetIds: [],
+        propIds: [],
+        lookIds: ["look-1"],
+      },
     });
   });
 

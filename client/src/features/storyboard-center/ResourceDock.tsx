@@ -98,13 +98,14 @@ export function ResourceDock({
   const shotBindings = useMemo(() => {
     const map = new Map<
       string,
-      { characterIds: string[]; scenePresetIds: string[]; propIds: string[] }
+      { characterIds: string[]; scenePresetIds: string[]; propIds: string[]; rev?: number }
     >();
     for (const s of shots.data ?? []) {
       map.set(s.id, {
         characterIds: (s.characterIds as string[] | null) ?? [],
         scenePresetIds: (s.scenePresetIds as string[] | null) ?? [],
         propIds: (s.propIds as string[] | null) ?? [],
+        rev: s.rev,
       });
     }
     return map;
@@ -155,7 +156,12 @@ export function ResourceDock({
         continue;
       }
       const next = [...current, cardId];
-      setCards.mutate({ sceneId, [kind]: next });
+      setCards.mutate({
+        sceneId,
+        [kind]: next,
+        expectedRev: binding.rev,
+        baseline: { [kind]: current },
+      });
       applied += 1;
     }
 

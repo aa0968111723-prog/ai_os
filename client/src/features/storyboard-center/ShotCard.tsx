@@ -515,7 +515,14 @@ export function ShotCard({
             <Meta as="span" className="shot-card__section-label">世界引用</Meta>
             <SceneCardBinding
               projectId={projectId}
-              scene={{ id: shot.id, characterIds: shot.characterIds, scenePresetIds: shot.scenePresetIds, propIds: shot.propIds }}
+              scene={{
+                id: shot.id,
+                characterIds: shot.characterIds,
+                scenePresetIds: shot.scenePresetIds,
+                propIds: shot.propIds,
+                lookIds: shot.lookIds,
+                rev: shot.rev,
+              }}
               canEdit={canEdit}
               onSaved={refreshBoard}
             />
