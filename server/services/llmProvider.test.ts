@@ -49,6 +49,7 @@ const {
   FAL_AGENT_PROFILES,
   LlmServiceError,
   FREE_MODEL_TIMEOUT_MESSAGE,
+  assertFreeOnlyCompletion,
   NIM_DEGRADE_PROBE_MS,
   isFalEconomyCongested,
   __resetNimDegradation,
@@ -121,6 +122,31 @@ describe("nim 模式 — 免費路徑", () => {
     expect(r.provider).toBe("fal-openrouter");
     expect(r.model).toBe(AGENT_LLM_MODEL_IDS.fal_economy);
     expect(r.fellBack).toBe(true);
+  });
+
+  it("assertFreeOnlyCompletion throws 免費模型逾時 for luna / fellBack", () => {
+    expect(() => assertFreeOnlyCompletion("nim", {
+      provider: "fal-openrouter",
+      model: AGENT_LLM_MODEL_IDS.fal_balanced,
+      text: "paid",
+      fellBack: true,
+    })).toThrow(FREE_MODEL_TIMEOUT_MESSAGE);
+    expect(assertFreeOnlyCompletion("nim", {
+      provider: "nvidia-nim",
+      model: "meta/llama-3.1-70b-instruct",
+      text: "free",
+    }).fellBack).toBe(false);
+  });
+
+  it("NIM 降級冷卻中，只用免費仍不呼叫 fal / gpt-5.6-luna", async () => {
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    falOk("luna");
+    await completeText({ prompt: "你好", mode: "auto" });
+    expect(falSubmit).toHaveBeenCalled();
+    falSubmit.mockClear();
+    chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
+    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow(FREE_MODEL_TIMEOUT_MESSAGE);
+    expect(falSubmit).not.toHaveBeenCalled();
   });
 
   it("NIM 金鑰/設定錯誤（不可降級）仍直接報錯，不偷偷改用付費供應商", async () => {

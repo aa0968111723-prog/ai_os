@@ -157,6 +157,19 @@ export function llmPointsForUsage(modelId: string | undefined | null, usage: Llm
   return pointsFromUsd(usd);
 }
 
+/**
+ * Project / site assistant ask: `mode:nim` / 只用免費 is always 0 points.
+ * Even if a paid model id leaked into usage (gpt-5.6-luna), do not debit.
+ */
+export function assistantAskUsagePoints(
+  mode: AgentPlannerMode,
+  modelId?: string | null,
+  usage?: LlmTokenUsage,
+): number {
+  if (mode === "nim") return 0;
+  return llmPointsForUsage(modelId, usage) ?? 0;
+}
+
 /** 一次規劃可能跨多個模型（auto 先 NIM 再備援 fal、JSON 修復重試）——各自的用量要各自計價 */
 export interface LlmUsageEntry {
   model: string;
