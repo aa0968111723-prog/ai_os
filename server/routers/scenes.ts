@@ -73,6 +73,8 @@ import {
   shotCameraSchema,
   shotPerformanceSchema,
 } from "../../shared/story";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
@@ -1520,7 +1522,7 @@ export const scenesRouter = router({
       // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
       // 表演（表情/視線）。Project 風格、角色/場景/道具錨點與本鏡造型（lookIds）
       // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的文字上下文。
-      const prompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
+      const prompt = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(scene, model)));
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
@@ -1529,6 +1531,11 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      const characterIds = await ensureXiaohuaCharacterIds(
+        scene.projectId,
+        cards.characterIds,
+        [scene.title, prompt, scene.action, scene.dialogue],
+      );
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -1538,7 +1545,7 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
-        characterIds: cards.characterIds,
+        characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         // 本鏡造型：進錨點層與角色身份同句同強度（Identity 不變、Look 逐鏡換）
@@ -1616,6 +1623,11 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      const characterIds = await ensureXiaohuaCharacterIds(
+        scene.projectId,
+        cards.characterIds,
+        [scene.title, input.prompt, scene.action, scene.dialogue],
+      );
       // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
       if (input.parentAssetId) {
         const [parent] = await db
@@ -1639,8 +1651,10 @@ export const scenesRouter = router({
         const virtualScene = compiled
           ? { ...scene, camera: compiled.camera, performance: compiled.performance, action: compiled.action }
           : scene;
-        const base = input.prompt ?? (await buildShotContextPrompt(virtualScene, model));
-        const prompt = compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base;
+        const base = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(virtualScene, model)));
+        const prompt = lockXiaohuaGenerationPrompt(
+          compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base,
+        );
         return { row, compiled, prompt };
       }));
       const empty = slots.find((slot) => !slot.prompt.trim());
@@ -1668,7 +1682,7 @@ export const scenesRouter = router({
           ...(slot.compiled?.direction.keep?.length ? { keep: slot.compiled.direction.keep } : {}),
           ...(input.parentAssetId ? { parentAssetId: input.parentAssetId } : {}),
         },
-        characterIds: cards.characterIds,
+        characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         lookIds: scene.lookIds ?? undefined,

@@ -174,3 +174,20 @@ export function rewritePersistedXiaohuaShotCopy<
 >(row: T): T {
   return lockXiaohuaCopyFields(row);
 }
+
+/**
+ * Last-mile lock for Fal / preview prompts. Card titles already rewrite 他→她;
+ * generateInto still painted a boy when the prompt said 年輕男性 or never
+ * named 粉橘短髮女孩.
+ */
+export function lockXiaohuaGenerationPrompt(prompt: string, characterNames: string[] = []): string {
+  if (!prompt) return prompt;
+  const namesXiaohua = characterNames.some((name) => isXiaohuaName(name));
+  if (!mentionsXiaohua(prompt) && !namesXiaohua) return prompt;
+  if (scriptExplicitlyMaleXiaohua(prompt)) return prompt;
+  const rewritten = rewriteXiaohuaMaleCopy(prompt, true)
+    .replace(/年輕男性/g, "粉橘短髮女孩")
+    .replace(/黑長直髮/g, "粉橘短髮");
+  if (FEMALE_LOOK.test(rewritten)) return rewritten;
+  return `${rewritten}\n\n外觀鎖定 小華：${XIAOHUA_LOCKED_APPEARANCE}`;
+}

@@ -358,6 +358,7 @@ const SceneRow = memo(function SceneRow({
   canEdit,
   meLoading,
   genModelId,
+  resolveGenModel,
   onOpenStudio,
   projectId,
   charIds,
@@ -378,6 +379,13 @@ const SceneRow = memo(function SceneRow({
   meLoading: boolean;
   /** 快速出圖用的文生圖模型（跟著單格工作室上次選的；預設 SDXL Lightning） */
   genModelId: string;
+  /**
+   * Read `aios.scenegen.${projectId}` at click time. SceneStudio regen
+   * already sends the select value; SceneList used to keep a stale
+   * DEFAULT_MODEL (SDXL Lightning) until the studio closed — Qwen
+   * selected in the open studio, then「生成這一格」debited 3pt SDXL.
+   */
+  resolveGenModel: () => string;
   /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
    *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
   onOpenStudio: (id: string, number: number) => void;
@@ -716,7 +724,7 @@ const SceneRow = memo(function SceneRow({
                   onConfirm={() =>
                     generate.mutate({
                       sceneId: s.id,
-                      modelId: genModel?.id ?? DEFAULT_MODEL,
+                      modelId: resolveGenModel(),
                       clientRequestId: genRequestId.current,
                       // 送畫面上顯示的那一份（與預覽同源）；伺服器仍會再解析一次當守門
                       // 上限與 generation.submit 同一份 shared 常數：超勾取前幾張，不讓逐格生成整個被 zod 擋下
@@ -1008,14 +1016,15 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const target = EDIT_TARGETS.find((t) => t.key === editTarget) ?? EDIT_TARGETS[0];
   // 快速出圖模型：跟著單格工作室「重畫這格」上次選的（同一把 localStorage 鑰匙）；失效 id 回退預設。
   // 工作室關閉時重讀——在工作室換過模型，列表的「生成這一格」立即跟上。
-  const readGenModel = () => {
+  // Confirm-time resolve (not this state) is what generateInto actually sends.
+  const readGenModel = useCallback(() => {
     try {
       const saved = window.localStorage.getItem(`aios.scenegen.${projectId}`);
       return saved && SCENE_GEN_MODELS.some((m) => m.id === saved) ? saved : DEFAULT_MODEL;
     } catch {
       return DEFAULT_MODEL;
     }
-  };
+  }, [projectId]);
   const [genModelId, setGenModelId] = useState<string>(readGenModel);
 
   const hint = stageHint();
@@ -1154,6 +1163,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   canEdit={canEdit}
                   meLoading={me.isLoading}
                   genModelId={genModelId}
+                  resolveGenModel={readGenModel}
                   projectId={projectId}
                   charIds={charIds}
                   sceneIds={sceneIds}

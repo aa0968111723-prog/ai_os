@@ -3,6 +3,7 @@ import {
   applyXiaohuaIdentityLock,
   lockXiaohuaCharacters,
   lockXiaohuaCopyFields,
+  lockXiaohuaGenerationPrompt,
   lockXiaohuaPlan,
   rewritePersistedXiaohuaShotCopy,
   rewriteXiaohuaMaleCopy,
@@ -141,6 +142,17 @@ describe("小華 identity lock", () => {
       prompt: "禪定龜龜站在校門口",
     });
     expect(turtle.title).toBe("禪定龜龜低頭");
+  });
+
+  it("locks generateInto prompts so 小華 cannot stay a boy", () => {
+    const flipped = lockXiaohuaGenerationPrompt("小華躺在床上，年輕男性看著禪定龜龜，夕陽光照在他身上");
+    expect(flipped).toContain("粉橘短髮女孩");
+    expect(flipped).not.toMatch(/年輕男性|他身上/);
+    expect(flipped).toContain("她身上");
+    const unnamed = lockXiaohuaGenerationPrompt("夕陽光照在他身上", ["小華"]);
+    expect(unnamed).toContain("她身上");
+    expect(unnamed).toMatch(/粉橘短髮女孩|女孩/);
+    expect(lockXiaohuaGenerationPrompt("禪定龜龜低頭")).toBe("禪定龜龜低頭");
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {

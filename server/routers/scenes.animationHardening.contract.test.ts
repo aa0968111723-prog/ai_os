@@ -363,7 +363,25 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(header).toContain("本週已用 ${weeklyUsed}");
     const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
     expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");
+    expect(reconcile).toContain("shouldDiscardLeftoverAwaitingApprovalOnRead");
     expect(reconcile).toContain("待你過目");
+    const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
+    expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
+    const agentCore = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
+    expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
+    const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
+    expect(hud).toContain("Authoritative overview omitted this run");
+  });
+
+  it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("lockXiaohuaGenerationPrompt");
+    expect(into).toContain("ensureXiaohuaCharacterIds");
+    expect(into).toContain("modelId: input.modelId");
+    expect(generationCore).toContain("lockXiaohuaGenerationPrompt");
+    expect(sceneList).toContain("resolveGenModel");
+    expect(sceneList).toContain("modelId: resolveGenModel()");
+    expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
   it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {

@@ -968,6 +968,8 @@ export function SceneStudio({
                           onConfirm={() =>
                             regen.mutate({
                               sceneId,
+                              // Working path (overnight-test-ad-20260819 shot 4):
+                              // send the select value, not SceneList's DEFAULT_MODEL.
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,

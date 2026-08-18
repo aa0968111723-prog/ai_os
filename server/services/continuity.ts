@@ -4,6 +4,7 @@ import { continuitySnapshotSchema, type ContinuitySnapshot } from "../../shared/
 import { db, schema } from "../db";
 import { orderRowsByIds } from "./cardAnchors";
 import { signAssetUrl } from "./storage";
+import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 
 export type ContinuitySelection = {
   characterIds?: string[];
@@ -157,8 +158,19 @@ export async function buildContinuitySnapshot(
   }
   const charactersWithLook = characterRows.map((row) => {
     const look = lookByCharacter.get(row.id);
+    const locked = applyXiaohuaIdentityLock(
+      { name: row.name, appearance: row.appearance, costume: look?.costume ?? "" },
+      row.name,
+    );
+    const base = { ...row, appearance: locked.appearance ?? row.appearance };
     // lookId 一起凍：過時偵測要比對同一張卡，只有名字/描述比不出「是不是同一套」
-    return look ? { ...row, lookId: look.id, lookName: look.name, lookCostume: look.costume } : row;
+    if (!look) return base;
+    return {
+      ...base,
+      lookId: look.id,
+      lookName: look.name,
+      lookCostume: look.costume ? (locked.costume ?? look.costume) : look.costume,
+    };
   });
 
   const requestedReferenceAssetIds = uniquePresent([

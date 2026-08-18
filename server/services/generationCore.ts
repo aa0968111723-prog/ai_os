@@ -33,6 +33,7 @@ import { failStaleGenerationTx, reserveQuota } from "./points";
 import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
 import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import type { ContinuitySnapshot, ContinuityShotDirection } from "../../shared/continuity";
@@ -473,9 +474,16 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const prop = continuitySnapshot
     ? formatPropAnchor(continuitySnapshot.props, continuitySnapshot.props.map((row) => row.id))
     : "";
-  const parts = effectivePromptParts(model, input.prompt, worldview);
-  const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
-  const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
+  const xiaohuaNames = (continuitySnapshot?.characters ?? []).map((row) => row.name);
+  const parts = effectivePromptParts(model, lockXiaohuaGenerationPrompt(input.prompt, xiaohuaNames), worldview);
+  const autoPositive = lockXiaohuaGenerationPrompt(
+    withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop),
+    xiaohuaNames,
+  );
+  const positivePrompt = lockXiaohuaGenerationPrompt(
+    input.promptOverride?.positive?.trim() || autoPositive,
+    xiaohuaNames,
+  );
   const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
   // Cost approval, quota reservation and persisted charge must all use the prompt actually sent.
   const { getUsdToTwd } = await import("./fxRate");
