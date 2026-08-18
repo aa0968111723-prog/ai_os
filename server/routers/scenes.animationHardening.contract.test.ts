@@ -77,7 +77,9 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("buildAssistantProjectStatusContext");
     expect(assistant).toContain("assistantAskCompletionChip");
     expect(assistant).toContain("allowPaidFallback");
-    expect(assistant).toContain("if (!a.sceneNo && scenes.length === 0) continue");
+    expect(assistant).toContain("if (!a.sceneNo) continue");
+    expect(assistant).toContain("expectedRev: scene.rev");
+    expect(assistant).toContain("expectedRev: project.rev");
   });
 
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {
@@ -153,6 +155,15 @@ describe("worldview OCC uses projects.rev", () => {
 
 const oneClickHook = readFileSync(join(process.cwd(), "client/src/features/story-workspace/useOneClickFilm.ts"), "utf8");
 const overnightRealGen = readFileSync(join(process.cwd(), "scripts/overnight-real-gen-adopt.py"), "utf8");
+
+describe("DeliveryRoom picked batch matches eligible-shot filter", () => {
+  it("uses listPickedBatchGenerateIds instead of raw picked.size", () => {
+    const delivery = readFileSync(join(process.cwd(), "client/src/features/delivery/DeliveryRoom.tsx"), "utf8");
+    expect(delivery).toContain("listPickedBatchGenerateIds");
+    expect(delivery).toContain("pickedEligibleIds");
+    expect(delivery).not.toContain("sceneIds: [...picked]");
+  });
+});
 
 describe("one-click does not batch-generate on an empty board", () => {
   it("refuses batchGenerate when listByProject is still 0 shots", () => {

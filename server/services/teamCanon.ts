@@ -197,9 +197,11 @@ async function referenceEntryForAsset(input: {
     projectId: schema.assets.projectId,
     groupId: schema.assets.groupId,
     deletedAt: schema.assets.deletedAt,
+    kind: schema.assets.kind,
   }).from(schema.assets).where(eq(schema.assets.id, input.assetId));
   if (!asset || asset.deletedAt || asset.groupId !== input.groupId) return null;
   if (asset.projectId !== input.projectId) return null;
+  if (asset.kind !== "image") return null;
   return {
     assetId: asset.id,
     role: input.role,

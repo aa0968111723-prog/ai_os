@@ -52,6 +52,7 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(src).toContain("projectId: string");
     expect(src).toContain("asset.projectId !== input.projectId");
     expect(src).toContain("projectId: project.id");
+    expect(src).toContain("asset.kind !== \"image\"");
   });
 });
 
@@ -78,6 +79,14 @@ describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", (
   it("prompts.savePromptCore asserts card ids belong to the project", () => {
     const src = readFileSync(new URL("../routers/prompts.ts", import.meta.url), "utf8");
     expect(src).toContain("await assertGenerationEntityIds(project.id");
+  });
+
+  it("MCP get_project_context slices story through the shared helper", () => {
+    const src = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
+    const block = src.slice(src.indexOf('if (name === "get_project_context")'), src.indexOf('if (name === "list_generations")'));
+    expect(block).toContain("formatPersistedStoryForAssistant");
+    expect(block).toContain("slicePersistedStoryContent");
+    expect(block).toContain("storyBlock");
   });
 
   it("assertGenerationEntityIds also covers lookIds and storySceneId", () => {
