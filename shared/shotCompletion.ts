@@ -185,6 +185,21 @@ export function isBatchGenerateEligibleShot(input: {
   return Boolean((input.prompt ?? "").trim() || (input.action ?? "").trim());
 }
 
+/**
+ * DeliveryRoom「批次生成選取的 N 鏡」must match scenes.batchGenerate:
+ * a picked approved / empty-prompt / already-visual shot is not a generate.
+ */
+export function listPickedBatchGenerateIds<T extends {
+  id: string;
+  assetId?: string | null;
+  reviewStatus?: string | null;
+  prompt?: string | null;
+  action?: string | null;
+}>(rows: readonly T[], picked: Iterable<string>): string[] {
+  const set = picked instanceof Set ? picked : new Set(picked);
+  return rows.filter((row) => set.has(row.id) && isBatchGenerateEligibleShot(row)).map((row) => row.id);
+}
+
 export function listDeliveryIssues(list: ShotCompletion[]): DeliveryIssue[] {
   const out: DeliveryIssue[] = [];
   for (const s of [...list].sort((a, b) => a.orderIndex - b.orderIndex)) {

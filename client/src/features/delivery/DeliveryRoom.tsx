@@ -28,6 +28,7 @@ import {
   computeProjectCompletion,
   computeShotCompletion,
   isBatchGenerateEligibleShot,
+  listPickedBatchGenerateIds,
   listDeliveryIssues,
   type CompletionTrack,
   type ShotCompletion,
@@ -141,6 +142,7 @@ export function DeliveryRoom({
    * 按鈕承諾的數字與實際結果不符，比不顯示數字還糟。
    */
   const missingVisual = rows.filter((row) => isBatchGenerateEligibleShot(row)).length;
+  const pickedEligibleIds = listPickedBatchGenerateIds(rows, picked);
   const sheetShot = sheetShotId ? completions.find((c) => c.shotId === sheetShotId) : null;
   const sheetRow = sheetShotId ? byId.get(sheetShotId) : null;
   const busy = voice.isPending || ambience.isPending || review.isPending;
@@ -225,15 +227,19 @@ export function DeliveryRoom({
       {canEdit && (
         <div className="delivery-room__batch">
           {picked.size > 0 ? (
+            pickedEligibleIds.length > 0 ? (
             <ConfirmButton
               triggerClassName="btn-sm btn-primary"
-              message={`為選取的 ${picked.size} 鏡批次生成畫面？會建立一份 AI 代理計畫，估點後由你核准才開始扣點；單鏡失敗不影響其他鏡。`}
+              message={`為選取且可生成的 ${pickedEligibleIds.length} 鏡批次生成畫面？會建立一份 AI 代理計畫，估點後由你核准才開始扣點；單鏡失敗不影響其他鏡。已有畫面、已審核或沒有畫面描述的鏡不會送出。`}
               confirmLabel="建立批次"
               disabled={batch.isPending}
-              onConfirm={() => batch.mutate({ projectId, modelId: BATCH_MODEL, sceneIds: [...picked] })}
+              onConfirm={() => batch.mutate({ projectId, modelId: BATCH_MODEL, sceneIds: pickedEligibleIds })}
             >
-              批次生成選取的 {picked.size} 鏡
+              批次生成選取的 {pickedEligibleIds.length} 鏡
             </ConfirmButton>
+            ) : (
+              <Hint>選取的鏡已有畫面、已審核或沒有畫面描述，無法批次生成</Hint>
+            )
           ) : (
             missingVisual > 0 && (
               <ConfirmButton
