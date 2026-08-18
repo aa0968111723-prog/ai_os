@@ -372,7 +372,11 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
     };
     if (!allowPaidFallback) {
       try {
-        return await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
+        const result = await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
+        if (result.provider !== "nvidia-nim") {
+          throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE);
+        }
+        return result;
       } catch (nimError) {
         // Default nim failure must not route to fal_economy (deepseek-v4-flash).
         // Timeout is a named error so the UI can ask before a paid retry.

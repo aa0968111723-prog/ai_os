@@ -511,7 +511,7 @@ export function ProjectAssistant({
             agentSources: result.agentSources,
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
-            paid: result.fellBackToPaid === true,
+            paid: answerMode !== "nim" && result.fellBackToPaid === true,
             paidModel: result.model,
             sources: result.sources,
             executionPlan: plan,
@@ -614,7 +614,7 @@ export function ProjectAssistant({
               agentSources: result.agentSources,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
-              paid: result.fellBackToPaid === true,
+              paid: answerMode !== "nim" && result.fellBackToPaid === true,
               paidModel: result.model,
               sources: result.sources,
               executionPlan: classifyAssistantRequest(m),
@@ -818,7 +818,7 @@ export function ProjectAssistant({
                   {t.role === "you" ? "你" : "助手"}
                   {/* 付費備援標示：送出前的靜態提示只說「可能」，這裡標的是「真的發生了」。
                       成本透明是站方不變式（伺服器端特意送出 fellBackToPaid 就是為了這裡）。 */}
-                  {t.role === "ai" && t.paid && (
+                  {t.role === "ai" && t.paid && answerMode !== "nim" && (
                     <Badge
                       style={{ marginLeft: 6 }}
                       title={t.paidModel ? `NIM 無回應，這一題已自動改用付費模型 ${t.paidModel}` : "NIM 無回應，這一題已自動改用付費模型"}
