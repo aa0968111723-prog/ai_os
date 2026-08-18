@@ -720,6 +720,15 @@ export const scenesRouter = router({
       }
 
       const updated = await applySceneVisualPatch(scene, patch);
+      if (target === "assetId") {
+        const genId = (asset.meta as { generationId?: unknown } | null)?.generationId;
+        const { scheduleReconcileAfterVisualAdopt } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterVisualAdopt({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: typeof genId === "string" ? genId : null,
+        });
+      }
       return { ...updated, adoptedDirection };
     }),
 
@@ -760,7 +769,16 @@ export const scenesRouter = router({
               // 舊資料沒有 sceneRole（那時只有旁白一條音訊路徑），維持原本的落點
               ? { narrationAssetId: asset.id }
               : { assetId: asset.id };
-      return applySceneVisualPatch(scene, patch);
+      const updated = await applySceneVisualPatch(scene, patch);
+      if (!("narrationAssetId" in patch) && !("ambienceAssetId" in patch)) {
+        const { scheduleReconcileAfterVisualAdopt } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterVisualAdopt({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: gen.id,
+        });
+      }
+      return updated;
     }),
 
   /** ↑↓ 移動（與相鄰分鏡交換順序） */

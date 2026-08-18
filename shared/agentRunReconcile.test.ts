@@ -151,4 +151,21 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       latestDoneVisualAt: null,
     })).toBe(false);
   });
+
+  it("clears leftover 0/6 after auto-現用 even when the batch is newer than the gen", () => {
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: six,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "running",
+      steps: six,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(false);
+  });
 });

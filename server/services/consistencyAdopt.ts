@@ -156,6 +156,12 @@ export async function adoptGenerationCurrent(input: {
       console.warn("[adopt] next-shot staleness skipped:", error instanceof Error ? error.message : error);
     }
   }
+  const { scheduleReconcileAfterVisualAdopt } = await import("./agentRunReconcile");
+  scheduleReconcileAfterVisualAdopt({
+    projectId: generation.projectId,
+    sceneId: updated.id,
+    generationId: generation.id,
+  });
   return { shotId: updated.id, assetId: asset.id, adopted: true };
 }
 

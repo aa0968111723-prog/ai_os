@@ -3,7 +3,7 @@
  * batch/agent plan for the same shot so the HUD cannot stay 「0/6 步」with a
  * 停 button and no Adopt control.
  */
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import {
   applyIndependentGenerateToSteps,
@@ -133,6 +133,16 @@ export async function reconcileLeftoverAwaitingApprovalOnRead(input: {
     ))
     .groupBy(schema.generations.projectId);
   const latestByProject = new Map(latestVisuals.map((row) => [row.projectId, row.latest]));
+  const currentVisuals = await db
+    .select({ projectId: schema.scenes.projectId })
+    .from(schema.scenes)
+    .where(and(
+      inArray(schema.scenes.projectId, projectIds),
+      isNull(schema.scenes.deletedAt),
+      isNotNull(schema.scenes.assetId),
+    ))
+    .groupBy(schema.scenes.projectId);
+  const currentByProject = new Set(currentVisuals.map((row) => row.projectId));
 
   for (const run of runs) {
     const steps = Array.isArray(run.steps) ? run.steps : [];
@@ -141,6 +151,7 @@ export async function reconcileLeftoverAwaitingApprovalOnRead(input: {
       steps,
       runCreatedAt: run.createdAt,
       latestDoneVisualAt: latestByProject.get(run.projectId) ?? null,
+      hasCurrentVisual: currentByProject.has(run.projectId),
     })) continue;
     const leftover = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
       status: run.status,
@@ -157,4 +168,25 @@ export async function reconcileLeftoverAwaitingApprovalOnRead(input: {
       })
       .where(eq(schema.agentRuns.id, run.id));
   }
+}
+
+/** Adopt / 設為現用 must clear leftover 0/6「待你過目」the same way generateInto does. */
+export function scheduleReconcileAfterVisualAdopt(input: {
+  projectId: string;
+  sceneId: string;
+  generationId?: string | null;
+}): void {
+  void (input.generationId
+    ? reconcileAgentRunsAfterSceneGenerate({
+      projectId: input.projectId,
+      sceneId: input.sceneId,
+      generationId: input.generationId,
+    })
+    : reconcileLeftoverAwaitingApprovalOnRead({ projectId: input.projectId })
+  ).catch((err) =>
+    console.warn(
+      "[agent-run] adopt reconcile failed:",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 }
