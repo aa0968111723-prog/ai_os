@@ -170,6 +170,21 @@ export interface DeliveryIssue {
  *
  * 「生成中」不算問題：它正在解決，列進去只會讓問題數字上下跳。
  */
+/**
+ * Aligns DeliveryRoom「補完 N 鏡」with scenes.batchGenerate:
+ * skip current visuals, approved shots, and shots with no visual description.
+ */
+export function isBatchGenerateEligibleShot(input: {
+  assetId?: string | null;
+  reviewStatus?: string | null;
+  prompt?: string | null;
+  action?: string | null;
+}): boolean {
+  if (input.assetId) return false;
+  if (input.reviewStatus === "approved") return false;
+  return Boolean((input.prompt ?? "").trim() || (input.action ?? "").trim());
+}
+
 export function listDeliveryIssues(list: ShotCompletion[]): DeliveryIssue[] {
   const out: DeliveryIssue[] = [];
   for (const s of [...list].sort((a, b) => a.orderIndex - b.orderIndex)) {

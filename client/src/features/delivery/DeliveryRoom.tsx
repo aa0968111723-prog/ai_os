@@ -27,6 +27,7 @@ import {
   TRACK_LABEL,
   computeProjectCompletion,
   computeShotCompletion,
+  isBatchGenerateEligibleShot,
   listDeliveryIssues,
   type CompletionTrack,
   type ShotCompletion,
@@ -85,7 +86,12 @@ export function DeliveryRoom({
     },
   });
 
-  const rows = (shots.data ?? []) as unknown as Array<ShotCompletionInput & { assetUrl: string | null; durationSec: number }>;
+  const rows = (shots.data ?? []) as unknown as Array<ShotCompletionInput & {
+    assetUrl: string | null;
+    durationSec: number;
+    prompt?: string | null;
+    action?: string | null;
+  }>;
   const { completions, project, issues, byId } = useMemo(() => {
     const completions = rows.map(computeShotCompletion);
     return {
@@ -134,9 +140,7 @@ export function DeliveryRoom({
    * 這裡若照著算全部缺畫面的鏡，按鈕會說「補完 4 鏡」而實際只做 3 鏡——
    * 按鈕承諾的數字與實際結果不符，比不顯示數字還糟。
    */
-  const missingVisual = completions.filter(
-    (c) => c.tracks.image === "missing" && byId.get(c.shotId)?.reviewStatus !== "approved",
-  ).length;
+  const missingVisual = rows.filter((row) => isBatchGenerateEligibleShot(row)).length;
   const sheetShot = sheetShotId ? completions.find((c) => c.shotId === sheetShotId) : null;
   const sheetRow = sheetShotId ? byId.get(sheetShotId) : null;
   const busy = voice.isPending || ambience.isPending || review.isPending;

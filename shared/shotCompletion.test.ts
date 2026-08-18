@@ -10,6 +10,7 @@ import {
   computeShotCompletion,
   computeProjectCompletion,
   listDeliveryIssues,
+  isBatchGenerateEligibleShot,
   COMPLETION_TRACKS,
   type ShotCompletionInput,
 } from "./shotCompletion";
@@ -136,5 +137,15 @@ describe("listDeliveryIssues", () => {
   it("全部做完就沒有問題", () => {
     const done = shot({ assetId: "x", assetKind: "video", narrationUrl: "n", ambienceUrl: "a", reviewStatus: "approved" });
     expect(listDeliveryIssues([done])).toEqual([]);
+  });
+});
+
+describe("isBatchGenerateEligibleShot", () => {
+  it("skips current visuals, approved shots, and empty-prompt shots", () => {
+    expect(isBatchGenerateEligibleShot({ assetId: null, prompt: "海邊" })).toBe(true);
+    expect(isBatchGenerateEligibleShot({ assetId: null, action: "走進禪堂" })).toBe(true);
+    expect(isBatchGenerateEligibleShot({ assetId: "a1", prompt: "海邊" })).toBe(false);
+    expect(isBatchGenerateEligibleShot({ assetId: null, reviewStatus: "approved", prompt: "海邊" })).toBe(false);
+    expect(isBatchGenerateEligibleShot({ assetId: null, prompt: "  ", action: "" })).toBe(false);
   });
 });
