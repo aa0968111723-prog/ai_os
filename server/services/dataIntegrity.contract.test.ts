@@ -47,6 +47,13 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(src).toContain("同組其他專案的圖不能當定裝");
   });
 
+  it("context bindings refuse same-group other-project assets and knowledge", () => {
+    const src = readFileSync(new URL("./contextBindings.ts", import.meta.url), "utf8");
+    expect(src).toContain("asset.projectId !== input.project.id");
+    expect(src).toContain("row.projectId !== input.project.id");
+    expect(src).toContain("同組其他專案的圖不能當定裝");
+  });
+
   it("Team Canon reference images also require the same project", () => {
     const src = readFileSync(new URL("./teamCanon.ts", import.meta.url), "utf8");
     expect(src).toContain("projectId: string");
