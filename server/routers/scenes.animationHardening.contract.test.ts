@@ -144,6 +144,12 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(bindings).toContain("table.groupId === project.groupId");
   });
 
+  it("review bumps rev through applySceneVisualPatch", () => {
+    const review = scenes.slice(scenes.indexOf("review:"), scenes.indexOf("inheritFromPrevious:"));
+    expect(review).toContain("applySceneVisualPatch");
+    expect(review).not.toContain("db.update(schema.scenes)");
+  });
+
   it("setVisual adopt paths bump rev through applySceneVisualPatch", () => {
     const fromAsset = scenes.slice(scenes.indexOf("setVisualFromAsset:"), scenes.indexOf("setVisualFromGeneration:"));
     const fromGen = scenes.slice(scenes.indexOf("setVisualFromGeneration:"), scenes.indexOf("move:"));

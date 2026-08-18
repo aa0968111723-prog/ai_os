@@ -930,12 +930,8 @@ export const scenesRouter = router({
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一鏡（可能已刪除）" });
       await getProjectChecked(ctx, scene.projectId, true);
-      const [row] = await db
-        .update(schema.scenes)
-        .set({ reviewStatus: input.status })
-        .where(eq(schema.scenes.id, scene.id))
-        .returning({ id: schema.scenes.id, reviewStatus: schema.scenes.reviewStatus });
-      return row;
+      const row = await applySceneVisualPatch(scene, { reviewStatus: input.status });
+      return { id: row.id, reviewStatus: row.reviewStatus };
     }),
 
   /**
