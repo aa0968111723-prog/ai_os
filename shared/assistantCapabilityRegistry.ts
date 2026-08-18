@@ -23,6 +23,8 @@ const PAGE_TERMS: Partial<Record<AssistantWirePageContext["pageType"], string[]>
   agent_run: ["agent", "approval", "task"],
   collab: ["agent", "task", "message", "dm", "approval"],
   chat: ["message", "dm"],
+  /** Animation Studio shares the project assistant (pageType=studio, entityType=shot). */
+  studio: ["scene", "shot", "character", "generation", "asset"],
 };
 
 function isRelevant(tool: McpToolInfo, terms: string[]): boolean {

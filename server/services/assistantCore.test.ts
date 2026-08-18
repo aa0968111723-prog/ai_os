@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_HONEST_ACTION_RULE,
   ASSISTANT_READONLY_SCOPE,
+  ASSISTANT_VIEWER_NO_WRITE_RULE,
   extractJsonObject,
   runToolLoop,
   stripJsonObject,
@@ -203,5 +204,14 @@ describe("ASSISTANT_HONEST_ACTION_RULE（缺陷A：不得假宣稱動作已完�
 
   it("規則標為最高優先，壓過其他回覆指令（LLM 才不會為了討好使用者而假宣稱）", () => {
     expect(ASSISTANT_HONEST_ACTION_RULE).toContain("最高優先");
+  });
+});
+
+describe("ASSISTANT_VIEWER_NO_WRITE_RULE", () => {
+  it("strips generate / update_scene / direct_shot when the caller is a viewer", () => {
+    expect(ASSISTANT_VIEWER_NO_WRITE_RULE).toContain("唯讀");
+    expect(ASSISTANT_VIEWER_NO_WRITE_RULE).toContain("actions 必須是 []");
+    expect(ASSISTANT_VIEWER_NO_WRITE_RULE).toContain("direct_shot");
+    expect(ASSISTANT_VIEWER_NO_WRITE_RULE).toContain("generate");
   });
 });

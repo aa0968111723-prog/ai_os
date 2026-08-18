@@ -122,6 +122,7 @@ function persistProjectTurns(projectId: string, turns: Turn[]): Turn[] {
 type ProjectDirectResult = {
   kind: string;
   message: string;
+  ok?: boolean;
   createdScenes?: number;
   sceneIds?: string[];
   verification?: { status: "verified" | "unverified"; message: string };
@@ -1062,8 +1063,10 @@ export function ProjectAssistant({
                                   utils.databases.list.invalidate();
                                 }
                                 if (!actionIsCurrent()) return;
-                                push({ role: "ai", text: `✓ ${result.message}` });
-                                setExecuted((prev) => new Set(prev).add(actKey));
+                                const verification = "verification" in result ? result.verification : undefined;
+                                const verified = result.ok !== false && verification?.status !== "unverified";
+                                push({ role: "ai", text: verified ? `✓ ${result.message}` : result.message });
+                                if (verified) setExecuted((prev) => new Set(prev).add(actKey));
                                 onRunActionSuccess?.({
                                   actionType: payloadAct.type,
                                   kind: result.kind,

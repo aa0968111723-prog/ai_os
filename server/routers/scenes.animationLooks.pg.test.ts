@@ -176,6 +176,33 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     expect(fresh.prompt).toBe("小蓮停在街口");
     expect(fresh.durationSec).toBe(4);
     expect(fresh.deletedAt).toBeNull();
+    expect(result.ok).toBe(true);
+    expect("verification" in result && result.verification?.status).toBe("verified");
+  });
+
+  it("assistant update_scene / direct_shot without read-back match → ok:false", async () => {
+    const { project, ctx } = await seed("助手讀回");
+    const [shot] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 2, title: "原標題",
+      camera: { shotSize: "近景" },
+    }).returning();
+    const assistant = assistantRouter.createCaller(ctx as never);
+    const updated = await assistant.runAction({
+      projectId: project.id,
+      action: { type: "update_scene", sceneId: shot.id, field: "title", value: "讀回後的標題" },
+    });
+    expect(updated.ok).toBe(true);
+    expect("verification" in updated && updated.verification?.status).toBe("verified");
+    const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, shot.id));
+    expect(fresh.title).toBe("讀回後的標題");
+
+    const noop = await assistant.runAction({
+      projectId: project.id,
+      action: { type: "direct_shot", sceneId: shot.id, camera: { shotSize: "近景" } },
+    });
+    expect(noop.ok).toBe(false);
+    expect("verification" in noop && noop.verification?.status).toBe("unverified");
+    expect(noop.message).not.toMatch(/^已調整/);
   });
 
   it("overlapping story.save with the same expectedRev: one wins, latest retry persists", async () => {

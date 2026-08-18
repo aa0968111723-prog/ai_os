@@ -56,4 +56,13 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain('if (a.type === "create_scene")');
     expect(assistant).toContain("publishToProject(project.id");
   });
+
+  it("assistant sceneNo uses orderIndex display lookup, never scenes[n-1]", () => {
+    expect(assistant).toContain("findSceneByDisplayNo");
+    expect(assistant).not.toContain("scenes[no - 1]");
+    expect(assistant).not.toContain("scenes[a.sceneNo - 1]");
+    expect(assistant).toContain("settleAssistantAskCompletion");
+    expect(assistant).toContain("ASSISTANT_VIEWER_NO_WRITE_RULE");
+    expect(assistant).toContain("formatStudioShotContext");
+  });
 });

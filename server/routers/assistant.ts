@@ -31,7 +31,10 @@ import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
 import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
-import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
+import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
+import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
+import { settleAssistantAskCompletion, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
+import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { applyWithRevision } from "../services/revisionGuard";
@@ -368,6 +371,22 @@ async function applyAssistantScenePatch(
   return row;
 }
 
+async function readBackScene(projectId: string, sceneId: string) {
+  const [fresh] = await db
+    .select()
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.id, sceneId), eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
+  return fresh;
+}
+
+function writeResult<T extends Record<string, unknown>>(
+  body: T,
+  verification: AssistantWriteVerification,
+  verifiedMessage: string,
+): T & { ok: boolean; verification: AssistantWriteVerification; message: string } {
+  return { ...body, ...formatAssistantWriteResult(verification, verifiedMessage) };
+}
+
 /* ── 多步工具調用（W4）：唯讀查詢工具 ── */
 
 /** LLM 的工具呼叫格式：{"tool":"...","args":{...}}（與最終回答的 {"answer":...} 互斥,以 tool 鍵區分） */
@@ -621,7 +640,7 @@ async function runLookupTool(
 
   if (call.tool === "read_scene") {
     const no = call.args?.sceneNo ?? 0;
-    const scene = scenes[no - 1];
+    const scene = findSceneByDisplayNo(scenes, no);
     if (!scene) {
       const text = `第 ${no} 鏡不存在——目前共 ${scenes.length} 個分鏡`;
       return { step: `讀分鏡(第 ${no} 鏡不存在)`, text, preview: { kind: "text", text } };
@@ -1217,7 +1236,29 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const chipGuide = worldviewChipGuidanceForAi(wv);
       const pageContextBlock = formatAssistantPageContext(input.pageContext);
       const historyBlock = buildAssistantHistoryBlock(input.history);
-      const context = `標題：${project.title}（${project.kind}，${project.format}）
+      const allowWrite = projectRole === "editor";
+      // 〈專案現況〉只組一次，工具迴圈各輪閉包重用——不要每輪重倒全專案。
+      // 動畫創作室只注入目前鏡頭＋已綁角色，避免再逼模型呼叫 get_project_context。
+      const studioShot = input.pageContext?.pageType === "studio" && input.pageContext.entityId
+        ? scenes.find((row) => row.id === input.pageContext?.entityId)
+        : undefined;
+      const studioCharIds = (studioShot?.characterIds ?? []).filter((id): id is string => Boolean(id));
+      const studioCharacters = studioCharIds.length
+        ? await db
+          .select({ name: schema.characters.name, appearance: schema.characters.appearance })
+          .from(schema.characters)
+          .where(and(eq(schema.characters.projectId, project.id), inArray(schema.characters.id, studioCharIds)))
+        : [];
+      const context = studioShot
+        ? formatStudioShotContext({
+          projectTitle: project.title,
+          kind: project.kind,
+          format: project.format,
+          displayNo: displayShotNo(scenes, studioShot.id) ?? 1,
+          shot: studioShot,
+          characters: studioCharacters,
+        })
+        : `標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜${formatWorldviewForAi(wv, "brief")}
 ${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
 ${sceneLines}
@@ -1225,10 +1266,11 @@ ${sceneLines}
 
       /** 把 LLM 的代號提議（sceneNo／modelId／presetId）解析成可執行動作；無效代號（幻覺）一律略過或退回預設 */
       const resolve = (actions: z.infer<typeof proposalSchema>[]): ResolvedAction[] => {
+        if (!allowWrite) return [];
         const out: ResolvedAction[] = [];
         for (const a of actions) {
           if (a.type === "generate") {
-            const scene = a.sceneNo ? scenes[a.sceneNo - 1] : undefined;
+            const scene = a.sceneNo ? findSceneByDisplayNo(scenes, a.sceneNo) : undefined;
             if (a.sceneNo && !scene) continue; // 指了不存在的鏡＝幻覺編號，整筆提議略過
             const model = pickGenerateModel(a.modelId); // 白名單不過就退回預設圖像模型
             out.push({
@@ -1250,7 +1292,7 @@ ${sceneLines}
           } else if (a.type === "plan_agent") {
             out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` });
           } else if (a.type === "prepare_external_generation") {
-            const scene = scenes[a.sceneNo - 1];
+            const scene = findSceneByDisplayNo(scenes, a.sceneNo);
             if (!scene) continue;
             const toolKey = a.externalTool ?? "flow";
             const tool = BUILT_IN_EXTERNAL_TOOLS.find((candidate) => candidate.key === toolKey);
@@ -1285,7 +1327,7 @@ ${sceneLines}
               label: `套用基調：${summary.slice(0, 48)}${summary.length > 48 ? "…" : ""}`,
             });
           } else if (a.type === "direct_shot") {
-            const scene = scenes[a.sceneNo - 1];
+            const scene = findSceneByDisplayNo(scenes, a.sceneNo);
             if (!scene) continue; // 幻覺的鏡次：不給使用者一顆註定失敗的按鈕
             // 先在伺服器算出合併結果與差異——確認卡要顯示的是「真的會變成什麼」，不是模型的說法
             const nextCamera = mergeShotDirection(scene.camera, a.camera);
@@ -1331,7 +1373,7 @@ ${sceneLines}
               label: `在資料庫「${target.name}」新增一列（${Object.keys(data).length} 欄）`,
             });
           } else {
-            const scene = scenes[a.sceneNo - 1];
+            const scene = findSceneByDisplayNo(scenes, a.sceneNo);
             if (!scene) continue;
             out.push({ type: "update_scene", sceneId: scene.id, field: a.field, value: a.value, label: `把第 ${a.sceneNo} 鏡的${FIELD_LABEL[a.field]}改為「${a.value.slice(0, 24)}」` });
           }
@@ -1363,27 +1405,12 @@ ${sceneLines}
       const capabilityBlock = selectAssistantCapabilities({
         intent: executionPlan.intent,
         pageContext: input.pageContext,
-        allowWrite: projectRole === "editor",
+        allowWrite,
         maxTools: 18,
       }).map((capability) => `- ${capability.name} [${capability.access}]：${capability.title}`).join("\n");
 
-      /** 組每輪的完整提示詞：基底任務＋工具說明＋速查＋情境手冊＋現況/知識庫/資料庫＋(累積的工具結果)＋問題 */
-      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `你是這支影片專案的「專案 AI 代理系統」——同一個對話統包問答、分鏡發想、拆分鏡、排計畫執行與資料庫查詢。用繁體中文簡潔回答使用者關於「進度、生成、分鏡、素材內容、細節、挑模型、資料庫」的問題。
-${forceFinal
-  ? "查詢額度已用完——這一輪你必須直接給最終回答，不得再呼叫工具。"
-  : `回答前你可以先用「唯讀查詢工具」看專案的實際內容（本次提問最多 ${MAX_TOOL_ROUNDS} 次）。要用工具時，整個回覆只回一個 JSON 工具呼叫，拿到 <工具結果> 後再決定要不要再查或給最終回答：
-- {"tool":"list_assets","args":{"kind":"image"}}：列素材庫（kind 可省略或 image/video/audio/doc）
-- {"tool":"read_scene","args":{"sceneNo":3}}：讀某一鏡的完整內容（提示詞/旁白全文）
-- {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
-- {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
-- {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
-- {"tool":"list_tasks","args":{}}：這個專案的人員任務與待核准（標題／狀態／負責人／期限）——被問到「誰卡住」「還有什麼要做」「等誰」時查這個
-- {"tool":"list_schedule","args":{}}：這個專案相關的行程與交付死線（含組層級；args 可加 {"includePast":true} 回顧過去）——被問到「什麼時候要交」「這週有什麼」時查這個
-- {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆）——被問到「上次討論的結論」「有沒有記錄」時查這個
-能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
-分鏡、生成統計與知識庫已經在 <專案現況> 裡，不要用工具重查；工具是用來看「人的事」（任務／行程／筆記）與明細（單一分鏡全文、素材清單、資料庫列）。
-例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
-你也可以輸出結構化動作意圖。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。後端會依風險決定直接執行或顯示確認。可提議的動作：
+      const proposedActionsBlock = allowWrite
+        ? `你也可以輸出結構化動作意圖。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。後端會依風險決定直接執行或顯示確認。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
 - direct_shot：只調某一鏡的**鏡頭語言與表演**（sceneNo＋camera／performance，兩者皆可選但至少給一個）。camera 可填 shotSize（${SHOT_SIZE_OPTIONS.join("/")}）、angle（${SHOT_ANGLE_OPTIONS.join("/")}）、movement（${SHOT_MOVEMENT_OPTIONS.join("/")}）、focalLength、lighting、composition；performance 可填 emotion、gaze。**只填你要改的欄位**——沒填的欄位會原樣保留，填空字串 "" 才是清掉。使用者說「這一鏡再靠近一點／換低角度／眼神看遠一點／光再柔一點」時用這個，不要用 update_scene（那支只改標題／旁白／秒數）。
@@ -1397,8 +1424,27 @@ ${forceFinal
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/add_database_row/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
 世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
-分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
-一次回覆最多輸出 6 個動作；不要假設前一步已完成。安全且可逆的明確 DIRECT 可由後端直接執行，其餘會要求使用者確認。
+分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝orderIndex 排序後的顯示鏡號）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
+一次回覆最多輸出 6 個動作；不要假設前一步已完成。安全且可逆的明確 DIRECT 可由後端直接執行，其餘會要求使用者確認。`
+        : ASSISTANT_VIEWER_NO_WRITE_RULE;
+
+      /** 組每輪的完整提示詞：基底任務＋工具說明＋速查＋情境手冊＋現況/知識庫/資料庫＋(累積的工具結果)＋問題 */
+      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `你是這支影片專案的「專案 AI 代理系統」——同一個對話統包問答、分鏡發想、拆分鏡、排計畫執行與資料庫查詢。用繁體中文簡潔回答使用者關於「進度、生成、分鏡、素材內容、細節、挑模型、資料庫」的問題。
+${forceFinal
+  ? "查詢額度已用完——這一輪你必須直接給最終回答，不得再呼叫工具。"
+  : `回答前你可以先用「唯讀查詢工具」看專案的實際內容（本次提問最多 ${MAX_TOOL_ROUNDS} 次）。要用工具時，整個回覆只回一個 JSON 工具呼叫，拿到 <工具結果> 後再決定要不要再查或給最終回答：
+- {"tool":"list_assets","args":{"kind":"image"}}：列素材庫（kind 可省略或 image/video/audio/doc）
+- {"tool":"read_scene","args":{"sceneNo":3}}：讀某一鏡的完整內容（提示詞/旁白全文）。sceneNo＝orderIndex 排序後的顯示鏡號，不是陣列下標。
+- {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
+- {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
+- {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
+- {"tool":"list_tasks","args":{}}：這個專案的人員任務與待核准（標題／狀態／負責人／期限）——被問到「誰卡住」「還有什麼要做」「等誰」時查這個
+- {"tool":"list_schedule","args":{}}：這個專案相關的行程與交付死線（含組層級；args 可加 {"includePast":true} 回顧過去）——被問到「什麼時候要交」「這週有什麼」時查這個
+- {"tool":"list_notes","args":{"keyword":"分鏡"}}：專案筆記與組內共用筆記的摘要（keyword 可省略＝最新 20 筆）——被問到「上次討論的結論」「有沒有記錄」時查這個
+能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
+分鏡、生成統計與知識庫已經在 <專案現況> 裡，不要用 get_project_context 或工具重倒同一份；工具是用來看「人的事」（任務／行程／筆記）與明細（單一分鏡全文、素材清單、資料庫列）。
+例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
+${proposedActionsBlock}
 ${ASSISTANT_HONEST_ACTION_RULE}
 <視覺風格速查>
 ${styleFamilyCheatsheet()}
@@ -1572,11 +1618,12 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         }
         const reply = outcome.reply;
         const actions = resolve(reply.rawActions);
+        const settled = settleAssistantAskCompletion({ answer: reply.answer, actions });
         const summary =
           reply.source === "reply" ? "回答與建議動作已整理完成"
           : reply.source === "coerced" ? "已修正模型格式並完成回答"
           : "以安全的純文字備援完成回答";
-        await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary, payload: { answer: reply.answer, actions, steps } });
+        await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary, payload: { answer: settled.answer, actions, steps } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
         // 完成事件必須在快照之前發（快照＝回傳當下的事件流）。
         // Project assistant proposes write actions but does not execute them here.
@@ -1590,7 +1637,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             status: "waiting",
             resultCount: actions.length,
           });
-        } else {
+        } else if (settled.emitCompleted) {
           stream.emit({
             type: "agent.completed",
             title: okAgentSources.length ? "已完成盤點" : "已回答（沒有讀取站內資料）",
@@ -1598,9 +1645,16 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             status: "ok",
             resultCount: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
           });
+        } else {
+          stream.emit({
+            type: "waiting.user_input",
+            title: "尚未寫入（沒有可確認的動作）",
+            description: "回答提到寫入，但專案資料沒有變更",
+            status: "waiting",
+          });
         }
         return {
-          answer: reply.answer, actions, steps, mock: false,
+          answer: settled.answer, actions, steps, mock: false,
           fallback: reply.source === "fallback",
           provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId,
           runId: stream.runId,
@@ -1866,7 +1920,20 @@ export const assistantRouter = router({
           if (!v) throw new TRPCError({ code: "BAD_REQUEST", message: `${FIELD_LABEL[a.field]}不能是空白` });
           await applyAssistantScenePatch(scene, { [a.field]: v }, "助手已更新分鏡");
         }
-        return { ok: true, kind: "update_scene" as const, message: "已更新分鏡" };
+        const expected = a.field === "durationSec"
+          ? String(Math.max(1, Math.min(60, Math.round(Number(a.value)))))
+          : a.value.trim();
+        let verification: AssistantWriteVerification;
+        try {
+          const fresh = await readBackScene(project.id, scene.id);
+          const actual = a.field === "durationSec" ? String(fresh?.durationSec ?? "") : String(fresh?.[a.field] ?? "");
+          verification = fresh && actual === expected
+            ? { status: "verified", message: `已重新讀取並確認${FIELD_LABEL[a.field]}` }
+            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+        } catch {
+          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
+        }
+        return writeResult({ kind: "update_scene" as const }, verification, "已更新分鏡");
       }
 
       if (a.type === "direct_shot") {
@@ -1884,11 +1951,27 @@ export const assistantRouter = router({
           ...describeDirectionChange(scene.performance, performance),
         ];
         if (!changes.length) {
-          return { ok: true, kind: "direct_shot" as const, message: "這一鏡已經是這個設定了，沒有變更" };
+          return {
+            ok: false,
+            kind: "direct_shot" as const,
+            verification: { status: "unverified" as const, message: "沒有變更，未寫入" },
+            message: "這一鏡已經是這個設定了，沒有變更",
+          };
         }
         await applyAssistantScenePatch(scene, { camera, performance }, "助手已調整鏡頭語言");
-        // 用標題不用 orderIndex＋1：orderIndex 不保證是連續的顯示鏡次（軟刪與插入會留洞），報錯鏡次比不報還糟
-        return { ok: true, kind: "direct_shot" as const, message: `已調整「${scene.title}」：${changes.join("、")}` };
+        let verification: AssistantWriteVerification;
+        try {
+          const fresh = await readBackScene(project.id, scene.id);
+          const match = fresh
+            && JSON.stringify(fresh.camera ?? null) === JSON.stringify(camera ?? null)
+            && JSON.stringify(fresh.performance ?? null) === JSON.stringify(performance ?? null);
+          verification = match
+            ? { status: "verified", message: `已重新讀取並確認「${scene.title}」鏡頭語言` }
+            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+        } catch {
+          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
+        }
+        return writeResult({ kind: "direct_shot" as const }, verification, `已調整「${scene.title}」：${changes.join("、")}`);
       }
 
       if (a.type === "create_scene") {
@@ -1918,7 +2001,16 @@ export const assistantRouter = router({
           return row;
         });
         publishToProject(project.id, { kind: "scene", id: scene.id }, "助手已新增分鏡");
-        return { ok: true, kind: "create_scene" as const, sceneId: scene.id, message: "已新增分鏡" };
+        let verification: AssistantWriteVerification;
+        try {
+          const fresh = await readBackScene(project.id, scene.id);
+          verification = fresh && fresh.title === title
+            ? { status: "verified", message: "已重新讀取並確認新增分鏡" }
+            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+        } catch {
+          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
+        }
+        return writeResult({ kind: "create_scene" as const, sceneId: scene.id }, verification, "已新增分鏡");
       }
 
       if (a.type === "run_workflow") {
@@ -1986,16 +2078,11 @@ export const assistantRouter = router({
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        return {
-          ok: true,
+        return writeResult({
           kind: "split_script" as const,
           createdScenes: result.count,
           sceneIds: createdIds,
-          verification,
-          message: verification.status === "verified"
-            ? `已拆出並驗證 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}`
-            : `操作已送出，但驗證未通過${truncNote}`,
-        };
+        }, verification, `已拆出並驗證 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}`);
       }
 
       if (a.type === "apply_worldview_chips") {
@@ -2015,11 +2102,27 @@ export const assistantRouter = router({
           .set({ worldview: merged, updatedAt: new Date() })
           .where(eq(schema.projects.id, project.id));
         const summary = summarizeWorldviewChipsPatch(patch);
-        return {
-          ok: true,
-          kind: "apply_worldview_chips" as const,
-          message: `已套用世界觀基調：${summary}。可在專案「基調與世界觀」再微調或改主要。`,
-        };
+        let verification: AssistantWriteVerification;
+        try {
+          const [fresh] = await db
+            .select({ worldview: schema.projects.worldview })
+            .from(schema.projects)
+            .where(eq(schema.projects.id, project.id));
+          const parsed = worldviewSchema.parse(fresh?.worldview ?? {});
+          const chipsMatch = (!patch.themes || JSON.stringify(parsed.themes) === JSON.stringify(patch.themes))
+            && (!patch.tones || JSON.stringify(parsed.tones) === JSON.stringify(patch.tones))
+            && (!patch.styles || JSON.stringify(parsed.styles) === JSON.stringify(patch.styles));
+          verification = fresh && chipsMatch
+            ? { status: "verified", message: `已重新讀取並確認世界觀：${summary}` }
+            : { status: "unverified", message: "操作已送出，但驗證未通過" };
+        } catch {
+          verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
+        }
+        return writeResult(
+          { kind: "apply_worldview_chips" as const },
+          verification,
+          `已套用世界觀基調：${summary}。可在專案「基調與世界觀」再微調或改主要。`,
+        );
       }
 
       if (a.type === "add_database_row") {
@@ -2051,16 +2154,11 @@ export const assistantRouter = router({
         } catch {
           verification = { status: "unverified", message: "操作已送出，但驗證未通過" };
         }
-        return {
-          ok: true,
+        return writeResult({
           kind: "add_database_row" as const,
           rowId: row.id,
           tableName: hit.table.name,
-          verification,
-          message: verification.status === "verified"
-            ? `已寫入資料庫「${hit.table.name}」一列`
-            : "操作已送出，但驗證未通過",
-        };
+        }, verification, `已寫入資料庫「${hit.table.name}」一列`);
       }
 
       throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });

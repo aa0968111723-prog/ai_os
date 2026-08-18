@@ -15,6 +15,24 @@ describe("assistant capability registry", () => {
     expect(tools.some((tool) => tool.name === "list_databases")).toBe(false);
   });
 
+  it("studio PAGE_TERMS exposes shot / scene / character / generation tools instead of collapsing to status-only", () => {
+    const tools = selectAssistantCapabilities({
+      intent: "ASK",
+      pageContext: { pageType: "studio", entityType: "shot" },
+      allowWrite: true,
+    });
+    const names = tools.map((tool) => tool.name);
+    expect(names).toContain("list_scenes");
+    expect(names).toContain("list_assets");
+    expect(names).toContain("list_generations");
+    expect(names).toContain("update_scene");
+    expect(names).toContain("add_character");
+    expect(names.some((name) => name.includes("scene") || name.includes("shot"))).toBe(true);
+    expect(names).not.toEqual([
+      "get_project_context", "get_project_status", "list_knowledge", "list_notes", "list_tasks",
+    ]);
+  });
+
   it("can expose relevant writes for an authorized DIRECT request without bypassing catalog policy", () => {
     const tools = selectAssistantCapabilities({
       intent: "DIRECT",
