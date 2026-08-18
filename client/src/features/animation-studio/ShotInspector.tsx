@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../../api";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
+import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
@@ -188,9 +189,16 @@ function ShotFields({
 
   const update = trpc.scenes.update.useMutation({
     onSuccess: (row) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectId,
+        writeProjectId: row.projectId,
+        mountedShotId: shot.id,
+        writeShotId: row.id,
+      });
+      if (!ack.applyFieldAck) return;
       setConflict(null);
       gateRef.current?.onAck(row.rev);
-      invalidate();
+      if (ack.applyInvalidate) invalidate();
     },
     onError: (err) => {
       gateRef.current?.reset();
@@ -202,12 +210,13 @@ function ShotFields({
   updateMutateRef.current = update.mutate;
   const shotRef = useRef(shot);
   shotRef.current = shot;
+  const boundSceneId = shot.id;
   const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
   if (!gateRef.current) {
     gateRef.current = createShotFieldSaveGate({
       send: (req) => {
         updateMutateRef.current({
-          sceneId: shotRef.current.id,
+          sceneId: boundSceneId,
           ...req.patch,
           expectedRev: req.expectedRev,
           baseline: req.baseline,

@@ -35,6 +35,7 @@ import {
 import type { NewShotKind } from "./NewShotMenu";
 import type { SketchPreview } from "./sketchReplay";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
+import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -89,6 +90,8 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     useBoardSession(projectId, boardSize, layout);
   const activeShotIdRef = useRef(activeShotId);
   activeShotIdRef.current = activeShotId;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   const shot = shots.find((s) => s.id === activeShotId) ?? null;
   const shotIndex = shot ? shots.findIndex((s) => s.id === shot.id) : -1;
 
@@ -238,24 +241,51 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   pickToolRef.current = pickTool;
 
   // ── 分鏡表操作 ────────────────────────────────────────────
-  const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId }); };
+  const invalidateScenes = () => { void utils.scenes.listByProject.invalidate({ projectId: projectIdRef.current }); };
   const addShot = trpc.scenes.addDraft.useMutation({
     onSuccess: (created) => {
-      invalidateScenes();
-      if (created?.id) switchTo(created.id);
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: created?.projectId,
+        followSelection: true,
+        mountedShotId: activeShotIdRef.current,
+        originShotId: activeShotIdRef.current,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+      if (ack.followCreated && created?.id) switchTo(created.id);
     },
   });
-  const move = trpc.scenes.move.useMutation({ onSuccess: invalidateScenes });
-  const reorder = trpc.scenes.reorder.useMutation({ onSuccess: invalidateScenes });
+  const move = trpc.scenes.move.useMutation({
+    onSuccess: (result) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: result.projectId,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+    },
+  });
+  const reorder = trpc.scenes.reorder.useMutation({
+    onSuccess: (_result, variables) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: variables.projectId,
+      });
+      if (ack.applyInvalidate) invalidateScenes();
+    },
+  });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created, variables) => {
-      invalidateScenes();
-      // Follow the new row only if the user is still on the shot we inserted
-      // after. Queued A's ACK must not steal selection after they moved to B.
-      if (created?.id && activeShotIdRef.current === variables.sceneId) {
-        switchTo(created.id);
-      }
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectIdRef.current,
+        writeProjectId: created?.projectId,
+        mountedShotId: activeShotIdRef.current,
+        originShotId: variables.sceneId,
+        followSelection: true,
+      });
+      // Same-project list refresh is fine; follow the new row only if still on origin.
+      if (ack.applyInvalidate) invalidateScenes();
+      if (ack.followCreated && created?.id) switchTo(created.id);
     },
   });
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);

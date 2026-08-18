@@ -38,6 +38,15 @@ describe("storyboard order / isolation contracts", () => {
     expect(appRoutes).toContain("<AnimationStudioPage key={params.projectId}");
     expect(phoneRoute).toContain("`key={id}` 由呼叫端（AppRoutes）保留");
     expect(storyboard).toContain("key={studioShot.id}");
+    expect(appRoutes).not.toContain("<Route path=\"/studio\"><AnimationStudioPage key=");
+  });
+
+  it("move ACKs carry projectId so a late A write cannot land on B", () => {
+    const move = block(scenes, "move:", "insertAfter:");
+    expect(move).toContain("return { ok: true, projectId: scene.projectId }");
+    expect(animStudio).toContain("shouldApplySceneWriteAck");
+    expect(sceneList).toContain("shouldApplySceneWriteAck");
+    expect(sceneList).toContain("sceneId: boundSceneId");
   });
 
   it("applyScript CONFLICTS when expectedSceneIds drift; omit does not delete", () => {

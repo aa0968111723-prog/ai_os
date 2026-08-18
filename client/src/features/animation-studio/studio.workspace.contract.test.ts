@@ -203,6 +203,19 @@ describe("Inspector 不新增資料格式", () => {
   });
 
   it("queue 完成時只跟著目前還停在 origin 的那一鏡，不搶走已切走的選取", () => {
-    expect(studio).toContain("activeShotIdRef.current === variables.sceneId");
+    expect(studio).toContain("shouldApplySceneWriteAck");
+    expect(studio).toContain("followCreated");
+    expect(studio).toContain("originShotId: variables.sceneId");
+    expect(studio).not.toContain("activeShotIdRef.current === variables.sceneId");
+  });
+
+  it("late insertAfter/move ACK from project A does not invalidate or write into project B", () => {
+    expect(studio).toContain("writeProjectId: created?.projectId");
+    expect(studio).toContain("writeProjectId: result.projectId");
+    expect(studio).toContain("applyInvalidate");
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("shouldApplySceneWriteAck");
+    expect(inspector).toContain("sceneId: boundSceneId");
+    expect(inspector).not.toContain("sceneId: shotRef.current.id");
   });
 });

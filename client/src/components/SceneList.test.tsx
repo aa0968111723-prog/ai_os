@@ -21,7 +21,8 @@ const exportCreateMutate = vi.fn();
 const invalidateScenes = vi.fn();
 const invalidateMessages = vi.fn();
 const invalidateDeleted = vi.fn();
-const lastUpdateSuccess = { current: undefined as undefined | ((row?: { rev?: number }) => void) };
+const lastUpdateSuccess = { current: undefined as undefined | ((row?: { id?: string; projectId?: string; rev?: number }) => void) };
+const lastInsertAfterSuccess = { current: undefined as undefined | ((row: { id: string; projectId: string }) => void) };
 const lastRemoveSuccess = { current: undefined as undefined | (() => void) };
 /** 專案層卡片庫（逐案覆寫）：文字腳本的卡片行是靠這三份把 id 翻成名字的 */
 const cardLists: {
@@ -41,27 +42,30 @@ vi.mock("../api", () => ({
     scenes: {
       listByProject: { useQuery: (...args: unknown[]) => scenesQuery(...args) },
       update: {
-        useMutation: (opts?: { onSuccess?: (row?: { rev?: number }) => void }) => {
+        useMutation: (opts?: { onSuccess?: (row?: { id?: string; projectId?: string; rev?: number }) => void }) => {
           lastUpdateSuccess.current = opts?.onSuccess;
           return { mutate: updateMutate, isPending: false, error: null };
         },
       },
       generateInto: { useMutation: () => ({ mutate: generateMutate, isPending: false, error: null }) },
       insertAfter: {
-        useMutation: (opts?: { onSuccess?: (row: { id: string }) => void }) => ({
+        useMutation: (opts?: { onSuccess?: (row: { id: string; projectId: string }) => void }) => {
+          lastInsertAfterSuccess.current = opts?.onSuccess;
+          return {
           mutate: (input: { sceneId: string; duplicate?: boolean }) => {
             insertAfterMutate(input);
-            opts?.onSuccess?.({ id: `new-from-${input.sceneId}` });
+            opts?.onSuccess?.({ id: `new-from-${input.sceneId}`, projectId: "p-1" });
           },
           mutateAsync: async (input: { sceneId: string; duplicate?: boolean }) => {
             insertAfterMutate(input);
-            const created = { id: `new-from-${input.sceneId}` };
+            const created = { id: `new-from-${input.sceneId}`, projectId: "p-1" };
             opts?.onSuccess?.(created);
             return created;
           },
           isPending: false,
           error: null,
-        }),
+        };
+        },
       },
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: {
@@ -277,6 +281,19 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: /第 1 鏡縮圖/ }));
     expect(screen.getByRole("dialog", { name: /單格工作室 stub 第 1 鏡/ })).toBeInTheDocument();
+  });
+
+  it("insertAfter ACK from another project does not refresh this list", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    invalidateScenes.mockClear();
+    lastInsertAfterSuccess.current?.({ id: "foreign-shot", projectId: "other-project" });
+    expect(invalidateScenes).not.toHaveBeenCalled();
+    lastInsertAfterSuccess.current?.({ id: "local-shot", projectId: "p-1" });
+    expect(invalidateScenes).toHaveBeenCalled();
   });
 
   it("整理分鏡：在這之後插入一鏡（不必加到最後再一路搬上來）", async () => {
@@ -513,10 +530,14 @@ describe("SceneList 長分鏡效能", () => {
       refetch: vi.fn(),
     });
     mount();
-    lastUpdateSuccess.current?.();
+    lastUpdateSuccess.current?.({ id: "s1", projectId: "p-1", rev: 1 });
     expect(invalidateScenes).toHaveBeenCalled();
     expect(invalidateMessages).not.toHaveBeenCalled();
     expect(invalidateDeleted).not.toHaveBeenCalled();
+
+    invalidateScenes.mockClear();
+    lastUpdateSuccess.current?.({ id: "s1", projectId: "other-project", rev: 2 });
+    expect(invalidateScenes).not.toHaveBeenCalled();
 
     invalidateScenes.mockClear();
     lastRemoveSuccess.current?.();

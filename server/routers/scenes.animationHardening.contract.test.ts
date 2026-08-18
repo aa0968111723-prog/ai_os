@@ -54,6 +54,8 @@ describe("animation shot writes stay consistent", () => {
 
   it("Shot Inspector sends lookIds when toggling a character", () => {
     expect(inspector).toContain("setCards.mutate({ sceneId: shot.id, characterIds: next, lookIds: nextLooks })");
+    expect(inspector).toContain("shouldApplySceneWriteAck");
+    expect(inspector).toContain("sceneId: boundSceneId");
   });
 
   it("story autosave serializes in-flight saves and does not baseline from live editor", () => {

@@ -765,10 +765,10 @@ export const scenesRouter = router({
         // 以鎖內重讀的列為準（入口讀到的 scene 可能已被並發 move 換位）
         const cur = all[idx];
         const swapWith = input.direction === "up" ? all[idx - 1] : all[idx + 1];
-        if (!cur || !swapWith) return { ok: true }; // 已在頂/底（或已被並發刪除）
+        if (!cur || !swapWith) return { ok: true, projectId: scene.projectId }; // 已在頂/底（或已被並發刪除）
         await tx.update(schema.scenes).set({ orderIndex: swapWith.orderIndex }).where(eq(schema.scenes.id, cur.id));
         await tx.update(schema.scenes).set({ orderIndex: cur.orderIndex }).where(eq(schema.scenes.id, swapWith.id));
-        return { ok: true };
+        return { ok: true, projectId: scene.projectId };
       });
     }),
 

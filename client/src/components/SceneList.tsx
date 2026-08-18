@@ -4,6 +4,7 @@ import { SceneCardBinding, type SceneCardLookup } from "./SceneCardBinding";
 import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { createInsertAfterQueue } from "../lib/insertAfterQueue";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
+import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -401,6 +402,13 @@ const SceneRow = memo(function SceneRow({
   useEffect(() => () => clearTimeout(savedTimer.current), []);
   const update = trpc.scenes.update.useMutation({
     onSuccess: (row) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectId,
+        writeProjectId: row?.projectId,
+        mountedShotId: s.id,
+        writeShotId: row?.id,
+      });
+      if (!ack.applyFieldAck) return;
       gateRef.current?.onAck(row?.rev);
       invalidate();
       setSavedFlash(true);
@@ -415,12 +423,13 @@ const SceneRow = memo(function SceneRow({
   updateMutateRef.current = update.mutate;
   const sceneRef = useRef(s);
   sceneRef.current = s;
+  const boundSceneId = s.id;
   const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
   if (!gateRef.current) {
     gateRef.current = createShotFieldSaveGate({
       send: (req) => {
         updateMutateRef.current({
-          sceneId: sceneRef.current.id,
+          sceneId: boundSceneId,
           ...req.patch,
           expectedRev: req.expectedRev,
           baseline: req.baseline,
@@ -441,7 +450,15 @@ const SceneRow = memo(function SceneRow({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
   });
   // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
-  const insertAfter = trpc.scenes.insertAfter.useMutation({ onSuccess: () => invalidate() });
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
+    onSuccess: (created) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectId,
+        writeProjectId: created.projectId,
+      });
+      if (ack.applyInvalidate) invalidate();
+    },
+  });
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
   insertAfterMutateRef.current = insertAfter.mutateAsync;
   const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
@@ -804,7 +821,15 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
     // 同類缺陷一併修：分鏡軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
     utils.projects.listDeleted.invalidate({ projectId });
   }, [utils, projectId]);
-  const move = trpc.scenes.move.useMutation({ onSuccess: invalidateList });
+  const move = trpc.scenes.move.useMutation({
+    onSuccess: (result) => {
+      const ack = shouldApplySceneWriteAck({
+        mountedProjectId: projectId,
+        writeProjectId: result.projectId,
+      });
+      if (ack.applyInvalidate) invalidateList();
+    },
+  });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidateAfterDelete });
   // 預覽台的 I／O 寫回修剪：SceneRow 的 update 在各列自己的 scope 裡，播放器搆不到，
   // 所以這裡另起一支（同一個 procedure、同一套 invalidate，行為一致）。
