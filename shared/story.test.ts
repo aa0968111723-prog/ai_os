@@ -14,6 +14,8 @@ import {
   storyParseModelSchema,
   diffStoryboardPlan,
   summarizeStoryboardDiff,
+  planOrphanAdoption,
+  inferLocationNameFromText,
   buildShotSearchTerms,
   suggestAssetsForShot,
   environmentStateSchema,
@@ -195,6 +197,51 @@ describe("diffStoryboardPlan（§22 逐場套用：不重複建、也不蓋掉�
       reuseScenes: 1,
       newShots: 2,
     });
+  });
+});
+
+describe("planOrphanAdoption（未分場鏡不得 silently 5→26）", () => {
+  it("5 orphans + 21 planned adopts the 5 and creates 16 — liveAfter 21, not 26", () => {
+    expect(planOrphanAdoption(21, 5)).toEqual({
+      adopt: 5,
+      create: 16,
+      leftoverAttach: 0,
+      liveAfter: 21,
+    });
+  });
+
+  it("leftover orphans attach into a scene instead of hanging outside", () => {
+    expect(planOrphanAdoption(3, 5)).toEqual({
+      adopt: 3,
+      create: 0,
+      leftoverAttach: 2,
+      liveAfter: 5,
+    });
+  });
+
+  it("no orphans is a plain create", () => {
+    expect(planOrphanAdoption(21, 0)).toEqual({
+      adopt: 0,
+      create: 21,
+      leftoverAttach: 0,
+      liveAfter: 21,
+    });
+  });
+});
+
+describe("inferLocationNameFromText（故事原文地點，不是未定地點）", () => {
+  it("uses a known 場景 name when the paragraph mentions it", () => {
+    expect(inferLocationNameFromText("清晨的克難坡下著雨。", ["克難坡", "禪堂"])).toBe("克難坡");
+  });
+
+  it("pulls a place noun from unmarked copy", () => {
+    expect(inferLocationNameFromText("她走進教室坐下。")).toBe("教室");
+    expect(inferLocationNameFromText("禪堂裡師父點頭。")).toBe("禪堂");
+    expect(inferLocationNameFromText("安倢在圖書館角落寫生。")).toBe("圖書館");
+  });
+
+  it("does not invent a place when the paragraph has none", () => {
+    expect(inferLocationNameFromText("她抬頭看天，還是想不明白。")).toBeUndefined();
   });
 });
 

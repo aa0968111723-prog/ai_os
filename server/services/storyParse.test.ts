@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { matchByName, mockStoryExtract, planStoryboardFromStoryText, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
+import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 
 const SAMPLE = [
   "角色：安倢（黑髮、柔和五官）、師父（灰袍長者）",
@@ -81,6 +82,27 @@ describe("mockStoryExtract", () => {
   it("parse-fail 產生分鏡 reuses the same story-text plan (not a second product)", () => {
     expect(planStoryboardFromStoryText(SAMPLE)).toEqual(mockStoryExtract(SAMPLE));
     expect(planStoryboardFromStoryText("只有一句話").scenes.length).toBeGreaterThan(0);
+  });
+
+  it("unmarked paragraphs pick locations from the story, not 未定地點", () => {
+    const unmarked = [
+      "安倢走進禪堂。晨光從窗櫺灑進來。",
+      "",
+      "她坐在教室最後一排寫生。",
+      "",
+      "宿舍走廊的燈還沒關。",
+    ].join("\n");
+    const plan = mockStoryExtract(unmarked);
+    expect(plan.scenes.map((sc) => sc.locationRef)).toEqual(["禪堂", "教室", "宿舍"]);
+    expect(plan.locations.map((l) => l.name)).toEqual(["禪堂", "教室", "宿舍"]);
+    expect(plan.scenes.every((sc) => sc.locationRef)).toBe(true);
+  });
+
+  it("SHOTLIST A–F mock parse stays 6 beats; act 1 is 校門口", () => {
+    const plan = mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE);
+    expect(plan.scenes).toHaveLength(6);
+    expect(plan.scenes[0]?.locationRef).toBe("校門口");
+    expect(JSON.stringify(plan)).not.toMatch(/宿舍夜|安倢|慕恩|茶會字卡/);
   });
 });
 

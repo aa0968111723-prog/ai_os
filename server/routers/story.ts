@@ -16,6 +16,7 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
+  loadOrphanShots,
   materializeStoryboard,
   runStoryParse,
   sha256Hex,
@@ -25,6 +26,7 @@ import { checkProjectContinuity } from "../services/continuityCheck";
 import { flushStoryDocNow } from "../services/collabDoc";
 import {
   diffStoryboardPlan,
+  planOrphanAdoption,
   summarizeStoryboardDiff,
   environmentStateSchema,
   STORY_MAX_CHARS,
@@ -457,6 +459,8 @@ export const storyRouter = router({
       run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots })),
       existingScenes,
     );
+    const summary = summarizeStoryboardDiff(diff);
+    const orphans = await loadOrphanShots(db, project.id);
     return {
       ready: true as const,
       runId: run.id,
@@ -464,10 +468,12 @@ export const storyRouter = router({
       planScenes: run.plan.scenes.length,
       planShots: run.plan.scenes.reduce((s, sc) => s + sc.shots.length, 0),
       existingShots: Number(existingShots),
+      orphanShots: orphans.length,
+      adoption: planOrphanAdoption(summary.newShots, orphans.length),
       scenes: run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots.length })),
       /** 逐場計畫：哪一場會新建、哪一場只補鏡、哪一場完全不動 */
       diff,
-      summary: summarizeStoryboardDiff(diff),
+      summary,
     };
   }),
 

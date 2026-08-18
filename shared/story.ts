@@ -388,6 +388,58 @@ export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
   };
 }
 
+/**
+ * Live: 0場 5 未分場鏡 + 產生分鏡 prepended 21 → 26, orphans still at the tail.
+ * Adopt orphans into the plan (or attach leftovers to a scene). Never grow 5→26.
+ */
+export function planOrphanAdoption(newShots: number, orphanCount: number): {
+  adopt: number;
+  create: number;
+  leftoverAttach: number;
+  liveAfter: number;
+} {
+  const orphans = Math.max(0, orphanCount);
+  const planned = Math.max(0, newShots);
+  const adopt = Math.min(planned, orphans);
+  const create = planned - adopt;
+  const leftoverAttach = orphans - adopt;
+  return { adopt, create, leftoverAttach, liveAfter: planned + leftoverAttach };
+}
+
+/**
+ * Heuristic / unmarked scripts have no「場景：」line. Pull a place name from the
+ * paragraph so 產生分鏡 does not leave every field as（未定地點）.
+ * Known 場景： names win; then a small place-noun list; then「在X堂/室/口…」.
+ */
+const STORY_PLACE_NOUNS = [
+  "校門口",
+  "克難坡",
+  "禪堂",
+  "教室",
+  "宿舍",
+  "校園",
+  "夕陽",
+  "超商",
+  "禮堂",
+  "操場",
+  "圖書館",
+  "走廊",
+  "頂樓",
+] as const;
+
+export function inferLocationNameFromText(text: string, knownNames: string[] = []): string | undefined {
+  const body = text.trim();
+  if (!body) return undefined;
+  for (const name of knownNames) {
+    if (name && body.includes(name)) return name;
+  }
+  for (const place of STORY_PLACE_NOUNS) {
+    if (body.includes(place)) return place;
+  }
+  const at = body.match(/在([\u4e00-\u9fff]{2,8}(?:堂|室|口|園|館|坡|樓|門|廳|房))/);
+  return at?.[1];
+}
+
 /* ── Shot 素材推薦（PE 計畫 §13／§26） ────────────────────────
  *
  * 刻意**不做**語意向量檢索，也刻意不寫「AI 已分析」這種文案——現在沒有那個能力，

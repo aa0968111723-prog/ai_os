@@ -11,6 +11,7 @@ import { markBootReady } from "../services/boot";
 import type { AuthState } from "../services/auth";
 import { scenesRouter } from "./scenes";
 import { storyRouter } from "./story";
+import { planStoryboardFromStoryText } from "../services/storyParse";
 import { TKU_ZEN_SHOTLIST_AD_PARSE } from "../../shared/fixtures/tkuZenPromo";
 import type { StoryParsePlan } from "../../shared/story";
 
@@ -39,6 +40,7 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
       await db.delete(schema.scenePackages).where(eq(schema.scenePackages.projectId, projectId));
       await db.delete(schema.scenes).where(eq(schema.scenes.projectId, projectId));
       await db.delete(schema.storyScenes).where(eq(schema.storyScenes.projectId, projectId));
+      await db.delete(schema.scenePresets).where(eq(schema.scenePresets.projectId, projectId));
       await db.delete(schema.stories).where(eq(schema.stories.projectId, projectId));
       await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
     }
@@ -147,5 +149,58 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
     const shots = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, project.id));
     expect(shots.some((s) => (s.title ?? "").includes("她身上") || (s.prompt ?? "").includes("她身上"))).toBe(true);
     expect(shots.some((s) => (s.title ?? "").includes("他身上") || (s.prompt ?? "").includes("他身上"))).toBe(false);
+  });
+
+  it("產生分鏡 adopts 5 orphan shots into scenes — does not grow 5→plan+5", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "OrphanBoard", email: `orphan-board-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-orphan-board", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+    const unmarked = [
+      "安倢走進禪堂。晨光從窗櫺灑進來。師父對她點頭。",
+      "",
+      "她走進教室。拉開椅子。坐下寫生。",
+      "",
+      "宿舍走廊很暗。燈還沒關。她停在門口。",
+    ].join("\n");
+    await db.insert(schema.stories).values({
+      projectId: project.id,
+      groupId,
+      content: unmarked,
+    });
+
+    const ctx = { auth: authFor(userId, groupId) };
+    const storyApi = storyRouter.createCaller(ctx as never);
+    const scenesApi = scenesRouter.createCaller(ctx as never);
+    for (let i = 1; i <= 5; i += 1) {
+      await scenesApi.addDraft({ projectId: project.id, title: `第 ${i} 鏡` });
+    }
+    const before = await scenesApi.listByProject({ projectId: project.id });
+    expect(before).toHaveLength(5);
+    expect(before.every((row) => !row.storySceneId)).toBe(true);
+
+    const planned = planStoryboardFromStoryText(unmarked);
+    const plannedShots = planned.scenes.reduce((n, sc) => n + sc.shots.length, 0);
+    expect(plannedShots).toBeGreaterThan(5);
+
+    const board = await storyApi.generateStoryboard({ projectId: project.id });
+    expect(board.reused).toBe(false);
+
+    const listed = await scenesApi.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(plannedShots);
+    expect(listed.every((row) => Boolean(row.storySceneId))).toBe(true);
+    expect(before.every((row) => listed.some((live) => live.id === row.id))).toBe(true);
+    expect(new Set(listed.map((row) => row.id))).toEqual(new Set(board.sceneIds));
+
+    const storyScenes = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.projectId, project.id));
+    expect(storyScenes.every((sc) => Boolean(sc.locationId))).toBe(true);
+    const presets = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, project.id));
+    expect(new Set(presets.map((p) => p.name))).toEqual(new Set(["禪堂", "教室", "宿舍"]));
   });
 });

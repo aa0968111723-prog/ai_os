@@ -27,6 +27,7 @@ import {
   MAX_PROJECT_LOOKS,
   STORY_PARSE_BUDGET,
   diffStoryboardPlan,
+  inferLocationNameFromText,
   type StoryParsePlan,
   type ParsedShot,
   type ExistingStoryScene,
@@ -237,11 +238,15 @@ export function mockStoryExtract(content: string): StoryParsePlan {
       propRefs: knownProps.filter((n) => s.includes(n)).slice(0, MAX_GENERATE_PROPS),
       durationSec: 5,
     }));
+    const locationRef = inferLocationNameFromText(p, locations.map((l) => l.name)) ?? locations[0]?.name;
+    if (locationRef && !locations.some((l) => nameKey(l.name) === nameKey(locationRef))) {
+      locations.push({ name: locationRef, confidence: 0.85 });
+    }
     return {
       title: `第 ${i + 1} 場`,
       summary: p.slice(0, 80),
       excerpt: p.slice(0, 200),
-      locationRef: locations[0]?.name,
+      locationRef,
       environment: Object.keys(env).length ? env : undefined,
       shots,
     };
@@ -820,6 +825,36 @@ export async function loadExistingStoryScenes(
   return rows.map((r) => ({ id: r.id, title: r.title, liveShots: liveByScene.get(r.id) ?? 0 }));
 }
 
+/** Live 0場 5鏡: shots with no storySceneId hang in the studio「未分場」tail. */
+export async function loadOrphanShots(
+  tx: Pick<typeof db, "select">,
+  projectId: string,
+): Promise<Array<{
+  id: string;
+  title: string;
+  prompt: string | null;
+  assetId: string | null;
+  scenePresetIds: string[] | null;
+}>> {
+  return tx
+    .select({
+      id: schema.scenes.id,
+      title: schema.scenes.title,
+      prompt: schema.scenes.prompt,
+      assetId: schema.scenes.assetId,
+      scenePresetIds: schema.scenes.scenePresetIds,
+    })
+    .from(schema.scenes)
+    .where(
+      and(
+        eq(schema.scenes.projectId, projectId),
+        isNull(schema.scenes.deletedAt),
+        isNull(schema.scenes.storySceneId),
+      ),
+    )
+    .orderBy(asc(schema.scenes.orderIndex));
+}
+
 /**
  * Parse timed out / never succeeded: still allow 產生分鏡 from the story text.
  * Same paragraph / sentence split as the E2E extractor — not a second product.
@@ -964,11 +999,37 @@ export async function materializeStoryboard(input: {
       plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots })),
       existingScenes,
     );
+    const orphanQueue = await loadOrphanShots(tx, project.id);
+    const createdLocationIds: string[] = [];
+    const locationNames = [
+      ...plan.locations.map((loc) => loc.name),
+      ...plan.scenes.map((sc) => sc.locationRef).filter((name): name is string => Boolean(name)),
+    ];
+    let locBudget = MAX_PROJECT_SCENE_PRESETS - existing.locations.length;
+    for (const rawName of locationNames) {
+      const name = rawName.trim();
+      if (!name || matchByName(existing.locations, name)) continue;
+      if (locBudget <= 0) break;
+      locBudget -= 1;
+      const [row] = await tx
+        .insert(schema.scenePresets)
+        .values({
+          projectId: project.id,
+          groupId: project.groupId,
+          name,
+          palette: `${name}（特徵待補）`,
+          createdBy: input.userId,
+        })
+        .returning();
+      existing.locations.push({ id: row.id, name: row.name, palette: row.palette, lighting: row.lighting });
+      createdLocationIds.push(row.id);
+    }
 
     let shotOrder = Number(maxOrder);
     let sceneOrder = Number(maxSceneOrder);
     const storySceneIds: string[] = [];
     const sceneIds: string[] = [];
+    let lastStorySceneId: string | null = null;
 
     for (const [i, sc] of plan.scenes.entries()) {
       const plannedAction = diff[i];
@@ -1004,6 +1065,7 @@ export async function materializeStoryboard(input: {
         // 的 Undo 把前一個 run 的場一起刪掉。
         storySceneIds.push(storyScene.id);
       }
+      lastStorySceneId = storyScene.id;
 
       const locationPresetIds = storyScene.locationId ? [storyScene.locationId] : [];
       const shotValues = sc.shots.map((shot) => {
@@ -1044,20 +1106,88 @@ export async function materializeStoryboard(input: {
           lookIds: lookIds.length ? lookIds : null,
         };
       });
+      const createdLocationIdSet = new Set(createdLocationIds);
       await assertGenerationEntityIds(project.id, {
         characterIds: [...new Set(shotValues.flatMap((row) => row.characterIds ?? []))],
-        scenePresetIds: [...new Set(shotValues.flatMap((row) => row.scenePresetIds ?? []))],
+        scenePresetIds: [...new Set(shotValues.flatMap((row) => row.scenePresetIds ?? []))].filter(
+          (id) => !createdLocationIdSet.has(id),
+        ),
         propIds: [...new Set(shotValues.flatMap((row) => row.propIds ?? []))],
         lookIds: [...new Set(shotValues.flatMap((row) => row.lookIds ?? []))],
       });
-      const rows = await tx
-        .insert(schema.scenes)
-        .values(shotValues)
-        .returning({ id: schema.scenes.id });
-      sceneIds.push(...rows.map((r) => r.id));
+      const toInsert: typeof shotValues = [];
+      for (const row of shotValues) {
+        const orphan = orphanQueue.shift();
+        if (!orphan) {
+          toInsert.push(row);
+          continue;
+        }
+        // Blank draft (＋新增鏡): replace copy from the plan. Hand-written / generated
+        // orphans keep their prompt and asset — only join a scene so they do not hang.
+        const keepCopy = Boolean(orphan.prompt?.trim()) || Boolean(orphan.assetId);
+        await tx
+          .update(schema.scenes)
+          .set({
+            storySceneId: storyScene.id,
+            scenePresetIds: locationPresetIds.length ? locationPresetIds : orphan.scenePresetIds,
+            ...(keepCopy
+              ? {}
+              : {
+                  title: row.title,
+                  prompt: row.prompt,
+                  action: row.action,
+                  dialogue: row.dialogue,
+                  voiceover: row.voiceover,
+                  durationSec: row.durationSec,
+                  camera: row.camera,
+                  performance: row.performance,
+                  characterIds: row.characterIds,
+                  propIds: row.propIds,
+                  lookIds: row.lookIds,
+                }),
+          })
+          .where(eq(schema.scenes.id, orphan.id));
+        sceneIds.push(orphan.id);
+      }
+      if (toInsert.length) {
+        const rows = await tx
+          .insert(schema.scenes)
+          .values(toInsert)
+          .returning({ id: schema.scenes.id });
+        sceneIds.push(...rows.map((r) => r.id));
+      }
     }
 
-    const applied: ParseRunApplied = { ...(run.applied ?? {}), storyboard: { storySceneIds, sceneIds } };
+    if (orphanQueue.length) {
+      let attachSceneId = lastStorySceneId;
+      if (!attachSceneId) {
+        const [row] = await tx
+          .insert(schema.storyScenes)
+          .values({
+            projectId: project.id,
+            orderIndex: ++sceneOrder,
+            title: "未分場",
+            summary: "原先未歸場的鏡",
+          })
+          .returning();
+        attachSceneId = row.id;
+        storySceneIds.push(row.id);
+      }
+      for (const leftover of orphanQueue) {
+        await tx
+          .update(schema.scenes)
+          .set({ storySceneId: attachSceneId })
+          .where(eq(schema.scenes.id, leftover.id));
+        sceneIds.push(leftover.id);
+      }
+      orphanQueue.length = 0;
+    }
+
+    const applied: ParseRunApplied = {
+      ...(run.applied ?? {}),
+      createdLocationIds: [...(run.applied?.createdLocationIds ?? []), ...createdLocationIds],
+      storyboard: { storySceneIds, sceneIds },
+    };
     await tx.update(schema.parseRuns).set({ applied, updatedAt: new Date() }).where(eq(schema.parseRuns.id, run.id));
     return { storySceneIds, sceneIds, reused: false };
   }).then(async (result) => {

@@ -338,6 +338,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     const lock = readFileSync(join(process.cwd(), "shared/characterIdentityLock.ts"), "utf8");
     const board = story.slice(story.indexOf("generateStoryboard:"), story.indexOf("undoRun:"));
     expect(board).toContain("materializeStoryboard");
+    expect(parse).toContain("loadOrphanShots");
+    expect(parse).toContain("orphanQueue.shift()");
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
