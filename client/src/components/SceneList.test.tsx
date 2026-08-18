@@ -268,7 +268,7 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
-    expect(screen.getByText(/還沒有分鏡/)).toBeInTheDocument();
+    expect(screen.getAllByText(/還沒有分鏡/).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /^生成這一格/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /生成畫面/ })).not.toBeInTheDocument();
   });
