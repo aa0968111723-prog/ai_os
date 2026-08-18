@@ -169,6 +169,34 @@ async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Cont
   return project;
 }
 
+async function applySceneVisualPatch(
+  scene: typeof schema.scenes.$inferSelect,
+  patch: Record<string, unknown>,
+) {
+  delete patch.rev;
+  const baseline: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) baseline[key] = (scene as Record<string, unknown>)[key];
+  const { row } = await applyWithRevisionTrpc({
+    entity: "scene",
+    table: schema.scenes,
+    idColumn: schema.scenes.id,
+    revColumn: schema.scenes.rev,
+    row: scene,
+    patch,
+    expectedRev: scene.rev,
+    baseline,
+    extraWhere: isNull(schema.scenes.deletedAt),
+    reload: async () => {
+      const [fresh] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt)));
+      return fresh;
+    },
+  });
+  return row;
+}
+
 /**
  * 文字腳本的三行卡片 → 要寫進哪幾欄。
  *
@@ -684,34 +712,12 @@ export const scenesRouter = router({
               patch.camera = frozen.camera ?? null;
               patch.performance = frozen.performance ?? null;
               patch.action = frozen.action ?? null;
-              // 動到 rev-protected 的欄位就要推進 rev，否則同時在編這一鏡的夥伴
-              // 帶著舊 expectedRev 存檔仍會成功，樂觀併發守衛形同虛設。
-              patch.rev = scene.rev + 1;
             }
           }
         }
       }
 
-      /*
-       * patch.rev 只有在「同步採用版本的鏡頭語言」真的動到 camera/performance/action
-       * 時才會設定。那些是 rev-protected 欄位，所以那一路必須是真正的 CAS：
-       * 只帶 set(rev: scene.rev + 1) 而 where 只比對 id，等於用一個讀取當下的舊值去寫，
-       * 夥伴若在讀與寫之間存過檔，他的修改會被這次覆蓋掉，而且 rev 停在同一個數字——
-       * 樂觀併發守衛在它唯一該生效的地方失效。加上 rev 條件後，撞車就是 0 列，
-       * 明確回 CONFLICT 讓呼叫端重讀，而不是靜默蓋掉別人的字。
-       */
-      const guarded = patch.rev !== undefined
-        ? and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt), eq(schema.scenes.rev, scene.rev))
-        : and(eq(schema.scenes.id, scene.id), isNull(schema.scenes.deletedAt));
-      const [updated] = await db.update(schema.scenes).set(patch).where(guarded).returning();
-      if (!updated) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: patch.rev !== undefined
-            ? "夥伴剛改過這一鏡的鏡頭語言，請重新整理後再採用這一版"
-            : "這一鏡剛被夥伴刪除了，沒有切換版本",
-        });
-      }
+      const updated = await applySceneVisualPatch(scene, patch);
       return { ...updated, adoptedDirection };
     }),
 
@@ -752,8 +758,7 @@ export const scenesRouter = router({
               // 舊資料沒有 sceneRole（那時只有旁白一條音訊路徑），維持原本的落點
               ? { narrationAssetId: asset.id }
               : { assetId: asset.id };
-      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
-      return updated;
+      return applySceneVisualPatch(scene, patch);
     }),
 
   /** ↑↓ 移動（與相鄰分鏡交換順序） */

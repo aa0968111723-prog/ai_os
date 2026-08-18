@@ -144,6 +144,16 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(bindings).toContain("table.groupId === project.groupId");
   });
 
+  it("setVisual adopt paths bump rev through applySceneVisualPatch", () => {
+    const fromAsset = scenes.slice(scenes.indexOf("setVisualFromAsset:"), scenes.indexOf("setVisualFromGeneration:"));
+    const fromGen = scenes.slice(scenes.indexOf("setVisualFromGeneration:"), scenes.indexOf("move:"));
+    expect(fromAsset).toContain("applySceneVisualPatch");
+    expect(fromAsset).not.toContain("db.update(schema.scenes).set(patch)");
+    expect(fromGen).toContain("applySceneVisualPatch");
+    expect(fromGen).not.toContain("db.update(schema.scenes).set(patch)");
+    expect(scenes).toContain("expectedRev: scene.rev");
+  });
+
   it("inheritFromPrevious goes through applyWithRevisionTrpc and conflict is formatted before 500 rewrite", () => {
     const inherit = scenes.slice(scenes.indexOf("inheritFromPrevious:"), scenes.indexOf("batchGenerate:"));
     expect(inherit).toContain("applyWithRevisionTrpc");
