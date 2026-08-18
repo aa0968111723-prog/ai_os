@@ -1,6 +1,6 @@
 /**
  * Disposable LOCAL 淡江禪學社 fixture — 動畫組 only.
- * Seven acts. Six SHOTLIST lines. 小華 lock sheets + 龜龜 from act 4.
+ * Six spoken SHOTLIST beats. 小華 lock sheets + 龜龜 from the third line.
  * No paid FAL. No live groups. Services must not import routers.
  */
 import { createHash } from "node:crypto";
@@ -255,7 +255,7 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   }
   if (snap.characters.length !== 2) throw new Error("only 小華 + 禪定龜龜 allowed");
   if (snap.props.length !== 0) throw new Error("fixture must not invent props");
-  if (snap.acts.length !== 7) throw new Error(`expected 7 acts, got ${snap.acts.length}`);
+  if (snap.acts.length !== 6) throw new Error(`expected 6 spoken acts, got ${snap.acts.length}`);
   if (snap.shots.length !== TKU_ZEN_SHOTS.length) {
     throw new Error(`expected ${TKU_ZEN_SHOTS.length} shots, got ${snap.shots.length}`);
   }
@@ -311,7 +311,7 @@ export function assertTkuZenPromoSnapshot(snap: Awaited<ReturnType<typeof loadTk
   const turtleShotActs = orderedShots
     .filter((s) => (s.characterIds ?? []).includes(turtle.id))
     .map((s) => snap.acts.find((a) => a.id === s.storySceneId)?.orderIndex ?? 0);
-  if (turtleShotActs.some((act) => act < 4)) throw new Error("龜龜 bound before act 4");
+  if (turtleShotActs.some((act) => act < 3)) throw new Error("龜龜 bound before the third spoken line");
 
   if (snap.assets.some((asset) => asset.title.includes(TKU_ZEN_XIAOHUA_SHEETS.threeview.file))) {
     if (xiaohua.referenceAssetId == null) throw new Error("lock sheet uploaded but character.referenceAssetId empty");

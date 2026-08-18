@@ -39,7 +39,7 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     }
   });
 
-  it("materializes 7 acts / pink-bob lock / 6 SHOTLIST lines and survives reload", async () => {
+  it("materializes 6 spoken SHOTLIST beats / pink-bob lock and survives reload", async () => {
     const userId = randomUUID();
     const groupId = randomUUID();
     leftovers.users.push(userId);
@@ -60,7 +60,7 @@ d("淡江禪學社 小華 SHOTLIST persists after save/reload", () => {
     assertTkuZenPromoSnapshot(first);
     const reloaded = await loadTkuZenPromoSnapshot(project.id);
     assertTkuZenPromoSnapshot(reloaded);
-    expect(reloaded.acts).toHaveLength(7);
+    expect(reloaded.acts).toHaveLength(6);
     expect(reloaded.characters.map((c) => c.name).sort()).toEqual(["小華", "禪定龜龜"]);
     expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).toContain("針織外套");
     expect(reloaded.characters.find((c) => c.name === "小華")?.appearance).not.toContain("白帽T");

@@ -29,8 +29,8 @@ import {
 } from "./tkuZenPromo";
 
 describe("淡江禪學社 小華 SHOTLIST fixture", () => {
-  it("keeps 7 acts, only 小華 + 禪定龜龜, and the six SHOTLIST lines", () => {
-    expect(TKU_ZEN_ACTS).toHaveLength(7);
+  it("keeps 6 spoken SHOTLIST beats, only 小華 + 禪定龜龜", () => {
+    expect(TKU_ZEN_ACTS).toHaveLength(6);
     expect(TKU_ZEN_CHARACTERS.map((c) => c.name)).toEqual(["小華", "禪定龜龜"]);
     expect(tkuZenDialogueLines(TKU_ZEN_SHOTS)).toEqual([...TKU_ZEN_SHOTLIST_LINES]);
     expect(TKU_ZEN_SHOTS.reduce((sum, shot) => sum + shot.durationSec, 0)).toBe(TKU_ZEN_FALLBACK_DURATION_SEC);
@@ -50,16 +50,19 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "slope")?.name).toBe("克難坡");
   });
 
-  it("keeps 龜龜 off until act 4 and drops the invented 媽媽 beats", () => {
-    expect(tkuZenTurtleFirstAct()).toBe(4);
-    expect(TKU_ZEN_SHOTS.filter((s) => s.act < 4).every((s) => !s.characters.includes("turtle"))).toBe(true);
+  it("keeps 龜龜 off until the third spoken line and drops the invented 媽媽 beats", () => {
+    expect(tkuZenTurtleFirstAct()).toBe(3);
+    expect(TKU_ZEN_SHOTS.filter((s) => s.act < 3).every((s) => !s.characters.includes("turtle"))).toBe(true);
     const blob = [
       TKU_ZEN_PROMO_SCRIPT,
       ...TKU_ZEN_CHARACTERS.map((c) => `${c.name}\n${c.appearance}\n${c.notes}`),
       ...TKU_ZEN_SHOTS.map((s) => `${s.title}\n${s.prompt}\n${s.dialogue}\n${s.action}`),
     ].join("\n");
     expect(tkuZenHasForbidden(blob)).toEqual([]);
-    expect(TKU_ZEN_FORBIDDEN).toContain("白帽T");
+    expect(TKU_ZEN_FORBIDDEN).not.toContain("白帽T");
+    expect(TKU_ZEN_FORBIDDEN).toContain("安倢");
+    expect(TKU_ZEN_SHOTS.every((s) => s.dialogue.trim().length > 0)).toBe(true);
+    expect(TKU_ZEN_SHOTS.map((s) => s.title).join("\n")).not.toMatch(/走上克難坡|茶會社課擺攤|收尾/);
   });
 
   it("keeps seeded fields inside character / script write limits", () => {
@@ -83,7 +86,13 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     const map = tkuZenLibraryMapContent();
     expect(map).toContain(TKU_ZEN_XIAOHUA_SHEETS.expression.file);
     expect(map).toContain(TKU_ZEN_XIAOHUA_SHEETS.action.file);
-    expect(map).toContain("第四幕");
-    expect(map).toContain("七幕");
+    expect(map).toContain("第三句");
+    expect(map).toContain("六句 SHOTLIST");
+    expect(map).not.toContain("七幕");
+    expect(map).not.toContain("A1-S01");
+    expect(map).not.toContain("成片稿");
+    expect(map).not.toContain("安倢");
+    expect(TKU_ZEN_LIBRARY.boards.files.join("\n")).not.toMatch(/A[1-4]-S/);
+    expect(TKU_ZEN_LIBRARY.scripts.files.join("\n")).not.toContain("成片稿");
   });
 });
