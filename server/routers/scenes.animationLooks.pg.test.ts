@@ -118,6 +118,25 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     expect(ok.characterIds).toEqual([huaA.id]);
   });
 
+  it("another group cannot list or mutate this project's shots", async () => {
+    const a = await seed("組A專案");
+    const b = await seed("組B專案");
+    await db.insert(schema.scenes).values({
+      projectId: a.project.id, orderIndex: 1, title: "只有組A看得到",
+    });
+    await expect(b.scenes.listByProject({ projectId: a.project.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const [shotB] = await db.insert(schema.scenes).values({
+      projectId: b.project.id, orderIndex: 1, title: "組B的鏡",
+    }).returning();
+    await expect(a.scenes.update({ sceneId: shotB.id, title: "被組A改名" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const [fresh] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, shotB.id));
+    expect(fresh.title).toBe("組B的鏡");
+  });
+
   it("assistant update_scene persists and bumps rev", async () => {
     const { project, ctx } = await seed("助手寫入");
     const [shot] = await db.insert(schema.scenes).values({

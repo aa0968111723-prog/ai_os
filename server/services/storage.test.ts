@@ -4,7 +4,7 @@
  * 依內容校正（.jpg 內容其實是 WebP）或拒絕（宣稱圖片但簽名辨識不出）。
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { isAllowedUploadMime, mimeFromPath, publicBaseUrl, resolveUploadMime, sniffMime } from "./storage";
+import { isAllowedUploadMime, mimeFromPath, publicBaseUrl, resolveUploadMime, rewriteMockAssetFetchUrl, sniffMime } from "./storage";
 
 const pad = (b: number[]) => Buffer.concat([Buffer.from(b), Buffer.alloc(16)]);
 
@@ -126,5 +126,26 @@ describe("publicBaseUrl", () => {
     delete process.env.RAILWAY_PUBLIC_DOMAIN;
     process.env.PORT = "4173";
     expect(publicBaseUrl()).toBe("http://localhost:4173");
+  });
+});
+
+describe("rewriteMockAssetFetchUrl", () => {
+  const prevPort = process.env.PORT;
+  afterEach(() => {
+    if (prevPort === undefined) delete process.env.PORT;
+    else process.env.PORT = prevPort;
+  });
+
+  it("rewrites leftover APP_URL mock-asset links to loopback", () => {
+    process.env.PORT = "3299";
+    expect(rewriteMockAssetFetchUrl("https://prod.example.internal/api/mock-asset/video"))
+      .toBe("http://127.0.0.1:3299/api/mock-asset/video");
+    expect(rewriteMockAssetFetchUrl("https://minio.zeabur.internal/api/mock-asset/image"))
+      .toBe("http://127.0.0.1:3299/api/mock-asset/image");
+  });
+
+  it("does not rewrite unrelated URLs (no SSRF via localhost)", () => {
+    expect(rewriteMockAssetFetchUrl("https://cdn.fal.ai/out.mp4")).toBe("https://cdn.fal.ai/out.mp4");
+    expect(rewriteMockAssetFetchUrl("https://evil.test/api/assets/abc/file")).toBe("https://evil.test/api/assets/abc/file");
   });
 });

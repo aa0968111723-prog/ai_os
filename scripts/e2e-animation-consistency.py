@@ -327,14 +327,29 @@ for s, sid in zip(SHOTS, shot_ids):
     gen_by_shot[sid] = g["generationId"]
 
 done_gens = {}
+first_sid = shot_ids[0]
 for sid, gen_id in gen_by_shot.items():
     st = wait_gen_done(admin, gen_id)
     ok(f"生成完成（假模式）：{gen_id[:8]}", isinstance(st, dict) and st.get("status") == "done")
     done_gens[sid] = st
     # #753：就地生成是 Candidate，不 silent 改 current。連戲檢查比的是「現用畫面」，
     # 必須明確採用之後分鏡才有 assetId。
+    if sid == first_sid:
+        listed_pre = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+        pre_shot = next(s for s in listed_pre if s["id"] == sid)
+        ok("generateInto done 後現用 assetId 仍空（Candidate，#753）", not pre_shot.get("assetId"))
+        pre_board = call("GET", admin, "creativeContext.animationBoard", {"projectId": pid})
+        pre_row = next(r for r in pre_board.get("rows", []) if r["shotId"] == sid)
+        ok("generateInto done 後看板 current 仍空", pre_row.get("current") is None)
+        ok("generateInto done 後看板列出 candidate", (pre_row.get("candidate") or {}).get("generationId") == gen_id)
+        ok("generateInto done 後看板不是 complete", pre_row.get("lifecycle") != "complete")
+        ok("generateInto done 後 summary.complete 仍是 0", (pre_board.get("summary") or {}).get("complete") == 0)
     adopted = call("POST", admin, "creativeContext.adoptGeneration", {"generationId": gen_id})
-    ok(f"明確採用回填分鏡：{sid[:8]}", isinstance(adopted, dict) and "__error__" not in adopted)
+    ok(f"明確採用回填分鏡：{sid[:8]}", isinstance(adopted, dict) and adopted.get("adopted") and adopted.get("assetId"))
+    if sid == first_sid:
+        listed_post = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+        post_shot = next(s for s in listed_post if s["id"] == sid)
+        ok("Adopt 後分鏡才有 assetId", post_shot.get("assetId") == adopted.get("assetId"))
 
 # ── 6. 生成後：continuity 指紋跨鏡一致 + 逐鏡動作物理各自不同 ───────────
 fingerprints = []
