@@ -48,6 +48,7 @@ const {
   modeCostsMoney,
   FAL_AGENT_PROFILES,
   LlmServiceError,
+  FREE_MODEL_TIMEOUT_MESSAGE,
   NIM_DEGRADE_PROBE_MS,
   isFalEconomyCongested,
   __resetNimDegradation,
@@ -109,7 +110,7 @@ describe("nim 模式 — 免費路徑", () => {
   it("只用免費（nim）逾時不自動切付費 deepseek，讓呼叫端誠實失敗", async () => {
     chatCompletion.mockRejectedValue(new FakeNimError("AI 文字服務回應逾時"));
     falOk("來自 fal 的回答");
-    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow(/逾時/);
+    await expect(completeText({ prompt: "你好", mode: "nim" })).rejects.toThrow(FREE_MODEL_TIMEOUT_MESSAGE);
     expect(falSubmit).not.toHaveBeenCalled();
   });
 

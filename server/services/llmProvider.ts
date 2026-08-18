@@ -165,6 +165,14 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Named so callers can ask before retrying a paid fal_economy model. */
+export const FREE_MODEL_TIMEOUT_MESSAGE = "免費模型逾時";
+
+function isFreeModelTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /逾時|無回應/.test(message);
+}
+
 function sanitize(error: unknown, provider: LlmProvider): LlmServiceError {
   if (error instanceof LlmServiceError) return error;
   if (provider === "nvidia-nim" && error instanceof NimServiceError) {
@@ -366,6 +374,13 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
       try {
         return await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
       } catch (nimError) {
+        // Default nim failure must not route to fal_economy (deepseek-v4-flash).
+        // Timeout is a named error so the UI can ask before a paid retry.
+        if (isFreeModelTimeout(nimError)) {
+          throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE, {
+            cause: nimError instanceof Error ? nimError : undefined,
+          });
+        }
         throw sanitize(nimError, "nvidia-nim");
       }
     }
