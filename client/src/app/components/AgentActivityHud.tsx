@@ -81,16 +81,7 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
   );
 
   const stop = trpc.agents.stop.useMutation({
-    onSuccess: (_data, variables) => {
-      const runId = variables?.runId;
-      const old = runId ? runCacheRef.current.get(runId) : undefined;
-      if (old && runId) {
-        runCacheRef.current.set(runId, {
-          ...old,
-          status: "stopped",
-          revision: runRevision(old) + 1,
-        });
-      }
+    onSuccess: () => {
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
     },
     onError: () => {
