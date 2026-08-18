@@ -159,6 +159,17 @@ describe("worldview OCC uses projects.rev", () => {
 const oneClickHook = readFileSync(join(process.cwd(), "client/src/features/story-workspace/useOneClickFilm.ts"), "utf8");
 const overnightRealGen = readFileSync(join(process.cwd(), "scripts/overnight-real-gen-adopt.py"), "utf8");
 
+describe("storyboard board blur sends expectedRev", () => {
+  it("ShotCard and SceneGroupHeader no longer raw-mutate without rev", () => {
+    const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
+    const header = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/SceneGroupHeader.tsx"), "utf8");
+    expect(shotCard).toContain("createShotFieldSaveGate");
+    expect(shotCard).toContain("expectedRev: req.expectedRev");
+    expect(header).toContain("expectedRev: scene.rev");
+    expect(header).not.toContain("update.mutate({ id: scene.id, title: v })");
+  });
+});
+
 describe("DeliveryRoom picked batch matches eligible-shot filter", () => {
   it("uses listPickedBatchGenerateIds instead of raw picked.size", () => {
     const delivery = readFileSync(join(process.cwd(), "client/src/features/delivery/DeliveryRoom.tsx"), "utf8");

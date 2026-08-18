@@ -91,6 +91,7 @@ function baseShot(over: Partial<ShotRow> = {}): ShotRow {
     performance: null,
     lookIds: [],
     pendingGenStatus: null,
+    rev: 3,
     ...over,
   };
 }

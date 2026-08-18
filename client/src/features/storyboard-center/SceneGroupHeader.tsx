@@ -15,6 +15,7 @@ export interface StorySceneRow {
   summary: string | null;
   locationId: string | null;
   environment: EnvironmentState | null;
+  rev?: number;
 }
 
 export function SceneGroupHeader({
@@ -47,9 +48,13 @@ export function SceneGroupHeader({
   const envText = formatEnvironmentState(scene.environment);
   const locationName = scene.locationId ? locations.find((l) => l.id === scene.locationId)?.name : null;
 
+  const occ = (baseline: Record<string, unknown>) => ({
+    expectedRev: scene.rev,
+    baseline,
+  });
   const saveEnvField = (field: keyof EnvironmentState, value: string) => {
     const next: EnvironmentState = { ...(scene.environment ?? {}), [field]: value.trim() || undefined };
-    update.mutate({ id: scene.id, environment: next });
+    update.mutate({ id: scene.id, environment: next, ...occ({ environment: scene.environment }) });
   };
 
   return (
@@ -64,7 +69,7 @@ export function SceneGroupHeader({
         maxLength={60}
         onBlur={(e) => {
           const v = e.target.value.trim();
-          if (canEdit && v && v !== scene.title) update.mutate({ id: scene.id, title: v });
+          if (canEdit && v && v !== scene.title) update.mutate({ id: scene.id, title: v, ...occ({ title: scene.title }) });
         }}
       />
       <Meta as="span">{shotCount} 鏡</Meta>
@@ -73,7 +78,7 @@ export function SceneGroupHeader({
           aria-label="這場戲的地點"
           className="board-scene-head__loc"
           value={scene.locationId ?? ""}
-          onChange={(e) => update.mutate({ id: scene.id, locationId: e.target.value || null })}
+          onChange={(e) => update.mutate({ id: scene.id, locationId: e.target.value || null, ...occ({ locationId: scene.locationId }) })}
         >
           <option value="">（未定地點）</option>
           {locations.map((l) => (

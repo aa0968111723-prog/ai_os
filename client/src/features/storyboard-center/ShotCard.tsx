@@ -7,7 +7,8 @@
  * 資料流與 mutation 不變：SceneCardBinding、cardAnchors、referenceAssetId、setVisualFromAsset 全沿用。
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
-import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
@@ -59,6 +60,8 @@ export interface ShotRow {
   pendingNarrationStatus?: string | null;
   pendingAmbienceStatus?: string | null;
   reviewStatus?: ShotCompletionInput["reviewStatus"];
+  /** listByProject already returns rev — board blur must send it or Shot Inspector wins LWW */
+  rev?: number;
 }
 
 export interface LookRow {
@@ -122,8 +125,32 @@ export function ShotCard({
     void utils.story.shotAssetSuggestionsBatch.invalidate({ projectId });
   };
   const update = trpc.scenes.update.useMutation({
-    onSuccess: refreshBoard,
+    onSuccess: (row) => {
+      gateRef.current?.onAck(row?.rev);
+      refreshBoard();
+    },
+    onError: () => {
+      gateRef.current?.reset();
+    },
   });
+  const updateMutateRef = useRef(update.mutate);
+  updateMutateRef.current = update.mutate;
+  const shotRef = useRef(shot);
+  shotRef.current = shot;
+  const gateRef = useRef<ReturnType<typeof createShotFieldSaveGate> | undefined>(undefined);
+  if (!gateRef.current) {
+    gateRef.current = createShotFieldSaveGate({
+      send: (req) => {
+        updateMutateRef.current({
+          sceneId: shot.id,
+          ...req.patch,
+          expectedRev: req.expectedRev,
+          baseline: req.baseline,
+        } as Parameters<typeof update.mutate>[0]);
+      },
+      getRev: () => shotRef.current.rev,
+    });
+  }
   const removeShot = trpc.scenes.remove.useMutation({
     onSuccess: refreshBoard,
   });
@@ -211,14 +238,19 @@ export function ShotCard({
     setDropBusy(false);
   };
 
-  const saveField = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const saveFields = (patch: Record<string, unknown>) => {
+    const baseline: Record<string, unknown> = {};
+    const live = shotRef.current as unknown as Record<string, unknown>;
+    for (const key of Object.keys(patch)) baseline[key] = live[key] ?? null;
+    gateRef.current?.save(patch, baseline);
+  };
   const saveCamera = (field: keyof ShotCamera, value: string) => {
     const next: ShotCamera = { ...(shot.camera ?? {}), [field]: value.trim() || undefined };
-    update.mutate({ sceneId: shot.id, camera: next });
+    saveFields({ camera: next });
   };
   const savePerformance = (field: keyof ShotPerformance, value: string) => {
     const next: ShotPerformance = { ...(shot.performance ?? {}), [field]: value.trim() || undefined };
-    update.mutate({ sceneId: shot.id, performance: next });
+    saveFields({ performance: next });
   };
 
   /** 本鏡可選造型＝綁定角色名下的造型；沒綁角色就沒得選（造型跟人走） */
@@ -226,7 +258,7 @@ export function ShotCard({
   const toggleLook = (lookId: string) => {
     const cur = shot.lookIds ?? [];
     const next = cur.includes(lookId) ? cur.filter((x) => x !== lookId) : [...cur, lookId];
-    update.mutate({ sceneId: shot.id, lookIds: next });
+    saveFields({ lookIds: next });
   };
 
   const generating = shot.pendingGenStatus === "queued" || shot.pendingGenStatus === "running";
@@ -299,7 +331,7 @@ export function ShotCard({
             maxLength={60}
             onBlur={(e) => {
               const v = e.target.value.trim();
-              if (canEdit && v && v !== shot.title) saveField({ sceneId: shot.id, title: v });
+              if (canEdit && v && v !== shot.title) saveFields({ title: v });
             }}
           />
           <label className="shot-card__dur">
@@ -314,7 +346,7 @@ export function ShotCard({
               onBlur={(e) => {
                 const v = Number(e.target.value);
                 if (canEdit && Number.isInteger(v) && v >= 1 && v <= 60 && v !== shot.durationSec) {
-                  saveField({ sceneId: shot.id, durationSec: v });
+                  saveFields({ durationSec: v });
                 }
               }}
             />
@@ -474,7 +506,7 @@ export function ShotCard({
             rows={2}
             onBlur={(e) => {
               const v = e.target.value;
-              if (canEdit && v !== (shot.prompt ?? "")) saveField({ sceneId: shot.id, prompt: v });
+              if (canEdit && v !== (shot.prompt ?? "")) saveFields({ prompt: v });
             }}
           />
 
@@ -621,7 +653,7 @@ export function ShotCard({
               rows={1}
               onBlur={(e) => {
                 const v = e.target.value;
-                if (canEdit && v !== (shot.action ?? "")) saveField({ sceneId: shot.id, action: v });
+                if (canEdit && v !== (shot.action ?? "")) saveFields({ action: v });
               }}
             />
           )}
