@@ -19,6 +19,7 @@ import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
+import { lockXiaohuaCopyFields } from "../../shared/characterIdentityLock";
 import {
   expandSketch,
   sketchBoardStateBlock,
@@ -253,6 +254,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
         : { ...s, ...resolveSceneCardRefs(cardAliases, s) },
     );
 
+  let copyLockScript = "";
   const suppliedSceneIds = input.sceneIds ?? [];
   if (suppliedSceneIds.length > 12 || new Set(suppliedSceneIds).size !== suppliedSceneIds.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼重複或超過 12 筆" });
@@ -304,22 +306,25 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
       const rows = await tx
         .insert(schema.scenes)
         .values(
-          scenesData.map((s, index) => ({
+          scenesData.map((s, index) => {
+            const locked = lockXiaohuaCopyFields(s, copyLockScript);
+            return {
             ...(targetIds[index] ? { id: targetIds[index] } : {}),
             projectId: project.id,
             orderIndex: ++order,
-            title: s.title.slice(0, 60),
+            title: (locked.title ?? s.title).slice(0, 60),
             durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
             status: "todo",
-            prompt: s.prompt,
-            action: s.action,
-            voiceover: s.voiceover,
+            prompt: locked.prompt,
+            action: locked.action,
+            voiceover: locked.voiceover,
             ...sceneCardColumns({
               characterIds: s.characterIds ?? [],
               scenePresetIds: s.scenePresetIds ?? [],
               propIds: s.propIds ?? [],
             }),
-          })),
+            };
+          }),
         )
         .returning();
       return rows;
@@ -327,6 +332,12 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
 
   // 已保存結果的恢復路徑不可再碰節流、額度或 provider；固定 id 讓 commit 前後重播都收斂到同一批 rows。
   if (preparedResult?.success) {
+    const [storyForLock] = await db
+      .select({ content: schema.stories.content })
+      .from(schema.stories)
+      .where(eq(schema.stories.projectId, project.id))
+      .limit(1);
+    copyLockScript = storyForLock?.content ?? "";
     const rows = await createScenes(freezeCards(preparedResult.data));
     return { scenes: rows, count: rows.length, mock: isMockMode(), truncation: null };
   }
@@ -368,6 +379,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   if (!script) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，先在故事區寫稿，或在知識庫加入腳本/開示稿" });
   }
+  copyLockScript = script;
 
   // 假模式：確定性切幕（依段落）——不花錢可測
   if (isMockMode()) {

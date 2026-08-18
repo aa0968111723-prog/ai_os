@@ -138,6 +138,30 @@ function shotBlob(shot: LockableShot): string {
   return [shot.title, shot.prompt, shot.action, shot.dialogue, shot.voiceover].filter(Boolean).join("");
 }
 
+/** 拆分鏡 / addDraft-style rows: rewrite 他→她 when the script or copy names 小華. */
+export function lockXiaohuaCopyFields<
+  T extends {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+>(row: T, script = ""): T {
+  if (scriptExplicitlyMaleXiaohua(script)) return row;
+  const blob = [row.title, row.prompt, row.action, row.dialogue, row.voiceover].filter(Boolean).join("");
+  const force = mentionsXiaohua(script) || mentionsXiaohua(blob);
+  if (!force) return row;
+  return {
+    ...row,
+    title: row.title != null ? rewriteXiaohuaMaleCopy(row.title, true) : row.title,
+    prompt: row.prompt != null ? rewriteXiaohuaMaleCopy(row.prompt, true) : row.prompt,
+    action: row.action != null ? rewriteXiaohuaMaleCopy(row.action, true) : row.action,
+    dialogue: row.dialogue != null ? rewriteXiaohuaMaleCopy(row.dialogue, true) : row.dialogue,
+    voiceover: row.voiceover != null ? rewriteXiaohuaMaleCopy(row.voiceover, true) : row.voiceover,
+  };
+}
+
 /** Persist-time rewrite for already-materialized 小華 shot rows (no delete). */
 export function rewritePersistedXiaohuaShotCopy<
   T extends {
@@ -148,14 +172,5 @@ export function rewritePersistedXiaohuaShotCopy<
     voiceover?: string | null;
   },
 >(row: T): T {
-  const blob = [row.title, row.prompt, row.action, row.dialogue, row.voiceover].filter(Boolean).join("");
-  if (!mentionsXiaohua(blob)) return row;
-  return {
-    ...row,
-    title: row.title != null ? rewriteXiaohuaMaleCopy(row.title, true) : row.title,
-    prompt: row.prompt != null ? rewriteXiaohuaMaleCopy(row.prompt, true) : row.prompt,
-    action: row.action != null ? rewriteXiaohuaMaleCopy(row.action, true) : row.action,
-    dialogue: row.dialogue != null ? rewriteXiaohuaMaleCopy(row.dialogue, true) : row.dialogue,
-    voiceover: row.voiceover != null ? rewriteXiaohuaMaleCopy(row.voiceover, true) : row.voiceover,
-  };
+  return lockXiaohuaCopyFields(row);
 }

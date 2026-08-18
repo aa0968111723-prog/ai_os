@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyXiaohuaIdentityLock,
   lockXiaohuaCharacters,
+  lockXiaohuaCopyFields,
   lockXiaohuaPlan,
   rewritePersistedXiaohuaShotCopy,
   rewriteXiaohuaMaleCopy,
@@ -140,5 +141,14 @@ describe("小華 identity lock", () => {
       prompt: "禪定龜龜站在校門口",
     });
     expect(turtle.title).toBe("禪定龜龜低頭");
+  });
+
+  it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {
+    const locked = lockXiaohuaCopyFields(
+      { title: "夕陽光照在他身上", prompt: "夕陽光照在他身上" },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(locked.title).toBe("夕陽光照在她身上");
+    expect(locked.prompt).not.toContain("他身上");
   });
 });
