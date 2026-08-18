@@ -23,8 +23,8 @@ const PAGE_TERMS: Partial<Record<AssistantWirePageContext["pageType"], string[]>
   agent_run: ["agent", "approval", "task"],
   collab: ["agent", "task", "message", "dm", "approval"],
   chat: ["message", "dm"],
-  /** Animation Studio shares the project assistant (pageType=studio, entityType=shot). */
-  studio: ["scene", "shot", "character", "generation", "asset", "story"],
+  /** Animation Studio shares the project assistant (pageType=studio, entityType=shot). Include shot; omit prop (not the studio main path). */
+  studio: ["scene", "shot", "character", "generation", "asset"],
 };
 
 /** Studio already injects story + current shot; this tool just re-dumps the project. */

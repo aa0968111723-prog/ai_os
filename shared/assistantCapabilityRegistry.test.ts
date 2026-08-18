@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { selectAssistantCapabilities } from "./assistantCapabilityRegistry";
 
@@ -32,6 +35,18 @@ describe("assistant capability registry", () => {
       "get_project_context", "get_project_status", "list_knowledge", "list_notes", "list_tasks",
     ]);
     expect(names).not.toContain("get_project_context");
+    expect(names).not.toContain("add_prop");
+    expect(names).not.toContain("update_prop");
+  });
+
+  it("studio PAGE_TERMS is scene/shot/character/generation/asset — shot in, prop out", () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "assistantCapabilityRegistry.ts"), "utf8");
+    expect(src).toContain('studio: ["scene", "shot", "character", "generation", "asset"]');
+    expect(src).toContain('storyboard: ["scene", "asset", "generation", "character", "prop"]');
+    const studioLine = src.split("\n").find((line) => /^\s*studio: \[/.test(line)) ?? "";
+    expect(studioLine).toContain('"shot"');
+    expect(studioLine).not.toContain('"prop"');
+    expect(studioLine).not.toContain('"story"');
   });
 
   it("studio ASK / PLAN / AGENT never expose get_project_context", () => {
