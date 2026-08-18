@@ -5,17 +5,23 @@
 
 export const ASSISTANT_STORY_CONTEXT_BUDGET = 4_000;
 
+/** Same 4k slice MCP / studio / planner use so truncation does not fork. */
+export function slicePersistedStoryContent(content?: string | null): string | null {
+  const text = (content ?? "").trim();
+  if (!text) return null;
+  return text.length > ASSISTANT_STORY_CONTEXT_BUDGET
+    ? `${text.slice(0, ASSISTANT_STORY_CONTEXT_BUDGET)}…[truncated]`
+    : text;
+}
+
 export function formatPersistedStoryForAssistant(input: {
   content?: string | null;
   lastParsedAt?: Date | string | null;
 }): string {
-  const text = (input.content ?? "").trim();
-  if (!text) {
+  const sliced = slicePersistedStoryContent(input.content);
+  if (!sliced) {
     return "故事全文：（專案尚未儲存稿。先據實說明目前沒有故事正文，再問要不要用對話發想。不要向使用者索取已存在於伺服器的稿。）";
   }
-  const sliced = text.length > ASSISTANT_STORY_CONTEXT_BUDGET
-    ? `${text.slice(0, ASSISTANT_STORY_CONTEXT_BUDGET)}…[truncated]`
-    : text;
   const parsed = input.lastParsedAt
     ? `（已解析過 ${typeof input.lastParsedAt === "string" ? input.lastParsedAt : input.lastParsedAt.toISOString()}）`
     : "（已儲存、尚未解析成分鏡）";

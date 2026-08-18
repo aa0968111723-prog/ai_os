@@ -17,6 +17,7 @@ import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { worldviewSchema, formatWorldviewForAi, worldviewChipGuidanceForAi } from "../../shared/worldview";
+import { loadPersistedStoryForAssistant } from "./assistantProjectStory";
 import { isMockMode } from "./fal";
 import { reserveQuota, refund, checkQuota, settleUsagePoints } from "./points";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
@@ -617,11 +618,14 @@ export async function planAgentCore(input: {
   if (goal.length > 1000) throw new TRPCError({ code: "BAD_REQUEST", message: "目標太長（最多 1000 字）" });
   const wv = worldviewSchema.parse(project.worldview ?? {});
   const chipGuide = worldviewChipGuidanceForAi(wv);
-  const scenes = await db
-    .select()
-    .from(schema.scenes)
-    .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
-    .orderBy(asc(schema.scenes.orderIndex));
+  const [scenes, storyBlock] = await Promise.all([
+    db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex)),
+    loadPersistedStoryForAssistant(project.id),
+  ]);
 
   // AI 代理可寫入的資料庫（規劃可引用；用代號避免 uuid 幻覺）
   const writableDbs = await listAgentWritableDbs(auth);
@@ -726,7 +730,7 @@ export async function planAgentCore(input: {
 }
 
 可用步驟與專屬欄位（不得發明其他 kind）：
-- split_script：script 可省略，從知識庫腳本拆分鏡。
+- split_script：script 可省略，優先從故事全文拆分鏡；沒有稿才退知識庫腳本。
 - create_scene：sceneTitle、voiceover?、durationSec?、prompt?。
 - update_scene：sceneNo、sceneTitle?、durationSec?（整數 1-60 秒）、prompt?、voiceover?、ambience?、trimStartMs?/trimEndMs?（毫秒；秒以下的節奏微調用修剪，不要發明小數秒）。免費，用於改欄位與剪輯節奏。
 - reorder_scenes：orderedSceneNos（把全部分鏡的「目前編號」按新順序完整列出，例如 [3,1,2,4]；不可重複、不可漏）。免費，用於調整敘事順序。
@@ -752,7 +756,7 @@ export async function planAgentCore(input: {
 8. modelId 只能抄模型速查的 id；不確定就省略。優先選經濟模型，除非目標明確要求品質。needs 模型務必搭配 sourceAssetRef 或 sourceUrl，否則該步無法執行。
 9. **多代理並行**：互不依賴的 generate 步驟不要硬串 dependsOn——獨立支線會同時開拍（長任務關頁也繼續）；真有先後才寫 dependsOn。
 10. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。禁止輸出 chain-of-thought、逐步心智草稿或內部推理；summary.rationale 與步驟 rationale 是給使用者看的簡短結論式說明（rationale ≤500 字、步驟 rationale ≤300 字），不是推理紀錄。
-11. summary.rationale 必填（1–3 句說明為何這樣排計畫）；summary.contextUsed 只能列你實際依據的上下文區塊標籤，不要虛列。可用標籤限：專案現況、專案運作情報、專案知識庫節錄、使用者指定來源、團隊成員、專案筆記、專案排程、既有人類任務、角色定裝、場景設定、素材庫、可寫資料庫、可用模型速查。
+11. summary.rationale 必填（1–3 句說明為何這樣排計畫）；summary.contextUsed 只能列你實際依據的上下文區塊標籤，不要虛列。可用標籤限：專案現況、故事全文、專案運作情報、專案知識庫節錄、使用者指定來源、團隊成員、專案筆記、專案排程、既有人類任務、角色定裝、場景設定、素材庫、可寫資料庫、可用模型速查。
 ${buildPlannerRoleBlock()}
 <可用模型速查>
 ${buildAiModelCheatsheet()}
@@ -764,6 +768,7 @@ ${picked.text ? `<使用者指定來源>\n${picked.text}\n</使用者指定來�
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜${formatWorldviewForAi(wv, "brief")}
+${storyBlock}
 ${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
 ${sceneLines}
 </專案現況>
@@ -1047,11 +1052,14 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
     return updated;
   }
 
-  const scenes = await db
-    .select()
-    .from(schema.scenes)
-    .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
-    .orderBy(asc(schema.scenes.orderIndex));
+  const [scenes, storyBlock] = await Promise.all([
+    db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex)),
+    loadPersistedStoryForAssistant(project.id),
+  ]);
   const writableDbs = await listAgentWritableDbs(auth);
   const plannerContext = await buildPlannerContext(project.groupId, project.id, writableDbs);
   const sceneLines = scenes.length
@@ -1082,6 +1090,7 @@ ${dbCheatsheet(writableDbs)}
 ${plannerContext.text}
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
+${storyBlock}
 分鏡（共 ${scenes.length}）：
 ${sceneLines}
 </專案現況>

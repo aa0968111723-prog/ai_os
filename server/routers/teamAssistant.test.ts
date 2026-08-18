@@ -518,8 +518,8 @@ describe("formatGroupBlockerDigest（S5：ask 的阻塞上下文）", () => {
 
 describe("sanitizeContextUsed／sanitizeRationale（S5：決策軌跡的守門）", () => {
   it("只留白名單內的標籤，去重且限量", () => {
-    expect(sanitizeContextUsed(["專案現況", "阻塞與人員負荷", "專案現況"]))
-      .toEqual(["專案現況", "阻塞與人員負荷"]);
+    expect(sanitizeContextUsed(["專案現況", "故事全文", "阻塞與人員負荷", "專案現況"]))
+      .toEqual(["專案現況", "故事全文", "阻塞與人員負荷"]);
   });
 
   it("編造的來源一律丟掉——不設限的話它會編出看起來很專業卻沒讀過的名稱", () => {
@@ -755,6 +755,7 @@ describe("project_detail injects persisted story", () => {
     expect(block).toContain("formatPersistedStoryForAssistant");
     expect(block).toContain("schema.stories.content");
     expect(block).toContain("storyBlock");
+    expect(TEAM_CONTEXT_LABELS).toContain("故事全文");
   });
 });
 

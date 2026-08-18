@@ -517,7 +517,7 @@ export function formatGroupBlockerDigest(insight: GroupBlockerDigestInput): stri
  * 因為使用者會據此相信答案。只認得這幾個標籤，其餘一律丟掉。
  */
 export const TEAM_CONTEXT_LABELS = [
-  "專案現況", "組花費", "資料庫快照", "阻塞與人員負荷",
+  "專案現況", "故事全文", "組花費", "資料庫快照", "阻塞與人員負荷",
   "分鏡明細", "生成紀錄", "模型目錄", "資料庫搜尋", "代理動態", "人員任務", "專案營運快照",
 ] as const;
 const TEAM_CONTEXT_LABEL_SET = new Set<string>(TEAM_CONTEXT_LABELS);

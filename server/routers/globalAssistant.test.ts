@@ -397,3 +397,13 @@ describe("禁止假進度契約（源碼斷言）", () => {
     expect(replySection).not.toContain("addSource");
   });
 });
+
+describe("global assistant injects persisted story for the current project", () => {
+  const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
+
+  it("loads stories.content via loadPersistedStoryForAssistant into <組現況>", () => {
+    expect(src).toContain("loadPersistedStoryForAssistant");
+    expect(src).toContain("currentStoryBlock");
+    expect(src).toContain("effectiveProjectId");
+  });
+});

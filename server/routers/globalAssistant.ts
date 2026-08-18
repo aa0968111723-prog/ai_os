@@ -23,6 +23,7 @@ import {
   type ResolvedDispatch,
   type TeamAskContext,
 } from "./teamAssistant";
+import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
 import { createProjectCore, listProjectCreationOptions } from "../services/projectCore";
 import { getAgentReadableTable } from "../services/databaseMcp";
 import { executeDatabaseWriteCommand } from "../services/databaseCommand";
@@ -807,7 +808,7 @@ export async function runGlobalAsk(
 
   // 站級動作的解析素材：成員（mN）＋該組啟用中的專案類型/平台＋可寫資料庫（dbN 的 agentAccess）
   const dbIds = [...dbByRef.values()].map((t) => t.id);
-  const [memberRows, creationOptions, dbAccessRows, currentScenePointers] = await Promise.all([
+  const [memberRows, creationOptions, dbAccessRows, currentScenePointers, currentStoryBlock] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.groupMembers)
@@ -830,6 +831,9 @@ export async function runGlobalAsk(
           .where(and(eq(schema.scenes.projectId, effectiveProjectId), isNull(schema.scenes.deletedAt)))
           .orderBy(asc(schema.scenes.orderIndex))
       : Promise.resolve([] as Array<{ id: string; title: string }>),
+    effectiveProjectId
+      ? loadPersistedStoryForAssistant(effectiveProjectId)
+      : Promise.resolve(""),
   ]);
   const members: SiteMemberRef[] = memberRows.map((m, i) => ({ ref: `m${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
   const agentAccessById = new Map(dbAccessRows.map((r) => [r.id, r.agentAccess]));
@@ -1455,9 +1459,12 @@ ${(() => {
     ? `
 ${formatAssistantPageContext(input.pageContext)}`
     : "";
-  const currentProjectBlock = currentProjectRef
-    ? `\n使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
-    : "";
+  const currentProjectBlock = [
+    currentProjectRef
+      ? `使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
+      : "",
+    currentStoryBlock,
+  ].filter(Boolean).map((line) => `\n${line}`).join("");
   const selectedIds = new Set(input.pageContext?.selectedEntityIds ?? []);
   const selectedSceneLabels = currentScenePointers
     .map((scene, index) => ({ scene, sceneNo: index + 1 }))

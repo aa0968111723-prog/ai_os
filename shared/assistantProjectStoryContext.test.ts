@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSISTANT_STORY_CONTEXT_BUDGET,
   buildAssistantProjectStatusContext,
   formatPersistedStoryForAssistant,
+  slicePersistedStoryContent,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
 
@@ -38,5 +40,14 @@ describe("assistant persisted story context", () => {
     const block = formatPersistedStoryForAssistant({ content: "   " });
     expect(block).toContain("尚未儲存稿");
     expect(block).not.toContain("請貼上");
+    expect(slicePersistedStoryContent("   ")).toBeNull();
+  });
+
+  it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {
+    const long = "華".repeat(ASSISTANT_STORY_CONTEXT_BUDGET + 20);
+    const sliced = slicePersistedStoryContent(long);
+    expect(sliced?.endsWith("…[truncated]")).toBe(true);
+    expect(sliced?.startsWith("華")).toBe(true);
+    expect(formatPersistedStoryForAssistant({ content: long })).toContain("…[truncated]");
   });
 });

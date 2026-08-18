@@ -28,6 +28,10 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import {
+  formatPersistedStoryForAssistant,
+  slicePersistedStoryContent,
+} from "../../shared/assistantProjectStoryContext";
 import { mcpToolAnnotations } from "../../shared/mcpCatalog";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { getModelContract, loadModelContractSnapshot } from "./modelContractStore";
@@ -1471,15 +1475,20 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const now = new Date();
     const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
     const story = storyRows[0];
+    const storyContent = slicePersistedStoryContent(story?.content);
     return {
       project: { title: project.title, kind: project.kind, format: project.format, status: project.status },
-      story: story
+      story: storyContent
         ? {
-          chars: story.content.length,
-          lastParsedAt: story.lastParsedAt,
-          content: story.content.length > 2_500 ? `${story.content.slice(0, 2_500)}…[truncated]` : story.content,
+          chars: (story?.content ?? "").trim().length,
+          lastParsedAt: story?.lastParsedAt ?? null,
+          content: storyContent,
         }
         : null,
+      storyBlock: formatPersistedStoryForAssistant({
+        content: story?.content,
+        lastParsedAt: story?.lastParsedAt,
+      }),
       scenes: { total: scenes.length, byStatus: tally(scenes.map((s) => s.status)) },
       generations: {
         recent: gens.length,
@@ -1509,17 +1518,22 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const wv = worldviewSchema.parse(project.worldview ?? {});
     const [scenes, storyRows] = await Promise.all([
       db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt))),
-      db.select({ content: schema.stories.content }).from(schema.stories).where(eq(schema.stories.projectId, project.id)).limit(1),
+      db.select({ content: schema.stories.content, lastParsedAt: schema.stories.lastParsedAt }).from(schema.stories).where(eq(schema.stories.projectId, project.id)).limit(1),
     ]);
-    const storyContent = storyRows[0]?.content ?? "";
+    const storyRow = storyRows[0];
+    const storyContent = slicePersistedStoryContent(storyRow?.content);
     return {
       title: project.title,
       kind: project.kind,
       format: project.format,
       worldview: wv,
       story: storyContent
-        ? { chars: storyContent.length, content: storyContent.length > 4_000 ? `${storyContent.slice(0, 4_000)}…[truncated]` : storyContent }
+        ? { chars: (storyRow?.content ?? "").trim().length, content: storyContent }
         : null,
+      storyBlock: formatPersistedStoryForAssistant({
+        content: storyRow?.content,
+        lastParsedAt: storyRow?.lastParsedAt,
+      }),
       scenes: scenes.map((s) => ({ title: s.title, status: s.status })),
     };
   }

@@ -1,3 +1,5 @@
+import { formatPersistedStoryForAssistant } from "./assistantProjectStoryContext";
+
 /** Compact studio prompt: current shot + bound characters only. Do not dump the whole project. */
 export function formatStudioShotContext(input: {
   projectTitle: string;
@@ -20,10 +22,7 @@ export function formatStudioShotContext(input: {
   const chars = input.characters.length
     ? input.characters.map((c) => `- ${c.name}｜${c.appearance}`).join("\n")
     : "（這一鏡尚未綁角色）";
-  const story = (input.storyText ?? "").trim();
-  const storyBlock = story
-    ? `故事全文：\n${story.length > 4_000 ? `${story.slice(0, 4_000)}…[truncated]` : story}\n`
-    : "";
+  const storyBlock = `${formatPersistedStoryForAssistant({ content: input.storyText })}\n`;
   return `標題：${input.projectTitle}（${input.kind}，${input.format}）
 ${storyBlock}目前鏡頭：第 ${input.displayNo} 鏡「${input.shot.title}」（orderIndex=${input.shot.orderIndex}，${input.shot.durationSec} 秒）
 畫面提示：${input.shot.prompt || "（未填）"}
