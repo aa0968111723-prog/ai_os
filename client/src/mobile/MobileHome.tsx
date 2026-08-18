@@ -4,7 +4,9 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { Button, EmptyState, Meta, Skeleton } from "../components/ui";
 import { registerAssistantPage } from "../lib/assistantContext";
+import { NEW_PROJECT_IDEA_EVENT, takePendingNewProjectIdea } from "../lib/newProjectIdea";
 import { MobileAiBar } from "./MobileAiBar";
+import { MobileCreateProjectSheet } from "./MobileCreateProjectSheet";
 import { MOBILE_STAGES, continueAnchor, continueLabel, stageIndex, stageSentence } from "./stages";
 
 /**
@@ -37,6 +39,8 @@ export function MobileHome({ groupId }: { groupId: string }) {
    * 換 limit＝換 query key，react-query 自動去抓，且 5 筆那份仍留在快取裡。
    */
   const [showAll, setShowAll] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
   const home = trpc.phone.home.useQuery(
     { groupId, ...(showAll ? { limit: 100 } : {}) },
     {
@@ -84,6 +88,23 @@ export function MobileHome({ groupId }: { groupId: string }) {
     }),
     [current?.id, current?.title],
   );
+
+  const openCreate = (title = "") => {
+    setCreateTitle(title);
+    setCreateOpen(true);
+  };
+
+  useEffect(() => {
+    const pending = takePendingNewProjectIdea();
+    if (pending) openCreate(pending);
+    const onIdea = (event: Event) => {
+      const idea = (event as CustomEvent<{ ideaTitle?: string }>).detail?.ideaTitle?.trim() ?? "";
+      takePendingNewProjectIdea();
+      openCreate(idea);
+    };
+    window.addEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
+    return () => window.removeEventListener(NEW_PROJECT_IDEA_EVENT, onIdea);
+  }, []);
 
   if (!groupId) {
     return (
@@ -151,7 +172,13 @@ export function MobileHome({ groupId }: { groupId: string }) {
         <EmptyState
           icon={<Icon name="Package" size={28} />}
           title="還沒有專案"
-          description="直接跟下面的 Aios 說你想做什麼，它會幫你把第一個專案建起來。"
+          description="填名稱就能開第一案；也可以跟下面的 Aios 說你想做什麼。"
+          action={(
+            <Button variant="primary" onClick={() => openCreate()}>
+              <Icon name="Plus" size={16} />
+              建立專案
+            </Button>
+          )}
         />
       )}
 
@@ -200,6 +227,19 @@ export function MobileHome({ groupId }: { groupId: string }) {
         </button>
       )}
       {showAll && home.isFetching && <Meta as="p" role="status">載入其餘專案…</Meta>}
+
+      <button type="button" className="m-secondary-link" onClick={() => openCreate()}>
+        <Icon name="Plus" size={15} />
+        建立專案
+      </button>
+
+      {createOpen && groupId && (
+        <MobileCreateProjectSheet
+          groupId={groupId}
+          initialTitle={createTitle}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
     </div>
   );
 }

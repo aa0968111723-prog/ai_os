@@ -9,6 +9,7 @@ import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { MobileAiBar } from "./MobileAiBar";
 import { usePhoneAnimationRepair } from "./usePhoneAnimationRepair";
 import { StageTrack } from "./MobileHome";
+import { revealStoryInlineSection, sectionFromHash, writeInlineHash, isStoryHomeHash } from "../features/story-workspace/storyInlineNav";
 import { anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageSentence } from "./stages";
 
 /**
@@ -57,7 +58,7 @@ const SECONDARY: SecondaryEntry[] = [
   { key: "storyboard", label: "分鏡", icon: "Clapperboard", hint: "看每一鏡、接著往下排", anchor: anchorForSection("storyboard") },
   { key: "assets", label: "素材", icon: "Image", hint: "這個專案的圖與影片", anchor: null },
   { key: "characters", label: "角色", icon: "Users", hint: "角色定裝與一致性", anchor: anchorForSection("characters") },
-  { key: "knowledge", label: "知識", icon: "FileText", hint: "腳本、開示稿、參考資料", anchor: anchorForSection("scenes") },
+  { key: "scenes", label: "場景", icon: "Compass", hint: "場景設定與地點", anchor: anchorForSection("scenes") },
 ];
 
 export function MobileProjectPage({ id }: { id: string }) {
@@ -102,17 +103,29 @@ export function MobileProjectPage({ id }: { id: string }) {
 
   /** 進完整工作台，並把錨點帶過去——深連結契約與桌面版相同 */
   const openFull = (anchor?: string) => {
-    setFullOpen(true);
     if (anchor) {
-      // chunk 還在下載時 getElementById 拿不到；工作台掛好後再捲（3 秒放棄，只是少捲動）
-      const deadline = Date.now() + 3000;
-      const tick = () => {
-        const el = document.getElementById(anchor);
-        if (el) el.scrollIntoView();
-        else if (Date.now() < deadline) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
+      const section = sectionFromHash(anchor);
+      if (section) writeInlineHash(section);
+      else if (isStoryHomeHash(`#${anchor}`) || anchor === "stage-story") writeInlineHash(null);
+      else {
+        const next = `#${anchor}`;
+        if (window.location.hash !== next) {
+          history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next}`);
+        }
+      }
     }
+    setFullOpen(true);
+    if (!anchor) return;
+    const section = sectionFromHash(anchor);
+    // chunk 還在下載時 getElementById 拿不到；工作台掛好後再揭開收合列並捲過去
+    const deadline = Date.now() + 3000;
+    const tick = () => {
+      if (section) revealStoryInlineSection(section, { projectId: id, scroll: true });
+      const el = document.getElementById(anchor);
+      if (el) el.scrollIntoView({ block: "start" });
+      else if (Date.now() < deadline) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   };
 
   // 帶著 hash 進來就直接開工作台（等同使用者自己按了「繼續製作」）

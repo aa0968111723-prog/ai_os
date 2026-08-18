@@ -97,14 +97,40 @@ const main = async () => {
     const net = recordNetwork(page);
     await login(page);
     net.reset();
-    const href = PROJECT_ID ? `${TARGET}/p/${PROJECT_ID}` : `${TARGET}/dashboard`;
-    await page.goto(href, { waitUntil: "domcontentloaded" });
-    await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
     if (!PROJECT_ID) {
+      await page.goto(`${TARGET}/dashboard`, { waitUntil: "domcontentloaded" });
+      await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
+      const createBtn = page.getByRole("button", { name: /建立專案/ }).first();
+      check(await createBtn.count() > 0, `${vp.name}: 首頁有建立專案入口`);
+      if (await createBtn.count()) {
+        await createBtn.click();
+        const createSheet = page.getByLabel("建立新專案");
+        check(await createSheet.isVisible().catch(() => false), `${vp.name}: 手機建立表單打開`);
+        if (await createSheet.count()) {
+          await page.getByRole("button", { name: "取消" }).click();
+        }
+      }
       const projectLink = page.locator("a[href^='/p/']").first();
-      if (await projectLink.count()) await projectLink.click();
+      const continueBtn = page.getByRole("button", { name: /繼續|開始寫故事|繼續排分鏡|開始做畫面|繼續生成/ }).first();
+      if (await projectLink.count()) {
+        await projectLink.click();
+      } else if (await continueBtn.count()) {
+        await continueBtn.click();
+      } else {
+        await createBtn.click();
+        const createSheet = page.getByLabel("建立新專案");
+        await createSheet.waitFor({ state: "visible", timeout: 10_000 });
+        await createSheet.getByLabel("專案名稱").fill("overnight-test-phone-repair");
+        await createSheet.getByRole("button", { name: "建立專案" }).click();
+        await page.waitForURL((u) => u.pathname.startsWith("/p/"), { timeout: 30_000 });
+      }
+      await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
+    } else {
+      await page.goto(`${TARGET}/p/${PROJECT_ID}`, { waitUntil: "domcontentloaded" });
       await page.getByLabel("跟 Aios 說一句話").waitFor({ state: "visible", timeout: 30_000 });
     }
+    const scenesEntry = page.getByRole("button", { name: /場景/ });
+    check(await scenesEntry.count() > 0, `${vp.name}: 專案頁有場景入口`);
     const projectNav = net.snapshot();
     metrics[vp.name] = { project: projectNav };
 

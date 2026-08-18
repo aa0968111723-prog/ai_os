@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useState, type RefObject } 
 import { useLocation } from "wouter";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
+import { publishNewProjectIdea } from "../../lib/newProjectIdea";
 
 /**
  * 助手本體延後載入。
@@ -171,12 +172,11 @@ export function GlobalAssistantSheet({
                   onNavigate={goTo}
                   onUseIdeaForNewProject={(ideaTitle) => {
                     // 建專案是寫入動作——這裡只把想法帶到建立流程，不代按確認。
-                    // 真正的建立仍在 Launchpad 的建立專案表單，由使用者自己送出。
+                    // 手機 <768 掛的是 MobileHome，不是 Launchpad；想法先寫進
+                    // sessionStorage，再發事件，避免導航後監聽器還沒掛上。
+                    publishNewProjectIdea(ideaTitle);
                     onClose();
                     navigate(`/dashboard#projects`);
-                    window.setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("aios:new-project-idea", { detail: { ideaTitle } }));
-                    }, 0);
                   }}
                 />
               </>

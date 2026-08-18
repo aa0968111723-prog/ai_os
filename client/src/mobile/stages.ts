@@ -96,7 +96,7 @@ export function continueAnchor(stage: string): string {
 /**
  * 某個 section 在專案頁實際渲染的錨點 id。
  *
- * 次級入口（分鏡／角色／知識）要跳的段落用這個取，不要直接把 section id 當錨點——
+ * 次級入口（分鏡／角色／場景）要跳的段落用這個取，不要直接把 section id 當錨點——
  * 那正是 `continueAnchor` 上面那段記載的坑。
  */
 export function anchorForSection(section: string): string {

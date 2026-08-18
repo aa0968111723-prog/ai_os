@@ -191,7 +191,7 @@
   }
 
   .m-ai__chip {
-    min-height: 36px;
+    min-height: 44px;
     padding: 0 12px;
     border: 1px solid var(--border-soft);
     border-radius: 999px;
@@ -593,6 +593,36 @@
     justify-content: space-between;
     gap: 8px;
     font-size: 16px;
+  }
+
+  .m-sheet__head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .m-create {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .m-create input,
+  .m-create select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .m-create__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .m-create__actions > button {
+    flex: 1 1 0;
+    min-height: 44px;
   }
 
   .m-sheet__more { width: 100%; min-height: 48px; }
