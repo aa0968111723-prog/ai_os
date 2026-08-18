@@ -77,6 +77,7 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("buildAssistantProjectStatusContext");
     expect(assistant).toContain("assistantAskCompletionChip");
     expect(assistant).toContain("allowPaidFallback");
+    expect(assistant).toContain("if (!a.sceneNo && scenes.length === 0) continue");
   });
 
   it("assistant scene writes use the same authoritative read-back as database row tools", () => {

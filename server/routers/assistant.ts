@@ -1319,6 +1319,8 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         const out: ResolvedAction[] = [];
         for (const a of actions) {
           if (a.type === "generate") {
+            // 0 鏡時未指 sceneNo＝素材庫生成，專案頁看起來像按下沒反應卻扣點。
+            if (!a.sceneNo && scenes.length === 0) continue;
             const scene = a.sceneNo ? findSceneByDisplayNo(scenes, a.sceneNo) : undefined;
             if (a.sceneNo && !scene) continue; // 指了不存在的鏡＝幻覺編號，整筆提議略過
             const model = pickGenerateModel(a.modelId); // 白名單不過就退回預設圖像模型
