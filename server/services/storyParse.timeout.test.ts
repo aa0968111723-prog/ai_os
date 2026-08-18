@@ -34,21 +34,43 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
     expect(strategy.fallbackTimeoutMs).toBe(STORY_PARSE_SHORT_FALLBACK_MS);
-    expect(strategy.primaryTimeoutMs).toBeGreaterThanOrEqual(40_000);
-    expect(strategy.primaryTimeoutMs).toBeLessThan(NIM_FIRST_ATTEMPT_MAX_MS);
-    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(90_000);
-    expect(strategy.budgetMs).toBeLessThan(90_000);
+    expect(strategy.primaryTimeoutMs).toBe(80_000);
+    expect(strategy.fallbackTimeoutMs).toBe(35_000);
+    expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(NIM_FIRST_ATTEMPT_MAX_MS);
+    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBe(115_000);
+    expect(strategy.budgetMs).toBe(115_000);
+    expect(strategy.budgetMs).toBeLessThan(120_000);
     expect(String(strategy.primaryTimeoutMs)).not.toMatch(/150000/);
   });
 
-  it("a ~1167-char script uses 70B first with a short budget, not 405B/150s", () => {
+  it("a 301–400 char 小華 A–F paste stays 6 beats and finishes inside 120s on 70B", () => {
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeGreaterThanOrEqual(301);
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.length).toBeLessThanOrEqual(400);
+    const pad = 400 - TKU_ZEN_SHOTLIST_FIRST_PARSE.length;
+    const padded = `${TKU_ZEN_SHOTLIST_FIRST_PARSE}${"。".repeat(pad)}`;
+    expect(padded.length).toBe(400);
+    expect(padded.split(/\n\n/).length).toBe(6);
+    expect(padded).not.toMatch(/宿舍夜|安倢|慕恩|茶會字卡/);
+    const fixture = resolveStoryExtractStrategy(TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
+    const strategy = resolveStoryExtractStrategy(padded.length);
+    expect(strategy.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.primaryModel).toBe(fixture.primaryModel);
+    expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.primaryTimeoutMs).toBe(80_000);
+    expect(strategy.fallbackTimeoutMs).toBe(35_000);
+    expect(strategy.budgetMs).toBeLessThan(120_000);
+    expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBe(strategy.budgetMs);
+  });
+
+  it("a ~1167-char script uses 70B first with a 115s wall, not 405B/150s", () => {
     const strategy = resolveStoryExtractStrategy(1_167);
     expect(1_167).toBeLessThanOrEqual(STORY_PARSE_SHORT_CHARS);
     expect(strategy.primaryModel).toContain("70b");
     expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
     expect(strategy.fallbackModel).not.toBe(NIM_REASONING_MODEL);
-    expect(strategy.primaryTimeoutMs).toBeLessThanOrEqual(45_000);
-    expect(strategy.budgetMs).toBeLessThanOrEqual(80_000);
+    expect(strategy.primaryTimeoutMs).toBe(80_000);
+    expect(strategy.budgetMs).toBe(115_000);
+    expect(strategy.budgetMs).toBeLessThan(120_000);
     expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(150_000);
   });
 
@@ -78,7 +100,8 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(String(result.error)).not.toMatch(/超過 150 秒/);
     expect(complete).toHaveBeenCalled();
     const firstTimeout = complete.mock.calls[0]?.[1]?.timeoutMs ?? 0;
-    expect(firstTimeout).toBeLessThanOrEqual(45_000);
+    expect(firstTimeout).toBe(80_000);
+    expect(firstTimeout).toBeLessThan(120_000);
   });
 
   it("cache-miss EXTRACT for 2k and 12k never forwards 405B/150s to the provider", async () => {
@@ -128,7 +151,7 @@ describe("story parse bounded extract（~1k 稿不得掛死 150s）", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(result.output).toContain("小華");
     expect(result.strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
-    expect(result.strategy.budgetMs).toBeLessThan(90_000);
+    expect(result.strategy.budgetMs).toBeLessThan(120_000);
     expect(complete).toHaveBeenCalledOnce();
   });
 

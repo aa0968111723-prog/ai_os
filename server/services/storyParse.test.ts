@@ -119,7 +119,8 @@ describe("解析模型檔位", () => {
       const short = resolveStoryExtractStrategy(n);
       expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
       expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);
-      expect(short.primaryTimeoutMs + short.fallbackTimeoutMs).toBeLessThan(150_000);
+      expect(short.primaryTimeoutMs + short.fallbackTimeoutMs).toBeLessThan(120_000);
+      expect(short.budgetMs).toBeLessThan(120_000);
     }
     const long = resolveStoryExtractStrategy(8_000);
     expect(long.primaryModel).toBe(NIM_REASONING_MODEL);

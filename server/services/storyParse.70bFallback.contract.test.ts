@@ -31,9 +31,23 @@ describe("runStoryParse falls to 70B under 150s", () => {
       expect(strategy.primaryModel).not.toBe(NIM_REASONING_MODEL);
       expect(strategy.fallbackModel).toBe(NIM_DEFAULT_MODEL);
       expect(strategy.primaryTimeoutMs).toBe(STORY_PARSE_SHORT_PRIMARY_MS);
-      expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(150_000);
-      expect(strategy.budgetMs).toBeLessThan(150_000);
+      expect(strategy.primaryTimeoutMs + strategy.fallbackTimeoutMs).toBeLessThan(120_000);
+      expect(strategy.budgetMs).toBeLessThan(120_000);
     }
+  });
+
+  it("301–400 char A–F (6 beats only) is 70B 80s then leftover 70B, wall < 120s", () => {
+    const pad = Math.max(0, 400 - TKU_ZEN_SHOTLIST_FIRST_PARSE.length);
+    const padded = `${TKU_ZEN_SHOTLIST_FIRST_PARSE}${"。".repeat(pad)}`;
+    expect(padded.length).toBeGreaterThanOrEqual(301);
+    expect(padded.length).toBeLessThanOrEqual(400);
+    expect(padded.split(/\n\n/).length).toBe(6);
+    const strategy = resolveStoryExtractStrategy(padded.length);
+    expect(strategy.primaryModel).toBe(NIM_DEFAULT_MODEL);
+    expect(strategy.primaryTimeoutMs).toBe(80_000);
+    expect(clampNimAttemptMs(strategy.primaryTimeoutMs)).toBe(80_000);
+    expect(strategy.fallbackTimeoutMs).toBe(35_000);
+    expect(strategy.budgetMs).toBeLessThan(120_000);
   });
 
   it("EXTRACT forwards the 70B strategy — never 405B/150s — for the 161-char A–D paste", async () => {

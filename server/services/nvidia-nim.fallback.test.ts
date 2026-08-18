@@ -84,6 +84,7 @@ describe("nimCompleteWithFallback", () => {
     expect(clampNimAttemptMs(undefined)).toBe(NIM_FIRST_ATTEMPT_DEFAULT_MS);
     expect(clampNimAttemptMs(150_000)).toBe(NIM_FIRST_ATTEMPT_MAX_MS);
     expect(clampNimAttemptMs(150_000)).toBeLessThan(150_000);
+    expect(clampNimAttemptMs(80_000)).toBe(80_000);
     expect(clampNimAttemptMs(20_000)).toBe(20_000);
   });
 

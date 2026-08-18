@@ -52,12 +52,13 @@ import {
  * Live cold-parse bracket on 405B/150s:
  *   21 字 OK ≤40s; 66 字 A-line OK ~35s; 161 字 A–D OK-but-slow ~2min; 301 字 A–F FAIL 150s.
  * 161 sat on 405B. 70B first under ~2000 chars so 161 does not wait 2 min and 301 can finish.
- * First attempt ~45s so a 6-beat extract can finish (21/66 字 already take ~35–40s).
- * Do not rely on parsedContentHash cache.
+ * First 70B attempt ~80s so a 301–400 char 6-beat extract can finish
+ * (21/66 字 already take ~35–40s; 45s leftover was too short for A–F).
+ * Leftover 70B ~35s. Wall 115s < client 120s. Do not rely on parsedContentHash cache.
  */
 export const STORY_PARSE_SHORT_CHARS = 2_000;
-export const STORY_PARSE_SHORT_PRIMARY_MS = 45_000;
-export const STORY_PARSE_SHORT_FALLBACK_MS = 25_000;
+export const STORY_PARSE_SHORT_PRIMARY_MS = 80_000;
+export const STORY_PARSE_SHORT_FALLBACK_MS = 35_000;
 /** 405B 45–60s；70B 再 50–60s。合計 ≤ ~120s，不讓 3×405B 重試吃掉整段 150s。 */
 export const STORY_PARSE_LONG_PRIMARY_MS = 55_000;
 export const STORY_PARSE_LONG_FALLBACK_MS = 55_000;
@@ -78,7 +79,7 @@ export function resolveStoryExtractStrategy(storyChars: number): StoryExtractStr
       fallbackModel: NIM_DEFAULT_MODEL,
       primaryTimeoutMs: STORY_PARSE_SHORT_PRIMARY_MS,
       fallbackTimeoutMs: STORY_PARSE_SHORT_FALLBACK_MS,
-      budgetMs: STORY_PARSE_SHORT_PRIMARY_MS + STORY_PARSE_SHORT_FALLBACK_MS + 5_000,
+      budgetMs: STORY_PARSE_SHORT_PRIMARY_MS + STORY_PARSE_SHORT_FALLBACK_MS,
     };
   }
   return {
@@ -437,7 +438,8 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
     try {
       // Live/base L353 sent every cache-miss to flagship with a 150s hang.
       // Bracket: 21 OK; 66 A-line ~35s OK; 161 A–D ~2min OK-but-slow on 405B; 301 FAIL 150s. Hash cache is not a parse.
-      // ≤2000 chars: 70B 45s then leftover 70B 25s. Do not restore an unbounded flagship first attempt.
+      // ≤2000 chars: 70B 80s then leftover 70B 35s (301–400 A–F must finish inside 120s).
+      // Do not restore an unbounded flagship first attempt.
       const completion = await extractStoryPlanFromProvider(sys, sentStory.length, input.complete);
       if (completion.downgraded && trace) {
         await recordAiTraceEventSafely({
