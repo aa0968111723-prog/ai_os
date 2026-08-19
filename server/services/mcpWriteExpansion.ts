@@ -884,7 +884,13 @@ export async function runMcpWriteExpansion(
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
     assertMcpProjectScope(row.projectId, args.projectId, "角色卡");
     const patch: Record<string, unknown> = {};
-    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
+    // Live leftover: add_character sanitizes EXTRACT blobs; update still
+    // wrote「小華（粉橘…）。不要寫素材清單」as the card name (slice 80).
+    if (typeof args.name === "string" && args.name.trim()) {
+      const nameStr = sanitizeCharacterProposalName(args.name);
+      if (!nameStr) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      patch.name = nameStr;
+    }
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;

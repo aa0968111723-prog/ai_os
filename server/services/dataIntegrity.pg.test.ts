@@ -161,5 +161,17 @@ describe.skipIf(!RUN_PG).sequential("data integrity: same-name projects stay iso
     expect(blob.name).toBe("小華");
     const cards = await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectA.id));
     expect(cards).toHaveLength(1);
+
+    const renamed = await characters.update({
+      id: row.id,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+    });
+    expect(renamed.name).toBe("小華");
+    await expect(characters.update({
+      id: row.id,
+      name: "不要寫素材清單",
+    })).rejects.toMatchObject({ message: expect.stringMatching(/指示句/) });
+    const [still] = await db.select().from(schema.characters).where(eq(schema.characters.id, row.id));
+    expect(still?.name).toBe("小華");
   });
 });

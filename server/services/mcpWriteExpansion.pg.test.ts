@@ -71,6 +71,18 @@ describe.skipIf(!RUN_PG).sequential("MCP animation write expansion (real Postgre
       characterId: created.characterId,
     }) as { unchanged?: boolean };
     expect(empty.unchanged).toBe(true);
+    const blobRename = await runMcpWriteExpansion(auth, "update_character", {
+      characterId: created.characterId,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+    }) as { characterId: string; name: string };
+    expect(blobRename.characterId).toBe(created.characterId);
+    expect(blobRename.name).toBe("小華");
+    await expect(runMcpWriteExpansion(auth, "update_character", {
+      characterId: created.characterId,
+      name: "不要寫素材清單",
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" } satisfies Partial<TRPCError>);
+    const [afterBlob] = await db.select().from(schema.characters).where(eq(schema.characters.id, created.characterId));
+    expect(afterBlob?.name).toBe("小華");
   });
 
   it("rejects updating project B 小華 with project A id", async () => {

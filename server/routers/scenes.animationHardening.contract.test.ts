@@ -207,6 +207,9 @@ describe("animation shot writes stay consistent", () => {
     expect(mcpAdd).toContain("sanitizeCharacterProposalName");
     expect(mcpAdd).toContain("upsertProjectCharacterCore");
     expect(mcpAdd).not.toContain("db.insert(schema.characters)");
+    const mcpUpdate = mcp.slice(mcp.indexOf('if (name === "update_character")'), mcp.indexOf('if (name === "add_scene_preset")'));
+    expect(mcpUpdate).toContain("sanitizeCharacterProposalName(args.name)");
+    expect(mcpUpdate).not.toContain("args.name.trim().slice(0, 80)");
   });
 
   it("pinCanonToProject reuses same-name 小華 instead of raw-inserting a second handle", () => {

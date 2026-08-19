@@ -20,7 +20,7 @@ describe("characters router 契約", () => {
   it("name/appearance 先 trim 再驗 min(1)，上限用共用常數", () => {
     expect(source).toMatch(/name:\s*z\.string\(\)\.trim\(\)\.min\(1/);
     expect(source).toMatch(/appearance:\s*z\.string\(\)\.trim\(\)\.min\(1/);
-    expect(source).toContain("CHAR_NAME_MAX");
+    expect(source).toContain(".max(240)");
     expect(source).toContain("CHAR_APPEARANCE_MAX");
     expect(CHAR_NAME_MAX).toBe(40);
     expect(CHAR_APPEARANCE_MAX).toBe(1000);
@@ -28,7 +28,7 @@ describe("characters router 契約", () => {
 
   it("update 只 set 有傳入的欄位（partial，防 lost update）", () => {
     expect(source).toContain("partial update");
-    expect(source).toContain("if (input.name !== undefined) patch.name");
+    expect(source).toContain("if (sanitizedName !== undefined) patch.name");
     expect(source).toContain("if (input.appearance !== undefined) patch.appearance");
     expect(source).not.toMatch(/name:\s*input\.name\?\.trim\(\)\s*\?\?\s*row\.name/);
     expect(source).not.toMatch(/appearance:\s*input\.appearance\?\.trim\(\)\s*\?\?\s*row\.appearance/);
@@ -44,7 +44,7 @@ describe("characters router 契約", () => {
   });
 
   it("refuses instruction-clause names and locks 小華 with the story", () => {
-    expect(source).toContain("isInstructionCharacterName");
+    expect(source).toContain("sanitizeCharacterProposalName");
     expect(source).toContain("這是指示句，不是角色名");
     expect(source).toContain("applyXiaohuaIdentityLock");
     expect(source).toContain("schema.stories.content");
@@ -57,6 +57,15 @@ describe("characters router 契約", () => {
     expect(add).toContain(".max(240)");
     expect(add).not.toContain(".insert(schema.characters)");
     expect(add).not.toContain("isInstructionCharacterName(input.name)");
+  });
+
+  it("update sanitizes EXTRACT blobs instead of raw-writing the card name", () => {
+    const update = source.slice(source.indexOf("update: authedProcedure"), source.indexOf("generateSheet:"));
+    expect(update).toContain("sanitizeCharacterProposalName(input.name)");
+    expect(update).toContain(".max(240)");
+    expect(update).toContain("這是指示句，不是角色名");
+    expect(update).not.toContain("isInstructionCharacterName(input.name)");
+    expect(update).not.toContain("patch.name = input.name");
   });
 
   it("generateSheet is cheap-image only and honorGeneratedSheet asserts same-project", () => {

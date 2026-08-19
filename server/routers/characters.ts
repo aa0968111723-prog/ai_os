@@ -3,7 +3,6 @@ import { and, asc, desc, eq, getTableColumns, inArray, isNull, sql } from "drizz
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
-  CHAR_NAME_MAX,
   CHAR_NOTES_MAX,
   MAX_PROJECT_CHARACTERS,
 } from "../../shared/cardLimits";
@@ -11,7 +10,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
-import { isInstructionCharacterName, sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
+import { sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import {
@@ -106,7 +105,8 @@ export const charactersRouter = router({
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX).optional(),
+        // Same 240 as add: paste may be the EXTRACT blob「小華（…）。不要寫素材清單」.
+        name: z.string().trim().min(1, "請填角色名").max(240).optional(),
         appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX).optional(),
         notes: z.string().trim().max(CHAR_NOTES_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
@@ -121,8 +121,13 @@ export const charactersRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-      if (input.name !== undefined && isInstructionCharacterName(input.name)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      let sanitizedName = input.name;
+      if (input.name !== undefined) {
+        const name = sanitizeCharacterProposalName(input.name);
+        if (!name) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+        }
+        sanitizedName = name;
       }
       // 跨專案引用驗證：改綁 referenceAssetId 時同樣要同專案且是圖片（null＝清除引用，免驗）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
@@ -134,7 +139,7 @@ export const charactersRouter = router({
         notes?: string | null;
         referenceAssetId?: string | null;
       } = {};
-      if (input.name !== undefined) patch.name = input.name;
+      if (sanitizedName !== undefined) patch.name = sanitizedName;
       if (input.appearance !== undefined) patch.appearance = input.appearance;
       const nextName = patch.name ?? row.name;
       const nextAppearance = patch.appearance ?? row.appearance;

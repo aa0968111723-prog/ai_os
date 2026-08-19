@@ -91,6 +91,15 @@ describe("MCP write honesty helpers", () => {
     expect(add).not.toContain("String(args.name ?? \"\").trim()");
   });
 
+  it("update_character sanitizes EXTRACT blobs instead of raw-writing the card name", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const update = source.slice(source.indexOf('if (name === "update_character")'), source.indexOf('if (name === "add_scene_preset")'));
+    expect(update).toContain("sanitizeCharacterProposalName(args.name)");
+    expect(update).toContain("這是指示句，不是角色名");
+    expect(update).not.toContain("args.name.trim().slice(0, 80)");
+    expect(update).not.toContain("patch.name = args.name");
+  });
+
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
     expect(source).toContain('import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset"');
