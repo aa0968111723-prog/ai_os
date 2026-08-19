@@ -35,6 +35,7 @@ import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError }
 import { getModel } from "../../shared/models";
 import { regenRejection } from "../../shared/sceneVersions";
 import { buildShotContextPrompt } from "./shotContextPrompt";
+import { assertNoPendingVisual } from "./scenePendingVisual";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -694,6 +695,7 @@ export async function runMcpWriteExpansion(
       ? args.prompt
       : await buildShotContextPrompt(scene, model)).trim();
     if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
+    await assertNoPendingVisual(scene.id);
     const cards = resolveSceneCards(scene, null);
     // Same 角色卡「生成時帶入」as generateInto: 0/6 or no live sheet = skip, no 500.
     const sourceAssetId = await resolveHonoredCharacterSheet({

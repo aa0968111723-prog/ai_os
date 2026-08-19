@@ -84,6 +84,7 @@ import {
   shouldReplayIdempotentGeneration,
 } from "../../shared/generationIdempotency";
 import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
+import { assertNoPendingVisual } from "../services/scenePendingVisual";
 
 export { regenRejection };
 
@@ -136,25 +137,6 @@ export function refineRejection(input: {
   }
   if (input.source.kind !== "image") return "底圖必須是圖片——影片／音訊版本不能拿來修圖";
   return null;
-}
-
-/**
- * 「這一格正在生成畫面嗎」——就地生成／修正共用的伺服器端防抖。
- * 兩顆鈕都直接扣點、沒有二次確認，快速雙擊或兩人同時按會重複送出、重複扣點。
- * （catch 常見雙擊；非強一致鎖）
- */
-async function assertNoPendingVisual(sceneId: string): Promise<void> {
-  const [pendingVisual] = await db
-    .select({ id: schema.generations.id })
-    .from(schema.generations)
-    .where(and(
-      eq(schema.generations.sceneId, sceneId),
-      sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
-      // awaiting_approval：超額待核也算「在途」，防連點堆多筆待核
-      inArray(schema.generations.status, ["queued", "running", "awaiting_approval"]),
-    ))
-    .limit(1);
-  if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成或待核准中，請稍候再生成" });
 }
 
 function assertReplayableGeneration(status: string): void {

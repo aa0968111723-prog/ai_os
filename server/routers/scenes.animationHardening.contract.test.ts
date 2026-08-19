@@ -555,6 +555,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("MCP generate_into_scene uses assertNoPendingVisual so a second send cannot double-charge", () => {
+    expect(scenes).toContain('import { assertNoPendingVisual } from "../services/scenePendingVisual"');
+    expect(scenes).not.toContain("async function assertNoPendingVisual");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("assertNoPendingVisual(scene.id)");
+    const gate = readFileSync(join(process.cwd(), "server/services/scenePendingVisual.ts"), "utf8");
+    expect(gate).toContain('status, ["queued", "running", "awaiting_approval"]');
+    expect(gate).toContain("這一格正在生成或待核准中，請稍候再生成");
+  });
+
   it("MCP generate_into_scene uses regenRejection so audio/text cannot fill the visual slot", () => {
     expect(scenes).toContain("export { regenRejection }");
     const versions = readFileSync(join(process.cwd(), "shared/sceneVersions.ts"), "utf8");
