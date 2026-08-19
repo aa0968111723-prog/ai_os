@@ -11,7 +11,13 @@ export const ASSISTANT_STORY_CONTEXT_BUDGET = 4_000;
 export function isAssistantStoryReadIntent(message: string): boolean {
   const text = (message ?? "").trim();
   if (!text) return false;
-  return /(?:讀|看|摘要|總結|概述|列出).{0,24}(?:已存|目前|這個|專案)?(?:故事|腳本)|(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)|小華在講|並列出角色|並列角色/u.test(text);
+  if (/(?:讀|看|摘要|總結|概述|列出|summarize).{0,32}(?:已存|目前|這個|專案)?(?:故事|腳本)/iu.test(text)) return true;
+  if (/(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)/u.test(text)) return true;
+  if (/小華在講|並列出角色|並列角色/u.test(text)) return true;
+  // Live A–D short-100w summarize still returned 「從疲憊中找到力量」.
+  if (/(?:A\s*[-–—~～到至]\s*D).{0,24}(?:摘要|總結|概述|summarize|故事|腳本|100\s*[wW字]|兩句)/iu.test(text)) return true;
+  if (/(?:摘要|總結|概述|summarize|短摘).{0,24}(?:A\s*[-–—~～到至]\s*D|前[四4]幕|short[- ]?100)/iu.test(text)) return true;
+  return false;
 }
 
 /** Only names already on the card or written in this project's story. Never invent 安倢／媽媽. */

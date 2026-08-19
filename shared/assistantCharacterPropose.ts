@@ -169,7 +169,7 @@ const CHARACTER_REFUSE_RE =
   /沒有可直接寫入|角色資料庫|不會把.{0,20}寫進素材清單|請先提供或建立角色資料庫|無法直接建立角色|目前無法建立角色|我也不會把/;
 
 /** Pending confirm is not a write — live 11:32 said「我新增了」with 0 cards written. */
-const CLAIMED_CHARACTER_WRITE_RE = /我新增了|已新增|已經新增|新增了角色|已建立角色|已經建立角色/;
+const CLAIMED_CHARACTER_WRITE_RE = /我新增了|已新增|已經新增|新增了角色|已建立角色|已經建立角色|已完成盤點/;
 
 /** When a confirm card exists, never leave the 05:29 refuse prose as the answer. */
 export function lockAddCharacterAnswer(answer: string, hasCharacterCard: boolean): string {

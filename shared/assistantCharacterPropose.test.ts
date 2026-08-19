@@ -187,6 +187,12 @@ describe("proposeAddCharacterActions", () => {
     expect(lockAddCharacterAnswer(claimed, false)).toBe(claimed);
   });
 
+  it("confirm-only add_character is not 已完成盤點", () => {
+    const locked = lockAddCharacterAnswer("已完成盤點。現有卡小華可以沿用。", true);
+    expect(locked).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(locked).not.toContain("已完成盤點");
+  });
+
   it("does not turn「不要寫素材清單」into a second character name", () => {
     expect(isInstructionCharacterName("不要寫素材清單")).toBe(true);
     expect(isInstructionCharacterName("「不要寫素材清單」")).toBe(true);

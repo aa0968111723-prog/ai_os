@@ -33,6 +33,7 @@ import { ProactiveModelConverter } from "../features/creation-workbench/Proactiv
 import { AgentRunCard } from "./AgentRunCard";
 import { AgentWorkPanel } from "./AgentWorkPanel";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import { honestAssistantVisibleEvents } from "@shared/assistantHonestCompletion";
 import {
   classifyAssistantRequest,
   type AssistantExecutionPlan,
@@ -489,8 +490,12 @@ export function ProjectAssistant({
             ? new Set(actions.filter((action) => action.type === "split_script"))
             : new Set<Action>();
           const pendingActions = actions.filter((action) => !directlyRunnable.has(action));
-          const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
-          const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+          const rawEvents = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+          const hasFailure = rawEvents.some((event) => event.type === "agent.failed" && event.status === "failed");
+          const events = honestAssistantVisibleEvents(rawEvents, {
+            runFailed: hasFailure,
+            pendingConfirm: pendingActions.length > 0,
+          });
           const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
           // Pending confirmation / proposed writes are not "Aios 已完成".
           const runStatus: Turn["runStatus"] = hasFailure
@@ -594,8 +599,12 @@ export function ProjectAssistant({
             setTraceSessionId(result.traceSessionId ?? null);
             const fallbackActivity = result.steps.map((text) => ({ phase: "step" as const, text }));
             const actions = result.actions as Action[];
-            const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
-            const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+            const rawEvents = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+            const hasFailure = rawEvents.some((event) => event.type === "agent.failed" && event.status === "failed");
+            const events = honestAssistantVisibleEvents(rawEvents, {
+              runFailed: hasFailure,
+              pendingConfirm: actions.length > 0,
+            });
             const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
             const runStatus: Turn["runStatus"] = hasFailure
               ? "failed"

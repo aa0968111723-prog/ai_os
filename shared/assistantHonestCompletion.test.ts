@@ -6,6 +6,7 @@ import {
   claimsCompletedWrite,
   claimsInabilityToCheck,
   formatAssistantWriteResult,
+  honestAssistantVisibleEvents,
   isCompletedInventoryChipTitle,
   rewriteCompletedTenseToProposal,
   settleAssistantAskCompletion,
@@ -167,6 +168,41 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(isCompletedInventoryChipTitle(chip.title)).toBe(false);
     expect(chip.title).not.toMatch(/已完成盤點|已取得來源|已讀取/);
     expect(chip.description).not.toMatch(/已完成盤點|已取得來源/);
+  });
+
+  it("confirm-only add_character is waiting, never 已完成盤點", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "已完成盤點。我新增了角色小華。",
+      actions: [{ type: "add_character", name: "小華" }],
+      userMessage: "新增角色 小華 粉橘短髮女孩",
+      hasVerifiedWrite: false,
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.answer).not.toMatch(/已完成盤點|我新增了/);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 1,
+      okSourceCount: 2,
+      okSourceItems: 2,
+    });
+    expect(chip.type).toBe("waiting.user_input");
+    expect(chip.title).toBe("有 1 件動作需要你確認");
+    expect(chip.title).not.toMatch(/已完成盤點|已讀取|Aios 已完成/);
+    expect(isCompletedInventoryChipTitle(chip.title)).toBe(false);
+  });
+
+  it("failed or pending events drop 已完成盤點 chips", () => {
+    const events = [
+      { type: "agent.completed", title: "已完成盤點", status: "ok" },
+      { type: "waiting.permission", title: "有 1 件動作需要你確認", status: "waiting" },
+      { type: "agent.failed", title: "模型未完成", status: "failed" },
+    ];
+    const pending = honestAssistantVisibleEvents(events, { pendingConfirm: true });
+    expect(pending.some((event) => event.type === "agent.completed")).toBe(false);
+    expect(pending.some((event) => event.title?.includes("已完成盤點"))).toBe(false);
+    const failed = honestAssistantVisibleEvents(events, { runFailed: true });
+    expect(failed.some((event) => event.type === "agent.completed")).toBe(false);
+    expect(failed.map((event) => event.title).join("")).not.toMatch(/已完成盤點/);
   });
 
   it("chip titles never emit 已完成盤點", () => {

@@ -100,6 +100,8 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).not.toContain("已取得：");
     expect(assistant).toContain("!storyReadAsk && knowledgeCtx");
     expect(assistant).toContain("!storyReadAsk && databaseEvidence.length");
+    expect(assistant).toContain("!storyReadAsk && intelligence.text");
+    expect(assistant).toContain("storyReadAsk ? \"\" : historyBlock");
     expect(assistant).toContain("userMessage: input.message");
     expect(assistant).toContain("allowPaidFallback");
     expect(assistant).toContain("assertFreeOnlyCompletion");
@@ -126,6 +128,10 @@ describe("animation shot writes stay consistent", () => {
     expect(siteAssistant).toContain("pickAnimationCompareItem");
     expect(siteAssistant).toContain("我不會把「執行修復」說成已完成");
     expect(siteAssistant).toContain("message: input.message");
+    expect(siteAssistant).toContain("isAssistantStoryReadIntent");
+    expect(siteAssistant).toContain("lockAssistantStoryAnswer");
+    expect(siteAssistant).toContain("settleAssistantAskCompletion");
+    expect(siteAssistant).toContain("assistantAskCompletionChip");
     expect(repairExecute).toContain("applyWithRevisionTrpc");
     expect(repairExecute).not.toContain("db.update(schema.scenes)");
   });

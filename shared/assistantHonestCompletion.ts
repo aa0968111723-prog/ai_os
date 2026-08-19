@@ -154,6 +154,27 @@ export function isCompletedInventoryChipTitle(title: string): boolean {
   return COMPLETED_INVENTORY_CHIP_RE.test(title);
 }
 
+/**
+ * Failed / pending / confirm-only runs must never paint 「已完成盤點」
+ * (or any completed-inventory chip) in the event list.
+ */
+export function honestAssistantVisibleEvents<T extends { type: string; title?: string; status?: string }>(
+  events: readonly T[],
+  input: { runFailed?: boolean; pendingConfirm?: boolean },
+): T[] {
+  const hideCompleted = input.runFailed === true || input.pendingConfirm === true;
+  return events.flatMap((event) => {
+    const title = event.title ?? "";
+    if (hideCompleted && (event.type === "agent.completed" || isCompletedInventoryChipTitle(title))) {
+      return [];
+    }
+    if (!title.includes("已完成盤點")) return [event];
+    const nextTitle = title.replace(/已完成盤點/g, "").trim();
+    if (!nextTitle) return [];
+    return [{ ...event, title: nextTitle }];
+  });
+}
+
 export function assistantAskCompletionChip(input: {
   settled: AssistantAskSettlement;
   actionCount: number;

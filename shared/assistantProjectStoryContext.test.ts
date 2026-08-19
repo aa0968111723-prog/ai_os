@@ -68,6 +68,8 @@ describe("assistant persisted story context", () => {
     const live = "請讀已存故事，兩句摘要小華在講什麼並列出角色名";
     expect(isAssistantStoryReadIntent(live)).toBe(true);
     expect(isAssistantStoryReadIntent("兩句話摘要已存故事並列角色名，不要寫入.")).toBe(true);
+    expect(isAssistantStoryReadIntent("A–D summarize 100w")).toBe(true);
+    expect(isAssistantStoryReadIntent("請摘要 A-D，短摘 100 字")).toBe(true);
     expect(isAssistantStoryReadIntent("現在有幾鏡？")).toBe(false);
     const locked = lockAssistantStoryAnswer({
       answer: "已完成盤點。小華在講述他的故事，提到他如何從疲憊中找到力量。角色名有小華和禪定龜龜。",

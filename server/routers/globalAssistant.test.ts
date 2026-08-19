@@ -567,13 +567,26 @@ describe("global assistant injects persisted story for the current project", () 
   const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
 
   it("marks page-project story presence in <組現況> without dumping 故事全文", () => {
-    expect(src).toContain("loadPersistedStoryForAssistant");
+    expect(src).toContain("loadPersistedStoryRow");
+    expect(src).toContain("formatPersistedStoryForAssistant");
     expect(src).toContain("formatTeamInventoryStoryFlag");
     expect(src).toContain("effectiveProjectId");
     expect(src).toContain("完整正文請用 project_detail");
     expect(src).toContain("currentStoryPointer");
-    expect(src).not.toMatch(/\$\{currentStoryBlock\}/);
+    expect(src).toContain("isAssistantStoryReadIntent");
+    expect(src).toContain("lockAssistantStoryAnswer");
+    expect(src).toContain("storyReadAsk && currentProjectRef");
+    expect(src).toContain("formatTeamInventoryStoryFlag(currentStoryContent)");
     expect(src).not.toContain("我是大二化工系的小華");
+  });
+
+  it("story-read injects THIS stories.content only and settles confirm-only chips", () => {
+    expect(src).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(src).toContain("!storyReadAsk && databaseEvidence.length");
+    expect(src).toContain("settleAssistantAskCompletion");
+    expect(src).toContain("assistantAskCompletionChip");
+    expect(src).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(src).toContain("禁止引用其他專案的小華故事");
   });
 
   it("siteActionBlock routes 角色 to add_character, not 素材清單", () => {
