@@ -52,6 +52,22 @@ describe("P0-1 story persist always sends expectedRev", () => {
   });
 });
 
+describe("P0 knowledge.update refuses silent LWW", () => {
+  it("title/content writes require baseline CAS; pin-only must not rewrite body", () => {
+    const kn = readFileSync(new URL("../routers/knowledge.ts", import.meta.url), "utf8");
+    const update = kn.slice(kn.indexOf("update: authedProcedure"), kn.indexOf("listVersions:"));
+    expect(update).toContain("knowledgeUpdateOmitMessage");
+    expect(update).toContain("eq(schema.knowledge.title, input.baseline!.title)");
+    const helper = readFileSync(new URL("../../shared/knowledgeUpdate.ts", import.meta.url), "utf8");
+    expect(helper).toContain("omitted knowledge baseline — refuse silent LWW over knowledge title/content");
+    expect(update).toContain("eq(schema.knowledge.content, input.baseline!.content)");
+    expect(update).not.toContain("title: input.title?.trim() ?? row.title");
+    const kb = readFileSync(new URL("../../client/src/components/KnowledgeBase.tsx", import.meta.url), "utf8");
+    expect(kb).toContain("knowledgeSaveBaseline");
+    expect(kb).toContain("baseline");
+  });
+});
+
 describe("P0-2 assertReferenceImage is project-scoped", () => {
   it("helper requires asset.projectId === projectId", () => {
     const src = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");

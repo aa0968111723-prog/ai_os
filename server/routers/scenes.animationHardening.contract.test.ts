@@ -363,6 +363,25 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(director).toContain("lockXiaohuaCopyFields");
   });
 
+  it("knowledge.update title/content is fail-closed baseline CAS, pin-only does not rewrite body", () => {
+    const kn = readFileSync(join(process.cwd(), "server/routers/knowledge.ts"), "utf8");
+    const update = kn.slice(kn.indexOf("update: authedProcedure"), kn.indexOf("listVersions:"));
+    expect(update).toContain("baseline:");
+    expect(update).toContain("knowledgeUpdateTouchesBody");
+    expect(update).toContain("knowledgeUpdateBaselineGate");
+    expect(update).toContain("knowledgeUpdateOmitMessage");
+    expect(update).toContain("eq(schema.knowledge.title, input.baseline!.title)");
+    expect(update).toContain("eq(schema.knowledge.content, input.baseline!.content)");
+    expect(update).toContain('code: "CONFLICT"');
+    expect(update).toContain("if (input.pinned !== undefined) patch.pinned = input.pinned");
+    expect(update).not.toContain("title: input.title?.trim() ?? row.title");
+    expect(update).not.toContain("content: nextContent");
+    const kb = readFileSync(join(process.cwd(), "client/src/components/KnowledgeBase.tsx"), "utf8");
+    expect(kb).toContain("knowledgeSaveBaseline");
+    expect(kb).toContain("baseline");
+    expect(kb).not.toContain("update.mutate({ id: k.id, title: t, content: editContent })");
+  });
+
   it("StoryStage onBlur and persistStoryDoc both require expectedRev", () => {
     expect(storyStage).toContain("dispatchStorySave(live)");
     expect(storyStage).toContain("expectedRev: req.expectedRev");
