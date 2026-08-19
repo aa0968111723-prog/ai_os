@@ -3,6 +3,7 @@ import {
   IDEMPOTENT_FAILED_GENERATION_RETRY,
   shouldReplayIdempotentGeneration,
   shouldRotateGenerateIntoRequestId,
+  variantRequestIdsAfterLaunch,
 } from "./generationIdempotency";
 
 describe("generateInto idempotent replay must not no-op a failed first send", () => {
@@ -23,5 +24,18 @@ describe("generateInto idempotent replay must not no-op a failed first send", ()
     expect(shouldRotateGenerateIntoRequestId("生成送出失敗，點數已退回，請重試")).toBe(true);
     expect(shouldRotateGenerateIntoRequestId("The operation was aborted due to timeout")).toBe(false);
     expect(shouldRotateGenerateIntoRequestId("這一格正在生成或待核准中，請稍候再生成")).toBe(false);
+  });
+
+  it("rotates only the failed variant slot so retry is not stuck on a dead key", () => {
+    const next = variantRequestIdsAfterLaunch(
+      ["keep-ok", "dead-fail", "keep-timeout"],
+      [
+        { ok: true },
+        { ok: false, error: IDEMPOTENT_FAILED_GENERATION_RETRY },
+        { ok: false, error: "The operation was aborted due to timeout" },
+      ],
+      () => "fresh-retry",
+    );
+    expect(next).toEqual(["keep-ok", "fresh-retry", "keep-timeout"]);
   });
 });

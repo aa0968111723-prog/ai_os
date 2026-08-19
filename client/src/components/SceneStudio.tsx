@@ -19,7 +19,7 @@ import { formatTMs } from "@shared/timecode";
 import { discussInMessages } from "../discuss";
 import { selectableBringInIds } from "@shared/studioReferenceImage";
 import { HonorSheetControl } from "./HonorSheetControl";
-import { shouldRotateGenerateIntoRequestId } from "@shared/generationIdempotency";
+import { shouldRotateGenerateIntoRequestId, variantRequestIdsAfterLaunch } from "@shared/generationIdempotency";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -375,6 +375,17 @@ export function SceneStudio({
           requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
         };
         setVariantParentAssetId(null); // 血緣綁定只屬於這一批，不該延續到下一批
+      } else {
+        // Failed first send: rotate only those slots. Keep ok keys so retry
+        // does not double-charge landed directions.
+        variantBatchRef.current = {
+          ...variantBatchRef.current,
+          requestIds: variantRequestIdsAfterLaunch(
+            variantBatchRef.current.requestIds,
+            result.results,
+            () => crypto.randomUUID(),
+          ),
+        };
       }
       setTab("versions");
       refresh();
@@ -389,10 +400,20 @@ export function SceneStudio({
       refresh();
       utils.quota.my.invalidate();
     },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        refineRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   // 完成後留在配音頁（試聽就在同一頁出現），不像重畫/修正要跳到版本頁看進度
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
     onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); refresh(); },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        voiceRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   // 環境音描述另開一支 update，理由同配音詞：三種「儲存中／已儲存」回饋不能互相污染
   const saveAmbience = trpc.scenes.update.useMutation({ onSuccess: () => { setAmbienceDraft(null); refresh(); } });
@@ -402,6 +423,11 @@ export function SceneStudio({
   const saveMusic = trpc.scenes.update.useMutation({ onSuccess: () => { setMusicDraft(null); refresh(); } });
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        ambienceRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   /** 採用時如果一併同步了鏡頭語言，把伺服器回報的差異顯示出來（不做靜默寫入） */
   const [adoptedDirection, setAdoptedDirection] = useState<string[]>([]);

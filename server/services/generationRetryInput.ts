@@ -50,6 +50,13 @@ export function buildRetryGenerationInput(
   const secondaryAssetId = signedAssetId(meta.secondarySourceUrl);
   const parsedSnapshot = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
   const lockedSnapshot = parsedSnapshot.success && parsedSnapshot.data.locked ? parsedSnapshot.data : undefined;
+  const lookIds = parsedSnapshot.success
+    ? [...new Set(
+      parsedSnapshot.data.characters
+        .map((row) => row.lookId)
+        .filter((id): id is string => Boolean(id)),
+    )]
+    : [];
 
   return {
     projectId: gen.projectId,
@@ -62,6 +69,8 @@ export function buildRetryGenerationInput(
     characterIds: (gen.characterIds as string[] | null) ?? undefined,
     scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
     propIds: (gen.propIds as string[] | null) ?? undefined,
+    // 少了這個，重試失敗的 generateInto／refine 會丟本鏡造型錨點，衣服換掉
+    lookIds: lookIds.length ? lookIds : undefined,
     continuityMode: parsedSnapshot.success ? parsedSnapshot.data.locked : undefined,
     continuitySnapshot: lockedSnapshot,
     sceneId: gen.sceneId ?? undefined,

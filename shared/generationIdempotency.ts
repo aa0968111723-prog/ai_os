@@ -19,3 +19,19 @@ export function shouldRotateGenerateIntoRequestId(message: string | undefined | 
   const text = message ?? "";
   return text.includes("上次送出失敗") || text.includes("生成送出失敗");
 }
+
+/**
+ * Partial variant retry: keep keys for landed slots (no double charge),
+ * rotate only slots whose first send already failed.
+ */
+export function variantRequestIdsAfterLaunch(
+  requestIds: readonly string[],
+  results: ReadonlyArray<{ ok: boolean; error?: string }>,
+  mintId: () => string,
+): string[] {
+  return requestIds.map((id, index) => {
+    const row = results[index];
+    if (row && !row.ok && shouldRotateGenerateIntoRequestId(row.error)) return mintId();
+    return id;
+  });
+}

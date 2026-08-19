@@ -473,12 +473,15 @@ describe("#790 overnight pins (do not reopen)", () => {
 
   it("generateInto failed idempotent replay is not a silent no-op", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
-    expect(into).toContain("shouldReplayIdempotentGeneration");
-    expect(into).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+    expect(into).toContain("assertReplayableGeneration");
     expect(generationCore).toContain("shouldReplayIdempotentGeneration");
     expect(generationCore).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
     expect(sceneList).toContain("shouldRotateGenerateIntoRequestId");
     expect(sceneStudio).toContain("shouldRotateGenerateIntoRequestId");
+    expect(sceneStudio).toContain("variantRequestIdsAfterLaunch");
+    expect(scenes).toContain("assertReplayableGeneration(gen.status)");
+    const retry = readFileSync(join(process.cwd(), "server/services/generationRetryInput.ts"), "utf8");
+    expect(retry).toContain("lookIds: lookIds.length ? lookIds : undefined");
   });
 
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {

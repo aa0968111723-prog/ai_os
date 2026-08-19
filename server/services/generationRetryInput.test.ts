@@ -103,6 +103,28 @@ describe("buildRetryGenerationInput — 重試不得靜默降級", () => {
     expect(input.propIds).toEqual(["p-1"]);
   });
 
+  it("本鏡造型 lookIds 沿用（少了重試會換掉衣服）", () => {
+    const lookId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const input = buildRetryGenerationInput(row({
+      continuitySnapshot: {
+        ...SNAPSHOT_BASE,
+        locked: false,
+        characters: [{
+          id: "55555555-5555-4555-8555-555555555555",
+          name: "小華",
+          appearance: "粉橘短髮女孩、白帽T",
+          notes: null,
+          referenceAssetId: null,
+          lookId,
+          lookName: "白帽T",
+          lookCostume: "白帽T",
+        }],
+      },
+    }));
+    expect(input.lookIds).toEqual([lookId]);
+    expect(input.continuitySnapshot).toBeUndefined();
+  });
+
   it("方向與批次沿用：重試出來的版本仍歸在原批次", () => {
     const creative = { batchId: "b-1", directionId: "closer", directionLabel: "更靠近人物", batchSize: 3 };
     const input = buildRetryGenerationInput(row({

@@ -165,6 +165,15 @@ async function assertNoPendingVisual(sceneId: string): Promise<void> {
   if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成或待核准中，請稍候再生成" });
 }
 
+function assertReplayableGeneration(status: string): void {
+  if (!shouldReplayIdempotentGeneration(status)) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+    });
+  }
+}
+
 /**
  * forEdit（需求 2.3 專案級權限）：分鏡的所有「寫入」mutation 走 forEdit=true——
  * 專案檢視者（viewer）唯讀；讀取（listByProject）不變。單一守門點，避免逐 mutation 漏掛。
@@ -1611,12 +1620,7 @@ export const scenesRouter = router({
       // Failed first send + same clientRequestId must not look like success
       // (no new job, leftover 待你過目 still discarded). Timeout replay of
       // queued/running/done stays idempotent.
-      if (!shouldReplayIdempotentGeneration(gen.status)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: IDEMPOTENT_FAILED_GENERATION_RETRY,
-        });
-      }
+      assertReplayableGeneration(gen.status);
       void import("../services/agentRunReconcile")
         .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
           reconcileAgentRunsAfterSceneGenerate({
@@ -1776,7 +1780,7 @@ export const scenesRouter = router({
             directionId: slot.compiled?.direction.id ?? "as-is",
             directionLabel: slot.compiled?.direction.label ?? "維持現況",
           };
-          return result.status === "fulfilled"
+          return result.status === "fulfilled" && shouldReplayIdempotentGeneration(result.value.status)
             ? {
                 ...shared,
                 ok: true as const,
@@ -1787,7 +1791,9 @@ export const scenesRouter = router({
             : {
                 ...shared,
                 ok: false as const,
-                error: result.reason instanceof Error ? result.reason.message : "變體送出失敗",
+                error: result.status === "fulfilled"
+                  ? IDEMPOTENT_FAILED_GENERATION_RETRY
+                  : result.reason instanceof Error ? result.reason.message : "變體送出失敗",
               };
         }),
       };
@@ -1872,6 +1878,7 @@ export const scenesRouter = router({
         lookIds: scene.lookIds ?? undefined,
         reasonPrefix: "分鏡修圖",
       });
+      assertReplayableGeneration(gen.status);
       return { generationId: gen.id };
     }),
 
@@ -1955,6 +1962,7 @@ export const scenesRouter = router({
         voiceIdentity: routed.voice && modelId === routed.voice.modelId ? routed.voice : undefined,
         reasonPrefix: "配音生成",
       });
+      assertReplayableGeneration(gen.status);
       return {
         generationId: gen.id,
         voice: routed.voice ? { canonId: routed.voice.canonId, voiceId: routed.voice.voiceId } : null,
@@ -2021,6 +2029,7 @@ export const scenesRouter = router({
           : undefined,
         reasonPrefix: "環境音生成",
       });
+      assertReplayableGeneration(gen.status);
       return { generationId: gen.id };
     }),
 
