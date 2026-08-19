@@ -824,6 +824,8 @@ button.studio-menu__scrim:focus-visible {
  * 其他用例，先沿用既有的「版面由 JS 決定、CSS 只吃屬性」原則：
  * 窄桌機由 studioLayout 判成 data-ai="sheet"，Inspector 自動讓位。 */
 .studio.is-workspace[data-ai="sheet"] { --ws-inspector: 264px; --ws-tool-options: 184px; }
+/* 1280 leftover: left AI rail was a 216px pointer at a missing Inspector. */
+.studio.is-workspace[data-tool="ai"] { --ws-tool-options: 320px; }
 
 @media (prefers-reduced-motion: no-preference) {
   .studio-menu { animation: studio-menu-in 120ms var(--m-ease, cubic-bezier(0.2, 0.8, 0.3, 1)); }

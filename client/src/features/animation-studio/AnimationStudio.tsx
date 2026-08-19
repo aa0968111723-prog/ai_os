@@ -11,6 +11,7 @@ import { StudioHeader } from "./StudioHeader";
 import { StudioStage } from "./StudioStage";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import { ShotInspector, type InspectorShot, type InspectorTab } from "./ShotInspector";
+import { AiCopilotActions } from "./AiCopilotActions";
 import { ToolRail } from "./ToolRail";
 import { WhiteboardCanvas, type BoardView } from "./WhiteboardCanvas";
 import { collectBrush, updateSavedBrush, workingCopy } from "./brushCollection";
@@ -196,7 +197,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setTool(next);
     const brushId = brushIdFor(next, lastDrawBrushRef.current);
     if (brushId) selectBrush(brushId);
-    if (next === "ai") setInspectorTab("ai");
+    if (next === "ai") {
+      setInspectorTab("ai");
+      setPanels((p) => ({ ...p, inspector: false }));
+    }
     if (next === "reference") setShowReference(true);
   };
 
@@ -606,6 +610,27 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       ? storyScenes.data?.find((s: { id: string }) => s.id === inspectorShot.storySceneId)
       : null;
     const optionsKind = optionsKindFor(tool);
+    const aiProps = {
+      projectId,
+      shot,
+      canEdit,
+      boardEmpty,
+      onBoardSaved: markSaved,
+      saveBoardToShot,
+      saveState,
+      saveError,
+      sketch: sketchBridge,
+      onApplyPrompt: (text: string) => {
+        if (!shot) return;
+        updateShot.mutate({
+          sceneId: shot.id,
+          prompt: text,
+          expectedRev: shot.rev,
+          baseline: { prompt: shot.prompt ?? null },
+        });
+        setInspectorTab("frame");
+      },
+    };
 
     return (
       <div
@@ -693,7 +718,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
                 </div>
               )
               : optionsKind === "ai" ? (
-                <Meta as="p">AI 的動作在右邊的 Inspector「AI」分頁——那裡看得到它掌握了哪些上下文。</Meta>
+                <AiCopilotActions {...aiProps} />
               )
               : null
             }
@@ -729,27 +754,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             onTabChange={setInspectorTab}
             collapsed={panels.inspector}
             onToggleCollapsed={() => setPanels((p) => ({ ...p, inspector: !p.inspector }))}
-            ai={{
-              projectId,
-              shot,
-              canEdit,
-              boardEmpty,
-              onBoardSaved: markSaved,
-              saveBoardToShot,
-              saveState,
-              saveError,
-              sketch: sketchBridge,
-              onApplyPrompt: (text: string) => {
-                if (!shot) return;
-                updateShot.mutate({
-                  sceneId: shot.id,
-                  prompt: text,
-                  expectedRev: shot.rev,
-                  baseline: { prompt: shot.prompt ?? null },
-                });
-                setInspectorTab("frame");
-              },
-            }}
+            ai={aiProps}
           />
         </div>
 

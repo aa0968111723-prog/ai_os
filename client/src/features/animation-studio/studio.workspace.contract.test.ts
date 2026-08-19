@@ -339,10 +339,21 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).not.toContain("sceneId: shotRef.current.id");
   });
 
-  it("live /studio/ 單格 inspector mounts HonorSheetControl (not only SceneStudio)", () => {
+  it("live /studio/ inspector mounts HonorSheet even on 自由塗鴉 (not gated on shot)", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
     expect(inspector).toContain("<HonorSheetControl");
     expect(inspector).toContain("InspectorHonorSheet");
-    expect(inspector).toContain("shot && canEdit && <InspectorHonorSheet");
+    expect(inspector).toContain("canEdit && <InspectorHonorSheet");
+    expect(inspector).not.toContain("shot && canEdit && <InspectorHonorSheet");
+    expect(inspector).toContain("readOnly={!shot}");
+    expect(studio).not.toMatch(/switchTo\(shots\[0\]/);
+  });
+
+  it("left AI rail mounts AiCopilotActions, not a pointer at 右邊 Inspector", () => {
+    expect(studio).toContain("<AiCopilotActions");
+    expect(studio).toContain("optionsKind === \"ai\"");
+    expect(studio).not.toContain("AI 的動作在右邊的 Inspector");
+    expect(studio).toMatch(/if \(next === "ai"\) \{[\s\S]*setInspectorTab\("ai"\)[\s\S]*inspector: false/);
+    expect(declarations).toMatch(/\.studio\.is-workspace\[data-tool="ai"\] \{[^}]*--ws-tool-options:\s*320px/);
   });
 });

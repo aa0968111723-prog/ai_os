@@ -145,8 +145,8 @@ export function ShotInspector({
         id="studio-inspector-tabpanel"
         aria-labelledby={`studio-inspector-tab-${tab}`}
       >
-        {/* Remaining hide: SceneStudio already mounts HonorSheetControl; live /studio/ 單格 is this inspector and never did. */}
-        {shot && canEdit && <InspectorHonorSheet projectId={projectId} shot={shot} />}
+        {/* 1280 leftover: HonorSheet was gated on shot, so 自由塗鴉 landing never mounted it. */}
+        {canEdit && <InspectorHonorSheet projectId={projectId} shot={shot} />}
         {tab === "ai" ? (
           <AiCopilotActions {...ai} />
         ) : !shot ? (
@@ -170,21 +170,27 @@ export function ShotInspector({
   );
 }
 
-/** Live /studio/ 單格 door. Do not hide HonorSheetControl on this inspector. */
-function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: InspectorShot }) {
+/** Live /studio/ 單格 door. Mount even on 自由塗鴉 — do not wait for a selected shot. */
+function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: InspectorShot | null }) {
   const characters = trpc.characters.list.useQuery({ projectId });
-  const [honorIds, setHonorIds] = useState<string[]>(() => shot.characterIds ?? []);
+  const [honorIds, setHonorIds] = useState<string[]>(() => shot?.characterIds ?? []);
   useEffect(() => {
-    setHonorIds(shot.characterIds ?? []);
-  }, [shot.id]);
+    setHonorIds(shot?.characterIds ?? []);
+  }, [shot?.id]);
   return (
-    <HonorSheetControl
-      characters={characters.data ?? []}
-      selectedIds={honorIds}
-      onToggle={(id) =>
-        setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
-      }
-    />
+    <>
+      <HonorSheetControl
+        characters={characters.data ?? []}
+        selectedIds={honorIds}
+        onToggle={(id) =>
+          setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
+        }
+        readOnly={!shot}
+      />
+      {!shot && (
+        <Hint>還沒選分鏡。到下面的時間軸選一鏡，才能把定裝帶進那一鏡的生成。</Hint>
+      )}
+    </>
   );
 }
 
