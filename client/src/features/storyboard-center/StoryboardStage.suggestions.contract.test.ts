@@ -47,6 +47,9 @@ describe("Storyboard suggestion query consolidation", () => {
     expect(card).not.toContain("insertAfter.mutate({ sceneId: shot.id })");
     expect(card).not.toMatch(/disabled=\{insertAfter\.isPending\}/);
     expect(card).toContain("在這之後插入一鏡");
+    expect(card).toContain("Ellipsis");
+    expect(card).toContain("第 ${shotNumber} 鏡的更多操作");
+    expect(card).toContain("role=\"menu\"");
   });
 
   it("does not add a visible-window second query (Phase E) on top of the project batch", () => {

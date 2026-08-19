@@ -242,6 +242,17 @@ describe("ShotCard progressive disclosure", () => {
     });
   });
 
+  it("分鏡卡 head has ⋯ menu with 在這之後插入一鏡 (not only toolbar ＋新增鏡 / trash)", async () => {
+    const user = userEvent.setup();
+    render(<ShotCard {...defaultProps} shot={baseShot()} />);
+    const more = screen.getByRole("button", { name: "第 1 鏡的更多操作" });
+    expect(more).toBeInTheDocument();
+    await user.click(more);
+    const item = screen.getByRole("menuitem", { name: /在這之後插入一鏡/ });
+    await user.click(item);
+    await vi.waitFor(() => expect(mutateInsertAfter).toHaveBeenCalledWith({ sceneId: "shot-1" }));
+  });
+
   it("分鏡卡 row has 在這之後插入一鏡 (same insertAfter as studio ⋯, not FIFO ＋新增鏡)", async () => {
     const user = userEvent.setup();
     render(<ShotCard {...defaultProps} shot={baseShot()} />);

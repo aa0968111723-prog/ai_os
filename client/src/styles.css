@@ -9096,6 +9096,24 @@ body.story-immersive { overflow: hidden; }
 .shot-card__title:hover, .shot-card__title:focus { border-color: var(--border); background: var(--field); }
 .shot-card__dur { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); white-space: nowrap; }
 .shot-card__dur input { width: 3.2em; text-align: right; padding: 2px 6px; }
+.shot-card__more { position: relative; margin-left: auto; }
+.shot-card__more-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; min-height: 32px; padding: 0; border: 0; background: transparent;
+  cursor: pointer; color: inherit; border-radius: 8px;
+}
+.shot-card__more-btn:hover, .shot-card__more-btn[aria-expanded="true"] { background: var(--field, #f4f4f5); }
+.shot-card__more-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 4;
+  min-width: 11em; padding: 4px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg, #fff); box-shadow: var(--e2, 0 8px 24px rgba(0,0,0,.12));
+}
+.shot-card__more-menu [role="menuitem"] {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 6px 8px; border: 0; background: transparent; cursor: pointer;
+  font-size: var(--fs-12); color: inherit; border-radius: 8px; text-align: left;
+}
+.shot-card__more-menu [role="menuitem"]:hover { background: var(--field, #f4f4f5); }
 .shot-card__preview-wrap {
   position: relative;
   border-radius: var(--r-md, 10px);

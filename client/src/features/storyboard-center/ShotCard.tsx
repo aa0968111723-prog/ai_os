@@ -7,7 +7,7 @@
  * 資料流與 mutation 不變：SceneCardBinding、cardAnchors、referenceAssetId、setVisualFromAsset 全沿用。
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
-import { useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { trpc } from "../../api";
@@ -201,6 +201,24 @@ export function ShotCard({
   const [dragOver, setDragOver] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(() => preferDetailsOpen(mode));
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDoc = (event: PointerEvent) => {
+      if (moreRef.current?.contains(event.target as Node)) return;
+      setMoreOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onDoc, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDoc, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
   const libraryAssets = trpc.projects.assets.useQuery(
     { projectId },
@@ -384,6 +402,39 @@ export function ShotCard({
             />
             秒
           </label>
+          {canEdit && (
+            <div className="shot-card__more" ref={moreRef}>
+              <button
+                type="button"
+                className="shot-card__more-btn"
+                aria-label={`第 ${shotNumber} 鏡的更多操作`}
+                title="更多（在這之後插入）"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMoreOpen((open) => !open);
+                }}
+              >
+                <Icon name="Ellipsis" size={14} />
+              </button>
+              {moreOpen && (
+                <div className="shot-card__more-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMoreOpen(false);
+                      enqueueBlankAfter();
+                    }}
+                  >
+                    <Icon name="Plus" size={13} /> 在這之後插入一鏡
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {generating && <Pill status="running">生成中</Pill>}
           {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
           {outdatedReason && <Pill status="failed">畫面過時</Pill>}
