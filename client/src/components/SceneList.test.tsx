@@ -342,7 +342,9 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
-    await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    const insert = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    expect(insert).toHaveTextContent("在這之後插入一鏡");
+    await user.click(insert);
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
   });
 

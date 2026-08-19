@@ -830,13 +830,13 @@ const SceneRow = memo(function SceneRow({
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
           <button
-            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px" }}
             aria-busy={insertAfter.isPending || undefined}
             aria-label="在這之後插入一鏡"
             title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
             onClick={() => enqueueInsertAfter("insert")}
           >
-            <Icon name="Plus" size={16} />
+            <Icon name="Plus" size={16} /> 在這之後插入一鏡
           </button>
           <button
             style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
