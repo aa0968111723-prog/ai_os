@@ -19,7 +19,7 @@ import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
-import { lockXiaohuaCopyFields } from "../../shared/characterIdentityLock";
+import { lockXiaohuaCopyFields, lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import {
   expandSketch,
@@ -585,13 +585,20 @@ export const directorRouter = router({
             propIds: input.propIds,
           })
         : null;
+      // generateInto / assistant already persist the locked prompt. Whiteboard
+      // already binds this shot's cards / looks / direction, but still passed
+      // the composed brief raw — generations.prompt could keep 年輕男性.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        prompt,
+        /小華/.test([scene?.title, input.prompt, scene?.action, scene?.dialogue].join("")) ? ["小華"] : [],
+      );
       const generation = await executeGenerationCommand({
         auth: ctx.auth,
         source: "web",
         id: input.clientRequestId,
         projectId: input.projectId,
         modelId: decision.model.id,
-        prompt,
+        prompt: lockedPrompt,
         sourceAssetId: input.sourceAssetId,
         sceneId: input.sceneId,
         sceneRole: "visual",

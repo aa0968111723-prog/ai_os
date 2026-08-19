@@ -782,6 +782,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(send).toContain("sceneId: shot.id");
   });
 
+  it("studio generateWhiteboardImage locks 小華 prompt before Command persist", () => {
+    const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
+    const block = director.slice(director.indexOf("generateWhiteboardImage:"), director.indexOf("suggest:"));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {
     expect(sceneList).toContain("enqueueInsertAfter");
     expect(sceneList).toContain("shouldApplySceneWriteAck");
