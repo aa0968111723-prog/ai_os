@@ -798,7 +798,20 @@ describe("project_detail injects persisted story", () => {
     expect(src).toContain("storyReadAsk ? [] : await retrieveDatabaseEvidence");
     expect(src).toContain("storyReadAsk ? \"\" : historyBlock");
     expect(src).toContain("fallbackReadOnlyStorySummary");
+    expect(src).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(src).toContain("answerAfterFreeOnlyTimeout");
+    expect(src).toContain("withoutEmptyNimTimeout");
+    expect(src).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
     expect(src).not.toContain("已完成盤點");
+  });
+
+  it("NIM empty 免費模型逾時 is replaced, not returned as the team answer", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    expect(src).toContain("isEmptyFreeOnlyTimeoutAnswer");
+    expect(src).toContain("withoutEmptyNimTimeout(FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(src).toContain("withoutEmptyNimTimeout(reply.answer");
+    expect(src).toContain("withoutEmptyNimTimeout(rawFail");
+    expect(src).toContain("const failedAnswer = withoutEmptyNimTimeout(rawFail, steps.length > 0)");
   });
 });
 

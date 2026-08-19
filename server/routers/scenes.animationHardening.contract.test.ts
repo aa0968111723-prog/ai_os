@@ -137,6 +137,8 @@ describe("animation shot writes stay consistent", () => {
     expect(teamAssistant).toContain("isAssistantStoryReadIntent");
     expect(teamAssistant).toContain("lockAssistantStoryAnswer");
     expect(teamAssistant).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(teamAssistant).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(teamAssistant).toContain("withoutEmptyNimTimeout");
     const messageAssistant = readFileSync(join(process.cwd(), "server/services/messageAssistant.ts"), "utf8");
     expect(messageAssistant).toContain("isAssistantStoryReadIntent");
     expect(messageAssistant).toContain("lockAssistantStoryAnswer");

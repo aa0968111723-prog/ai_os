@@ -6,7 +6,7 @@ import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
-import { assertFreeOnlyCompletion, completeText, LlmServiceError } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, FREE_MODEL_TIMEOUT_MESSAGE, LlmServiceError } from "../services/llmProvider";
 import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import { reserveQuota, refund } from "../services/points";
@@ -58,6 +58,9 @@ import {
   namesFromPersistedStory,
   pickNamedStoryProject,
   fallbackReadOnlyStorySummary,
+  answerAfterFreeOnlyTimeout,
+  isEmptyFreeOnlyTimeoutAnswer,
+  replaceEmptyFreeTimeoutAfterTools,
   STORY_READ_THIS_PROJECT_LOCK,
 } from "../../shared/assistantProjectStoryContext";
 import {
@@ -1448,6 +1451,30 @@ export const teamAssistantRouter = router({
         storyContent: scopedStoryContent,
         characterNames: scopedCharacterNames,
       });
+      const replaceEmptyNimTimeout = (answer?: string | null, extraFetched = false) =>
+        replaceEmptyFreeTimeoutAfterTools({
+          answer: answer ?? FREE_MODEL_TIMEOUT_MESSAGE,
+          fetchedOk: extraFetched || storyReadAsk || Boolean(scopedStoryContent.trim()),
+          storyContent: scopedStoryContent,
+          characterNames: scopedCharacterNames,
+        }) ?? answerAfterFreeOnlyTimeout({
+          storyReadAsk,
+          fetchedOk: extraFetched || Boolean(scopedStoryContent.trim()),
+          storyContent: scopedStoryContent,
+          characterNames: scopedCharacterNames,
+        });
+      const withoutEmptyNimTimeout = (answer: string, extraFetched = false) => {
+        const replaced = replaceEmptyNimTimeout(answer, extraFetched);
+        if (replaced) return replaced;
+        if (storyReadAsk && scopedStoryContent.trim()) {
+          return fallbackReadOnlyStorySummary({
+            storyContent: scopedStoryContent,
+            characterNames: scopedCharacterNames,
+          });
+        }
+        if (isEmptyFreeOnlyTimeoutAnswer(answer)) return ASSISTANT_ASK_TIMEOUT_MESSAGE;
+        return answer;
+      };
       const retrieveDatabaseEvidence = () => retrieveAssistantDatabaseEvidence(
         [...dbByRef.values()]
           .filter((table) => table.agentAccess === "read" || table.agentAccess === "write")
@@ -1578,12 +1605,7 @@ ${storyReadAsk ? "" : historyBlock}使用者的問題：${input.message}`;
         });
         if (outcome.aborted || !outcome.reply) {
           const timeoutAnswer = assistantAskTimedOut(askDeadline)
-            ? (storyReadAsk && scopedStoryContent
-              ? fallbackReadOnlyStorySummary({
-                storyContent: scopedStoryContent,
-                characterNames: scopedCharacterNames,
-              })
-              : ASSISTANT_ASK_TIMEOUT_MESSAGE)
+            ? withoutEmptyNimTimeout(FREE_MODEL_TIMEOUT_MESSAGE, steps.length > 0)
             : "已停止。";
           return {
             answer: lockTeamStoryAnswer(timeoutAnswer),
@@ -1595,13 +1617,14 @@ ${storyReadAsk ? "" : historyBlock}使用者的問題：${input.message}`;
         const reply = outcome.reply;
         if (outcome.usedFallback) {
           return {
-            answer: lockTeamStoryAnswer(reply.answer), dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
+            answer: lockTeamStoryAnswer(withoutEmptyNimTimeout(reply.answer, steps.length > 0)),
+            dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
             steps, canDispatch, commandLevel, mock: false,
             rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
           };
         }
         return {
-          answer: lockTeamStoryAnswer(reply.answer),
+          answer: lockTeamStoryAnswer(withoutEmptyNimTimeout(reply.answer, steps.length > 0)),
           dispatches: resolveDispatches(projByRef, reply.dispatches ?? [], canDispatch),
           actions: resolveCommandProposals(commandRefs, reply.actions ?? [], commandLevel),
           steps, canDispatch, commandLevel, mock: false,
@@ -1614,16 +1637,13 @@ ${storyReadAsk ? "" : historyBlock}使用者的問題：${input.message}`;
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦。
         // completeText 會把 NimServiceError 包成 LlmServiceError 拋出（見 llmProvider.sanitize），
         // 逾時/上限兩者都要顯示人話原因，不能只認 NimServiceError。
-        const failedAnswer = assistantAskTimedOut(askDeadline)
-          ? (storyReadAsk && scopedStoryContent
-            ? fallbackReadOnlyStorySummary({
-              storyContent: scopedStoryContent,
-              characterNames: scopedCharacterNames,
-            })
-            : ASSISTANT_ASK_TIMEOUT_MESSAGE)
-          : err instanceof NimServiceError || err instanceof LlmServiceError
+        const rawFail =
+          err instanceof NimServiceError || err instanceof LlmServiceError
             ? err.message
-            : "AI 彙總助手暫時沒回應，請稍後再問一次。";
+            : assistantAskTimedOut(askDeadline)
+              ? FREE_MODEL_TIMEOUT_MESSAGE
+              : "AI 彙總助手暫時沒回應，請稍後再問一次。";
+        const failedAnswer = withoutEmptyNimTimeout(rawFail, steps.length > 0);
         return {
           answer: lockTeamStoryAnswer(failedAnswer), dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps,
           canDispatch, commandLevel, mock: false,
