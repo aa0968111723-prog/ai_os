@@ -56,7 +56,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
 
       <Hint style={{ marginTop: 8, fontSize: 13 }}>
         這是一套把「腳本 → 分鏡 → 生成 → 送審 → 交付」串起來的工具。第一次來，建議先開一個<strong>範例專案</strong>看看完整長相——
-        裡面已經填好世界觀、附了四格草稿分鏡（含提示詞與配音詞）與一張示範縮圖，<strong>不會花到任何點數</strong>。
+        裡面已經填好世界觀、附了六格 A–F 草稿分鏡（小華與禪定龜龜、含提示詞與對白）與一張示範縮圖，<strong>不會花到任何點數</strong>。
       </Hint>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "12px 0 4px" }}>

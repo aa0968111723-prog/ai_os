@@ -5,6 +5,8 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { TKU_ZEN_SHOTS, tkuZenHasForbidden, tkuZenSpokenDialogue } from "../../shared/fixtures/tkuZenPromo";
 import { canOwnProject } from "./projects";
 
 const members = ["u-leader", "u-member-1", "u-member-2"];
@@ -60,6 +62,24 @@ describe("createSample seeds 小華 A–F, not 七幕", () => {
     expect(body).not.toContain("哲維");
     expect(body).not.toContain("瑀晴");
     expect(body).not.toContain("紅傘");
+  });
+
+  it("runtime seed is 6 A–F, locked 小華 look, no forbidden tokens", () => {
+    expect(TKU_ZEN_SHOTS).toHaveLength(6);
+    expect(TKU_ZEN_SHOTS.map((shot) => shot.title).join("\n")).toMatch(/A 校門口[\s\S]*F 真的真的/);
+    const people = [`小華：${XIAOHUA_LOCKED_APPEARANCE}`, "禪定龜龜：吉祥物龜龜，第三句才登場"];
+    const blob = JSON.stringify({
+      people,
+      shots: TKU_ZEN_SHOTS.map((shot) => ({
+        title: shot.title,
+        prompt: shot.prompt,
+        dialogue: shot.dialogue,
+        voiceover: tkuZenSpokenDialogue(shot.dialogue),
+      })),
+    });
+    expect(people[0]).toContain("粉橘短髮女孩");
+    expect(people[0]).toContain("白帽T");
+    expect(tkuZenHasForbidden(blob)).toEqual([]);
   });
 });
 
