@@ -93,6 +93,8 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(block).toContain("saveDagProgress");
     expect(block).not.toMatch(/if \(adoptedWaiting\) await saveRun\(run\.id, \{ steps \}\);/);
     expect(source).toContain('inArray(schema.agentRuns.status, ["running", "waiting"])');
+    expect(source).toContain("steps.every((step) => step.status === \"done\")");
+    expect(source).toContain("run.status !== \"running\" && run.status !== \"waiting\"");
   });
 
   it("clears ghost generationId on INTERNAL_SERVER_ERROR and NOT_FOUND (no permanent stuck running)", () => {

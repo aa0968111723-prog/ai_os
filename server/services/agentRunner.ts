@@ -1161,6 +1161,15 @@ function clearGhostGenerationId(step: AgentStep, detail: string): void {
 async function advanceRun(run: RunRow): Promise<void> {
   const steps = run.steps as AgentStep[];
 
+  if (
+    (run.status === "waiting" || run.status === "running")
+    && steps.length > 0
+    && steps.every((step) => step.status === "done")
+  ) {
+    await saveDagProgress(run, steps);
+    return;
+  }
+
   // ── 多代理長跑：先結算「所有」已送出的生成（供應商並發，我們輪詢收斂） ──
   // 一支 failed 不可中斷迴圈：其餘支線仍須 settle，否則永遠卡 running（run 已 failed 也不再被 tick 撈到舊邏輯）
   const inFlight = listInFlightGenerationSteps(steps);
@@ -2367,7 +2376,7 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
     addOutputRef(step, "generation", gen.id, step.title ?? step.note);
     step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";
     auditAgentStep(run, step, idx, true);
-    if (run.status !== "running") {
+    if (run.status !== "running" && run.status !== "waiting") {
       markRestStopped(steps, idx);
       await saveRun(run.id, { steps });
       return;

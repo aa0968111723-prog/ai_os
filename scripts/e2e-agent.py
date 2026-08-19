@@ -97,7 +97,17 @@ for _ in range(40):
     adopt_waiting_generate_steps(call, admin, terminal)
     if terminal["status"] in ("done", "failed"):
         break
-ok("背景 Runner 完成完整代理計畫", terminal is not None and terminal.get("status") == "done")
+ok(
+    "背景 Runner 完成完整代理計畫",
+    terminal is not None and terminal.get("status") == "done",
+    None if terminal is None else {
+        "status": terminal.get("status"),
+        "steps": [
+            {"kind": step.get("kind"), "status": step.get("status"), "gid": step.get("generationId")}
+            for step in (terminal.get("steps") or [])
+        ],
+    },
+)
 
 events_page = call("GET", admin, "agents.eventsByProject", {"projectId": project_id, "limit": 100})
 event_types = [event["eventType"] for event in events_page.get("items", [])]
