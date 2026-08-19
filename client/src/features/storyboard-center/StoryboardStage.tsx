@@ -45,12 +45,16 @@ export function StoryboardStage({
   const utils = trpc.useUtils();
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
   const shots = trpc.scenes.listByProject.useQuery({ projectId });
+  const invalidateShots = () => {
+    void utils.scenes.listByProject.invalidate({ projectId });
+    void utils.story.get.invalidate({ projectId });
+    void utils.story.scenesList.invalidate({ projectId });
+  };
   const addShot = trpc.scenes.addDraft.useMutation({
-    onSuccess: () => {
-      void utils.scenes.listByProject.invalidate({ projectId });
-      void utils.story.get.invalidate({ projectId });
-      void utils.story.scenesList.invalidate({ projectId });
-    },
+    onSuccess: invalidateShots,
+  });
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
+    onSuccess: invalidateShots,
   });
   const characters = trpc.characters.list.useQuery({ projectId });
   const honoredCharIds = useMemo(
@@ -162,11 +166,18 @@ export function StoryboardStage({
                 size="sm"
                 variant="primary"
                 type="button"
-                disabled={addShot.isPending}
-                title="解析逾時時不必卡住：先開一格空白鏡，或回故事按產生分鏡"
-                onClick={() => addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` })}
+                disabled={addShot.isPending || insertAfter.isPending}
+                title={
+                  focusShot
+                    ? "插在勾選的那一鏡後面（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
+                    : "沒勾鏡時加在最後。要插在某一鏡後面：先勾那一鏡，或到動畫創作室用 ⋯"
+                }
+                onClick={() => {
+                  if (focusShot) insertAfter.mutate({ sceneId: focusShot.id });
+                  else addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` });
+                }}
               >
-                <Icon name="Plus" size={13} /> {addShot.isPending ? "建立中…" : "新增鏡"}
+                <Icon name="Plus" size={13} /> {(addShot.isPending || insertAfter.isPending) ? "建立中…" : "新增鏡"}
               </Button>
             )}
             {canEdit && onSendToWorkbench && focusShot && (
@@ -203,7 +214,7 @@ export function StoryboardStage({
           ) : (
             <>
               <Hint style={{ margin: "4px 0 10px" }}>
-                勾選一鏡先看目前創作狀態，再直接改角色、動作、光線或鏡頭；素材庫與定裝仍可由上方入口完整管理。
+                勾一鏡再按「新增鏡」會插在那一鏡後面。動畫創作室時間軸 ⋯ 也有「在這之後插入一鏡」。沒勾時加在最後。
               </Hint>
               {outdatedByShot.size > 0 && (
                 <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>

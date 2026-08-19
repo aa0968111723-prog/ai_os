@@ -33,7 +33,10 @@ describe("Storyboard suggestion query consolidation", () => {
 
   it("exposes Studio-style ＋新增鏡 so a parse-timeout project is not stuck", () => {
     expect(stage).toContain("scenes.addDraft.useMutation");
+    expect(stage).toContain("scenes.insertAfter.useMutation");
+    expect(stage).toContain("insertAfter.mutate({ sceneId: focusShot.id })");
     expect(stage).toContain("新增鏡");
+    expect(stage).toContain("在這之後插入一鏡");
     expect(stage).toContain("解析未完成也能依原文拆鏡");
   });
 
