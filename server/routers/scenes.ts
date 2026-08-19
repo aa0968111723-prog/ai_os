@@ -35,6 +35,11 @@ import {
 } from "../../shared/shotLooks";
 import { batchGenerateFingerprint } from "../../shared/projectCreativeContext";
 import {
+  discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  leftoverAwaitingApprovalIdsToDiscard,
+  type ReconcileAgentStep,
+} from "../../shared/agentRunReconcile";
+import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
   SCRIPT_CARD_MAX,
@@ -1152,6 +1157,32 @@ export const scenesRouter = router({
         });
         return existingFp === fingerprint;
       });
+      // Same-fingerprint reuse keeps that run. Leftover 0/N with a
+      // different / missing fingerprint used to stay, so insert stacked
+      // a second 「待你過目」chip. Discard those first.
+      const leftoverIds = leftoverAwaitingApprovalIdsToDiscard({
+        keepRunId: reused?.id,
+        runs: pending.map((run) => ({
+          id: run.id,
+          status: "awaiting_approval",
+          steps: Array.isArray(run.steps) ? (run.steps as ReconcileAgentStep[]) : [],
+        })),
+      });
+      for (const runId of leftoverIds) {
+        const row = pending.find((run) => run.id === runId);
+        const leftoverSteps = Array.isArray(row?.steps) ? (row.steps as ReconcileAgentStep[]) : [];
+        const leftover = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+          status: "awaiting_approval",
+          steps: leftoverSteps,
+          independentGenerateLanded: true,
+        });
+        if (!leftover.discarded) continue;
+        await db.update(schema.agentRuns).set({
+          steps: leftover.steps,
+          status: "discarded",
+          updatedAt: new Date(),
+        }).where(eq(schema.agentRuns.id, runId));
+      }
       if (reused) {
         return { runId: reused.id, shots: steps.length, estPoints: reused.estPoints, reused: true as const };
       }

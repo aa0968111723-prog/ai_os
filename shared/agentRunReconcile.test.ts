@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyIndependentGenerateToSteps,
   discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  leftoverAwaitingApprovalIdsToDiscard,
   shouldDiscardLeftoverAwaitingApprovalOnRead,
   type ReconcileAgentStep,
 } from "./agentRunReconcile";
@@ -286,5 +287,24 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       latestDoneVisualAt: created,
       hasCurrentVisual: true,
     })).toBe(false);
+  });
+});
+
+describe("leftoverAwaitingApprovalIdsToDiscard", () => {
+  it("drops leftover 0/6 when batchGenerate mints a different plan, keeps the reused fingerprint", () => {
+    const leftover = { id: "old-0n", status: "awaiting_approval" as const, steps: six };
+    const reused = { id: "same-fp", status: "awaiting_approval" as const, steps: six };
+    const running = {
+      id: "running",
+      status: "running" as const,
+      steps: six.map((step) => ({ ...step, status: "running" })),
+    };
+    expect(leftoverAwaitingApprovalIdsToDiscard({
+      keepRunId: reused.id,
+      runs: [leftover, reused, running],
+    })).toEqual(["old-0n"]);
+    expect(leftoverAwaitingApprovalIdsToDiscard({
+      runs: [leftover, reused],
+    })).toEqual(["old-0n", "same-fp"]);
   });
 });

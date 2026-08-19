@@ -141,6 +141,22 @@ function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep
 }
 
 /**
+ * batchGenerate only reuses the same fingerprint. A leftover 0/N
+ * 「待你過目」with a different (or missing) fingerprint stays, then
+ * insert mints a second HUD chip. Drop leftover unstarted batches
+ * except the reused run — not a Command reconcile.
+ */
+export function leftoverAwaitingApprovalIdsToDiscard(input: {
+  keepRunId?: string | null;
+  runs: Array<{ id: string; status: string; steps: ReconcileAgentStep[] }>;
+}): string[] {
+  return input.runs
+    .filter((run) => run.id !== input.keepRunId)
+    .filter((run) => isLeftoverUnstartedApprovalBatch(run.status, run.steps))
+    .map((run) => run.id);
+}
+
+/**
  * Studio generateInto already billed. An unstarted leftover 6-step plan must
  * not stay HUD-active as「待你過目 · 第 1 鏡… 0/6 步」.
  */

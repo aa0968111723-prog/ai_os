@@ -27,4 +27,12 @@ describe("scenes.batchGenerate charge-safety contract", () => {
     expect(src).toContain("reused: true");
     expect(src).toContain("batchFingerprint");
   });
+
+  it("discards leftover 0/N 待你過目 before minting a second batch chip", () => {
+    const batch = src.slice(src.indexOf("batchGenerate: authedProcedure"), src.indexOf("update: authedProcedure"));
+    expect(batch).toContain("leftoverAwaitingApprovalIdsToDiscard");
+    expect(batch).toContain("keepRunId: reused?.id");
+    expect(batch).toContain('status: "discarded"');
+    expect(batch).not.toContain("scheduleReconcileAfterIndependentGenerate");
+  });
 });
