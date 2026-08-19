@@ -542,6 +542,19 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(update).not.toContain("lockXiaohuaGenerationPrompt");
   });
 
+  it("MCP generate_into and animationPipeline lock 小華 prompt before persist", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("lockXiaohuaGenerationPrompt");
+    expect(into).toContain('? ["小華"]');
+    expect(into).not.toContain("rewritePersistedXiaohuaShotCopy");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("lockXiaohuaGenerationPrompt");
+    expect(stage).toContain('? ["小華"]');
+    expect(stage).not.toContain("rewritePersistedXiaohuaShotCopy");
+  });
+
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("lockXiaohuaGenerationPrompt");

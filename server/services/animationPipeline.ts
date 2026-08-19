@@ -15,6 +15,7 @@ import {
 import { executeGenerationCommand } from "./generationCommand";
 import { buildShotContextPrompt } from "./shotContextPrompt";
 import { ensureXiaohuaCharacterIds } from "./cardAnchors";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 
 function evaluationRecommendation(
   result: typeof schema.generationConsistencyEvaluations.$inferSelect["result"] | null,
@@ -119,12 +120,17 @@ export async function executeAnimationGenerationStage(input: {
   if (input.stage === "video_generation" && !capabilityForModel(model).imageToVideo) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "影片階段必須使用支援 image-to-video 的模型" });
   }
-  const prompt = input.prompt?.trim() || (await buildShotContextPrompt(shot, model)).trim();
-  if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡還沒有生成提示詞" });
+  const rawPrompt = input.prompt?.trim() || (await buildShotContextPrompt(shot, model)).trim();
+  if (!rawPrompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡還沒有生成提示詞" });
   const characterIds = await ensureXiaohuaCharacterIds(
     project.id,
     shot.characterIds ?? undefined,
-    [shot.title, prompt, shot.action, shot.dialogue],
+    [shot.title, rawPrompt, shot.action, shot.dialogue],
+  );
+  // Same persist-lock as generateInto: Command stores input.prompt, not the provider lock.
+  const prompt = lockXiaohuaGenerationPrompt(
+    rawPrompt,
+    /小華/.test([shot.title, rawPrompt, shot.action, shot.dialogue].join("")) ? ["小華"] : [],
   );
 
   const generation = await executeGenerationCommand({
