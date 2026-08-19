@@ -50,6 +50,16 @@ describe("MCP write honesty helpers", () => {
     expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
   });
 
+  it("generate_into_scene goes through executeGenerationCommand so a failed first send cannot look like success", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf('if (name === "generate_into_scene")'), source.indexOf('if (name === "update_worldview")'));
+    expect(block).toContain("executeGenerationCommand");
+    expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
+    const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");
+    expect(command).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(command).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+  });
+
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
     expect(source).toContain('import { assertReferenceImage } from "./referenceAsset"');

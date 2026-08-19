@@ -58,6 +58,14 @@ describe("generationCommand #749 review guards", () => {
     expect(preflightAt).toBeGreaterThan(Math.min(freezeAt, loadAt));
   });
 
+  it("refuses a failed first send so MCP generate_into is not a silent no-op", () => {
+    expect(src).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(src).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+    const afterSubmit = src.slice(src.indexOf("const generation = await submitGenerationCore"));
+    expect(afterSubmit).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(afterSubmit.indexOf("shouldReplayIdempotentGeneration")).toBeLessThan(afterSubmit.lastIndexOf("return generation"));
+  });
+
   it("defaults visual scene-bound generations to preserveScenePointer", () => {
     expect(src).toContain("const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core)");
     expect(src).toContain("preserveScenePointer");

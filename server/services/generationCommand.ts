@@ -28,6 +28,10 @@ import {
   type SubmitCoreInput,
 } from "./generationCore";
 import type { ShotContextPacketPayload } from "../../shared/shotContextPacket";
+import {
+  IDEMPOTENT_FAILED_GENERATION_RETRY,
+  shouldReplayIdempotentGeneration,
+} from "../../shared/generationIdempotency";
 
 export type ExecuteGenerationInput = Omit<SubmitCoreInput, "assertAccess" | "userId"> & {
   auth: AuthState;
@@ -228,5 +232,14 @@ export async function executeGenerationCommand(input: ExecuteGenerationInput): P
     ));
   }
 
+  // generateInto already refused a failed first send. MCP generate_into /
+  // generation.submit / submit_generation still returned that failed row as
+  // success — same silent no-op, other doors.
+  if (!shouldReplayIdempotentGeneration(generation.status)) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+    });
+  }
   return generation;
 }
