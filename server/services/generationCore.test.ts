@@ -126,11 +126,32 @@ describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
     })).toBe("https://v3.fal.media/files/shot-b.png");
   });
 
+  it("falls back to http url when originUrl is blank or a rewritten local path", () => {
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-c.png",
+      originUrl: "   ",
+    })).toBe("https://v3.fal.media/files/shot-c.png");
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-d.png",
+      originUrl: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+    })).toBe("https://v3.fal.media/files/shot-d.png");
+  });
+
   it("returns null when neither url nor originUrl is fetchable", () => {
     expect(unlandedPersistSource({
       url: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
       originUrl: null,
     })).toBeNull();
+  });
+
+  it("enqueueLanding / persist / sweep keep fal in originUrl via the same helper", () => {
+    const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+    expect(source).toContain("const source = unlandedPersistSource(asset);");
+    expect(source).toContain("originUrl: remoteUrl");
+    expect(source).toContain("originUrl: source");
+    const audit = readFileSync(new URL("./storageAudit.ts", import.meta.url), "utf8");
+    expect(audit).toContain("unlandedPersistSource(row)");
+    expect(audit).not.toContain("row.originUrl || row.url");
   });
 });
 

@@ -101,6 +101,7 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
         mime: persisted.mime,
         sizeBytes: persisted.sizeBytes,
         url: localUrl,
+        originUrl: remoteUrl,
         landState: "landed",
       })
       .where(eq(schema.assets.id, assetId));
@@ -1563,7 +1564,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
 export async function enqueueLanding(assetId: string): Promise<boolean> {
   const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, assetId)).limit(1);
   if (!asset) return false;
-  const source = asset.originUrl ?? (asset.url.startsWith("http") ? asset.url : null);
+  // Same helper as sweep: empty / local originUrl must not hide a still-fetchable fal CDN url.
+  const source = unlandedPersistSource(asset);
   if (!source || !asset.isAiGenerated) {
     await db
       .update(schema.assets)
@@ -1621,6 +1623,7 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
           mime: persisted.mime,
           sizeBytes: persisted.sizeBytes,
           url: localUrl,
+          originUrl: source,
           landState: "landed",
         })
         .where(eq(schema.assets.id, asset.id));
