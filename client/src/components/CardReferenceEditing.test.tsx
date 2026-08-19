@@ -141,6 +141,17 @@ describe("卡片編輯表單的參考圖欄", () => {
     expect(propUpdate.mock.calls[0][0]).toMatchObject({ id: "prop-1", referenceAssetId: null });
   });
 
+  it("角色卡：勾「生成時帶入」會回報卡片 id（重畫這格才注入定裝）", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={onToggle} />);
+
+    expect(screen.getByRole("checkbox", { name: /生成時帶入/ })).not.toBeChecked();
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /生成時帶入/ }));
+    expect(onToggle).toHaveBeenCalledWith("char-1");
+  });
+
   it("素材卡：勾「生成時帶入」會回報卡片 id（生成才注入道具錨點）", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();

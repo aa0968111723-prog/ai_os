@@ -927,7 +927,7 @@ export function SceneStudio({
                               prompt: instruction,
                               sourceAssetId: baseVersion!.assetId!,
                               clientRequestId: refineRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -987,7 +987,7 @@ export function SceneStudio({
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -1097,7 +1097,7 @@ export function SceneStudio({
                               // 它同時也是越權欄位的第二道濾網（AI 提案／未來的自訂方向都走這裡）。
                               direction: sanitizeDirection(direction),
                             })),
-                            characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                            ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });
