@@ -9,6 +9,7 @@ import { StoryContextStatus } from "./StoryContextStatus";
 import { StoryScorecardRepair } from "./StoryScorecardRepair";
 import { StoryAnimationBoard } from "./StoryAnimationBoard";
 import { canonStatusLine } from "@shared/projectConsistencyGraph";
+import { revealStoryInlineSection } from "./storyInlineNav";
 
 export function StoryContextStatusBlock({
   projectId,
@@ -54,6 +55,7 @@ export function StoryContextStatusBlock({
         nextAction={workspace.data?.nextAction}
         canonSummary={canonStatusLine(workspace.data?.canonPins ?? [])}
         showSources={showSources}
+        onOpenStoryboard={() => revealStoryInlineSection("storyboard", { projectId, scroll: true })}
       />
       {onRepairShots ? (
         <>

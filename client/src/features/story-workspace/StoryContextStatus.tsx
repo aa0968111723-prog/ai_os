@@ -1,4 +1,4 @@
-import { Chip, Meta } from "../../components/ui";
+import { Button, Chip, Meta } from "../../components/ui";
 import { compactContextStates, compactSourceSummary, type CreativeContextCounts } from "@shared/creativeContextStatus";
 
 export function StoryContextStatus({
@@ -9,6 +9,7 @@ export function StoryContextStatus({
   compactStatus,
   nextAction,
   canonSummary,
+  onOpenStoryboard,
 }: {
   counts: CreativeContextCounts;
   applied: boolean;
@@ -18,10 +19,13 @@ export function StoryContextStatus({
   nextAction?: string;
   /** Team Canon 引用摘要（server canonStatusLine；null＝專案沒有引用，不佔版面） */
   canonSummary?: string | null;
+  /** Live leftover: 5 鏡需確認 had no confirm UI for untitled 未分場 orphans. */
+  onOpenStoryboard?: () => void;
 }) {
   const states = compactContextStates({ ...counts, applied, trainingAvailable });
   const sources = showSources ? compactSourceSummary(counts) : [];
   if (states.length === 0 && sources.length === 0 && !compactStatus && !canonSummary) return null;
+  const openBoard = Boolean(onOpenStoryboard && nextAction?.includes("打開分鏡"));
   return (
     <div className="story-context-status" data-fb="專案脈絡狀態">
       {compactStatus ? (
@@ -34,7 +38,13 @@ export function StoryContextStatus({
           ))}
         </div>
       )}
-      {nextAction ? <Meta as="p" className="story-context-status__next">下一步：{nextAction}</Meta> : null}
+      {nextAction && openBoard ? (
+        <p className="story-context-status__next">
+          <Button variant="ghost" size="sm" type="button" onClick={onOpenStoryboard}>
+            下一步：{nextAction}
+          </Button>
+        </p>
+      ) : nextAction ? <Meta as="p" className="story-context-status__next">下一步：{nextAction}</Meta> : null}
       {canonSummary ? <Meta as="p" className="story-context-status__canon">{canonSummary}</Meta> : null}
       {sources.length > 0 && (
         <Meta as="p" className="story-context-status__sources">

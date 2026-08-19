@@ -287,11 +287,14 @@ export function compactWorkspaceStatus(input: {
   consistentShots: number;
   shotCount: number;
   needsConfirm: number;
+  /** Blank 未分場 drafts. Not binding proposals — those stay needsConfirm. */
+  untitledOrphans?: number;
 }): string {
   const parts: string[] = [];
   parts.push(input.charactersApplied ? "人物已套用" : "人物尚未套用");
   if (input.sceneCount > 0) parts.push(`${input.sceneCount} 個場景`);
   if (input.shotCount > 0) parts.push(`${input.consistentShots}/${input.shotCount} 鏡一致`);
+  if ((input.untitledOrphans ?? 0) > 0) parts.push(`${input.untitledOrphans} 鏡未分場`);
   if (input.needsConfirm > 0) parts.push(`${input.needsConfirm} 鏡需確認`);
   return parts.join(" · ");
 }
@@ -302,6 +305,7 @@ export function nextWorkspaceAction(input: {
   shotCount: number;
   needsConfirm: number;
   consistentShots: number;
+  untitledOrphans?: number;
 }): string {
   if (!input.storyReady) return "先寫故事或貼上腳本";
   // Live leftover: compactStatus already said 人物已套用 · 21/26 鏡一致,
@@ -309,6 +313,11 @@ export function nextWorkspaceAction(input: {
   // (cards / heuristic board / assistant writes do not always stamp parse).
   if (!input.parsed && input.shotCount <= 0) return "解析故事，讓人物與場景就位";
   if (input.shotCount <= 0) return "產生分鏡";
+  // Live leftover: 5 untitled 未分場 orphans were counted as 鏡需確認,
+  // but markers only confirm parse proposals. Path is 分鏡歸場.
+  if ((input.untitledOrphans ?? 0) > 0) {
+    return `打開分鏡，把 ${input.untitledOrphans} 鏡未分場歸場`;
+  }
   if (input.needsConfirm > 0) return `確認 ${input.needsConfirm} 個項目後再生成`;
   if (input.consistentShots < input.shotCount) return "只重做不一致的鏡頭";
   return "產生畫面或粗剪";

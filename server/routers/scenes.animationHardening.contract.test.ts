@@ -396,6 +396,22 @@ describe("DeliveryRoom picked batch matches eligible-shot filter", () => {
   });
 });
 
+describe("untitled 未分場 orphans are not a dead 5 鏡需確認", () => {
+  it("workspace next-action opens 分鏡 for blank orphans, and needsConfirm is proposals only", () => {
+    const graph = readFileSync(join(process.cwd(), "server/services/projectConsistencyGraph.ts"), "utf8");
+    const shared = readFileSync(join(process.cwd(), "shared/projectConsistencyGraph.ts"), "utf8");
+    const status = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryContextStatus.tsx"), "utf8");
+    const block = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryContextStatusBlock.tsx"), "utf8");
+    expect(graph).toContain("isBlankOrphanShot");
+    expect(graph).toContain("untitledOrphans");
+    expect(graph).toContain("needsConfirm = bindings.proposals.length");
+    expect(graph).not.toContain("shots.filter((shot) => !shot.prompt && !shot.assetId).length");
+    expect(shared).toContain("打開分鏡，把 ${input.untitledOrphans} 鏡未分場歸場");
+    expect(status).toContain("onOpenStoryboard");
+    expect(block).toContain('revealStoryInlineSection("storyboard"');
+  });
+});
+
 describe("one-click does not batch-generate on an empty board", () => {
   it("refuses batchGenerate when listByProject is still 0 shots", () => {
     expect(oneClickHook).toContain("listByProject.fetch");

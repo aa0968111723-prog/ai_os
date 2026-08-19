@@ -49,6 +49,30 @@ describe("workspace projection", () => {
       shotCount: 26,
       needsConfirm: 0,
     })).toBe("人物已套用 · 5 個場景 · 21/26 鏡一致");
+    expect(compactWorkspaceStatus({
+      charactersApplied: true,
+      sceneCount: 5,
+      consistentShots: 21,
+      shotCount: 26,
+      needsConfirm: 0,
+      untitledOrphans: 5,
+    })).toBe("人物已套用 · 5 個場景 · 21/26 鏡一致 · 5 鏡未分場");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 5,
+      untitledOrphans: 5,
+      consistentShots: 21,
+    })).toBe("打開分鏡，把 5 鏡未分場歸場");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 5,
+      untitledOrphans: 5,
+      consistentShots: 21,
+    })).not.toMatch(/確認 5 個項目後再生成/);
   });
 });
 
