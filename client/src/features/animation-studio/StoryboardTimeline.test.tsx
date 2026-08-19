@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import type { StudioShot } from "./ShotStrip";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
 
 const SHOTS: StudioShot[] = [
   { id: "s1", title: "第01鏡", orderIndex: 0, durationSec: 4 },
@@ -41,11 +43,13 @@ describe("StoryboardTimeline empty vs loading", () => {
 });
 
 describe("StoryboardTimeline 複製這一鏡", () => {
-  it("menu 複製 calls onDuplicate with the source shot id (not a no-op)", async () => {
+  it("/studio/:id timeline ⋯ 複製 calls onDuplicate (not a no-op on 分鏡卡 / 單格工作室)", async () => {
     const user = userEvent.setup();
     const props = setup();
     const shot04 = screen.getAllByRole("listitem")[1]!;
-    await user.click(within(shot04).getByRole("button", { name: /更多操作/ }));
+    const more = within(shot04).getByRole("button", { name: /的更多操作/ });
+    expect(more.className).toContain("studio-tlshot__more");
+    await user.click(more);
     await user.click(screen.getByRole("menuitem", { name: /複製這一鏡/ }));
     expect(props.onDuplicate).toHaveBeenCalledTimes(1);
     expect(props.onDuplicate).toHaveBeenCalledWith("s2");
@@ -64,6 +68,52 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     expect(screen.queryByRole("button", { name: "關閉選單" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /複製這一鏡/ })).toBeInTheDocument();
+  });
+
+  it("timeline ⋯ → 複製 bumps 3→4 via insertAfter(duplicate) (fails on silent no-op)", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [rows, setRows] = useState(SHOTS);
+      return (
+        <>
+          <p data-testid="studio-count">{rows.length} 鏡</p>
+          <StoryboardTimeline
+            shots={rows}
+            activeId="s2"
+            draftIds={new Set()}
+            canEdit
+            shotSizeOf={() => null}
+            onSelect={vi.fn()}
+            onMove={vi.fn()}
+            onReorder={vi.fn()}
+            onNewShot={vi.fn()}
+            onInsertAfter={vi.fn()}
+            onDelete={vi.fn()}
+            onDuplicate={(id) => {
+              void runStudioDuplicateShot({
+                sceneId: id,
+                insertAfter: async ({ sceneId }) => {
+                  const src = rows.find((row) => row.id === sceneId);
+                  if (!src) return { id: "", orderIndex: 0, title: "" };
+                  return { id: "s2-copy", orderIndex: src.orderIndex + 1, title: `${src.title} 複本`, durationSec: src.durationSec };
+                },
+                mergeIntoCache: (sourceId, created) => {
+                  setRows((prev) => mergeDuplicatedShotIntoList(prev, sourceId, created));
+                },
+                refresh: async () => undefined,
+              });
+            }}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    expect(screen.getByTestId("studio-count")).toHaveTextContent("3 鏡");
+    const shot04 = screen.getAllByRole("listitem")[1]!;
+    await user.click(within(shot04).getByRole("button", { name: /的更多操作/ }));
+    await user.click(screen.getByRole("menuitem", { name: /複製這一鏡/ }));
+    expect(await screen.findByTestId("studio-count")).toHaveTextContent("4 鏡");
+    expect(screen.getByText("第04鏡 複本")).toBeInTheDocument();
   });
 
   it("menu 在這之後插入一鏡 calls onInsertAfter with the source shot id", async () => {

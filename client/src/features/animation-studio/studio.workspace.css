@@ -31,7 +31,9 @@
   --ws-rail: 52px;
   --ws-tool-options: 216px;
   --ws-inspector: 320px;
-  --ws-timeline: 148px;
+  /* 148px clipped the ⋯ ops row (thumb+title+tracks already filled the strip).
+     1024-high live then needed 1280×1600 to hunt 複製. 208px fits ⋯ + arrows. */
+  --ws-timeline: 208px;
   --ws-header: 48px;
 
   /* 進站即工作台：固定滿版，全站殼層由 body.studio-workspace 讓開 */
@@ -557,7 +559,7 @@ body.studio-workspace { overflow: hidden; }
 .studio-timeline__title { font-size: var(--fs-12); font-weight: 700; color: var(--ws-ink); }
 .studio-timeline__count { font-size: var(--fs-11); }
 .studio-timeline__empty { font-size: var(--fs-12); color: var(--ws-ink-2); margin: 6px 0 0; }
-.studio-timeline__tip { font-size: 10px; margin: 2px 0 0; opacity: 0.7; }
+.studio-timeline__tip { display: none; }
 .studio-timeline__list {
   display: flex;
   gap: 7px;
@@ -581,6 +583,30 @@ body.studio-workspace { overflow: hidden; }
   background: var(--card);
   scroll-snap-align: start;
   overflow: visible;
+}
+/* ⋯ sits on the thumb (first ~65px) so 1024-high overflow-y cannot hide it. */
+.studio-tlshot__more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  color: var(--ws-ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(22, 34, 59, 0.25);
+}
+.studio-tlshot__more:hover,
+.studio-tlshot__more[aria-expanded="true"] {
+  background: var(--card);
+  color: var(--ws-ink);
 }
 /* Open shot menu: keep the fixed scrim inside this card's stacking
    context so 複製/刪除 stay above the transparent overlay. Without

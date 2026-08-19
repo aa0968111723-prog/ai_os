@@ -20,6 +20,7 @@ import {
 } from "@shared/shotCompletion";
 import type { StudioShot } from "./ShotStrip";
 import { NewShotMenu, type NewShotKind } from "./NewShotMenu";
+import { placeFixedShotMenu } from "./placeFixedShotMenu";
 
 export interface StoryboardTimelineProps {
   shots: readonly StudioShot[];
@@ -164,6 +165,28 @@ export function StoryboardTimeline({
                 </button>
 
                 {canEdit && (
+                  <button
+                    type="button"
+                    className="studio-tlshot__more"
+                    ref={(el) => {
+                      if (el) moreBtnRefs.current.set(shot.id, el);
+                      else moreBtnRefs.current.delete(shot.id);
+                    }}
+                    aria-label={`「${shot.title}」的更多操作`}
+                    title="更多（複製、刪除）"
+                    aria-haspopup="menu"
+                    aria-expanded={menuId === shot.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuId((cur) => (cur === shot.id ? null : shot.id));
+                    }}
+                  >
+                    <Icon name="Ellipsis" size={12} />
+                  </button>
+                )}
+
+                {canEdit && (
                   <div className="studio-tlshot__ops">
                     <button
                       type="button"
@@ -173,20 +196,6 @@ export function StoryboardTimeline({
                       onClick={() => onMove(shot.id, "up")}
                     >
                       <Icon name="ArrowLeft" size={11} />
-                    </button>
-                    <button
-                      type="button"
-                      ref={(el) => {
-                        if (el) moreBtnRefs.current.set(shot.id, el);
-                        else moreBtnRefs.current.delete(shot.id);
-                      }}
-                      aria-label={`「${shot.title}」的更多操作`}
-                      title="更多（插入、複製、刪除）"
-                      aria-haspopup="menu"
-                      aria-expanded={menuId === shot.id}
-                      onClick={() => setMenuId((cur) => (cur === shot.id ? null : shot.id))}
-                    >
-                      <Icon name="Ellipsis" size={11} />
                     </button>
                     <button
                       type="button"
@@ -249,21 +258,14 @@ function ShotMoreMenu({
     const place = () => {
       const menuH = menuRef.current?.offsetHeight ?? 120;
       const menuW = menuRef.current?.offsetWidth ?? 190;
-      const rect = trigger?.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const gap = 4;
-      if (!rect) {
-        setBox({ top: Math.max(8, vh - menuH - 8), left: 8 });
-        return;
-      }
-      const above = rect.top - gap - menuH;
-      const below = rect.bottom + gap;
-      const top = above >= 8 ? above : Math.min(below, Math.max(8, vh - menuH - 8));
-      let left = rect.left;
-      if (left + menuW > vw - 8) left = vw - menuW - 8;
-      if (left < 8) left = 8;
-      setBox({ top, left });
+      const rect = trigger?.getBoundingClientRect() ?? null;
+      setBox(placeFixedShotMenu({
+        trigger: rect,
+        menuH,
+        menuW,
+        vw: window.innerWidth,
+        vh: window.innerHeight,
+      }));
     };
     place();
     window.addEventListener("resize", place);

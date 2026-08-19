@@ -229,6 +229,20 @@ describe("Inspector 不新增資料格式", () => {
     expect(declarations).toContain(".studio-menu--fixed");
     expect(studio).toContain("onInsertAfter={insertBlankAfter}");
     expect(timeline).toContain("在這之後插入一鏡");
+    expect(timeline).toContain("studio-tlshot__more");
+    expect(timeline).toContain("的更多操作");
+    expect(timeline).toContain("placeFixedShotMenu");
+    expect(declarations).toMatch(/--ws-timeline:\s*208px/);
+    expect(declarations).toContain(".studio-tlshot__more");
+  });
+
+  it("動畫創作室 deep-link is /studio/:projectId, not ?project=", () => {
+    const routes = readFileSync(resolve(process.cwd(), "client/src/app/AppRoutes.tsx"), "utf8");
+    const page = readFileSync(resolve(process.cwd(), "client/src/pages/AnimationStudioPage.tsx"), "utf8");
+    expect(routes).toContain('path="/studio/:projectId"');
+    expect(routes).not.toContain("/studio?project=");
+    expect(page).toContain("`/studio/${project.id}`");
+    expect(page).not.toContain("?project=");
   });
 
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
