@@ -549,7 +549,6 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runner).toContain("characterIds = cards.characterIds");
     expect(runner).toContain("lookIds = step.lookIds ?? scene.lookIds");
     expect(runner).not.toContain("ensureXiaohuaCharacterIds");
-    expect(runner).not.toContain("resolveHonoredCharacterSheet");
   });
 
   it("agent execute falls back to this shot's lookIds when the planner omitted them", () => {
@@ -558,7 +557,6 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runner.match(/^\s*lookIds,$/gm)?.length).toBeGreaterThanOrEqual(2);
     expect(runner).not.toContain("lookIds: step.lookIds");
     expect(runner).not.toContain("ensureXiaohuaCharacterIds");
-    expect(runner).not.toContain("resolveHonoredCharacterSheet");
   });
 
   it("agent execute locks 小華 prompt before Command persist", () => {
@@ -569,7 +567,15 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runner).not.toContain("prompt: step.prompt");
     expect(runner).not.toContain("rewritePersistedXiaohuaShotCopy");
     expect(runner).not.toContain("ensureXiaohuaCharacterIds");
-    expect(runner).not.toContain("resolveHonoredCharacterSheet");
+  });
+
+  it("agent execute honours 角色卡 生成時帶入 when the planner omitted a parent", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/resolveHonoredCharacterSheet/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/if \(!sourceAssetId\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("characterIds: cards.characterIds");
+    expect(runner).not.toContain("explicitSourceAssetId: step.sourceAssetId");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
   });
 
   it("batchGenerate locks 小華 prompt before the agent step stores it", () => {

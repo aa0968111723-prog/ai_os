@@ -20,6 +20,7 @@ import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import type { ContinuityShotDirection } from "../../shared/continuity";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -1010,6 +1011,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     let sceneRole: "visual" | "narration" | "ambience" | undefined;
     let shotDirection = step.shotDirection;
     let lookIds = step.lookIds;
+    let sourceAssetId = step.sourceAssetId;
     let characterIds = step.characterIds;
     let scenePresetIds = step.scenePresetIds;
     let propIds = step.propIds;
@@ -1053,6 +1055,16 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         characterIds = cards.characterIds;
         scenePresetIds = cards.scenePresetIds;
         propIds = cards.propIds;
+        // batchGenerate already stamps honor onto the step. LLM plans omit
+        // sourceAssetId; execute used to draw without 定裝. Keep an existing
+        // i2v parent — honor-sheet must not replace that frame.
+        if (!sourceAssetId) {
+          sourceAssetId = await resolveHonoredCharacterSheet({
+            projectId: run.projectId,
+            groupId: run.groupId,
+            characterIds: cards.characterIds,
+          });
+        }
       }
     }
 
@@ -1112,7 +1124,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         propIds,
         lookIds,
         shotDirection,
-        sourceAssetId: step.sourceAssetId,
+        sourceAssetId,
         sourceUrl: step.sourceUrl,
         shotContextPacketId: step.shotContextPacketId,
         preserveScenePointer: true,
@@ -2118,6 +2130,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
   let shotDirection = step.shotDirection;
   let lookIds = step.lookIds;
+  let sourceAssetId = step.sourceAssetId;
   let characterIds = step.characterIds;
   let scenePresetIds = step.scenePresetIds;
   let propIds = step.propIds;
@@ -2204,6 +2217,13 @@ async function advanceRun(run: RunRow): Promise<void> {
         characterIds = cards.characterIds;
         scenePresetIds = cards.scenePresetIds;
         propIds = cards.propIds;
+        if (!sourceAssetId) {
+          sourceAssetId = await resolveHonoredCharacterSheet({
+            projectId: run.projectId,
+            groupId: run.groupId,
+            characterIds: cards.characterIds,
+          });
+        }
       }
     }
     modelId = model.id;
@@ -2297,7 +2317,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       propIds,
       lookIds,
       shotDirection,
-      sourceAssetId: step.sourceAssetId,
+      sourceAssetId,
       sourceUrl: step.sourceUrl,
       shotContextPacketId: step.shotContextPacketId,
       preserveScenePointer: true,
