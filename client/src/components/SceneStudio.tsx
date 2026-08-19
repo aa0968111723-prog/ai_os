@@ -863,6 +863,7 @@ export function SceneStudio({
             </div>
 
             {canEdit && (
+              <>
               <HonorSheetControl
                 characters={characters.data ?? []}
                 selectedIds={honorIds}
@@ -873,6 +874,7 @@ export function SceneStudio({
                 generatingCharacterId={sheet.pendingCharacterId}
               />
               {sheet.error ? <Hint>定裝生成失敗：{sheet.error.message}</Hint> : null}
+              </>
             )}
 
             <div className="scene-studio__tabs" role="tablist" aria-label="單格工作室工具">
