@@ -411,7 +411,10 @@ export function DirectGenerateMode({
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onFocus={(e) => focusAndReveal(e.currentTarget)}
-        placeholder={model?.secondaryNeeds ? "例：中文配音版，保留原人物表情" : "例：清晨禪堂，柔和光線灑落，一炷香的靜謐"}
+        placeholder={model?.secondaryNeeds
+          ? "例：中文配音版，保留原人物表情"
+          // Live leftover: 製作 AI 工作台 empty-prompt sample still taught incense empty-shot, not A–F 白帽T.
+          : "例：小華站在淡大校門口校名牌前，粉橘短髮女孩、白帽T，暖色光"}
       />
 
       <div className="ctx-summary ctx-summary--wrap" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
