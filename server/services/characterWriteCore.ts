@@ -36,6 +36,7 @@ export async function upsertProjectCharacterCore(input: {
     .select({
       id: schema.projects.id,
       groupId: schema.projects.groupId,
+      title: schema.projects.title,
     })
     .from(schema.projects)
     .where(eq(schema.projects.id, input.projectId));
@@ -55,7 +56,7 @@ export async function upsertProjectCharacterCore(input: {
     .limit(1);
   const locked = applyXiaohuaIdentityLock(
     { name, appearance: input.appearance.trim(), costume: null },
-    storyRow?.content ?? "",
+    `${input.appearance}\n${storyRow?.content ?? ""}\n${project.title}`,
   );
   const appearance = (locked.appearance ?? input.appearance).trim();
   const notes = input.notes?.trim() || null;
@@ -72,7 +73,7 @@ export async function upsertProjectCharacterCore(input: {
   if (reused) {
     const requested = applyXiaohuaIdentityLock(
       { name, appearance, costume: null },
-      storyRow?.content ?? "",
+      `${appearance}\n${storyRow?.content ?? ""}\n${project.title}`,
     );
     const nextAppearance = (requested.appearance ?? appearance).trim();
     const keepPending = nextAppearance === PENDING_CHARACTER_APPEARANCE && reused.appearance.trim();

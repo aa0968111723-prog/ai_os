@@ -102,6 +102,14 @@ describe("formatCharacterAnchor 仍可用（與場景並存）", () => {
     expect(out).not.toMatch(/年輕男性|黑長直髮/);
     expect(out).toContain("外觀鎖定 禪定龜龜：吉祥物龜龜");
   });
+
+  it("keeps 淡江 in the Fal anchor when the generation prompt names 淡大", () => {
+    const xiaohua = { id: "c-xh", name: "小華", appearance: "大二化工、粉橘短髮女孩、白帽T" };
+    const out = formatCharacterAnchor([xiaohua], ["c-xh"], "站在淡大校門口校名牌前");
+    expect(out).toContain("淡江大二化工");
+    expect(out).toContain("粉橘短髮女孩");
+    expect(out).not.toContain("年輕男性");
+  });
 });
 
 describe("formatCharacterAnchor × 造型（Identity/Look 分層）", () => {

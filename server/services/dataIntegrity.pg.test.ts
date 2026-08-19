@@ -131,4 +131,25 @@ describe.skipIf(!RUN_PG).sequential("data integrity: same-name projects stay iso
     expect(ok.referenceAssetId).toBe(assetA.id);
     expect(ok.projectId).toBe(projectA.id);
   });
+
+  it("characters.add refuses「不要寫素材清單」and keeps 淡江 when the story names 淡大", async () => {
+    const { projectA, characters, story } = await seedPair();
+    await story.save({ projectId: projectA.id, content: "小華站在淡大校門口。我是大二化工系的小華。" });
+    await expect(characters.add({
+      projectId: projectA.id,
+      name: "不要寫素材清單",
+      appearance: "待補外觀描述",
+    })).rejects.toMatchObject({ message: expect.stringMatching(/指示句/) });
+    expect(await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectA.id))).toHaveLength(0);
+
+    const row = await characters.add({
+      projectId: projectA.id,
+      name: "小華",
+      appearance: "年輕男性",
+    });
+    expect(row.name).toBe("小華");
+    expect(row.appearance).toContain("淡江大二化工");
+    expect(row.appearance).toContain("粉橘短髮女孩");
+    expect(row.appearance).not.toContain("年輕男性");
+  });
 });

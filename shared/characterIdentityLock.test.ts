@@ -6,8 +6,10 @@ import {
   lockXiaohuaGenerationPrompt,
   lockXiaohuaPlan,
   rewritePersistedXiaohuaShotCopy,
+  rewriteXiaohuaInventedMaleLook,
   rewriteXiaohuaMaleCopy,
   scriptExplicitlyMaleXiaohua,
+  withTamkangSophomore,
   XIAOHUA_LOCKED_APPEARANCE,
 } from "./characterIdentityLock";
 import { TKU_ZEN_SHOTLIST_AD_PARSE, TKU_ZEN_SHOTLIST_FIRST_PARSE } from "./fixtures/tkuZenPromo";
@@ -63,6 +65,15 @@ describe("小華 identity lock", () => {
     const keep = "大二化工、粉橘短髮女孩、白帽T、微笑";
     const locked = applyXiaohuaIdentityLock({ name: "小華", appearance: keep, costume: "白帽T" }, TKU_ZEN_SHOTLIST_AD_PARSE);
     expect(locked.appearance).toBe(keep);
+  });
+
+  it("restores 淡江大二化工 when the story names 淡大 but the card already dropped it", () => {
+    const dropped = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE, costume: "白帽T" },
+      "小華站在淡大校門口校名牌前。我是大二化工系的小華。",
+    );
+    expect(dropped.appearance).toBe("淡江大二化工、粉橘短髮女孩、白帽T");
+    expect(withTamkangSophomore(XIAOHUA_LOCKED_APPEARANCE, "淡大校門口")).toContain("淡江大二化工");
   });
 
   it("honors an explicit male clause only when the script has no female cues", () => {
@@ -193,6 +204,8 @@ describe("小華 identity lock", () => {
     expect(plan.scenes[0]?.shots[0]?.prompt).toContain("淡大校門口");
     expect(plan.scenes[0]?.shots[0]?.prompt).not.toContain("克難坡");
     expect(plan.scenes[1]?.locationRef).toBe("夕陽");
+    expect(plan.characters[0]?.appearance).toContain("淡江大二化工");
+    expect(plan.characters[0]?.appearance).toContain("粉橘短髮女孩");
   });
 
   it("locks generateInto prompts so 小華 cannot stay a boy", () => {
@@ -206,6 +219,11 @@ describe("小華 identity lock", () => {
     expect(lockXiaohuaGenerationPrompt("禪定龜龜低頭")).toBe("禪定龜龜低頭");
     const boyTurtle = lockXiaohuaGenerationPrompt("a young boy sitting with a zen turtle", ["小華"]);
     expect(boyTurtle).toContain(XIAOHUA_LOCKED_APPEARANCE);
+    const campus = lockXiaohuaGenerationPrompt("年輕男性站在淡大校門口", ["小華"]);
+    expect(campus).toContain("粉橘短髮女孩");
+    expect(campus).toContain("淡江大二化工");
+    expect(campus).not.toContain("年輕男性");
+    expect(rewriteXiaohuaInventedMaleLook("小華是年輕男性，黑長直髮")).toBe("小華是粉橘短髮女孩，粉橘短髮");
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {
@@ -215,5 +233,13 @@ describe("小華 identity lock", () => {
     );
     expect(locked.title).toBe("夕陽光照在她身上");
     expect(locked.prompt).not.toContain("他身上");
+    const maleLook = lockXiaohuaCopyFields(
+      { title: "年輕男性站在校門口", prompt: "年輕男性站在淡大校門口，夕陽光照在他身上" },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(maleLook.title).toContain("粉橘短髮女孩");
+    expect(maleLook.prompt).toContain("粉橘短髮女孩");
+    expect(maleLook.prompt).toContain("她身上");
+    expect(maleLook.prompt).not.toMatch(/年輕男性|他身上/);
   });
 });

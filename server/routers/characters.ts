@@ -12,6 +12,8 @@ import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
+import { isInstructionCharacterName } from "../../shared/assistantCharacterPropose";
+import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
@@ -53,6 +55,9 @@ export const charactersRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
+      if (isInstructionCharacterName(input.name)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      }
       // 跨專案引用驗證：referenceAssetId 必須同專案且是圖片（同組兩個「小華」不能互綁定裝圖）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId, project.id);
 
@@ -77,14 +82,23 @@ export const charactersRouter = router({
       }
 
       try {
+        const [story] = await db
+          .select({ content: schema.stories.content })
+          .from(schema.stories)
+          .where(eq(schema.stories.projectId, project.id))
+          .limit(1);
+        const locked = applyXiaohuaIdentityLock(
+          { name: input.name, appearance: input.appearance, costume: null },
+          `${input.appearance}\n${story?.content ?? ""}\n${project.title}`,
+        );
         const [row] = await db
           .insert(schema.characters)
           .values({
             id: input.clientRequestId,
             projectId: project.id,
             groupId: project.groupId,
-            name: input.name,
-            appearance: input.appearance,
+            name: locked.name,
+            appearance: locked.appearance ?? input.appearance,
             notes: input.notes || null,
             referenceAssetId: input.referenceAssetId,
             createdBy: ctx.auth.user.id,
@@ -123,6 +137,9 @@ export const charactersRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
+      if (input.name !== undefined && isInstructionCharacterName(input.name)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      }
       // 跨專案引用驗證：改綁 referenceAssetId 時同樣要同專案且是圖片（null＝清除引用，免驗）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
@@ -135,6 +152,26 @@ export const charactersRouter = router({
       } = {};
       if (input.name !== undefined) patch.name = input.name;
       if (input.appearance !== undefined) patch.appearance = input.appearance;
+      const nextName = patch.name ?? row.name;
+      const nextAppearance = patch.appearance ?? row.appearance;
+      if (nextName && nextAppearance && (input.name !== undefined || input.appearance !== undefined)) {
+        const [story] = await db
+          .select({ content: schema.stories.content })
+          .from(schema.stories)
+          .where(eq(schema.stories.projectId, row.projectId))
+          .limit(1);
+        const [project] = await db
+          .select({ title: schema.projects.title })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, row.projectId))
+          .limit(1);
+        const locked = applyXiaohuaIdentityLock(
+          { name: nextName, appearance: nextAppearance, costume: null },
+          `${nextAppearance}\n${story?.content ?? ""}\n${project?.title ?? ""}`,
+        );
+        if (input.name !== undefined) patch.name = locked.name;
+        patch.appearance = locked.appearance ?? nextAppearance;
+      }
       if (input.notes !== undefined) patch.notes = input.notes || null;
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;

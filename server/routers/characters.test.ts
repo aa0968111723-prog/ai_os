@@ -41,4 +41,11 @@ describe("characters router 契約", () => {
     expect(source).toContain("assertReferenceImage(input.referenceAssetId, project.groupId, project.id)");
     expect(source).toContain("assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId)");
   });
+
+  it("refuses instruction-clause names and locks 小華 with the story", () => {
+    expect(source).toContain("isInstructionCharacterName");
+    expect(source).toContain("這是指示句，不是角色名");
+    expect(source).toContain("applyXiaohuaIdentityLock");
+    expect(source).toContain("schema.stories.content");
+  });
 });

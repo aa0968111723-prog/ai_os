@@ -491,7 +491,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
 
   // Live A–D extracted 小華 as「年輕男性」and shot titles「夕陽光照在他身上」.
   // Name + script lock wins over model gender flip in cards and storyboard copy.
-  plan = lockXiaohuaPlan(plan, sentStory);
+  plan = lockXiaohuaPlan(plan, `${sentStory}\n${project.title}`);
 
   /* ── NORMALIZE＋RESOLVE＋CONFIDENCE＋DIFF＋SAVE（單一交易） ── */
   const applied: ParseRunApplied = { createdCharacterIds: [], createdLocationIds: [], createdPropIds: [], createdLookIds: [], updated: [] };
@@ -1128,7 +1128,7 @@ export async function materializeStoryboard(input: {
     return { ...run.applied.storyboard, reused: true };
   }
 
-  const plan = lockXiaohuaPlan(run.plan, script);
+  const plan = lockXiaohuaPlan(run.plan, `${script}\n${project.title}`);
   const existing = await loadExistingEntities(project.id);
   const aliases = await loadProjectCardAliases(project.id);
 

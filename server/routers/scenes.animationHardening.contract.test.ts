@@ -423,6 +423,7 @@ describe("#790 overnight pins (do not reopen)", () => {
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("lockXiaohuaGenerationPrompt");
+    expect(into).toContain('? ["小華"]');
     expect(into).toContain("ensureXiaohuaCharacterIds");
     expect(into).toContain("modelId: input.modelId");
     expect(generationCore).toContain("lockXiaohuaGenerationPrompt");

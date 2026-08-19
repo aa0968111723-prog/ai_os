@@ -6,11 +6,17 @@
 export const XIAOHUA_LOCKED_APPEARANCE = "大二化工、粉橘短髮女孩、白帽T";
 export const XIAOHUA_LOCKED_COSTUME = "白帽T、休閒日常";
 
+/** Story / title / prompt / look named 淡江 or 淡大. */
+export function mentionsTamkangCampus(...parts: Array<string | null | undefined>): boolean {
+  return parts.some((part) => Boolean(part && /淡江|淡大/.test(part)));
+}
+
 /** Live ask「淡江大二化工」must not be stored as bare 大二化工. */
 export function withTamkangSophomore(appearance: string, source = ""): string {
-  if (!/淡江|淡大/.test(`${appearance} ${source}`)) return appearance;
+  if (!mentionsTamkangCampus(appearance, source)) return appearance;
   if (/淡江大二化工/.test(appearance)) return appearance;
   if (/大二化工/.test(appearance)) return appearance.replace(/大二化工/g, "淡江大二化工");
+  if (/粉橘短髮女孩|白帽T/.test(appearance)) return `淡江大二化工、${appearance}`;
   return appearance;
 }
 
@@ -59,6 +65,16 @@ export function lockXiaohuaCharacters<
   return (characters ?? []).map((c) => applyXiaohuaIdentityLock(c, script));
 }
 
+/** EXTRACT invents「年輕男性／黑長直髮」for 小華. Text-lock wins over that. */
+export function rewriteXiaohuaInventedMaleLook(text: string): string {
+  if (!text) return text;
+  return text.replace(/年輕男性/g, "粉橘短髮女孩").replace(/黑長直髮/g, "粉橘短髮");
+}
+
+function rewriteXiaohuaLockedCopy(text: string, force: boolean): string {
+  return rewriteXiaohuaInventedMaleLook(rewriteXiaohuaMaleCopy(text, force));
+}
+
 /**
  * EXTRACT often writes「夕陽光照在他身上」for 小華. She is female.
  * Never turn 其他 → 其她. Keep 他們 / 他家.
@@ -94,7 +110,21 @@ function refsXiaohua(refs: string[] | null | undefined): boolean {
 
 function rewriteMaybe(text: string | null | undefined, force: boolean): string | null | undefined {
   if (text == null) return text;
-  return rewriteXiaohuaMaleCopy(text, force);
+  return rewriteXiaohuaLockedCopy(text, force);
+}
+
+function campusBlobFromPlan(
+  plan: {
+    locations?: Array<{ name?: string | null }>;
+    scenes: LockableScene<LockableShot>[];
+  },
+  script: string,
+): string {
+  const locations = (plan.locations ?? []).map((loc) => loc.name ?? "").join("\n");
+  const scenes = plan.scenes
+    .map((scene) => [scene.title, scene.summary, scene.excerpt, scene.locationRef, ...scene.shots.map(shotBlob)].join("\n"))
+    .join("\n");
+  return `${script}\n${locations}\n${scenes}`;
 }
 
 type LockableShot = {
@@ -171,7 +201,8 @@ export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string |
   plan: T,
   script: string,
 ): T {
-  const characters = lockXiaohuaCharacters(plan.characters, script);
+  const campus = campusBlobFromPlan(plan, script);
+  const characters = lockXiaohuaCharacters(plan.characters, campus);
   if (scriptExplicitlyMaleXiaohua(script)) {
     return lockXiaohuaAct1Location({ ...plan, characters, scenes: plan.scenes }, script);
   }
@@ -191,7 +222,7 @@ export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string |
         return {
           ...shot,
           title: rewriteMaybe(shot.title, force),
-          prompt: rewriteXiaohuaMaleCopy(shot.prompt, force),
+          prompt: rewriteXiaohuaLockedCopy(shot.prompt, force),
           action: rewriteMaybe(shot.action, force),
           dialogue: rewriteMaybe(shot.dialogue, force),
           voiceover: rewriteMaybe(shot.voiceover, force),
@@ -199,7 +230,12 @@ export function lockXiaohuaPlan<T extends { characters?: Array<{ name?: string |
       }),
     };
   });
-  return lockXiaohuaAct1Location({ ...plan, characters, scenes }, script);
+  // Act 1 rewrite may introduce 淡大校門口 after cards were locked from a 大二化工-only paste.
+  const located = lockXiaohuaAct1Location({ ...plan, characters, scenes }, script);
+  return {
+    ...located,
+    characters: lockXiaohuaCharacters(located.characters, campusBlobFromPlan(located, script)),
+  };
 }
 
 function shotBlob(shot: LockableShot): string {
@@ -222,11 +258,11 @@ export function lockXiaohuaCopyFields<
   if (!force) return row;
   return {
     ...row,
-    title: row.title != null ? rewriteXiaohuaMaleCopy(row.title, true) : row.title,
-    prompt: row.prompt != null ? rewriteXiaohuaMaleCopy(row.prompt, true) : row.prompt,
-    action: row.action != null ? rewriteXiaohuaMaleCopy(row.action, true) : row.action,
-    dialogue: row.dialogue != null ? rewriteXiaohuaMaleCopy(row.dialogue, true) : row.dialogue,
-    voiceover: row.voiceover != null ? rewriteXiaohuaMaleCopy(row.voiceover, true) : row.voiceover,
+    title: row.title != null ? rewriteXiaohuaLockedCopy(row.title, true) : row.title,
+    prompt: row.prompt != null ? rewriteXiaohuaLockedCopy(row.prompt, true) : row.prompt,
+    action: row.action != null ? rewriteXiaohuaLockedCopy(row.action, true) : row.action,
+    dialogue: row.dialogue != null ? rewriteXiaohuaLockedCopy(row.dialogue, true) : row.dialogue,
+    voiceover: row.voiceover != null ? rewriteXiaohuaLockedCopy(row.voiceover, true) : row.voiceover,
   };
 }
 
@@ -254,12 +290,16 @@ export function lockXiaohuaGenerationPrompt(prompt: string, characterNames: stri
   if (!mentionsXiaohua(prompt) && !namesXiaohua) return prompt;
   // Do not honor 年輕男性 inside the prompt itself — EXTRACT invents
   // 「小華…年輕男性」within 24 chars, which is not an explicit male clause.
-  const rewritten = rewriteXiaohuaMaleCopy(prompt, true)
-    .replace(/年輕男性/g, "粉橘短髮女孩")
-    .replace(/黑長直髮/g, "粉橘短髮")
+  const rewritten = rewriteXiaohuaInventedMaleLook(rewriteXiaohuaMaleCopy(prompt, true))
     .replace(/男孩/g, "女孩")
     .replace(/男生/g, "女生");
+  const source = [prompt, rewritten, ...characterNames].join(" ");
+  const lockLine = xiaohuaLockedAppearance(source);
   // 她 is a pronoun lock, not a look. Fal still draws a boy+turtle without 粉橘短髮女孩.
-  if (/粉橘短髮女孩/.test(rewritten) && !/年輕男性|男孩|男生/.test(rewritten)) return rewritten;
-  return `${rewritten}\n\n外觀鎖定 小華：${XIAOHUA_LOCKED_APPEARANCE}`;
+  // 0 own sheets: text-lock must still carry 粉橘短髮女孩, and 淡江 when the prompt/story has 淡大.
+  const hasLook = /粉橘短髮女孩/.test(rewritten);
+  const stillMale = /年輕男性|男孩|男生/.test(rewritten);
+  const needsCampus = mentionsTamkangCampus(source) && !/淡江大二化工/.test(rewritten);
+  if (hasLook && !stillMale && !needsCampus) return rewritten;
+  return `${rewritten}\n\n外觀鎖定 小華：${lockLine}`;
 }

@@ -160,7 +160,7 @@ export async function buildContinuitySnapshot(
     const look = lookByCharacter.get(row.id);
     const locked = applyXiaohuaIdentityLock(
       { name: row.name, appearance: row.appearance, costume: look?.costume ?? "" },
-      row.name,
+      `${row.appearance ?? ""}\n${row.name}`,
     );
     const base = { ...row, appearance: locked.appearance ?? row.appearance };
     // lookId 一起凍：過時偵測要比對同一張卡，只有名字/描述比不出「是不是同一套」

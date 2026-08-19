@@ -1547,8 +1547,8 @@ export const scenesRouter = router({
       // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
       // 表演（表情/視線）。Project 風格、角色/場景/道具錨點與本鏡造型（lookIds）
       // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的文字上下文。
-      const prompt = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(scene, model)));
-      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      const rawPrompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
+      if (!rawPrompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
       const cards = resolveSceneCards(scene, {
@@ -1559,7 +1559,12 @@ export const scenesRouter = router({
       const characterIds = await ensureXiaohuaCharacterIds(
         scene.projectId,
         cards.characterIds,
-        [scene.title, prompt, scene.action, scene.dialogue],
+        [scene.title, rawPrompt, scene.action, scene.dialogue],
+      );
+      // 0 own sheets: stay on text-lock. Do not wait for 帶入 / 參考圖.
+      const prompt = lockXiaohuaGenerationPrompt(
+        rawPrompt,
+        /小華/.test([scene.title, rawPrompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
       );
       // 角色卡「生成時帶入」：只從勾選／本鏡綁定找定裝圖。0/6 或沒有活圖＝略過，不 500。
       const sourceAssetId = await resolveHonoredCharacterSheet({
@@ -1663,6 +1668,9 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, input.prompt, scene.action, scene.dialogue],
       );
+      const xiaohuaLockNames = /小華/.test([scene.title, input.prompt, scene.action, scene.dialogue].join(""))
+        ? ["小華"]
+        : [];
       const sourceAssetId = await resolveHonoredCharacterSheet({
         projectId: project.id,
         groupId: project.groupId,
@@ -1692,9 +1700,13 @@ export const scenesRouter = router({
         const virtualScene = compiled
           ? { ...scene, camera: compiled.camera, performance: compiled.performance, action: compiled.action }
           : scene;
-        const base = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(virtualScene, model)));
+        const base = lockXiaohuaGenerationPrompt(
+          input.prompt ?? (await buildShotContextPrompt(virtualScene, model)),
+          xiaohuaLockNames,
+        );
         const prompt = lockXiaohuaGenerationPrompt(
           compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base,
+          xiaohuaLockNames,
         );
         return { row, compiled, prompt };
       }));

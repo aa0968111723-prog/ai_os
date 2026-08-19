@@ -112,7 +112,7 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
         shots: [
           {
             title: "小華站在校門口，夕陽光照在他身上",
-            prompt: "小華站在校門口，夕陽光照在他身上",
+            prompt: "年輕男性站在校門口，夕陽光照在他身上",
             characterRefs: ["小華"],
             durationSec: 5,
           },
@@ -149,6 +149,8 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
     const shots = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, project.id));
     expect(shots.some((s) => (s.title ?? "").includes("她身上") || (s.prompt ?? "").includes("她身上"))).toBe(true);
     expect(shots.some((s) => (s.title ?? "").includes("他身上") || (s.prompt ?? "").includes("他身上"))).toBe(false);
+    expect(shots.some((s) => (s.prompt ?? "").includes("年輕男性"))).toBe(false);
+    expect(shots.some((s) => (s.prompt ?? "").includes("粉橘短髮女孩"))).toBe(true);
   });
 
   it("產生分鏡 adopts 5 orphan shots into scenes — does not grow 5→plan+5", async () => {

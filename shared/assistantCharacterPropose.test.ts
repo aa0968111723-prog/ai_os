@@ -156,6 +156,8 @@ describe("proposeAddCharacterActions", () => {
 
   it("does not turn「不要寫素材清單」into a second character name", () => {
     expect(isInstructionCharacterName("不要寫素材清單")).toBe(true);
+    expect(isInstructionCharacterName("「不要寫素材清單」")).toBe(true);
+    expect(isInstructionCharacterName("請不要寫素材清單")).toBe(true);
     expect(isInstructionCharacterName("寫入角色")).toBe(true);
     expect(isInstructionCharacterName("小華")).toBe(false);
     const live = "新增角色小華，淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";

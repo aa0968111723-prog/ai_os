@@ -466,7 +466,11 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     };
   }
   const character = continuitySnapshot
-    ? formatCharacterAnchor(continuitySnapshot.characters, continuitySnapshot.characters.map((row) => row.id))
+    ? formatCharacterAnchor(
+        continuitySnapshot.characters,
+        continuitySnapshot.characters.map((row) => row.id),
+        input.prompt,
+      )
     : "";
   const scene = continuitySnapshot
     ? formatSceneAnchor(continuitySnapshot.scenes, continuitySnapshot.scenes.map((row) => row.id))
