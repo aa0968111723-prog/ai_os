@@ -286,7 +286,7 @@ export function startAgentRunner(): void {
 async function tick(): Promise<void> {
   // stopped：仍有 running/pending 步驟 → 收尾（按停時在途生成自然完成）
   // failed：仍有 running 步驟 → 並行支線一支失敗後，其餘已送出的生成仍須 settle（否則永遠卡 running）
-  // waiting：仍有 running 步驟 → 多為超額生成等組長核准；須持續 settle 核准結果（否則永久卡 waiting）
+  // waiting：Adopt 後步驟可能已全 done，或仍待你採用／超額核准——都要繼續 tick
   const runs = await db
     .select()
     .from(schema.agentRuns)
@@ -301,10 +301,7 @@ async function tick(): Promise<void> {
           eq(schema.agentRuns.status, "failed"),
           sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
         ),
-        and(
-          eq(schema.agentRuns.status, "waiting"),
-          sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
-        ),
+        eq(schema.agentRuns.status, "waiting"),
       ),
     )
     .orderBy(asc(schema.agentRuns.createdAt))

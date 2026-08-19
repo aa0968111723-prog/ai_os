@@ -92,7 +92,7 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     const block = source.slice(start, source.indexOf("使用者已按停：沒有新生成要送時收停 pending"));
     expect(block).toContain("saveDagProgress");
     expect(block).not.toMatch(/if \(adoptedWaiting\) await saveRun\(run\.id, \{ steps \}\);/);
-    expect(source).toContain('inArray(schema.agentRuns.status, ["running", "waiting"])');
+    expect(source).toContain('eq(schema.agentRuns.status, "waiting")');
     expect(source).toContain("steps.every((step) => step.status === \"done\")");
     expect(source).toContain("run.status !== \"running\" && run.status !== \"waiting\"");
   });
@@ -138,7 +138,7 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toMatch(/等組長核准超額生成中/);
     expect(source).toMatch(/AWAITING_APPROVAL_MAX_MS/);
     expect(source).toMatch(/status: "waiting"/);
-    expect(source).toMatch(/status, "waiting"[\s\S]*status":"running"/);
+    expect(source).toContain('eq(schema.agentRuns.status, "waiting")');
   });
 });
 
