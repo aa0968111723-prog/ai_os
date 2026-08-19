@@ -555,7 +555,7 @@ describe("#790 overnight pins (do not reopen)", () => {
   it("agent execute falls back to this shot's lookIds when the planner omitted them", () => {
     const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
     expect(runner.match(/lookIds = step.lookIds \?\? scene.lookIds/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(runner.match(/^\s*lookIds,$/m)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/^\s*lookIds,$/gm)?.length).toBeGreaterThanOrEqual(2);
     expect(runner).not.toContain("lookIds: step.lookIds");
     expect(runner).not.toContain("ensureXiaohuaCharacterIds");
     expect(runner).not.toContain("resolveHonoredCharacterSheet");
