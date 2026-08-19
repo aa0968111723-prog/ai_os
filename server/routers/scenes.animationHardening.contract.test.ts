@@ -621,6 +621,18 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
   });
 
+  it("MCP submit_generation locks 小華 prompt before Command persist", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("prompt: userPrompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {
     const start = assistant.indexOf('if (a.type === "generate")');
     const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));

@@ -36,6 +36,7 @@ import { mcpToolAnnotations } from "../../shared/mcpCatalog";
 import { MODELS, CATEGORIES, getModel, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sceneFillRole } from "../../shared/sceneVersions";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { getModelContract, loadModelContractSnapshot } from "./modelContractStore";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
@@ -1601,6 +1602,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     let visualCards: ReturnType<typeof resolveSceneCards> | undefined;
     let lookIds: string[] | undefined;
     let shotDirection: { camera: typeof schema.scenes.$inferSelect["camera"]; performance: typeof schema.scenes.$inferSelect["performance"]; action: string | null } | undefined;
+    let namedXiaohua = /小華/.test(userPrompt);
     if (args.sceneNo !== undefined && args.sceneNo !== null && args.sceneNo !== "") {
       const sceneNo = Number(args.sceneNo);
       const shots = await db
@@ -1622,7 +1624,15 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         lookIds = shot.lookIds ?? undefined;
         shotDirection = { camera: shot.camera, performance: shot.performance, action: shot.action };
       }
+      // generateInto / generate_into_scene already persist the locked prompt.
+      // submit_generation already binds sceneRole / cards / looks / direction,
+      // but still passed userPrompt raw — generations.prompt could keep 年輕男性.
+      namedXiaohua = /小華/.test([shot.title, userPrompt, shot.action, shot.dialogue].join(""));
     }
+    const lockedPrompt = lockXiaohuaGenerationPrompt(
+      userPrompt,
+      namedXiaohua ? ["小華"] : [],
+    );
     // TD-02：MCP 與網頁端同一 Command（政策／狀態機／ACL／扣點／門檻）
     // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他。
     const gen = await executeGenerationCommand({
@@ -1632,7 +1642,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       projectId: project.id,
       modelId,
-      prompt: userPrompt,
+      prompt: lockedPrompt,
       sceneId,
       sceneRole,
       sourceUrl,
