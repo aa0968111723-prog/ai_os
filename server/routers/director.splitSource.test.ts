@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { pickSplitScriptSource } from "./director";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "../../shared/fixtures/xiaohuaSevenAct";
@@ -41,5 +42,17 @@ describe("pickSplitScriptSource", () => {
       knowledgeText: "知識庫第一段。",
     })).toEqual({ script: "知識庫第一段。", source: "knowledge" });
     expect(pickSplitScriptSource({})).toEqual({ script: "", source: null });
+  });
+});
+
+describe("mockSuggestions empty-hook fallback is A–F, not 七幕", () => {
+  it("開場 fallback teaches 校門口 白帽T 小華, not 清晨禪堂空景", () => {
+    const source = readFileSync(new URL("./director.ts", import.meta.url), "utf8");
+    const body = source.slice(source.indexOf("function mockSuggestions"), source.indexOf("export interface SplitScriptCoreInput"));
+    expect(body).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華");
+    expect(body).not.toContain("清晨禪堂空景");
+    expect(body).not.toContain("安倢");
+    expect(body).not.toContain("慕恩");
+    expect(body).not.toContain("紅傘");
   });
 });

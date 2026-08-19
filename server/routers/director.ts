@@ -158,7 +158,7 @@ function mockSuggestions(wv: Worldview, _kind: string): DirectorSuggestion[] {
   return [
     {
       title: "開場・氛圍鏡",
-      prompt: `${base}的開場${audienceHint}：${hook || "清晨禪堂空景"}，${tone}氛圍，${style}，柔和晨光斜射，留白構圖`,
+      prompt: `${base}的開場${audienceHint}：${hook || "淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華"}，${tone}氛圍，${style}，柔和晨光斜射，留白構圖`,
     },
     {
       title: "主軸・轉化鏡",
