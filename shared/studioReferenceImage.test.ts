@@ -77,6 +77,10 @@ describe("cardBringInPayload", () => {
   it("0 refs stays empty — no 1/6, no stray source", () => {
     expect(cardBringInPayload([EMPTY_SHEET], [EMPTY_SHEET.id])).toEqual({});
   });
+
+  it("unchecked HonorSheet with a live sheet still sends no characterIds", () => {
+    expect(cardBringInPayload([XIAOHUA], [])).toEqual({});
+  });
 });
 
 describe("honorExplicitCharacterSheet", () => {

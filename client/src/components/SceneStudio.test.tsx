@@ -290,6 +290,30 @@ describe("SceneStudio", () => {
     expect(arg).not.toHaveProperty("sourceAssetId");
   });
 
+  it("有定裝圖但取消 HonorSheet：重畫不帶 characterIds，文字錨點仍在", async () => {
+    const user = userEvent.setup();
+    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{
+        id: xiaohuaId,
+        name: "小華",
+        referenceAssetId: "22222222-2222-4222-8222-222222222222",
+        referenceUrl: "https://example.test/xiaohua-sheet.png",
+      }],
+      isLoading: false,
+    });
+    mountStudio({ charIds: [xiaohuaId] });
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByText(/已選 1\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /小華/ }));
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg).not.toHaveProperty("characterIds");
+    expect(arg).not.toHaveProperty("sourceAssetId");
+  });
+
   it("第一張候選（尚未現用）舞台顯示該版模型並給採用，不標成 SDXL / 現用", () => {
     versionsQuery.mockReturnValue({
       data: serverData({

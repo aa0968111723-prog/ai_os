@@ -174,7 +174,9 @@ export function SceneStudio({
   }, [charIds, sceneId]);
   const honoredCharIds = characters.data
     ? selectableBringInIds(characters.data, honorIds)
-    : (charIds ?? []);
+    : honorIds.length
+      ? (charIds ?? [])
+      : [];
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
