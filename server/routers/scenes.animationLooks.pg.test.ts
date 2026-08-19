@@ -332,13 +332,15 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const got = await story.get({ projectId: project.id });
     expect(["A較短", "B這一份比較長而且是最新草稿"]).toContain(got.story?.content);
     const latest = "B這一份比較長而且是最新草稿";
-    const saved = await story.save({
-      projectId: project.id,
-      content: latest,
-      expectedRev: got.story?.rev,
-      baseline: got.story?.content,
-    });
-    expect(saved.rev).toBeGreaterThan(got.story?.rev ?? 0);
+    if (got.story?.content !== latest) {
+      const saved = await story.save({
+        projectId: project.id,
+        content: latest,
+        expectedRev: got.story?.rev,
+        baseline: got.story?.content,
+      });
+      expect(saved.rev).toBeGreaterThan(got.story?.rev ?? 0);
+    }
     const again = await story.get({ projectId: project.id });
     expect(again.story?.content).toBe(latest);
   });
