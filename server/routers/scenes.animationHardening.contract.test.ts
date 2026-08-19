@@ -877,6 +877,21 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 
+  it("generateVoiceover / generateAmbience drop leftover HUD without attaching audio onto visual steps", () => {
+    const voice = scenes.slice(scenes.indexOf("generateVoiceover:"), scenes.indexOf("generateAmbience:"));
+    const ambience = scenes.slice(scenes.indexOf("generateAmbience:"), scenes.indexOf("reorder:"));
+    const voiceAfter = voice.slice(voice.indexOf("assertReplayableGeneration"));
+    const ambienceAfter = ambience.slice(ambience.indexOf("assertReplayableGeneration"));
+    expect(voiceAfter).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(voiceAfter).toContain("projectId: scene.projectId");
+    expect(voiceAfter).toContain("generationId: gen.id");
+    expect(voiceAfter).not.toContain("sceneId:");
+    expect(ambienceAfter).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(ambienceAfter).toContain("projectId: scene.projectId");
+    expect(ambienceAfter).toContain("generationId: gen.id");
+    expect(ambienceAfter).not.toContain("sceneId:");
+  });
+
   it("batchGenerate / agent generate freeze shotDirection so 補完 N 鏡 marks 畫面過時", () => {
     const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
     expect(batch).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");

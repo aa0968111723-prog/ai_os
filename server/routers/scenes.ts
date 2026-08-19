@@ -2030,6 +2030,14 @@ export const scenesRouter = router({
         reasonPrefix: "配音生成",
       });
       assertReplayableGeneration(gen.status);
+      // generateInto already drops leftover 0/N「待你過目」on a replayable
+      // visual job. 配音 still left the HUD parked until the 30s poll.
+      // No sceneId — audio must not attach onto visual agent steps.
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        generationId: gen.id,
+      });
       return {
         generationId: gen.id,
         voice: routed.voice ? { canonId: routed.voice.canonId, voiceId: routed.voice.voiceId } : null,
@@ -2097,6 +2105,13 @@ export const scenesRouter = router({
         reasonPrefix: "環境音生成",
       });
       assertReplayableGeneration(gen.status);
+      // Same leftover HUD hole as 配音. No sceneId — audio must not
+      // attach onto visual agent steps.
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        generationId: gen.id,
+      });
       return { generationId: gen.id };
     }),
 
