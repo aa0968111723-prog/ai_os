@@ -159,6 +159,44 @@ describe("buildRetryGenerationInput — 重試不得靜默降級", () => {
     expect(input.shotDirection).toEqual({ camera: { shotSize: "特寫" }, performance: null, action: null });
   });
 
+  it("沿用凍結 packet／meta 父圖／聲線／聲音世界（少了重試會重建或斷鏈）", () => {
+    const parentId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const packetId = "99999999-9999-4999-8999-999999999999";
+    const input = buildRetryGenerationInput(row({
+      modelId: "fal-ai/kokoro/mandarin-chinese",
+      sourceUrl: "https://v3.fal.media/files/expired-parent.png",
+      params: storeGenerationSourceMeta({ prompt: "p", language: "zh" }, {
+        shotContextPacketId: packetId,
+        sourceAssetId: parentId,
+        preserveScenePointer: true,
+        voice: {
+          canonId: "11111111-1111-4111-8111-111111111111",
+          versionId: "22222222-2222-4222-8222-222222222222",
+          voiceId: "zf_xiaoxiao",
+          applied: true,
+        },
+        soundWorld: {
+          canonId: "33333333-3333-4333-8333-333333333333",
+          versionId: "44444444-4444-4444-8444-444444444444",
+        },
+      }),
+    }));
+    expect(input.shotContextPacketId).toBe(packetId);
+    expect(input.sourceAssetId).toBe(parentId);
+    expect(input.sourceUrl).toBeUndefined();
+    expect(input.voiceIdentity).toEqual({
+      canonId: "11111111-1111-4111-8111-111111111111",
+      versionId: "22222222-2222-4222-8222-222222222222",
+      voiceId: "zf_xiaoxiao",
+      modelId: "fal-ai/kokoro/mandarin-chinese",
+      language: "zh",
+    });
+    expect(input.soundWorldRef).toEqual({
+      canonId: "33333333-3333-4333-8333-333333333333",
+      versionId: "44444444-4444-4444-8444-444444444444",
+    });
+  });
+
   it("素材庫來源走 sourceAssetId 重新簽名；外部網址原樣透傳", () => {
     const fromLibrary = buildRetryGenerationInput(row({
       sourceUrl: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file?sig=expired",
