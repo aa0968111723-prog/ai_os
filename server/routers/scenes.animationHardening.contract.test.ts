@@ -133,6 +133,11 @@ describe("animation shot writes stay consistent", () => {
     expect(siteAssistant).toContain("settleAssistantAskCompletion");
     expect(siteAssistant).toContain("assistantAskCompletionChip");
     expect(siteAssistant).toContain("STORY_READ_THIS_PROJECT_LOCK");
+    expect(siteAssistant).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(siteAssistant).toContain("answerAfterFreeOnlyTimeout");
+    expect(siteAssistant).toContain("withoutEmptyNimTimeout");
+    expect(siteAssistant).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(siteAssistant).toContain("const answer = withoutEmptyNimTimeout(rawFail, toolsSucceeded)");
     const teamAssistant = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(teamAssistant).toContain("isAssistantStoryReadIntent");
     expect(teamAssistant).toContain("lockAssistantStoryAnswer");

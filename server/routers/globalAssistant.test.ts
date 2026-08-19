@@ -607,4 +607,15 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
     expect(src).toContain("已停止（逾時）");
   });
+
+  it("NIM empty 免費模型逾時 after tools is replaced, not returned as the site answer", () => {
+    expect(src).toContain("answerAfterFreeOnlyTimeout");
+    expect(src).toContain("withoutEmptyNimTimeout");
+    expect(src).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(src).toContain("timeoutAnswer = withoutEmptyNimTimeout(");
+    expect(src).toContain("afterTools = withoutEmptyNimTimeout(");
+    expect(src).toContain("const answer = withoutEmptyNimTimeout(rawFail, toolsSucceeded)");
+    expect(src).toContain("collectedSteps.length > 0");
+    expect(src).not.toContain("fetchedOk: storyReadAsk,");
+  });
 });

@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
-import { assertFreeOnlyCompletion, completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, FREE_MODEL_TIMEOUT_MESSAGE, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { reserveQuota, refund } from "../services/points";
 import { ASSISTANT_HONEST_ACTION_RULE, runToolLoop } from "../services/assistantCore";
 import {
@@ -28,6 +28,7 @@ import { loadPersistedStoryRow } from "../services/assistantProjectStory";
 import {
   formatPersistedStoryForAssistant,
   formatTeamInventoryStoryFlag,
+  answerAfterFreeOnlyTimeout,
   isAssistantStoryReadIntent,
   isEmptyFreeOnlyTimeoutAnswer,
   lockAssistantStoryAnswer,
@@ -1841,6 +1842,26 @@ ${formatAssistantPageContext(input.pageContext)}`
   const currentCharacterNames = (effectiveProjectId
     ? charactersByProjectId.get(effectiveProjectId) ?? []
     : []).map((row) => row.name);
+  // Live 14:14: 免費 team/site ask still returned empty「免費模型逾時」after
+  // tools (2/2). Team ask already replaces; this door only replaced on story-read.
+  const replaceEmptyNimTimeout = (answer?: string | null, extraFetched = false) =>
+    replaceEmptyFreeTimeoutAfterTools({
+      answer: answer ?? FREE_MODEL_TIMEOUT_MESSAGE,
+      fetchedOk: extraFetched || storyReadAsk || Boolean(currentStoryContent.trim()),
+      storyContent: currentStoryContent,
+      characterNames: currentCharacterNames,
+    }) ?? answerAfterFreeOnlyTimeout({
+      storyReadAsk,
+      fetchedOk: extraFetched || Boolean(currentStoryContent.trim()),
+      storyContent: currentStoryContent,
+      characterNames: currentCharacterNames,
+    });
+  const withoutEmptyNimTimeout = (answer: string, extraFetched = false) => {
+    const replaced = replaceEmptyNimTimeout(answer, extraFetched);
+    if (replaced) return replaced;
+    if (isEmptyFreeOnlyTimeoutAnswer(answer)) return ASSISTANT_ASK_TIMEOUT_MESSAGE;
+    return answer;
+  };
   const currentStoryPointer = currentProjectRef
     ? `本頁「${currentProjectTitle ?? "目前專案"}」${formatTeamInventoryStoryFlag(currentStoryContent)}。完整正文請用 project_detail 讀取；組現況不貼故事全文，也不可把本頁故事套到其他專案。`
     : "";
@@ -2031,12 +2052,11 @@ ${storyReadAsk ? "" : historyBlock}${!storyReadAsk && recentResultBlock ? `${rec
 
     if (outcome.aborted || !outcome.reply) {
       if (assistantAskTimedOut(askDeadline, input.signal)) {
-        const timeoutAnswer = replaceEmptyFreeTimeoutAfterTools({
-          answer: "",
-          fetchedOk: storyReadAsk,
-          storyContent: currentStoryContent,
-          characterNames: currentCharacterNames,
-        }) ?? ASSISTANT_ASK_TIMEOUT_MESSAGE;
+        const timeoutAnswer = withoutEmptyNimTimeout(
+          FREE_MODEL_TIMEOUT_MESSAGE,
+          collectedSteps.length > 0
+            || stream.snapshotSources().some((source) => source.status === "ok"),
+        );
         const settled = settleAssistantAskCompletion({
           answer: lockAssistantStoryAnswer({
             answer: timeoutAnswer,
@@ -2104,14 +2124,12 @@ ${storyReadAsk ? "" : historyBlock}${!storyReadAsk && recentResultBlock ? `${rec
       storyContent: currentStoryContent,
       characterNames: currentCharacterNames,
     });
-    const afterTools = storyReadAsk
-      ? (replaceEmptyFreeTimeoutAfterTools({
-        answer: lockedAnswer,
-        fetchedOk: true,
-        storyContent: currentStoryContent,
-        characterNames: currentCharacterNames,
-      }) ?? lockedAnswer)
-      : lockedAnswer;
+    const afterTools = withoutEmptyNimTimeout(
+      lockedAnswer,
+      collectedSteps.length > 0
+        || outcome.steps.length > 0
+        || okSources.length > 0,
+    );
     const settled = settleAssistantAskCompletion({
       answer: afterTools,
       actions: pendingConfirmation,
@@ -2201,9 +2219,15 @@ ${storyReadAsk ? "" : historyBlock}${!storyReadAsk && recentResultBlock ? `${rec
     }
     // 供應商限制錯誤給人話原因；工具失敗已在 runTeamTool 內折成回饋文字，這裡不會假裝成功。
     // steps 用迴圈外收集的那份：中途炸掉不該讓「查過什麼」從回覆裡消失。
-    const answer = timedOut
-      ? ASSISTANT_ASK_TIMEOUT_MESSAGE
-      : err instanceof LlmServiceError ? err.message : "全站 AI 助手暫時沒回應，請稍後再問一次。";
+    // After tools, never return empty「免費模型逾時」— same SHOTLIST fallback as team ask.
+    const toolsSucceeded = collectedSteps.length > 0
+      || stream.snapshotSources().some((source) => source.status === "ok");
+    const rawFail = timedOut
+      ? FREE_MODEL_TIMEOUT_MESSAGE
+      : err instanceof LlmServiceError
+        ? err.message
+        : "全站 AI 助手暫時沒回應，請稍後再問一次。";
+    const answer = withoutEmptyNimTimeout(rawFail, toolsSucceeded);
     // 卡住的那一步要在軌跡上留下失敗記號，否則畫面會停在「正在查…」永遠轉圈
     if (pendingToolStep) {
       stream.finishStep(pendingToolStep, {

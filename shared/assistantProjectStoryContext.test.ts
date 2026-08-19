@@ -8,6 +8,7 @@ import {
   formatPersistedStoryForAssistant,
   formatTeamInventoryStoryFlag,
   isAssistantStoryReadIntent,
+  isEmptyFreeOnlyTimeoutAnswer,
   lockAssistantStoryAnswer,
   namesFromPersistedStory,
   pickNamedStoryProject,
@@ -145,6 +146,19 @@ describe("assistant persisted story context", () => {
       answer: "免費模型逾時",
       fetchedOk: false,
     })).toBeNull();
+    expect(isEmptyFreeOnlyTimeoutAnswer("免費模型逾時。")).toBe(true);
+    expect(isEmptyFreeOnlyTimeoutAnswer("免費模型逾時，請稍後再試")).toBe(true);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時。",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時，請稍後再試",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(isEmptyFreeOnlyTimeoutAnswer("第 2 鏡生成逾時，請看失敗原因")).toBe(false);
     expect((answer.match(/[。！？]/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 

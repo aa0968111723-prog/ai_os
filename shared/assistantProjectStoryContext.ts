@@ -95,7 +95,11 @@ const FREE_ONLY_EMPTY_TIMEOUT = "免費模型逾時";
 
 export function isEmptyFreeOnlyTimeoutAnswer(answer?: string | null): boolean {
   const text = (answer ?? "").trim();
-  return !text || text === FREE_ONLY_EMPTY_TIMEOUT;
+  if (!text) return true;
+  const stripped = text.replace(/[。．.！!？?\s]+$/u, "").trim();
+  if (stripped === FREE_ONLY_EMPTY_TIMEOUT) return true;
+  // Live 14:14: NIM / fallback sometimes wraps the same empty token.
+  return /^免費模型逾時[，,]\s*請稍後再(?:試|問)(?:一次)?$/u.test(stripped);
 }
 
 /**
