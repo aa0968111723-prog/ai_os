@@ -72,6 +72,11 @@ describe("animation shot writes stay consistent", () => {
     expect(inspector).not.toContain("到專案頁的「② 分鏡」");
   });
 
+  it("Shot Inspector prompt placeholder teaches A–F 白帽T, not 禪堂空景", () => {
+    expect(inspector).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
+    expect(inspector).not.toContain("清晨的禪堂空景");
+  });
+
   it("story autosave serializes in-flight saves and does not baseline from live editor", () => {
     expect(storyStage).toContain("createStorySaveGate");
     expect(storyStage).toContain("dispatchStorySave(live)");

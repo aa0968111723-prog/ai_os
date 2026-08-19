@@ -392,7 +392,7 @@ function FrameTab({
           rows={6}
           defaultValue={shot.prompt ?? ""}
           readOnly={ro}
-          placeholder="例：清晨的禪堂空景，柔和晨光斜射，留白構圖"
+          placeholder="例：淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.prompt ?? "")) saveField({ prompt: e.target.value }); }}
         />
       </Field>
