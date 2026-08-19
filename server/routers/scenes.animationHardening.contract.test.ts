@@ -85,6 +85,7 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("isAssistantStoryReadIntent");
     expect(assistant).toContain("lockAssistantStoryAnswer");
     expect(assistant).toContain("answerAfterFreeOnlyTimeout");
+    expect(assistant).toContain("replaceEmptyFreeTimeoutAfterTools");
     expect(assistant).toContain("isFreeOnlyAskTimeout");
     expect(assistant).toContain("finishFetchedStoryFallback");
     expect(assistant).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");

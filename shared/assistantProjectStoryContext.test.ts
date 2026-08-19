@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_STORY_CONTEXT_BUDGET,
   answerAfterFreeOnlyTimeout,
+  replaceEmptyFreeTimeoutAfterTools,
   buildAssistantProjectStatusContext,
   fallbackReadOnlyStorySummary,
   formatPersistedStoryForAssistant,
@@ -120,6 +121,20 @@ describe("assistant persisted story context", () => {
       storyReadAsk: false,
       fetchedOk: false,
       storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBeNull();
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toContain("小華");
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時",
+      fetchedOk: false,
     })).toBeNull();
   });
 

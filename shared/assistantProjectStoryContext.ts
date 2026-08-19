@@ -65,6 +65,33 @@ export function fallbackReadOnlyStorySummary(input: {
   });
 }
 
+const FREE_ONLY_EMPTY_TIMEOUT = "免費模型逾時";
+
+export function isEmptyFreeOnlyTimeoutAnswer(answer?: string | null): boolean {
+  const text = (answer ?? "").trim();
+  return !text || text === FREE_ONLY_EMPTY_TIMEOUT;
+}
+
+/**
+ * Live: tools already returned 專案全貌／分鏡 (2/2), then NIM died with
+ * empty「免費模型逾時」. Never show that string once tools succeeded.
+ */
+export function replaceEmptyFreeTimeoutAfterTools(input: {
+  answer?: string | null;
+  fetchedOk: boolean;
+  storyContent?: string | null;
+  characterNames?: readonly string[];
+}): string | null {
+  if (!input.fetchedOk) {
+    return isEmptyFreeOnlyTimeoutAnswer(input.answer) ? null : (input.answer ?? "").trim() || null;
+  }
+  if (!isEmptyFreeOnlyTimeoutAnswer(input.answer)) return (input.answer ?? "").trim();
+  return fallbackReadOnlyStorySummary({
+    storyContent: input.storyContent,
+    characterNames: input.characterNames ?? [],
+  });
+}
+
 /** After 專案全貌／分鏡 already returned, a free-only timeout must still answer. */
 export function answerAfterFreeOnlyTimeout(input: {
   storyReadAsk: boolean;

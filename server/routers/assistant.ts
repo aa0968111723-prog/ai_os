@@ -35,7 +35,7 @@ import { assertFreeOnlyCompletion, completeText, FREE_MODEL_TIMEOUT_MESSAGE, Llm
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
 import { settleAssistantAskCompletion, assistantAskCompletionChip, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
-import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, answerAfterFreeOnlyTimeout, isAssistantStoryReadIntent, lockAssistantStoryAnswer } from "../../shared/assistantProjectStoryContext";
+import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, answerAfterFreeOnlyTimeout, isAssistantStoryReadIntent, lockAssistantStoryAnswer, replaceEmptyFreeTimeoutAfterTools } from "../../shared/assistantProjectStoryContext";
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
@@ -1839,6 +1839,16 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           storyContent: storyRow?.content,
           characterNames: characterRows.map((row) => row.name),
         });
+        const toolsSucceeded = fetchedOk
+          || steps.length > 0
+          || stream.snapshotSources().some((s) => s.status === "ok");
+        const afterTools = replaceEmptyFreeTimeoutAfterTools({
+          answer: settled.answer,
+          fetchedOk: toolsSucceeded || storyReadAsk,
+          storyContent: storyRow?.content,
+          characterNames: characterRows.map((row) => row.name),
+        });
+        if (afterTools) settled.answer = afterTools;
         const summary =
           reply.source === "reply" ? "回答與建議動作已整理完成"
           : reply.source === "coerced" ? "已修正模型格式並完成回答"
@@ -1887,13 +1897,21 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         };
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
-        const fetchedAnswer = (assistantAskTimedOut(askDeadline, input.signal) || isFreeOnlyAskTimeout(err))
-          ? answerAfterFreeOnlyTimeout({
+        const toolsSucceeded = fetchedOk
+          || steps.length > 0
+          || stream.snapshotSources().some((s) => s.status === "ok");
+        const fetchedAnswer = (toolsSucceeded || storyReadAsk || assistantAskTimedOut(askDeadline, input.signal) || isFreeOnlyAskTimeout(err))
+          ? (replaceEmptyFreeTimeoutAfterTools({
+            answer: FREE_MODEL_TIMEOUT_MESSAGE,
+            fetchedOk: toolsSucceeded || storyReadAsk,
+            storyContent: storyRow?.content,
+            characterNames: characterRows.map((row) => row.name),
+          }) ?? answerAfterFreeOnlyTimeout({
             storyReadAsk,
             storyContent: storyRow?.content,
             characterNames: characterRows.map((row) => row.name),
-            fetchedOk,
-          })
+            fetchedOk: toolsSucceeded,
+          }))
           : null;
         if (fetchedAnswer) return finishFetchedStoryFallback(fetchedAnswer);
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
