@@ -52,6 +52,7 @@ import {
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
@@ -2135,12 +2136,19 @@ export const assistantRouter = router({
         // 為第 N 鏡生成 dropped costume and 畫面過時. Same fields, visual only.
         const visual = (role ?? "visual") === "visual";
         const cards = resolveSceneCards(scene, null);
+        // generateInto / refine already persist the locked prompt. Assistant
+        // generate already binds this shot's cards / looks / direction, but
+        // still passed a.prompt raw — generations.prompt could keep 年輕男性.
+        const lockedPrompt = lockXiaohuaGenerationPrompt(
+          a.prompt,
+          /小華/.test([scene.title, a.prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+        );
         const gen = await executeGenerationCommand({
           auth: ctx.auth,
           source: "web",
           projectId: project.id,
           modelId: model.id,
-          prompt: a.prompt,
+          prompt: lockedPrompt,
           sceneId: scene.id,
           sceneRole: role ?? undefined,
           ...(visual ? {

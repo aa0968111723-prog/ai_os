@@ -633,6 +633,18 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("resolveHonoredCharacterSheet");
   });
 
+  it("assistant generate locks 小華 prompt before Command persist", () => {
+    const start = assistant.indexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("prompt: a.prompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("refine freezes shotDirection so a later camera change marks the picture stale", () => {
     const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
     expect(refine).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
