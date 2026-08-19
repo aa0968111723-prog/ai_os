@@ -526,6 +526,12 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runReconcile).toContain("export function scheduleReconcileAfterIndependentGenerate");
     expect(generationRetry).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(generationRetry).toContain("shouldReplayIdempotentGeneration(retried.status)");
+    const submit = generationRetry.slice(
+      generationRetry.indexOf("submit: authedProcedure"),
+      generationRetry.indexOf("ablation: authedProcedure"),
+    );
+    expect(submit).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(submit).toContain("shouldReplayIdempotentGeneration(generation.status)");
     expect(mcpRetry).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(mcpRetry).toContain("shouldReplayIdempotentGeneration(newGen.status)");
     const mcpInto = mcpRetry.slice(mcpRetry.indexOf('if (name === "generate_into_scene")'), mcpRetry.indexOf('if (name === "update_worldview")'));

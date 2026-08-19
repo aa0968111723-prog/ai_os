@@ -192,11 +192,12 @@ export function scheduleReconcileAfterVisualAdopt(input: {
 }
 
 /**
- * generateInto / refine / generateVariants / generation.retry / MCP
- * retry_generation / MCP generate_into_scene must clear leftover
- * 0/N「待你過目」when a replayable job lands. First-send throw skips
- * this; 重試 / 修正 / 變體 / MCP 分鏡格生成 used to leave the HUD
- * parked until the 30s poll.
+ * generateInto / refine / generateVariants / generation.submit /
+ * generation.ablation / generation.bench / generation.retry / MCP
+ * retry_generation / MCP generate_into_scene / MCP submit_generation
+ * must clear leftover 0/N「待你過目」when a replayable job lands.
+ * First-send throw skips this; 主路徑生成 / 重試 / 修正 / 變體 / MCP
+ * used to leave the HUD parked until the 30s poll.
  */
 export function scheduleReconcileAfterIndependentGenerate(input: {
   projectId: string;
