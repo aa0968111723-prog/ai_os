@@ -426,19 +426,22 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
-  it("generateInto / generateVariants attach 角色參考圖 via assertReferenceImage(projectId); empty sheet skips", () => {
+  it("generateInto honours 角色卡 生成時帶入 via resolveHonoredCharacterSheet(projectId); 0/6 skips", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
-    expect(into).toContain("sourceAssetId: z.string().uuid().optional()");
-    expect(into).toContain("assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id)");
-    expect(variants).toContain("sourceAssetId: z.string().uuid().optional()");
-    expect(variants).toContain("assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id)");
-    expect(sceneStudio).toContain("生成時帶入角色參考圖");
-    expect(sceneStudio).toContain("studioGenerateCardPayload");
-    expect(sceneStudio).toContain("...studioCardPayload");
+    expect(into).toContain("resolveHonoredCharacterSheet");
+    expect(into).toContain("characterIds: cards.characterIds");
+    expect(into).toContain("explicitSourceAssetId: input.sourceAssetId");
+    expect(variants).toContain("resolveHonoredCharacterSheet");
+    expect(variants).toContain("characterIds: cards.characterIds");
+    expect(sceneStudio).not.toContain("生成時帶入角色參考圖");
+    expect(sceneStudio).toContain("characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined");
+    const cards = readFileSync(join(process.cwd(), "client/src/components/CharacterCards.tsx"), "utf8");
+    expect(cards).toContain("生成時帶入");
+    expect(cards).toContain("生成時勾選，AI 自動帶入外觀");
     const ref = readFileSync(join(process.cwd(), "server/services/referenceAsset.ts"), "utf8");
-    expect(ref).toContain("export async function assertOptionalReferenceImage");
-    expect(ref).toContain("if (!id) return undefined");
+    expect(ref).toContain("export async function resolveHonoredCharacterSheet");
+    expect(ref).toContain("if (!opts.characterIds?.length) return undefined");
     expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 

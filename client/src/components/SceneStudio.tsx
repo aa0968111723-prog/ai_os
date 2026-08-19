@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
-import { defaultStudioBringInIds, studioGenerateCardPayload, type StudioCharacterRef } from "@shared/studioReferenceImage";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { groupVisualVariantBatches, isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion, type SceneVersionRole } from "@shared/sceneVersions";
 import { parseSpeechLines } from "@shared/sceneSpeech";
@@ -173,11 +172,6 @@ export function SceneStudio({
    * 手機上沒有 hover 也沒有修飾鍵，隱式模式在觸控裝置上根本用不了。
    */
   const [annotating, setAnnotating] = useState(false);
-  /**
-   * 單格工作室自己的「生成時帶入」：工作台 0/6 時這裡仍能勾小華。
-   * null＝跟隨預設（工作台勾選，否則本專案角色）。
-   */
-  const [bringInCharacterIds, setBringInCharacterIds] = useState<string[] | null>(null);
   /** 舞台容器：時間碼留言的「點留言 → seek 到 00:18」要找得到舞台上的 video */
   const stageRef = useRef<HTMLDivElement | null>(null);
   /** 把舞台影片跳到某個時間碼並暫停——暫停是刻意的：跳過去是要「看那一格畫面」，不是繼續播 */
@@ -274,32 +268,6 @@ export function SceneStudio({
    * 這一格的標注。includeResolved：已改好的仍要看得到（空心圓點），
    * 否則「處理完了」在畫面上等同「從來沒發生過」，沒人知道那裡曾經被指出過問題。
    */
-  const charactersQ = trpc.characters.list.useQuery({ projectId });
-  const characterRows = useMemo<StudioCharacterRef[]>(
-    () => (charactersQ.data ?? []).map((row) => ({
-      id: row.id,
-      name: row.name,
-      referenceAssetId: row.referenceAssetId,
-      referenceUrl: row.referenceUrl,
-    })),
-    [charactersQ.data],
-  );
-  const selectedBringInIds = useMemo(
-    () => bringInCharacterIds ?? defaultStudioBringInIds(characterRows, charIds),
-    [bringInCharacterIds, characterRows, charIds],
-  );
-  const studioCardPayload = useMemo(
-    () => studioGenerateCardPayload(characterRows, selectedBringInIds),
-    [characterRows, selectedBringInIds],
-  );
-  const toggleBringIn = (id: string) => {
-    setBringInCharacterIds((prev) => {
-      const current = prev ?? defaultStudioBringInIds(characterRows, charIds);
-      if (current.includes(id)) return current.filter((row) => row !== id);
-      if (current.length >= MAX_GENERATE_CHARACTERS) return current;
-      return [...current, id];
-    });
-  };
   const annotationsQ = trpc.messages.listByRef.useQuery(
     { projectId, refType: "scene", refId: sceneId, includeResolved: true },
     { refetchInterval: 30_000 },
@@ -959,7 +927,7 @@ export function SceneStudio({
                               prompt: instruction,
                               sourceAssetId: baseVersion!.assetId!,
                               clientRequestId: refineRequestId.current,
-                              characterIds: studioCardPayload.characterIds,
+                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -1001,52 +969,6 @@ export function SceneStudio({
                     {regenModel && <Meta as="div">{regenModel.strengths}</Meta>}
                     {prompt.trim() === "" && <Hint>先在上面寫這一格的提示詞才能重畫。</Hint>}
                     {promptDirty && <Hint>提示詞還沒儲存——先按「儲存提示詞」，重畫才會用新的。</Hint>}
-                    <fieldset className="studio-bring-in" style={{ border: "1px solid var(--border-soft)", borderRadius: 8, padding: "8px 10px", margin: "10px 0 0" }}>
-                      <legend style={{ fontSize: "var(--fs-12)", padding: "0 4px" }}>生成時帶入角色參考圖</legend>
-                      {characterRows.length === 0 ? (
-                        <Hint>還沒有角色定裝卡——身份只能靠提示詞文字錨點。</Hint>
-                      ) : (
-                        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
-                          {characterRows.map((row) => {
-                            const on = selectedBringInIds.includes(row.id);
-                            const hasSheet = Boolean(row.referenceAssetId && row.referenceUrl);
-                            const selectDisabled = !on && selectedBringInIds.length >= MAX_GENERATE_CHARACTERS;
-                            return (
-                              <li key={row.id}>
-                                <label
-                                  style={{
-                                    fontSize: "var(--fs-12)",
-                                    display: "flex",
-                                    gap: 6,
-                                    alignItems: "flex-start",
-                                    cursor: selectDisabled ? "not-allowed" : "pointer",
-                                    opacity: selectDisabled ? 0.55 : 1,
-                                  }}
-                                  title={selectDisabled ? `最多帶入 ${MAX_GENERATE_CHARACTERS} 個角色` : undefined}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={on}
-                                    disabled={selectDisabled || !canEdit}
-                                    onChange={() => {
-                                      if (selectDisabled) return;
-                                      toggleBringIn(row.id);
-                                    }}
-                                  />
-                                  <span>
-                                    {row.name}
-                                    {hasSheet ? " · 有定裝參考圖" : " · 沒有定裝參考圖，身份只能靠文字錨點"}
-                                  </span>
-                                </label>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                      <Hint style={{ marginTop: 6 }}>
-                        已選 {selectedBringInIds.length}/{MAX_GENERATE_CHARACTERS}。空定裝不會中斷生成，只靠文字錨點。
-                      </Hint>
-                    </fieldset>
                     <div style={{ marginTop: 8 }}>
                       {isGenerating || regen.isPending ? (
                         <Button variant="primary" disabled>生成中…</Button>
@@ -1065,7 +987,7 @@ export function SceneStudio({
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,
-                              ...studioCardPayload,
+                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -1175,7 +1097,7 @@ export function SceneStudio({
                               // 它同時也是越權欄位的第二道濾網（AI 提案／未來的自訂方向都走這裡）。
                               direction: sanitizeDirection(direction),
                             })),
-                            ...studioCardPayload,
+                            characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });

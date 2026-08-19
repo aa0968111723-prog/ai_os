@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 
@@ -33,4 +33,46 @@ export async function assertOptionalReferenceImage(
   if (!id) return undefined;
   await assertReferenceImage(id, groupId, projectId);
   return id;
+}
+
+/**
+ * 角色卡「生成時帶入」：勾選才找定裝圖，assert 同專案後交給 generateInto。
+ * 已選 0/6、勾了但沒有活著的參考圖＝略過（文字錨點／粉橘短髮女孩白帽T），不得 500。
+ * 不從 ensureXiaohua 自動補的 id 找圖——未勾選不得偷偷帶圖。
+ */
+export async function resolveHonoredCharacterSheet(opts: {
+  projectId: string;
+  groupId: string;
+  /** 角色卡勾選／這一鏡自己的綁定，不是自動補的小華 */
+  characterIds?: string[];
+  /** 呼叫端明示的來源；有就只驗這張 */
+  explicitSourceAssetId?: string;
+}): Promise<string | undefined> {
+  const explicit = await assertOptionalReferenceImage(opts.explicitSourceAssetId, opts.groupId, opts.projectId);
+  if (explicit) return explicit;
+  if (!opts.characterIds?.length) return undefined;
+
+  const ids = [...new Set(opts.characterIds)];
+  const rows = await db
+    .select({
+      id: schema.characters.id,
+      referenceAssetId: schema.characters.referenceAssetId,
+    })
+    .from(schema.characters)
+    .innerJoin(
+      schema.assets,
+      and(
+        eq(schema.assets.id, schema.characters.referenceAssetId),
+        eq(schema.assets.projectId, opts.projectId),
+        isNull(schema.assets.deletedAt),
+        eq(schema.assets.kind, "image"),
+      ),
+    )
+    .where(and(eq(schema.characters.projectId, opts.projectId), inArray(schema.characters.id, ids)));
+  const byId = new Map(rows.map((row) => [row.id, row.referenceAssetId]));
+  for (const id of opts.characterIds) {
+    const assetId = byId.get(id);
+    if (assetId) return assertOptionalReferenceImage(assetId, opts.groupId, opts.projectId);
+  }
+  return undefined;
 }

@@ -20,7 +20,6 @@ const setCurrentMutate = vi.fn();
 const invalidate = vi.fn();
 /** 標注清單（預設空；tMs 情境會覆寫） */
 const annotationsQuery = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
-const charactersQuery = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
 
 vi.mock("../api", () => ({
   trpc: {
@@ -37,9 +36,6 @@ vi.mock("../api", () => ({
       generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
       generateAmbience: { useMutation: () => ({ mutate: ambienceMutate, isPending: false, error: null }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
-    },
-    characters: {
-      list: { useQuery: () => charactersQuery() },
     },
     // 圖上標注：本檔專注在版本與生成的狀態機，標注另有專屬情境；這裡回空清單
     messages: {
@@ -98,13 +94,14 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
   };
 }
 
-function mountStudio(over: { canEdit?: boolean } = {}) {
+function mountStudio(over: { canEdit?: boolean; charIds?: string[] } = {}) {
   return render(
     <SceneStudio
       sceneId="s-1"
       projectId="p-1"
       sceneNumber={3}
       canEdit={over.canEdit ?? true}
+      charIds={over.charIds}
       onClose={vi.fn()}
       onChanged={vi.fn()}
     />,
@@ -115,7 +112,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   versionsQuery.mockReturnValue({ data: serverData(), isLoading: false, isError: false, refetch: vi.fn() });
   annotationsQuery.mockReturnValue({ data: [], isLoading: false });
-  charactersQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
 describe("SceneStudio", () => {
@@ -248,53 +244,27 @@ describe("SceneStudio", () => {
     });
   });
 
-  it("重畫這格露出「生成時帶入角色參考圖」，有定裝圖時連 characterIds 與 sourceAssetId 一起送", async () => {
+  it("重畫這格 honours 角色卡 生成時帶入：勾選就送 characterIds，不另開單格 toggle", async () => {
     const user = userEvent.setup();
     const xiaohuaId = "11111111-1111-4111-8111-111111111111";
-    const sheetId = "22222222-2222-4222-8222-222222222222";
-    charactersQuery.mockReturnValue({
-      data: [{
-        id: xiaohuaId,
-        name: "小華",
-        referenceAssetId: sheetId,
-        referenceUrl: "https://example.test/xiaohua-sheet.png",
-      }],
-      isLoading: false,
-    });
-    mountStudio();
+    mountStudio({ charIds: [xiaohuaId] });
     await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
-    expect(screen.getByRole("group", { name: "生成時帶入角色參考圖" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /小華/ })).toBeChecked();
-    expect(screen.getByText(/已選 1\/6/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
-    await user.click(screen.getByRole("button", { name: "確認重畫" }));
-    expect(regenMutate.mock.calls[0]![0]).toMatchObject({
-      sceneId: "s-1",
-      characterIds: [xiaohuaId],
-      sourceAssetId: sheetId,
-    });
-  });
-
-  it("空定裝仍可重畫：送 characterIds、不送 sourceAssetId，不 500", async () => {
-    const user = userEvent.setup();
-    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
-    charactersQuery.mockReturnValue({
-      data: [{
-        id: xiaohuaId,
-        name: "小華",
-        referenceAssetId: null,
-        referenceUrl: null,
-      }],
-      isLoading: false,
-    });
-    mountStudio();
-    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
-    expect(screen.getByRole("checkbox", { name: /小華/ })).toBeChecked();
-    expect(screen.getByText(/沒有定裝參考圖，身份只能靠文字錨點/)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "生成時帶入角色參考圖" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
     await user.click(screen.getByRole("button", { name: "確認重畫" }));
     const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.characterIds).toEqual([xiaohuaId]);
+    expect(arg).not.toHaveProperty("sourceAssetId");
+  });
+
+  it("已選 0/6：重畫不送 characterIds／sourceAssetId，不 500", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg).not.toHaveProperty("characterIds");
     expect(arg).not.toHaveProperty("sourceAssetId");
   });
 

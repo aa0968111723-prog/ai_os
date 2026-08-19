@@ -50,7 +50,7 @@ import {
 } from "../../shared/storyboardScript";
 import { loadSceneCardLookup, sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
-import { assertOptionalReferenceImage } from "../services/referenceAsset";
+import { resolveHonoredCharacterSheet } from "../services/referenceAsset";
 import {
   buildSceneVersions,
   findDuplicateCurrent,
@@ -1561,8 +1561,13 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, prompt, scene.action, scene.dialogue],
       );
-      // 空定裝＝略過，不 500；有圖才 assert 同專案
-      const sourceAssetId = await assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id);
+      // 角色卡「生成時帶入」：只從勾選／本鏡綁定找定裝圖。0/6 或沒有活圖＝略過，不 500。
+      const sourceAssetId = await resolveHonoredCharacterSheet({
+        projectId: project.id,
+        groupId: project.groupId,
+        characterIds: cards.characterIds,
+        explicitSourceAssetId: input.sourceAssetId,
+      });
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -1658,7 +1663,12 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, input.prompt, scene.action, scene.dialogue],
       );
-      const sourceAssetId = await assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id);
+      const sourceAssetId = await resolveHonoredCharacterSheet({
+        projectId: project.id,
+        groupId: project.groupId,
+        characterIds: cards.characterIds,
+        explicitSourceAssetId: input.sourceAssetId,
+      });
       // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
       if (input.parentAssetId) {
         const [parent] = await db
