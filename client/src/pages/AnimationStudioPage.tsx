@@ -5,6 +5,7 @@ import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { AssetImg } from "../components/MediaFallback";
 import { EmptyState, Hint, Meta, Skeleton } from "../components/ui";
+import { studioProjectIdFromLocation } from "@shared/studioDeepLink";
 
 /**
  * 動畫創作室的路由外殼。
@@ -12,15 +13,23 @@ import { EmptyState, Hint, Meta, Skeleton } from "../components/ui";
  * 創作室一定屬於某一個專案（分鏡、素材、點數都掛在專案下），所以：
  * - `/studio` → 先挑專案（進來沒有指定時的落點）
  * - `/studio/:projectId` → 直接進那個專案的創作室
+ * - `/studio?project=<id>` → 同上（live leftover；route 會導到 canonical path）
  *
  * 挑專案這一段刻意留在頁面層而不是塞進創作室裡：創作室已經是三區塊的重版面，
  * 再多一層「還沒選專案」的空狀態會讓它同時要處理兩種完全不同的畫面。
  */
 export function AnimationStudioPage({ groupId, projectId }: { groupId: string; projectId?: string }) {
+  const queryProjectId =
+    projectId ??
+    studioProjectIdFromLocation(
+      typeof window === "undefined" ? "" : window.location.pathname,
+      typeof window === "undefined" ? "" : window.location.search,
+    );
+  const resolvedId = queryProjectId ?? undefined;
   const projects = trpc.projects.list.useQuery({ groupId }, { enabled: !!groupId });
-  const current = projects.data?.find((p) => p.id === projectId);
+  const current = projects.data?.find((p) => p.id === resolvedId);
 
-  if (projectId) {
+  if (resolvedId) {
     if (projects.isLoading) {
       return (
         <div className="page-shell">

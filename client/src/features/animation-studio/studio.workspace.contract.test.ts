@@ -253,13 +253,15 @@ describe("Inspector 不新增資料格式", () => {
     expect(fixed).toMatch(/max-width:\s*min\(240px/);
   });
 
-  it("動畫創作室 deep-link is /studio/:projectId, not ?project=", () => {
+  it("動畫創作室 deep-link is /studio/:projectId and /studio?project= opens that project", () => {
     const routes = readFileSync(resolve(process.cwd(), "client/src/app/AppRoutes.tsx"), "utf8");
     const page = readFileSync(resolve(process.cwd(), "client/src/pages/AnimationStudioPage.tsx"), "utf8");
     expect(routes).toContain('path="/studio/:projectId"');
-    expect(routes).not.toContain("/studio?project=");
+    expect(routes).toContain("studioProjectIdFromLocation");
+    expect(routes).toContain("studioCanonicalPath");
     expect(page).toContain("`/studio/${project.id}`");
-    expect(page).not.toContain("?project=");
+    expect(page).toContain("studioProjectIdFromLocation");
+    expect(page).toContain("resolvedId");
   });
 
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type RefObject } from "react";
 import { useLocation } from "wouter";
+import { studioProjectIdFromLocation } from "@shared/studioDeepLink";
 import { MenuSurface } from "./MenuSurface";
 import { Meta } from "../../components/ui";
 import { publishNewProjectIdea } from "../../lib/newProjectIdea";
@@ -29,13 +30,15 @@ const ProjectAssistant = lazy(() =>
 
 /**
  * Scope 路由（deterministic，GLOBAL_ASSISTANT_PLAN §3.3）：
- * 只認兩種專案路徑（/p/:id、/studio/:projectId）。不靠 LLM、不靠猜——
+ * 只認專案路徑（/p/:id、/studio/:projectId、/studio?project=）。不靠 LLM、不靠猜——
  * route 說你在專案裡，助手就預設聚焦這個專案；chip 可一鍵切回整個組。
  * 伺服器端永遠用 requireGroup／專案查詢重驗，偽造 route 只會看到你本來就有權看的東西。
  */
-export function projectIdFromRoute(path: string): string | null {
+export function projectIdFromRoute(path: string, search?: string): string | null {
   const m = /^\/(?:p|studio)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(path);
-  return m ? m[1] : null;
+  if (m) return m[1];
+  const q = search ?? (typeof window !== "undefined" ? window.location.search : "");
+  return studioProjectIdFromLocation(path, q);
 }
 
 /**

@@ -3,6 +3,7 @@ import { NoGroupGuide } from "../components/NoGroupGuide";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { HomeRoute, ProjectRoute } from "../mobile/PhoneRoute";
+import { studioCanonicalPath, studioProjectIdFromLocation } from "@shared/studioDeepLink";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
 // 避免首屏（作業台、專案頁、登入）揹整個 App 的 JS。具名匯出需轉成 lazy 所需的 default export。
@@ -133,7 +134,14 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/studio/:projectId">
         {(params) => <AnimationStudioPage key={params.projectId} groupId={activeGroupId} projectId={params.projectId} />}
       </Route>
-      <Route path="/studio"><AnimationStudioPage groupId={activeGroupId} /></Route>
+      <Route path="/studio">
+        {() => {
+          // Live leftover `/studio?project=<id>` must open that 動畫創作室, not the picker.
+          const q = studioProjectIdFromLocation("/studio", typeof window === "undefined" ? "" : window.location.search);
+          if (q) return <Redirect to={studioCanonicalPath(q)} />;
+          return <AnimationStudioPage groupId={activeGroupId} />;
+        }}
+      </Route>
       <Route path="/community"><CommunityPage /></Route>
       {/* key=id：從通知、待辦或上一頁／下一頁切換專案時強制重建 ProjectPage。
           否則前一案的提示詞、模型、角色場景勾選與 localStorage 初始化狀態可能殘留到新案。 */}
