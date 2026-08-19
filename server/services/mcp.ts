@@ -42,6 +42,8 @@ import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
 import { advanceGeneration } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "./agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
 import { resolveHonoredCharacterSheet } from "./referenceAsset";
 import { findSceneByDisplayNo } from "../../shared/assistantSceneLookup";
 import { signAssetUrl, signDbFileUrl } from "./storage";
@@ -1669,6 +1671,17 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       } : {}),
       reasonPrefix: "MCP 生成",
     });
+    // generate_into_scene already drops leftover 0/N「待你過目」when a
+    // replayable job lands. submit_generation is the other MCP generate
+    // door and still left the HUD parked until the 30s poll.
+    // Narration / ambience must not attach onto visual agent steps.
+    if (shouldReplayIdempotentGeneration(gen.status)) {
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: project.id,
+        sceneId: (!sceneRole || sceneRole === "visual") ? sceneId : undefined,
+        generationId: gen.id,
+      });
+    }
     // 待核准（達門檻的組員）與已送出兩種終局都據實回報，讓外部客戶端知道要等組長核准
     if (gen.status === "awaiting_approval") {
       return { generationId: gen.id, status: "awaiting_approval", points: gen.pointsEst, note: "已達成本門檻，等組長核准後才會送出扣點" };

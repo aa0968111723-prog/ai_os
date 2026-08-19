@@ -711,6 +711,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
     expect(block).not.toContain("explicitSourceAssetId");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
   });
 
   it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {

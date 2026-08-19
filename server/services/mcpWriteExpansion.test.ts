@@ -54,6 +54,8 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("sceneRole");
     expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
     expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
   });
 
   it("generate_into_scene goes through executeGenerationCommand so a failed first send cannot look like success", () => {
