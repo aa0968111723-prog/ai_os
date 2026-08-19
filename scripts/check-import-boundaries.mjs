@@ -5,7 +5,8 @@
  * Rules:
  *  1. client/** must not import server/**
  *  2. server/routers/** must not import client/**
- *  3. server/services/** must not import server/routers/**
+ *  3. server/services/** production sources must not import server/routers/**
+ *     (pg/unit tests under services may createCaller routers; they are skipped)
  *
  * Pre-existing exceptions are allowlisted (see docs/adr/009-import-boundaries.md).
  * Do not grow the allowlist without updating the ADR.
@@ -45,7 +46,6 @@ const ALLOWLIST = new Set([
   "server/services/agentCore.ts::../routers/knowledge",
   "server/services/agentRunner.ts::../routers/director",
   "server/services/agentRunner.ts::../routers/assistant",
-  "server/services/agentSplitRecovery.pg.test.ts::../routers/director",
   "server/services/messageAssistant.ts::../routers/knowledge",
   "server/services/restApi.ts::../routers/schedule",
 ]);
@@ -114,6 +114,12 @@ function under(relPath, prefix) {
   return relPath === prefix || relPath.startsWith(prefix + "/");
 }
 
+/** Integration tests may createCaller a router. Production services still cannot. */
+function isServiceTestFile(relPath) {
+  return under(relPath, "server/services")
+    && /\.(?:pg\.)?test\.(?:ts|tsx|js|mjs)$/.test(relPath);
+}
+
 function checkFile(absPath, violations) {
   const relSource = toPosix(path.relative(ROOT, absPath));
   const specs = collectImports(absPath);
@@ -178,8 +184,10 @@ function checkFile(absPath, violations) {
       continue;
     }
 
-    // Rule 3: server/services → routers
-    if (under(relSource, "server/services") && targetsRouters) {
+    // Rule 3: server/services → routers (production files only).
+    // pg/unit tests under services/ use createCaller; that is not a runtime
+    // service→router cycle. Do not grow the allowlist for those tests.
+    if (under(relSource, "server/services") && targetsRouters && !isServiceTestFile(relSource)) {
       violations.push({
         rule: "services-must-not-import-routers",
         file: relSource,
