@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoryContextStatusBlock } from "./StoryContextStatusBlock";
+import { revealStoryInlineSection } from "./storyInlineNav";
+
+vi.mock("./storyInlineNav", () => ({
+  revealStoryInlineSection: vi.fn(),
+}));
 
 const pinCanon = vi.fn();
 const generateSheetMutate = vi.fn();
@@ -23,6 +28,12 @@ const scorecard = [
     status: "warning",
     affectedShotIds: ["s1"],
     reason: "1 位角色沒有定裝參考圖——身份一致性只剩文字錨點",
+  },
+  {
+    dimension: "delivery",
+    status: "blocker",
+    affectedShotIds: [] as string[],
+    reason: "還有鏡頭沒有已採用畫面；有鏡頭尚未核准",
   },
 ];
 
@@ -135,5 +146,13 @@ describe("StoryContextStatusBlock", () => {
       expect.anything(),
     );
     expect(JSON.stringify(generateSheetMutate.mock.calls[0]![0])).not.toMatch(/veo/i);
+  });
+
+  it("delivery blocker opens 交付, not 修復鏡頭 or 未分場", () => {
+    render(<StoryContextStatusBlock projectId="p1" canEdit onRepairShots={vi.fn()} />);
+    expect(screen.getByText("交付・擋交付")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打開交付" }));
+    expect(revealStoryInlineSection).toHaveBeenCalledWith("delivery", { projectId: "p1", scroll: true });
   });
 });

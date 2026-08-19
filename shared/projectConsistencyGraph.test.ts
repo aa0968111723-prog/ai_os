@@ -5,6 +5,7 @@ import {
   nextWorkspaceAction,
   scorecardNeedsSetupCta,
   scorecardNeedsSheetCta,
+  scorecardNeedsDeliveryCta,
   visualCoverageScore,
 } from "./projectConsistencyGraph";
 import { inheritContinuityState, referenceRoleConflicts } from "./shotContextPacket";
@@ -137,6 +138,10 @@ describe("consistency scorecard (closure §11)", () => {
     expect(voice?.status).toBe("stale");
     const delivery = rows.find((row) => row.dimension === "delivery");
     expect(delivery?.status).toBe("blocker");
+    expect(delivery?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsDeliveryCta(delivery!)).toBe(true);
+    expect(scorecardNeedsSetupCta(delivery!)).toBe(false);
+    expect(scorecardNeedsSheetCta(delivery!)).toBe(false);
     expect(rows.every((row) => typeof row.reason === "string" && row.reason.length > 0)).toBe(true);
   });
 

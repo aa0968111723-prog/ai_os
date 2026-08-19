@@ -31,6 +31,13 @@ const staleRow: ScorecardRow = {
   reason: "2 鏡因上游變更而過期——只重做這幾鏡即可",
 };
 
+const deliveryRow: ScorecardRow = {
+  dimension: "delivery",
+  status: "blocker",
+  affectedShotIds: [],
+  reason: "還有鏡頭沒有已採用畫面；有鏡頭尚未核准",
+};
+
 describe("StoryScorecardRepair", () => {
   it("style/sound empty-state offers setup, not 修復 0 鏡", () => {
     const onSetupDimension = vi.fn();
@@ -109,6 +116,37 @@ describe("StoryScorecardRepair", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成定裝" }));
     expect(onGenerateSheets).toHaveBeenCalledWith(identityRow);
     expect(onRepairShots).not.toHaveBeenCalled();
+  });
+
+  it("delivery blocker offers 打開交付, not 修復鏡頭", () => {
+    const onRepairShots = vi.fn();
+    const onOpenDelivery = vi.fn();
+    render(
+      <StoryScorecardRepair
+        rows={[deliveryRow]}
+        canEdit
+        onRepairShots={onRepairShots}
+        onOpenDelivery={onOpenDelivery}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打開交付" }));
+    expect(onOpenDelivery).toHaveBeenCalledTimes(1);
+    expect(onRepairShots).not.toHaveBeenCalled();
+  });
+
+  it("read-only members can still open delivery from the blocker chip", () => {
+    const onOpenDelivery = vi.fn();
+    render(
+      <StoryScorecardRepair
+        rows={[deliveryRow]}
+        canEdit={false}
+        onRepairShots={vi.fn()}
+        onOpenDelivery={onOpenDelivery}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打開交付" }));
+    expect(onOpenDelivery).toHaveBeenCalledTimes(1);
   });
 
   it("repair CTA still fires for stale shots", () => {

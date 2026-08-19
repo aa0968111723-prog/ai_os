@@ -9,10 +9,16 @@
  *
  * 風格／聲音世界未 pin 是專案級訊號（affectedShotIds 空）——不能假裝修復鏡，
  * 要給「固定目前畫風／設定聲音世界」去真的 pin project canon。
+ * 交付擋交付也是專案級（affectedShotIds 空）——打開交付，不重生鏡頭。
  */
 import { useState } from "react";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
-import { scorecardNeedsSetupCta, scorecardNeedsSheetCta, type ScorecardRow } from "@shared/projectConsistencyGraph";
+import {
+  scorecardNeedsDeliveryCta,
+  scorecardNeedsSetupCta,
+  scorecardNeedsSheetCta,
+  type ScorecardRow,
+} from "@shared/projectConsistencyGraph";
 
 const STATUS_LABELS: Record<ScorecardRow["status"], string> = {
   ok: "正常",
@@ -47,6 +53,7 @@ export function StoryScorecardRepair({
   onRepairShots,
   onSetupDimension,
   onGenerateSheets,
+  onOpenDelivery,
   hasWorldviewStyles = false,
   suggestedSound,
 }: {
@@ -61,6 +68,8 @@ export function StoryScorecardRepair({
   onSetupDimension?: (row: ScorecardRow, draft?: { ambience?: string; music?: string }) => void;
   /** 人物沒有定裝參考圖：走便宜生圖，不重做鏡頭。 */
   onGenerateSheets?: (row: ScorecardRow) => void;
+  /** 交付擋交付：打開交付（補畫面／核准），不是重生鏡頭、也不是未分場。 */
+  onOpenDelivery?: () => void;
   /** 世界觀已有 styles 才能一鍵 pin；否則 CTA 帶去選畫風。 */
   hasWorldviewStyles?: boolean;
   /** 各鏡已寫的環境音／配樂——有就能一鍵固定聲音世界。 */
@@ -71,6 +80,7 @@ export function StoryScorecardRepair({
   if (!rows.length) return null;
   const hasSetup = rows.some(scorecardNeedsSetupCta);
   const hasSheet = rows.some(scorecardNeedsSheetCta);
+  const hasDelivery = rows.some(scorecardNeedsDeliveryCta);
   return (
     <div className="story-scorecard" data-fb="一致性修復">
       {rows.map((row) => (
@@ -89,6 +99,16 @@ export function StoryScorecardRepair({
               onClick={() => onRepairShots(row)}
             >
               修復 {row.affectedShotIds.length} 鏡
+            </Button>
+          )}
+          {onOpenDelivery && scorecardNeedsDeliveryCta(row) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={onOpenDelivery}
+            >
+              打開交付
             </Button>
           )}
           {canEdit && onGenerateSheets && scorecardNeedsSheetCta(row) && (
@@ -145,11 +165,13 @@ export function StoryScorecardRepair({
         </div>
       ))}
       <Hint as="p" className="story-scorecard__hint">
-        {hasSheet
-          ? "沒有定裝參考圖時，先生成定裝；修復只重做受影響的鏡，新結果會先當候選。"
-          : hasSetup
-            ? "風格與聲音還沒固定時，先設定；修復只重做受影響的鏡，新結果會先當候選。"
-            : "修復只重做受影響的鏡；新結果會先當候選，由你比較後採用。"}
+        {hasDelivery
+          ? "擋交付要到「交付」處理：補畫面、核准、再打包。修復只重做受影響的鏡，新結果會先當候選。"
+          : hasSheet
+            ? "沒有定裝參考圖時，先生成定裝；修復只重做受影響的鏡，新結果會先當候選。"
+            : hasSetup
+              ? "風格與聲音還沒固定時，先設定；修復只重做受影響的鏡，新結果會先當候選。"
+              : "修復只重做受影響的鏡；新結果會先當候選，由你比較後採用。"}
       </Hint>
     </div>
   );

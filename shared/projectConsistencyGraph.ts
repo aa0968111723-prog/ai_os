@@ -137,6 +137,14 @@ export function scorecardNeedsSheetCta(row: ScorecardRow): boolean {
 }
 
 /**
+ * 「交付・擋交付」是專案級訊號（affectedShotIds 空）——不能走「修復 N 鏡」，
+ * 也不能假裝未分場。真路是打開交付：補畫面、核准、再打包。
+ */
+export function scorecardNeedsDeliveryCta(row: ScorecardRow): boolean {
+  return row.dimension === "delivery" && row.status === "blocker";
+}
+
+/**
  * 純建構器：所有輸入都是 server 已載入的既有 records 推導值。
  * 規則：每維度最多一列最重狀態（blocker > unresolved > stale > capability_downgrade > warning > ok）；
  * ok 的維度不出列（第一層只講需要人看的事）。
