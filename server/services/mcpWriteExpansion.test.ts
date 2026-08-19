@@ -64,7 +64,7 @@ describe("MCP write honesty helpers", () => {
 
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
-    expect(source).toContain('import { assertReferenceImage } from "./referenceAsset"');
+    expect(source).toContain('import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset"');
     expect(source.match(/await assertReferenceImage\(/g)?.length).toBeGreaterThanOrEqual(6);
     expect(source).toContain("project.groupId, project.id");
     expect(source).toContain("row.groupId, row.projectId");
