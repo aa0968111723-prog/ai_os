@@ -650,6 +650,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(stage).toContain('input.stage === "keyframe_generation"');
     expect(stage).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
     expect(stage).toContain(": input.sourceAssetId");
+    expect(stage).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(stage).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(stage).toContain("sceneId: shot.id");
   });
 
   it("MCP generate_into and animationPipeline lock 小華 prompt before persist", () => {

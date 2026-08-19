@@ -13,6 +13,8 @@ import {
   type AnimationRepairPlan,
 } from "../../shared/animationPipeline";
 import { executeGenerationCommand } from "./generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "./agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
 import { buildShotContextPrompt } from "./shotContextPrompt";
 import { ensureXiaohuaCharacterIds } from "./cardAnchors";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
@@ -163,6 +165,16 @@ export async function executeAnimationGenerationStage(input: {
     preserveScenePointer: true,
     reasonPrefix: input.stage === "keyframe_generation" ? "動畫關鍵影格" : "動畫影片",
   });
+  // generateInto already drops leftover 0/N「待你過目」when a replayable
+  // job lands. 動畫關鍵影格 / 動畫影片 still left the HUD parked until
+  // the 30s poll. Candidate-only: reconcile marks steps 待你採用, not done.
+  if (shouldReplayIdempotentGeneration(generation.status)) {
+    scheduleReconcileAfterIndependentGenerate({
+      projectId: project.id,
+      sceneId: shot.id,
+      generationId: generation.id,
+    });
+  }
   return {
     generationId: generation.id,
     status: generation.status,
