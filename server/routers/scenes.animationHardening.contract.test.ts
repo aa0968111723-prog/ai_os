@@ -561,7 +561,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("sceneFillRole");
     expect(block).toContain("resolveSceneCards(shot, null)");
     expect(block).toContain("lookIds = shot.lookIds ?? undefined");
-    expect(block).toContain("shotDirection: { camera: shot.camera, performance: shot.performance, action: shot.action }");
+    expect(block).toContain("shotDirection = { camera: shot.camera, performance: shot.performance, action: shot.action }");
     expect(block).toContain("sceneRole");
     expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
   });
