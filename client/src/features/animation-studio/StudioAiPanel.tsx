@@ -223,6 +223,7 @@ export function StudioAiPanel({
         prompt: (sketchPrompt.trim() || shot.prompt || "完成這個分鏡畫面").slice(0, 8_000),
         mode: whiteboardMode,
         sourceAssetId: upload.asset.id,
+        sceneId: shot.id,
         characterIds: undefined,
         scenePresetIds: undefined,
         propIds: undefined,

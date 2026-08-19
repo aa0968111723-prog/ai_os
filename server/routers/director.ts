@@ -20,6 +20,7 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
 import { lockXiaohuaCopyFields } from "../../shared/characterIdentityLock";
+import { resolveSceneCards } from "../../shared/sceneCards";
 import {
   expandSketch,
   sketchBoardStateBlock,
@@ -559,6 +560,31 @@ export const directorRouter = router({
         "User brief:",
         input.prompt.trim(),
       ].join("\n\n");
+      // Studio 「生成正式畫面」 is shot-scoped (button disabled without a shot)
+      // but used to send only projectId. sceneId already exists on this input —
+      // load this shot and bind cards / looks / frozen direction the same way
+      // generateInto and assistant visual generate do. No honor-sheet / Xiaohua
+      // ensure / shot-context rewrite: those doors stay on their own leftovers.
+      const [scene] = input.sceneId
+        ? await db
+            .select()
+            .from(schema.scenes)
+            .where(and(
+              eq(schema.scenes.id, input.sceneId),
+              eq(schema.scenes.projectId, input.projectId),
+              isNull(schema.scenes.deletedAt),
+            ))
+        : [];
+      if (input.sceneId && !scene) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個分鏡" });
+      }
+      const cards = scene
+        ? resolveSceneCards(scene, {
+            characterIds: input.characterIds,
+            scenePresetIds: input.scenePresetIds,
+            propIds: input.propIds,
+          })
+        : null;
       const generation = await executeGenerationCommand({
         auth: ctx.auth,
         source: "web",
@@ -569,9 +595,13 @@ export const directorRouter = router({
         sourceAssetId: input.sourceAssetId,
         sceneId: input.sceneId,
         sceneRole: "visual",
-        characterIds: input.characterIds,
-        scenePresetIds: input.scenePresetIds,
-        propIds: input.propIds,
+        characterIds: cards?.characterIds ?? input.characterIds,
+        scenePresetIds: cards?.scenePresetIds ?? input.scenePresetIds,
+        propIds: cards?.propIds ?? input.propIds,
+        lookIds: scene?.lookIds ?? undefined,
+        shotDirection: scene
+          ? { camera: scene.camera, performance: scene.performance, action: scene.action }
+          : undefined,
         continuityMode: input.continuityMode,
         reasonPrefix: `白板 AI 繪畫（${input.mode}）`,
       });

@@ -665,6 +665,22 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 
+  it("studio generateWhiteboardImage with sceneId binds this shot's cards / looks / shotDirection", () => {
+    const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
+    const block = director.slice(director.indexOf("generateWhiteboardImage:"), director.indexOf("suggest:"));
+    expect(block).toContain("resolveSceneCards(scene,");
+    expect(block).toContain("lookIds: scene?.lookIds ?? undefined");
+    expect(block).toContain("shotDirection: scene");
+    expect(block).toContain("{ camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(block).toContain("characterIds: cards?.characterIds ?? input.characterIds");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
+    expect(block).not.toContain("buildShotContextPrompt");
+    const panel = readFileSync(join(process.cwd(), "client/src/features/animation-studio/StudioAiPanel.tsx"), "utf8");
+    const send = panel.slice(panel.indexOf("generateFinishedWhiteboardImage"), panel.indexOf("generatedImageUrl"));
+    expect(send).toContain("sceneId: shot.id");
+  });
+
   it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {
     expect(sceneList).toContain("enqueueInsertAfter");
     expect(sceneList).toContain("shouldApplySceneWriteAck");
