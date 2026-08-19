@@ -547,11 +547,13 @@ describe("#790 overnight pins (do not reopen)", () => {
     const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
     expect(into).toContain("lockXiaohuaGenerationPrompt");
     expect(into).toContain('? ["小華"]');
+    expect(into).toContain("prompt: lockedPrompt.slice(0, MAX_PROMPT)");
     expect(into).not.toContain("rewritePersistedXiaohuaShotCopy");
     const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
     const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
     expect(stage).toContain("lockXiaohuaGenerationPrompt");
     expect(stage).toContain('? ["小華"]');
+    expect(stage).toContain("prompt: lockedPrompt");
     expect(stage).not.toContain("rewritePersistedXiaohuaShotCopy");
   });
 

@@ -693,23 +693,23 @@ export async function runMcpWriteExpansion(
     const model = getModel(modelId);
     const rejection = regenRejection(model);
     if (rejection) throw new TRPCError({ code: "BAD_REQUEST", message: rejection });
-    const rawPrompt = (typeof args.prompt === "string" && args.prompt.trim()
+    const prompt = (typeof args.prompt === "string" && args.prompt.trim()
       ? args.prompt
       : await buildShotContextPrompt(scene, model)).trim();
-    if (!rawPrompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
+    if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
     await assertNoPendingVisual(scene.id);
     const cards = resolveSceneCards(scene, null);
     // Same 小華 card bind as generateInto: shot names 小華 but characterIds omitted her.
     const characterIds = await ensureXiaohuaCharacterIds(
       scene.projectId,
       cards.characterIds,
-      [scene.title, rawPrompt, scene.action, scene.dialogue],
+      [scene.title, prompt, scene.action, scene.dialogue],
     );
     // generateInto locks before Command so generations.prompt cannot keep 年輕男性.
     // generationCore re-locks for the provider but persists input.prompt verbatim.
-    const prompt = lockXiaohuaGenerationPrompt(
-      rawPrompt,
-      /小華/.test([scene.title, rawPrompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+    const lockedPrompt = lockXiaohuaGenerationPrompt(
+      prompt,
+      /小華/.test([scene.title, prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
     );
     // Same 角色卡「生成時帶入」as generateInto: 0/6 or no live sheet = skip, no 500.
     const sourceAssetId = await resolveHonoredCharacterSheet({
@@ -723,7 +723,7 @@ export async function runMcpWriteExpansion(
       id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       projectId: scene.projectId,
       modelId,
-      prompt: prompt.slice(0, MAX_PROMPT),
+      prompt: lockedPrompt.slice(0, MAX_PROMPT),
       sceneId: scene.id,
       characterIds,
       scenePresetIds: cards.scenePresetIds,
