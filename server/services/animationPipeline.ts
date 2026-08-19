@@ -13,6 +13,7 @@ import {
   type AnimationRepairPlan,
 } from "../../shared/animationPipeline";
 import { executeGenerationCommand } from "./generationCommand";
+import { buildShotContextPrompt } from "./shotContextPrompt";
 
 function evaluationRecommendation(
   result: typeof schema.generationConsistencyEvaluations.$inferSelect["result"] | null,
@@ -117,7 +118,7 @@ export async function executeAnimationGenerationStage(input: {
   if (input.stage === "video_generation" && !capabilityForModel(model).imageToVideo) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "影片階段必須使用支援 image-to-video 的模型" });
   }
-  const prompt = input.prompt?.trim() || shot.prompt?.trim();
+  const prompt = input.prompt?.trim() || (await buildShotContextPrompt(shot, model)).trim();
   if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡還沒有生成提示詞" });
 
   const generation = await executeGenerationCommand({

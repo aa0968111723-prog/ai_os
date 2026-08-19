@@ -555,6 +555,19 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("MCP generate_into and animationPipeline reuse buildShotContextPrompt, not raw prompt/title", () => {
+    expect(scenes).toContain('import { buildShotContextPrompt } from "../services/shotContextPrompt"');
+    expect(scenes).not.toContain("async function buildShotContextPrompt(");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("buildShotContextPrompt(scene, model)");
+    expect(into).not.toContain("scene.prompt ?? scene.title");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("buildShotContextPrompt(shot, model)");
+    expect(stage).not.toContain("shot.prompt?.trim()");
+  });
+
   it("generateInto honours 角色卡 生成時帶入 via resolveHonoredCharacterSheet(projectId); 0/6 skips", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));

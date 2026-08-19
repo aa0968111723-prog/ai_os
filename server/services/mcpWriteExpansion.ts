@@ -32,6 +32,8 @@ import { adoptGenerationCurrent } from "./consistencyAdopt";
 import { refreshShotContextStalenessSafely } from "./shotContextPackets";
 import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "./revisionGuard";
+import { getModel } from "../../shared/models";
+import { buildShotContextPrompt } from "./shotContextPrompt";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -684,9 +686,10 @@ export async function runMcpWriteExpansion(
     if (!genProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, genProject.groupId);
     await assertProjectEditable(auth, genProject);
+    const model = getModel(modelId);
     const prompt = (typeof args.prompt === "string" && args.prompt.trim()
       ? args.prompt
-      : scene.prompt ?? scene.title ?? "").trim();
+      : await buildShotContextPrompt(scene, model)).trim();
     if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
     const cards = resolveSceneCards(scene, null);
     // Same 角色卡「生成時帶入」as generateInto: 0/6 or no live sheet = skip, no 500.

@@ -56,12 +56,12 @@ import {
   buildSceneVersions,
   findDuplicateCurrent,
   isSceneRefineModel,
-  sceneVisualPrompt,
   isSceneRegenModel,
   summarizeSceneVersions,
   type SceneExternalAsset,
   type SceneVersionGenerationRow,
 } from "../../shared/sceneVersions";
+import { buildShotContextPrompt } from "../services/shotContextPrompt";
 import { lockSceneOrder } from "../services/locks";
 import { restoreOrderPlan } from "../../shared/sceneRestoreOrder";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
@@ -70,8 +70,6 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { softDeleteScenesCore } from "../services/sceneWriteCore";
 import { MAX_PROMPT_CHARS } from "./prompts";
 import {
-  formatEnvironmentState,
-  formatShotDirection,
   shotCameraSchema,
   shotPerformanceSchema,
 } from "../../shared/story";
@@ -290,36 +288,6 @@ export function cardPatchFromScript(
     patch[column] = outcome.ids.length ? outcome.ids : null;
   }
   return patch;
-}
-
-/**
- * Shot Context Builder（PE 計畫 §11）：把「這一鏡獨有」的上下文疊到畫面描述上。
- * 組裝順序＝繼承順序：Scene State（所屬場的天氣/時間/氛圍）→ 鏡頭語言 → 表演 → 造型鎖定。
- * Project 風格（worldview）與角色/場景/道具錨點不在這裡——generationCore 既有機制會注入，
- * 這裡重複加只會把提示詞灌爆（Cost Control guardrail）。
- */
-async function buildShotContextPrompt(
-  scene: typeof schema.scenes.$inferSelect,
-  model: Parameters<typeof sceneVisualPrompt>[1],
-): Promise<string> {
-  const base = sceneVisualPrompt(scene, model);
-  if (!base.trim()) return base;
-  const parts: string[] = [base];
-
-  if (scene.storySceneId) {
-    const [storyScene] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, scene.storySceneId));
-    const envText = storyScene ? formatEnvironmentState(storyScene.environment) : "";
-    if (envText) parts.push(`[場景狀態] ${envText}`);
-  }
-
-  const direction = formatShotDirection(scene.camera, scene.performance);
-  if (direction) parts.push(`[鏡頭語言] ${direction}`);
-
-  // 造型（Look）不在這裡注入：它已經提到 generationCore 的錨點層，
-  // 與角色身份併成同一句「外觀鎖定 安倢：…，造型鎖定：米白外套」（見 cardAnchors.formatCharacterAnchor）。
-  // 在這裡再寫一次會變成同一件衣服講兩遍，對擴散模型是雜訊不是加強。
-
-  return parts.join("\n\n");
 }
 
 /** 分鏡：簡易排序（↑↓）＋從生成成品加入（定案：不做拖曳時間軸） */
