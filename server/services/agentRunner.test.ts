@@ -57,6 +57,9 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toContain("characterIds: step.characterIds");
     expect(source).toContain("scenePresetIds: step.scenePresetIds");
     expect(source).toContain("lookIds: step.lookIds");
+    expect(source).toContain("shotDirection");
+    expect(source.match(/shotDirection,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("step.shotDirection ??");
     expect(source).toContain("sourceAssetId: step.sourceAssetId");
     expect(source).toContain("sourceUrl: step.sourceUrl");
     expect(source).toContain("executeGenerationCommand({");

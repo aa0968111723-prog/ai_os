@@ -665,6 +665,16 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 
+  it("batchGenerate / agent generate freeze shotDirection so 補完 N 鏡 marks 畫面過時", () => {
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner).toContain("shotDirection?: ContinuityShotDirection");
+    expect(runner.match(/shotDirection,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("step.shotDirection ??");
+    expect(runner).toContain("{ camera: scene.camera, performance: scene.performance, action: scene.action }");
+  });
+
   it("studio generateWhiteboardImage with sceneId binds this shot's cards / looks / shotDirection", () => {
     const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
     const block = director.slice(director.indexOf("generateWhiteboardImage:"), director.indexOf("suggest:"));

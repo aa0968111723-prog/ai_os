@@ -17,6 +17,7 @@ import { pushToUsers } from "./webPush";
 import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import type { ContinuityShotDirection } from "../../shared/continuity";
 import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -157,6 +158,12 @@ export interface AgentStep {
   propIds?: string[];
   /** 本鏡造型（character_looks.id）。generateInto / refine 都有帶；批次補完漏了會換掉衣服。 */
   lookIds?: string[];
+  /**
+   * Frozen camera / performance / action at batch or execute time.
+   * generateInto / refine already freeze this so 中景→特寫 marks 畫面過時;
+   * 補完 N 鏡 / planner generate used to omit it.
+   */
+  shotDirection?: ContinuityShotDirection;
   /** Frozen packet from batchGenerate. Approval resume must reuse this ID. */
   shotContextPacketId?: string;
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
@@ -999,6 +1006,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
 
     let sceneId: string | undefined;
     let sceneRole: "visual" | "narration" | "ambience" | undefined;
+    let shotDirection = step.shotDirection;
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) {
@@ -1017,6 +1025,13 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       }
       sceneId = scene.id;
       sceneRole = role;
+      if (role === "visual") {
+        shotDirection = step.shotDirection ?? {
+          camera: scene.camera,
+          performance: scene.performance,
+          action: scene.action,
+        };
+      }
     }
 
     const [fresh] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
@@ -1068,6 +1083,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         scenePresetIds: step.scenePresetIds,
         propIds: step.propIds,
         lookIds: step.lookIds,
+        shotDirection,
         sourceAssetId: step.sourceAssetId,
         sourceUrl: step.sourceUrl,
         shotContextPacketId: step.shotContextPacketId,
@@ -2071,6 +2087,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let prompt: string;
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
+  let shotDirection = step.shotDirection;
   let stepVoiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
@@ -2136,6 +2153,13 @@ async function advanceRun(run: RunRow): Promise<void> {
       }
       sceneId = scene.id;
       sceneRole = role;
+      if (role === "visual") {
+        shotDirection = step.shotDirection ?? {
+          camera: scene.camera,
+          performance: scene.performance,
+          action: scene.action,
+        };
+      }
     }
     modelId = model.id;
     prompt = step.prompt;
@@ -2223,6 +2247,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       scenePresetIds: step.scenePresetIds,
       propIds: step.propIds,
       lookIds: step.lookIds,
+      shotDirection,
       sourceAssetId: step.sourceAssetId,
       sourceUrl: step.sourceUrl,
       shotContextPacketId: step.shotContextPacketId,

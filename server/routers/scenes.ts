@@ -1107,6 +1107,7 @@ export const scenesRouter = router({
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
           lookIds: scene.lookIds ?? undefined,
+          shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
           ...(sourceAssetId ? { sourceAssetId } : {}),
           shotContextPacketId: packetId,
         });

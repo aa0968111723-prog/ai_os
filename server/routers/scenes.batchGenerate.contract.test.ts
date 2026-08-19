@@ -8,6 +8,7 @@ describe("scenes.batchGenerate charge-safety contract", () => {
   it("batchGenerate steps keep this shot's lookIds so 補完 N 鏡 does not drop costume", () => {
     const batch = src.slice(src.indexOf("batchGenerate: authedProcedure"), src.indexOf("update: authedProcedure"));
     expect(batch).toContain("lookIds: scene.lookIds ?? undefined");
+    expect(batch).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
     expect(batch).toContain("ensureXiaohuaCharacterIds");
     expect(batch).toContain("characterIds: cards.characterIds");
     expect(batch).toContain("characterIds,");
