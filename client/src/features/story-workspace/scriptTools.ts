@@ -346,7 +346,6 @@ export type ScriptAction =
   | { type: "mark"; kind: MarkKind }
   | { type: "toggleImmersive" }
   | { type: "exitImmersive" }
-  | { type: "toggleFind" }
   | { type: "toggleOutline" };
 
 export interface ScriptKeyEvent {
@@ -386,7 +385,9 @@ export function resolveScriptShortcut(event: ScriptKeyEvent): ScriptAction | nul
   if (event.key === "Escape") return { type: "exitImmersive" };
   if (!mod) return null;
   const key = event.key.toLowerCase();
-  if (key === "f") return event.shiftKey ? { type: "toggleImmersive" } : { type: "toggleFind" };
+  // Ctrl/⌘+F is browser find. Stealing it opened 尋找／取代 and
+  // preventDefault'd the page search — live leftover on /p story.
+  if (key === "f") return event.shiftKey ? { type: "toggleImmersive" } : null;
   if (key === "o" && event.shiftKey) return { type: "toggleOutline" };
   return null;
 }
@@ -394,7 +395,6 @@ export function resolveScriptShortcut(event: ScriptKeyEvent): ScriptAction | nul
 export const SCRIPT_SHORTCUT_HINTS: Array<{ keys: string; what: string }> = [
   { keys: "Ctrl/⌘ + Shift + F", what: "全螢幕寫作" },
   { keys: "Esc", what: "離開全螢幕" },
-  { keys: "Ctrl/⌘ + F", what: "尋找／取代" },
   { keys: "Ctrl/⌘ + Shift + O", what: "大綱" },
   { keys: "Alt + 1～9", what: "角色／場景／道具／造型／對白／旁白／動作／轉場／註記" },
 ];

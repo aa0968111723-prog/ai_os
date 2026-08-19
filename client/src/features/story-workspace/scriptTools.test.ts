@@ -15,6 +15,7 @@ import {
   replaceAll,
   resolveScriptShortcut,
   SCRIPT_MARKS,
+  SCRIPT_SHORTCUT_HINTS,
   scriptOutline,
   scriptStats,
 } from "./scriptTools";
@@ -182,11 +183,17 @@ describe("resolveScriptShortcut", () => {
     expect(resolveScriptShortcut({ key: "a", shiftKey: true })).toBeNull();
   });
 
-  it("⌘F 尋找、⌘⇧F 全螢幕、⌘⇧O 大綱、Esc 離開", () => {
-    expect(resolveScriptShortcut({ key: "f", metaKey: true })).toEqual({ type: "toggleFind" });
+  it("⌘⇧F 全螢幕、⌘⇧O 大綱、Esc 離開；Ctrl/⌘+F 不攔（留給瀏覽器尋找）", () => {
+    expect(resolveScriptShortcut({ key: "f", metaKey: true })).toBeNull();
+    expect(resolveScriptShortcut({ key: "f", ctrlKey: true })).toBeNull();
     expect(resolveScriptShortcut({ key: "F", ctrlKey: true, shiftKey: true })).toEqual({ type: "toggleImmersive" });
     expect(resolveScriptShortcut({ key: "o", metaKey: true, shiftKey: true })).toEqual({ type: "toggleOutline" });
     expect(resolveScriptShortcut({ key: "Escape" })).toEqual({ type: "exitImmersive" });
+  });
+
+  it("SCRIPT_SHORTCUT_HINTS never claims Ctrl/⌘+F for 尋找／取代", () => {
+    expect(SCRIPT_SHORTCUT_HINTS.some((h) => /尋找/.test(h.what))).toBe(false);
+    expect(SCRIPT_SHORTCUT_HINTS.some((h) => h.keys === "Ctrl/⌘ + F")).toBe(false);
   });
 
   it("Alt 搭 Ctrl/⌘ 不算標注（避免搶走系統快捷鍵）", () => {

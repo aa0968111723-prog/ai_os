@@ -52,6 +52,15 @@ describe("ScriptEditor", () => {
     expect(editor().selectionStart).toBe("清晨下著雨。\n\n".length);
   });
 
+  it("Ctrl+F 不打開尋找列、也不 preventDefault（瀏覽器尋找要出得來）", () => {
+    const { container } = render(<Harness initial="小華走進淡大校門口。" />);
+    const host = container.querySelector(".script-editor");
+    expect(host).toBeTruthy();
+    const allowed = fireEvent.keyDown(host!, { key: "f", ctrlKey: true });
+    expect(allowed).toBe(true);
+    expect(screen.queryByLabelText("尋找")).toBeNull();
+  });
+
   it("尋找／取代改得掉主角名字，但不動註記行", async () => {
     const user = userEvent.setup();
     render(<Harness initial={"安倢走了。\n註：安倢原本叫小美\n安倢回頭。"} />);
