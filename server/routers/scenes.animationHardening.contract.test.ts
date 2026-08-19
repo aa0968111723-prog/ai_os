@@ -634,7 +634,7 @@ describe("#790 overnight pins (do not reopen)", () => {
   });
 
   it("assistant generate locks 小華 prompt before Command persist", () => {
-    const start = assistant.indexOf('if (a.type === "generate")');
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
     const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
     expect(block).toContain("lockXiaohuaGenerationPrompt");
     expect(block).toContain('? ["小華"]');
