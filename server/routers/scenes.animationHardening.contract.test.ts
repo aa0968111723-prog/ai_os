@@ -67,6 +67,11 @@ describe("animation shot writes stay consistent", () => {
     expect(inspector).toContain("sceneId: boundSceneId");
   });
 
+  it("Shot Inspector 未分場 points at the 分鏡 chip, not TocNav「② 分鏡」", () => {
+    expect(inspector).toContain("到專案頁打開「分鏡」可以把這一鏡歸到某一場");
+    expect(inspector).not.toContain("到專案頁的「② 分鏡」");
+  });
+
   it("story autosave serializes in-flight saves and does not baseline from live editor", () => {
     expect(storyStage).toContain("createStorySaveGate");
     expect(storyStage).toContain("dispatchStorySave(live)");

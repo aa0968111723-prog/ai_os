@@ -379,7 +379,9 @@ function FrameTab({
           </output>
         ) : (
           <output className="studio-fields__readonly studio-fields__readonly--muted">
-            未分場——到專案頁的「② 分鏡」可以把這一鏡歸到某一場
+            {/* Live leftover: /studio 未分場 still sent people to the old four-stage
+                TocNav item. ProjectPage no longer mounts that nav — the chip is「分鏡」。 */}
+            未分場——到專案頁打開「分鏡」可以把這一鏡歸到某一場
           </output>
         )}
       </Field>

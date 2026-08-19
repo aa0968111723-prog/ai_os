@@ -163,6 +163,12 @@ describe("面板降級（1280 也要能用）", () => {
     expect(inspector).toContain("is-collapsed");
     expect(inspector).toContain("展開 Shot Inspector");
   });
+
+  it("未分場 points at the project-page 分鏡 chip, not TocNav「② 分鏡」", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("到專案頁打開「分鏡」可以把這一鏡歸到某一場");
+    expect(inspector).not.toContain("到專案頁的「② 分鏡」");
+  });
 });
 
 describe("既有能力沒有被 UI 重構弄丟", () => {
