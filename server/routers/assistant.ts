@@ -51,6 +51,7 @@ import {
 } from "../services/assistantAskBudget";
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
+import { resolveSceneCards } from "../../shared/sceneCards";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
@@ -2133,26 +2134,36 @@ export const assistantRouter = router({
             message: "請指定要生成的分鏡（第 N 鏡）。沒有綁分鏡的生成只會進素材庫，專案頁看起來像沒反應。",
           });
         }
-        if (a.sceneId) {
-          const [scene] = await db
-            .select({ id: schema.scenes.id })
-            .from(schema.scenes)
-            .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-          if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
-        }
+        const [scene] = await db
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
         // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）。
         // sceneRole 依模型類別決定：視覺（圖/影）→主畫面、旁白語音→旁白音檔、音效/配樂→環境音（純文字已在上面擋掉不會走到這）
         // 對齊 GLOBAL_ASSISTANT_PLAN §4.4：改走 executeGenerationCommand——
         // 舊路直呼 submitGenerationCore 只有 requireGroup，繞過了狀態機（封存/暫停可生成）、
         // 專案 viewer 檢查與 policyEngine；MCP／工作流／代理早就全走 Command，這裡是最後一個旁路。
+        // generateInto already passes this shot's cards / looks / frozen direction.
+        // Assistant generate bound the shot but only loaded `{ id }`, so 助手
+        // 為第 N 鏡生成 dropped costume and 畫面過時. Same fields, visual only.
+        const visual = (role ?? "visual") === "visual";
+        const cards = resolveSceneCards(scene, null);
         const gen = await executeGenerationCommand({
           auth: ctx.auth,
           source: "web",
           projectId: project.id,
           modelId: model.id,
           prompt: a.prompt,
-          sceneId: a.sceneId,
+          sceneId: scene.id,
           sceneRole: role ?? undefined,
+          ...(visual ? {
+            characterIds: cards.characterIds,
+            scenePresetIds: cards.scenePresetIds,
+            propIds: cards.propIds,
+            lookIds: scene.lookIds ?? undefined,
+            shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+          } : {}),
           reasonPrefix: "助手生成",
         });
         return { ok: true, kind: "generate" as const, generationId: gen.id, message: "已送出生成，完成後會出現在生成紀錄" };
