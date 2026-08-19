@@ -28,7 +28,7 @@ describe("StoryContextStatus", () => {
         onOpenStoryboard={onOpenStoryboard}
       />,
     );
-    expect(screen.getByText(/5 鏡未分場/)).toBeInTheDocument();
+    expect(screen.getByText("人物已套用 · 5 個場景 · 21/26 鏡一致 · 5 鏡未分場")).toBeInTheDocument();
     expect(screen.queryByText(/5 鏡需確認/)).not.toBeInTheDocument();
     screen.getByRole("button", { name: "下一步：打開分鏡，把 5 鏡未分場歸場" }).click();
     expect(onOpenStoryboard).toHaveBeenCalledTimes(1);
