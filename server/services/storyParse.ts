@@ -1122,7 +1122,9 @@ async function persistXiaohuaShotRewrites(
   rows: Array<{
     id: string;
     title: string;
-    prompt: string;
+    // scenes.prompt 是 nullable 欄位——宣告成 string 會讓查詢結果指派不進來，
+    // 而下游的 rewritePersistedXiaohuaShotCopy 本來就吃 `string | null`。
+    prompt: string | null;
     action: string | null;
     dialogue: string | null;
     voiceover: string | null;

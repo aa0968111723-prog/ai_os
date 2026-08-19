@@ -83,7 +83,11 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.palette).toContain("校名牌");
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.lighting).toContain("暖色光");
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "sunset")?.name).toBe("夕陽");
-    expect(TKU_ZEN_LOCATIONS.some((loc) => loc.name === "茶會" || loc.name.includes("茶會") || loc.name.includes("克難坡"))).toBe(false);
+    // 場景名目前是字面值聯集，TS 因此認為 === "茶會" 永遠為 false。
+    // 這條斷言守的是「日後有人把茶會加回 fixture」，所以要保留執行期檢查——
+    // 明確放寬成 string 才不會變成一個編譯錯誤（而不是被刪掉）。
+    const locationNames: string[] = TKU_ZEN_LOCATIONS.map((loc) => loc.name);
+    expect(locationNames.some((name) => name === "茶會" || name.includes("茶會") || name.includes("克難坡"))).toBe(false);
   });
 
   it("keeps 龜龜 off until the third spoken line and drops the invented 媽媽 beats", () => {

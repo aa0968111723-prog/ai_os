@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 執行中：核心透出 mint（#8FE3CB），金環加粗。顏色差異要在 48dp 上看得出來。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="54%"
+                android:centerX="0.36"
+                android:centerY="0.3"
+                android:startColor="#FFFDF7"
+                android:endColor="#D8F1E7" />
+            <stroke android:width="4dp" android:color="#C9A24B" />
+        </shape>
+    </item>
+</layer-list>

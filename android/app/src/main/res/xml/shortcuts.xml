@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  長按 App 圖示的捷徑。
+
+  兩顆，不是五顆：捷徑清單超過三項之後就沒有人會用第四項，而每一項都要
+  一直維護一個網址契約。這兩條對應 Companion 最常見的兩個開場。
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="companion_voice"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_voice_short"
+        android:shortcutLongLabel="@string/shortcut_voice_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.aios.mobile"
+            android:targetClass="app.aios.mobile.MainActivity"
+            android:data="https://ai-os-app.zeabur.app/?voice=1" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="companion_tasks"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_tasks_short"
+        android:shortcutLongLabel="@string/shortcut_tasks_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.aios.mobile"
+            android:targetClass="app.aios.mobile.MainActivity"
+            android:data="https://ai-os-app.zeabur.app/?tab=tasks" />
+    </shortcut>
+</shortcuts>

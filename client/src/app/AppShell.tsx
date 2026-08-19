@@ -13,6 +13,7 @@ import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { safeInternalPath } from "../lib/safePath";
+import { useCompanionSurface, useSurfaceAttribute } from "../lib/companionSurface";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import posthog from "../posthog";
 
@@ -39,6 +40,14 @@ const FloatingDmBubble = lazyWithRetry(() => import("../components/FloatingDmBub
 const AgentActivityHud = lazyWithRetry(() => import("./components/AgentActivityHud").then((m) => ({ default: m.AgentActivityHud })));
 const PushSubscriptionSync = lazyWithRetry(() => import("../components/NotificationSettings").then((m) => ({ default: m.PushSubscriptionSync })));
 const NotificationSettingsDialog = lazyWithRetry(() => import("../components/NotificationSettings").then((m) => ({ default: m.NotificationSettingsDialog })));
+/**
+ * Companion 外殼（手機原生 App）。
+ *
+ * lazy 是**必要的**，不是最佳化：Companion 帶著自己的 Orb、語音、即時訂閱與三個分頁，
+ * 而桌面與平板永遠不會渲染它。靜態 import 會讓每一位桌機使用者的首屏都揹上這一包。
+ * 反過來也成立——Companion 不下載桌面工作台那一包（見 mobile/PhoneRoute.tsx 同一個理由）。
+ */
+const CompanionApp = lazyWithRetry(() => import("../companion/CompanionApp").then((m) => ({ default: m.CompanionApp })));
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 
@@ -78,6 +87,14 @@ function shouldShowSplash(): boolean {
     return true;
   }
 }
+
+/**
+ * Companion 接管的路由。
+ *
+ * 只有「App 開起來看到的第一頁」。深連結（`/p/:id`、`/studio/:id`、`/collab`…）
+ * 一律走既有路由表：那些網址是通知、分享與書籤的契約，不能因為外殼換了就失效。
+ */
+const COMPANION_HOME_ROUTES = new Set(["/", "/dashboard", "/companion"]);
 
 function pageTitle(pathname: string): string {
   // #273：與 brand.ts BRAND_NAME 對齊（Aios）
@@ -248,6 +265,20 @@ export function AppShell() {
   // 進站 splash：auth 就緒後淡出；不阻擋互動路徑以外的預載，僅首次掛載
   const [splashDone, setSplashDone] = useState(() => !shouldShowSplash());
 
+  /**
+   * 產品外殼：桌機／平板／手機瀏覽器 → 既有站；手機原生 App → Companion。
+   *
+   * `useSurfaceAttribute` 把答案寫到 `<html data-surface>`，於是 Companion 的樣式表
+   * 在其他外殼下**一條規則都不會命中**（見 styles.companion.css 檔頭）。
+   *
+   * Companion 只接管**首頁**（`/`、`/dashboard`、`/companion`）。其餘路由照舊——
+   * 通知與分享連結點進來的 `/p/:id` 必須打得開它承諾的內容，
+   * 不能因為裝了 App 就變成一顆球。
+   */
+  const surface = useCompanionSurface();
+  useSurfaceAttribute(surface.surface);
+  const companionHome = surface.surface === "companion" && COMPANION_HOME_ROUTES.has(location);
+
   return (
     <div className="app">
       {me.data && <a className="skip-link" href="#main-content">跳到主要內容</a>}
@@ -256,7 +287,12 @@ export function AppShell() {
       )}
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
-        {me.data && <AppHeader
+        {/*
+          Companion 不掛桌面頂欄：它有自己的三格導航，而頂欄的組別選單、通知鈴、
+          帳號選單在 390px 上會把「一顆球」的第一屏擠成一條工具列——那正是這次
+          要拿掉的東西。其餘外殼（含手機瀏覽器）維持原樣。
+        */}
+        {me.data && !companionHome && <AppHeader
           userName={me.data?.user.name}
           avatarUrl={me.data?.user.avatarUrl}
           me={me.data}
@@ -279,7 +315,17 @@ export function AppShell() {
         {me.data && <ShareInboxRescue />}
 
         {/* lazy 頁面載入中的過場：RouteFallback 超過門檻可強制重整，避免 chunk 卡住永遠「載入中」 */}
-        {me.data ? (
+        {me.data && companionHome ? (
+          <Suspense fallback={<RouteFallback />}>
+            <CompanionApp
+              groupId={activeGroupId}
+              userName={me.data.user.name}
+              groups={groups}
+              onActiveGroupIdChange={setActiveGroupId}
+              unreadCount={dmUnread.data?.total ?? 0}
+            />
+          </Suspense>
+        ) : me.data ? (
           <>
             <main id="main-content" className="app-main" tabIndex={-1}>
               <Suspense fallback={<RouteFallback />}>

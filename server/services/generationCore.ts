@@ -47,7 +47,7 @@ import {
   type ContinuityCoverage,
 } from "./continuity";
 import { groupLeaderIds, pushToUsers } from "./webPush";
-import { publishToProject } from "./realtime";
+import { publishCompanionEvent, publishToProject } from "./realtime";
 import {
   findAiTraceSessionBySource,
   recordAiTraceEventSafely,
@@ -1064,6 +1064,13 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           body: `⏳ 生成待核准：${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請組長到生成紀錄核准或駁回`,
         })
         .catch((err) => console.warn("[generation] 待核系統訊息寫入失敗：", err instanceof Error ? err.message : err));
+      // Companion：待核＝人被擋住，是手機上最該看到的那一件事（優先序見 shared/companionNotifications）
+      publishCompanionEvent({
+        kind: "approval_required",
+        projectId: project.id,
+        groupId: project.groupId,
+        entityId: gated.id,
+      });
       // 跨裝置推播給組長們：待核是「組長不在線就卡住整條產線」的事件，推到手機讓人隨時能核
       void groupLeaderIds(project.groupId, input.userId)
         .then((ids) => pushToUsers(ids, {
@@ -1191,6 +1198,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       .set({ requestId, status: "running", updatedAt: new Date() })
       .where(eq(schema.generations.id, gen.id))
       .returning();
+    // Companion（手機 AI 夥伴）語意事件：與上面的 invalidate 不同層——
+    // 它要的是「開始跑了」而不是「某一格髒了」。fire-and-forget，永不影響生成流程。
+    if (gen.projectId) {
+      publishCompanionEvent({ kind: "generation_started", projectId: gen.projectId, entityId: gen.id });
+    }
     return updated;
   } catch (err) {
     console.error("[generation] submit 失敗:", err);
@@ -1283,6 +1295,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 空輸出失敗推播失敗：", err instanceof Error ? err.message : err));
+    if (gen.projectId) {
+      publishCompanionEvent({ kind: "generation_failed", projectId: gen.projectId, entityId: gen.id });
+    }
     return updated;
   }
   if (result.status === "done" && (result.resultUrl || result.resultText)) {
@@ -1408,6 +1423,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         advanced.pointerMoved ? "生成完成，畫面已更新" : "生成完成，已存為候選版本（現用畫面未變）",
       );
     }
+    if (gen.projectId) {
+      publishCompanionEvent({ kind: "generation_completed", projectId: gen.projectId, entityId: gen.id });
+    }
     if (
       (gen.modelId.startsWith("fal-ai/") || gen.modelId.startsWith("openrouter/router#"))
       && !gen.requestId.startsWith("mock_")
@@ -1497,6 +1515,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
+    if (gen.projectId) {
+      publishCompanionEvent({ kind: "generation_failed", projectId: gen.projectId, entityId: gen.id });
+    }
     return updated;
   }
   return gen;

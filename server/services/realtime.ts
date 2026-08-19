@@ -409,6 +409,95 @@ export function publishToProject(
 }
 
 /**
+ * Companion 事件（手機 AI 夥伴的即時訊號）。
+ *
+ * ## 為什麼是新的 message type，而不是再一則 invalidate
+ *
+ * `invalidate` 說的是「這一格資料髒了，重抓」——它的收件人是查詢快取。
+ * Companion 要的是**語意事件**：「A07 生成失敗了」「批次跑完了」。前者無法投影成後者
+ * （scope.kind=scene 看不出成功還失敗），而 Companion 首頁那顆球必須在 200ms 內
+ * 轉成對的顏色，等 refetch 回來再說已經太慢。
+ *
+ * 舊客戶端的 onmessage 是 switch＋default 不處理，收到不認得的 type 會安靜忽略，
+ * 所以這一則對桌面版是零影響（線路格式與客戶端 reducer 見 shared/companionRealtime.ts）。
+ *
+ * ## 為什麼要扇到組房
+ *
+ * Companion 首頁沒有開任何專案——它連的是組房。只發專案房的話，手機在首頁時
+ * 什麼都收不到，而那正是使用者最常停留的畫面。
+ *
+ * ## groupId 從哪來
+ *
+ * 呼叫端多半手上只有 projectId。這裡自己查一次並記在行程內快取：專案的所屬組
+ * 在產品上不會變，而每一則生成事件都打一次 DB 是沒必要的成本。查不到就只發專案房，
+ * **不會丟事件、也不會擋住呼叫端**（本函式全程 fire-and-forget）。
+ */
+const projectGroupCache = new Map<string, string>();
+
+export interface CompanionEventInput {
+  kind: string;
+  projectId: string;
+  /** 已知就傳，省一次查詢 */
+  groupId?: string | null;
+  entityId?: string | null;
+  entityLabel?: string | null;
+  count?: number;
+  progress?: number;
+}
+
+async function resolveProjectGroupId(projectId: string): Promise<string | null> {
+  const cached = projectGroupCache.get(projectId);
+  if (cached) return cached;
+  try {
+    const [row] = await db
+      .select({ groupId: schema.projects.groupId })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId));
+    if (!row?.groupId) return null;
+    // 上限只是記憶體防呆：一個部署不會有十萬個活躍專案同時在發事件。
+    if (projectGroupCache.size > 10_000) projectGroupCache.clear();
+    projectGroupCache.set(projectId, row.groupId);
+    return row.groupId;
+  } catch {
+    return null;
+  }
+}
+
+export function publishCompanionEvent(input: CompanionEventInput): void {
+  const payload: Record<string, unknown> = {
+    type: "companion-event",
+    kind: input.kind,
+    projectId: input.projectId,
+    entityId: input.entityId ?? null,
+    entityLabel: input.entityLabel ?? null,
+    occurredAt: new Date().toISOString(),
+  };
+  if (typeof input.count === "number") payload.count = input.count;
+  if (typeof input.progress === "number") payload.progress = input.progress;
+
+  const projectRoomKey = `p:${input.projectId}`;
+  broadcast(projectRoomKey, rooms.get(projectRoomKey) ?? new Set<Client>(), payload);
+
+  const fanOutToGroup = (groupId: string) => {
+    const groupRoomKey = `g:${groupId}`;
+    broadcast(groupRoomKey, rooms.get(groupRoomKey) ?? new Set<Client>(), { ...payload, groupId });
+  };
+  if (input.groupId) {
+    fanOutToGroup(input.groupId);
+    return;
+  }
+  // 查組別失敗不該讓生成流程看見任何錯誤：這是通知，不是資料寫入。
+  void resolveProjectGroupId(input.projectId)
+    .then((groupId) => { if (groupId) fanOutToGroup(groupId); })
+    .catch(() => undefined);
+}
+
+/** 測試用：清掉 projectId → groupId 快取。 */
+export function resetCompanionEventCache(): void {
+  projectGroupCache.clear();
+}
+
+/**
  * 讀出「這個組現在有誰在線、各自在哪個專案／區塊」——協作首頁與協作中心的資料來源。
  *
  * 為什麼從記憶體讀而不是查表：presence 本來就是 ephemeral 的，把每一次 cursor／focus

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Widget 規格。
+
+  updatePeriodMillis=0：**不排週期更新**。這顆球的狀態由 App 主動推
+  （見 OrbWidgetState 檔頭的單向流向），排一個 30 分鐘的喚醒只會在使用者
+  沒打開過 App 的日子裡白白耗電，而且什麼都不會更新——資料來源根本不在這一端。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="72dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_aios_orb"
+    android:previewLayout="@layout/widget_aios_orb"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen" />

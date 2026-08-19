@@ -34,6 +34,32 @@
 
         </activity>
 
+        <!-- 長按 App 圖示的捷徑：直接進語音或任務（見 res/xml/shortcuts.xml） -->
+        <meta-data
+            android:name="android.app.shortcuts"
+            android:resource="@xml/shortcuts" />
+
+        <!--
+            桌面 Orb Widget。
+
+            exported="false"：這個 receiver 只接系統的 APPWIDGET_UPDATE 廣播與
+            自家 App 的更新呼叫，沒有任何理由讓別的 App 叫得動它。
+            注意 Widget **不需要任何額外權限**——它不上網、不讀資料，
+            只顯示 App 寫進 SharedPreferences 的狀態（任務書 §9 的紅線：
+            核心功能不得依賴 SYSTEM_ALERT_WINDOW 之類的高風險權限）。
+        -->
+        <receiver
+            android:name=".OrbWidgetProvider"
+            android:label="@string/orb_widget_label"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aios_orb_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

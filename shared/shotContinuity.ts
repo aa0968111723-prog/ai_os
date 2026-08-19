@@ -42,12 +42,21 @@ export interface ContinuityShot {
   camera: ShotCamera | null;
 }
 
-export interface ContinuityPatch {
+/**
+ * 刻意用 type alias 而不是 interface。
+ *
+ * 這個 patch 會直接餵給 `applyWithRevisionTrpc({ patch })`，而那支的參數是
+ * `Record<string, unknown>`。**介面**沒有隱含索引簽章，指派過去會被 TS 擋下
+ *（`interface ContinuityPatch` is not assignable to `Record<string, unknown>`）；
+ * type alias 的物件型別有，所以同一份欄位換個宣告方式就通了。
+ * 兩者在執行期完全相同，這裡只是選了能被通用寫入器接受的那一種。
+ */
+export type ContinuityPatch = {
   characterIds?: string[];
   lookIds?: string[];
   scenePresetIds?: string[];
   camera?: ShotCamera | null;
-}
+};
 
 const sameIds = (a: string[] | null | undefined, b: string[] | null | undefined) =>
   JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());

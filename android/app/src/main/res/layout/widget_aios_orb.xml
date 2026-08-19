@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面 Widget 版面：球 ＋ 一行現況 ＋ 一顆「說一句話」。
+
+  兩個可點區域是刻意分開的：點球＝打開對話，點麥克風＝直接進語音。
+  兩者都 >= 48dp（Android 的觸控目標下限，與 Web 端的 44px 同一個要求）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="12dp"
+    android:background="@drawable/orb_widget_panel">
+
+    <ImageView
+        android:id="@+id/orb_widget_orb"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:src="@drawable/orb_widget_idle"
+        android:contentDescription="AIOS 助手，目前待機" />
+
+    <TextView
+        android:id="@+id/orb_widget_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="12dp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:textColor="#16223B"
+        android:textSize="14sp"
+        android:text="點一下跟 Aios 說話" />
+
+    <TextView
+        android:id="@+id/orb_widget_voice"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:gravity="center"
+        android:text="🎙"
+        android:textSize="20sp"
+        android:contentDescription="按住說話" />
+</LinearLayout>

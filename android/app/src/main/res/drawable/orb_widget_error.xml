@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  出錯：陶土色（#B8452F）。刻意不是純紅——桌布上一顆警示紅的球會讓人整天焦慮，
+  而這裡要講的只是「有一件事沒成功，你有空再看」。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="54%"
+                android:centerX="0.36"
+                android:centerY="0.3"
+                android:startColor="#FFFDF7"
+                android:endColor="#F2DDD7" />
+            <stroke android:width="4dp" android:color="#B8452F" />
+        </shape>
+    </item>
+</layer-list>

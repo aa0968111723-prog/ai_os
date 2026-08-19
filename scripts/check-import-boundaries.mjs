@@ -46,6 +46,10 @@ const ALLOWLIST = new Set([
   "server/services/agentRunner.ts::../routers/director",
   "server/services/agentRunner.ts::../routers/assistant",
   "server/services/agentSplitRecovery.pg.test.ts::../routers/director",
+  // 同一類「pg 測試沿用 router core」的既有例外（隨 #790 進來，補登記）
+  "server/services/collabDoc.pg.test.ts::../routers/story",
+  "server/services/dataIntegrity.pg.test.ts::../routers/characters",
+  "server/services/dataIntegrity.pg.test.ts::../routers/story",
   "server/services/messageAssistant.ts::../routers/knowledge",
   "server/services/restApi.ts::../routers/schedule",
 ]);
