@@ -87,6 +87,14 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toContain("listRunnableDagSteps");
   });
 
+  it("after Adopt, re-evaluates the DAG so a waiting run can reach done", () => {
+    const start = source.indexOf("let adoptedWaiting = false");
+    const block = source.slice(start, source.indexOf("使用者已按停：沒有新生成要送時收停 pending"));
+    expect(block).toContain("saveDagProgress");
+    expect(block).not.toMatch(/if \(adoptedWaiting\) await saveRun\(run\.id, \{ steps \}\);/);
+    expect(source).toContain('inArray(schema.agentRuns.status, ["running", "waiting"])');
+  });
+
   it("clears ghost generationId on INTERNAL_SERVER_ERROR and NOT_FOUND (no permanent stuck running)", () => {
     expect(source).toContain("clearGhostGenerationId");
     expect(source).toMatch(/INTERNAL_SERVER_ERROR[\s\S]*clearGhostGenerationId/);

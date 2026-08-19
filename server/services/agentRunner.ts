@@ -482,9 +482,13 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
     const flipped = await db
       .update(schema.agentRuns)
       .set({ status, updatedAt: new Date() })
-      .where(and(eq(schema.agentRuns.id, runId), eq(schema.agentRuns.status, "running")))
+      .where(and(
+        eq(schema.agentRuns.id, runId),
+        inArray(schema.agentRuns.status, ["running", "waiting"]),
+      ))
       .returning({ id: schema.agentRuns.id });
-    // 只在「真的把 running 翻成終局」的那一次發完成通知（idempotent 重入或已被 stop 搶走時 flipped 為空，不重發）
+    // 只在「真的把 running／waiting 翻成終局」的那一次發完成通知
+    // （Adopt 後 DAG 為 done 時 run 常已是 waiting，不能只 CAS running）
     if (flipped.length) {
       void trackBackgroundTask(
         notifyRunFinished(runId, status).catch((err) =>
@@ -1198,7 +1202,17 @@ async function advanceRun(run: RunRow): Promise<void> {
     waiting.detail = waiting.detail || "已採用";
     adoptedWaiting = true;
   }
-  if (adoptedWaiting) await saveRun(run.id, { steps });
+  if (adoptedWaiting) {
+    // Adopt unblocks waiting generate steps; re-evaluate the DAG so a run
+    // that was persisted as waiting can flip to done instead of early-returning
+    // on status !== "running" and hanging forever.
+    await saveDagProgress(run, steps);
+    const [freshAdopt] = await db
+      .select({ status: schema.agentRuns.status })
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.id, run.id));
+    if (freshAdopt) run.status = freshAdopt.status;
+  }
 
   // 使用者已按停：沒有新生成要送時收停 pending
   {
