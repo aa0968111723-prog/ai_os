@@ -105,7 +105,7 @@ export function MobileHome({ groupId }: { groupId: string }) {
 
   useEffect(() => {
     const pending = takePendingNewProjectIdea();
-    if (pending) openCreate(pending);
+    if (pending !== null) openCreate(pending);
     const onIdea = (event: Event) => {
       const idea = (event as CustomEvent<{ ideaTitle?: string }>).detail?.ideaTitle?.trim() ?? "";
       takePendingNewProjectIdea();

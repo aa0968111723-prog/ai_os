@@ -27,6 +27,12 @@ describe("phone animation P0/P1 wiring", () => {
     expect(phoneBranch).toContain("return");
     expect(phoneBranch).not.toContain("navigate(`/dashboard#projects`)");
     expect(launchpad).toContain("NEW_PROJECT_IDEA_EVENT");
+    const idea = readFileSync(resolve(process.cwd(), "client/src/lib/newProjectIdea.ts"), "utf8");
+    expect(idea).toContain("sessionStorage.setItem(NEW_PROJECT_IDEA_KEY, title)");
+    expect(idea).not.toContain("if (title) sessionStorage.setItem");
+    expect(home).toContain("if (pending !== null) openCreate(pending)");
+    const nav = readFileSync(resolve(process.cwd(), "client/src/app/components/MobileNavigation.tsx"), "utf8");
+    expect(nav).toContain('publishNewProjectIdea("")');
   });
 
   it("project page has a 場景 entry and openFull reveals the inline section", () => {

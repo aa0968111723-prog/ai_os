@@ -334,7 +334,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       requestAnimationFrame(() => document.getElementById("np-title")?.focus({ preventScroll: true }));
     };
     const pending = takePendingNewProjectIdea();
-    if (pending) applyIdea(pending);
+    if (pending !== null) applyIdea(pending);
     const onIdea = (event: Event) => {
       const idea = (event as CustomEvent<{ ideaTitle?: string }>).detail?.ideaTitle?.trim() ?? "";
       takePendingNewProjectIdea();

@@ -195,6 +195,13 @@ describe("手機首頁", () => {
     expect(screen.getByDisplayValue("從助手來的標題")).toBeInTheDocument();
   });
 
+  it("更多 blank create survives remount after navigate(/dashboard)", () => {
+    sessionStorage.setItem("aios.pendingNewProjectIdea", "");
+    render(<MobileHome groupId="g1" />);
+    expect(screen.getByLabelText("建立新專案")).toBeInTheDocument();
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+
   it("aios:new-project-idea 打開手機建立表單，確認前不送出", async () => {
     render(<MobileHome groupId="g1" />);
     publishNewProjectIdea("只預填不建立");
