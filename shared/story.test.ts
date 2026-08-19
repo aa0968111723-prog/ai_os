@@ -273,6 +273,18 @@ describe("planOrphanAdoption（未分場鏡不得 silently 5→26）", () => {
       liveAfter: 21,
     });
   });
+
+  it("second 產生分鏡 must not grow live 26→47", () => {
+    expect(planReuseOrphanAttach(26, 21)).toEqual({
+      attach: 21,
+      create: 0,
+      delete: 0,
+      liveAfter: 26,
+    });
+    expect(planReuseOrphanAttach(26, 21).liveAfter).not.toBe(47);
+    expect(planOrphanAdoption(21, 5).liveAfter).toBe(21);
+    expect(planOrphanAdoption(21, 5).liveAfter).not.toBe(26);
+  });
 });
 
 describe("inferLocationNameFromText（故事原文地點，不是未定地點）", () => {
