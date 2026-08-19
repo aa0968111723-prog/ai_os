@@ -15,9 +15,29 @@ export function isAssistantStoryReadIntent(message: string): boolean {
   if (/(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)/u.test(text)) return true;
   if (/小華在講|並列出角色|並列角色/u.test(text)) return true;
   // Live A–D short-100w summarize still returned 「從疲憊中找到力量」.
-  if (/(?:A\s*[-–—~～到至]\s*D).{0,24}(?:摘要|總結|概述|summarize|故事|腳本|100\s*[wW字]|兩句)/iu.test(text)) return true;
-  if (/(?:摘要|總結|概述|summarize|短摘).{0,24}(?:A\s*[-–—~～到至]\s*D|前[四4]幕|short[- ]?100)/iu.test(text)) return true;
+  if (/(?:A\s*[-–—~～到至]\s*D).{0,40}(?:摘要|總結|概述|summarize|故事|腳本|100\s*[wW字]|兩句|short[- ]?100)/iu.test(text)) return true;
+  if (/(?:摘要|總結|概述|summarize|短摘|short[- ]?100).{0,40}(?:A\s*[-–—~～到至]\s*D|前[四4]幕|short[- ]?100|100\s*[wW字])/iu.test(text)) return true;
   return false;
+}
+
+/** Story-read lock line: 小華 is 她 / 粉橘短髮女孩; never another project's 疲憊稿. */
+export const STORY_READ_THIS_PROJECT_LOCK =
+  "本專案小華是粉橘短髮女孩，代詞用「她」不用「他」。摘要只依本專案 stories.content，禁止引用其他專案的小華故事（躺在床上、從疲憊中找到力量）。";
+
+/**
+ * Team / group ask has many projects. Inject stories.content only when
+ * THIS project is uniquely named, or the group has exactly one project.
+ */
+export function pickNamedStoryProject<T extends { title: string }>(
+  message: string,
+  projects: readonly T[],
+): T | null {
+  if (projects.length === 1) return projects[0]!;
+  const named = projects.filter((project) => {
+    const title = project.title.trim();
+    return title.length >= 2 && message.includes(title);
+  });
+  return named.length === 1 ? named[0]! : null;
 }
 
 /** Only names already on the card or written in this project's story. Never invent 安倢／媽媽. */

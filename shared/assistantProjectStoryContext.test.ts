@@ -10,7 +10,9 @@ import {
   isAssistantStoryReadIntent,
   lockAssistantStoryAnswer,
   namesFromPersistedStory,
+  pickNamedStoryProject,
   slicePersistedStoryContent,
+  STORY_READ_THIS_PROJECT_LOCK,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
 import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "./fixtures/tkuZenPromo";
@@ -70,7 +72,11 @@ describe("assistant persisted story context", () => {
     expect(isAssistantStoryReadIntent("兩句話摘要已存故事並列角色名，不要寫入.")).toBe(true);
     expect(isAssistantStoryReadIntent("A–D summarize 100w")).toBe(true);
     expect(isAssistantStoryReadIntent("請摘要 A-D，短摘 100 字")).toBe(true);
+    expect(isAssistantStoryReadIntent("A–D summarize once returned short-100w")).toBe(true);
+    expect(isAssistantStoryReadIntent("short-100w summarize A-D")).toBe(true);
     expect(isAssistantStoryReadIntent("現在有幾鏡？")).toBe(false);
+    expect(STORY_READ_THIS_PROJECT_LOCK).toContain("粉橘短髮女孩");
+    expect(STORY_READ_THIS_PROJECT_LOCK).toContain("從疲憊中找到力量");
     const locked = lockAssistantStoryAnswer({
       answer: "已完成盤點。小華在講述他的故事，提到他如何從疲憊中找到力量。角色名有小華和禪定龜龜。",
       storyContent: XIAOHUA_SEVEN_ACT_SCRIPT,
@@ -140,6 +146,14 @@ describe("assistant persisted story context", () => {
       fetchedOk: false,
     })).toBeNull();
     expect((answer.match(/[。！？]/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("team story-read injects only the uniquely named project, never a 疲憊 sibling", () => {
+    const xiaohua = { title: "動畫組 小華" };
+    const tired = { title: "從疲憊中找到力量" };
+    expect(pickNamedStoryProject("A–D summarize once short-100w 「動畫組 小華」", [xiaohua, tired])).toEqual(xiaohua);
+    expect(pickNamedStoryProject("A–D summarize 100w", [xiaohua, tired])).toBeNull();
+    expect(pickNamedStoryProject("A–D summarize 100w", [xiaohua])).toEqual(xiaohua);
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {

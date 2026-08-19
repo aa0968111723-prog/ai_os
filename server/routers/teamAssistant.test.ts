@@ -786,5 +786,19 @@ describe("project_detail injects persisted story", () => {
     expect(src).toContain("allowPaidFallback: quality === \"auto\"");
     expect(src).toContain("resolveFreeOnlyLlmMode");
   });
+
+  it("story-read injects THIS project's stories.content only and locks 她 / no 疲憊", () => {
+    const src = readFileSync(new URL("./teamAssistant.ts", import.meta.url), "utf8");
+    expect(src).toContain("isAssistantStoryReadIntent");
+    expect(src).toContain("pickNamedStoryProject");
+    expect(src).toContain("loadPersistedStoryRow");
+    expect(src).toContain("lockAssistantStoryAnswer");
+    expect(src).toContain("STORY_READ_THIS_PROJECT_LOCK");
+    expect(src).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(src).toContain("storyReadAsk ? [] : await retrieveDatabaseEvidence");
+    expect(src).toContain("storyReadAsk ? \"\" : historyBlock");
+    expect(src).toContain("fallbackReadOnlyStorySummary");
+    expect(src).not.toContain("已完成盤點");
+  });
 });
 

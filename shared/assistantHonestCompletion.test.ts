@@ -210,6 +210,10 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(src).not.toMatch(/title:\s*[`'"][^`'"]*已完成盤點/);
     const globalSrc = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
     expect(globalSrc).not.toContain("已完成盤點");
+    const teamSrc = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
+    expect(teamSrc).not.toContain("已完成盤點");
+    const messageSrc = readFileSync(join(process.cwd(), "server/services/messageAssistant.ts"), "utf8");
+    expect(messageSrc).not.toContain("已完成盤點");
   });
 });
 

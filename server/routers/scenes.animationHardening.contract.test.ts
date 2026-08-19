@@ -132,6 +132,15 @@ describe("animation shot writes stay consistent", () => {
     expect(siteAssistant).toContain("lockAssistantStoryAnswer");
     expect(siteAssistant).toContain("settleAssistantAskCompletion");
     expect(siteAssistant).toContain("assistantAskCompletionChip");
+    expect(siteAssistant).toContain("STORY_READ_THIS_PROJECT_LOCK");
+    const teamAssistant = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
+    expect(teamAssistant).toContain("isAssistantStoryReadIntent");
+    expect(teamAssistant).toContain("lockAssistantStoryAnswer");
+    expect(teamAssistant).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    const messageAssistant = readFileSync(join(process.cwd(), "server/services/messageAssistant.ts"), "utf8");
+    expect(messageAssistant).toContain("isAssistantStoryReadIntent");
+    expect(messageAssistant).toContain("lockAssistantStoryAnswer");
+    expect(messageAssistant).toContain("STORY_READ_THIS_PROJECT_LOCK");
     expect(repairExecute).toContain("applyWithRevisionTrpc");
     expect(repairExecute).not.toContain("db.update(schema.scenes)");
   });

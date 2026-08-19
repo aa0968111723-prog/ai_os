@@ -32,6 +32,7 @@ import {
   isEmptyFreeOnlyTimeoutAnswer,
   lockAssistantStoryAnswer,
   replaceEmptyFreeTimeoutAfterTools,
+  STORY_READ_THIS_PROJECT_LOCK,
 } from "../../shared/assistantProjectStoryContext";
 import { assistantAskCompletionChip, settleAssistantAskCompletion } from "../../shared/assistantHonestCompletion";
 import {
@@ -1848,7 +1849,7 @@ ${formatAssistantPageContext(input.pageContext)}`
       ? `使用者目前正停在專案 ${currentProjectRef} 的頁面——問題裡的「這個專案／這一案」未指明時，預設指 ${currentProjectRef}。`
       : "",
     storyReadAsk && currentProjectRef
-      ? `${currentStoryBlock}\n本專案小華是粉橘短髮女孩，代詞用「她」不用「他」。摘要只依本專案 stories.content，禁止引用其他專案的小華故事（躺在床上、從疲憊中找到力量）。`
+      ? `${currentStoryBlock}\n${STORY_READ_THIS_PROJECT_LOCK}`
       : currentStoryPointer,
   ].filter(Boolean).map((line) => `\n${line}`).join("");
   const selectedIds = new Set(input.pageContext?.selectedEntityIds ?? []);

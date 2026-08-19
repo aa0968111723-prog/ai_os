@@ -586,7 +586,7 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).toContain("settleAssistantAskCompletion");
     expect(src).toContain("assistantAskCompletionChip");
     expect(src).toContain("replaceEmptyFreeTimeoutAfterTools");
-    expect(src).toContain("禁止引用其他專案的小華故事");
+    expect(src).toContain("STORY_READ_THIS_PROJECT_LOCK");
   });
 
   it("siteActionBlock routes 角色 to add_character, not 素材清單", () => {
