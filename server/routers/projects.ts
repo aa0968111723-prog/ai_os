@@ -29,7 +29,9 @@ import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
 import { visibleProjectsWhere } from "../services/projectInventory";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
-const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
+const SAMPLE_PROJECT_TITLE = "範例專案：校門口遇見龜龜";
+/** 舊七幕標題：只當去重別名，不再寫入。同組已有就回傳既有那份，不另生一份。 */
+const SAMPLE_PROJECT_TITLE_LEGACY = "範例專案：禪心一炷香";
 
 /**
  * 專案負責人資格（純規則，供測試）：新負責人必須「該組成員」或「該團隊管理員」——
@@ -173,15 +175,19 @@ export const projectsRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
 
-      const findExisting = () =>
-        db
+      const findExisting = async () => {
+        const rows = await db
           .select()
           .from(schema.projects)
-          .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.title, SAMPLE_PROJECT_TITLE)))
-          .limit(1);
+          .where(and(
+            eq(schema.projects.groupId, input.groupId),
+            inArray(schema.projects.title, [SAMPLE_PROJECT_TITLE, SAMPLE_PROJECT_TITLE_LEGACY]),
+          ));
+        return rows.find((row) => row.title === SAMPLE_PROJECT_TITLE) ?? rows[0];
+      };
 
       // 去重（主守門）：同組已建過範例 → 直接回既有那個，不重建
-      const [existing] = await findExisting();
+      const existing = await findExisting();
       if (existing) return existing;
 
       // 併發兜底：同組同時只跑一個建立，雙擊不會產生兩個範例
@@ -191,7 +197,7 @@ export const projectsRouter = router({
       sampleInFlight.add(input.groupId);
       try {
         // 拿到鎖後再查一次：可能在等鎖期間已由另一個請求建好
-        const [again] = await findExisting();
+        const again = await findExisting();
         if (again) return again;
 
         // 內容類型／發布平台沿用該組選項（保證已 seed），取第一個啟用中的；極端無選項時退安全預設。

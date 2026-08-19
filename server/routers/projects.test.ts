@@ -52,6 +52,14 @@ describe("createSample seeds 小華 A–F, not 七幕", () => {
   const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
   const body = source.slice(source.indexOf("createSample:"), source.indexOf("seriesOverview:"));
 
+  it("範例專案 title is 校門口遇見龜龜, not 禪心一炷香", () => {
+    expect(source).toContain('const SAMPLE_PROJECT_TITLE = "範例專案：校門口遇見龜龜"');
+    expect(source).toContain("SAMPLE_PROJECT_TITLE_LEGACY");
+    expect(source).not.toMatch(/const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香"/);
+    expect(body).toContain("inArray(schema.projects.title");
+    expect(body).toContain("SAMPLE_PROJECT_TITLE_LEGACY");
+  });
+
   it("範例專案 worldview + shots mint 小華／禪定龜龜, never 安倢／慕恩", () => {
     expect(body).toContain("小華");
     expect(body).toContain("禪定龜龜");
