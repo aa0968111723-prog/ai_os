@@ -798,7 +798,7 @@ export function worldviewGuideSteps(
     {
       id: "story",
       label: "這支片在講什麼",
-      hint: "一句話就好，例如：一位訪客在晨光禪堂點香",
+      hint: "一句話就好，例如：粉橘短髮女孩、白帽T的小華在淡大校門口遇見禪定龜龜",
       done: !!(wv.logline.trim() || wv.message.trim()),
       optional: false,
       anchor: "#wv-logline",

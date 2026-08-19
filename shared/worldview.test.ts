@@ -553,6 +553,9 @@ describe("快速層引導四步", () => {
     expect(steps.map((s) => s.id)).toEqual(["story", "mood", "look", "narrative"]);
     expect(steps.map((s) => s.anchor)).toEqual(["#wv-logline", "#wv-tones", "#wv-styles", "#wv-audience"]);
     expect(steps.filter((s) => s.optional).map((s) => s.id)).toEqual(["narrative"]);
+    expect(steps[0]!.hint).toContain("粉橘短髮女孩、白帽T的小華在淡大校門口遇見禪定龜龜");
+    expect(steps[0]!.hint).not.toContain("晨光禪堂");
+    expect(steps[0]!.hint).not.toContain("點香");
   });
 
   it("logline 或 message 任一即算第一步完成", () => {
