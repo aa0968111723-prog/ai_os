@@ -64,7 +64,10 @@ describe("createSample seeds 小華 A–F, not 七幕", () => {
     expect(body).not.toContain("紅傘");
     expect(body).not.toContain("清晨禪堂");
     expect(body).not.toContain("針織外套");
+    expect(body).not.toContain("走進禪堂點香");
+    expect(body).not.toContain("那炷香之後");
     expect(body).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
+    expect(body).toContain("範例見證 · 校門口遇見龜龜");
   });
 
   it("runtime seed is 6 A–F, locked 小華 look, no forbidden tokens", () => {
