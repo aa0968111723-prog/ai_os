@@ -542,6 +542,18 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(update).not.toContain("lockXiaohuaGenerationPrompt");
   });
 
+  it("animationPipeline keyframe honours 角色卡 生成時帶入; video keeps i2v parent", () => {
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("resolveSceneCards(shot, null)");
+    expect(stage).toContain("resolveHonoredCharacterSheet");
+    expect(stage).toContain("characterIds: cards.characterIds");
+    expect(stage).toContain("explicitSourceAssetId: input.sourceAssetId");
+    expect(stage).toContain('input.stage === "keyframe_generation"');
+    expect(stage).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(stage).toContain(": input.sourceAssetId");
+  });
+
   it("MCP generate_into and animationPipeline lock 小華 prompt before persist", () => {
     const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
     const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
