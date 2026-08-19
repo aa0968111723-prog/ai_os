@@ -15,6 +15,7 @@ import {
   styleFamilyCheatsheet,
 } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
+import { sceneFillRole } from "../../shared/sceneVersions";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import {
   shotCameraSchema,
@@ -185,7 +186,7 @@ export function pickGenerateModel(proposedId?: string): ModelEntry {
     requireVerified: true,
   }).model;
 }
-export { sceneFillRole } from "../../shared/sceneVersions";
+export { sceneFillRole };
 /** 提示詞用「可用工作流速查」：LLM 只能從這裡挑 presetId（resolve／startWorkflowCore 都會再過 getWorkflow 白名單） */
 const WORKFLOW_CHEATSHEET = WORKFLOW_PRESETS.map((w) => `- ${w.id}｜${w.label}｜約 ${w.points} 點｜${w.bestFor}`).join("\n");
 

@@ -756,6 +756,14 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
   });
 
+  it("assistant generate binds sceneFillRole locally so sceneId generate does not ReferenceError", () => {
+    expect(assistant).toMatch(/import\s*\{[^}]*\bsceneFillRole\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/shared\/sceneVersions["']/);
+    expect(assistant).not.toMatch(/export\s*\{\s*sceneFillRole\s*\}\s*from\s+/);
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("sceneFillRole(model)");
+  });
+
   it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {
     const start = assistant.indexOf('if (a.type === "generate")');
     const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
