@@ -209,6 +209,16 @@ describe("animation shot writes stay consistent", () => {
     expect(mcpAdd).not.toContain("db.insert(schema.characters)");
   });
 
+  it("pinCanonToProject reuses same-name 小華 instead of raw-inserting a second handle", () => {
+    const canon = readFileSync(join(process.cwd(), "server/services/teamCanon.ts"), "utf8");
+    const pin = canon.slice(canon.indexOf("export async function pinCanonToProject"), canon.indexOf("export async function unpinCanon"));
+    expect(pin).toContain("matchLocalCharacterByName");
+    expect(pin).toContain("existingCards");
+    expect(pin).toContain("payload.name");
+    expect(pin).not.toContain("sanitizeCharacterProposalName");
+    expect(pin).not.toContain("upsertProjectCharacterCore");
+  });
+
   it("parse confirmCandidate reuses 小華 instead of raw-inserting the EXTRACT blob", () => {
     const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
     const confirm = story.slice(story.indexOf("confirmCandidate:"), story.indexOf("storyboardPreview:"));

@@ -41,11 +41,25 @@ import {
   type ProjectCanonKind,
 } from "../../shared/teamCanon";
 import { packetDependencies, staleShotIdsForEntityChange } from "../../shared/shotContextPacket";
+import { nameKey } from "../../shared/story";
 import type { TrainingJobState } from "../../shared/consistencyTraining";
 
 export type CanonEntryRow = typeof schema.canonEntries.$inferSelect;
 export type CanonVersionRow = typeof schema.canonVersions.$inferSelect;
 export type ProjectCanonPinRow = typeof schema.projectCanonPins.$inferSelect;
+
+/**
+ * Import leftover: pin used to raw-insert a handle even when the project
+ * already had 小華. nameKey-only — no sanitize, no upsert clone.
+ */
+export function matchLocalCharacterByName<T extends { id: string; name: string }>(
+  rows: T[],
+  name: string,
+): T | null {
+  const key = nameKey(name);
+  if (!key) return null;
+  return rows.find((row) => nameKey(row.name) === key) ?? null;
+}
 
 export function canonVersionFingerprint(payload: CanonVersionPayload): string {
   return createHash("sha256").update(canonicalCanonVersionMaterial(payload)).digest("hex");
@@ -1095,16 +1109,25 @@ export async function pinCanonToProject(input: {
     const payload = version.payload;
     const primaryRef = payload.references.find((ref) => ref.priority === "PRIMARY")?.assetId ?? null;
     if (localKind === "character") {
-      const [row] = await tx.insert(schema.characters).values({
-        projectId: project.id,
-        groupId: project.groupId,
-        name: payload.name,
-        appearance: payload.descriptor.appearance ?? payload.name,
-        notes: payload.descriptor.notes ?? null,
-        referenceAssetId: primaryRef,
-        createdBy: input.auth.user.id,
-      }).returning({ id: schema.characters.id });
-      localEntityId = row.id;
+      const existingCards = await tx
+        .select({ id: schema.characters.id, name: schema.characters.name })
+        .from(schema.characters)
+        .where(eq(schema.characters.projectId, project.id));
+      const matched = matchLocalCharacterByName(existingCards, payload.name);
+      if (matched) {
+        localEntityId = matched.id;
+      } else {
+        const [row] = await tx.insert(schema.characters).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          name: payload.name,
+          appearance: payload.descriptor.appearance ?? payload.name,
+          notes: payload.descriptor.notes ?? null,
+          referenceAssetId: primaryRef,
+          createdBy: input.auth.user.id,
+        }).returning({ id: schema.characters.id });
+        localEntityId = row.id;
+      }
     } else if (localKind === "character_look") {
       if (!canon.parentCanonId) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個造型 Canon 缺少所屬角色" });
