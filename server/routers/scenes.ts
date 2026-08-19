@@ -1918,6 +1918,9 @@ export const scenesRouter = router({
         // 本鏡造型（#725 P1-8）：generateInto 與 generateVariants 都有帶，refine 漏了——
         // 於是每一次「以這版修正」都丟失造型錨點，改出來的圖會換掉衣服。
         lookIds: scene.lookIds ?? undefined,
+        // 凍結鏡頭語言（與 generateInto 同口徑）：refine 曾略過，改中景→特寫
+        // 修出來的圖不會被標成過時。
+        shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
         reasonPrefix: "分鏡修圖",
       });
       assertReplayableGeneration(gen.status);

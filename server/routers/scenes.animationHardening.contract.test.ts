@@ -555,6 +555,14 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("refine freezes shotDirection so a later camera change marks the picture stale", () => {
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(refine).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(refine).toContain("lookIds: scene.lookIds ?? undefined");
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+  });
+
   it("MCP / batch / animationPipeline bind 小華 card when the shot names her", () => {
     expect(scenes).toContain("ensureXiaohuaCharacterIds");
     const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
