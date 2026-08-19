@@ -39,6 +39,9 @@ describe("storyboard order / isolation contracts", () => {
     expect(sceneList).not.toContain("createInsertAfterQueue");
     expect(sceneList).toMatch(/disabled=\{i === 0 \|\| move\.isPending\}/);
     expect(animStudio).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(storyboard).toContain("createInsertAfterQueue");
+    expect(storyboard).toContain("insertQueueRef.current?.enqueue(focusShot.id)");
+    expect(storyboard).not.toContain("insertAfter.mutate({ sceneId: focusShot.id })");
   });
 
   it("/p/:id and /studio/:id remount on project switch; studio is keyed by shot", () => {

@@ -9,6 +9,7 @@
  */
 import { useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
@@ -97,6 +98,7 @@ export function ShotCard({
   picked,
   onTogglePick,
   onFocusShot,
+  onInsertAfter,
   assetHints = [],
 }: {
   projectId: string;
@@ -116,6 +118,8 @@ export function ShotCard({
   onTogglePick?: (sceneId: string) => void;
   /** Clicking the card (not a control) marks it as the ＋新增鏡 insert-after anchor. */
   onFocusShot?: (sceneId: string) => void;
+  /** Board-level insertAfter queue (shared with ＋新增鏡). Falls back to a per-card queue. */
+  onInsertAfter?: (sceneId: string) => void;
   /**
    * 專業模式相關素材。由 StoryboardStage 一次批次載入後注入，
    * 卡片本身不再發 suggestion query。
@@ -161,6 +165,16 @@ export function ShotCard({
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: refreshBoard,
   });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
+  const enqueueBlankAfter = () => {
+    if (onInsertAfter) onInsertAfter(shot.id);
+    else insertQueueRef.current?.enqueue(shot.id);
+  };
   /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
     onSuccess: refreshBoard,
@@ -482,8 +496,8 @@ export function ShotCard({
               type="button"
               aria-label={`在第 ${shotNumber} 鏡之後插入一鏡`}
               title="在這一鏡後面插入一格空的（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
-              disabled={insertAfter.isPending}
-              onClick={() => insertAfter.mutate({ sceneId: shot.id })}
+              aria-busy={insertAfter.isPending || undefined}
+              onClick={enqueueBlankAfter}
             >
               <Icon name="Plus" size={13} /> 在這之後插入一鏡
             </Button>

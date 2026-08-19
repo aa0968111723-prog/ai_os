@@ -3,7 +3,8 @@
  * PR-4a：右側 ResourceDock 就近取用素材／定裝／知識。
  * PR #710：勾選分鏡後顯示 VisualChoiceTray（動作／表情／鏡頭／光線／風格視覺選擇）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { SceneStudio } from "../../components/SceneStudio";
@@ -56,6 +57,12 @@ export function StoryboardStage({
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: invalidateShots,
   });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
   const characters = trpc.characters.list.useQuery({ projectId });
   const honoredCharIds = useMemo(
     () => (characters.data ? selectableBringInIds(characters.data, charIds) : charIds),
@@ -171,18 +178,19 @@ export function StoryboardStage({
                 size="sm"
                 variant="primary"
                 type="button"
-                disabled={addShot.isPending || insertAfter.isPending}
+                disabled={!focusShot && addShot.isPending}
+                aria-busy={(focusShot ? insertAfter.isPending : addShot.isPending) || undefined}
                 title={
                   focusShot
                     ? "插在選取的那一鏡後面（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
                     : "沒選鏡時加在最後。每張分鏡卡也有「在這之後插入一鏡」。"
                 }
                 onClick={() => {
-                  if (focusShot) insertAfter.mutate({ sceneId: focusShot.id });
+                  if (focusShot) insertQueueRef.current?.enqueue(focusShot.id);
                   else addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` });
                 }}
               >
-                <Icon name="Plus" size={13} /> {(addShot.isPending || insertAfter.isPending) ? "建立中…" : "新增鏡"}
+                <Icon name="Plus" size={13} /> {!focusShot && addShot.isPending ? "建立中…" : "新增鏡"}
               </Button>
             )}
             {canEdit && onSendToWorkbench && focusShot && (
@@ -245,7 +253,7 @@ export function StoryboardStage({
                       ) : (
                         <div className="board-shots">
                           {group.shots.map((shot) => (
-                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} onFocusShot={setAnchorShotId} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} onFocusShot={setAnchorShotId} onInsertAfter={(sceneId) => insertQueueRef.current?.enqueue(sceneId)} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
                           ))}
                         </div>
                       )}

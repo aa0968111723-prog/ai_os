@@ -15,6 +15,7 @@ const mutateInherit = vi.fn();
 const mutateSetVisual = vi.fn();
 const mutateConfirm = vi.fn();
 let updateOnSuccess: ((row: { rev: number }) => void) | undefined;
+let insertCreated = 0;
 
 vi.mock("../../api", () => ({
   trpc: {
@@ -32,7 +33,18 @@ vi.mock("../../api", () => ({
         },
       },
       remove: { useMutation: () => ({ mutate: mutateRemove, isPending: false, error: null }) },
-      insertAfter: { useMutation: () => ({ mutate: mutateInsertAfter, isPending: false, error: null }) },
+      insertAfter: {
+        useMutation: () => ({
+          mutate: mutateInsertAfter,
+          mutateAsync: async (input: { sceneId: string; duplicate?: boolean }) => {
+            mutateInsertAfter(input);
+            insertCreated += 1;
+            return { id: `created-${insertCreated}` };
+          },
+          isPending: false,
+          error: null,
+        }),
+      },
       inheritFromPrevious: {
         useMutation: () => ({ mutate: mutateInherit, isPending: false, error: null, data: undefined }),
       },
@@ -118,6 +130,7 @@ describe("ShotCard progressive disclosure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateOnSuccess = undefined;
+    insertCreated = 0;
   });
 
   it("緊湊面永遠可見：編號、標題、完成度、預覽空狀態、素材庫入口", () => {
@@ -236,8 +249,21 @@ describe("ShotCard progressive disclosure", () => {
     expect(insert).toBeInTheDocument();
     expect(insert).toHaveTextContent("在這之後插入一鏡");
     await user.click(insert);
-    expect(mutateInsertAfter).toHaveBeenCalledWith({ sceneId: "shot-1" });
+    await vi.waitFor(() => expect(mutateInsertAfter).toHaveBeenCalledWith({ sceneId: "shot-1" }));
     expect(mutateInsertAfter.mock.calls[0]?.[0]).not.toMatchObject({ duplicate: true });
+  });
+
+  it("連點 在這之後插入一鏡 chains the new id (not LIFO same shot.id)", async () => {
+    const user = userEvent.setup();
+    render(<ShotCard {...defaultProps} shot={baseShot()} />);
+    const insert = screen.getByRole("button", { name: "在第 1 鏡之後插入一鏡" });
+    await user.click(insert);
+    await user.click(insert);
+    await vi.waitFor(() => expect(mutateInsertAfter).toHaveBeenCalledTimes(2));
+    expect(mutateInsertAfter.mock.calls.map((c) => c[0])).toEqual([
+      { sceneId: "shot-1" },
+      { sceneId: "created-1" },
+    ]);
   });
 
   it("文案區分帶入我的素材 vs 外部成果", async () => {

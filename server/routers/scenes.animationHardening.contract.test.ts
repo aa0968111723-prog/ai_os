@@ -212,6 +212,17 @@ describe("SceneList insertAfter queue (do not invent a /p/ button)", () => {
     expect(sceneList).toContain("insertTailRef");
     expect(sceneList).not.toContain("在這格之後插入");
   });
+
+  it("project ShotCard / StoryboardStage queue insertAfter so 連點 is click-order not LIFO", () => {
+    const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
+    const stage = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/StoryboardStage.tsx"), "utf8");
+    expect(shotCard).toContain("createInsertAfterQueue");
+    expect(shotCard).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(shotCard).not.toContain("insertAfter.mutate({ sceneId: shot.id })");
+    expect(stage).toContain("createInsertAfterQueue");
+    expect(stage).toContain("insertQueueRef.current?.enqueue(focusShot.id)");
+    expect(stage).not.toContain("insertAfter.mutate({ sceneId: focusShot.id })");
+  });
 });
 
 describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => {
