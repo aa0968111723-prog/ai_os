@@ -34,6 +34,7 @@ describe("StoryStage parse chips", () => {
     const start = src.indexOf("trpc.story.generateStoryboard.useMutation");
     const block = src.slice(start, src.indexOf("undoRun", start));
     expect(block).toContain("refreshStudioShotList(utils, projectId)");
+    expect(block).toContain("utils.scenes.listByProject.invalidate({ projectId })");
   });
 
   it("產生分鏡 stays available from story text when parse never finished", () => {

@@ -425,11 +425,13 @@ export function StoryStage({
   });
 
   const board = trpc.story.generateStoryboard.useMutation({
-    onSuccess: (r) => {
+    onSuccess: async (r) => {
       setParseNotice(
         r.reused ? "這次解析已經轉過分鏡了——直接看下方「分鏡」" : `已建立 ${r.storySceneIds.length} 場、${r.sceneIds.length} 個分鏡`,
       );
-      void refreshStudioShotList(utils, projectId);
+      // Invalidate + fetch so /studio first paint is not a cached 0 鏡 (tiny/A–D).
+      void utils.scenes.listByProject.invalidate({ projectId });
+      await refreshStudioShotList(utils, projectId);
       utils.story.get.invalidate({ projectId });
       utils.story.storyboardPreview.invalidate({ projectId });
       onRevealSection?.("storyboard");

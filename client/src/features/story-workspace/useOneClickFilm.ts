@@ -49,6 +49,8 @@ export function useOneClickFilm(projectId: string) {
         },
         generateStoryboard: async () => {
           await board.mutateAsync({ projectId });
+          void utils.scenes.listByProject.invalidate({ projectId });
+          await refreshStudioShotList(utils, projectId);
         },
         batchGenerate: async () => {
           const shots = await utils.scenes.listByProject.fetch({ projectId });
