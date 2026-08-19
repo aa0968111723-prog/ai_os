@@ -1220,10 +1220,11 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (freshAdopt) run.status = freshAdopt.status;
   }
 
-  // 使用者已按停：沒有新生成要送時收停 pending
+  // 使用者已按停／失敗：沒有新生成要送時收停 pending。waiting 是 Adopt／人類關卡，還要繼續跑依賴已解除的步驟。
   {
     const [freshStop] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (freshStop && freshStop.status !== "running") {
+    if (freshStop) run.status = freshStop.status;
+    if (freshStop && freshStop.status !== "running" && freshStop.status !== "waiting") {
       const stillFlying = listInFlightGenerationSteps(steps);
       if (!stillFlying.length) {
         stopPendingDagSteps(steps);
@@ -1244,7 +1245,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   const idx = selectAgentDagStep(steps);
   const step = steps[idx];
   if (!step) {
-    if (run.status === "running") await saveDagProgress(run, steps);
+    if (run.status === "running" || run.status === "waiting") await saveDagProgress(run, steps);
     return;
   }
 
@@ -1255,7 +1256,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   // 使用者已按停且這一步沒有生成在跑：從這一步起全部收停
-  if (run.status !== "running") {
+  if (run.status !== "running" && run.status !== "waiting") {
     stopPendingDagSteps(steps);
     await saveRun(run.id, { steps });
     return;
@@ -1268,7 +1269,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   // 免費步驟雖不扣點，但「按了停止還在建分鏡」同樣違反使用者預期（生成路徑送出前另有一次復查）
   {
     const [freshNow] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (!freshNow || freshNow.status !== "running") return; // 下一輪由收停分支統一標記
+    if (!freshNow || (freshNow.status !== "running" && freshNow.status !== "waiting")) return;
   }
 
   // 執行任何「新」步驟前，復驗發起人當下的專案權限（帳號停用／移出組／降為檢視者／專案封存都擋，
