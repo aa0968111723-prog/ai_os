@@ -18,6 +18,7 @@ import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import type { ContinuityShotDirection } from "../../shared/continuity";
+import { resolveSceneCards } from "../../shared/sceneCards";
 import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -1007,6 +1008,9 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     let sceneId: string | undefined;
     let sceneRole: "visual" | "narration" | "ambience" | undefined;
     let shotDirection = step.shotDirection;
+    let characterIds = step.characterIds;
+    let scenePresetIds = step.scenePresetIds;
+    let propIds = step.propIds;
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) {
@@ -1031,6 +1035,16 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
           performance: scene.performance,
           action: scene.action,
         };
+        // generateInto: shot bindings win when this shot has cards. LLM plans
+        // often omit characterRefs; execute used to drop 小華 / 定裝 anchors.
+        const cards = resolveSceneCards(scene, {
+          characterIds: step.characterIds,
+          scenePresetIds: step.scenePresetIds,
+          propIds: step.propIds,
+        });
+        characterIds = cards.characterIds;
+        scenePresetIds = cards.scenePresetIds;
+        propIds = cards.propIds;
       }
     }
 
@@ -1079,9 +1093,9 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         prompt: step.prompt,
         sceneId,
         sceneRole,
-        characterIds: step.characterIds,
-        scenePresetIds: step.scenePresetIds,
-        propIds: step.propIds,
+        characterIds,
+        scenePresetIds,
+        propIds,
         lookIds: step.lookIds,
         shotDirection,
         sourceAssetId: step.sourceAssetId,
@@ -2088,6 +2102,9 @@ async function advanceRun(run: RunRow): Promise<void> {
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
   let shotDirection = step.shotDirection;
+  let characterIds = step.characterIds;
+  let scenePresetIds = step.scenePresetIds;
+  let propIds = step.propIds;
   let stepVoiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
@@ -2159,6 +2176,14 @@ async function advanceRun(run: RunRow): Promise<void> {
           performance: scene.performance,
           action: scene.action,
         };
+        const cards = resolveSceneCards(scene, {
+          characterIds: step.characterIds,
+          scenePresetIds: step.scenePresetIds,
+          propIds: step.propIds,
+        });
+        characterIds = cards.characterIds;
+        scenePresetIds = cards.scenePresetIds;
+        propIds = cards.propIds;
       }
     }
     modelId = model.id;
@@ -2243,9 +2268,9 @@ async function advanceRun(run: RunRow): Promise<void> {
       // closure §5（稽核修正）：代理旁白帶聲線 identity（與 generateVoiceover 同一路由）
       voiceIdentity: stepVoiceIdentity,
       // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／素材／來源素材
-      characterIds: step.characterIds,
-      scenePresetIds: step.scenePresetIds,
-      propIds: step.propIds,
+      characterIds,
+      scenePresetIds,
+      propIds,
       lookIds: step.lookIds,
       shotDirection,
       sourceAssetId: step.sourceAssetId,

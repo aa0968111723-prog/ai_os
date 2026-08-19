@@ -542,6 +542,16 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(update).not.toContain("lockXiaohuaGenerationPrompt");
   });
 
+  it("agent generate resolveSceneCards at execute so planner-omitted cards still bind", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/resolveSceneCards\(scene,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("characterIds: step.characterIds");
+    expect(runner).toContain("characterIds = cards.characterIds");
+    expect(runner).toContain("lookIds: step.lookIds");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+    expect(runner).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("batchGenerate locks 小華 prompt before the agent step stores it", () => {
     const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
     expect(batch).toContain("lockXiaohuaGenerationPrompt");
