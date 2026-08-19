@@ -180,6 +180,16 @@ describe("既有能力沒有被 UI 重構弄丟", () => {
 });
 
 describe("Inspector 不新增資料格式", () => {
+  it("畫面分頁帶入外部成果走既有 ExternalAssetIntake，綁這一鏡 sceneId", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain('from "../external-intake/ExternalAssetIntake"');
+    expect(inspector).toContain("<ExternalAssetIntake");
+    expect(inspector).toContain('triggerLabel="帶入外部成果"');
+    expect(inspector).toContain("sceneId={shot.id}");
+    expect(inspector).toContain("sceneLabel=");
+    expect(inspector).not.toContain("ExternalGenerationLauncher");
+  });
+
   it("六個分頁全部接既有欄位（camera／performance／lookIds 是 Story-first 既有欄位）", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
     expect(inspector).toContain("trpc.scenes.update.useMutation");

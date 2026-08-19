@@ -29,6 +29,7 @@ import {
 } from "@shared/story";
 import type { StudioShot } from "./ShotStrip";
 import { AiCopilotActions, type AiCopilotProps } from "./AiCopilotActions";
+import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 
 export type InspectorTab = "frame" | "cast" | "camera" | "sound" | "ai" | "notes";
 
@@ -156,6 +157,7 @@ export function ShotInspector({
             projectId={projectId}
             projectFormat={projectFormat}
             shot={shot}
+            shotNumber={shotNumber}
             canEdit={canEdit}
             tab={tab}
           />
@@ -174,12 +176,14 @@ function ShotFields({
   projectId,
   projectFormat,
   shot,
+  shotNumber,
   canEdit,
   tab,
 }: {
   projectId: string;
   projectFormat: string | null | undefined;
   shot: InspectorShot;
+  shotNumber: number | null;
   canEdit: boolean;
   tab: InspectorTab;
 }) {
@@ -257,7 +261,18 @@ function ShotFields({
       )}
       {update.error && !conflict && <p className="error" role="alert">儲存失敗：{update.error.message}</p>}
 
-      {tab === "frame" && <FrameTab shot={shot} projectId={projectId} projectFormat={projectFormat} ro={ro} saveField={saveField} saveCamera={saveCamera} />}
+      {tab === "frame" && (
+        <FrameTab
+          shot={shot}
+          shotNumber={shotNumber}
+          projectId={projectId}
+          projectFormat={projectFormat}
+          ro={ro}
+          saveField={saveField}
+          saveCamera={saveCamera}
+          onImported={invalidate}
+        />
+      )}
       {tab === "cast" && <CastTab shot={shot} projectId={projectId} ro={ro} setCards={setCards} saveField={saveField} />}
       {tab === "camera" && <CameraTab shot={shot} ro={ro} saveCamera={saveCamera} />}
       {tab === "sound" && <SoundTab shot={shot} ro={ro} saveField={saveField} />}
@@ -269,18 +284,22 @@ function ShotFields({
 /* ── 畫面 ─────────────────────────────────────────────── */
 function FrameTab({
   shot,
+  shotNumber,
   projectId,
   projectFormat,
   ro,
   saveField,
   saveCamera,
+  onImported,
 }: {
   shot: InspectorShot;
+  shotNumber: number | null;
   projectId: string;
   projectFormat: string | null | undefined;
   ro: boolean;
   saveField: (patch: Record<string, unknown>) => void;
   saveCamera: (field: keyof ShotCamera, value: string) => void;
+  onImported: () => void;
 }) {
   // 場（story_scenes）：這一鏡在哪一場戲；環境狀態由場繼承下來，這裡唯讀顯示
   const scenes = trpc.story.scenesList.useQuery({ projectId });
@@ -348,6 +367,19 @@ function FrameTab({
           onBlur={(e) => { if (!ro && e.target.value !== (shot.prompt ?? "")) saveField({ prompt: e.target.value }); }}
         />
       </Field>
+
+      {!ro && (
+        <div className="studio-fields__row">
+          <ExternalAssetIntake
+            projectId={projectId}
+            sceneId={shot.id}
+            sceneLabel={shotNumber != null ? `第 ${shotNumber} 鏡「${shot.title}」` : `「${shot.title}」`}
+            triggerLabel="帶入外部成果"
+            triggerVariant="ghost"
+            onImported={onImported}
+          />
+        </div>
+      )}
     </div>
   );
 }
