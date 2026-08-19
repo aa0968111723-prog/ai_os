@@ -165,7 +165,7 @@ describe("animation shot writes stay consistent", () => {
     expect(sceneList).toContain("trimStartMs: s.trimStartMs ?? null");
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     expect(shotCard).toContain("expectedRev: shot.rev");
-    expect(shotCard).toContain("baseline: { [field]:");
+    expect(shotCard).toContain("[field]: (shot as unknown as Record<string, unknown>)[field] ?? null");
     expect(shotCard).toContain("gateRef.current?.save(");
     expect(shotCard).not.toMatch(/const saveField[\s\S]*?update\.mutate\(\{[\s\S]*?expectedRev: shot\.rev/);
   });
