@@ -526,6 +526,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(scenes).toContain("assertReplayableGeneration(gen.status)");
     const retry = readFileSync(join(process.cwd(), "server/services/generationRetryInput.ts"), "utf8");
     expect(retry).toContain("lookIds: lookIds.length ? lookIds : undefined");
+    expect(retry).toContain("...(meta.lookIds ?? [])");
     expect(retry).toContain("shotContextPacketId: meta.shotContextPacketId");
     expect(retry).toContain("sourceAssetId = metaSourceId ?? assetId");
     expect(retry).toContain("voiceIdentity: meta.voice");

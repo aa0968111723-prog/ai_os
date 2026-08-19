@@ -1034,6 +1034,9 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     // closure §7：parent 素材 id 落 meta——完成時寫 asset_revisions 正式血緣列，
     // 不再依賴 sourceUrl regex 反推（外部網址會斷鏈）
     sourceAssetId: prepared.effectiveSourceAssetId,
+    // Retry used to restore lookIds only from snapshot characters[].lookId.
+    // A look-only shot (lookIds, no character cards) never froze those ids.
+    lookIds: input.lookIds?.length ? [...new Set(input.lookIds)] : undefined,
     // closure §5／§6：聲線與聲音世界的 canon 依賴落進 meta——lineage 與 targeted stale 的根據
     voice: input.voiceIdentity
       ? {

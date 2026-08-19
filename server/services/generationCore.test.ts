@@ -206,6 +206,7 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
     expect(source).toContain("characterIds: input.characterIds");
     expect(source).toContain("scenePresetIds: input.scenePresetIds");
     expect(source).toContain("sourceAssetId: input.sourceAssetId");
+    expect(source).toContain("lookIds: input.lookIds");
     // 必須在 assertProjectAllows 之後、素材簽名／建列之前
     const projectAllowsIdx = source.indexOf('assertProjectAllows(project, "generate")');
     const assertEntityIdx = source.indexOf("await assertGenerationEntityIds(project.id");

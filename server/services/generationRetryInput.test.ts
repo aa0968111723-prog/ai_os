@@ -125,6 +125,15 @@ describe("buildRetryGenerationInput — 重試不得靜默降級", () => {
     expect(input.continuitySnapshot).toBeUndefined();
   });
 
+  it("look-only shot：meta lookIds 沿用（快照沒角色時 snapshot 拿不到造型）", () => {
+    const lookId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const input = buildRetryGenerationInput(row({
+      continuitySnapshot: null,
+      params: storeGenerationSourceMeta({ prompt: "p" }, { lookIds: [lookId] }),
+    }));
+    expect(input.lookIds).toEqual([lookId]);
+  });
+
   it("方向與批次沿用：重試出來的版本仍歸在原批次", () => {
     const creative = { batchId: "b-1", directionId: "closer", directionLabel: "更靠近人物", batchSize: 3 };
     const input = buildRetryGenerationInput(row({

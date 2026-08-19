@@ -40,6 +40,14 @@ describe("closure §5–§7 lineage meta", () => {
     expect(meta.sourceAssetId).toBe("asset-parent");
   });
 
+  it("round-trips lookIds so retry of a look-only shot keeps costume", () => {
+    const lookId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const stored = storeGenerationSourceMeta({ prompt: "x" }, { lookIds: [lookId] });
+    const { meta, providerParams } = splitGenerationSourceMeta(stored);
+    expect(providerParams).toEqual({ prompt: "x" });
+    expect(meta.lookIds).toEqual([lookId]);
+  });
+
   it("legacy params without the new fields stay untouched", () => {
     const stored = storeGenerationSourceMeta({ prompt: "x" }, {});
     expect(stored).toEqual({ prompt: "x" });
@@ -47,5 +55,6 @@ describe("closure §5–§7 lineage meta", () => {
     expect(meta.voice).toBeUndefined();
     expect(meta.soundWorld).toBeUndefined();
     expect(meta.sourceAssetId).toBeUndefined();
+    expect(meta.lookIds).toBeUndefined();
   });
 });

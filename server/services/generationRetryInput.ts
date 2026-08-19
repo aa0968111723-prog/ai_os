@@ -57,13 +57,15 @@ export function buildRetryGenerationInput(
   const sourceAssetId = metaSourceId ?? assetId;
   const parsedSnapshot = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
   const lockedSnapshot = parsedSnapshot.success && parsedSnapshot.data.locked ? parsedSnapshot.data : undefined;
-  const lookIds = parsedSnapshot.success
-    ? [...new Set(
-      parsedSnapshot.data.characters
-        .map((row) => row.lookId)
-        .filter((id): id is string => Boolean(id)),
-    )]
+  // Snapshot characters[].lookId is empty when the shot had lookIds but no
+  // character cards (buildContinuitySnapshot returns null). Meta keeps the
+  // ids that were actually sent — same restore as sourceAssetId.
+  const snapshotLookIds = parsedSnapshot.success
+    ? parsedSnapshot.data.characters
+      .map((row) => row.lookId)
+      .filter((id): id is string => Boolean(id))
     : [];
+  const lookIds = [...new Set([...snapshotLookIds, ...(meta.lookIds ?? [])])];
 
   return {
     projectId: gen.projectId,
