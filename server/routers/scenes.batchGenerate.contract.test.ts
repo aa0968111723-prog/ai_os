@@ -18,7 +18,7 @@ describe("scenes.batchGenerate charge-safety contract", () => {
     expect(batch).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
     const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
     expect(runner).toContain("lookIds?: string[]");
-    expect(runner.match(/lookIds: step.lookIds/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/lookIds = step.lookIds \?\? scene.lookIds/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("reuses an awaiting_approval run with the same fingerprint instead of inserting another", () => {

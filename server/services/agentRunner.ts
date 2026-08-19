@@ -1008,6 +1008,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     let sceneId: string | undefined;
     let sceneRole: "visual" | "narration" | "ambience" | undefined;
     let shotDirection = step.shotDirection;
+    let lookIds = step.lookIds;
     let characterIds = step.characterIds;
     let scenePresetIds = step.scenePresetIds;
     let propIds = step.propIds;
@@ -1035,6 +1036,10 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
           performance: scene.performance,
           action: scene.action,
         };
+        // batchGenerate already stamps lookIds on the step. LLM plans omit
+        // them the same way they omit characterRefs / shotDirection — execute
+        // used to drop this shot's 定裝. Same fallback as shotDirection.
+        lookIds = step.lookIds ?? scene.lookIds ?? undefined;
         // generateInto: shot bindings win when this shot has cards. LLM plans
         // often omit characterRefs; execute used to drop 小華 / 定裝 anchors.
         const cards = resolveSceneCards(scene, {
@@ -1096,7 +1101,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         characterIds,
         scenePresetIds,
         propIds,
-        lookIds: step.lookIds,
+        lookIds,
         shotDirection,
         sourceAssetId: step.sourceAssetId,
         sourceUrl: step.sourceUrl,
@@ -2102,6 +2107,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
   let shotDirection = step.shotDirection;
+  let lookIds = step.lookIds;
   let characterIds = step.characterIds;
   let scenePresetIds = step.scenePresetIds;
   let propIds = step.propIds;
@@ -2176,6 +2182,7 @@ async function advanceRun(run: RunRow): Promise<void> {
           performance: scene.performance,
           action: scene.action,
         };
+        lookIds = step.lookIds ?? scene.lookIds ?? undefined;
         const cards = resolveSceneCards(scene, {
           characterIds: step.characterIds,
           scenePresetIds: step.scenePresetIds,
@@ -2271,7 +2278,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       characterIds,
       scenePresetIds,
       propIds,
-      lookIds: step.lookIds,
+      lookIds,
       shotDirection,
       sourceAssetId: step.sourceAssetId,
       sourceUrl: step.sourceUrl,
