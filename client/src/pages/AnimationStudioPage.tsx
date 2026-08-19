@@ -17,6 +17,10 @@ import { studioProjectIdFromLocation } from "@shared/studioDeepLink";
  *
  * 挑專案這一段刻意留在頁面層而不是塞進創作室裡：創作室已經是三區塊的重版面，
  * 再多一層「還沒選專案」的空狀態會讓它同時要處理兩種完全不同的畫面。
+ *
+ * 清單不跟 activeGroupId 走——頂欄晶片可能不是動畫組，動畫組小華
+ * （81b265dc-d41c-4ace-ae8f-c05b6debefec）仍必須出現。開案走 projects.get，
+ * 不在這頁建立專案。
  */
 export function AnimationStudioPage({ groupId, projectId }: { groupId: string; projectId?: string }) {
   const queryProjectId =
@@ -26,18 +30,31 @@ export function AnimationStudioPage({ groupId, projectId }: { groupId: string; p
       typeof window === "undefined" ? "" : window.location.search,
     );
   const resolvedId = queryProjectId ?? undefined;
-  const projects = trpc.projects.list.useQuery({ groupId }, { enabled: !!groupId });
-  const current = projects.data?.find((p) => p.id === resolvedId);
+  const projects = trpc.projects.list.useQuery({});
+  const open = trpc.projects.get.useQuery(
+    { id: resolvedId! },
+    { enabled: Boolean(resolvedId), retry: (count, err) => {
+      const code = err.data?.code;
+      if (code === "FORBIDDEN" || code === "NOT_FOUND") return false;
+      return count < 2;
+    } },
+  );
+  const listed = (projects.data ?? []).slice().sort((a, b) => {
+    if (!groupId) return 0;
+    const ag = a.groupId === groupId ? 0 : 1;
+    const bg = b.groupId === groupId ? 0 : 1;
+    return ag - bg;
+  });
 
   if (resolvedId) {
-    if (projects.isLoading) {
+    if (open.isLoading) {
       return (
         <div className="page-shell">
           <Skeleton height={320} />
         </div>
       );
     }
-    if (!current) {
+    if (!open.data) {
       return (
         <div className="page-shell secondary-page">
           <EmptyState
@@ -51,10 +68,10 @@ export function AnimationStudioPage({ groupId, projectId }: { groupId: string; p
     }
     return (
       <AnimationStudio
-        projectId={current.id}
-        projectTitle={current.title}
-        projectFormat={current.format}
-        canEdit={current.myProjectRole !== "viewer" && current.status !== "archived"}
+        projectId={open.data.id}
+        projectTitle={open.data.title}
+        projectFormat={open.data.format}
+        canEdit={open.data.myProjectRole !== "viewer" && open.data.status !== "archived"}
       />
     );
   }
@@ -75,9 +92,9 @@ export function AnimationStudioPage({ groupId, projectId }: { groupId: string; p
       />
       {projects.isLoading ? (
         <Skeleton height={160} />
-      ) : projects.data?.length ? (
+      ) : listed.length ? (
         <ul className="studio-picker">
-          {projects.data.map((project) => (
+          {listed.map((project) => (
             <li key={project.id}>
               <Link href={`/studio/${project.id}`} className="studio-picker__item">
                 <span className="studio-picker__cover">
@@ -99,9 +116,9 @@ export function AnimationStudioPage({ groupId, projectId }: { groupId: string; p
       ) : (
         <EmptyState
           icon={<Icon name="Clapperboard" />}
-          title={<>這一組還沒有專案</>}
+          title={<>還沒有可以開的專案</>}
           description={<>創作室的分鏡與素材都掛在專案底下，先到今日工作台開一個專案再回來。</>}
-          action={<Link href="/dashboard">去建立專案</Link>}
+          action={<Link href="/dashboard">去今日工作台</Link>}
         />
       )}
       <Hint>手稿在存成分鏡畫面之前只留在這台裝置上——換手機或換電腦看不到未存的草稿。</Hint>

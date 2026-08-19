@@ -262,6 +262,12 @@ describe("Inspector 不新增資料格式", () => {
     expect(page).toContain("`/studio/${project.id}`");
     expect(page).toContain("studioProjectIdFromLocation");
     expect(page).toContain("resolvedId");
+    expect(page).toContain("trpc.projects.list.useQuery({})");
+    expect(page).toContain("trpc.projects.get.useQuery");
+    expect(page).toContain("81b265dc-d41c-4ace-ae8f-c05b6debefec");
+    expect(page).not.toContain("enabled: !!groupId");
+    expect(page).not.toContain("projects.create");
+    expect(page).not.toContain("create.mutate");
   });
 
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
