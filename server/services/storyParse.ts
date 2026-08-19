@@ -28,6 +28,8 @@ import {
   STORY_PARSE_BUDGET,
   diffStoryboardPlan,
   inferLocationNameFromText,
+  isBlankOrphanShot,
+  orderShotsForStoryboard,
   type StoryParsePlan,
   type ParsedShot,
   type ExistingStoryScene,
@@ -923,62 +925,104 @@ export async function attachLeftoverOrphansOnReuse(input: {
       return { attached: 0, locationsBound };
     }
 
-    let attachSceneId = scenes.at(-1)?.id ?? null;
+    const attachSceneId = scenes.at(-1)?.id ?? null;
     if (!attachSceneId) {
-      const [{ maxSceneOrder }] = await tx
-        .select({ maxSceneOrder: sql<number>`coalesce(max(${schema.storyScenes.orderIndex}), 0)` })
-        .from(schema.storyScenes)
-        .where(eq(schema.storyScenes.projectId, input.projectId));
-      const [row] = await tx
-        .insert(schema.storyScenes)
-        .values({
-          projectId: input.projectId,
-          orderIndex: Number(maxSceneOrder) + 1,
-          title: "未分場",
-          summary: "原先未歸場的鏡",
-        })
-        .returning();
-      attachSceneId = row.id;
+      // First parse folds orphans into planned 場. Do not invent a「未分場」
+      // tail here either — that is the live untitled leftover group.
+      return { attached: 0, locationsBound };
     }
 
+    const [{ maxOrder }] = await tx
+      .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)));
+    let nextOrder = Number(maxOrder);
     for (const leftover of orphans) {
+      nextOrder += 1;
       await tx
         .update(schema.scenes)
-        .set({ storySceneId: attachSceneId })
+        .set({ storySceneId: attachSceneId, orderIndex: nextOrder })
         .where(eq(schema.scenes.id, leftover.id));
     }
+    await compactProjectShotOrder(tx, input.projectId);
     return { attached: orphans.length, locationsBound };
   });
 }
 
-/** Live 0場 5鏡: shots with no storySceneId hang in the studio「未分場」tail. */
-export async function loadOrphanShots(
-  tx: Pick<typeof db, "select">,
-  projectId: string,
-): Promise<Array<{
+export type OrphanShotRow = {
   id: string;
   title: string;
   prompt: string | null;
   assetId: string | null;
   scenePresetIds: string[] | null;
-}>> {
-  return tx
+  storySceneId: string | null;
+  orderIndex: number;
+};
+
+/**
+ * Live 0場 5鏡: null storySceneId OR a dangling id (場 deleted, 鏡 left behind)
+ * hangs in the 分鏡中心「未分場」tail. NULL-only missed those dangling rows,
+ * so 產生分鏡 FIFO-appended 21 after maxOrder and left untitled #1–5 at the tail.
+ */
+export async function loadOrphanShots(
+  tx: Pick<typeof db, "select">,
+  projectId: string,
+): Promise<OrphanShotRow[]> {
+  const [liveScenes, rows] = await Promise.all([
+    tx
+      .select({ id: schema.storyScenes.id })
+      .from(schema.storyScenes)
+      .where(eq(schema.storyScenes.projectId, projectId)),
+    tx
+      .select({
+        id: schema.scenes.id,
+        title: schema.scenes.title,
+        prompt: schema.scenes.prompt,
+        assetId: schema.scenes.assetId,
+        scenePresetIds: schema.scenes.scenePresetIds,
+        storySceneId: schema.scenes.storySceneId,
+        orderIndex: schema.scenes.orderIndex,
+      })
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex)),
+  ]);
+  const liveIds = new Set(liveScenes.map((row) => row.id));
+  return rows.filter((row) => !row.storySceneId || !liveIds.has(row.storySceneId));
+}
+
+const SHOT_ORDER_COMPACT_OFFSET = 1_000_000;
+
+async function compactProjectShotOrder(
+  tx: Pick<typeof db, "select" | "update">,
+  projectId: string,
+): Promise<void> {
+  const storyScenes = await tx
+    .select({ id: schema.storyScenes.id })
+    .from(schema.storyScenes)
+    .where(eq(schema.storyScenes.projectId, projectId))
+    .orderBy(asc(schema.storyScenes.orderIndex));
+  const live = await tx
     .select({
       id: schema.scenes.id,
-      title: schema.scenes.title,
-      prompt: schema.scenes.prompt,
-      assetId: schema.scenes.assetId,
-      scenePresetIds: schema.scenes.scenePresetIds,
+      storySceneId: schema.scenes.storySceneId,
+      orderIndex: schema.scenes.orderIndex,
     })
     .from(schema.scenes)
-    .where(
-      and(
-        eq(schema.scenes.projectId, projectId),
-        isNull(schema.scenes.deletedAt),
-        isNull(schema.scenes.storySceneId),
-      ),
-    )
-    .orderBy(asc(schema.scenes.orderIndex));
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
+  const ordered = orderShotsForStoryboard(storyScenes.map((row) => row.id), live);
+  for (let i = 0; i < ordered.length; i += 1) {
+    await tx
+      .update(schema.scenes)
+      .set({ orderIndex: SHOT_ORDER_COMPACT_OFFSET + i + 1 })
+      .where(eq(schema.scenes.id, ordered[i]!.id));
+  }
+  for (let i = 0; i < ordered.length; i += 1) {
+    await tx
+      .update(schema.scenes)
+      .set({ orderIndex: i + 1 })
+      .where(eq(schema.scenes.id, ordered[i]!.id));
+  }
 }
 
 /**
@@ -1117,10 +1161,6 @@ export async function materializeStoryboard(input: {
 
   return db.transaction(async (tx) => {
     await lockSceneOrder(tx, project.id);
-    const [{ maxOrder }] = await tx
-      .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-      .from(schema.scenes)
-      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     const [{ maxSceneOrder }] = await tx
       .select({ maxSceneOrder: sql<number>`coalesce(max(${schema.storyScenes.orderIndex}), 0)` })
       .from(schema.storyScenes)
@@ -1159,7 +1199,9 @@ export async function materializeStoryboard(input: {
       createdLocationIds.push(row.id);
     }
 
-    let shotOrder = Number(maxOrder);
+    // Fold into plan order (1…n), then compact. Starting from maxOrder FIFO-appended
+    // the new board after the 5 untitled drafts (live 0場5鏡 → 7場26鏡).
+    let shotOrder = 0;
     let sceneOrder = Number(maxSceneOrder);
     const storySceneIds: string[] = [];
     const sceneIds: string[] = [];
@@ -1223,7 +1265,6 @@ export async function materializeStoryboard(input: {
         }, script);
         return {
           projectId: project.id,
-          orderIndex: ++shotOrder,
           title: (lockedShot.title ?? shot.prompt.slice(0, 24)).slice(0, 60),
           durationSec: shot.durationSec ?? (project.format === "9:16" ? 4 : 5),
           status: "todo" as const,
@@ -1249,20 +1290,22 @@ export async function materializeStoryboard(input: {
         propIds: [...new Set(shotValues.flatMap((row) => row.propIds ?? []))],
         lookIds: [...new Set(shotValues.flatMap((row) => row.lookIds ?? []))],
       });
-      const toInsert: typeof shotValues = [];
+      const toInsert: Array<(typeof shotValues)[number] & { orderIndex: number }> = [];
       for (const row of shotValues) {
+        const orderIndex = ++shotOrder;
         const orphan = orphanQueue.shift();
         if (!orphan) {
-          toInsert.push(row);
+          toInsert.push({ ...row, orderIndex });
           continue;
         }
-        // Blank draft (＋新增鏡): replace copy from the plan. Hand-written / generated
-        // orphans keep their prompt and asset — only join a scene so they do not hang.
-        const keepCopy = Boolean(orphan.prompt?.trim()) || Boolean(orphan.assetId);
+        // Blank ＋新增鏡 / 第 N 鏡: replace copy from the plan (location/line).
+        // Hand-written or generated orphans keep prompt/asset — only join + reindex.
+        const keepCopy = !isBlankOrphanShot(orphan);
         await tx
           .update(schema.scenes)
           .set({
             storySceneId: storyScene.id,
+            orderIndex,
             scenePresetIds: locationPresetIds.length ? locationPresetIds : orphan.scenePresetIds,
             ...(keepCopy
               ? {}
@@ -1292,30 +1335,47 @@ export async function materializeStoryboard(input: {
       }
     }
 
-    if (orphanQueue.length) {
-      let attachSceneId = lastStorySceneId;
-      if (!attachSceneId) {
-        const [row] = await tx
-          .insert(schema.storyScenes)
-          .values({
-            projectId: project.id,
-            orderIndex: ++sceneOrder,
-            title: "未分場",
-            summary: "原先未歸場的鏡",
-          })
-          .returning();
-        attachSceneId = row.id;
-        storySceneIds.push(row.id);
-      }
+    if (orphanQueue.length && lastStorySceneId) {
+      // Do not open a「未分場」tail. Fold leftovers into the last planned 場
+      // and give blank drafts that 場's title (location/line), not empty / 第 N 鏡.
+      const [attachScene] = await tx
+        .select({ id: schema.storyScenes.id, title: schema.storyScenes.title })
+        .from(schema.storyScenes)
+        .where(eq(schema.storyScenes.id, lastStorySceneId));
+      const foldTitle = (attachScene?.title ?? "續").slice(0, 60);
       for (const leftover of orphanQueue) {
+        const blank = isBlankOrphanShot(leftover);
         await tx
           .update(schema.scenes)
-          .set({ storySceneId: attachSceneId })
+          .set({
+            storySceneId: lastStorySceneId,
+            orderIndex: ++shotOrder,
+            ...(blank ? { title: foldTitle } : {}),
+          })
           .where(eq(schema.scenes.id, leftover.id));
         sceneIds.push(leftover.id);
       }
       orphanQueue.length = 0;
     }
+
+    const sceneRows = await tx
+      .select({
+        id: schema.storyScenes.id,
+        title: schema.storyScenes.title,
+        summary: schema.storyScenes.summary,
+        storyExcerpt: schema.storyScenes.storyExcerpt,
+        locationId: schema.storyScenes.locationId,
+      })
+      .from(schema.storyScenes)
+      .where(eq(schema.storyScenes.projectId, project.id))
+      .orderBy(asc(schema.storyScenes.orderIndex));
+    await backfillStorySceneLocations(tx, {
+      projectId: project.id,
+      groupId: project.groupId,
+      userId: input.userId,
+      scenes: sceneRows,
+    });
+    await compactProjectShotOrder(tx, project.id);
 
     const applied: ParseRunApplied = {
       ...(run.applied ?? {}),
@@ -1353,7 +1413,11 @@ async function rewriteProjectXiaohuaStoryboardCopy(projectId: string, script = "
     })
     .from(schema.scenes)
     .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
-  await persistXiaohuaShotRewrites(rows, boundIds, forceXiaohua);
+  await persistXiaohuaShotRewrites(
+    rows.map((row) => ({ ...row, prompt: row.prompt ?? "" })),
+    boundIds,
+    forceXiaohua,
+  );
 
   const storyScenes = await db
     .select({

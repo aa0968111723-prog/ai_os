@@ -16,6 +16,9 @@ import {
   summarizeStoryboardDiff,
   planOrphanAdoption,
   planReuseOrphanAttach,
+  isPlaceholderShotTitle,
+  isBlankOrphanShot,
+  orderShotsForStoryboard,
   inferLocationNameFromText,
   buildShotSearchTerms,
   suggestAssetsForShot,
@@ -198,6 +201,33 @@ describe("diffStoryboardPlan（§22 逐場套用：不重複建、也不蓋掉�
       reuseScenes: 1,
       newShots: 2,
     });
+  });
+});
+
+describe("placeholder / blank orphan shots", () => {
+  it("treats 第 N 鏡 / empty / 未分場 as placeholders", () => {
+    expect(isPlaceholderShotTitle("第 1 鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("第3鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("")).toBe(true);
+    expect(isPlaceholderShotTitle("未分場第 2 鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("校門口自我介紹")).toBe(false);
+    expect(isBlankOrphanShot({ title: "第 5 鏡", prompt: null, assetId: null })).toBe(true);
+    expect(isBlankOrphanShot({ title: "第 5 鏡", prompt: "她走進校門", assetId: null })).toBe(false);
+  });
+});
+
+describe("orderShotsForStoryboard", () => {
+  it("puts dangling / null storySceneId after planned 場 — that is the live untitled tail", () => {
+    const ordered = orderShotsForStoryboard(
+      ["場1", "場7"],
+      [
+        { id: "old-1", storySceneId: null, orderIndex: 1 },
+        { id: "new-6", storySceneId: "場1", orderIndex: 6 },
+        { id: "old-5", storySceneId: "missing", orderIndex: 5 },
+        { id: "new-26", storySceneId: "場7", orderIndex: 26 },
+      ],
+    );
+    expect(ordered.map((row) => row.id)).toEqual(["new-6", "new-26", "old-1", "old-5"]);
   });
 });
 

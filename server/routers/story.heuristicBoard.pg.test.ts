@@ -200,8 +200,78 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
 
     const storyScenes = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.projectId, project.id));
     expect(storyScenes.every((sc) => Boolean(sc.locationId))).toBe(true);
+    expect(storyScenes.every((sc) => sc.title !== "未分場")).toBe(true);
+    expect(listed.every((row) => !/^第\s*\d+\s*鏡$/.test(row.title ?? ""))).toBe(true);
+    expect(listed.map((row) => row.orderIndex)).toEqual(listed.map((_, i) => i + 1));
+    const tail = listed.slice(-5);
+    expect(tail.every((row) => before.some((old) => old.id === row.id))).toBe(false);
     const presets = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, project.id));
     expect(new Set(presets.map((p) => p.name))).toEqual(new Set(["禪堂", "教室", "宿舍"]));
+  });
+
+  it("dangling storySceneId drafts fold into the new board — no untitled 未分場 tail", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "DanglingOrphan", email: `dangling-orphan-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-dangling-orphan", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+    const seven = [
+      "林林站在校門口。校名牌反著暖色光。她抬手打招呼。",
+      "夕陽把操場染成橘色。她仰頭看天。風吹過操場。",
+      "走廊轉角有人影。她停下腳步。問了一聲。",
+      "禪堂裡香煙垂直。木魚輕輕響。她坐下。",
+      "教室裡她抓住書包帶。聲音發亮。轉身就走。",
+      "禮堂燈還沒關。回音散開。她再說一次。",
+      "頂樓風很大。城市燈海在腳下。她深呼吸。",
+    ].join("\n\n");
+    await db.insert(schema.stories).values({
+      projectId: project.id,
+      groupId,
+      content: seven,
+    });
+
+    const ctx = { auth: authFor(userId, groupId) };
+    const storyApi = storyRouter.createCaller(ctx as never);
+    const scenesApi = scenesRouter.createCaller(ctx as never);
+    const danglingIds: string[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const [row] = await db.insert(schema.scenes).values({
+        projectId: project.id,
+        orderIndex: i,
+        title: `第 ${i} 鏡`,
+        storySceneId: randomUUID(),
+      }).returning();
+      danglingIds.push(row.id);
+    }
+    const before = await scenesApi.listByProject({ projectId: project.id });
+    expect(before).toHaveLength(5);
+
+    const planned = planStoryboardFromStoryText(seven);
+    const plannedShots = planned.scenes.reduce((n, sc) => n + sc.shots.length, 0);
+    expect(planned.scenes).toHaveLength(7);
+    expect(plannedShots).toBe(21);
+
+    const board = await storyApi.generateStoryboard({ projectId: project.id });
+    expect(board.reused).toBe(false);
+
+    const listed = await scenesApi.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(plannedShots);
+    expect(listed.every((row) => Boolean(row.storySceneId))).toBe(true);
+    expect(danglingIds.every((id) => listed.some((row) => row.id === id))).toBe(true);
+    expect(listed.every((row) => !/^第\s*\d+\s*鏡$/.test(row.title ?? ""))).toBe(true);
+    expect(listed.slice(-5).every((row) => danglingIds.includes(row.id))).toBe(false);
+
+    const storyScenes = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.projectId, project.id));
+    expect(storyScenes).toHaveLength(7);
+    expect(storyScenes.every((sc) => sc.title !== "未分場")).toBe(true);
+    expect(storyScenes.every((sc) => Boolean(sc.locationId))).toBe(true);
+    const orphanTail = listed.filter((row) => !storyScenes.some((sc) => sc.id === row.storySceneId));
+    expect(orphanTail).toEqual([]);
   });
 
   it("reuse 產生分鏡 attaches leftover orphans and does not grow live 26", async () => {

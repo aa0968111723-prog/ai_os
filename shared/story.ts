@@ -389,6 +389,64 @@ export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
 }
 
 /**
+ * 「＋新增鏡」placeholder titles. First 產生分鏡 must replace these with
+ * location/line copy — leaving「第 3 鏡」or empty at the 未分場 tail is the
+ * live 0場5鏡 → 7場26鏡 shape.
+ */
+export function isPlaceholderShotTitle(title?: string | null): boolean {
+  const t = (title ?? "").trim();
+  if (!t) return true;
+  if (/^第\s*\d+\s*鏡$/.test(t)) return true;
+  if (/^未分場/.test(t)) return true;
+  if (t === "新分鏡") return true;
+  return false;
+}
+
+/** Blank draft: no prompt, no still, placeholder title. Safe to overwrite from the plan. */
+export function isBlankOrphanShot(row: {
+  title?: string | null;
+  prompt?: string | null;
+  assetId?: string | null;
+}): boolean {
+  if ((row.prompt ?? "").trim()) return false;
+  if (row.assetId) return false;
+  return isPlaceholderShotTitle(row.title);
+}
+
+export interface StoryboardOrderShot {
+  id: string;
+  storySceneId: string | null;
+  orderIndex: number;
+}
+
+/**
+ * 場序 → 場內 orderIndex → 未分場/dangling 殿後.
+ * Used to compact after fold so untitled #1–5 cannot sit after 場1–7 as a tail.
+ */
+export function orderShotsForStoryboard<S extends StoryboardOrderShot>(
+  storySceneIds: readonly string[],
+  shots: readonly S[],
+): S[] {
+  const byScene = new Map<string, S[]>();
+  for (const id of storySceneIds) byScene.set(id, []);
+  const dangling: S[] = [];
+  for (const shot of shots) {
+    if (shot.storySceneId && byScene.has(shot.storySceneId)) {
+      byScene.get(shot.storySceneId)!.push(shot);
+    } else {
+      dangling.push(shot);
+    }
+  }
+  const byIndex = (a: S, b: S) => a.orderIndex - b.orderIndex;
+  const out: S[] = [];
+  for (const id of storySceneIds) {
+    out.push(...(byScene.get(id) ?? []).sort(byIndex));
+  }
+  out.push(...dangling.sort(byIndex));
+  return out;
+}
+
+/**
  * Live: 0場 5 未分場鏡 + 產生分鏡 prepended 21 → 26, orphans still at the tail.
  * Adopt orphans into the plan (or attach leftovers to a scene). Never grow 5→26.
  */

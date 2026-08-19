@@ -345,8 +345,12 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(board).toContain("materializeStoryboard");
     expect(parse).toContain("loadOrphanShots");
     expect(parse).toContain("orphanQueue.shift()");
+    expect(parse).toContain("isBlankOrphanShot");
+    expect(parse).toContain("compactProjectShotOrder");
+    expect(parse).toContain("orderShotsForStoryboard");
     expect(parse).toContain("attachLeftoverOrphansOnReuse");
     expect(parse).toContain("backfillStorySceneLocations");
+    expect(parse).not.toMatch(/title: "未分場"/);
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
