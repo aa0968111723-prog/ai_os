@@ -892,6 +892,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
     expect(block).not.toContain("resolveHonoredCharacterSheet");
     expect(block).not.toContain("buildShotContextPrompt");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(generation.status)");
     const panel = readFileSync(join(process.cwd(), "client/src/features/animation-studio/StudioAiPanel.tsx"), "utf8");
     const send = panel.slice(panel.indexOf("generateFinishedWhiteboardImage"), panel.indexOf("generatedImageUrl"));
     expect(send).toContain("sceneId: shot.id");

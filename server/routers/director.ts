@@ -9,6 +9,8 @@ import { worldviewSchema, formatWorldviewForAi, formatActsOutline, type Worldvie
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { executeGenerationCommand } from "../services/generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "../services/agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
 import {
   selectWhiteboardImageModel,
   WHITEBOARD_COMPOSITION_GUIDANCE,
@@ -612,6 +614,16 @@ export const directorRouter = router({
         continuityMode: input.continuityMode,
         reasonPrefix: `白板 AI 繪畫（${input.mode}）`,
       });
+      // generateInto / refine / retry already drop leftover 0/N「待你過目」
+      // when a replayable job lands. Studio 「生成正式畫面」 still skipped
+      // reconcile, so the HUD stayed parked until the 30s poll.
+      if (shouldReplayIdempotentGeneration(generation.status)) {
+        scheduleReconcileAfterIndependentGenerate({
+          projectId: input.projectId,
+          sceneId: input.sceneId,
+          generationId: generation.id,
+        });
+      }
       return {
         generationId: generation.id,
         mode: input.mode as WhiteboardImageMode,
