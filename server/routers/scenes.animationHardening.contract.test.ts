@@ -672,7 +672,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runner).toContain("shotDirection?: ContinuityShotDirection");
     expect(runner.match(/shotDirection,/g)?.length).toBeGreaterThanOrEqual(2);
     expect(runner).toContain("step.shotDirection ??");
-    expect(runner).toContain("{ camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(runner).toContain("camera: scene.camera");
+    expect(runner).toContain("performance: scene.performance");
+    expect(runner).toContain("action: scene.action");
   });
 
   it("studio generateWhiteboardImage with sceneId binds this shot's cards / looks / shotDirection", () => {
