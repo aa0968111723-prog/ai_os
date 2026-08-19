@@ -407,6 +407,22 @@ export function planOrphanAdoption(newShots: number, orphanCount: number): {
 }
 
 /**
+ * Live leftover after the first 產生分鏡 already wrote applied.storyboard:
+ * 21 new shots + 5 tail orphans = 26. A second click must attach those
+ * orphans into existing scenes. Never insert. Never delete. liveAfter stays.
+ */
+export function planReuseOrphanAttach(liveShots: number, orphanCount: number): {
+  attach: number;
+  create: number;
+  delete: number;
+  liveAfter: number;
+} {
+  const live = Math.max(0, liveShots);
+  const attach = Math.max(0, orphanCount);
+  return { attach, create: 0, delete: 0, liveAfter: live };
+}
+
+/**
  * Heuristic / unmarked scripts have no「場景：」line. Pull a place name from the
  * paragraph so 產生分鏡 does not leave every field as（未定地點）.
  * Known 場景： names win; then a small place-noun list; then「在X堂/室/口…」.

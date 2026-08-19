@@ -27,6 +27,7 @@ import { flushStoryDocNow } from "../services/collabDoc";
 import {
   diffStoryboardPlan,
   planOrphanAdoption,
+  planReuseOrphanAttach,
   summarizeStoryboardDiff,
   environmentStateSchema,
   STORY_MAX_CHARS,
@@ -469,7 +470,9 @@ export const storyRouter = router({
       planShots: run.plan.scenes.reduce((s, sc) => s + sc.shots.length, 0),
       existingShots: Number(existingShots),
       orphanShots: orphans.length,
-      adoption: planOrphanAdoption(summary.newShots, orphans.length),
+      adoption: run.applied?.storyboard
+        ? planReuseOrphanAttach(Number(existingShots), orphans.length)
+        : planOrphanAdoption(summary.newShots, orphans.length),
       scenes: run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots.length })),
       /** 逐場計畫：哪一場會新建、哪一場只補鏡、哪一場完全不動 */
       diff,

@@ -825,6 +825,132 @@ export async function loadExistingStoryScenes(
   return rows.map((r) => ({ id: r.id, title: r.title, liveShots: liveByScene.get(r.id) ?? 0 }));
 }
 
+type StorySceneLocationRow = {
+  id: string;
+  title: string;
+  summary: string | null;
+  storyExcerpt: string | null;
+  locationId: string | null;
+};
+
+/**
+ * Bind（未定地點） from each scene's own title/summary/excerpt.
+ * Do not scan the whole leftover script — a 1167-char 七幕稿 would
+ * stamp the first place noun onto every field.
+ */
+async function backfillStorySceneLocations(
+  tx: Pick<typeof db, "select" | "insert" | "update">,
+  input: {
+    projectId: string;
+    groupId: string;
+    userId: string;
+    scenes: StorySceneLocationRow[];
+  },
+): Promise<number> {
+  const existing = await tx
+    .select({
+      id: schema.scenePresets.id,
+      name: schema.scenePresets.name,
+    })
+    .from(schema.scenePresets)
+    .where(eq(schema.scenePresets.projectId, input.projectId));
+  let locBudget = MAX_PROJECT_SCENE_PRESETS - existing.length;
+  let bound = 0;
+  for (const scene of input.scenes) {
+    if (scene.locationId) continue;
+    const name = inferLocationNameFromText(
+      [scene.title, scene.summary, scene.storyExcerpt].filter(Boolean).join("\n"),
+    );
+    if (!name) continue;
+    let loc = matchByName(existing, name);
+    if (!loc) {
+      if (locBudget <= 0) continue;
+      locBudget -= 1;
+      const [row] = await tx
+        .insert(schema.scenePresets)
+        .values({
+          projectId: input.projectId,
+          groupId: input.groupId,
+          name,
+          palette: `${name}（特徵待補）`,
+          createdBy: input.userId,
+        })
+        .returning({ id: schema.scenePresets.id, name: schema.scenePresets.name });
+      loc = row;
+      existing.push(row);
+    }
+    await tx
+      .update(schema.storyScenes)
+      .set({ locationId: loc.id, updatedAt: new Date() })
+      .where(eq(schema.storyScenes.id, scene.id));
+    bound += 1;
+  }
+  return bound;
+}
+
+/**
+ * Second 產生分鏡 after applied.storyboard: put leftover orphans into
+ * existing scenes. Never insert shots. Never delete live shots.
+ */
+export async function attachLeftoverOrphansOnReuse(input: {
+  projectId: string;
+  groupId: string;
+  userId: string;
+}): Promise<{ attached: number; locationsBound: number }> {
+  return db.transaction(async (tx) => {
+    await lockSceneOrder(tx, input.projectId);
+    const orphans = await loadOrphanShots(tx, input.projectId);
+    const scenes = await tx
+      .select({
+        id: schema.storyScenes.id,
+        title: schema.storyScenes.title,
+        summary: schema.storyScenes.summary,
+        storyExcerpt: schema.storyScenes.storyExcerpt,
+        locationId: schema.storyScenes.locationId,
+      })
+      .from(schema.storyScenes)
+      .where(eq(schema.storyScenes.projectId, input.projectId))
+      .orderBy(asc(schema.storyScenes.orderIndex));
+
+    const locationsBound = await backfillStorySceneLocations(tx, {
+      projectId: input.projectId,
+      groupId: input.groupId,
+      userId: input.userId,
+      scenes,
+    });
+
+    if (orphans.length === 0) {
+      return { attached: 0, locationsBound };
+    }
+
+    let attachSceneId = scenes.at(-1)?.id ?? null;
+    if (!attachSceneId) {
+      const [{ maxSceneOrder }] = await tx
+        .select({ maxSceneOrder: sql<number>`coalesce(max(${schema.storyScenes.orderIndex}), 0)` })
+        .from(schema.storyScenes)
+        .where(eq(schema.storyScenes.projectId, input.projectId));
+      const [row] = await tx
+        .insert(schema.storyScenes)
+        .values({
+          projectId: input.projectId,
+          orderIndex: Number(maxSceneOrder) + 1,
+          title: "未分場",
+          summary: "原先未歸場的鏡",
+        })
+        .returning();
+      attachSceneId = row.id;
+    }
+
+    for (const leftover of orphans) {
+      await tx
+        .update(schema.scenes)
+        .set({ storySceneId: attachSceneId })
+        .where(eq(schema.scenes.id, leftover.id));
+    }
+    return { attached: orphans.length, locationsBound };
+  });
+}
+
 /** Live 0場 5鏡: shots with no storySceneId hang in the studio「未分場」tail. */
 export async function loadOrphanShots(
   tx: Pick<typeof db, "select">,
@@ -943,10 +1069,18 @@ export async function materializeStoryboard(input: {
   // 冪等：這個 run 已經轉過分鏡→直接回同一批（重按不重複建）
   // Always rewrite 小華 他→她 on *all* project shots. reuse skips inserts,
   // so a cached male plan would keep 他身上 without a project-wide pass.
+  // Live leftover: first click already wrote applied.storyboard (21 new)
+  // and left 5 orphans at the tail. Attach those into existing scenes —
+  // never insert, never delete the live 26.
   if (run.applied?.storyboard) {
     if (!scriptExplicitlyMaleXiaohua(script)) {
       await rewriteProjectXiaohuaStoryboardCopy(project.id, script);
     }
+    await attachLeftoverOrphansOnReuse({
+      projectId: project.id,
+      groupId: project.groupId,
+      userId: input.userId,
+    });
     return { ...run.applied.storyboard, reused: true };
   }
 

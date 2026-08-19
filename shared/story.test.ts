@@ -15,6 +15,7 @@ import {
   diffStoryboardPlan,
   summarizeStoryboardDiff,
   planOrphanAdoption,
+  planReuseOrphanAttach,
   inferLocationNameFromText,
   buildShotSearchTerms,
   suggestAssetsForShot,
@@ -224,6 +225,21 @@ describe("planOrphanAdoption（未分場鏡不得 silently 5→26）", () => {
       adopt: 0,
       create: 21,
       leftoverAttach: 0,
+      liveAfter: 21,
+    });
+  });
+
+  it("reuse attaches leftover orphans and never grows 21+5→26 again", () => {
+    expect(planReuseOrphanAttach(26, 5)).toEqual({
+      attach: 5,
+      create: 0,
+      delete: 0,
+      liveAfter: 26,
+    });
+    expect(planReuseOrphanAttach(21, 0)).toEqual({
+      attach: 0,
+      create: 0,
+      delete: 0,
       liveAfter: 21,
     });
   });

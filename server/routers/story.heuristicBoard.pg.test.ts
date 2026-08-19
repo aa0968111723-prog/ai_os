@@ -203,4 +203,72 @@ d("parse-fail 產生分鏡 from story text (real PostgreSQL)", () => {
     const presets = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, project.id));
     expect(new Set(presets.map((p) => p.name))).toEqual(new Set(["禪堂", "教室", "宿舍"]));
   });
+
+  it("reuse 產生分鏡 attaches leftover orphans and does not grow live 26", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "ReuseOrphan", email: `reuse-orphan-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-reuse-orphan", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+    const unmarked = [
+      "安倢走進禪堂。晨光從窗櫺灑進來。師父對她點頭。",
+      "",
+      "她走進教室。拉開椅子。坐下寫生。",
+      "",
+      "宿舍走廊很暗。燈還沒關。她停在門口。",
+    ].join("\n");
+    const [story] = await db.insert(schema.stories).values({
+      projectId: project.id,
+      groupId,
+      content: unmarked,
+    }).returning();
+
+    const ctx = { auth: authFor(userId, groupId) };
+    const storyApi = storyRouter.createCaller(ctx as never);
+    const scenesApi = scenesRouter.createCaller(ctx as never);
+
+    const first = await storyApi.generateStoryboard({ projectId: project.id });
+    expect(first.reused).toBe(false);
+    const afterFirst = await scenesApi.listByProject({ projectId: project.id });
+    const plannedLive = afterFirst.length;
+    expect(plannedLive).toBeGreaterThan(0);
+    expect(afterFirst.every((row) => Boolean(row.storySceneId))).toBe(true);
+
+    // Simulate the live leftover: first click already wrote applied.storyboard,
+    // then 5 handwritten orphans hang at the tail. Do not use the 1167字七幕稿.
+    const orphanIds: string[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const draft = await scenesApi.addDraft({ projectId: project.id, title: `未分場第 ${i} 鏡` });
+      orphanIds.push(draft.id);
+    }
+    const beforeReuse = await scenesApi.listByProject({ projectId: project.id });
+    expect(beforeReuse).toHaveLength(plannedLive + 5);
+    expect(beforeReuse.filter((row) => !row.storySceneId).map((row) => row.id)).toEqual(orphanIds);
+
+    const [appliedRun] = await db.select().from(schema.parseRuns).where(eq(schema.parseRuns.projectId, project.id));
+    expect(appliedRun?.applied?.storyboard).toBeTruthy();
+    expect(appliedRun?.storyId).toBe(story.id);
+
+    const reused = await storyApi.generateStoryboard({ projectId: project.id });
+    expect(reused.reused).toBe(true);
+
+    const afterReuse = await scenesApi.listByProject({ projectId: project.id });
+    expect(afterReuse).toHaveLength(plannedLive + 5);
+    expect(afterReuse.every((row) => Boolean(row.storySceneId))).toBe(true);
+    expect(orphanIds.every((id) => afterReuse.some((row) => row.id === id))).toBe(true);
+    expect(afterFirst.every((row) => afterReuse.some((live) => live.id === row.id))).toBe(true);
+
+    await db.update(schema.storyScenes).set({ locationId: null }).where(eq(schema.storyScenes.projectId, project.id));
+    const rebound = await storyApi.generateStoryboard({ projectId: project.id });
+    expect(rebound.reused).toBe(true);
+    const storyScenes = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.projectId, project.id));
+    expect(storyScenes.every((sc) => Boolean(sc.locationId))).toBe(true);
+    const listedAgain = await scenesApi.listByProject({ projectId: project.id });
+    expect(listedAgain).toHaveLength(plannedLive + 5);
+  });
 });
