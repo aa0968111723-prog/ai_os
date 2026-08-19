@@ -241,7 +241,7 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
         expectedRevision: 1,
         approval: { granted: true },
       })
-      .catch((e: unknown) => e as CutosClientError);
+      .catch((e: unknown) => e) as CutosClientError;
     expect(error.code).toBe("STALE_TIMELINE_REVISION");
     expect(error.retryable).toBe(false);
     expect(error.messageKey).toBe("aios.error.staleRevision");
@@ -257,7 +257,7 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
         correlation: { ...correlation, idempotencyKey: "k-approval" },
         expectedRevision: 1,
       })
-      .catch((e: unknown) => e as CutosClientError);
+      .catch((e: unknown) => e) as CutosClientError;
     expect(error.code).toBe("APPROVAL_REQUIRED");
     const approval = (error as { approvalRequest?: { reasonCode: string; impact: Record<string, number> } })
       .approvalRequest;
@@ -298,7 +298,7 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
     nextScenario = "protocol_mismatch";
     const error = await client()
       .invokeRead("list_projects", {}, { correlation })
-      .catch((e: unknown) => e as CutosClientError);
+      .catch((e: unknown) => e) as CutosClientError;
     expect(error.code).toBe("PROTOCOL_VERSION_MISMATCH");
   });
 
@@ -306,7 +306,7 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
     nextScenario = "capability_not_found";
     const error = await client()
       .invokeRead("read_arbitrary_file", { path: "/etc/passwd" }, { correlation })
-      .catch((e: unknown) => e as CutosClientError);
+      .catch((e: unknown) => e) as CutosClientError;
     expect(error.code).toBe("CAPABILITY_NOT_FOUND");
   });
 
@@ -314,7 +314,7 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
     nextScenario = "validation_failed";
     const error = await client()
       .invokeRead("get_project", {}, { correlation })
-      .catch((e: unknown) => e as CutosClientError);
+      .catch((e: unknown) => e) as CutosClientError;
     expect(error.code).toBe("VALIDATION_FAILED");
   });
 

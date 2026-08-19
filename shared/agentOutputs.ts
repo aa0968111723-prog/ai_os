@@ -13,6 +13,8 @@ export const AGENT_OUTPUT_KIND_LABEL: Record<string, string> = {
   schedule: "行程",
   generation: "生成",
   database_row: "資料列",
+  cutos_job: "影片工作",
+  cutos_result: "影片剪輯結果",
 };
 
 /** 未知型別原樣顯示（不要吞掉，讓人看得出是新型別而不是壞掉） */

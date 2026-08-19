@@ -108,6 +108,12 @@ import {
   isMcpWriteExpansionTool,
   runMcpWriteExpansion,
 } from "./mcpWriteExpansion";
+import {
+  isMcpCutosTool,
+  mcpCutosActivity,
+  mcpCutosToolDefinitions,
+  runMcpCutosTool,
+} from "./mcpCutos";
 import type { DataField } from "../../shared/databaseFields";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -654,6 +660,18 @@ export const TOOLS = [
   ...MCP_UPLOAD_GRANT_TOOLS,
   // ── 寫入擴充（知識庫／分鏡／世界觀／素材卡／Adobe，實作見 mcpWriteExpansion）──
   ...MCP_WRITE_EXPANSION_TOOLS,
+  // CUTOS 影片剪輯：治理後的唯讀＋非破壞性寫入子集（見 services/mcpCutos）
+  ...mcpCutosToolDefinitions(),
+  {
+    name: "cutos_list_activity",
+    description: "查影片分析／剪輯的跨系統活動事件（唯讀）。",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, limit: { type: "number" } },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /**
@@ -737,6 +755,19 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   // 名稱不屬於擴充時 isMcpWriteExpansionTool 回 false，流程照舊往下走核心工具。
   if (isMcpWriteExpansionTool(name)) {
     return runMcpWriteExpansion(auth, name, args);
+  }
+
+  // CUTOS 影片剪輯：同樣先於核心工具分派。專案 ACL、綁定解析、工具 schema 與
+  // 冪等契約全部沿用 agentToolRegistry，MCP 不會拿到 raw invoke。
+  if (isMcpCutosTool(name)) {
+    return runMcpCutosTool(auth, name, args);
+  }
+  if (name === "cutos_list_activity") {
+    return mcpCutosActivity(
+      auth,
+      String(args.projectId ?? ""),
+      typeof args.limit === "number" ? args.limit : 50,
+    );
   }
 
   if (name === "whoami") {

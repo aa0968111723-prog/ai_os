@@ -176,6 +176,10 @@ function readTool(spec: ReadToolSpec): ToolDefinition<Record<string, unknown>, u
     evidenceScope: "project",
     availability,
     handlerIdentity: `cutosClient.invokeRead:${spec.capability}`,
+    // CUTOS is an optional external plane. A deployment without CUTOS_URL is a
+    // valid deployment, so an unconfigured CUTOS must not make the whole agent
+    // capability contract report "not ready".
+    required: false,
     handler: async (input, context) => {
       const binding = await bindingFor(context);
       const requestId = randomUUID();
@@ -249,6 +253,7 @@ function writeTool(spec: WriteToolSpec): ToolDefinition<Record<string, unknown>,
     evidenceScope: "project",
     availability,
     handlerIdentity: `cutosClient.invokeWrite:${spec.capability}`,
+    required: false,
     handler: async (input, context) => {
       const binding = await bindingFor(context);
       const args = spec.args(input, binding);
