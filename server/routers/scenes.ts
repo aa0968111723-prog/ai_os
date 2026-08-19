@@ -1908,6 +1908,14 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      // generateInto / MCP / pipeline already persist the locked prompt. Refine
+      // used to pass input.prompt raw — generationCore re-locks for the provider
+      // but the generation row kept the unlocked copy, so a 小華修圖 could store
+      // 「是男性」 and replay / HUD would show the boy line.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        input.prompt,
+        /小華/.test([scene.title, input.prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+      );
       // 走與其他生成同一條 Command（政策＋狀態機＋ACL＋估點＋扣點＋失敗退點）；
       // sourceAssetId 由 generationCore 換成短效簽名網址，fal 才抓得到、外人不可偽造。
       const gen = await executeGenerationCommand({
@@ -1916,7 +1924,7 @@ export const scenesRouter = router({
         id: input.clientRequestId,
         projectId: scene.projectId,
         modelId: input.modelId,
-        prompt: input.prompt,
+        prompt: lockedPrompt,
         sourceAssetId: source.id,
         sceneId: scene.id,
         sceneRole: "visual",

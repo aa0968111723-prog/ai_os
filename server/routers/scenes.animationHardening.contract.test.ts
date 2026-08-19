@@ -641,6 +641,16 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(into).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
   });
 
+  it("scenes.refine locks 小華 prompt before Command persist", () => {
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(refine).toContain("lockXiaohuaGenerationPrompt");
+    expect(refine).toContain('? ["小華"]');
+    expect(refine).toContain("prompt: lockedPrompt");
+    expect(refine).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(refine).not.toContain("ensureXiaohuaCharacterIds");
+    expect(refine).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("MCP / batch / animationPipeline bind 小華 card when the shot names her", () => {
     expect(scenes).toContain("ensureXiaohuaCharacterIds");
     const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
