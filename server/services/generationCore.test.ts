@@ -9,6 +9,7 @@ import {
   effectivePromptParts,
   humanizeGenerationError,
   isUnusableRealModeSourceUrl,
+  unlandedPersistSource,
 } from "./generationCore";
 import { MODELS, getModel, type ModelEntry } from "../../shared/models";
 import {
@@ -107,6 +108,29 @@ describe("isUnusableRealModeSourceUrl：正式模式擋 mock 佔位來源", () =
     expect(isUnusableRealModeSourceUrl("https://cdn.fal.ai/files/a.png")).toBe(false);
     expect(isUnusableRealModeSourceUrl("https://ai-os-app.zeabur.app/api/assets/x/file")).toBe(false);
     expect(isUnusableRealModeSourceUrl(undefined)).toBe(false);
+  });
+});
+
+describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
+  it("keeps fal CDN in originUrl when url was rewritten to /api/assets/…/file", () => {
+    expect(unlandedPersistSource({
+      url: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+      originUrl: "https://v3.fal.media/files/xiaohua-a.png",
+    })).toBe("https://v3.fal.media/files/xiaohua-a.png");
+  });
+
+  it("falls back to http url when originUrl is empty", () => {
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-b.png",
+      originUrl: null,
+    })).toBe("https://v3.fal.media/files/shot-b.png");
+  });
+
+  it("returns null when neither url nor originUrl is fetchable", () => {
+    expect(unlandedPersistSource({
+      url: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+      originUrl: null,
+    })).toBeNull();
   });
 });
 

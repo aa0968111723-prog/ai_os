@@ -443,6 +443,13 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(reconcile).toContain("shouldDiscardLeftoverAwaitingApprovalOnRead");
     expect(reconcile).toContain("hasCurrentVisual");
     expect(reconcile).toContain("待你過目");
+    expect(reconcile).toContain("isLeftoverGenerateStep");
+    expect(reconcile).toContain('step.kind === "generate_image"');
+    const genCore = readFileSync(join(process.cwd(), "server/services/generationCore.ts"), "utf8");
+    expect(genCore).toContain("originUrl: stored ? null : mediaUrl");
+    expect(genCore).toContain('landState: stored ? "landed" : "pending"');
+    expect(genCore).toContain("unlandedPersistSource");
+    expect(genCore).toContain("persistGenerationResult");
     expect(adopt).toContain("scheduleReconcileAfterVisualAdopt");
     expect(scenes).toContain("scheduleReconcileAfterVisualAdopt");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");

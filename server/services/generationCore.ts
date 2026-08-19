@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, isGeminiModel, generationProviderOf, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -92,7 +92,13 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
     const localUrl = `/api/assets/${assetId}/file`;
     await db
       .update(schema.assets)
-      .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
+      .set({
+        storagePath: persisted.storagePath,
+        mime: persisted.mime,
+        sizeBytes: persisted.sizeBytes,
+        url: localUrl,
+        landState: "landed",
+      })
       .where(eq(schema.assets.id, assetId));
     await db
       .update(schema.generations)
@@ -100,6 +106,22 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
       .where(eq(schema.generations.id, generationId));
     console.log(`[storage] 成品已落地：asset=${assetId}（${persisted.sizeBytes}B ${persisted.mime}）`);
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
+}
+
+/**
+ * Sweep source when persist is fire-and-forget.
+ * generateInto may rewrite url to `/api/assets/…/file` before storagePath lands;
+ * originUrl keeps the fal CDN so the next tick can still fetch.
+ */
+export function unlandedPersistSource(asset: {
+  url?: string | null;
+  originUrl?: string | null;
+}): string | null {
+  const origin = (asset.originUrl ?? "").trim();
+  if (/^https?:\/\//i.test(origin)) return origin;
+  const url = (asset.url ?? "").trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  return null;
 }
 
 /** 注入結果：正向提示詞＋（視覺類別的）負向提示詞。 */
@@ -1326,10 +1348,11 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
             kind: mediaKind,
             title: gen.prompt.slice(0, 40),
             url: stored ? "pending" : mediaUrl,
+            originUrl: stored ? null : mediaUrl,
             storagePath: stored?.storagePath ?? null,
             mime: stored?.mime ?? null,
             sizeBytes: stored?.sizeBytes ?? null,
-            landState: stored ? "landed" : undefined,
+            landState: stored ? "landed" : "pending",
             isAiGenerated: true,
             meta: { generationId: gen.id, modelId: gen.modelId },
           })
@@ -1546,7 +1569,7 @@ export async function enqueueLanding(assetId: string): Promise<boolean> {
  * 落地補抓（修：persistGenerationResult 是「射後不理」的背景作業，一次網路抖動失敗後，
  * 素材的 url 就永久停在 fal CDN 外部網址、storagePath 為空——fal CDN 網址是短效的，
  * 過期後成品變永久死連結且無源可重抓，是慢性資料流失）。
- * 這裡掃「AI 生成、未落地（storagePath 空）、url 仍是外部 http」的素材重試 persistRemote，
+ * 這裡掃「AI 生成、未落地（storagePath 空）、url 或 originUrl 仍是外部 http」的素材重試 persistRemote，
  * 由 generationRunner 的 sweep tick 定期呼叫。冪等：已落地的（storagePath 非空）撈不到；
  * 假模式的 /api/mock-asset/* 佔位網址略過（不需落地、也避免 e2e 期間改動 mock 素材）。
  */
@@ -1560,19 +1583,26 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
     .where(and(
       eq(schema.assets.isAiGenerated, true),
       isNull(schema.assets.storagePath),
-      like(schema.assets.url, "http%"),
+      or(like(schema.assets.url, "http%"), like(schema.assets.originUrl, "http%")),
     ))
     .limit(limit);
   let landed = 0;
   for (const asset of rows) {
-    if (asset.url.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
+    const source = unlandedPersistSource(asset);
+    if (!source || source.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
     try {
-      const persisted = await persistRemote(asset.url);
+      const persisted = await persistRemote(source);
       if (!persisted) continue; // fal 網址已死/抓取失敗 → 下輪再試（或已無源，無害，不擋）
       const localUrl = `/api/assets/${asset.id}/file`;
       await db
         .update(schema.assets)
-        .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
+        .set({
+          storagePath: persisted.storagePath,
+          mime: persisted.mime,
+          sizeBytes: persisted.sizeBytes,
+          url: localUrl,
+          landState: "landed",
+        })
         .where(eq(schema.assets.id, asset.id));
       // 順帶把來源生成的 resultUrl 也指向落地後的自有網址（與 persistGenerationResult 同口徑）
       const genId = (asset.meta as { generationId?: string } | null)?.generationId;

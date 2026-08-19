@@ -105,6 +105,38 @@ describe("discardUnstartedAwaitingApprovalAfterIndependentGenerate", () => {
     expect(out.status).toBe("discarded");
   });
 
+  it("stops kindless leftover 0/6 steps after generateInto (live 停 leftover)", () => {
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: kindless,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.status).toBe("discarded");
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+    expect(out.steps[0]?.detail).toMatch(/單格工作室已先生成/);
+  });
+
+  it("stops generate_image leftover 0/6 steps after generateInto", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: imageKind,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
   it("leaves a running leftover plan alone", () => {
     const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
       status: "running",

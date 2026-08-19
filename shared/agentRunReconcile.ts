@@ -110,6 +110,12 @@ function stepIsParked(status: string | undefined): boolean {
   return !status || status === "pending" || status === "waiting" || status === "stopped";
 }
 
+/** Live leftover 0/N rows use kind "" / generate_image, not only generate. */
+function isLeftoverGenerateStep(step: ReconcileAgentStep): boolean {
+  if (step.kind === "generate" || step.kind === "generate_image") return true;
+  return leftoverShotNote(step.note);
+}
+
 /**
  * Leftover 0/N「待你過目」: unstarted awaiting_approval batch.
  * Live rows sometimes use kind "" / "generate_image" instead of "generate".
@@ -148,8 +154,8 @@ export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
     return { status: input.status, steps: input.steps, discarded: false };
   }
   const steps = input.steps.map((step) => {
-    if (step.kind !== "generate") return step;
     if (step.status === "done" || step.status === "failed" || step.status === "stopped") return step;
+    if (!isLeftoverGenerateStep(step) || !stepIsParked(step.status)) return step;
     return {
       ...step,
       status: "stopped",
