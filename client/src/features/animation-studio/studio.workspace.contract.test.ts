@@ -338,4 +338,11 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).toContain("sceneId: boundSceneId");
     expect(inspector).not.toContain("sceneId: shotRef.current.id");
   });
+
+  it("live /studio/ 單格 inspector mounts HonorSheetControl (not only SceneStudio)", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("<HonorSheetControl");
+    expect(inspector).toContain("InspectorHonorSheet");
+    expect(inspector).toContain("shot && canEdit && <InspectorHonorSheet");
+  });
 });

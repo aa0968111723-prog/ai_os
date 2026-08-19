@@ -16,6 +16,7 @@ import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
+import { HonorSheetControl } from "../../components/HonorSheetControl";
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { SCRIPT_AMBIENCE_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "@shared/storyboardScript";
@@ -144,6 +145,8 @@ export function ShotInspector({
         id="studio-inspector-tabpanel"
         aria-labelledby={`studio-inspector-tab-${tab}`}
       >
+        {/* Remaining hide: SceneStudio already mounts HonorSheetControl; live /studio/ 單格 is this inspector and never did. */}
+        {shot && canEdit && <InspectorHonorSheet projectId={projectId} shot={shot} />}
         {tab === "ai" ? (
           <AiCopilotActions {...ai} />
         ) : !shot ? (
@@ -164,6 +167,24 @@ export function ShotInspector({
         )}
       </div>
     </aside>
+  );
+}
+
+/** Live /studio/ 單格 door. Do not hide HonorSheetControl on this inspector. */
+function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: InspectorShot }) {
+  const characters = trpc.characters.list.useQuery({ projectId });
+  const [honorIds, setHonorIds] = useState<string[]>(() => shot.characterIds ?? []);
+  useEffect(() => {
+    setHonorIds(shot.characterIds ?? []);
+  }, [shot.id]);
+  return (
+    <HonorSheetControl
+      characters={characters.data ?? []}
+      selectedIds={honorIds}
+      onToggle={(id) =>
+        setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
+      }
+    />
   );
 }
 
