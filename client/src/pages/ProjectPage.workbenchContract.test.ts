@@ -138,6 +138,7 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/oneClickPrimaryLabel/);
     expect(src).toMatch(/shouldShowOneClickGenerateCta/);
     expect(src).toMatch(/showGenerateCta/);
+    expect(src).toMatch(/stillCount/);
     expect(src).toMatch(/showWriteStoryCta/);
     expect(src).toMatch(/readiness\.kind === "empty"/);
     expect(src).toContain("開始寫故事");

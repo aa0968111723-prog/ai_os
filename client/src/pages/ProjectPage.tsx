@@ -1252,9 +1252,11 @@ export function ProjectPage({ id }: { id: string }) {
     isDirty: storyDirty || Boolean(storyMeta.data?.story?.isDirty),
   });
   const hasDeliverable = playableResultCount > 0;
+  const stillCount = (scenes.data ?? []).filter((s) => Boolean(s.assetId)).length;
   const showGenerateCta = shouldShowOneClickGenerateCta({
     sceneCount,
     readinessKind: readiness.kind,
+    stillCount,
   });
   const showWriteStoryCta = canEdit && readiness.kind === "empty";
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{

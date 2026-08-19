@@ -62,4 +62,16 @@ describe("StoryReadinessBar", () => {
     expect(screen.getByRole("button", { name: "開始寫故事" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成|AI 解析/ })).not.toBeInTheDocument();
   });
+
+  it("可解析 card has no story-readiness__cta 生成畫面 when parent hides one-click", () => {
+    render(
+      <StoryReadinessBar
+        readiness={{ kind: "needs_parse", label: "可解析", detail: "按「AI 解析」讓角色、場景、道具在背景就位。" }}
+        canEdit
+      />,
+    );
+    expect(screen.getByText("可解析")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /生成畫面/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".story-readiness__cta")).toBeNull();
+  });
 });

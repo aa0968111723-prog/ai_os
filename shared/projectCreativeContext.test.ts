@@ -72,6 +72,15 @@ describe("generation honesty helpers", () => {
     expect(shouldShowOneClickGenerateCta({ sceneCount: 0, readinessKind: "needs_parse" })).toBe(false);
     expect(shouldShowOneClickGenerateCta({ sceneCount: 6, readinessKind: "ready_to_produce" })).toBe(true);
     expect(shouldShowOneClickGenerateCta({ sceneCount: 1, readinessKind: "empty" })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "needs_parse", stillCount: 21,
+    })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "ready_to_produce", stillCount: 21,
+    })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "ready_to_produce", stillCount: 0,
+    })).toBe(true);
   });
 
   it("does not treat a single shot video as an assembled project film", () => {

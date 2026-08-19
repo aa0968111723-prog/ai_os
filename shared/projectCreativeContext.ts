@@ -223,13 +223,21 @@ export function oneClickPrimaryLabel(opts: {
 /**
  * mobile-test 0場0鏡: a visible generate CTA is a spendable no-op.
  * Hide it — do not show a disabled 「生成畫面／先解析出分鏡」.
+ *
+ * Live leftover: 可解析 card still showed primary 生成畫面 after 21
+ * stills already existed (heuristic board / no lastParsedAt). Per-shot
+ * 重畫 stays on the board. This is only the first-screen one-click.
  */
 export function shouldShowOneClickGenerateCta(input: {
   sceneCount: number;
   readinessKind?: string;
+  /** Adopted stills on the board (assetId). Not assembled film. */
+  stillCount?: number;
 }): boolean {
   if (input.sceneCount <= 0) return false;
   if (input.readinessKind === "empty") return false;
+  if (input.readinessKind === "needs_parse") return false;
+  if ((input.stillCount ?? 0) >= input.sceneCount) return false;
   return true;
 }
 
