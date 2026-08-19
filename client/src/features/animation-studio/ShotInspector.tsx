@@ -98,7 +98,7 @@ export function ShotInspector({
     <aside className="studio-inspector" aria-label="Shot Inspector">
       <header className="studio-inspector__head">
         <strong className="studio-inspector__title">
-          {shotNumber ? `Shot ${String(shotNumber).padStart(2, "0")}` : "未選分鏡"}
+          {shotNumber ? `第 ${shotNumber} 鏡` : "未選分鏡"}
         </strong>
         {shot && <Meta as="span" className="studio-inspector__subtitle">{shot.title}</Meta>}
         <span style={{ flex: "1 1 auto" }} />

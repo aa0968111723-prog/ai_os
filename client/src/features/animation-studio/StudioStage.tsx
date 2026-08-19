@@ -97,7 +97,7 @@ export function StudioStage({
       {/* 底部中央：這一格的規格。攝影組看板的資訊密度——一行講完，不要卡片 */}
       <div className="studio-stage__hud" aria-live="polite">
         {hud.shotNumber ? (
-          <b className="studio-stage__hud-shot">Shot {String(hud.shotNumber).padStart(2, "0")}</b>
+          <b className="studio-stage__hud-shot">第 {hud.shotNumber} 鏡</b>
         ) : (
           <b className="studio-stage__hud-shot studio-stage__hud-shot--free">自由塗鴉</b>
         )}

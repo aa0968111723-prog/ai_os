@@ -85,6 +85,19 @@ describe("沉浸：全站導航讓開", () => {
     expect(studio).toContain("shotCount={shots.length}");
     expect(studio).not.toContain("<ShotNavigator");
   });
+
+  it("1280 inspector and stage HUD show 第 N 鏡, not Shot 03 beside the header", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    const stage = readFileSync(resolve(dir, "StudioStage.tsx"), "utf8");
+    const title = inspector.slice(
+      inspector.indexOf("studio-inspector__title"),
+      inspector.indexOf("studio-inspector__subtitle"),
+    );
+    expect(title).toContain("第 ${shotNumber} 鏡");
+    expect(title).not.toContain('Shot ${String(shotNumber).padStart(2, "0")}');
+    expect(stage).toContain("第 {hud.shotNumber} 鏡");
+    expect(stage).not.toContain('Shot ${String(hud.shotNumber).padStart(2, "0")}');
+  });
 });
 
 describe("觸控目標：視覺收斂但命中圈不縮", () => {
