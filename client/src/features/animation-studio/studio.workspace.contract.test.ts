@@ -244,6 +244,14 @@ describe("Inspector 不新增資料格式", () => {
     const scrim = ruleFor(".studio-menu__scrim");
     expect(scrim).toContain("border-radius: 0");
     expect(scrim).toContain("background: transparent");
+    expect(declarations).toContain("button.studio-menu__scrim:hover:not(:disabled)");
+    expect(declarations).toContain("button.studio-menu__scrim:focus-visible");
+    const scrimHoverStart = declarations.indexOf("button.studio-menu__scrim:hover:not(:disabled)");
+    const scrimHover = declarations.slice(scrimHoverStart, declarations.indexOf("}", scrimHoverStart));
+    expect(scrimHover).toContain("background: transparent");
+    expect(scrimHover).toContain("border-radius: 0");
+    expect(mainStyles).toContain("button:hover:not(:disabled) { background: var(--card2)");
+    expect(mainStyles).toContain("button:focus-visible { border-radius: 999px; }");
     const fixed = ruleFor(".studio-menu.studio-menu--fixed");
     expect(fixed).toContain("inset: unset");
     expect(fixed).toContain("bottom: unset");

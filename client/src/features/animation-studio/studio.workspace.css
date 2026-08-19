@@ -732,6 +732,22 @@ body.studio-workspace { overflow: hidden; }
   box-shadow: none;
   cursor: default;
 }
+/* Leftover of that cream ellipse: default transparent loses to
+   `button:hover:not(:disabled)` / `button:focus-visible` (higher specificity),
+   so ＋新增鏡 and 頂欄更多 still paint --card2 / 999px over the whiteboard. */
+button.studio-menu__scrim:hover,
+button.studio-menu__scrim:hover:not(:disabled),
+button.studio-menu__scrim:active,
+button.studio-menu__scrim:active:not(:disabled),
+button.studio-menu__scrim:focus,
+button.studio-menu__scrim:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+  outline: none;
+}
 .studio-menu {
   position: absolute;
   z-index: 51;
