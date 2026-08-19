@@ -166,9 +166,12 @@ describe("animation shot writes stay consistent", () => {
   });
 
   it("SceneList and ShotCard send expectedRev on inline edits", () => {
-    expect(sceneList).toContain("expectedRev: s.rev");
-    expect(sceneList).toContain("baseline: { title: s.title }");
-    expect(sceneList).toContain("baseline: { durationSec: s.durationSec }");
+    expect(sceneList).toContain("createShotFieldSaveGate");
+    expect(sceneList).toContain("expectedRev: req.expectedRev");
+    expect(sceneList).toContain("saveFields({ title: String(v) })");
+    expect(sceneList).toContain("saveFields({ durationSec: Number(v) })");
+    expect(sceneList).toContain("saveFields(patch)");
+    expect(sceneList).not.toMatch(/onCommit=\{\(v\) => update\.mutate\(\{[\s\S]*?expectedRev: s\.rev/);
     expect(sceneList).toContain("trimStartMs: s.trimStartMs ?? null");
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     expect(shotCard).toContain("expectedRev: shot.rev");
@@ -323,6 +326,8 @@ describe("storyboard board blur sends expectedRev", () => {
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     const header = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/SceneGroupHeader.tsx"), "utf8");
     expect(sceneList).toContain("expectedRev: row?.rev");
+    expect(sceneList).toContain("createShotFieldSaveGate");
+    expect(sceneList).toContain("saveFields({ title: String(v) })");
     expect(shotCard).toContain("createShotFieldSaveGate");
     expect(shotCard).toContain("expectedRev: req.expectedRev");
     expect(shotCard).toContain("expectedRev: shot.rev");
