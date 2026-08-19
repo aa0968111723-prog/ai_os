@@ -53,6 +53,7 @@ import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { resolveHonoredCharacterSheet } from "../services/referenceAsset";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
@@ -2136,6 +2137,17 @@ export const assistantRouter = router({
         // 為第 N 鏡生成 dropped costume and 畫面過時. Same fields, visual only.
         const visual = (role ?? "visual") === "visual";
         const cards = resolveSceneCards(scene, null);
+        // generateInto / agent execute already honour 角色卡 生成時帶入.
+        // Assistant already binds cards / looks / direction / locked prompt,
+        // but still sent no sheet — 助手為第 N 鏡生成 drew without 定裝.
+        // 0/6 skips. No caller sketch to preserve.
+        const sourceAssetId = visual
+          ? await resolveHonoredCharacterSheet({
+              projectId: project.id,
+              groupId: project.groupId,
+              characterIds: cards.characterIds,
+            })
+          : undefined;
         // generateInto / refine already persist the locked prompt. Assistant
         // generate already binds this shot's cards / looks / direction, but
         // still passed a.prompt raw — generations.prompt could keep 年輕男性.
@@ -2157,6 +2169,7 @@ export const assistantRouter = router({
             propIds: cards.propIds,
             lookIds: scene.lookIds ?? undefined,
             shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+            ...(sourceAssetId ? { sourceAssetId } : {}),
           } : {}),
           reasonPrefix: "助手生成",
         });

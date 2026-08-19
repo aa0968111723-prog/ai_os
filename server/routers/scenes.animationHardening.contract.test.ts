@@ -668,7 +668,6 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("characterIds: cards.characterIds");
     expect(block).not.toContain("select({ id: schema.scenes.id })");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
-    expect(block).not.toContain("resolveHonoredCharacterSheet");
   });
 
   it("assistant generate locks 小華 prompt before Command persist", () => {
@@ -680,7 +679,16 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("prompt: a.prompt");
     expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
-    expect(block).not.toContain("resolveHonoredCharacterSheet");
+  });
+
+  it("assistant generate honours 角色卡 生成時帶入 on visual", () => {
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: cards.characterIds");
+    expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("explicitSourceAssetId");
   });
 
   it("refine freezes shotDirection so a later camera change marks the picture stale", () => {
