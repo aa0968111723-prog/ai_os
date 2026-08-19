@@ -94,6 +94,8 @@ describe("卡片編輯表單的參考圖欄", () => {
     charUpdate.mockReset();
     sceneUpdate.mockReset();
     propUpdate.mockReset();
+    CHAR.referenceAssetId = null;
+    CHAR.referenceUrl = null;
   });
 
   it("角色卡：按「編輯」後，表單裡就有定裝參考圖欄（不必先取消編輯再另外找入口）", async () => {
@@ -141,14 +143,39 @@ describe("卡片編輯表單的參考圖欄", () => {
     expect(propUpdate.mock.calls[0][0]).toMatchObject({ id: "prop-1", referenceAssetId: null });
   });
 
-  it("角色卡：勾「生成時帶入」會回報卡片 id（重畫這格才注入定裝）", async () => {
+  it("角色卡：0 refs 勾「生成時帶入」保持 已選 0/6，不回報 id", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
     render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={onToggle} />);
 
+    const box = screen.getByRole("checkbox", { name: /生成時帶入/ });
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(screen.getByText(/共 1\/50 張/)).toBeInTheDocument();
+    await user.click(box);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("角色卡：已勾但沒有定裝圖顯示 已選 0/6，不當作帶入", () => {
+    const onToggle = vi.fn();
+    render(<CharacterCards projectId="p1" selectedIds={["char-1"]} onToggle={onToggle} />);
+
     expect(screen.getByRole("checkbox", { name: /生成時帶入/ })).not.toBeChecked();
     expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: /生成時帶入/ }));
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("角色卡：有自己的定裝參考圖才能勾成 1/6", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    CHAR.referenceAssetId = "asset-xiaohua";
+    CHAR.referenceUrl = "https://example.test/xiaohua-sheet.png";
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={onToggle} />);
+
+    const box = screen.getByRole("checkbox", { name: /生成時帶入/ });
+    expect(box).toBeEnabled();
+    await user.click(box);
     expect(onToggle).toHaveBeenCalledWith("char-1");
   });
 

@@ -10,6 +10,7 @@ import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
 import { formatPropDisplayName } from "@shared/propOwnership";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
@@ -917,6 +918,10 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const list = (scenes.data ?? []) as Scene[];
   // 文字腳本的「設定卡」唯讀標注要顯示名字——與專案頁同快取鍵，不會多打 API
   const characterCards = trpc.characters.list.useQuery({ projectId });
+  const honoredCharIds = useMemo(
+    () => (characterCards.data ? selectableBringInIds(characterCards.data, charIds ?? []) : charIds ?? []),
+    [characterCards.data, charIds],
+  );
   const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
   const propCards = trpc.props.list.useQuery({ projectId });
   const characterNameById = useMemo(
@@ -1168,7 +1173,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   genModelId={genModelId}
                   resolveGenModel={readGenModel}
                   projectId={projectId}
-                  charIds={charIds}
+                  charIds={honoredCharIds}
                   sceneIds={sceneIds}
                   propIds={propIds}
                   cardLookup={cardLookup}
@@ -1313,7 +1318,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
               projectId={projectId}
               sceneNumber={studioScene.number}
               canEdit={canEdit}
-              charIds={charIds}
+              charIds={honoredCharIds}
               sceneIds={sceneIds}
               propIds={propIds}
               onClose={() => {

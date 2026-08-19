@@ -74,6 +74,7 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(into).toContain("explicitSourceAssetId: input.sourceAssetId");
     const helper = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");
     expect(helper).toContain("if (!opts.characterIds?.length) return undefined");
+    expect(helper).toContain("owned.has(explicit)");
     expect(helper).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 

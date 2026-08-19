@@ -21,6 +21,7 @@ import { ShotCard, type ShotRow } from "./ShotCard";
 import { ShotNavigator } from "./ShotNavigator";
 import { VisualChoiceTray } from "./VisualChoiceTray";
 import { registerAssistantFocus } from "../../lib/assistantContext";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
 
 export function StoryboardStage({
   projectId,
@@ -52,6 +53,10 @@ export function StoryboardStage({
     },
   });
   const characters = trpc.characters.list.useQuery({ projectId });
+  const honoredCharIds = useMemo(
+    () => (characters.data ? selectableBringInIds(characters.data, charIds) : charIds),
+    [characters.data, charIds],
+  );
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const looks = trpc.characterLooks.list.useQuery({ projectId });
   const continuity = trpc.story.continuityCheck.useQuery({ projectId });
@@ -253,7 +258,7 @@ export function StoryboardStage({
           projectId={projectId}
           sceneNumber={shotNumber.get(studioShot.id) ?? 1}
           canEdit={canEdit}
-          charIds={charIds}
+          charIds={honoredCharIds}
           sceneIds={sceneIds}
           propIds={propIds}
           nav={<ShotNavigator shots={shotRows} currentId={studioShot.id} onGo={(nextId) => setStudioSceneId(nextId)} />}

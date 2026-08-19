@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { cardBringInPayload, pickStudioReferenceAssetId } from "./studioReferenceImage";
+import {
+  cardBringInPayload,
+  characterHasLiveSheet,
+  honorExplicitCharacterSheet,
+  pickStudioReferenceAssetId,
+  selectableBringInIds,
+} from "./studioReferenceImage";
 
 const XIAOHUA = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -25,41 +31,63 @@ const TURTLE = {
   referenceAssetId: null,
   referenceUrl: null,
 };
+const STRAY = "44444444-4444-4444-8444-444444444444";
+
+describe("characterHasLiveSheet", () => {
+  it("only 小華’s own live 定裝參考圖 counts", () => {
+    expect(characterHasLiveSheet(XIAOHUA)).toBe(true);
+    expect(characterHasLiveSheet(EMPTY_SHEET)).toBe(false);
+    expect(characterHasLiveSheet(TRASHED)).toBe(false);
+    expect(characterHasLiveSheet(TURTLE)).toBe(false);
+  });
+});
+
+describe("selectableBringInIds", () => {
+  it("0 refs stays 0/6 even if the checkbox was ticked", () => {
+    expect(selectableBringInIds([EMPTY_SHEET], [EMPTY_SHEET.id])).toEqual([]);
+  });
+
+  it("live 小華 sheet may become 1/6", () => {
+    expect(selectableBringInIds([XIAOHUA], [XIAOHUA.id])).toEqual([XIAOHUA.id]);
+  });
+});
 
 describe("pickStudioReferenceAssetId", () => {
-  it("honours 角色卡 生成時帶入 — first checked sheet", () => {
+  it("honours 角色卡 生成時帶入 — that character's own sheet", () => {
     expect(pickStudioReferenceAssetId([XIAOHUA, TURTLE], [XIAOHUA.id])).toBe(XIAOHUA.referenceAssetId);
   });
 
-  it("checked with 0 refs omits source — text lock only", () => {
+  it("0 refs omits source — text lock only", () => {
     expect(pickStudioReferenceAssetId([EMPTY_SHEET], [EMPTY_SHEET.id])).toBeUndefined();
   });
 
-  it("trashed sheet (bound but no url) is omitted", () => {
-    expect(pickStudioReferenceAssetId([TRASHED], [TRASHED.id])).toBeUndefined();
-  });
-
-  it("unchecked 0/6 does not attach another card's sheet", () => {
-    expect(pickStudioReferenceAssetId([XIAOHUA, TURTLE], [])).toBeUndefined();
+  it("does not attach another card's sheet", () => {
     expect(pickStudioReferenceAssetId([XIAOHUA, TURTLE], [TURTLE.id])).toBeUndefined();
   });
 });
 
 describe("cardBringInPayload", () => {
-  it("checked + sheet sends characterIds and sourceAssetId", () => {
+  it("checked + 小華 sheet sends characterIds and sourceAssetId", () => {
     expect(cardBringInPayload([XIAOHUA], [XIAOHUA.id])).toEqual({
       characterIds: [XIAOHUA.id],
       sourceAssetId: XIAOHUA.referenceAssetId,
     });
   });
 
-  it("checked with 0 refs sends characterIds only", () => {
-    expect(cardBringInPayload([EMPTY_SHEET], [EMPTY_SHEET.id])).toEqual({
-      characterIds: [EMPTY_SHEET.id],
-    });
+  it("0 refs stays empty — no 1/6, no stray source", () => {
+    expect(cardBringInPayload([EMPTY_SHEET], [EMPTY_SHEET.id])).toEqual({});
+  });
+});
+
+describe("honorExplicitCharacterSheet", () => {
+  it("drops an arbitrary 1/50 that is not 小華’s 定裝", () => {
+    expect(honorExplicitCharacterSheet([XIAOHUA], [XIAOHUA.id], STRAY)).toBe(XIAOHUA.referenceAssetId);
+    expect(honorExplicitCharacterSheet([EMPTY_SHEET], [EMPTY_SHEET.id], STRAY)).toBeUndefined();
   });
 
-  it("已選 0/6 sends neither field", () => {
-    expect(cardBringInPayload([XIAOHUA], [])).toEqual({});
+  it("accepts explicit only when it is that character's own sheet", () => {
+    expect(honorExplicitCharacterSheet([XIAOHUA], [XIAOHUA.id], XIAOHUA.referenceAssetId)).toBe(
+      XIAOHUA.referenceAssetId,
+    );
   });
 });

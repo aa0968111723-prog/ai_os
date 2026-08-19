@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   CHAR_APPEARANCE_MAX,
   CHAR_NAME_MAX,
@@ -6,6 +6,7 @@ import {
   MAX_GENERATE_CHARACTERS,
   MAX_PROJECT_CHARACTERS,
 } from "@shared/cardLimits";
+import { characterHasLiveSheet, selectableBringInIds } from "@shared/studioReferenceImage";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
@@ -60,7 +61,7 @@ export function CharacterCards({
       setNotes("");
       setRefImg(null);
       setOpen(false);
-      if (row?.id) onCreated?.(row.id);
+      if (row?.id && characterHasLiveSheet(row)) onCreated?.(row.id);
     },
   });
   const remove = trpc.characters.remove.useMutation({
@@ -82,7 +83,11 @@ export function CharacterCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
   /** 正在就地編輯文字欄的卡 id */
   const [textEditId, setTextEditId] = useState<string | null>(null);
-  const atSelectMax = selectedIds.length >= maxSelect;
+  const bringInIds = useMemo(
+    () => (list.data ? selectableBringInIds(list.data, selectedIds, maxSelect) : selectedIds.slice(0, maxSelect)),
+    [list.data, selectedIds, maxSelect],
+  );
+  const atSelectMax = bringInIds.length >= maxSelect;
   const cardCount = list.data?.length ?? 0;
   const atProjectMax = cardCount >= MAX_PROJECT_CHARACTERS;
 
@@ -90,12 +95,12 @@ export function CharacterCards({
     <Card as="section" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
       <Hint>
-        設定角色外觀一次鎖定；生成時勾選，AI 自動帶入外觀，跨鏡頭不走樣。可綁定裝參考圖。
+        設定角色外觀一次鎖定；生成時勾選（需有該角色自己的定裝參考圖），AI 自動帶入外觀，跨鏡頭不走樣。可綁定裝參考圖。未設參考圖只靠文字錨點，已選保持 0/6。
         外觀前段會注入畫面生成（過長會自動截短）；個性只給導演／助手，不會畫進畫面。
         {list.data && list.data.length > 0 && (
           <>
             {" "}
-            · 已選 {selectedIds.length}/{maxSelect}
+            · 已選 {bringInIds.length}/{maxSelect}
             {atSelectMax ? "（已達上限）" : ""}
             {" · "}共 {cardCount}/{MAX_PROJECT_CHARACTERS} 張
           </>
@@ -117,8 +122,9 @@ export function CharacterCards({
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {list.data.map((c) => {
-            const on = selectedIds.includes(c.id);
-            const selectDisabled = !on && atSelectMax;
+            const hasOwnSheet = characterHasLiveSheet(c);
+            const on = bringInIds.includes(c.id);
+            const selectDisabled = !on && (atSelectMax || !hasOwnSheet);
             const refTrashed = Boolean(c.referenceAssetId && !c.referenceUrl);
             const editingText = textEditId === c.id;
             return (
@@ -145,14 +151,20 @@ export function CharacterCards({
                       cursor: selectDisabled ? "not-allowed" : "pointer",
                       opacity: selectDisabled ? 0.55 : 1,
                     }}
-                    title={selectDisabled ? `最多帶入 ${maxSelect} 個角色定裝——先取消其他勾選` : undefined}
+                    title={
+                      !hasOwnSheet
+                        ? "沒有定裝參考圖——先設參考圖。未設則只靠文字錨點（粉橘短髮女孩、白帽T）"
+                        : selectDisabled
+                          ? `最多帶入 ${maxSelect} 個角色定裝——先取消其他勾選`
+                          : undefined
+                    }
                   >
                     <input
                       type="checkbox"
                       checked={on}
                       disabled={selectDisabled}
                       onChange={() => {
-                        if (selectDisabled) return;
+                        if (selectDisabled || !hasOwnSheet) return;
                         onToggle(c.id);
                       }}
                     />{" "}

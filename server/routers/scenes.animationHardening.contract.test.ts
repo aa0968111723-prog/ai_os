@@ -436,12 +436,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(variants).toContain("characterIds: cards.characterIds");
     expect(sceneStudio).not.toContain("生成時帶入角色參考圖");
     expect(sceneStudio).toContain("...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {})");
+    expect(sceneList).toContain("selectableBringInIds");
+    expect(sceneList).toContain("honoredCharIds");
     const cards = readFileSync(join(process.cwd(), "client/src/components/CharacterCards.tsx"), "utf8");
     expect(cards).toContain("生成時帶入");
-    expect(cards).toContain("生成時勾選，AI 自動帶入外觀");
+    expect(cards).toContain("selectableBringInIds");
+    expect(cards).toContain("characterHasLiveSheet");
+    expect(cards).toContain("沒有定裝參考圖——先設參考圖");
     const ref = readFileSync(join(process.cwd(), "server/services/referenceAsset.ts"), "utf8");
     expect(ref).toContain("export async function resolveHonoredCharacterSheet");
     expect(ref).toContain("if (!opts.characterIds?.length) return undefined");
+    expect(ref).toContain("owned.has(explicit)");
     expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 
