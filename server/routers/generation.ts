@@ -11,6 +11,8 @@ import { signAssetUrl } from "../services/storage";
 import { resolveByokFalKey, byokFalOpts } from "../services/byokBilling";
 import { GENERATION_SOURCE_META_KEY, splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { buildRetryGenerationInput, signedAssetId } from "../services/generationRetryInput";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
+import { scheduleReconcileAfterIndependentGenerate } from "../services/agentRunReconcile";
 import { geminiSubmit } from "../services/gemini";
 import { nimSubmit } from "../services/nvidia-nim";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -509,12 +511,22 @@ export const generationRouter = router({
     // 非 UUID 會讓 pg 的 uuid cast 直接 500——非 UUID 一律走 sourceUrl 原樣透傳
     // 重試輸入的組法是單一真相（services/generationRetryInput）——MCP 的 retry_generation
     // 走同一支，兩邊不會再漂移（#725 P1-4：MCP 版曾少帶 sceneRole/preserveScenePointer/卡片）。
-    return executeGenerationCommand({
+    const retried = await executeGenerationCommand({
       auth: ctx.auth,
       source: "web",
       ...buildRetryGenerationInput(gen),
       reasonPrefix: "重試生成",
     });
+    // First generateInto throw never reaches reconcile. 重試 is a new job;
+    // leftover 0/N「待你過目」must drop here, not wait for the 30s HUD poll.
+    if (shouldReplayIdempotentGeneration(retried.status)) {
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: retried.projectId,
+        sceneId: retried.sceneId,
+        generationId: retried.id,
+      });
+    }
+    return retried;
   }),
 
   /**

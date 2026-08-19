@@ -1621,20 +1621,12 @@ export const scenesRouter = router({
       // (no new job, leftover 待你過目 still discarded). Timeout replay of
       // queued/running/done stays idempotent.
       assertReplayableGeneration(gen.status);
-      void import("../services/agentRunReconcile")
-        .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
-          reconcileAgentRunsAfterSceneGenerate({
-            projectId: scene.projectId,
-            sceneId: scene.id,
-            generationId: gen.id,
-          }),
-        )
-        .catch((err) =>
-          console.warn(
-            "[scenes.generateInto] agent-run reconcile failed:",
-            err instanceof Error ? err.message : err,
-          ),
-        );
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        sceneId: scene.id,
+        generationId: gen.id,
+      });
       return { generationId: gen.id, modelId: gen.modelId };
     }),
 

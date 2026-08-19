@@ -229,7 +229,7 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(into).toContain("executeGenerationCommand");
     expect(into).toContain("modelId: input.modelId");
     expect(into).toContain("modelId: gen.modelId");
-    expect(into).toContain("reconcileAgentRunsAfterSceneGenerate");
+    expect(into).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(into).not.toContain("fast-lightning-sdxl");
     expect(into).toContain("preserveScenePointer: true");
     expect(generationCommand).toContain("const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core)");
@@ -452,6 +452,15 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(genCore).toContain("persistGenerationResult");
     expect(adopt).toContain("scheduleReconcileAfterVisualAdopt");
     expect(scenes).toContain("scheduleReconcileAfterVisualAdopt");
+    expect(scenes).toContain("scheduleReconcileAfterIndependentGenerate");
+    const generationRetry = readFileSync(join(process.cwd(), "server/routers/generation.ts"), "utf8");
+    const mcpRetry = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const runReconcile = readFileSync(join(process.cwd(), "server/services/agentRunReconcile.ts"), "utf8");
+    expect(runReconcile).toContain("export function scheduleReconcileAfterIndependentGenerate");
+    expect(generationRetry).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(generationRetry).toContain("shouldReplayIdempotentGeneration(retried.status)");
+    expect(mcpRetry).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(mcpRetry).toContain("shouldReplayIdempotentGeneration(newGen.status)");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     expect(overview).toContain("assertFreeOnlyCompletion");

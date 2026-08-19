@@ -21,6 +21,8 @@ describe("generation 核准路徑的順序約束", () => {
     // 這是結構斷言（有沒有長出第二套實作），不是行為斷言——行為由
     // services/generationRetryInput.test.ts 覆蓋。
     expect(source).toContain("buildRetryGenerationInput(gen)");
+    expect(source).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(source).toContain("shouldReplayIdempotentGeneration(retried.status)");
     expect(source).not.toContain("const lockedSnapshot =");
   });
 

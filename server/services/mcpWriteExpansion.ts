@@ -12,6 +12,8 @@ import { lockSceneOrder } from "./locks";
 import { worldviewSchema } from "../../shared/worldview";
 import { buildRetryGenerationInput } from "./generationRetryInput";
 import { executeGenerationCommand } from "./generationCommand";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
+import { scheduleReconcileAfterIndependentGenerate } from "./agentRunReconcile";
 import type { AuthState } from "./auth";
 import {
   AdobeNotConnectedError,
@@ -998,6 +1000,15 @@ export async function runMcpWriteExpansion(
       ...buildRetryGenerationInput(gen),
       reasonPrefix: "MCP 重試生成",
     });
+    // Same leftover HUD hole as generation.retry: first generateInto throw
+    // skips reconcile; a replayable 重試 must drop 0/N「待你過目」now.
+    if (shouldReplayIdempotentGeneration(newGen.status)) {
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: newGen.projectId,
+        sceneId: newGen.sceneId,
+        generationId: newGen.id,
+      });
+    }
     return {
       generationId: newGen.id,
       status: newGen.status,
