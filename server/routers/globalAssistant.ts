@@ -1800,10 +1800,11 @@ export async function runGlobalAsk(
 
   const platformList = creationOptions.platforms.map((p) => p.value).join("、") || "（該組尚無啟用中的發布平台）";
   const kindList = creationOptions.kinds.join("、") || "（自由填寫）";
+  // Live leftover: this few-shot still taught 七幕 costume as the Decision Log sample, not A–F 白帽T.
   const siteActionBlock = `你還可以輸出「站級動作意圖」（siteActions 陣列；你只負責正確組裝，後端會依 ASK/DIRECT 與風險決定直接執行或顯示確認卡）：
 - {"type":"create_project","title":"專案名（80字內）","kind":"內容類型","platform":"發布平台"}——只有使用者明確想開新專案才提議。platform 只能從這份清單挑：${platformList}；kind 參考：${kindList}。
 - {"type":"add_note","projectRef":"p2","title":"標題","content":"內容"}——記錄結論／會議紀錄；projectRef 可省略＝組層級筆記。
-- {"type":"save_decision","projectRef":"p2","title":"角色之後都穿米白外套"}——只有使用者已明確確認長期規則或定案時使用；寫入專案 Decision Log。
+- {"type":"save_decision","projectRef":"p2","title":"小華定裝鎖定粉橘短髮女孩、白帽T"}——只有使用者已明確確認長期規則或定案時使用；寫入專案 Decision Log。
 - {"type":"create_watch","projectRef":"p2","kind":"deadline_approaching|overdue_task|generation_failed|missing_asset|approval_waiting|agent_blocked|storyboard_incomplete","label":"可選顯示名稱"}——使用者明確要求持續監看／有變化就提醒時使用；這會建立持久監看，不是回一份即時摘要。
 - {"type":"add_schedule_item","projectRef":"p2","title":"標題","startsAt":"含時區 ISO 8601，如 2026-08-09T10:00:00+08:00","endsAt":"可省略","note":"可省略"}——安排行程／死線；projectRef 可省略＝組層級。
 - {"type":"create_task","projectRef":"p2","title":"任務標題","assigneeRef":"m1","dueAt":"可省略","priority":"low|normal|high|urgent 可省略"}——建立人員任務（projectRef 必填）。

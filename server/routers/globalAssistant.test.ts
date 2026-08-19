@@ -602,6 +602,17 @@ describe("global assistant injects persisted story for the current project", () 
     expect(src).not.toContain("settleUsagePoints");
   });
 
+  it("save_decision few-shot teaches 小華 A–F 白帽T, not 七幕 米白外套", () => {
+    expect(src).toContain('"title":"小華定裝鎖定粉橘短髮女孩、白帽T"');
+    expect(src).not.toContain("角色之後都穿米白外套");
+    expect(src).not.toContain("針織外套");
+    expect(src).not.toContain("安倢");
+    expect(src).not.toContain("慕恩");
+    expect(src).not.toContain("哲維");
+    expect(src).not.toContain("瑀晴");
+    expect(src).not.toContain("紅傘");
+  });
+
   it("binds the same 120s ask deadline as project assistant", () => {
     expect(src).toContain("bindAssistantAskDeadline");
     expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
