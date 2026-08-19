@@ -202,6 +202,8 @@ describe("animation shot writes stay consistent", () => {
     expect(client).toContain('type: "add_character"');
     expect(client).toContain("新增角色定裝卡");
     expect(client).toContain("if (a.type === \"add_character\") return { type: \"add_character\"");
+    expect(client).toContain('revealStoryInlineSection("storyboard"');
+    expect(client).not.toContain('hash = "sec-scenes"');
     const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
     const mcpAdd = mcp.slice(mcp.indexOf('if (name === "add_character")'), mcp.indexOf('if (name === "update_character")'));
     expect(mcpAdd).toContain("sanitizeCharacterProposalName");

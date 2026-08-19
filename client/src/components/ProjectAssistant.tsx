@@ -44,6 +44,7 @@ import { toWirePageContext } from "../lib/assistantQuickActions";
 import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
 import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
 import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
+import { revealStoryInlineSection } from "../features/story-workspace/storyInlineNav";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -143,7 +144,13 @@ function ProjectDirectResultCard({ projectId, result }: { projectId: string; res
         {undo.isSuccess ? "已復原這次建立的分鏡" : result.message}
       </span>
       {!undo.isSuccess && result.kind === "split_script" ? (
-        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = "sec-scenes"; }}>查看分鏡</Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => revealStoryInlineSection("storyboard", { projectId, scroll: true })}
+        >
+          查看分鏡
+        </Button>
       ) : null}
       {!undo.isSuccess && canUndo ? (
         <Button
