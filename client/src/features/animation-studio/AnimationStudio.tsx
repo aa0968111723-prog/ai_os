@@ -645,6 +645,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           projectTitle={projectTitle}
           sceneName={scene?.title || null}
           shotNumber={shotIndex >= 0 ? shotIndex + 1 : null}
+          shotCount={shots.length}
           shotTitle={shot?.title ?? null}
           canUndo={board.doc.strokes.length > 0}
           canRedo={board.redo.length > 0}

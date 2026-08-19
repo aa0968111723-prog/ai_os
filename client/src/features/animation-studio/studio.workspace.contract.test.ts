@@ -77,6 +77,14 @@ describe("沉浸：全站導航讓開", () => {
     expect(header).toContain('href={`/p/${projectId}`}');
     expect(header).toContain("返回專案");
   });
+
+  it("1280 header shows 第 N / M 鏡, not Shot 03 while the timeline holds the count", () => {
+    const header = readFileSync(resolve(dir, "StudioHeader.tsx"), "utf8");
+    expect(header).toContain("第 ${shotNumber} / ${shotCount} 鏡");
+    expect(header).not.toContain('Shot ${String(shotNumber).padStart(2, "0")}');
+    expect(studio).toContain("shotCount={shots.length}");
+    expect(studio).not.toContain("<ShotNavigator");
+  });
 });
 
 describe("觸控目標：視覺收斂但命中圈不縮", () => {
