@@ -69,6 +69,8 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("assertNoPendingVisual(scene.id)");
     expect(block).toContain("ensureXiaohuaCharacterIds");
     expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("generationId: gen.id");
     expect(block).toContain("characterIds,");
     expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
     const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");

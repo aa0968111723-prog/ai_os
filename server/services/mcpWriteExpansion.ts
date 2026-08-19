@@ -734,6 +734,14 @@ export async function runMcpWriteExpansion(
       preserveScenePointer: true,
       reasonPrefix: "MCP 分鏡格生成",
     });
+    // generateInto / refine / retry already drop leftover 0/N「待你過目」
+    // on a replayable independent job. MCP generate_into_scene is the same
+    // shot generate door and used to leave the HUD parked until the 30s poll.
+    scheduleReconcileAfterIndependentGenerate({
+      projectId: scene.projectId,
+      sceneId: scene.id,
+      generationId: gen.id,
+    });
     return {
       generationId: gen.id,
       status: gen.status,

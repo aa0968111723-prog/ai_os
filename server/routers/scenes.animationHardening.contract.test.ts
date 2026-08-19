@@ -485,6 +485,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(generationRetry).toContain("shouldReplayIdempotentGeneration(retried.status)");
     expect(mcpRetry).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(mcpRetry).toContain("shouldReplayIdempotentGeneration(newGen.status)");
+    const mcpInto = mcpRetry.slice(mcpRetry.indexOf('if (name === "generate_into_scene")'), mcpRetry.indexOf('if (name === "update_worldview")'));
+    expect(mcpInto).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(mcpInto).toContain("generationId: gen.id");
     const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
     const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
     expect(variants).toContain("scheduleReconcileAfterIndependentGenerate");
@@ -747,6 +750,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
     expect(stage).toContain("ensureXiaohuaCharacterIds");
     expect(stage).toContain("[shot.title, prompt, shot.action, shot.dialogue]");
+  });
+
+  it("MCP generate_into_scene drops leftover 待你過目 the same way generateInto does", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(into).toContain("projectId: scene.projectId");
+    expect(into).toContain("sceneId: scene.id");
+    expect(into).toContain("generationId: gen.id");
+    const generateInto = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(generateInto).toContain("scheduleReconcileAfterIndependentGenerate");
   });
 
   it("MCP generate_into_scene uses assertNoPendingVisual so a second send cannot double-charge", () => {
