@@ -8,10 +8,25 @@ import sys
 _counts = {"pass": 0, "fail": 0}
 
 
-def ok(name, cond):
+def ok(name, cond, detail=None):
     good = bool(cond)
-    print(("✅" if good else "❌"), name)
+    extra = f"  — {detail}" if (not good and detail not in (None, "")) else ""
+    print(("✅" if good else "❌"), name + extra)
     _counts["pass" if good else "fail"] += 1
+
+
+def adopt_waiting_generate_steps(call, opener, run):
+    """Visual generate steps stay waiting until Adopt (#753). Unblock the runner."""
+    adopted = 0
+    for step in run.get("steps") or []:
+        if step.get("kind") != "generate" or step.get("status") != "waiting":
+            continue
+        gid = step.get("generationId")
+        if not gid:
+            continue
+        call("POST", opener, "creativeContext.adoptGeneration", {"generationId": gid})
+        adopted += 1
+    return adopted
 
 
 @atexit.register

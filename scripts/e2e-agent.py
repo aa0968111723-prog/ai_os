@@ -8,7 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from e2e_lib import ok
+from e2e_lib import adopt_waiting_generate_steps, ok
 
 HOST = f"http://localhost:{os.environ.get('E2E_PORT', '3199')}"
 BASE = f"{HOST}/api/trpc"
@@ -88,11 +88,14 @@ approved = call("POST", admin, "agents.approve", {"runId": planned["id"]})
 ok("核准後進入執行", approved.get("status") == "running")
 
 terminal = None
-for _ in range(35):
+for _ in range(40):
     time.sleep(2)
     runs = call("GET", admin, "agents.listByProject", {"projectId": project_id})
     terminal = next((run for run in runs if run["id"] == planned["id"]), None)
-    if terminal and terminal["status"] in ("done", "failed"):
+    if not terminal:
+        continue
+    adopt_waiting_generate_steps(call, admin, terminal)
+    if terminal["status"] in ("done", "failed"):
         break
 ok("背景 Runner 完成完整代理計畫", terminal is not None and terminal.get("status") == "done")
 
