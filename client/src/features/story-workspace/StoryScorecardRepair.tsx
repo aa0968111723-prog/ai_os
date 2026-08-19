@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
-import { scorecardNeedsSetupCta, type ScorecardRow } from "@shared/projectConsistencyGraph";
+import { scorecardNeedsSetupCta, scorecardNeedsSheetCta, type ScorecardRow } from "@shared/projectConsistencyGraph";
 
 const STATUS_LABELS: Record<ScorecardRow["status"], string> = {
   ok: "正常",
@@ -46,6 +46,7 @@ export function StoryScorecardRepair({
   canEdit,
   onRepairShots,
   onSetupDimension,
+  onGenerateSheets,
   hasWorldviewStyles = false,
   suggestedSound,
 }: {
@@ -58,6 +59,8 @@ export function StoryScorecardRepair({
   onRepairShots?: (row: ScorecardRow) => void;
   /** 風格／聲音世界還沒 pin：固定目前畫風，或寫環境音後固定聲音世界。 */
   onSetupDimension?: (row: ScorecardRow, draft?: { ambience?: string; music?: string }) => void;
+  /** 人物沒有定裝參考圖：走便宜生圖，不重做鏡頭。 */
+  onGenerateSheets?: (row: ScorecardRow) => void;
   /** 世界觀已有 styles 才能一鍵 pin；否則 CTA 帶去選畫風。 */
   hasWorldviewStyles?: boolean;
   /** 各鏡已寫的環境音／配樂——有就能一鍵固定聲音世界。 */
@@ -67,6 +70,7 @@ export function StoryScorecardRepair({
   const canOneClickSound = Boolean(suggestedSound?.ambience || suggestedSound?.music);
   if (!rows.length) return null;
   const hasSetup = rows.some(scorecardNeedsSetupCta);
+  const hasSheet = rows.some(scorecardNeedsSheetCta);
   return (
     <div className="story-scorecard" data-fb="一致性修復">
       {rows.map((row) => (
@@ -76,7 +80,8 @@ export function StoryScorecardRepair({
           </Chip>
           <Meta as="span" className="story-scorecard__reason">{row.reason}</Meta>
           {canEdit && onRepairShots && row.affectedShotIds.length > 0
-            && (row.status === "stale" || row.status === "warning") && (
+            && (row.status === "stale" || row.status === "warning")
+            && !scorecardNeedsSheetCta(row) && (
             <Button
               variant="ghost"
               size="sm"
@@ -84,6 +89,16 @@ export function StoryScorecardRepair({
               onClick={() => onRepairShots(row)}
             >
               修復 {row.affectedShotIds.length} 鏡
+            </Button>
+          )}
+          {canEdit && onGenerateSheets && scorecardNeedsSheetCta(row) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => onGenerateSheets(row)}
+            >
+              生成定裝
             </Button>
           )}
           {canEdit && onSetupDimension && scorecardNeedsSetupCta(row) && row.dimension === "style" && (
@@ -130,9 +145,11 @@ export function StoryScorecardRepair({
         </div>
       ))}
       <Hint as="p" className="story-scorecard__hint">
-        {hasSetup
-          ? "風格與聲音還沒固定時，先設定；修復只重做受影響的鏡，新結果會先當候選。"
-          : "修復只重做受影響的鏡；新結果會先當候選，由你比較後採用。"}
+        {hasSheet
+          ? "沒有定裝參考圖時，先生成定裝；修復只重做受影響的鏡，新結果會先當候選。"
+          : hasSetup
+            ? "風格與聲音還沒固定時，先設定；修復只重做受影響的鏡，新結果會先當候選。"
+            : "修復只重做受影響的鏡；新結果會先當候選，由你比較後採用。"}
       </Hint>
     </div>
   );

@@ -17,6 +17,13 @@ const soundRow: ScorecardRow = {
   reason: "尚未設定聲音世界——各鏡環境音各自為政",
 };
 
+const identityRow: ScorecardRow = {
+  dimension: "identity",
+  status: "warning",
+  affectedShotIds: ["s1"],
+  reason: "1 位角色沒有定裝參考圖——身份一致性只剩文字錨點",
+};
+
 const staleRow: ScorecardRow = {
   dimension: "continuity",
   status: "stale",
@@ -85,6 +92,23 @@ describe("StoryScorecardRepair", () => {
     expect(screen.queryByLabelText("環境音")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "固定聲音世界" }));
     expect(onSetupDimension).toHaveBeenCalledWith(soundRow, { ambience: "校門口暖色光、遠處車流" });
+  });
+
+  it("identity missing sheets offers 生成定裝, not 修復 N 鏡", () => {
+    const onRepairShots = vi.fn();
+    const onGenerateSheets = vi.fn();
+    render(
+      <StoryScorecardRepair
+        rows={[identityRow]}
+        canEdit
+        onRepairShots={onRepairShots}
+        onGenerateSheets={onGenerateSheets}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "生成定裝" }));
+    expect(onGenerateSheets).toHaveBeenCalledWith(identityRow);
+    expect(onRepairShots).not.toHaveBeenCalled();
   });
 
   it("repair CTA still fires for stale shots", () => {

@@ -129,6 +129,14 @@ export function scorecardNeedsSetupCta(row: ScorecardRow): boolean {
 }
 
 /**
+ * 「N 位角色沒有定裝參考圖」——修復鏡生不出參考圖，要走便宜生圖定裝。
+ * 多人鏡 capability_downgrade 是另一扇門。
+ */
+export function scorecardNeedsSheetCta(row: ScorecardRow): boolean {
+  return row.dimension === "identity" && row.status === "warning";
+}
+
+/**
  * 純建構器：所有輸入都是 server 已載入的既有 records 推導值。
  * 規則：每維度最多一列最重狀態（blocker > unresolved > stale > capability_downgrade > warning > ok）；
  * ok 的維度不出列（第一層只講需要人看的事）。

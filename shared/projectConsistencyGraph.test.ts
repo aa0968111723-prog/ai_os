@@ -4,6 +4,7 @@ import {
   compactWorkspaceStatus,
   nextWorkspaceAction,
   scorecardNeedsSetupCta,
+  scorecardNeedsSheetCta,
   visualCoverageScore,
 } from "./projectConsistencyGraph";
 import { inheritContinuityState, referenceRoleConflicts } from "./shotContextPacket";
@@ -162,5 +163,17 @@ describe("consistency scorecard (closure §11)", () => {
       affectedShotIds: [],
       reason: "1 位有台詞的角色還沒綁定聲線",
     })).toBe(false);
+  });
+
+  it("identity missing sheets ask for 生成定裝, not 修復 N 鏡", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      charactersMissingReference: ["c-xiaohua"],
+      charactersBoundShotIds: ["sh1"],
+    });
+    const identity = rows.find((row) => row.dimension === "identity" && row.status === "warning");
+    expect(identity?.reason).toMatch(/沒有定裝參考圖/);
+    expect(scorecardNeedsSheetCta(identity!)).toBe(true);
+    expect(scorecardNeedsSetupCta(identity!)).toBe(false);
   });
 });

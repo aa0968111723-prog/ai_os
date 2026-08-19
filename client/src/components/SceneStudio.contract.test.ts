@@ -30,4 +30,11 @@ describe("單格／工作室 empty-field samples are 小華 A–F, not 七幕", 
     expect(inspector).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
     expect(inspector).not.toContain("清晨的禪堂空景");
   });
+
+  it("單格 HonorSheet can 生成定裝 without opening 角色卡", () => {
+    expect(studio).toContain("onGenerateSheet={sheet.start}");
+    expect(inspector).toContain("onGenerateSheet={sheet.start}");
+    expect(studio).toContain("useCharacterSheetGenerate");
+    expect(inspector).toContain("useCharacterSheetGenerate");
+  });
 });

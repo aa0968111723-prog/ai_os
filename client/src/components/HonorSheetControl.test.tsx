@@ -25,6 +25,22 @@ describe("HonorSheetControl", () => {
     expect(screen.getByRole("checkbox", { name: /小華/ })).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: /小華/ }));
     expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /生成定裝/ })).not.toBeInTheDocument();
+  });
+
+  it("0 own refs on 單格 can 生成定裝 without going to 角色卡", async () => {
+    const user = userEvent.setup();
+    const onGenerateSheet = vi.fn();
+    render(
+      <HonorSheetControl
+        characters={[EMPTY]}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onGenerateSheet={onGenerateSheet}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "生成定裝：小華" }));
+    expect(onGenerateSheet).toHaveBeenCalledWith(EMPTY.id);
   });
 
   it("own same-project sheet can become 已選 1/6", async () => {

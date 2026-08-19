@@ -360,6 +360,7 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).toContain("canEdit && <InspectorHonorSheet");
     expect(inspector).not.toContain("shot && canEdit && <InspectorHonorSheet");
     expect(inspector).toContain("readOnly={!shot}");
+    expect(inspector).toContain("onGenerateSheet={sheet.start}");
     expect(studio).not.toMatch(/switchTo\(shots\[0\]/);
   });
 

@@ -29,9 +29,16 @@ vi.mock("../api", () => ({
       messages: { listByRef: { invalidate }, openCountsByScene: { invalidate } },
       quota: { my: { invalidate } },
       teamAssistant: { agentOverview: { invalidate } },
+      characters: { list: { invalidate } },
+      creativeContext: { workspace: { invalidate } },
     }),
     characters: {
       list: { useQuery: (...args: unknown[]) => charactersQuery(...args) },
+      generateSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+      honorGeneratedSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+    },
+    generation: {
+      status: { useQuery: () => ({ data: null }) },
     },
     scenes: {
       versions: { useQuery: (...args: unknown[]) => versionsQuery(...args) },

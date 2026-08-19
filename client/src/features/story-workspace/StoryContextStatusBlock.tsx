@@ -15,6 +15,8 @@ import { revealStoryInlineSection } from "./storyInlineNav";
 import { revealProjectContext } from "../project-nav/projectContextNav";
 import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { Hint } from "../../components/ui";
+import { useCharacterSheetGenerate } from "../../components/useCharacterSheetGenerate";
+import { characterHasLiveSheet } from "@shared/studioReferenceImage";
 
 function uniqueJoined(values: Array<string | null | undefined>): string {
   return [...new Set(values.map((row) => row?.trim()).filter((row): row is string => Boolean(row)))].join("、");
@@ -54,6 +56,7 @@ export function StoryContextStatusBlock({
     },
     onError: (err) => setSetupError(err.message),
   });
+  const sheet = useCharacterSheetGenerate(projectId);
 
   const pending = Array.isArray(storyMeta.data?.pending) ? storyMeta.data.pending.length : 0;
   const counts = {
@@ -124,10 +127,17 @@ export function StoryContextStatusBlock({
             canEdit={canEdit}
             onRepairShots={onRepairShots}
             onSetupDimension={canEdit ? setupDimension : undefined}
+            onGenerateSheets={canEdit ? () => {
+              const missing = (characters.data ?? [])
+                .filter((row) => !characterHasLiveSheet(row))
+                .map((row) => row.id);
+              sheet.startMany(missing);
+            } : undefined}
             hasWorldviewStyles={wv.styles.length > 0}
             suggestedSound={suggestedSound.ambience || suggestedSound.music ? suggestedSound : undefined}
           />
           {setupError ? <Hint as="p">{setupError}</Hint> : null}
+          {sheet.error ? <Hint as="p">定裝生成失敗：{sheet.error.message}</Hint> : null}
           <StoryAnimationBoard projectId={projectId} canEdit={canEdit} />
         </>
       ) : null}

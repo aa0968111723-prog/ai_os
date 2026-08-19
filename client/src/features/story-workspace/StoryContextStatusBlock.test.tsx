@@ -1,14 +1,37 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoryContextStatusBlock } from "./StoryContextStatusBlock";
 
 const pinCanon = vi.fn();
+const generateSheetMutate = vi.fn();
+
+const scorecard = [
+  {
+    dimension: "style",
+    status: "warning",
+    affectedShotIds: [] as string[],
+    reason: "尚未固定視覺風格設定——各鏡風格靠即時世界觀，跨腳本重用時可能漂移",
+  },
+  {
+    dimension: "sound_world",
+    status: "warning",
+    affectedShotIds: [] as string[],
+    reason: "尚未設定聲音世界——各鏡環境音各自為政",
+  },
+  {
+    dimension: "identity",
+    status: "warning",
+    affectedShotIds: ["s1"],
+    reason: "1 位角色沒有定裝參考圖——身份一致性只剩文字錨點",
+  },
+];
 
 vi.mock("../../api", () => ({
   trpc: {
     useUtils: () => ({
       canon: { projectPins: { invalidate: () => Promise.resolve() } },
       creativeContext: { workspace: { invalidate: () => Promise.resolve() } },
+      characters: { list: { invalidate: () => Promise.resolve() } },
     }),
     story: {
       get: {
@@ -21,7 +44,21 @@ vi.mock("../../api", () => ({
         }),
       },
     },
-    characters: { list: { useQuery: () => ({ data: [{ id: "c1" }, { id: "c2" }] }) } },
+    characters: {
+      list: {
+        useQuery: () => ({
+          data: [
+            { id: "c1", name: "小華", referenceAssetId: null, referenceUrl: null },
+            { id: "c2", name: "禪定龜龜", referenceAssetId: "sheet-2", referenceUrl: "https://example.test/turtle.png" },
+          ],
+        }),
+      },
+      generateSheet: { useMutation: () => ({ isPending: false, mutate: generateSheetMutate, error: null }) },
+      honorGeneratedSheet: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) },
+    },
+    generation: {
+      status: { useQuery: () => ({ data: null }) },
+    },
     scenePresets: { list: { useQuery: () => ({ data: [{ id: "s1" }] }) } },
     props: { list: { useQuery: () => ({ data: [] }) } },
     knowledge: { list: { useQuery: () => ({ data: [] }) } },
@@ -47,20 +84,7 @@ vi.mock("../../api", () => ({
             canonPins: [
               { pinId: "p", canonId: "c", kind: "character", name: "魯夫", state: "UPDATE_AVAILABLE", pinnedVersionNumber: 7, productionVersionNumber: 8, localEntityKind: "character", localEntityId: "c1" },
             ],
-            scorecard: [
-              {
-                dimension: "style",
-                status: "warning",
-                affectedShotIds: [],
-                reason: "尚未固定視覺風格設定——各鏡風格靠即時世界觀，跨腳本重用時可能漂移",
-              },
-              {
-                dimension: "sound_world",
-                status: "warning",
-                affectedShotIds: [],
-                reason: "尚未設定聲音世界——各鏡環境音各自為政",
-              },
-            ],
+            scorecard,
           },
         }),
       },
@@ -78,7 +102,6 @@ describe("StoryContextStatusBlock", () => {
     expect(screen.getByText("下一步：產生分鏡")).toBeInTheDocument();
     expect(screen.getByText("1 個團隊設定引用 · 1 個有新版")).toBeInTheDocument();
     expect(screen.getByText("有 1 項需要確認")).toBeInTheDocument();
-    // provider 未設定時絕不假稱可加強一致性
     expect(screen.queryByText("可加強一致性")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "固定目前畫風" })).not.toBeInTheDocument();
   });
@@ -101,5 +124,16 @@ describe("StoryContextStatusBlock", () => {
       descriptor: { ambience: "淡大校門口日間人聲與車流" },
       confirmRights: true,
     });
+  });
+
+  it("identity missing sheets kicks cheap 生成定裝 for 小華, not 修復鏡頭", () => {
+    render(<StoryContextStatusBlock projectId="p1" canEdit onRepairShots={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "生成定裝" }));
+    expect(generateSheetMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "c1" }),
+      expect.anything(),
+    );
+    expect(JSON.stringify(generateSheetMutate.mock.calls[0]![0])).not.toMatch(/veo/i);
   });
 });

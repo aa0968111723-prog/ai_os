@@ -19,6 +19,7 @@ import { formatTMs } from "@shared/timecode";
 import { discussInMessages } from "../discuss";
 import { selectableBringInIds } from "@shared/studioReferenceImage";
 import { HonorSheetControl } from "./HonorSheetControl";
+import { useCharacterSheetGenerate } from "./useCharacterSheetGenerate";
 import { shouldRotateGenerateIntoRequestId, variantRequestIdsAfterLaunch } from "@shared/generationIdempotency";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
@@ -170,6 +171,7 @@ export function SceneStudio({
   const [variantParentAssetId, setVariantParentAssetId] = useState<string | null>(null);
   const [honorIds, setHonorIds] = useState<string[]>(charIds ?? []);
   const characters = trpc.characters.list.useQuery({ projectId });
+  const sheet = useCharacterSheetGenerate(projectId);
   useEffect(() => {
     setHonorIds(charIds ?? []);
   }, [charIds, sceneId]);
@@ -867,7 +869,10 @@ export function SceneStudio({
                 onToggle={(id) =>
                   setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
                 }
+                onGenerateSheet={sheet.start}
+                generatingCharacterId={sheet.pendingCharacterId}
               />
+              {sheet.error ? <Hint>定裝生成失敗：{sheet.error.message}</Hint> : null}
             )}
 
             <div className="scene-studio__tabs" role="tablist" aria-label="單格工作室工具">

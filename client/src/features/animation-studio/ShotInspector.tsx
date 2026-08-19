@@ -17,6 +17,7 @@ import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
 import { HonorSheetControl } from "../../components/HonorSheetControl";
+import { useCharacterSheetGenerate } from "../../components/useCharacterSheetGenerate";
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { SCRIPT_AMBIENCE_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "@shared/storyboardScript";
@@ -173,6 +174,7 @@ export function ShotInspector({
 /** Live /studio/ 單格 door. Mount even on 自由塗鴉 — do not wait for a selected shot. */
 function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: InspectorShot | null }) {
   const characters = trpc.characters.list.useQuery({ projectId });
+  const sheet = useCharacterSheetGenerate(projectId);
   const [honorIds, setHonorIds] = useState<string[]>(() => shot?.characterIds ?? []);
   useEffect(() => {
     setHonorIds(shot?.characterIds ?? []);
@@ -186,7 +188,10 @@ function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: Ins
           setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
         }
         readOnly={!shot}
+        onGenerateSheet={sheet.start}
+        generatingCharacterId={sheet.pendingCharacterId}
       />
+      {sheet.error ? <Hint>定裝生成失敗：{sheet.error.message}</Hint> : null}
       {!shot && (
         <Hint>還沒選分鏡。到下面的時間軸選一鏡，才能把定裝帶進那一鏡的生成。</Hint>
       )}
