@@ -6,6 +6,7 @@ import {
   MAX_GENERATE_CHARACTERS,
   MAX_PROJECT_CHARACTERS,
 } from "@shared/cardLimits";
+import { XIAOHUA_LOCKED_APPEARANCE } from "@shared/characterIdentityLock";
 import { characterHasLiveSheet, selectableBringInIds } from "@shared/studioReferenceImage";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
@@ -392,9 +393,10 @@ export function CharacterCards({
       ) : (
         <EmptyState
           title="還沒有角色"
-          description="加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。"
+          description="加一張定裝卡（例：小華＝粉橘短髮女孩、白帽T）。角色只有小華與禪定龜龜。"
           /* 範例本來只寫在說明裡、要自己打一次。EmptyState 收 action 就是為了
-             「不要死路」——直接建出這張範例卡，建完再改比從零想快得多。 */
+             「不要死路」——直接建出這張範例卡，建完再改比從零想快得多。
+             Live leftover: this door still minted 安倢 (七幕), not 小華. */
           action={
             readOnly ? undefined : (
               <Button
@@ -403,9 +405,9 @@ export function CharacterCards({
                 onClick={() =>
                   add.mutate({
                     projectId,
-                    name: "安倢",
-                    appearance: "紅色雨傘、米白外套、帆布包、無眼鏡、溫柔回望",
-                    notes: "由範例建立，可再改",
+                    name: "小華",
+                    appearance: XIAOHUA_LOCKED_APPEARANCE,
+                    notes: "淡江大二化工，與禪定龜龜同行",
                     clientRequestId: requestId.current,
                   })
                 }
@@ -426,7 +428,7 @@ export function CharacterCards({
               value={name}
               maxLength={CHAR_NAME_MAX}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例：安倢"
+              placeholder="例：小華"
               autoComplete="off"
             />
             <CharCount value={name} max={CHAR_NAME_MAX} />
@@ -437,7 +439,7 @@ export function CharacterCards({
               maxLength={CHAR_APPEARANCE_MAX}
               onChange={(e) => setAppearance(e.target.value)}
               rows={3}
-              placeholder="例：紅色雨傘、米白外套、帆布包、無眼鏡、溫柔回望"
+              placeholder="例：粉橘短髮女孩、白帽T"
             />
             <CharCount value={appearance} max={CHAR_APPEARANCE_MAX} />
             <label htmlFor="char-notes">個性・語氣・關係（選填，供 AI 導演參考，不畫進畫面）</label>
@@ -447,7 +449,7 @@ export function CharacterCards({
               maxLength={CHAR_NOTES_MAX}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              placeholder="例：安靜溫柔，與慕恩是同社團學姐"
+              placeholder="例：淡江大二化工，與禪定龜龜同行"
             />
             <CharCount value={notes} max={CHAR_NOTES_MAX} />
             <label style={{ marginTop: 8 }}>定裝參考圖（選填：上傳或從素材庫選）</label>
