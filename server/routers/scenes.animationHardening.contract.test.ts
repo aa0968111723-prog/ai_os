@@ -209,6 +209,18 @@ describe("animation shot writes stay consistent", () => {
     expect(mcpAdd).not.toContain("db.insert(schema.characters)");
   });
 
+  it("parse confirmCandidate reuses 小華 instead of raw-inserting the EXTRACT blob", () => {
+    const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
+    const confirm = story.slice(story.indexOf("confirmCandidate:"), story.indexOf("storyboardPreview:"));
+    expect(confirm).toContain("sanitizeCharacterProposalName");
+    expect(confirm).toContain("matchByName(existing, name)");
+    expect(confirm).toContain("這是指示句，不是角色名");
+    const parse = readFileSync(join(process.cwd(), "server/services/storyParse.ts"), "utf8");
+    expect(parse).toContain("sanitizeCharacterProposalName(cand.name)");
+    expect(parse).toContain("sanitizeCharacterProposalName(name)");
+    expect(parse).toContain("name: cardName");
+  });
+
   it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {
     const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
     const start = story.indexOf("generateStoryboard:");

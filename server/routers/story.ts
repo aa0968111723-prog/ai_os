@@ -17,11 +17,13 @@ import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
   loadOrphanShots,
+  matchByName,
   materializeStoryboard,
   runStoryParse,
   sha256Hex,
   undoParseRun,
 } from "../services/storyParse";
+import { sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
 import { checkProjectContinuity } from "../services/continuityCheck";
 import { flushStoryDocNow } from "../services/collabDoc";
 import {
@@ -362,28 +364,36 @@ export const storyRouter = router({
       // create
       let entityId: string;
       if (cand.kind === "character") {
-        const [row] = await db
-          .insert(schema.characters)
-          .values({
-            projectId: project.id,
-            groupId: project.groupId,
-            name: cand.name,
-            appearance: payload.appearance?.trim() || `${cand.name}（外觀待補）`,
-            createdBy: ctx.auth.user.id,
-          })
-          .returning();
-        entityId = row.id;
-        // 帶服裝資訊的角色候選：確認建立時一併建 Look（Identity/Look 分層）
-        if (payload.costume?.trim()) {
-          await db.insert(schema.characterLooks).values({
-            projectId: project.id,
-            groupId: project.groupId,
-            characterId: row.id,
-            name: payload.costume.trim().slice(0, 40),
-            costume: payload.costume.trim(),
-            source: "parse",
-            createdBy: ctx.auth.user.id,
-          });
+        const name = sanitizeCharacterProposalName(cand.name);
+        if (!name) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+        const existing = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+        const matched = matchByName(existing, name);
+        if (matched) {
+          entityId = matched.id;
+        } else {
+          const [row] = await db
+            .insert(schema.characters)
+            .values({
+              projectId: project.id,
+              groupId: project.groupId,
+              name,
+              appearance: payload.appearance?.trim() || `${name}（外觀待補）`,
+              createdBy: ctx.auth.user.id,
+            })
+            .returning();
+          entityId = row.id;
+          // 帶服裝資訊的角色候選：確認建立時一併建 Look（Identity/Look 分層）
+          if (payload.costume?.trim()) {
+            await db.insert(schema.characterLooks).values({
+              projectId: project.id,
+              groupId: project.groupId,
+              characterId: row.id,
+              name: payload.costume.trim().slice(0, 40),
+              costume: payload.costume.trim(),
+              source: "parse",
+              createdBy: ctx.auth.user.id,
+            });
+          }
         }
       } else if (cand.kind === "location") {
         const [row] = await db

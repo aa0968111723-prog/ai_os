@@ -34,6 +34,7 @@ import {
   type ParsedShot,
   type ExistingStoryScene,
 } from "../../shared/story";
+import { sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
 import {
   lockXiaohuaCopyFields,
   lockXiaohuaPlan,
@@ -337,9 +338,18 @@ function resolveExistingRef(
 }
 
 export function matchByName<T extends { id: string; name: string }>(rows: T[], name: string): T | null {
-  const key = nameKey(name);
-  if (!key) return null;
-  return rows.find((r) => nameKey(r.name) === key) ?? null;
+  const keys = new Set<string>();
+  const primary = nameKey(name);
+  if (primary) keys.add(primary);
+  // EXTRACT leftover:「小華（粉橘短髮女孩／白帽T）」must hit the existing 小華
+  // card. nameKey alone keeps the look phrase, so resolve minted a second row.
+  const sanitized = sanitizeCharacterProposalName(name);
+  if (sanitized) {
+    const cleaned = nameKey(sanitized);
+    if (cleaned) keys.add(cleaned);
+  }
+  if (!keys.size) return null;
+  return rows.find((r) => keys.has(nameKey(r.name))) ?? null;
 }
 
 /* ── 解析主流程 ───────────────────────── */
@@ -552,15 +562,18 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
 
     /* 角色 */
     for (const cand of plan.characters) {
-      const key = `character:${nameKey(cand.name)}`;
-      if (!nameKey(cand.name) || seenKeys.has(key)) continue;
+      const cardName = sanitizeCharacterProposalName(cand.name);
+      if (!cardName) continue;
+      const key = `character:${nameKey(cardName)}`;
+      if (!nameKey(cardName) || seenKeys.has(key)) continue;
       seenKeys.add(key);
       const matchedId =
-        resolveExistingRef(cardAliases, "character", cand.existingRef) ?? matchByName(existing.characters, cand.name)?.id ?? null;
+        resolveExistingRef(cardAliases, "character", cand.existingRef) ?? matchByName(existing.characters, cardName)?.id ?? null;
       const bucket = bucketConfidence(cand.confidence);
       if (matchedId) {
         stats.characters.linked += 1;
-        charIdByKey.set(nameKey(cand.name), matchedId);
+        charIdByKey.set(nameKey(cardName), matchedId);
+        if (nameKey(cand.name) !== nameKey(cardName)) charIdByKey.set(nameKey(cand.name), matchedId);
         const row = existing.characters.find((r) => r.id === matchedId);
         if (row && bucket !== "confirm") await enrich("characters", matchedId, "appearance", row.appearance, cand.appearance);
       } else if (bucket === "confirm" || charBudget <= 0) {
@@ -569,7 +582,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
           projectId: project.id,
           runId: run.id,
           kind: "character",
-          name: cand.name,
+          name: cardName,
           payload: { appearance: cand.appearance, costume: cand.costume, aliases: cand.aliases } satisfies ParseCandidatePayload,
           confidence: cand.confidence,
           status: "pending",
@@ -583,19 +596,20 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
           .values({
             projectId: project.id,
             groupId: project.groupId,
-            name: cand.name,
-            appearance: cand.appearance?.trim() || `${cand.name}（外觀待補）`,
+            name: cardName,
+            appearance: cand.appearance?.trim() || `${cardName}（外觀待補）`,
             createdBy: input.userId,
           })
           .returning();
         stats.characters.created += 1;
         applied.createdCharacterIds!.push(row.id);
-        charIdByKey.set(nameKey(cand.name), row.id);
+        charIdByKey.set(nameKey(cardName), row.id);
+        if (nameKey(cand.name) !== nameKey(cardName)) charIdByKey.set(nameKey(cand.name), row.id);
         candidateRows.push({
           projectId: project.id,
           runId: run.id,
           kind: "character",
-          name: cand.name,
+          name: cardName,
           payload: { appearance: cand.appearance, aliases: cand.aliases } satisfies ParseCandidatePayload,
           confidence: cand.confidence,
           status: "applied",
@@ -604,7 +618,7 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
         });
       }
       // 造型（Look）：服裝與 Identity 分層——不覆蓋 appearance，建（或沿用）一筆 Look
-      const ownerId = charIdByKey.get(nameKey(cand.name));
+      const ownerId = charIdByKey.get(nameKey(cardName)) ?? charIdByKey.get(nameKey(cand.name));
       const costume = cand.costume?.trim();
       if (ownerId && costume && bucket !== "confirm" && lookBudget > 0) {
         const lookName = costume.slice(0, LOOK_NAME_MAX);

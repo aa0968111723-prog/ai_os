@@ -170,4 +170,11 @@ describe("matchByName", () => {
     expect(matchByName([{ id: "char-a", name: "小華" }], "禪定龜龜")).toBeNull();
     expect(matchByName([], "小華")).toBeNull();
   });
+
+  it("EXTRACT blob「小華（粉橘…）」hits the existing 小華 card, not a second row", () => {
+    const existing = { id: "char-a", name: "小華" };
+    expect(matchByName([existing], "小華（粉橘短髮女孩／白帽T）")?.id).toBe("char-a");
+    expect(matchByName([existing], "小華（粉橘短髮女孩／白帽T）。不要寫素材清單")?.id).toBe("char-a");
+    expect(matchByName([existing], "不要寫素材清單")).toBeNull();
+  });
 });
