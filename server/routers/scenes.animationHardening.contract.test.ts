@@ -469,6 +469,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(genCore).toContain("unlandedPersistSource");
     expect(genCore).toContain("persistGenerationResult");
     expect(genCore).toContain("originUrl: remoteUrl");
+    expect(genCore).toContain("failPersistGenerationLand");
+    expect(genCore).not.toContain("if (!persisted) return;");
     expect(genCore).toContain("const source = unlandedPersistSource(asset)");
     expect(genCore).toContain("landingBackoffSeconds");
     expect(genCore).toContain("markLandAttemptFailed");

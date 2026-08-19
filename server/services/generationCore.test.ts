@@ -151,6 +151,8 @@ describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
     expect(source).toContain("const source = unlandedPersistSource(asset);");
     expect(source).toContain("originUrl: remoteUrl");
     expect(source).toContain("originUrl: source");
+    expect(source).toContain("failPersistGenerationLand");
+    expect(source).not.toContain("if (!persisted) return;");
     const audit = readFileSync(new URL("./storageAudit.ts", import.meta.url), "utf8");
     expect(audit).toContain("unlandedPersistSource(row)");
     expect(audit).not.toContain("row.originUrl || row.url");

@@ -92,7 +92,13 @@ export function humanizeGenerationError(raw: string | undefined | null): string 
 function persistGenerationResult(assetId: string, generationId: string, remoteUrl: string): void {
   void (async () => {
     const persisted = await persistRemote(remoteUrl);
-    if (!persisted) return;
+    if (!persisted) {
+      // Silent return left newest generateInto rows due (landNextTryAt null)
+      // and never wrote originUrl. Sweep is newest-first / limit 20, so those
+      // stale fal URLs starved older landable persists. Same backoff as sweep.
+      await failPersistGenerationLand(assetId, remoteUrl, "persistRemote 回空（來源已死或抓取失敗）");
+      return;
+    }
     const localUrl = `/api/assets/${assetId}/file`;
     await db
       .update(schema.assets)
@@ -111,6 +117,20 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
       .where(eq(schema.generations.id, generationId));
     console.log(`[storage] 成品已落地：asset=${assetId}（${persisted.sizeBytes}B ${persisted.mime}）`);
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
+}
+
+/** Keep fal in originUrl and leave the due queue so older generateInto can land. */
+async function failPersistGenerationLand(assetId: string, remoteUrl: string, error: string): Promise<void> {
+  const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, assetId)).limit(1);
+  if (!asset) return;
+  const origin = unlandedPersistSource(asset) ?? remoteUrl;
+  if (origin) {
+    await db
+      .update(schema.assets)
+      .set({ originUrl: origin })
+      .where(eq(schema.assets.id, assetId));
+  }
+  await markLandAttemptFailed(asset, error);
 }
 
 /**
