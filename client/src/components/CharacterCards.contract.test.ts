@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { XIAOHUA_LOCKED_APPEARANCE } from "@shared/characterIdentityLock";
 
-const source = readFileSync(new URL("./CharacterCards.tsx", import.meta.url), "utf8");
+const source = readFileSync(resolve(process.cwd(), "client/src/components/CharacterCards.tsx"), "utf8");
 
 describe("角色卡 UI sample writes 小華, not 安倢", () => {
   it("empty-state 帶入這張範例卡 mints 小華 + locked look", () => {
