@@ -1204,6 +1204,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     const adopted = await scenePointerIsGeneration(waiting.targetSceneId, waiting.generationId);
     if (!adopted) continue;
     waiting.status = "done";
+    addOutputRef(waiting, "generation", waiting.generationId, waiting.title ?? waiting.note);
     if (waiting.note.startsWith("待你採用 · ")) waiting.note = waiting.note.slice("待你採用 · ".length);
     waiting.detail = waiting.detail || "已採用";
     adoptedWaiting = true;
@@ -2276,6 +2277,11 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       if (applied.changed) {
         steps.splice(0, steps.length, ...(applied.steps as AgentStep[]));
+        for (const next of steps) {
+          if (next.kind !== "generate") continue;
+          if (next.generationId !== latest.id && next.targetSceneId !== sceneId) continue;
+          addOutputRef(next, "generation", latest.id, next.title ?? next.note);
+        }
         await saveRun(run.id, { steps });
       }
       return;

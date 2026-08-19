@@ -87,9 +87,20 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toContain("listRunnableDagSteps");
   });
 
+  it("records generation outputRefs on Adopt and independent generateInto reconcile", () => {
+    const start = source.indexOf("let adoptedWaiting = false");
+    const block = source.slice(start, source.indexOf("使用者已按停／失敗：沒有新生成要送時收停 pending"));
+    expect(block).toContain('addOutputRef(waiting, "generation"');
+    const independent = source.slice(
+      source.indexOf("if (step.kind === \"generate\" && sceneId && !step.generationId)"),
+      source.indexOf("送出前再讀一次狀態：使用者若剛按停就不要再扣點送出"),
+    );
+    expect(independent).toContain('addOutputRef(next, "generation"');
+  });
+
   it("after Adopt, re-evaluates the DAG so a waiting run can reach done", () => {
     const start = source.indexOf("let adoptedWaiting = false");
-    const block = source.slice(start, source.indexOf("使用者已按停：沒有新生成要送時收停 pending"));
+    const block = source.slice(start, source.indexOf("使用者已按停／失敗：沒有新生成要送時收停 pending"));
     expect(block).toContain("saveDagProgress");
     expect(block).not.toMatch(/if \(adoptedWaiting\) await saveRun\(run\.id, \{ steps \}\);/);
     expect(source).toContain('eq(schema.agentRuns.status, "waiting")');

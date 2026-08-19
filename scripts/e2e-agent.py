@@ -118,8 +118,8 @@ ok("事件分頁明示 nextCursor", "nextCursor" in events_page)
 
 insights = call("GET", admin, "agents.insights", {"projectId": project_id})
 result_types = {result["type"] for result in insights.get("results", [])}
-ok("成果中心收錄分鏡", "scene" in result_types)
-ok("成果中心收錄生成", "generation" in result_types)
+ok("成果中心收錄分鏡", "scene" in result_types, sorted(result_types))
+ok("成果中心收錄生成", "generation" in result_types, sorted(result_types))
 ok("健康摘要含統一任務與截斷旗標", isinstance(insights.get("workItems"), list) and isinstance(insights.get("truncated"), dict))
 
 discarded_plan = call("POST", admin, "agents.plan", {
