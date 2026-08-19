@@ -52,6 +52,7 @@ import {
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { resolveHonoredCharacterSheet } from "../services/referenceAsset";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
@@ -2151,10 +2152,66 @@ export const assistantRouter = router({
         // generateInto / refine already persist the locked prompt. Assistant
         // generate already binds this shot's cards / looks / direction, but
         // still passed a.prompt raw — generations.prompt could keep 年輕男性.
-        const lockedPrompt = lockXiaohuaGenerationPrompt(
+        let lockedPrompt = lockXiaohuaGenerationPrompt(
           a.prompt,
           /小華/.test([scene.title, a.prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
         );
+        // generateVoiceover / generateAmbience / agent voiceover already speak
+        // this shot's 對白／旁白 and stamp voice / Sound World. Assistant has
+        // no voiceover action — TTS／音效 must go through type generate — and
+        // still sent a.prompt with no canon. 助手為第 N 鏡配音 could speak
+        // 「為第3鏡生成配音」in the model default voice.
+        let voiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
+        let soundWorldRef: { canonId: string; versionId: string } | undefined;
+        if (role === "narration") {
+          const speech = speechForTts(sceneSpeechLines(scene)).map((line) => line.text).join("\n").trim();
+          if (!speech) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有旁白或對白，請先在分鏡或文字腳本裡填" });
+          }
+          lockedPrompt = speech;
+          const { resolveProjectCanonDefaults } = await import("../services/teamCanon");
+          const { routeSpeechVoice } = await import("../../shared/voiceRouting");
+          const audioCanons = await resolveProjectCanonDefaults(project.id);
+          const speakerNames = [...new Set(
+            sceneSpeechLines(scene).filter((line) => line.speaker && line.speaker !== "旁白").map((line) => line.speaker!),
+          )];
+          const voiceByName = new Map<string, import("../../shared/voiceRouting").VoiceIdentity>();
+          if (speakerNames.length && audioCanons.characterVoices.size) {
+            const chars = await db.select({ id: schema.characters.id, name: schema.characters.name })
+              .from(schema.characters)
+              .where(eq(schema.characters.projectId, project.id));
+            for (const row of chars) {
+              const voice = audioCanons.characterVoices.get(row.id);
+              if (voice) voiceByName.set(row.name, voice);
+            }
+          }
+          const routed = routeSpeechVoice({
+            speakers: speakerNames,
+            characterVoiceByName: voiceByName,
+            narrationVoice: audioCanons.narrationVoice,
+          });
+          // Caller already confirmed this model — do not silent-switch to the
+          // canon TTS. Same as generateVoiceover when modelId is explicit.
+          if (routed.voice && routed.voice.modelId === model.id) {
+            voiceIdentity = routed.voice;
+          }
+        } else if (role === "ambience") {
+          const { resolveProjectCanonDefaults } = await import("../services/teamCanon");
+          const ambienceCanons = await resolveProjectCanonDefaults(project.id);
+          const shotAmbience = (scene.ambience ?? "").trim();
+          const worldAmbience = ambienceCanons.soundWorld?.ambience?.trim() ?? "";
+          const composed = [worldAmbience, shotAmbience].filter(Boolean).join("，");
+          if (!composed) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有環境音描述，請先在分鏡或腳本裡填" });
+          }
+          lockedPrompt = composed;
+          if (ambienceCanons.soundWorld) {
+            soundWorldRef = {
+              canonId: ambienceCanons.soundWorld.canonId,
+              versionId: ambienceCanons.soundWorld.versionId,
+            };
+          }
+        }
         const gen = await executeGenerationCommand({
           auth: ctx.auth,
           source: "web",
@@ -2171,6 +2228,8 @@ export const assistantRouter = router({
             shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
             ...(sourceAssetId ? { sourceAssetId } : {}),
           } : {}),
+          ...(voiceIdentity ? { voiceIdentity } : {}),
+          ...(soundWorldRef ? { soundWorldRef } : {}),
           reasonPrefix: "助手生成",
         });
         return { ok: true, kind: "generate" as const, generationId: gen.id, message: "已送出生成，完成後會出現在生成紀錄" };

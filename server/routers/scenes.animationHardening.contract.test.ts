@@ -701,6 +701,22 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("explicitSourceAssetId");
   });
 
+  it("assistant generate narration/ambience uses this shot's speech + voice / Sound World", () => {
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("sceneSpeechLines");
+    expect(block).toContain("speechForTts");
+    expect(block).toContain("routeSpeechVoice");
+    expect(block).toContain("voiceIdentity");
+    expect(block).toContain("soundWorldRef");
+    expect(block).toContain("resolveProjectCanonDefaults");
+    expect(block).toContain("lockedPrompt = speech");
+    expect(block).toContain("lockedPrompt = composed");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("assertNoPendingVisual");
+    expect(block).not.toContain("scheduleReconcileAfterIndependentGenerate");
+  });
+
   it("refine freezes shotDirection so a later camera change marks the picture stale", () => {
     const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
     expect(refine).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
