@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
@@ -289,7 +289,22 @@ export const charactersRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.characters).where(eq(schema.characters.id, input.id));
+    const { stripCardIdsFromProjectScenes } = await import("../services/sceneEntityIds");
+    await db.transaction(async (tx) => {
+      const looks = await tx
+        .select({ id: schema.characterLooks.id })
+        .from(schema.characterLooks)
+        .where(and(eq(schema.characterLooks.projectId, row.projectId), eq(schema.characterLooks.characterId, row.id)));
+      const lookIds = looks.map((look) => look.id);
+      await stripCardIdsFromProjectScenes(tx, row.projectId, {
+        characterIds: [row.id],
+        lookIds,
+      });
+      if (lookIds.length) {
+        await tx.delete(schema.characterLooks).where(inArray(schema.characterLooks.id, lookIds));
+      }
+      await tx.delete(schema.characters).where(eq(schema.characters.id, row.id));
+    });
     return { ok: true };
   }),
 });

@@ -143,4 +143,26 @@ describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", (
     expect(src).toContain("造型不屬於本專案或不存在");
     expect(src).toContain("場次不屬於本專案或不存在");
   });
+
+  it("card remove strips JSONB ids from project scenes before delete; duplicate copies only living refs", () => {
+    const characters = readFileSync(new URL("../routers/characters.ts", import.meta.url), "utf8");
+    const presets = readFileSync(new URL("../routers/scenePresets.ts", import.meta.url), "utf8");
+    const props = readFileSync(new URL("../routers/props.ts", import.meta.url), "utf8");
+    const looks = readFileSync(new URL("../routers/characterLooks.ts", import.meta.url), "utf8");
+    const scenes = readFileSync(new URL("../routers/scenes.ts", import.meta.url), "utf8");
+    const helper = readFileSync(new URL("./sceneEntityIds.ts", import.meta.url), "utf8");
+    expect(helper).toContain("export async function keepLivingSceneRefs");
+    expect(helper).toContain("export async function stripCardIdsFromProjectScenes");
+    expect(helper).toContain("isNull(schema.assets.deletedAt)");
+    expect(characters).toContain("stripCardIdsFromProjectScenes");
+    expect(characters.indexOf("stripCardIdsFromProjectScenes")).toBeLessThan(
+      characters.lastIndexOf("tx.delete(schema.characters)"),
+    );
+    expect(presets).toContain("stripCardIdsFromProjectScenes");
+    expect(props).toContain("stripCardIdsFromProjectScenes");
+    expect(looks).toContain("stripCardIdsFromProjectScenes");
+    const insert = scenes.slice(scenes.indexOf("insertAfter:"), scenes.indexOf("remove:", scenes.indexOf("insertAfter:")));
+    expect(insert).toContain("keepLivingSceneRefs");
+    expect(insert).not.toContain("characterIds: dup ? cur.characterIds : null");
+  });
 });

@@ -50,6 +50,7 @@ import {
 } from "../../shared/storyboardScript";
 import { loadSceneCardLookup, sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
+import { keepLivingSceneRefs } from "../services/sceneEntityIds";
 import { resolveHonoredCharacterSheet } from "../services/referenceAsset";
 import {
   buildSceneVersions,
@@ -867,17 +868,27 @@ export const scenesRouter = router({
             action: dup ? cur.action : null,
             dialogue: dup ? cur.dialogue : null,
             music: dup ? cur.music : null,
-            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
-            characterIds: dup ? cur.characterIds : null,
-            scenePresetIds: dup ? cur.scenePresetIds : null,
-            propIds: dup ? cur.propIds : null,
-            // 造型／鏡頭語言／所屬場同屬設定：漏複製的話複本會用角色預設外觀、丟運鏡，連戲直接分岔
-            lookIds: dup ? cur.lookIds : null,
+            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期。
+            // JSONB 沒有 FK：來源若已掛幽靈 id（卡片刪了／素材進回收桶），複本只帶走還活著的。
+            ...(dup
+              ? await keepLivingSceneRefs(tx, project.id, {
+                  characterIds: cur.characterIds,
+                  scenePresetIds: cur.scenePresetIds,
+                  propIds: cur.propIds,
+                  lookIds: cur.lookIds,
+                  storySceneId: cur.storySceneId,
+                  assetId: cur.assetId,
+                })
+              : {
+                  characterIds: null,
+                  scenePresetIds: null,
+                  propIds: null,
+                  lookIds: null,
+                  storySceneId: null,
+                  assetId: null,
+                }),
             camera: dup ? cur.camera : null,
             performance: dup ? cur.performance : null,
-            storySceneId: dup ? cur.storySceneId : null,
-            // 現用畫面跟著走（創作室「複製這一鏡」要看得到同一張圖）。兩格共用同一 asset 列。
-            assetId: dup ? cur.assetId : null,
           })
           .returning();
         return created;

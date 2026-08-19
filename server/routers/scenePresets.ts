@@ -165,7 +165,11 @@ export const scenePresetsRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.scenePresets).where(eq(schema.scenePresets.id, input.id));
+    const { stripCardIdsFromProjectScenes } = await import("../services/sceneEntityIds");
+    await db.transaction(async (tx) => {
+      await stripCardIdsFromProjectScenes(tx, row.projectId, { scenePresetIds: [row.id] });
+      await tx.delete(schema.scenePresets).where(eq(schema.scenePresets.id, row.id));
+    });
     return { ok: true };
   }),
 });

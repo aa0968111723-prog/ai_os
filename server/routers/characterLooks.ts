@@ -126,7 +126,11 @@ export const characterLooksRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId });
-    await db.delete(schema.characterLooks).where(eq(schema.characterLooks.id, input.id));
+    const { stripCardIdsFromProjectScenes } = await import("../services/sceneEntityIds");
+    await db.transaction(async (tx) => {
+      await stripCardIdsFromProjectScenes(tx, row.projectId, { lookIds: [row.id] });
+      await tx.delete(schema.characterLooks).where(eq(schema.characterLooks.id, row.id));
+    });
     return { ok: true };
   }),
 });

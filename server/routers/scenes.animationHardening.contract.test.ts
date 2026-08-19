@@ -28,11 +28,12 @@ describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
     const start = scenes.indexOf("insertAfter:");
     const block = scenes.slice(start, scenes.indexOf("remove:", start));
-    expect(block).toContain("lookIds: dup ? cur.lookIds : null");
+    expect(block).toContain("keepLivingSceneRefs");
     expect(block).toContain("camera: dup ? cur.camera : null");
     expect(block).toContain("performance: dup ? cur.performance : null");
-    expect(block).toContain("storySceneId: dup ? cur.storySceneId : null");
-    expect(block).toContain("assetId: dup ? cur.assetId : null");
+    expect(block).toContain("storySceneId: cur.storySceneId");
+    expect(block).toContain("assetId: cur.assetId");
+    expect(block).not.toContain("lookIds: dup ? cur.lookIds : null");
   });
 
   it("setCards auto-strips orphan looks when only characterIds is sent", () => {
