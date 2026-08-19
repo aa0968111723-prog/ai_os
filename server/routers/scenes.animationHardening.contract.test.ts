@@ -542,6 +542,14 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(update).not.toContain("lockXiaohuaGenerationPrompt");
   });
 
+  it("batchGenerate locks 小華 prompt before the agent step stores it", () => {
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("lockXiaohuaGenerationPrompt");
+    expect(batch).toContain('? ["小華"]');
+    expect(batch).toContain("prompt: lockedPrompt");
+    expect(batch).not.toContain("rewritePersistedXiaohuaShotCopy");
+  });
+
   it("LLM agent plans freeze shotContextPacketId the same way batchGenerate does", () => {
     const core = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
     expect(core).toContain("async function stampAgentGenerateShotContextPackets");

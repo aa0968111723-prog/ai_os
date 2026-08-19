@@ -1077,6 +1077,13 @@ export const scenesRouter = router({
           cards.characterIds,
           [scene.title, prompt, scene.action, scene.dialogue],
         );
+        // generateInto locks before Command so generations.prompt cannot keep 年輕男性.
+        // batchGenerate used to store the raw string on the agent step; core only
+        // re-locks the provider. Same lock, same 小華 name test. Not scene persist-lock.
+        const lockedPrompt = lockXiaohuaGenerationPrompt(
+          prompt,
+          /小華/.test([scene.title, prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+        );
         const sourceAssetId = await resolveHonoredCharacterSheet({
           projectId: project.id,
           groupId: project.groupId,
@@ -1102,7 +1109,7 @@ export const scenesRouter = router({
           actorType: "ai",
           sceneNo: i + 1,
           modelId: model.id,
-          prompt,
+          prompt: lockedPrompt,
           characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
