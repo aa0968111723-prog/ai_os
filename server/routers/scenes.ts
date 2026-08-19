@@ -57,6 +57,7 @@ import {
   findDuplicateCurrent,
   isSceneRefineModel,
   isSceneRegenModel,
+  regenRejection,
   summarizeSceneVersions,
   type SceneExternalAsset,
   type SceneVersionGenerationRow,
@@ -83,6 +84,8 @@ import {
   shouldReplayIdempotentGeneration,
 } from "../../shared/generationIdempotency";
 import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
+
+export { regenRejection };
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
@@ -132,19 +135,6 @@ export function refineRejection(input: {
     return "找不到底圖，或它不屬於本專案（可能已在回收桶）";
   }
   if (input.source.kind !== "image") return "底圖必須是圖片——影片／音訊版本不能拿來修圖";
-  return null;
-}
-
-/** 「生成／重生這一格」的純模型守門：不合規回中文訊息，合規回 null */
-export function regenRejection(model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined): string | null {
-  if (!model || (model.kind !== "image" && model.kind !== "video")) {
-    return "分鏡就地生成需要用圖像或影片模型";
-  }
-  // 需要底圖的模型走 scenes.refine（那裡才會帶 sourceAssetId）。不擋的話會一路送到
-  // generationCore 才因「此模型需要來源」被拒——使用者按了鈕、等了一下，才拿到一句看不懂的錯。
-  if (!isSceneRegenModel(model)) {
-    return `「${model.label}」需要底圖，請改用單格工作室的「以這張為底圖修正」`;
-  }
   return null;
 }
 

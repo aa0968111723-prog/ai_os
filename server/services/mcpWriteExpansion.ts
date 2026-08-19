@@ -33,6 +33,7 @@ import { refreshShotContextStalenessSafely } from "./shotContextPackets";
 import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "./revisionGuard";
 import { getModel } from "../../shared/models";
+import { regenRejection } from "../../shared/sceneVersions";
 import { buildShotContextPrompt } from "./shotContextPrompt";
 
 /** Empty MCP patches must not look like a successful write. */
@@ -687,6 +688,8 @@ export async function runMcpWriteExpansion(
     requireGroup(auth, genProject.groupId);
     await assertProjectEditable(auth, genProject);
     const model = getModel(modelId);
+    const rejection = regenRejection(model);
+    if (rejection) throw new TRPCError({ code: "BAD_REQUEST", message: rejection });
     const prompt = (typeof args.prompt === "string" && args.prompt.trim()
       ? args.prompt
       : await buildShotContextPrompt(scene, model)).trim();

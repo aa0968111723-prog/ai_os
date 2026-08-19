@@ -382,6 +382,24 @@ export function isSceneRegenModel(model: Pick<ModelEntry, "kind" | "needs">): bo
 }
 
 /**
+ * 「生成／重生這一格」的純模型守門：不合規回中文訊息，合規回 null。
+ * generateInto / generateVariants / batchGenerate 早已走這支。MCP generate_into_scene
+ * 曾略過，音訊／文字或需要底圖的模型會寫進畫面槽——或一路送到 generationCore
+ * 才因「此模型需要來源」被拒。抽出來讓 MCP 共用，不另寫一份守門。
+ */
+export function regenRejection(model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined): string | null {
+  if (!model || (model.kind !== "image" && model.kind !== "video")) {
+    return "分鏡就地生成需要用圖像或影片模型";
+  }
+  // 需要底圖的模型走 scenes.refine（那裡才會帶 sourceAssetId）。不擋的話會一路送到
+  // generationCore 才因「此模型需要來源」被拒——使用者按了鈕、等了一下，才拿到一句看不懂的錯。
+  if (!isSceneRegenModel(model)) {
+    return `「${model.label}」需要底圖，請改用單格工作室的「以這張為底圖修正」`;
+  }
+  return null;
+}
+
+/**
  * 動作走位要不要注入這個模型。
  *
  * 只有影片類吃。走位是時間性的——「從門口走到窗邊」在單張圖上畫不出來，

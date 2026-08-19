@@ -58,6 +58,8 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("characterIds: cards.characterIds");
     expect(block).toContain("buildShotContextPrompt(scene, model)");
     expect(block).not.toContain("scene.prompt ?? scene.title");
+    expect(block).toContain("regenRejection(model)");
+    expect(block).toContain('code: "BAD_REQUEST"');
     expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
     const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");
     expect(command).toContain("shouldReplayIdempotentGeneration(generation.status)");

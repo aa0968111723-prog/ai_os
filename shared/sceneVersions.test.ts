@@ -5,6 +5,7 @@ import {
   findDuplicateCurrent,
   isSceneRefineModel,
   isSceneRegenModel,
+  regenRejection,
   sceneActionAppliesTo,
   sceneVisualPrompt,
   refineGroupOf,
@@ -235,6 +236,13 @@ describe("單格工作室的模型判斷", () => {
     expect(regen.length).toBeGreaterThan(0);
     expect(refine.length).toBeGreaterThan(0);
     expect(regen.some((m) => refine.includes(m))).toBe(false);
+  });
+
+  it("regenRejection refuses audio/text and i2i, keeps text-to-image", () => {
+    expect(regenRejection(getModel("fal-ai/fast-lightning-sdxl"))).toBeNull();
+    expect(regenRejection(getModel("fal-ai/kokoro/mandarin-chinese"))).toContain("圖像或影片");
+    expect(regenRejection(undefined)).toContain("圖像或影片");
+    expect(regenRejection({ kind: "image", needs: "image", label: "圖生圖" })).toContain("需要底圖");
   });
 
   it("既有逐格生成預設模型仍在重生清單內（不會因收斂而消失）", () => {

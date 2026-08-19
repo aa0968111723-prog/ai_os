@@ -555,6 +555,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("MCP generate_into_scene uses regenRejection so audio/text cannot fill the visual slot", () => {
+    expect(scenes).toContain("export { regenRejection }");
+    const versions = readFileSync(join(process.cwd(), "shared/sceneVersions.ts"), "utf8");
+    expect(versions).toContain("export function regenRejection");
+    expect(versions).toContain("分鏡就地生成需要用圖像或影片模型");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("regenRejection(model)");
+    expect(into).toContain('code: "BAD_REQUEST"');
+  });
+
   it("MCP generate_into and animationPipeline reuse buildShotContextPrompt, not raw prompt/title", () => {
     expect(scenes).toContain('import { buildShotContextPrompt } from "../services/shotContextPrompt"');
     expect(scenes).not.toContain("async function buildShotContextPrompt(");
