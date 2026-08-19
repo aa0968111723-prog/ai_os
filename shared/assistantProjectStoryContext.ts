@@ -11,7 +11,74 @@ export const ASSISTANT_STORY_CONTEXT_BUDGET = 4_000;
 export function isAssistantStoryReadIntent(message: string): boolean {
   const text = (message ?? "").trim();
   if (!text) return false;
-  return /(?:讀|看|摘要|總結|概述|列出).{0,24}(?:已存|目前|這個|專案)?(?:故事|腳本)|(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)|小華在講|並列出角色/u.test(text);
+  return /(?:讀|看|摘要|總結|概述|列出).{0,24}(?:已存|目前|這個|專案)?(?:故事|腳本)|(?:故事|腳本).{0,20}(?:在講|說什麼|講什麼|內容|摘要|角色)|小華在講|並列出角色|並列角色/u.test(text);
+}
+
+/** Only names already on the card or written in this project's story. Never invent 安倢／媽媽. */
+const STORY_CHARACTER_HINTS = ["小華", "禪定龜龜"] as const;
+
+export function namesFromPersistedStory(
+  storyContent?: string | null,
+  cardNames: readonly string[] = [],
+): string[] {
+  const story = storyContent ?? "";
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of [...cardNames, ...STORY_CHARACTER_HINTS]) {
+    const name = raw.trim();
+    if (!name || seen.has(name)) continue;
+    if (cardNames.some((card) => card.trim() === name) || story.includes(name)) {
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+/**
+ * Live 08:32: 只用免費 tools already returned 專案全貌／分鏡, then the
+ * final NIM call died with empty「免費模型逾時」. A read-only summarize
+ * must still give two sentences + names from the fetched story.
+ */
+export function fallbackReadOnlyStorySummary(input: {
+  storyContent?: string | null;
+  characterNames?: readonly string[];
+}): string {
+  const story = (input.storyContent ?? "").trim();
+  const names = namesFromPersistedStory(story, input.characterNames ?? []);
+  const nameLine = names.length
+    ? `角色：${names.join("、")}。`
+    : "角色定裝尚未建立。";
+  const sentences = story
+    .split(/[。！？\n]+/u)
+    .map((part) => part.replace(/^[A-F]\s+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 72));
+  const body = sentences.length
+    ? `${sentences.join("。")}。`
+    : "這個專案還沒有已存故事正文。";
+  return lockAssistantStoryAnswer({
+    answer: `${body}${nameLine}`,
+    storyContent: story,
+    characterNames: names,
+  });
+}
+
+/** After 專案全貌／分鏡 already returned, a free-only timeout must still answer. */
+export function answerAfterFreeOnlyTimeout(input: {
+  storyReadAsk: boolean;
+  fetchedOk: boolean;
+  storyContent?: string | null;
+  characterNames?: readonly string[];
+}): string | null {
+  if (!input.storyReadAsk && !input.fetchedOk) return null;
+  if (!(input.storyContent ?? "").trim() && !input.fetchedOk) return null;
+  const answer = fallbackReadOnlyStorySummary({
+    storyContent: input.storyContent,
+    characterNames: input.characterNames ?? [],
+  });
+  return answer.trim() ? answer : null;
 }
 
 /**

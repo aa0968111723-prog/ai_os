@@ -31,11 +31,11 @@ import {
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { NimServiceError } from "../services/nvidia-nim";
-import { assertFreeOnlyCompletion, completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
+import { assertFreeOnlyCompletion, completeText, FREE_MODEL_TIMEOUT_MESSAGE, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { ASSISTANT_HONEST_ACTION_RULE, ASSISTANT_VIEWER_NO_WRITE_RULE, runToolLoop } from "../services/assistantCore";
 import { findSceneByDisplayNo, displayShotNo } from "../../shared/assistantSceneLookup";
 import { settleAssistantAskCompletion, assistantAskCompletionChip, formatAssistantWriteResult, type AssistantWriteVerification } from "../../shared/assistantHonestCompletion";
-import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, isAssistantStoryReadIntent, lockAssistantStoryAnswer } from "../../shared/assistantProjectStoryContext";
+import { formatPersistedStoryForAssistant, buildAssistantProjectStatusContext, answerAfterFreeOnlyTimeout, isAssistantStoryReadIntent, lockAssistantStoryAnswer } from "../../shared/assistantProjectStoryContext";
 import { ASSISTANT_SCENE_READ_BACK_METHOD } from "../../shared/assistantSceneReadBack";
 import { verifySceneWriteReadBack } from "../services/assistantSceneReadBack";
 import { formatStudioShotContext } from "../../shared/assistantStudioContext";
@@ -838,6 +838,12 @@ async function callLlm(
   };
 }
 
+function isFreeOnlyAskTimeout(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes(FREE_MODEL_TIMEOUT_MESSAGE) || /逾時|無回應/.test(message);
+}
+
+
 /** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label]));
 
@@ -1584,7 +1590,11 @@ ${context}
 <專案運作情報>
 ${intelligence.text}
 </專案運作情報>
-${pageContextBlock ? `${pageContextBlock}\n` : ""}${historyBlock}${resourceResolution.promptBlock}
+${pageContextBlock ? `${pageContextBlock}\n` : ""}${historyBlock}${storyReadAsk
+  ? (resourceResolution.results.some((row) => row.outcome === "OK")
+    ? `<resource_evidence>\n已讀取：${resourceResolution.results.filter((row) => row.outcome === "OK").map((row) => row.label).join("、")}。摘要只依 <專案現況> 故事全文與角色定裝，不要再呼叫工具、不要寫入。\n</resource_evidence>\n`
+    : "")
+  : resourceResolution.promptBlock}
 ${libraryRetrieval.context && !storyReadAsk ? `<專案脈絡>\n${libraryRetrieval.context}\n</專案脈絡>\n` : ""}
 ${databaseEvidence.length ? `<database_evidence>\n${formatAssistantDatabaseEvidence(databaseEvidence)}\n</database_evidence>\n` : ""}
 <相關能力目錄>
@@ -1606,11 +1616,65 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       // 否則 LLM 呼叫耗時（長上下文可達數十秒）期間 session 一直停在 prepared，
       // 使用者查軌跡只看到「卡在準備階段」——實際上模型請求已在途。
       await updateAiTraceSession(traceSessionId, { status: "running" }).catch(() => undefined);
+      const fetchedOk = resourceResolution.results.some((row) => row.outcome === "OK");
+      const finishFetchedStoryFallback = async (rawAnswer: string) => {
+        const settled = settleAssistantAskCompletion({
+          answer: lockAssistantStoryAnswer({
+            answer: rawAnswer,
+            storyContent: storyRow?.content,
+            characterNames: characterRows.map((row) => row.name),
+          }),
+          actions: [],
+          userMessage: input.message,
+          hasVerifiedWrite: false,
+        });
+        await recordAiTraceEventSafely({
+          sessionId: traceSessionId,
+          eventType: "completed",
+          summary: "已用已讀專案內容回覆",
+          payload: { answer: settled.answer, steps },
+        });
+        await updateAiTraceSession(traceSessionId, {
+          status: "completed",
+          provider: "nvidia-nim",
+          model: usedModel,
+        }).catch(() => undefined);
+        const okAgentSources = stream.snapshotSources().filter((s) => s.status === "ok");
+        const chip = assistantAskCompletionChip({
+          settled,
+          actionCount: 0,
+          okSourceCount: Math.max(okAgentSources.length, resourceResolution.metrics.okCount),
+          okSourceItems: okAgentSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0)
+            || resourceResolution.results.reduce((sum, row) => sum + row.itemCount, 0),
+        });
+        stream.emit({
+          type: chip.type,
+          title: chip.title,
+          description: chip.description ?? "已用已讀的專案全貌整理摘要",
+          status: chip.status,
+          resultCount: chip.resultCount,
+        });
+        return {
+          answer: settled.answer,
+          actions: [] as ResolvedAction[],
+          steps,
+          mock: false,
+          fallback: true,
+          provider: "nvidia-nim" as LlmProvider,
+          model: usedModel,
+          fellBackToPaid: false,
+          traceSessionId,
+          runId: stream.runId,
+          agentEvents: stream.snapshotEvents(),
+          agentSources: stream.snapshotSources(),
+          sources: sourcesReport,
+        };
+      };
       try {
         /** 最終回覆的三種來源：正規 JSON、C2 self-healing 救回、純文字備援——trace 摘要與 fallback 旗標據此分流 */
         type ProjectAskReply = { source: "reply" | "coerced" | "fallback"; answer: string; rawActions: z.infer<typeof proposalSchema>[] };
         const outcome = await runToolLoop<z.infer<typeof toolCallSchema>, ProjectAskReply, Awaited<ReturnType<typeof runLookupTool>>>({
-          maxToolRounds: MAX_TOOL_ROUNDS,
+          maxToolRounds: storyReadAsk ? 0 : MAX_TOOL_ROUNDS,
           signal: askSignal,
           buildPrompt,
           /** 「思考中…」換成可理解的工作摘要：列出**已經取得**的來源（真實資料，非模型自述）。
@@ -1725,6 +1789,13 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         // 用戶端已斷線（SSE close）：提早收工不白燒免費額度。回傳值不會被寫回（sse 對已關閉連線是 no-op）。
         if (outcome.aborted || !outcome.reply) {
           if (assistantAskTimedOut(askDeadline, input.signal)) {
+            const fetchedAnswer = answerAfterFreeOnlyTimeout({
+              storyReadAsk,
+              storyContent: storyRow?.content,
+              characterNames: characterRows.map((row) => row.name),
+              fetchedOk,
+            });
+            if (fetchedAnswer) return finishFetchedStoryFallback(fetchedAnswer);
             stream.emit({ type: "agent.failed", title: "已停止（逾時）", status: "failed" });
             return {
               answer: ASSISTANT_ASK_TIMEOUT_MESSAGE, actions: [], steps, mock: false, fallback: true, traceSessionId, sources: sourcesReport,
@@ -1816,6 +1887,15 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         };
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
+        const fetchedAnswer = (assistantAskTimedOut(askDeadline, input.signal) || isFreeOnlyAskTimeout(err))
+          ? answerAfterFreeOnlyTimeout({
+            storyReadAsk,
+            storyContent: storyRow?.content,
+            characterNames: characterRows.map((row) => row.name),
+            fetchedOk,
+          })
+          : null;
+        if (fetchedAnswer) return finishFetchedStoryFallback(fetchedAnswer);
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
         const answer = assistantAskTimedOut(askDeadline, input.signal)
           ? ASSISTANT_ASK_TIMEOUT_MESSAGE

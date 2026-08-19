@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_STORY_CONTEXT_BUDGET,
+  answerAfterFreeOnlyTimeout,
   buildAssistantProjectStatusContext,
+  fallbackReadOnlyStorySummary,
   formatPersistedStoryForAssistant,
   formatTeamInventoryStoryFlag,
   isAssistantStoryReadIntent,
   lockAssistantStoryAnswer,
+  namesFromPersistedStory,
   slicePersistedStoryContent,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
+import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "./fixtures/tkuZenPromo";
 
 describe("assistant persisted story context", () => {
   it("injects the saved 故事全文 so the model cannot claim it cannot see 你的故事", () => {
@@ -62,6 +66,7 @@ describe("assistant persisted story context", () => {
   it("story-read intent matches the live 05:15 ask and locks 她 / no 已完成盤點", () => {
     const live = "請讀已存故事，兩句摘要小華在講什麼並列出角色名";
     expect(isAssistantStoryReadIntent(live)).toBe(true);
+    expect(isAssistantStoryReadIntent("兩句話摘要已存故事並列角色名，不要寫入.")).toBe(true);
     expect(isAssistantStoryReadIntent("現在有幾鏡？")).toBe(false);
     const locked = lockAssistantStoryAnswer({
       answer: "已完成盤點。小華在講述他的故事，提到他如何從疲憊中找到力量。角色名有小華和禪定龜龜。",
@@ -86,6 +91,36 @@ describe("assistant persisted story context", () => {
     });
     expect(locked).toContain("躺在床上");
     expect(locked).toContain("從疲憊中找到力量");
+  });
+
+  it("read-only summarize fallback uses fetched SHOTLIST A–F, never empty 免費模型逾時", () => {
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.split(/\n\n/).length).toBe(6);
+    expect(namesFromPersistedStory(TKU_ZEN_SHOTLIST_FIRST_PARSE, [])).toEqual(["小華", "禪定龜龜"]);
+    const answer = fallbackReadOnlyStorySummary({
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+      characterNames: [],
+    });
+    expect(answer.length).toBeGreaterThan(12);
+    expect(answer).toContain("小華");
+    expect(answer).toContain("禪定龜龜");
+    expect(answer).toMatch(/校門口|大二化工|白帽T/);
+    expect(answer).not.toBe("");
+    expect(answer).not.toContain("免費模型逾時");
+    expect(answer).not.toContain("執行未完成");
+    expect(answer).not.toContain("安倢");
+    expect(answer).not.toContain("慕恩");
+    expect(answer).not.toMatch(/年輕男性|他的故事/);
+    expect(answerAfterFreeOnlyTimeout({
+      storyReadAsk: true,
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+      characterNames: [],
+    })).toBe(answer);
+    expect(answerAfterFreeOnlyTimeout({
+      storyReadAsk: false,
+      fetchedOk: false,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBeNull();
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {
