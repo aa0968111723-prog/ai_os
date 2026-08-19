@@ -1132,6 +1132,11 @@ export const scenesRouter = router({
         const prompt = await buildShotContextPrompt(scene, model);
         if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
         const cards = resolveSceneCards(scene, null);
+        const sourceAssetId = await resolveHonoredCharacterSheet({
+          projectId: project.id,
+          groupId: project.groupId,
+          characterIds: cards.characterIds,
+        });
         let packetId: string | undefined;
         try {
           const { freezeShotContextPacket } = await import("../services/shotContextPackets");
@@ -1157,6 +1162,7 @@ export const scenesRouter = router({
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
           lookIds: scene.lookIds ?? undefined,
+          ...(sourceAssetId ? { sourceAssetId } : {}),
           shotContextPacketId: packetId,
         });
       }

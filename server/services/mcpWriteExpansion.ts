@@ -30,7 +30,7 @@ import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { adoptGenerationCurrent } from "./consistencyAdopt";
 import { refreshShotContextStalenessSafely } from "./shotContextPackets";
-import { assertReferenceImage } from "./referenceAsset";
+import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "./revisionGuard";
 
 /** Empty MCP patches must not look like a successful write. */
@@ -689,6 +689,12 @@ export async function runMcpWriteExpansion(
       : scene.prompt ?? scene.title ?? "").trim();
     if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
     const cards = resolveSceneCards(scene, null);
+    // Same 角色卡「生成時帶入」as generateInto: 0/6 or no live sheet = skip, no 500.
+    const sourceAssetId = await resolveHonoredCharacterSheet({
+      projectId: genProject.id,
+      groupId: genProject.groupId,
+      characterIds: cards.characterIds,
+    });
     const gen = await executeGenerationCommand({
       auth,
       source: "mcp",
@@ -701,6 +707,7 @@ export async function runMcpWriteExpansion(
       scenePresetIds: cards.scenePresetIds,
       propIds: cards.propIds,
       lookIds: scene.lookIds ?? undefined,
+      ...(sourceAssetId ? { sourceAssetId } : {}),
       shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
       preserveScenePointer: true,
       reasonPrefix: "MCP 分鏡格生成",

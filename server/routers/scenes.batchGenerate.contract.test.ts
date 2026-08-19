@@ -9,6 +9,8 @@ describe("scenes.batchGenerate charge-safety contract", () => {
     const batch = src.slice(src.indexOf("batchGenerate: authedProcedure"), src.indexOf("update: authedProcedure"));
     expect(batch).toContain("lookIds: scene.lookIds ?? undefined");
     expect(batch).toContain("characterIds: cards.characterIds");
+    expect(batch).toContain("resolveHonoredCharacterSheet");
+    expect(batch).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
     const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
     expect(runner).toContain("lookIds?: string[]");
     expect(runner.match(/lookIds: step.lookIds/g)?.length).toBeGreaterThanOrEqual(2);

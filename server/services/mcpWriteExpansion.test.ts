@@ -54,6 +54,8 @@ describe("MCP write honesty helpers", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
     const block = source.slice(source.indexOf('if (name === "generate_into_scene")'), source.indexOf('if (name === "update_worldview")'));
     expect(block).toContain("executeGenerationCommand");
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: cards.characterIds");
     expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
     const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");
     expect(command).toContain("shouldReplayIdempotentGeneration(generation.status)");
