@@ -13,6 +13,7 @@ import { ScenePresetCards } from "./ScenePresetCards";
 import { PropCards } from "./PropCards";
 
 const charUpdate = vi.fn();
+const generateSheetMutate = vi.fn();
 const sceneUpdate = vi.fn();
 const propUpdate = vi.fn();
 
@@ -59,6 +60,11 @@ vi.mock("../api", () => ({
       add: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, reset: vi.fn() }) },
       update: { useMutation: () => ({ mutate: charUpdate, isPending: false, error: null, reset: vi.fn() }) },
       remove: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, reset: vi.fn() }) },
+      generateSheet: { useMutation: () => ({ mutate: generateSheetMutate, isPending: false, error: null }) },
+      honorGeneratedSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+    },
+    generation: {
+      status: { useQuery: () => ({ data: null }) },
     },
     scenePresets: {
       list: { useQuery: () => ({ data: [SCENE], isLoading: false }) },
@@ -92,6 +98,7 @@ vi.mock("../api", () => ({
 describe("卡片編輯表單的參考圖欄", () => {
   beforeEach(() => {
     charUpdate.mockReset();
+    generateSheetMutate.mockReset();
     sceneUpdate.mockReset();
     propUpdate.mockReset();
     CHAR.referenceAssetId = null;
@@ -164,6 +171,18 @@ describe("卡片編輯表單的參考圖欄", () => {
     expect(screen.getByRole("checkbox", { name: /生成時帶入/ })).not.toBeChecked();
     expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
     expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("角色卡：生成定裝走便宜生圖，不花 Veo", async () => {
+    const user = userEvent.setup();
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: /生成定裝/ });
+    expect(btn).toBeEnabled();
+    expect(btn).toHaveAttribute("title", expect.stringMatching(/schnell|不用 Veo/));
+    await user.click(btn);
+    expect(generateSheetMutate).toHaveBeenCalledTimes(1);
+    expect(generateSheetMutate.mock.calls[0]![0]).toMatchObject({ characterId: "char-1" });
+    expect(JSON.stringify(generateSheetMutate.mock.calls[0]![0])).not.toMatch(/veo/i);
   });
 
   it("角色卡：有自己的定裝參考圖才能勾成 1/6", async () => {

@@ -441,8 +441,12 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(into).toContain("explicitSourceAssetId: input.sourceAssetId");
     expect(variants).toContain("resolveHonoredCharacterSheet");
     expect(variants).toContain("characterIds: cards.characterIds");
-    expect(sceneStudio).not.toContain("生成時帶入角色參考圖");
-    expect(sceneStudio).toContain("...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {})");
+    expect(sceneStudio).toContain("HonorSheetControl");
+    expect(sceneStudio).toContain("honoredCharIds");
+    const honor = readFileSync(join(process.cwd(), "client/src/components/HonorSheetControl.tsx"), "utf8");
+    expect(honor).toContain("生成時帶入角色參考圖");
+    expect(honor).toContain("已選");
+    expect(sceneStudio).not.toContain("sourceAssetId: stray");
     expect(sceneList).toContain("selectableBringInIds");
     expect(sceneList).toContain("honoredCharIds");
     const cards = readFileSync(join(process.cwd(), "client/src/components/CharacterCards.tsx"), "utf8");

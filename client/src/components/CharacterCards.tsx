@@ -74,6 +74,26 @@ export function CharacterCards({
       setTextEditId(null);
     },
   });
+  const generateSheet = trpc.characters.generateSheet.useMutation();
+  const honorSheet = trpc.characters.honorGeneratedSheet.useMutation({
+    onSuccess: () => utils.characters.list.invalidate({ projectId }),
+  });
+  const [pendingSheet, setPendingSheet] = useState<{ characterId: string; generationId: string } | null>(null);
+  const honoringSheet = useRef(false);
+  const sheetStatus = trpc.generation.status.useQuery(
+    { id: pendingSheet?.generationId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(pendingSheet), refetchInterval: pendingSheet ? 3_000 : false },
+  );
+  useEffect(() => {
+    if (!pendingSheet || sheetStatus.data?.status !== "done" || honoringSheet.current) return;
+    honoringSheet.current = true;
+    honorSheet.mutate(pendingSheet, {
+      onSettled: () => {
+        honoringSheet.current = false;
+      },
+      onSuccess: () => setPendingSheet(null),
+    });
+  }, [honorSheet, pendingSheet, sheetStatus.data?.status]);
 
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -318,6 +338,24 @@ export function CharacterCards({
                     <Button
                       variant="ghost"
                       style={{ fontSize: "var(--fs-11)" }}
+                      title="用便宜生圖做一張定裝參考圖（FLUX schnell，不用 Veo）。完成後才能勾成 1/6。"
+                      disabled={generateSheet.isPending || pendingSheet?.characterId === c.id}
+                      onClick={() =>
+                        generateSheet.mutate(
+                          { characterId: c.id, clientRequestId: crypto.randomUUID() },
+                          {
+                            onSuccess: (row) =>
+                              setPendingSheet({ characterId: row.characterId, generationId: row.generationId }),
+                          },
+                        )
+                      }
+                    >
+                      <Icon name="Sparkles" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      {pendingSheet?.characterId === c.id ? "定裝生成中…" : "生成定裝"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      style={{ fontSize: "var(--fs-11)" }}
                       title="發布到全站靈感頻道"
                       disabled={publish.isPending}
                       onClick={() => {
@@ -471,6 +509,11 @@ export function CharacterCards({
       {update.error && !textEditId && (
         <p className="error" role="alert">
           更新失敗：{update.error.message}
+        </p>
+      )}
+      {generateSheet.error && (
+        <p className="error" role="alert">
+          定裝生成失敗：{generateSheet.error.message}
         </p>
       )}
       {publishState && !publishState.ok && publishState.msg && (

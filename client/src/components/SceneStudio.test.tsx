@@ -10,6 +10,7 @@ import { buildSceneVersions, type SceneVersionGenerationRow } from "@shared/scen
 import { SceneStudio } from "./SceneStudio";
 
 const versionsQuery = vi.fn();
+const charactersQuery = vi.fn();
 const updateMutate = vi.fn();
 const regenMutate = vi.fn();
 const variantsMutate = vi.fn();
@@ -27,6 +28,9 @@ vi.mock("../api", () => ({
       scenes: { versions: { invalidate } },
       messages: { listByRef: { invalidate }, openCountsByScene: { invalidate } },
     }),
+    characters: {
+      list: { useQuery: (...args: unknown[]) => charactersQuery(...args) },
+    },
     scenes: {
       versions: { useQuery: (...args: unknown[]) => versionsQuery(...args) },
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
@@ -111,6 +115,7 @@ function mountStudio(over: { canEdit?: boolean; charIds?: string[] } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   versionsQuery.mockReturnValue({ data: serverData(), isLoading: false, isError: false, refetch: vi.fn() });
+  charactersQuery.mockReturnValue({ data: undefined, isLoading: false });
   annotationsQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
@@ -244,12 +249,22 @@ describe("SceneStudio", () => {
     });
   });
 
-  it("重畫這格 honours 角色卡 生成時帶入：勾選就送 characterIds，不另開單格 toggle", async () => {
+  it("重畫這格 honours 單格帶入：有自己的定裝圖才能變成 1/6", async () => {
     const user = userEvent.setup();
     const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{
+        id: xiaohuaId,
+        name: "小華",
+        referenceAssetId: "22222222-2222-4222-8222-222222222222",
+        referenceUrl: "https://example.test/xiaohua-sheet.png",
+      }],
+      isLoading: false,
+    });
     mountStudio({ charIds: [xiaohuaId] });
     await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
-    expect(screen.queryByRole("group", { name: "生成時帶入角色參考圖" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "生成時帶入角色參考圖" })).toBeInTheDocument();
+    expect(screen.getByText(/已選 1\/6/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
     await user.click(screen.getByRole("button", { name: "確認重畫" }));
     const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
@@ -257,10 +272,17 @@ describe("SceneStudio", () => {
     expect(arg).not.toHaveProperty("sourceAssetId");
   });
 
-  it("已選 0/6：重畫不送 characterIds／sourceAssetId，不 500", async () => {
+  it("已選 0/6：小華沒有自己的定裝圖時重畫只走文字錨點，不掛 1/50", async () => {
     const user = userEvent.setup();
-    mountStudio();
+    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{ id: xiaohuaId, name: "小華", referenceAssetId: null, referenceUrl: null }],
+      isLoading: false,
+    });
+    mountStudio({ charIds: [xiaohuaId] });
     await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /小華/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
     await user.click(screen.getByRole("button", { name: "確認重畫" }));
     const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;

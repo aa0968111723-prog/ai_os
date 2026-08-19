@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
@@ -14,6 +14,12 @@ import { isUniqueViolation } from "../services/generationCore";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import { isInstructionCharacterName } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
+import {
+  CHARACTER_SHEET_MODEL_ID,
+  characterSheetPrompt,
+  isAllowedCharacterSheetModel,
+} from "../../shared/characterSheetGenerate";
+import { executeGenerationCommand } from "../services/generationCommand";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
@@ -198,6 +204,84 @@ export const charactersRouter = router({
         changed: { kind: "character", id: row.id },
       });
       return { ...updated, merged };
+    }),
+
+  /**
+   * Cheap-image 定裝圖：只走 schnell / sdxl / qwen 等級，禁止 Veo。
+   * 0 own sheets 仍用文字鎖定出圖；完成後 honorGeneratedSheet 才綁回這張卡。
+   */
+  generateSheet: authedProcedure
+    .input(
+      z.object({
+        characterId: z.string().uuid(),
+        modelId: z.string().optional(),
+        clientRequestId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.characterId));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, row.groupId);
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project);
+      const modelId = input.modelId ?? CHARACTER_SHEET_MODEL_ID;
+      if (!isAllowedCharacterSheetModel(modelId)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "定裝圖只用便宜生圖模型，不能用 Veo 或影片" });
+      }
+      const [story] = await db
+        .select({ content: schema.stories.content })
+        .from(schema.stories)
+        .where(eq(schema.stories.projectId, project.id))
+        .limit(1);
+      const locked = applyXiaohuaIdentityLock(
+        { name: row.name, appearance: row.appearance, costume: null },
+        `${row.appearance}\n${story?.content ?? ""}\n${project.title}`,
+      );
+      const prompt = characterSheetPrompt(locked.name, locked.appearance ?? row.appearance);
+      const generation = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id: input.clientRequestId,
+        projectId: project.id,
+        modelId,
+        prompt,
+      });
+      return { generationId: generation.id, modelId, characterId: row.id };
+    }),
+
+  honorGeneratedSheet: authedProcedure
+    .input(z.object({
+      characterId: z.string().uuid(),
+      generationId: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.characterId));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, row.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId });
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+      if (!gen || gen.projectId !== row.projectId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到這次定裝生成" });
+      }
+      const [asset] = await db
+        .select({ id: schema.assets.id })
+        .from(schema.assets)
+        .where(and(
+          eq(schema.assets.projectId, row.projectId),
+          isNull(schema.assets.deletedAt),
+          sql`${schema.assets.meta}->>'generationId' = ${gen.id}`,
+        ))
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(1);
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "這次定裝生成還沒有成品圖" });
+      await assertReferenceImage(asset.id, row.groupId, row.projectId);
+      const [updated] = await db
+        .update(schema.characters)
+        .set({ referenceAssetId: asset.id, rev: sql`${schema.characters.rev} + 1` })
+        .where(eq(schema.characters.id, row.id))
+        .returning();
+      return updated;
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

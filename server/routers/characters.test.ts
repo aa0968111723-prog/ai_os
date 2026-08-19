@@ -48,4 +48,14 @@ describe("characters router 契約", () => {
     expect(source).toContain("applyXiaohuaIdentityLock");
     expect(source).toContain("schema.stories.content");
   });
+
+  it("generateSheet is cheap-image only and honorGeneratedSheet asserts same-project", () => {
+    expect(source).toContain("generateSheet:");
+    expect(source).toContain("CHARACTER_SHEET_MODEL_ID");
+    expect(source).toContain("isAllowedCharacterSheetModel");
+    expect(source).toContain("不能用 Veo");
+    expect(source).toContain("honorGeneratedSheet:");
+    expect(source).toContain("assertReferenceImage(asset.id, row.groupId, row.projectId)");
+    expect(source).not.toMatch(/veo3/);
+  });
 });

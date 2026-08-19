@@ -17,6 +17,8 @@ import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus }
 import { ConflictNotice, conflictFromError } from "./ConflictNotice";
 import { formatTMs } from "@shared/timecode";
 import { discussInMessages } from "../discuss";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
+import { HonorSheetControl } from "./HonorSheetControl";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -165,6 +167,14 @@ export function SceneStudio({
   const [pickedDirectionIds, setPickedDirectionIds] = useState<string[] | null>(null);
   /** 血緣：從哪一版按下「再用這版變體」的（null＝從這一鏡當下的狀態出發） */
   const [variantParentAssetId, setVariantParentAssetId] = useState<string | null>(null);
+  const [honorIds, setHonorIds] = useState<string[]>(charIds ?? []);
+  const characters = trpc.characters.list.useQuery({ projectId });
+  useEffect(() => {
+    setHonorIds(charIds ?? []);
+  }, [charIds, sceneId]);
+  const honoredCharIds = characters.data
+    ? selectableBringInIds(characters.data, honorIds)
+    : (charIds ?? []);
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
@@ -812,6 +822,16 @@ export function SceneStudio({
               )}
             </div>
 
+            {canEdit && (
+              <HonorSheetControl
+                characters={characters.data ?? []}
+                selectedIds={honorIds}
+                onToggle={(id) =>
+                  setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
+                }
+              />
+            )}
+
             <div className="scene-studio__tabs" role="tablist" aria-label="單格工作室工具">
               {TABS.map((t) => (
                 <button
@@ -927,7 +947,7 @@ export function SceneStudio({
                               prompt: instruction,
                               sourceAssetId: baseVersion!.assetId!,
                               clientRequestId: refineRequestId.current,
-                              ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
+                              ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -987,7 +1007,7 @@ export function SceneStudio({
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,
-                              ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
+                              ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -1097,7 +1117,7 @@ export function SceneStudio({
                               // 它同時也是越權欄位的第二道濾網（AI 提案／未來的自訂方向都走這裡）。
                               direction: sanitizeDirection(direction),
                             })),
-                            ...(charIds?.length ? { characterIds: charIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
+                            ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });
