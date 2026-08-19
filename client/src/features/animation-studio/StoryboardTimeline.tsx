@@ -20,7 +20,7 @@ import {
 } from "@shared/shotCompletion";
 import type { StudioShot } from "./ShotStrip";
 import { NewShotMenu, type NewShotKind } from "./NewShotMenu";
-import { placeFixedShotMenu } from "./placeFixedShotMenu";
+import { fixedShotMenuStyle, placeFixedShotMenu, viewportCssSize } from "./placeFixedShotMenu";
 
 export interface StoryboardTimelineProps {
   shots: readonly StudioShot[];
@@ -233,10 +233,11 @@ export function StoryboardTimeline({
 }
 
 /**
- * Portal + position:fixed so the shot menu stays on-screen at 1024px
- * viewport height. Do NOT use the full-viewport transparent scrim here:
- * that button sits at z-50 and ate 複製 on live (#790) — click only
- * closed the menu (7→7, silent no-op). Close on outside pointerdown.
+ * Portal + position:fixed. Live 10:08: height is not the cause — 50%
+ * zoom (CSS ~2560×1320) still painted the #790 cream ellipse. That is
+ * the full-viewport scrim <button> (cream + 999px + inset:0), not
+ * overflow-y. Do not mount a scrim. Do not keep --shot `bottom: 100%`
+ * on a fixed portal (that stretches). Escape + outside pointerdown close.
  */
 function ShotMoreMenu({
   trigger,
@@ -259,17 +260,24 @@ function ShotMoreMenu({
       const menuH = menuRef.current?.offsetHeight ?? 120;
       const menuW = menuRef.current?.offsetWidth ?? 190;
       const rect = trigger?.getBoundingClientRect() ?? null;
+      const { vw, vh } = viewportCssSize();
       setBox(placeFixedShotMenu({
         trigger: rect,
         menuH,
         menuW,
-        vw: window.innerWidth,
-        vh: window.innerHeight,
+        vw,
+        vh,
       }));
     };
     place();
     window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("scroll", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("scroll", place);
+    };
   }, [trigger]);
 
   useEffect(() => {
@@ -280,18 +288,27 @@ function ShotMoreMenu({
       if (trigger?.contains(node)) return;
       onClose();
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
     document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [trigger, onClose]);
 
   if (typeof document === "undefined") return null;
   return createPortal(
     <div
       ref={menuRef}
-      className="studio-menu studio-menu--shot studio-menu--fixed"
+      className="studio-menu studio-menu--fixed"
       role="menu"
       data-studio-shot-menu="1"
-      style={box ? { top: box.top, left: box.left, width: "max-content", maxWidth: 240, height: "auto" } : { visibility: "hidden", top: 0, left: 0 }}
+      style={fixedShotMenuStyle(box)}
     >
       <button
         type="button"

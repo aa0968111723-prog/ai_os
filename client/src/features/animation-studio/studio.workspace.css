@@ -768,21 +768,26 @@ body.studio-workspace { overflow: hidden; }
 /* New Shot 的選單往上開（它在 Timeline 頂端，往下會超出視窗） */
 .studio-menu--newshot { bottom: calc(100% + 5px); right: 0; }
 .studio-menu--shot { bottom: calc(100% + 4px); left: 0; min-width: 190px; }
-/* Portal + fixed: small menu at 1280×800. Kill inset/999px so this cannot
-   become the live giant cream circle. No scrim on the shot menu. */
-.studio-menu--fixed {
+/* Portal + fixed: small menu. Live 10:08 cream ellipse is inset:0 +
+   999px + cream — zoom 50% still paints it. Never inherit --shot
+   `bottom: calc(100% + 4px)` (stretches a fixed box) or a scrim. */
+.studio-menu.studio-menu--fixed {
   position: fixed;
-  inset: auto;
+  inset: unset;
   top: auto;
-  right: auto;
-  bottom: auto;
+  right: unset;
+  bottom: unset;
   left: auto;
   width: max-content;
-  max-width: 240px;
+  max-width: min(240px, calc(100vw - 16px));
   height: auto;
   max-height: min(240px, calc(100vh - 16px));
   min-width: 190px;
+  min-height: 0;
   overflow: auto;
+  transform: none;
+  transform-origin: top left;
+  animation: none;
   border-radius: 10px;
   z-index: 200;
 }

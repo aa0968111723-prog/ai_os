@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import type { StudioShot } from "./ShotStrip";
 import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
-import { menuBoxCoversPoint } from "./placeFixedShotMenu";
+import { LAPTOP_VIEWPORT, ZOOMED_TALL_VIEWPORT, shotMenuCoversWhiteboard } from "./placeFixedShotMenu";
 
 const SHOTS: StudioShot[] = [
   { id: "s1", title: "第01鏡", orderIndex: 0, durationSec: 4 },
@@ -127,18 +127,21 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     expect(props.onDuplicate).not.toHaveBeenCalled();
   });
 
-  it("1280×800: 複製 bounding box is on-screen and the menu does not cover the canvas", async () => {
+  it.each([
+    { name: "1280×800", viewport: LAPTOP_VIEWPORT, triggerTop: 668 },
+    { name: "zoomed/tall 2560×1320", viewport: ZOOMED_TALL_VIEWPORT, triggerTop: 1188 },
+  ])("$name: 複製 bounding box is on-screen and the overlay does not cover the whiteboard", async ({ viewport, triggerTop }) => {
     const user = userEvent.setup();
     const prevW = window.innerWidth;
     const prevH = window.innerHeight;
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: viewport.vw });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: viewport.vh });
     const triggerRect = {
       x: 320,
-      y: 668,
-      top: 668,
+      y: triggerTop,
+      top: triggerTop,
       left: 320,
-      bottom: 692,
+      bottom: triggerTop + 24,
       right: 344,
       width: 24,
       height: 24,
@@ -209,18 +212,25 @@ describe("StoryboardTimeline 複製這一鏡", () => {
       expect(copy).toBeVisible();
       const copyBox = copy.getBoundingClientRect();
       expect(copyBox.top).toBeGreaterThanOrEqual(0);
-      expect(copyBox.bottom).toBeLessThanOrEqual(800);
+      expect(copyBox.bottom).toBeLessThanOrEqual(viewport.vh);
       expect(copyBox.left).toBeGreaterThanOrEqual(0);
-      expect(copyBox.right).toBeLessThanOrEqual(1280);
+      expect(copyBox.right).toBeLessThanOrEqual(viewport.vw);
       const menu = screen.getByRole("menu");
       expect(menu.className).toContain("studio-menu--fixed");
+      expect(menu.className).not.toContain("studio-menu--shot");
       expect(menu).toHaveAttribute("data-studio-shot-menu", "1");
+      expect(menu.style.right).toBe("auto");
+      expect(menu.style.bottom).toBe("auto");
+      expect(menu.style.transform).toBe("none");
+      expect(menu.style.maxWidth).toBe("240px");
+      expect(menu.style.maxHeight).toBe("240px");
+      expect(menu.style.borderRadius).toBe("10px");
       const menuBox = menu.getBoundingClientRect();
       expect(menuBox.width).toBeLessThanOrEqual(240);
       expect(menuBox.height).toBeLessThanOrEqual(240);
-      expect(menuBoxCoversPoint(
+      expect(shotMenuCoversWhiteboard(
         { top: menuBox.top, left: menuBox.left, width: menuBox.width, height: menuBox.height },
-        { x: 640, y: 280 },
+        viewport,
       )).toBe(false);
       expect(document.querySelector(".studio-menu__scrim")).toBeNull();
       expect(screen.queryByRole("button", { name: "關閉選單" })).not.toBeInTheDocument();
@@ -231,5 +241,15 @@ describe("StoryboardTimeline 複製這一鏡", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: prevW });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: prevH });
     }
+  });
+
+  it("Escape dismisses the shot menu (live cream ellipse ignored Escape)", async () => {
+    const user = userEvent.setup();
+    setup();
+    const shot04 = screen.getAllByRole("listitem")[1]!;
+    await user.click(within(shot04).getByRole("button", { name: /的更多操作/ }));
+    expect(screen.getByRole("menuitem", { name: "複製這一鏡" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
