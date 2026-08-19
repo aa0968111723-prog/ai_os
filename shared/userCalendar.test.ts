@@ -21,4 +21,11 @@ describe("dashboard date chip uses user TZ, not UTC leftover", () => {
     expect(formatDashboardDateChip(afterMidnightTaipei, "America/Los_Angeles")).toBe("8月18日星期二");
     expect(formatDashboardDateChip(afterMidnightTaipei, "Asia/Taipei")).toBe("8月19日星期三");
   });
+
+  it("8/19 02:39 Asia/Taipei is 8月19日星期三, never leftover 8月18日星期二", () => {
+    const liveNow = new Date("2026-08-18T18:39:00.000Z");
+    expect(formatDashboardDateChip(liveNow, resolveUserTimeZone("UTC"))).toBe("8月19日星期三");
+    expect(formatDashboardDateChip(liveNow, resolveUserTimeZone("UTC"))).not.toBe("8月18日星期二");
+    expect(formatDashboardDateChip(liveNow, PRODUCT_USER_TIME_ZONE)).toBe("8月19日星期三");
+  });
 });

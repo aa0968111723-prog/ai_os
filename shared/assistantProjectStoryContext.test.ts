@@ -136,6 +136,7 @@ describe("assistant persisted story context", () => {
       answer: "免費模型逾時",
       fetchedOk: false,
     })).toBeNull();
+    expect((answer.match(/[。！？]/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {

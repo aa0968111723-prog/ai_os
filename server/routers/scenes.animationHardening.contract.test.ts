@@ -392,6 +392,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(header).toContain("scopedTightRemaining");
     expect(header).toContain("剩 ${remaining.toLocaleString()}");
     expect(header).toContain("本週已用 ${weeklyUsed}");
+    expect(header).toContain("Leftover-only 4,708 is not the wallet");
     expect(header).toContain("placeholderData: (previous) => previous");
     const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
     expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");

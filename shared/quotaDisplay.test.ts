@@ -52,6 +52,22 @@ describe("header 剩 is the scoped wallet, never leftover 4708", () => {
     })).toBe(324);
   });
 
+  it("live leftover 4700 · 週已用 11 paints weekly ~320, not 4,700", () => {
+    const live = {
+      groupId: "g1",
+      memberBudgetRemaining: null,
+      groupBudgetRemaining: null,
+      totalRemaining: 4700,
+      falPointsCap: 4700,
+      weeklyQuota: 331,
+      weeklyUsed: 11,
+    };
+    expect(tightRemainingPoints(live)).toBe(320);
+    expect(tightRemainingPoints(live)).not.toBe(4700);
+    expect(scopedTightRemaining(live, "g1")).toBe(320);
+    expect(scopedWalletRemainingLabel(live, "g1")).toBe("目前剩 320 點・本週 11/331");
+  });
+
   it("falPointsCap === leftover with only 週已用 7 still cannot paint 4704", () => {
     expect(tightRemainingPoints({
       groupId: "g1",
