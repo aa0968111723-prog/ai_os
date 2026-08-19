@@ -19,6 +19,7 @@ import { formatTMs } from "@shared/timecode";
 import { discussInMessages } from "../discuss";
 import { selectableBringInIds } from "@shared/studioReferenceImage";
 import { HonorSheetControl } from "./HonorSheetControl";
+import { shouldRotateGenerateIntoRequestId } from "@shared/generationIdempotency";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -343,6 +344,11 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+    },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        regenRequestId.current = crypto.randomUUID();
+      }
     },
   });
   const generateVariants = trpc.scenes.generateVariants.useMutation({

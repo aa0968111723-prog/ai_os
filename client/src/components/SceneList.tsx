@@ -5,6 +5,7 @@ import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { pendingAdoptGenerationId } from "@shared/sceneAdopt";
+import { shouldRotateGenerateIntoRequestId } from "@shared/generationIdempotency";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
@@ -459,6 +460,11 @@ const SceneRow = memo(function SceneRow({
   const genRequestId = useRef<string>(crypto.randomUUID());
   const generate = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        genRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   const adopt = trpc.creativeContext.adoptGeneration.useMutation({
     onSuccess: () => { invalidate(); },

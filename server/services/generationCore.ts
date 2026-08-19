@@ -34,6 +34,10 @@ import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  IDEMPOTENT_FAILED_GENERATION_RETRY,
+  shouldReplayIdempotentGeneration,
+} from "../../shared/generationIdempotency";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
 import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import type { ContinuitySnapshot, ContinuityShotDirection } from "../../shared/continuity";
@@ -1061,7 +1065,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
               eq(schema.generations.groupId, project.groupId),
               input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
             ));
-          if (existing) return existing;
+          if (existing) {
+            if (!shouldReplayIdempotentGeneration(existing.status)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+              });
+            }
+            return existing;
+          }
           throw new TRPCError({
             code: "CONFLICT",
             message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
@@ -1145,7 +1157,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           eq(schema.generations.groupId, project.groupId),
           input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
         ));
-      if (existing) return existing;
+      if (existing) {
+        if (!shouldReplayIdempotentGeneration(existing.status)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+          });
+        }
+        return existing;
+      }
       throw new TRPCError({
         code: "CONFLICT",
         message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",

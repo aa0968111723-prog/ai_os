@@ -76,6 +76,10 @@ import {
   shotPerformanceSchema,
 } from "../../shared/story";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  IDEMPOTENT_FAILED_GENERATION_RETRY,
+  shouldReplayIdempotentGeneration,
+} from "../../shared/generationIdempotency";
 import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
@@ -1604,6 +1608,15 @@ export const scenesRouter = router({
         preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
+      // Failed first send + same clientRequestId must not look like success
+      // (no new job, leftover 待你過目 still discarded). Timeout replay of
+      // queued/running/done stays idempotent.
+      if (!shouldReplayIdempotentGeneration(gen.status)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+        });
+      }
       void import("../services/agentRunReconcile")
         .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
           reconcileAgentRunsAfterSceneGenerate({
