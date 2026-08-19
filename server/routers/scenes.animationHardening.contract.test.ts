@@ -529,6 +529,19 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(retry).toContain("soundWorldRef: meta.soundWorld");
   });
 
+  it("scenes.update persist-locks 是男性 so IME prompt save cannot keep a boy", () => {
+    const update = scenes.slice(scenes.indexOf("update: authedProcedure"), scenes.indexOf("applyScript:"));
+    const addDraft = scenes.slice(scenes.indexOf("addDraft: authedProcedure"), scenes.indexOf("versions:"));
+    const apply = scenes.slice(scenes.indexOf("applyScript: authedProcedure"), scenes.indexOf("setCards:"));
+    expect(scenes).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).toContain("sceneCopyBoundToXiaohua");
+    expect(update).toContain("assignLockedXiaohuaCopy");
+    expect(addDraft).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(apply).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).not.toContain("lockXiaohuaGenerationPrompt");
+  });
+
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("lockXiaohuaGenerationPrompt");

@@ -75,7 +75,11 @@ import {
   shotCameraSchema,
   shotPerformanceSchema,
 } from "../../shared/story";
-import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  isXiaohuaName,
+  lockXiaohuaGenerationPrompt,
+  rewritePersistedXiaohuaShotCopy,
+} from "../../shared/characterIdentityLock";
 import {
   IDEMPOTENT_FAILED_GENERATION_RETRY,
   shouldReplayIdempotentGeneration,
@@ -172,6 +176,43 @@ function assertReplayableGeneration(status: string): void {
       message: IDEMPOTENT_FAILED_GENERATION_RETRY,
     });
   }
+}
+
+/** IME / prompt save must not persist EXTRACT leftover「是男性」on a 小華 shot. */
+async function sceneCopyBoundToXiaohua(
+  projectId: string,
+  characterIds?: string[] | null,
+): Promise<boolean> {
+  const ids = [...new Set((characterIds ?? []).filter(Boolean))];
+  if (!ids.length) return false;
+  const rows = await db
+    .select({ name: schema.characters.name })
+    .from(schema.characters)
+    .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, ids)));
+  return rows.some((row) => isXiaohuaName(row.name));
+}
+
+function assignLockedXiaohuaCopy(
+  patch: {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+  locked: {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+): void {
+  if (patch.title !== undefined) patch.title = locked.title;
+  if (patch.prompt !== undefined) patch.prompt = locked.prompt;
+  if (patch.action !== undefined) patch.action = locked.action;
+  if (patch.dialogue !== undefined) patch.dialogue = locked.dialogue;
+  if (patch.voiceover !== undefined) patch.voiceover = locked.voiceover;
 }
 
 /**
@@ -454,16 +495,21 @@ export const scenesRouter = router({
           .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
           .from(schema.scenes)
           .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        const locked = rewritePersistedXiaohuaShotCopy({
+          title: input.title,
+          prompt: input.prompt ?? null,
+          voiceover: input.voiceover ?? null,
+        }, false);
         const [scene] = await tx
           .insert(schema.scenes)
           .values({
             projectId: project.id,
             orderIndex: Number(maxOrder) + 1,
-            title: input.title,
+            title: locked.title ?? input.title,
             durationSec: input.durationSec ?? (project.format === "9:16" ? 4 : 5),
             status: "todo",
-            prompt: input.prompt,
-            voiceover: input.voiceover,
+            prompt: locked.prompt ?? input.prompt,
+            voiceover: locked.voiceover ?? input.voiceover,
           })
           .returning();
         return scene;
@@ -1241,6 +1287,23 @@ export const scenesRouter = router({
       if (input.dialogue !== undefined) patch.dialogue = input.dialogue;
       if (input.music !== undefined) patch.music = input.music;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
+      if (
+        patch.title !== undefined
+        || patch.prompt !== undefined
+        || patch.action !== undefined
+        || patch.dialogue !== undefined
+        || patch.voiceover !== undefined
+      ) {
+        const bound = await sceneCopyBoundToXiaohua(scene.projectId, scene.characterIds);
+        const locked = rewritePersistedXiaohuaShotCopy({
+          title: (patch.title ?? scene.title) as string,
+          prompt: (patch.prompt !== undefined ? patch.prompt : scene.prompt) as string | null,
+          action: patch.action !== undefined ? patch.action : scene.action,
+          dialogue: patch.dialogue !== undefined ? patch.dialogue : scene.dialogue,
+          voiceover: patch.voiceover !== undefined ? patch.voiceover : scene.voiceover,
+        }, bound);
+        assignLockedXiaohuaCopy(patch, locked);
+      }
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
       if (input.storySceneId !== undefined) patch.storySceneId = input.storySceneId;
@@ -1355,19 +1418,26 @@ export const scenesRouter = router({
           const where = row ? `第 ${(rowIndex ?? 0) + 1} 鏡的` : `新增的「${scene.title.slice(0, 12)}」的`;
           const cardPatch = cardLookup ? cardPatchFromScript(scene, row, cardLookup, where, warnings) : {};
           if (!row) {
+            const locked = rewritePersistedXiaohuaShotCopy({
+              title: (scene.title || `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
+              prompt: scene.prompt ?? null,
+              voiceover: scene.voiceover ?? null,
+              action: scene.action ?? null,
+              dialogue: scene.dialogue ?? null,
+            }, false);
             await tx.insert(schema.scenes).values({
               projectId: project.id,
               orderIndex: ++order,
               // 標題留空在既有鏡是「維持原值」，但新增的鏡沒有原值可維持——
               // 就地補一個看得懂的佔位，否則分鏡列會多出一格無名空白。
-              title: (scene.title || `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
+              title: (locked.title ?? `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
               durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
               status: "todo",
-              prompt: scene.prompt ?? null,
-              voiceover: scene.voiceover ?? null,
+              prompt: locked.prompt ?? null,
+              voiceover: locked.voiceover ?? null,
               ambience: scene.ambience ?? null,
-              action: scene.action ?? null,
-              dialogue: scene.dialogue ?? null,
+              action: locked.action ?? null,
+              dialogue: locked.dialogue ?? null,
               music: scene.music ?? null,
               ...cardPatch,
             });
@@ -1399,6 +1469,23 @@ export const scenesRouter = router({
             patch.music = scene.music;
           }
           Object.assign(patch, cardPatch);
+          if (
+            patch.title !== undefined
+            || patch.prompt !== undefined
+            || patch.action !== undefined
+            || patch.dialogue !== undefined
+            || patch.voiceover !== undefined
+          ) {
+            const bound = await sceneCopyBoundToXiaohua(project.id, row.characterIds);
+            const locked = rewritePersistedXiaohuaShotCopy({
+              title: (patch.title ?? row.title) as string,
+              prompt: (patch.prompt !== undefined ? patch.prompt : row.prompt) as string | null,
+              action: patch.action !== undefined ? patch.action : row.action,
+              dialogue: patch.dialogue !== undefined ? patch.dialogue : row.dialogue,
+              voiceover: patch.voiceover !== undefined ? patch.voiceover : row.voiceover,
+            }, bound);
+            assignLockedXiaohuaCopy(patch, locked);
+          }
           if (Object.keys(patch).length === 0) continue;
           const [wrote] = await tx
             .update(schema.scenes)

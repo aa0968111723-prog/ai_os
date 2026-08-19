@@ -234,6 +234,12 @@ describe("小華 identity lock", () => {
     expect(gen9).toContain("粉橘短髮女孩");
     expect(gen9).not.toMatch(/是男性|（是男性）/);
     expect(rewriteXiaohuaInventedMaleLook("主：粉橘髮女孩、白T(是男性)")).toBe("主：粉橘髮女孩、白T");
+    const imeSave = rewritePersistedXiaohuaShotCopy({
+      title: "第9鏡",
+      prompt: "主：粉橘髮女孩、白T（是男性）",
+    }, true);
+    expect(imeSave.prompt).toBe("主：粉橘髮女孩、白T");
+    expect(imeSave.prompt).not.toMatch(/是男性|（是男性）/);
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {
