@@ -1762,6 +1762,17 @@ export const scenesRouter = router({
         ...(sourceAssetId ? { sourceAssetId } : {}),
         reasonPrefix: "分鏡變體",
       })));
+      const landed = settled.find((result) =>
+        result.status === "fulfilled" && shouldReplayIdempotentGeneration(result.value.status),
+      );
+      if (landed && landed.status === "fulfilled") {
+        const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterIndependentGenerate({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: landed.value.id,
+        });
+      }
       return {
         batchId: input.batchId,
         requested: input.variants.length,
@@ -1871,6 +1882,12 @@ export const scenesRouter = router({
         reasonPrefix: "分鏡修圖",
       });
       assertReplayableGeneration(gen.status);
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        sceneId: scene.id,
+        generationId: gen.id,
+      });
       return { generationId: gen.id };
     }),
 

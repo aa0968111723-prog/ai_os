@@ -461,6 +461,12 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(generationRetry).toContain("shouldReplayIdempotentGeneration(retried.status)");
     expect(mcpRetry).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(mcpRetry).toContain("shouldReplayIdempotentGeneration(newGen.status)");
+    const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(variants).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(refine).toContain("scheduleReconcileAfterIndependentGenerate");
+    const genList = readFileSync(join(process.cwd(), "client/src/components/GenerationList.tsx"), "utf8");
+    expect(genList).toContain("teamAssistant.agentOverview.invalidate");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     expect(overview).toContain("assertFreeOnlyCompletion");

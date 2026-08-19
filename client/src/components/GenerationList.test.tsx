@@ -28,6 +28,7 @@ vi.mock("../api", () => ({
       scenes: { listByProject: { invalidate } },
       projects: { assets: { invalidate } },
       community: { invalidate },
+      teamAssistant: { agentOverview: { invalidate } },
     }),
     generation: {
       listByProject: {

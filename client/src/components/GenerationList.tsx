@@ -254,6 +254,9 @@ export function GenerationList({
       utils.generation.listByProject.invalidate({ projectId });
       utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.quota.my.invalidate();
+      // 44dcb14c discards leftover 0/N on the server; HUD cache stays
+      // until this refetch (or the 30s poll).
+      void utils.teamAssistant.agentOverview.invalidate();
     },
   });
   // #20 命名：純 metadata，成功後同時失效首頁 list 與分頁 paged（兩種顯示來源都要更新）
