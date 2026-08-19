@@ -172,7 +172,7 @@ describe("animation shot writes stay consistent", () => {
     expect(sceneList).toContain("saveFields({ durationSec: Number(v) })");
     expect(sceneList).toContain("saveFields(patch)");
     expect(sceneList).not.toMatch(/onCommit=\{\(v\) => update\.mutate\(\{[\s\S]*?expectedRev: s\.rev/);
-    expect(sceneList).toContain("trimStartMs: s.trimStartMs ?? null");
+    expect(sceneList).toContain("trimStartMs: row?.trimStartMs ?? null");
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     expect(shotCard).toContain("expectedRev: shot.rev");
     expect(shotCard).toContain("[field]: (shot as unknown as Record<string, unknown>)[field] ?? null");
