@@ -138,6 +138,10 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/oneClickPrimaryLabel/);
     expect(src).toMatch(/shouldShowOneClickGenerateCta/);
     expect(src).toMatch(/showGenerateCta/);
+    expect(src).toMatch(/showWriteStoryCta/);
+    expect(src).toMatch(/readiness\.kind === "empty"/);
+    expect(src).toContain("開始寫故事");
+    expect(src).toMatch(/getElementById\("story-editor"\)/);
     expect(src).toMatch(/sceneCount/);
     expect(src).toMatch(/ONE_CLICK_BATCH_KIND/);
     expect(src).not.toMatch(/: "生成影片"/);

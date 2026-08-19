@@ -1256,6 +1256,7 @@ export function ProjectPage({ id }: { id: string }) {
     sceneCount,
     readinessKind: readiness.kind,
   });
+  const showWriteStoryCta = canEdit && readiness.kind === "empty";
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
     id: string;
     title: string;
@@ -1863,9 +1864,11 @@ export function ProjectPage({ id }: { id: string }) {
                     modelKind: ONE_CLICK_BATCH_KIND,
                     sceneCount,
                   })
-                : undefined
+                : showWriteStoryCta
+                  ? "開始寫故事"
+                  : undefined
             }
-            primaryDisabled={oneClick.pending}
+            primaryDisabled={showGenerateCta && oneClick.pending}
             error={oneClick.error}
             onPrimary={
               showGenerateCta
@@ -1875,7 +1878,9 @@ export function ProjectPage({ id }: { id: string }) {
                       .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
                       .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
                   }
-                : undefined
+                : showWriteStoryCta
+                  ? () => focusAndReveal(document.getElementById("story-editor"))
+                  : undefined
             }
             latestLabel={
               oneClick.result

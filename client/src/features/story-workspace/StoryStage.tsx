@@ -25,6 +25,7 @@ import {
   type StorySaveState,
 } from "./storyDraft";
 import { refreshStudioShotList } from "../../lib/studioShotList";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 
 const SAVE_LABEL: Record<StorySaveState, string> = {
   idle: "",
@@ -488,6 +489,9 @@ export function StoryStage({
   const parseReady = Boolean(lastRun && lastRun.status === "done");
   /** Parse timeout / never-done: still allow 產生分鏡 from story text (xiaohua stuck). */
   const canBoardFromStory = !isBlank;
+  const startWriting = () => {
+    focusAndReveal(editorElRef.current ?? document.getElementById("story-editor"));
+  };
 
   /**
    * §33 變更預覽：專案已經有分鏡時，「產生分鏡」是會動到既有內容的批次操作，
@@ -589,20 +593,25 @@ export function StoryStage({
             description="貼上你寫好的故事或腳本；還沒有想法，也可以先跟 AI 聊聊。角色與場景不用先建——AI 解析時會自動整理。"
             action={
               canEdit ? (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    onRevealSection?.("production");
-                    revealStoryInlineSection("production", {
-                      projectId,
-                      scroll: false,
-                      nestedSelector: "#sec-assistant",
-                    });
-                    revealWorkbenchAnchor("#sec-assistant", { projectId });
-                  }}
-                >
-                  <Icon name="MessageSquare" size={14} /> 與 AI 一起開始
-                </Button>
+                <>
+                  <Button variant="primary" onClick={startWriting} title="把游標放到故事編輯器，開始寫或貼上">
+                    開始寫故事
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      onRevealSection?.("production");
+                      revealStoryInlineSection("production", {
+                        projectId,
+                        scroll: false,
+                        nestedSelector: "#sec-assistant",
+                      });
+                      revealWorkbenchAnchor("#sec-assistant", { projectId });
+                    }}
+                  >
+                    <Icon name="MessageSquare" size={14} /> 與 AI 一起開始
+                  </Button>
+                </>
               ) : undefined
             }
           />
@@ -695,36 +704,48 @@ export function StoryStage({
                 ) : null}
                 {canEdit && (
                   <div className="story-parse-bar__actions">
-                    <Button
-                      variant={hasParsed && !isDirty ? "ghost" : "primary"}
-                      disabled={parse.isPending || isBlank}
-                      onClick={() => parse.mutate({ projectId })}
-                      title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
-                    >
-                      {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
-                    </Button>
-                    {needsBoardConfirm ? (
-                      // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
-                      <ConfirmButton
-                        triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
-                        message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
-                        confirmLabel="套用"
-                        disabled={board.isPending || !canBoardFromStory}
-                        onConfirm={() => board.mutate({ projectId })}
-                      >
-                        {board.isPending ? "建立中…" : "產生分鏡"}
-                      </ConfirmButton>
-                    ) : (
+                    {isBlank ? (
                       <Button
-                        variant={hasParsed && !isDirty ? "primary" : "ghost"}
-                        disabled={board.isPending || !canBoardFromStory}
-                        onClick={() => board.mutate({ projectId })}
-                        title={parseReady
-                          ? "把解析出的場與鏡建成可編輯的分鏡卡"
-                          : "解析未完成時，仍可依故事原文拆場拆鏡"}
+                        variant="primary"
+                        onClick={startWriting}
+                        title="把游標放到故事編輯器，開始寫或貼上"
                       >
-                        {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
+                        開始寫故事
                       </Button>
+                    ) : (
+                      <>
+                        <Button
+                          variant={hasParsed && !isDirty ? "ghost" : "primary"}
+                          disabled={parse.isPending}
+                          onClick={() => parse.mutate({ projectId })}
+                          title="AI 讀完整份故事，自動建立／連結角色、場景、道具，並規劃分鏡（免費）"
+                        >
+                          {parse.isPending ? "解析中…" : hasParsed ? "重新解析" : "AI 解析"}
+                        </Button>
+                        {needsBoardConfirm ? (
+                          // 已經有分鏡＝這顆會動到既有內容，先把逐場計畫講清楚再讓人按（§33）
+                          <ConfirmButton
+                            triggerClassName={hasParsed && !isDirty ? "btn-primary" : "btn-ghost"}
+                            message={`AI 準備這樣做：${boardPlanText}。已經有鏡的場一律不動（你調過的鏡頭語言、造型、生成都會留著）。套用？`}
+                            confirmLabel="套用"
+                            disabled={board.isPending || !canBoardFromStory}
+                            onConfirm={() => board.mutate({ projectId })}
+                          >
+                            {board.isPending ? "建立中…" : "產生分鏡"}
+                          </ConfirmButton>
+                        ) : (
+                          <Button
+                            variant={hasParsed && !isDirty ? "primary" : "ghost"}
+                            disabled={board.isPending || !canBoardFromStory}
+                            onClick={() => board.mutate({ projectId })}
+                            title={parseReady
+                              ? "把解析出的場與鏡建成可編輯的分鏡卡"
+                              : "解析未完成時，仍可依故事原文拆場拆鏡"}
+                          >
+                            {board.isPending ? "建立中…" : lastRun?.hasStoryboard ? "分鏡已建立 ✓" : "產生分鏡"}
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

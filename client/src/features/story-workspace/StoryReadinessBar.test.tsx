@@ -48,4 +48,18 @@ describe("StoryReadinessBar", () => {
     );
     expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成/ })).not.toBeInTheDocument();
   });
+
+  it("empty 0-shot shows 開始寫故事, not generate or AI 解析", () => {
+    const onPrimary = vi.fn();
+    render(
+      <StoryReadinessBar
+        readiness={{ kind: "empty", label: "先寫故事", detail: "貼上或寫下故事後，就能解析並產生分鏡。" }}
+        canEdit
+        primaryLabel="開始寫故事"
+        onPrimary={onPrimary}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "開始寫故事" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成|AI 解析/ })).not.toBeInTheDocument();
+  });
 });

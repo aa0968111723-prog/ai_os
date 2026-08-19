@@ -43,6 +43,19 @@ describe("StoryStage parse chips", () => {
     expect(src).not.toMatch(/disabled=\{board\.isPending \|\| !lastRun \|\| lastRun\.status !== "done"\}/);
   });
 
+  it("0-shot empty story shows 開始寫故事, not primary AI 解析", () => {
+    expect(src).toContain("開始寫故事");
+    expect(src).toContain("startWriting");
+    expect(src).toContain("focusAndReveal");
+    expect(src).toContain("#story-editor");
+    const actions = src.slice(src.indexOf("story-parse-bar__actions"));
+    expect(actions).toMatch(/isBlank \? \(/);
+    expect(actions).toMatch(/開始寫故事/);
+    expect(actions).toMatch(/AI 解析/);
+    expect(actions).not.toMatch(/disabled=\{parse\.isPending \|\| isBlank\}/);
+    expect(src).not.toMatch(/variant=\{hasParsed && !isDirty \? "ghost" : "primary"\}[\s\S]{0,80}disabled=\{parse\.isPending \|\| isBlank\}/);
+  });
+
   it("onBlur sends the same expectedRev/baseline as debounce/flush (no rev-less saveRef)", () => {
     // default branch: saveRef.current({ projectId, content }) — silent LWW
     expect(src).not.toMatch(/saveRef\.current\(\{\s*projectId,\s*content\s*\}\)/);
