@@ -98,10 +98,6 @@ export interface DiscardUnstartedAwaitingApprovalResult {
   discarded: boolean;
 }
 
-function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
-  return steps.filter((step) => step.kind === "generate");
-}
-
 function leftoverShotNote(note: string | undefined): boolean {
   return /第\s*\d+\s*鏡|生成畫面/.test(note ?? "");
 }
@@ -112,8 +108,12 @@ function stepIsParked(status: string | undefined): boolean {
 
 /** Live leftover 0/N rows use kind "" / generate_image, not only generate. */
 function isLeftoverGenerateStep(step: ReconcileAgentStep): boolean {
-  if (step.kind === "generate" || step.kind === "generate_image") return true;
+  if (step.kind === "generate" || step.kind === "generate_image" || !step.kind) return true;
   return leftoverShotNote(step.note);
+}
+
+function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
+  return steps.filter((step) => isLeftoverGenerateStep(step));
 }
 
 /**
@@ -131,8 +131,8 @@ export function isLeftoverUnstartedApprovalBatch(
   const visualish = steps.filter((step) => leftoverShotNote(step.note));
   if (visualish.length >= 2) return visualish.every((step) => stepIsParked(step.status));
   return steps.every((step) => {
-    if (step.kind && step.kind !== "generate") return false;
-    return stepIsParked(step.status) && leftoverShotNote(step.note);
+    if (step.kind && step.kind !== "generate" && step.kind !== "generate_image") return false;
+    return stepIsParked(step.status);
   });
 }
 

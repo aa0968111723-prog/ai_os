@@ -137,6 +137,36 @@ describe("discardUnstartedAwaitingApprovalAfterIndependentGenerate", () => {
     expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
   });
 
+  it("stops generate_image leftover 0/6 even when notes omit 第 N 鏡 / 生成畫面", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: `生成主視覺 ${n}`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: imageKind,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
+  it("stops kindless leftover 0/6 even when notes omit 第 N 鏡 / 生成畫面", () => {
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: `出圖 ${n}`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: kindless,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
   it("leaves a running leftover plan alone", () => {
     const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
       status: "running",
@@ -208,6 +238,33 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "awaiting_approval",
       steps: imageKind,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+  });
+
+  it("hides leftover 0/6 generate_image / kindless when notes omit 第 N 鏡 / 生成畫面", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: `生成主視覺 ${n}`,
+    }));
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: `出圖 ${n}`,
+    }));
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: imageKind,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: kindless,
       runCreatedAt: "2026-08-18T14:00:00.000Z",
       latestDoneVisualAt: created,
       hasCurrentVisual: true,

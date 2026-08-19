@@ -462,6 +462,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(reconcile).toContain("待你過目");
     expect(reconcile).toContain("isLeftoverGenerateStep");
     expect(reconcile).toContain('step.kind === "generate_image"');
+    expect(reconcile).toContain("|| !step.kind");
     const genCore = readFileSync(join(process.cwd(), "server/services/generationCore.ts"), "utf8");
     expect(genCore).toContain("originUrl: stored ? null : mediaUrl");
     expect(genCore).toContain('landState: stored ? "landed" : "pending"');
