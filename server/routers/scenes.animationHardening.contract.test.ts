@@ -166,6 +166,8 @@ describe("animation shot writes stay consistent", () => {
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     expect(shotCard).toContain("expectedRev: shot.rev");
     expect(shotCard).toContain("baseline: { [field]:");
+    expect(shotCard).toContain("gateRef.current?.save(");
+    expect(shotCard).not.toMatch(/const saveField[\s\S]*?update\.mutate\(\{[\s\S]*?expectedRev: shot\.rev/);
   });
 
   it("assistant add_character writes read back the character row", () => {
@@ -306,6 +308,8 @@ describe("storyboard board blur sends expectedRev", () => {
     expect(shotCard).toContain("createShotFieldSaveGate");
     expect(shotCard).toContain("expectedRev: req.expectedRev");
     expect(shotCard).toContain("expectedRev: shot.rev");
+    expect(shotCard).toContain("gateRef.current?.save(");
+    expect(shotCard).not.toMatch(/const saveField[\s\S]*?update\.mutate\(\{[\s\S]*?expectedRev: shot\.rev/);
     expect(header).toContain("expectedRev: scene.rev");
     expect(header).not.toContain("update.mutate({ id: scene.id, title: v })");
     expect(shotCard).toContain("rev: shot.rev");

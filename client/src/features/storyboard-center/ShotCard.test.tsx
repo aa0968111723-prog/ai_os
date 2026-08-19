@@ -2,7 +2,7 @@
  * ShotCard Progressive Disclosure：緊湊面預設精簡、展開後功能仍在。
  * 不測完整 trpc 管線——mutation 以 stub 驗證入口存在與結構 class。
  */
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShotCard, type ShotRow } from "./ShotCard";
@@ -14,6 +14,7 @@ const mutateInsertAfter = vi.fn();
 const mutateInherit = vi.fn();
 const mutateSetVisual = vi.fn();
 const mutateConfirm = vi.fn();
+let updateOnSuccess: ((row: { rev: number }) => void) | undefined;
 
 vi.mock("../../api", () => ({
   trpc: {
@@ -24,7 +25,12 @@ vi.mock("../../api", () => ({
       story: { shotAssetSuggestionsBatch: { invalidate } },
     }),
     scenes: {
-      update: { useMutation: () => ({ mutate: mutateUpdate, isPending: false, error: null }) },
+      update: {
+        useMutation: (opts?: { onSuccess?: (row: { rev: number }) => void }) => {
+          updateOnSuccess = opts?.onSuccess;
+          return { mutate: mutateUpdate, isPending: false, error: null };
+        },
+      },
       remove: { useMutation: () => ({ mutate: mutateRemove, isPending: false, error: null }) },
       insertAfter: { useMutation: () => ({ mutate: mutateInsertAfter, isPending: false, error: null }) },
       inheritFromPrevious: {
@@ -111,6 +117,7 @@ const defaultProps = {
 describe("ShotCard progressive disclosure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    updateOnSuccess = undefined;
   });
 
   it("緊湊面永遠可見：編號、標題、完成度、預覽空狀態、素材庫入口", () => {
@@ -192,6 +199,34 @@ describe("ShotCard progressive disclosure", () => {
     );
     expect(screen.getByText("專案素材裡名稱或標籤對得上的：")).toBeInTheDocument();
     expect(screen.getByText("安倢定裝")).toBeInTheDocument();
+  });
+
+  it("title then duration onBlur queues the second save until ACK (not stale shot.rev)", () => {
+    render(<ShotCard {...defaultProps} shot={baseShot({ rev: 3 })} />);
+    const title = screen.getByLabelText("第 1 鏡標題");
+    fireEvent.change(title, { target: { value: "新標題" } });
+    fireEvent.blur(title);
+    expect(mutateUpdate).toHaveBeenCalledTimes(1);
+    expect(mutateUpdate.mock.calls[0]?.[0]).toMatchObject({
+      sceneId: "shot-1",
+      title: "新標題",
+      expectedRev: 3,
+      baseline: { title: "開場特寫" },
+    });
+
+    const dur = screen.getByLabelText("秒數");
+    fireEvent.change(dur, { target: { value: "8" } });
+    fireEvent.blur(dur);
+    expect(mutateUpdate).toHaveBeenCalledTimes(1);
+
+    updateOnSuccess?.({ rev: 4 });
+    expect(mutateUpdate).toHaveBeenCalledTimes(2);
+    expect(mutateUpdate.mock.calls[1]?.[0]).toMatchObject({
+      sceneId: "shot-1",
+      durationSec: 8,
+      expectedRev: 4,
+      baseline: { durationSec: 3 },
+    });
   });
 
   it("分鏡卡 row has 在這之後插入一鏡 (same insertAfter as studio ⋯, not FIFO ＋新增鏡)", async () => {

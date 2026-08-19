@@ -245,15 +245,14 @@ export function ShotCard({
     setDropBusy(false);
   };
 
+  /**
+   * 連續改兩個欄位不得共用同一個 shot.rev：閘門等 ACK 再用新 rev。
+   * 分鏡卡 title→duration/prompt 連 blur 若直接送 live shot.rev，第一發 ACK 後第二發是 self-conflict。
+   */
   const saveField = (patch: Record<string, unknown>) => {
     const { sceneId: _sceneId, ...fields } = patch;
     const field = Object.keys(fields)[0]!;
-    update.mutate({
-      sceneId: shot.id,
-      ...fields,
-      expectedRev: shot.rev,
-      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
-    } as Parameters<typeof update.mutate>[0]);
+    gateRef.current?.save(fields, { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null });
   };
   const saveFields = (patch: Record<string, unknown>) => {
     saveField(patch);
