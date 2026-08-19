@@ -656,7 +656,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).not.toContain("prompt: userPrompt");
     expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
-    expect(block).not.toContain("resolveHonoredCharacterSheet");
+  });
+
+  it("MCP submit_generation honours 角色卡 生成時帶入 when sceneNo is visual", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: visualCards.characterIds");
+    expect(block).toContain("if (!sourceUrl)");
+    expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("explicitSourceAssetId");
   });
 
   it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {

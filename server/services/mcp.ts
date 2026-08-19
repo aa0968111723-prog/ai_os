@@ -42,6 +42,7 @@ import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
 import { advanceGeneration } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
+import { resolveHonoredCharacterSheet } from "./referenceAsset";
 import { findSceneByDisplayNo } from "../../shared/assistantSceneLookup";
 import { signAssetUrl, signDbFileUrl } from "./storage";
 import { requireGroup } from "../trpc";
@@ -1603,6 +1604,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     let lookIds: string[] | undefined;
     let shotDirection: { camera: typeof schema.scenes.$inferSelect["camera"]; performance: typeof schema.scenes.$inferSelect["performance"]; action: string | null } | undefined;
     let namedXiaohua = /小華/.test(userPrompt);
+    let sourceAssetId: string | undefined;
     if (args.sceneNo !== undefined && args.sceneNo !== null && args.sceneNo !== "") {
       const sceneNo = Number(args.sceneNo);
       const shots = await db
@@ -1623,6 +1625,17 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         visualCards = resolveSceneCards(shot, null);
         lookIds = shot.lookIds ?? undefined;
         shotDirection = { camera: shot.camera, performance: shot.performance, action: shot.action };
+        // generate_into_scene already honours 角色卡 生成時帶入. submit_generation
+        // already binds sceneRole / cards / looks / direction / lock, but still
+        // sent no sheet — MCP 第 N 鏡生成 drew without 定裝. 0/6 skips.
+        // Keep caller source_url as the i2v parent — honor must not replace it.
+        if (!sourceUrl) {
+          sourceAssetId = await resolveHonoredCharacterSheet({
+            projectId: project.id,
+            groupId: project.groupId,
+            characterIds: visualCards.characterIds,
+          });
+        }
       }
       // generateInto / generate_into_scene already persist the locked prompt.
       // submit_generation already binds sceneRole / cards / looks / direction,
@@ -1646,6 +1659,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       sceneId,
       sceneRole,
       sourceUrl,
+      ...(sourceAssetId ? { sourceAssetId } : {}),
       ...(visualCards ? {
         characterIds: visualCards.characterIds,
         scenePresetIds: visualCards.scenePresetIds,
