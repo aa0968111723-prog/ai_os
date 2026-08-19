@@ -39,6 +39,7 @@ import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { refreshStudioShotList, studioShotListIsLoading } from "../../lib/studioShotList";
 import { mergeDuplicatedShotIntoList, runStudioDuplicateShot, runStudioInsertShot } from "../../lib/studioDuplicateShot";
+import { popShotUndo, preferShotUndoOverBoard, pushShotUndo, shotUndoMutation, type ShotUndoEntry } from "@shared/studioShotUndo";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -285,6 +286,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     },
   });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
+  const restoreShot = trpc.scenes.restore.useMutation({ onSuccess: invalidateScenes });
+  const shotUndoRef = useRef<ShotUndoEntry[]>([]);
+  const undoShotListRef = useRef<() => boolean>(() => false);
   const [shotActionError, setShotActionError] = useState<string | null>(null);
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created, variables) => {
@@ -332,6 +336,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         refresh: () => refreshStudioShotList(utils, projectIdRef.current),
       })
         .then((created) => {
+          if (created?.id) shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "create", sceneId: created.id });
           if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
         })
         .catch((err: unknown) => {
@@ -347,6 +352,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       refresh: () => refreshStudioShotList(utils, projectIdRef.current),
     })
       .then((created) => {
+        if (created?.id) shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "create", sceneId: created.id });
         if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
       })
       .catch((err: unknown) => {
@@ -362,6 +368,39 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   const insertBlankAfter = (sceneId: string) => {
     runShotInsert(sceneId, false);
   };
+  const deleteShot = (sceneId: string) => {
+    setShotActionError(null);
+    removeShot.mutate(
+      { sceneId },
+      {
+        onSuccess: () => {
+          shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "delete", sceneId });
+        },
+      },
+    );
+  };
+  const undoShotList = (): boolean => {
+    if (!preferShotUndoOverBoard(shotUndoRef.current)) return false;
+    const { next, entry } = popShotUndo(shotUndoRef.current);
+    if (!entry) return false;
+    shotUndoRef.current = next;
+    setShotActionError(null);
+    const requeue = () => {
+      shotUndoRef.current = pushShotUndo(shotUndoRef.current, entry);
+    };
+    const onError = (err: { message?: string }) => {
+      requeue();
+      setShotActionError(err.message || "復原分鏡失敗");
+    };
+    if (shotUndoMutation(entry) === "remove") {
+      // 還原複製／插入＝軟刪進回收桶，不是 purge。
+      removeShot.mutate({ sceneId: entry.sceneId }, { onError });
+    } else {
+      restoreShot.mutate({ sceneId: entry.sceneId }, { onError });
+    }
+    return true;
+  };
+  undoShotListRef.current = undoShotList;
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -430,7 +469,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       if (action === "exitImmersive" && !immersive) return;
       event.preventDefault();
       switch (action) {
-        case "undo": undo(); break;
+        case "undo":
+          if (undoShotListRef.current()) break;
+          undo();
+          break;
         case "redo": redo(); break;
         case "toggleImmersive": toggleImmersive(); break;
         case "exitImmersive": exitImmersive(); break;
@@ -725,7 +767,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onNewShot={createShot}
           onDuplicate={duplicateShot}
           onInsertAfter={insertBlankAfter}
-          onDelete={(id) => removeShot.mutate({ sceneId: id })}
+          onDelete={deleteShot}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />
       </div>

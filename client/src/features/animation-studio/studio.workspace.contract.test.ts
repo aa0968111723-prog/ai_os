@@ -275,6 +275,22 @@ describe("Inspector 不新增資料格式", () => {
     expect(studio).not.toContain("activeShotIdRef.current === variables.sceneId");
   });
 
+  it("Ctrl+Z 分鏡列 undo 只還原複製／插入／刪除，從回收桶還原而不是 purge", () => {
+    expect(studio).toContain("pushShotUndo");
+    expect(studio).toContain("popShotUndo");
+    expect(studio).toContain("preferShotUndoOverBoard");
+    expect(studio).toContain("trpc.scenes.restore");
+    expect(studio).toContain("shotUndoMutation");
+    expect(studio).toContain("const deleteShot = (sceneId: string)");
+    expect(studio).toContain("onDelete={deleteShot}");
+    expect(studio).toContain("kind: \"create\"");
+    expect(studio).toContain("kind: \"delete\"");
+    expect(studio).toContain("undoShotListRef.current()");
+    expect(studio).toContain("還原複製／插入＝軟刪進回收桶，不是 purge");
+    expect(studio).not.toContain("scenes.purge");
+    expect(studio).not.toContain("trpc.scenes.purge");
+  });
+
   it("late insertAfter/move ACK from project A does not invalidate or write into project B", () => {
     expect(studio).toContain("writeProjectId: created?.projectId");
     expect(studio).toContain("writeProjectId: result.projectId");
