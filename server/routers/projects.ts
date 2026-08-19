@@ -274,7 +274,7 @@ export const projectsRouter = router({
           userId: ctx.auth.user.id,
           modelId: "fal-ai/fast-lightning-sdxl",
           kind: "image",
-          prompt: "（範例）日系水彩、溫柔療癒調性：清晨禪堂前庭空景，柔和晨光斜射、地面薄霧，構圖大量留白。",
+          prompt: "（範例）日系水彩、溫柔療癒調性：淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光。",
           status: "done",
           pointsEst: 0,
           pointsActual: 0,
