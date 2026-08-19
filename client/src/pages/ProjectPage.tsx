@@ -71,7 +71,7 @@ import {
 import { consumeNestedReveal, peekStoryReveal, subscribeStoryReveal } from "../features/story-workspace/storyRevealQueue";
 import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
 import { ONE_CLICK_BATCH_KIND, revealAfterOneClick } from "../features/story-workspace/oneClickFilm";
-import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
+import { oneClickPrimaryLabel, shouldShowOneClickGenerateCta } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
 import { StoryContextStatusBlock } from "../features/story-workspace/StoryContextStatusBlock";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
@@ -1252,6 +1252,10 @@ export function ProjectPage({ id }: { id: string }) {
     isDirty: storyDirty || Boolean(storyMeta.data?.story?.isDirty),
   });
   const hasDeliverable = playableResultCount > 0;
+  const showGenerateCta = shouldShowOneClickGenerateCta({
+    sceneCount,
+    readinessKind: readiness.kind,
+  });
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
     id: string;
     title: string;
@@ -1852,26 +1856,26 @@ export function ProjectPage({ id }: { id: string }) {
             contextStatus={<StoryContextStatusBlock projectId={id} />}
             canEdit={canEdit}
             primaryLabel={
-              readiness.kind === "empty"
-                ? undefined
-                : oneClickPrimaryLabel({
+              showGenerateCta
+                ? oneClickPrimaryLabel({
                     pending: oneClick.pending,
                     hasBatch: Boolean(oneClick.result),
                     modelKind: ONE_CLICK_BATCH_KIND,
                     sceneCount,
                   })
+                : undefined
             }
-            primaryDisabled={oneClick.pending || readiness.kind === "empty" || sceneCount === 0}
+            primaryDisabled={oneClick.pending}
             error={oneClick.error}
             onPrimary={
-              readiness.kind === "empty"
-                ? undefined
-                : () => {
+              showGenerateCta
+                ? () => {
                     if (!window.confirm("會先儲存並解析故事、補齊缺少的分鏡，再建立批次生成計畫。估點後由你核准才扣點；已細修或已通過審核的鏡不會被覆蓋。開始？")) return;
                     void oneClick.run()
                       .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
                       .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
                   }
+                : undefined
             }
             latestLabel={
               oneClick.result

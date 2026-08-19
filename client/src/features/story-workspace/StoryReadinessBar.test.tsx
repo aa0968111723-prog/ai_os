@@ -39,18 +39,13 @@ describe("StoryReadinessBar", () => {
     expect(screen.getByRole("button", { name: "已完成 2 次生成" })).toBeInTheDocument();
   });
 
-  it("disables 0-shot CTA with title 先解析出分鏡", () => {
+  it("hides generate CTA on 0場0鏡 — no spendable no-op", () => {
     render(
       <StoryReadinessBar
         readiness={{ kind: "ready_for_board", label: "可產生分鏡", detail: "解析已完成。" }}
         canEdit
-        primaryLabel="先解析出分鏡"
-        primaryDisabled
-        onPrimary={vi.fn()}
       />,
     );
-    const cta = screen.getByRole("button", { name: "先解析出分鏡" });
-    expect(cta).toBeDisabled();
-    expect(cta).toHaveAttribute("title", "先解析出分鏡");
+    expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成/ })).not.toBeInTheDocument();
   });
 });

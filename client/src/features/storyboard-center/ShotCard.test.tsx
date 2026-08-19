@@ -10,6 +10,7 @@ import { ShotCard, type ShotRow } from "./ShotCard";
 const invalidate = vi.fn();
 const mutateUpdate = vi.fn();
 const mutateRemove = vi.fn();
+const mutateInsertAfter = vi.fn();
 const mutateInherit = vi.fn();
 const mutateSetVisual = vi.fn();
 const mutateConfirm = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("../../api", () => ({
     scenes: {
       update: { useMutation: () => ({ mutate: mutateUpdate, isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: mutateRemove, isPending: false, error: null }) },
+      insertAfter: { useMutation: () => ({ mutate: mutateInsertAfter, isPending: false, error: null }) },
       inheritFromPrevious: {
         useMutation: () => ({ mutate: mutateInherit, isPending: false, error: null, data: undefined }),
       },
@@ -190,6 +192,17 @@ describe("ShotCard progressive disclosure", () => {
     );
     expect(screen.getByText("專案素材裡名稱或標籤對得上的：")).toBeInTheDocument();
     expect(screen.getByText("安倢定裝")).toBeInTheDocument();
+  });
+
+  it("分鏡卡 row has 在這之後插入一鏡 (same insertAfter as studio ⋯, not FIFO ＋新增鏡)", async () => {
+    const user = userEvent.setup();
+    render(<ShotCard {...defaultProps} shot={baseShot()} />);
+    const insert = screen.getByRole("button", { name: "在第 1 鏡之後插入一鏡" });
+    expect(insert).toBeInTheDocument();
+    expect(insert).toHaveTextContent("在這之後插入一鏡");
+    await user.click(insert);
+    expect(mutateInsertAfter).toHaveBeenCalledWith({ sceneId: "shot-1" });
+    expect(mutateInsertAfter.mock.calls[0]?.[0]).not.toMatchObject({ duplicate: true });
   });
 
   it("文案區分帶入我的素材 vs 外部成果", async () => {

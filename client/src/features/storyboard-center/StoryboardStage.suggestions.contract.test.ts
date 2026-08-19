@@ -37,7 +37,11 @@ describe("Storyboard suggestion query consolidation", () => {
     expect(stage).toContain("insertAfter.mutate({ sceneId: focusShot.id })");
     expect(stage).toContain("新增鏡");
     expect(stage).toContain("在這之後插入一鏡");
+    expect(stage).toContain("onFocusShot={setAnchorShotId}");
     expect(stage).toContain("解析未完成也能依原文拆鏡");
+    expect(card).toContain("scenes.insertAfter.useMutation");
+    expect(card).toContain("insertAfter.mutate({ sceneId: shot.id })");
+    expect(card).toContain("在這之後插入一鏡");
   });
 
   it("does not add a visible-window second query (Phase E) on top of the project batch", () => {

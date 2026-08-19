@@ -106,6 +106,7 @@ export function StoryboardStage({
   const isEmpty = !shots.isLoading && shotRows.length === 0;
 
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchorShotId, setAnchorShotId] = useState<string | null>(null);
   const togglePick = useCallback((shotId: string) => {
     setPicked((prev) => {
       const next = new Set(prev);
@@ -113,6 +114,7 @@ export function StoryboardStage({
       else next.add(shotId);
       return next;
     });
+    setAnchorShotId(shotId);
   }, []);
   const liveShotIds = useMemo(() => new Set(shotRows.map((s) => s.id)), [shotRows]);
   useEffect(() => {
@@ -120,10 +122,13 @@ export function StoryboardStage({
       const kept = [...prev].filter((id) => liveShotIds.has(id));
       return kept.length === prev.size ? prev : new Set(kept);
     });
+    setAnchorShotId((prev) => (prev && liveShotIds.has(prev) ? prev : null));
   }, [liveShotIds]);
 
   const pickedIds = useMemo(() => [...picked], [picked]);
-  const focusShot = studioShot ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined);
+  const focusShot = studioShot
+    ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined)
+    ?? (anchorShotId ? shotRows.find((s) => s.id === anchorShotId) : undefined);
   const focusShotNo = focusShot ? shotNumber.get(focusShot.id) : undefined;
   const hasShotFocus = !!focusShot || pickedIds.length > 0;
   useEffect(() => {
@@ -169,8 +174,8 @@ export function StoryboardStage({
                 disabled={addShot.isPending || insertAfter.isPending}
                 title={
                   focusShot
-                    ? "插在勾選的那一鏡後面（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
-                    : "沒勾鏡時加在最後。要插在某一鏡後面：先勾那一鏡，或到動畫創作室用 ⋯"
+                    ? "插在選取的那一鏡後面（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
+                    : "沒選鏡時加在最後。每張分鏡卡也有「在這之後插入一鏡」。"
                 }
                 onClick={() => {
                   if (focusShot) insertAfter.mutate({ sceneId: focusShot.id });
@@ -214,7 +219,7 @@ export function StoryboardStage({
           ) : (
             <>
               <Hint style={{ margin: "4px 0 10px" }}>
-                勾一鏡再按「新增鏡」會插在那一鏡後面。動畫創作室時間軸 ⋯ 也有「在這之後插入一鏡」。沒勾時加在最後。
+                點一張分鏡卡或勾一鏡再按「新增鏡」會插在那一鏡後面。每張卡也有「在這之後插入一鏡」。沒選時加在最後。
               </Hint>
               {outdatedByShot.size > 0 && (
                 <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
@@ -240,7 +245,7 @@ export function StoryboardStage({
                       ) : (
                         <div className="board-shots">
                           {group.shots.map((shot) => (
-                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} onFocusShot={setAnchorShotId} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
                           ))}
                         </div>
                       )}

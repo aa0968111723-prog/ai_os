@@ -96,6 +96,7 @@ export function ShotCard({
   onOpenStudio,
   picked,
   onTogglePick,
+  onFocusShot,
   assetHints = [],
 }: {
   projectId: string;
@@ -113,6 +114,8 @@ export function ShotCard({
   /** 是否被勾選（多選交給 AI 助手一起處理）；未提供 onTogglePick 時整個勾選欄不渲染 */
   picked?: boolean;
   onTogglePick?: (sceneId: string) => void;
+  /** Clicking the card (not a control) marks it as the ＋新增鏡 insert-after anchor. */
+  onFocusShot?: (sceneId: string) => void;
   /**
    * 專業模式相關素材。由 StoryboardStage 一次批次載入後注入，
    * 卡片本身不再發 suggestion query。
@@ -152,6 +155,10 @@ export function ShotCard({
     });
   }
   const removeShot = trpc.scenes.remove.useMutation({
+    onSuccess: refreshBoard,
+  });
+  /** Same insertAfter as /studio ⋯「在這之後插入一鏡」— not FIFO ＋新增鏡. */
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: refreshBoard,
   });
   /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
@@ -311,6 +318,11 @@ export function ShotCard({
       data-fb="分鏡卡"
       data-picked={picked ? "1" : undefined}
       data-mode={mode}
+      onClick={onFocusShot ? (event: MouseEvent<HTMLElement>) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("button, input, a, label, textarea, select, summary")) return;
+        onFocusShot(shot.id);
+      } : undefined}
       onDragOver={canEdit ? onDragOverCard : undefined}
       onDragLeave={canEdit ? onDragLeaveCard : undefined}
       onDrop={canEdit ? onDropCard : undefined}
@@ -464,6 +476,19 @@ export function ShotCard({
           <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
             <Icon name="SlidersHorizontal" size={13} /> 單格工作室
           </Button>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              aria-label={`在第 ${shotNumber} 鏡之後插入一鏡`}
+              title="在這一鏡後面插入一格空的（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
+              disabled={insertAfter.isPending}
+              onClick={() => insertAfter.mutate({ sceneId: shot.id })}
+            >
+              <Icon name="Plus" size={13} /> 在這之後插入一鏡
+            </Button>
+          )}
           {canEdit && shotNumber > 1 && (
             <ConfirmButton
               triggerClassName="btn-sm btn-ghost"

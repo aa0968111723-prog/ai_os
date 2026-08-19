@@ -221,6 +221,19 @@ export function oneClickPrimaryLabel(opts: {
 }
 
 /**
+ * mobile-test 0場0鏡: a visible generate CTA is a spendable no-op.
+ * Hide it — do not show a disabled 「生成畫面／先解析出分鏡」.
+ */
+export function shouldShowOneClickGenerateCta(input: {
+  sceneCount: number;
+  readinessKind?: string;
+}): boolean {
+  if (input.sceneCount <= 0) return false;
+  if (input.readinessKind === "empty") return false;
+  return true;
+}
+
+/**
  * 單鏡的 video 成品不是整部片。
  * 只有明確標記為組裝成片／交付影片的資產才算「已有成片」。
  */

@@ -336,6 +336,8 @@ describe("one-click does not batch-generate on an empty board", () => {
     expect(oneClick).toContain("export function revealAfterOneClick");
     const page = readFileSync(join(process.cwd(), "client/src/pages/ProjectPage.tsx"), "utf8");
     expect(page).toContain("error={oneClick.error}");
+    expect(page).toContain("shouldShowOneClickGenerateCta");
+    expect(page).toContain("showGenerateCta");
     expect(page).toContain("revealAfterOneClick");
     expect(page).not.toMatch(/oneClick\.run\(\)[\s\S]{0,240}catch \(\(\) => \{\s*openInlineSection\("production"\);/);
     const bar = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryReadinessBar.tsx"), "utf8");
