@@ -1072,6 +1072,11 @@ export const scenesRouter = router({
         const prompt = await buildShotContextPrompt(scene, model);
         if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
         const cards = resolveSceneCards(scene, null);
+        const characterIds = await ensureXiaohuaCharacterIds(
+          scene.projectId,
+          cards.characterIds,
+          [scene.title, prompt, scene.action, scene.dialogue],
+        );
         const sourceAssetId = await resolveHonoredCharacterSheet({
           projectId: project.id,
           groupId: project.groupId,
@@ -1098,7 +1103,7 @@ export const scenesRouter = router({
           sceneNo: i + 1,
           modelId: model.id,
           prompt,
-          characterIds: cards.characterIds,
+          characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
           lookIds: scene.lookIds ?? undefined,

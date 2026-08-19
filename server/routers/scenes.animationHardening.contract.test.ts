@@ -555,6 +555,20 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("MCP / batch / animationPipeline bind 小華 card when the shot names her", () => {
+    expect(scenes).toContain("ensureXiaohuaCharacterIds");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("ensureXiaohuaCharacterIds");
+    expect(into).toContain("[scene.title, prompt, scene.action, scene.dialogue]");
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("ensureXiaohuaCharacterIds");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("ensureXiaohuaCharacterIds");
+    expect(stage).toContain("[shot.title, prompt, shot.action, shot.dialogue]");
+  });
+
   it("MCP generate_into_scene uses assertNoPendingVisual so a second send cannot double-charge", () => {
     expect(scenes).toContain('import { assertNoPendingVisual } from "../services/scenePendingVisual"');
     expect(scenes).not.toContain("async function assertNoPendingVisual");

@@ -61,6 +61,8 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("regenRejection(model)");
     expect(block).toContain('code: "BAD_REQUEST"');
     expect(block).toContain("assertNoPendingVisual(scene.id)");
+    expect(block).toContain("ensureXiaohuaCharacterIds");
+    expect(block).toContain("characterIds,");
     expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
     const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");
     expect(command).toContain("shouldReplayIdempotentGeneration(generation.status)");

@@ -14,6 +14,7 @@ import {
 } from "../../shared/animationPipeline";
 import { executeGenerationCommand } from "./generationCommand";
 import { buildShotContextPrompt } from "./shotContextPrompt";
+import { ensureXiaohuaCharacterIds } from "./cardAnchors";
 
 function evaluationRecommendation(
   result: typeof schema.generationConsistencyEvaluations.$inferSelect["result"] | null,
@@ -120,6 +121,11 @@ export async function executeAnimationGenerationStage(input: {
   }
   const prompt = input.prompt?.trim() || (await buildShotContextPrompt(shot, model)).trim();
   if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡還沒有生成提示詞" });
+  const characterIds = await ensureXiaohuaCharacterIds(
+    project.id,
+    shot.characterIds ?? undefined,
+    [shot.title, prompt, shot.action, shot.dialogue],
+  );
 
   const generation = await executeGenerationCommand({
     auth: input.auth,
@@ -130,7 +136,7 @@ export async function executeAnimationGenerationStage(input: {
     prompt,
     sceneId: shot.id,
     sourceAssetId: input.sourceAssetId,
-    characterIds: shot.characterIds ?? undefined,
+    characterIds,
     scenePresetIds: shot.scenePresetIds ?? undefined,
     propIds: shot.propIds ?? undefined,
     lookIds: shot.lookIds ?? undefined,
