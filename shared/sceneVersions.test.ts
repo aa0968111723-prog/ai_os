@@ -6,6 +6,7 @@ import {
   isSceneRefineModel,
   isSceneRegenModel,
   regenRejection,
+  sceneFillRole,
   sceneActionAppliesTo,
   sceneVisualPrompt,
   refineGroupOf,
@@ -236,6 +237,13 @@ describe("單格工作室的模型判斷", () => {
     expect(regen.length).toBeGreaterThan(0);
     expect(refine.length).toBeGreaterThan(0);
     expect(regen.some((m) => refine.includes(m))).toBe(false);
+  });
+
+  it("sceneFillRole routes TTS to narration and SFX to ambience, not visual", () => {
+    expect(sceneFillRole({ category: "text-to-image" })).toBe("visual");
+    expect(sceneFillRole({ category: "text-to-speech" })).toBe("narration");
+    expect(sceneFillRole({ category: "text-to-audio" })).toBe("ambience");
+    expect(sceneFillRole({ category: "llm" })).toBeNull();
   });
 
   it("regenRejection refuses audio/text and i2i, keeps text-to-image", () => {

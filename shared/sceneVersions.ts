@@ -21,6 +21,19 @@ import type { ModelEntry } from "./models";
 export type SceneVersionRole = "visual" | "narration" | "ambience";
 
 /**
+ * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面；旁白語音→旁白音檔；
+ * 音效／配樂（text-to-audio）→環境音。純文字仍是 null——綁了只會靜默落空。
+ * assistant / agentRunner 早已走這支。MCP submit_generation 曾略過，
+ * sceneNo + TTS 會被 generationCommand 當成 visual（sceneRole 預設畫面槽）。
+ */
+export function sceneFillRole(model: Pick<ModelEntry, "category">): SceneVersionRole | null {
+  if (model.category === "text-to-image" || model.category === "text-to-video") return "visual";
+  if (model.category === "text-to-speech") return "narration";
+  if (model.category === "text-to-audio") return "ambience";
+  return null;
+}
+
+/**
  * 版本在使用者眼中的狀態。與 `AssetVersionStatus`（candidate/selected/superseded/rejected）
  * 同一概念，但多帶「生成中／待審／失敗」——因為這裡直接投影生成紀錄，未完成的嘗試也要看得到。
  */

@@ -33,7 +33,9 @@ import {
   slicePersistedStoryContent,
 } from "../../shared/assistantProjectStoryContext";
 import { mcpToolAnnotations } from "../../shared/mcpCatalog";
-import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
+import { MODELS, CATEGORIES, getModel, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
+import { sceneFillRole } from "../../shared/sceneVersions";
+import { resolveSceneCards } from "../../shared/sceneCards";
 import { getModelContract, loadModelContractSnapshot } from "./modelContractStore";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
@@ -1592,17 +1594,34 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const userPrompt = String(args.prompt ?? "").trim();
     if (!userPrompt) throw new Error("prompt 不可為空");
     const sourceUrl = args.source_url ? String(args.source_url) : undefined;
+    const modelId = String(args.modelId ?? "");
+    const model = getModel(modelId);
     let sceneId: string | undefined;
+    let sceneRole: "visual" | "narration" | "ambience" | undefined;
+    let visualCards: ReturnType<typeof resolveSceneCards> | undefined;
+    let lookIds: string[] | undefined;
+    let shotDirection: { camera: typeof schema.scenes.$inferSelect["camera"]; performance: typeof schema.scenes.$inferSelect["performance"]; action: string | null } | undefined;
     if (args.sceneNo !== undefined && args.sceneNo !== null && args.sceneNo !== "") {
       const sceneNo = Number(args.sceneNo);
       const shots = await db
-        .select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })
+        .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
       const shot = findSceneByDisplayNo(shots, sceneNo);
       if (!shot) throw new Error(`找不到第 ${sceneNo} 鏡——該案目前共 ${shots.length} 個分鏡`);
       sceneId = shot.id;
+      const fill = model ? sceneFillRole(model) : null;
+      const visual = fill === "visual" || (!fill && Boolean(model && (model.kind === "image" || model.kind === "video")));
+      if (model && fill === null && !visual) {
+        throw new Error(`「${model.label}」的成品是文字，不會填入分鏡，只會進生成紀錄／素材庫——請改用圖像／影片／旁白語音／音效模型，或不要帶 sceneNo`);
+      }
+      sceneRole = fill ?? (visual ? "visual" : undefined);
+      if (visual) {
+        visualCards = resolveSceneCards(shot, null);
+        lookIds = shot.lookIds ?? undefined;
+        shotDirection = { camera: shot.camera, performance: shot.performance, action: shot.action };
+      }
     }
     // TD-02：MCP 與網頁端同一 Command（政策／狀態機／ACL／扣點／門檻）
     // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他。
@@ -1612,10 +1631,18 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       // 修 R6-MONEY-01：客戶端冪等鍵——逾時重送同鍵回既有列、不雙重扣點
       id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       projectId: project.id,
-      modelId: String(args.modelId ?? ""),
+      modelId,
       prompt: userPrompt,
       sceneId,
+      sceneRole,
       sourceUrl,
+      ...(visualCards ? {
+        characterIds: visualCards.characterIds,
+        scenePresetIds: visualCards.scenePresetIds,
+        propIds: visualCards.propIds,
+        lookIds,
+        shotDirection,
+      } : {}),
       reasonPrefix: "MCP 生成",
     });
     // 待核准（達門檻的組員）與已送出兩種終局都據實回報，讓外部客戶端知道要等組長核准

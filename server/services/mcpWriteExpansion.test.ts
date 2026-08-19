@@ -47,6 +47,12 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("findSceneByDisplayNo");
     expect(block).toContain("sceneId");
     expect(block).toContain("args.sceneNo");
+    expect(block).toContain("sceneFillRole");
+    expect(block).toContain("resolveSceneCards(shot, null)");
+    expect(block).toContain("lookIds: shot.lookIds ?? undefined");
+    expect(block).toContain("shotDirection");
+    expect(block).toContain("sceneRole");
+    expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
     expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
   });
 

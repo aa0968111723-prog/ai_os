@@ -555,6 +555,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("MCP submit_generation sceneNo sets sceneRole and visual shot bindings", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("sceneFillRole");
+    expect(block).toContain("resolveSceneCards(shot, null)");
+    expect(block).toContain("lookIds: shot.lookIds ?? undefined");
+    expect(block).toContain("shotDirection: { camera: shot.camera, performance: shot.performance, action: shot.action }");
+    expect(block).toContain("sceneRole");
+    expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
+  });
+
   it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {
     const start = assistant.indexOf('if (a.type === "generate")');
     const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));

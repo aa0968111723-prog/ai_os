@@ -180,21 +180,7 @@ export function pickGenerateModel(proposedId?: string): ModelEntry {
     requireVerified: true,
   }).model;
 }
-/**
- * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面 assetId；旁白語音→旁白音檔 narrationAssetId；
- * 音效／配樂（text-to-audio）→環境音 ambienceAssetId。
- *
- * text-to-audio 以前回 null——那時候環境音沒有欄位，綁分鏡只會覆蓋旁白槽，擋下來是對的。
- * 0038 之後它有自己的槽了，繼續擋等於讓助手做不到使用者明明可以在單格工作室做的事。
- *
- * 純文字（llm）仍是 null：文字成品沒有任何分鏡格可填，綁了只會靜默落空。
- */
-export function sceneFillRole(model: ModelEntry): "visual" | "narration" | "ambience" | null {
-  if (model.category === "text-to-image" || model.category === "text-to-video") return "visual";
-  if (model.category === "text-to-speech") return "narration";
-  if (model.category === "text-to-audio") return "ambience";
-  return null;
-}
+export { sceneFillRole } from "../../shared/sceneVersions";
 /** 提示詞用「可用工作流速查」：LLM 只能從這裡挑 presetId（resolve／startWorkflowCore 都會再過 getWorkflow 白名單） */
 const WORKFLOW_CHEATSHEET = WORKFLOW_PRESETS.map((w) => `- ${w.id}｜${w.label}｜約 ${w.points} 點｜${w.bestFor}`).join("\n");
 
