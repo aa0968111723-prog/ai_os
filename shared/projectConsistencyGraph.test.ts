@@ -3,6 +3,7 @@ import {
   buildConsistencyScorecard,
   compactWorkspaceStatus,
   nextWorkspaceAction,
+  scorecardNeedsSetupCta,
   visualCoverageScore,
 } from "./projectConsistencyGraph";
 import { inheritContinuityState, referenceRoleConflicts } from "./shotContextPacket";
@@ -141,5 +142,25 @@ describe("consistency scorecard (closure §11)", () => {
   it("multi-character shots surface as capability downgrade, not a fake OK", () => {
     const rows = buildConsistencyScorecard({ ...empty, multiCharacterShotIds: ["sh9"] });
     expect(rows.find((row) => row.status === "capability_downgrade")?.affectedShotIds).toEqual(["sh9"]);
+  });
+
+  it("unpinned style/sound_world are project-level setup, not 修復 N 鏡", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      styleCanonPinned: false,
+      soundWorldPinned: false,
+    });
+    const style = rows.find((row) => row.dimension === "style");
+    const sound = rows.find((row) => row.dimension === "sound_world");
+    expect(style?.affectedShotIds).toEqual([]);
+    expect(sound?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsSetupCta(style!)).toBe(true);
+    expect(scorecardNeedsSetupCta(sound!)).toBe(true);
+    expect(scorecardNeedsSetupCta({
+      dimension: "voice",
+      status: "warning",
+      affectedShotIds: [],
+      reason: "1 位有台詞的角色還沒綁定聲線",
+    })).toBe(false);
   });
 });

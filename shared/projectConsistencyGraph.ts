@@ -119,6 +119,16 @@ export interface ScorecardRow {
 }
 
 /**
+ * 風格／聲音世界未 pin 是專案級訊號（affectedShotIds 空）——
+ * 不能走「修復 N 鏡」，要先固定設定。語音「還沒綁定聲線」是另一扇門。
+ */
+export function scorecardNeedsSetupCta(row: ScorecardRow): boolean {
+  return row.status === "warning"
+    && row.affectedShotIds.length === 0
+    && (row.dimension === "style" || row.dimension === "sound_world");
+}
+
+/**
  * 純建構器：所有輸入都是 server 已載入的既有 records 推導值。
  * 規則：每維度最多一列最重狀態（blocker > unresolved > stale > capability_downgrade > warning > ok）；
  * ok 的維度不出列（第一層只講需要人看的事）。

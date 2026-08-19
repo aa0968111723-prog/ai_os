@@ -10384,6 +10384,16 @@ body.story-immersive { overflow: hidden; }
 .story-scorecard__row .chip[data-status="unresolved"] { border-color: var(--warn, #b8860b); }
 .story-scorecard__reason { min-width: 0; }
 .story-scorecard__row button { min-height: 44px; }
+.story-scorecard__ambience {
+  min-height: 44px;
+  min-width: 16rem;
+  flex: 1 1 12rem;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font: inherit;
+}
 .story-scorecard__hint { margin: 2px 0 0; }
 
 .animation-board { margin-top: 12px; display: grid; gap: 10px; }
