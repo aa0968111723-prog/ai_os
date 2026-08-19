@@ -95,6 +95,11 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("shotIdFromPageContext");
     expect(assistant).toContain("shotId: shotIdFromPageContext(input.pageContext)");
     expect(assistant).toContain("assistantAskCompletionChip");
+    expect(assistant).toContain("runFailed: true");
+    expect(assistant).toContain("roundAcquiredSourcesDescription");
+    expect(assistant).not.toContain("已取得：");
+    expect(assistant).toContain("!storyReadAsk && knowledgeCtx");
+    expect(assistant).toContain("!storyReadAsk && databaseEvidence.length");
     expect(assistant).toContain("userMessage: input.message");
     expect(assistant).toContain("allowPaidFallback");
     expect(assistant).toContain("assertFreeOnlyCompletion");

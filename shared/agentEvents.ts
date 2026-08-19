@@ -303,6 +303,13 @@ export function formatResultSummary(summary: AgentResultSummary | undefined): st
  * 工作過程就不再長得一模一樣。只取第一個句子、截到 18 字，避免長問題
  * 把整條軌跡撐爆。
  */
+/** Mid-run only — never 「已取得來源」 (that reads as a completed-inventory chip). */
+export function roundAcquiredSourcesDescription(names: readonly string[]): string | undefined {
+  if (!names.length) return undefined;
+  const shown = names.slice(0, 5);
+  return `讀取中：${shown.join("、")}${names.length > 5 ? ` 等 ${names.length} 項` : ""}`;
+}
+
 export function roundThinkingTitle(round: number, message: string): string {
   const label = queryGoalLabel(message);
   return round === 0

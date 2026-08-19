@@ -64,6 +64,8 @@ export interface AssistantAskSettlement {
   cannotVerify: boolean;
   /** User asked to write, but this turn has no verified write. */
   unverifiedWriteIntent: boolean;
+  /** Model timed out / emptied / threw — never a completed-inventory chip. */
+  runFailed: boolean;
 }
 
 /**
@@ -76,11 +78,24 @@ export function settleAssistantAskCompletion(input: {
   actions: readonly unknown[];
   userMessage?: string;
   hasVerifiedWrite?: boolean;
+  /** NIM timeout / empty / thrown — answer may be a story fallback; chip must not say 已完成盤點. */
+  runFailed?: boolean;
 }): AssistantAskSettlement {
   const pendingActions = input.actions.length > 0;
   const claimed = claimsCompletedWrite(input.answer);
   const cannotVerify = claimsInabilityToCheck(input.answer);
   const unverifiedWriteIntent = userAskedForWrite(input.userMessage ?? "") && !input.hasVerifiedWrite;
+  const runFailed = input.runFailed === true;
+  if (runFailed) {
+    return {
+      answer: claimed ? rewriteCompletedTenseToProposal(input.answer) : input.answer,
+      emitCompleted: false,
+      claimedUnexecutedWrite: claimed,
+      cannotVerify,
+      unverifiedWriteIntent,
+      runFailed: true,
+    };
+  }
   if (pendingActions) {
     return {
       answer: claimed ? rewriteCompletedTenseToProposal(input.answer) : input.answer,
@@ -88,6 +103,7 @@ export function settleAssistantAskCompletion(input: {
       claimedUnexecutedWrite: claimed,
       cannotVerify,
       unverifiedWriteIntent,
+      runFailed: false,
     };
   }
   if (claimed) {
@@ -97,6 +113,7 @@ export function settleAssistantAskCompletion(input: {
       claimedUnexecutedWrite: true,
       cannotVerify,
       unverifiedWriteIntent,
+      runFailed: false,
     };
   }
   if (cannotVerify) {
@@ -106,6 +123,7 @@ export function settleAssistantAskCompletion(input: {
       claimedUnexecutedWrite: false,
       cannotVerify: true,
       unverifiedWriteIntent,
+      runFailed: false,
     };
   }
   if (unverifiedWriteIntent) {
@@ -115,6 +133,7 @@ export function settleAssistantAskCompletion(input: {
       claimedUnexecutedWrite: false,
       cannotVerify: false,
       unverifiedWriteIntent: true,
+      runFailed: false,
     };
   }
   return {
@@ -123,7 +142,14 @@ export function settleAssistantAskCompletion(input: {
     claimedUnexecutedWrite: false,
     cannotVerify: false,
     unverifiedWriteIntent: false,
+    runFailed: false,
   };
+}
+
+const COMPLETED_INVENTORY_CHIP_RE = /已完成盤點|已取得來源|已讀取\s*\d+\s*個來源|Aios 已完成/;
+
+export function isCompletedInventoryChipTitle(title: string): boolean {
+  return COMPLETED_INVENTORY_CHIP_RE.test(title);
 }
 
 export function assistantAskCompletionChip(input: {
@@ -132,12 +158,22 @@ export function assistantAskCompletionChip(input: {
   okSourceCount: number;
   okSourceItems: number;
 }): {
-  type: "agent.completed" | "waiting.user_input";
+  type: "agent.completed" | "waiting.user_input" | "agent.failed";
   title: string;
   description?: string;
-  status: "ok" | "waiting";
+  status: "ok" | "waiting" | "failed";
   resultCount?: number;
 } {
+  if (input.settled.runFailed) {
+    return {
+      type: "agent.failed",
+      title: "模型未完成",
+      description: input.okSourceCount
+        ? "有讀到本專案稿，但模型沒有寫完。若有摘要，是依本專案故事的備援"
+        : "這次沒有完成，專案資料沒有變更",
+      status: "failed",
+    };
+  }
   if (input.actionCount > 0) {
     return {
       type: "waiting.user_input",

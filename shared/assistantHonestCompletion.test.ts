@@ -6,6 +6,7 @@ import {
   claimsCompletedWrite,
   claimsInabilityToCheck,
   formatAssistantWriteResult,
+  isCompletedInventoryChipTitle,
   rewriteCompletedTenseToProposal,
   settleAssistantAskCompletion,
   userAskedForWrite,
@@ -144,6 +145,28 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.type).toBe("waiting.user_input");
     expect(chip.title).toBe("尚未寫入，請確認");
     expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
+  });
+
+  it("failed or empty NIM run never paints a completed-inventory chip", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "小華在校門口自我介紹。角色：小華、禪定龜龜。",
+      actions: [],
+      userMessage: "請讀已存故事，兩句摘要小華在講什麼並列出角色名",
+      runFailed: true,
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.runFailed).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 8,
+    });
+    expect(chip.type).toBe("agent.failed");
+    expect(chip.title).toBe("模型未完成");
+    expect(isCompletedInventoryChipTitle(chip.title)).toBe(false);
+    expect(chip.title).not.toMatch(/已完成盤點|已取得來源|已讀取/);
+    expect(chip.description).not.toMatch(/已完成盤點|已取得來源/);
   });
 
   it("chip titles never emit 已完成盤點", () => {

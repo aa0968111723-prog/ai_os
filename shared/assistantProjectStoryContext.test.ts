@@ -75,6 +75,7 @@ describe("assistant persisted story context", () => {
       characterNames: ["小華", "禪定龜龜"],
     });
     expect(locked).not.toContain("已完成盤點");
+    expect(locked).not.toContain("已讀取本專案故事");
     expect(locked).toContain("她的故事");
     expect(locked).not.toMatch(/講述他的故事/);
     expect(locked).not.toContain("疲憊");

@@ -142,7 +142,7 @@ export function lockAssistantStoryAnswer(input: {
   storyContent?: string | null;
   characterNames?: readonly string[];
 }): string {
-  let answer = (input.answer ?? "").replace(/已完成盤點/g, "已讀取本專案故事");
+  let answer = (input.answer ?? "").replace(/已完成盤點/g, "");
   answer = stripForeignStoryBleed(answer, input.storyContent);
   const hasXiaohua =
     /小華/.test(input.storyContent ?? "")

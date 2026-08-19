@@ -5,6 +5,7 @@ import {
   formatResultSummary,
   isAgentEvent,
   queryGoalLabel,
+  roundAcquiredSourcesDescription,
   roundThinkingTitle,
   summarizeAgentEvents,
   type AgentEvent,
@@ -135,6 +136,14 @@ describe("roundThinkingTitle（#669 U7：不同查詢要有不同工作過程標
     expect(queryGoalLabel("   ")).toBe("你的請求");
     expect(queryGoalLabel("？")).toBe("？");
     expect(roundThinkingTitle(0, "")).toBe("整理「你的請求」相關資料");
+  });
+});
+
+describe("roundAcquiredSourcesDescription", () => {
+  it("mid-run copy is 讀取中, never 已取得來源", () => {
+    expect(roundAcquiredSourcesDescription(["專案全貌", "分鏡"])).toBe("讀取中：專案全貌、分鏡");
+    expect(roundAcquiredSourcesDescription([])).toBeUndefined();
+    expect(roundAcquiredSourcesDescription(["專案全貌", "分鏡"])).not.toMatch(/已取得/);
   });
 });
 

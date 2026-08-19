@@ -25,7 +25,7 @@ import {
   type TeamAskContext,
 } from "./teamAssistant";
 import { loadPersistedStoryForAssistant } from "../services/assistantProjectStory";
-import { formatTeamInventoryStoryFlag } from "../../shared/assistantProjectStoryContext";
+import { formatTeamInventoryStoryFlag, isEmptyFreeOnlyTimeoutAnswer } from "../../shared/assistantProjectStoryContext";
 import {
   addCharacterConfirmLabel,
   dropMisroutedCharacterDatabaseActions,
@@ -91,7 +91,7 @@ import {
 } from "../services/rateLimit";
 import { AgentEventStream } from "../services/agentEventStream";
 import type { AgentEvent, AgentResultSummary, AgentSourceRecord } from "../../shared/agentEvents";
-import { roundThinkingTitle } from "../../shared/agentEvents";
+import { roundAcquiredSourcesDescription, roundThinkingTitle } from "../../shared/agentEvents";
 import {
   formatRecentActionResults,
   type AssistantActionResult,
@@ -1920,9 +1920,7 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         stream.emit({
           type: "agent.thinking",
           title: roundThinkingTitle(round, input.message),
-          description: acquired.length
-            ? `已取得：${acquired.slice(0, 5).map((s) => s.name).join("、")}${acquired.length > 5 ? ` 等 ${acquired.length} 項` : ""}`
-            : undefined,
+          description: roundAcquiredSourcesDescription(acquired.map((s) => s.name)),
           resultCount: acquired.length,
           metadata: { round: round + 1 },
         });
@@ -2043,16 +2041,25 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
     // 收尾事件必須在 withTrace 之前發：快照是「回傳當下的事件流」，
     // 晚一步發出的完成事件就永遠不會出現在使用者的軌跡裡。
     const okSources = stream.snapshotSources().filter((s) => s.status === "ok");
-    emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
-      completedTitle: okSources.length ? `已讀取 ${okSources.length} 個來源` : "已回答（沒有讀取站內資料）",
-      completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
-      resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
-      resultSummary: [
-        { label: "來源", value: okSources.length },
-        { label: "查詢", value: outcome.steps.length, unit: "次" },
-        ...(verifiedExecuted.length ? [{ label: "已完成動作", value: verifiedExecuted.length, unit: "件" }] : []),
-      ],
-    }, { requiresVerifiedWrite });
+    if (isEmptyFreeOnlyTimeoutAnswer(reply.answer)) {
+      stream.emit({
+        type: "agent.failed",
+        title: "模型未完成",
+        description: "這次沒有寫完，專案資料沒有變更",
+        status: "failed",
+      });
+    } else {
+      emitExecutionTerminalEvent(stream, pendingConfirmation, direct.executed, {
+        completedTitle: okSources.length ? `已讀取 ${okSources.length} 個來源` : "已回答（沒有讀取站內資料）",
+        completedDescription: okSources.length ? `依據 ${okSources.length} 個來源` : undefined,
+        resultCount: okSources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0),
+        resultSummary: [
+          { label: "來源", value: okSources.length },
+          { label: "查詢", value: outcome.steps.length, unit: "次" },
+          ...(verifiedExecuted.length ? [{ label: "已完成動作", value: verifiedExecuted.length, unit: "件" }] : []),
+        ],
+      }, { requiresVerifiedWrite });
+    }
     const result: GlobalAskResult = withTrace({
       answer: answerWithVerifiedActions(
         lockAddCharacterAnswer(
