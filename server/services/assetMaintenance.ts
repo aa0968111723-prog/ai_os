@@ -13,7 +13,7 @@ import path from "node:path";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { absPathOf, openStoredReadStream, putStoredBuffer, readStoredFile, storageBackend } from "./storage";
-import { sweepUnlandedAssets } from "./generationCore";
+import { sweepUnlandedAssets, unlandedPersistWhere } from "./generationCore";
 import { isShuttingDown } from "./shutdown";
 
 export type AssetMaintenanceWork = {
@@ -59,13 +59,7 @@ export async function countMaintenanceQueues(): Promise<AssetMaintenanceWork["qu
   const [unlandedRow] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.assets)
-    .where(
-      and(
-        eq(schema.assets.isAiGenerated, true),
-        isNull(schema.assets.storagePath),
-        sql`${schema.assets.url} like 'http%'`,
-      ),
-    );
+    .where(unlandedPersistWhere());
   const [shaRow] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.assets)

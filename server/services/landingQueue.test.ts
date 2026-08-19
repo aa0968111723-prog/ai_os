@@ -1,28 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Minimal unit coverage for the landing / sweep path that the asset-durability
-// feature relies on. Full integration lives in generationCore + storage tests.
+import { describe, it, expect } from "vitest";
+import { isLandAttemptDue, landingBackoffSeconds } from "./generationCore";
 
 describe("landing queue helpers (asset-durability)", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("documents the expected land_state machine", () => {
-    // landed | pending | failed | structural_fail
     const states = ["landed", "pending", "failed", "structural_fail"] as const;
     expect(states).toContain("pending");
     expect(states).toContain("landed");
   });
 
-  it("backoff grows with attempts (smoke)", () => {
-    // The real implementation lives in generationCore; this just guards the
-    // contract the rest of the system assumes.
-    const backoffSeconds = (attempts: number) =>
-      Math.min(3600 * 6, Math.pow(2, Math.min(attempts, 10)) * 30);
-    expect(backoffSeconds(0)).toBe(30);
-    expect(backoffSeconds(1)).toBe(60);
-    expect(backoffSeconds(5)).toBeGreaterThan(backoffSeconds(2));
-    expect(backoffSeconds(20)).toBe(3600 * 6);
+  it("backoff grows with attempts (lives in generationCore sweep)", () => {
+    expect(landingBackoffSeconds(0)).toBe(30);
+    expect(landingBackoffSeconds(1)).toBe(60);
+    expect(landingBackoffSeconds(5)).toBeGreaterThan(landingBackoffSeconds(2));
+    expect(landingBackoffSeconds(20)).toBe(3600 * 6);
+    expect(isLandAttemptDue(null)).toBe(true);
+    expect(isLandAttemptDue(new Date(Date.now() + 60_000))).toBe(false);
   });
 });

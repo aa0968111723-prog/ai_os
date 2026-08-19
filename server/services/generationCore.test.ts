@@ -10,6 +10,8 @@ import {
   humanizeGenerationError,
   isUnusableRealModeSourceUrl,
   unlandedPersistSource,
+  landingBackoffSeconds,
+  isLandAttemptDue,
 } from "./generationCore";
 import { MODELS, getModel, type ModelEntry } from "../../shared/models";
 import {
@@ -152,6 +154,24 @@ describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
     const audit = readFileSync(new URL("./storageAudit.ts", import.meta.url), "utf8");
     expect(audit).toContain("unlandedPersistSource(row)");
     expect(audit).not.toContain("row.originUrl || row.url");
+  });
+
+  it("sweep backs off dead fal URLs so newer generateInto rows are not starved", () => {
+    expect(landingBackoffSeconds(0)).toBe(30);
+    expect(landingBackoffSeconds(1)).toBe(60);
+    expect(landingBackoffSeconds(5)).toBeGreaterThan(landingBackoffSeconds(2));
+    expect(landingBackoffSeconds(20)).toBe(3600 * 6);
+    expect(isLandAttemptDue(null)).toBe(true);
+    expect(isLandAttemptDue(new Date(Date.now() + 60_000))).toBe(false);
+    expect(isLandAttemptDue(new Date(Date.now() - 1_000))).toBe(true);
+    const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+    expect(source).toContain("markLandAttemptFailed");
+    expect(source).toContain("landingBackoffSeconds");
+    expect(source).toContain("unlandedPersistWhere");
+    expect(source).toContain("orderBy(desc(schema.assets.createdAt))");
+    const maint = readFileSync(new URL("./assetMaintenance.ts", import.meta.url), "utf8");
+    expect(maint).toContain("unlandedPersistWhere()");
+    expect(maint).not.toContain("assets.url} like 'http%'");
   });
 });
 

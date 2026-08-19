@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, isGeminiModel, generationProviderOf, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -127,6 +127,33 @@ export function unlandedPersistSource(asset: {
   const url = (asset.url ?? "").trim();
   if (/^https?:\/\//i.test(url)) return url;
   return null;
+}
+
+/** Same where as sweep: url-or-originUrl http, so rewritten local url is still counted. */
+export function unlandedPersistWhere() {
+  return and(
+    eq(schema.assets.isAiGenerated, true),
+    isNull(schema.assets.storagePath),
+    or(like(schema.assets.url, "http%"), like(schema.assets.originUrl, "http%")),
+  );
+}
+
+/**
+ * landingQueue.test.ts documents this contract. Sweep used to `continue`
+ * on persistRemote null without bumping landNextTryAt, so 20 dead fal
+ * URLs starved newer generateInto rows forever.
+ */
+export function landingBackoffSeconds(attempts: number): number {
+  return Math.min(3600 * 6, 2 ** Math.min(Math.max(0, attempts), 10) * 30);
+}
+
+export function isLandAttemptDue(
+  nextTryAt: Date | string | null | undefined,
+  now = new Date(),
+): boolean {
+  if (nextTryAt == null) return true;
+  const at = nextTryAt instanceof Date ? nextTryAt : new Date(nextTryAt);
+  return !Number.isNaN(at.getTime()) && at.getTime() <= now.getTime();
 }
 
 /** 注入結果：正向提示詞＋（視覺類別的）負向提示詞。 */
@@ -1595,7 +1622,21 @@ export async function enqueueLanding(assetId: string): Promise<boolean> {
  * 由 generationRunner 的 sweep tick 定期呼叫。冪等：已落地的（storagePath 非空）撈不到；
  * 假模式的 /api/mock-asset/* 佔位網址略過（不需落地、也避免 e2e 期間改動 mock 素材）。
  */
+async function markLandAttemptFailed(asset: { id: string; landAttempts: number }, error: string): Promise<void> {
+  const now = new Date();
+  await db
+    .update(schema.assets)
+    .set({
+      landAttempts: sql`${schema.assets.landAttempts} + 1`,
+      landLastError: error.slice(0, 500),
+      landLastTriedAt: now,
+      landNextTryAt: new Date(now.getTime() + landingBackoffSeconds(asset.landAttempts) * 1000),
+    })
+    .where(eq(schema.assets.id, asset.id));
+}
+
 export async function sweepUnlandedAssets(limit = 20): Promise<number> {
+  const now = new Date();
   const rows = await db
     .select()
     .from(schema.assets)
@@ -1603,10 +1644,10 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
     // 丟回收桶→fal 短效網址過期→還原」的素材變永久死連結，回收桶「可救回」承諾落空。未落地時素材唯一來源就是
     // 外部 url，還原時必須有 Volume 檔可用。落地本身冪等（已落地的 storagePath 非空撈不到），對回收桶素材無副作用。
     .where(and(
-      eq(schema.assets.isAiGenerated, true),
-      isNull(schema.assets.storagePath),
-      or(like(schema.assets.url, "http%"), like(schema.assets.originUrl, "http%")),
+      unlandedPersistWhere(),
+      or(isNull(schema.assets.landNextTryAt), lte(schema.assets.landNextTryAt, now)),
     ))
+    .orderBy(desc(schema.assets.createdAt))
     .limit(limit);
   let landed = 0;
   for (const asset of rows) {
@@ -1614,7 +1655,10 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
     if (!source || source.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
     try {
       const persisted = await persistRemote(source);
-      if (!persisted) continue; // fal 網址已死/抓取失敗 → 下輪再試（或已無源，無害，不擋）
+      if (!persisted) {
+        await markLandAttemptFailed(asset, "persistRemote 回空（來源已死或抓取失敗）");
+        continue;
+      }
       const localUrl = `/api/assets/${asset.id}/file`;
       await db
         .update(schema.assets)
@@ -1635,7 +1679,9 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
       landed += 1;
       console.log(`[storage] 落地補抓成功：asset=${asset.id}（${persisted.sizeBytes}B ${persisted.mime}）`);
     } catch (err) {
-      console.warn(`[storage] 落地補抓略過（下輪再試）：asset=${asset.id}`, err instanceof Error ? err.message : err);
+      const message = err instanceof Error ? err.message : String(err);
+      await markLandAttemptFailed(asset, message).catch(() => undefined);
+      console.warn(`[storage] 落地補抓略過（下輪再試）：asset=${asset.id}`, message);
     }
   }
   return landed;

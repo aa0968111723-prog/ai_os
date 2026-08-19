@@ -452,6 +452,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(genCore).toContain("persistGenerationResult");
     expect(genCore).toContain("originUrl: remoteUrl");
     expect(genCore).toContain("const source = unlandedPersistSource(asset)");
+    expect(genCore).toContain("landingBackoffSeconds");
+    expect(genCore).toContain("markLandAttemptFailed");
+    expect(genCore).toContain("unlandedPersistWhere");
     const storageAudit = readFileSync(join(process.cwd(), "server/services/storageAudit.ts"), "utf8");
     expect(storageAudit).toContain("unlandedPersistSource(row)");
     expect(adopt).toContain("scheduleReconcileAfterVisualAdopt");
