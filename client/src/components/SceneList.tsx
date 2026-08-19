@@ -5,11 +5,13 @@ import { sceneListRefetchIntervalMs } from "../lib/sceneListPoll";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { pendingAdoptGenerationId } from "@shared/sceneAdopt";
+import { shouldRotateGenerateIntoRequestId } from "@shared/generationIdempotency";
 import { ScenePromptPreview } from "./ScenePromptPreview";
 import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
 import { formatPropDisplayName } from "@shared/propOwnership";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
@@ -404,6 +406,7 @@ const SceneRow = memo(function SceneRow({
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
 }) {
+  const utils = trpc.useUtils();
   const openThisStudio = () => onOpenStudio(s.id, i + 1);
   // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
@@ -457,7 +460,18 @@ const SceneRow = memo(function SceneRow({
   // 冪等鍵（QA-007）：同一格「還沒成功」的生成重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const genRequestId = useRef<string>(crypto.randomUUID());
   const generate = trpc.scenes.generateInto.useMutation({
-    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+    onSuccess: () => {
+      genRequestId.current = crypto.randomUUID();
+      invalidate();
+      // Server already discarded leftover 0/N; HUD cache stays until this
+      // refetch (or the 30s poll). GenerationList retry already does this.
+      void utils.teamAssistant.agentOverview.invalidate();
+    },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        genRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   const adopt = trpc.creativeContext.adoptGeneration.useMutation({
     onSuccess: () => { invalidate(); },
@@ -589,7 +603,7 @@ const SceneRow = memo(function SceneRow({
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
             maxLength={60}
-            onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v), expectedRev: s.rev, baseline: { title: s.title } })}
+            onCommit={(v) => saveFields({ title: String(v) })}
             style={{ flex: 1, minWidth: 0 }}
           />
         </div>
@@ -600,7 +614,7 @@ const SceneRow = memo(function SceneRow({
               kind="number"
               pending={update.isPending || !canEdit}
               ariaLabel={`第 ${i + 1} 鏡秒數`}
-              onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v), expectedRev: s.rev, baseline: { durationSec: s.durationSec } })}
+              onCommit={(v) => saveFields({ durationSec: Number(v) })}
               style={{ width: 56, textAlign: "center" }}
             />
             秒
@@ -612,7 +626,7 @@ const SceneRow = memo(function SceneRow({
               scene={s}
               index={i}
               disabled={update.isPending || !canEdit}
-              onCommit={(patch) => update.mutate({ sceneId: s.id, ...patch, expectedRev: s.rev, baseline: { trimStartMs: s.trimStartMs ?? null, trimEndMs: s.trimEndMs ?? null } })}
+              onCommit={(patch) => saveFields(patch)}
             />
           )}
           {isGenerating && <Pill status="running">生成中…</Pill>}
@@ -816,13 +830,13 @@ const SceneRow = memo(function SceneRow({
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
           <button
-            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px" }}
             aria-busy={insertAfter.isPending || undefined}
             aria-label="在這之後插入一鏡"
             title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
             onClick={() => enqueueInsertAfter("insert")}
           >
-            <Icon name="Plus" size={16} />
+            <Icon name="Plus" size={16} /> 在這之後插入一鏡
           </button>
           <button
             style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
@@ -917,6 +931,10 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
   const list = (scenes.data ?? []) as Scene[];
   // 文字腳本的「設定卡」唯讀標注要顯示名字——與專案頁同快取鍵，不會多打 API
   const characterCards = trpc.characters.list.useQuery({ projectId });
+  const honoredCharIds = useMemo(
+    () => (characterCards.data ? selectableBringInIds(characterCards.data, charIds ?? []) : charIds ?? []),
+    [characterCards.data, charIds],
+  );
   const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
   const propCards = trpc.props.list.useQuery({ projectId });
   const characterNameById = useMemo(
@@ -1168,7 +1186,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
                   genModelId={genModelId}
                   resolveGenModel={readGenModel}
                   projectId={projectId}
-                  charIds={charIds}
+                  charIds={honoredCharIds}
                   sceneIds={sceneIds}
                   propIds={propIds}
                   cardLookup={cardLookup}
@@ -1313,7 +1331,7 @@ export function SceneList({ projectId, canEdit = true, charIds, sceneIds, propId
               projectId={projectId}
               sceneNumber={studioScene.number}
               canEdit={canEdit}
-              charIds={charIds}
+              charIds={honoredCharIds}
               sceneIds={sceneIds}
               propIds={propIds}
               onClose={() => {

@@ -16,15 +16,20 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
 import {
   loadExistingStoryScenes,
+  loadOrphanShots,
+  matchByName,
   materializeStoryboard,
   runStoryParse,
   sha256Hex,
   undoParseRun,
 } from "../services/storyParse";
+import { sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
 import { checkProjectContinuity } from "../services/continuityCheck";
 import { flushStoryDocNow } from "../services/collabDoc";
 import {
   diffStoryboardPlan,
+  planOrphanAdoption,
+  planReuseOrphanAttach,
   summarizeStoryboardDiff,
   environmentStateSchema,
   STORY_MAX_CHARS,
@@ -359,28 +364,36 @@ export const storyRouter = router({
       // create
       let entityId: string;
       if (cand.kind === "character") {
-        const [row] = await db
-          .insert(schema.characters)
-          .values({
-            projectId: project.id,
-            groupId: project.groupId,
-            name: cand.name,
-            appearance: payload.appearance?.trim() || `${cand.name}（外觀待補）`,
-            createdBy: ctx.auth.user.id,
-          })
-          .returning();
-        entityId = row.id;
-        // 帶服裝資訊的角色候選：確認建立時一併建 Look（Identity/Look 分層）
-        if (payload.costume?.trim()) {
-          await db.insert(schema.characterLooks).values({
-            projectId: project.id,
-            groupId: project.groupId,
-            characterId: row.id,
-            name: payload.costume.trim().slice(0, 40),
-            costume: payload.costume.trim(),
-            source: "parse",
-            createdBy: ctx.auth.user.id,
-          });
+        const name = sanitizeCharacterProposalName(cand.name);
+        if (!name) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+        const existing = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+        const matched = matchByName(existing, name);
+        if (matched) {
+          entityId = matched.id;
+        } else {
+          const [row] = await db
+            .insert(schema.characters)
+            .values({
+              projectId: project.id,
+              groupId: project.groupId,
+              name,
+              appearance: payload.appearance?.trim() || `${name}（外觀待補）`,
+              createdBy: ctx.auth.user.id,
+            })
+            .returning();
+          entityId = row.id;
+          // 帶服裝資訊的角色候選：確認建立時一併建 Look（Identity/Look 分層）
+          if (payload.costume?.trim()) {
+            await db.insert(schema.characterLooks).values({
+              projectId: project.id,
+              groupId: project.groupId,
+              characterId: row.id,
+              name: payload.costume.trim().slice(0, 40),
+              costume: payload.costume.trim(),
+              source: "parse",
+              createdBy: ctx.auth.user.id,
+            });
+          }
         }
       } else if (cand.kind === "location") {
         const [row] = await db
@@ -457,6 +470,8 @@ export const storyRouter = router({
       run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots })),
       existingScenes,
     );
+    const summary = summarizeStoryboardDiff(diff);
+    const orphans = await loadOrphanShots(db, project.id);
     return {
       ready: true as const,
       runId: run.id,
@@ -464,10 +479,14 @@ export const storyRouter = router({
       planScenes: run.plan.scenes.length,
       planShots: run.plan.scenes.reduce((s, sc) => s + sc.shots.length, 0),
       existingShots: Number(existingShots),
+      orphanShots: orphans.length,
+      adoption: run.applied?.storyboard
+        ? planReuseOrphanAttach(Number(existingShots), orphans.length)
+        : planOrphanAdoption(summary.newShots, orphans.length),
       scenes: run.plan.scenes.map((sc) => ({ title: sc.title, shots: sc.shots.length })),
       /** 逐場計畫：哪一場會新建、哪一場只補鏡、哪一場完全不動 */
       diff,
-      summary: summarizeStoryboardDiff(diff),
+      summary,
     };
   }),
 

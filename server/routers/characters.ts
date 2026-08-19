@@ -1,17 +1,24 @@
 import { z } from "zod";
-import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
-  CHAR_NAME_MAX,
   CHAR_NOTES_MAX,
   MAX_PROJECT_CHARACTERS,
 } from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
-import { isUniqueViolation } from "../services/generationCore";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
+import { sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
+import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
+import { upsertProjectCharacterCore } from "../services/characterWriteCore";
+import {
+  CHARACTER_SHEET_MODEL_ID,
+  characterSheetPrompt,
+  isAllowedCharacterSheetModel,
+} from "../../shared/characterSheetGenerate";
+import { executeGenerationCommand } from "../services/generationCommand";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
@@ -39,12 +46,13 @@ export const charactersRouter = router({
     .input(
       z.object({
         projectId: z.string().uuid(),
-        // 先 trim 再驗：否則 "   " 通過 min(1) 後再 trim 成空字串入庫
-        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX),
+        // Raw paste may be the model blob「小華（…）。不要寫素材清單」.
+        // Sanitize down to a card name; CHAR_NAME_MAX still applies after.
+        name: z.string().trim().min(1, "請填角色名").max(240),
         appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX),
         notes: z.string().trim().max(CHAR_NOTES_MAX).optional(),
         referenceAssetId: z.string().uuid().optional(),
-        /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
+        /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原卡片，不重複建立 */
         clientRequestId: z.string().uuid().optional(),
       }),
     )
@@ -53,6 +61,10 @@ export const charactersRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
+      const name = sanitizeCharacterProposalName(input.name);
+      if (!name) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      }
       // 跨專案引用驗證：referenceAssetId 必須同專案且是圖片（同組兩個「小華」不能互綁定裝圖）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId, project.id);
 
@@ -65,50 +77,36 @@ export const charactersRouter = router({
         if (existing) return existing;
       }
 
-      const [{ n }] = await db
-        .select({ n: count() })
+      const written = await upsertProjectCharacterCore({
+        auth: ctx.auth,
+        groupId: project.groupId,
+        projectId: project.id,
+        name,
+        appearance: input.appearance,
+        notes: input.notes,
+      });
+      if (input.referenceAssetId) {
+        await db
+          .update(schema.characters)
+          .set({ referenceAssetId: input.referenceAssetId })
+          .where(eq(schema.characters.id, written.characterId));
+      }
+      const [row] = await db
+        .select()
         .from(schema.characters)
-        .where(eq(schema.characters.projectId, project.id));
-      if (Number(n) >= MAX_PROJECT_CHARACTERS) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `此專案角色定裝已達上限（${MAX_PROJECT_CHARACTERS} 張）——先刪不用的再新增`,
-        });
+        .where(and(eq(schema.characters.id, written.characterId), eq(schema.characters.projectId, project.id)));
+      if (!row) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "角色定裝寫入後讀回失敗" });
       }
-
-      try {
-        const [row] = await db
-          .insert(schema.characters)
-          .values({
-            id: input.clientRequestId,
-            projectId: project.id,
-            groupId: project.groupId,
-            name: input.name,
-            appearance: input.appearance,
-            notes: input.notes || null,
-            referenceAssetId: input.referenceAssetId,
-            createdBy: ctx.auth.user.id,
-          })
-          .returning();
-        return row;
-      } catch (err) {
-        // 冪等重送撞唯一鍵＝前次請求已建卡（client timeout 後重試）：回既有卡，不重複建立（QA-003）
-        if (input.clientRequestId && isUniqueViolation(err)) {
-          const [existing] = await db
-            .select()
-            .from(schema.characters)
-            .where(and(eq(schema.characters.id, input.clientRequestId), eq(schema.characters.projectId, project.id)));
-          if (existing) return existing;
-        }
-        throw err;
-      }
+      return row;
     }),
 
   update: authedProcedure
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX).optional(),
+        // Same 240 as add: paste may be the EXTRACT blob「小華（…）。不要寫素材清單」.
+        name: z.string().trim().min(1, "請填角色名").max(240).optional(),
         appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX).optional(),
         notes: z.string().trim().max(CHAR_NOTES_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
@@ -123,6 +121,14 @@ export const charactersRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
+      let sanitizedName = input.name;
+      if (input.name !== undefined) {
+        const name = sanitizeCharacterProposalName(input.name);
+        if (!name) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+        }
+        sanitizedName = name;
+      }
       // 跨專案引用驗證：改綁 referenceAssetId 時同樣要同專案且是圖片（null＝清除引用，免驗）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId, row.projectId);
 
@@ -133,8 +139,28 @@ export const charactersRouter = router({
         notes?: string | null;
         referenceAssetId?: string | null;
       } = {};
-      if (input.name !== undefined) patch.name = input.name;
+      if (sanitizedName !== undefined) patch.name = sanitizedName;
       if (input.appearance !== undefined) patch.appearance = input.appearance;
+      const nextName = patch.name ?? row.name;
+      const nextAppearance = patch.appearance ?? row.appearance;
+      if (nextName && nextAppearance && (input.name !== undefined || input.appearance !== undefined)) {
+        const [story] = await db
+          .select({ content: schema.stories.content })
+          .from(schema.stories)
+          .where(eq(schema.stories.projectId, row.projectId))
+          .limit(1);
+        const [project] = await db
+          .select({ title: schema.projects.title })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, row.projectId))
+          .limit(1);
+        const locked = applyXiaohuaIdentityLock(
+          { name: nextName, appearance: nextAppearance, costume: null },
+          `${nextAppearance}\n${story?.content ?? ""}\n${project?.title ?? ""}`,
+        );
+        if (input.name !== undefined) patch.name = locked.name;
+        patch.appearance = locked.appearance ?? nextAppearance;
+      }
       if (input.notes !== undefined) patch.notes = input.notes || null;
       if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
       if (Object.keys(patch).length === 0) return row;
@@ -163,12 +189,105 @@ export const charactersRouter = router({
       return { ...updated, merged };
     }),
 
+  /**
+   * Cheap-image 定裝圖：只走 schnell / sdxl / qwen 等級，禁止 Veo。
+   * 0 own sheets 仍用文字鎖定出圖；完成後 honorGeneratedSheet 才綁回這張卡。
+   */
+  generateSheet: authedProcedure
+    .input(
+      z.object({
+        characterId: z.string().uuid(),
+        modelId: z.string().optional(),
+        clientRequestId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.characterId));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, row.groupId);
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project);
+      const modelId = input.modelId ?? CHARACTER_SHEET_MODEL_ID;
+      if (!isAllowedCharacterSheetModel(modelId)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "定裝圖只用便宜生圖模型，不能用 Veo 或影片" });
+      }
+      const [story] = await db
+        .select({ content: schema.stories.content })
+        .from(schema.stories)
+        .where(eq(schema.stories.projectId, project.id))
+        .limit(1);
+      const locked = applyXiaohuaIdentityLock(
+        { name: row.name, appearance: row.appearance, costume: null },
+        `${row.appearance}\n${story?.content ?? ""}\n${project.title}`,
+      );
+      const prompt = characterSheetPrompt(locked.name, locked.appearance ?? row.appearance);
+      const generation = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id: input.clientRequestId,
+        projectId: project.id,
+        modelId,
+        prompt,
+      });
+      return { generationId: generation.id, modelId, characterId: row.id };
+    }),
+
+  honorGeneratedSheet: authedProcedure
+    .input(z.object({
+      characterId: z.string().uuid(),
+      generationId: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.characterId));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, row.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId });
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+      if (!gen || gen.projectId !== row.projectId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到這次定裝生成" });
+      }
+      const [asset] = await db
+        .select({ id: schema.assets.id })
+        .from(schema.assets)
+        .where(and(
+          eq(schema.assets.projectId, row.projectId),
+          isNull(schema.assets.deletedAt),
+          sql`${schema.assets.meta}->>'generationId' = ${gen.id}`,
+        ))
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(1);
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "這次定裝生成還沒有成品圖" });
+      await assertReferenceImage(asset.id, row.groupId, row.projectId);
+      const [updated] = await db
+        .update(schema.characters)
+        .set({ referenceAssetId: asset.id, rev: sql`${schema.characters.rev} + 1` })
+        .where(eq(schema.characters.id, row.id))
+        .returning();
+      return updated;
+    }),
+
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.characters).where(eq(schema.characters.id, input.id));
+    const { stripCardIdsFromProjectScenes } = await import("../services/sceneEntityIds");
+    await db.transaction(async (tx) => {
+      const looks = await tx
+        .select({ id: schema.characterLooks.id })
+        .from(schema.characterLooks)
+        .where(and(eq(schema.characterLooks.projectId, row.projectId), eq(schema.characterLooks.characterId, row.id)));
+      const lookIds = looks.map((look) => look.id);
+      await stripCardIdsFromProjectScenes(tx, row.projectId, {
+        characterIds: [row.id],
+        lookIds,
+      });
+      if (lookIds.length) {
+        await tx.delete(schema.characterLooks).where(inArray(schema.characterLooks.id, lookIds));
+      }
+      await tx.delete(schema.characters).where(eq(schema.characters.id, row.id));
+    });
     return { ok: true };
   }),
 });

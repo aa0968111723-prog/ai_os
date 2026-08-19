@@ -64,7 +64,8 @@ export function isNimTimeoutError(err: unknown): boolean {
  * Live Zeabur still toasted「超過 150 秒無回應」when timeoutMs was omitted
  * or a caller forwarded the historic default — fallback never got a turn.
  */
-export const NIM_FIRST_ATTEMPT_MAX_MS = 60_000;
+/** 70B A–F extract needs ~80s; still clamp the historic 150s hang. */
+export const NIM_FIRST_ATTEMPT_MAX_MS = 90_000;
 /** When callers forget timeoutMs, probe quickly then fall to 70B. */
 export const NIM_FIRST_ATTEMPT_DEFAULT_MS = 25_000;
 

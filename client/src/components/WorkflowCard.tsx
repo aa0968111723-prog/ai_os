@@ -253,7 +253,8 @@ export function WorkflowCard({
       <label htmlFor="wf-idea" style={{ display: "block", marginTop: 10 }}>
         這次想完成什麼？（一句話）
       </label>
-      <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
+      {/* Live leftover: template idea still sampled 七幕 incense empty-shot, not A–F 校門口 白帽T. */}
+      <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：淡大校門口，粉橘短髮女孩、白帽T的小華向鏡頭自我介紹" />
       {wf ? (
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>進階：逐步調整創作提示</summary>

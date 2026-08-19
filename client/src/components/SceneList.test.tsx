@@ -41,6 +41,7 @@ vi.mock("../api", () => ({
       scenes: { listByProject: { invalidate: invalidateScenes } },
       messages: { list: { invalidate: invalidateMessages }, openCountsByScene: { invalidate: vi.fn() } },
       projects: { listDeleted: { invalidate: invalidateDeleted } },
+      teamAssistant: { agentOverview: { invalidate: vi.fn() } },
     }),
     auth: { me: { useQuery: (...args: unknown[]) => meQuery(...args) } },
     scenes: {
@@ -341,7 +342,9 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
-    await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    const insert = rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" });
+    expect(insert).toHaveTextContent("在這之後插入一鏡");
+    await user.click(insert);
     expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
   });
 
@@ -539,6 +542,38 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
       title: "新標題",
       expectedRev: 1,
     }));
+  });
+
+  it("title then duration onBlur queues the second save until ACK (not stale s.rev)", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    const title = rowOf("s1").getByRole("textbox", { name: "第 1 鏡標題" });
+    fireEvent.change(title, { target: { value: "新標題" } });
+    fireEvent.blur(title);
+    expect(updateMutate).toHaveBeenCalledTimes(1);
+    expect(updateMutate.mock.calls[0]?.[0]).toMatchObject({
+      sceneId: "s1",
+      title: "新標題",
+      expectedRev: 1,
+      baseline: { title: "鏡 s1" },
+    });
+
+    const dur = rowOf("s1").getByRole("spinbutton", { name: "第 1 鏡秒數" });
+    fireEvent.change(dur, { target: { value: "8" } });
+    fireEvent.blur(dur);
+    expect(updateMutate).toHaveBeenCalledTimes(1);
+
+    lastUpdateSuccess.current?.({ rev: 2, id: "s1", projectId: "p-1" });
+    expect(updateMutate).toHaveBeenCalledTimes(2);
+    expect(updateMutate.mock.calls[1]?.[0]).toMatchObject({
+      sceneId: "s1",
+      durationSec: 8,
+      expectedRev: 2,
+      baseline: { durationSec: 5 },
+    });
   });
 
   it("檢視者看不到插入／複製（整理分鏡是寫入動作）", () => {

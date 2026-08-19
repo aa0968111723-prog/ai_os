@@ -8,7 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from e2e_lib import ok
+from e2e_lib import adopt_waiting_generate_steps, ok
 
 HOST = f"http://localhost:{os.environ.get('E2E_PORT', '3199')}"
 BASE = f"{HOST}/api/trpc"
@@ -88,13 +88,26 @@ approved = call("POST", admin, "agents.approve", {"runId": planned["id"]})
 ok("核准後進入執行", approved.get("status") == "running")
 
 terminal = None
-for _ in range(35):
+for _ in range(40):
     time.sleep(2)
     runs = call("GET", admin, "agents.listByProject", {"projectId": project_id})
     terminal = next((run for run in runs if run["id"] == planned["id"]), None)
-    if terminal and terminal["status"] in ("done", "failed"):
+    if not terminal:
+        continue
+    adopt_waiting_generate_steps(call, admin, terminal)
+    if terminal["status"] in ("done", "failed"):
         break
-ok("背景 Runner 完成完整代理計畫", terminal is not None and terminal.get("status") == "done")
+ok(
+    "背景 Runner 完成完整代理計畫",
+    terminal is not None and terminal.get("status") == "done",
+    None if terminal is None else {
+        "status": terminal.get("status"),
+        "steps": [
+            {"kind": step.get("kind"), "status": step.get("status"), "gid": step.get("generationId")}
+            for step in (terminal.get("steps") or [])
+        ],
+    },
+)
 
 events_page = call("GET", admin, "agents.eventsByProject", {"projectId": project_id, "limit": 100})
 event_types = [event["eventType"] for event in events_page.get("items", [])]
@@ -105,8 +118,8 @@ ok("事件分頁明示 nextCursor", "nextCursor" in events_page)
 
 insights = call("GET", admin, "agents.insights", {"projectId": project_id})
 result_types = {result["type"] for result in insights.get("results", [])}
-ok("成果中心收錄分鏡", "scene" in result_types)
-ok("成果中心收錄生成", "generation" in result_types)
+ok("成果中心收錄分鏡", "scene" in result_types, sorted(result_types))
+ok("成果中心收錄生成", "generation" in result_types, sorted(result_types))
 ok("健康摘要含統一任務與截斷旗標", isinstance(insights.get("workItems"), list) and isinstance(insights.get("truncated"), dict))
 
 discarded_plan = call("POST", admin, "agents.plan", {

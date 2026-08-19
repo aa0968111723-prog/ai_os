@@ -28,10 +28,12 @@ describe("animation shot writes stay consistent", () => {
   it("duplicate copies look / camera / performance / story scene (not just character ids)", () => {
     const start = scenes.indexOf("insertAfter:");
     const block = scenes.slice(start, scenes.indexOf("remove:", start));
-    expect(block).toContain("lookIds: dup ? cur.lookIds : null");
+    expect(block).toContain("keepLivingSceneRefs");
     expect(block).toContain("camera: dup ? cur.camera : null");
     expect(block).toContain("performance: dup ? cur.performance : null");
-    expect(block).toContain("storySceneId: dup ? cur.storySceneId : null");
+    expect(block).toContain("storySceneId: cur.storySceneId");
+    expect(block).toContain("assetId: cur.assetId");
+    expect(block).not.toContain("lookIds: dup ? cur.lookIds : null");
   });
 
   it("setCards auto-strips orphan looks when only characterIds is sent", () => {
@@ -65,6 +67,16 @@ describe("animation shot writes stay consistent", () => {
     expect(inspector).toContain("sceneId: boundSceneId");
   });
 
+  it("Shot Inspector 未分場 points at the 分鏡 chip, not TocNav「② 分鏡」", () => {
+    expect(inspector).toContain("到專案頁打開「分鏡」可以把這一鏡歸到某一場");
+    expect(inspector).not.toContain("到專案頁的「② 分鏡」");
+  });
+
+  it("Shot Inspector prompt placeholder teaches A–F 白帽T, not 禪堂空景", () => {
+    expect(inspector).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
+    expect(inspector).not.toContain("清晨的禪堂空景");
+  });
+
   it("story autosave serializes in-flight saves and does not baseline from live editor", () => {
     expect(storyStage).toContain("createStorySaveGate");
     expect(storyStage).toContain("dispatchStorySave(live)");
@@ -81,12 +93,33 @@ describe("animation shot writes stay consistent", () => {
     expect(assistant).toContain("ASSISTANT_VIEWER_NO_WRITE_RULE");
     expect(assistant).toContain("formatStudioShotContext");
     expect(assistant).toContain("formatPersistedStoryForAssistant");
+    expect(assistant).toContain("isAssistantStoryReadIntent");
+    expect(assistant).toContain("lockAssistantStoryAnswer");
+    expect(assistant).toContain("answerAfterFreeOnlyTimeout");
+    expect(assistant).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(assistant).toContain("isFreeOnlyAskTimeout");
+    expect(assistant).toContain("finishFetchedStoryFallback");
+    expect(assistant).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(assistant).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
     expect(assistant).toContain("buildAssistantProjectStatusContext");
     expect(assistant).toContain("shotIdFromPageContext");
     expect(assistant).toContain("shotId: shotIdFromPageContext(input.pageContext)");
     expect(assistant).toContain("assistantAskCompletionChip");
+    expect(assistant).toContain("runFailed: true");
+    expect(assistant).toContain("roundAcquiredSourcesDescription");
+    expect(assistant).not.toContain("已取得：");
+    expect(assistant).toContain("!storyReadAsk && knowledgeCtx");
+    expect(assistant).toContain("!storyReadAsk && databaseEvidence.length");
+    expect(assistant).toContain("!storyReadAsk && intelligence.text");
+    expect(assistant).toContain("storyReadAsk ? \"\" : historyBlock");
     expect(assistant).toContain("userMessage: input.message");
     expect(assistant).toContain("allowPaidFallback");
+    expect(assistant).toContain("assertFreeOnlyCompletion");
+    expect(assistant).toContain("lockAddCharacterAnswer");
+    expect(assistant).toContain("upsertProjectCharacterCore");
+    expect(assistant).not.toContain("settleUsagePoints");
+    expect(assistant).toContain("dropMisroutedCharacterDatabaseActions");
+    expect(assistant).toContain("禁止把角色／定裝／小華寫進「素材清單」");
     expect(assistant).toContain("if (!a.sceneNo) continue");
     expect(assistant).toContain("請指定要生成的分鏡");
     expect(assistant).toContain("expectedRev: scene.rev");
@@ -105,6 +138,26 @@ describe("animation shot writes stay consistent", () => {
     expect(siteAssistant).toContain("pickAnimationCompareItem");
     expect(siteAssistant).toContain("我不會把「執行修復」說成已完成");
     expect(siteAssistant).toContain("message: input.message");
+    expect(siteAssistant).toContain("isAssistantStoryReadIntent");
+    expect(siteAssistant).toContain("lockAssistantStoryAnswer");
+    expect(siteAssistant).toContain("settleAssistantAskCompletion");
+    expect(siteAssistant).toContain("assistantAskCompletionChip");
+    expect(siteAssistant).toContain("STORY_READ_THIS_PROJECT_LOCK");
+    expect(siteAssistant).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(siteAssistant).toContain("answerAfterFreeOnlyTimeout");
+    expect(siteAssistant).toContain("withoutEmptyNimTimeout");
+    expect(siteAssistant).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(siteAssistant).toContain("const answer = withoutEmptyNimTimeout(rawFail, toolsSucceeded)");
+    const teamAssistant = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
+    expect(teamAssistant).toContain("isAssistantStoryReadIntent");
+    expect(teamAssistant).toContain("lockAssistantStoryAnswer");
+    expect(teamAssistant).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(teamAssistant).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(teamAssistant).toContain("withoutEmptyNimTimeout");
+    const messageAssistant = readFileSync(join(process.cwd(), "server/services/messageAssistant.ts"), "utf8");
+    expect(messageAssistant).toContain("isAssistantStoryReadIntent");
+    expect(messageAssistant).toContain("lockAssistantStoryAnswer");
+    expect(messageAssistant).toContain("STORY_READ_THIS_PROJECT_LOCK");
     expect(repairExecute).toContain("applyWithRevisionTrpc");
     expect(repairExecute).not.toContain("db.update(schema.scenes)");
   });
@@ -123,33 +176,74 @@ describe("animation shot writes stay consistent", () => {
   });
 
   it("SceneList and ShotCard send expectedRev on inline edits", () => {
-    expect(sceneList).toContain("expectedRev: s.rev");
-    expect(sceneList).toContain("baseline: { title: s.title }");
-    expect(sceneList).toContain("baseline: { durationSec: s.durationSec }");
-    expect(sceneList).toContain("trimStartMs: s.trimStartMs ?? null");
+    expect(sceneList).toContain("createShotFieldSaveGate");
+    expect(sceneList).toContain("expectedRev: req.expectedRev");
+    expect(sceneList).toContain("saveFields({ title: String(v) })");
+    expect(sceneList).toContain("saveFields({ durationSec: Number(v) })");
+    expect(sceneList).toContain("saveFields(patch)");
+    expect(sceneList).not.toMatch(/onCommit=\{\(v\) => update\.mutate\(\{[\s\S]*?expectedRev: s\.rev/);
+    expect(sceneList).toContain("trimStartMs: row?.trimStartMs ?? null");
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     expect(shotCard).toContain("expectedRev: shot.rev");
-    expect(shotCard).toContain("baseline: { [field]:");
+    expect(shotCard).toContain("[field]: (shot as unknown as Record<string, unknown>)[field] ?? null");
+    expect(shotCard).toContain("gateRef.current?.save(");
+    expect(shotCard).not.toMatch(/const saveField[\s\S]*?update\.mutate\(\{[\s\S]*?expectedRev: shot\.rev/);
   });
 
   it("assistant add_character writes read back the character row", () => {
     const exec = assistant.slice(assistant.indexOf("async function applyAssistantScenePatch"));
+    const writeCore = readFileSync(join(process.cwd(), "server/services/characterWriteCore.ts"), "utf8");
     expect(assistant).toContain('type: z.literal("add_character")');
     expect(exec).toContain('if (a.type === "add_character")');
+    expect(exec).toContain("upsertProjectCharacterCore");
     expect(exec).toContain("authoritative_character_row_read_back");
-    expect(exec).toContain("MAX_PROJECT_CHARACTERS");
+    expect(writeCore).toContain("MAX_PROJECT_CHARACTERS");
+    expect(writeCore).toContain("never 素材清單 / dataRows");
+    expect(writeCore).toContain("publishToProject(");
+    expect(writeCore).toContain("{ kind: \"character\"");
     expect(assistant).toContain("proposeAddCharacterActions");
     expect(assistant).toContain("待補外觀描述");
     expect(assistant).toContain("建角色／加定裝卡");
     expect(assistant).toContain("確認下方就寫入");
     expect(assistant).toContain('type: z.literal("add_character")');
     expect(assistant).toContain('"add_character"');
-    expect(assistant).toContain("publishToProject(project.id, { kind: \"character\"");
     expect(assistant).toContain("authoritative_character_row_read_back");
     const client = readFileSync(join(process.cwd(), "client/src/components/ProjectAssistant.tsx"), "utf8");
     expect(client).toContain('type: "add_character"');
     expect(client).toContain("新增角色定裝卡");
     expect(client).toContain("if (a.type === \"add_character\") return { type: \"add_character\"");
+    expect(client).toContain('revealStoryInlineSection("storyboard"');
+    expect(client).not.toContain('hash = "sec-scenes"');
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const mcpAdd = mcp.slice(mcp.indexOf('if (name === "add_character")'), mcp.indexOf('if (name === "update_character")'));
+    expect(mcpAdd).toContain("sanitizeCharacterProposalName");
+    expect(mcpAdd).toContain("upsertProjectCharacterCore");
+    expect(mcpAdd).not.toContain("db.insert(schema.characters)");
+    const mcpUpdate = mcp.slice(mcp.indexOf('if (name === "update_character")'), mcp.indexOf('if (name === "add_scene_preset")'));
+    expect(mcpUpdate).toContain("sanitizeCharacterProposalName(args.name)");
+    expect(mcpUpdate).not.toContain("args.name.trim().slice(0, 80)");
+  });
+
+  it("pinCanonToProject reuses same-name 小華 instead of raw-inserting a second handle", () => {
+    const canon = readFileSync(join(process.cwd(), "server/services/teamCanon.ts"), "utf8");
+    const pin = canon.slice(canon.indexOf("export async function pinCanonToProject"), canon.indexOf("export async function unpinCanon"));
+    expect(pin).toContain("matchLocalCharacterByName");
+    expect(pin).toContain("existingCards");
+    expect(pin).toContain("payload.name");
+    expect(pin).not.toContain("sanitizeCharacterProposalName");
+    expect(pin).not.toContain("upsertProjectCharacterCore");
+  });
+
+  it("parse confirmCandidate reuses 小華 instead of raw-inserting the EXTRACT blob", () => {
+    const story = readFileSync(join(process.cwd(), "server/routers/story.ts"), "utf8");
+    const confirm = story.slice(story.indexOf("confirmCandidate:"), story.indexOf("storyboardPreview:"));
+    expect(confirm).toContain("sanitizeCharacterProposalName");
+    expect(confirm).toContain("matchByName(existing, name)");
+    expect(confirm).toContain("這是指示句，不是角色名");
+    const parse = readFileSync(join(process.cwd(), "server/services/storyParse.ts"), "utf8");
+    expect(parse).toContain("sanitizeCharacterProposalName(cand.name)");
+    expect(parse).toContain("sanitizeCharacterProposalName(name)");
+    expect(parse).toContain("name: cardName");
   });
 
   it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {
@@ -170,6 +264,17 @@ describe("SceneList insertAfter queue (do not invent a /p/ button)", () => {
     expect(sceneList).toContain("insertTailRef");
     expect(sceneList).not.toContain("在這格之後插入");
   });
+
+  it("project ShotCard / StoryboardStage queue insertAfter so 連點 is click-order not LIFO", () => {
+    const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
+    const stage = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/StoryboardStage.tsx"), "utf8");
+    expect(shotCard).toContain("createInsertAfterQueue");
+    expect(shotCard).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(shotCard).not.toContain("insertAfter.mutate({ sceneId: shot.id })");
+    expect(stage).toContain("createInsertAfterQueue");
+    expect(stage).toContain("insertQueueRef.current?.enqueue(focusShot.id)");
+    expect(stage).not.toContain("insertAfter.mutate({ sceneId: focusShot.id })");
+  });
 });
 
 describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => {
@@ -189,7 +294,7 @@ describe("teammate map: Candidate-only generateInto / Adopt / isolation", () => 
     expect(into).toContain("executeGenerationCommand");
     expect(into).toContain("modelId: input.modelId");
     expect(into).toContain("modelId: gen.modelId");
-    expect(into).toContain("reconcileAgentRunsAfterSceneGenerate");
+    expect(into).toContain("scheduleReconcileAfterIndependentGenerate");
     expect(into).not.toContain("fast-lightning-sdxl");
     expect(into).toContain("preserveScenePointer: true");
     expect(generationCommand).toContain("const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core)");
@@ -263,9 +368,13 @@ describe("storyboard board blur sends expectedRev", () => {
     const shotCard = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/ShotCard.tsx"), "utf8");
     const header = readFileSync(join(process.cwd(), "client/src/features/storyboard-center/SceneGroupHeader.tsx"), "utf8");
     expect(sceneList).toContain("expectedRev: row?.rev");
+    expect(sceneList).toContain("createShotFieldSaveGate");
+    expect(sceneList).toContain("saveFields({ title: String(v) })");
     expect(shotCard).toContain("createShotFieldSaveGate");
     expect(shotCard).toContain("expectedRev: req.expectedRev");
     expect(shotCard).toContain("expectedRev: shot.rev");
+    expect(shotCard).toContain("gateRef.current?.save(");
+    expect(shotCard).not.toMatch(/const saveField[\s\S]*?update\.mutate\(\{[\s\S]*?expectedRev: shot\.rev/);
     expect(header).toContain("expectedRev: scene.rev");
     expect(header).not.toContain("update.mutate({ id: scene.id, title: v })");
     expect(shotCard).toContain("rev: shot.rev");
@@ -287,6 +396,22 @@ describe("DeliveryRoom picked batch matches eligible-shot filter", () => {
   });
 });
 
+describe("untitled 未分場 orphans are not a dead 5 鏡需確認", () => {
+  it("workspace next-action opens 分鏡 for blank orphans, and needsConfirm is proposals only", () => {
+    const graph = readFileSync(join(process.cwd(), "server/services/projectConsistencyGraph.ts"), "utf8");
+    const shared = readFileSync(join(process.cwd(), "shared/projectConsistencyGraph.ts"), "utf8");
+    const status = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryContextStatus.tsx"), "utf8");
+    const block = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryContextStatusBlock.tsx"), "utf8");
+    expect(graph).toContain("isBlankOrphanShot");
+    expect(graph).toContain("untitledOrphans");
+    expect(graph).toContain("needsConfirm = bindings.proposals.length");
+    expect(graph).not.toContain("shots.filter((shot) => !shot.prompt && !shot.assetId).length");
+    expect(shared).toContain("打開分鏡，把 ${input.untitledOrphans} 鏡未分場歸場");
+    expect(status).toContain("onOpenStoryboard");
+    expect(block).toContain('revealStoryInlineSection("storyboard"');
+  });
+});
+
 describe("one-click does not batch-generate on an empty board", () => {
   it("refuses batchGenerate when listByProject is still 0 shots", () => {
     expect(oneClickHook).toContain("listByProject.fetch");
@@ -296,6 +421,9 @@ describe("one-click does not batch-generate on an empty board", () => {
     expect(oneClick).toContain("export function revealAfterOneClick");
     const page = readFileSync(join(process.cwd(), "client/src/pages/ProjectPage.tsx"), "utf8");
     expect(page).toContain("error={oneClick.error}");
+    expect(page).toContain("shouldShowOneClickGenerateCta");
+    expect(page).toContain("showGenerateCta");
+    expect(page).toContain("stillCount");
     expect(page).toContain("revealAfterOneClick");
     expect(page).not.toMatch(/oneClick\.run\(\)[\s\S]{0,240}catch \(\(\) => \{\s*openInlineSection\("production"\);/);
     const bar = readFileSync(join(process.cwd(), "client/src/features/story-workspace/StoryReadinessBar.tsx"), "utf8");
@@ -325,6 +453,14 @@ describe("#790 overnight pins (do not reopen)", () => {
     const lock = readFileSync(join(process.cwd(), "shared/characterIdentityLock.ts"), "utf8");
     const board = story.slice(story.indexOf("generateStoryboard:"), story.indexOf("undoRun:"));
     expect(board).toContain("materializeStoryboard");
+    expect(parse).toContain("loadOrphanShots");
+    expect(parse).toContain("orphanQueue.shift()");
+    expect(parse).toContain("isBlankOrphanShot");
+    expect(parse).toContain("compactProjectShotOrder");
+    expect(parse).toContain("orderShotsForStoryboard");
+    expect(parse).toContain("attachLeftoverOrphansOnReuse");
+    expect(parse).toContain("backfillStorySceneLocations");
+    expect(parse).not.toMatch(/title: "未分場"/);
     expect(parse).toContain("lockXiaohuaPlan(run.plan");
     expect(parse).toContain("rewriteProjectXiaohuaStoryboardCopy");
     expect(parse).toContain("lockXiaohuaCopyFields");
@@ -332,8 +468,29 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
     expect(lock).toContain("lockXiaohuaAct1Location");
+    expect(lock).toContain("（是男性）");
+    expect(lock).toContain("(?:是)?(?:男性|男生)");
     const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
     expect(director).toContain("lockXiaohuaCopyFields");
+  });
+
+  it("knowledge.update title/content is fail-closed baseline CAS, pin-only does not rewrite body", () => {
+    const kn = readFileSync(join(process.cwd(), "server/routers/knowledge.ts"), "utf8");
+    const update = kn.slice(kn.indexOf("update: authedProcedure"), kn.indexOf("listVersions:"));
+    expect(update).toContain("baseline:");
+    expect(update).toContain("knowledgeUpdateTouchesBody");
+    expect(update).toContain("knowledgeUpdateBaselineGate");
+    expect(update).toContain("knowledgeUpdateOmitMessage");
+    expect(update).toContain("eq(schema.knowledge.title, input.baseline!.title)");
+    expect(update).toContain("eq(schema.knowledge.content, input.baseline!.content)");
+    expect(update).toContain('code: "CONFLICT"');
+    expect(update).toContain("if (input.pinned !== undefined) patch.pinned = input.pinned");
+    expect(update).not.toContain("title: input.title?.trim() ?? row.title");
+    expect(update).not.toContain("content: nextContent");
+    const kb = readFileSync(join(process.cwd(), "client/src/components/KnowledgeBase.tsx"), "utf8");
+    expect(kb).toContain("knowledgeSaveBaseline");
+    expect(kb).toContain("baseline");
+    expect(kb).not.toContain("update.mutate({ id: k.id, title: t, content: editContent })");
   });
 
   it("StoryStage onBlur and persistStoryDoc both require expectedRev", () => {
@@ -365,21 +522,67 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(header).toContain("scopedTightRemaining");
     expect(header).toContain("剩 ${remaining.toLocaleString()}");
     expect(header).toContain("本週已用 ${weeklyUsed}");
+    expect(header).toContain("Leftover-only 4,708 is not the wallet");
     expect(header).toContain("placeholderData: (previous) => previous");
     const reconcile = readFileSync(join(process.cwd(), "shared/agentRunReconcile.ts"), "utf8");
     expect(reconcile).toContain("discardUnstartedAwaitingApprovalAfterIndependentGenerate");
     expect(reconcile).toContain("shouldDiscardLeftoverAwaitingApprovalOnRead");
     expect(reconcile).toContain("hasCurrentVisual");
     expect(reconcile).toContain("待你過目");
+    expect(reconcile).toContain("isLeftoverGenerateStep");
+    expect(reconcile).toContain('step.kind === "generate_image"');
+    expect(reconcile).toContain("|| !step.kind");
+    const genCore = readFileSync(join(process.cwd(), "server/services/generationCore.ts"), "utf8");
+    expect(genCore).toContain("originUrl: stored ? null : mediaUrl");
+    expect(genCore).toContain('landState: stored ? "landed" : "pending"');
+    expect(genCore).toContain("unlandedPersistSource");
+    expect(genCore).toContain("persistGenerationResult");
+    expect(genCore).toContain("originUrl: remoteUrl");
+    expect(genCore).toContain("failPersistGenerationLand");
+    expect(genCore).not.toContain("if (!persisted) return;");
+    expect(genCore).toContain("const source = unlandedPersistSource(asset)");
+    expect(genCore).toContain("landingBackoffSeconds");
+    expect(genCore).toContain("markLandAttemptFailed");
+    expect(genCore).toContain("unlandedPersistWhere");
+    const storageAudit = readFileSync(join(process.cwd(), "server/services/storageAudit.ts"), "utf8");
+    expect(storageAudit).toContain("unlandedPersistSource(row)");
     expect(adopt).toContain("scheduleReconcileAfterVisualAdopt");
     expect(scenes).toContain("scheduleReconcileAfterVisualAdopt");
+    expect(scenes).toContain("scheduleReconcileAfterIndependentGenerate");
+    const generationRetry = readFileSync(join(process.cwd(), "server/routers/generation.ts"), "utf8");
+    const mcpRetry = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const runReconcile = readFileSync(join(process.cwd(), "server/services/agentRunReconcile.ts"), "utf8");
+    expect(runReconcile).toContain("export function scheduleReconcileAfterIndependentGenerate");
+    expect(generationRetry).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(generationRetry).toContain("shouldReplayIdempotentGeneration(retried.status)");
+    const submit = generationRetry.slice(
+      generationRetry.indexOf("submit: authedProcedure"),
+      generationRetry.indexOf("ablation: authedProcedure"),
+    );
+    expect(submit).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(submit).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(mcpRetry).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(mcpRetry).toContain("shouldReplayIdempotentGeneration(newGen.status)");
+    const mcpInto = mcpRetry.slice(mcpRetry.indexOf('if (name === "generate_into_scene")'), mcpRetry.indexOf('if (name === "update_worldview")'));
+    expect(mcpInto).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(mcpInto).toContain("generationId: gen.id");
+    const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(variants).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(refine).toContain("scheduleReconcileAfterIndependentGenerate");
+    const genList = readFileSync(join(process.cwd(), "client/src/components/GenerationList.tsx"), "utf8");
+    expect(genList).toContain("teamAssistant.agentOverview.invalidate");
+    expect(sceneList).toContain("teamAssistant.agentOverview.invalidate");
+    expect(sceneStudio).toContain("teamAssistant.agentOverview.invalidate");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
+    expect(overview).toContain("assertFreeOnlyCompletion");
+    expect(overview).toContain("allowPaidFallback: quality === \"auto\"");
     const agentCore = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
     expect(agentCore).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     const hud = readFileSync(join(process.cwd(), "client/src/app/components/AgentActivityHud.tsx"), "utf8");
     expect(hud).toContain("Authoritative overview omitted this run");
-    expect(hud).toContain('lead.status === "awaiting_approval"');
+    expect(hud).toContain("isLeftoverUnstartedHudRun");
     expect(hud).toContain("discard.mutate");
     const stopFn = agentCore.slice(agentCore.indexOf("export async function stopAgentCore"), agentCore.indexOf("export async function listAgentRunsForProject"));
     expect(stopFn).toContain("canStopAgentRunStatus");
@@ -390,9 +593,125 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(stopFn).not.toContain("return stopped ?? run");
   });
 
+  it("generateInto failed idempotent replay is not a silent no-op", () => {
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("assertReplayableGeneration");
+    expect(generationCore).toContain("shouldReplayIdempotentGeneration");
+    expect(generationCore).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+    expect(sceneList).toContain("shouldRotateGenerateIntoRequestId");
+    expect(sceneStudio).toContain("shouldRotateGenerateIntoRequestId");
+    expect(sceneStudio).toContain("variantRequestIdsAfterLaunch");
+    expect(scenes).toContain("assertReplayableGeneration(gen.status)");
+    const retry = readFileSync(join(process.cwd(), "server/services/generationRetryInput.ts"), "utf8");
+    expect(retry).toContain("lookIds: lookIds.length ? lookIds : undefined");
+    expect(retry).toContain("...(meta.lookIds ?? [])");
+    expect(retry).toContain("shotContextPacketId: meta.shotContextPacketId");
+    expect(retry).toContain("sourceAssetId = metaSourceId ?? assetId");
+    expect(retry).toContain("voiceIdentity: meta.voice");
+    expect(retry).toContain("soundWorldRef: meta.soundWorld");
+  });
+
+  it("scenes.update persist-locks 是男性 so IME prompt save cannot keep a boy", () => {
+    const update = scenes.slice(scenes.indexOf("update: authedProcedure"), scenes.indexOf("applyScript:"));
+    const addDraft = scenes.slice(scenes.indexOf("addDraft: authedProcedure"), scenes.indexOf("versions:"));
+    const apply = scenes.slice(scenes.indexOf("applyScript: authedProcedure"), scenes.indexOf("setCards:"));
+    expect(scenes).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).toContain("sceneCopyBoundToXiaohua");
+    expect(update).toContain("assignLockedXiaohuaCopy");
+    expect(addDraft).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(apply).toContain("rewritePersistedXiaohuaShotCopy");
+    expect(update).not.toContain("lockXiaohuaGenerationPrompt");
+  });
+
+  it("agent generate resolveSceneCards at execute so planner-omitted cards still bind", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/resolveSceneCards\(scene,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("characterIds: step.characterIds");
+    expect(runner).toContain("characterIds = cards.characterIds");
+    expect(runner).toContain("lookIds = step.lookIds ?? scene.lookIds");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("agent execute falls back to this shot's lookIds when the planner omitted them", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/lookIds = step.lookIds \?\? scene.lookIds/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/^\s*lookIds,$/gm)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).not.toContain("lookIds: step.lookIds");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("agent execute locks 小華 prompt before Command persist", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/lockXiaohuaGenerationPrompt/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/\? \["小華"\]/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/prompt: lockedPrompt/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).not.toContain("prompt: step.prompt");
+    expect(runner).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("agent execute honours 角色卡 生成時帶入 when the planner omitted a parent", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/resolveHonoredCharacterSheet/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/if \(!sourceAssetId\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("characterIds: cards.characterIds");
+    expect(runner).not.toContain("explicitSourceAssetId: step.sourceAssetId");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("batchGenerate locks 小華 prompt before the agent step stores it", () => {
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("lockXiaohuaGenerationPrompt");
+    expect(batch).toContain('? ["小華"]');
+    expect(batch).toContain("prompt: lockedPrompt");
+    expect(batch).not.toContain("rewritePersistedXiaohuaShotCopy");
+  });
+
+  it("LLM agent plans freeze shotContextPacketId the same way batchGenerate does", () => {
+    const core = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
+    expect(core).toContain("async function stampAgentGenerateShotContextPackets");
+    expect(core.match(/stampAgentGenerateShotContextPackets\(auth, project.id, plan.steps\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(core).toContain("step.shotContextPacketId = frozen.packetId");
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("shotContextPacketId: packetId");
+    expect(batch).toContain("freezeShotContextPacket");
+  });
+
+  it("animationPipeline keyframe honours 角色卡 生成時帶入; video keeps i2v parent", () => {
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("resolveSceneCards(shot, null)");
+    expect(stage).toContain("resolveHonoredCharacterSheet");
+    expect(stage).toContain("characterIds: cards.characterIds");
+    expect(stage).toContain("explicitSourceAssetId: input.sourceAssetId");
+    expect(stage).toContain('input.stage === "keyframe_generation"');
+    expect(stage).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(stage).toContain(": input.sourceAssetId");
+    expect(stage).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(stage).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(stage).toContain("sceneId: shot.id");
+  });
+
+  it("MCP generate_into and animationPipeline lock 小華 prompt before persist", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("lockXiaohuaGenerationPrompt");
+    expect(into).toContain('? ["小華"]');
+    expect(into).toContain("prompt: lockedPrompt.slice(0, MAX_PROMPT)");
+    expect(into).not.toContain("rewritePersistedXiaohuaShotCopy");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("lockXiaohuaGenerationPrompt");
+    expect(stage).toContain('? ["小華"]');
+    expect(stage).toContain("prompt: lockedPrompt");
+    expect(stage).not.toContain("rewritePersistedXiaohuaShotCopy");
+  });
+
   it("generateInto prompt locks 小華 female and both clients send the selected modelId", () => {
     const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
     expect(into).toContain("lockXiaohuaGenerationPrompt");
+    expect(into).toContain('? ["小華"]');
     expect(into).toContain("ensureXiaohuaCharacterIds");
     expect(into).toContain("modelId: input.modelId");
     expect(generationCore).toContain("lockXiaohuaGenerationPrompt");
@@ -400,6 +719,264 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneList).toContain("liveGenModelId");
     expect(sceneList).toContain("modelId: liveGenModelId");
     expect(sceneStudio).toContain("modelId: regenModelId");
+  });
+
+  it("MCP submit_generation sceneNo sets sceneRole and visual shot bindings", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("sceneFillRole");
+    expect(block).toContain("resolveSceneCards(shot, null)");
+    expect(block).toContain("lookIds = shot.lookIds ?? undefined");
+    expect(block).toContain("shotDirection = { camera: shot.camera, performance: shot.performance, action: shot.action }");
+    expect(block).toContain("sceneRole");
+    expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
+  });
+
+  it("MCP submit_generation locks 小華 prompt before Command persist", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("prompt: userPrompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("MCP submit_generation honours 角色卡 生成時帶入 when sceneNo is visual", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcp.ts"), "utf8");
+    const block = mcp.slice(mcp.indexOf('if (name === "submit_generation")'), mcp.indexOf('if (name === "post_message")'));
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: visualCards.characterIds");
+    expect(block).toContain("if (!sourceUrl)");
+    expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("explicitSourceAssetId");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
+  });
+
+  it("assistant generate binds sceneFillRole locally so sceneId generate does not ReferenceError", () => {
+    expect(assistant).toMatch(/import\s*\{[^}]*\bsceneFillRole\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/shared\/sceneVersions["']/);
+    expect(assistant).not.toMatch(/export\s*\{\s*sceneFillRole\s*\}\s*from\s+/);
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("sceneFillRole(model)");
+  });
+
+  it("assistant generate into a shot keeps this shot's cards / looks / shotDirection", () => {
+    const start = assistant.indexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("resolveSceneCards(scene, null)");
+    expect(block).toContain("lookIds: scene.lookIds ?? undefined");
+    expect(block).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(block).toContain("characterIds: cards.characterIds");
+    expect(block).not.toContain("select({ id: schema.scenes.id })");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("assistant generate locks 小華 prompt before Command persist", () => {
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("prompt: a.prompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+  });
+
+  it("assistant generate honours 角色卡 生成時帶入 on visual", () => {
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: cards.characterIds");
+    expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("explicitSourceAssetId");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
+    expect(block).toContain("sceneId: visual ? scene.id : undefined");
+  });
+
+  it("assistant generate narration/ambience uses this shot's speech + voice / Sound World", () => {
+    const start = assistant.lastIndexOf('if (a.type === "generate")');
+    const block = assistant.slice(start, assistant.indexOf('if (a.type === "update_scene")', start));
+    expect(block).toContain("sceneSpeechLines");
+    expect(block).toContain("speechForTts");
+    expect(block).toContain("routeSpeechVoice");
+    expect(block).toContain("voiceIdentity");
+    expect(block).toContain("soundWorldRef");
+    expect(block).toContain("resolveProjectCanonDefaults");
+    expect(block).toContain("lockedPrompt = speech");
+    expect(block).toContain("lockedPrompt = composed");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("assertNoPendingVisual");
+    expect(block).toContain("sceneId: visual ? scene.id : undefined");
+  });
+
+  it("refine freezes shotDirection so a later camera change marks the picture stale", () => {
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(refine).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(refine).toContain("lookIds: scene.lookIds ?? undefined");
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+  });
+
+  it("scenes.refine locks 小華 prompt before Command persist", () => {
+    const refine = scenes.slice(scenes.indexOf("refine:"), scenes.indexOf("generateVoiceover:"));
+    expect(refine).toContain("lockXiaohuaGenerationPrompt");
+    expect(refine).toContain('? ["小華"]');
+    expect(refine).toContain("prompt: lockedPrompt");
+    expect(refine).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(refine).not.toContain("ensureXiaohuaCharacterIds");
+    expect(refine).not.toContain("resolveHonoredCharacterSheet");
+  });
+
+  it("MCP / batch / animationPipeline bind 小華 card when the shot names her", () => {
+    expect(scenes).toContain("ensureXiaohuaCharacterIds");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("ensureXiaohuaCharacterIds");
+    expect(into).toContain("[scene.title, prompt, scene.action, scene.dialogue]");
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("ensureXiaohuaCharacterIds");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("ensureXiaohuaCharacterIds");
+    expect(stage).toContain("[shot.title, prompt, shot.action, shot.dialogue]");
+  });
+
+  it("MCP generate_into_scene drops leftover 待你過目 the same way generateInto does", () => {
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(into).toContain("projectId: scene.projectId");
+    expect(into).toContain("sceneId: scene.id");
+    expect(into).toContain("generationId: gen.id");
+    const generateInto = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(generateInto).toContain("scheduleReconcileAfterIndependentGenerate");
+  });
+
+  it("MCP generate_into_scene uses assertNoPendingVisual so a second send cannot double-charge", () => {
+    expect(scenes).toContain('import { assertNoPendingVisual } from "../services/scenePendingVisual"');
+    expect(scenes).not.toContain("async function assertNoPendingVisual");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("assertNoPendingVisual(scene.id)");
+    const gate = readFileSync(join(process.cwd(), "server/services/scenePendingVisual.ts"), "utf8");
+    expect(gate).toContain('status, ["queued", "running", "awaiting_approval"]');
+    expect(gate).toContain("這一格正在生成或待核准中，請稍候再生成");
+  });
+
+  it("MCP generate_into_scene uses regenRejection so audio/text cannot fill the visual slot", () => {
+    expect(scenes).toContain("export { regenRejection }");
+    const versions = readFileSync(join(process.cwd(), "shared/sceneVersions.ts"), "utf8");
+    expect(versions).toContain("export function regenRejection");
+    expect(versions).toContain("分鏡就地生成需要用圖像或影片模型");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("regenRejection(model)");
+    expect(into).toContain('code: "BAD_REQUEST"');
+  });
+
+  it("MCP generate_into and animationPipeline reuse buildShotContextPrompt, not raw prompt/title", () => {
+    expect(scenes).toContain('import { buildShotContextPrompt } from "../services/shotContextPrompt"');
+    expect(scenes).not.toContain("async function buildShotContextPrompt(");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const into = mcp.slice(mcp.indexOf('if (name === "generate_into_scene")'), mcp.indexOf('if (name === "update_worldview")'));
+    expect(into).toContain("buildShotContextPrompt(scene, model)");
+    expect(into).not.toContain("scene.prompt ?? scene.title");
+    const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
+    const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));
+    expect(stage).toContain("buildShotContextPrompt(shot, model)");
+    expect(stage).not.toContain("shot.prompt?.trim()");
+  });
+
+  it("generateInto honours 角色卡 生成時帶入 via resolveHonoredCharacterSheet(projectId); 0/6 skips", () => {
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
+    expect(into).toContain("resolveHonoredCharacterSheet");
+    expect(into).toContain("characterIds: cards.characterIds");
+    expect(into).toContain("explicitSourceAssetId: input.sourceAssetId");
+    expect(variants).toContain("resolveHonoredCharacterSheet");
+    expect(variants).toContain("characterIds: cards.characterIds");
+    expect(sceneStudio).toContain("HonorSheetControl");
+    expect(sceneStudio).toContain("honoredCharIds");
+    expect(sceneStudio).toContain("{canEdit && (");
+    const honor = readFileSync(join(process.cwd(), "client/src/components/HonorSheetControl.tsx"), "utf8");
+    expect(honor).toContain("生成時帶入角色參考圖");
+    expect(honor).toContain("生成時帶入 · 已選");
+    expect(honor).toContain("已選");
+    expect(sceneStudio).not.toContain("sourceAssetId: stray");
+    expect(sceneList).toContain("selectableBringInIds");
+    expect(sceneList).toContain("honoredCharIds");
+    const cards = readFileSync(join(process.cwd(), "client/src/components/CharacterCards.tsx"), "utf8");
+    expect(cards).toContain("生成時帶入");
+    expect(cards).toContain("selectableBringInIds");
+    expect(cards).toContain("characterHasLiveSheet");
+    expect(cards).toContain("沒有定裝參考圖——先設參考圖");
+    const ref = readFileSync(join(process.cwd(), "server/services/referenceAsset.ts"), "utf8");
+    expect(ref).toContain("export async function resolveHonoredCharacterSheet");
+    expect(ref).toContain("if (!opts.characterIds?.length) return undefined");
+    expect(ref).toContain("owned.has(explicit)");
+    expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
+  });
+
+  it("generateVoiceover / generateAmbience drop leftover HUD without attaching audio onto visual steps", () => {
+    const voice = scenes.slice(scenes.indexOf("generateVoiceover:"), scenes.indexOf("generateAmbience:"));
+    const ambience = scenes.slice(scenes.indexOf("generateAmbience:"), scenes.indexOf("reorder:"));
+    const voiceAfter = voice.slice(voice.indexOf("assertReplayableGeneration"));
+    const ambienceAfter = ambience.slice(ambience.indexOf("assertReplayableGeneration"));
+    expect(voiceAfter).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(voiceAfter).toContain("projectId: scene.projectId");
+    expect(voiceAfter).toContain("generationId: gen.id");
+    expect(voiceAfter).not.toContain("sceneId:");
+    expect(ambienceAfter).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(ambienceAfter).toContain("projectId: scene.projectId");
+    expect(ambienceAfter).toContain("generationId: gen.id");
+    expect(ambienceAfter).not.toContain("sceneId:");
+  });
+
+  it("batchGenerate / agent generate freeze shotDirection so 補完 N 鏡 marks 畫面過時", () => {
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action }");
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner).toContain("shotDirection?: ContinuityShotDirection");
+    expect(runner.match(/shotDirection,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).toContain("step.shotDirection ??");
+    expect(runner).toContain("camera: scene.camera");
+    expect(runner).toContain("performance: scene.performance");
+    expect(runner).toContain("action: scene.action");
+  });
+
+  it("studio generateWhiteboardImage with sceneId binds this shot's cards / looks / shotDirection", () => {
+    const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
+    const block = director.slice(director.indexOf("generateWhiteboardImage:"), director.indexOf("suggest:"));
+    expect(block).toContain("resolveSceneCards(scene,");
+    expect(block).toContain("lookIds: scene?.lookIds ?? undefined");
+    expect(block).toContain("shotDirection: scene");
+    expect(block).toContain("{ camera: scene.camera, performance: scene.performance, action: scene.action }");
+    expect(block).toContain("characterIds: cards?.characterIds ?? input.characterIds");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
+    expect(block).not.toContain("buildShotContextPrompt");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    const panel = readFileSync(join(process.cwd(), "client/src/features/animation-studio/StudioAiPanel.tsx"), "utf8");
+    const send = panel.slice(panel.indexOf("generateFinishedWhiteboardImage"), panel.indexOf("generatedImageUrl"));
+    expect(send).toContain("sceneId: shot.id");
+  });
+
+  it("studio generateWhiteboardImage locks 小華 prompt before Command persist", () => {
+    const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
+    const block = director.slice(director.indexOf("generateWhiteboardImage:"), director.indexOf("suggest:"));
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain('? ["小華"]');
+    expect(block).toContain("prompt: lockedPrompt");
+    expect(block).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(block).not.toContain("ensureXiaohuaCharacterIds");
+    expect(block).not.toContain("resolveHonoredCharacterSheet");
   });
 
   it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {

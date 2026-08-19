@@ -42,11 +42,15 @@ vi.mock("../../../api", () => ({
       my: {
         useQuery: () => ({
           data: {
-            totalRemaining: 100,
-            weeklyQuota: 50,
-            weeklyUsed: 3,
+            groupId: "group-1",
+            totalRemaining: 4704,
+            falPointsCap: 4704,
+            weeklyQuota: 331,
+            weeklyUsed: 7,
             dailyQuota: null,
             dailyUsed: 0,
+            memberBudgetRemaining: null,
+            groupBudgetRemaining: null,
             approvalThreshold: 20,
           },
         }),
@@ -274,6 +278,10 @@ describe("DirectGenerateMode", () => {
     await user.click(genBtn);
 
     const confirm = await screen.findByRole("button", { name: "確認生成" });
+    const remainingLabels = screen.getAllByText(/目前剩 324 點/);
+    expect(remainingLabels.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/4,708/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/4708/)).not.toBeInTheDocument();
     await user.click(confirm);
 
     await waitFor(() => expect(submitMutate).toHaveBeenCalledTimes(1));

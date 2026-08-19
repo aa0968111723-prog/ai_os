@@ -31,7 +31,9 @@
   --ws-rail: 52px;
   --ws-tool-options: 216px;
   --ws-inspector: 320px;
-  --ws-timeline: 148px;
+  /* 148px clipped the ⋯ ops row (thumb+title+tracks already filled the strip).
+     1024-high live then needed 1280×1600 to hunt 複製. 208px fits ⋯ + arrows. */
+  --ws-timeline: 208px;
   --ws-header: 48px;
 
   /* 進站即工作台：固定滿版，全站殼層由 body.studio-workspace 讓開 */
@@ -549,6 +551,10 @@ body.studio-workspace { overflow: hidden; }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Grid item min-width:auto grows with the A–F strip; workspace
+     overflow:hidden then clips later shots (live board-only nav). */
+  min-width: 0;
+  overflow: hidden;
   border-top: 1px solid var(--ws-line);
   background: var(--ws-panel);
   padding: 6px 10px 8px;
@@ -557,7 +563,7 @@ body.studio-workspace { overflow: hidden; }
 .studio-timeline__title { font-size: var(--fs-12); font-weight: 700; color: var(--ws-ink); }
 .studio-timeline__count { font-size: var(--fs-11); }
 .studio-timeline__empty { font-size: var(--fs-12); color: var(--ws-ink-2); margin: 6px 0 0; }
-.studio-timeline__tip { font-size: 10px; margin: 2px 0 0; opacity: 0.7; }
+.studio-timeline__tip { display: none; }
 .studio-timeline__list {
   display: flex;
   gap: 7px;
@@ -567,6 +573,7 @@ body.studio-workspace { overflow: hidden; }
   margin: 0;
   padding: 2px 2px 4px;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   scroll-snap-type: x proximity;
 }
@@ -581,6 +588,36 @@ body.studio-workspace { overflow: hidden; }
   background: var(--card);
   scroll-snap-align: start;
   overflow: visible;
+}
+/* ⋯ sits on the thumb (first ~65px) so 1024-high overflow-y cannot hide it. */
+.studio-tlshot__more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  color: var(--ws-ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(22, 34, 59, 0.25);
+}
+.studio-tlshot__more:hover,
+.studio-tlshot__more[aria-expanded="true"] {
+  background: var(--card);
+  color: var(--ws-ink);
+}
+/* Open shot menu: keep the fixed scrim inside this card's stacking
+   context so 複製/刪除 stay above the transparent overlay. Without
+   this, the scrim (fixed z-50) covers the menu — click only closes it. */
+.studio-tlshot:has(.studio-menu) {
+  z-index: 60;
 }
 .studio-tlshot.is-active {
   border-color: var(--primary-solid);
@@ -688,8 +725,33 @@ body.studio-workspace { overflow: hidden; }
   z-index: 50;
   border: 0;
   padding: 0;
+  margin: 0;
+  /* Global `button` is cream + border-radius: 999px. A scrim <button>
+     with inset:0 becomes the live giant blank circle over the canvas. */
+  border-radius: 0;
   background: transparent;
+  min-width: 0;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  box-shadow: none;
   cursor: default;
+}
+/* Leftover of that cream ellipse: default transparent loses to
+   `button:hover:not(:disabled)` / `button:focus-visible` (higher specificity),
+   so ＋新增鏡 and 頂欄更多 still paint --card2 / 999px over the whiteboard. */
+button.studio-menu__scrim:hover,
+button.studio-menu__scrim:hover:not(:disabled),
+button.studio-menu__scrim:active,
+button.studio-menu__scrim:active:not(:disabled),
+button.studio-menu__scrim:focus,
+button.studio-menu__scrim:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+  outline: none;
 }
 .studio-menu {
   position: absolute;
@@ -727,6 +789,29 @@ body.studio-workspace { overflow: hidden; }
 /* New Shot 的選單往上開（它在 Timeline 頂端，往下會超出視窗） */
 .studio-menu--newshot { bottom: calc(100% + 5px); right: 0; }
 .studio-menu--shot { bottom: calc(100% + 4px); left: 0; min-width: 190px; }
+/* Portal + fixed: small menu. Live 10:08 cream ellipse is inset:0 +
+   999px + cream — zoom 50% still paints it. Never inherit --shot
+   `bottom: calc(100% + 4px)` (stretches a fixed box) or a scrim. */
+.studio-menu.studio-menu--fixed {
+  position: fixed;
+  inset: unset;
+  top: auto;
+  right: unset;
+  bottom: unset;
+  left: auto;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 16px));
+  height: auto;
+  max-height: min(240px, calc(100vh - 16px));
+  min-width: 190px;
+  min-height: 0;
+  overflow: auto;
+  transform: none;
+  transform-origin: top left;
+  animation: none;
+  border-radius: 10px;
+  z-index: 200;
+}
 .studio-menu--more { top: calc(var(--ws-header) - 2px); right: 10px; }
 
 .studio__alert { margin: 6px 10px; }
@@ -739,6 +824,8 @@ body.studio-workspace { overflow: hidden; }
  * 其他用例，先沿用既有的「版面由 JS 決定、CSS 只吃屬性」原則：
  * 窄桌機由 studioLayout 判成 data-ai="sheet"，Inspector 自動讓位。 */
 .studio.is-workspace[data-ai="sheet"] { --ws-inspector: 264px; --ws-tool-options: 184px; }
+/* 1280 leftover: left AI rail was a 216px pointer at a missing Inspector. */
+.studio.is-workspace[data-tool="ai"] { --ws-tool-options: 320px; }
 
 @media (prefers-reduced-motion: no-preference) {
   .studio-menu { animation: studio-menu-in 120ms var(--m-ease, cubic-bezier(0.2, 0.8, 0.3, 1)); }

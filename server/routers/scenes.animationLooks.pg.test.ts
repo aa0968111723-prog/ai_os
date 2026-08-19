@@ -34,6 +34,7 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
       await db.delete(schema.stories).where(eq(schema.stories.projectId, projectId));
       await db.delete(schema.characterLooks).where(eq(schema.characterLooks.projectId, projectId));
       await db.delete(schema.characters).where(eq(schema.characters.projectId, projectId));
+      await db.delete(schema.assets).where(eq(schema.assets.projectId, projectId));
       await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
     }
     for (const userId of leftovers.users) {
@@ -75,6 +76,104 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const updated = await scenes.setCards({ sceneId: shot.id, characterIds: [afu.id] });
     expect(updated.characterIds).toEqual([afu.id]);
     expect(updated.lookIds).toBeNull();
+  });
+
+  it("26→27: 複製這一鏡 clones after the source (fails on the live silent no-op)", async () => {
+    const { project, scenes } = await seed("創作室複製26");
+    const ids: string[] = [];
+    for (let i = 1; i <= 26; i += 1) {
+      const [row] = await db.insert(schema.scenes).values({
+        projectId: project.id, orderIndex: i, title: `第 ${i} 鏡`,
+      }).returning();
+      ids.push(row.id);
+    }
+    const sourceId = ids[12]!;
+    const listedBefore = await scenes.listByProject({ projectId: project.id });
+    expect(listedBefore).toHaveLength(26);
+
+    const dup = await scenes.insertAfter({ sceneId: sourceId, duplicate: true });
+    expect(dup.id).toBeTruthy();
+    expect(dup.projectId).toBe(project.id);
+
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(27);
+    const sourceIdx = listed.findIndex((row) => row.id === sourceId);
+    expect(listed[sourceIdx + 1]?.id).toBe(dup.id);
+    expect(listed[sourceIdx + 1]?.title).toMatch(/複本/);
+    expect(listed.map((row) => row.id)).toEqual([
+      ...ids.slice(0, 13),
+      dup.id,
+      ...ids.slice(13),
+    ]);
+  });
+
+  it("在這之後插入一鏡: 3→4 after the clicked row, not FIFO append", async () => {
+    const { project, scenes } = await seed("創作室插入之後");
+    const titles = ["第01鏡", "第04鏡", "第05鏡"];
+    const ids: string[] = [];
+    for (const [i, title] of titles.entries()) {
+      const [row] = await db.insert(schema.scenes).values({
+        projectId: project.id, orderIndex: i, title,
+      }).returning();
+      ids.push(row.id);
+    }
+    const sourceId = ids[1]!;
+    const created = await scenes.insertAfter({ sceneId: sourceId });
+    expect(created.id).toBeTruthy();
+    expect(created.title).toBe("新分鏡");
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(4);
+    expect(listed.map((row) => row.id)).toEqual([ids[0], sourceId, created.id, ids[2]]);
+    expect(listed.map((row) => row.title)).toEqual(["第01鏡", "第04鏡", "新分鏡", "第05鏡"]);
+    expect(listed.at(-1)?.id).toBe(ids[2]);
+  });
+
+  it("複製 increases listByProject by 1 and the new row sits after the source", async () => {
+    const { project, userId, groupId, scenes } = await seed("創作室複製這一鏡");
+    const [lian] = await db.insert(schema.characters).values({
+      projectId: project.id, groupId, name: "小蓮", appearance: "圓臉", createdBy: userId,
+    }).returning();
+    const [look] = await db.insert(schema.characterLooks).values({
+      projectId: project.id, groupId, characterId: lian.id, name: "除夕夜", costume: "大紅棉襖", createdBy: userId,
+    }).returning();
+    const assetId = randomUUID();
+    await db.insert(schema.assets).values({
+      id: assetId,
+      projectId: project.id,
+      groupId,
+      kind: "image",
+      title: "第04鏡畫面",
+      url: `/api/assets/${assetId}/file`,
+    });
+    const [before] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 0, title: "第03鏡",
+    }).returning();
+    const [source] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 1, title: "第04鏡",
+      characterIds: [lian.id], lookIds: [look.id], assetId,
+      camera: { shotSize: "近景" },
+    }).returning();
+    const [after] = await db.insert(schema.scenes).values({
+      projectId: project.id, orderIndex: 2, title: "第05鏡",
+    }).returning();
+
+    const listedBefore = await scenes.listByProject({ projectId: project.id });
+    expect(listedBefore).toHaveLength(3);
+
+    const dup = await scenes.insertAfter({ sceneId: source.id, duplicate: true });
+    expect(dup.projectId).toBe(project.id);
+    expect(dup.lookIds).toEqual([look.id]);
+    expect(dup.assetId).toBe(assetId);
+    expect(dup.characterIds).toEqual([lian.id]);
+
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(listedBefore.length + 1);
+    const sourceIdx = listed.findIndex((row) => row.id === source.id);
+    expect(sourceIdx).toBe(1);
+    expect(listed[sourceIdx + 1]?.id).toBe(dup.id);
+    expect(listed.map((row) => row.id)).toEqual([before.id, source.id, dup.id, after.id]);
+    expect(listed[sourceIdx + 1]?.lookIds).toEqual([look.id]);
+    expect(listed[sourceIdx + 1]?.assetId).toBe(assetId);
   });
 
   it("duplicate copies look, camera, and performance", async () => {
@@ -233,13 +332,15 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     const got = await story.get({ projectId: project.id });
     expect(["A較短", "B這一份比較長而且是最新草稿"]).toContain(got.story?.content);
     const latest = "B這一份比較長而且是最新草稿";
-    const saved = await story.save({
-      projectId: project.id,
-      content: latest,
-      expectedRev: got.story?.rev,
-      baseline: got.story?.content,
-    });
-    expect(saved.rev).toBeGreaterThan(got.story?.rev ?? 0);
+    if (got.story?.content !== latest) {
+      const saved = await story.save({
+        projectId: project.id,
+        content: latest,
+        expectedRev: got.story?.rev,
+        baseline: got.story?.content,
+      });
+      expect(saved.rev).toBeGreaterThan(got.story?.rev ?? 0);
+    }
     const again = await story.get({ projectId: project.id });
     expect(again.story?.content).toBe(latest);
   });

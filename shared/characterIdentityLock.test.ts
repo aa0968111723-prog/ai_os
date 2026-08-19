@@ -6,8 +6,10 @@ import {
   lockXiaohuaGenerationPrompt,
   lockXiaohuaPlan,
   rewritePersistedXiaohuaShotCopy,
+  rewriteXiaohuaInventedMaleLook,
   rewriteXiaohuaMaleCopy,
   scriptExplicitlyMaleXiaohua,
+  withTamkangSophomore,
   XIAOHUA_LOCKED_APPEARANCE,
 } from "./characterIdentityLock";
 import { TKU_ZEN_SHOTLIST_AD_PARSE, TKU_ZEN_SHOTLIST_FIRST_PARSE } from "./fixtures/tkuZenPromo";
@@ -25,9 +27,36 @@ describe("小華 identity lock", () => {
     expect(locked.costume).toContain("白帽T");
   });
 
+  it("keeps 淡江大二化工 when the ask or look already names 淡江", () => {
+    const asked = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "淡江大二化工、年輕男性", costume: "" },
+      "新增角色小華 淡江大二化工",
+    );
+    expect(asked.appearance).toContain("淡江大二化工");
+    expect(asked.appearance).toContain("粉橘短髮女孩");
+    expect(asked.appearance).toContain("白帽T");
+    expect(asked.appearance).not.toContain("年輕男性");
+    const keep = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "淡江大二化工、粉橘短髮女孩、白帽T", costume: "白帽T" },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(keep.appearance).toBe("淡江大二化工、粉橘短髮女孩、白帽T");
+  });
+
   it("fills a missing female look on an empty 小華 card", () => {
     const locked = applyXiaohuaIdentityLock({ name: "小華", appearance: "", costume: "" }, TKU_ZEN_SHOTLIST_FIRST_PARSE);
     expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("upgrades truncated A–F EXTRACT 大二化工、白帽T、短髮 to 粉橘短髮女孩", () => {
+    const locked = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "大二化工、白帽T、短髮", costume: "白帽T、短髮，腳本未換裝" },
+      TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    );
+    expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(locked.appearance).toContain("粉橘短髮女孩");
+    expect(locked.appearance).toContain("白帽T");
+    expect(locked.appearance).not.toContain("年輕男性");
   });
 
   it("does not rewrite 禪定龜龜 or a non-小華 male extra", () => {
@@ -47,6 +76,35 @@ describe("小華 identity lock", () => {
     const keep = "大二化工、粉橘短髮女孩、白帽T、微笑";
     const locked = applyXiaohuaIdentityLock({ name: "小華", appearance: keep, costume: "白帽T" }, TKU_ZEN_SHOTLIST_AD_PARSE);
     expect(locked.appearance).toBe(keep);
+  });
+
+  it("does not rewrite another project's 小華 (藍外套／紅旗袍) into A–F 白帽T", () => {
+    const isolation = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "專案B的小華・藍外套黑框眼鏡", costume: "" },
+      "動畫短片・小華專案B",
+    );
+    expect(isolation.appearance).toBe("專案B的小華・藍外套黑框眼鏡");
+    expect(isolation.appearance).not.toContain("白帽T");
+    const qipao = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "專案B小華、紅旗袍、盤髮" },
+      "小華站在祠堂門口",
+    );
+    expect(qipao.appearance).toBe("專案B小華、紅旗袍、盤髮");
+    const cardLocked = lockXiaohuaGenerationPrompt(
+      "小華站在校門口\n\n外觀鎖定 小華：專案B的小華・藍外套黑框眼鏡",
+      ["小華"],
+    );
+    expect(cardLocked).toContain("藍外套黑框眼鏡");
+    expect(cardLocked).not.toContain(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("restores 淡江大二化工 when the story names 淡大 but the card already dropped it", () => {
+    const dropped = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE, costume: "白帽T" },
+      "小華站在淡大校門口校名牌前。我是大二化工系的小華。",
+    );
+    expect(dropped.appearance).toBe("淡江大二化工、粉橘短髮女孩、白帽T");
+    expect(withTamkangSophomore(XIAOHUA_LOCKED_APPEARANCE, "淡大校門口")).toContain("淡江大二化工");
   });
 
   it("honors an explicit male clause only when the script has no female cues", () => {
@@ -177,6 +235,8 @@ describe("小華 identity lock", () => {
     expect(plan.scenes[0]?.shots[0]?.prompt).toContain("淡大校門口");
     expect(plan.scenes[0]?.shots[0]?.prompt).not.toContain("克難坡");
     expect(plan.scenes[1]?.locationRef).toBe("夕陽");
+    expect(plan.characters[0]?.appearance).toContain("淡江大二化工");
+    expect(plan.characters[0]?.appearance).toContain("粉橘短髮女孩");
   });
 
   it("locks generateInto prompts so 小華 cannot stay a boy", () => {
@@ -188,6 +248,29 @@ describe("小華 identity lock", () => {
     expect(unnamed).toContain("她身上");
     expect(unnamed).toMatch(/粉橘短髮女孩|女孩/);
     expect(lockXiaohuaGenerationPrompt("禪定龜龜低頭")).toBe("禪定龜龜低頭");
+    const boyTurtle = lockXiaohuaGenerationPrompt("a young boy sitting with a zen turtle", ["小華"]);
+    expect(boyTurtle).toContain(XIAOHUA_LOCKED_APPEARANCE);
+    const campus = lockXiaohuaGenerationPrompt("年輕男性站在淡大校門口", ["小華"]);
+    expect(campus).toContain("粉橘短髮女孩");
+    expect(campus).toContain("淡江大二化工");
+    expect(campus).not.toContain("年輕男性");
+    expect(rewriteXiaohuaInventedMaleLook("小華是年輕男性，黑長直髮")).toBe("小華是粉橘短髮女孩，粉橘短髮");
+    const shot9 = lockXiaohuaCopyFields(
+      { title: "第9鏡", prompt: "主：粉橘髮女孩、白T（是男性）" },
+      "小華站在校門口",
+    );
+    expect(shot9.prompt).toBe("主：粉橘髮女孩、白T");
+    expect(shot9.prompt).not.toMatch(/是男性|（是男性）|\(是男性\)/);
+    const gen9 = lockXiaohuaGenerationPrompt("主：粉橘髮女孩、白T（是男性）", ["小華"]);
+    expect(gen9).toContain("粉橘短髮女孩");
+    expect(gen9).not.toMatch(/是男性|（是男性）/);
+    expect(rewriteXiaohuaInventedMaleLook("主：粉橘髮女孩、白T(是男性)")).toBe("主：粉橘髮女孩、白T");
+    const imeSave = rewritePersistedXiaohuaShotCopy({
+      title: "第9鏡",
+      prompt: "主：粉橘髮女孩、白T（是男性）",
+    }, true);
+    expect(imeSave.prompt).toBe("主：粉橘髮女孩、白T");
+    expect(imeSave.prompt).not.toMatch(/是男性|（是男性）/);
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {
@@ -197,5 +280,13 @@ describe("小華 identity lock", () => {
     );
     expect(locked.title).toBe("夕陽光照在她身上");
     expect(locked.prompt).not.toContain("他身上");
+    const maleLook = lockXiaohuaCopyFields(
+      { title: "年輕男性站在校門口", prompt: "年輕男性站在淡大校門口，夕陽光照在他身上" },
+      TKU_ZEN_SHOTLIST_AD_PARSE,
+    );
+    expect(maleLook.title).toContain("粉橘短髮女孩");
+    expect(maleLook.prompt).toContain("粉橘短髮女孩");
+    expect(maleLook.prompt).toContain("她身上");
+    expect(maleLook.prompt).not.toMatch(/年輕男性|他身上/);
   });
 });

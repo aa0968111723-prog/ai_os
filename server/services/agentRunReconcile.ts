@@ -190,3 +190,31 @@ export function scheduleReconcileAfterVisualAdopt(input: {
     ),
   );
 }
+
+/**
+ * generateInto / refine / generateVariants / generation.submit /
+ * generation.ablation / generation.bench / generation.retry / MCP
+ * retry_generation / MCP generate_into_scene / MCP submit_generation
+ * must clear leftover 0/N「待你過目」when a replayable job lands.
+ * First-send throw skips this; 主路徑生成 / 重試 / 修正 / 變體 / MCP
+ * used to leave the HUD parked until the 30s poll.
+ */
+export function scheduleReconcileAfterIndependentGenerate(input: {
+  projectId: string;
+  sceneId?: string | null;
+  generationId: string;
+}): void {
+  void (input.sceneId
+    ? reconcileAgentRunsAfterSceneGenerate({
+      projectId: input.projectId,
+      sceneId: input.sceneId,
+      generationId: input.generationId,
+    })
+    : reconcileLeftoverAwaitingApprovalOnRead({ projectId: input.projectId })
+  ).catch((err) =>
+    console.warn(
+      "[agent-run] generate reconcile failed:",
+      err instanceof Error ? err.message : err,
+    ),
+  );
+}

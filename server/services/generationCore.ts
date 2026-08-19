@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, isGeminiModel, generationProviderOf, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -34,6 +34,10 @@ import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  IDEMPOTENT_FAILED_GENERATION_RETRY,
+  shouldReplayIdempotentGeneration,
+} from "../../shared/generationIdempotency";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
 import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import type { ContinuitySnapshot, ContinuityShotDirection } from "../../shared/continuity";
@@ -88,11 +92,24 @@ export function humanizeGenerationError(raw: string | undefined | null): string 
 function persistGenerationResult(assetId: string, generationId: string, remoteUrl: string): void {
   void (async () => {
     const persisted = await persistRemote(remoteUrl);
-    if (!persisted) return;
+    if (!persisted) {
+      // Silent return left newest generateInto rows due (landNextTryAt null)
+      // and never wrote originUrl. Sweep is newest-first / limit 20, so those
+      // stale fal URLs starved older landable persists. Same backoff as sweep.
+      await failPersistGenerationLand(assetId, remoteUrl, "persistRemote 回空（來源已死或抓取失敗）");
+      return;
+    }
     const localUrl = `/api/assets/${assetId}/file`;
     await db
       .update(schema.assets)
-      .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
+      .set({
+        storagePath: persisted.storagePath,
+        mime: persisted.mime,
+        sizeBytes: persisted.sizeBytes,
+        url: localUrl,
+        originUrl: remoteUrl,
+        landState: "landed",
+      })
       .where(eq(schema.assets.id, assetId));
     await db
       .update(schema.generations)
@@ -100,6 +117,68 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
       .where(eq(schema.generations.id, generationId));
     console.log(`[storage] 成品已落地：asset=${assetId}（${persisted.sizeBytes}B ${persisted.mime}）`);
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
+}
+
+/** Keep fal in originUrl and leave the due queue so older generateInto can land. */
+async function failPersistGenerationLand(assetId: string, remoteUrl: string, error: string): Promise<void> {
+  const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, assetId)).limit(1);
+  if (!asset) return;
+  const origin = unlandedPersistSource(asset) ?? remoteUrl;
+  if (origin) {
+    await db
+      .update(schema.assets)
+      .set({ originUrl: origin })
+      .where(eq(schema.assets.id, assetId));
+  }
+  await markLandAttemptFailed(asset, error);
+}
+
+/**
+ * Sweep source when persist is fire-and-forget.
+ * generateInto may rewrite url to `/api/assets/…/file` before storagePath lands;
+ * originUrl keeps the fal CDN so the next tick can still fetch.
+ */
+export function unlandedPersistSource(asset: {
+  url?: string | null;
+  originUrl?: string | null;
+}): string | null {
+  const origin = (asset.originUrl ?? "").trim();
+  if (/^https?:\/\//i.test(origin)) return origin;
+  const url = (asset.url ?? "").trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  return null;
+}
+
+/** Same where as sweep: url-or-originUrl http, so rewritten local url is still counted. */
+export function unlandedPersistWhere() {
+  return and(
+    eq(schema.assets.isAiGenerated, true),
+    isNull(schema.assets.storagePath),
+    or(like(schema.assets.url, "http%"), like(schema.assets.originUrl, "http%")),
+    // /api/mock-asset/* placeholders are not landable. Sweep used to
+    // `continue` them without landNextTryAt, so 20 mock rows starved
+    // newer generateInto fal persists forever — same class as
+    // persistRemote null without markLandAttemptFailed.
+    sql`(coalesce(${schema.assets.url}, '') not ilike '%/api/mock-asset/%' and coalesce(${schema.assets.originUrl}, '') not ilike '%/api/mock-asset/%')`,
+  );
+}
+
+/**
+ * landingQueue.test.ts documents this contract. Sweep used to `continue`
+ * on persistRemote null without bumping landNextTryAt, so 20 dead fal
+ * URLs starved newer generateInto rows forever.
+ */
+export function landingBackoffSeconds(attempts: number): number {
+  return Math.min(3600 * 6, 2 ** Math.min(Math.max(0, attempts), 10) * 30);
+}
+
+export function isLandAttemptDue(
+  nextTryAt: Date | string | null | undefined,
+  now = new Date(),
+): boolean {
+  if (nextTryAt == null) return true;
+  const at = nextTryAt instanceof Date ? nextTryAt : new Date(nextTryAt);
+  return !Number.isNaN(at.getTime()) && at.getTime() <= now.getTime();
 }
 
 /** 注入結果：正向提示詞＋（視覺類別的）負向提示詞。 */
@@ -466,7 +545,11 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     };
   }
   const character = continuitySnapshot
-    ? formatCharacterAnchor(continuitySnapshot.characters, continuitySnapshot.characters.map((row) => row.id))
+    ? formatCharacterAnchor(
+        continuitySnapshot.characters,
+        continuitySnapshot.characters.map((row) => row.id),
+        input.prompt,
+      )
     : "";
   const scene = continuitySnapshot
     ? formatSceneAnchor(continuitySnapshot.scenes, continuitySnapshot.scenes.map((row) => row.id))
@@ -971,6 +1054,9 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     // closure §7：parent 素材 id 落 meta——完成時寫 asset_revisions 正式血緣列，
     // 不再依賴 sourceUrl regex 反推（外部網址會斷鏈）
     sourceAssetId: prepared.effectiveSourceAssetId,
+    // Retry used to restore lookIds only from snapshot characters[].lookId.
+    // A look-only shot (lookIds, no character cards) never froze those ids.
+    lookIds: input.lookIds?.length ? [...new Set(input.lookIds)] : undefined,
     // closure §5／§6：聲線與聲音世界的 canon 依賴落進 meta——lineage 與 targeted stale 的根據
     voice: input.voiceIdentity
       ? {
@@ -1035,7 +1121,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
               eq(schema.generations.groupId, project.groupId),
               input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
             ));
-          if (existing) return existing;
+          if (existing) {
+            if (!shouldReplayIdempotentGeneration(existing.status)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+              });
+            }
+            return existing;
+          }
           throw new TRPCError({
             code: "CONFLICT",
             message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
@@ -1119,7 +1213,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           eq(schema.generations.groupId, project.groupId),
           input.sceneId ? eq(schema.generations.sceneId, input.sceneId) : isNull(schema.generations.sceneId),
         ));
-      if (existing) return existing;
+      if (existing) {
+        if (!shouldReplayIdempotentGeneration(existing.status)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+          });
+        }
+        return existing;
+      }
       throw new TRPCError({
         code: "CONFLICT",
         message: "這個送出編號已被另一筆生成使用，請重新整理後再送一次（未扣點）",
@@ -1322,10 +1424,11 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
             kind: mediaKind,
             title: gen.prompt.slice(0, 40),
             url: stored ? "pending" : mediaUrl,
+            originUrl: stored ? null : mediaUrl,
             storagePath: stored?.storagePath ?? null,
             mime: stored?.mime ?? null,
             sizeBytes: stored?.sizeBytes ?? null,
-            landState: stored ? "landed" : undefined,
+            landState: stored ? "landed" : "pending",
             isAiGenerated: true,
             meta: { generationId: gen.id, modelId: gen.modelId },
           })
@@ -1516,7 +1619,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
 export async function enqueueLanding(assetId: string): Promise<boolean> {
   const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, assetId)).limit(1);
   if (!asset) return false;
-  const source = asset.originUrl ?? (asset.url.startsWith("http") ? asset.url : null);
+  // Same helper as sweep: empty / local originUrl must not hide a still-fetchable fal CDN url.
+  const source = unlandedPersistSource(asset);
   if (!source || !asset.isAiGenerated) {
     await db
       .update(schema.assets)
@@ -1542,11 +1646,25 @@ export async function enqueueLanding(assetId: string): Promise<boolean> {
  * 落地補抓（修：persistGenerationResult 是「射後不理」的背景作業，一次網路抖動失敗後，
  * 素材的 url 就永久停在 fal CDN 外部網址、storagePath 為空——fal CDN 網址是短效的，
  * 過期後成品變永久死連結且無源可重抓，是慢性資料流失）。
- * 這裡掃「AI 生成、未落地（storagePath 空）、url 仍是外部 http」的素材重試 persistRemote，
+ * 這裡掃「AI 生成、未落地（storagePath 空）、url 或 originUrl 仍是外部 http」的素材重試 persistRemote，
  * 由 generationRunner 的 sweep tick 定期呼叫。冪等：已落地的（storagePath 非空）撈不到；
  * 假模式的 /api/mock-asset/* 佔位網址略過（不需落地、也避免 e2e 期間改動 mock 素材）。
  */
+async function markLandAttemptFailed(asset: { id: string; landAttempts: number }, error: string): Promise<void> {
+  const now = new Date();
+  await db
+    .update(schema.assets)
+    .set({
+      landAttempts: sql`${schema.assets.landAttempts} + 1`,
+      landLastError: error.slice(0, 500),
+      landLastTriedAt: now,
+      landNextTryAt: new Date(now.getTime() + landingBackoffSeconds(asset.landAttempts) * 1000),
+    })
+    .where(eq(schema.assets.id, asset.id));
+}
+
 export async function sweepUnlandedAssets(limit = 20): Promise<number> {
+  const now = new Date();
   const rows = await db
     .select()
     .from(schema.assets)
@@ -1554,21 +1672,39 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
     // 丟回收桶→fal 短效網址過期→還原」的素材變永久死連結，回收桶「可救回」承諾落空。未落地時素材唯一來源就是
     // 外部 url，還原時必須有 Volume 檔可用。落地本身冪等（已落地的 storagePath 非空撈不到），對回收桶素材無副作用。
     .where(and(
-      eq(schema.assets.isAiGenerated, true),
-      isNull(schema.assets.storagePath),
-      like(schema.assets.url, "http%"),
+      unlandedPersistWhere(),
+      or(isNull(schema.assets.landNextTryAt), lte(schema.assets.landNextTryAt, now)),
     ))
+    .orderBy(desc(schema.assets.createdAt))
     .limit(limit);
   let landed = 0;
   for (const asset of rows) {
-    if (asset.url.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
+    const source = unlandedPersistSource(asset);
+    if (!source) {
+      await markLandAttemptFailed(asset, "沒有可重新抓取的外部來源");
+      continue;
+    }
+    if (isUnusableRealModeSourceUrl(source)) {
+      await markLandAttemptFailed(asset, "假模式佔位圖不落地");
+      continue;
+    }
     try {
-      const persisted = await persistRemote(asset.url);
-      if (!persisted) continue; // fal 網址已死/抓取失敗 → 下輪再試（或已無源，無害，不擋）
+      const persisted = await persistRemote(source);
+      if (!persisted) {
+        await markLandAttemptFailed(asset, "persistRemote 回空（來源已死或抓取失敗）");
+        continue;
+      }
       const localUrl = `/api/assets/${asset.id}/file`;
       await db
         .update(schema.assets)
-        .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
+        .set({
+          storagePath: persisted.storagePath,
+          mime: persisted.mime,
+          sizeBytes: persisted.sizeBytes,
+          url: localUrl,
+          originUrl: source,
+          landState: "landed",
+        })
         .where(eq(schema.assets.id, asset.id));
       // 順帶把來源生成的 resultUrl 也指向落地後的自有網址（與 persistGenerationResult 同口徑）
       const genId = (asset.meta as { generationId?: string } | null)?.generationId;
@@ -1578,7 +1714,9 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
       landed += 1;
       console.log(`[storage] 落地補抓成功：asset=${asset.id}（${persisted.sizeBytes}B ${persisted.mime}）`);
     } catch (err) {
-      console.warn(`[storage] 落地補抓略過（下輪再試）：asset=${asset.id}`, err instanceof Error ? err.message : err);
+      const message = err instanceof Error ? err.message : String(err);
+      await markLandAttemptFailed(asset, message).catch(() => undefined);
+      console.warn(`[storage] 落地補抓略過（下輪再試）：asset=${asset.id}`, message);
     }
   }
   return landed;

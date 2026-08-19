@@ -31,6 +31,7 @@ describe("變體不另建第二條管線", () => {
     // 一個 slot 一把冪等鍵：計費／重送的收據仍然是既有那一套
     expect(variantsBlock).toContain("id: slot.row.clientRequestId");
     expect(variantsBlock).toContain("Promise.allSettled");
+    expect(variantsBlock).toContain("scheduleReconcileAfterIndependentGenerate");
   });
 
   it("候選一律不動 current 指標，且方向與批次落在既有 params 內", () => {

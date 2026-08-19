@@ -35,6 +35,11 @@ import {
 } from "../../shared/shotLooks";
 import { batchGenerateFingerprint } from "../../shared/projectCreativeContext";
 import {
+  discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  leftoverAwaitingApprovalIdsToDiscard,
+  type ReconcileAgentStep,
+} from "../../shared/agentRunReconcile";
+import {
   MAX_SCRIPT_SCENES,
   SCRIPT_CARD_LABELS,
   SCRIPT_CARD_MAX,
@@ -50,16 +55,19 @@ import {
 } from "../../shared/storyboardScript";
 import { loadSceneCardLookup, sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
+import { keepLivingSceneRefs } from "../services/sceneEntityIds";
+import { resolveHonoredCharacterSheet } from "../services/referenceAsset";
 import {
   buildSceneVersions,
   findDuplicateCurrent,
   isSceneRefineModel,
-  sceneVisualPrompt,
   isSceneRegenModel,
+  regenRejection,
   summarizeSceneVersions,
   type SceneExternalAsset,
   type SceneVersionGenerationRow,
 } from "../../shared/sceneVersions";
+import { buildShotContextPrompt } from "../services/shotContextPrompt";
 import { lockSceneOrder } from "../services/locks";
 import { restoreOrderPlan } from "../../shared/sceneRestoreOrder";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
@@ -68,13 +76,22 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { softDeleteScenesCore } from "../services/sceneWriteCore";
 import { MAX_PROMPT_CHARS } from "./prompts";
 import {
-  formatEnvironmentState,
-  formatShotDirection,
   shotCameraSchema,
   shotPerformanceSchema,
 } from "../../shared/story";
-import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  isXiaohuaName,
+  lockXiaohuaGenerationPrompt,
+  rewritePersistedXiaohuaShotCopy,
+} from "../../shared/characterIdentityLock";
+import {
+  IDEMPOTENT_FAILED_GENERATION_RETRY,
+  shouldReplayIdempotentGeneration,
+} from "../../shared/generationIdempotency";
 import { ensureXiaohuaCharacterIds } from "../services/cardAnchors";
+import { assertNoPendingVisual } from "../services/scenePendingVisual";
+
+export { regenRejection };
 
 /** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
 const SCENE_VERSION_LIMIT = 120;
@@ -127,36 +144,50 @@ export function refineRejection(input: {
   return null;
 }
 
-/** 「生成／重生這一格」的純模型守門：不合規回中文訊息，合規回 null */
-export function regenRejection(model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined): string | null {
-  if (!model || (model.kind !== "image" && model.kind !== "video")) {
-    return "分鏡就地生成需要用圖像或影片模型";
+function assertReplayableGeneration(status: string): void {
+  if (!shouldReplayIdempotentGeneration(status)) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: IDEMPOTENT_FAILED_GENERATION_RETRY,
+    });
   }
-  // 需要底圖的模型走 scenes.refine（那裡才會帶 sourceAssetId）。不擋的話會一路送到
-  // generationCore 才因「此模型需要來源」被拒——使用者按了鈕、等了一下，才拿到一句看不懂的錯。
-  if (!isSceneRegenModel(model)) {
-    return `「${model.label}」需要底圖，請改用單格工作室的「以這張為底圖修正」`;
-  }
-  return null;
 }
 
-/**
- * 「這一格正在生成畫面嗎」——就地生成／修正共用的伺服器端防抖。
- * 兩顆鈕都直接扣點、沒有二次確認，快速雙擊或兩人同時按會重複送出、重複扣點。
- * （catch 常見雙擊；非強一致鎖）
- */
-async function assertNoPendingVisual(sceneId: string): Promise<void> {
-  const [pendingVisual] = await db
-    .select({ id: schema.generations.id })
-    .from(schema.generations)
-    .where(and(
-      eq(schema.generations.sceneId, sceneId),
-      sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
-      // awaiting_approval：超額待核也算「在途」，防連點堆多筆待核
-      inArray(schema.generations.status, ["queued", "running", "awaiting_approval"]),
-    ))
-    .limit(1);
-  if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成或待核准中，請稍候再生成" });
+/** IME / prompt save must not persist EXTRACT leftover「是男性」on a 小華 shot. */
+async function sceneCopyBoundToXiaohua(
+  projectId: string,
+  characterIds?: string[] | null,
+): Promise<boolean> {
+  const ids = [...new Set((characterIds ?? []).filter(Boolean))];
+  if (!ids.length) return false;
+  const rows = await db
+    .select({ name: schema.characters.name })
+    .from(schema.characters)
+    .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, ids)));
+  return rows.some((row) => isXiaohuaName(row.name));
+}
+
+function assignLockedXiaohuaCopy(
+  patch: {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+  locked: {
+    title?: string | null;
+    prompt?: string | null;
+    action?: string | null;
+    dialogue?: string | null;
+    voiceover?: string | null;
+  },
+): void {
+  if (patch.title !== undefined) patch.title = locked.title;
+  if (patch.prompt !== undefined) patch.prompt = locked.prompt;
+  if (patch.action !== undefined) patch.action = locked.action;
+  if (patch.dialogue !== undefined) patch.dialogue = locked.dialogue;
+  if (patch.voiceover !== undefined) patch.voiceover = locked.voiceover;
 }
 
 /**
@@ -234,36 +265,6 @@ export function cardPatchFromScript(
     patch[column] = outcome.ids.length ? outcome.ids : null;
   }
   return patch;
-}
-
-/**
- * Shot Context Builder（PE 計畫 §11）：把「這一鏡獨有」的上下文疊到畫面描述上。
- * 組裝順序＝繼承順序：Scene State（所屬場的天氣/時間/氛圍）→ 鏡頭語言 → 表演 → 造型鎖定。
- * Project 風格（worldview）與角色/場景/道具錨點不在這裡——generationCore 既有機制會注入，
- * 這裡重複加只會把提示詞灌爆（Cost Control guardrail）。
- */
-async function buildShotContextPrompt(
-  scene: typeof schema.scenes.$inferSelect,
-  model: Parameters<typeof sceneVisualPrompt>[1],
-): Promise<string> {
-  const base = sceneVisualPrompt(scene, model);
-  if (!base.trim()) return base;
-  const parts: string[] = [base];
-
-  if (scene.storySceneId) {
-    const [storyScene] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, scene.storySceneId));
-    const envText = storyScene ? formatEnvironmentState(storyScene.environment) : "";
-    if (envText) parts.push(`[場景狀態] ${envText}`);
-  }
-
-  const direction = formatShotDirection(scene.camera, scene.performance);
-  if (direction) parts.push(`[鏡頭語言] ${direction}`);
-
-  // 造型（Look）不在這裡注入：它已經提到 generationCore 的錨點層，
-  // 與角色身份併成同一句「外觀鎖定 安倢：…，造型鎖定：米白外套」（見 cardAnchors.formatCharacterAnchor）。
-  // 在這裡再寫一次會變成同一件衣服講兩遍，對擴散模型是雜訊不是加強。
-
-  return parts.join("\n\n");
 }
 
 /** 分鏡：簡易排序（↑↓）＋從生成成品加入（定案：不做拖曳時間軸） */
@@ -439,16 +440,21 @@ export const scenesRouter = router({
           .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
           .from(schema.scenes)
           .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        const locked = rewritePersistedXiaohuaShotCopy({
+          title: input.title,
+          prompt: input.prompt ?? null,
+          voiceover: input.voiceover ?? null,
+        }, false);
         const [scene] = await tx
           .insert(schema.scenes)
           .values({
             projectId: project.id,
             orderIndex: Number(maxOrder) + 1,
-            title: input.title,
+            title: locked.title ?? input.title,
             durationSec: input.durationSec ?? (project.format === "9:16" ? 4 : 5),
             status: "todo",
-            prompt: input.prompt,
-            voiceover: input.voiceover,
+            prompt: locked.prompt ?? input.prompt,
+            voiceover: locked.voiceover ?? input.voiceover,
           })
           .returning();
         return scene;
@@ -818,9 +824,8 @@ export const scenesRouter = router({
    * 先前只有「加到最後」＋↑↓ 一路搬——想在第 3 鏡後面補一格，要按十幾次箭頭。
    * 同一 sceneId 連打 N 次＝每次都插在錨點正後方，先插入的會被後來的往下推（LIFO）。
    * 產品要的「點擊順序」由前端 insertAfterQueue 串新 id；這裡只保證鎖內不撞 orderIndex。
-   * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定；
-   * **不複製成品**（assetId／narrationAssetId）：那是花過點數的產物，複製一份引用
-   * 會讓兩格指向同一素材，刪一格就互相影響。新格一律從 todo 開始。
+   * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定／造型／
+   * 現用畫面（assetId）。旁白／環境音檔不複製——那是另一軌成品。
    */
   insertAfter: authedProcedure
     .input(z.object({ sceneId: z.string().uuid(), duplicate: z.boolean().optional() }))
@@ -867,15 +872,27 @@ export const scenesRouter = router({
             action: dup ? cur.action : null,
             dialogue: dup ? cur.dialogue : null,
             music: dup ? cur.music : null,
-            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
-            characterIds: dup ? cur.characterIds : null,
-            scenePresetIds: dup ? cur.scenePresetIds : null,
-            propIds: dup ? cur.propIds : null,
-            // 造型／鏡頭語言／所屬場同屬設定：漏複製的話複本會用角色預設外觀、丟運鏡，連戲直接分岔
-            lookIds: dup ? cur.lookIds : null,
+            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期。
+            // JSONB 沒有 FK：來源若已掛幽靈 id（卡片刪了／素材進回收桶），複本只帶走還活著的。
+            ...(dup
+              ? await keepLivingSceneRefs(tx, project.id, {
+                  characterIds: cur.characterIds,
+                  scenePresetIds: cur.scenePresetIds,
+                  propIds: cur.propIds,
+                  lookIds: cur.lookIds,
+                  storySceneId: cur.storySceneId,
+                  assetId: cur.assetId,
+                })
+              : {
+                  characterIds: null,
+                  scenePresetIds: null,
+                  propIds: null,
+                  lookIds: null,
+                  storySceneId: null,
+                  assetId: null,
+                }),
             camera: dup ? cur.camera : null,
             performance: dup ? cur.performance : null,
-            storySceneId: dup ? cur.storySceneId : null,
           })
           .returning();
         return created;
@@ -1001,7 +1018,7 @@ export const scenesRouter = router({
         idColumn: schema.scenes.id,
         revColumn: schema.scenes.rev,
         row: cur,
-        patch,
+        patch: { ...patch },
         expectedRev: input.expectedRev ?? cur.rev,
         baseline,
         extraWhere: isNull(schema.scenes.deletedAt),
@@ -1060,6 +1077,23 @@ export const scenesRouter = router({
         const prompt = await buildShotContextPrompt(scene, model);
         if (!prompt.trim()) continue; // 沒有畫面描述的鏡跳過，不送一個註定失敗的步驟
         const cards = resolveSceneCards(scene, null);
+        const characterIds = await ensureXiaohuaCharacterIds(
+          scene.projectId,
+          cards.characterIds,
+          [scene.title, prompt, scene.action, scene.dialogue],
+        );
+        // generateInto locks before Command so generations.prompt cannot keep 年輕男性.
+        // batchGenerate used to store the raw string on the agent step; core only
+        // re-locks the provider. Same lock, same 小華 name test. Not scene persist-lock.
+        const lockedPrompt = lockXiaohuaGenerationPrompt(
+          prompt,
+          /小華/.test([scene.title, prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+        );
+        const sourceAssetId = await resolveHonoredCharacterSheet({
+          projectId: project.id,
+          groupId: project.groupId,
+          characterIds: cards.characterIds,
+        });
         let packetId: string | undefined;
         try {
           const { freezeShotContextPacket } = await import("../services/shotContextPackets");
@@ -1080,10 +1114,13 @@ export const scenesRouter = router({
           actorType: "ai",
           sceneNo: i + 1,
           modelId: model.id,
-          prompt,
-          characterIds: cards.characterIds,
+          prompt: lockedPrompt,
+          characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
+          lookIds: scene.lookIds ?? undefined,
+          shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
+          ...(sourceAssetId ? { sourceAssetId } : {}),
           shotContextPacketId: packetId,
         });
       }
@@ -1120,6 +1157,32 @@ export const scenesRouter = router({
         });
         return existingFp === fingerprint;
       });
+      // Same-fingerprint reuse keeps that run. Leftover 0/N with a
+      // different / missing fingerprint used to stay, so insert stacked
+      // a second 「待你過目」chip. Discard those first.
+      const leftoverIds = leftoverAwaitingApprovalIdsToDiscard({
+        keepRunId: reused?.id,
+        runs: pending.map((run) => ({
+          id: run.id,
+          status: "awaiting_approval",
+          steps: Array.isArray(run.steps) ? (run.steps as ReconcileAgentStep[]) : [],
+        })),
+      });
+      for (const runId of leftoverIds) {
+        const row = pending.find((run) => run.id === runId);
+        const leftoverSteps = Array.isArray(row?.steps) ? (row.steps as ReconcileAgentStep[]) : [];
+        const leftover = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+          status: "awaiting_approval",
+          steps: leftoverSteps,
+          independentGenerateLanded: true,
+        });
+        if (!leftover.discarded) continue;
+        await db.update(schema.agentRuns).set({
+          steps: leftover.steps,
+          status: "discarded",
+          updatedAt: new Date(),
+        }).where(eq(schema.agentRuns.id, runId));
+      }
       if (reused) {
         return { runId: reused.id, shots: steps.length, estPoints: reused.estPoints, reused: true as const };
       }
@@ -1215,6 +1278,23 @@ export const scenesRouter = router({
       if (input.dialogue !== undefined) patch.dialogue = input.dialogue;
       if (input.music !== undefined) patch.music = input.music;
       if (input.prompt !== undefined) patch.prompt = input.prompt;
+      if (
+        patch.title !== undefined
+        || patch.prompt !== undefined
+        || patch.action !== undefined
+        || patch.dialogue !== undefined
+        || patch.voiceover !== undefined
+      ) {
+        const bound = await sceneCopyBoundToXiaohua(scene.projectId, scene.characterIds);
+        const locked = rewritePersistedXiaohuaShotCopy({
+          title: (patch.title ?? scene.title) as string,
+          prompt: (patch.prompt !== undefined ? patch.prompt : scene.prompt) as string | null,
+          action: patch.action !== undefined ? patch.action : scene.action,
+          dialogue: patch.dialogue !== undefined ? patch.dialogue : scene.dialogue,
+          voiceover: patch.voiceover !== undefined ? patch.voiceover : scene.voiceover,
+        }, bound);
+        assignLockedXiaohuaCopy(patch, locked);
+      }
       if (input.trimStartMs !== undefined) patch.trimStartMs = input.trimStartMs;
       if (input.trimEndMs !== undefined) patch.trimEndMs = input.trimEndMs;
       if (input.storySceneId !== undefined) patch.storySceneId = input.storySceneId;
@@ -1329,19 +1409,26 @@ export const scenesRouter = router({
           const where = row ? `第 ${(rowIndex ?? 0) + 1} 鏡的` : `新增的「${scene.title.slice(0, 12)}」的`;
           const cardPatch = cardLookup ? cardPatchFromScript(scene, row, cardLookup, where, warnings) : {};
           if (!row) {
+            const locked = rewritePersistedXiaohuaShotCopy({
+              title: (scene.title || `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
+              prompt: scene.prompt ?? null,
+              voiceover: scene.voiceover ?? null,
+              action: scene.action ?? null,
+              dialogue: scene.dialogue ?? null,
+            }, false);
             await tx.insert(schema.scenes).values({
               projectId: project.id,
               orderIndex: ++order,
               // 標題留空在既有鏡是「維持原值」，但新增的鏡沒有原值可維持——
               // 就地補一個看得懂的佔位，否則分鏡列會多出一格無名空白。
-              title: (scene.title || `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
+              title: (locked.title ?? `第 ${rows.length + created + 1} 鏡`).slice(0, SCRIPT_TITLE_MAX),
               durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
               status: "todo",
-              prompt: scene.prompt ?? null,
-              voiceover: scene.voiceover ?? null,
+              prompt: locked.prompt ?? null,
+              voiceover: locked.voiceover ?? null,
               ambience: scene.ambience ?? null,
-              action: scene.action ?? null,
-              dialogue: scene.dialogue ?? null,
+              action: locked.action ?? null,
+              dialogue: locked.dialogue ?? null,
               music: scene.music ?? null,
               ...cardPatch,
             });
@@ -1373,6 +1460,23 @@ export const scenesRouter = router({
             patch.music = scene.music;
           }
           Object.assign(patch, cardPatch);
+          if (
+            patch.title !== undefined
+            || patch.prompt !== undefined
+            || patch.action !== undefined
+            || patch.dialogue !== undefined
+            || patch.voiceover !== undefined
+          ) {
+            const bound = await sceneCopyBoundToXiaohua(project.id, row.characterIds);
+            const locked = rewritePersistedXiaohuaShotCopy({
+              title: (patch.title ?? row.title) as string,
+              prompt: (patch.prompt !== undefined ? patch.prompt : row.prompt) as string | null,
+              action: patch.action !== undefined ? patch.action : row.action,
+              dialogue: patch.dialogue !== undefined ? patch.dialogue : row.dialogue,
+              voiceover: patch.voiceover !== undefined ? patch.voiceover : row.voiceover,
+            }, bound);
+            assignLockedXiaohuaCopy(patch, locked);
+          }
           if (Object.keys(patch).length === 0) continue;
           const [wrote] = await tx
             .update(schema.scenes)
@@ -1522,6 +1626,11 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      /**
+       * 單格工作室「生成時帶入角色參考圖」：有定裝圖才帶，空定裝省略。
+       * 必須走 assertReferenceImage(projectId)——同組另一個小華的圖不能互綁。
+       */
+      sourceAssetId: z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -1540,8 +1649,8 @@ export const scenesRouter = router({
       // 依序疊上 場景狀態（天氣/時間/氛圍，繼承所屬的場）→ 鏡頭語言（鏡別/運鏡/光線/構圖）→
       // 表演（表情/視線）。Project 風格、角色/場景/道具錨點與本鏡造型（lookIds）
       // 由 generationCore 既有機制注入——這裡只補「Shot 層獨有」的文字上下文。
-      const prompt = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(scene, model)));
-      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      const rawPrompt = input.prompt ?? (await buildShotContextPrompt(scene, model));
+      if (!rawPrompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
       // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
       const cards = resolveSceneCards(scene, {
@@ -1552,8 +1661,20 @@ export const scenesRouter = router({
       const characterIds = await ensureXiaohuaCharacterIds(
         scene.projectId,
         cards.characterIds,
-        [scene.title, prompt, scene.action, scene.dialogue],
+        [scene.title, rawPrompt, scene.action, scene.dialogue],
       );
+      // 0 own sheets: stay on text-lock. Do not wait for 帶入 / 參考圖.
+      const prompt = lockXiaohuaGenerationPrompt(
+        rawPrompt,
+        /小華/.test([scene.title, rawPrompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+      );
+      // 角色卡「生成時帶入」：只從勾選／本鏡綁定找定裝圖。0/6 或沒有活圖＝略過，不 500。
+      const sourceAssetId = await resolveHonoredCharacterSheet({
+        projectId: project.id,
+        groupId: project.groupId,
+        characterIds: cards.characterIds,
+        explicitSourceAssetId: input.sourceAssetId,
+      });
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -1563,6 +1684,7 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
+        ...(sourceAssetId ? { sourceAssetId } : {}),
         characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
@@ -1573,20 +1695,16 @@ export const scenesRouter = router({
         preserveScenePointer: true,
         reasonPrefix: "分鏡生成",
       });
-      void import("../services/agentRunReconcile")
-        .then(({ reconcileAgentRunsAfterSceneGenerate }) =>
-          reconcileAgentRunsAfterSceneGenerate({
-            projectId: scene.projectId,
-            sceneId: scene.id,
-            generationId: gen.id,
-          }),
-        )
-        .catch((err) =>
-          console.warn(
-            "[scenes.generateInto] agent-run reconcile failed:",
-            err instanceof Error ? err.message : err,
-          ),
-        );
+      // Failed first send + same clientRequestId must not look like success
+      // (no new job, leftover 待你過目 still discarded). Timeout replay of
+      // queued/running/done stays idempotent.
+      assertReplayableGeneration(gen.status);
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        sceneId: scene.id,
+        generationId: gen.id,
+      });
       return { generationId: gen.id, modelId: gen.modelId };
     }),
 
@@ -1618,6 +1736,8 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      /** 與 generateInto 同口徑：有定裝圖才帶，空定裝省略、不 500 */
+      sourceAssetId: z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -1646,6 +1766,15 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, input.prompt, scene.action, scene.dialogue],
       );
+      const xiaohuaLockNames = /小華/.test([scene.title, input.prompt, scene.action, scene.dialogue].join(""))
+        ? ["小華"]
+        : [];
+      const sourceAssetId = await resolveHonoredCharacterSheet({
+        projectId: project.id,
+        groupId: project.groupId,
+        characterIds: cards.characterIds,
+        explicitSourceAssetId: input.sourceAssetId,
+      });
       // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
       if (input.parentAssetId) {
         const [parent] = await db
@@ -1669,9 +1798,13 @@ export const scenesRouter = router({
         const virtualScene = compiled
           ? { ...scene, camera: compiled.camera, performance: compiled.performance, action: compiled.action }
           : scene;
-        const base = lockXiaohuaGenerationPrompt(input.prompt ?? (await buildShotContextPrompt(virtualScene, model)));
+        const base = lockXiaohuaGenerationPrompt(
+          input.prompt ?? (await buildShotContextPrompt(virtualScene, model)),
+          xiaohuaLockNames,
+        );
         const prompt = lockXiaohuaGenerationPrompt(
           compiled ? [base, formatDirectionContext(compiled)].filter((part) => part.trim()).join("\n\n") : base,
+          xiaohuaLockNames,
         );
         return { row, compiled, prompt };
       }));
@@ -1704,8 +1837,20 @@ export const scenesRouter = router({
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         lookIds: scene.lookIds ?? undefined,
+        ...(sourceAssetId ? { sourceAssetId } : {}),
         reasonPrefix: "分鏡變體",
       })));
+      const landed = settled.find((result) =>
+        result.status === "fulfilled" && shouldReplayIdempotentGeneration(result.value.status),
+      );
+      if (landed && landed.status === "fulfilled") {
+        const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+        scheduleReconcileAfterIndependentGenerate({
+          projectId: scene.projectId,
+          sceneId: scene.id,
+          generationId: landed.value.id,
+        });
+      }
       return {
         batchId: input.batchId,
         requested: input.variants.length,
@@ -1716,7 +1861,7 @@ export const scenesRouter = router({
             directionId: slot.compiled?.direction.id ?? "as-is",
             directionLabel: slot.compiled?.direction.label ?? "維持現況",
           };
-          return result.status === "fulfilled"
+          return result.status === "fulfilled" && shouldReplayIdempotentGeneration(result.value.status)
             ? {
                 ...shared,
                 ok: true as const,
@@ -1727,7 +1872,9 @@ export const scenesRouter = router({
             : {
                 ...shared,
                 ok: false as const,
-                error: result.reason instanceof Error ? result.reason.message : "變體送出失敗",
+                error: result.status === "fulfilled"
+                  ? IDEMPOTENT_FAILED_GENERATION_RETRY
+                  : result.reason instanceof Error ? result.reason.message : "變體送出失敗",
               };
         }),
       };
@@ -1792,6 +1939,14 @@ export const scenesRouter = router({
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
       });
+      // generateInto / MCP / pipeline already persist the locked prompt. Refine
+      // used to pass input.prompt raw — generationCore re-locks for the provider
+      // but the generation row kept the unlocked copy, so a 小華修圖 could store
+      // 「是男性」 and replay / HUD would show the boy line.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        input.prompt,
+        /小華/.test([scene.title, input.prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+      );
       // 走與其他生成同一條 Command（政策＋狀態機＋ACL＋估點＋扣點＋失敗退點）；
       // sourceAssetId 由 generationCore 換成短效簽名網址，fal 才抓得到、外人不可偽造。
       const gen = await executeGenerationCommand({
@@ -1800,7 +1955,7 @@ export const scenesRouter = router({
         id: input.clientRequestId,
         projectId: scene.projectId,
         modelId: input.modelId,
-        prompt: input.prompt,
+        prompt: lockedPrompt,
         sourceAssetId: source.id,
         sceneId: scene.id,
         sceneRole: "visual",
@@ -1810,7 +1965,17 @@ export const scenesRouter = router({
         // 本鏡造型（#725 P1-8）：generateInto 與 generateVariants 都有帶，refine 漏了——
         // 於是每一次「以這版修正」都丟失造型錨點，改出來的圖會換掉衣服。
         lookIds: scene.lookIds ?? undefined,
+        // 凍結鏡頭語言（與 generateInto 同口徑）：refine 曾略過，改中景→特寫
+        // 修出來的圖不會被標成過時。
+        shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
         reasonPrefix: "分鏡修圖",
+      });
+      assertReplayableGeneration(gen.status);
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        sceneId: scene.id,
+        generationId: gen.id,
       });
       return { generationId: gen.id };
     }),
@@ -1895,6 +2060,15 @@ export const scenesRouter = router({
         voiceIdentity: routed.voice && modelId === routed.voice.modelId ? routed.voice : undefined,
         reasonPrefix: "配音生成",
       });
+      assertReplayableGeneration(gen.status);
+      // generateInto already drops leftover 0/N「待你過目」on a replayable
+      // visual job. 配音 still left the HUD parked until the 30s poll.
+      // No sceneId — audio must not attach onto visual agent steps.
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        generationId: gen.id,
+      });
       return {
         generationId: gen.id,
         voice: routed.voice ? { canonId: routed.voice.canonId, voiceId: routed.voice.voiceId } : null,
@@ -1960,6 +2134,14 @@ export const scenesRouter = router({
           ? { canonId: ambienceCanons.soundWorld.canonId, versionId: ambienceCanons.soundWorld.versionId }
           : undefined,
         reasonPrefix: "環境音生成",
+      });
+      assertReplayableGeneration(gen.status);
+      // Same leftover HUD hole as 配音. No sceneId — audio must not
+      // attach onto visual agent steps.
+      const { scheduleReconcileAfterIndependentGenerate } = await import("../services/agentRunReconcile");
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: scene.projectId,
+        generationId: gen.id,
       });
       return { generationId: gen.id };
     }),

@@ -275,4 +275,23 @@ describe.skipIf(!RUN_PG).sequential("Team Canon foundation (real PostgreSQL)", (
     await expect(promoteCanonVersion({ auth: leaderAuth, versionId: v3Id }))
       .rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
+
+  it("pin 進已有同名小華的專案＝reuse 本地卡，不 mint 第二張", async () => {
+    const [huaB] = await db.insert(schema.characters).values({
+      projectId: projectB, groupId, name: "小華",
+      appearance: "大二化工、粉橘短髮女孩、白帽T", createdBy: userId,
+    }).returning({ id: schema.characters.id });
+    const [huaA] = await db.insert(schema.characters).values({
+      projectId: projectA, groupId, name: "小華",
+      appearance: "大二化工、粉橘短髮女孩、白帽T", createdBy: userId,
+    }).returning({ id: schema.characters.id });
+    const created = await createCanonFromEntity({
+      auth: leaderAuth, projectId: projectA, entityKind: "character", entityId: huaA.id, confirmRights: true,
+    });
+    const pinned = await pinCanonToProject({ auth: leaderAuth, projectId: projectB, canonId: created.canonId });
+    expect(pinned.localEntityId).toBe(huaB.id);
+    expect(pinned.reused).toBe(false);
+    const cards = await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectB));
+    expect(cards.filter((row) => row.name === "小華")).toHaveLength(1);
+  });
 });

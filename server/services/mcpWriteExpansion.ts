@@ -12,6 +12,8 @@ import { lockSceneOrder } from "./locks";
 import { worldviewSchema } from "../../shared/worldview";
 import { buildRetryGenerationInput } from "./generationRetryInput";
 import { executeGenerationCommand } from "./generationCommand";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
+import { scheduleReconcileAfterIndependentGenerate } from "./agentRunReconcile";
 import type { AuthState } from "./auth";
 import {
   AdobeNotConnectedError,
@@ -28,8 +30,19 @@ import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { adoptGenerationCurrent } from "./consistencyAdopt";
 import { refreshShotContextStalenessSafely } from "./shotContextPackets";
-import { assertReferenceImage } from "./referenceAsset";
+import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "./revisionGuard";
+import { getModel } from "../../shared/models";
+import { regenRejection } from "../../shared/sceneVersions";
+import { buildShotContextPrompt } from "./shotContextPrompt";
+import { assertNoPendingVisual } from "./scenePendingVisual";
+import { ensureXiaohuaCharacterIds } from "./cardAnchors";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  PENDING_CHARACTER_APPEARANCE,
+  sanitizeCharacterProposalName,
+} from "../../shared/assistantCharacterPropose";
+import { upsertProjectCharacterCore } from "./characterWriteCore";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -682,26 +695,57 @@ export async function runMcpWriteExpansion(
     if (!genProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, genProject.groupId);
     await assertProjectEditable(auth, genProject);
+    const model = getModel(modelId);
+    const rejection = regenRejection(model);
+    if (rejection) throw new TRPCError({ code: "BAD_REQUEST", message: rejection });
     const prompt = (typeof args.prompt === "string" && args.prompt.trim()
       ? args.prompt
-      : scene.prompt ?? scene.title ?? "").trim();
+      : await buildShotContextPrompt(scene, model)).trim();
     if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡沒有提示詞，請先 update_scene 或傳 prompt" });
+    await assertNoPendingVisual(scene.id);
     const cards = resolveSceneCards(scene, null);
+    // Same 小華 card bind as generateInto: shot names 小華 but characterIds omitted her.
+    const characterIds = await ensureXiaohuaCharacterIds(
+      scene.projectId,
+      cards.characterIds,
+      [scene.title, prompt, scene.action, scene.dialogue],
+    );
+    // generateInto locks before Command so generations.prompt cannot keep 年輕男性.
+    // generationCore re-locks for the provider but persists input.prompt verbatim.
+    const lockedPrompt = lockXiaohuaGenerationPrompt(
+      prompt,
+      /小華/.test([scene.title, prompt, scene.action, scene.dialogue].join("")) ? ["小華"] : [],
+    );
+    // Same 角色卡「生成時帶入」as generateInto: 0/6 or no live sheet = skip, no 500.
+    const sourceAssetId = await resolveHonoredCharacterSheet({
+      projectId: genProject.id,
+      groupId: genProject.groupId,
+      characterIds: cards.characterIds,
+    });
     const gen = await executeGenerationCommand({
       auth,
       source: "mcp",
       id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       projectId: scene.projectId,
       modelId,
-      prompt: prompt.slice(0, MAX_PROMPT),
+      prompt: lockedPrompt.slice(0, MAX_PROMPT),
       sceneId: scene.id,
-      characterIds: cards.characterIds,
+      characterIds,
       scenePresetIds: cards.scenePresetIds,
       propIds: cards.propIds,
       lookIds: scene.lookIds ?? undefined,
+      ...(sourceAssetId ? { sourceAssetId } : {}),
       shotDirection: { camera: scene.camera, performance: scene.performance, action: scene.action },
       preserveScenePointer: true,
       reasonPrefix: "MCP 分鏡格生成",
+    });
+    // generateInto / refine / retry already drop leftover 0/N「待你過目」
+    // on a replayable independent job. MCP generate_into_scene is the same
+    // shot generate door and used to leave the HUD parked until the 30s poll.
+    scheduleReconcileAfterIndependentGenerate({
+      projectId: scene.projectId,
+      sceneId: scene.id,
+      generationId: gen.id,
     });
     return {
       generationId: gen.id,
@@ -801,35 +845,34 @@ export async function runMcpWriteExpansion(
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, project.groupId);
-    await assertProjectEditable(auth, project);
-    const nameStr = String(args.name ?? "").trim();
-    const appearance = String(args.appearance ?? "").trim();
-    if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
+    // Live leftover: raw insert wrote「小華（…）。不要寫素材清單」as the card
+    // name and minted a second 小華 when one already existed (over-claim).
+    const nameStr = sanitizeCharacterProposalName(String(args.name ?? ""));
+    if (!nameStr) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+    const appearance = String(args.appearance ?? "").trim() || PENDING_CHARACTER_APPEARANCE;
     if (typeof args.referenceAssetId === "string") {
       await assertReferenceImage(args.referenceAssetId, project.groupId, project.id);
     }
-    const [row] = await db
-      .insert(schema.characters)
-      .values({
-        projectId: project.id,
-        groupId: project.groupId,
-        name: nameStr.slice(0, 80),
-        appearance: appearance.slice(0, 2000),
-        notes: typeof args.notes === "string" ? args.notes.slice(0, 2000) : null,
-        referenceAssetId: typeof args.referenceAssetId === "string" ? args.referenceAssetId : null,
-        createdBy: auth.user.id,
-      })
-      .returning();
-    const [verified] = await db.select({
-      id: schema.characters.id,
-      name: schema.characters.name,
-      projectId: schema.characters.projectId,
-    }).from(schema.characters).where(eq(schema.characters.id, row.id));
+    const row = await upsertProjectCharacterCore({
+      auth,
+      groupId: project.groupId,
+      projectId: project.id,
+      name: nameStr,
+      appearance,
+      notes: typeof args.notes === "string" ? args.notes : null,
+    });
+    if (typeof args.referenceAssetId === "string") {
+      await db
+        .update(schema.characters)
+        .set({ referenceAssetId: args.referenceAssetId })
+        .where(eq(schema.characters.id, row.characterId));
+    }
     return {
-      characterId: verified?.id ?? row.id,
-      name: verified?.name ?? row.name,
-      projectId: verified?.projectId ?? project.id,
-      verified: Boolean(verified && verified.projectId === project.id && verified.name === nameStr.slice(0, 80)),
+      characterId: row.characterId,
+      name: row.name,
+      projectId: project.id,
+      verified: row.verification.status === "verified",
+      reused: row.reused,
     };
   }
 
@@ -841,7 +884,13 @@ export async function runMcpWriteExpansion(
     await assertProjectEditable(auth, { id: row.projectId, groupId: row.groupId });
     assertMcpProjectScope(row.projectId, args.projectId, "角色卡");
     const patch: Record<string, unknown> = {};
-    if (typeof args.name === "string" && args.name.trim()) patch.name = args.name.trim().slice(0, 80);
+    // Live leftover: add_character sanitizes EXTRACT blobs; update still
+    // wrote「小華（粉橘…）。不要寫素材清單」as the card name (slice 80).
+    if (typeof args.name === "string" && args.name.trim()) {
+      const nameStr = sanitizeCharacterProposalName(args.name);
+      if (!nameStr) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+      patch.name = nameStr;
+    }
     if (typeof args.appearance === "string" && args.appearance.trim()) patch.appearance = args.appearance.trim().slice(0, 2000);
     if (typeof args.notes === "string") patch.notes = args.notes.slice(0, 2000);
     if (args.referenceAssetId === null) patch.referenceAssetId = null;
@@ -998,6 +1047,15 @@ export async function runMcpWriteExpansion(
       ...buildRetryGenerationInput(gen),
       reasonPrefix: "MCP 重試生成",
     });
+    // Same leftover HUD hole as generation.retry: first generateInto throw
+    // skips reconcile; a replayable 重試 must drop 0/N「待你過目」now.
+    if (shouldReplayIdempotentGeneration(newGen.status)) {
+      scheduleReconcileAfterIndependentGenerate({
+        projectId: newGen.projectId,
+        sceneId: newGen.sceneId,
+        generationId: newGen.id,
+      });
+    }
     return {
       generationId: newGen.id,
       status: newGen.status,

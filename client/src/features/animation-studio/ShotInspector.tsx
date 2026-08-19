@@ -16,6 +16,8 @@ import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { Icon } from "../../components/Icon";
 import type { IconName } from "../../components/Icon";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
+import { HonorSheetControl } from "../../components/HonorSheetControl";
+import { useCharacterSheetGenerate } from "../../components/useCharacterSheetGenerate";
 import { ConflictNotice, conflictFromError } from "../../components/ConflictNotice";
 import type { RevisionConflict } from "@shared/revision";
 import { SCRIPT_AMBIENCE_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "@shared/storyboardScript";
@@ -29,6 +31,7 @@ import {
 } from "@shared/story";
 import type { StudioShot } from "./ShotStrip";
 import { AiCopilotActions, type AiCopilotProps } from "./AiCopilotActions";
+import { ExternalAssetIntake } from "../external-intake/ExternalAssetIntake";
 
 export type InspectorTab = "frame" | "cast" | "camera" | "sound" | "ai" | "notes";
 
@@ -95,7 +98,7 @@ export function ShotInspector({
     <aside className="studio-inspector" aria-label="Shot Inspector">
       <header className="studio-inspector__head">
         <strong className="studio-inspector__title">
-          {shotNumber ? `Shot ${String(shotNumber).padStart(2, "0")}` : "未選分鏡"}
+          {shotNumber ? `第 ${shotNumber} 鏡` : "未選分鏡"}
         </strong>
         {shot && <Meta as="span" className="studio-inspector__subtitle">{shot.title}</Meta>}
         <span style={{ flex: "1 1 auto" }} />
@@ -143,6 +146,8 @@ export function ShotInspector({
         id="studio-inspector-tabpanel"
         aria-labelledby={`studio-inspector-tab-${tab}`}
       >
+        {/* 1280 leftover: HonorSheet was gated on shot, so 自由塗鴉 landing never mounted it. */}
+        {canEdit && <InspectorHonorSheet projectId={projectId} shot={shot} />}
         {tab === "ai" ? (
           <AiCopilotActions {...ai} />
         ) : !shot ? (
@@ -156,12 +161,41 @@ export function ShotInspector({
             projectId={projectId}
             projectFormat={projectFormat}
             shot={shot}
+            shotNumber={shotNumber}
             canEdit={canEdit}
             tab={tab}
           />
         )}
       </div>
     </aside>
+  );
+}
+
+/** Live /studio/ 單格 door. Mount even on 自由塗鴉 — do not wait for a selected shot. */
+function InspectorHonorSheet({ projectId, shot }: { projectId: string; shot: InspectorShot | null }) {
+  const characters = trpc.characters.list.useQuery({ projectId });
+  const sheet = useCharacterSheetGenerate(projectId);
+  const [honorIds, setHonorIds] = useState<string[]>(() => shot?.characterIds ?? []);
+  useEffect(() => {
+    setHonorIds(shot?.characterIds ?? []);
+  }, [shot?.id]);
+  return (
+    <>
+      <HonorSheetControl
+        characters={characters.data ?? []}
+        selectedIds={honorIds}
+        onToggle={(id) =>
+          setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
+        }
+        readOnly={!shot}
+        onGenerateSheet={sheet.start}
+        generatingCharacterId={sheet.pendingCharacterId}
+      />
+      {sheet.error ? <Hint>定裝生成失敗：{sheet.error.message}</Hint> : null}
+      {!shot && (
+        <Hint>還沒選分鏡。到下面的時間軸選一鏡，才能把定裝帶進那一鏡的生成。</Hint>
+      )}
+    </>
   );
 }
 
@@ -174,12 +208,14 @@ function ShotFields({
   projectId,
   projectFormat,
   shot,
+  shotNumber,
   canEdit,
   tab,
 }: {
   projectId: string;
   projectFormat: string | null | undefined;
   shot: InspectorShot;
+  shotNumber: number | null;
   canEdit: boolean;
   tab: InspectorTab;
 }) {
@@ -257,7 +293,18 @@ function ShotFields({
       )}
       {update.error && !conflict && <p className="error" role="alert">儲存失敗：{update.error.message}</p>}
 
-      {tab === "frame" && <FrameTab shot={shot} projectId={projectId} projectFormat={projectFormat} ro={ro} saveField={saveField} saveCamera={saveCamera} />}
+      {tab === "frame" && (
+        <FrameTab
+          shot={shot}
+          shotNumber={shotNumber}
+          projectId={projectId}
+          projectFormat={projectFormat}
+          ro={ro}
+          saveField={saveField}
+          saveCamera={saveCamera}
+          onImported={invalidate}
+        />
+      )}
       {tab === "cast" && <CastTab shot={shot} projectId={projectId} ro={ro} setCards={setCards} saveField={saveField} />}
       {tab === "camera" && <CameraTab shot={shot} ro={ro} saveCamera={saveCamera} />}
       {tab === "sound" && <SoundTab shot={shot} ro={ro} saveField={saveField} />}
@@ -269,18 +316,22 @@ function ShotFields({
 /* ── 畫面 ─────────────────────────────────────────────── */
 function FrameTab({
   shot,
+  shotNumber,
   projectId,
   projectFormat,
   ro,
   saveField,
   saveCamera,
+  onImported,
 }: {
   shot: InspectorShot;
+  shotNumber: number | null;
   projectId: string;
   projectFormat: string | null | undefined;
   ro: boolean;
   saveField: (patch: Record<string, unknown>) => void;
   saveCamera: (field: keyof ShotCamera, value: string) => void;
+  onImported: () => void;
 }) {
   // 場（story_scenes）：這一鏡在哪一場戲；環境狀態由場繼承下來，這裡唯讀顯示
   const scenes = trpc.story.scenesList.useQuery({ projectId });
@@ -333,21 +384,37 @@ function FrameTab({
           </output>
         ) : (
           <output className="studio-fields__readonly studio-fields__readonly--muted">
-            未分場——到專案頁的「② 分鏡」可以把這一鏡歸到某一場
+            {/* Live leftover: /studio 未分場 still sent people to the old four-stage
+                TocNav item. ProjectPage no longer mounts that nav — the chip is「分鏡」。 */}
+            未分場——到專案頁打開「分鏡」可以把這一鏡歸到某一場
           </output>
         )}
       </Field>
 
+      {/* Live leftover: empty prompt still taught incense empty-shot, not A–F 校門口 白帽T. */}
       <Field label="畫面描述（生成提示詞）" hint="這一鏡要看到什麼：主體、構圖、光線、氣氛。動作走位寫在「備註」。">
         <textarea
           key={`prompt-${shot.id}-${shot.prompt ?? ""}`}
           rows={6}
           defaultValue={shot.prompt ?? ""}
           readOnly={ro}
-          placeholder="例：清晨的禪堂空景，柔和晨光斜射，留白構圖"
+          placeholder="例：淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.prompt ?? "")) saveField({ prompt: e.target.value }); }}
         />
       </Field>
+
+      {!ro && (
+        <div className="studio-fields__row">
+          <ExternalAssetIntake
+            projectId={projectId}
+            sceneId={shot.id}
+            sceneLabel={shotNumber != null ? `第 ${shotNumber} 鏡「${shot.title}」` : `「${shot.title}」`}
+            triggerLabel="帶入外部成果"
+            triggerVariant="ghost"
+            onImported={onImported}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -521,7 +588,7 @@ function SoundTab({
           rows={3}
           defaultValue={shot.dialogue ?? ""}
           readOnly={ro}
-          placeholder="@師父：坐吧。"
+          placeholder="@小華：咦？你是誰？"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.dialogue ?? "")) saveField({ dialogue: e.target.value }); }}
         />
       </Field>
@@ -579,7 +646,7 @@ function NotesTab({
           rows={3}
           defaultValue={shot.action ?? ""}
           readOnly={ro}
-          placeholder="安倢從門口走到窗邊，停下"
+          placeholder="小華從淡大校門口走到鏡頭前，停下"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.action ?? "")) saveField({ action: e.target.value }); }}
         />
       </Field>

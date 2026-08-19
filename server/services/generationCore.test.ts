@@ -9,6 +9,9 @@ import {
   effectivePromptParts,
   humanizeGenerationError,
   isUnusableRealModeSourceUrl,
+  unlandedPersistSource,
+  landingBackoffSeconds,
+  isLandAttemptDue,
 } from "./generationCore";
 import { MODELS, getModel, type ModelEntry } from "../../shared/models";
 import {
@@ -110,6 +113,74 @@ describe("isUnusableRealModeSourceUrl：正式模式擋 mock 佔位來源", () =
   });
 });
 
+describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
+  it("keeps fal CDN in originUrl when url was rewritten to /api/assets/…/file", () => {
+    expect(unlandedPersistSource({
+      url: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+      originUrl: "https://v3.fal.media/files/xiaohua-a.png",
+    })).toBe("https://v3.fal.media/files/xiaohua-a.png");
+  });
+
+  it("falls back to http url when originUrl is empty", () => {
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-b.png",
+      originUrl: null,
+    })).toBe("https://v3.fal.media/files/shot-b.png");
+  });
+
+  it("falls back to http url when originUrl is blank or a rewritten local path", () => {
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-c.png",
+      originUrl: "   ",
+    })).toBe("https://v3.fal.media/files/shot-c.png");
+    expect(unlandedPersistSource({
+      url: "https://v3.fal.media/files/shot-d.png",
+      originUrl: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+    })).toBe("https://v3.fal.media/files/shot-d.png");
+  });
+
+  it("returns null when neither url nor originUrl is fetchable", () => {
+    expect(unlandedPersistSource({
+      url: "/api/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/file",
+      originUrl: null,
+    })).toBeNull();
+  });
+
+  it("enqueueLanding / persist / sweep keep fal in originUrl via the same helper", () => {
+    const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+    expect(source).toContain("const source = unlandedPersistSource(asset);");
+    expect(source).toContain("originUrl: remoteUrl");
+    expect(source).toContain("originUrl: source");
+    expect(source).toContain("failPersistGenerationLand");
+    expect(source).not.toContain("if (!persisted) return;");
+    const audit = readFileSync(new URL("./storageAudit.ts", import.meta.url), "utf8");
+    expect(audit).toContain("unlandedPersistSource(row)");
+    expect(audit).not.toContain("row.originUrl || row.url");
+  });
+
+  it("sweep backs off dead fal URLs so newer generateInto rows are not starved", () => {
+    expect(landingBackoffSeconds(0)).toBe(30);
+    expect(landingBackoffSeconds(1)).toBe(60);
+    expect(landingBackoffSeconds(5)).toBeGreaterThan(landingBackoffSeconds(2));
+    expect(landingBackoffSeconds(20)).toBe(3600 * 6);
+    expect(isLandAttemptDue(null)).toBe(true);
+    expect(isLandAttemptDue(new Date(Date.now() + 60_000))).toBe(false);
+    expect(isLandAttemptDue(new Date(Date.now() - 1_000))).toBe(true);
+    const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+    expect(source).toContain("markLandAttemptFailed");
+    expect(source).toContain("landingBackoffSeconds");
+    expect(source).toContain("unlandedPersistWhere");
+    expect(source).toContain("orderBy(desc(schema.assets.createdAt))");
+    expect(source).toContain("not ilike '%/api/mock-asset/%'");
+    expect(source).toContain("isUnusableRealModeSourceUrl(source)");
+    expect(source).toContain("沒有可重新抓取的外部來源");
+    expect(source).not.toContain('if (!source || source.includes("/api/mock-asset/")) continue');
+    const maint = readFileSync(new URL("./assetMaintenance.ts", import.meta.url), "utf8");
+    expect(maint).toContain("unlandedPersistWhere()");
+    expect(maint).not.toContain("assets.url} like 'http%'");
+  });
+});
+
 describe("humanizeGenerationError：供應商人話", () => {
   it("逾時原文 → 可行動說明", () => {
     expect(humanizeGenerationError("The operation was aborted due to timeout")).toContain("逾時");
@@ -137,6 +208,7 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
     expect(source).toContain("characterIds: input.characterIds");
     expect(source).toContain("scenePresetIds: input.scenePresetIds");
     expect(source).toContain("sourceAssetId: input.sourceAssetId");
+    expect(source).toContain("lookIds: input.lookIds");
     // 必須在 assertProjectAllows 之後、素材簽名／建列之前
     const projectAllowsIdx = source.indexOf('assertProjectAllows(project, "generate")');
     const assertEntityIdx = source.indexOf("await assertGenerationEntityIds(project.id");

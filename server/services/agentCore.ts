@@ -35,6 +35,7 @@ import {
   type AgentPlannerTelemetry,
 } from "../../shared/agentPlanner";
 import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
+import { resolveFreeOnlyLlmMode } from "../../shared/assistantSemanticResolution";
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
@@ -48,6 +49,7 @@ import {
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "../../shared/agentDag";
 import { canStopAgentRunStatus, isAgentRunActiveForHud } from "../../shared/agentQuestions";
+import { isLeftoverUnstartedApprovalBatch } from "../../shared/agentRunReconcile";
 import { recordAgentEventSafely } from "./agentEventCore";
 import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
@@ -104,6 +106,17 @@ async function persistHudCancel(input: {
   if (!cancelled) {
     const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
     if (current && !isAgentRunActiveForHud(current.status)) return current;
+    const leftoverSteps = Array.isArray(current?.steps)
+      ? (current.steps as Array<{ kind: string; status: string; note: string }>)
+      : [];
+    if (current && isLeftoverUnstartedApprovalBatch(current.status, leftoverSteps)) {
+      const [forced] = await db
+        .update(schema.agentRuns)
+        .set({ status: "discarded", activeQuestionId: null, updatedAt: new Date() })
+        .where(eq(schema.agentRuns.id, run.id))
+        .returning();
+      if (forced) return forced;
+    }
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
   }
   if (run.activeQuestionId) {
@@ -632,6 +645,47 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
   };
 }
 
+/**
+ * batchGenerate already freezes a shot-context packet on each visual generate
+ * step so approval resume cannot rebuild from a later shot edit. LLM / mock
+ * plans used to omit that id; Command then froze at submit. Same helper,
+ * same skip-on-failure. New scenes (create_scene then generate) have no row
+ * yet — skip; Command freezes after the shot exists.
+ */
+async function stampAgentGenerateShotContextPackets(
+  auth: AuthState,
+  projectId: string,
+  steps: AgentStep[],
+): Promise<void> {
+  const pending = steps.filter((step) => step.kind === "generate" && step.sceneNo && !step.shotContextPacketId);
+  if (!pending.length) return;
+  const { freezeShotContextPacket } = await import("./shotContextPackets");
+  const { getModel } = await import("../../shared/models");
+  const { sceneFillRole } = await import("../../shared/sceneVersions");
+  const rows = await db
+    .select({ id: schema.scenes.id })
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)))
+    .orderBy(asc(schema.scenes.orderIndex));
+  for (const step of pending) {
+    const model = getModel(step.modelId ?? "");
+    if (!model || sceneFillRole(model) !== "visual") continue;
+    const scene = rows[(step.sceneNo ?? 0) - 1];
+    if (!scene) continue;
+    try {
+      const frozen = await freezeShotContextPacket({
+        auth,
+        projectId,
+        shotId: scene.id,
+        modelId: model.id,
+      });
+      step.shotContextPacketId = frozen.packetId;
+    } catch (error) {
+      console.warn("[agent] packet freeze skipped:", error instanceof Error ? error.message : error);
+    }
+  }
+}
+
 /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
 export async function planAgentCore(input: {
   auth: AuthState;
@@ -649,7 +703,10 @@ export async function planAgentCore(input: {
   const { auth } = input;
   // 沒指定就用高品質檔（DEFAULT_AGENT_PLANNER_MODE）：規劃品質決定後面執行要燒多少點，
   // 這一步省錢往往是最貴的省法。花費逐次進帳本，額度不足會在下面被擋。
-  const plannerMode = input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE;
+  const plannerMode = resolveFreeOnlyLlmMode(
+    input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE,
+    input.goal,
+  );
   assertUuid(input.projectId, "專案編號");
   try {
     if (await overLimit(auth.user.id)) {
@@ -688,6 +745,7 @@ export async function planAgentCore(input: {
 
   if (isMockMode()) {
     const plan = mockPlan(goal, scenes.length, writableDbs);
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     const plannerTelemetry: AgentPlannerTelemetry = {
       requestedMode: plannerMode,
       provider: "mock",
@@ -930,7 +988,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     userId: auth.user.id,
     groupId: project.groupId,
     reserved: reservedPoints,
-    actual: usagePoints ?? reservedPoints,
+    actual: plannerMode === "nim" ? 0 : (usagePoints ?? reservedPoints),
     reason: `AI 代理規劃（${plannerLabel}）`,
   });
 
@@ -950,6 +1008,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     } catch {
       throw new TRPCError({ code: "BAD_REQUEST", message: "AI 計畫含有無效依賴或引用，系統已阻止落地；請重新規劃" });
     }
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     plan.summary.goal = goal;
     plan.summaryText = `${goal}｜${plan.steps.length} 個步驟｜預估 ${plan.estPoints} 點`;
     if (plan.steps.length === 0) {
@@ -1063,8 +1122,11 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
   const clarifications = (run.contextSlots?.planningClarifications ?? "").trim();
   const round = run.contextSlots?.planningClarificationRound ?? 1;
   const goal = run.goal;
-  const plannerMode = (run.plannerTelemetry as AgentPlannerTelemetry | null)?.requestedMode
-    ?? DEFAULT_AGENT_PLANNER_MODE;
+  const plannerMode = resolveFreeOnlyLlmMode(
+    (run.plannerTelemetry as AgentPlannerTelemetry | null)?.requestedMode
+      ?? DEFAULT_AGENT_PLANNER_MODE,
+    goal,
+  );
 
   // Mock / e2e：不清真 LLM，用固定計畫清掉 blocking 後進 awaiting_approval
   if (isMockMode()) {
@@ -1074,6 +1136,7 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     const writableDbs = await listAgentWritableDbs(auth);
     const plan = mockPlan(goal, scenes.length, writableDbs);
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     plan.planSummary = attachPlanningIssuesToSummary({
       ...plan.planSummary,
       missingInformation: [],
@@ -1199,7 +1262,7 @@ ${clarifications || "（無額外文字）"}
     userId: auth.user.id,
     groupId: project.groupId,
     reserved: reservedPoints,
-    actual: usagePoints ?? reservedPoints,
+    actual: plannerMode === "nim" ? 0 : (usagePoints ?? reservedPoints),
     reason: `AI 代理澄清後重新規劃（${plannerLabel}）`,
   });
 
@@ -1209,6 +1272,7 @@ ${clarifications || "（無額外文字）"}
   } catch {
     throw new TRPCError({ code: "BAD_REQUEST", message: "重新規劃結果含無效依賴或引用，已阻止落地" });
   }
+  await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
   plan.summary.goal = goal;
   plan.summary = attachPlanningIssuesToSummary(plan.summary);
   plan.summaryText = `${goal}｜${plan.steps.length} 個步驟｜預估 ${plan.estPoints} 點｜澄清後重規劃`;

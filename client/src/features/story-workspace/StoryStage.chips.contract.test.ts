@@ -28,10 +28,32 @@ describe("StoryStage parse chips", () => {
     expect(src).not.toMatch(/baselineRef\.current = contentRef\.current/);
   });
 
+  it("generateStoryboard success refreshes studio listByProject so /studio first paint is not 0 鏡", () => {
+    expect(src).toContain("refreshStudioShotList");
+    expect(src).toContain("trpc.story.generateStoryboard.useMutation");
+    const start = src.indexOf("trpc.story.generateStoryboard.useMutation");
+    const block = src.slice(start, src.indexOf("undoRun", start));
+    expect(block).toContain("refreshStudioShotList(utils, projectId)");
+    expect(block).toContain("utils.scenes.listByProject.invalidate({ projectId })");
+  });
+
   it("產生分鏡 stays available from story text when parse never finished", () => {
     expect(src).toContain("canBoardFromStory");
     expect(src).toContain("解析未完成時，仍可依故事原文拆場拆鏡");
     expect(src).not.toMatch(/disabled=\{board\.isPending \|\| !lastRun \|\| lastRun\.status !== "done"\}/);
+  });
+
+  it("0-shot empty story shows 開始寫故事, not primary AI 解析", () => {
+    expect(src).toContain("開始寫故事");
+    expect(src).toContain("startWriting");
+    expect(src).toContain("focusAndReveal");
+    expect(src).toContain("getElementById(\"story-editor\")");
+    const actions = src.slice(src.indexOf("story-parse-bar__actions"));
+    expect(actions).toMatch(/isBlank \? \(/);
+    expect(actions).toMatch(/開始寫故事/);
+    expect(actions).toMatch(/AI 解析/);
+    expect(actions).not.toMatch(/disabled=\{parse\.isPending \|\| isBlank\}/);
+    expect(src).not.toMatch(/variant=\{hasParsed && !isDirty \? "ghost" : "primary"\}[\s\S]{0,80}disabled=\{parse\.isPending \|\| isBlank\}/);
   });
 
   it("onBlur sends the same expectedRev/baseline as debounce/flush (no rev-less saveRef)", () => {

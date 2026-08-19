@@ -5,6 +5,8 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { TKU_ZEN_SHOTS, tkuZenHasForbidden, tkuZenSpokenDialogue } from "../../shared/fixtures/tkuZenPromo";
 import { canOwnProject } from "./projects";
 
 const members = ["u-leader", "u-member-1", "u-member-2"];
@@ -43,6 +45,55 @@ describe("updateWorldview OCC", () => {
     expect(body).toContain("expectedRev: input.expectedRev");
     expect(body).toContain("revColumn: schema.projects.rev");
     expect(body).toContain("patch: { worldview: merged }");
+  });
+});
+
+describe("createSample seeds 小華 A–F, not 七幕", () => {
+  const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("createSample:"), source.indexOf("seriesOverview:"));
+
+  it("範例專案 title is 校門口遇見龜龜, not 禪心一炷香", () => {
+    expect(source).toContain('const SAMPLE_PROJECT_TITLE = "範例專案：校門口遇見龜龜"');
+    expect(source).toContain("SAMPLE_PROJECT_TITLE_LEGACY");
+    expect(source).not.toMatch(/const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香"/);
+    expect(body).toContain("inArray(schema.projects.title");
+    expect(body).toContain("SAMPLE_PROJECT_TITLE_LEGACY");
+  });
+
+  it("範例專案 worldview + shots mint 小華／禪定龜龜, never 安倢／慕恩", () => {
+    expect(body).toContain("小華");
+    expect(body).toContain("禪定龜龜");
+    expect(body).toContain("XIAOHUA_LOCKED_APPEARANCE");
+    expect(body).toContain("TKU_ZEN_SHOTS");
+    expect(body).not.toContain("安倢");
+    expect(body).not.toContain("慕恩");
+    expect(body).not.toContain("哲維");
+    expect(body).not.toContain("瑀晴");
+    expect(body).not.toContain("紅傘");
+    expect(body).not.toContain("清晨禪堂");
+    expect(body).not.toContain("針織外套");
+    expect(body).not.toContain("走進禪堂點香");
+    expect(body).not.toContain("那炷香之後");
+    expect(body).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
+    expect(body).toContain("範例見證 · 校門口遇見龜龜");
+  });
+
+  it("runtime seed is 6 A–F, locked 小華 look, no forbidden tokens", () => {
+    expect(TKU_ZEN_SHOTS).toHaveLength(6);
+    expect(TKU_ZEN_SHOTS.map((shot) => shot.title).join("\n")).toMatch(/A 校門口[\s\S]*F 真的真的/);
+    const people = [`小華：${XIAOHUA_LOCKED_APPEARANCE}`, "禪定龜龜：吉祥物龜龜，第三句才登場"];
+    const blob = JSON.stringify({
+      people,
+      shots: TKU_ZEN_SHOTS.map((shot) => ({
+        title: shot.title,
+        prompt: shot.prompt,
+        dialogue: shot.dialogue,
+        voiceover: tkuZenSpokenDialogue(shot.dialogue),
+      })),
+    });
+    expect(people[0]).toContain("粉橘短髮女孩");
+    expect(people[0]).toContain("白帽T");
+    expect(tkuZenHasForbidden(blob)).toEqual([]);
   });
 });
 

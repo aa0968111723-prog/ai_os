@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { matchByName, mockStoryExtract, planStoryboardFromStoryText, resolveStoryExtractStrategy, sha256Hex } from "./storyParse";
 import { isStoryNoteLine, storyParseModelSchema, stripStoryNotes } from "../../shared/story";
 import { NIM_DEFAULT_MODEL, NIM_REASONING_MODEL, NVIDIA_MODELS } from "./nvidia-nim";
+import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "../../shared/fixtures/tkuZenPromo";
 
 const SAMPLE = [
   "角色：安倢（黑髮、柔和五官）、師父（灰袍長者）",
@@ -82,6 +83,27 @@ describe("mockStoryExtract", () => {
     expect(planStoryboardFromStoryText(SAMPLE)).toEqual(mockStoryExtract(SAMPLE));
     expect(planStoryboardFromStoryText("只有一句話").scenes.length).toBeGreaterThan(0);
   });
+
+  it("unmarked paragraphs pick locations from the story, not 未定地點", () => {
+    const unmarked = [
+      "安倢走進禪堂。晨光從窗櫺灑進來。",
+      "",
+      "她坐在教室最後一排寫生。",
+      "",
+      "宿舍走廊的燈還沒關。",
+    ].join("\n");
+    const plan = mockStoryExtract(unmarked);
+    expect(plan.scenes.map((sc) => sc.locationRef)).toEqual(["禪堂", "教室", "宿舍"]);
+    expect(plan.locations.map((l) => l.name)).toEqual(["禪堂", "教室", "宿舍"]);
+    expect(plan.scenes.every((sc) => sc.locationRef)).toBe(true);
+  });
+
+  it("SHOTLIST A–F mock parse stays 6 beats; act 1 is 校門口", () => {
+    const plan = mockStoryExtract(TKU_ZEN_SHOTLIST_FIRST_PARSE);
+    expect(plan.scenes).toHaveLength(6);
+    expect(plan.scenes[0]?.locationRef).toBe("校門口");
+    expect(JSON.stringify(plan)).not.toMatch(/宿舍夜|安倢|慕恩|茶會字卡/);
+  });
 });
 
 describe("作者備註行不進解析", () => {
@@ -119,7 +141,8 @@ describe("解析模型檔位", () => {
       const short = resolveStoryExtractStrategy(n);
       expect(short.primaryModel).toBe(NIM_DEFAULT_MODEL);
       expect(short.fallbackModel).toBe(NIM_DEFAULT_MODEL);
-      expect(short.primaryTimeoutMs + short.fallbackTimeoutMs).toBeLessThan(150_000);
+      expect(short.primaryTimeoutMs + short.fallbackTimeoutMs).toBeLessThan(120_000);
+      expect(short.budgetMs).toBeLessThan(120_000);
     }
     const long = resolveStoryExtractStrategy(8_000);
     expect(long.primaryModel).toBe(NIM_REASONING_MODEL);
@@ -146,5 +169,12 @@ describe("matchByName", () => {
   it("找不到就回 null——不跨專案猜一張同名卡", () => {
     expect(matchByName([{ id: "char-a", name: "小華" }], "禪定龜龜")).toBeNull();
     expect(matchByName([], "小華")).toBeNull();
+  });
+
+  it("EXTRACT blob「小華（粉橘…）」hits the existing 小華 card, not a second row", () => {
+    const existing = { id: "char-a", name: "小華" };
+    expect(matchByName([existing], "小華（粉橘短髮女孩／白帽T）")?.id).toBe("char-a");
+    expect(matchByName([existing], "小華（粉橘短髮女孩／白帽T）。不要寫素材清單")?.id).toBe("char-a");
+    expect(matchByName([existing], "不要寫素材清單")).toBeNull();
   });
 });

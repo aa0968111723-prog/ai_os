@@ -14,6 +14,12 @@ import {
   storyParseModelSchema,
   diffStoryboardPlan,
   summarizeStoryboardDiff,
+  planOrphanAdoption,
+  planReuseOrphanAttach,
+  isPlaceholderShotTitle,
+  isBlankOrphanShot,
+  orderShotsForStoryboard,
+  inferLocationNameFromText,
   buildShotSearchTerms,
   suggestAssetsForShot,
   environmentStateSchema,
@@ -195,6 +201,105 @@ describe("diffStoryboardPlan（§22 逐場套用：不重複建、也不蓋掉�
       reuseScenes: 1,
       newShots: 2,
     });
+  });
+});
+
+describe("placeholder / blank orphan shots", () => {
+  it("treats 第 N 鏡 / empty / 未分場 as placeholders", () => {
+    expect(isPlaceholderShotTitle("第 1 鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("第3鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("")).toBe(true);
+    expect(isPlaceholderShotTitle("未分場第 2 鏡")).toBe(true);
+    expect(isPlaceholderShotTitle("校門口自我介紹")).toBe(false);
+    expect(isBlankOrphanShot({ title: "第 5 鏡", prompt: null, assetId: null })).toBe(true);
+    expect(isBlankOrphanShot({ title: "第 5 鏡", prompt: "她走進校門", assetId: null })).toBe(false);
+  });
+});
+
+describe("orderShotsForStoryboard", () => {
+  it("puts dangling / null storySceneId after planned 場 — that is the live untitled tail", () => {
+    const ordered = orderShotsForStoryboard(
+      ["場1", "場7"],
+      [
+        { id: "old-1", storySceneId: null, orderIndex: 1 },
+        { id: "new-6", storySceneId: "場1", orderIndex: 6 },
+        { id: "old-5", storySceneId: "missing", orderIndex: 5 },
+        { id: "new-26", storySceneId: "場7", orderIndex: 26 },
+      ],
+    );
+    expect(ordered.map((row) => row.id)).toEqual(["new-6", "new-26", "old-1", "old-5"]);
+  });
+});
+
+describe("planOrphanAdoption（未分場鏡不得 silently 5→26）", () => {
+  it("5 orphans + 21 planned adopts the 5 and creates 16 — liveAfter 21, not 26", () => {
+    expect(planOrphanAdoption(21, 5)).toEqual({
+      adopt: 5,
+      create: 16,
+      leftoverAttach: 0,
+      liveAfter: 21,
+    });
+  });
+
+  it("leftover orphans attach into a scene instead of hanging outside", () => {
+    expect(planOrphanAdoption(3, 5)).toEqual({
+      adopt: 3,
+      create: 0,
+      leftoverAttach: 2,
+      liveAfter: 5,
+    });
+  });
+
+  it("no orphans is a plain create", () => {
+    expect(planOrphanAdoption(21, 0)).toEqual({
+      adopt: 0,
+      create: 21,
+      leftoverAttach: 0,
+      liveAfter: 21,
+    });
+  });
+
+  it("reuse attaches leftover orphans and never grows 21+5→26 again", () => {
+    expect(planReuseOrphanAttach(26, 5)).toEqual({
+      attach: 5,
+      create: 0,
+      delete: 0,
+      liveAfter: 26,
+    });
+    expect(planReuseOrphanAttach(21, 0)).toEqual({
+      attach: 0,
+      create: 0,
+      delete: 0,
+      liveAfter: 21,
+    });
+  });
+
+  it("second 產生分鏡 must not grow live 26→47", () => {
+    expect(planReuseOrphanAttach(26, 21)).toEqual({
+      attach: 21,
+      create: 0,
+      delete: 0,
+      liveAfter: 26,
+    });
+    expect(planReuseOrphanAttach(26, 21).liveAfter).not.toBe(47);
+    expect(planOrphanAdoption(21, 5).liveAfter).toBe(21);
+    expect(planOrphanAdoption(21, 5).liveAfter).not.toBe(26);
+  });
+});
+
+describe("inferLocationNameFromText（故事原文地點，不是未定地點）", () => {
+  it("uses a known 場景 name when the paragraph mentions it", () => {
+    expect(inferLocationNameFromText("清晨的克難坡下著雨。", ["克難坡", "禪堂"])).toBe("克難坡");
+  });
+
+  it("pulls a place noun from unmarked copy", () => {
+    expect(inferLocationNameFromText("她走進教室坐下。")).toBe("教室");
+    expect(inferLocationNameFromText("禪堂裡師父點頭。")).toBe("禪堂");
+    expect(inferLocationNameFromText("安倢在圖書館角落寫生。")).toBe("圖書館");
+  });
+
+  it("does not invent a place when the paragraph has none", () => {
+    expect(inferLocationNameFromText("她抬頭看天，還是想不明白。")).toBeUndefined();
   });
 });
 

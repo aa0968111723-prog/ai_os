@@ -3,6 +3,10 @@ import {
   buildConsistencyScorecard,
   compactWorkspaceStatus,
   nextWorkspaceAction,
+  scorecardNeedsSetupCta,
+  scorecardNeedsSheetCta,
+  scorecardNeedsDeliveryCta,
+  scorecardNeedsOpenCardsCta,
   visualCoverageScore,
 } from "./projectConsistencyGraph";
 import { inheritContinuityState, referenceRoleConflicts } from "./shotContextPacket";
@@ -28,6 +32,51 @@ describe("workspace projection", () => {
       needsConfirm: 2,
       consistentShots: 18,
     })).toMatch(/確認/);
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 0,
+      consistentShots: 21,
+    })).toBe("只重做不一致的鏡頭");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 0,
+      consistentShots: 21,
+    })).not.toBe("解析故事，讓人物與場景就位");
+    expect(compactWorkspaceStatus({
+      charactersApplied: true,
+      sceneCount: 5,
+      consistentShots: 21,
+      shotCount: 26,
+      needsConfirm: 0,
+    })).toBe("人物已套用 · 5 個場景 · 21/26 鏡一致");
+    expect(compactWorkspaceStatus({
+      charactersApplied: true,
+      sceneCount: 5,
+      consistentShots: 21,
+      shotCount: 26,
+      needsConfirm: 0,
+      untitledOrphans: 5,
+    })).toBe("人物已套用 · 5 個場景 · 21/26 鏡一致 · 5 鏡未分場");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 5,
+      untitledOrphans: 5,
+      consistentShots: 21,
+    })).toBe("打開分鏡，把 5 鏡未分場歸場");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 5,
+      untitledOrphans: 5,
+      consistentShots: 21,
+    })).not.toMatch(/確認 5 個項目後再生成/);
   });
 });
 
@@ -90,11 +139,65 @@ describe("consistency scorecard (closure §11)", () => {
     expect(voice?.status).toBe("stale");
     const delivery = rows.find((row) => row.dimension === "delivery");
     expect(delivery?.status).toBe("blocker");
+    expect(delivery?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsDeliveryCta(delivery!)).toBe(true);
+    expect(scorecardNeedsSetupCta(delivery!)).toBe(false);
+    expect(scorecardNeedsSheetCta(delivery!)).toBe(false);
     expect(rows.every((row) => typeof row.reason === "string" && row.reason.length > 0)).toBe(true);
   });
 
   it("multi-character shots surface as capability downgrade, not a fake OK", () => {
     const rows = buildConsistencyScorecard({ ...empty, multiCharacterShotIds: ["sh9"] });
     expect(rows.find((row) => row.status === "capability_downgrade")?.affectedShotIds).toEqual(["sh9"]);
+  });
+
+  it("unpinned style/sound_world are project-level setup, not 修復 N 鏡", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      styleCanonPinned: false,
+      soundWorldPinned: false,
+    });
+    const style = rows.find((row) => row.dimension === "style");
+    const sound = rows.find((row) => row.dimension === "sound_world");
+    expect(style?.affectedShotIds).toEqual([]);
+    expect(sound?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsSetupCta(style!)).toBe(true);
+    expect(scorecardNeedsSetupCta(sound!)).toBe(true);
+    expect(scorecardNeedsSetupCta({
+      dimension: "voice",
+      status: "warning",
+      affectedShotIds: [],
+      reason: "1 位有台詞的角色還沒綁定聲線",
+    })).toBe(false);
+  });
+
+  it("identity missing sheets ask for 生成定裝, not 修復 N 鏡", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      charactersMissingReference: ["c-xiaohua"],
+      charactersBoundShotIds: ["sh1"],
+    });
+    const identity = rows.find((row) => row.dimension === "identity" && row.status === "warning");
+    expect(identity?.reason).toMatch(/沒有定裝參考圖/);
+    expect(scorecardNeedsSheetCta(identity!)).toBe(true);
+    expect(scorecardNeedsSetupCta(identity!)).toBe(false);
+  });
+
+  it("look/scene missing reference opens cards, not 修復 0 鏡 or 生成定裝", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      looksMissingReference: ["look-1"],
+      presetsMissingReference: ["preset-1"],
+    });
+    const look = rows.find((row) => row.dimension === "look");
+    const scene = rows.find((row) => row.dimension === "scene");
+    expect(look?.affectedShotIds).toEqual([]);
+    expect(scene?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsOpenCardsCta(look!)).toBe("looks");
+    expect(scorecardNeedsOpenCardsCta(scene!)).toBe("scenes");
+    expect(scorecardNeedsSheetCta(look!)).toBe(false);
+    expect(scorecardNeedsSheetCta(scene!)).toBe(false);
+    expect(scorecardNeedsSetupCta(look!)).toBe(false);
+    expect(scorecardNeedsDeliveryCta(look!)).toBe(false);
   });
 });

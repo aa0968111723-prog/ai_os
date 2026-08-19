@@ -177,6 +177,7 @@ export function collectAgentResults(
   for (const run of runs) {
     const steps = run.steps as AgentStep[];
     for (const [index, step] of steps.entries()) {
+      const stepId = step.id ?? `step-${index + 1}`;
       for (const ref of step.outputRefs ?? []) {
         const key = `${ref.type}:${ref.id}`;
         if (!resultsByKey.has(key)) {
@@ -185,7 +186,22 @@ export function collectAgentResults(
             id: ref.id,
             label: ref.label ?? step.title ?? step.note,
             runId: run.id,
-            stepId: step.id ?? `step-${index + 1}`,
+            stepId,
+          });
+        }
+      }
+      // Independent generateInto / Adopt can mark generate done with generationId
+      // and no outputRefs. 成果中心 still needs that 生成 tile.
+      const gid = step.generationId;
+      if (gid) {
+        const key = `generation:${gid}`;
+        if (!resultsByKey.has(key)) {
+          resultsByKey.set(key, {
+            type: "generation",
+            id: gid,
+            label: step.title ?? step.note,
+            runId: run.id,
+            stepId,
           });
         }
       }

@@ -56,7 +56,14 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
   it("passes characterIds / scenePresetIds / sourceAssetId / sourceUrl to executeGenerationCommand", () => {
     expect(source).toContain("characterIds: step.characterIds");
     expect(source).toContain("scenePresetIds: step.scenePresetIds");
-    expect(source).toContain("sourceAssetId: step.sourceAssetId");
+    expect(source).toContain("resolveSceneCards(scene,");
+    expect(source.match(/resolveSceneCards\(scene,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("lookIds = step.lookIds ?? scene.lookIds");
+    expect(source).toContain("shotDirection");
+    expect(source.match(/shotDirection,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("step.shotDirection ??");
+    expect(source).toContain("let sourceAssetId = step.sourceAssetId");
+    expect(source).toContain("resolveHonoredCharacterSheet");
     expect(source).toContain("sourceUrl: step.sourceUrl");
     expect(source).toContain("executeGenerationCommand({");
   });
@@ -78,6 +85,28 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toContain("MAX_PARALLEL_GEN_STARTS");
     expect(source).toContain("listInFlightGenerationSteps");
     expect(source).toContain("listRunnableDagSteps");
+  });
+
+  it("records generation outputRefs on Adopt and independent generateInto reconcile", () => {
+    const start = source.indexOf("let adoptedWaiting = false");
+    const block = source.slice(start, source.indexOf("使用者已按停／失敗：沒有新生成要送時收停 pending"));
+    expect(block).toContain('addOutputRef(waiting, "generation"');
+    const independent = source.slice(
+      source.indexOf("if (step.kind === \"generate\" && sceneId && !step.generationId)"),
+      source.indexOf("送出前再讀一次狀態：使用者若剛按停就不要再扣點送出"),
+    );
+    expect(independent).toContain('addOutputRef(next, "generation"');
+  });
+
+  it("after Adopt, re-evaluates the DAG so a waiting run can reach done", () => {
+    const start = source.indexOf("let adoptedWaiting = false");
+    const block = source.slice(start, source.indexOf("使用者已按停／失敗：沒有新生成要送時收停 pending"));
+    expect(block).toContain("saveDagProgress");
+    expect(block).not.toMatch(/if \(adoptedWaiting\) await saveRun\(run\.id, \{ steps \}\);/);
+    expect(source).toContain('eq(schema.agentRuns.status, "waiting")');
+    expect(source).toContain("steps.every((step) => step.status === \"done\")");
+    expect(source).toContain("run.status !== \"running\" && run.status !== \"waiting\"");
+    expect(source).toContain("freshNow.status !== \"running\" && freshNow.status !== \"waiting\"");
   });
 
   it("clears ghost generationId on INTERNAL_SERVER_ERROR and NOT_FOUND (no permanent stuck running)", () => {
@@ -121,7 +150,7 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toMatch(/等組長核准超額生成中/);
     expect(source).toMatch(/AWAITING_APPROVAL_MAX_MS/);
     expect(source).toMatch(/status: "waiting"/);
-    expect(source).toMatch(/status, "waiting"[\s\S]*status":"running"/);
+    expect(source).toContain('eq(schema.agentRuns.status, "waiting")');
   });
 });
 

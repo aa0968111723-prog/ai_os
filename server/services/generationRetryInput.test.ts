@@ -103,6 +103,37 @@ describe("buildRetryGenerationInput — 重試不得靜默降級", () => {
     expect(input.propIds).toEqual(["p-1"]);
   });
 
+  it("本鏡造型 lookIds 沿用（少了重試會換掉衣服）", () => {
+    const lookId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const input = buildRetryGenerationInput(row({
+      continuitySnapshot: {
+        ...SNAPSHOT_BASE,
+        locked: false,
+        characters: [{
+          id: "55555555-5555-4555-8555-555555555555",
+          name: "小華",
+          appearance: "粉橘短髮女孩、白帽T",
+          notes: null,
+          referenceAssetId: null,
+          lookId,
+          lookName: "白帽T",
+          lookCostume: "白帽T",
+        }],
+      },
+    }));
+    expect(input.lookIds).toEqual([lookId]);
+    expect(input.continuitySnapshot).toBeUndefined();
+  });
+
+  it("look-only shot：meta lookIds 沿用（快照沒角色時 snapshot 拿不到造型）", () => {
+    const lookId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const input = buildRetryGenerationInput(row({
+      continuitySnapshot: null,
+      params: storeGenerationSourceMeta({ prompt: "p" }, { lookIds: [lookId] }),
+    }));
+    expect(input.lookIds).toEqual([lookId]);
+  });
+
   it("方向與批次沿用：重試出來的版本仍歸在原批次", () => {
     const creative = { batchId: "b-1", directionId: "closer", directionLabel: "更靠近人物", batchSize: 3 };
     const input = buildRetryGenerationInput(row({
@@ -135,6 +166,44 @@ describe("buildRetryGenerationInput — 重試不得靜默降級", () => {
       },
     }));
     expect(input.shotDirection).toEqual({ camera: { shotSize: "特寫" }, performance: null, action: null });
+  });
+
+  it("沿用凍結 packet／meta 父圖／聲線／聲音世界（少了重試會重建或斷鏈）", () => {
+    const parentId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const packetId = "99999999-9999-4999-8999-999999999999";
+    const input = buildRetryGenerationInput(row({
+      modelId: "fal-ai/kokoro/mandarin-chinese",
+      sourceUrl: "https://v3.fal.media/files/expired-parent.png",
+      params: storeGenerationSourceMeta({ prompt: "p", language: "zh" }, {
+        shotContextPacketId: packetId,
+        sourceAssetId: parentId,
+        preserveScenePointer: true,
+        voice: {
+          canonId: "11111111-1111-4111-8111-111111111111",
+          versionId: "22222222-2222-4222-8222-222222222222",
+          voiceId: "zf_xiaoxiao",
+          applied: true,
+        },
+        soundWorld: {
+          canonId: "33333333-3333-4333-8333-333333333333",
+          versionId: "44444444-4444-4444-8444-444444444444",
+        },
+      }),
+    }));
+    expect(input.shotContextPacketId).toBe(packetId);
+    expect(input.sourceAssetId).toBe(parentId);
+    expect(input.sourceUrl).toBeUndefined();
+    expect(input.voiceIdentity).toEqual({
+      canonId: "11111111-1111-4111-8111-111111111111",
+      versionId: "22222222-2222-4222-8222-222222222222",
+      voiceId: "zf_xiaoxiao",
+      modelId: "fal-ai/kokoro/mandarin-chinese",
+      language: "zh",
+    });
+    expect(input.soundWorldRef).toEqual({
+      canonId: "33333333-3333-4333-8333-333333333333",
+      versionId: "44444444-4444-4444-8444-444444444444",
+    });
   });
 
   it("素材庫來源走 sourceAssetId 重新簽名；外部網址原樣透傳", () => {

@@ -58,6 +58,14 @@ describe("generationCommand #749 review guards", () => {
     expect(preflightAt).toBeGreaterThan(Math.min(freezeAt, loadAt));
   });
 
+  it("refuses a failed first send so MCP generate_into is not a silent no-op", () => {
+    expect(src).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(src).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+    const afterSubmit = src.slice(src.indexOf("const generation = await submitGenerationCore"));
+    expect(afterSubmit).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(afterSubmit.indexOf("shouldReplayIdempotentGeneration")).toBeLessThan(afterSubmit.lastIndexOf("return generation"));
+  });
+
   it("defaults visual scene-bound generations to preserveScenePointer", () => {
     expect(src).toContain("const preserveScenePointer = core.preserveScenePointer ?? isVisualSceneBound(core)");
     expect(src).toContain("preserveScenePointer");
@@ -65,6 +73,15 @@ describe("generationCommand #749 review guards", () => {
 
   it("passes the batch packet id through both agent runner generate paths", () => {
     expect(runner.match(/shotContextPacketId: step.shotContextPacketId/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("planAgentCore stamps shotContextPacketId on visual generate steps like batchGenerate", () => {
+    const core = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
+    expect(core).toContain("async function stampAgentGenerateShotContextPackets");
+    expect(core.match(/stampAgentGenerateShotContextPackets\(auth, project.id, plan.steps\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(core).toContain("step.shotContextPacketId = frozen.packetId");
+    expect(core).toContain("sceneFillRole(model) !== \"visual\"");
+    expect(core).toContain("freezeShotContextPacket");
   });
 
   it("stores the frozen packet id in generation source meta for resume", () => {

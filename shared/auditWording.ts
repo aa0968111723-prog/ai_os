@@ -179,6 +179,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "characters.add": "新增角色卡",
   "characters.update": "更新角色卡",
   "characters.remove": "刪除角色卡",
+  "characters.generateSheet": "生成角色定裝圖",
+  "characters.honorGeneratedSheet": "採用生成的定裝圖",
   // Story-first：故事工作台、自動解析與造型
   "story.save": "儲存故事",
   "story.restoreVersion": "還原故事版本",

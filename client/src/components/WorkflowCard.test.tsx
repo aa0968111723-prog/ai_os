@@ -95,7 +95,10 @@ describe("WorkflowCard", () => {
     expect(screen.getByRole("heading", { name: /製作範本/ })).toBeVisible();
     expect(screen.getByLabelText("選擇製作範本")).toBeVisible();
     expect(screen.getByRole("option", { name: /經濟・分鏡快速串 — 約 12 點（2 步）/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("這次想完成什麼？（一句話）")).toBeVisible();
+    expect(screen.getByLabelText("這次想完成什麼？（一句話）")).toHaveAttribute(
+      "placeholder",
+      "例：淡大校門口，粉橘短髮女孩、白帽T的小華向鏡頭自我介紹",
+    );
     expect(screen.getByRole("button", { name: /執行製作範本（約 −12 點）/ })).toBeDisabled();
   });
 

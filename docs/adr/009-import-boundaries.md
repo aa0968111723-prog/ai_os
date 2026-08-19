@@ -39,6 +39,7 @@ client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/se
 - `server/services/**` 不得 import `server/routers/**`。
 - 正確方向：Router → Service；Runner／MCP／Command 亦只呼叫 Service。
 - 若邏輯目前仍掛在 router 檔（例如 helper／core 函式），應逐步抽到 `server/services/*` 或 `shared/*`，而不是讓 service 回頭 import router。
+- **測試檔不算這條：** `server/services/**/*.test.ts`／`*.pg.test.ts` 用 tRPC `createCaller` 打 router 是整合測試，不是 runtime 倒吃。不列入 allowlist。正式 `server/services/*.ts` 仍禁止。
 
 ## 既有例外（legacy allowlist）
 
@@ -62,7 +63,6 @@ client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/se
 |---|---|---|
 | `server/services/agentCore.ts` | `../routers/knowledge`（`buildKnowledgeContext`） | 知識 helper 仍在 router 檔；模型決策已下沉至共用 service |
 | `server/services/agentRunner.ts` | `../routers/director`、`../routers/assistant` | 分鏡拆本、scene fill 仍在 router |
-| `server/services/agentSplitRecovery.pg.test.ts` | `../routers/director` | 測試沿用 `splitScriptCore` |
 | ~~`server/services/generationCore.ts`~~ | ~~`../routers/characters`、`../routers/scenePresets`~~ | ✅ 已下沉 `services/cardAnchors`（角色＋場景錨點） |
 | `server/services/messageAssistant.ts` | `../routers/knowledge` | 同上 knowledge helper |
 | `server/services/restApi.ts` | `../routers/schedule`（`buildIcs`） | ICS 建置仍在 schedule router |

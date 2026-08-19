@@ -39,18 +39,39 @@ describe("StoryReadinessBar", () => {
     expect(screen.getByRole("button", { name: "已完成 2 次生成" })).toBeInTheDocument();
   });
 
-  it("disables 0-shot CTA with title 先解析出分鏡", () => {
+  it("hides generate CTA on 0場0鏡 — no spendable no-op", () => {
     render(
       <StoryReadinessBar
         readiness={{ kind: "ready_for_board", label: "可產生分鏡", detail: "解析已完成。" }}
         canEdit
-        primaryLabel="先解析出分鏡"
-        primaryDisabled
-        onPrimary={vi.fn()}
       />,
     );
-    const cta = screen.getByRole("button", { name: "先解析出分鏡" });
-    expect(cta).toBeDisabled();
-    expect(cta).toHaveAttribute("title", "先解析出分鏡");
+    expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成/ })).not.toBeInTheDocument();
+  });
+
+  it("empty 0-shot shows 開始寫故事, not generate or AI 解析", () => {
+    const onPrimary = vi.fn();
+    render(
+      <StoryReadinessBar
+        readiness={{ kind: "empty", label: "先寫故事", detail: "貼上或寫下故事後，就能解析並產生分鏡。" }}
+        canEdit
+        primaryLabel="開始寫故事"
+        onPrimary={onPrimary}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "開始寫故事" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /生成畫面|生成影片|先解析出分鏡|繼續生成|AI 解析/ })).not.toBeInTheDocument();
+  });
+
+  it("可解析 card has no story-readiness__cta 生成畫面 when parent hides one-click", () => {
+    render(
+      <StoryReadinessBar
+        readiness={{ kind: "needs_parse", label: "可解析", detail: "按「AI 解析」讓角色、場景、道具在背景就位。" }}
+        canEdit
+      />,
+    );
+    expect(screen.getByText("可解析")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /生成畫面/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".story-readiness__cta")).toBeNull();
   });
 });

@@ -37,6 +37,13 @@ import {
   type KnowledgeInjectResult,
   type KnowledgeRowForInject,
 } from "../../shared/knowledgeInject";
+import {
+  knowledgeBaselineMatches,
+  knowledgeUpdateBaselineGate,
+  knowledgeUpdateConflictMessage,
+  knowledgeUpdateOmitMessage,
+  knowledgeUpdateTouchesBody,
+} from "../../shared/knowledgeUpdate";
 
 export const KNOWLEDGE_KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -420,6 +427,11 @@ export const knowledgeRouter = router({
         content: z.string().min(1).max(MAX_CONTENT).optional(),
         /** 釘選＝注入優先；只改釘選不觸發版本快照 */
         pinned: z.boolean().optional(),
+        /**
+         * 標題／全文寫入的 CAS 基準（讀到的那一版）。省略＝拒絕靜默 LWW。
+         * 知識列沒有 rev，不能退回 applyWithRevision；釘選-only 不碰正文。
+         */
+        baseline: z.object({ title: z.string(), content: z.string() }).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -432,23 +444,48 @@ export const knowledgeRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
+      const touchingBody = knowledgeUpdateTouchesBody(input);
+      if (touchingBody) {
+        const gate = knowledgeUpdateBaselineGate(input.baseline);
+        if (gate !== "ok") {
+          throw new TRPCError({ code: "CONFLICT", message: knowledgeUpdateOmitMessage(gate) });
+        }
+        if (!knowledgeBaselineMatches(row, input.baseline!)) {
+          throw new TRPCError({ code: "CONFLICT", message: knowledgeUpdateConflictMessage() });
+        }
+      }
       // 版本歷史（#29）：覆寫前，先把「更新前」的舊全文存成一版快照——
       // 只在內容『真的改變』時存（只改標題／重存相同內容不灌版本），避免雜訊。
       const contentChanges = input.content !== undefined && input.content !== row.content;
       if (contentChanges) await snapshotKnowledge(row, ctx.auth.user.id);
-      const nextContent = input.content ?? row.content;
-      const summary = contentChanges ? extractKnowledgeSummary(nextContent) || null : row.summary;
-      const [updated] = await db
-        .update(schema.knowledge)
-        .set({
-          kind: input.kind ?? row.kind,
-          title: input.title?.trim() ?? row.title,
-          content: nextContent,
-          pinned: input.pinned ?? row.pinned,
-          summary,
-        })
-        .where(eq(schema.knowledge.id, input.id))
-        .returning();
+      const patch: {
+        kind?: typeof row.kind;
+        title?: string;
+        content?: string;
+        pinned?: boolean;
+        summary?: string | null;
+      } = {};
+      if (input.kind !== undefined) patch.kind = input.kind;
+      if (input.title !== undefined) patch.title = input.title.trim();
+      if (input.content !== undefined) {
+        patch.content = input.content;
+        if (contentChanges) patch.summary = extractKnowledgeSummary(input.content) || null;
+      }
+      if (input.pinned !== undefined) patch.pinned = input.pinned;
+      if (Object.keys(patch).length === 0) return row;
+      // 真 CAS：正文寫入帶 baseline WHERE，不是讀完再用 WHERE id 蓋回去。
+      const casWhere = touchingBody
+        ? and(
+            eq(schema.knowledge.id, input.id),
+            eq(schema.knowledge.title, input.baseline!.title),
+            eq(schema.knowledge.content, input.baseline!.content),
+            isNull(schema.knowledge.deletedAt),
+          )
+        : and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt));
+      const [updated] = await db.update(schema.knowledge).set(patch).where(casWhere).returning();
+      if (!updated) {
+        throw new TRPCError({ code: "CONFLICT", message: knowledgeUpdateConflictMessage() });
+      }
       return updated;
     }),
 

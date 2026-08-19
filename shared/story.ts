@@ -388,6 +388,132 @@ export function summarizeStoryboardDiff(diff: StoryboardSceneDiff[]): {
   };
 }
 
+/**
+ * 「＋新增鏡」placeholder titles. First 產生分鏡 must replace these with
+ * location/line copy — leaving「第 3 鏡」or empty at the 未分場 tail is the
+ * live 0場5鏡 → 7場26鏡 shape.
+ */
+export function isPlaceholderShotTitle(title?: string | null): boolean {
+  const t = (title ?? "").trim();
+  if (!t) return true;
+  if (/^第\s*\d+\s*鏡$/.test(t)) return true;
+  if (/^未分場/.test(t)) return true;
+  if (t === "新分鏡") return true;
+  return false;
+}
+
+/** Blank draft: no prompt, no still, placeholder title. Safe to overwrite from the plan. */
+export function isBlankOrphanShot(row: {
+  title?: string | null;
+  prompt?: string | null;
+  assetId?: string | null;
+}): boolean {
+  if ((row.prompt ?? "").trim()) return false;
+  if (row.assetId) return false;
+  return isPlaceholderShotTitle(row.title);
+}
+
+export interface StoryboardOrderShot {
+  id: string;
+  storySceneId: string | null;
+  orderIndex: number;
+}
+
+/**
+ * 場序 → 場內 orderIndex → 未分場/dangling 殿後.
+ * Used to compact after fold so untitled #1–5 cannot sit after 場1–7 as a tail.
+ */
+export function orderShotsForStoryboard<S extends StoryboardOrderShot>(
+  storySceneIds: readonly string[],
+  shots: readonly S[],
+): S[] {
+  const byScene = new Map<string, S[]>();
+  for (const id of storySceneIds) byScene.set(id, []);
+  const dangling: S[] = [];
+  for (const shot of shots) {
+    if (shot.storySceneId && byScene.has(shot.storySceneId)) {
+      byScene.get(shot.storySceneId)!.push(shot);
+    } else {
+      dangling.push(shot);
+    }
+  }
+  const byIndex = (a: S, b: S) => a.orderIndex - b.orderIndex;
+  const out: S[] = [];
+  for (const id of storySceneIds) {
+    out.push(...(byScene.get(id) ?? []).sort(byIndex));
+  }
+  out.push(...dangling.sort(byIndex));
+  return out;
+}
+
+/**
+ * Live: 0場 5 未分場鏡 + 產生分鏡 prepended 21 → 26, orphans still at the tail.
+ * Adopt orphans into the plan (or attach leftovers to a scene). Never grow 5→26.
+ */
+export function planOrphanAdoption(newShots: number, orphanCount: number): {
+  adopt: number;
+  create: number;
+  leftoverAttach: number;
+  liveAfter: number;
+} {
+  const orphans = Math.max(0, orphanCount);
+  const planned = Math.max(0, newShots);
+  const adopt = Math.min(planned, orphans);
+  const create = planned - adopt;
+  const leftoverAttach = orphans - adopt;
+  return { adopt, create, leftoverAttach, liveAfter: planned + leftoverAttach };
+}
+
+/**
+ * Live leftover after the first 產生分鏡 already wrote applied.storyboard:
+ * 21 new shots + 5 tail orphans = 26. A second click must attach those
+ * orphans into existing scenes. Never insert. Never delete. liveAfter stays.
+ */
+export function planReuseOrphanAttach(liveShots: number, orphanCount: number): {
+  attach: number;
+  create: number;
+  delete: number;
+  liveAfter: number;
+} {
+  const live = Math.max(0, liveShots);
+  const attach = Math.max(0, orphanCount);
+  return { attach, create: 0, delete: 0, liveAfter: live };
+}
+
+/**
+ * Heuristic / unmarked scripts have no「場景：」line. Pull a place name from the
+ * paragraph so 產生分鏡 does not leave every field as（未定地點）.
+ * Known 場景： names win; then a small place-noun list; then「在X堂/室/口…」.
+ */
+const STORY_PLACE_NOUNS = [
+  "校門口",
+  "克難坡",
+  "禪堂",
+  "教室",
+  "宿舍",
+  "校園",
+  "夕陽",
+  "超商",
+  "禮堂",
+  "操場",
+  "圖書館",
+  "走廊",
+  "頂樓",
+] as const;
+
+export function inferLocationNameFromText(text: string, knownNames: string[] = []): string | undefined {
+  const body = text.trim();
+  if (!body) return undefined;
+  for (const name of knownNames) {
+    if (name && body.includes(name)) return name;
+  }
+  for (const place of STORY_PLACE_NOUNS) {
+    if (body.includes(place)) return place;
+  }
+  const at = body.match(/在([\u4e00-\u9fff]{2,8}(?:堂|室|口|園|館|坡|樓|門|廳|房))/);
+  return at?.[1];
+}
+
 /* ── Shot 素材推薦（PE 計畫 §13／§26） ────────────────────────
  *
  * 刻意**不做**語意向量檢索，也刻意不寫「AI 已分析」這種文案——現在沒有那個能力，

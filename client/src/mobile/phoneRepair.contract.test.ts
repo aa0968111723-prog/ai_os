@@ -16,6 +16,7 @@ describe("phone animation P0/P1 wiring", () => {
     expect(home).toContain("trpc.projects.create.useMutation");
     expect(home).toContain("跟 Aios 說它會建起來");
     expect(home).toContain("建立專案");
+    expect(home).toContain("m-current__create");
     expect(sheet).toContain("publishNewProjectIdea");
     expect(sheet).toContain("useIsPhone");
     expect(sheet).toContain("if (isPhone)");
@@ -26,6 +27,12 @@ describe("phone animation P0/P1 wiring", () => {
     expect(phoneBranch).toContain("return");
     expect(phoneBranch).not.toContain("navigate(`/dashboard#projects`)");
     expect(launchpad).toContain("NEW_PROJECT_IDEA_EVENT");
+    const handoff = readFileSync(resolve(process.cwd(), "client/src/lib/newProjectIdea.ts"), "utf8");
+    expect(handoff).toContain("sessionStorage.setItem(NEW_PROJECT_IDEA_KEY, title)");
+    expect(handoff).not.toContain("if (title) sessionStorage.setItem");
+    expect(home).toContain("if (pending !== null) openCreate(pending)");
+    const nav = readFileSync(resolve(process.cwd(), "client/src/app/components/MobileNavigation.tsx"), "utf8");
+    expect(nav).toContain('publishNewProjectIdea("")');
   });
 
   it("project page has a 場景 entry and openFull reveals the inline section", () => {
@@ -33,12 +40,25 @@ describe("phone animation P0/P1 wiring", () => {
     expect(project).toContain('anchorForSection("scenes")');
     expect(project).not.toContain('label: "知識"');
     expect(project).toContain("revealStoryInlineSection");
+    expect(project).toContain('getElementById("story-reveal-slot")');
+    expect(project).not.toMatch(/if \(section\) revealStoryInlineSection\([\s\S]{0,120}getElementById\(anchor\)[\s\S]{0,80}scrollIntoView/);
     expect(project).toContain("writeInlineHash");
+    expect(project).toContain("isAutoOpenProjectAnchor");
+    expect(project).not.toMatch(/if \(initialHash && isProjectAnchor/);
+    expect(project).not.toMatch(/if \(hash && isProjectAnchor\(hash\)\)/);
   });
 
   it("phone asset sheet mounts AddDataSheet for upload", () => {
     expect(assets).toContain("AddDataSheet");
     expect(assets).toContain("加入素材");
+  });
+
+  it("最近 rows clear the fixed 專案／AI 助手／更多 bar at 390×844 and 390×569", () => {
+    expect(css).toContain("var(--chrome-bottom, 140px) + var(--fab-slot, 58px)");
+    expect(css).toContain("max-height: 569px");
+    expect(css).toMatch(/\.m-recent\s*\{[^}]*--fab-slot/);
+    expect(home).toContain("MobileCreateProjectSheet");
+    expect(home).toContain('aria-label="最近的其他專案"');
   });
 
   it("AI quick chips meet the 44px touch floor", () => {

@@ -98,21 +98,62 @@ export interface DiscardUnstartedAwaitingApprovalResult {
   discarded: boolean;
 }
 
+function leftoverShotNote(note: string | undefined): boolean {
+  return /第\s*\d+\s*鏡|生成畫面/.test(note ?? "");
+}
+
+function stepIsParked(status: string | undefined): boolean {
+  return !status || status === "pending" || status === "waiting" || status === "stopped";
+}
+
+/** Live leftover 0/N rows use kind "" / generate_image, not only generate. */
+function isLeftoverGenerateStep(step: ReconcileAgentStep): boolean {
+  if (step.kind === "generate" || step.kind === "generate_image" || !step.kind) return true;
+  return leftoverShotNote(step.note);
+}
+
 function generateSteps(steps: ReconcileAgentStep[]): ReconcileAgentStep[] {
-  return steps.filter((step) => step.kind === "generate");
+  return steps.filter((step) => isLeftoverGenerateStep(step));
+}
+
+/**
+ * Leftover 0/N「待你過目」: unstarted awaiting_approval batch.
+ * Live rows sometimes use kind "" / "generate_image" instead of "generate".
+ */
+export function isLeftoverUnstartedApprovalBatch(
+  status: string,
+  steps: ReconcileAgentStep[],
+): boolean {
+  if (status !== "awaiting_approval") return false;
+  if (steps.some((step) => step.status === "done" || step.status === "running")) return false;
+  if (generateSteps(steps).length >= 2) return true;
+  if (steps.length < 2) return false;
+  const visualish = steps.filter((step) => leftoverShotNote(step.note));
+  if (visualish.length >= 2) return visualish.every((step) => stepIsParked(step.status));
+  return steps.every((step) => {
+    if (step.kind && step.kind !== "generate" && step.kind !== "generate_image") return false;
+    return stepIsParked(step.status);
+  });
 }
 
 function leftoverAwaitingApprovalBatch(status: string, steps: ReconcileAgentStep[]): boolean {
-  if (status !== "awaiting_approval") return false;
-  if (generateSteps(steps).length >= 2) return true;
-  // Live leftover 0/N sometimes stored without kind: "generate".
-  if (steps.length < 2) return false;
-  if (steps.some((step) => step.status === "done")) return false;
-  return steps.every((step) => {
-    if (step.kind && step.kind !== "generate") return false;
-    const parked = step.status === "pending" || step.status === "waiting" || step.status === "stopped";
-    return parked && /第\s*\d+\s*鏡|生成畫面/.test(step.note ?? "");
-  });
+  return isLeftoverUnstartedApprovalBatch(status, steps);
+}
+
+/**
+ * batchGenerate only reuses the same fingerprint. A leftover 0/N
+ * 「待你過目」with a different (or missing) fingerprint stays, then
+ * insert mints a second HUD chip. Drop leftover unstarted batches
+ * except the reused run — not a Command reconcile.
+ */
+export function leftoverAwaitingApprovalIdsToDiscard(input: {
+  keepRunId?: string | null;
+  runs: Array<{ id: string; status: string; steps: ReconcileAgentStep[] }>;
+}): string[] {
+  return input.runs
+    .filter((run) => run.id !== input.keepRunId)
+    .filter((run) => isLeftoverUnstartedApprovalBatch(run.status, run.steps))
+    .map((run) => run.id);
 }
 
 /**
@@ -129,8 +170,8 @@ export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
     return { status: input.status, steps: input.steps, discarded: false };
   }
   const steps = input.steps.map((step) => {
-    if (step.kind !== "generate") return step;
     if (step.status === "done" || step.status === "failed" || step.status === "stopped") return step;
+    if (!isLeftoverGenerateStep(step) || !stepIsParked(step.status)) return step;
     return {
       ...step,
       status: "stopped",
@@ -138,11 +179,6 @@ export function discardUnstartedAwaitingApprovalAfterIndependentGenerate(
     };
   });
   return { status: "discarded", steps, discarded: true };
-}
-
-function timeMs(value: Date | string | number): number {
-  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : Number.NaN;
 }
 
 /**
@@ -164,10 +200,7 @@ export function shouldDiscardLeftoverAwaitingApprovalOnRead(input: {
   hasCurrentVisual?: boolean;
 }): boolean {
   if (!leftoverAwaitingApprovalBatch(input.status, input.steps)) return false;
-  if (input.hasCurrentVisual) return true;
-  if (input.latestDoneVisualAt == null) return false;
-  const runAt = timeMs(input.runCreatedAt);
-  const visualAt = timeMs(input.latestDoneVisualAt);
-  if (!Number.isFinite(runAt) || !Number.isFinite(visualAt)) return false;
-  return visualAt >= runAt;
+  // Live leftover 0/N「待你過目 · 第 1 鏡…生成畫面」must not survive reload
+  // even when the project still has no 現用 pointer (unparsed / blank shots).
+  return true;
 }

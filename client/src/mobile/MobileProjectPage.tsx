@@ -10,7 +10,7 @@ import { MobileAiBar } from "./MobileAiBar";
 import { usePhoneAnimationRepair } from "./usePhoneAnimationRepair";
 import { StageTrack } from "./MobileHome";
 import { revealStoryInlineSection, sectionFromHash, writeInlineHash, isStoryHomeHash } from "../features/story-workspace/storyInlineNav";
-import { anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageSentence } from "./stages";
+import { anchorForSection, continueAnchor, continueLabel, isAutoOpenProjectAnchor, stageSentence } from "./stages";
 
 /**
  * 手機專案頁（<768px）。
@@ -72,7 +72,9 @@ export function MobileProjectPage({ id }: { id: string }) {
 
   /**
    * 深連結：`/p/:id#stage-board` 這種網址從通知、書籤或桌機分享過來時，手機不能
-   * 只顯示摘要就當作到了——使用者要的是那一段。有 hash 就直接進工作台並帶著錨點。
+   * 只顯示摘要就當作到了——使用者要的是那一段。*區段* hash 才直接進工作台。
+   * `#stage-story` 是桌面主畫面預設（writeInlineHash(null)），不當深連結，
+   * 否則 600px 會立刻掛上被 overflow-x:clip 左裁的桌面工作台。
    *
    * 只在掛載時看一次：之後的 hash 變動是 openFull 自己寫的，再讀一次會打架。
    */
@@ -117,10 +119,16 @@ export function MobileProjectPage({ id }: { id: string }) {
     setFullOpen(true);
     if (!anchor) return;
     const section = sectionFromHash(anchor);
-    // chunk 還在下載時 getElementById 拿不到；工作台掛好後再揭開收合列並捲過去
+    // chunk 還在下載時 slot 還不在。#stage-board / #stage-create / #sec-scenes
+    // 是頁頂空的 legacy anchor，不是分鏡／場景本體——捲它們會停在編輯器上方。
     const deadline = Date.now() + 3000;
     const tick = () => {
-      if (section) revealStoryInlineSection(section, { projectId: id, scroll: true });
+      if (section) {
+        revealStoryInlineSection(section, { projectId: id, scroll: true });
+        if (document.getElementById("story-reveal-slot") || Date.now() >= deadline) return;
+        requestAnimationFrame(tick);
+        return;
+      }
       const el = document.getElementById(anchor);
       if (el) el.scrollIntoView({ block: "start" });
       else if (Date.now() < deadline) requestAnimationFrame(tick);
@@ -130,7 +138,7 @@ export function MobileProjectPage({ id }: { id: string }) {
 
   // 帶著 hash 進來就直接開工作台（等同使用者自己按了「繼續製作」）
   useEffect(() => {
-    if (initialHash && isProjectAnchor(initialHash)) openFull(initialHash);
+    if (initialHash && isAutoOpenProjectAnchor(initialHash)) openFull(initialHash);
     // openFull 是穩定的區域函式；刻意只在掛載時跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHash]);
@@ -148,7 +156,7 @@ export function MobileProjectPage({ id }: { id: string }) {
   useEffect(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace(/^#/, "");
-      if (hash && isProjectAnchor(hash)) openFull(hash);
+      if (hash && isAutoOpenProjectAnchor(hash)) openFull(hash);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);

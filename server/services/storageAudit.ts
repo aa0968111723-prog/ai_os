@@ -17,7 +17,7 @@ import { db } from "../db";
 import { assets } from "../db/schema";
 import { storageAuditRuns } from "../db/schema/storage";
 import { statStored } from "./storage";
-import { enqueueLanding } from "./generationCore";
+import { enqueueLanding, unlandedPersistSource } from "./generationCore";
 
 export type AuditMode = "sample" | "full";
 
@@ -105,8 +105,8 @@ export async function reconcileAssets(mode: AuditMode = "sample"): Promise<Audit
           storagePath: row.storagePath,
         });
         // 有來源就排回補抓
-        const source = row.originUrl || row.url;
-        if (source && source.startsWith("http") && row.isAiGenerated) {
+        const source = unlandedPersistSource(row);
+        if (source && row.isAiGenerated) {
           try {
             await enqueueLanding(row.id);
             recoveredQueued += 1;

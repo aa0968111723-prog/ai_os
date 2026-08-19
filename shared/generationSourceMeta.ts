@@ -80,13 +80,21 @@ export type GenerationSourceMeta = {
   voice?: { canonId: string; versionId: string; voiceId: string; applied: boolean };
   /** Sound World（closure §6）：這筆 ambience／music 生成依賴的聲音世界 canon。 */
   soundWorld?: { canonId: string; versionId: string };
+  /**
+   * 本鏡造型。Retry used to read lookIds only from
+   * continuitySnapshot.characters[].lookId. buildContinuitySnapshot returns
+   * null when the shot has lookIds but no character/scene/prop cards (live
+   * 小華 rows do that), so 重試 dropped costume. Persist the ids that were
+   * actually sent — same class as sourceAssetId / voice / soundWorld.
+   */
+  lookIds?: string[];
 };
 
 export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined && !meta.shotContextPacketId && !meta.voice && !meta.soundWorld && !meta.sourceAssetId) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey && !meta.preserveScenePointer && !meta.creative && meta.scenePointerAtSubmit === undefined && !meta.shotContextPacketId && !meta.voice && !meta.soundWorld && !meta.sourceAssetId && !meta.lookIds?.length) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -183,5 +191,13 @@ export function splitGenerationSourceMeta(params: unknown): {
       versionId: (soundRow as Record<string, string>).versionId,
     }
     : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit, shotContextPacketId, voice, soundWorld, sourceAssetId } };
+  const lookIds = Array.isArray(metaObj?.lookIds)
+    ? [...new Set(
+      metaObj.lookIds.filter((id): id is string =>
+        typeof id === "string"
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
+      ),
+    )]
+    : [];
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined, preserveScenePointer: preserveScenePointer || undefined, creative, scenePointerAtSubmit, shotContextPacketId, voice, soundWorld, sourceAssetId, ...(lookIds.length ? { lookIds } : {}) } };
 }

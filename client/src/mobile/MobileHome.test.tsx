@@ -195,6 +195,13 @@ describe("手機首頁", () => {
     expect(screen.getByDisplayValue("從助手來的標題")).toBeInTheDocument();
   });
 
+  it("更多 blank create survives remount after navigate(/dashboard)", () => {
+    sessionStorage.setItem("aios.pendingNewProjectIdea", "");
+    render(<MobileHome groupId="g1" />);
+    expect(screen.getByLabelText("建立新專案")).toBeInTheDocument();
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+
   it("aios:new-project-idea 打開手機建立表單，確認前不送出", async () => {
     render(<MobileHome groupId="g1" />);
     publishNewProjectIdea("只預填不建立");
@@ -205,7 +212,7 @@ describe("手機首頁", () => {
 
   it("aios:new-project-idea 打開手機建立表單，不走 Launchpad modal", async () => {
     render(<MobileHome groupId="g1" />);
-    fireEvent.click(screen.getByRole("button", { name: "建立專案" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "建立專案" })[0]!);
     expect(await screen.findByLabelText("建立新專案")).toBeInTheDocument();
     fireEvent.click(within(screen.getByLabelText("建立新專案")).getByRole("button", { name: "關閉建立專案" }));
     publishNewProjectIdea("淡江禪學社・小華");

@@ -22,6 +22,7 @@ vi.mock("../../api", () => ({
     scenes: {
       update: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+      insertAfter: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
       inheritFromPrevious: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, data: undefined }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },

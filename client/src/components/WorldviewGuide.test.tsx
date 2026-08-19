@@ -22,6 +22,8 @@ describe("WorldviewGuide：下一步指引", () => {
   it("全空時第一步是「這支片在講什麼」", () => {
     render(<WorldviewGuide wv={blank} onJump={() => {}} />);
     expect(currentStepText()).toContain("這支片在講什麼");
+    expect(screen.getByText(/粉橘短髮女孩、白帽T的小華在淡大校門口遇見禪定龜龜/)).toBeInTheDocument();
+    expect(screen.queryByText(/晨光禪堂點香/)).not.toBeInTheDocument();
   });
 
   it("填了一句話後推進到「想要什麼感覺」", () => {

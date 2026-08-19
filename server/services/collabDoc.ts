@@ -434,7 +434,7 @@ export function attachCollabDoc(server: Server): void {
   onShutdown(async () => {
     server.removeListener("upgrade", handleUpgrade);
     // 關機前把每個房間都落盤——記憶體裡未 flush 的內容不可以跟著行程一起消失
-    const flushes: Promise<void>[] = [];
+    const flushes: Promise<{ conflict: boolean }>[] = [];
     for (const [docKey, room] of docRooms) {
       if (room.persistTimer) {
         clearTimeout(room.persistTimer);

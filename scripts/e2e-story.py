@@ -140,8 +140,9 @@ looks = call("GET", admin, "characterLooks.list", {"projectId": pid})
 ok("造型自動建立（米白外套→Look）", any(l["characterId"] == anjie["id"] for l in looks))
 lk = call("POST", admin, "characterLooks.add", {"characterId": anjie["id"], "name": "短髮時期", "costume": "俐落短髮、深色大衣"})
 ok("手動建立造型", lk["name"] == "短髮時期")
-upd = call("POST", admin, "scenes.update", {"sceneId": shot0["id"], "lookIds": [lk["id"]]})
-ok("鏡採用造型（lookIds）", upd["lookIds"] == [lk["id"]])
+look_shot = with_anjie[0]
+upd = call("POST", admin, "scenes.update", {"sceneId": look_shot["id"], "lookIds": [lk["id"]]})
+ok("鏡採用造型（lookIds）", not upd.get("__error__") and upd.get("lookIds") == [lk["id"]])
 ok("Identity 未被造型污染", call("GET", admin, "characters.list", {"projectId": pid})[0]["appearance"] != "俐落短髮、深色大衣")
 
 # ── 8.5 連戲檢查（§23 雙向影響 / P3 Continuity Checker）：改了卡片，既有畫面要被標成過時 ──

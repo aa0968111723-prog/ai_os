@@ -79,6 +79,20 @@ describe("assistantCapabilityGuide 排序（固定清單對誰都不合身）", 
   });
 });
 
+describe("add_character sample is 小華 A–F, not 七幕", () => {
+  it("capability catalog tap-to-send teaches 白帽T, not 米白針織外套", () => {
+    expect(capabilityExample("add_character")).toBe("幫我加一張角色卡：小華，粉橘短髮女孩、白帽T。");
+    expect(capabilityExample("add_character")).not.toContain("針織外套");
+    expect(capabilityExample("add_character")).not.toContain("米白外套");
+    expect(capabilityExample("add_character")).not.toContain("粉橘短髮鮑伯");
+    expect(capabilityExample("add_character")).not.toContain("安倢");
+    expect(capabilityExample("add_character")).not.toContain("慕恩");
+    expect(capabilityExample("add_character")).not.toContain("哲維");
+    expect(capabilityExample("add_character")).not.toContain("瑀晴");
+    expect(capabilityExample("add_character")).not.toContain("紅傘");
+  });
+});
+
 describe("capabilityExample", () => {
   it("正在盯著某個東西時，例句直接對著它講——樣板句要人自己代換名詞就等於沒省事", () => {
     const focused = ctx({ pageType: "storyboard", entityType: "shot", entityId: "s-1", entityLabel: "第 3 鏡" });

@@ -10,9 +10,10 @@ vi.mock("../../api", () => ({
         useQuery: () => ({
           data: {
             groupId: "00000000-0000-4000-8000-000000000001",
-            totalRemaining: 100,
-            weeklyQuota: 300,
-            weeklyUsed: 12,
+            totalRemaining: 4704,
+            falPointsCap: 4704,
+            weeklyQuota: 331,
+            weeklyUsed: 7,
             dailyQuota: 50,
             dailyUsed: 3,
             memberBudgetRemaining: null,
@@ -56,6 +57,14 @@ function stubViewport(compact: boolean) {
 
 describe("AccountMenu", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("paints scoped 324, not leftover 4704, when falPointsCap === leftover", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu {...props} />);
+    await user.click(screen.getByRole("button", { name: /Bruce/ }));
+    expect(screen.getByText("剩 324 點")).toBeInTheDocument();
+    expect(screen.queryByText(/剩 4,704/)).toBeNull();
+  });
 
   it("moves focus into the menu and returns it on Escape", async () => {
     const user = userEvent.setup();

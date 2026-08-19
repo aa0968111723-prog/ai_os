@@ -9,6 +9,8 @@ import { worldviewSchema, formatWorldviewForAi, formatActsOutline, type Worldvie
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { executeGenerationCommand } from "../services/generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "../services/agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
 import {
   selectWhiteboardImageModel,
   WHITEBOARD_COMPOSITION_GUIDANCE,
@@ -19,7 +21,8 @@ import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 import { resolveContext } from "../services/contextResolver";
-import { lockXiaohuaCopyFields } from "../../shared/characterIdentityLock";
+import { lockXiaohuaCopyFields, lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { resolveSceneCards } from "../../shared/sceneCards";
 import {
   expandSketch,
   sketchBoardStateBlock,
@@ -155,7 +158,7 @@ function mockSuggestions(wv: Worldview, _kind: string): DirectorSuggestion[] {
   return [
     {
       title: "開場・氛圍鏡",
-      prompt: `${base}的開場${audienceHint}：${hook || "清晨禪堂空景"}，${tone}氛圍，${style}，柔和晨光斜射，留白構圖`,
+      prompt: `${base}的開場${audienceHint}：${hook || "淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華"}，${tone}氛圍，${style}，柔和晨光斜射，留白構圖`,
     },
     {
       title: "主軸・轉化鏡",
@@ -559,22 +562,68 @@ export const directorRouter = router({
         "User brief:",
         input.prompt.trim(),
       ].join("\n\n");
+      // Studio 「生成正式畫面」 is shot-scoped (button disabled without a shot)
+      // but used to send only projectId. sceneId already exists on this input —
+      // load this shot and bind cards / looks / frozen direction the same way
+      // generateInto and assistant visual generate do. No honor-sheet / Xiaohua
+      // ensure / shot-context rewrite: those doors stay on their own leftovers.
+      const [scene] = input.sceneId
+        ? await db
+            .select()
+            .from(schema.scenes)
+            .where(and(
+              eq(schema.scenes.id, input.sceneId),
+              eq(schema.scenes.projectId, input.projectId),
+              isNull(schema.scenes.deletedAt),
+            ))
+        : [];
+      if (input.sceneId && !scene) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個分鏡" });
+      }
+      const cards = scene
+        ? resolveSceneCards(scene, {
+            characterIds: input.characterIds,
+            scenePresetIds: input.scenePresetIds,
+            propIds: input.propIds,
+          })
+        : null;
+      // generateInto / assistant already persist the locked prompt. Whiteboard
+      // already binds this shot's cards / looks / direction, but still passed
+      // the composed brief raw — generations.prompt could keep 年輕男性.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        prompt,
+        /小華/.test([scene?.title, input.prompt, scene?.action, scene?.dialogue].join("")) ? ["小華"] : [],
+      );
       const generation = await executeGenerationCommand({
         auth: ctx.auth,
         source: "web",
         id: input.clientRequestId,
         projectId: input.projectId,
         modelId: decision.model.id,
-        prompt,
+        prompt: lockedPrompt,
         sourceAssetId: input.sourceAssetId,
         sceneId: input.sceneId,
         sceneRole: "visual",
-        characterIds: input.characterIds,
-        scenePresetIds: input.scenePresetIds,
-        propIds: input.propIds,
+        characterIds: cards?.characterIds ?? input.characterIds,
+        scenePresetIds: cards?.scenePresetIds ?? input.scenePresetIds,
+        propIds: cards?.propIds ?? input.propIds,
+        lookIds: scene?.lookIds ?? undefined,
+        shotDirection: scene
+          ? { camera: scene.camera, performance: scene.performance, action: scene.action }
+          : undefined,
         continuityMode: input.continuityMode,
         reasonPrefix: `白板 AI 繪畫（${input.mode}）`,
       });
+      // generateInto / refine / retry already drop leftover 0/N「待你過目」
+      // when a replayable job lands. Studio 「生成正式畫面」 still skipped
+      // reconcile, so the HUD stayed parked until the 30s poll.
+      if (shouldReplayIdempotentGeneration(generation.status)) {
+        scheduleReconcileAfterIndependentGenerate({
+          projectId: input.projectId,
+          sceneId: input.sceneId,
+          generationId: generation.id,
+        });
+      }
       return {
         generationId: generation.id,
         mode: input.mode as WhiteboardImageMode,

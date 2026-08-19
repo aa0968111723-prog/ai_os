@@ -33,8 +33,23 @@ describe("Storyboard suggestion query consolidation", () => {
 
   it("exposes Studio-style ＋新增鏡 so a parse-timeout project is not stuck", () => {
     expect(stage).toContain("scenes.addDraft.useMutation");
+    expect(stage).toContain("scenes.insertAfter.useMutation");
+    expect(stage).toContain("createInsertAfterQueue");
+    expect(stage).toContain("insertQueueRef.current?.enqueue(focusShot.id)");
+    expect(stage).not.toContain("insertAfter.mutate({ sceneId: focusShot.id })");
     expect(stage).toContain("新增鏡");
+    expect(stage).toContain("在這之後插入一鏡");
+    expect(stage).toContain("onFocusShot={setAnchorShotId}");
     expect(stage).toContain("解析未完成也能依原文拆鏡");
+    expect(card).toContain("scenes.insertAfter.useMutation");
+    expect(card).toContain("createInsertAfterQueue");
+    expect(card).toContain("insertQueueRef.current?.enqueue(shot.id)");
+    expect(card).not.toContain("insertAfter.mutate({ sceneId: shot.id })");
+    expect(card).not.toMatch(/disabled=\{insertAfter\.isPending\}/);
+    expect(card).toContain("在這之後插入一鏡");
+    expect(card).toContain("Ellipsis");
+    expect(card).toContain("第 ${shotNumber} 鏡的更多操作");
+    expect(card).toContain("role=\"menu\"");
   });
 
   it("does not add a visible-window second query (Phase E) on top of the project batch", () => {

@@ -1,7 +1,7 @@
 import type { IconName } from "../components/Icon";
 import { PHONE_STAGES } from "@shared/phoneStages";
 // 錨點的單一出處：桌面 hash 路由（sectionFromHash）也是讀這一份
-import { STORY_INLINE_SECTIONS } from "../features/story-workspace/storyInlineNav";
+import { STORY_INLINE_SECTIONS, isStoryHomeHash } from "../features/story-workspace/storyInlineNav";
 
 /**
  * 手機版的五段製作階段：故事 → 分鏡 → 視覺 → 生成 → 交付。
@@ -108,6 +108,22 @@ export function isProjectAnchor(hash: string): boolean {
   const id = hash.replace(/^#/, "").trim();
   if (!id) return false;
   return id === STORY_HOME_ANCHOR || [...ANCHOR_BY_SECTION.values()].includes(id);
+}
+
+/**
+ * Auto-open the desktop workbench only for a *section* deep link.
+ *
+ * `#stage-story` is the desktop home hash (`writeInlineHash(null)`). Treating
+ * it as a deep link remounts MobileProjectPage at ≤767.98 and immediately
+ * loads the 234KB workbench — at ~600px that page left-clips under
+ * `html/body { overflow-x: clip }` instead of staying on the mobile shell.
+ * Explicit 「開始寫故事」 still calls `openFull("stage-story")`.
+ */
+export function isAutoOpenProjectAnchor(hash: string): boolean {
+  const id = hash.replace(/^#/, "").trim();
+  if (!id) return false;
+  if (isStoryHomeHash(`#${id}`)) return false;
+  return isProjectAnchor(id);
 }
 
 /** 「繼續製作」按鈕上的字：按鈕要講出它會做什麼，不是講一個泛稱 */

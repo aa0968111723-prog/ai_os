@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyIndependentGenerateToSteps,
   discardUnstartedAwaitingApprovalAfterIndependentGenerate,
+  leftoverAwaitingApprovalIdsToDiscard,
   shouldDiscardLeftoverAwaitingApprovalOnRead,
   type ReconcileAgentStep,
 } from "./agentRunReconcile";
@@ -105,6 +106,68 @@ describe("discardUnstartedAwaitingApprovalAfterIndependentGenerate", () => {
     expect(out.status).toBe("discarded");
   });
 
+  it("stops kindless leftover 0/6 steps after generateInto (live 停 leftover)", () => {
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: kindless,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.status).toBe("discarded");
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+    expect(out.steps[0]?.detail).toMatch(/單格工作室已先生成/);
+  });
+
+  it("stops generate_image leftover 0/6 steps after generateInto", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: imageKind,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
+  it("stops generate_image leftover 0/6 even when notes omit 第 N 鏡 / 生成畫面", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: `生成主視覺 ${n}`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: imageKind,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
+  it("stops kindless leftover 0/6 even when notes omit 第 N 鏡 / 生成畫面", () => {
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: `出圖 ${n}`,
+    }));
+    const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
+      status: "awaiting_approval",
+      steps: kindless,
+      independentGenerateLanded: true,
+    });
+    expect(out.discarded).toBe(true);
+    expect(out.steps.every((s) => s.status === "stopped")).toBe(true);
+  });
+
   it("leaves a running leftover plan alone", () => {
     const out = discardUnstartedAwaitingApprovalAfterIndependentGenerate({
       status: "running",
@@ -128,16 +191,16 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
     })).toBe(true);
   });
 
-  it("keeps a newer batch queued after existing images so it stays approvable", () => {
+  it("hides leftover 0/6 even when the batch is newer than existing images", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "awaiting_approval",
       steps: six,
       runCreatedAt: "2026-08-18T14:00:00.000Z",
       latestDoneVisualAt: created,
-    })).toBe(false);
+    })).toBe(true);
   });
 
-  it("leaves a running leftover plan and a plan with no visual alone", () => {
+  it("leaves a running leftover plan alone; unstarted 0/6 with no visual still hides", () => {
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "running",
       steps: six,
@@ -149,7 +212,7 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       steps: six,
       runCreatedAt: created,
       latestDoneVisualAt: null,
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("hides leftover 0/6 even when steps omit kind: generate", () => {
@@ -158,6 +221,48 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       status: "pending",
       note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
     }));
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: kindless,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+  });
+
+  it("hides leftover 0/6 when steps use generate_image instead of generate", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: n === 1 ? "第 1 鏡「小華躺在床上」生成畫面" : `第 ${n} 鏡生成畫面`,
+    }));
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: imageKind,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
+  });
+
+  it("hides leftover 0/6 generate_image / kindless when notes omit 第 N 鏡 / 生成畫面", () => {
+    const imageKind = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "generate_image",
+      status: "pending",
+      note: `生成主視覺 ${n}`,
+    }));
+    const kindless = [1, 2, 3, 4, 5, 6].map((n) => ({
+      kind: "",
+      status: "pending",
+      note: `出圖 ${n}`,
+    }));
+    expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
+      status: "awaiting_approval",
+      steps: imageKind,
+      runCreatedAt: "2026-08-18T14:00:00.000Z",
+      latestDoneVisualAt: created,
+      hasCurrentVisual: true,
+    })).toBe(true);
     expect(shouldDiscardLeftoverAwaitingApprovalOnRead({
       status: "awaiting_approval",
       steps: kindless,
@@ -182,5 +287,24 @@ describe("shouldDiscardLeftoverAwaitingApprovalOnRead", () => {
       latestDoneVisualAt: created,
       hasCurrentVisual: true,
     })).toBe(false);
+  });
+});
+
+describe("leftoverAwaitingApprovalIdsToDiscard", () => {
+  it("drops leftover 0/6 when batchGenerate mints a different plan, keeps the reused fingerprint", () => {
+    const leftover = { id: "old-0n", status: "awaiting_approval" as const, steps: six };
+    const reused = { id: "same-fp", status: "awaiting_approval" as const, steps: six };
+    const running = {
+      id: "running",
+      status: "running" as const,
+      steps: six.map((step) => ({ ...step, status: "running" })),
+    };
+    expect(leftoverAwaitingApprovalIdsToDiscard({
+      keepRunId: reused.id,
+      runs: [leftover, reused, running],
+    })).toEqual(["old-0n"]);
+    expect(leftoverAwaitingApprovalIdsToDiscard({
+      runs: [leftover, reused],
+    })).toEqual(["old-0n", "same-fp"]);
   });
 });

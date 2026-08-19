@@ -25,6 +25,7 @@ import {
   type AssistantLatencyMetrics,
 } from "@shared/assistantExecution";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import { honestAssistantVisibleEvents } from "@shared/assistantHonestCompletion";
 import { expireStaleActiveGoal, type AssistantActiveGoal } from "@shared/assistantGoalFrame";
 import type { AssistantActionResult } from "@shared/assistantActions";
 import { interactionPickerMode, type AssistantInteractionRequest } from "@shared/assistantInteractions";
@@ -200,6 +201,8 @@ export function toSiteActionInput(a: SiteAction) {
       return { type: a.type, peerId: a.peerId, body: a.body } as const;
     case "add_database_row":
       return { type: a.type, tableId: a.tableId, data: a.data } as const;
+    case "add_character":
+      return { type: a.type, groupId: a.groupId, projectId: a.projectId, name: a.name, appearance: a.appearance, notes: a.notes } as const;
     case "import_url":
       return { type: a.type, groupId: a.groupId, projectId: a.projectId, url: a.url } as const;
   }
@@ -214,6 +217,7 @@ export function siteActionDoneLink(a: SiteAction, result: { type: string; projec
   if (a.type === "create_task") return { href: `/p/${a.projectId}`, label: "前往專案" };
   if (a.type === "send_dm") return { href: "/chat", label: "打開私訊" };
   if (a.type === "add_database_row") return { href: "/databases", label: "查看資料庫" };
+  if (a.type === "add_character") return { href: `/p/${a.projectId}`, label: "查看角色" };
   if (a.type === "import_url" && result.projectId) return { href: `/p/${result.projectId}#sec-assets`, label: "查看資料" };
   return null;
 }
@@ -280,6 +284,7 @@ function SiteActionCard({ action, onNavigate }: { action: SiteAction; onNavigate
     action.type === "send_dm" ? action.body
     : action.type === "add_note" ? action.content
     : action.type === "add_database_row" ? action.preview
+    : action.type === "add_character" ? action.appearance
     : null;
   return (
     <div className="ai-copilot-action-card" data-fb="站級動作卡">
@@ -931,7 +936,15 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       setOrbState("speaking");
       // 事件與來源一律以伺服器的最終版本為準；串流中途掉封包或整條退回 tRPC 時，
       // 前端累積的即時事件會不完整，而軌跡不能因為傳輸方式而有兩套內容。
-      const events = data.events ?? liveEventsRef.current.filter(isAgentEvent);
+      const rawEvents = data.events ?? liveEventsRef.current.filter(isAgentEvent);
+      const pendingConfirm = data.siteActions.length > 0
+        || data.dispatches.length > 0
+        || data.actions.length > 0;
+      const hasFailure = rawEvents.some((event) => event.type === "agent.failed" && event.status === "failed");
+      const events = honestAssistantVisibleEvents(rawEvents, {
+        runFailed: hasFailure,
+        pendingConfirm,
+      });
       // A durable file/Drive/folder question is already rendered as the
       // assistant answer plus the mini workspace. Repeating waiting.user_input
       // as a work-step card made the same prompt appear twice on mobile.
@@ -941,13 +954,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       const sources = data.sources ?? [];
       const actionResults = assistantActionResultsFromExecuted(data.executedSiteActions ?? []);
       recordAssistantActionResults(groupId, actionResults);
-      const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
       const hasWaiting = !!data.intakeFallbacks?.length
         || !!data.interactionRequest
         || !!data.intakeRequest
-        || data.siteActions.length > 0
-        || data.dispatches.length > 0
-        || data.actions.length > 0
+        || pendingConfirm
         || events.some((event) => (event.type === "waiting.permission" || event.type === "waiting.user_input") && event.status === "waiting");
       const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
       const hasVerifiedWrites = (data.executedSiteActions ?? []).some(

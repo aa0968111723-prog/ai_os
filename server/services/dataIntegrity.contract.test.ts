@@ -52,6 +52,22 @@ describe("P0-1 story persist always sends expectedRev", () => {
   });
 });
 
+describe("P0 knowledge.update refuses silent LWW", () => {
+  it("title/content writes require baseline CAS; pin-only must not rewrite body", () => {
+    const kn = readFileSync(new URL("../routers/knowledge.ts", import.meta.url), "utf8");
+    const update = kn.slice(kn.indexOf("update: authedProcedure"), kn.indexOf("listVersions:"));
+    expect(update).toContain("knowledgeUpdateOmitMessage");
+    expect(update).toContain("eq(schema.knowledge.title, input.baseline!.title)");
+    const helper = readFileSync(new URL("../../shared/knowledgeUpdate.ts", import.meta.url), "utf8");
+    expect(helper).toContain("omitted knowledge baseline — refuse silent LWW over knowledge title/content");
+    expect(update).toContain("eq(schema.knowledge.content, input.baseline!.content)");
+    expect(update).not.toContain("title: input.title?.trim() ?? row.title");
+    const kb = readFileSync(new URL("../../client/src/components/KnowledgeBase.tsx", import.meta.url), "utf8");
+    expect(kb).toContain("knowledgeSaveBaseline");
+    expect(kb).toContain("baseline");
+  });
+});
+
 describe("P0-2 assertReferenceImage is project-scoped", () => {
   it("helper requires asset.projectId === projectId", () => {
     const src = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");
@@ -64,6 +80,18 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(src).toContain("asset.projectId !== input.project.id");
     expect(src).toContain("row.projectId !== input.project.id");
     expect(src).toContain("同組其他專案的圖不能當定裝");
+  });
+
+  it("generateInto honours 角色卡 生成時帶入 via resolveHonoredCharacterSheet(projectId); 0/6 skips", () => {
+    const scenes = readFileSync(new URL("../routers/scenes.ts", import.meta.url), "utf8");
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("resolveHonoredCharacterSheet");
+    expect(into).toContain("characterIds: cards.characterIds");
+    expect(into).toContain("explicitSourceAssetId: input.sourceAssetId");
+    const helper = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");
+    expect(helper).toContain("if (!opts.characterIds?.length) return undefined");
+    expect(helper).toContain("owned.has(explicit)");
+    expect(helper).toContain("await assertReferenceImage(id, groupId, projectId)");
   });
 
   it("Team Canon reference images also require the same project", () => {
@@ -114,5 +142,27 @@ describe("P0-3 import/director/prompts cannot skip assertGenerationEntityIds", (
     expect(src).toContain("storySceneId?: string");
     expect(src).toContain("造型不屬於本專案或不存在");
     expect(src).toContain("場次不屬於本專案或不存在");
+  });
+
+  it("card remove strips JSONB ids from project scenes before delete; duplicate copies only living refs", () => {
+    const characters = readFileSync(new URL("../routers/characters.ts", import.meta.url), "utf8");
+    const presets = readFileSync(new URL("../routers/scenePresets.ts", import.meta.url), "utf8");
+    const props = readFileSync(new URL("../routers/props.ts", import.meta.url), "utf8");
+    const looks = readFileSync(new URL("../routers/characterLooks.ts", import.meta.url), "utf8");
+    const scenes = readFileSync(new URL("../routers/scenes.ts", import.meta.url), "utf8");
+    const helper = readFileSync(new URL("./sceneEntityIds.ts", import.meta.url), "utf8");
+    expect(helper).toContain("export async function keepLivingSceneRefs");
+    expect(helper).toContain("export async function stripCardIdsFromProjectScenes");
+    expect(helper).toContain("isNull(schema.assets.deletedAt)");
+    expect(characters).toContain("stripCardIdsFromProjectScenes");
+    expect(characters.indexOf("stripCardIdsFromProjectScenes")).toBeLessThan(
+      characters.lastIndexOf("tx.delete(schema.characters)"),
+    );
+    expect(presets).toContain("stripCardIdsFromProjectScenes");
+    expect(props).toContain("stripCardIdsFromProjectScenes");
+    expect(looks).toContain("stripCardIdsFromProjectScenes");
+    const insert = scenes.slice(scenes.indexOf("insertAfter:"), scenes.indexOf("remove:", scenes.indexOf("insertAfter:")));
+    expect(insert).toContain("keepLivingSceneRefs");
+    expect(insert).not.toContain("characterIds: dup ? cur.characterIds : null");
   });
 });

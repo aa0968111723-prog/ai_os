@@ -7,7 +7,8 @@
  * 兩種排序操作並存是刻意的（沿用 ShotStrip 的既有決定）：桌機可以拖，但每一格
  * 永遠也有前／後按鈕——拖曳對鍵盤與讀屏使用者不成立，那是加速捷徑不是唯一的路。
  */
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { AssetImg } from "../../components/MediaFallback";
 import { Button, Meta } from "../../components/ui";
@@ -19,6 +20,7 @@ import {
 } from "@shared/shotCompletion";
 import type { StudioShot } from "./ShotStrip";
 import { NewShotMenu, type NewShotKind } from "./NewShotMenu";
+import { fixedShotMenuStyle, placeFixedShotMenu, viewportCssSize } from "./placeFixedShotMenu";
 
 export interface StoryboardTimelineProps {
   shots: readonly StudioShot[];
@@ -36,6 +38,8 @@ export interface StoryboardTimelineProps {
   onReorder: (orderedIds: string[]) => void;
   onNewShot: (kind: NewShotKind) => void;
   onDuplicate: (id: string) => void;
+  /** Blank row immediately after this shot (not append-at-end). */
+  onInsertAfter: (id: string) => void;
   onDelete: (id: string) => void;
   newShotBusy?: boolean;
 }
@@ -53,6 +57,7 @@ export function StoryboardTimeline({
   onReorder,
   onNewShot,
   onDuplicate,
+  onInsertAfter,
   onDelete,
   newShotBusy,
 }: StoryboardTimelineProps) {
@@ -60,6 +65,13 @@ export function StoryboardTimeline({
   const [overId, setOverId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const listRef = useRef<HTMLOListElement | null>(null);
+  const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  useLayoutEffect(() => {
+    if (!activeId || !listRef.current) return;
+    const item = listRef.current.querySelector<HTMLElement>(`[data-shot-id="${CSS.escape(activeId)}"]`);
+    item?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeId]);
 
   const drop = (targetId: string) => {
     setOverId(null);
@@ -105,6 +117,7 @@ export function StoryboardTimeline({
             return (
               <li
                 key={shot.id}
+                data-shot-id={shot.id}
                 className={`studio-tlshot${active ? " is-active" : ""}${overId === shot.id ? " is-over" : ""}`}
                 draggable={draggable}
                 onDragStart={draggable ? () => setDragId(shot.id) : undefined}
@@ -159,6 +172,28 @@ export function StoryboardTimeline({
                 </button>
 
                 {canEdit && (
+                  <button
+                    type="button"
+                    className="studio-tlshot__more"
+                    ref={(el) => {
+                      if (el) moreBtnRefs.current.set(shot.id, el);
+                      else moreBtnRefs.current.delete(shot.id);
+                    }}
+                    aria-label={`「${shot.title}」的更多操作`}
+                    title="更多（插入、複製、刪除）"
+                    aria-haspopup="menu"
+                    aria-expanded={menuId === shot.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuId((cur) => (cur === shot.id ? null : shot.id));
+                    }}
+                  >
+                    <Icon name="Ellipsis" size={12} />
+                  </button>
+                )}
+
+                {canEdit && (
                   <div className="studio-tlshot__ops">
                     <button
                       type="button"
@@ -168,16 +203,6 @@ export function StoryboardTimeline({
                       onClick={() => onMove(shot.id, "up")}
                     >
                       <Icon name="ArrowLeft" size={11} />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`「${shot.title}」的更多操作`}
-                      title="更多（複製、刪除）"
-                      aria-haspopup="menu"
-                      aria-expanded={menuId === shot.id}
-                      onClick={() => setMenuId((cur) => (cur === shot.id ? null : shot.id))}
-                    >
-                      <Icon name="Ellipsis" size={11} />
                     </button>
                     <button
                       type="button"
@@ -192,31 +217,13 @@ export function StoryboardTimeline({
                 )}
 
                 {menuId === shot.id && (
-                  <>
-                    <button
-                      type="button"
-                      className="studio-menu__scrim"
-                      aria-label="關閉選單"
-                      onClick={() => setMenuId(null)}
-                    />
-                    <div className="studio-menu studio-menu--shot" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => { setMenuId(null); onDuplicate(shot.id); }}
-                      >
-                        <Icon name="Copy" size={13} /> 複製這一鏡
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="is-danger"
-                        onClick={() => { setMenuId(null); onDelete(shot.id); }}
-                      >
-                        <Icon name="Trash2" size={13} /> 刪除（進回收桶）
-                      </button>
-                    </div>
-                  </>
+                  <ShotMoreMenu
+                    trigger={moreBtnRefs.current.get(shot.id) ?? null}
+                    onClose={() => setMenuId(null)}
+                    onDuplicate={() => { setMenuId(null); onDuplicate(shot.id); }}
+                    onInsertAfter={() => { setMenuId(null); onInsertAfter(shot.id); }}
+                    onDelete={() => { setMenuId(null); onDelete(shot.id); }}
+                  />
                 )}
               </li>
             );
@@ -229,5 +236,125 @@ export function StoryboardTimeline({
         </Meta>
       )}
     </section>
+  );
+}
+
+/**
+ * Portal + position:fixed. Live 10:08: height is not the cause — 50%
+ * zoom (CSS ~2560×1320) still painted the #790 cream ellipse. That is
+ * the full-viewport scrim <button> (cream + 999px + inset:0), not
+ * overflow-y. Do not mount a scrim. Do not keep --shot `bottom: 100%`
+ * on a fixed portal (that stretches). Escape + outside pointerdown close.
+ */
+function ShotMoreMenu({
+  trigger,
+  onClose,
+  onDuplicate,
+  onInsertAfter,
+  onDelete,
+}: {
+  trigger: HTMLButtonElement | null;
+  onClose: () => void;
+  onDuplicate: () => void;
+  onInsertAfter: () => void;
+  onDelete: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const menuH = menuRef.current?.offsetHeight ?? 120;
+      const menuW = menuRef.current?.offsetWidth ?? 190;
+      const rect = trigger?.getBoundingClientRect() ?? null;
+      const { vw, vh } = viewportCssSize();
+      setBox(placeFixedShotMenu({
+        trigger: rect,
+        menuH,
+        menuW,
+        vw,
+        vh,
+      }));
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("scroll", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("scroll", place);
+    };
+  }, [trigger]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const node = event.target;
+      if (!(node instanceof Node)) return;
+      if (menuRef.current?.contains(node)) return;
+      if (trigger?.contains(node)) return;
+      onClose();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [trigger, onClose]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="studio-menu studio-menu--fixed"
+      role="menu"
+      data-studio-shot-menu="1"
+      style={fixedShotMenuStyle(box)}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onInsertAfter();
+        }}
+      >
+        <Icon name="Plus" size={13} /> 在這之後插入一鏡
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDuplicate();
+        }}
+      >
+        <Icon name="Copy" size={13} /> 複製這一鏡
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="is-danger"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <Icon name="Trash2" size={13} /> 刪除（進回收桶）
+      </button>
+    </div>,
+    document.body,
   );
 }

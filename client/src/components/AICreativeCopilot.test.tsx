@@ -445,6 +445,22 @@ describe("toSiteActionInput（label 等顯示欄位不上送）", () => {
       .toEqual({ type: "create_watch", groupId: "g", projectId: "p", kind: "generation_failed", label: "失敗提醒" });
     expect(toSiteActionInput({ type: "import_url", groupId: "g", projectId: "p", projectTitle: "PT", url: "https://example.com/source", label: "L" }))
       .toEqual({ type: "import_url", groupId: "g", projectId: "p", url: "https://example.com/source" });
+    expect(toSiteActionInput({
+      type: "add_character",
+      groupId: "g",
+      projectId: "p",
+      projectTitle: "PT",
+      name: "小華",
+      appearance: "大二化工、粉橘短髮女孩、白帽T",
+      label: "新增角色「小華」",
+    })).toEqual({
+      type: "add_character",
+      groupId: "g",
+      projectId: "p",
+      name: "小華",
+      appearance: "大二化工、粉橘短髮女孩、白帽T",
+      notes: undefined,
+    });
   });
 });
 
@@ -461,6 +477,18 @@ describe("siteActionDoneLink", () => {
       { type: "import_url", groupId: "g", projectId: "pp", projectTitle: "PT", url: "https://example.com/source", label: "L" },
       { type: "import", projectId: "pp" },
     )).toEqual({ href: "/p/pp#sec-assets", label: "查看資料" });
+    expect(siteActionDoneLink(
+      {
+        type: "add_character",
+        groupId: "g",
+        projectId: "pp",
+        projectTitle: "PT",
+        name: "小華",
+        appearance: "大二化工、粉橘短髮女孩、白帽T",
+        label: "新增角色「小華」",
+      },
+      { type: "add_character", projectId: "pp" },
+    )).toEqual({ href: "/p/pp", label: "查看角色" });
   });
 
   it("opens the existing Drive mini workspace from conversation without starting a campaign", async () => {

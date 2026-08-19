@@ -71,7 +71,7 @@ import {
 import { consumeNestedReveal, peekStoryReveal, subscribeStoryReveal } from "../features/story-workspace/storyRevealQueue";
 import { useOneClickFilm } from "../features/story-workspace/useOneClickFilm";
 import { ONE_CLICK_BATCH_KIND, revealAfterOneClick } from "../features/story-workspace/oneClickFilm";
-import { oneClickPrimaryLabel } from "@shared/projectCreativeContext";
+import { oneClickPrimaryLabel, shouldShowOneClickGenerateCta } from "@shared/projectCreativeContext";
 import { StoryResultFix } from "../features/story-workspace/StoryResultFix";
 import { StoryContextStatusBlock } from "../features/story-workspace/StoryContextStatusBlock";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
@@ -279,7 +279,7 @@ function NarrativePersonAdd({ onAdd, disabled }: { onAdd: (token: string) => voi
       <input
         value={draft}
         aria-label="新增敘事人物"
-        placeholder={disabled ? "已達 30 項上限" : "例：安倢＝紅傘、米白外套"}
+        placeholder={disabled ? "已達 30 項上限" : "例：小華＝粉橘短髮女孩、白帽T"}
         maxLength={100}
         disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
@@ -1252,6 +1252,13 @@ export function ProjectPage({ id }: { id: string }) {
     isDirty: storyDirty || Boolean(storyMeta.data?.story?.isDirty),
   });
   const hasDeliverable = playableResultCount > 0;
+  const stillCount = (scenes.data ?? []).filter((s) => Boolean(s.assetId)).length;
+  const showGenerateCta = shouldShowOneClickGenerateCta({
+    sceneCount,
+    readinessKind: readiness.kind,
+    stillCount,
+  });
+  const showWriteStoryCta = canEdit && readiness.kind === "empty";
   const boardRail = storyboardRailSummary((scenes.data ?? []) as Array<{
     id: string;
     title: string;
@@ -1852,26 +1859,30 @@ export function ProjectPage({ id }: { id: string }) {
             contextStatus={<StoryContextStatusBlock projectId={id} />}
             canEdit={canEdit}
             primaryLabel={
-              readiness.kind === "empty"
-                ? undefined
-                : oneClickPrimaryLabel({
+              showGenerateCta
+                ? oneClickPrimaryLabel({
                     pending: oneClick.pending,
                     hasBatch: Boolean(oneClick.result),
                     modelKind: ONE_CLICK_BATCH_KIND,
                     sceneCount,
                   })
+                : showWriteStoryCta
+                  ? "開始寫故事"
+                  : undefined
             }
-            primaryDisabled={oneClick.pending || readiness.kind === "empty" || sceneCount === 0}
+            primaryDisabled={showGenerateCta && oneClick.pending}
             error={oneClick.error}
             onPrimary={
-              readiness.kind === "empty"
-                ? undefined
-                : () => {
+              showGenerateCta
+                ? () => {
                     if (!window.confirm("會先儲存並解析故事、補齊缺少的分鏡，再建立批次生成計畫。估點後由你核准才扣點；已細修或已通過審核的鏡不會被覆蓋。開始？")) return;
                     void oneClick.run()
                       .then(() => revealAfterOneClick(true, () => openInlineSection("production")))
                       .catch(() => revealAfterOneClick(false, () => openInlineSection("production")));
                   }
+                : showWriteStoryCta
+                  ? () => focusAndReveal(document.getElementById("story-editor"))
+                  : undefined
             }
             latestLabel={
               oneClick.result
@@ -2537,7 +2548,8 @@ export function ProjectPage({ id }: { id: string }) {
                       <p className="error" style={{ marginTop: 6 }}>{addCharFromPerson.error.message}</p>
                     )}
                     <Hint style={{ margin: "6px 0 0", fontSize: 12 }}>
-                      寫法可用「名字＝外觀」（例：安倢＝紅傘、米白外套），建定裝會拆成名與外觀。
+                      {/* Live leftover: this door still taught 七幕 安倢＝紅傘, not A–F. */}
+                      寫法可用「名字＝外觀」（例：小華＝粉橘短髮女孩、白帽T），建定裝會拆成名與外觀。
                     </Hint>
                   </div>
 

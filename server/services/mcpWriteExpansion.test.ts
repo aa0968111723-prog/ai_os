@@ -47,12 +47,62 @@ describe("MCP write honesty helpers", () => {
     expect(block).toContain("findSceneByDisplayNo");
     expect(block).toContain("sceneId");
     expect(block).toContain("args.sceneNo");
+    expect(block).toContain("sceneFillRole");
+    expect(block).toContain("resolveSceneCards(shot, null)");
+    expect(block).toContain("lookIds = shot.lookIds ?? undefined");
+    expect(block).toContain("shotDirection");
+    expect(block).toContain("sceneRole");
+    expect(block).not.toContain("select({ id: schema.scenes.id, orderIndex: schema.scenes.orderIndex })");
     expect(source).toContain("要寫進第 N 鏡請帶 sceneNo");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
+  });
+
+  it("generate_into_scene goes through executeGenerationCommand so a failed first send cannot look like success", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf('if (name === "generate_into_scene")'), source.indexOf('if (name === "update_worldview")'));
+    expect(block).toContain("executeGenerationCommand");
+    expect(block).toContain("resolveHonoredCharacterSheet");
+    expect(block).toContain("characterIds: cards.characterIds");
+    expect(block).toContain("buildShotContextPrompt(scene, model)");
+    expect(block).not.toContain("scene.prompt ?? scene.title");
+    expect(block).toContain("regenRejection(model)");
+    expect(block).toContain('code: "BAD_REQUEST"');
+    expect(block).toContain("assertNoPendingVisual(scene.id)");
+    expect(block).toContain("ensureXiaohuaCharacterIds");
+    expect(block).toContain("lockXiaohuaGenerationPrompt");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("generationId: gen.id");
+    expect(block).toContain("characterIds,");
+    expect(block).toContain("id: typeof args.client_request_id === \"string\" ? args.client_request_id : undefined");
+    const command = readFileSync(new URL("./generationCommand.ts", import.meta.url), "utf8");
+    expect(command).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(command).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
+  });
+
+  it("add_character sanitizes the name and upserts — no raw insert / instruction-name swallow", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const add = source.slice(source.indexOf('if (name === "add_character")'), source.indexOf('if (name === "update_character")'));
+    expect(add).toContain("sanitizeCharacterProposalName");
+    expect(add).toContain("upsertProjectCharacterCore");
+    expect(add).toContain("這是指示句，不是角色名");
+    expect(add).toContain("reused: row.reused");
+    expect(add).not.toContain("db.insert(schema.characters)");
+    expect(add).not.toContain("String(args.name ?? \"\").trim()");
+  });
+
+  it("update_character sanitizes EXTRACT blobs instead of raw-writing the card name", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const update = source.slice(source.indexOf('if (name === "update_character")'), source.indexOf('if (name === "add_scene_preset")'));
+    expect(update).toContain("sanitizeCharacterProposalName(args.name)");
+    expect(update).toContain("這是指示句，不是角色名");
+    expect(update).not.toContain("args.name.trim().slice(0, 80)");
+    expect(update).not.toContain("patch.name = args.name");
   });
 
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
-    expect(source).toContain('import { assertReferenceImage } from "./referenceAsset"');
+    expect(source).toContain('import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset"');
     expect(source.match(/await assertReferenceImage\(/g)?.length).toBeGreaterThanOrEqual(6);
     expect(source).toContain("project.groupId, project.id");
     expect(source).toContain("row.groupId, row.projectId");

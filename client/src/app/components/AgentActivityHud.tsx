@@ -5,6 +5,7 @@ import {
   agentRunHudLabel,
   isAgentRunActiveForHud,
   isAgentRunWaitingForHuman,
+  isLeftoverUnstartedHudRun,
 } from "../../../../shared/agentQuestions";
 import {
   agentStopAckLatency,
@@ -80,6 +81,7 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     },
   );
 
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const discard = trpc.agents.discard.useMutation({
     onSuccess: (_data, variables) => {
       const runId = variables?.runId;
@@ -93,7 +95,16 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
       }
       void utils.teamAssistant.agentOverview.invalidate({ groupId });
     },
-    onError: () => {
+    onError: (_err, variables) => {
+      const runId = variables?.runId;
+      if (runId) {
+        setHiddenIds((prev) => {
+          if (!prev.has(runId)) return prev;
+          const next = new Set(prev);
+          next.delete(runId);
+          return next;
+        });
+      }
       setStoppingId(null);
       stopClickedAtRef.current = null;
     },
@@ -131,9 +142,9 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
         cache.delete(id);
       }
     }
-    return [...cache.values()];
+    return [...cache.values()].filter((r) => !hiddenIds.has(r.id));
     // rawRuns identity changes each query; overview.data gates prune
-  }, [rawRuns, overview.data, stoppingId]);
+  }, [rawRuns, overview.data, stoppingId, hiddenIds]);
 
   // Stop ack: hold until authoritative terminal
   useEffect(() => {
@@ -189,8 +200,8 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
     () => null,
   );
 
-  const active = runs.filter((r) => isAgentRunActiveForHud(r.status) || r.id === stoppingId);
-  if (active.length === 0 && !stoppingId) return null;
+  const active = runs.filter((r) => !hiddenIds.has(r.id) && (isAgentRunActiveForHud(r.status) || r.id === stoppingId));
+  if (active.length === 0 && (!stoppingId || hiddenIds.has(stoppingId))) return null;
 
   const lead = (stoppingId ? active.find((r) => r.id === stoppingId) : null)
     ?? active[0]
@@ -254,14 +265,14 @@ export function AgentActivityHud({ groupId }: { groupId: string }) {
             // Theater stop first: cancel pending nav/cursor even if stop API is slow
             cancelTheaterForRun(lead.id);
             clearPendingTheaterSuggest();
-            setStoppingId(lead.id);
-            stopClickedAtRef.current = Date.now();
-            // Leftover 0/N「待你過目」is awaiting_approval. 停 used to call
-            // stop, which rejected as already-ended — toast survived reload.
-            // discard already persists discarded (overview omits it).
-            if (lead.status === "awaiting_approval") {
+            // Leftover 0/N「待你過目」must discard (not stop). Hide immediately;
+            // persist discarded so reload cannot resurrect the toast.
+            if (isLeftoverUnstartedHudRun(lead)) {
+              setHiddenIds((prev) => new Set(prev).add(lead.id));
               discard.mutate({ runId: lead.id });
             } else {
+              setStoppingId(lead.id);
+              stopClickedAtRef.current = Date.now();
               stop.mutate({ runId: lead.id });
             }
           }}

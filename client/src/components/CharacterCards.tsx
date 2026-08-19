@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   CHAR_APPEARANCE_MAX,
   CHAR_NAME_MAX,
@@ -6,6 +6,8 @@ import {
   MAX_GENERATE_CHARACTERS,
   MAX_PROJECT_CHARACTERS,
 } from "@shared/cardLimits";
+import { XIAOHUA_LOCKED_APPEARANCE } from "@shared/characterIdentityLock";
+import { characterHasLiveSheet, selectableBringInIds } from "@shared/studioReferenceImage";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
@@ -60,7 +62,7 @@ export function CharacterCards({
       setNotes("");
       setRefImg(null);
       setOpen(false);
-      if (row?.id) onCreated?.(row.id);
+      if (row?.id && characterHasLiveSheet(row)) onCreated?.(row.id);
     },
   });
   const remove = trpc.characters.remove.useMutation({
@@ -73,6 +75,26 @@ export function CharacterCards({
       setTextEditId(null);
     },
   });
+  const generateSheet = trpc.characters.generateSheet.useMutation();
+  const honorSheet = trpc.characters.honorGeneratedSheet.useMutation({
+    onSuccess: () => utils.characters.list.invalidate({ projectId }),
+  });
+  const [pendingSheet, setPendingSheet] = useState<{ characterId: string; generationId: string } | null>(null);
+  const honoringSheet = useRef(false);
+  const sheetStatus = trpc.generation.status.useQuery(
+    { id: pendingSheet?.generationId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(pendingSheet), refetchInterval: pendingSheet ? 3_000 : false },
+  );
+  useEffect(() => {
+    if (!pendingSheet || sheetStatus.data?.status !== "done" || honoringSheet.current) return;
+    honoringSheet.current = true;
+    honorSheet.mutate(pendingSheet, {
+      onSettled: () => {
+        honoringSheet.current = false;
+      },
+      onSuccess: () => setPendingSheet(null),
+    });
+  }, [honorSheet, pendingSheet, sheetStatus.data?.status]);
 
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -82,7 +104,11 @@ export function CharacterCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
   /** 正在就地編輯文字欄的卡 id */
   const [textEditId, setTextEditId] = useState<string | null>(null);
-  const atSelectMax = selectedIds.length >= maxSelect;
+  const bringInIds = useMemo(
+    () => (list.data ? selectableBringInIds(list.data, selectedIds, maxSelect) : selectedIds.slice(0, maxSelect)),
+    [list.data, selectedIds, maxSelect],
+  );
+  const atSelectMax = bringInIds.length >= maxSelect;
   const cardCount = list.data?.length ?? 0;
   const atProjectMax = cardCount >= MAX_PROJECT_CHARACTERS;
 
@@ -90,12 +116,12 @@ export function CharacterCards({
     <Card as="section" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
       <Hint>
-        設定角色外觀一次鎖定；生成時勾選，AI 自動帶入外觀，跨鏡頭不走樣。可綁定裝參考圖。
+        設定角色外觀一次鎖定；生成時勾選（需有該角色自己的定裝參考圖），AI 自動帶入外觀，跨鏡頭不走樣。可綁定裝參考圖。未設參考圖只靠文字錨點，已選保持 0/6。
         外觀前段會注入畫面生成（過長會自動截短）；個性只給導演／助手，不會畫進畫面。
         {list.data && list.data.length > 0 && (
           <>
             {" "}
-            · 已選 {selectedIds.length}/{maxSelect}
+            · 已選 {bringInIds.length}/{maxSelect}
             {atSelectMax ? "（已達上限）" : ""}
             {" · "}共 {cardCount}/{MAX_PROJECT_CHARACTERS} 張
           </>
@@ -117,8 +143,9 @@ export function CharacterCards({
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {list.data.map((c) => {
-            const on = selectedIds.includes(c.id);
-            const selectDisabled = !on && atSelectMax;
+            const hasOwnSheet = characterHasLiveSheet(c);
+            const on = bringInIds.includes(c.id);
+            const selectDisabled = !on && (atSelectMax || !hasOwnSheet);
             const refTrashed = Boolean(c.referenceAssetId && !c.referenceUrl);
             const editingText = textEditId === c.id;
             return (
@@ -145,14 +172,20 @@ export function CharacterCards({
                       cursor: selectDisabled ? "not-allowed" : "pointer",
                       opacity: selectDisabled ? 0.55 : 1,
                     }}
-                    title={selectDisabled ? `最多帶入 ${maxSelect} 個角色定裝——先取消其他勾選` : undefined}
+                    title={
+                      !hasOwnSheet
+                        ? "沒有定裝參考圖——先設參考圖。未設則只靠文字錨點（粉橘短髮女孩、白帽T）"
+                        : selectDisabled
+                          ? `最多帶入 ${maxSelect} 個角色定裝——先取消其他勾選`
+                          : undefined
+                    }
                   >
                     <input
                       type="checkbox"
                       checked={on}
                       disabled={selectDisabled}
                       onChange={() => {
-                        if (selectDisabled) return;
+                        if (selectDisabled || !hasOwnSheet) return;
                         onToggle(c.id);
                       }}
                     />{" "}
@@ -306,6 +339,24 @@ export function CharacterCards({
                     <Button
                       variant="ghost"
                       style={{ fontSize: "var(--fs-11)" }}
+                      title="用便宜生圖做一張定裝參考圖（FLUX schnell，不用 Veo）。完成後才能勾成 1/6。"
+                      disabled={generateSheet.isPending || pendingSheet?.characterId === c.id}
+                      onClick={() =>
+                        generateSheet.mutate(
+                          { characterId: c.id, clientRequestId: crypto.randomUUID() },
+                          {
+                            onSuccess: (row) =>
+                              setPendingSheet({ characterId: row.characterId, generationId: row.generationId }),
+                          },
+                        )
+                      }
+                    >
+                      <Icon name="Sparkles" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      {pendingSheet?.characterId === c.id ? "定裝生成中…" : "生成定裝"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      style={{ fontSize: "var(--fs-11)" }}
                       title="發布到全站靈感頻道"
                       disabled={publish.isPending}
                       onClick={() => {
@@ -342,9 +393,10 @@ export function CharacterCards({
       ) : (
         <EmptyState
           title="還沒有角色"
-          description="加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。"
+          description="加一張定裝卡（例：小華＝粉橘短髮女孩、白帽T）。角色只有小華與禪定龜龜。"
           /* 範例本來只寫在說明裡、要自己打一次。EmptyState 收 action 就是為了
-             「不要死路」——直接建出這張範例卡，建完再改比從零想快得多。 */
+             「不要死路」——直接建出這張範例卡，建完再改比從零想快得多。
+             Live leftover: this door still minted 安倢 (七幕), not 小華. */
           action={
             readOnly ? undefined : (
               <Button
@@ -353,9 +405,9 @@ export function CharacterCards({
                 onClick={() =>
                   add.mutate({
                     projectId,
-                    name: "安倢",
-                    appearance: "紅色雨傘、米白外套、帆布包、無眼鏡、溫柔回望",
-                    notes: "由範例建立，可再改",
+                    name: "小華",
+                    appearance: XIAOHUA_LOCKED_APPEARANCE,
+                    notes: "淡江大二化工，與禪定龜龜同行",
                     clientRequestId: requestId.current,
                   })
                 }
@@ -376,7 +428,7 @@ export function CharacterCards({
               value={name}
               maxLength={CHAR_NAME_MAX}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例：安倢"
+              placeholder="例：小華"
               autoComplete="off"
             />
             <CharCount value={name} max={CHAR_NAME_MAX} />
@@ -387,7 +439,7 @@ export function CharacterCards({
               maxLength={CHAR_APPEARANCE_MAX}
               onChange={(e) => setAppearance(e.target.value)}
               rows={3}
-              placeholder="例：紅色雨傘、米白外套、帆布包、無眼鏡、溫柔回望"
+              placeholder="例：粉橘短髮女孩、白帽T"
             />
             <CharCount value={appearance} max={CHAR_APPEARANCE_MAX} />
             <label htmlFor="char-notes">個性・語氣・關係（選填，供 AI 導演參考，不畫進畫面）</label>
@@ -397,7 +449,7 @@ export function CharacterCards({
               maxLength={CHAR_NOTES_MAX}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              placeholder="例：安靜溫柔，與慕恩是同社團學姐"
+              placeholder="例：淡江大二化工，與禪定龜龜同行"
             />
             <CharCount value={notes} max={CHAR_NOTES_MAX} />
             <label style={{ marginTop: 8 }}>定裝參考圖（選填：上傳或從素材庫選）</label>
@@ -459,6 +511,11 @@ export function CharacterCards({
       {update.error && !textEditId && (
         <p className="error" role="alert">
           更新失敗：{update.error.message}
+        </p>
+      )}
+      {generateSheet.error && (
+        <p className="error" role="alert">
+          定裝生成失敗：{generateSheet.error.message}
         </p>
       )}
       {publishState && !publishState.ok && publishState.msg && (

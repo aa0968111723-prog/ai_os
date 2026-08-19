@@ -13,6 +13,7 @@ describe("projectIdFromRoute（scope 路由是 deterministic 的：route 說了�
     expect(projectIdFromRoute(`/p/${UUID}`)).toBe(UUID);
     expect(projectIdFromRoute(`/studio/${UUID}`)).toBe(UUID);
     expect(projectIdFromRoute(`/p/${UUID}/anything`)).toBe(UUID);
+    expect(projectIdFromRoute("/studio", `?project=${UUID}`)).toBe(UUID);
   });
 
   it("非專案頁 → null（組級視野）", () => {

@@ -7,8 +7,9 @@
  * 資料流與 mutation 不變：SceneCardBinding、cardAnchors、referenceAssetId、setVisualFromAsset 全沿用。
  * Shot 只存自己獨有的 Override——共用資料一律引用（卡片綁定），不複製。
  */
-import { useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { createShotFieldSaveGate } from "@shared/shotFieldSaveGate";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { ConfirmButton } from "../../components/interactions";
@@ -96,6 +97,8 @@ export function ShotCard({
   onOpenStudio,
   picked,
   onTogglePick,
+  onFocusShot,
+  onInsertAfter,
   assetHints = [],
 }: {
   projectId: string;
@@ -113,6 +116,10 @@ export function ShotCard({
   /** 是否被勾選（多選交給 AI 助手一起處理）；未提供 onTogglePick 時整個勾選欄不渲染 */
   picked?: boolean;
   onTogglePick?: (sceneId: string) => void;
+  /** Clicking the card (not a control) marks it as the ＋新增鏡 insert-after anchor. */
+  onFocusShot?: (sceneId: string) => void;
+  /** Board-level insertAfter queue (shared with ＋新增鏡). Falls back to a per-card queue. */
+  onInsertAfter?: (sceneId: string) => void;
   /**
    * 專業模式相關素材。由 StoryboardStage 一次批次載入後注入，
    * 卡片本身不再發 suggestion query。
@@ -154,6 +161,20 @@ export function ShotCard({
   const removeShot = trpc.scenes.remove.useMutation({
     onSuccess: refreshBoard,
   });
+  /** Same insertAfter as /studio ⋯「在這之後插入一鏡」— not FIFO ＋新增鏡. */
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
+    onSuccess: refreshBoard,
+  });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
+  const enqueueBlankAfter = () => {
+    if (onInsertAfter) onInsertAfter(shot.id);
+    else insertQueueRef.current?.enqueue(shot.id);
+  };
   /** §8 連戲：把上一鏡的角色／造型／場景／攝影風格接過來（一次性套用，不是隱形跟隨） */
   const inherit = trpc.scenes.inheritFromPrevious.useMutation({
     onSuccess: refreshBoard,
@@ -180,6 +201,24 @@ export function ShotCard({
   const [dragOver, setDragOver] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(() => preferDetailsOpen(mode));
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDoc = (event: PointerEvent) => {
+      if (moreRef.current?.contains(event.target as Node)) return;
+      setMoreOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onDoc, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDoc, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
   const libraryAssets = trpc.projects.assets.useQuery(
     { projectId },
@@ -238,15 +277,14 @@ export function ShotCard({
     setDropBusy(false);
   };
 
+  /**
+   * 連續改兩個欄位不得共用同一個 shot.rev：閘門等 ACK 再用新 rev。
+   * 分鏡卡 title→duration/prompt 連 blur 若直接送 live shot.rev，第一發 ACK 後第二發是 self-conflict。
+   */
   const saveField = (patch: Record<string, unknown>) => {
     const { sceneId: _sceneId, ...fields } = patch;
     const field = Object.keys(fields)[0]!;
-    update.mutate({
-      sceneId: shot.id,
-      ...fields,
-      expectedRev: shot.rev,
-      baseline: { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null },
-    } as Parameters<typeof update.mutate>[0]);
+    gateRef.current?.save(fields, { [field]: (shot as unknown as Record<string, unknown>)[field] ?? null });
   };
   const saveFields = (patch: Record<string, unknown>) => {
     saveField(patch);
@@ -311,6 +349,11 @@ export function ShotCard({
       data-fb="分鏡卡"
       data-picked={picked ? "1" : undefined}
       data-mode={mode}
+      onClick={onFocusShot ? (event: MouseEvent<HTMLElement>) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("button, input, a, label, textarea, select, summary")) return;
+        onFocusShot(shot.id);
+      } : undefined}
       onDragOver={canEdit ? onDragOverCard : undefined}
       onDragLeave={canEdit ? onDragLeaveCard : undefined}
       onDrop={canEdit ? onDropCard : undefined}
@@ -359,6 +402,39 @@ export function ShotCard({
             />
             秒
           </label>
+          {canEdit && (
+            <div className="shot-card__more" ref={moreRef}>
+              <button
+                type="button"
+                className="shot-card__more-btn"
+                aria-label={`第 ${shotNumber} 鏡的更多操作`}
+                title="更多（在這之後插入）"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMoreOpen((open) => !open);
+                }}
+              >
+                <Icon name="Ellipsis" size={14} />
+              </button>
+              {moreOpen && (
+                <div className="shot-card__more-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMoreOpen(false);
+                      enqueueBlankAfter();
+                    }}
+                  >
+                    <Icon name="Plus" size={13} /> 在這之後插入一鏡
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {generating && <Pill status="running">生成中</Pill>}
           {shot.pendingGenStatus === "awaiting_approval" && <Pill status="queued">待核價</Pill>}
           {outdatedReason && <Pill status="failed">畫面過時</Pill>}
@@ -464,6 +540,19 @@ export function ShotCard({
           <Button size="sm" variant="primary" onClick={() => onOpenStudio(shot.id)}>
             <Icon name="SlidersHorizontal" size={13} /> 單格工作室
           </Button>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              aria-label={`在第 ${shotNumber} 鏡之後插入一鏡`}
+              title="在這一鏡後面插入一格空的（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
+              aria-busy={insertAfter.isPending || undefined}
+              onClick={enqueueBlankAfter}
+            >
+              <Icon name="Plus" size={13} /> 在這之後插入一鏡
+            </Button>
+          )}
           {canEdit && shotNumber > 1 && (
             <ConfirmButton
               triggerClassName="btn-sm btn-ghost"

@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADD_CHARACTER_CONFIRM_PROSE,
   PENDING_CHARACTER_APPEARANCE,
   addCharacterConfirmLabel,
   collectAddCharacterProposals,
+  dropMisroutedCharacterDatabaseActions,
   extractCharacterNames,
+  isInstructionCharacterName,
+  lockAddCharacterAnswer,
   proposeAddCharacterActions,
+  sanitizeCharacterProposalName,
 } from "./assistantCharacterPropose";
 import { XIAOHUA_LOCKED_APPEARANCE } from "./characterIdentityLock";
 
@@ -44,6 +49,15 @@ describe("proposeAddCharacterActions", () => {
     ]);
   });
 
+  it("emits confirm when same-name 小華 is 年輕男性 and the ask only names her look", () => {
+    const existing = [{ name: "小華", appearance: "年輕男性" }];
+    const actions = proposeAddCharacterActions("小華是女生，不要年輕男性", existing);
+    expect(actions).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("更新角色「小華」外觀");
+  });
+
   it("does not invent cards for a non-character write", () => {
     expect(proposeAddCharacterActions("幫我開一個新專案 小華短片")).toEqual([]);
     expect(proposeAddCharacterActions("今天天氣如何")).toEqual([]);
@@ -81,6 +95,57 @@ describe("proposeAddCharacterActions", () => {
     ]);
   });
 
+  it("parses live「新增角色「小華」粉橘…／白帽T」as name 小華, not the look blob", () => {
+    const live = "新增角色「小華」粉橘短髮女孩／白帽T／大二化工";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const existing = [{ name: "小華", appearance: "年輕男性" }];
+    const actions = proposeAddCharacterActions(live, existing);
+    expect(actions).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("更新角色「小華」外觀");
+    expect(addCharacterConfirmLabel("小華", XIAOHUA_LOCKED_APPEARANCE, existing[0])).toContain("年輕男性");
+  });
+
+  it("drops 素材清單 add_database_row when the ask is 新增角色", () => {
+    const kept = dropMisroutedCharacterDatabaseActions(
+      "新增角色「小華」粉橘短髮女孩／白帽T／大二化工",
+      [
+        { type: "add_database_row", tableName: "素材清單" },
+        { type: "add_character", name: "小華" },
+        { type: "create_scene", title: "校門口" },
+      ],
+    );
+    expect(kept.map((row) => row.type)).toEqual(["add_character", "create_scene"]);
+    expect(kept.some((row) => row.type === "add_database_row")).toBe(false);
+  });
+
+  it("parses live「建立角色小華（粉橘…／白帽T），寫入角色不要素材清單」as 小華", () => {
+    const live = "建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    expect(proposeAddCharacterActions(live)).toEqual([
+      { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+    ]);
+    const merged = collectAddCharacterProposals(live, [], []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual({
+      type: "add_character",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    expect(dropMisroutedCharacterDatabaseActions(live, [
+      { type: "add_database_row", tableName: "素材清單" },
+    ])).toEqual([]);
+  });
+
+  it("rewrites the 05:29 角色資料庫 refuse when a confirm card exists", () => {
+    const refuse =
+      "目前沒有可直接寫入「角色資料」的角色資料庫；我也不會把小華寫進素材清單。請先提供或建立角色資料庫後，我才能記錄…";
+    expect(lockAddCharacterAnswer(refuse, true)).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(lockAddCharacterAnswer(refuse, true)).not.toContain("角色資料庫");
+    expect(lockAddCharacterAnswer(refuse, false)).toBe(refuse);
+  });
+
   it("locks 年輕男性 from the model to 粉橘短髮女孩", () => {
     const merged = collectAddCharacterProposals(
       "新增角色 小華",
@@ -88,5 +153,77 @@ describe("proposeAddCharacterActions", () => {
       [],
     );
     expect(merged[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("live 11:32 prompt with existing 小華 is one 沿用 card, never prompt-as-name 新增", () => {
+    const live = "請新增角色小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料。";
+    const blob = "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料";
+    expect(sanitizeCharacterProposalName(blob)).toBe("小華");
+    expect(isInstructionCharacterName(blob)).toBe(true);
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const existing = [{ name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE }];
+    const merged = collectAddCharacterProposals(
+      live,
+      [
+        { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+        { type: "add_character", name: blob, appearance: "粉橘短髮女孩／白帽T" },
+      ],
+      existing,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.name).toBe("小華");
+    expect(merged[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(addCharacterConfirmLabel(merged[0]!.name, merged[0]!.appearance, existing[0])).toBe(
+      "沿用角色「小華」（已存在）",
+    );
+    expect(addCharacterConfirmLabel(blob, "粉橘短髮女孩／白帽T")).not.toContain(blob);
+  });
+
+  it("pending confirm must not say 我新增了", () => {
+    const claimed = "我新增了角色小華的角色卡。";
+    const locked = lockAddCharacterAnswer(claimed, true);
+    expect(locked).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(locked).not.toContain("我新增了");
+    expect(lockAddCharacterAnswer(claimed, false)).toBe(claimed);
+  });
+
+  it("confirm-only add_character is not 已完成盤點", () => {
+    const locked = lockAddCharacterAnswer("已完成盤點。現有卡小華可以沿用。", true);
+    expect(locked).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(locked).not.toContain("已完成盤點");
+  });
+
+  it("does not turn「不要寫素材清單」into a second character name", () => {
+    expect(isInstructionCharacterName("不要寫素材清單")).toBe(true);
+    expect(isInstructionCharacterName("「不要寫素材清單」")).toBe(true);
+    expect(isInstructionCharacterName("請不要寫素材清單")).toBe(true);
+    expect(isInstructionCharacterName("寫入角色")).toBe(true);
+    expect(isInstructionCharacterName("小華")).toBe(false);
+    const live = "新增角色小華，淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const merged = collectAddCharacterProposals(
+      live,
+      [
+        { type: "add_character", name: "小華", appearance: "淡江大二化工" },
+        { type: "add_character", name: "不要寫素材清單", appearance: PENDING_CHARACTER_APPEARANCE },
+      ],
+      [],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.name).toBe("小華");
+    expect(merged.map((row) => row.name)).not.toContain("不要寫素材清單");
+    expect(merged[0]!.appearance).toContain("淡江大二化工");
+  });
+
+  it("keeps 淡江大二化工 on 小華 when the ask names 淡江", () => {
+    const live = "新增角色「小華」淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    const actions = proposeAddCharacterActions(live);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.name).toBe("小華");
+    expect(actions[0]!.appearance).toContain("淡江大二化工");
+    expect(actions[0]!.appearance).toContain("粉橘短髮女孩");
+    expect(actions[0]!.appearance).toContain("白帽T");
+    expect(actions[0]!.appearance).not.toContain("年輕男性");
+    expect(addCharacterConfirmLabel("小華", actions[0]!.appearance)).toBe("新增角色「小華」");
   });
 });

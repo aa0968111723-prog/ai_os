@@ -6,6 +6,7 @@ import {
   estimatePlannerPoints,
   estimateTokensFromChars,
   isFreeLlmModel,
+  assistantAskUsagePoints,
   llmPointsForUsage,
   llmPointsForUsageEntries,
   llmUsdForUsage,
@@ -115,6 +116,15 @@ describe("llmPricing：多模型用量（auto 備援、JSON 修復重試）", ()
 
   it("付費呼叫即使極小額也至少 1 點（帳要留得下來）", () => {
     expect(llmPointsForUsageEntries([{ model: quality, usage: { costUsd: 0.0001 } }])).toBe(1);
+  });
+
+  it("mode:nim / 只用免費 never debits even if gpt-5.6-luna usage leaked", () => {
+    expect(assistantAskUsagePoints("nim", AGENT_LLM_MODEL_IDS.fal_balanced, {
+      promptTokens: 8_000,
+      completionTokens: 1_200,
+    })).toBe(0);
+    expect(assistantAskUsagePoints("nim", AGENT_LLM_MODEL_IDS.fal_balanced, { costUsd: 0.04 })).toBe(0);
+    expect(assistantAskUsagePoints("auto", AGENT_LLM_MODEL_IDS.fal_balanced, { costUsd: 0.04 })).toBeGreaterThan(0);
   });
 });
 

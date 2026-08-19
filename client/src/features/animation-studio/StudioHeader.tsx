@@ -18,6 +18,8 @@ export interface StudioHeaderProps {
   sceneName: string | null;
   /** 全片第幾鏡（1 起算）；null＝自由塗鴉未選鏡 */
   shotNumber: number | null;
+  /** Live leftover: 1280 header said Shot 03; only the timeline had「26 鏡・125s」. */
+  shotCount: number;
   shotTitle: string | null;
   canUndo: boolean;
   canRedo: boolean;
@@ -41,6 +43,7 @@ export function StudioHeader({
   projectTitle,
   sceneName,
   shotNumber,
+  shotCount,
   shotTitle,
   canUndo,
   canRedo,
@@ -72,7 +75,9 @@ export function StudioHeader({
         )}
         <span className="studio-crumbs__sep" aria-hidden="true">/</span>
         <span className="studio-crumbs__shot">
-          {shotNumber ? `Shot ${String(shotNumber).padStart(2, "0")}` : "自由塗鴉"}
+          {shotNumber
+            ? (shotCount > 0 ? `第 ${shotNumber} / ${shotCount} 鏡` : `第 ${shotNumber} 鏡`)
+            : "自由塗鴉"}
           {shotTitle && <span className="studio-crumbs__shot-title">{shotTitle}</span>}
         </span>
       </nav>

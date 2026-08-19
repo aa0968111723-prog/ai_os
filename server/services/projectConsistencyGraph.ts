@@ -19,6 +19,7 @@ import { pinState } from "../../shared/teamCanon";
 import { deliveryBlockers } from "./consistencyAdopt";
 import { listStoryEntityBindings, loadCreativeContextProject } from "./storyEntityBinding";
 import { deriveSequenceLock } from "../../shared/animationTemporal";
+import { isBlankOrphanShot } from "../../shared/story";
 
 export async function projectWorkspaceProjection(input: {
   auth: AuthState;
@@ -158,7 +159,7 @@ export async function projectWorkspaceProjection(input: {
   const expectedSlots = characters.length + looks.length + presets.length + props.length;
   const stale = new Set((heads ?? []).filter((row) => row.stale).map((row) => row.shotId));
   const consistentShots = shots.filter((shot) => shot.assetId && !stale.has(shot.id)).length;
-  const needsConfirm = bindings.proposals.length + shots.filter((shot) => !shot.prompt && !shot.assetId).length;
+  const needsConfirm = bindings.proposals.length;
   const readyShots = shots.filter((shot) => Boolean(shot.prompt?.trim())).length;
   const worldview = project.worldview && typeof project.worldview === "object" ? project.worldview as Record<string, unknown> : {};
   const worldBits = [worldview.logline, Array.isArray(worldview.styles) ? worldview.styles[0] : null, Array.isArray(worldview.taboos) ? worldview.taboos[0] : null].filter(Boolean).length;
@@ -171,6 +172,9 @@ export async function projectWorkspaceProjection(input: {
         .map((row) => [row.id, row.storyExcerpt])
       : [],
   );
+  const untitledOrphans = shots.filter((shot) =>
+    isBlankOrphanShot(shot) && (!shot.storySceneId || !storyExcerptByScene.has(shot.storySceneId)),
+  ).length;
   const blockers = deliveryBlockers({
     shots: shots.map((shot) => ({ id: shot.id, assetId: shot.assetId, reviewStatus: shot.reviewStatus })),
     staleShotIds: [...stale],
@@ -223,6 +227,7 @@ export async function projectWorkspaceProjection(input: {
       consistentShots,
       shotCount: shots.length,
       needsConfirm,
+      untitledOrphans,
     }),
     nextAction: nextWorkspaceAction({
       storyReady: Boolean(story?.content?.trim()),
@@ -230,6 +235,7 @@ export async function projectWorkspaceProjection(input: {
       shotCount: shots.length,
       needsConfirm,
       consistentShots,
+      untitledOrphans,
     }),
     rightsReadiness: summarizeRightsRows(assets.length, rightsRows ?? []),
     nodes,

@@ -136,6 +136,13 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<StoryCanonPanel\b/);
     expect(src).toMatch(/useOneClickFilm/);
     expect(src).toMatch(/oneClickPrimaryLabel/);
+    expect(src).toMatch(/shouldShowOneClickGenerateCta/);
+    expect(src).toMatch(/showGenerateCta/);
+    expect(src).toMatch(/stillCount/);
+    expect(src).toMatch(/showWriteStoryCta/);
+    expect(src).toMatch(/readiness\.kind === "empty"/);
+    expect(src).toContain("開始寫故事");
+    expect(src).toMatch(/getElementById\("story-editor"\)/);
     expect(src).toMatch(/sceneCount/);
     expect(src).toMatch(/ONE_CLICK_BATCH_KIND/);
     expect(src).not.toMatch(/: "生成影片"/);
@@ -209,5 +216,15 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     // reveal 監聽仍須存在，且在 early return 前
     expect(before).toMatch(/PROJECT_CONTEXT_REVEAL_EVENT/);
     expect(before).toMatch(/\buseEffect\s*\(/);
+  });
+});
+
+describe("敘事人物 sample is 小華 A–F, not 七幕", () => {
+  it("NarrativePersonAdd placeholder + hint teach 小華, not 安倢＝紅傘", () => {
+    expect(src).toContain("例：小華＝粉橘短髮女孩、白帽T");
+    expect(src).not.toContain("例：安倢＝紅傘、米白外套");
+    expect(src).not.toContain("慕恩");
+    expect(src).not.toContain("哲維");
+    expect(src).not.toContain("瑀晴");
   });
 });

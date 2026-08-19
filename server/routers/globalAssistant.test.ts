@@ -9,10 +9,19 @@ import {
   readBackVerification,
   referencedShotOrdinal,
   resolveMentionedProjectRef,
+  injectAddCharacterSiteProposals,
+  pinProjectIntoRefMap,
   resolveSiteActions,
   siteActionProposalsForPlan,
   type SiteActionRefs,
 } from "./globalAssistant";
+import {
+  deriveDeterministicGoalFrame,
+  executionPlanFromGoal,
+  matchAssistantCapabilityForGoal,
+} from "../../shared/assistantSemanticResolution";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { PENDING_CHARACTER_APPEARANCE } from "../../shared/assistantCharacterPropose";
 
 describe("DIRECT -> VERIFY -> COMPLETE", () => {
   it("only reports verified after a successful matching read-back", async () => {
@@ -101,6 +110,18 @@ describe("Goal -> Action routing helpers", () => {
       ],
     );
     expect(proposals).toEqual([{ type: "import_url", projectRef: "p1", url: "https://example.com/a.pdf" }]);
+  });
+
+  it("add_character capability drops create_project and add_database_row", () => {
+    const proposals = siteActionProposalsForPlan(
+      { intent: "DIRECT", confidence: "high", title: "新增角色", steps: [], capabilityId: "add_character", executionMode: "DIRECT_TOOL" },
+      [
+        { type: "add_character", projectRef: "p1", name: "小華" },
+        { type: "create_project", title: "不該建立", kind: "回顧", platform: "youtube" },
+        { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },
+      ],
+    );
+    expect(proposals).toEqual([{ type: "add_character", projectRef: "p1", name: "小華" }]);
   });
 
   it("read capability plans still allow schedule write proposals for confirmation (Q13)", () => {
@@ -300,6 +321,150 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(new Set(out.map((a) => a.label)).size).toBe(6);
   });
 
+  it("add_character 寫角色定裝卡，不需要已解析故事；幻覺 projectRef 整筆丟", () => {
+    const out = resolveSiteActions(refs(), [
+      { type: "add_character", projectRef: "p1", name: "小華" },
+      { type: "add_character", projectRef: "p9", name: "媽媽" },
+      { type: "add_character", name: "禪定龜龜" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    expect(out[0].label).toContain("新增角色「小華」");
+    expect(out[0].label).not.toContain("素材清單");
+  });
+
+  it("add_character 省略 projectRef 時用本頁 defaultProjectRef（未解析專案也可）", () => {
+    const out = resolveSiteActions(refs({ defaultProjectRef: "p2" }), [
+      { type: "add_character", name: "媽媽" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-2",
+      name: "媽媽",
+      appearance: PENDING_CHARACTER_APPEARANCE,
+    });
+  });
+
+  it("same-name 小華 confirm says 更新外觀, never 素材清單", () => {
+    const out = resolveSiteActions(refs({
+      projects: new Map([
+        ["p1", {
+          id: "proj-1",
+          title: "招生短片",
+          characters: [{ name: "小華", appearance: "年輕男性" }],
+        }],
+        ["p2", { id: "proj-2", title: "社課回顧" }],
+      ]),
+    }), [
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: "粉橘短髮女孩" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("add_character");
+    expect(out[0].label).toContain("更新角色「小華」外觀");
+    expect(out[0].label).toContain("年輕男性");
+    expect(out[0].label).toContain(XIAOHUA_LOCKED_APPEARANCE);
+    expect(out[0].label).not.toContain("新增角色");
+    expect(out[0].label).not.toContain("素材清單");
+  });
+
+  it("live 05:29 建立角色小華（…）injects add_character even when the model refused", () => {
+    const live = "建立角色小華（粉橘短髮女孩／白帽T），寫入角色不要素材清單.";
+    const { frame } = deriveDeterministicGoalFrame(live);
+    const match = matchAssistantCapabilityForGoal(frame, { message: live });
+    const plan = executionPlanFromGoal(frame, match, live);
+    expect(match.capabilityId).toBe("add_character");
+    const injected = injectAddCharacterSiteProposals(live, "p1", []);
+    expect(injected).toEqual([{
+      type: "add_character",
+      projectRef: "p1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    }]);
+    const kept = siteActionProposalsForPlan(plan, injected);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.type).toBe("add_character");
+    const out = resolveSiteActions(refs(), kept);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      type: "add_character",
+      projectId: "proj-1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+  });
+
+  it("pinProjectIntoRefMap keeps a scoped unlisted project addressable as p0", () => {
+    const map = new Map<string, { id: string; title: string }>([
+      ["p1", { id: "listed", title: "listed" }],
+    ]);
+    expect(pinProjectIntoRefMap(map, { id: "scoped", title: "overnight-xiaohua" })).toBe("p0");
+    expect(map.get("p0")).toEqual({ id: "scoped", title: "overnight-xiaohua" });
+    expect(pinProjectIntoRefMap(map, { id: "listed", title: "listed" })).toBe("p1");
+  });
+
+  it("does not propose 新增角色「不要寫素材清單」and keeps 淡江大二化工", () => {
+    const live = "新增角色小華，淡江大二化工、粉橘短髮女孩、白帽T。不要寫素材清單。";
+    const injected = injectAddCharacterSiteProposals(live, "p1", [
+      { type: "add_character", projectRef: "p1", name: "不要寫素材清單" },
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: "淡江大二化工" },
+    ]);
+    expect(injected.every((action) => action.type !== "add_character" || action.name !== "不要寫素材清單")).toBe(true);
+    expect(injected.filter((action) => action.type === "add_character")).toHaveLength(1);
+    const out = resolveSiteActions(refs(), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "add_character", name: "小華" });
+    expect(out[0].type === "add_character" && out[0].appearance).toContain("淡江大二化工");
+    expect(out[0].type === "add_character" && out[0].label).toBe("新增角色「小華」");
+    expect(out[0].type === "add_character" && out[0].label).not.toContain("不要寫素材清單");
+  });
+
+  it("live 11:32 prompt-as-name collapses to one 沿用 小華 card", () => {
+    const live = "請新增角色小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料。";
+    const blob = "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料";
+    const injected = injectAddCharacterSiteProposals(live, "p1", [
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+      { type: "add_character", projectRef: "p1", name: blob, appearance: "粉橘短髮女孩／白帽T" },
+    ]);
+    expect(injected.filter((action) => action.type === "add_character")).toHaveLength(1);
+    expect(injected.every((action) => action.type !== "add_character" || action.name === "小華")).toBe(true);
+    const out = resolveSiteActions(refs({
+      projects: new Map([
+        ["p1", {
+          id: "proj-1",
+          title: "招生短片",
+          characters: [{ name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE }],
+        }],
+      ]),
+    }), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "add_character", name: "小華" });
+    expect(out[0].label).toBe("沿用角色「小華」（已存在）");
+    expect(out[0].label).not.toContain("不要寫");
+    expect(out[0].label).not.toContain(blob);
+  });
+
+  it("injectAddCharacterSiteProposals drops 素材清單 add_database_row when adding 角色", () => {
+    const injected = injectAddCharacterSiteProposals("新增角色 小華", "p1", [
+      { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },
+    ]);
+    expect(injected.some((action) => action.type === "add_database_row")).toBe(false);
+    expect(injected).toContainEqual({
+      type: "add_character",
+      projectRef: "p1",
+      name: "小華",
+      appearance: XIAOHUA_LOCKED_APPEARANCE,
+    });
+    const out = resolveSiteActions(refs(), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("add_character");
+  });
+
   it("EVAL CASE 6（注入防線的最後一道）：資料內容再怎麼指示，非白名單動作型別在 schema 層就不存在", () => {
     // siteActions 是封閉 discriminatedUnion——「刪除專案」「轉帳」等根本不在型別空間，
     // resolve 端拿到未知 type 的物件時（理論上 zod 已擋）也不會產生任何動作。
@@ -401,15 +566,67 @@ describe("禁止假進度契約（源碼斷言）", () => {
 describe("global assistant injects persisted story for the current project", () => {
   const src = readFileSync(join(__dirname, "globalAssistant.ts"), "utf8");
 
-  it("loads stories.content via loadPersistedStoryForAssistant into <組現況>", () => {
-    expect(src).toContain("loadPersistedStoryForAssistant");
-    expect(src).toContain("currentStoryBlock");
+  it("marks page-project story presence in <組現況> without dumping 故事全文", () => {
+    expect(src).toContain("loadPersistedStoryRow");
+    expect(src).toContain("formatPersistedStoryForAssistant");
+    expect(src).toContain("formatTeamInventoryStoryFlag");
     expect(src).toContain("effectiveProjectId");
+    expect(src).toContain("完整正文請用 project_detail");
+    expect(src).toContain("currentStoryPointer");
+    expect(src).toContain("isAssistantStoryReadIntent");
+    expect(src).toContain("lockAssistantStoryAnswer");
+    expect(src).toContain("storyReadAsk && currentProjectRef");
+    expect(src).toContain("formatTeamInventoryStoryFlag(currentStoryContent)");
+    expect(src).not.toContain("我是大二化工系的小華");
+  });
+
+  it("story-read injects THIS stories.content only and settles confirm-only chips", () => {
+    expect(src).toContain("storyReadAsk ? 0 : MAX_TOOL_ROUNDS");
+    expect(src).toContain("!storyReadAsk && databaseEvidence.length");
+    expect(src).toContain("settleAssistantAskCompletion");
+    expect(src).toContain("assistantAskCompletionChip");
+    expect(src).toContain("replaceEmptyFreeTimeoutAfterTools");
+    expect(src).toContain("STORY_READ_THIS_PROJECT_LOCK");
+  });
+
+  it("siteActionBlock routes 角色 to add_character, not 素材清單", () => {
+    expect(src).toContain('"type":"add_character"');
+    expect(src).toContain("角色定裝卡");
+    expect(src).toContain("禁止用 add_database_row 假裝建角色");
+    expect(src).toContain("injectAddCharacterSiteProposals");
+    expect(src).toContain("pinProjectIntoRefMap");
+    expect(src).toContain("assertFreeOnlyCompletion");
+    expect(src).toContain("lockAddCharacterAnswer");
+    expect(src).toContain("addCharacterConfirmLabel(name, appearance, existing)");
+    expect(src).toContain("charactersByProjectId");
+    expect(src).not.toContain("settleUsagePoints");
+  });
+
+  it("save_decision few-shot teaches 小華 A–F 白帽T, not 七幕 米白外套", () => {
+    expect(src).toContain('"title":"小華定裝鎖定粉橘短髮女孩、白帽T"');
+    expect(src).not.toContain("角色之後都穿米白外套");
+    expect(src).not.toContain("針織外套");
+    expect(src).not.toContain("安倢");
+    expect(src).not.toContain("慕恩");
+    expect(src).not.toContain("哲維");
+    expect(src).not.toContain("瑀晴");
+    expect(src).not.toContain("紅傘");
   });
 
   it("binds the same 120s ask deadline as project assistant", () => {
     expect(src).toContain("bindAssistantAskDeadline");
     expect(src).toContain("ASSISTANT_ASK_TIMEOUT_MESSAGE");
     expect(src).toContain("已停止（逾時）");
+  });
+
+  it("NIM empty 免費模型逾時 after tools is replaced, not returned as the site answer", () => {
+    expect(src).toContain("answerAfterFreeOnlyTimeout");
+    expect(src).toContain("withoutEmptyNimTimeout");
+    expect(src).toContain("FREE_MODEL_TIMEOUT_MESSAGE");
+    expect(src).toContain("timeoutAnswer = withoutEmptyNimTimeout(");
+    expect(src).toContain("afterTools = withoutEmptyNimTimeout(");
+    expect(src).toContain("const answer = withoutEmptyNimTimeout(rawFail, toolsSucceeded)");
+    expect(src).toContain("collectedSteps.length > 0");
+    expect(src).not.toContain("fetchedOk: storyReadAsk,");
   });
 });

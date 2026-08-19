@@ -71,6 +71,13 @@ describe("首頁與專案頁的 Phone/Desktop 分岔", () => {
     expect(mounted).not.toContain("desktop-project");
   });
 
+  it.each([360, 600, 767.98])("%spx 專案頁走手機殼，不掛被 overflow-x:clip 左裁的桌面頁", async (width) => {
+    setViewport(width);
+    render(<ProjectRoute id="p1" />);
+    expect(await screen.findByTestId("mobile-project")).toBeInTheDocument();
+    expect(mounted).not.toContain("desktop-project");
+  });
+
   it("專案頁在平板與桌機上仍是既有的完整工作台", async () => {
     for (const width of [768, 1280]) {
       mounted.length = 0;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../../api";
+import { refreshStudioShotList } from "../../lib/studioShotList";
 import {
   ONE_CLICK_BATCH_MODEL,
   ONE_CLICK_NEED_SHOTS,
@@ -48,6 +49,8 @@ export function useOneClickFilm(projectId: string) {
         },
         generateStoryboard: async () => {
           await board.mutateAsync({ projectId });
+          void utils.scenes.listByProject.invalidate({ projectId });
+          await refreshStudioShotList(utils, projectId);
         },
         batchGenerate: async () => {
           const shots = await utils.scenes.listByProject.fetch({ projectId });
@@ -59,9 +62,8 @@ export function useOneClickFilm(projectId: string) {
         },
       });
       setResult(next);
-      utils.scenes.listByProject.invalidate({ projectId });
+      await refreshStudioShotList(utils, projectId);
       utils.story.get.invalidate({ projectId });
-      utils.story.scenesList.invalidate({ projectId });
       utils.agents.listByProject.invalidate({ projectId });
       return next;
     } catch (err) {

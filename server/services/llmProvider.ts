@@ -168,6 +168,15 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /** Named so callers can ask before retrying a paid fal_economy model. */
 export const FREE_MODEL_TIMEOUT_MESSAGE = "免費模型逾時";
 
+/** mode:nim / 只用免費 must never return a fal / gpt-5.6-luna completion. */
+export function assertFreeOnlyCompletion(mode: AgentPlannerMode, result: LlmCompletion): LlmCompletion {
+  if (mode !== "nim") return result;
+  if (result.fellBack || result.provider !== "nvidia-nim") {
+    throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE);
+  }
+  return { ...result, fellBack: false };
+}
+
 function isFreeModelTimeout(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /逾時|無回應/.test(message);
@@ -372,7 +381,11 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
     };
     if (!allowPaidFallback) {
       try {
-        return await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
+        const result = await completeNim({ ...params, timeoutMs: params.timeoutMs ?? 60_000 });
+        if (result.provider !== "nvidia-nim") {
+          throw new LlmServiceError(FREE_MODEL_TIMEOUT_MESSAGE);
+        }
+        return result;
       } catch (nimError) {
         // Default nim failure must not route to fal_economy (deepseek-v4-flash).
         // Timeout is a named error so the UI can ask before a paid retry.

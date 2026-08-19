@@ -21,7 +21,20 @@ describe("generation 核准路徑的順序約束", () => {
     // 這是結構斷言（有沒有長出第二套實作），不是行為斷言——行為由
     // services/generationRetryInput.test.ts 覆蓋。
     expect(source).toContain("buildRetryGenerationInput(gen)");
+    expect(source).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(source).toContain("shouldReplayIdempotentGeneration(retried.status)");
     expect(source).not.toContain("const lockedSnapshot =");
+  });
+
+  it("web generation.submit drops leftover 待你過目 on land (not only retry)", () => {
+    const submit = source.slice(source.indexOf("submit: authedProcedure"), source.indexOf("ablation: authedProcedure"));
+    expect(submit).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(submit).toContain("shouldReplayIdempotentGeneration(generation.status)");
+    expect(submit).toContain("generationId: generation.id");
+    const ablation = source.slice(source.indexOf("ablation: authedProcedure"), source.indexOf("bench: authedProcedure"));
+    expect(ablation).toContain("scheduleReconcileAfterIndependentGenerate");
+    const bench = source.slice(source.indexOf("bench: authedProcedure"), source.indexOf("benchResult: authedProcedure"));
+    expect(bench).toContain("scheduleReconcileAfterIndependentGenerate");
   });
 
   it("核准後送出前，鎖定的參考圖都已重簽並套用", () => {

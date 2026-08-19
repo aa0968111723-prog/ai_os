@@ -5,6 +5,7 @@ import {
   isAssembledProjectFilm,
   needsBindingProposal,
   oneClickPrimaryLabel,
+  shouldShowOneClickGenerateCta,
   resolveMentionAgainstCatalog,
   type StoryEntityCatalogEntry,
 } from "./projectCreativeContext";
@@ -66,6 +67,20 @@ describe("generation honesty helpers", () => {
       .toBe("先解析出分鏡");
     expect(oneClickPrimaryLabel({ pending: false, hasBatch: false, modelKind: "image", sceneCount: 3 }))
       .toBe("生成畫面");
+    expect(shouldShowOneClickGenerateCta({ sceneCount: 0, readinessKind: "ready_for_board" })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({ sceneCount: 0, readinessKind: "empty" })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({ sceneCount: 0, readinessKind: "needs_parse" })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({ sceneCount: 6, readinessKind: "ready_to_produce" })).toBe(true);
+    expect(shouldShowOneClickGenerateCta({ sceneCount: 1, readinessKind: "empty" })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "needs_parse", stillCount: 21,
+    })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "ready_to_produce", stillCount: 21,
+    })).toBe(false);
+    expect(shouldShowOneClickGenerateCta({
+      sceneCount: 21, readinessKind: "ready_to_produce", stillCount: 0,
+    })).toBe(true);
   });
 
   it("does not treat a single shot video as an assembled project film", () => {

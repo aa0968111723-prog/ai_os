@@ -7,6 +7,7 @@ import { resolveStudioLayout } from "./studioLayout";
 
 const updateMutate = vi.fn();
 const sketchMutate = vi.fn();
+const generateImageMutate = vi.fn();
 
 /** 站內既有做法（見 AICreativeCopilot.test.tsx）：整支 api 換成假的，只留這支面板用到的路徑 */
 vi.mock("../../api", () => {
@@ -33,7 +34,7 @@ vi.mock("../../api", () => {
         splitScript: { useMutation: mutation },
         sketchBoard: { useMutation: () => ({ ...mutation(), mutate: sketchMutate }) },
         whiteboardImagePlan: { useQuery: query },
-        generateWhiteboardImage: { useMutation: mutation },
+        generateWhiteboardImage: { useMutation: () => ({ ...mutation(), mutateAsync: generateImageMutate }) },
       },
       generation: {
         status: { useQuery: query },
@@ -84,6 +85,7 @@ function setup(shot: StudioShot | null = SHOT) {
 beforeEach(() => {
   updateMutate.mockClear();
   sketchMutate.mockClear();
+  generateImageMutate.mockReset();
 });
 
 describe("StudioAiPanel・這一鏡", () => {
@@ -228,5 +230,37 @@ describe("StudioAiPanel・AI 畫草圖按不下去時要說原因", () => {
     );
     expect(screen.getByText(/你在這個專案是檢視者/)).toBeInTheDocument();
     expect(screen.queryByText(/先在上面寫這一鏡要看到什麼/)).not.toBeInTheDocument();
+  });
+});
+
+describe("StudioAiPanel・生成正式畫面", () => {
+  it("選了分鏡時送出 sceneId——伺服器靠它綁本鏡卡片／造型／鏡頭", async () => {
+    const exportBoard = vi.fn(async () => ({ blob: new Blob(["png"], { type: "image/png" }), width: 1600, height: 900 }));
+    generateImageMutate.mockResolvedValue({ generationId: "gen-1" });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, asset: { id: "asset-1" } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <StudioAiPanel
+          layout={DESKTOP}
+          projectId="proj-1"
+          shot={SHOT}
+          canEdit
+          boardEmpty={false}
+          exportBoard={exportBoard}
+          onBoardSaved={vi.fn()}
+          sketch={SKETCH}
+        />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: "生成正式畫面" }));
+      expect(generateImageMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: "proj-1", sceneId: "shot-1", sourceAssetId: "asset-1" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

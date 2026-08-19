@@ -142,3 +142,15 @@
 body:has(.project-page) .dm-bubble-root {
   display: none;
 }
+
+/* Dashboard 390px leftover: the chat bubble had no rail, so it sat on 最近.
+   Pin it to the same chrome-clearing rail as 回饋 (left thumb, above the bar). */
+@media (max-width: 767.98px) {
+  .app:has(.mobile-nav) .dm-bubble-root {
+    position: fixed;
+    z-index: 45;
+    left: var(--fab-rail-right);
+    right: auto;
+    bottom: calc(var(--fab-rail-base) + var(--kb-inset, 0px));
+  }
+}

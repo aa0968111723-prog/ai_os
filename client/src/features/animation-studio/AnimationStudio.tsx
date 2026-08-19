@@ -11,6 +11,7 @@ import { StudioHeader } from "./StudioHeader";
 import { StudioStage } from "./StudioStage";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import { ShotInspector, type InspectorShot, type InspectorTab } from "./ShotInspector";
+import { AiCopilotActions } from "./AiCopilotActions";
 import { ToolRail } from "./ToolRail";
 import { WhiteboardCanvas, type BoardView } from "./WhiteboardCanvas";
 import { collectBrush, updateSavedBrush, workingCopy } from "./brushCollection";
@@ -37,6 +38,9 @@ import type { SketchPreview } from "./sketchReplay";
 import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
+import { refreshStudioShotList, studioShotListIsLoading } from "../../lib/studioShotList";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot, runStudioInsertShot } from "../../lib/studioDuplicateShot";
+import { popShotUndo, preferShotUndoOverBoard, pushShotUndo, shotUndoMutation, type ShotUndoEntry } from "@shared/studioShotUndo";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -89,7 +93,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     },
   );
   const shots: StudioShot[] = useMemo(() => scenes.data ?? [], [scenes.data]);
-  const shotsLoading = scenes.isLoading && !scenes.data;
+  const shotsLoading = studioShotListIsLoading(scenes);
   // 場（story_scenes）：Top Bar 的麵包屑要顯示「這一鏡屬於哪一場」
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
 
@@ -193,7 +197,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     setTool(next);
     const brushId = brushIdFor(next, lastDrawBrushRef.current);
     if (brushId) selectBrush(brushId);
-    if (next === "ai") setInspectorTab("ai");
+    if (next === "ai") {
+      setInspectorTab("ai");
+      setPanels((p) => ({ ...p, inspector: false }));
+    }
     if (next === "reference") setShowReference(true);
   };
 
@@ -283,11 +290,15 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
     },
   });
   const removeShot = trpc.scenes.remove.useMutation({ onSuccess: invalidateScenes });
+  const restoreShot = trpc.scenes.restore.useMutation({ onSuccess: invalidateScenes });
+  const shotUndoRef = useRef<ShotUndoEntry[]>([]);
+  const undoShotListRef = useRef<() => boolean>(() => false);
+  const [shotActionError, setShotActionError] = useState<string | null>(null);
   const insertAfter = trpc.scenes.insertAfter.useMutation({
     onSuccess: (created, variables) => {
       const ack = shouldApplySceneWriteAck({
         mountedProjectId: projectIdRef.current,
-        writeProjectId: created?.projectId,
+        writeProjectId: created?.projectId ?? projectIdRef.current,
         mountedShotId: activeShotIdRef.current,
         originShotId: variables.sceneId,
         followSelection: true,
@@ -296,6 +307,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       if (ack.applyInvalidate) invalidateScenes();
       if (ack.followCreated && created?.id) switchTo(created.id);
     },
+    onError: (err) => {
+      setShotActionError(err.message || "複製這一鏡失敗");
+    },
   });
   const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
   insertAfterMutateRef.current = insertAfter.mutateAsync;
@@ -303,6 +317,94 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   if (!insertQueueRef.current) {
     insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
   }
+  const mergeCreatedShotIntoCache = (sourceId: string, created: { id: string; orderIndex: number; title?: string | null }) => {
+    const projectIdNow = projectIdRef.current;
+    utils.scenes.listByProject.setData({ projectId: projectIdNow }, (old) => {
+      if (!old) return old;
+      const template = old[0];
+      const row = template
+        ? { ...template, ...created, id: created.id, orderIndex: created.orderIndex, title: created.title ?? template.title }
+        : { id: created.id, orderIndex: created.orderIndex, title: created.title ?? "" } as (typeof old)[number];
+      return mergeDuplicatedShotIntoList(old, sourceId, row);
+    });
+  };
+  const runShotInsert = (sceneId: string, duplicate: boolean) => {
+    setShotActionError(null);
+    if (duplicate) {
+      // Cache merge first so 26→27 / 7→8 paints before fetch. Live #790
+      // invalidate-only left the count unchanged (silent no-op).
+      void runStudioDuplicateShot({
+        sceneId,
+        insertAfter: (input) => insertAfter.mutateAsync(input),
+        mergeIntoCache: mergeCreatedShotIntoCache,
+        refresh: () => refreshStudioShotList(utils, projectIdRef.current),
+      })
+        .then((created) => {
+          if (created?.id) shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "create", sceneId: created.id });
+          if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error && err.message ? err.message : "複製這一鏡失敗";
+          setShotActionError(message);
+        });
+      return;
+    }
+    void runStudioInsertShot({
+      sceneId,
+      insertAfter: (input) => insertAfter.mutateAsync(input),
+      mergeIntoCache: mergeCreatedShotIntoCache,
+      refresh: () => refreshStudioShotList(utils, projectIdRef.current),
+    })
+      .then((created) => {
+        if (created?.id) shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "create", sceneId: created.id });
+        if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error && err.message ? err.message : "插入分鏡失敗";
+        setShotActionError(message);
+      });
+  };
+  /** Studio timeline 複製：不走 insertAfterQueue 的 silent catch。失敗要出 error。 */
+  const duplicateShot = (sceneId: string) => {
+    runShotInsert(sceneId, true);
+  };
+  /** After-row blank insert from the shot menu (not append-at-end). */
+  const insertBlankAfter = (sceneId: string) => {
+    runShotInsert(sceneId, false);
+  };
+  const deleteShot = (sceneId: string) => {
+    setShotActionError(null);
+    removeShot.mutate(
+      { sceneId },
+      {
+        onSuccess: () => {
+          shotUndoRef.current = pushShotUndo(shotUndoRef.current, { kind: "delete", sceneId });
+        },
+      },
+    );
+  };
+  const undoShotList = (): boolean => {
+    if (!preferShotUndoOverBoard(shotUndoRef.current)) return false;
+    const { next, entry } = popShotUndo(shotUndoRef.current);
+    if (!entry) return false;
+    shotUndoRef.current = next;
+    setShotActionError(null);
+    const requeue = () => {
+      shotUndoRef.current = pushShotUndo(shotUndoRef.current, entry);
+    };
+    const onError = (err: { message?: string }) => {
+      requeue();
+      setShotActionError(err.message || "復原分鏡失敗");
+    };
+    if (shotUndoMutation(entry) === "remove") {
+      // 還原複製／插入＝軟刪進回收桶，不是 purge。
+      removeShot.mutate({ sceneId: entry.sceneId }, { onError });
+    } else {
+      restoreShot.mutate({ sceneId: entry.sceneId }, { onError });
+    }
+    return true;
+  };
+  undoShotListRef.current = undoShotList;
   const updateShot = trpc.scenes.update.useMutation({ onSuccess: invalidateScenes });
 
   /**
@@ -371,7 +473,10 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       if (action === "exitImmersive" && !immersive) return;
       event.preventDefault();
       switch (action) {
-        case "undo": undo(); break;
+        case "undo":
+          if (undoShotListRef.current()) break;
+          undo();
+          break;
         case "redo": redo(); break;
         case "toggleImmersive": toggleImmersive(); break;
         case "exitImmersive": exitImmersive(); break;
@@ -505,6 +610,27 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
       ? storyScenes.data?.find((s: { id: string }) => s.id === inspectorShot.storySceneId)
       : null;
     const optionsKind = optionsKindFor(tool);
+    const aiProps = {
+      projectId,
+      shot,
+      canEdit,
+      boardEmpty,
+      onBoardSaved: markSaved,
+      saveBoardToShot,
+      saveState,
+      saveError,
+      sketch: sketchBridge,
+      onApplyPrompt: (text: string) => {
+        if (!shot) return;
+        updateShot.mutate({
+          sceneId: shot.id,
+          prompt: text,
+          expectedRev: shot.rev,
+          baseline: { prompt: shot.prompt ?? null },
+        });
+        setInspectorTab("frame");
+      },
+    };
 
     return (
       <div
@@ -519,6 +645,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           projectTitle={projectTitle}
           sceneName={scene?.title || null}
           shotNumber={shotIndex >= 0 ? shotIndex + 1 : null}
+          shotCount={shots.length}
           shotTitle={shot?.title ?? null}
           canUndo={board.doc.strokes.length > 0}
           canRedo={board.redo.length > 0}
@@ -559,6 +686,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           </>
         )}
 
+        {shotActionError && (
+          <p className="error studio__alert" role="alert">{shotActionError}</p>
+        )}
         {storageFull && (
           <p className="error studio__alert" role="alert">
             本機草稿空間已滿，這張白板沒有存起來——請先把手稿「存成這一鏡的畫面」，或清掉其他鏡的草稿。
@@ -589,7 +719,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
                 </div>
               )
               : optionsKind === "ai" ? (
-                <Meta as="p">AI 的動作在右邊的 Inspector「AI」分頁——那裡看得到它掌握了哪些上下文。</Meta>
+                <AiCopilotActions {...aiProps} />
               )
               : null
             }
@@ -625,27 +755,7 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
             onTabChange={setInspectorTab}
             collapsed={panels.inspector}
             onToggleCollapsed={() => setPanels((p) => ({ ...p, inspector: !p.inspector }))}
-            ai={{
-              projectId,
-              shot,
-              canEdit,
-              boardEmpty,
-              onBoardSaved: markSaved,
-              saveBoardToShot,
-              saveState,
-              saveError,
-              sketch: sketchBridge,
-              onApplyPrompt: (text: string) => {
-                if (!shot) return;
-                updateShot.mutate({
-                  sceneId: shot.id,
-                  prompt: text,
-                  expectedRev: shot.rev,
-                  baseline: { prompt: shot.prompt ?? null },
-                });
-                setInspectorTab("frame");
-              },
-            }}
+            ai={aiProps}
           />
         </div>
 
@@ -661,8 +771,9 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
           onMove={(id, direction) => move.mutate({ sceneId: id, direction })}
           onReorder={(orderedIds) => reorder.mutate({ projectId, orderedIds })}
           onNewShot={createShot}
-          onDuplicate={(id) => insertQueueRef.current?.enqueue(id, { duplicate: true })}
-          onDelete={(id) => removeShot.mutate({ sceneId: id })}
+          onDuplicate={duplicateShot}
+          onInsertAfter={insertBlankAfter}
+          onDelete={deleteShot}
           newShotBusy={addShot.isPending || insertAfter.isPending}
         />
       </div>

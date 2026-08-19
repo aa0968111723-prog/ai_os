@@ -119,6 +119,43 @@ export interface ScorecardRow {
 }
 
 /**
+ * 風格／聲音世界未 pin 是專案級訊號（affectedShotIds 空）——
+ * 不能走「修復 N 鏡」，要先固定設定。語音「還沒綁定聲線」是另一扇門。
+ */
+export function scorecardNeedsSetupCta(row: ScorecardRow): boolean {
+  return row.status === "warning"
+    && row.affectedShotIds.length === 0
+    && (row.dimension === "style" || row.dimension === "sound_world");
+}
+
+/**
+ * 「N 位角色沒有定裝參考圖」——修復鏡生不出參考圖，要走便宜生圖定裝。
+ * 多人鏡 capability_downgrade 是另一扇門。
+ */
+export function scorecardNeedsSheetCta(row: ScorecardRow): boolean {
+  return row.dimension === "identity" && row.status === "warning";
+}
+
+/**
+ * 「交付・擋交付」是專案級訊號（affectedShotIds 空）——不能走「修復 N 鏡」，
+ * 也不能假裝未分場。真路是打開交付：補畫面、核准、再打包。
+ */
+export function scorecardNeedsDeliveryCta(row: ScorecardRow): boolean {
+  return row.dimension === "delivery" && row.status === "blocker";
+}
+
+/**
+ * 造型／場景沒有參考圖是專案級訊號（affectedShotIds 空）——
+ * 不能走「修復 0 鏡」，也不能假裝生成定裝（那是角色卡）。真路是打開造型／場景卡補圖。
+ */
+export function scorecardNeedsOpenCardsCta(row: ScorecardRow): "looks" | "scenes" | null {
+  if (row.status !== "warning" || row.affectedShotIds.length > 0) return null;
+  if (row.dimension === "look") return "looks";
+  if (row.dimension === "scene") return "scenes";
+  return null;
+}
+
+/**
  * 純建構器：所有輸入都是 server 已載入的既有 records 推導值。
  * 規則：每維度最多一列最重狀態（blocker > unresolved > stale > capability_downgrade > warning > ok）；
  * ok 的維度不出列（第一層只講需要人看的事）。
@@ -287,11 +324,14 @@ export function compactWorkspaceStatus(input: {
   consistentShots: number;
   shotCount: number;
   needsConfirm: number;
+  /** Blank 未分場 drafts. Not binding proposals — those stay needsConfirm. */
+  untitledOrphans?: number;
 }): string {
   const parts: string[] = [];
   parts.push(input.charactersApplied ? "人物已套用" : "人物尚未套用");
   if (input.sceneCount > 0) parts.push(`${input.sceneCount} 個場景`);
   if (input.shotCount > 0) parts.push(`${input.consistentShots}/${input.shotCount} 鏡一致`);
+  if ((input.untitledOrphans ?? 0) > 0) parts.push(`${input.untitledOrphans} 鏡未分場`);
   if (input.needsConfirm > 0) parts.push(`${input.needsConfirm} 鏡需確認`);
   return parts.join(" · ");
 }
@@ -302,10 +342,19 @@ export function nextWorkspaceAction(input: {
   shotCount: number;
   needsConfirm: number;
   consistentShots: number;
+  untitledOrphans?: number;
 }): string {
   if (!input.storyReady) return "先寫故事或貼上腳本";
-  if (!input.parsed) return "解析故事，讓人物與場景就位";
+  // Live leftover: compactStatus already said 人物已套用 · 21/26 鏡一致,
+  // but nextAction still looped to parse because lastParsedAt was empty
+  // (cards / heuristic board / assistant writes do not always stamp parse).
+  if (!input.parsed && input.shotCount <= 0) return "解析故事，讓人物與場景就位";
   if (input.shotCount <= 0) return "產生分鏡";
+  // Live leftover: 5 untitled 未分場 orphans were counted as 鏡需確認,
+  // but markers only confirm parse proposals. Path is 分鏡歸場.
+  if ((input.untitledOrphans ?? 0) > 0) {
+    return `打開分鏡，把 ${input.untitledOrphans} 鏡未分場歸場`;
+  }
   if (input.needsConfirm > 0) return `確認 ${input.needsConfirm} 個項目後再生成`;
   if (input.consistentShots < input.shotCount) return "只重做不一致的鏡頭";
   return "產生畫面或粗剪";

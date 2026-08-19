@@ -13,6 +13,7 @@ import { ScenePresetCards } from "./ScenePresetCards";
 import { PropCards } from "./PropCards";
 
 const charUpdate = vi.fn();
+const generateSheetMutate = vi.fn();
 const sceneUpdate = vi.fn();
 const propUpdate = vi.fn();
 
@@ -59,6 +60,11 @@ vi.mock("../api", () => ({
       add: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, reset: vi.fn() }) },
       update: { useMutation: () => ({ mutate: charUpdate, isPending: false, error: null, reset: vi.fn() }) },
       remove: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, reset: vi.fn() }) },
+      generateSheet: { useMutation: () => ({ mutate: generateSheetMutate, isPending: false, error: null }) },
+      honorGeneratedSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+    },
+    generation: {
+      status: { useQuery: () => ({ data: null }) },
     },
     scenePresets: {
       list: { useQuery: () => ({ data: [SCENE], isLoading: false }) },
@@ -92,8 +98,11 @@ vi.mock("../api", () => ({
 describe("卡片編輯表單的參考圖欄", () => {
   beforeEach(() => {
     charUpdate.mockReset();
+    generateSheetMutate.mockReset();
     sceneUpdate.mockReset();
     propUpdate.mockReset();
+    CHAR.referenceAssetId = null;
+    CHAR.referenceUrl = null;
   });
 
   it("角色卡：按「編輯」後，表單裡就有定裝參考圖欄（不必先取消編輯再另外找入口）", async () => {
@@ -139,6 +148,54 @@ describe("卡片編輯表單的參考圖欄", () => {
     await user.click(screen.getByRole("button", { name: /儲存/ }));
     await waitFor(() => expect(propUpdate).toHaveBeenCalled());
     expect(propUpdate.mock.calls[0][0]).toMatchObject({ id: "prop-1", referenceAssetId: null });
+  });
+
+  it("角色卡：0 refs 勾「生成時帶入」保持 已選 0/6，不回報 id", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={onToggle} />);
+
+    const box = screen.getByRole("checkbox", { name: /生成時帶入/ });
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(screen.getByText(/共 1\/50 張/)).toBeInTheDocument();
+    await user.click(box);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("角色卡：已勾但沒有定裝圖顯示 已選 0/6，不當作帶入", () => {
+    const onToggle = vi.fn();
+    render(<CharacterCards projectId="p1" selectedIds={["char-1"]} onToggle={onToggle} />);
+
+    expect(screen.getByRole("checkbox", { name: /生成時帶入/ })).not.toBeChecked();
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("角色卡：生成定裝走便宜生圖，不花 Veo", async () => {
+    const user = userEvent.setup();
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: /生成定裝/ });
+    expect(btn).toBeEnabled();
+    expect(btn).toHaveAttribute("title", expect.stringMatching(/schnell|不用 Veo/));
+    await user.click(btn);
+    expect(generateSheetMutate).toHaveBeenCalledTimes(1);
+    expect(generateSheetMutate.mock.calls[0]![0]).toMatchObject({ characterId: "char-1" });
+    expect(JSON.stringify(generateSheetMutate.mock.calls[0]![0])).not.toMatch(/veo/i);
+  });
+
+  it("角色卡：有自己的定裝參考圖才能勾成 1/6", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    CHAR.referenceAssetId = "asset-xiaohua";
+    CHAR.referenceUrl = "https://example.test/xiaohua-sheet.png";
+    render(<CharacterCards projectId="p1" selectedIds={[]} onToggle={onToggle} />);
+
+    const box = screen.getByRole("checkbox", { name: /生成時帶入/ });
+    expect(box).toBeEnabled();
+    await user.click(box);
+    expect(onToggle).toHaveBeenCalledWith("char-1");
   });
 
   it("素材卡：勾「生成時帶入」會回報卡片 id（生成才注入道具錨點）", async () => {

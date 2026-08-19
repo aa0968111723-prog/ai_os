@@ -9,7 +9,7 @@ import { getModel, isGeminiModel } from "../../shared/models";
 import { db, schema } from "../db";
 import { submitGenerationCore, advanceGeneration } from "./generationCore";
 import { parseStoredResultUrl, STORAGE_ROOT } from "./storage";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isMockMode } from "./fal";
 
@@ -389,13 +389,18 @@ export interface GeminiCertPublicSnapshot {
 let inFlight: Promise<StoredGeminiCert> | null = null;
 let lastMemory: StoredGeminiCert | "running" | null = null;
 
+function evidencePath(): string {
+  return path.join(STORAGE_ROOT, "qa", "gemini-cert-last.json");
+}
+
 export function resetGeminiCertMemoryForTests(): void {
   inFlight = null;
   lastMemory = null;
-}
-
-function evidencePath(): string {
-  return path.join(STORAGE_ROOT, "qa", "gemini-cert-last.json");
+  try {
+    if (existsSync(evidencePath())) unlinkSync(evidencePath());
+  } catch {
+    /* leftover boot evidence must not poison shouldAutoCert assertions */
+  }
 }
 
 function liveImagePassed(report: GeminiCertReport): boolean {

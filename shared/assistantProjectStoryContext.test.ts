@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_STORY_CONTEXT_BUDGET,
+  answerAfterFreeOnlyTimeout,
+  replaceEmptyFreeTimeoutAfterTools,
   buildAssistantProjectStatusContext,
+  fallbackReadOnlyStorySummary,
   formatPersistedStoryForAssistant,
   formatTeamInventoryStoryFlag,
+  isAssistantStoryReadIntent,
+  isEmptyFreeOnlyTimeoutAnswer,
+  lockAssistantStoryAnswer,
+  namesFromPersistedStory,
+  pickNamedStoryProject,
   slicePersistedStoryContent,
+  STORY_READ_THIS_PROJECT_LOCK,
 } from "./assistantProjectStoryContext";
 import { XIAOHUA_SEVEN_ACT_SCRIPT } from "./fixtures/xiaohuaSevenAct";
+import { TKU_ZEN_SHOTLIST_FIRST_PARSE } from "./fixtures/tkuZenPromo";
 
 describe("assistant persisted story context", () => {
   it("injects the saved 故事全文 so the model cannot claim it cannot see 你的故事", () => {
@@ -18,6 +28,10 @@ describe("assistant persisted story context", () => {
     expect(block).toContain("我是大二化工系的小華");
     expect(block).toContain("校門口");
     expect(block).toContain("已儲存");
+    expect(block).toContain("僅本專案 stories.content");
+    expect(block).toContain("宇宙呀");
+    expect(block).not.toContain("從疲憊中找到力量");
+    expect(block).not.toContain("躺在床上");
 
     const context = buildAssistantProjectStatusContext({
       title: "overnight-test-xiaohua-20260818",
@@ -51,6 +65,109 @@ describe("assistant persisted story context", () => {
     expect(block).toContain("尚未儲存稿");
     expect(block).not.toContain("請貼上");
     expect(slicePersistedStoryContent("   ")).toBeNull();
+  });
+
+  it("story-read intent matches the live 05:15 ask and locks 她 / no 已完成盤點", () => {
+    const live = "請讀已存故事，兩句摘要小華在講什麼並列出角色名";
+    expect(isAssistantStoryReadIntent(live)).toBe(true);
+    expect(isAssistantStoryReadIntent("兩句話摘要已存故事並列角色名，不要寫入.")).toBe(true);
+    expect(isAssistantStoryReadIntent("A–D summarize 100w")).toBe(true);
+    expect(isAssistantStoryReadIntent("請摘要 A-D，短摘 100 字")).toBe(true);
+    expect(isAssistantStoryReadIntent("A–D summarize once returned short-100w")).toBe(true);
+    expect(isAssistantStoryReadIntent("short-100w summarize A-D")).toBe(true);
+    expect(isAssistantStoryReadIntent("現在有幾鏡？")).toBe(false);
+    expect(STORY_READ_THIS_PROJECT_LOCK).toContain("粉橘短髮女孩");
+    expect(STORY_READ_THIS_PROJECT_LOCK).toContain("從疲憊中找到力量");
+    const locked = lockAssistantStoryAnswer({
+      answer: "已完成盤點。小華在講述他的故事，提到他如何從疲憊中找到力量。角色名有小華和禪定龜龜。",
+      storyContent: XIAOHUA_SEVEN_ACT_SCRIPT,
+      characterNames: ["小華", "禪定龜龜"],
+    });
+    expect(locked).not.toContain("已完成盤點");
+    expect(locked).not.toContain("已讀取本專案故事");
+    expect(locked).toContain("她的故事");
+    expect(locked).not.toMatch(/講述他的故事/);
+    expect(locked).not.toContain("疲憊");
+    expect(locked).not.toContain("從疲憊中找到力量");
+    expect(locked).not.toContain("躺在床上");
+    expect(locked).toContain("角色名有小華和禪定龜龜");
+  });
+
+  it("keeps 疲憊 only when this project's stories.content actually says it", () => {
+    const story = "小華躺在床上，從疲憊中找到力量。";
+    const locked = lockAssistantStoryAnswer({
+      answer: "小華躺在床上，從疲憊中找到力量。",
+      storyContent: story,
+      characterNames: ["小華"],
+    });
+    expect(locked).toContain("躺在床上");
+    expect(locked).toContain("從疲憊中找到力量");
+  });
+
+  it("read-only summarize fallback uses fetched SHOTLIST A–F, never empty 免費模型逾時", () => {
+    expect(TKU_ZEN_SHOTLIST_FIRST_PARSE.split(/\n\n/).length).toBe(6);
+    expect(namesFromPersistedStory(TKU_ZEN_SHOTLIST_FIRST_PARSE, [])).toEqual(["小華", "禪定龜龜"]);
+    const answer = fallbackReadOnlyStorySummary({
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+      characterNames: [],
+    });
+    expect(answer.length).toBeGreaterThan(12);
+    expect(answer).toContain("小華");
+    expect(answer).toContain("禪定龜龜");
+    expect(answer).toMatch(/校門口|大二化工|白帽T/);
+    expect(answer).not.toBe("");
+    expect(answer).not.toContain("免費模型逾時");
+    expect(answer).not.toContain("執行未完成");
+    expect(answer).not.toContain("安倢");
+    expect(answer).not.toContain("慕恩");
+    expect(answer).not.toMatch(/年輕男性|他的故事/);
+    expect(answerAfterFreeOnlyTimeout({
+      storyReadAsk: true,
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+      characterNames: [],
+    })).toBe(answer);
+    expect(answerAfterFreeOnlyTimeout({
+      storyReadAsk: false,
+      fetchedOk: false,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBeNull();
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toContain("小華");
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時",
+      fetchedOk: false,
+    })).toBeNull();
+    expect(isEmptyFreeOnlyTimeoutAnswer("免費模型逾時。")).toBe(true);
+    expect(isEmptyFreeOnlyTimeoutAnswer("免費模型逾時，請稍後再試")).toBe(true);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時。",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(replaceEmptyFreeTimeoutAfterTools({
+      answer: "免費模型逾時，請稍後再試",
+      fetchedOk: true,
+      storyContent: TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    })).toBe(answer);
+    expect(isEmptyFreeOnlyTimeoutAnswer("第 2 鏡生成逾時，請看失敗原因")).toBe(false);
+    expect((answer.match(/[。！？]/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("team story-read injects only the uniquely named project, never a 疲憊 sibling", () => {
+    const xiaohua = { title: "動畫組 小華" };
+    const tired = { title: "從疲憊中找到力量" };
+    expect(pickNamedStoryProject("A–D summarize once short-100w 「動畫組 小華」", [xiaohua, tired])).toEqual(xiaohua);
+    expect(pickNamedStoryProject("A–D summarize 100w", [xiaohua, tired])).toBeNull();
+    expect(pickNamedStoryProject("A–D summarize 100w", [xiaohua])).toEqual(xiaohua);
   });
 
   it("slicePersistedStoryContent uses the same 4k budget as the prompt block", () => {

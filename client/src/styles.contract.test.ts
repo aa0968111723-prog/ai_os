@@ -49,5 +49,6 @@ describe("global stylesheet contract", () => {
     expect(declarations).toContain(".app:has(.mobile-nav) { --chrome-bottom: 100px; }");
     // 舊的寫死 padding-bottom: calc(88px …) 不可復活（會蓋掉手機 140px）
     expect(declarations).not.toMatch(/\.app:has\(\.mobile-nav\)\s*\{\s*padding-bottom:\s*calc\(88px/);
+    expect(declarations).not.toMatch(/calc\(40px \+ var\(--safe-bottom\)\)/);
   });
 });

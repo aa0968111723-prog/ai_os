@@ -10,6 +10,24 @@ import {
 } from "./agentEventCore";
 
 describe("agent project insights", () => {
+  it("treats generate.generationId as a 成果中心 generation even without outputRefs", () => {
+    const results = collectAgentResults([
+      {
+        id: "run-adopt",
+        steps: [
+          { id: "create", note: "建鏡", status: "done", outputRefs: [{ type: "scene", id: "sc-1", label: "第一鏡" }] },
+          { id: "gen", kind: "generate", note: "生成畫面", status: "done", generationId: "g-1" },
+        ],
+      },
+    ]);
+    expect(results.map((row) => row.type).sort()).toEqual(["generation", "scene"]);
+    expect(results.find((row) => row.type === "generation")).toMatchObject({
+      id: "g-1",
+      runId: "run-adopt",
+      stepId: "gen",
+    });
+  });
+
   it("deduplicates outputs emitted by a replayed step", () => {
     const ref = { type: "note", id: "note-1", label: "研究筆記" };
     const results = collectAgentResults([

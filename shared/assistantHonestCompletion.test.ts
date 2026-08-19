@@ -6,6 +6,8 @@ import {
   claimsCompletedWrite,
   claimsInabilityToCheck,
   formatAssistantWriteResult,
+  honestAssistantVisibleEvents,
+  isCompletedInventoryChipTitle,
   rewriteCompletedTenseToProposal,
   settleAssistantAskCompletion,
   userAskedForWrite,
@@ -64,6 +66,24 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.type).toBe("waiting.user_input");
     expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
     expect(chip.title).toContain("尚未核對");
+  });
+
+  it("story-read ask is not a write and chip is never 已完成盤點", () => {
+    expect(userAskedForWrite("請讀已存故事，兩句摘要小華在講什麼並列出角色名")).toBe(false);
+    const settled = settleAssistantAskCompletion({
+      answer: "小華在校門口自我介紹，夕陽下問宇宙呀。角色有小華和禪定龜龜。",
+      actions: [],
+      userMessage: "請讀已存故事，兩句摘要小華在講什麼並列出角色名",
+    });
+    expect(settled.emitCompleted).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 2,
+    });
+    expect(chip.title).toBe("已讀取 2 個來源");
+    expect(chip.title).not.toMatch(/已完成盤點/);
   });
 
   it("read-only inventory chip is 已讀取 N 個來源, never 已完成盤點", () => {
@@ -128,11 +148,72 @@ describe("settleAssistantAskCompletion（completed-tense + actions=[] must not c
     expect(chip.title).not.toMatch(/已完成盤點|Aios 已完成/);
   });
 
+  it("failed or empty NIM run never paints a completed-inventory chip", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "小華在校門口自我介紹。角色：小華、禪定龜龜。",
+      actions: [],
+      userMessage: "請讀已存故事，兩句摘要小華在講什麼並列出角色名",
+      runFailed: true,
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.runFailed).toBe(true);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 0,
+      okSourceCount: 2,
+      okSourceItems: 8,
+    });
+    expect(chip.type).toBe("agent.failed");
+    expect(chip.title).toBe("模型未完成");
+    expect(isCompletedInventoryChipTitle(chip.title)).toBe(false);
+    expect(chip.title).not.toMatch(/已完成盤點|已取得來源|已讀取/);
+    expect(chip.description).not.toMatch(/已完成盤點|已取得來源/);
+  });
+
+  it("confirm-only add_character is waiting, never 已完成盤點", () => {
+    const settled = settleAssistantAskCompletion({
+      answer: "已完成盤點。我新增了角色小華。",
+      actions: [{ type: "add_character", name: "小華" }],
+      userMessage: "新增角色 小華 粉橘短髮女孩",
+      hasVerifiedWrite: false,
+    });
+    expect(settled.emitCompleted).toBe(false);
+    expect(settled.answer).not.toMatch(/已完成盤點|我新增了/);
+    const chip = assistantAskCompletionChip({
+      settled,
+      actionCount: 1,
+      okSourceCount: 2,
+      okSourceItems: 2,
+    });
+    expect(chip.type).toBe("waiting.user_input");
+    expect(chip.title).toBe("有 1 件動作需要你確認");
+    expect(chip.title).not.toMatch(/已完成盤點|已讀取|Aios 已完成/);
+    expect(isCompletedInventoryChipTitle(chip.title)).toBe(false);
+  });
+
+  it("failed or pending events drop 已完成盤點 chips", () => {
+    const events = [
+      { type: "agent.completed", title: "已完成盤點", status: "ok" },
+      { type: "waiting.permission", title: "有 1 件動作需要你確認", status: "waiting" },
+      { type: "agent.failed", title: "模型未完成", status: "failed" },
+    ];
+    const pending = honestAssistantVisibleEvents(events, { pendingConfirm: true });
+    expect(pending.some((event) => event.type === "agent.completed")).toBe(false);
+    expect(pending.some((event) => event.title?.includes("已完成盤點"))).toBe(false);
+    const failed = honestAssistantVisibleEvents(events, { runFailed: true });
+    expect(failed.some((event) => event.type === "agent.completed")).toBe(false);
+    expect(failed.map((event) => event.title).join("")).not.toMatch(/已完成盤點/);
+  });
+
   it("chip titles never emit 已完成盤點", () => {
     const src = readFileSync(join(process.cwd(), "shared/assistantHonestCompletion.ts"), "utf8");
     expect(src).not.toMatch(/title:\s*[`'"][^`'"]*已完成盤點/);
     const globalSrc = readFileSync(join(process.cwd(), "server/routers/globalAssistant.ts"), "utf8");
     expect(globalSrc).not.toContain("已完成盤點");
+    const teamSrc = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
+    expect(teamSrc).not.toContain("已完成盤點");
+    const messageSrc = readFileSync(join(process.cwd(), "server/services/messageAssistant.ts"), "utf8");
+    expect(messageSrc).not.toContain("已完成盤點");
   });
 });
 
@@ -160,7 +241,9 @@ describe("write verification", () => {
 
   it("detects completed-tense write claims", () => {
     expect(claimsCompletedWrite("已調整鏡頭")).toBe(true);
+    expect(claimsCompletedWrite("我新增了角色小華的角色卡。")).toBe(true);
     expect(claimsCompletedWrite("我建議調整鏡頭，請確認")).toBe(false);
     expect(rewriteCompletedTenseToProposal("已套用世界觀")).toContain("建議套用");
+    expect(rewriteCompletedTenseToProposal("我新增了角色小華的角色卡。")).not.toContain("我新增了");
   });
 });

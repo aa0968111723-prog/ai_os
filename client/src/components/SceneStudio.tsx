@@ -17,6 +17,10 @@ import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus }
 import { ConflictNotice, conflictFromError } from "./ConflictNotice";
 import { formatTMs } from "@shared/timecode";
 import { discussInMessages } from "../discuss";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
+import { HonorSheetControl } from "./HonorSheetControl";
+import { useCharacterSheetGenerate } from "./useCharacterSheetGenerate";
+import { shouldRotateGenerateIntoRequestId, variantRequestIdsAfterLaunch } from "@shared/generationIdempotency";
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
@@ -165,6 +169,17 @@ export function SceneStudio({
   const [pickedDirectionIds, setPickedDirectionIds] = useState<string[] | null>(null);
   /** 血緣：從哪一版按下「再用這版變體」的（null＝從這一鏡當下的狀態出發） */
   const [variantParentAssetId, setVariantParentAssetId] = useState<string | null>(null);
+  const [honorIds, setHonorIds] = useState<string[]>(charIds ?? []);
+  const characters = trpc.characters.list.useQuery({ projectId });
+  const sheet = useCharacterSheetGenerate(projectId);
+  useEffect(() => {
+    setHonorIds(charIds ?? []);
+  }, [charIds, sceneId]);
+  const honoredCharIds = characters.data
+    ? selectableBringInIds(characters.data, honorIds)
+    : honorIds.length
+      ? (charIds ?? [])
+      : [];
   useFocusTrap(panelRef, !compareOpen, onClose);
   useFocusTrap(compareRef, compareOpen, () => setCompareOpen(false));
   /**
@@ -331,6 +346,13 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      // Server discarded leftover 0/N; HUD cache stays until this refetch.
+      void utils.teamAssistant.agentOverview.invalidate();
+    },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        regenRequestId.current = crypto.randomUUID();
+      }
     },
   });
   const generateVariants = trpc.scenes.generateVariants.useMutation({
@@ -357,10 +379,22 @@ export function SceneStudio({
           requestIds: [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()],
         };
         setVariantParentAssetId(null); // 血緣綁定只屬於這一批，不該延續到下一批
+      } else {
+        // Failed first send: rotate only those slots. Keep ok keys so retry
+        // does not double-charge landed directions.
+        variantBatchRef.current = {
+          ...variantBatchRef.current,
+          requestIds: variantRequestIdsAfterLaunch(
+            variantBatchRef.current.requestIds,
+            result.results,
+            () => crypto.randomUUID(),
+          ),
+        };
       }
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      void utils.teamAssistant.agentOverview.invalidate();
     },
   });
   const refine = trpc.scenes.refine.useMutation({
@@ -370,11 +404,22 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      void utils.teamAssistant.agentOverview.invalidate();
+    },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        refineRequestId.current = crypto.randomUUID();
+      }
     },
   });
   // 完成後留在配音頁（試聽就在同一頁出現），不像重畫/修正要跳到版本頁看進度
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
     onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); refresh(); },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        voiceRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   // 環境音描述另開一支 update，理由同配音詞：三種「儲存中／已儲存」回饋不能互相污染
   const saveAmbience = trpc.scenes.update.useMutation({ onSuccess: () => { setAmbienceDraft(null); refresh(); } });
@@ -384,6 +429,11 @@ export function SceneStudio({
   const saveMusic = trpc.scenes.update.useMutation({ onSuccess: () => { setMusicDraft(null); refresh(); } });
   const generateAmbience = trpc.scenes.generateAmbience.useMutation({
     onSuccess: () => { ambienceRequestId.current = crypto.randomUUID(); refresh(); },
+    onError: (err) => {
+      if (shouldRotateGenerateIntoRequestId(err.message)) {
+        ambienceRequestId.current = crypto.randomUUID();
+      }
+    },
   });
   /** 採用時如果一併同步了鏡頭語言，把伺服器回報的差異顯示出來（不做靜默寫入） */
   const [adoptedDirection, setAdoptedDirection] = useState<string[]>([]);
@@ -797,7 +847,7 @@ export function SceneStudio({
                 disabled={!canEdit || saveAction.isPending}
                 maxLength={MAX_ACTION_CHARS}
                 rows={2}
-                placeholder="例：安倢從門口走到窗邊，停下（可留白＝這鏡沒有特別的走位）"
+                placeholder="例：小華從淡大校門口走到鏡頭前，停下（可留白＝這鏡沒有特別的走位）"
                 onChange={(e) => setActionDraft(e.target.value)}
                 style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
               />
@@ -811,6 +861,21 @@ export function SceneStudio({
                 </div>
               )}
             </div>
+
+            {canEdit && (
+              <>
+              <HonorSheetControl
+                characters={characters.data ?? []}
+                selectedIds={honorIds}
+                onToggle={(id) =>
+                  setHonorIds((cur) => (cur.includes(id) ? cur.filter((row) => row !== id) : [...cur, id]))
+                }
+                onGenerateSheet={sheet.start}
+                generatingCharacterId={sheet.pendingCharacterId}
+              />
+              {sheet.error ? <Hint>定裝生成失敗：{sheet.error.message}</Hint> : null}
+              </>
+            )}
 
             <div className="scene-studio__tabs" role="tablist" aria-label="單格工作室工具">
               {TABS.map((t) => (
@@ -878,7 +943,7 @@ export function SceneStudio({
                       動作走位唯一接得上的生成路徑。
                       「重畫這格」選影片模型時，走位由 sceneVisualPrompt 自動接在畫面後面；但「讓這張動起來」
                       走的是修正這條路，提示詞是使用者當場打的指示，伺服器不該擅自接上去（那會跟他打的字打架）。
-                      於是這一鏡明明寫好了「安倢從門口走到窗邊」，要讓它動起來時還得再打一次。
+                      於是這一鏡明明寫好了「小華從淡大校門口走到鏡頭前」，要讓它動起來時還得再打一次。
                       一顆按鈕把它填進去就好——只在指示還空著時出現，永遠不會蓋掉使用者打的字。
                     */}
                     {refineModel && refineGroupOf(refineModel) === "video" && action.trim() !== "" && instruction.trim() === "" && (
@@ -927,7 +992,7 @@ export function SceneStudio({
                               prompt: instruction,
                               sourceAssetId: baseVersion!.assetId!,
                               clientRequestId: refineRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -987,7 +1052,7 @@ export function SceneStudio({
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                               propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
@@ -1097,7 +1162,7 @@ export function SceneStudio({
                               // 它同時也是越權欄位的第二道濾網（AI 提案／未來的自訂方向都走這裡）。
                               direction: sanitizeDirection(direction),
                             })),
-                            characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                            ...(honoredCharIds.length ? { characterIds: honoredCharIds.slice(0, MAX_GENERATE_CHARACTERS) } : {}),
                             scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                           });
@@ -1141,7 +1206,7 @@ export function SceneStudio({
                     </div>
                     <label htmlFor={`studio-dialogue-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: "10px 0 0" }}>
                       這一鏡的對白
-                      <HelpTip text="一行一句：@師父：坐吧。旁白要插在中間就寫 @旁白：…，順序就是唸出來的順序。括號寫表演指示（@安倢（小聲）：…），不會被唸出來。" />
+                      <HelpTip text="一行一句：@小華：咦？你是誰？旁白要插在中間就寫 @旁白：…，順序就是唸出來的順序。括號寫表演指示（@小華（小聲）：…），不會被唸出來。" />
                     </label>
                     <textarea
                       id={`studio-dialogue-${sceneId}`}
@@ -1149,7 +1214,7 @@ export function SceneStudio({
                       disabled={saveDialogue.isPending}
                       maxLength={MAX_DIALOGUE_CHARS}
                       rows={4}
-                      placeholder={"@師父：坐吧。心急的人，茶會燙。\n@安倢（小聲）：謝謝師父。"}
+                      placeholder={"@小華：咦？你是誰？\n@禪定龜龜：我是禪學社的禪定龜龜，我來拯救你了！"}
                       onChange={(e) => setDialogueDraft(e.target.value)}
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />

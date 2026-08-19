@@ -110,7 +110,8 @@ const EXAMPLE: Record<string, { base: string; focused?: string }> = {
   create_project: { base: "幫我開一個中秋活動宣傳專案。" },
   create_watch: { base: "幫我盯著這個專案，有人卡住就提醒我。" },
   add_database_row: { base: "把這次的拍攝清單寫進資料庫。" },
-  add_character: { base: "幫我加一張角色卡：小華，粉橘短髮鮑伯、米白針織外套。" },
+  // Live leftover: this tap-to-send example still taught 七幕 米白針織外套, not A–F 白帽T.
+  add_character: { base: "幫我加一張角色卡：小華，粉橘短髮女孩、白帽T。" },
   add_schedule_item: { base: "下週三下午三點排一小時的分鏡審查。" },
   send_dm: { base: "幫我私訊小明，請他今天內回覆旁白稿。" },
 

@@ -263,6 +263,16 @@ describe("ProjectAssistant project-scoped async results", () => {
     expect(await screen.findByText("已拆出 8 個分鏡，可逐鏡生成畫面")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /把目前專案腳本拆成分鏡/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /復原/ })).toBeInTheDocument();
+
+    const seen: Array<{ section?: string; projectId?: string; scroll?: boolean }> = [];
+    const onReveal = (event: Event) => {
+      seen.push((event as CustomEvent<{ section?: string; projectId?: string; scroll?: boolean }>).detail);
+    };
+    window.addEventListener("aios:story-inline-reveal", onReveal);
+    await userEvent.setup().click(screen.getByRole("button", { name: "查看分鏡" }));
+    window.removeEventListener("aios:story-inline-reveal", onReveal);
+    expect(seen).toEqual([expect.objectContaining({ section: "storyboard", projectId: "project-a", scroll: true })]);
+    expect(window.location.hash).not.toBe("#sec-scenes");
   });
 });
 

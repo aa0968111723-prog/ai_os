@@ -105,7 +105,7 @@ export function MobileHome({ groupId }: { groupId: string }) {
 
   useEffect(() => {
     const pending = takePendingNewProjectIdea();
-    if (pending) openCreate(pending);
+    if (pending !== null) openCreate(pending);
     const onIdea = (event: Event) => {
       const idea = (event as CustomEvent<{ ideaTitle?: string }>).detail?.ideaTitle?.trim() ?? "";
       takePendingNewProjectIdea();
@@ -161,7 +161,13 @@ export function MobileHome({ groupId }: { groupId: string }) {
       {current ? (
         <section className="m-current" aria-label="目前專案">
           <div className="m-current__head">
-            <Meta as="span" className="m-current__eyebrow">目前專案</Meta>
+            <div className="m-current__head-row">
+              <Meta as="span" className="m-current__eyebrow">目前專案</Meta>
+              <button type="button" className="m-current__create" onClick={() => openCreate()}>
+                <Icon name="Plus" size={14} />
+                建立專案
+              </button>
+            </div>
             <h1 className="m-current__title">{current.title}</h1>
             <p className="m-current__status">{currentStatus}</p>
           </div>

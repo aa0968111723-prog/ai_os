@@ -33,6 +33,7 @@ import { ProactiveModelConverter } from "../features/creation-workbench/Proactiv
 import { AgentRunCard } from "./AgentRunCard";
 import { AgentWorkPanel } from "./AgentWorkPanel";
 import { isAgentEvent, type AgentEvent, type AgentSourceRecord } from "@shared/agentEvents";
+import { honestAssistantVisibleEvents } from "@shared/assistantHonestCompletion";
 import {
   classifyAssistantRequest,
   type AssistantExecutionPlan,
@@ -43,6 +44,7 @@ import { toWirePageContext } from "../lib/assistantQuickActions";
 import { detectEditingHandoffRequest } from "../lib/externalEditingIntent";
 import { EditingHandoffSheet } from "../features/external-editing/EditingHandoffSheet";
 import { EditingResultCard, EditingSessionCard } from "../features/external-editing/EditingSessionCard";
+import { revealStoryInlineSection } from "../features/story-workspace/storyInlineNav";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -142,7 +144,13 @@ function ProjectDirectResultCard({ projectId, result }: { projectId: string; res
         {undo.isSuccess ? "已復原這次建立的分鏡" : result.message}
       </span>
       {!undo.isSuccess && result.kind === "split_script" ? (
-        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = "sec-scenes"; }}>查看分鏡</Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => revealStoryInlineSection("storyboard", { projectId, scroll: true })}
+        >
+          查看分鏡
+        </Button>
       ) : null}
       {!undo.isSuccess && canUndo ? (
         <Button
@@ -489,8 +497,12 @@ export function ProjectAssistant({
             ? new Set(actions.filter((action) => action.type === "split_script"))
             : new Set<Action>();
           const pendingActions = actions.filter((action) => !directlyRunnable.has(action));
-          const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
-          const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+          const rawEvents = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+          const hasFailure = rawEvents.some((event) => event.type === "agent.failed" && event.status === "failed");
+          const events = honestAssistantVisibleEvents(rawEvents, {
+            runFailed: hasFailure,
+            pendingConfirm: pendingActions.length > 0,
+          });
           const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
           // Pending confirmation / proposed writes are not "Aios 已完成".
           const runStatus: Turn["runStatus"] = hasFailure
@@ -511,7 +523,7 @@ export function ProjectAssistant({
             agentSources: result.agentSources,
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
-            paid: result.fellBackToPaid === true,
+            paid: answerMode !== "nim" && result.fellBackToPaid === true,
             paidModel: result.model,
             sources: result.sources,
             executionPlan: plan,
@@ -594,8 +606,12 @@ export function ProjectAssistant({
             setTraceSessionId(result.traceSessionId ?? null);
             const fallbackActivity = result.steps.map((text) => ({ phase: "step" as const, text }));
             const actions = result.actions as Action[];
-            const events = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
-            const hasFailure = events.some((event) => event.type === "agent.failed" && event.status === "failed");
+            const rawEvents = result.agentEvents ?? traceRef.current.filter(isAgentEvent);
+            const hasFailure = rawEvents.some((event) => event.type === "agent.failed" && event.status === "failed");
+            const events = honestAssistantVisibleEvents(rawEvents, {
+              runFailed: hasFailure,
+              pendingConfirm: actions.length > 0,
+            });
             const hasVerifiedCompletion = events.some((event) => event.type === "agent.completed" && event.status === "ok");
             const runStatus: Turn["runStatus"] = hasFailure
               ? "failed"
@@ -614,7 +630,7 @@ export function ProjectAssistant({
               agentSources: result.agentSources,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
-              paid: result.fellBackToPaid === true,
+              paid: answerMode !== "nim" && result.fellBackToPaid === true,
               paidModel: result.model,
               sources: result.sources,
               executionPlan: classifyAssistantRequest(m),
@@ -818,7 +834,7 @@ export function ProjectAssistant({
                   {t.role === "you" ? "你" : "助手"}
                   {/* 付費備援標示：送出前的靜態提示只說「可能」，這裡標的是「真的發生了」。
                       成本透明是站方不變式（伺服器端特意送出 fellBackToPaid 就是為了這裡）。 */}
-                  {t.role === "ai" && t.paid && (
+                  {t.role === "ai" && t.paid && answerMode !== "nim" && (
                     <Badge
                       style={{ marginLeft: 6 }}
                       title={t.paidModel ? `NIM 無回應，這一題已自動改用付費模型 ${t.paidModel}` : "NIM 無回應，這一題已自動改用付費模型"}
@@ -902,7 +918,8 @@ export function ProjectAssistant({
                       const isRunning = pendingKey === actKey;
                       // generate 動作套上使用者可能換過的模型；其餘動作照原樣
                       const gen = act.type === "generate" ? effectiveGenerate(act, actKey) : null;
-                      const chosenPlannerMode = plannerModeOverride[actKey] ?? defaultPlannerMode;
+                      const chosenPlannerMode = plannerModeOverride[actKey]
+                        ?? (answerMode === "nim" ? "nim" : defaultPlannerMode);
                       const payloadAct = gen
                         ? gen.action
                         : act.type === "plan_agent"
@@ -934,7 +951,9 @@ export function ProjectAssistant({
                                     : payloadAct.type === "add_database_row"
                                       ? `在資料庫「${payloadAct.tableName}」新增這一列？\n${payloadAct.preview}`
                                     : payloadAct.type === "add_character"
-                                      ? `新增角色定裝卡「${payloadAct.name}」？\n外觀：${payloadAct.appearance}${payloadAct.notes ? `\n備註：${payloadAct.notes}` : ""}`
+                                      ? `${payloadAct.label.includes("更新") || payloadAct.label.includes("沿用")
+                                        ? payloadAct.label
+                                        : `新增角色定裝卡「${payloadAct.name}」`}？\n外觀：${payloadAct.appearance}${payloadAct.notes ? `\n備註：${payloadAct.notes}` : ""}`
                                     : `執行「${payloadAct.label}」？`;
                       return (
                         <div

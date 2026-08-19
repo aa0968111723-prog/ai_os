@@ -21,6 +21,19 @@ import type { ModelEntry } from "./models";
 export type SceneVersionRole = "visual" | "narration" | "ambience";
 
 /**
+ * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面；旁白語音→旁白音檔；
+ * 音效／配樂（text-to-audio）→環境音。純文字仍是 null——綁了只會靜默落空。
+ * assistant / agentRunner 早已走這支。MCP submit_generation 曾略過，
+ * sceneNo + TTS 會被 generationCommand 當成 visual（sceneRole 預設畫面槽）。
+ */
+export function sceneFillRole(model: Pick<ModelEntry, "category">): SceneVersionRole | null {
+  if (model.category === "text-to-image" || model.category === "text-to-video") return "visual";
+  if (model.category === "text-to-speech") return "narration";
+  if (model.category === "text-to-audio") return "ambience";
+  return null;
+}
+
+/**
  * 版本在使用者眼中的狀態。與 `AssetVersionStatus`（candidate/selected/superseded/rejected）
  * 同一概念，但多帶「生成中／待審／失敗」——因為這裡直接投影生成紀錄，未完成的嘗試也要看得到。
  */
@@ -379,6 +392,24 @@ export function findDuplicateCurrent(versions: readonly SceneVersion[]): SceneVe
  */
 export function isSceneRegenModel(model: Pick<ModelEntry, "kind" | "needs">): boolean {
   return !model.needs && (model.kind === "image" || model.kind === "video");
+}
+
+/**
+ * 「生成／重生這一格」的純模型守門：不合規回中文訊息，合規回 null。
+ * generateInto / generateVariants / batchGenerate 早已走這支。MCP generate_into_scene
+ * 曾略過，音訊／文字或需要底圖的模型會寫進畫面槽——或一路送到 generationCore
+ * 才因「此模型需要來源」被拒。抽出來讓 MCP 共用，不另寫一份守門。
+ */
+export function regenRejection(model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined): string | null {
+  if (!model || (model.kind !== "image" && model.kind !== "video")) {
+    return "分鏡就地生成需要用圖像或影片模型";
+  }
+  // 需要底圖的模型走 scenes.refine（那裡才會帶 sourceAssetId）。不擋的話會一路送到
+  // generationCore 才因「此模型需要來源」被拒——使用者按了鈕、等了一下，才拿到一句看不懂的錯。
+  if (!isSceneRegenModel(model)) {
+    return `「${model.label}」需要底圖，請改用單格工作室的「以這張為底圖修正」`;
+  }
+  return null;
 }
 
 /**

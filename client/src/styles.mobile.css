@@ -24,7 +24,17 @@
     display: flex;
     flex-direction: column;
     gap: 18px;
-    padding: 14px max(14px, var(--safe-left)) var(--chrome-bottom, 100px) max(14px, var(--safe-right));
+    /* Live 11:43 390px: tab bar + orb + FAB/chat sat on 最近. --chrome-bottom
+       alone (100/140) is the nav; add one FAB slot + safe so last rows and
+       ＋建立專案 clear the fixed chrome at 390×844. */
+    padding: 14px max(14px, var(--safe-left))
+      calc(var(--chrome-bottom, 140px) + var(--fab-slot, 58px) + var(--safe-bottom, env(safe-area-inset-bottom, 0px)))
+      max(14px, var(--safe-right));
+  }
+
+  .m-recent {
+    /* Extra air after the last 最近 row so it is not the thing under the bar. */
+    padding-bottom: calc(var(--fab-slot, 58px) + 8px);
   }
 
   .m-section-title {
@@ -41,6 +51,27 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .m-current__head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .m-current__create {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 11px;
+    background: var(--muted);
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 700;
   }
 
   .m-current__eyebrow {
@@ -629,6 +660,20 @@
 
   /* 完整工作台掛在手機上時，底部仍要讓開分頁列 */
   .m-project-full { padding-bottom: var(--chrome-bottom, 100px); }
+}
+
+/* 390×569 (and other short phone chrome): tab bar eats a bigger share of
+   the viewport, so 最近 needs a second FAB slot to scroll clear. */
+@media (max-width: 767.98px) and (max-height: 569px) {
+  .m-home,
+  .m-project {
+    padding-bottom: calc(
+      var(--chrome-bottom, 140px)
+      + var(--fab-slot, 58px)
+      + var(--fab-slot, 58px)
+      + var(--safe-bottom, env(safe-area-inset-bottom, 0px))
+    );
+  }
 }
 
 /* 動作偏好：關掉按壓縮放（與 styles.css 的 reduced-motion 區塊同一條契約） */

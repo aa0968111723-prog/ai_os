@@ -17,6 +17,10 @@ import { pushToUsers } from "./webPush";
 import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
+import type { ContinuityShotDirection } from "../../shared/continuity";
+import { resolveSceneCards } from "../../shared/sceneCards";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { resolveHonoredCharacterSheet } from "./referenceAsset";
 import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -155,7 +159,15 @@ export interface AgentStep {
   scenePresetIds?: string[];
   /** 素材設定卡 id（最多 4）：道具外觀／材質錨點 */
   propIds?: string[];
-  /** Frozen packet from batchGenerate. Approval resume must reuse this ID. */
+  /** 本鏡造型（character_looks.id）。generateInto / refine 都有帶；批次補完漏了會換掉衣服。 */
+  lookIds?: string[];
+  /**
+   * Frozen camera / performance / action at batch or execute time.
+   * generateInto / refine already freeze this so 中景→特寫 marks 畫面過時;
+   * 補完 N 鏡 / planner generate used to omit it.
+   */
+  shotDirection?: ContinuityShotDirection;
+  /** Frozen packet from batchGenerate / planAgentCore. Approval resume must reuse this ID. */
   shotContextPacketId?: string;
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
   sourceAssetId?: string;
@@ -274,7 +286,7 @@ export function startAgentRunner(): void {
 async function tick(): Promise<void> {
   // stopped：仍有 running/pending 步驟 → 收尾（按停時在途生成自然完成）
   // failed：仍有 running 步驟 → 並行支線一支失敗後，其餘已送出的生成仍須 settle（否則永遠卡 running）
-  // waiting：仍有 running 步驟 → 多為超額生成等組長核准；須持續 settle 核准結果（否則永久卡 waiting）
+  // waiting：Adopt 後步驟可能已全 done，或仍待你採用／超額核准——都要繼續 tick
   const runs = await db
     .select()
     .from(schema.agentRuns)
@@ -289,10 +301,7 @@ async function tick(): Promise<void> {
           eq(schema.agentRuns.status, "failed"),
           sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
         ),
-        and(
-          eq(schema.agentRuns.status, "waiting"),
-          sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
-        ),
+        eq(schema.agentRuns.status, "waiting"),
       ),
     )
     .orderBy(asc(schema.agentRuns.createdAt))
@@ -470,9 +479,13 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
     const flipped = await db
       .update(schema.agentRuns)
       .set({ status, updatedAt: new Date() })
-      .where(and(eq(schema.agentRuns.id, runId), eq(schema.agentRuns.status, "running")))
+      .where(and(
+        eq(schema.agentRuns.id, runId),
+        inArray(schema.agentRuns.status, ["running", "waiting"]),
+      ))
       .returning({ id: schema.agentRuns.id });
-    // 只在「真的把 running 翻成終局」的那一次發完成通知（idempotent 重入或已被 stop 搶走時 flipped 為空，不重發）
+    // 只在「真的把 running／waiting 翻成終局」的那一次發完成通知
+    // （Adopt 後 DAG 為 done 時 run 常已是 waiting，不能只 CAS running）
     if (flipped.length) {
       void trackBackgroundTask(
         notifyRunFinished(runId, status).catch((err) =>
@@ -997,6 +1010,13 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
 
     let sceneId: string | undefined;
     let sceneRole: "visual" | "narration" | "ambience" | undefined;
+    let shotDirection = step.shotDirection;
+    let lookIds = step.lookIds;
+    let sourceAssetId = step.sourceAssetId;
+    let characterIds = step.characterIds;
+    let scenePresetIds = step.scenePresetIds;
+    let propIds = step.propIds;
+    let namedXiaohua = /小華/.test(step.prompt ?? "");
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) {
@@ -1015,6 +1035,38 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       }
       sceneId = scene.id;
       sceneRole = role;
+      namedXiaohua = /小華/.test([scene.title, step.prompt, scene.action, scene.dialogue].join(""));
+      if (role === "visual") {
+        shotDirection = step.shotDirection ?? {
+          camera: scene.camera,
+          performance: scene.performance,
+          action: scene.action,
+        };
+        // batchGenerate already stamps lookIds on the step. LLM plans omit
+        // them the same way they omit characterRefs / shotDirection — execute
+        // used to drop this shot's 定裝. Same fallback as shotDirection.
+        lookIds = step.lookIds ?? scene.lookIds ?? undefined;
+        // generateInto: shot bindings win when this shot has cards. LLM plans
+        // often omit characterRefs; execute used to drop 小華 / 定裝 anchors.
+        const cards = resolveSceneCards(scene, {
+          characterIds: step.characterIds,
+          scenePresetIds: step.scenePresetIds,
+          propIds: step.propIds,
+        });
+        characterIds = cards.characterIds;
+        scenePresetIds = cards.scenePresetIds;
+        propIds = cards.propIds;
+        // batchGenerate already stamps honor onto the step. LLM plans omit
+        // sourceAssetId; execute used to draw without 定裝. Keep an existing
+        // i2v parent — honor-sheet must not replace that frame.
+        if (!sourceAssetId) {
+          sourceAssetId = await resolveHonoredCharacterSheet({
+            projectId: run.projectId,
+            groupId: run.groupId,
+            characterIds: cards.characterIds,
+          });
+        }
+      }
     }
 
     const [fresh] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
@@ -1052,6 +1104,12 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
       const auth = await loadAuthState(run.userId);
       if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
+      // batchGenerate already persist-locks when writing the step. LLM plans
+      // store raw step.prompt; Command used to persist 年輕男性 on the row.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        step.prompt,
+        namedXiaohua ? ["小華"] : [],
+      );
       await executeGenerationCommand({
         auth,
         source: "agent",
@@ -1059,13 +1117,15 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         id: step.generationId,
         projectId: run.projectId,
         modelId: model.id,
-        prompt: step.prompt,
+        prompt: lockedPrompt,
         sceneId,
         sceneRole,
-        characterIds: step.characterIds,
-        scenePresetIds: step.scenePresetIds,
-        propIds: step.propIds,
-        sourceAssetId: step.sourceAssetId,
+        characterIds,
+        scenePresetIds,
+        propIds,
+        lookIds,
+        shotDirection,
+        sourceAssetId,
         sourceUrl: step.sourceUrl,
         shotContextPacketId: step.shotContextPacketId,
         preserveScenePointer: true,
@@ -1097,6 +1157,15 @@ function clearGhostGenerationId(step: AgentStep, detail: string): void {
 /** 推進單一 run：長任務可多支線 in-flight；同輪可並行送出獨立 generate（多代理開拍） */
 async function advanceRun(run: RunRow): Promise<void> {
   const steps = run.steps as AgentStep[];
+
+  if (
+    (run.status === "waiting" || run.status === "running")
+    && steps.length > 0
+    && steps.every((step) => step.status === "done")
+  ) {
+    await saveDagProgress(run, steps);
+    return;
+  }
 
   // ── 多代理長跑：先結算「所有」已送出的生成（供應商並發，我們輪詢收斂） ──
   // 一支 failed 不可中斷迴圈：其餘支線仍須 settle，否則永遠卡 running（run 已 failed 也不再被 tick 撈到舊邏輯）
@@ -1135,16 +1204,28 @@ async function advanceRun(run: RunRow): Promise<void> {
     const adopted = await scenePointerIsGeneration(waiting.targetSceneId, waiting.generationId);
     if (!adopted) continue;
     waiting.status = "done";
+    addOutputRef(waiting, "generation", waiting.generationId, waiting.title ?? waiting.note);
     if (waiting.note.startsWith("待你採用 · ")) waiting.note = waiting.note.slice("待你採用 · ".length);
     waiting.detail = waiting.detail || "已採用";
     adoptedWaiting = true;
   }
-  if (adoptedWaiting) await saveRun(run.id, { steps });
+  if (adoptedWaiting) {
+    // Adopt unblocks waiting generate steps; re-evaluate the DAG so a run
+    // that was persisted as waiting can flip to done instead of early-returning
+    // on status !== "running" and hanging forever.
+    await saveDagProgress(run, steps);
+    const [freshAdopt] = await db
+      .select({ status: schema.agentRuns.status })
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.id, run.id));
+    if (freshAdopt) run.status = freshAdopt.status;
+  }
 
-  // 使用者已按停：沒有新生成要送時收停 pending
+  // 使用者已按停／失敗：沒有新生成要送時收停 pending。waiting 是 Adopt／人類關卡，還要繼續跑依賴已解除的步驟。
   {
     const [freshStop] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (freshStop && freshStop.status !== "running") {
+    if (freshStop) run.status = freshStop.status;
+    if (freshStop && freshStop.status !== "running" && freshStop.status !== "waiting") {
       const stillFlying = listInFlightGenerationSteps(steps);
       if (!stillFlying.length) {
         stopPendingDagSteps(steps);
@@ -1165,7 +1246,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   const idx = selectAgentDagStep(steps);
   const step = steps[idx];
   if (!step) {
-    if (run.status === "running") await saveDagProgress(run, steps);
+    if (run.status === "running" || run.status === "waiting") await saveDagProgress(run, steps);
     return;
   }
 
@@ -1176,7 +1257,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   // 使用者已按停且這一步沒有生成在跑：從這一步起全部收停
-  if (run.status !== "running") {
+  if (run.status !== "running" && run.status !== "waiting") {
     stopPendingDagSteps(steps);
     await saveRun(run.id, { steps });
     return;
@@ -1189,7 +1270,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   // 免費步驟雖不扣點，但「按了停止還在建分鏡」同樣違反使用者預期（生成路徑送出前另有一次復查）
   {
     const [freshNow] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (!freshNow || freshNow.status !== "running") return; // 下一輪由收停分支統一標記
+    if (!freshNow || (freshNow.status !== "running" && freshNow.status !== "waiting")) return;
   }
 
   // 執行任何「新」步驟前，復驗發起人當下的專案權限（帳號停用／移出組／降為檢視者／專案封存都擋，
@@ -2066,8 +2147,16 @@ async function advanceRun(run: RunRow): Promise<void> {
   // ── 生成類步驟（generate / voiceover）：冪等佔位 → submitGenerationCore ──
   let modelId: string;
   let prompt: string;
+  let lockedPrompt = "";
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
+  let shotDirection = step.shotDirection;
+  let lookIds = step.lookIds;
+  let sourceAssetId = step.sourceAssetId;
+  let characterIds = step.characterIds;
+  let scenePresetIds = step.scenePresetIds;
+  let propIds = step.propIds;
+  let namedXiaohua = /小華/.test(step.prompt ?? "");
   let stepVoiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
@@ -2106,6 +2195,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     }
     modelId = voiceModel.id;
     prompt = text;
+    lockedPrompt = text;
     sceneId = scene.id;
     sceneRole = "narration";
     stepVoiceIdentity = agentRoutedVoice && agentRoutedVoice.modelId === voiceModel.id ? agentRoutedVoice : undefined;
@@ -2133,9 +2223,37 @@ async function advanceRun(run: RunRow): Promise<void> {
       }
       sceneId = scene.id;
       sceneRole = role;
+      namedXiaohua = /小華/.test([scene.title, step.prompt, scene.action, scene.dialogue].join(""));
+      if (role === "visual") {
+        shotDirection = step.shotDirection ?? {
+          camera: scene.camera,
+          performance: scene.performance,
+          action: scene.action,
+        };
+        lookIds = step.lookIds ?? scene.lookIds ?? undefined;
+        const cards = resolveSceneCards(scene, {
+          characterIds: step.characterIds,
+          scenePresetIds: step.scenePresetIds,
+          propIds: step.propIds,
+        });
+        characterIds = cards.characterIds;
+        scenePresetIds = cards.scenePresetIds;
+        propIds = cards.propIds;
+        if (!sourceAssetId) {
+          sourceAssetId = await resolveHonoredCharacterSheet({
+            projectId: run.projectId,
+            groupId: run.groupId,
+            characterIds: cards.characterIds,
+          });
+        }
+      }
     }
     modelId = model.id;
-    prompt = step.prompt;
+    lockedPrompt = lockXiaohuaGenerationPrompt(
+      step.prompt,
+      namedXiaohua ? ["小華"] : [],
+    );
+    prompt = lockedPrompt;
   }
 
   if (step.kind === "generate" && sceneId && !step.generationId) {
@@ -2159,6 +2277,11 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       if (applied.changed) {
         steps.splice(0, steps.length, ...(applied.steps as AgentStep[]));
+        for (const next of steps) {
+          if (next.kind !== "generate") continue;
+          if (next.generationId !== latest.id && next.targetSceneId !== sceneId) continue;
+          addOutputRef(next, "generation", latest.id, next.title ?? next.note);
+        }
         await saveRun(run.id, { steps });
       }
       return;
@@ -2210,16 +2333,18 @@ async function advanceRun(run: RunRow): Promise<void> {
       id: step.generationId,
       projectId: run.projectId,
       modelId,
-      prompt,
+      prompt: lockedPrompt,
       sceneId,
       sceneRole,
       // closure §5（稽核修正）：代理旁白帶聲線 identity（與 generateVoiceover 同一路由）
       voiceIdentity: stepVoiceIdentity,
       // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／素材／來源素材
-      characterIds: step.characterIds,
-      scenePresetIds: step.scenePresetIds,
-      propIds: step.propIds,
-      sourceAssetId: step.sourceAssetId,
+      characterIds,
+      scenePresetIds,
+      propIds,
+      lookIds,
+      shotDirection,
+      sourceAssetId,
       sourceUrl: step.sourceUrl,
       shotContextPacketId: step.shotContextPacketId,
       preserveScenePointer: true,
@@ -2255,7 +2380,7 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
     addOutputRef(step, "generation", gen.id, step.title ?? step.note);
     step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";
     auditAgentStep(run, step, idx, true);
-    if (run.status !== "running") {
+    if (run.status !== "running" && run.status !== "waiting") {
       markRestStopped(steps, idx);
       await saveRun(run.id, { steps });
       return;

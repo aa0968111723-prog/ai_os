@@ -5,7 +5,7 @@
  *   1. 不被打斷的版面——全螢幕吃掉頂欄／分頁列／浮動球，長稿一次看得到一整場；
  *   2. 標注——把散文裡的名字一鍵宣告成角色／場景／道具，把某一行標成對白／旁白／註記；
  *   3. 導覽與量測——大綱跳場、尋找取代、字數與預估片長；
- *   4. 鍵盤——手不離開稿子（Alt+1～9 標注、⌘F 尋找、⌘⇧F 全螢幕）。
+ *   4. 鍵盤——手不離開稿子（Alt+1～9 標注、⌘⇧F 全螢幕）。Ctrl/⌘+F 留給瀏覽器尋找。
  *
  * 所有會出錯的邏輯（選取範圍、toggle、取代、快捷鍵對照）都在 scriptTools.ts，
  * 這裡只負責接線與版面。標注寫進故事全文本身，不另存中繼格式——
@@ -172,9 +172,6 @@ export function ScriptEditor({
           if (showFind) setShowFind(false);
           else exit();
           break;
-        case "toggleFind":
-          setShowFind((v) => !v);
-          break;
         case "toggleOutline":
           setShowOutline((v) => !v);
           break;
@@ -183,7 +180,7 @@ export function ScriptEditor({
     [exit, immersive, mark, showFind, toggle],
   );
 
-  // 找找列開啟時把焦點送進查詢框（⌘F 之後直接打字）
+  // 找找列開啟時把焦點送進查詢框（工具列「尋找」之後直接打字）
   const findInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (showFind) findInputRef.current?.focus();
@@ -232,7 +229,7 @@ export function ScriptEditor({
             variant={showFind ? "tonal" : "ghost"}
             aria-pressed={showFind}
             onClick={() => setShowFind((v) => !v)}
-            title="尋找／取代：改角色名時一次改完（Ctrl/⌘ + F）"
+            title="尋找／取代：改角色名時一次改完。Ctrl/⌘+F 是瀏覽器尋找，不會打開這一列。"
           >
             <Icon name="Search" size={14} /> 尋找
           </Button>

@@ -6,6 +6,7 @@ import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
 import { AttachmentPanel } from "./AttachmentPanel";
 import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { knowledgeSaveBaseline } from "@shared/knowledgeUpdate";
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
   { id: "testimony", label: "見證故事" },
@@ -488,7 +489,16 @@ function KnowledgeRow({
   const save = () => {
     const t = editTitle.trim();
     if (!t || !editContent.trim() || !seededRef.current) return;
-    update.mutate({ id: k.id, title: t, content: editContent });
+    // Baseline is knowledge.get（或 get 失敗時的 excerpt），不是編輯框草稿。
+    const baseline = knowledgeSaveBaseline({
+      getTitle: full.data?.title,
+      getContent: full.data?.content,
+      fallbackTitle: k.title,
+      fallbackExcerpt: k.excerpt ?? "",
+      getFailed: full.isError,
+    });
+    if (!baseline) return;
+    update.mutate({ id: k.id, title: t, content: editContent, baseline });
   };
 
   if (editing) {

@@ -82,14 +82,14 @@ export function clipCardField(text: string, max: number = CARD_FIELD_MAX): strin
  * 為什麼放在同一個錨點而不是另開一個 marker：造型是這個角色的外觀，不是獨立實體——
  * 拆開會讓模型把服裝當成畫面裡另一個東西，也會讓消融測試的三段錨點語意變糊。
  */
-export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: string[]): string {
+export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: string[], script = ""): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
   return ordered
     .map((c) => {
       const locked = applyXiaohuaIdentityLock(
         { name: c.name, appearance: c.appearance, costume: c.lookCostume ?? "" },
-        c.name ?? "",
+        `${c.appearance ?? ""}\n${script}`,
       );
       const appearance = locked.appearance ?? c.appearance;
       const base = `外觀鎖定 ${c.name}：${clipCardField(appearance)}`;

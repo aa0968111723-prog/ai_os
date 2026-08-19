@@ -10,6 +10,7 @@ import { buildSceneVersions, type SceneVersionGenerationRow } from "@shared/scen
 import { SceneStudio } from "./SceneStudio";
 
 const versionsQuery = vi.fn();
+const charactersQuery = vi.fn();
 const updateMutate = vi.fn();
 const regenMutate = vi.fn();
 const variantsMutate = vi.fn();
@@ -26,7 +27,19 @@ vi.mock("../api", () => ({
     useUtils: () => ({
       scenes: { versions: { invalidate } },
       messages: { listByRef: { invalidate }, openCountsByScene: { invalidate } },
+      quota: { my: { invalidate } },
+      teamAssistant: { agentOverview: { invalidate } },
+      characters: { list: { invalidate } },
+      creativeContext: { workspace: { invalidate } },
     }),
+    characters: {
+      list: { useQuery: (...args: unknown[]) => charactersQuery(...args) },
+      generateSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+      honorGeneratedSheet: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
+    },
+    generation: {
+      status: { useQuery: () => ({ data: null }) },
+    },
     scenes: {
       versions: { useQuery: (...args: unknown[]) => versionsQuery(...args) },
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
@@ -94,13 +107,14 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
   };
 }
 
-function mountStudio(over: { canEdit?: boolean } = {}) {
+function mountStudio(over: { canEdit?: boolean; charIds?: string[] } = {}) {
   return render(
     <SceneStudio
       sceneId="s-1"
       projectId="p-1"
       sceneNumber={3}
       canEdit={over.canEdit ?? true}
+      charIds={over.charIds}
       onClose={vi.fn()}
       onChanged={vi.fn()}
     />,
@@ -110,6 +124,7 @@ function mountStudio(over: { canEdit?: boolean } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   versionsQuery.mockReturnValue({ data: serverData(), isLoading: false, isError: false, refetch: vi.fn() });
+  charactersQuery.mockReturnValue({ data: undefined, isLoading: false });
   annotationsQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
@@ -118,6 +133,12 @@ describe("SceneStudio", () => {
     mountStudio();
     expect(screen.getByRole("dialog", { name: /第 3 鏡・單格工作室/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /修正這張/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("單格工作室面板有 HonorSheetControl：生成時帶入 / 已選 n/6，不是只有角色卡", () => {
+    mountStudio();
+    expect(screen.getByRole("group", { name: "生成時帶入角色參考圖" })).toBeInTheDocument();
+    expect(screen.getByText(/生成時帶入 · 已選 0\/6/)).toBeInTheDocument();
   });
 
   it("有現用畫面時，底圖預設就是它，寫了指示才能送修正", async () => {
@@ -241,6 +262,71 @@ describe("SceneStudio", () => {
       sceneId: "s-1",
       modelId: "fal-ai/qwen-image-2/text-to-image",
     });
+  });
+
+  it("重畫這格 honours 單格帶入：有自己的定裝圖才能變成 1/6", async () => {
+    const user = userEvent.setup();
+    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{
+        id: xiaohuaId,
+        name: "小華",
+        referenceAssetId: "22222222-2222-4222-8222-222222222222",
+        referenceUrl: "https://example.test/xiaohua-sheet.png",
+      }],
+      isLoading: false,
+    });
+    mountStudio({ charIds: [xiaohuaId] });
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByRole("group", { name: "生成時帶入角色參考圖" })).toBeInTheDocument();
+    expect(screen.getByText(/已選 1\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.characterIds).toEqual([xiaohuaId]);
+    expect(arg).not.toHaveProperty("sourceAssetId");
+  });
+
+  it("已選 0/6：小華沒有自己的定裝圖時重畫只走文字錨點，不掛 1/50", async () => {
+    const user = userEvent.setup();
+    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{ id: xiaohuaId, name: "小華", referenceAssetId: null, referenceUrl: null }],
+      isLoading: false,
+    });
+    mountStudio({ charIds: [xiaohuaId] });
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /小華/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg).not.toHaveProperty("characterIds");
+    expect(arg).not.toHaveProperty("sourceAssetId");
+  });
+
+  it("有定裝圖但取消 HonorSheet：重畫不帶 characterIds，文字錨點仍在", async () => {
+    const user = userEvent.setup();
+    const xiaohuaId = "11111111-1111-4111-8111-111111111111";
+    charactersQuery.mockReturnValue({
+      data: [{
+        id: xiaohuaId,
+        name: "小華",
+        referenceAssetId: "22222222-2222-4222-8222-222222222222",
+        referenceUrl: "https://example.test/xiaohua-sheet.png",
+      }],
+      isLoading: false,
+    });
+    mountStudio({ charIds: [xiaohuaId] });
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByText(/已選 1\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /小華/ }));
+    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /重畫這格（/ }));
+    await user.click(screen.getByRole("button", { name: "確認重畫" }));
+    const arg = regenMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg).not.toHaveProperty("characterIds");
+    expect(arg).not.toHaveProperty("sourceAssetId");
   });
 
   it("第一張候選（尚未現用）舞台顯示該版模型並給採用，不標成 SDXL / 現用", () => {

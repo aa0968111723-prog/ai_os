@@ -23,13 +23,13 @@ export { MAX_GENERATE_PROPS };
 
 /**
  * 素材設定卡（「角色·場景一致性」缺的第三塊：物件）：
- * 反覆出現的道具／標誌物件（紅傘、佛珠、活動主視覺牌）外觀材質一次鎖定，
+ * 反覆出現的道具／標誌物件（禪學社圓標、校名牌）外觀材質一次鎖定，
  * 生成時勾選 → 自動注入錨點，同一件東西跨鏡不變樣。
  *
  * 與下方「素材庫」不同：素材庫是已經存在的檔案，這裡是還沒被畫出來的物件設定。
  *
  * 歸屬：一張卡可掛在某角色（隨身物品）或某場景（場上物件）底下。掛了主人之後，
- * 生成時只要勾主人，這件物件會自動一起帶入——不必記得「畫安倢就要順便勾紅傘」。
+ * 生成時只要勾主人，這件物件會自動一起帶入——不必記得「畫禪定龜龜就要順便勾禪學社圓標」。
  * readOnly（檢視者）：隱藏新增／刪除／編輯／設參考圖。
  */
 export function PropCards({
@@ -381,8 +381,9 @@ export function PropCards({
       ) : (
         <EmptyState
           title="還沒有素材設定"
-          description="加一張道具卡（例：紅傘＝正紅色長柄傘、木質握把、傘面微舊）。"
-          /* 與角色卡同理：範例要能一鍵建出來，不要只寫在說明裡讓人自己打 */
+          description="加一張道具卡（例：禪學社圓標＝龜殼上的圓形社徽、墨色線稿）。"
+          /* 與角色卡同理：範例要能一鍵建出來，不要只寫在說明裡讓人自己打。
+             Live leftover: this door still minted 紅傘 (七幕), not A–F 禪定龜龜. */
           action={
             readOnly ? undefined : (
               <Button
@@ -391,9 +392,9 @@ export function PropCards({
                 onClick={() =>
                   add.mutate({
                     projectId,
-                    name: "紅傘",
-                    appearance: "正紅色長柄傘、木質握把、傘面微舊",
-                    notes: "由範例建立，可再改",
+                    name: "禪學社圓標",
+                    appearance: "龜殼上的圓形社徽、墨色線稿、淡定感",
+                    notes: "禪定龜龜殼上帶著，第三句登場。由範例建立，可再改",
                     clientRequestId: requestId.current,
                   })
                 }
@@ -414,7 +415,7 @@ export function PropCards({
               value={name}
               maxLength={PROP_NAME_MAX}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例：紅傘"
+              placeholder="例：禪學社圓標"
               autoComplete="off"
             />
             <CharCount value={name} max={PROP_NAME_MAX} />
@@ -425,7 +426,7 @@ export function PropCards({
               maxLength={PROP_APPEARANCE_MAX}
               onChange={(e) => setAppearance(e.target.value)}
               rows={3}
-              placeholder="例：正紅色長柄傘、霧面傘布、木質握把、傘面微舊"
+              placeholder="例：龜殼上的圓形社徽、墨色線稿、淡定感"
             />
             <CharCount value={appearance} max={PROP_APPEARANCE_MAX} />
             <label htmlFor="prop-notes">用途・出現場合（選填，供 AI 導演參考，不畫進畫面）</label>
@@ -435,7 +436,7 @@ export function PropCards({
               maxLength={PROP_NOTES_MAX}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              placeholder="例：安倢每次出場都帶著；雨停後收起夾在臂彎"
+              placeholder="例：禪定龜龜殼上帶著，第三句登場"
             />
             <CharCount value={notes} max={PROP_NOTES_MAX} />
             <OwnerPicker projectId={projectId} value={owner} onChange={setOwner} disabled={add.isPending} />

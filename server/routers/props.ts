@@ -235,7 +235,11 @@ export const propsRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.props).where(eq(schema.props.id, input.id));
+    const { stripCardIdsFromProjectScenes } = await import("../services/sceneEntityIds");
+    await db.transaction(async (tx) => {
+      await stripCardIdsFromProjectScenes(tx, row.projectId, { propIds: [row.id] });
+      await tx.delete(schema.props).where(eq(schema.props.id, row.id));
+    });
     return { ok: true };
   }),
 });

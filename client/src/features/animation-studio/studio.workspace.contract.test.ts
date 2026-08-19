@@ -42,6 +42,18 @@ describe("版面的真相只有一份（沿用既有契約）", () => {
     expect(ruleFor(".studio-workarea")).toMatch(/grid-template-columns: auto minmax\(0, 1fr\) auto/);
   });
 
+  it("timeline strip is a horizontal scrollport (not clipped by workspace overflow)", () => {
+    const strip = ruleFor(".studio-timeline");
+    expect(strip).toContain("min-width: 0");
+    expect(strip).toContain("overflow: hidden");
+    const list = ruleFor(".studio-timeline__list");
+    expect(list).toContain("overflow-x: auto");
+    expect(list).toContain("min-width: 0");
+    const timeline = readFileSync(resolve(dir, "StoryboardTimeline.tsx"), "utf8");
+    expect(timeline).toContain("data-shot-id={shot.id}");
+    expect(timeline).toContain('scrollIntoView({ inline: "nearest", block: "nearest" })');
+  });
+
   it("只有桌機掛工作台：手機拿掉底部分頁列會讓人出不去", () => {
     expect(studio).toMatch(/if \(lite\) return;\s*\n\s*document\.body\.classList\.add\(WORKSPACE_BODY_CLASS\)/);
   });
@@ -64,6 +76,27 @@ describe("沉浸：全站導航讓開", () => {
     const header = readFileSync(resolve(dir, "StudioHeader.tsx"), "utf8");
     expect(header).toContain('href={`/p/${projectId}`}');
     expect(header).toContain("返回專案");
+  });
+
+  it("1280 header shows 第 N / M 鏡, not Shot 03 while the timeline holds the count", () => {
+    const header = readFileSync(resolve(dir, "StudioHeader.tsx"), "utf8");
+    expect(header).toContain("第 ${shotNumber} / ${shotCount} 鏡");
+    expect(header).not.toContain('Shot ${String(shotNumber).padStart(2, "0")}');
+    expect(studio).toContain("shotCount={shots.length}");
+    expect(studio).not.toContain("<ShotNavigator");
+  });
+
+  it("1280 inspector and stage HUD show 第 N 鏡, not Shot 03 beside the header", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    const stage = readFileSync(resolve(dir, "StudioStage.tsx"), "utf8");
+    const title = inspector.slice(
+      inspector.indexOf("studio-inspector__title"),
+      inspector.indexOf("studio-inspector__subtitle"),
+    );
+    expect(title).toContain("第 ${shotNumber} 鏡");
+    expect(title).not.toContain('Shot ${String(shotNumber).padStart(2, "0")}');
+    expect(stage).toContain("第 {hud.shotNumber} 鏡");
+    expect(stage).not.toContain('Shot ${String(hud.shotNumber).padStart(2, "0")}');
   });
 });
 
@@ -143,6 +176,12 @@ describe("面板降級（1280 也要能用）", () => {
     expect(inspector).toContain("is-collapsed");
     expect(inspector).toContain("展開 Shot Inspector");
   });
+
+  it("未分場 points at the project-page 分鏡 chip, not TocNav「② 分鏡」", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("到專案頁打開「分鏡」可以把這一鏡歸到某一場");
+    expect(inspector).not.toContain("到專案頁的「② 分鏡」");
+  });
 });
 
 describe("既有能力沒有被 UI 重構弄丟", () => {
@@ -180,6 +219,16 @@ describe("既有能力沒有被 UI 重構弄丟", () => {
 });
 
 describe("Inspector 不新增資料格式", () => {
+  it("畫面分頁帶入外部成果走既有 ExternalAssetIntake，綁這一鏡 sceneId", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain('from "../external-intake/ExternalAssetIntake"');
+    expect(inspector).toContain("<ExternalAssetIntake");
+    expect(inspector).toContain('triggerLabel="帶入外部成果"');
+    expect(inspector).toContain("sceneId={shot.id}");
+    expect(inspector).toContain("sceneLabel=");
+    expect(inspector).not.toContain("ExternalGenerationLauncher");
+  });
+
   it("六個分頁全部接既有欄位（camera／performance／lookIds 是 Story-first 既有欄位）", () => {
     const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
     expect(inspector).toContain("trpc.scenes.update.useMutation");
@@ -208,6 +257,74 @@ describe("Inspector 不新增資料格式", () => {
   it("studio listByProject always remounts so /p/ 產生分鏡 rows appear on the timeline", () => {
     expect(studio).toContain("refetchOnMount: \"always\"");
     expect(studio).toContain("trpc.scenes.listByProject.useQuery");
+    expect(studio).toContain("studioShotListIsLoading");
+    expect(studio).not.toContain("scenes.isLoading && !scenes.data");
+  });
+
+  it("創作室 複製這一鏡 走 insertAfter(duplicate) 且失敗要出 error，不是 silent queue", () => {
+    expect(studio).toContain("const duplicateShot = (sceneId: string)");
+    expect(studio).toContain("runStudioDuplicateShot");
+    expect(studio).toContain("mergeDuplicatedShotIntoList");
+    expect(studio).toContain("refreshStudioShotList");
+    expect(studio).toContain("onDuplicate={duplicateShot}");
+    expect(studio).not.toContain("enqueue(id, { duplicate: true })");
+    expect(studio).toContain("setShotActionError");
+    const timeline = readFileSync(resolve(dir, "StoryboardTimeline.tsx"), "utf8");
+    expect(timeline).toContain("複製這一鏡");
+    expect(timeline).toContain("onDuplicate()");
+    expect(timeline).toContain("createPortal");
+    expect(timeline).toContain("studio-menu--fixed");
+    expect(timeline).not.toContain("studio-menu__scrim");
+    expect(declarations).toContain(".studio-menu--fixed");
+    expect(studio).toContain("onInsertAfter={insertBlankAfter}");
+    expect(studio).toContain("runStudioInsertShot");
+    expect(timeline).toContain("在這之後插入一鏡");
+    expect(timeline).toContain("studio-tlshot__more");
+    expect(timeline).toContain("的更多操作");
+    expect(timeline).toContain("placeFixedShotMenu");
+    expect(timeline).toContain("fixedShotMenuStyle");
+    expect(timeline).toContain("viewportCssSize");
+    expect(timeline).toContain('title="更多（插入、複製、刪除）"');
+    expect(timeline).toContain("data-studio-shot-menu");
+    expect(timeline).toContain('event.key !== "Escape"');
+    expect(timeline).not.toContain("studio-menu--shot");
+    expect(declarations).toMatch(/--ws-timeline:\s*208px/);
+    expect(declarations).toContain(".studio-tlshot__more");
+    const scrim = ruleFor(".studio-menu__scrim");
+    expect(scrim).toContain("border-radius: 0");
+    expect(scrim).toContain("background: transparent");
+    expect(declarations).toContain("button.studio-menu__scrim:hover:not(:disabled)");
+    expect(declarations).toContain("button.studio-menu__scrim:focus-visible");
+    const scrimHoverStart = declarations.indexOf("button.studio-menu__scrim:hover:not(:disabled)");
+    const scrimHover = declarations.slice(scrimHoverStart, declarations.indexOf("}", scrimHoverStart));
+    expect(scrimHover).toContain("background: transparent");
+    expect(scrimHover).toContain("border-radius: 0");
+    expect(mainStyles).toContain("button:hover:not(:disabled) { background: var(--card2)");
+    expect(mainStyles).toContain("button:focus-visible { border-radius: 999px; }");
+    const fixed = ruleFor(".studio-menu.studio-menu--fixed");
+    expect(fixed).toContain("inset: unset");
+    expect(fixed).toContain("bottom: unset");
+    expect(fixed).toContain("transform: none");
+    expect(fixed).toContain("animation: none");
+    expect(fixed).toContain("border-radius: 10px");
+    expect(fixed).toMatch(/max-width:\s*min\(240px/);
+  });
+
+  it("動畫創作室 deep-link is /studio/:projectId and /studio?project= opens that project", () => {
+    const routes = readFileSync(resolve(process.cwd(), "client/src/app/AppRoutes.tsx"), "utf8");
+    const page = readFileSync(resolve(process.cwd(), "client/src/pages/AnimationStudioPage.tsx"), "utf8");
+    expect(routes).toContain('path="/studio/:projectId"');
+    expect(routes).toContain("studioProjectIdFromLocation");
+    expect(routes).toContain("studioCanonicalPath");
+    expect(page).toContain("`/studio/${project.id}`");
+    expect(page).toContain("studioProjectIdFromLocation");
+    expect(page).toContain("resolvedId");
+    expect(page).toContain("trpc.projects.list.useQuery({})");
+    expect(page).toContain("trpc.projects.get.useQuery");
+    expect(page).toContain("81b265dc-d41c-4ace-ae8f-c05b6debefec");
+    expect(page).not.toContain("enabled: !!groupId");
+    expect(page).not.toContain("projects.create");
+    expect(page).not.toContain("create.mutate");
   });
 
   it("延續上一鏡不因切鏡 reset 整條 queue——各 origin 自帶 tail", () => {
@@ -223,6 +340,22 @@ describe("Inspector 不新增資料格式", () => {
     expect(studio).not.toContain("activeShotIdRef.current === variables.sceneId");
   });
 
+  it("Ctrl+Z 分鏡列 undo 只還原複製／插入／刪除，從回收桶還原而不是 purge", () => {
+    expect(studio).toContain("pushShotUndo");
+    expect(studio).toContain("popShotUndo");
+    expect(studio).toContain("preferShotUndoOverBoard");
+    expect(studio).toContain("trpc.scenes.restore");
+    expect(studio).toContain("shotUndoMutation");
+    expect(studio).toContain("const deleteShot = (sceneId: string)");
+    expect(studio).toContain("onDelete={deleteShot}");
+    expect(studio).toContain("kind: \"create\"");
+    expect(studio).toContain("kind: \"delete\"");
+    expect(studio).toContain("undoShotListRef.current()");
+    expect(studio).toContain("還原複製／插入＝軟刪進回收桶，不是 purge");
+    expect(studio).not.toContain("scenes.purge");
+    expect(studio).not.toContain("trpc.scenes.purge");
+  });
+
   it("late insertAfter/move ACK from project A does not invalidate or write into project B", () => {
     expect(studio).toContain("writeProjectId: created?.projectId");
     expect(studio).toContain("writeProjectId: result.projectId");
@@ -231,5 +364,24 @@ describe("Inspector 不新增資料格式", () => {
     expect(inspector).toContain("shouldApplySceneWriteAck");
     expect(inspector).toContain("sceneId: boundSceneId");
     expect(inspector).not.toContain("sceneId: shotRef.current.id");
+  });
+
+  it("live /studio/ inspector mounts HonorSheet even on 自由塗鴉 (not gated on shot)", () => {
+    const inspector = readFileSync(resolve(dir, "ShotInspector.tsx"), "utf8");
+    expect(inspector).toContain("<HonorSheetControl");
+    expect(inspector).toContain("InspectorHonorSheet");
+    expect(inspector).toContain("canEdit && <InspectorHonorSheet");
+    expect(inspector).not.toContain("shot && canEdit && <InspectorHonorSheet");
+    expect(inspector).toContain("readOnly={!shot}");
+    expect(inspector).toContain("onGenerateSheet={sheet.start}");
+    expect(studio).not.toMatch(/switchTo\(shots\[0\]/);
+  });
+
+  it("left AI rail mounts AiCopilotActions, not a pointer at 右邊 Inspector", () => {
+    expect(studio).toContain("<AiCopilotActions");
+    expect(studio).toContain("optionsKind === \"ai\"");
+    expect(studio).not.toContain("AI 的動作在右邊的 Inspector");
+    expect(studio).toMatch(/if \(next === "ai"\) \{[\s\S]*setInspectorTab\("ai"\)[\s\S]*inspector: false/);
+    expect(declarations).toMatch(/\.studio\.is-workspace\[data-tool="ai"\] \{[^}]*--ws-tool-options:\s*320px/);
   });
 });

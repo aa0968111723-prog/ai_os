@@ -3,7 +3,8 @@
  * PR-4a：右側 ResourceDock 就近取用素材／定裝／知識。
  * PR #710：勾選分鏡後顯示 VisualChoiceTray（動作／表情／鏡頭／光線／風格視覺選擇）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { SceneStudio } from "../../components/SceneStudio";
@@ -21,6 +22,7 @@ import { ShotCard, type ShotRow } from "./ShotCard";
 import { ShotNavigator } from "./ShotNavigator";
 import { VisualChoiceTray } from "./VisualChoiceTray";
 import { registerAssistantFocus } from "../../lib/assistantContext";
+import { selectableBringInIds } from "@shared/studioReferenceImage";
 
 export function StoryboardStage({
   projectId,
@@ -44,14 +46,28 @@ export function StoryboardStage({
   const utils = trpc.useUtils();
   const storyScenes = trpc.story.scenesList.useQuery({ projectId });
   const shots = trpc.scenes.listByProject.useQuery({ projectId });
+  const invalidateShots = () => {
+    void utils.scenes.listByProject.invalidate({ projectId });
+    void utils.story.get.invalidate({ projectId });
+    void utils.story.scenesList.invalidate({ projectId });
+  };
   const addShot = trpc.scenes.addDraft.useMutation({
-    onSuccess: () => {
-      void utils.scenes.listByProject.invalidate({ projectId });
-      void utils.story.get.invalidate({ projectId });
-      void utils.story.scenesList.invalidate({ projectId });
-    },
+    onSuccess: invalidateShots,
   });
+  const insertAfter = trpc.scenes.insertAfter.useMutation({
+    onSuccess: invalidateShots,
+  });
+  const insertAfterMutateRef = useRef(insertAfter.mutateAsync);
+  insertAfterMutateRef.current = insertAfter.mutateAsync;
+  const insertQueueRef = useRef<ReturnType<typeof createInsertAfterQueue> | undefined>(undefined);
+  if (!insertQueueRef.current) {
+    insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
+  }
   const characters = trpc.characters.list.useQuery({ projectId });
+  const honoredCharIds = useMemo(
+    () => (characters.data ? selectableBringInIds(characters.data, charIds) : charIds),
+    [characters.data, charIds],
+  );
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const looks = trpc.characterLooks.list.useQuery({ projectId });
   const continuity = trpc.story.continuityCheck.useQuery({ projectId });
@@ -97,6 +113,7 @@ export function StoryboardStage({
   const isEmpty = !shots.isLoading && shotRows.length === 0;
 
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchorShotId, setAnchorShotId] = useState<string | null>(null);
   const togglePick = useCallback((shotId: string) => {
     setPicked((prev) => {
       const next = new Set(prev);
@@ -104,6 +121,7 @@ export function StoryboardStage({
       else next.add(shotId);
       return next;
     });
+    setAnchorShotId(shotId);
   }, []);
   const liveShotIds = useMemo(() => new Set(shotRows.map((s) => s.id)), [shotRows]);
   useEffect(() => {
@@ -111,10 +129,13 @@ export function StoryboardStage({
       const kept = [...prev].filter((id) => liveShotIds.has(id));
       return kept.length === prev.size ? prev : new Set(kept);
     });
+    setAnchorShotId((prev) => (prev && liveShotIds.has(prev) ? prev : null));
   }, [liveShotIds]);
 
   const pickedIds = useMemo(() => [...picked], [picked]);
-  const focusShot = studioShot ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined);
+  const focusShot = studioShot
+    ?? (pickedIds.length === 1 ? shotRows.find((s) => s.id === pickedIds[0]) : undefined)
+    ?? (anchorShotId ? shotRows.find((s) => s.id === anchorShotId) : undefined);
   const focusShotNo = focusShot ? shotNumber.get(focusShot.id) : undefined;
   const hasShotFocus = !!focusShot || pickedIds.length > 0;
   useEffect(() => {
@@ -157,11 +178,19 @@ export function StoryboardStage({
                 size="sm"
                 variant="primary"
                 type="button"
-                disabled={addShot.isPending}
-                title="解析逾時時不必卡住：先開一格空白鏡，或回故事按產生分鏡"
-                onClick={() => addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` })}
+                disabled={!focusShot && addShot.isPending}
+                aria-busy={(focusShot ? insertAfter.isPending : addShot.isPending) || undefined}
+                title={
+                  focusShot
+                    ? "插在選取的那一鏡後面（與動畫創作室 ⋯「在這之後插入一鏡」同一支）"
+                    : "沒選鏡時加在最後。每張分鏡卡也有「在這之後插入一鏡」。"
+                }
+                onClick={() => {
+                  if (focusShot) insertQueueRef.current?.enqueue(focusShot.id);
+                  else addShot.mutate({ projectId, title: `第 ${shotRows.length + 1} 鏡` });
+                }}
               >
-                <Icon name="Plus" size={13} /> {addShot.isPending ? "建立中…" : "新增鏡"}
+                <Icon name="Plus" size={13} /> {!focusShot && addShot.isPending ? "建立中…" : "新增鏡"}
               </Button>
             )}
             {canEdit && onSendToWorkbench && focusShot && (
@@ -198,7 +227,7 @@ export function StoryboardStage({
           ) : (
             <>
               <Hint style={{ margin: "4px 0 10px" }}>
-                勾選一鏡先看目前創作狀態，再直接改角色、動作、光線或鏡頭；素材庫與定裝仍可由上方入口完整管理。
+                點一張分鏡卡或勾一鏡再按「新增鏡」會插在那一鏡後面。每張卡也有「在這之後插入一鏡」。沒選時加在最後。
               </Hint>
               {outdatedByShot.size > 0 && (
                 <Hint as="div" role="status" style={{ margin: "0 0 10px" }}>
@@ -224,7 +253,7 @@ export function StoryboardStage({
                       ) : (
                         <div className="board-shots">
                           {group.shots.map((shot) => (
-                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
+                            <ShotCard key={shot.id} projectId={projectId} shot={shot} shotNumber={shotNumber.get(shot.id) ?? 0} canEdit={canEdit} mode={mode} looks={looks.data ?? []} characterNames={characterNames} outdatedReason={outdatedByShot.get(shot.id)} onOpenStudio={setStudioSceneId} picked={picked.has(shot.id)} onTogglePick={togglePick} onFocusShot={setAnchorShotId} onInsertAfter={(sceneId) => insertQueueRef.current?.enqueue(sceneId)} assetHints={mode === "pro" ? (hintsByShot.get(shot.id) ?? EMPTY_SHOT_SUGGESTION_ITEMS) : EMPTY_SHOT_SUGGESTION_ITEMS} />
                           ))}
                         </div>
                       )}
@@ -253,7 +282,7 @@ export function StoryboardStage({
           projectId={projectId}
           sceneNumber={shotNumber.get(studioShot.id) ?? 1}
           canEdit={canEdit}
-          charIds={charIds}
+          charIds={honoredCharIds}
           sceneIds={sceneIds}
           propIds={propIds}
           nav={<ShotNavigator shots={shotRows} currentId={studioShot.id} onGo={(nextId) => setStudioSceneId(nextId)} />}

@@ -131,4 +131,47 @@ describe.skipIf(!RUN_PG).sequential("data integrity: same-name projects stay iso
     expect(ok.referenceAssetId).toBe(assetA.id);
     expect(ok.projectId).toBe(projectA.id);
   });
+
+  it("characters.add refuses「不要寫素材清單」and keeps 淡江 when the story names 淡大", async () => {
+    const { projectA, characters, story } = await seedPair();
+    await story.save({ projectId: projectA.id, content: "小華站在淡大校門口。我是大二化工系的小華。" });
+    await expect(characters.add({
+      projectId: projectA.id,
+      name: "不要寫素材清單",
+      appearance: "待補外觀描述",
+    })).rejects.toMatchObject({ message: expect.stringMatching(/指示句/) });
+    expect(await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectA.id))).toHaveLength(0);
+
+    const row = await characters.add({
+      projectId: projectA.id,
+      name: "小華",
+      appearance: "年輕男性",
+    });
+    expect(row.name).toBe("小華");
+    expect(row.appearance).toContain("淡江大二化工");
+    expect(row.appearance).toContain("粉橘短髮女孩");
+    expect(row.appearance).not.toContain("年輕男性");
+
+    const blob = await characters.add({
+      projectId: projectA.id,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+      appearance: "年輕男性",
+    });
+    expect(blob.id).toBe(row.id);
+    expect(blob.name).toBe("小華");
+    const cards = await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectA.id));
+    expect(cards).toHaveLength(1);
+
+    const renamed = await characters.update({
+      id: row.id,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+    });
+    expect(renamed.name).toBe("小華");
+    await expect(characters.update({
+      id: row.id,
+      name: "不要寫素材清單",
+    })).rejects.toMatchObject({ message: expect.stringMatching(/指示句/) });
+    const [still] = await db.select().from(schema.characters).where(eq(schema.characters.id, row.id));
+    expect(still?.name).toBe("小華");
+  });
 });

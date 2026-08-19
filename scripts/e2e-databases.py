@@ -63,7 +63,7 @@ def upload_file(opener, table_id, filename, content, content_type):
             return e.code, {}
 
 
-from e2e_lib import ok
+from e2e_lib import adopt_waiting_generate_steps, ok
 
 admin = client(); azhe = client()
 
@@ -391,11 +391,15 @@ ok("代理計畫含 record_to_database 步驟", has_record_step)
 appr = call("POST", azhe, "agents.approve", {"runId": plan["id"]})
 ok("代理計畫核准執行", appr["status"] == "running")
 
-# 等背景執行器跑完（每 4 秒一 tick；mock 生成也要幾輪）——輪詢代理成果庫出現新列
+# 等背景執行器跑完（每 4 秒一 tick；視覺生成要先 Adopt 才會從 waiting 繼續）
 import time
 agent_wrote = False
 for _ in range(40):
     time.sleep(2)
+    runs = call("GET", azhe, "agents.listByProject", {"projectId": agent_proj["id"]})
+    run = next((row for row in runs if row.get("id") == plan["id"]), None)
+    if run:
+        adopt_waiting_generate_steps(call, azhe, run)
     rr = call("GET", azhe, "databases.listRows", {"tableId": agent_db["id"]})
     if rr.get("total", 0) >= 1:
         agent_wrote = True

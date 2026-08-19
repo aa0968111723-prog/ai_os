@@ -13,6 +13,13 @@ import {
   type AnimationRepairPlan,
 } from "../../shared/animationPipeline";
 import { executeGenerationCommand } from "./generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "./agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
+import { buildShotContextPrompt } from "./shotContextPrompt";
+import { ensureXiaohuaCharacterIds } from "./cardAnchors";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import { resolveSceneCards } from "../../shared/sceneCards";
+import { resolveHonoredCharacterSheet } from "./referenceAsset";
 
 function evaluationRecommendation(
   result: typeof schema.generationConsistencyEvaluations.$inferSelect["result"] | null,
@@ -117,8 +124,29 @@ export async function executeAnimationGenerationStage(input: {
   if (input.stage === "video_generation" && !capabilityForModel(model).imageToVideo) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "影片階段必須使用支援 image-to-video 的模型" });
   }
-  const prompt = input.prompt?.trim() || shot.prompt?.trim();
+  const prompt = input.prompt?.trim() || (await buildShotContextPrompt(shot, model)).trim();
   if (!prompt) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡還沒有生成提示詞" });
+  const cards = resolveSceneCards(shot, null);
+  const characterIds = await ensureXiaohuaCharacterIds(
+    project.id,
+    cards.characterIds,
+    [shot.title, prompt, shot.action, shot.dialogue],
+  );
+  // Same persist-lock as generateInto: Command stores input.prompt, not the provider lock.
+  const lockedPrompt = lockXiaohuaGenerationPrompt(
+    prompt,
+    /小華/.test([shot.title, prompt, shot.action, shot.dialogue].join("")) ? ["小華"] : [],
+  );
+  // Keyframe only: same 角色卡「生成時帶入」as generateInto. Video keeps the
+  // caller / adopted i2v parent — honor-sheet must not replace that frame.
+  const sourceAssetId = input.stage === "keyframe_generation"
+    ? await resolveHonoredCharacterSheet({
+        projectId: project.id,
+        groupId: project.groupId,
+        characterIds: cards.characterIds,
+        explicitSourceAssetId: input.sourceAssetId,
+      })
+    : input.sourceAssetId;
 
   const generation = await executeGenerationCommand({
     auth: input.auth,
@@ -126,17 +154,27 @@ export async function executeAnimationGenerationStage(input: {
     id: input.clientRequestId,
     projectId: project.id,
     modelId: model.id,
-    prompt,
+    prompt: lockedPrompt,
     sceneId: shot.id,
-    sourceAssetId: input.sourceAssetId,
-    characterIds: shot.characterIds ?? undefined,
-    scenePresetIds: shot.scenePresetIds ?? undefined,
-    propIds: shot.propIds ?? undefined,
+    ...(sourceAssetId ? { sourceAssetId } : {}),
+    characterIds,
+    scenePresetIds: cards.scenePresetIds,
+    propIds: cards.propIds,
     lookIds: shot.lookIds ?? undefined,
     shotDirection: { camera: shot.camera, performance: shot.performance, action: shot.action },
     preserveScenePointer: true,
     reasonPrefix: input.stage === "keyframe_generation" ? "動畫關鍵影格" : "動畫影片",
   });
+  // generateInto already drops leftover 0/N「待你過目」when a replayable
+  // job lands. 動畫關鍵影格 / 動畫影片 still left the HUD parked until
+  // the 30s poll. Candidate-only: reconcile marks steps 待你採用, not done.
+  if (shouldReplayIdempotentGeneration(generation.status)) {
+    scheduleReconcileAfterIndependentGenerate({
+      projectId: project.id,
+      sceneId: shot.id,
+      generationId: generation.id,
+    });
+  }
   return {
     generationId: generation.id,
     status: generation.status,
