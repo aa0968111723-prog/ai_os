@@ -155,6 +155,8 @@ export interface AgentStep {
   scenePresetIds?: string[];
   /** 素材設定卡 id（最多 4）：道具外觀／材質錨點 */
   propIds?: string[];
+  /** 本鏡造型（character_looks.id）。generateInto / refine 都有帶；批次補完漏了會換掉衣服。 */
+  lookIds?: string[];
   /** Frozen packet from batchGenerate. Approval resume must reuse this ID. */
   shotContextPacketId?: string;
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
@@ -1065,6 +1067,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         characterIds: step.characterIds,
         scenePresetIds: step.scenePresetIds,
         propIds: step.propIds,
+        lookIds: step.lookIds,
         sourceAssetId: step.sourceAssetId,
         sourceUrl: step.sourceUrl,
         shotContextPacketId: step.shotContextPacketId,
@@ -2219,6 +2222,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       characterIds: step.characterIds,
       scenePresetIds: step.scenePresetIds,
       propIds: step.propIds,
+      lookIds: step.lookIds,
       sourceAssetId: step.sourceAssetId,
       sourceUrl: step.sourceUrl,
       shotContextPacketId: step.shotContextPacketId,

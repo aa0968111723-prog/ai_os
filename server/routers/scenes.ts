@@ -1156,6 +1156,7 @@ export const scenesRouter = router({
           characterIds: cards.characterIds,
           scenePresetIds: cards.scenePresetIds,
           propIds: cards.propIds,
+          lookIds: scene.lookIds ?? undefined,
           shotContextPacketId: packetId,
         });
       }
