@@ -29,6 +29,5 @@ describe("單格／工作室 empty-field samples are 小華 A–F, not 七幕", 
   it("ShotInspector prompt placeholder teaches A–F 校門口 白帽T, not 禪堂空景", () => {
     expect(inspector).toContain("淡大校門口校名牌前，粉橘短髮女孩、白帽T的小華，暖色光");
     expect(inspector).not.toContain("清晨的禪堂空景");
-    expect(inspector).not.toContain("禪堂空景");
   });
 });

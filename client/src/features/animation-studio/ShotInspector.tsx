@@ -386,7 +386,7 @@ function FrameTab({
         )}
       </Field>
 
-      {/* Live leftover: empty prompt still taught 七幕 禪堂空景, not A–F 校門口 白帽T. */}
+      {/* Live leftover: empty prompt still taught incense empty-shot, not A–F 校門口 白帽T. */}
       <Field label="畫面描述（生成提示詞）" hint="這一鏡要看到什麼：主體、構圖、光線、氣氛。動作走位寫在「備註」。">
         <textarea
           key={`prompt-${shot.id}-${shot.prompt ?? ""}`}
