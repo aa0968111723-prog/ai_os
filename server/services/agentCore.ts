@@ -645,6 +645,47 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
   };
 }
 
+/**
+ * batchGenerate already freezes a shot-context packet on each visual generate
+ * step so approval resume cannot rebuild from a later shot edit. LLM / mock
+ * plans used to omit that id; Command then froze at submit. Same helper,
+ * same skip-on-failure. New scenes (create_scene then generate) have no row
+ * yet — skip; Command freezes after the shot exists.
+ */
+async function stampAgentGenerateShotContextPackets(
+  auth: AuthState,
+  projectId: string,
+  steps: AgentStep[],
+): Promise<void> {
+  const pending = steps.filter((step) => step.kind === "generate" && step.sceneNo && !step.shotContextPacketId);
+  if (!pending.length) return;
+  const { freezeShotContextPacket } = await import("./shotContextPackets");
+  const { getModel } = await import("../../shared/models");
+  const { sceneFillRole } = await import("../../shared/sceneVersions");
+  const rows = await db
+    .select({ id: schema.scenes.id })
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)))
+    .orderBy(asc(schema.scenes.orderIndex));
+  for (const step of pending) {
+    const model = getModel(step.modelId ?? "");
+    if (!model || sceneFillRole(model) !== "visual") continue;
+    const scene = rows[(step.sceneNo ?? 0) - 1];
+    if (!scene) continue;
+    try {
+      const frozen = await freezeShotContextPacket({
+        auth,
+        projectId,
+        shotId: scene.id,
+        modelId: model.id,
+      });
+      step.shotContextPacketId = frozen.packetId;
+    } catch (error) {
+      console.warn("[agent] packet freeze skipped:", error instanceof Error ? error.message : error);
+    }
+  }
+}
+
 /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
 export async function planAgentCore(input: {
   auth: AuthState;
@@ -704,6 +745,7 @@ export async function planAgentCore(input: {
 
   if (isMockMode()) {
     const plan = mockPlan(goal, scenes.length, writableDbs);
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     const plannerTelemetry: AgentPlannerTelemetry = {
       requestedMode: plannerMode,
       provider: "mock",
@@ -966,6 +1008,7 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     } catch {
       throw new TRPCError({ code: "BAD_REQUEST", message: "AI 計畫含有無效依賴或引用，系統已阻止落地；請重新規劃" });
     }
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     plan.summary.goal = goal;
     plan.summaryText = `${goal}｜${plan.steps.length} 個步驟｜預估 ${plan.estPoints} 點`;
     if (plan.steps.length === 0) {
@@ -1093,6 +1136,7 @@ export async function replanAgentRunAfterPlanningAnswer(input: {
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     const writableDbs = await listAgentWritableDbs(auth);
     const plan = mockPlan(goal, scenes.length, writableDbs);
+    await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
     plan.planSummary = attachPlanningIssuesToSummary({
       ...plan.planSummary,
       missingInformation: [],
@@ -1228,6 +1272,7 @@ ${clarifications || "（無額外文字）"}
   } catch {
     throw new TRPCError({ code: "BAD_REQUEST", message: "重新規劃結果含無效依賴或引用，已阻止落地" });
   }
+  await stampAgentGenerateShotContextPackets(auth, project.id, plan.steps);
   plan.summary.goal = goal;
   plan.summary = attachPlanningIssuesToSummary(plan.summary);
   plan.summaryText = `${goal}｜${plan.steps.length} 個步驟｜預估 ${plan.estPoints} 點｜澄清後重規劃`;

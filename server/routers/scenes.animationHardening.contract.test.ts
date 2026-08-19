@@ -542,6 +542,16 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(update).not.toContain("lockXiaohuaGenerationPrompt");
   });
 
+  it("LLM agent plans freeze shotContextPacketId the same way batchGenerate does", () => {
+    const core = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
+    expect(core).toContain("async function stampAgentGenerateShotContextPackets");
+    expect(core.match(/stampAgentGenerateShotContextPackets\(auth, project.id, plan.steps\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(core).toContain("step.shotContextPacketId = frozen.packetId");
+    const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
+    expect(batch).toContain("shotContextPacketId: packetId");
+    expect(batch).toContain("freezeShotContextPacket");
+  });
+
   it("animationPipeline keyframe honours 角色卡 生成時帶入; video keeps i2v parent", () => {
     const pipe = readFileSync(join(process.cwd(), "server/services/animationPipeline.ts"), "utf8");
     const stage = pipe.slice(pipe.indexOf("export async function executeAnimationGenerationStage"), pipe.indexOf("export async function targetedAnimationRepairPlan"));

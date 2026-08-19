@@ -164,7 +164,7 @@ export interface AgentStep {
    * 補完 N 鏡 / planner generate used to omit it.
    */
   shotDirection?: ContinuityShotDirection;
-  /** Frozen packet from batchGenerate. Approval resume must reuse this ID. */
+  /** Frozen packet from batchGenerate / planAgentCore. Approval resume must reuse this ID. */
   shotContextPacketId?: string;
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
   sourceAssetId?: string;

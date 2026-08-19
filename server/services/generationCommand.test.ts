@@ -75,6 +75,15 @@ describe("generationCommand #749 review guards", () => {
     expect(runner.match(/shotContextPacketId: step.shotContextPacketId/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("planAgentCore stamps shotContextPacketId on visual generate steps like batchGenerate", () => {
+    const core = readFileSync(join(process.cwd(), "server/services/agentCore.ts"), "utf8");
+    expect(core).toContain("async function stampAgentGenerateShotContextPackets");
+    expect(core.match(/stampAgentGenerateShotContextPackets\(auth, project.id, plan.steps\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(core).toContain("step.shotContextPacketId = frozen.packetId");
+    expect(core).toContain("sceneFillRole(model) !== \"visual\"");
+    expect(core).toContain("freezeShotContextPacket");
+  });
+
   it("stores the frozen packet id in generation source meta for resume", () => {
     const stored = storeGenerationSourceMeta({ prompt: "x" }, { shotContextPacketId: "pkt-1", preserveScenePointer: true });
     const split = splitGenerationSourceMeta(stored);
