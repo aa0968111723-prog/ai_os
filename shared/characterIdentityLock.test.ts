@@ -48,6 +48,17 @@ describe("小華 identity lock", () => {
     expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
   });
 
+  it("upgrades truncated A–F EXTRACT 大二化工、白帽T、短髮 to 粉橘短髮女孩", () => {
+    const locked = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "大二化工、白帽T、短髮", costume: "白帽T、短髮，腳本未換裝" },
+      TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    );
+    expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(locked.appearance).toContain("粉橘短髮女孩");
+    expect(locked.appearance).toContain("白帽T");
+    expect(locked.appearance).not.toContain("年輕男性");
+  });
+
   it("does not rewrite 禪定龜龜 or a non-小華 male extra", () => {
     const turtle = applyXiaohuaIdentityLock(
       { name: "禪定龜龜", appearance: "吉祥物龜龜", costume: "圓殼" },

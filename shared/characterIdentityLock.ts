@@ -50,12 +50,17 @@ export function applyXiaohuaIdentityLock<
   const source = `${appearance} ${script}`;
   const empty = !appearance.trim() || appearance.trim() === "待補外觀描述";
   const campus = mentionsTamkangCampus(appearance, script);
+  // A–F EXTRACT often yields「大二化工、白帽T、短髮」without 粉橘短髮女孩.
+  // That is the promo card, not another project's look — still lock it.
+  const incompletePromoLook =
+    /大二化工|白帽T/.test(`${appearance} ${costume}`) && !/粉橘短髮女孩/.test(appearance);
   if (!flipped && !missingFemale && appearance.trim()) {
     return { ...character, appearance: withTamkangSophomore(appearance, source) };
   }
-  // Another project's 小華 (藍外套／紅旗袍) is not the A–F 白帽T lock.
-  // Only empty cards, EXTRACT male flips, and 淡江／淡大 scripts take the promo look.
-  if (!flipped && !empty && !campus) {
+  // Another project's 小華 (藍外套／紅旗袍／紅衣長髮) is not the A–F 白帽T lock.
+  // Empty cards, EXTRACT male flips, 淡江／淡大 scripts, and truncated A–F
+  // extracts take the promo look.
+  if (!flipped && !empty && !campus && !incompletePromoLook) {
     return character;
   }
   const keepCostume = /白帽/.test(costume) && !MALE_FLIP.test(costume);
