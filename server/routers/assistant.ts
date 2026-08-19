@@ -1010,7 +1010,7 @@ const RESOURCE_OUTCOME_REASON: Partial<Record<ResourceOutcome, string>> = {
  * 不帶 onEvent 時行為與原本 ask 完全一致（只在結束回 steps 摘要）。所有寫入仍只走 runAction 的 ACL／政策守門。
  */
 export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
-  let traceSessionId = input.traceSessionId;
+  let pendingTraceSessionId = input.traceSessionId;
   /**
    * 統一 Agent 事件流。與全站助手同一個發射端與同一份不變式：
    * **事件只在事情真的發生的那一刻發出**（services/agentEventStream 檔頭）。
@@ -1040,7 +1040,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       if (!input.auth.groups.some((g) => g.groupId === project.groupId)) throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
-      if (!traceSessionId) {
+      if (!pendingTraceSessionId) {
         const trace = await createAiTraceSession({
           groupId: project.groupId,
           projectId: project.id,
@@ -1049,8 +1049,12 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
           title: input.message.slice(0, 160),
           summary: "專案助手問答",
         });
-        traceSessionId = trace.id;
+        pendingTraceSessionId = trace.id;
       }
+      if (!pendingTraceSessionId) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "無法建立 AI 軌跡" });
+      }
+      const traceSessionId = pendingTraceSessionId;
       await recordAiTraceEventSafely({
         sessionId: traceSessionId,
         eventType: "prepared",

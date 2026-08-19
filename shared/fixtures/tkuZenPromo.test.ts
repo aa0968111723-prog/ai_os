@@ -83,7 +83,7 @@ describe("淡江禪學社 小華 SHOTLIST fixture", () => {
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.palette).toContain("校名牌");
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "gate")?.lighting).toContain("暖色光");
     expect(TKU_ZEN_LOCATIONS.find((loc) => loc.key === "sunset")?.name).toBe("夕陽");
-    expect(TKU_ZEN_LOCATIONS.some((loc) => loc.name === "茶會" || loc.name.includes("茶會") || loc.name.includes("克難坡"))).toBe(false);
+    expect(TKU_ZEN_LOCATIONS.map((loc) => loc.name).join(" ")).not.toMatch(/茶會|克難坡/);
   });
 
   it("keeps 龜龜 off until the third spoken line and drops the invented 媽媽 beats", () => {

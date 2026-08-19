@@ -76,7 +76,7 @@ describe("runStudioInsertShot", () => {
       refresh: async () => undefined,
     });
     expect(insertAfter).toHaveBeenCalledWith({ sceneId: "s2" });
-    expect(insertAfter.mock.calls[0]?.[0]).not.toMatchObject({ duplicate: true });
+    expect(insertAfter).not.toHaveBeenCalledWith(expect.objectContaining({ duplicate: true }));
     expect(next.id).toBe("s2-new");
     expect(rows).toHaveLength(8);
     expect(rows.map((row) => row.id)).toEqual([

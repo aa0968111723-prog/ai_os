@@ -24,11 +24,11 @@ export function shouldRotateGenerateIntoRequestId(message: string | undefined | 
  * Partial variant retry: keep keys for landed slots (no double charge),
  * rotate only slots whose first send already failed.
  */
-export function variantRequestIdsAfterLaunch(
-  requestIds: readonly string[],
+export function variantRequestIdsAfterLaunch<T extends string>(
+  requestIds: readonly T[],
   results: ReadonlyArray<{ ok: boolean; error?: string }>,
-  mintId: () => string,
-): string[] {
+  mintId: () => T,
+): T[] {
   return requestIds.map((id, index) => {
     const row = results[index];
     if (row && !row.ok && shouldRotateGenerateIntoRequestId(row.error)) return mintId();

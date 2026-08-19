@@ -113,7 +113,7 @@ describe("StoryboardTimeline 複製這一鏡", () => {
                 sceneId: id,
                 insertAfter: async ({ sceneId }) => {
                   const src = rows.find((row) => row.id === sceneId);
-                  if (!src) return { id: "", orderIndex: 0, title: "" };
+                  if (!src) return { id: "", orderIndex: 0, title: "", durationSec: 0 };
                   return { id: "s2-copy", orderIndex: src.orderIndex + 1, title: `${src.title} 複本`, durationSec: src.durationSec };
                 },
                 mergeIntoCache: (sourceId, created) => {
@@ -170,7 +170,7 @@ describe("StoryboardTimeline 複製這一鏡", () => {
                 sceneId: id,
                 insertAfter: async ({ sceneId }) => {
                   const src = rows.find((row) => row.id === sceneId);
-                  if (!src) return { id: "", orderIndex: 0, title: "" };
+                  if (!src) return { id: "", orderIndex: 0, title: "", durationSec: 0 };
                   return { id: "s2-new", orderIndex: src.orderIndex + 1, title: "新分鏡", durationSec: 4 };
                 },
                 mergeIntoCache: (sourceId, created) => {

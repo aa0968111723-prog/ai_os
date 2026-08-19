@@ -1018,7 +1018,7 @@ export const scenesRouter = router({
         idColumn: schema.scenes.id,
         revColumn: schema.scenes.rev,
         row: cur,
-        patch,
+        patch: { ...patch },
         expectedRev: input.expectedRev ?? cur.rev,
         baseline,
         extraWhere: isNull(schema.scenes.deletedAt),
