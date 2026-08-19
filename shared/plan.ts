@@ -33,6 +33,9 @@ export const planStepKindSchema = z.enum([
   "adobe_photo_edit",
   "adobe_export_timeline",
   "adobe_timeline_render",
+  // CUTOS PR9：一個受治理的外部工具步驟。能力清單在 agentToolRegistry，
+  // 不讓每新增一項剪輯能力就長一個 kind。
+  "tool_call",
 ]);
 
 export const planStepStatusSchema = z.enum([
