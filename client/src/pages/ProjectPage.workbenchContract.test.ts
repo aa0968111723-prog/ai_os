@@ -213,3 +213,13 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(before).toMatch(/\buseEffect\s*\(/);
   });
 });
+
+describe("敘事人物 sample is 小華 A–F, not 七幕", () => {
+  it("NarrativePersonAdd placeholder + hint teach 小華, not 安倢＝紅傘", () => {
+    expect(src).toContain("例：小華＝粉橘短髮女孩、白帽T");
+    expect(src).not.toContain("例：安倢＝紅傘、米白外套");
+    expect(src).not.toContain("慕恩");
+    expect(src).not.toContain("哲維");
+    expect(src).not.toContain("瑀晴");
+  });
+});

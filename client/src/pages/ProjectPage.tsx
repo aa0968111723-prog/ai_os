@@ -279,7 +279,7 @@ function NarrativePersonAdd({ onAdd, disabled }: { onAdd: (token: string) => voi
       <input
         value={draft}
         aria-label="新增敘事人物"
-        placeholder={disabled ? "已達 30 項上限" : "例：安倢＝紅傘、米白外套"}
+        placeholder={disabled ? "已達 30 項上限" : "例：小華＝粉橘短髮女孩、白帽T"}
         maxLength={100}
         disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
@@ -2541,7 +2541,8 @@ export function ProjectPage({ id }: { id: string }) {
                       <p className="error" style={{ marginTop: 6 }}>{addCharFromPerson.error.message}</p>
                     )}
                     <Hint style={{ margin: "6px 0 0", fontSize: 12 }}>
-                      寫法可用「名字＝外觀」（例：安倢＝紅傘、米白外套），建定裝會拆成名與外觀。
+                      {/* Live leftover: this door still taught 七幕 安倢＝紅傘, not A–F. */}
+                      寫法可用「名字＝外觀」（例：小華＝粉橘短髮女孩、白帽T），建定裝會拆成名與外觀。
                     </Hint>
                   </div>
 
