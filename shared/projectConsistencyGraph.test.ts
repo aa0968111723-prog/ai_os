@@ -28,6 +28,27 @@ describe("workspace projection", () => {
       needsConfirm: 2,
       consistentShots: 18,
     })).toMatch(/確認/);
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 0,
+      consistentShots: 21,
+    })).toBe("只重做不一致的鏡頭");
+    expect(nextWorkspaceAction({
+      storyReady: true,
+      parsed: false,
+      shotCount: 26,
+      needsConfirm: 0,
+      consistentShots: 21,
+    })).not.toBe("解析故事，讓人物與場景就位");
+    expect(compactWorkspaceStatus({
+      charactersApplied: true,
+      sceneCount: 5,
+      consistentShots: 21,
+      shotCount: 26,
+      needsConfirm: 0,
+    })).toBe("人物已套用 · 5 個場景 · 21/26 鏡一致");
   });
 });
 

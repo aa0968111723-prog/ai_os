@@ -304,7 +304,10 @@ export function nextWorkspaceAction(input: {
   consistentShots: number;
 }): string {
   if (!input.storyReady) return "先寫故事或貼上腳本";
-  if (!input.parsed) return "解析故事，讓人物與場景就位";
+  // Live leftover: compactStatus already said 人物已套用 · 21/26 鏡一致,
+  // but nextAction still looped to parse because lastParsedAt was empty
+  // (cards / heuristic board / assistant writes do not always stamp parse).
+  if (!input.parsed && input.shotCount <= 0) return "解析故事，讓人物與場景就位";
   if (input.shotCount <= 0) return "產生分鏡";
   if (input.needsConfirm > 0) return `確認 ${input.needsConfirm} 個項目後再生成`;
   if (input.consistentShots < input.shotCount) return "只重做不一致的鏡頭";
