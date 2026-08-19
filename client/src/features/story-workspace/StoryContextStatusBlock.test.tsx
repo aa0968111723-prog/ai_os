@@ -35,6 +35,18 @@ const scorecard = [
     affectedShotIds: [] as string[],
     reason: "還有鏡頭沒有已採用畫面；有鏡頭尚未核准",
   },
+  {
+    dimension: "look",
+    status: "warning",
+    affectedShotIds: [] as string[],
+    reason: "1 套造型沒有參考圖",
+  },
+  {
+    dimension: "scene",
+    status: "warning",
+    affectedShotIds: [] as string[],
+    reason: "1 個場景卡沒有參考圖",
+  },
 ];
 
 vi.mock("../../api", () => ({
@@ -154,5 +166,14 @@ describe("StoryContextStatusBlock", () => {
     expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "打開交付" }));
     expect(revealStoryInlineSection).toHaveBeenCalledWith("delivery", { projectId: "p1", scroll: true });
+  });
+
+  it("look/scene missing reference opens 造型／場景, not 修復鏡頭 or 生成定裝", () => {
+    render(<StoryContextStatusBlock projectId="p1" canEdit onRepairShots={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打開造型" }));
+    expect(revealStoryInlineSection).toHaveBeenCalledWith("looks", { projectId: "p1", scroll: true });
+    fireEvent.click(screen.getByRole("button", { name: "打開場景" }));
+    expect(revealStoryInlineSection).toHaveBeenCalledWith("scenes", { projectId: "p1", scroll: true });
   });
 });

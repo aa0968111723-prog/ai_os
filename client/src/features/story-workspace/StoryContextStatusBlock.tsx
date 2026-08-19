@@ -136,6 +136,7 @@ export function StoryContextStatusBlock({
             hasWorldviewStyles={wv.styles.length > 0}
             suggestedSound={suggestedSound.ambience || suggestedSound.music ? suggestedSound : undefined}
             onOpenDelivery={() => revealStoryInlineSection("delivery", { projectId, scroll: true })}
+            onOpenCards={(section) => revealStoryInlineSection(section, { projectId, scroll: true })}
           />
           {setupError ? <Hint as="p">{setupError}</Hint> : null}
           {sheet.error ? <Hint as="p">定裝生成失敗：{sheet.error.message}</Hint> : null}

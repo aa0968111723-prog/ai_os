@@ -6,6 +6,7 @@ import {
   scorecardNeedsSetupCta,
   scorecardNeedsSheetCta,
   scorecardNeedsDeliveryCta,
+  scorecardNeedsOpenCardsCta,
   visualCoverageScore,
 } from "./projectConsistencyGraph";
 import { inheritContinuityState, referenceRoleConflicts } from "./shotContextPacket";
@@ -180,5 +181,23 @@ describe("consistency scorecard (closure §11)", () => {
     expect(identity?.reason).toMatch(/沒有定裝參考圖/);
     expect(scorecardNeedsSheetCta(identity!)).toBe(true);
     expect(scorecardNeedsSetupCta(identity!)).toBe(false);
+  });
+
+  it("look/scene missing reference opens cards, not 修復 0 鏡 or 生成定裝", () => {
+    const rows = buildConsistencyScorecard({
+      ...empty,
+      looksMissingReference: ["look-1"],
+      presetsMissingReference: ["preset-1"],
+    });
+    const look = rows.find((row) => row.dimension === "look");
+    const scene = rows.find((row) => row.dimension === "scene");
+    expect(look?.affectedShotIds).toEqual([]);
+    expect(scene?.affectedShotIds).toEqual([]);
+    expect(scorecardNeedsOpenCardsCta(look!)).toBe("looks");
+    expect(scorecardNeedsOpenCardsCta(scene!)).toBe("scenes");
+    expect(scorecardNeedsSheetCta(look!)).toBe(false);
+    expect(scorecardNeedsSheetCta(scene!)).toBe(false);
+    expect(scorecardNeedsSetupCta(look!)).toBe(false);
+    expect(scorecardNeedsDeliveryCta(look!)).toBe(false);
   });
 });

@@ -38,6 +38,20 @@ const deliveryRow: ScorecardRow = {
   reason: "還有鏡頭沒有已採用畫面；有鏡頭尚未核准",
 };
 
+const lookRow: ScorecardRow = {
+  dimension: "look",
+  status: "warning",
+  affectedShotIds: [],
+  reason: "1 套造型沒有參考圖",
+};
+
+const sceneRow: ScorecardRow = {
+  dimension: "scene",
+  status: "warning",
+  affectedShotIds: [],
+  reason: "1 個場景卡沒有參考圖",
+};
+
 describe("StoryScorecardRepair", () => {
   it("style/sound empty-state offers setup, not 修復 0 鏡", () => {
     const onSetupDimension = vi.fn();
@@ -133,6 +147,29 @@ describe("StoryScorecardRepair", () => {
     fireEvent.click(screen.getByRole("button", { name: "打開交付" }));
     expect(onOpenDelivery).toHaveBeenCalledTimes(1);
     expect(onRepairShots).not.toHaveBeenCalled();
+  });
+
+  it("look/scene missing reference offers 打開造型／打開場景, not 修復 or 生成定裝", () => {
+    const onRepairShots = vi.fn();
+    const onGenerateSheets = vi.fn();
+    const onOpenCards = vi.fn();
+    render(
+      <StoryScorecardRepair
+        rows={[lookRow, sceneRow]}
+        canEdit
+        onRepairShots={onRepairShots}
+        onGenerateSheets={onGenerateSheets}
+        onOpenCards={onOpenCards}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /修復/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成定裝" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打開造型" }));
+    fireEvent.click(screen.getByRole("button", { name: "打開場景" }));
+    expect(onOpenCards).toHaveBeenCalledWith("looks");
+    expect(onOpenCards).toHaveBeenCalledWith("scenes");
+    expect(onRepairShots).not.toHaveBeenCalled();
+    expect(onGenerateSheets).not.toHaveBeenCalled();
   });
 
   it("read-only members can still open delivery from the blocker chip", () => {

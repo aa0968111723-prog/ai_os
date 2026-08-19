@@ -15,6 +15,7 @@ import { useState } from "react";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
 import {
   scorecardNeedsDeliveryCta,
+  scorecardNeedsOpenCardsCta,
   scorecardNeedsSetupCta,
   scorecardNeedsSheetCta,
   type ScorecardRow,
@@ -54,6 +55,7 @@ export function StoryScorecardRepair({
   onSetupDimension,
   onGenerateSheets,
   onOpenDelivery,
+  onOpenCards,
   hasWorldviewStyles = false,
   suggestedSound,
 }: {
@@ -70,6 +72,8 @@ export function StoryScorecardRepair({
   onGenerateSheets?: (row: ScorecardRow) => void;
   /** 交付擋交付：打開交付（補畫面／核准），不是重生鏡頭、也不是未分場。 */
   onOpenDelivery?: () => void;
+  /** 造型／場景沒有參考圖：打開對應卡片補圖，不是修復鏡、也不是生成定裝。 */
+  onOpenCards?: (section: "looks" | "scenes") => void;
   /** 世界觀已有 styles 才能一鍵 pin；否則 CTA 帶去選畫風。 */
   hasWorldviewStyles?: boolean;
   /** 各鏡已寫的環境音／配樂——有就能一鍵固定聲音世界。 */
@@ -81,6 +85,7 @@ export function StoryScorecardRepair({
   const hasSetup = rows.some(scorecardNeedsSetupCta);
   const hasSheet = rows.some(scorecardNeedsSheetCta);
   const hasDelivery = rows.some(scorecardNeedsDeliveryCta);
+  const hasOpenCards = rows.some((row) => scorecardNeedsOpenCardsCta(row));
   return (
     <div className="story-scorecard" data-fb="一致性修復">
       {rows.map((row) => (
@@ -91,7 +96,8 @@ export function StoryScorecardRepair({
           <Meta as="span" className="story-scorecard__reason">{row.reason}</Meta>
           {canEdit && onRepairShots && row.affectedShotIds.length > 0
             && (row.status === "stale" || row.status === "warning")
-            && !scorecardNeedsSheetCta(row) && (
+            && !scorecardNeedsSheetCta(row)
+            && !scorecardNeedsOpenCardsCta(row) && (
             <Button
               variant="ghost"
               size="sm"
@@ -109,6 +115,26 @@ export function StoryScorecardRepair({
               onClick={onOpenDelivery}
             >
               打開交付
+            </Button>
+          )}
+          {onOpenCards && scorecardNeedsOpenCardsCta(row) === "looks" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => onOpenCards("looks")}
+            >
+              打開造型
+            </Button>
+          )}
+          {onOpenCards && scorecardNeedsOpenCardsCta(row) === "scenes" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => onOpenCards("scenes")}
+            >
+              打開場景
             </Button>
           )}
           {canEdit && onGenerateSheets && scorecardNeedsSheetCta(row) && (
@@ -167,7 +193,9 @@ export function StoryScorecardRepair({
       <Hint as="p" className="story-scorecard__hint">
         {hasDelivery
           ? "擋交付要到「交付」處理：補畫面、核准、再打包。修復只重做受影響的鏡，新結果會先當候選。"
-          : hasSheet
+          : hasOpenCards
+            ? "造型／場景沒有參考圖時，打開卡片補圖。修復只重做受影響的鏡，新結果會先當候選。"
+            : hasSheet
             ? "沒有定裝參考圖時，先生成定裝；修復只重做受影響的鏡，新結果會先當候選。"
             : hasSetup
               ? "風格與聲音還沒固定時，先設定；修復只重做受影響的鏡，新結果會先當候選。"
