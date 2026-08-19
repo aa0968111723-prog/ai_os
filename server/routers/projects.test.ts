@@ -46,6 +46,23 @@ describe("updateWorldview OCC", () => {
   });
 });
 
+describe("createSample seeds 小華 A–F, not 七幕", () => {
+  const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("createSample:"), source.indexOf("seriesOverview:"));
+
+  it("範例專案 worldview + shots mint 小華／禪定龜龜, never 安倢／慕恩", () => {
+    expect(body).toContain("小華");
+    expect(body).toContain("禪定龜龜");
+    expect(body).toContain("XIAOHUA_LOCKED_APPEARANCE");
+    expect(body).toContain("TKU_ZEN_SHOTS");
+    expect(body).not.toContain("安倢");
+    expect(body).not.toContain("慕恩");
+    expect(body).not.toContain("哲維");
+    expect(body).not.toContain("瑀晴");
+    expect(body).not.toContain("紅傘");
+  });
+});
+
 describe("setCover（專案封面圖）契約", () => {
   const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
   /** 只取 setCover 這一條 procedure 的本文（下一條是 assets），避免比對到隔壁 procedure */

@@ -5,6 +5,8 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { worldviewSchema } from "../../shared/worldview";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
+import { TKU_ZEN_SHOTS, tkuZenSpokenDialogue } from "../../shared/fixtures/tkuZenPromo";
 import { PLATFORMS, PROJECT_FORMAT_IDS, type ProjectFormat } from "../../shared/models";
 import {
   buildEpisodeNote,
@@ -157,8 +159,8 @@ export const projectsRouter = router({
     .mutation(({ ctx, input }) => createProjectCore({ auth: ctx.auth, ...input })),
 
   /**
-   * 建立「範例專案」——新夥伴一鍵看完整可運作範例：已填好世界觀＋3-4 格草稿分鏡（含提示詞與配音詞）
-   * ＋一張免費佔位縮圖。目的是讓沒有專案的人先看懂整條流程長什麼樣子。
+   * 建立「範例專案」——新夥伴一鍵看完整可運作範例：已填好世界觀＋6 格 A–F 草稿分鏡（含提示詞與對白）
+   * ＋一張免費佔位縮圖。只種小華與禪定龜龜，不種七幕角色。目的是讓沒有專案的人先看懂整條流程長什麼樣子。
    *
    * ★ 金錢安全（硬性約束）：這條路徑「絕不」呼叫 fal、「絕不」扣任何點數。
    *   縮圖用自家 /api/mock-asset/image（回傳靜態 1px PNG，見 server/index.ts）當免費佔位，
@@ -204,24 +206,22 @@ export const projectsRouter = router({
         const platform = platformOpt?.value ?? "youtube";
         const format = platformOpt?.format ?? "16:9";
 
-        // 世界觀：填成完整可讀的範例（基金會語氣＋CLAUDE.md 角色定裝，忠於原設定）。
+        // 世界觀：小華＋禪定龜龜 A–F only。Do not seed 七幕 names into a new sample.
         const worldview = worldviewSchema.parse({
-          logline: "一位訪客在晨光禪堂點起一炷香，在陪伴與整理之間，把浮躁的心慢慢交還給平靜。",
-          message: "把心交給佛，日子就有了呼吸的空隙。",
+          logline: "大二化工、粉橘短髮女孩、白帽T 的小華，在淡大校門口遇見禪學社的禪定龜龜。",
+          message: "真正認識自己。",
           audience: "初次接觸禪修、想在忙碌生活裡找一點安定的年輕人與家庭。",
           themes: ["苦→修行→轉變→感恩"],
           tones: ["溫柔療癒", "真誠", "療癒"],
           styles: ["日系水彩"],
           people: [
-            "安倢：紅傘、米白外套、帆布包，無眼鏡，溫柔回望，是引路與陪伴的角色。",
-            "慕恩：戴眼鏡、米色開襟衫、背書包，安靜好奇，代表初學者的視角。",
-            "哲維：薄荷綠上衣，溫和可靠，負責遞茶與照應。",
-            "瑀晴：深綠襯衫，做事俐落，收束整理與交付。",
+            `小華：${XIAOHUA_LOCKED_APPEARANCE}`,
+            "禪定龜龜：吉祥物龜龜，第三句才登場",
           ],
           acts: {
-            hook: "清晨禪堂前庭，安倢撐著紅傘走進柔和晨光，帆布包輕輕垂著。",
-            turn: "慕恩在書架旁翻閱善本，哲維默默遞上一杯溫茶，浮躁被慢慢安放。",
-            cta: "瑀晴把整理好的經本輕輕闔上——把心交給佛，留白處給觀眾一個字卡的位置。",
+            hook: "A 淡大校門口。小華穿白帽T、粉橘短髮面向鏡頭自我介紹。",
+            turn: "C–D 校門口。小華遇見禪定龜龜，龜龜說我來拯救你了。",
+            cta: "E–F 小華跟上龜龜：真的嗎？帶我去！真的真的！",
           },
           taboos: [
             "不得使用「治癒／治療／療效」等醫療宣稱字眼",
@@ -283,48 +283,19 @@ export const projectsRouter = router({
           params: { sample: true, note: "範例專案示範生成，未經 fal、未扣點" },
         });
 
-        // 3-4 格草稿分鏡（status=todo）：各有可直接帶回生成台的 prompt 與配音詞；第一鏡掛上免費佔位縮圖。
-        const scenesData: Array<{ title: string; durationSec: number; prompt: string; voiceover: string; assetId?: string }> = [
-          {
-            title: "開場・晨光禪堂",
-            durationSec: 5,
-            prompt:
-              "日系水彩、溫柔療癒調性：清晨禪堂前庭空景，安倢撐紅傘、穿米白外套、背帆布包，自畫面左側緩步走入，柔和晨光斜射、地面薄霧，構圖大量留白；攤位吊牌上有合理的三色光小色塊點綴、不搶戲；畫面內不出現任何可讀文字。",
-            voiceover: "有些早晨，適合把腳步放慢一點。",
-            assetId: asset.id,
-          },
-          {
-            title: "相遇・書卷之緣",
-            durationSec: 4,
-            prompt:
-              "日系水彩：慕恩戴眼鏡、穿米色開襟衫、背書包，在木質書架旁安靜翻閱善本，側光溫暖、神情好奇；水面倒影帶一點三色光反射作氛圍、比例克制；無任何文字招牌。",
-            voiceover: "好奇心，是走進來的第一步。",
-          },
-          {
-            title: "陪伴・一杯溫茶",
-            durationSec: 5,
-            prompt:
-              "日系水彩、療癒氛圍：哲維穿薄荷綠上衣，雙手溫和遞上一杯冒熱氣的茶，淺景深聚焦茶杯與手，背景禪堂柔焦；暖色晨光，情緒安穩不誇張；小圓牌上的三色光僅作點綴。",
-            voiceover: "有人陪著，煩躁就慢慢安放下來。",
-          },
-          {
-            title: "收束・把心交給佛",
-            durationSec: 4,
-            prompt:
-              "日系水彩：瑀晴穿深綠襯衫，俐落地把整理好的經本輕輕闔上，蓮花與柔光意象在旁；畫面右側預留乾淨留白給後製字卡；光由暗轉亮，收束在溫柔的平靜裡，無可讀文字。",
-            voiceover: "把心交給佛，日子就有了呼吸的空隙。",
-          },
-        ];
+        // 6 SHOTLIST A–F 草稿（status=todo）：對白鎖在 dialogue，唸詞另寫 voiceover；第一鏡掛免費佔位縮圖。
         await tx.insert(schema.scenes).values(
-          scenesData.map((s, i) => ({
+          TKU_ZEN_SHOTS.map((shot, i) => ({
             projectId: project.id,
             orderIndex: i + 1,
-            title: s.title,
-            durationSec: s.durationSec,
+            title: shot.title,
+            durationSec: shot.durationSec,
             status: "todo",
-            prompt: s.prompt,
-            voiceover: s.voiceover,
-            assetId: s.assetId ?? null,
+            prompt: shot.prompt,
+            action: shot.action,
+            dialogue: shot.dialogue,
+            voiceover: tkuZenSpokenDialogue(shot.dialogue),
+            assetId: i === 0 ? asset.id : null,
           })),
         );
 
