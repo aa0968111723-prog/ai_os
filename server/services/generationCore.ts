@@ -135,6 +135,11 @@ export function unlandedPersistWhere() {
     eq(schema.assets.isAiGenerated, true),
     isNull(schema.assets.storagePath),
     or(like(schema.assets.url, "http%"), like(schema.assets.originUrl, "http%")),
+    // /api/mock-asset/* placeholders are not landable. Sweep used to
+    // `continue` them without landNextTryAt, so 20 mock rows starved
+    // newer generateInto fal persists forever — same class as
+    // persistRemote null without markLandAttemptFailed.
+    sql`(coalesce(${schema.assets.url}, '') not ilike '%/api/mock-asset/%' and coalesce(${schema.assets.originUrl}, '') not ilike '%/api/mock-asset/%')`,
   );
 }
 
@@ -1652,7 +1657,14 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
   let landed = 0;
   for (const asset of rows) {
     const source = unlandedPersistSource(asset);
-    if (!source || source.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
+    if (!source) {
+      await markLandAttemptFailed(asset, "沒有可重新抓取的外部來源");
+      continue;
+    }
+    if (isUnusableRealModeSourceUrl(source)) {
+      await markLandAttemptFailed(asset, "假模式佔位圖不落地");
+      continue;
+    }
     try {
       const persisted = await persistRemote(source);
       if (!persisted) {

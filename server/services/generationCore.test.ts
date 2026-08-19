@@ -169,6 +169,10 @@ describe("unlandedPersistSource：generateInto persist 停 leftover", () => {
     expect(source).toContain("landingBackoffSeconds");
     expect(source).toContain("unlandedPersistWhere");
     expect(source).toContain("orderBy(desc(schema.assets.createdAt))");
+    expect(source).toContain("not ilike '%/api/mock-asset/%'");
+    expect(source).toContain("isUnusableRealModeSourceUrl(source)");
+    expect(source).toContain("沒有可重新抓取的外部來源");
+    expect(source).not.toContain('if (!source || source.includes("/api/mock-asset/")) continue');
     const maint = readFileSync(new URL("./assetMaintenance.ts", import.meta.url), "utf8");
     expect(maint).toContain("unlandedPersistWhere()");
     expect(maint).not.toContain("assets.url} like 'http%'");
