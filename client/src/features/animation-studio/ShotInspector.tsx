@@ -553,7 +553,7 @@ function SoundTab({
           rows={3}
           defaultValue={shot.dialogue ?? ""}
           readOnly={ro}
-          placeholder="@師父：坐吧。"
+          placeholder="@小華：咦？你是誰？"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.dialogue ?? "")) saveField({ dialogue: e.target.value }); }}
         />
       </Field>
@@ -611,7 +611,7 @@ function NotesTab({
           rows={3}
           defaultValue={shot.action ?? ""}
           readOnly={ro}
-          placeholder="安倢從門口走到窗邊，停下"
+          placeholder="小華從淡大校門口走到鏡頭前，停下"
           onBlur={(e) => { if (!ro && e.target.value !== (shot.action ?? "")) saveField({ action: e.target.value }); }}
         />
       </Field>

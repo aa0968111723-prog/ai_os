@@ -845,7 +845,7 @@ export function SceneStudio({
                 disabled={!canEdit || saveAction.isPending}
                 maxLength={MAX_ACTION_CHARS}
                 rows={2}
-                placeholder="例：安倢從門口走到窗邊，停下（可留白＝這鏡沒有特別的走位）"
+                placeholder="例：小華從淡大校門口走到鏡頭前，停下（可留白＝這鏡沒有特別的走位）"
                 onChange={(e) => setActionDraft(e.target.value)}
                 style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
               />
@@ -936,7 +936,7 @@ export function SceneStudio({
                       動作走位唯一接得上的生成路徑。
                       「重畫這格」選影片模型時，走位由 sceneVisualPrompt 自動接在畫面後面；但「讓這張動起來」
                       走的是修正這條路，提示詞是使用者當場打的指示，伺服器不該擅自接上去（那會跟他打的字打架）。
-                      於是這一鏡明明寫好了「安倢從門口走到窗邊」，要讓它動起來時還得再打一次。
+                      於是這一鏡明明寫好了「小華從淡大校門口走到鏡頭前」，要讓它動起來時還得再打一次。
                       一顆按鈕把它填進去就好——只在指示還空著時出現，永遠不會蓋掉使用者打的字。
                     */}
                     {refineModel && refineGroupOf(refineModel) === "video" && action.trim() !== "" && instruction.trim() === "" && (
@@ -1199,7 +1199,7 @@ export function SceneStudio({
                     </div>
                     <label htmlFor={`studio-dialogue-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: "10px 0 0" }}>
                       這一鏡的對白
-                      <HelpTip text="一行一句：@師父：坐吧。旁白要插在中間就寫 @旁白：…，順序就是唸出來的順序。括號寫表演指示（@安倢（小聲）：…），不會被唸出來。" />
+                      <HelpTip text="一行一句：@小華：咦？你是誰？旁白要插在中間就寫 @旁白：…，順序就是唸出來的順序。括號寫表演指示（@小華（小聲）：…），不會被唸出來。" />
                     </label>
                     <textarea
                       id={`studio-dialogue-${sceneId}`}
@@ -1207,7 +1207,7 @@ export function SceneStudio({
                       disabled={saveDialogue.isPending}
                       maxLength={MAX_DIALOGUE_CHARS}
                       rows={4}
-                      placeholder={"@師父：坐吧。心急的人，茶會燙。\n@安倢（小聲）：謝謝師父。"}
+                      placeholder={"@小華：咦？你是誰？\n@禪定龜龜：我是禪學社的禪定龜龜，我來拯救你了！"}
                       onChange={(e) => setDialogueDraft(e.target.value)}
                       style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
                     />
