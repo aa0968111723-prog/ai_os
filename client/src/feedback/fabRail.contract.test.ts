@@ -42,7 +42,7 @@ describe("右下 FAB 軌道與底部分頁列", () => {
 
   it("每一顆掛在軌道上的 FAB 都由 --fab-rail-base 起算，沒有人自己貼底", () => {
     const css = rail();
-    for (const sel of [".fb-fab-root", ".project-page--mobile-compact .project-messages-fab"]) {
+    for (const sel of [".fb-fab-root", ".project-page--mobile-compact .project-messages-fab", ".dm-bubble-root"]) {
       // 取「宣告 bottom 的那條規則」——軌道區塊在檔尾，用 lastIndexOf 對到的就是它
       const at = css.lastIndexOf(sel);
       const block = css.slice(at, css.indexOf("}", at));

@@ -1006,10 +1006,12 @@ button:focus-visible { border-radius: 999px; }
   /* --touch-min 已在 :root 提到 44px 並全站生效，此處不再覆寫 */
   :root { --app-pad-x: 14px; --topbar-pad-y: 8px; }
   .app {
+    /* Same --chrome-bottom contract as desktop / ≤560. A hard 40px here
+       clips 最近 under the 專案／AI 助手／更多 bar (live 11:43 leftover). */
     padding:
       0
       max(var(--app-pad-x), var(--safe-right))
-      calc(40px + var(--safe-bottom))
+      calc(var(--chrome-bottom) + var(--safe-bottom))
       max(var(--app-pad-x), var(--safe-left));
   }
   .cols { grid-template-columns: 1fr; }

@@ -42,6 +42,14 @@ describe("phone animation P0/P1 wiring", () => {
     expect(assets).toContain("加入素材");
   });
 
+  it("最近 rows clear the fixed 專案／AI 助手／更多 bar at 390×844 and 390×569", () => {
+    expect(css).toContain("var(--chrome-bottom, 140px) + var(--fab-slot, 58px)");
+    expect(css).toContain("max-height: 569px");
+    expect(css).toMatch(/\.m-recent\s*\{[^}]*--fab-slot/);
+    expect(home).toContain("MobileCreateProjectSheet");
+    expect(home).toContain('aria-label="最近的其他專案"');
+  });
+
   it("AI quick chips meet the 44px touch floor", () => {
     expect(css).toMatch(/\.m-ai__chip \{[^}]*min-height: 44px/);
     expect(css).not.toMatch(/\.m-ai__chip \{[^}]*min-height: 36px/);
