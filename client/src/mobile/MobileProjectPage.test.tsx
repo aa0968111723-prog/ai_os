@@ -167,6 +167,16 @@ describe("手機專案頁", () => {
     expect(heavyLoads).toEqual([]);
   });
 
+  it("桌面預設 #stage-story 維持摘要，不把 600px 左裁進完整工作台", () => {
+    // writeInlineHash(null) 會把桌面專案頁寫成 #stage-story。縮到手機寬再掛
+    // MobileProjectPage 時，那不是「使用者點了分鏡／角色」的深連結。
+    window.history.replaceState(null, "", "/p/p1#stage-story");
+    render(<MobileProjectPage id="p1" />);
+    expect(screen.queryByTestId("desktop-workbench")).not.toBeInTheDocument();
+    expect(heavyLoads).toEqual([]);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("禪心一炷香");
+  });
+
   it("不認得的 hash 不會誤開工作台", () => {
     // #storyboard 是 section id 不是錨點——不能因為「看起來像」就開
     window.history.replaceState(null, "", "/p/p1#storyboard");

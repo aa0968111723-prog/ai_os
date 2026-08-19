@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PHONE_STAGES } from "@shared/phoneStages";
 import { STORY_INLINE_SECTIONS, isStoryHomeHash, sectionFromHash } from "../features/story-workspace/storyInlineNav";
-import { MOBILE_STAGES, anchorForSection, continueAnchor, continueLabel, isProjectAnchor, stageIndex, stageLabel, stageSentence } from "./stages";
+import { MOBILE_STAGES, anchorForSection, continueAnchor, continueLabel, isAutoOpenProjectAnchor, isProjectAnchor, stageIndex, stageLabel, stageSentence } from "./stages";
 
 describe("手機製作階段", () => {
   it("前後端的階段字面值完全一致", () => {
@@ -69,6 +69,19 @@ describe("手機製作階段", () => {
     expect(isProjectAnchor("#storyboard")).toBe(false);
     expect(isProjectAnchor("#production")).toBe(false);
     expect(isProjectAnchor("")).toBe(false);
+  });
+
+  it("isAutoOpenProjectAnchor skips the desktop home hash so ~600px stays on the mobile shell", () => {
+    expect(isAutoOpenProjectAnchor("#stage-board")).toBe(true);
+    expect(isAutoOpenProjectAnchor("#sec-characters")).toBe(true);
+    expect(isAutoOpenProjectAnchor("#stage-create")).toBe(true);
+    // writeInlineHash(null) lands here; auto-opening FullProjectPage left-clips at 600px
+    expect(isAutoOpenProjectAnchor("stage-story")).toBe(false);
+    expect(isAutoOpenProjectAnchor("#stage-story")).toBe(false);
+    expect(isAutoOpenProjectAnchor("#stage-context")).toBe(false);
+    expect(isAutoOpenProjectAnchor("#story-workspace")).toBe(false);
+    expect(isAutoOpenProjectAnchor("#storyboard")).toBe(false);
+    expect(isAutoOpenProjectAnchor("")).toBe(false);
   });
 
   it("錨點同時是桌面 hash 路由認得的值（深連結契約）", () => {

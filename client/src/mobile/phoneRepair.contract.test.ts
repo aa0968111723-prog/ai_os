@@ -41,6 +41,9 @@ describe("phone animation P0/P1 wiring", () => {
     expect(project).not.toContain('label: "知識"');
     expect(project).toContain("revealStoryInlineSection");
     expect(project).toContain("writeInlineHash");
+    expect(project).toContain("isAutoOpenProjectAnchor");
+    expect(project).not.toMatch(/if \(initialHash && isProjectAnchor/);
+    expect(project).not.toMatch(/if \(hash && isProjectAnchor\(hash\)\)/);
   });
 
   it("phone asset sheet mounts AddDataSheet for upload", () => {
