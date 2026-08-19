@@ -21,7 +21,7 @@ describe("HonorSheetControl", () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
     render(<HonorSheetControl characters={[EMPTY]} selectedIds={[EMPTY.id]} onToggle={onToggle} />);
-    expect(screen.getByText(/已選 0\/6/)).toBeInTheDocument();
+    expect(screen.getByText(/生成時帶入 · 已選 0\/6/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /小華/ })).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: /小華/ }));
     expect(onToggle).not.toHaveBeenCalled();

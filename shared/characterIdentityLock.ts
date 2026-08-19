@@ -68,7 +68,13 @@ export function lockXiaohuaCharacters<
 /** EXTRACT invents「年輕男性／黑長直髮」for 小華. Text-lock wins over that. */
 export function rewriteXiaohuaInventedMaleLook(text: string): string {
   if (!text) return text;
-  return text.replace(/年輕男性/g, "粉橘短髮女孩").replace(/黑長直髮/g, "粉橘短髮");
+  return text
+    .replace(/年輕男性/g, "粉橘短髮女孩")
+    .replace(/黑長直髮/g, "粉橘短髮")
+    // Live 第9鏡: 「主：粉橘髮女孩、白T（是男性）」— lock is 粉橘短髮女孩, not a parenthetical male.
+    .replace(/[（(]\s*(?:是)?(?:男性|男生)\s*[）)]/g, "")
+    .replace(/[、，]\s*是(?:男性|男生)/g, "")
+    .replace(/是(?:男性|男生)/g, "");
 }
 
 function rewriteXiaohuaLockedCopy(text: string, force: boolean): string {
@@ -298,7 +304,7 @@ export function lockXiaohuaGenerationPrompt(prompt: string, characterNames: stri
   // 她 is a pronoun lock, not a look. Fal still draws a boy+turtle without 粉橘短髮女孩.
   // 0 own sheets: text-lock must still carry 粉橘短髮女孩, and 淡江 when the prompt/story has 淡大.
   const hasLook = /粉橘短髮女孩/.test(rewritten);
-  const stillMale = /年輕男性|男孩|男生/.test(rewritten);
+  const stillMale = /年輕男性|是男性|是男生|男孩|男生|[（(]\s*(?:是)?男性/.test(rewritten);
   const needsCampus = mentionsTamkangCampus(source) && !/淡江大二化工/.test(rewritten);
   if (hasLook && !stillMale && !needsCampus) return rewritten;
   return `${rewritten}\n\n外觀鎖定 小華：${lockLine}`;

@@ -359,6 +359,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(lock).toContain("rewriteXiaohuaMaleCopy");
     expect(lock).toContain("lockXiaohuaCopyFields");
     expect(lock).toContain("lockXiaohuaAct1Location");
+    expect(lock).toContain("（是男性）");
+    expect(lock).toContain("(?:是)?(?:男性|男生)");
     const director = readFileSync(join(process.cwd(), "server/routers/director.ts"), "utf8");
     expect(director).toContain("lockXiaohuaCopyFields");
   });
@@ -462,8 +464,10 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(variants).toContain("characterIds: cards.characterIds");
     expect(sceneStudio).toContain("HonorSheetControl");
     expect(sceneStudio).toContain("honoredCharIds");
+    expect(sceneStudio).toContain("{canEdit && (");
     const honor = readFileSync(join(process.cwd(), "client/src/components/HonorSheetControl.tsx"), "utf8");
     expect(honor).toContain("生成時帶入角色參考圖");
+    expect(honor).toContain("生成時帶入 · 已選");
     expect(honor).toContain("已選");
     expect(sceneStudio).not.toContain("sourceAssetId: stray");
     expect(sceneList).toContain("selectableBringInIds");

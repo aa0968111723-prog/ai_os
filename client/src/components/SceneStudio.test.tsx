@@ -126,6 +126,12 @@ describe("SceneStudio", () => {
     expect(screen.getByRole("tab", { name: /修正這張/ })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("單格工作室面板有 HonorSheetControl：生成時帶入 / 已選 n/6，不是只有角色卡", () => {
+    mountStudio();
+    expect(screen.getByRole("group", { name: "生成時帶入角色參考圖" })).toBeInTheDocument();
+    expect(screen.getByText(/生成時帶入 · 已選 0\/6/)).toBeInTheDocument();
+  });
+
   it("有現用畫面時，底圖預設就是它，寫了指示才能送修正", async () => {
     const user = userEvent.setup();
     mountStudio();

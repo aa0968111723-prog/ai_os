@@ -29,7 +29,7 @@ export function HonorSheetControl({
   return (
     <div role="group" aria-label="生成時帶入角色參考圖" style={{ margin: "8px 0" }}>
       <Meta as="div">
-        已選 {honored.length}/{maxSelect}
+        生成時帶入 · 已選 {honored.length}/{maxSelect}
         {honored.length === 0 ? " · 沒有自己的定裝圖＝只靠文字錨點" : ""}
       </Meta>
       {characters.length === 0 ? (

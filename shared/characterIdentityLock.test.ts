@@ -224,6 +224,16 @@ describe("小華 identity lock", () => {
     expect(campus).toContain("淡江大二化工");
     expect(campus).not.toContain("年輕男性");
     expect(rewriteXiaohuaInventedMaleLook("小華是年輕男性，黑長直髮")).toBe("小華是粉橘短髮女孩，粉橘短髮");
+    const shot9 = lockXiaohuaCopyFields(
+      { title: "第9鏡", prompt: "主：粉橘髮女孩、白T（是男性）" },
+      "小華站在校門口",
+    );
+    expect(shot9.prompt).toBe("主：粉橘髮女孩、白T");
+    expect(shot9.prompt).not.toMatch(/是男性|（是男性）|\(是男性\)/);
+    const gen9 = lockXiaohuaGenerationPrompt("主：粉橘髮女孩、白T（是男性）", ["小華"]);
+    expect(gen9).toContain("粉橘短髮女孩");
+    expect(gen9).not.toMatch(/是男性|（是男性）/);
+    expect(rewriteXiaohuaInventedMaleLook("主：粉橘髮女孩、白T(是男性)")).toBe("主：粉橘髮女孩、白T");
   });
 
   it("locks 拆分鏡 rows when the script names 小華 even if the title omits her", () => {
