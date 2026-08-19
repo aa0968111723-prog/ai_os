@@ -551,6 +551,10 @@ body.studio-workspace { overflow: hidden; }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Grid item min-width:auto grows with the A–F strip; workspace
+     overflow:hidden then clips later shots (live board-only nav). */
+  min-width: 0;
+  overflow: hidden;
   border-top: 1px solid var(--ws-line);
   background: var(--ws-panel);
   padding: 6px 10px 8px;
@@ -569,6 +573,7 @@ body.studio-workspace { overflow: hidden; }
   margin: 0;
   padding: 2px 2px 4px;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   scroll-snap-type: x proximity;
 }

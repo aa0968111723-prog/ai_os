@@ -33,6 +33,24 @@ function setup(overrides: Partial<React.ComponentProps<typeof StoryboardTimeline
   return props;
 }
 
+describe("StoryboardTimeline horizontal nav", () => {
+  it("active shot scrolls into the strip (board select is not the only way to reach later 鏡)", () => {
+    const scrollIntoView = vi.fn();
+    const proto = HTMLElement.prototype as HTMLElement & { scrollIntoView: typeof scrollIntoView };
+    const previous = proto.scrollIntoView;
+    proto.scrollIntoView = scrollIntoView;
+    try {
+      setup({ activeId: "s3" });
+      const active = document.querySelector('[data-shot-id="s3"]');
+      expect(active).toBeTruthy();
+      expect(scrollIntoView).toHaveBeenCalled();
+      expect(scrollIntoView.mock.calls.some((call) => call[0]?.inline === "nearest")).toBe(true);
+    } finally {
+      proto.scrollIntoView = previous;
+    }
+  });
+});
+
 describe("StoryboardTimeline empty vs loading", () => {
   it("loading + 0 shots shows 載入中, not 0 鏡 / 還沒有分鏡", () => {
     setup({ shots: [], loading: true, activeId: null });

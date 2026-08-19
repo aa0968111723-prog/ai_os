@@ -42,6 +42,18 @@ describe("版面的真相只有一份（沿用既有契約）", () => {
     expect(ruleFor(".studio-workarea")).toMatch(/grid-template-columns: auto minmax\(0, 1fr\) auto/);
   });
 
+  it("timeline strip is a horizontal scrollport (not clipped by workspace overflow)", () => {
+    const strip = ruleFor(".studio-timeline");
+    expect(strip).toContain("min-width: 0");
+    expect(strip).toContain("overflow: hidden");
+    const list = ruleFor(".studio-timeline__list");
+    expect(list).toContain("overflow-x: auto");
+    expect(list).toContain("min-width: 0");
+    const timeline = readFileSync(resolve(dir, "StoryboardTimeline.tsx"), "utf8");
+    expect(timeline).toContain("data-shot-id={shot.id}");
+    expect(timeline).toContain('scrollIntoView({ inline: "nearest", block: "nearest" })');
+  });
+
   it("只有桌機掛工作台：手機拿掉底部分頁列會讓人出不去", () => {
     expect(studio).toMatch(/if \(lite\) return;\s*\n\s*document\.body\.classList\.add\(WORKSPACE_BODY_CLASS\)/);
   });

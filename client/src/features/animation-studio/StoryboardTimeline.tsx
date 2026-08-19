@@ -67,6 +67,12 @@ export function StoryboardTimeline({
   const listRef = useRef<HTMLOListElement | null>(null);
   const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
 
+  useLayoutEffect(() => {
+    if (!activeId || !listRef.current) return;
+    const item = listRef.current.querySelector<HTMLElement>(`[data-shot-id="${CSS.escape(activeId)}"]`);
+    item?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeId]);
+
   const drop = (targetId: string) => {
     setOverId(null);
     const from = shots.findIndex((s) => s.id === dragId);
@@ -111,6 +117,7 @@ export function StoryboardTimeline({
             return (
               <li
                 key={shot.id}
+                data-shot-id={shot.id}
                 className={`studio-tlshot${active ? " is-active" : ""}${overId === shot.id ? " is-over" : ""}`}
                 draggable={draggable}
                 onDragStart={draggable ? () => setDragId(shot.id) : undefined}
