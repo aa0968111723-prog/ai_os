@@ -29,7 +29,7 @@ import { formatTeamInventoryStoryFlag, isEmptyFreeOnlyTimeoutAnswer } from "../.
 import {
   addCharacterConfirmLabel,
   dropMisroutedCharacterDatabaseActions,
-  isInstructionCharacterName,
+  sanitizeCharacterProposalName,
   lockAddCharacterAnswer,
   PENDING_CHARACTER_APPEARANCE,
   proposeAddCharacterActions,
@@ -292,8 +292,9 @@ export function injectAddCharacterSiteProposals(
 ): SiteActionProposal[] {
   const filled = existing.flatMap((action): SiteActionProposal[] => {
     if (action.type !== "add_character") return [action];
-    if (isInstructionCharacterName(action.name)) return [];
-    return [{ ...action, projectRef: action.projectRef?.trim() || projectRef }];
+    const name = sanitizeCharacterProposalName(action.name);
+    if (!name) return [];
+    return [{ ...action, name, projectRef: action.projectRef?.trim() || projectRef }];
   });
   const extra = proposeAddCharacterActions(message).flatMap((row): SiteActionProposal[] => {
     const ref = (projectRef ?? "").trim();
@@ -592,8 +593,8 @@ export function resolveSiteActions(
     if (p.type === "add_character") {
       const project = refs.projects.get((p.projectRef ?? refs.defaultProjectRef ?? "").trim());
       if (!project) continue;
-      const name = p.name.trim();
-      if (!name || isInstructionCharacterName(name)) continue;
+      const name = sanitizeCharacterProposalName(p.name);
+      if (!name) continue;
       const appearance = isXiaohuaName(name)
         ? xiaohuaLockedAppearance(p.appearance ?? "")
         : (p.appearance?.trim() || PENDING_CHARACTER_APPEARANCE);

@@ -424,6 +424,31 @@ describe("resolveSiteActions（LLM 站級動作提議 → 確認卡）", () => {
     expect(out[0].type === "add_character" && out[0].label).not.toContain("不要寫素材清單");
   });
 
+  it("live 11:32 prompt-as-name collapses to one 沿用 小華 card", () => {
+    const live = "請新增角色小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料。";
+    const blob = "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料";
+    const injected = injectAddCharacterSiteProposals(live, "p1", [
+      { type: "add_character", projectRef: "p1", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+      { type: "add_character", projectRef: "p1", name: blob, appearance: "粉橘短髮女孩／白帽T" },
+    ]);
+    expect(injected.filter((action) => action.type === "add_character")).toHaveLength(1);
+    expect(injected.every((action) => action.type !== "add_character" || action.name === "小華")).toBe(true);
+    const out = resolveSiteActions(refs({
+      projects: new Map([
+        ["p1", {
+          id: "proj-1",
+          title: "招生短片",
+          characters: [{ name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE }],
+        }],
+      ]),
+    }), injected);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: "add_character", name: "小華" });
+    expect(out[0].label).toBe("沿用角色「小華」（已存在）");
+    expect(out[0].label).not.toContain("不要寫");
+    expect(out[0].label).not.toContain(blob);
+  });
+
   it("injectAddCharacterSiteProposals drops 素材清單 add_database_row when adding 角色", () => {
     const injected = injectAddCharacterSiteProposals("新增角色 小華", "p1", [
       { type: "add_database_row", dbRef: "db1", values: { "名稱": "小華" } },

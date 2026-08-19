@@ -201,7 +201,9 @@ describe("write verification", () => {
 
   it("detects completed-tense write claims", () => {
     expect(claimsCompletedWrite("已調整鏡頭")).toBe(true);
+    expect(claimsCompletedWrite("我新增了角色小華的角色卡。")).toBe(true);
     expect(claimsCompletedWrite("我建議調整鏡頭，請確認")).toBe(false);
     expect(rewriteCompletedTenseToProposal("已套用世界觀")).toContain("建議套用");
+    expect(rewriteCompletedTenseToProposal("我新增了角色小華的角色卡。")).not.toContain("我新增了");
   });
 });

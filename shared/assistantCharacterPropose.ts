@@ -32,10 +32,33 @@ function lockAppearance(name: string, appearance: string, source = ""): string {
 export function isInstructionCharacterName(name: string): boolean {
   const n = name.replace(/[「」『』《》【】"'“”]/g, "").trim();
   if (!n) return true;
-  if (/^(?:不要|別|勿|禁止|不准|並非|并非|而非|不是)/.test(n)) return true;
-  if (/不要寫|別寫|勿寫|不要素材|寫入角色|寫進素材|素材清單|資料庫/.test(n)) return true;
+  if (/^(?:不要|別|勿|禁止|不准|並非|并非|而非|不是|請不要)/.test(n)) return true;
+  if (/不要寫|別寫|勿寫|不要素材|寫入角色|寫進素材|素材清單|資料庫|除角色卡以外/.test(n)) return true;
   if (/^寫入/.test(n)) return true;
   return false;
+}
+
+/**
+ * Live 11:32: model named the card
+ * 「小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料」.
+ * Keep 小華; drop look parens and 不要… clauses. Over-long blobs are not a name.
+ */
+export function sanitizeCharacterProposalName(raw: string): string | null {
+  let n = (raw ?? "").replace(/[「」『』《》【】"'“”]/g, "").trim();
+  if (!n) return null;
+  n = n
+    .replace(/[。．.！!？?;；]+\s*(?:不要|別|勿|禁止|不准|並非|并非).*$/u, "")
+    .replace(/[，,]?\s*(?:不要|別|勿|禁止|不准|不是|而非|寫入除|寫入角色|不要素材).*$/u, "")
+    .trim();
+  n = n.split(/[（(]/)[0]?.trim() ?? "";
+  n = n.split(/[／/]/)[0]?.trim() ?? "";
+  n = n.split(/[：:]/)[0]?.trim() ?? "";
+  n = n.split(/[，,、。．.]/)[0]?.trim() ?? "";
+  n = n.split(/\s+/)[0]?.trim() ?? "";
+  if (!n || n.length > CHAR_NAME_MAX) return null;
+  if (isInstructionCharacterName(n) || isAppearancePhrase(n)) return null;
+  if (/小華/.test(n)) return "小華";
+  return n;
 }
 
 /**
@@ -84,8 +107,8 @@ export function mergeAddCharacterProposals(
   const proposed = proposeAddCharacterActions(message, existingCards);
   const byName = new Map<string, ProposedAddCharacter>();
   const put = (row: ProposedAddCharacter) => {
-    const name = row.name.trim();
-    if (!name || isInstructionCharacterName(name)) return;
+    const name = sanitizeCharacterProposalName(row.name);
+    if (!name) return;
     byName.set(nameKey(name), {
       type: "add_character",
       name,
@@ -145,11 +168,16 @@ export const ADD_CHARACTER_CONFIRM_PROSE =
 const CHARACTER_REFUSE_RE =
   /沒有可直接寫入|角色資料庫|不會把.{0,20}寫進素材清單|請先提供或建立角色資料庫|無法直接建立角色|目前無法建立角色|我也不會把/;
 
+/** Pending confirm is not a write — live 11:32 said「我新增了」with 0 cards written. */
+const CLAIMED_CHARACTER_WRITE_RE = /我新增了|已新增|已經新增|新增了角色|已建立角色|已經建立角色/;
+
 /** When a confirm card exists, never leave the 05:29 refuse prose as the answer. */
 export function lockAddCharacterAnswer(answer: string, hasCharacterCard: boolean): string {
   if (!hasCharacterCard) return answer;
   const text = (answer ?? "").trim();
-  if (!text || CHARACTER_REFUSE_RE.test(text)) return ADD_CHARACTER_CONFIRM_PROSE;
+  if (!text || CHARACTER_REFUSE_RE.test(text) || CLAIMED_CHARACTER_WRITE_RE.test(text)) {
+    return ADD_CHARACTER_CONFIRM_PROSE;
+  }
   if (/確認下方|確認卡/.test(text)) return text;
   return `${text}\n請用下方確認卡寫入角色定裝，不會寫進素材清單。`.slice(0, 4000);
 }
@@ -159,13 +187,14 @@ export function addCharacterConfirmLabel(
   appearance: string,
   existing?: ExistingCharacterCard | null,
 ): string {
-  const locked = lockAppearance(name, appearance, appearance);
-  if (existing && nameKey(existing.name) === nameKey(name)) {
+  const clean = sanitizeCharacterProposalName(name) ?? name.trim();
+  const locked = lockAppearance(clean, appearance, appearance);
+  if (existing && nameKey(existing.name) === nameKey(clean)) {
     const from = (existing.appearance ?? "").trim() || "（空）";
-    if (from !== locked) return `更新角色「${name}」外觀：${from} → ${locked}`;
-    return `沿用角色「${name}」（已存在）`;
+    if (from !== locked) return `更新角色「${clean}」外觀：${from} → ${locked}`;
+    return `沿用角色「${clean}」（已存在）`;
   }
-  return `新增角色「${name}」`;
+  return `新增角色「${clean}」`;
 }
 
 function isAppearancePhrase(token: string): boolean {
@@ -188,13 +217,8 @@ export function extractCharacterNames(
   const seen = new Set<string>();
   const names: string[] = [];
   const push = (raw: string) => {
-    const stripped = raw.replace(/[「」『』《》【】"'“”]/g, " ").trim();
-    // 「建立角色小華（粉橘短髮女孩／白帽T）」→ name is 小華, not 小華（粉橘短髮女孩
-    const beforeParen = stripped.split(/[（(]/)[0]?.trim() ?? "";
-    const beforeLook = beforeParen.split(/[／/]/)[0]?.trim() ?? "";
-    const name = beforeLook.split(/[：:]/)[0]?.trim().split(/\s+/)[0]?.trim() ?? "";
-    if (!name || name.length > CHAR_NAME_MAX || isAppearancePhrase(name)) return;
-    if (isInstructionCharacterName(name)) return;
+    const name = sanitizeCharacterProposalName(raw);
+    if (!name) return;
     const key = nameKey(name);
     if (!key || seen.has(key)) return;
     seen.add(key);

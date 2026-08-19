@@ -8,7 +8,7 @@
  */
 
 const COMPLETED_WRITE_RE =
-  /已(?:建立|新增|更新|調整|套用|拆出|寫入|送出|完成|標記|加入|改為|生成|掛上|鎖定|重排)/;
+  /我新增了|新增了角色|已(?:建立|新增|更新|調整|套用|拆出|寫入|送出|完成|標記|加入|改為|生成|掛上|鎖定|重排)/;
 
 /** Body says it cannot see / check the saved story — not a completed inventory. */
 const CANNOT_VERIFY_RE =
@@ -33,6 +33,8 @@ export function userAskedForWrite(message: string): boolean {
 export function rewriteCompletedTenseToProposal(answer: string): string {
   const rewritten = answer
     .replace(/已完成盤點/g, "尚未核對來源")
+    .replace(/我新增了/g, "我準備了")
+    .replace(/新增了角色/g, "準備了角色")
     .replace(/已建立/g, "建議建立")
     .replace(/已新增/g, "建議新增")
     .replace(/已更新/g, "建議更新")

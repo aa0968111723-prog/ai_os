@@ -9,6 +9,7 @@ import {
   isInstructionCharacterName,
   lockAddCharacterAnswer,
   proposeAddCharacterActions,
+  sanitizeCharacterProposalName,
 } from "./assistantCharacterPropose";
 import { XIAOHUA_LOCKED_APPEARANCE } from "./characterIdentityLock";
 
@@ -152,6 +153,38 @@ describe("proposeAddCharacterActions", () => {
       [],
     );
     expect(merged[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("live 11:32 prompt with existing 小華 is one 沿用 card, never prompt-as-name 新增", () => {
+    const live = "請新增角色小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料。";
+    const blob = "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料";
+    expect(sanitizeCharacterProposalName(blob)).toBe("小華");
+    expect(isInstructionCharacterName(blob)).toBe(true);
+    expect(extractCharacterNames(live)).toEqual(["小華"]);
+    const existing = [{ name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE }];
+    const merged = collectAddCharacterProposals(
+      live,
+      [
+        { type: "add_character", name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE },
+        { type: "add_character", name: blob, appearance: "粉橘短髮女孩／白帽T" },
+      ],
+      existing,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.name).toBe("小華");
+    expect(merged[0]!.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    expect(addCharacterConfirmLabel(merged[0]!.name, merged[0]!.appearance, existing[0])).toBe(
+      "沿用角色「小華」（已存在）",
+    );
+    expect(addCharacterConfirmLabel(blob, "粉橘短髮女孩／白帽T")).not.toContain(blob);
+  });
+
+  it("pending confirm must not say 我新增了", () => {
+    const claimed = "我新增了角色小華的角色卡。";
+    const locked = lockAddCharacterAnswer(claimed, true);
+    expect(locked).toBe(ADD_CHARACTER_CONFIRM_PROSE);
+    expect(locked).not.toContain("我新增了");
+    expect(lockAddCharacterAnswer(claimed, false)).toBe(claimed);
   });
 
   it("does not turn「不要寫素材清單」into a second character name", () => {
