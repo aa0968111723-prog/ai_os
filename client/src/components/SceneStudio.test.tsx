@@ -39,7 +39,7 @@ vi.mock("../api", () => ({
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
     },
     characters: {
-      list: { useQuery: (...args: unknown[]) => charactersQuery(...args) },
+      list: { useQuery: () => charactersQuery() },
     },
     // 圖上標注：本檔專注在版本與生成的狀態機，標注另有專屬情境；這裡回空清單
     messages: {
