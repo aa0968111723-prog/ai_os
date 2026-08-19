@@ -47,7 +47,7 @@ describe("StoryStage parse chips", () => {
     expect(src).toContain("開始寫故事");
     expect(src).toContain("startWriting");
     expect(src).toContain("focusAndReveal");
-    expect(src).toContain("#story-editor");
+    expect(src).toContain("getElementById(\"story-editor\")");
     const actions = src.slice(src.indexOf("story-parse-bar__actions"));
     expect(actions).toMatch(/isBlank \? \(/);
     expect(actions).toMatch(/開始寫故事/);
