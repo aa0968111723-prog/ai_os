@@ -19,6 +19,7 @@ import { sceneFillRole } from "../routers/assistant";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import type { ContinuityShotDirection } from "../../shared/continuity";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
 import { applyIndependentGenerateToSteps } from "../../shared/agentRunReconcile";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -1012,6 +1013,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     let characterIds = step.characterIds;
     let scenePresetIds = step.scenePresetIds;
     let propIds = step.propIds;
+    let namedXiaohua = /小華/.test(step.prompt ?? "");
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) {
@@ -1030,6 +1032,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       }
       sceneId = scene.id;
       sceneRole = role;
+      namedXiaohua = /小華/.test([scene.title, step.prompt, scene.action, scene.dialogue].join(""));
       if (role === "visual") {
         shotDirection = step.shotDirection ?? {
           camera: scene.camera,
@@ -1088,6 +1091,12 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
       const auth = await loadAuthState(run.userId);
       if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
+      // batchGenerate already persist-locks when writing the step. LLM plans
+      // store raw step.prompt; Command used to persist 年輕男性 on the row.
+      const lockedPrompt = lockXiaohuaGenerationPrompt(
+        step.prompt,
+        namedXiaohua ? ["小華"] : [],
+      );
       await executeGenerationCommand({
         auth,
         source: "agent",
@@ -1095,7 +1104,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         id: step.generationId,
         projectId: run.projectId,
         modelId: model.id,
-        prompt: step.prompt,
+        prompt: lockedPrompt,
         sceneId,
         sceneRole,
         characterIds,
@@ -2104,6 +2113,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   // ── 生成類步驟（generate / voiceover）：冪等佔位 → submitGenerationCore ──
   let modelId: string;
   let prompt: string;
+  let lockedPrompt = "";
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | "ambience" | undefined;
   let shotDirection = step.shotDirection;
@@ -2111,6 +2121,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let characterIds = step.characterIds;
   let scenePresetIds = step.scenePresetIds;
   let propIds = step.propIds;
+  let namedXiaohua = /小華/.test(step.prompt ?? "");
   let stepVoiceIdentity: import("../../shared/voiceRouting").VoiceIdentity | undefined;
   if (step.kind === "voiceover") {
     const scene = await resolvePersistedSceneTarget(run, steps, step);
@@ -2149,6 +2160,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     }
     modelId = voiceModel.id;
     prompt = text;
+    lockedPrompt = text;
     sceneId = scene.id;
     sceneRole = "narration";
     stepVoiceIdentity = agentRoutedVoice && agentRoutedVoice.modelId === voiceModel.id ? agentRoutedVoice : undefined;
@@ -2176,6 +2188,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       }
       sceneId = scene.id;
       sceneRole = role;
+      namedXiaohua = /小華/.test([scene.title, step.prompt, scene.action, scene.dialogue].join(""));
       if (role === "visual") {
         shotDirection = step.shotDirection ?? {
           camera: scene.camera,
@@ -2194,7 +2207,11 @@ async function advanceRun(run: RunRow): Promise<void> {
       }
     }
     modelId = model.id;
-    prompt = step.prompt;
+    lockedPrompt = lockXiaohuaGenerationPrompt(
+      step.prompt,
+      namedXiaohua ? ["小華"] : [],
+    );
+    prompt = lockedPrompt;
   }
 
   if (step.kind === "generate" && sceneId && !step.generationId) {
@@ -2269,7 +2286,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       id: step.generationId,
       projectId: run.projectId,
       modelId,
-      prompt,
+      prompt: lockedPrompt,
       sceneId,
       sceneRole,
       // closure §5（稽核修正）：代理旁白帶聲線 identity（與 generateVoiceover 同一路由）

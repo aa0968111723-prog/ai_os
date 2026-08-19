@@ -561,6 +561,17 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(runner).not.toContain("resolveHonoredCharacterSheet");
   });
 
+  it("agent execute locks 小華 prompt before Command persist", () => {
+    const runner = readFileSync(join(process.cwd(), "server/services/agentRunner.ts"), "utf8");
+    expect(runner.match(/lockXiaohuaGenerationPrompt/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/\? \["小華"\]/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner.match(/prompt: lockedPrompt/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(runner).not.toContain("prompt: step.prompt");
+    expect(runner).not.toContain("rewritePersistedXiaohuaShotCopy");
+    expect(runner).not.toContain("ensureXiaohuaCharacterIds");
+    expect(runner).not.toContain("resolveHonoredCharacterSheet");
+  });
+
   it("batchGenerate locks 小華 prompt before the agent step stores it", () => {
     const batch = scenes.slice(scenes.indexOf("batchGenerate: authedProcedure"), scenes.indexOf("update: authedProcedure"));
     expect(batch).toContain("lockXiaohuaGenerationPrompt");
