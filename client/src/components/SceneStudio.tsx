@@ -344,6 +344,8 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      // Server discarded leftover 0/N; HUD cache stays until this refetch.
+      void utils.teamAssistant.agentOverview.invalidate();
     },
     onError: (err) => {
       if (shouldRotateGenerateIntoRequestId(err.message)) {
@@ -390,6 +392,7 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      void utils.teamAssistant.agentOverview.invalidate();
     },
   });
   const refine = trpc.scenes.refine.useMutation({
@@ -399,6 +402,7 @@ export function SceneStudio({
       setTab("versions");
       refresh();
       utils.quota.my.invalidate();
+      void utils.teamAssistant.agentOverview.invalidate();
     },
     onError: (err) => {
       if (shouldRotateGenerateIntoRequestId(err.message)) {

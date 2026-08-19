@@ -27,6 +27,8 @@ vi.mock("../api", () => ({
     useUtils: () => ({
       scenes: { versions: { invalidate } },
       messages: { listByRef: { invalidate }, openCountsByScene: { invalidate } },
+      quota: { my: { invalidate } },
+      teamAssistant: { agentOverview: { invalidate } },
     }),
     characters: {
       list: { useQuery: (...args: unknown[]) => charactersQuery(...args) },

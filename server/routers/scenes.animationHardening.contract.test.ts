@@ -467,6 +467,8 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(refine).toContain("scheduleReconcileAfterIndependentGenerate");
     const genList = readFileSync(join(process.cwd(), "client/src/components/GenerationList.tsx"), "utf8");
     expect(genList).toContain("teamAssistant.agentOverview.invalidate");
+    expect(sceneList).toContain("teamAssistant.agentOverview.invalidate");
+    expect(sceneStudio).toContain("teamAssistant.agentOverview.invalidate");
     const overview = readFileSync(join(process.cwd(), "server/routers/teamAssistant.ts"), "utf8");
     expect(overview).toContain("reconcileLeftoverAwaitingApprovalOnRead");
     expect(overview).toContain("assertFreeOnlyCompletion");

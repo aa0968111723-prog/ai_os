@@ -406,6 +406,7 @@ const SceneRow = memo(function SceneRow({
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
 }) {
+  const utils = trpc.useUtils();
   const openThisStudio = () => onOpenStudio(s.id, i + 1);
   // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
@@ -459,7 +460,13 @@ const SceneRow = memo(function SceneRow({
   // 冪等鍵（QA-007）：同一格「還沒成功」的生成重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const genRequestId = useRef<string>(crypto.randomUUID());
   const generate = trpc.scenes.generateInto.useMutation({
-    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+    onSuccess: () => {
+      genRequestId.current = crypto.randomUUID();
+      invalidate();
+      // Server already discarded leftover 0/N; HUD cache stays until this
+      // refetch (or the 30s poll). GenerationList retry already does this.
+      void utils.teamAssistant.agentOverview.invalidate();
+    },
     onError: (err) => {
       if (shouldRotateGenerateIntoRequestId(err.message)) {
         genRequestId.current = crypto.randomUUID();

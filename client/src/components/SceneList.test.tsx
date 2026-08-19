@@ -41,6 +41,7 @@ vi.mock("../api", () => ({
       scenes: { listByProject: { invalidate: invalidateScenes } },
       messages: { list: { invalidate: invalidateMessages }, openCountsByScene: { invalidate: vi.fn() } },
       projects: { listDeleted: { invalidate: invalidateDeleted } },
+      teamAssistant: { agentOverview: { invalidate: vi.fn() } },
     }),
     auth: { me: { useQuery: (...args: unknown[]) => meQuery(...args) } },
     scenes: {
