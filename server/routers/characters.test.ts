@@ -13,7 +13,8 @@ describe("characters router 契約", () => {
   it("每專案角色卡硬上限來自 cardLimits", () => {
     expect(MAX_PROJECT_CHARACTERS).toBe(50);
     expect(source).toContain("MAX_PROJECT_CHARACTERS");
-    expect(source).toContain("此專案角色定裝已達上限");
+    const writeCore = readFileSync(new URL("../services/characterWriteCore.ts", import.meta.url), "utf8");
+    expect(writeCore).toContain("此專案角色定裝已達上限");
   });
 
   it("name/appearance 先 trim 再驗 min(1)，上限用共用常數", () => {
@@ -47,6 +48,15 @@ describe("characters router 契約", () => {
     expect(source).toContain("這是指示句，不是角色名");
     expect(source).toContain("applyXiaohuaIdentityLock");
     expect(source).toContain("schema.stories.content");
+  });
+
+  it("add sanitizes the name and upserts — no raw insert / second 小華", () => {
+    const add = source.slice(source.indexOf("add: authedProcedure"), source.indexOf("update: authedProcedure"));
+    expect(add).toContain("sanitizeCharacterProposalName");
+    expect(add).toContain("upsertProjectCharacterCore");
+    expect(add).toContain(".max(240)");
+    expect(add).not.toContain(".insert(schema.characters)");
+    expect(add).not.toContain("isInstructionCharacterName(input.name)");
   });
 
   it("generateSheet is cheap-image only and honorGeneratedSheet asserts same-project", () => {

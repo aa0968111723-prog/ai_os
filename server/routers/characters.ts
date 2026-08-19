@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, count, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   CHAR_APPEARANCE_MAX,
@@ -10,10 +10,10 @@ import {
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
-import { isUniqueViolation } from "../services/generationCore";
 import { applyWithRevisionTrpc } from "../services/revisionGuard";
-import { isInstructionCharacterName } from "../../shared/assistantCharacterPropose";
+import { isInstructionCharacterName, sanitizeCharacterProposalName } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
+import { upsertProjectCharacterCore } from "../services/characterWriteCore";
 import {
   CHARACTER_SHEET_MODEL_ID,
   characterSheetPrompt,
@@ -47,12 +47,13 @@ export const charactersRouter = router({
     .input(
       z.object({
         projectId: z.string().uuid(),
-        // 先 trim 再驗：否則 "   " 通過 min(1) 後再 trim 成空字串入庫
-        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX),
+        // Raw paste may be the model blob「小華（…）。不要寫素材清單」.
+        // Sanitize down to a card name; CHAR_NAME_MAX still applies after.
+        name: z.string().trim().min(1, "請填角色名").max(240),
         appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX),
         notes: z.string().trim().max(CHAR_NOTES_MAX).optional(),
         referenceAssetId: z.string().uuid().optional(),
-        /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
+        /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原卡片，不重複建立 */
         clientRequestId: z.string().uuid().optional(),
       }),
     )
@@ -61,7 +62,8 @@ export const charactersRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
-      if (isInstructionCharacterName(input.name)) {
+      const name = sanitizeCharacterProposalName(input.name);
+      if (!name) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
       }
       // 跨專案引用驗證：referenceAssetId 必須同專案且是圖片（同組兩個「小華」不能互綁定裝圖）
@@ -76,52 +78,28 @@ export const charactersRouter = router({
         if (existing) return existing;
       }
 
-      const [{ n }] = await db
-        .select({ n: count() })
+      const written = await upsertProjectCharacterCore({
+        auth: ctx.auth,
+        groupId: project.groupId,
+        projectId: project.id,
+        name,
+        appearance: input.appearance,
+        notes: input.notes,
+      });
+      if (input.referenceAssetId) {
+        await db
+          .update(schema.characters)
+          .set({ referenceAssetId: input.referenceAssetId })
+          .where(eq(schema.characters.id, written.characterId));
+      }
+      const [row] = await db
+        .select()
         .from(schema.characters)
-        .where(eq(schema.characters.projectId, project.id));
-      if (Number(n) >= MAX_PROJECT_CHARACTERS) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `此專案角色定裝已達上限（${MAX_PROJECT_CHARACTERS} 張）——先刪不用的再新增`,
-        });
+        .where(and(eq(schema.characters.id, written.characterId), eq(schema.characters.projectId, project.id)));
+      if (!row) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "角色定裝寫入後讀回失敗" });
       }
-
-      try {
-        const [story] = await db
-          .select({ content: schema.stories.content })
-          .from(schema.stories)
-          .where(eq(schema.stories.projectId, project.id))
-          .limit(1);
-        const locked = applyXiaohuaIdentityLock(
-          { name: input.name, appearance: input.appearance, costume: null },
-          `${input.appearance}\n${story?.content ?? ""}\n${project.title}`,
-        );
-        const [row] = await db
-          .insert(schema.characters)
-          .values({
-            id: input.clientRequestId,
-            projectId: project.id,
-            groupId: project.groupId,
-            name: locked.name,
-            appearance: locked.appearance ?? input.appearance,
-            notes: input.notes || null,
-            referenceAssetId: input.referenceAssetId,
-            createdBy: ctx.auth.user.id,
-          })
-          .returning();
-        return row;
-      } catch (err) {
-        // 冪等重送撞唯一鍵＝前次請求已建卡（client timeout 後重試）：回既有卡，不重複建立（QA-003）
-        if (input.clientRequestId && isUniqueViolation(err)) {
-          const [existing] = await db
-            .select()
-            .from(schema.characters)
-            .where(and(eq(schema.characters.id, input.clientRequestId), eq(schema.characters.projectId, project.id)));
-          if (existing) return existing;
-        }
-        throw err;
-      }
+      return row;
     }),
 
   update: authedProcedure

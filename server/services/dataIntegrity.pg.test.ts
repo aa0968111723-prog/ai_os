@@ -151,5 +151,15 @@ describe.skipIf(!RUN_PG).sequential("data integrity: same-name projects stay iso
     expect(row.appearance).toContain("淡江大二化工");
     expect(row.appearance).toContain("粉橘短髮女孩");
     expect(row.appearance).not.toContain("年輕男性");
+
+    const blob = await characters.add({
+      projectId: projectA.id,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+      appearance: "年輕男性",
+    });
+    expect(blob.id).toBe(row.id);
+    expect(blob.name).toBe("小華");
+    const cards = await db.select().from(schema.characters).where(eq(schema.characters.projectId, projectA.id));
+    expect(cards).toHaveLength(1);
   });
 });
