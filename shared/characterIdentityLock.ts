@@ -48,8 +48,15 @@ export function applyXiaohuaIdentityLock<
   const flipped = MALE_FLIP.test(`${appearance} ${costume}`);
   const missingFemale = !FEMALE_LOOK.test(appearance);
   const source = `${appearance} ${script}`;
+  const empty = !appearance.trim() || appearance.trim() === "待補外觀描述";
+  const campus = mentionsTamkangCampus(appearance, script);
   if (!flipped && !missingFemale && appearance.trim()) {
     return { ...character, appearance: withTamkangSophomore(appearance, source) };
+  }
+  // Another project's 小華 (藍外套／紅旗袍) is not the A–F 白帽T lock.
+  // Only empty cards, EXTRACT male flips, and 淡江／淡大 scripts take the promo look.
+  if (!flipped && !empty && !campus) {
+    return character;
   }
   const keepCostume = /白帽/.test(costume) && !MALE_FLIP.test(costume);
   return {
@@ -304,8 +311,11 @@ export function lockXiaohuaGenerationPrompt(prompt: string, characterNames: stri
   // 她 is a pronoun lock, not a look. Fal still draws a boy+turtle without 粉橘短髮女孩.
   // 0 own sheets: text-lock must still carry 粉橘短髮女孩, and 淡江 when the prompt/story has 淡大.
   const hasLook = /粉橘短髮女孩/.test(rewritten);
+  const hasNonMaleCardLock = /外觀鎖定\s*小華[：:]/.test(rewritten) && !MALE_FLIP.test(rewritten);
   const stillMale = /年輕男性|是男性|是男生|男孩|男生|[（(]\s*(?:是)?男性/.test(rewritten);
   const needsCampus = mentionsTamkangCampus(source) && !/淡江大二化工/.test(rewritten);
+  // Isolation previews already carry 外觀鎖定 小華：藍外套 — do not append A–F 白帽T.
+  if (hasNonMaleCardLock && !stillMale) return rewritten;
   if (hasLook && !stillMale && !needsCampus) return rewritten;
   return `${rewritten}\n\n外觀鎖定 小華：${lockLine}`;
 }

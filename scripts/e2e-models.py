@@ -135,8 +135,11 @@ ok("點數已扣(totalUsed>0)", quota.get("totalUsed", 0) > 0)
 # ── 自檢端點 ──
 req = urllib.request.Request(f"{HOST}/api/selftest")
 req.add_header("Cookie", admin.cookie)
-with urllib.request.urlopen(req) as r:
-    st = json.load(r)
+try:
+    with urllib.request.urlopen(req) as r:
+        st = json.load(r)
+except urllib.error.HTTPError as e:
+    st = json.load(e)
 ok("系統自檢全綠", st.get("ok") is True and len(st.get("checks", [])) >= 7)
 
 # ── 交付包含音訊資料夾(把音訊加入分鏡再打包) ──

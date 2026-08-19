@@ -743,7 +743,8 @@ ok("專案 B preview 鎖的是 B 的小華外觀", "紅旗袍" in pos_b and "藍
 ok("跨專案同名小華不會共用錨點文字", pos_a != pos_b)
 board_a = call("GET", admin, "creativeContext.animationBoard", {"projectId": pid})
 board_b = call("GET", admin, "creativeContext.animationBoard", {"projectId": proj_b["id"]})
-ok("A 看板鏡頭數不含 B 的空專案鏡頭", board_a.get("summary", {}).get("total") == 7)
+a_listed = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+ok("A 看板鏡頭數不含 B 的空專案鏡頭", board_a.get("summary", {}).get("total") == len(a_listed))
 ok("B 空專案看板 total=0", board_b.get("summary", {}).get("total") == 0)
 cross = call("POST", admin, "generation.preview", {
     "projectId": pid,

@@ -67,6 +67,26 @@ describe("小華 identity lock", () => {
     expect(locked.appearance).toBe(keep);
   });
 
+  it("does not rewrite another project's 小華 (藍外套／紅旗袍) into A–F 白帽T", () => {
+    const isolation = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "專案B的小華・藍外套黑框眼鏡", costume: "" },
+      "動畫短片・小華專案B",
+    );
+    expect(isolation.appearance).toBe("專案B的小華・藍外套黑框眼鏡");
+    expect(isolation.appearance).not.toContain("白帽T");
+    const qipao = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "專案B小華、紅旗袍、盤髮" },
+      "小華站在祠堂門口",
+    );
+    expect(qipao.appearance).toBe("專案B小華、紅旗袍、盤髮");
+    const cardLocked = lockXiaohuaGenerationPrompt(
+      "小華站在校門口\n\n外觀鎖定 小華：專案B的小華・藍外套黑框眼鏡",
+      ["小華"],
+    );
+    expect(cardLocked).toContain("藍外套黑框眼鏡");
+    expect(cardLocked).not.toContain(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
   it("restores 淡江大二化工 when the story names 淡大 but the card already dropped it", () => {
     const dropped = applyXiaohuaIdentityLock(
       { name: "小華", appearance: XIAOHUA_LOCKED_APPEARANCE, costume: "白帽T" },
