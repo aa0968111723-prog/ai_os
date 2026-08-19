@@ -14,9 +14,9 @@ export type StudioShotListUtils = {
       fetch: (input: { projectId: string }) => Promise<unknown>;
     };
   };
-  story: {
-    scenesList: {
-      invalidate: (input: { projectId: string }) => Promise<unknown>;
+  story?: {
+    scenesList?: {
+      invalidate?: (input: { projectId: string }) => Promise<unknown>;
     };
   };
 };
@@ -27,7 +27,7 @@ export async function refreshStudioShotList(
 ): Promise<void> {
   await Promise.all([
     utils.scenes.listByProject.invalidate({ projectId }),
-    utils.story.scenesList.invalidate({ projectId }),
+    utils.story?.scenesList?.invalidate?.({ projectId }) ?? Promise.resolve(),
   ]);
   await utils.scenes.listByProject.fetch({ projectId });
 }

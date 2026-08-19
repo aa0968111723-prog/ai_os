@@ -38,6 +38,7 @@ import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { refreshStudioShotList, studioShotListIsLoading } from "../../lib/studioShotList";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -308,18 +309,46 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
   if (!insertQueueRef.current) {
     insertQueueRef.current = createInsertAfterQueue((input) => insertAfterMutateRef.current(input));
   }
+  const mergeCreatedShotIntoCache = (sourceId: string, created: { id: string; orderIndex: number; title?: string | null }) => {
+    const projectIdNow = projectIdRef.current;
+    utils.scenes.listByProject.setData({ projectId: projectIdNow }, (old) => {
+      if (!old) return old;
+      const template = old[0];
+      const row = template
+        ? { ...template, ...created, id: created.id, orderIndex: created.orderIndex, title: created.title ?? template.title }
+        : { id: created.id, orderIndex: created.orderIndex, title: created.title ?? "" } as (typeof old)[number];
+      return mergeDuplicatedShotIntoList(old, sourceId, row);
+    });
+  };
   const runShotInsert = (sceneId: string, duplicate: boolean) => {
     setShotActionError(null);
+    if (duplicate) {
+      // Cache merge first so 26→27 / 7→8 paints before fetch. Live #790
+      // invalidate-only left the count unchanged (silent no-op).
+      void runStudioDuplicateShot({
+        sceneId,
+        insertAfter: (input) => insertAfter.mutateAsync(input),
+        mergeIntoCache: mergeCreatedShotIntoCache,
+        refresh: () => refreshStudioShotList(utils, projectIdRef.current),
+      })
+        .then((created) => {
+          if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error && err.message ? err.message : "複製這一鏡失敗";
+          setShotActionError(message);
+        });
+      return;
+    }
     void insertAfter
-      .mutateAsync(duplicate ? { sceneId, duplicate: true } : { sceneId })
+      .mutateAsync({ sceneId })
       .then(async (created) => {
-        // Do not depend on ACK-only invalidate: live 複製 closed the menu
-        // and left 7→7 until reload. Fetch the list so the new row appears.
+        if (created) mergeCreatedShotIntoCache(sceneId, created);
         await refreshStudioShotList(utils, projectIdRef.current);
         if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error && err.message ? err.message : duplicate ? "複製這一鏡失敗" : "插入分鏡失敗";
+        const message = err instanceof Error && err.message ? err.message : "插入分鏡失敗";
         setShotActionError(message);
       });
   };

@@ -78,6 +78,35 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     expect(updated.lookIds).toBeNull();
   });
 
+  it("26→27: 複製這一鏡 clones after the source (fails on the live silent no-op)", async () => {
+    const { project, scenes } = await seed("創作室複製26");
+    const ids: string[] = [];
+    for (let i = 1; i <= 26; i += 1) {
+      const [row] = await db.insert(schema.scenes).values({
+        projectId: project.id, orderIndex: i, title: `第 ${i} 鏡`,
+      }).returning();
+      ids.push(row.id);
+    }
+    const sourceId = ids[12]!;
+    const listedBefore = await scenes.listByProject({ projectId: project.id });
+    expect(listedBefore).toHaveLength(26);
+
+    const dup = await scenes.insertAfter({ sceneId: sourceId, duplicate: true });
+    expect(dup.id).toBeTruthy();
+    expect(dup.projectId).toBe(project.id);
+
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(27);
+    const sourceIdx = listed.findIndex((row) => row.id === sourceId);
+    expect(listed[sourceIdx + 1]?.id).toBe(dup.id);
+    expect(listed[sourceIdx + 1]?.title).toMatch(/複本/);
+    expect(listed.map((row) => row.id)).toEqual([
+      ...ids.slice(0, 13),
+      dup.id,
+      ...ids.slice(13),
+    ]);
+  });
+
   it("複製 increases listByProject by 1 and the new row sits after the source", async () => {
     const { project, userId, groupId, scenes } = await seed("創作室複製這一鏡");
     const [lian] = await db.insert(schema.characters).values({

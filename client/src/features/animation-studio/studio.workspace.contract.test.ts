@@ -214,7 +214,8 @@ describe("Inspector 不新增資料格式", () => {
 
   it("創作室 複製這一鏡 走 insertAfter(duplicate) 且失敗要出 error，不是 silent queue", () => {
     expect(studio).toContain("const duplicateShot = (sceneId: string)");
-    expect(studio).toContain("{ sceneId, duplicate: true }");
+    expect(studio).toContain("runStudioDuplicateShot");
+    expect(studio).toContain("mergeDuplicatedShotIntoList");
     expect(studio).toContain("refreshStudioShotList");
     expect(studio).toContain("onDuplicate={duplicateShot}");
     expect(studio).not.toContain("enqueue(id, { duplicate: true })");

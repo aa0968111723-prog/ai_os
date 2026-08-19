@@ -21,6 +21,15 @@ describe("refreshStudioShotList", () => {
     expect(fetchList).toHaveBeenCalledWith({ projectId: "proj-1" });
     expect(order.indexOf("fetch")).toBeGreaterThan(order.indexOf("invalidate-list"));
   });
+
+  it("still fetches when story.scenesList is missing (複製 must not throw as a no-op)", async () => {
+    const fetchList = vi.fn(async () => [{ id: "shot-1" }]);
+    const invalidateList = vi.fn(async () => undefined);
+    await refreshStudioShotList({
+      scenes: { listByProject: { invalidate: invalidateList, fetch: fetchList } },
+    }, "proj-1");
+    expect(fetchList).toHaveBeenCalledWith({ projectId: "proj-1" });
+  });
 });
 
 describe("studioShotListIsLoading", () => {
