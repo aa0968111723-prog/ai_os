@@ -745,6 +745,9 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("...(sourceAssetId ? { sourceAssetId } : {})");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
     expect(block).not.toContain("explicitSourceAssetId");
+    expect(block).toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("shouldReplayIdempotentGeneration(gen.status)");
+    expect(block).toContain("sceneId: visual ? scene.id : undefined");
   });
 
   it("assistant generate narration/ambience uses this shot's speech + voice / Sound World", () => {
@@ -760,7 +763,7 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(block).toContain("lockedPrompt = composed");
     expect(block).not.toContain("ensureXiaohuaCharacterIds");
     expect(block).not.toContain("assertNoPendingVisual");
-    expect(block).not.toContain("scheduleReconcileAfterIndependentGenerate");
+    expect(block).toContain("sceneId: visual ? scene.id : undefined");
   });
 
   it("refine freezes shotDirection so a later camera change marks the picture stale", () => {

@@ -51,6 +51,8 @@ import {
 } from "../services/assistantAskBudget";
 import { publishToProject } from "../services/realtime";
 import { executeGenerationCommand } from "../services/generationCommand";
+import { scheduleReconcileAfterIndependentGenerate } from "../services/agentRunReconcile";
+import { shouldReplayIdempotentGeneration } from "../../shared/generationIdempotency";
 import { resolveSceneCards } from "../../shared/sceneCards";
 import { sceneSpeechLines, speechForTts } from "../../shared/sceneSpeech";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
@@ -2232,6 +2234,16 @@ export const assistantRouter = router({
           ...(soundWorldRef ? { soundWorldRef } : {}),
           reasonPrefix: "助手生成",
         });
+        // generateInto already drops leftover 0/N「待你過目」when a
+        // replayable job lands. 助手為第 N 鏡生成 still left the HUD
+        // parked until the 30s poll. Audio must not attach onto visual steps.
+        if (shouldReplayIdempotentGeneration(gen.status)) {
+          scheduleReconcileAfterIndependentGenerate({
+            projectId: project.id,
+            sceneId: visual ? scene.id : undefined,
+            generationId: gen.id,
+          });
+        }
         return { ok: true, kind: "generate" as const, generationId: gen.id, message: "已送出生成，完成後會出現在生成紀錄" };
       }
 
