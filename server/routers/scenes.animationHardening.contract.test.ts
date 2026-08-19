@@ -202,6 +202,11 @@ describe("animation shot writes stay consistent", () => {
     expect(client).toContain('type: "add_character"');
     expect(client).toContain("新增角色定裝卡");
     expect(client).toContain("if (a.type === \"add_character\") return { type: \"add_character\"");
+    const mcp = readFileSync(join(process.cwd(), "server/services/mcpWriteExpansion.ts"), "utf8");
+    const mcpAdd = mcp.slice(mcp.indexOf('if (name === "add_character")'), mcp.indexOf('if (name === "update_character")'));
+    expect(mcpAdd).toContain("sanitizeCharacterProposalName");
+    expect(mcpAdd).toContain("upsertProjectCharacterCore");
+    expect(mcpAdd).not.toContain("db.insert(schema.characters)");
   });
 
   it("generateStoryboard publishes scene invalidate so studio timeline matches /p/", () => {

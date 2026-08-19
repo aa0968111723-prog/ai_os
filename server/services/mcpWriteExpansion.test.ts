@@ -78,6 +78,17 @@ describe("MCP write honesty helpers", () => {
     expect(command).toContain("IDEMPOTENT_FAILED_GENERATION_RETRY");
   });
 
+  it("add_character sanitizes the name and upserts — no raw insert / instruction-name swallow", () => {
+    const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
+    const add = source.slice(source.indexOf('if (name === "add_character")'), source.indexOf('if (name === "update_character")'));
+    expect(add).toContain("sanitizeCharacterProposalName");
+    expect(add).toContain("upsertProjectCharacterCore");
+    expect(add).toContain("這是指示句，不是角色名");
+    expect(add).toContain("reused: row.reused");
+    expect(add).not.toContain("db.insert(schema.characters)");
+    expect(add).not.toContain("String(args.name ?? \"\").trim()");
+  });
+
   it("add/update character·preset·prop bind images through assertReferenceImage(projectId)", () => {
     const source = readFileSync(new URL("./mcpWriteExpansion.ts", import.meta.url), "utf8");
     expect(source).toContain('import { assertReferenceImage, resolveHonoredCharacterSheet } from "./referenceAsset"');

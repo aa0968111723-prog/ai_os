@@ -38,6 +38,11 @@ import { buildShotContextPrompt } from "./shotContextPrompt";
 import { assertNoPendingVisual } from "./scenePendingVisual";
 import { ensureXiaohuaCharacterIds } from "./cardAnchors";
 import { lockXiaohuaGenerationPrompt } from "../../shared/characterIdentityLock";
+import {
+  PENDING_CHARACTER_APPEARANCE,
+  sanitizeCharacterProposalName,
+} from "../../shared/assistantCharacterPropose";
+import { upsertProjectCharacterCore } from "./characterWriteCore";
 
 /** Empty MCP patches must not look like a successful write. */
 export function mcpUnchanged<T extends Record<string, unknown>>(payload: T): T & { unchanged: true } {
@@ -840,35 +845,34 @@ export async function runMcpWriteExpansion(
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(auth, project.groupId);
-    await assertProjectEditable(auth, project);
-    const nameStr = String(args.name ?? "").trim();
-    const appearance = String(args.appearance ?? "").trim();
-    if (!nameStr || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
+    // Live leftover: raw insert wrote「小華（…）。不要寫素材清單」as the card
+    // name and minted a second 小華 when one already existed (over-claim).
+    const nameStr = sanitizeCharacterProposalName(String(args.name ?? ""));
+    if (!nameStr) throw new TRPCError({ code: "BAD_REQUEST", message: "這是指示句，不是角色名" });
+    const appearance = String(args.appearance ?? "").trim() || PENDING_CHARACTER_APPEARANCE;
     if (typeof args.referenceAssetId === "string") {
       await assertReferenceImage(args.referenceAssetId, project.groupId, project.id);
     }
-    const [row] = await db
-      .insert(schema.characters)
-      .values({
-        projectId: project.id,
-        groupId: project.groupId,
-        name: nameStr.slice(0, 80),
-        appearance: appearance.slice(0, 2000),
-        notes: typeof args.notes === "string" ? args.notes.slice(0, 2000) : null,
-        referenceAssetId: typeof args.referenceAssetId === "string" ? args.referenceAssetId : null,
-        createdBy: auth.user.id,
-      })
-      .returning();
-    const [verified] = await db.select({
-      id: schema.characters.id,
-      name: schema.characters.name,
-      projectId: schema.characters.projectId,
-    }).from(schema.characters).where(eq(schema.characters.id, row.id));
+    const row = await upsertProjectCharacterCore({
+      auth,
+      groupId: project.groupId,
+      projectId: project.id,
+      name: nameStr,
+      appearance,
+      notes: typeof args.notes === "string" ? args.notes : null,
+    });
+    if (typeof args.referenceAssetId === "string") {
+      await db
+        .update(schema.characters)
+        .set({ referenceAssetId: args.referenceAssetId })
+        .where(eq(schema.characters.id, row.characterId));
+    }
     return {
-      characterId: verified?.id ?? row.id,
-      name: verified?.name ?? row.name,
-      projectId: verified?.projectId ?? project.id,
-      verified: Boolean(verified && verified.projectId === project.id && verified.name === nameStr.slice(0, 80)),
+      characterId: row.characterId,
+      name: row.name,
+      projectId: project.id,
+      verified: row.verification.status === "verified",
+      reused: row.reused,
     };
   }
 

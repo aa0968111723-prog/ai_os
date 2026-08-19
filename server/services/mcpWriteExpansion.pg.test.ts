@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
+import { XIAOHUA_LOCKED_APPEARANCE } from "../../shared/characterIdentityLock";
 import { runMcpWriteExpansion } from "./mcpWriteExpansion";
 
 const RUN_PG = process.env.RUN_PG_INTEGRATION === "1" && Boolean(process.env.DATABASE_URL);
@@ -52,6 +53,20 @@ describe.skipIf(!RUN_PG).sequential("MCP animation write expansion (real Postgre
     expect(created.name).toBe("小華");
     const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, created.characterId));
     expect(row?.projectId).toBe(projectA);
+    expect(row?.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+    const again = await runMcpWriteExpansion(auth, "add_character", {
+      projectId: projectA,
+      name: "小華（粉橘短髮女孩／白帽T）。不要寫素材清單。不要寫入除角色卡以外的資料",
+      appearance: "年輕男性",
+    }) as { characterId: string; name: string; reused: boolean };
+    expect(again.characterId).toBe(created.characterId);
+    expect(again.name).toBe("小華");
+    expect(again.reused).toBe(true);
+    await expect(runMcpWriteExpansion(auth, "add_character", {
+      projectId: projectA,
+      name: "不要寫素材清單",
+      appearance: "待補外觀描述",
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" } satisfies Partial<TRPCError>);
     const empty = await runMcpWriteExpansion(auth, "update_character", {
       characterId: created.characterId,
     }) as { unchanged?: boolean };
@@ -70,7 +85,7 @@ describe.skipIf(!RUN_PG).sequential("MCP animation write expansion (real Postgre
       appearance: "不該寫入",
     })).rejects.toMatchObject({ code: "FORBIDDEN" } satisfies Partial<TRPCError>);
     const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, inB.characterId));
-    expect(row?.appearance).toBe("專案B小華、紅衣");
+    expect(row?.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
   });
 
   it("set_scene_visual(generationId) adopts through the canonical path", async () => {
