@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import type { StudioShot } from "./ShotStrip";
-import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot, runStudioInsertShot } from "../../lib/studioDuplicateShot";
 import { LAPTOP_VIEWPORT, ZOOMED_TALL_VIEWPORT, shotMenuCoversWhiteboard } from "./placeFixedShotMenu";
 
 const SHOTS: StudioShot[] = [
@@ -125,6 +125,53 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     await user.click(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ }));
     expect(props.onInsertAfter).toHaveBeenCalledWith("s2");
     expect(props.onDuplicate).not.toHaveBeenCalled();
+  });
+
+  it("timeline ⋯ → 在這之後插入一鏡 bumps 3→4 after the clicked row (not FIFO append)", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [rows, setRows] = useState(SHOTS);
+      return (
+        <>
+          <p data-testid="studio-count">{rows.length} 鏡</p>
+          <p data-testid="studio-ids">{rows.map((row) => row.title).join("｜")}</p>
+          <StoryboardTimeline
+            shots={rows}
+            activeId="s2"
+            draftIds={new Set()}
+            canEdit
+            shotSizeOf={() => null}
+            onSelect={vi.fn()}
+            onMove={vi.fn()}
+            onReorder={vi.fn()}
+            onNewShot={vi.fn()}
+            onDelete={vi.fn()}
+            onDuplicate={vi.fn()}
+            onInsertAfter={(id) => {
+              void runStudioInsertShot({
+                sceneId: id,
+                insertAfter: async ({ sceneId }) => {
+                  const src = rows.find((row) => row.id === sceneId);
+                  if (!src) return { id: "", orderIndex: 0, title: "" };
+                  return { id: "s2-new", orderIndex: src.orderIndex + 1, title: "新分鏡", durationSec: 4 };
+                },
+                mergeIntoCache: (sourceId, created) => {
+                  setRows((prev) => mergeDuplicatedShotIntoList(prev, sourceId, created));
+                },
+                refresh: async () => undefined,
+              });
+            }}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    expect(screen.getByTestId("studio-count")).toHaveTextContent("3 鏡");
+    const shot04 = screen.getAllByRole("listitem")[1]!;
+    await user.click(within(shot04).getByRole("button", { name: /的更多操作/ }));
+    await user.click(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ }));
+    expect(await screen.findByTestId("studio-count")).toHaveTextContent("4 鏡");
+    expect(screen.getByTestId("studio-ids")).toHaveTextContent("第01鏡｜第04鏡｜新分鏡｜第05鏡");
   });
 
   it.each([

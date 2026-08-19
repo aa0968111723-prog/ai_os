@@ -38,7 +38,7 @@ import { createInsertAfterQueue } from "../../lib/insertAfterQueue";
 import { shouldApplySceneWriteAck } from "@shared/sceneWriteAck";
 import { BOOT_NOT_READY_RETRY_LIMIT, isBootNotReadyError, queryRetryDelay } from "@shared/bootRetry";
 import { refreshStudioShotList, studioShotListIsLoading } from "../../lib/studioShotList";
-import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot, runStudioInsertShot } from "../../lib/studioDuplicateShot";
 import { useBoardSession } from "./useBoardSession";
 import { useImmersive } from "./useImmersive";
 import { useStudioLayout } from "./useStudioLayout";
@@ -340,11 +340,13 @@ export function AnimationStudio({ projectId, projectTitle, projectFormat, canEdi
         });
       return;
     }
-    void insertAfter
-      .mutateAsync({ sceneId })
-      .then(async (created) => {
-        if (created) mergeCreatedShotIntoCache(sceneId, created);
-        await refreshStudioShotList(utils, projectIdRef.current);
+    void runStudioInsertShot({
+      sceneId,
+      insertAfter: (input) => insertAfter.mutateAsync(input),
+      mergeIntoCache: mergeCreatedShotIntoCache,
+      refresh: () => refreshStudioShotList(utils, projectIdRef.current),
+    })
+      .then((created) => {
         if (created?.id && activeShotIdRef.current === sceneId) switchTo(created.id);
       })
       .catch((err: unknown) => {

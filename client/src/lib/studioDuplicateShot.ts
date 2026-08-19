@@ -46,3 +46,22 @@ export async function runStudioDuplicateShot<T extends DuplicatableShot>(input: 
   await input.refresh();
   return created;
 }
+
+/**
+ * 在這之後插入一鏡: blank row AFTER the source, not FIFO ＋新增鏡 append.
+ * Live #790 tooltip is only 複製、刪除 (Chrome find 「插」=0).
+ */
+export async function runStudioInsertShot<T extends DuplicatableShot>(input: {
+  sceneId: string;
+  insertAfter: (args: { sceneId: string }) => Promise<T | null | undefined>;
+  mergeIntoCache: (sourceId: string, created: T) => void;
+  refresh: () => Promise<void>;
+}): Promise<T> {
+  const created = await input.insertAfter({ sceneId: input.sceneId });
+  if (!created?.id) {
+    throw new Error("在這之後插入一鏡沒有寫入新列");
+  }
+  input.mergeIntoCache(input.sceneId, created);
+  await input.refresh();
+  return created;
+}

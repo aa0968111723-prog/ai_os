@@ -107,6 +107,27 @@ d("animation look reconcile + isolation (real PostgreSQL)", () => {
     ]);
   });
 
+  it("在這之後插入一鏡: 3→4 after the clicked row, not FIFO append", async () => {
+    const { project, scenes } = await seed("創作室插入之後");
+    const titles = ["第01鏡", "第04鏡", "第05鏡"];
+    const ids: string[] = [];
+    for (const [i, title] of titles.entries()) {
+      const [row] = await db.insert(schema.scenes).values({
+        projectId: project.id, orderIndex: i, title,
+      }).returning();
+      ids.push(row.id);
+    }
+    const sourceId = ids[1]!;
+    const created = await scenes.insertAfter({ sceneId: sourceId });
+    expect(created.id).toBeTruthy();
+    expect(created.title).toBe("新分鏡");
+    const listed = await scenes.listByProject({ projectId: project.id });
+    expect(listed).toHaveLength(4);
+    expect(listed.map((row) => row.id)).toEqual([ids[0], sourceId, created.id, ids[2]]);
+    expect(listed.map((row) => row.title)).toEqual(["第01鏡", "第04鏡", "新分鏡", "第05鏡"]);
+    expect(listed.at(-1)?.id).toBe(ids[2]);
+  });
+
   it("複製 increases listByProject by 1 and the new row sits after the source", async () => {
     const { project, userId, groupId, scenes } = await seed("創作室複製這一鏡");
     const [lian] = await db.insert(schema.characters).values({

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "./studioDuplicateShot";
+import { mergeDuplicatedShotIntoList, runStudioDuplicateShot, runStudioInsertShot } from "./studioDuplicateShot";
 
 const SEVEN = [
   { id: "s1", orderIndex: 1, title: "一" },
@@ -59,5 +59,39 @@ describe("runStudioDuplicateShot", () => {
       mergeIntoCache: () => undefined,
       refresh: async () => undefined,
     })).rejects.toThrow("複製這一鏡沒有寫入新列");
+  });
+});
+
+describe("runStudioInsertShot", () => {
+  it("7→8: blank sits after the source, not FIFO-appended", async () => {
+    const created = { id: "s2-new", orderIndex: 99, title: "新分鏡" };
+    const insertAfter = vi.fn(async () => created);
+    let rows = SEVEN;
+    const next = await runStudioInsertShot({
+      sceneId: "s2",
+      insertAfter,
+      mergeIntoCache: (sourceId, row) => {
+        rows = mergeDuplicatedShotIntoList(rows, sourceId, row);
+      },
+      refresh: async () => undefined,
+    });
+    expect(insertAfter).toHaveBeenCalledWith({ sceneId: "s2" });
+    expect(insertAfter.mock.calls[0]?.[0]).not.toMatchObject({ duplicate: true });
+    expect(next.id).toBe("s2-new");
+    expect(rows).toHaveLength(8);
+    expect(rows.map((row) => row.id)).toEqual([
+      "s1", "s2", "s2-new", "s3", "s4", "s5", "s6", "s7",
+    ]);
+    expect(rows[2]?.title).toBe("新分鏡");
+    expect(rows.at(-1)?.id).toBe("s7");
+  });
+
+  it("throws when insertAfter returns no id", async () => {
+    await expect(runStudioInsertShot({
+      sceneId: "s2",
+      insertAfter: async () => ({ id: "", orderIndex: 0 }),
+      mergeIntoCache: () => undefined,
+      refresh: async () => undefined,
+    })).rejects.toThrow("在這之後插入一鏡沒有寫入新列");
   });
 });

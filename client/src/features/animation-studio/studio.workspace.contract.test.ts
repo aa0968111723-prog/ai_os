@@ -228,6 +228,7 @@ describe("Inspector 不新增資料格式", () => {
     expect(timeline).not.toContain("studio-menu__scrim");
     expect(declarations).toContain(".studio-menu--fixed");
     expect(studio).toContain("onInsertAfter={insertBlankAfter}");
+    expect(studio).toContain("runStudioInsertShot");
     expect(timeline).toContain("在這之後插入一鏡");
     expect(timeline).toContain("studio-tlshot__more");
     expect(timeline).toContain("的更多操作");
