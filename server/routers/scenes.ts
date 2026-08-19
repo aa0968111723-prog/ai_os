@@ -50,6 +50,7 @@ import {
 } from "../../shared/storyboardScript";
 import { loadSceneCardLookup, sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
+import { assertOptionalReferenceImage } from "../services/referenceAsset";
 import {
   buildSceneVersions,
   findDuplicateCurrent,
@@ -1523,6 +1524,11 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      /**
+       * 單格工作室「生成時帶入角色參考圖」：有定裝圖才帶，空定裝省略。
+       * 必須走 assertReferenceImage(projectId)——同組另一個小華的圖不能互綁。
+       */
+      sourceAssetId: z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -1555,6 +1561,8 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, prompt, scene.action, scene.dialogue],
       );
+      // 空定裝＝略過，不 500；有圖才 assert 同專案
+      const sourceAssetId = await assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id);
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -1564,6 +1572,7 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
+        ...(sourceAssetId ? { sourceAssetId } : {}),
         characterIds,
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
@@ -1619,6 +1628,8 @@ export const scenesRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      /** 與 generateInto 同口徑：有定裝圖才帶，空定裝省略、不 500 */
+      sourceAssetId: z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -1647,6 +1658,7 @@ export const scenesRouter = router({
         cards.characterIds,
         [scene.title, input.prompt, scene.action, scene.dialogue],
       );
+      const sourceAssetId = await assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id);
       // 血緣來源必須屬於本專案：否則「這一版是從 V2 延伸」會指到別的專案的素材
       if (input.parentAssetId) {
         const [parent] = await db
@@ -1705,6 +1717,7 @@ export const scenesRouter = router({
         scenePresetIds: cards.scenePresetIds,
         propIds: cards.propIds,
         lookIds: scene.lookIds ?? undefined,
+        ...(sourceAssetId ? { sourceAssetId } : {}),
         reasonPrefix: "分鏡變體",
       })));
       return {

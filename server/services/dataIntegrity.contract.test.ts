@@ -66,6 +66,16 @@ describe("P0-2 assertReferenceImage is project-scoped", () => {
     expect(src).toContain("同組其他專案的圖不能當定裝");
   });
 
+  it("generateInto attach path uses assertOptionalReferenceImage(projectId) and empty sheet skips", () => {
+    const scenes = readFileSync(new URL("../routers/scenes.ts", import.meta.url), "utf8");
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    expect(into).toContain("assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id)");
+    expect(into).toContain("sourceAssetId: z.string().uuid().optional()");
+    const helper = readFileSync(new URL("./referenceAsset.ts", import.meta.url), "utf8");
+    expect(helper).toContain("if (!id) return undefined");
+    expect(helper).toContain("await assertReferenceImage(id, groupId, projectId)");
+  });
+
   it("Team Canon reference images also require the same project", () => {
     const src = readFileSync(new URL("./teamCanon.ts", import.meta.url), "utf8");
     expect(src).toContain("projectId: string");

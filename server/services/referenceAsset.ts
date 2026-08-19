@@ -19,3 +19,18 @@ export async function assertReferenceImage(assetId: string, groupId: string, pro
   }
   if (asset.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "參考素材要是圖片——請選圖片類素材" });
 }
+
+/**
+ * 生成路徑帶入定裝圖：有 id 才 assert（同組＋同專案＋是圖片）。
+ * 空定裝／未勾選＝略過，不得 500。
+ */
+export async function assertOptionalReferenceImage(
+  assetId: string | undefined,
+  groupId: string,
+  projectId: string,
+): Promise<string | undefined> {
+  const id = assetId?.trim();
+  if (!id) return undefined;
+  await assertReferenceImage(id, groupId, projectId);
+  return id;
+}

@@ -426,6 +426,22 @@ describe("#790 overnight pins (do not reopen)", () => {
     expect(sceneStudio).toContain("modelId: regenModelId");
   });
 
+  it("generateInto / generateVariants attach 角色參考圖 via assertReferenceImage(projectId); empty sheet skips", () => {
+    const into = scenes.slice(scenes.indexOf("generateInto:"), scenes.indexOf("generateVariants:"));
+    const variants = scenes.slice(scenes.indexOf("generateVariants:"), scenes.indexOf("refine:"));
+    expect(into).toContain("sourceAssetId: z.string().uuid().optional()");
+    expect(into).toContain("assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id)");
+    expect(variants).toContain("sourceAssetId: z.string().uuid().optional()");
+    expect(variants).toContain("assertOptionalReferenceImage(input.sourceAssetId, project.groupId, project.id)");
+    expect(sceneStudio).toContain("生成時帶入角色參考圖");
+    expect(sceneStudio).toContain("studioGenerateCardPayload");
+    expect(sceneStudio).toContain("...studioCardPayload");
+    const ref = readFileSync(join(process.cwd(), "server/services/referenceAsset.ts"), "utf8");
+    expect(ref).toContain("export async function assertOptionalReferenceImage");
+    expect(ref).toContain("if (!id) return undefined");
+    expect(ref).toContain("await assertReferenceImage(id, groupId, projectId)");
+  });
+
   it("insertAfter A→B ACK gating stays on shouldApplySceneWriteAck", () => {
     expect(sceneList).toContain("enqueueInsertAfter");
     expect(sceneList).toContain("shouldApplySceneWriteAck");
