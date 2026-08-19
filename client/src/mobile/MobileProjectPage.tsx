@@ -119,10 +119,16 @@ export function MobileProjectPage({ id }: { id: string }) {
     setFullOpen(true);
     if (!anchor) return;
     const section = sectionFromHash(anchor);
-    // chunk 還在下載時 getElementById 拿不到；工作台掛好後再揭開收合列並捲過去
+    // chunk 還在下載時 slot 還不在。#stage-board / #stage-create / #sec-scenes
+    // 是頁頂空的 legacy anchor，不是分鏡／場景本體——捲它們會停在編輯器上方。
     const deadline = Date.now() + 3000;
     const tick = () => {
-      if (section) revealStoryInlineSection(section, { projectId: id, scroll: true });
+      if (section) {
+        revealStoryInlineSection(section, { projectId: id, scroll: true });
+        if (document.getElementById("story-reveal-slot") || Date.now() >= deadline) return;
+        requestAnimationFrame(tick);
+        return;
+      }
       const el = document.getElementById(anchor);
       if (el) el.scrollIntoView({ block: "start" });
       else if (Date.now() < deadline) requestAnimationFrame(tick);

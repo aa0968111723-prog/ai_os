@@ -40,6 +40,8 @@ describe("phone animation P0/P1 wiring", () => {
     expect(project).toContain('anchorForSection("scenes")');
     expect(project).not.toContain('label: "知識"');
     expect(project).toContain("revealStoryInlineSection");
+    expect(project).toContain('getElementById("story-reveal-slot")');
+    expect(project).not.toMatch(/if \(section\) revealStoryInlineSection\([\s\S]{0,120}getElementById\(anchor\)[\s\S]{0,80}scrollIntoView/);
     expect(project).toContain("writeInlineHash");
     expect(project).toContain("isAutoOpenProjectAnchor");
     expect(project).not.toMatch(/if \(initialHash && isProjectAnchor/);
