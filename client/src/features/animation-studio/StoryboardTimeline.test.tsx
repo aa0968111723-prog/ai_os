@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StoryboardTimeline } from "./StoryboardTimeline";
 import type { StudioShot } from "./ShotStrip";
 import { mergeDuplicatedShotIntoList, runStudioDuplicateShot } from "../../lib/studioDuplicateShot";
+import { menuBoxCoversPoint } from "./placeFixedShotMenu";
 
 const SHOTS: StudioShot[] = [
   { id: "s1", title: "第01鏡", orderIndex: 0, durationSec: 4 },
@@ -124,5 +125,111 @@ describe("StoryboardTimeline 複製這一鏡", () => {
     await user.click(screen.getByRole("menuitem", { name: /在這之後插入一鏡/ }));
     expect(props.onInsertAfter).toHaveBeenCalledWith("s2");
     expect(props.onDuplicate).not.toHaveBeenCalled();
+  });
+
+  it("1280×800: 複製 bounding box is on-screen and the menu does not cover the canvas", async () => {
+    const user = userEvent.setup();
+    const prevW = window.innerWidth;
+    const prevH = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    const triggerRect = {
+      x: 320,
+      y: 668,
+      top: 668,
+      left: 320,
+      bottom: 692,
+      right: 344,
+      width: 24,
+      height: 24,
+      toJSON() {
+        return {};
+      },
+    };
+    const origGbr = HTMLElement.prototype.getBoundingClientRect;
+    const offsetH = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const offsetW = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      if (this.classList?.contains("studio-tlshot__more")) return triggerRect as DOMRect;
+      if (this.getAttribute("data-studio-shot-menu") === "1") {
+        const top = Number.parseFloat(this.style.top || "0") || 0;
+        const left = Number.parseFloat(this.style.left || "0") || 0;
+        return {
+          x: left,
+          y: top,
+          top,
+          left,
+          bottom: top + 120,
+          right: left + 190,
+          width: 190,
+          height: 120,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      if (this.getAttribute("role") === "menuitem" && (this.textContent ?? "").includes("複製這一鏡")) {
+        const menu = this.closest("[data-studio-shot-menu]");
+        const top = (Number.parseFloat((menu as HTMLElement | null)?.style.top ?? "0") || 0) + 40;
+        const left = (Number.parseFloat((menu as HTMLElement | null)?.style.left ?? "0") || 0) + 8;
+        return {
+          x: left,
+          y: top,
+          top,
+          left,
+          bottom: top + 32,
+          right: left + 170,
+          width: 170,
+          height: 32,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      return origGbr.call(this);
+    };
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).getAttribute?.("data-studio-shot-menu") === "1" ? 120 : 24;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).getAttribute?.("data-studio-shot-menu") === "1" ? 190 : 24;
+      },
+    });
+    try {
+      setup();
+      const more = screen.getAllByRole("button", { name: /的更多操作/ })[0]!;
+      expect(more).toHaveAttribute("title", "更多（插入、複製、刪除）");
+      await user.click(more);
+      const copy = screen.getByRole("menuitem", { name: "複製這一鏡" });
+      expect(copy).toBeVisible();
+      const copyBox = copy.getBoundingClientRect();
+      expect(copyBox.top).toBeGreaterThanOrEqual(0);
+      expect(copyBox.bottom).toBeLessThanOrEqual(800);
+      expect(copyBox.left).toBeGreaterThanOrEqual(0);
+      expect(copyBox.right).toBeLessThanOrEqual(1280);
+      const menu = screen.getByRole("menu");
+      expect(menu.className).toContain("studio-menu--fixed");
+      expect(menu).toHaveAttribute("data-studio-shot-menu", "1");
+      const menuBox = menu.getBoundingClientRect();
+      expect(menuBox.width).toBeLessThanOrEqual(240);
+      expect(menuBox.height).toBeLessThanOrEqual(240);
+      expect(menuBoxCoversPoint(
+        { top: menuBox.top, left: menuBox.left, width: menuBox.width, height: menuBox.height },
+        { x: 640, y: 280 },
+      )).toBe(false);
+      expect(document.querySelector(".studio-menu__scrim")).toBeNull();
+      expect(screen.queryByRole("button", { name: "關閉選單" })).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = origGbr;
+      if (offsetH) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetH);
+      if (offsetW) Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetW);
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prevW });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: prevH });
+    }
   });
 });

@@ -173,7 +173,7 @@ export function StoryboardTimeline({
                       else moreBtnRefs.current.delete(shot.id);
                     }}
                     aria-label={`「${shot.title}」的更多操作`}
-                    title="更多（複製、刪除）"
+                    title="更多（插入、複製、刪除）"
                     aria-haspopup="menu"
                     aria-expanded={menuId === shot.id}
                     onClick={(e) => {
@@ -290,7 +290,8 @@ function ShotMoreMenu({
       ref={menuRef}
       className="studio-menu studio-menu--shot studio-menu--fixed"
       role="menu"
-      style={box ? { top: box.top, left: box.left } : { visibility: "hidden", top: 0, left: 0 }}
+      data-studio-shot-menu="1"
+      style={box ? { top: box.top, left: box.left, width: "max-content", maxWidth: 240, height: "auto" } : { visibility: "hidden", top: 0, left: 0 }}
     >
       <button
         type="button"

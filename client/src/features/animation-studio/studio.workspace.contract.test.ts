@@ -232,8 +232,17 @@ describe("Inspector 不新增資料格式", () => {
     expect(timeline).toContain("studio-tlshot__more");
     expect(timeline).toContain("的更多操作");
     expect(timeline).toContain("placeFixedShotMenu");
+    expect(timeline).toContain('title="更多（插入、複製、刪除）"');
+    expect(timeline).toContain("data-studio-shot-menu");
     expect(declarations).toMatch(/--ws-timeline:\s*208px/);
     expect(declarations).toContain(".studio-tlshot__more");
+    const scrim = ruleFor(".studio-menu__scrim");
+    expect(scrim).toContain("border-radius: 0");
+    expect(scrim).toContain("background: transparent");
+    const fixed = ruleFor(".studio-menu--fixed");
+    expect(fixed).toContain("inset: auto");
+    expect(fixed).toContain("max-width: 240px");
+    expect(fixed).toContain("border-radius: 10px");
   });
 
   it("動畫創作室 deep-link is /studio/:projectId, not ?project=", () => {
