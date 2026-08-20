@@ -1045,6 +1045,13 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         });
         traceSessionId = trace.id;
       }
+      /**
+       * 上面那個 if 之後 traceSessionId 必定有值，但 TS 的縮小只到宣告區塊為止——
+       * 下面幾個 callback（llm／onToolCall／onToolResult）是閉包，在它們裡面
+       * 這個 let 又變回 `string | undefined`。綁一個不可為空的別名，
+       * 免得每個 callback 各自寫一個 `!`（那等於把「這裡一定有值」的理由丟掉）。
+       */
+      const traceSession: string = traceSessionId;
       await recordAiTraceEventSafely({
         sessionId: traceSessionId,
         eventType: "prepared",
@@ -1612,14 +1619,14 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           llm: async (prompt, round, forceFinal) => {
             const startedAt = Date.now();
             await recordAiTraceEventSafely({
-              sessionId: traceSessionId,
+              sessionId: traceSession,
               eventType: "provider_request",
               summary: `送出第 ${round + 1} 輪模型請求`,
               payload: { prompt, mode: input.mode ?? "nim", forceFinal },
             });
             const completion = await callLlm(prompt, askSignal, input.mode);
             await recordAiTraceEventSafely({
-              sessionId: traceSessionId,
+              sessionId: traceSession,
               eventType: "provider_response",
               summary: `收到第 ${round + 1} 輪模型回應`,
               latencyMs: Date.now() - startedAt,
@@ -1637,7 +1644,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           },
           toolName: (call) => call.tool,
           onToolCall: async (call) => {
-            await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${call.tool}`, payload: call });
+            await recordAiTraceEventSafely({ sessionId: traceSession, eventType: "tool_call", summary: `呼叫 ${call.tool}`, payload: call });
             pendingToolStep = stream.startStep({
               type: "tool.started",
               title: `正在查${LOOKUP_LABEL[call.tool] ?? "資料"}`,
@@ -1651,7 +1658,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             // preview 一併落庫：trace 是「實際運作紀錄」，只存一段給 LLM 讀的文字摘要，
             // 使用者事後回看仍然看不到工具究竟查到了什麼。
             await recordAiTraceEventSafely({
-              sessionId: traceSessionId,
+              sessionId: traceSession,
               eventType: "tool_result",
               summary: r.step,
               payload: { tool: call.tool, result: r.text, preview: r.preview },

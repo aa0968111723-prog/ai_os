@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 等你決定／有提醒：amber（#F2B24A）。這是 Widget 上唯一會讓人想去點它的狀態。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="54%"
+                android:centerX="0.36"
+                android:centerY="0.3"
+                android:startColor="#FFFDF7"
+                android:endColor="#FAE7C2" />
+            <stroke android:width="4dp" android:color="#F2B24A" />
+        </shape>
+    </item>
+</layer-list>

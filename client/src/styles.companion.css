@@ -1,0 +1,688 @@
+/* ═══ Companion Design Tokens ＋ AIOS Orb（手機原生 App 專用）═══
+ *
+ * 作用域：整份檔案的每一條規則都掛在 `html[data-surface="companion"]` 之下。
+ * 桌面版、平板、手機瀏覽器**一條都不會命中**——不是靠命名慣例期待沒人用到，
+ * 而是選擇器本身就進不去（見 lib/companionSurface.ts 的 useSurfaceAttribute）。
+ *
+ * 紅線契約（比照 styles.mobile-tokens.css）：
+ * 1. 變數一律帶 --c- 前綴，絕不覆寫桌機既有變數（--primary/--bg/--r-*）。
+ * 2. 不改任何既有 class 的行為；Companion 只用 .companion-* 與 .orb* 節點。
+ * 3. 顏色沿用品牌：金環 #c9a24b（icon.svg）＋ board 四色（navy/coral/amber/mint）。
+ *
+ * 禁止清單（任務書 §18）：大量彩虹漸層、滿版發光、廉價 cyberpunk、
+ * 過度玻璃擬態、太多 floating card、每個東西都動畫。
+ * 下面只有**一個**東西會動：球。其餘是靜的。
+ */
+
+html[data-surface="companion"] {
+  /* ── Orb 色彩（品牌延續，不是新配色） ── */
+  --c-orb-gold: #c9a24b;
+  --c-orb-gold-soft: rgba(201, 162, 75, 0.34);
+  --c-orb-navy: #16223b;
+  --c-orb-coral: #ef6a4e;
+  --c-orb-amber: #f2b24a;
+  --c-orb-mint: #8fe3cb;
+  --c-orb-core: rgba(255, 253, 247, 0.86);
+
+  /* ── 表面 ── */
+  --c-surface: #f3f0e8;          /* 暖米紙感，與 --m-paper 同值 */
+  --c-surface-raised: #fffdf8;
+  --c-glass: rgba(255, 253, 247, 0.62);
+  --c-overlay: rgba(22, 34, 59, 0.42);
+  --c-border: rgba(22, 34, 59, 0.1);
+
+  /* ── 文字（對比沿用既有已過 AA 的墨色，不自創） ── */
+  --c-text: #16223b;
+  --c-muted: rgba(22, 34, 59, 0.62);
+
+  /* ── 語意 ── */
+  --c-success: #4f8a5b;
+  --c-warning: #b5791f;
+  --c-danger: #b8452f;
+
+  /* ── 形 ── */
+  --c-r-card: 20px;
+  --c-r-control: 14px;
+  --c-r-sheet: 26px;
+  --c-shadow-1: 0 1px 2px rgba(22, 34, 59, 0.05), 0 6px 18px -10px rgba(22, 34, 59, 0.16);
+  --c-shadow-2: 0 2px 6px rgba(22, 34, 59, 0.07), 0 18px 42px -20px rgba(22, 34, 59, 0.22);
+  --c-blur: 14px;
+
+  /* ── 動效 ── */
+  --c-dur: 220ms;
+  --c-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+
+  /* Orb 執行期變數：由元件寫入 */
+  --orb-amp: 0;
+}
+
+/* ══════════════════ AIOS Orb ══════════════════ */
+
+html[data-surface="companion"] .orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  /* 觸控目標永遠 >= 44px，就算 size 被傳成更小的值 */
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+  touch-action: none; /* 手勢由元件處理；瀏覽器的捲動接管會吃掉上下滑 */
+  -webkit-tap-highlight-color: transparent;
+  /* 只提升這一顆，不是滿版：整層合成才是省電的關鍵 */
+  will-change: transform;
+  transition: transform var(--c-dur) var(--c-ease);
+}
+
+html[data-surface="companion"] .orb:focus-visible {
+  outline: 3px solid var(--c-orb-gold);
+  outline-offset: 4px;
+}
+
+/* ── 外圈光暈 ── */
+html[data-surface="companion"] .orb__halo {
+  position: absolute;
+  inset: -14%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--c-orb-gold-soft) 0%,
+    rgba(201, 162, 75, 0.12) 46%,
+    transparent 68%
+  );
+  opacity: 0.85;
+  transition: opacity var(--c-dur) var(--c-ease), background var(--c-dur) var(--c-ease);
+}
+
+/* ── 玻璃球體 ── */
+html[data-surface="companion"] .orb__glass {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(circle at 34% 28%, var(--c-orb-core) 0%, rgba(255, 253, 247, 0.5) 38%, rgba(243, 240, 232, 0.36) 100%);
+  box-shadow:
+    inset 0 2px 10px rgba(255, 255, 255, 0.75),
+    inset 0 -10px 22px rgba(22, 34, 59, 0.1),
+    0 10px 30px -14px rgba(22, 34, 59, 0.35);
+  /* backdrop-filter 只用在這一層；滿版玻璃擬態在中階機上是最貴的一個效果 */
+  backdrop-filter: blur(var(--c-blur));
+}
+
+/* ── 內部光流：三團低飽和色斑，緩慢互相穿過 ── */
+html[data-surface="companion"] .orb__flow {
+  position: absolute;
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  filter: blur(16px);
+  opacity: 0.5;
+}
+html[data-surface="companion"] .orb__flow--a {
+  background: radial-gradient(circle, var(--c-orb-mint) 0%, transparent 68%);
+  top: 6%;
+  left: -8%;
+}
+html[data-surface="companion"] .orb__flow--b {
+  background: radial-gradient(circle, var(--c-orb-amber) 0%, transparent 68%);
+  bottom: -6%;
+  right: -4%;
+}
+html[data-surface="companion"] .orb__flow--c {
+  background: radial-gradient(circle, var(--c-orb-coral) 0%, transparent 70%);
+  top: 26%;
+  left: 30%;
+  opacity: 0.34;
+}
+
+/* 高光：一道，不是四道。多一道就開始像塑膠。 */
+html[data-surface="companion"] .orb__sheen {
+  position: absolute;
+  top: 6%;
+  left: 14%;
+  width: 46%;
+  height: 30%;
+  border-radius: 50%;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0));
+  filter: blur(2px);
+}
+
+/* ── 粒子 ── */
+html[data-surface="companion"] .orb__particles {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  overflow: hidden;
+}
+html[data-surface="companion"] .orb__particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: var(--c-orb-gold);
+  opacity: 0.5;
+  transform: rotate(var(--p-angle)) translateX(var(--p-radius));
+  animation: orb-orbit var(--p-duration) linear infinite;
+  animation-delay: var(--p-delay);
+}
+
+/* ── 金環與進度環 ── */
+html[data-surface="companion"] .orb__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 從 12 點開始順時針，與所有進度指示的共同直覺一致 */
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+html[data-surface="companion"] .orb__ring-track {
+  fill: none;
+  stroke: var(--c-orb-gold);
+  stroke-width: 3;
+  opacity: 0.32;
+}
+html[data-surface="companion"] .orb__ring-progress {
+  fill: none;
+  stroke: var(--c-orb-gold);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--c-dur) var(--c-ease);
+}
+
+/* ── 聆聽音量圈 ── */
+html[data-surface="companion"] .orb__listen {
+  position: absolute;
+  inset: -4%;
+  border-radius: 50%;
+  border: 2px solid var(--c-orb-coral);
+  opacity: 0;
+  /* 音量 0 時貼著球，滿格時外擴 12%——不是那種會蓋住半個畫面的擴散 */
+  transform: scale(calc(1 + var(--orb-amp) * 0.12));
+  transition: transform 90ms linear, opacity var(--c-dur) var(--c-ease);
+}
+
+/* ══════════════════ 狀態 ══════════════════ */
+
+/* idle：緩慢呼吸 ＋ 微微漂浮 */
+html[data-surface="companion"] .orb--motion-full.orb--idle,
+html[data-surface="companion"] .orb--motion-reduced.orb--idle {
+  animation: orb-breathe 6.5s var(--c-ease) infinite;
+}
+html[data-surface="companion"] .orb--motion-full.orb--idle .orb__glass {
+  animation: orb-float 9s var(--c-ease) infinite;
+}
+
+/* listening：音量圈現身，光暈轉暖 */
+html[data-surface="companion"] .orb--listening .orb__listen { opacity: 0.9; }
+html[data-surface="companion"] .orb--listening .orb__halo {
+  background: radial-gradient(circle at 50% 50%, rgba(239, 106, 78, 0.3) 0%, rgba(239, 106, 78, 0.1) 46%, transparent 68%);
+}
+
+/* thinking：光流旋轉（不是 spinner——沒有那條追著跑的弧線） */
+html[data-surface="companion"] .orb--motion-full.orb--thinking .orb__flow--a { animation: orb-swirl 7s linear infinite; }
+html[data-surface="companion"] .orb--motion-full.orb--thinking .orb__flow--b { animation: orb-swirl 9s linear infinite reverse; }
+html[data-surface="companion"] .orb--motion-full.orb--thinking .orb__flow--c { animation: orb-swirl 12s linear infinite; }
+html[data-surface="companion"] .orb--motion-full.orb--thinking .orb__particle { animation-duration: 4.5s; }
+html[data-surface="companion"] .orb--motion-reduced.orb--thinking {
+  animation: orb-breathe 2.4s var(--c-ease) infinite;
+}
+
+/* executing：進度環是主角，光暈退到背景 */
+html[data-surface="companion"] .orb--executing .orb__halo { opacity: 0.5; }
+html[data-surface="companion"] .orb--motion-full.orb--executing .orb__flow--a { animation: orb-swirl 5s linear infinite; }
+
+/* waiting_confirmation：柔和脈衝——「我在等你」而不是「出事了」 */
+html[data-surface="companion"] .orb--motion-full.orb--waiting_confirmation,
+html[data-surface="companion"] .orb--motion-reduced.orb--waiting_confirmation {
+  animation: orb-pulse 2.2s var(--c-ease) infinite;
+}
+html[data-surface="companion"] .orb--waiting_confirmation .orb__halo {
+  background: radial-gradient(circle at 50% 50%, rgba(242, 178, 74, 0.4) 0%, rgba(242, 178, 74, 0.12) 46%, transparent 68%);
+}
+html[data-surface="companion"] .orb--waiting_confirmation .orb__ring-track { opacity: 0.6; }
+
+/* success：一次性光暈擴散，沒有煙火 */
+html[data-surface="companion"] .orb--success .orb__halo {
+  background: radial-gradient(circle at 50% 50%, rgba(143, 227, 203, 0.5) 0%, rgba(143, 227, 203, 0.14) 46%, transparent 68%);
+}
+html[data-surface="companion"] .orb--motion-full.orb--success .orb__halo,
+html[data-surface="companion"] .orb--motion-reduced.orb--success .orb__halo {
+  animation: orb-bloom 1.1s var(--c-ease) 1;
+}
+
+/* error：顏色偏陶土色，球身輕微一次擺動。畫面不會變成警告頁。 */
+html[data-surface="companion"] .orb--error .orb__halo {
+  background: radial-gradient(circle at 50% 50%, rgba(184, 69, 47, 0.34) 0%, rgba(184, 69, 47, 0.1) 46%, transparent 68%);
+}
+html[data-surface="companion"] .orb--error .orb__ring-track { stroke: var(--c-danger); opacity: 0.5; }
+html[data-surface="companion"] .orb--motion-full.orb--error { animation: orb-nudge 620ms var(--c-ease) 1; }
+
+/* notification：輕輕點頭一下，像被叫到名字 */
+html[data-surface="companion"] .orb--motion-full.orb--notification,
+html[data-surface="companion"] .orb--motion-reduced.orb--notification {
+  animation: orb-bob 1.4s var(--c-ease) 2;
+}
+
+/* still：一律不動。連 transition 都停——低階機上 transition 也要重繪。 */
+html[data-surface="companion"] .orb--motion-still,
+html[data-surface="companion"] .orb--motion-still * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/*
+ * 系統層級的「減少動態」是最後一道保險。
+ * useOrbMotion 已經會降到 reduced，但使用者可能在 App 執行中才打開它，
+ * 而 CSS 這一條是即時生效的——不必等 React 重繪。
+ */
+@media (prefers-reduced-motion: reduce) {
+  html[data-surface="companion"] .orb,
+  html[data-surface="companion"] .orb * {
+    animation: none !important;
+  }
+  html[data-surface="companion"] .orb__listen {
+    transition: opacity var(--c-dur) var(--c-ease);
+  }
+}
+
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+@keyframes orb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes orb-swirl {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes orb-orbit {
+  from { transform: rotate(var(--p-angle)) translateX(var(--p-radius)) rotate(0deg); }
+  to { transform: rotate(calc(var(--p-angle) + 360deg)) translateX(var(--p-radius)) rotate(-360deg); }
+}
+@keyframes orb-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.055); }
+}
+@keyframes orb-bloom {
+  0% { transform: scale(0.94); opacity: 0.5; }
+  55% { transform: scale(1.16); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+@keyframes orb-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  70% { transform: translateX(4px); }
+}
+@keyframes orb-bob {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-8px); }
+}
+
+/* ══════════════════ Companion 外殼 ══════════════════ */
+
+/*
+ * 為什麼版面規則也在這裡而不是 styles.mobile.css：
+ * 手機 Web 殼層（.m-*）與 Companion（.companion-*）是**兩套產品**，
+ * 不是同一套的兩個尺寸。放在一起的話，改其中一個一定會不小心動到另一個。
+ */
+
+html[data-surface="companion"] body {
+  background: var(--c-surface);
+}
+
+html[data-surface="companion"] .companion {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  color: var(--c-text);
+}
+
+html[data-surface="companion"] .companion__main {
+  flex: 1;
+  /* 底欄 68px ＋ 安全區；--safe-bottom 由既有手機 token 提供 */
+  padding: 24px 20px calc(84px + var(--safe-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── 首頁 ── */
+
+html[data-surface="companion"] .companion-home {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+html[data-surface="companion"] .companion-home__head {
+  text-align: center;
+}
+html[data-surface="companion"] .companion-home__greeting {
+  margin: 0;
+  font-family: var(--m-font-display, inherit);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+html[data-surface="companion"] .companion-home__nudge {
+  margin: 6px 0 0;
+  color: var(--c-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+html[data-surface="companion"] .companion-home__orb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  /* 球是主角，給它真正的空間；上下留白比任何一張卡都多 */
+  padding: 14px 0 6px;
+}
+
+html[data-surface="companion"] .companion-home__transcript {
+  margin: 0;
+  max-width: 300px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--c-text);
+}
+html[data-surface="companion"] .companion-home__voice-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-muted);
+}
+
+/* ── 輸入 ── */
+
+html[data-surface="companion"] .companion-home__ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  box-shadow: var(--c-shadow-1);
+}
+html[data-surface="companion"] .companion-home__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  /* 16px 是 iOS 不自動放大頁面的下限；小一個 px 就會在聚焦時整頁跳動 */
+  font-size: 16px;
+  color: var(--c-text);
+  padding: 12px 0;
+}
+html[data-surface="companion"] .companion-home__input:focus { outline: none; }
+html[data-surface="companion"] .companion-home__ask:focus-within {
+  border-color: var(--c-orb-gold);
+}
+html[data-surface="companion"] .companion-home__send {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 999px;
+}
+
+html[data-surface="companion"] .companion-home__offline,
+html[data-surface="companion"] .companion-home__handoff {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-muted);
+}
+
+/* ── 智慧卡 ── */
+
+html[data-surface="companion"] .companion-home__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+html[data-surface="companion"] .companion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-r-card);
+  /* 只有一層陰影：任務書 §18 明令「不要太多 floating card」 */
+  box-shadow: var(--c-shadow-1);
+}
+html[data-surface="companion"] .companion-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+html[data-surface="companion"] .companion-card__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+html[data-surface="companion"] .companion-card__line {
+  font-size: 14px;
+}
+html[data-surface="companion"] .companion-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-surface="companion"] .companion-card__actions > * {
+  min-height: 44px;
+}
+
+/* 左緣一道細色條標示種類；不整張卡染色——那會讓三張卡看起來像三個警告 */
+html[data-surface="companion"] .companion-card--approval { border-left: 3px solid var(--c-orb-amber); }
+html[data-surface="companion"] .companion-card--failure { border-left: 3px solid var(--c-danger); }
+html[data-surface="companion"] .companion-card--running { border-left: 3px solid var(--c-orb-mint); }
+html[data-surface="companion"] .companion-card--done { border-left: 3px solid var(--c-success); }
+html[data-surface="companion"] .companion-card--resume { border-left: 3px solid var(--c-orb-gold); }
+
+/* ── 任務分頁 ── */
+
+html[data-surface="companion"] .companion-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+html[data-surface="companion"] .companion-tasks__title {
+  margin: 0;
+  font-family: var(--m-font-display, inherit);
+  font-size: 22px;
+  font-weight: 600;
+}
+html[data-surface="companion"] .companion-tasks__totals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+html[data-surface="companion"] .companion-total {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 72px;
+  padding: 12px 8px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-r-card);
+  color: var(--c-text);
+  cursor: pointer;
+}
+html[data-surface="companion"] .companion-total:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-surface="companion"] .companion-total__value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+html[data-surface="companion"] .companion-total__label {
+  font-size: 13px;
+  color: var(--c-muted);
+}
+html[data-surface="companion"] .companion-total--warn .companion-total__value { color: var(--c-warning); }
+html[data-surface="companion"] .companion-total--danger .companion-total__value { color: var(--c-danger); }
+html[data-surface="companion"] .companion-total--calm .companion-total__value { color: var(--c-success); }
+
+html[data-surface="companion"] .companion-tasks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-surface="companion"] .companion-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-r-card);
+}
+html[data-surface="companion"] .companion-notice__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+html[data-surface="companion"] .companion-notice__text strong { font-size: 15px; }
+html[data-surface="companion"] .companion-notice__actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+html[data-surface="companion"] .companion-notice__actions > * { min-height: 44px; }
+html[data-surface="companion"] .companion-notice--critical { border-left: 3px solid var(--c-danger); }
+html[data-surface="companion"] .companion-notice--action_required { border-left: 3px solid var(--c-orb-amber); }
+
+/* ── 我 ── */
+
+html[data-surface="companion"] .companion-me {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+html[data-surface="companion"] .companion-me__title {
+  margin: 0;
+  font-family: var(--m-font-display, inherit);
+  font-size: 22px;
+  font-weight: 600;
+}
+html[data-surface="companion"] .companion-me__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-surface="companion"] .companion-me__label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-muted);
+  text-transform: none;
+}
+html[data-surface="companion"] .companion-me__hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-muted);
+}
+html[data-surface="companion"] .companion-me__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-surface="companion"] .companion-me__actions > * { min-height: 44px; }
+html[data-surface="companion"] .companion-me__groups {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+html[data-surface="companion"] .companion-me__groups button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-r-control);
+  color: var(--c-text);
+  font-size: 15px;
+}
+html[data-surface="companion"] .companion-me__groups button.is-active {
+  border-color: var(--c-orb-gold);
+}
+
+/* ── 底部三格 ── */
+
+html[data-surface="companion"] .companion-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  gap: 4px;
+  padding: 8px 12px calc(8px + var(--safe-bottom, 0px));
+  background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -1px 0 var(--c-border), 0 -10px 26px -22px rgba(22, 34, 59, 0.4);
+}
+html[data-surface="companion"] .companion-nav button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  /* 每一格都 >= 44px 觸控目標（任務書 §19） */
+  min-height: 52px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
+  border-radius: var(--c-r-control);
+}
+html[data-surface="companion"] .companion-nav button.is-active { color: var(--c-text); }
+html[data-surface="companion"] .companion-nav__icon { position: relative; display: inline-flex; }
+html[data-surface="companion"] .companion-nav__dot {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-orb-coral);
+}
+/* 中央那格是球本人；order 排在中間，與三格網格對齊 */
+html[data-surface="companion"] .companion-nav__orb {
+  order: 0;
+  grid-column: 2;
+}
+html[data-surface="companion"] .companion-nav .companion-nav__orb-visual {
+  /* 小球不吃手勢：分頁列的按鈕自己處理點擊 */
+  pointer-events: none;
+}
+html[data-surface="companion"] .companion-nav button:nth-child(1) { grid-column: 1; }
+html[data-surface="companion"] .companion-nav button:nth-child(3) { grid-column: 3; }

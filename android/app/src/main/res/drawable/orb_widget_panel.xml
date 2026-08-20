@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget 底板：暖米紙 ＋ 大圓角（與 App 的 --c-r-card 同節奏）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#F3F0E8" />
+    <corners android:radius="20dp" />
+</shape>

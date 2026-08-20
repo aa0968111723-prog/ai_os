@@ -4,6 +4,7 @@ import { sessionBootRouter } from "./sessionBoot";
 import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
 import { phoneRouter } from "./phone";
+import { companionRouter } from "./companion";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 import { scenesRouter } from "./scenes";
@@ -69,6 +70,8 @@ export const appRouter = router({
   projects: projectsRouter,
   // 手機首屏專用唯讀彙總（<768px）；桌面沿用既有 procedures，未動一行
   phone: phoneRouter,
+  // 手機原生 App 的 AI 夥伴讀模型（唯讀；寫入一律走既有 globalAssistant/creativeContext）
+  companion: companionRouter,
   generation: generationRouter,
   messages: messagesRouter,
   scenes: scenesRouter,

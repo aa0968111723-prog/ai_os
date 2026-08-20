@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面 Widget 的 Orb：待機。
+
+  視覺與 App 內的 Orb 同一套語彙——金環（#C9A24B，取自 client/public/icon.svg）
+  ＋ 暖米紙核心。RemoteViews 不支援 CSS 那種粒子與光流，所以這裡是那顆球的
+  「靜態肖像」：一眼認得出是同一個東西，但不假裝會動（AppWidget 的動畫成本
+  由 launcher 承擔，而使用者的桌布下面不該有一個一直在重繪的東西）。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="54%"
+                android:centerX="0.36"
+                android:centerY="0.3"
+                android:startColor="#FFFDF7"
+                android:endColor="#EFE9DC" />
+            <stroke android:width="3dp" android:color="#C9A24B" />
+        </shape>
+    </item>
+</layer-list>

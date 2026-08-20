@@ -4,4 +4,11 @@
     <string name="title_activity_main">Aios</string>
     <string name="package_name">app.aios.mobile</string>
     <string name="custom_url_scheme">app.aios.mobile</string>
+    <!-- 桌面 Widget 與長按捷徑（Companion） -->
+    <string name="orb_widget_label">AIOS 助手</string>
+    <string name="orb_widget_description">桌面上的 Aios 小球：看一眼現況，點一下開始說話。</string>
+    <string name="shortcut_voice_short">說一句話</string>
+    <string name="shortcut_voice_long">直接跟 Aios 說話</string>
+    <string name="shortcut_tasks_short">看任務</string>
+    <string name="shortcut_tasks_long">看現在有什麼在等我</string>
 </resources>
