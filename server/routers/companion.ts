@@ -330,6 +330,54 @@ export const companionRouter = router({
         },
       };
     }),
+
+  /**
+   * 失敗生成清單（重跑確認卡的資料來源）。
+   *
+   * ## 為什麼讀在這裡、而重跑不在這裡
+   *
+   * Companion 的「失敗的重跑」是一張確認卡：要列出**幾筆、預估幾點**，
+   * 使用者拍板後逐筆呼叫既有的 `generation.retry`（完整還原錨點、
+   * 走 executeGenerationCommand、真扣點）。讀在 companion（這支），
+   * 寫在 generation router（既有）——companion router 維持零 mutation 的不變式。
+   *
+   * 授權與 context 的 loadProjectChecked 同一道：專案 → requireGroup(project.groupId)。
+   */
+  failedGenerations: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db
+        .select({ id: schema.projects.id, groupId: schema.projects.groupId, title: schema.projects.title })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      const rows = await db
+        .select({
+          id: schema.generations.id,
+          kind: schema.generations.kind,
+          modelId: schema.generations.modelId,
+          sceneId: schema.generations.sceneId,
+          pointsEst: schema.generations.pointsEst,
+          error: schema.generations.error,
+          updatedAt: schema.generations.updatedAt,
+        })
+        .from(schema.generations)
+        .where(and(eq(schema.generations.projectId, input.projectId), eq(schema.generations.status, "failed")))
+        .orderBy(desc(schema.generations.updatedAt))
+        // 一張確認卡放得下的量；更多失敗代表這一輪整個垮了，該去 Web 看
+        .limit(20);
+      return {
+        projectTitle: project.title,
+        items: rows.map((row) => ({
+          ...row,
+          // 失敗原因進卡片一行，不進整段 provider stack
+          error: row.error ? row.error.slice(0, 120) : null,
+          updatedAt: row.updatedAt.toISOString(),
+        })),
+        totalPointsEst: rows.reduce((sum, row) => sum + (row.pointsEst ?? 0), 0),
+      };
+    }),
 });
 
 function emptyTotals() {

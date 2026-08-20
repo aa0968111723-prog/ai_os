@@ -66,6 +66,26 @@ describe("companion router 的授權與查詢契約", () => {
   });
 });
 
+describe("failedGenerations（重跑確認卡的資料來源）", () => {
+  it("先驗專案再 requireGroup——不能靠 projectId 讀到別組的失敗清單", () => {
+    const at = src.indexOf("failedGenerations: authedProcedure");
+    expect(at).toBeGreaterThan(-1);
+    const block = src.slice(at, at + 1200);
+    expect(block).toContain("requireGroup(ctx.auth, project.groupId)");
+  });
+
+  it("錯誤原因截斷、清單有上限（20）", () => {
+    const at = src.indexOf("failedGenerations: authedProcedure");
+    const block = src.slice(at, at + 1800);
+    expect(block).toContain(".limit(20)");
+    expect(block).toContain("slice(0, 120)");
+  });
+
+  it("router 仍是唯讀——重跑走既有 generation.retry", () => {
+    expect(src).not.toContain(".mutation(");
+  });
+});
+
 describe("Companion 即時事件", () => {
   it("生成的四個生命週期都發事件（開始／完成／失敗／待核）", () => {
     for (const kind of [

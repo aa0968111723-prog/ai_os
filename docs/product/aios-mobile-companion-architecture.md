@@ -434,3 +434,87 @@
 | P2 | iOS WidgetKit | 對稱補齊 |
 | P2 | 主動提醒的推播端（目前只有站內優先序，推播文案尚未走 `companionNotificationCopy`） | 讓 §8 的分級真的影響推播 |
 | P3 | Floating Bubble（Android，optional enhancement，不得成為核心路徑） | 任務書 §9 的紅線已寫明 |
+
+---
+
+## 15. Native v1（Android）
+
+### 15.1 選型：Capacitor（繼續），但這次把 native bridge 做真
+
+Audit 結論（任務書 B2）：
+
+- repo 已有 Capacitor 8 殼（`server.url` 直連線上站）、APK CI（`apk.yml`，tag 觸發、簽章）。
+- 前端 100% TypeScript／tRPC contracts；auth 是 cookie session（WebView cookie jar 持有）。
+- realtime 是自有 WS；push 是 Web Push（VAPID）。
+- React Native ＝ 重寫全部 UI 與資料層、複製 business logic（任務書明令禁止複製後端／另建 App 專用邏輯）。
+- TWA ＝ 零 native 能力（Widget／SpeechRecognizer／自訂 scheme 都做不到）。
+
+**Capacitor 是唯一同時滿足「最大共用 TS contracts」與「真 native 能力」的選項。**
+
+#### 哪些是真 native bridge、哪些是 Web UI（誠實邊界）
+
+| 層 | 實作 | 性質 |
+|---|---|---|
+| Orb／對話／卡片／離線佇列 | #794 的 Web Companion（surface=companion） | Web UI（WebView 內） |
+| 語音辨識 | `AiosSpeechPlugin.java`（系統 SpeechRecognizer） | **真 native**（WebView 沒有 Web Speech API——沒有這個 bridge，APK 內按住 Orb 只能退回打字） |
+| 桌面 Widget | `OrbWidgetProvider/State/Plugin`（#794） | **真 native**（AppWidget＋SharedPreferences 單向狀態） |
+| 深連結 | `AiosSchemeRouter.java`（aios://→https 轉譯）＋ App Links | **真 native**（intent 層） |
+| 快捷 | `shortcuts.xml`（語音／任務） | **真 native** |
+| Auth | WebView cookie jar（session cookie） | 平台能力（見 15.4） |
+
+### 15.2 語音（B5）
+
+long press → `AiosSpeech.start()`（plugin 自帶 RECORD_AUDIO 權限流程）
+→ SpeechRecognizer 裝置端辨識 → `partialResult` 事件逐字稿即時顯示
+→ 放開 → `stopAsync()` 等最終結果 ≤800ms → `composeToAssistant()`
+→ 既有意圖判定／能力路由：DIRECT 寫入直接執行（executeDirectSiteActions）、
+COSTFUL/HIGH 出既有提議卡——**不是把文字填進 input 就算了**。
+
+音量圈由 plugin 的 `rms` 事件餵（onRmsChanged dB 正規化 0–1），不再 getUserMedia，
+避免雙重佔麥。App 進背景 `handleOnPause` 強制收麥（Java 端雙保險）。
+隱私：辨識在裝置端，音訊不經 AIOS 伺服器；plugin 不落錄音檔、不 log 逐字稿
+（`shared/androidManifest.contract.test.ts` 守住）。
+
+### 15.3 確定性重跑（B7/B8/B9 垂直切片）
+
+失敗卡「全部重跑」（單一專案，`actionId=retry_generation`）
+→ `companion.failedGenerations`（唯讀：筆數＋預估點數）
+→ `CompanionRetryConfirm` 確認卡（B9 Confirmation 規格：幾筆、預估幾點、就這樣做／先不要）
+→ 逐筆 `generation.retry`（既有端點：完整還原角色定裝／場景／道具／分鏡綁定，
+走 executeGenerationCommand 真扣點）
+→ 逐筆誠實回報（N 成功、M 失敗＋首個錯誤）→ WS companion-event 讓 Orb 即時轉 executing。
+
+多專案聚合的失敗卡維持 compose 給助手（沒有唯一目標專案時不猜）。
+
+### 15.4 Auth（B15）
+
+- session cookie 存在 **WebView cookie jar**（Android 系統層，app-private），
+  不是 SharedPreferences、不是 JS 可讀的 localStorage token。
+- capacitor.config `androidScheme=https` ＋ `server.url` 為 https——cookie 全程 Secure。
+- 登出＝既有 `auth.logout`（清 server session＋cookie）；token 過期＝既有 401 →
+  SessionGate 轉登入頁；revoked session＝realtime 心跳重驗（≤60s 斷線）＋下一請求 401。
+- 多裝置＝既有 sessions 表本來就是 per-device；deviceTrust 機制原樣適用。
+- 禁止清單核對：無 plaintext token 落地、無 password 存 SharedPreferences、
+  無 hardcoded API key、Java 端不 log 任何 auth 資料（contract test 守住權限清單與 Log 呼叫）。
+
+### 15.5 通知（B13）——已知限制
+
+Capacitor WebView 沒有 Web Push（PushManager 不存在）；真 FCM push 需要
+google-services.json（apk.yml 已預留掛點）→ **下一個 PR**。本版：
+
+- 站內事件照 #794 的優先序進收件匣＋WS 即時（App 開著時 Orb／任務分頁即時反應）。
+- 已安裝 App 時，通知 email／瀏覽器推播裡的 https 連結經 App Links 直開 App。
+
+### 15.6 App Links / Deep Link 契約（B10）
+
+https（正典，分享／通知一律用它；未裝 App 自然退回瀏覽器）：
+`/p/:id`、`/p/:id#stage-board`、`/studio/:id`、`/collab`、`/dashboard#projects`
+
+aios://（App 在場表面專用：Widget／捷徑；MainActivity 轉譯成上列 https 同路徑）：
+`project/:id`、`storyboard/:id`、`studio/:id`、`generation/:id`、`voice`、`tasks`、`home`
+
+對照表有兩份實作（TS `parseAiosUri` ＋ Java `AiosSchemeRouter`，冷啟動時 WebView
+還沒起來只能在原生層轉譯），`companionDeepLink.test.ts` 用 source 斷言鎖住兩邊同步。
+
+驗證：`/.well-known/assetlinks.json` 由 `ANDROID_APPLINK_SHA256` 環境變數驅動
+（`server/services/appLinks.ts`）；未設定 → 404 → 驗證失敗 → 連結開瀏覽器（功能無損）。

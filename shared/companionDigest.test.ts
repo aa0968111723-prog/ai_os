@@ -61,6 +61,24 @@ describe("companionDigest", () => {
     expect(digest.cards.length).toBeLessThanOrEqual(MAX_COMPANION_CARDS);
   });
 
+  it("resume 卡在生成階段帶進度百分比——「做到哪」要一眼可讀", () => {
+    const digest = companionDigest({ nowHour: 9, projects: [base] });
+    const resume = digest.cards.find((card) => card.kind === "resume");
+    expect(resume?.line).toBe("畫面 8／12 鏡（67%）");
+  });
+
+  it("failure 卡的「全部重跑」掛 actionId=retry_generation——UI 走確定性路徑靠 id，不靠比對文案", () => {
+    const digest = companionDigest({
+      nowHour: 9,
+      projects: [{ ...base, failedGenerations: 2 }],
+    });
+    const failure = digest.cards.find((card) => card.kind === "failure");
+    const retry = failure?.actions.find((action) => action.actionId === "retry_generation");
+    expect(retry?.label).toBe("全部重跑");
+    // 「先看原因」沒有 actionId：那句話仍走助手
+    expect(failure?.actions.filter((action) => action.actionId).length).toBe(1);
+  });
+
   it("待確認排第一：人被擋住最貴", () => {
     const digest = companionDigest({
       nowHour: 9,

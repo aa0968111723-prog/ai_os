@@ -25,11 +25,22 @@
             <!-- 深層連結：分享/通知裡的 https://ai-os-app.zeabur.app/* 直接開 App
                  （側載 App 無法 App Links 驗證 assetlinks，故不設 autoVerify；
                  使用者首次點擊會出現「用哪個應用程式開啟」選單，屬預期行為） -->
-            <intent-filter>
+            <!-- autoVerify：assetlinks.json 端點就緒（設定 ANDROID_APPLINK_SHA256）後
+                 驗證通過即直開 App；未設定時驗證失敗→連結開瀏覽器，行為與先前相同 -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="ai-os-app.zeabur.app" />
+            </intent-filter>
+
+            <!-- aios:// 自訂 scheme（App 在場表面專用：Widget／捷徑；分享一律仍發 https。
+                 MainActivity 白名單轉譯成同站 https，走 Capacitor 既有深連結路徑） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aios" />
             </intent-filter>
 
         </activity>
@@ -74,4 +85,14 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- AiosSpeech（系統 SpeechRecognizer）：執行期仍要使用者同意；辨識在裝置端，音訊不上傳 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Android 11+ 套件可見性：少了這段 SpeechRecognizer.isRecognitionAvailable 恆 false，
+         按住 Orb 會靜默退化成打字，而且只在實機上看得出來 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 </manifest>

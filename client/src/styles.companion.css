@@ -482,6 +482,41 @@ html[data-surface="companion"] .companion-card__actions > * {
   min-height: 44px;
 }
 
+/* ── 重跑確認卡（B8 MEDIUM 花點數 → 先問一次） ── */
+
+html[data-surface="companion"] .companion-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-danger);
+  border-radius: var(--c-r-card);
+  box-shadow: var(--c-shadow-1);
+}
+html[data-surface="companion"] .companion-confirm__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+html[data-surface="companion"] .companion-confirm__line {
+  margin: 0;
+  font-size: 14px;
+}
+html[data-surface="companion"] .companion-confirm__outcome {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-text);
+}
+html[data-surface="companion"] .companion-confirm__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-surface="companion"] .companion-confirm__actions > * {
+  min-height: 44px;
+}
+
 /* 左緣一道細色條標示種類；不整張卡染色——那會讓三張卡看起來像三個警告 */
 html[data-surface="companion"] .companion-card--approval { border-left: 3px solid var(--c-orb-amber); }
 html[data-surface="companion"] .companion-card--failure { border-left: 3px solid var(--c-danger); }

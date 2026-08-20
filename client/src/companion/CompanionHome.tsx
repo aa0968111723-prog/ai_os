@@ -11,6 +11,7 @@ import { registerAssistantPage } from "../lib/assistantContext";
 import { usePhoneAssistantTurn } from "../lib/phoneAssistantBridge";
 import { anchorForSection } from "../mobile/stages";
 import { AiosOrb } from "./AiosOrb";
+import { CompanionRetryConfirm, type RetryItem } from "./CompanionRetryConfirm";
 import { useCompanionRealtime } from "./useCompanionRealtime";
 import { useVoiceInput } from "./useVoiceInput";
 import { openCompanionDeepLink } from "./openInBrowser";
@@ -60,6 +61,22 @@ export function CompanionHome({
   const [queued, setQueued] = useState(() => listQueuedCommands().length);
   const [handoff, setHandoff] = useState<string | null>(null);
   const voice = useVoiceInput();
+
+  /**
+   * 「失敗的重跑」確認卡（任務書 B5/B8）。
+   *
+   * 打開＝設定目標專案；資料由 companion.failedGenerations 現抓（staleTime 0：
+   * 確認卡上的筆數與點數必須是**現在的**事實，不能是 30 秒前的快取）。
+   * 執行＝逐筆呼叫既有 generation.retry；這個元件不含任何生成邏輯。
+   */
+  const [retryTarget, setRetryTarget] = useState<{ projectId: string } | null>(null);
+  const [retryRunning, setRetryRunning] = useState(false);
+  const [retryOutcome, setRetryOutcome] = useState<{ succeeded: number; failed: number; firstError?: string } | null>(null);
+  const failedList = trpc.companion.failedGenerations.useQuery(
+    { projectId: retryTarget?.projectId ?? "" },
+    { enabled: !!retryTarget, staleTime: 0 },
+  );
+  const retryMutation = trpc.generation.retry.useMutation();
 
   const digest = trpc.companion.digest.useQuery(
     { groupId },
@@ -227,8 +244,44 @@ export function CompanionHome({
     setHandoff(opened ? companionHandoffReason(deepTarget) : "瀏覽器沒有打開，請再試一次。");
   }, []);
 
+  /**
+   * 逐筆重跑、逐筆記結果——部分失敗就照實說 N 成功 M 失敗。
+   * Orb 的 executing 不在這裡設：retry 讓生成翻 running 時，伺服器會發
+   * generation_started 的 companion-event，球自己會轉。
+   */
+  const runRetry = useCallback(async () => {
+    const items = failedList.data?.items ?? [];
+    if (!items.length) {
+      setRetryOutcome({ succeeded: 0, failed: 0 });
+      return;
+    }
+    setRetryRunning(true);
+    let succeeded = 0;
+    let failed = 0;
+    let firstError: string | undefined;
+    for (const item of items) {
+      try {
+        await retryMutation.mutateAsync({ id: item.id });
+        succeeded += 1;
+      } catch (error) {
+        failed += 1;
+        firstError ??= error instanceof Error ? error.message : String(error);
+      }
+    }
+    setRetryRunning(false);
+    setRetryOutcome({ succeeded, failed, ...(firstError ? { firstError } : {}) });
+    resync();
+  }, [failedList.data, retryMutation, resync]);
+
   const runCardAction = useCallback((card: CompanionCard, action: CompanionCardAction) => {
     if (action.kind === "compose" && action.prompt) {
+      // 單一專案的重跑：語意完全確定（該案所有 failed → 逐筆 retry），
+      // 走確定性確認卡而不是丟給助手。多專案聚合卡沒有 projectId → 照舊 compose。
+      if (action.actionId === "retry_generation" && card.projectId) {
+        setRetryOutcome(null);
+        setRetryTarget({ projectId: card.projectId });
+        return;
+      }
       send(card.projectId ? `在「${card.title}」：${action.prompt}` : action.prompt);
       return;
     }
@@ -269,8 +322,11 @@ export function CompanionHome({
   }, [voice]);
 
   const holdEnd = useCallback(() => {
-    const said = voice.stop();
-    if (said) send(said);
+    // stopAsync：原生辨識在 stop 之後才吐最終結果（比最後一段 partial 準），
+    // 等它 ≤800ms；web 模式立即返回，行為與 #794 相同。
+    void voice.stopAsync().then((said) => {
+      if (said) send(said);
+    });
   }, [voice, send]);
 
   if (!groupId) {
@@ -345,6 +401,18 @@ export function CompanionHome({
         </p>
       )}
       {handoff && <p className="companion-home__handoff" role="status">{handoff}</p>}
+
+      {retryTarget && failedList.data && (
+        <CompanionRetryConfirm
+          projectTitle={failedList.data.projectTitle}
+          items={failedList.data.items as RetryItem[]}
+          totalPointsEst={failedList.data.totalPointsEst}
+          running={retryRunning}
+          outcome={retryOutcome}
+          onConfirm={() => { void runRetry(); }}
+          onCancel={() => { setRetryTarget(null); setRetryOutcome(null); }}
+        />
+      )}
 
       {digest.isLoading && !digest.data && (
         <div className="companion-home__cards">

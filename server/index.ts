@@ -51,6 +51,7 @@ import {
 } from "./services/storage";
 import { setStorageDegraded } from "./services/storageHealth";
 import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
+import { buildAssetLinks } from "./services/appLinks";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { normalizeRequestId, withRequestContext } from "./services/requestContext";
 import { sessionGate } from "./services/sessionPolicy";
@@ -208,6 +209,20 @@ function requireUsableSession(auth: AuthState | null, res: express.Response): au
 }
 
 // 健康檢查 — 純 HTTP，不碰 DB
+/**
+ * Android App Links 數位資產宣告。指紋由 ANDROID_APPLINK_SHA256 提供
+ * （逗號分隔，多把＝換簽過渡期）；未設定回 404——App Links 驗證失敗時
+ * Android 自動退回瀏覽器開啟，功能無損（見 services/appLinks 檔頭）。
+ */
+app.get("/.well-known/assetlinks.json", (_req, res) => {
+  const statements = buildAssetLinks(process.env.ANDROID_APPLINK_SHA256);
+  if (!statements) {
+    return res.status(404).json({ error: "App Links 未設定（ANDROID_APPLINK_SHA256）" });
+  }
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.json(statements);
+});
+
 app.get("/api/health", (_req, res) => {
   // 只回存活狀態＋建置版本（公開 repo 的 commit SHA 非敏感），不外洩生成模式等內部資訊（#26）
   res.json({ ok: true, time: new Date().toISOString(), build: currentDeploymentIdentity() });

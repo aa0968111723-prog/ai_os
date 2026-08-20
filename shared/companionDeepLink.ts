@@ -128,6 +128,57 @@ export function companionAbsoluteUrl(origin: string, path: string): string | nul
 }
 
 /**
+ * aios:// 自訂 scheme → 站內相對路徑。
+ *
+ * ## 為什麼 App Links 優先、scheme 只是備援
+ *
+ * https App Links 在「未安裝 App」時自然退回瀏覽器；aios:// 在未安裝時
+ * 什麼都不會發生（死連結）。所以站內所有對外分享、通知一律發 https 連結，
+ * aios:// 只給「已知 App 在場」的表面用（桌面捷徑、Widget、App 內部）。
+ *
+ * ## 白名單解析，不是字串拼接
+ *
+ * scheme 的 host/path 可能來自任何發 intent 的 App——一律過白名單，
+ * 對不上就回 null（呼叫端落到首頁），絕不把未知字串拼進路由。
+ *
+ * 這份對照表在 Java 端有一份鏡像（android/…/AiosSchemeRouter.java，
+ * App 冷啟動時 WebView 還沒起來，只能在原生層轉譯）——兩邊要一起改，
+ * companionDeepLink.test.ts 有一條測試盯著。
+ *
+ * 支援：
+ *   aios://project/:id      → /p/:id
+ *   aios://storyboard/:id   → /p/:id#stage-board
+ *   aios://studio/:id       → /studio/:id
+ *   aios://generation/:id   → /collab（生成細節的既有落點）
+ *   aios://voice            → /?voice=1
+ *   aios://tasks            → /?tab=tasks
+ *   aios://home             → /
+ */
+export function parseAiosUri(uri: string): string | null {
+  const m = /^aios:\/\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/?$/i.exec(uri.trim());
+  if (!m) return null;
+  const [, host, id] = m;
+  switch (host.toLowerCase()) {
+    case "project":
+      return id && UUID_RE.test(id) ? `/p/${id}` : null;
+    case "storyboard":
+      return id && UUID_RE.test(id) ? `/p/${id}#stage-board` : null;
+    case "studio":
+      return id && UUID_RE.test(id) ? `/studio/${id}` : null;
+    case "generation":
+      return id && UUID_RE.test(id) ? `/collab` : null;
+    case "voice":
+      return "/?voice=1";
+    case "tasks":
+      return "/?tab=tasks";
+    case "home":
+      return "/";
+    default:
+      return null;
+  }
+}
+
+/**
  * 「這件事在瀏覽器看比較完整」的一句話。
  *
  * 講的是**理由**（畫面比較大／要拖曳），不是「App 不支援」——後者會讓人覺得
