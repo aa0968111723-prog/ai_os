@@ -91,20 +91,39 @@ async function persistHudCancel(input: {
   run: AgentRunRow;
   terminal: "stopped" | "discarded";
   summary: string;
+  /**
+   * 這一次收哪些狀態（原子 CAS 的 where 條件）。預設＝HUD 停按鈕的全部可停狀態；
+   * discard 傳 ["awaiting_approval"]——「放棄」只作用於還沒開始執行的計畫
+   * （#721 契約：放棄≠停止；running 的計畫該走 stop，訊息與語意都不同）。
+   * 用 CAS 而不是先查再判：核准與放棄同時發生時，贏的是先落庫的那一個。
+   */
+  allowedStatuses?: readonly AgentRunRow["status"][];
+  /** CAS 沒吃到、且目前狀態不在 allowed 裡時的錯誤訊息 */
+  preconditionMessage?: string;
 }): Promise<AgentRunRow> {
   const { auth, run, terminal, summary } = input;
+  const allowed = input.allowedStatuses ?? HUD_CANCEL_STATUSES;
   const [cancelled] = await db
     .update(schema.agentRuns)
     .set({ status: terminal, activeQuestionId: null, updatedAt: new Date() })
     .where(and(
       eq(schema.agentRuns.id, run.id),
-      inArray(schema.agentRuns.status, [...HUD_CANCEL_STATUSES]),
+      inArray(schema.agentRuns.status, [...allowed]),
     ))
     .returning();
   if (!cancelled) {
     const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
-    if (current && !isAgentRunActiveForHud(current.status)) return current;
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
+    // 已終局且呼叫端收全部可停狀態（HUD 停）：冪等地回現況——重按不該紅 toast。
+    // 收窄過的呼叫端（discard）不冪等：計畫已經開跑，「放棄」就是失敗，要講清楚。
+    if (
+      current
+      && !isAgentRunActiveForHud(current.status)
+      && input.allowedStatuses === undefined
+    ) return current;
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: input.preconditionMessage ?? "這個代理已經結束，不需要停止",
+    });
   }
   if (run.activeQuestionId) {
     await db.update(schema.agentQuestions).set({ status: "cancelled", updatedAt: new Date() })
@@ -1471,14 +1490,20 @@ export async function discardAgentCore(input: { auth: AuthState; runId: string }
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以放棄" });
   }
-  if (!canStopAgentRunStatus(run.status)) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
-  }
+  /**
+   * 放棄只作用於「還沒開始執行」的計畫（#721 起的公開契約：
+   * teamAssistant e2e「🔒 已開始執行的子計畫不能放棄」）。
+   * #790 曾把 running 也收進來轉成 stop——那讓「放棄」變成披著別名的停止，
+   * 呼叫端拿到的訊息還寫著「沒有花點」，而 running 的計畫點已經在花了。
+   * running/waiting 要停請走 stopAgentCore（訊息與收尾語意都不同）。
+   */
   return persistHudCancel({
     auth,
     run,
-    terminal: run.status === "running" ? "stopped" : "discarded",
+    terminal: "discarded",
     summary: "使用者放棄了尚未執行的計畫",
+    allowedStatuses: ["awaiting_approval"] as const,
+    preconditionMessage: "這份計畫已經開始執行或已結束",
   });
 }
 
