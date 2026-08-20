@@ -7,6 +7,7 @@ import { listProjectFiles, readProjectFile, searchProjectFiles } from "./agentPr
 import { PracticalAutonomyRuntime, ToolRegistry, type ToolContext, type ToolResult } from "./practicalAutonomy";
 import { AgentRunLedger } from "./agentRunLedger";
 import { agentDatabaseToolDefinitions } from "./agentDatabaseTools";
+import { cutosToolDefinitions } from "./cutosToolRegistry";
 
 async function authFor(context: ToolContext) {
   const auth = await loadAuthState(context.userId);
@@ -26,6 +27,13 @@ export const agentToolRegistry = new ToolRegistry()
   .register({ id: "project.health", label: "Project health and delivery gaps", category: "creator", access: "READ", input: z.object({}), output: z.unknown(), requiredContext: ["userId", "groupId", "projectId"], risk: "low", confirmation: "never", idempotency: "keyed", cost: { paid: false, estimatePoints: () => 0 }, retry: readPolicy, verify: verifiedRead, verificationStage: "VERIFIED", verificationMethod: "authoritative_project_state_read_back", evidenceScope: "project", availability: available, handlerIdentity: "projectIntelligence.buildProjectIntelligence", handler: async (_input, context) => { await authFor(context); const value = await buildProjectIntelligence(context.projectId); return { value, evidence: [{ type: "citation", ref: `project-health:${context.projectId}`, verifiedAt: new Date().toISOString(), trust: "VERIFIED_INTERNAL" }], actualPoints: 0, verified: true }; } });
 
 for (const tool of agentDatabaseToolDefinitions(authFor)) {
+  agentToolRegistry.register(tool);
+}
+
+// CUTOS video-editing capabilities join the SAME registry rather than a second
+// tool system, so they inherit the existing access/risk/confirmation/idempotency
+// /retry/verify/evidence governance instead of re-implementing it.
+for (const tool of cutosToolDefinitions()) {
   agentToolRegistry.register(tool);
 }
 

@@ -568,6 +568,20 @@
       "when": 1789683600000,
       "tag": "0080_project_rev",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789687200000,
+      "tag": "0081_cutos_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789690800000,
+      "tag": "0082_cutos_memory",
+      "breakpoints": true
     }
   ]
 }

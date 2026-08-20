@@ -382,8 +382,14 @@ describe("legacy migration adoption bridge", () => {
     // 0079 Animation consistency evaluations: 1 immutable evidence table +
     // 3 guarded indexes — 4 additive statements, no Canon/current rewrite.
     // 0080 Project rev: 1 ADD COLUMN IF NOT EXISTS on projects — 1 statement.
+    // 0081 CUTOS bridge: 3 CREATE TABLE IF NOT EXISTS (project bindings, tool
+    // effects, mirrored activity) + 10 guarded indexes — 13 additive statements.
+    // No existing table is touched: the CUTOS integration keeps its own state
+    // and references projects by id, so a re-run is a no-op.
+    // 0082 CUTOS memory: 1 CREATE TABLE IF NOT EXISTS + 5 guarded indexes —
+    // 6 additive statements; agent preferences only, no video content.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4 + 1,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4 + 1 + 13 + 6,
     );
   });
 

@@ -376,4 +376,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0080_project_rev": [
     "d70f2058229cb6da52436d29f31eaf9dbc564cad19f1e0b4516a78ab12732240",
   ],
+  "0081_cutos_bridge": [
+    "7a5a27ca3a216c524f228645bd013b15588ae584fef94ba72d1e569bc2d1bbde",
+  ],
+  "0082_cutos_memory": [
+    "6853defb118249996c6ac8319755f139decc6003a449801a38d411085b79292a",
+  ],
 };

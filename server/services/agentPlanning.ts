@@ -263,7 +263,11 @@ function referenceFor(
   return undefined;
 }
 
-function actorFor(kind: CompletePlanDraft["steps"][number]["kind"]): "ai" | "human" | "system" {
+/**
+ * Widened past the draft union: resolved steps carry the executor's kind set
+ * (which includes `tool_call`), and every kind still has to land on an actor.
+ */
+function actorFor(kind: AgentStep["kind"]): "ai" | "human" | "system" {
   if (kind === "create_task" || kind === "wait_for_human" || kind === "request_approval") return "human";
   return "ai";
 }

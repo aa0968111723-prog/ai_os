@@ -81,6 +81,12 @@ import {
 } from "../../shared/agentTheater";
 import { applyWithRevision, isRevisionConflictError } from "./revisionGuard";
 import { notifyAgentProgress } from "./realtime";
+import {
+  cancelCutosJob,
+  executeCutosToolStep,
+  isCutosToolId,
+  pollCutosJob,
+} from "./cutosStepRunner";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -110,7 +116,15 @@ export interface AgentStep {
     | "update_schedule"
     | "create_task"
     | "wait_for_human"
-    | "request_approval";
+    | "request_approval"
+    /**
+     * Governed external tool call (currently the CUTOS video-editing plane).
+     * One generic kind rather than one enum member per capability: the
+     * capability set lives in agentToolRegistry, so adding a CUTOS ability
+     * does not grow this union. `toolId` is still restricted to registered
+     * `cutos.*` tools — this is not an arbitrary-function step.
+     */
+    | "tool_call";
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
   /** 決策軌跡：為何需要此步（規劃端結構化說明，非模型內部推理） */
@@ -209,6 +223,16 @@ export interface AgentStep {
   scenesBefore?: number;
   /** 執行期：split_script 的失敗重試計數（防 LLM 回壞 JSON 時無限重打 NIM 燒免費額度） */
   retries?: number;
+  /** tool_call 用：已註冊的工具 id（目前限 `cutos.*`） */
+  toolId?: string;
+  /** tool_call 用：工具輸入（由該工具自己的 zod schema 驗證） */
+  toolInput?: Record<string, unknown>;
+  /** 執行期：外部系統的長任務 id（CUTOS jobId）；有值＝已送出，改用輪詢收斂 */
+  externalJobId?: string;
+  /** 執行期：外部系統的執行 id（CUTOS agent run），供跨系統追蹤 */
+  externalRunId?: string;
+  /** 執行期：外部寫入完成後對方回報的時間軸版本 */
+  externalRevision?: number;
   detail?: string;
 }
 
@@ -1100,6 +1124,11 @@ async function advanceRun(run: RunRow): Promise<void> {
 
   // ── 多代理長跑：先結算「所有」已送出的生成（供應商並發，我們輪詢收斂） ──
   // 一支 failed 不可中斷迴圈：其餘支線仍須 settle，否則永遠卡 running（run 已 failed 也不再被 tick 撈到舊邏輯）
+  // 外部長任務（CUTOS FFmpeg 分析／輸出）：與生成同一套收斂模型——
+  // 已送出的就只輪詢，不占住 HTTP 連線、也不重送。
+  const settledExternal = await settleCutosJobs(run, steps);
+  if (settledExternal) await saveRun(run.id, { steps });
+
   const inFlight = listInFlightGenerationSteps(steps);
   let terminalSettled = false;
   let ghostCleared = false;
@@ -1166,6 +1195,12 @@ async function advanceRun(run: RunRow): Promise<void> {
   const step = steps[idx];
   if (!step) {
     if (run.status === "running") await saveDagProgress(run, steps);
+    return;
+  }
+
+  // 已送出的外部工具步驟：上面已輪詢；仍在跑就只更新心跳。
+  if (step.externalJobId && step.status === "running") {
+    await saveRun(run.id, { steps });
     return;
   }
 
@@ -2020,6 +2055,100 @@ async function advanceRun(run: RunRow): Promise<void> {
 
   // 把一筆結果寫進自訂資料庫（AI 代理 × 資料庫）：以發起人身分＋AI 介面權限（agentAccess）落地。
   // tableId 在規劃端已對照「組可寫資料庫」解析過，這裡再驗一次現況（防資料庫被刪或權限收回）。
+  if (step.kind === "tool_call") {
+    if (!step.toolId || !isCutosToolId(step.toolId)) {
+      return failRun(run, steps, idx, `計畫指定的工具「${step.toolId ?? ""}」不是已註冊的 CUTOS 能力`);
+    }
+    const stepId = stableStepId(step, idx);
+    const dependencies = (step.dependsOn ?? []).map((dependencyId) => {
+      const index = steps.findIndex((candidate, position) => stableStepId(candidate, position) === dependencyId);
+      const dependency = index >= 0 ? steps[index]! : undefined;
+      return {
+        id: dependencyId,
+        kind: dependency?.kind ?? "unknown",
+        status: dependency?.status ?? "failed",
+      };
+    });
+
+    const outcome = await executeCutosToolStep({
+      runId: run.id,
+      stepId,
+      userId: run.userId,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      toolId: step.toolId,
+      toolInput: step.toolInput ?? {},
+      dependencies,
+    });
+
+    if (outcome.state === "waiting_approval") {
+      // The control plane owns the human gate: park rather than fail, so the
+      // plan can continue once the approval step ahead of it completes.
+      step.status = "waiting";
+      step.detail = outcome.reason;
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        stepId,
+        stepIndex: idx,
+        eventKey: `step:${stepId}:waiting-approval`,
+        eventType: "step_waiting",
+        actorType: "system",
+        summary: outcome.reason,
+        data: { toolId: step.toolId },
+      });
+      await saveRun(run.id, { steps });
+      return;
+    }
+
+    if (outcome.state === "failed") {
+      if (outcome.retryable && (step.retries ?? 0) < 2) {
+        // Transient: leave the step pending so the next tick retries with the
+        // SAME idempotency key. CUTOS replays a completed effect, so a retry
+        // can never double-apply.
+        step.retries = (step.retries ?? 0) + 1;
+        step.status = "pending";
+        step.detail = outcome.reason;
+        await saveRun(run.id, { steps });
+        return;
+      }
+      return failRun(run, steps, idx, outcome.reason);
+    }
+
+    if (outcome.state === "waiting_external") {
+      step.status = "running";
+      step.externalJobId = outcome.jobId;
+      step.detail = "CUTOS 正在處理中";
+      addOutputRef(step, "cutos_job", outcome.jobId, step.title ?? step.note);
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        stepId,
+        stepIndex: idx,
+        eventKey: `step:${stepId}:external-started`,
+        eventType: "step_waiting",
+        actorType: "system",
+        summary: "已交給 CUTOS 背景處理",
+        data: { toolId: step.toolId, jobId: outcome.jobId },
+      });
+      await saveRun(run.id, { steps });
+      return;
+    }
+
+    const value = outcome.value as Record<string, unknown> | null;
+    const externalRunId = typeof value?.runId === "string" ? value.runId : undefined;
+    if (externalRunId) step.externalRunId = externalRunId;
+    if (outcome.timelineRevision !== null) step.externalRevision = outcome.timelineRevision;
+    addOutputRef(step, "cutos_result", stepId, step.title ?? step.note);
+    step.status = "done";
+    step.detail = describeCutosOutcome(step.toolId, value);
+    auditAgentStep(run, step, idx, true);
+    await saveDagProgress(run, steps);
+    return;
+  }
+
   if (step.kind === "record_to_database") {
     if (!step.tableId) return failRun(run, steps, idx, "計畫沒有指定要寫入的資料庫");
     const [table] = await db
@@ -2239,6 +2368,127 @@ async function advanceRun(run: RunRow): Promise<void> {
 }
 
 /** 生成步驟已有生成列：看結果決定前進、收尾或等下一輪 */
+/**
+ * Poll every parked CUTOS job for this run.
+ *
+ * The runner must never hold an HTTP request open across an FFmpeg render, so
+ * a long-running capability parks its step with `externalJobId` and this pass
+ * converges it on later ticks — the same shape the generation pipeline uses.
+ */
+async function settleCutosJobs(run: RunRow, steps: AgentStep[]): Promise<boolean> {
+  let changed = false;
+  for (let idx = 0; idx < steps.length; idx += 1) {
+    const step = steps[idx]!;
+    if (step.kind !== "tool_call" || step.status !== "running" || !step.externalJobId) continue;
+    const stepId = stableStepId(step, idx);
+
+    // 使用者已按停：向 CUTOS 送取消，讓對方的 worker 也真的停下來。
+    if (run.status !== "running") {
+      await cancelCutosJob({
+        runId: run.id,
+        stepId,
+        userId: run.userId,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        jobId: step.externalJobId,
+      });
+      step.status = "stopped";
+      step.detail = "已要求 CUTOS 停止";
+      changed = true;
+      continue;
+    }
+
+    const poll = await pollCutosJob({
+      runId: run.id,
+      stepId,
+      userId: run.userId,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      jobId: step.externalJobId,
+    });
+
+    if (poll.state === "running") {
+      const detail = poll.stage ? `CUTOS 處理中（${poll.stage}）` : "CUTOS 處理中";
+      if (step.detail !== detail) {
+        step.detail = detail;
+        changed = true;
+      }
+      continue;
+    }
+
+    changed = true;
+    if (poll.state === "completed") {
+      step.status = "done";
+      step.detail = "CUTOS 已完成";
+      auditAgentStep(run, step, idx, true);
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        stepId,
+        stepIndex: idx,
+        eventKey: `step:${stepId}:external-done`,
+        eventType: "step_completed",
+        actorType: "system",
+        summary: "CUTOS 已完成",
+        data: { jobId: step.externalJobId },
+      });
+      continue;
+    }
+    step.status = "failed";
+    step.detail = poll.reason ?? "CUTOS 背景工作未完成";
+    markRestStopped(steps, idx);
+  }
+  if (changed) {
+    const failedIdx = steps.findIndex((step) => step.kind === "tool_call" && step.status === "failed");
+    if (failedIdx >= 0) {
+      await saveRun(run.id, {
+        steps,
+        currentStep: failedIdx,
+        status: "failed",
+        error: steps[failedIdx]!.detail ?? "CUTOS 背景工作失敗",
+      });
+      return false;
+    }
+    await saveDagProgress(run, steps);
+    return false;
+  }
+  return changed;
+}
+
+/** zh-TW one-liner for the step list. Structured facts only, never reasoning. */
+function describeCutosOutcome(toolId: string, value: Record<string, unknown> | null): string {
+  const count = (key: string) => {
+    const item = value?.[key];
+    return Array.isArray(item) ? item.length : undefined;
+  };
+  switch (toolId) {
+    case "cutos.semantic.search":
+    case "cutos.transcript.search":
+      return `找到 ${count("hits") ?? 0} 個相關片段`;
+    case "cutos.highlights.find":
+      return `找到 ${count("highlights") ?? 0} 個候選精華`;
+    case "cutos.topics.list":
+      return `整理出 ${count("topics") ?? 0} 個主題`;
+    case "cutos.speakers.list":
+      return `辨識出 ${count("speakers") ?? 0} 位說話者`;
+    case "cutos.edit.plan":
+      return `已建立剪輯計畫（${typeof value?.operationCount === "number" ? value.operationCount : 0} 項操作）`;
+    case "cutos.edit.verify":
+      return value?.ok === true ? "剪輯計畫驗證通過" : "剪輯計畫有問題需要調整";
+    case "cutos.edit.preview":
+      return "已產生即時預覽";
+    case "cutos.edit.apply":
+      return `已套用到時間軸（版本 ${typeof value?.timelineRevision === "number" ? value.timelineRevision : "?"}）`;
+    case "cutos.undo":
+      return "已復原上一個剪輯";
+    case "cutos.redo":
+      return "已重做剪輯";
+    default:
+      return "已完成";
+  }
+}
+
 async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, step: AgentStep, gen: GenerationRow): Promise<void> {
   if (gen.status === "done") {
     const visual = !gen.sceneRole || gen.sceneRole === "visual";
