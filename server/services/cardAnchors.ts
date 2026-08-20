@@ -90,6 +90,8 @@ export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: s
       const locked = applyXiaohuaIdentityLock(
         { name: c.name, appearance: c.appearance, costume: c.lookCostume ?? "" },
         c.name ?? "",
+        // 同 continuity：入庫資料不推平（#790 跨專案隔離）
+        { storedAppearance: true },
       );
       const appearance = locked.appearance ?? c.appearance;
       const base = `外觀鎖定 ${c.name}：${clipCardField(appearance)}`;

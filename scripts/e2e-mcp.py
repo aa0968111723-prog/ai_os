@@ -172,7 +172,12 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","get_mod
     "add_prop","update_prop",
     "rename_generation","retry_generation",
     "adobe_status","adobe_list_assets","adobe_edit_photo","adobe_job",
-    "adobe_export_timeline","adobe_render_timeline"}
+    "adobe_export_timeline","adobe_render_timeline",
+    # CUTOS 剪輯整合（#793 services/mcpCutos）：分析、逐字稿、剪輯計畫——名單與 shared/mcpCatalog 同步
+    "cutos_get_project","cutos_start_analysis","cutos_get_job","cutos_get_transcript",
+    "cutos_search_transcript","cutos_search_semantic","cutos_list_topics","cutos_list_speakers",
+    "cutos_list_activity","cutos_inspect_scene","cutos_find_highlights",
+    "cutos_create_edit_plan","cutos_verify_edit_plan","cutos_get_preview"}
 _missing, _extra = sorted(EXPECTED - names), sorted(names - EXPECTED)
 ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED,
    f"{len(names)} 個"

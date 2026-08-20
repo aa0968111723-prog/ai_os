@@ -1189,6 +1189,23 @@ export const scenesRouter = router({
         const [ss] = await db.select().from(schema.storyScenes).where(eq(schema.storyScenes.id, input.storySceneId));
         if (!ss || ss.projectId !== scene.projectId) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一場" });
       }
+      /**
+       * 採用造型＝造型主人出場。
+       *
+       * 主人還不在這一鏡時，把他**同一筆原子寫入**綁進 characterIds，而不是拒絕。
+       * 這裡與 setCards 刻意不同、而且必須不同：
+       *
+       * - setCards 的 input 同時載 characterIds 與 lookIds，「送了排除主人的
+       *   characterIds、卻又送他的造型」是一句自相矛盾的指令，該拒絕（見 setCards 的 unboundLookIds 守衛）。
+       * - scenes.update 的 input **沒有 characterIds 欄位**——拒絕等於要求呼叫端走
+       *   「先 setCards 綁角色、再 update 採造型」的兩段式寫入，而那正是 setCards
+       *   檔頭記載要消滅的孤兒來源（第二支失敗就留下壞狀態）。#791 在這裡加的
+       *   拒絕曾把 #721 以來的公開契約（e2e-story 的「鏡採用造型」）打斷。
+       *
+       * #791 的不變式原樣保住：寫入之後，每個造型的主人都在 characterIds 裡，
+       * 不存在孤兒造型。跨專案／不存在的造型仍然 fail-closed 拒絕。
+       */
+      let adoptLookCharacterIds: string[] | undefined;
       if (input.lookIds?.length) {
         const rows = await db
           .select({
@@ -1202,11 +1219,23 @@ export const scenesRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: "造型不存在或不屬於此專案" });
         }
         const owners = lookOwnerMap(rows);
-        if (unboundLookIds(input.lookIds, owners, scene.characterIds).length) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "造型不屬於這一鏡已綁定的角色" });
+        const missingOwners = unboundLookIds(input.lookIds, owners, scene.characterIds)
+          .map((id) => owners.get(id))
+          .filter((owner): owner is string => !!owner);
+        if (missingOwners.length) {
+          const next = [...new Set([...(scene.characterIds ?? []), ...missingOwners])];
+          // 上限與 setCards 的 characterIds 同口徑：自動綁定不能成為突破角色數上限的後門
+          if (next.length > MAX_GENERATE_CHARACTERS) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `這一鏡的角色已達上限（${MAX_GENERATE_CHARACTERS}），無法為造型自動加入角色`,
+            });
+          }
+          adoptLookCharacterIds = next;
         }
       }
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+      if (adoptLookCharacterIds) patch.characterIds = adoptLookCharacterIds;
       if (input.title !== undefined) patch.title = input.title;
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
@@ -1256,6 +1285,15 @@ export const scenesRouter = router({
       });
       // 合併過就順手叫醒同房的人：他們畫面上那一格剛被兩個人各改了一半，值得立刻重取。
       if (merged) publishToProject(scene.projectId, { kind: "scene", id: scene.id }, "合併了修改");
+      // 造型／角色動了就刷新 shot packet 的過時標記——與 setCards 同一個聯動；
+      // 少了這一段，經 update 採用造型的鏡，其既有出圖不會被標成「卡片已變」。
+      if (patch.lookIds !== undefined || patch.characterIds !== undefined) {
+        await (await import("../services/shotContextPackets")).refreshShotContextStalenessSafely({
+          auth: ctx.auth,
+          projectId: scene.projectId,
+          shotIds: [scene.id],
+        });
+      }
       return { ...updated, merged };
     }),
 

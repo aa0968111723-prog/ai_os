@@ -22,13 +22,34 @@ export function scriptExplicitlyMaleXiaohua(script: string): boolean {
 
 export function applyXiaohuaIdentityLock<
   T extends { name?: string | null; appearance?: string | null; costume?: string | null },
->(character: T, script: string): T {
+>(
+  character: T,
+  script: string,
+  opts?: {
+    /**
+     * 這份外觀是**已入庫的資料**（角色卡／造型卡），不是 EXTRACT 的即時產物。
+     *
+     * 分界線是資料的可信度，不是呼叫的位置：
+     * - **抽取路徑**（storyParse 的 150s fallback、助手 add_character 的 LLM 提案）
+     *   吃的是模型輸出——腳本沒寫的外觀它會亂補、寫了的它會掉。缺女性字眼時
+     *   推平成鎖定外觀是本鎖的本職（tku parse 契約：「大二化工、白帽T、短髮」→ 補回女孩）。
+     * - **渲染路徑**（continuity 快照、卡片錨點）吃的是庫裡的正典資料——使用者為
+     *   某個專案刻意寫的「紅旗袍、盤髮」「藍外套黑框眼鏡」沒有性別字眼，卻是那個
+     *   專案自己的臉。推平它＝所有專案的小華共用一張全域臉，正是 #790 跨專案隔離
+     *   e2e（「專案 B preview 鎖的是 B 的小華外觀」）要擋的洩漏（斷言寫了、行為
+     *   沒跟上——CI 當時死在 story 之前沒人看見）。
+     *
+     * storedAppearance=true 時仍然擋男性標記與空外觀——那兩種在庫裡也是壞資料。
+     */
+    storedAppearance?: boolean;
+  },
+): T {
   if (!isXiaohuaName(character.name)) return character;
   if (scriptExplicitlyMaleXiaohua(script)) return character;
   const appearance = character.appearance ?? "";
   const costume = character.costume ?? "";
   const flipped = MALE_FLIP.test(`${appearance} ${costume}`);
-  const missingFemale = !FEMALE_LOOK.test(appearance);
+  const missingFemale = !opts?.storedAppearance && !FEMALE_LOOK.test(appearance);
   if (!flipped && !missingFemale && appearance.trim()) return character;
   const keepCostume = /白帽/.test(costume) && !MALE_FLIP.test(costume);
   return {
