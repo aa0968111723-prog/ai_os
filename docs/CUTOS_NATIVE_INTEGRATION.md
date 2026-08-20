@@ -47,7 +47,7 @@ CUTOS 提供三個端點：
 `PROTOCOL_CONTRACT_FINGERPRINT`，兩個 repo 的測試都斷言同一個值。任一邊改了協定
 卻沒有鏡像到另一邊，兩邊的測試都會紅——不會變成 runtime 才發現的 JSON 不合。
 
-目前 fingerprint：`d309ebbe4020a6f7e4a496d8de215433b8750a44d7f4cfbc6b0c718e529515c6`
+目前 fingerprint：`2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f`
 
 ### 版本協商
 
@@ -85,13 +85,16 @@ timelineRevision · expectedRevision · traceId · createdAt · updatedAt
 | `server/services/mcpCutos.ts` | MCP 治理暴露 |
 | `shared/cutosMessages.ts` | 全繁中文案（測試掃程式碼擋漏翻） |
 
-### 資料表（migration 0081 / 0082）
+### 資料表（migration 0081 / 0082 / 0083）
 
 - `aios_cutos_project_bindings` — 一個 AIOS 專案對一個 CUTOS 專案（唯一索引），
   一個 CUTOS 專案只能被一個 AIOS 專案綁定（唯一索引）。
 - `cutos_tool_effects` — 每次 CUTOS 寫入的意圖紀錄，`idempotency_key` 唯一。
 - `cutos_activity_events` — 鏡像的跨系統活動，`(cutos_project_id, source_event_id)` 唯一。
 - `cutos_memory_items` — 命名空間化的代理記憶。
+- `cutos_inbound_runs` — 上一張表的鏡像方向：CUTOS 請 AIOS 協調的 run。
+  `idempotency_key` 唯一，所以重送不會變成第二條 run；CUTOS 的
+  `cutosAgentRunId` / `traceId` 也存在這裡，每次輪詢原樣回送。
 
 ### 授權邊界
 
@@ -99,6 +102,54 @@ timelineRevision · expectedRevision · traceId · createdAt · updatedAt
 CUTOS 專案一律由 `resolveCutosProject({userId, groupId, projectId})` 從 run 自身的
 scope 查表得出，並重新驗證組成員資格。使用者被移出組或帳號停用，下一次工具呼叫
 就會被擋。
+
+反方向刻意不對稱，但守的是同一件事：**CUTOS 不能指定 AIOS 專案。**
+`resolveInboundCutosProject({auth, cutosProjectId})` 讓 CUTOS 報自己的影片專案
+（那本來就是它的 id 空間），AIOS 專案則由綁定推出來，並重新檢查呼叫者是否仍是該
+組成員。請求裡沒有任何欄位能指名 AIOS 專案。「沒人綁過這個影片」與「那是別組綁
+的」在線上是**同一個回答**（404 `PROJECT_NOT_FOUND`），否則 CUTOS 就成了探測他組
+專案是否存在的神諭。
+
+---
+
+## CUTOS → AIOS：inbound 控制平面
+
+`server/services/cutosInboundRuns.ts`，掛在 `server/index.ts`：
+
+| 端點 | 用途 |
+| --- | --- |
+| `GET /api/cutos/health` | 版本握手 |
+| `POST /api/cutos/runs` | CUTOS 請 AIOS 協調一件影片工作 |
+| `GET /api/cutos/runs/:runId` | 輪詢狀態（含完整 correlation） |
+| `POST /api/cutos/runs/:runId/cancel` | 取消（重送不算錯） |
+| `POST /api/cutos/runs/:runId/resume` | 解除外部等待——**不是核准** |
+
+這一面以前完全不存在：CUTOS 早就有指向 `/api/cutos/*` 的 orchestrator，ai_os 一條
+都沒實作，而兩邊測試全綠——因為協定只描述了 CUTOS 那一側，沒有東西檢查得到。現在
+`PROTOCOL_CONTRACT.aiosEndpoints` 也進了 fingerprint。
+
+治理沒有因為呼叫者是機器就放寬：
+
+- **認證**＝個人金鑰（`Authorization: Bearer` 或 `x-api-key`），與 REST v1／MCP
+  同一道門、同一套失敗限流；唯讀金鑰可以輪詢但不能啟動或停止 run。絕不接受
+  `?key=`——submit 是寫入，金鑰進網址就會留在反代記錄裡被重放。
+- **capability 是白名單**（`video.edit.plan` / `video.export` /
+  `video.highlight.package` / `video.timeline.update`）。CUTOS 說意圖，不能送步驟
+  清單；沒有任何欄位接受檔案路徑、URL、shell 片段或工具 id。
+- **核准閘門留在控制平面**：inbound run 就是一條普通的 `awaiting_approval` agent
+  run，CUTOS 看到 `waiting_approval` 並顯示「需要你的確認」。送出者**不能核准自己
+  的 run**——`resume` 明確回 `APPROVAL_REQUIRED`。這正是「tool injection 繞過確認」
+  那條禁令要擋的東西。
+- **重送不等於重跑**：`cutos_inbound_runs.idempotency_key` 唯一，而且是
+  **insert 本身**（不是先讀再寫）決定勝負，所以兩個同時到達的重試會收斂到同一條
+  run。測試真的併發送兩次來證明這件事。
+- **health 刻意不驗證**：它是版本握手。要求金鑰會讓「版本不相容」與「認證失敗」
+  混成同一種不可達狀態，正是協定禁止的靜默失敗。它只回兩邊原始碼裡本來就公開的
+  常數，不含任何租戶資料。
+
+生命週期一律沿用既有的 `agentCore`（`stopAgentCore` / `resumePausedAgentCore` /
+`getAgentRunChecked`）與同一張 `agent_runs`：**沒有第二個 runner，也沒有第二套核准
+機制。**
 
 ---
 
@@ -267,20 +318,38 @@ MCP client 指定的是 AI Director 專案；CUTOS 專案由綁定解析，clien
 | `server/services/cutosMemory.test.ts` | 記憶邊界 |
 | `server/services/mcpCutos.test.ts` | MCP 治理 |
 | `shared/cutosMessages.test.ts` | 繁中文案不脫節 |
+| `server/services/cutosInboundRuns.pg.test.ts` | **CUTOS→AIOS inbound：真實 HTTP＋真實 PostgreSQL**，並錄下反向 fixture |
 
-### 跨 repo contract 檔
+### 跨 repo contract 檔（兩個方向各一份）
 
-`docs/contract/cutos.agent.v2.fixtures.json` 由 CUTOS 的
-`apps/web/server/aios-http.test.ts` 對自己的 production handler 錄下真實 HTTP
-流量產生，再由 ai_os 用真實 client 重播。任一邊改了 wire shape，另一邊會紅。
+| 檔案 | 誰錄的 | 誰重播 |
+| --- | --- | --- |
+| `docs/contract/cutos.agent.v2.fixtures.json` | CUTOS `aios-http.test.ts` | ai_os `cutosContract.test.ts` |
+| `docs/contract/aios.cutos.v2.inbound.fixtures.json` | ai_os `cutosInboundRuns.pg.test.ts`（真實 PostgreSQL） | CUTOS `aios-orchestrator.contract.test.ts` |
+
+兩份都是**確定性**的：id 與時間戳在寫入前正規化，所以沒有行為改變時重新產生是
+零 diff。第一版每跑一次測試就重寫 284 行，工作區永遠是髒的，兩個 repo 的副本也
+必然不同——那等於讓這個「跨 repo 成品」失去唯一的用處。
+
+`cutosContract.test.ts` 另外做**真正的鏡射檢查**：fixture 記了 CUTOS 那份
+`protocol.ts` 的 `protocolSourceSha256`，這裡對自己的 `shared/cutosProtocol.ts`
+取雜湊比對。原本 `PROTOCOL_CONTRACT_FINGERPRINT` 只是同 repo 的自我一致性檢查——
+契約改了、只鏡射到一邊，兩邊測試都還是綠的，錯誤留到執行期才炸。現在沒收到那次
+變更的一邊會紅。
+
+同一支測試也讀 `server/index.ts`，斷言 `PROTOCOL_CONTRACT.aiosEndpoints` 列的五條
+路由真的掛上去了。
 
 更新流程：
 
 ```bash
-# CUTOS
-pnpm vitest run apps/web/server/aios-http.test.ts
-# ai_os
+# CUTOS → ai_os
+(cd ../CUTOS && pnpm vitest run apps/web/server/aios-http.test.ts)
 cp ../CUTOS/docs/contract/cutos.agent.v2.fixtures.json docs/contract/
+
+# ai_os → CUTOS
+RUN_PG_INTEGRATION=1 npx vitest run server/services/cutosInboundRuns.pg.test.ts
+cp docs/contract/aios.cutos.v2.inbound.fixtures.json ../CUTOS/docs/contract/
 ```
 
 ### 真實跨 repo E2E

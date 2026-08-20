@@ -282,3 +282,60 @@ export async function listGroupBindings(groupId: string): Promise<CutosBinding[]
     .where(eq(schema.aiosCutosProjectBindings.groupId, groupId));
   return rows.map(toBinding);
 }
+
+/**
+ * Resolve the AIOS project a CUTOS-initiated request may act on.
+ *
+ * This is the inbound mirror of {@link resolveCutosProject} and it is THE
+ * authorization choke point for the CUTOS → AIOS direction. The asymmetry is
+ * deliberate:
+ *
+ *  - outbound, an agent must not choose the video, so the CUTOS project is
+ *    derived from the AIOS project the run is already scoped to;
+ *  - inbound, CUTOS legitimately names its own project (it owns that id space),
+ *    but it must not be able to name an AIOS project. So the AIOS project is
+ *    derived from the durable binding, and the caller's identity is re-checked
+ *    against the binding's group on every request.
+ *
+ * A CUTOS deployment holding a valid AIOS credential therefore still cannot
+ * reach an AIOS project that nobody bound to the video it is asking about.
+ */
+export async function resolveInboundCutosProject(input: {
+  auth: AuthState;
+  cutosProjectId: string;
+}): Promise<CutosBinding> {
+  const [row] = await db
+    .select()
+    .from(schema.aiosCutosProjectBindings)
+    .where(eq(schema.aiosCutosProjectBindings.cutosProjectId, input.cutosProjectId));
+  // Unbound and forbidden are the same answer on the wire: a caller must not be
+  // able to probe which CUTOS project ids exist in someone else's group.
+  if (!row) {
+    throw new CutosBindingError(
+      "BINDING_NOT_FOUND",
+      "cutos.binding.notFound",
+      "No AIOS project is bound to this CUTOS project",
+    );
+  }
+  if (!input.auth.groups.some((membership) => membership.groupId === row.groupId)) {
+    throw new CutosBindingError(
+      "BINDING_NOT_FOUND",
+      "cutos.binding.notFound",
+      "Caller is not a member of the bound group",
+    );
+  }
+  // The project must still exist and still belong to that group — a project
+  // moved or deleted since the binding was written must not be reachable.
+  const [project] = await db
+    .select({ groupId: schema.projects.groupId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, row.aiosProjectId));
+  if (!project || project.groupId !== row.groupId) {
+    throw new CutosBindingError(
+      "BINDING_NOT_FOUND",
+      "cutos.binding.notFound",
+      "Bound AIOS project is gone or moved group",
+    );
+  }
+  return toBinding(row);
+}

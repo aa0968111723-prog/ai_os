@@ -545,6 +545,25 @@ export type QualityProfile = z.infer<typeof qualityProfileSchema>;
  * quality profile, deadline) and never WHICH vendor — model routing is an AIOS
  * decision, so no vendor conditionals leak into CUTOS.
  */
+/**
+ * Correlation for a CUTOS-initiated run.
+ *
+ * Not `requestCorrelationSchema`: that one describes AIOS calling CUTOS, so it
+ * omits the ids CUTOS fills in. Here CUTOS is the caller and legitimately
+ * declares its own `cutosAgentRunId`/`cutosJobId` — without them the
+ * `aiosRunId ↔ cutosAgentRunId ↔ cutosJobId ↔ timelineRevision` chain has no
+ * link at all in this direction. `timelineRevision` stays omitted because it is
+ * an outcome of the work, not an input to it; state the revision you are acting
+ * on in `expectedRevision`.
+ */
+export const aiosRunCorrelationSchema = runCorrelationSchema
+  .partial({
+    createdAt: true,
+    updatedAt: true,
+  })
+  .omit({ timelineRevision: true });
+export type AiosRunCorrelation = z.infer<typeof aiosRunCorrelationSchema>;
+
 export const aiosRunRequestSchema = z.object({
   protocolVersion: protocolVersionSchema,
   goal: z.string().min(1).max(4_000),
@@ -553,7 +572,7 @@ export const aiosRunRequestSchema = z.object({
   qualityProfile: qualityProfileSchema,
   deadlineMs: z.number().int().positive().optional(),
   context: cutosSemanticContextSchema.optional(),
-  correlation: requestCorrelationSchema,
+  correlation: aiosRunCorrelationSchema,
 });
 export type AiosRunRequest = z.infer<typeof aiosRunRequestSchema>;
 
@@ -727,6 +746,11 @@ export const PROTOCOL_CONTRACT = {
       "protocolVersion", "goal", "capability", "qualityProfile", "deadlineMs",
       "context", "correlation",
     ],
+    aiosRunCorrelation: [
+      "requestId", "idempotencyKey", "aiosRunId", "aiosStepId", "cutosAgentRunId",
+      "cutosJobId", "aiosProjectId", "cutosProjectId", "expectedRevision",
+      "traceId", "createdAt", "updatedAt",
+    ],
     aiosRunState: [
       "protocolVersion", "aiosRunId", "status", "steps", "result", "error",
       "correlation", "updatedAt",
@@ -779,6 +803,32 @@ export const PROTOCOL_CONTRACT = {
     invoke: "POST /api/aios/invoke",
     health: "GET /api/aios/health",
   },
+  /**
+   * HTTP surface AIOS must expose for the CUTOS → AIOS direction.
+   *
+   * This was the half of the contract nobody could check: CUTOS shipped an
+   * orchestrator client for these paths while AIOS served none of them, and no
+   * test could notice because the contract only described CUTOS's side. Listing
+   * them here makes the omission a fingerprint change rather than a silent
+   * runtime 404.
+   */
+  aiosEndpoints: {
+    submitRun: "POST /api/cutos/runs",
+    getRun: "GET /api/cutos/runs/:runId",
+    cancelRun: "POST /api/cutos/runs/:runId/cancel",
+    resumeRun: "POST /api/cutos/runs/:runId/resume",
+    health: "GET /api/cutos/health",
+  },
+  /**
+   * Abstract capabilities AIOS orchestrates on CUTOS's behalf. An allow-list,
+   * exactly like the CUTOS manifest: CUTOS states an intent, never a step list.
+   */
+  aiosCapabilities: [
+    "video.edit.plan",
+    "video.export",
+    "video.highlight.package",
+    "video.timeline.update",
+  ],
 } as const;
 
 function stableStringify(value: unknown): string {
@@ -802,7 +852,7 @@ export function protocolContractFingerprint(): string {
  * update this constant IN BOTH REPOSITORIES in the same change set.
  */
 export const PROTOCOL_CONTRACT_FINGERPRINT =
-  "d309ebbe4020a6f7e4a496d8de215433b8750a44d7f4cfbc6b0c718e529515c6";
+  "2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f";
 
 // ---------------------------------------------------------------------------
 // Helpers shared by both repos
