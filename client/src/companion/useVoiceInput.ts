@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * 語音輸入（按住 Orb 說話）。
+ * 語音輸入（按住 Orb 說話）——原生優先、Web Speech 備援。
  *
- * ## 為什麼是 Web Speech API 而不是自己送模型
+ * ## 兩條路（Native v1 起）
  *
- * Companion 的語音要在**按住的當下**就顯示逐字稿，使用者才知道機器有沒有聽懂。
- * 錄完再上傳轉寫至少要多等一秒，而那一秒使用者會以為壞了、再按一次。
- * Android WebView 的 `webkitSpeechRecognition` 是裝置端的，interim result
- * 幾百毫秒就回來。缺點是 iOS Safari 支援不完整——所以這裡**一定要有退路**：
- * 不支援時 `supported=false`，Companion 顯示文字輸入而不是一顆按不動的麥克風。
+ * 1. **原生 AiosSpeech plugin**（Capacitor 殼）：Android WebView **沒有**
+ *    `webkitSpeechRecognition`，在 APK 裡 Web Speech 的偵測必定 unsupported——
+ *    按住 Orb 只能退回打字。原生 bridge 用系統 SpeechRecognizer 補上：
+ *    同樣的逐字稿與音量圈語意，辨識在裝置端跑，音訊不經伺服器。
+ *    音量由 plugin 的 rms 事件餵，**不再另開 getUserMedia**（避免雙重佔麥）。
+ * 2. **Web Speech**（手機瀏覽器）：與 #794 相同，行為不變。
  *
- * ## 音量圈是另一條路
+ * ## stopAsync 與 stop
  *
- * `SpeechRecognition` 不吐音量，所以振幅另外從 `getUserMedia` ＋ `AnalyserNode` 取。
- * 兩者共用麥克風在 Android Chrome 是可以的；拿不到就回 0，音量圈不動，
- * **辨識照樣運作**——不要因為裝飾拿不到而讓核心功能失效。
+ * 原生引擎在 stopListening 之後才吐最終結果（比最後一段 partial 準）。
+ * `stopAsync()` 等最終結果最多 800ms，逾時取最後的 partial——放開 Orb 的
+ * 呼叫端用它。同步 `stop()` 保留（立即回目前逐字稿），行為與 #794 相同。
  *
  * ## 清理
  *
- * 麥克風是使用者看得到的資源（狀態列的紅點）。停止時一定要 stop 每一條 track、
- * close AudioContext。少一個，使用者會看到 App 明明沒在錄音卻一直亮著。
+ * 麥克風是使用者看得到的資源（狀態列紅點）。stop／unmount 收乾淨兩條路的
+ * 所有資源；原生側另有 handleOnPause 在 App 進背景時強制收麥（雙保險）。
  */
 
 export type VoiceStatus = "idle" | "listening" | "denied" | "unsupported" | "error";
@@ -33,9 +34,36 @@ export interface VoiceInputState {
   /** 0–1 音量；拿不到時恆為 0 */
   amplitude: number;
   start: () => void;
-  /** 停止並回傳最終逐字稿（空字串＝沒說話） */
+  /** 停止並回傳目前逐字稿（同步；native 下不等最終結果） */
   stop: () => string;
+  /** 停止並等最終結果（native ≤800ms；web 立即）——放開 Orb 用這個 */
+  stopAsync: () => Promise<string>;
 }
+
+/* ── 原生 plugin 介面（與 android/.../AiosSpeechPlugin.java 一對一） ── */
+
+interface PluginListenerHandleLike { remove: () => Promise<void> | void }
+
+interface AiosSpeechPluginLike {
+  available?: () => Promise<{ available?: boolean }>;
+  start?: (options: { language?: string }) => Promise<void>;
+  stop?: () => Promise<void>;
+  addListener?: (
+    event: "partialResult" | "result" | "rms" | "state" | "error",
+    callback: (payload: Record<string, unknown>) => void,
+  ) => Promise<PluginListenerHandleLike> | PluginListenerHandleLike;
+}
+
+function nativeSpeechPlugin(): AiosSpeechPluginLike | null {
+  if (typeof window === "undefined") return null;
+  const cap = (window as unknown as {
+    Capacitor?: { Plugins?: { AiosSpeech?: AiosSpeechPluginLike } };
+  }).Capacitor;
+  const plugin = cap?.Plugins?.AiosSpeech ?? null;
+  return plugin?.start && plugin.addListener ? plugin : null;
+}
+
+/* ── Web Speech（與 #794 相同） ── */
 
 interface SpeechRecognitionLike {
   lang: string;
@@ -69,15 +97,28 @@ function recognitionCtor(): RecognitionCtor | null {
 const RECOGNITION_LANG = "zh-TW";
 /** 音量取樣間隔：15Hz 足以讓圈跟著聲音動，又不會每幀都算 FFT。 */
 const AMPLITUDE_INTERVAL_MS = 66;
+/** stopAsync 等原生最終結果的上限：再久使用者會以為沒送出去。 */
+const NATIVE_FINAL_RESULT_MS = 800;
 
 export function useVoiceInput(): VoiceInputState {
-  const [supported] = useState(() => recognitionCtor() !== null);
-  const [status, setStatus] = useState<VoiceStatus>(() => (recognitionCtor() ? "idle" : "unsupported"));
+  // 原生 plugin 在場＝一定支援語音介面（有沒有辨識服務由 start 時的 reject 誠實回報）
+  const [mode] = useState<"native" | "web" | "none">(() =>
+    nativeSpeechPlugin() ? "native" : recognitionCtor() ? "web" : "none");
+  const supported = mode !== "none";
+  const [status, setStatus] = useState<VoiceStatus>(() => (mode === "none" ? "unsupported" : "idle"));
   const [transcript, setTranscript] = useState("");
   const [amplitude, setAmplitude] = useState(0);
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = useRef("");
+  /** stopAsync 正在等的最終結果；native result 事件到時 resolve */
+  const pendingFinalRef = useRef<((text: string) => void) | null>(null);
+
+  /* ── native 資源 ── */
+  const nativeHandlesRef = useRef<PluginListenerHandleLike[]>([]);
+  const nativeActiveRef = useRef(false);
+
+  /* ── web 資源 ── */
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const meterTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
@@ -92,6 +133,75 @@ export function useVoiceInput(): VoiceInputState {
     setAmplitude(0);
   }, []);
 
+  const teardownNativeListeners = useCallback(() => {
+    for (const handle of nativeHandlesRef.current) {
+      try {
+        void handle.remove();
+      } catch {
+        /* 已移除 */
+      }
+    }
+    nativeHandlesRef.current = [];
+    nativeActiveRef.current = false;
+    setAmplitude(0);
+  }, []);
+
+  /* ── native start ── */
+  const startNative = useCallback(async () => {
+    const plugin = nativeSpeechPlugin();
+    if (!plugin?.start || !plugin.addListener) {
+      setStatus("unsupported");
+      return;
+    }
+    if (nativeActiveRef.current) return; // 連按兩次不開兩條辨識
+    nativeActiveRef.current = true;
+    transcriptRef.current = "";
+    setTranscript("");
+
+    const listen = async (
+      event: Parameters<NonNullable<AiosSpeechPluginLike["addListener"]>>[0],
+      callback: (payload: Record<string, unknown>) => void,
+    ) => {
+      const handle = await plugin.addListener!(event, callback);
+      nativeHandlesRef.current.push(handle);
+    };
+    try {
+      await listen("partialResult", (payload) => {
+        const text = typeof payload.transcript === "string" ? payload.transcript : "";
+        if (!text) return;
+        transcriptRef.current = text;
+        setTranscript(text);
+      });
+      await listen("result", (payload) => {
+        const text = typeof payload.transcript === "string" ? payload.transcript : "";
+        if (text) {
+          transcriptRef.current = text;
+          setTranscript(text);
+        }
+        pendingFinalRef.current?.(transcriptRef.current.trim());
+        pendingFinalRef.current = null;
+      });
+      await listen("rms", (payload) => {
+        const level = typeof payload.level === "number" ? payload.level : 0;
+        setAmplitude(Math.min(1, Math.max(0, level)));
+      });
+      await listen("state", (payload) => {
+        const next = payload.status;
+        if (next === "listening") setStatus("listening");
+        else if (next === "denied") setStatus("denied");
+        else if (next === "error") setStatus("error");
+        else if (next === "idle") setStatus((prev) => (prev === "listening" ? "idle" : prev));
+      });
+      await plugin.start({ language: RECOGNITION_LANG });
+      setStatus("listening");
+    } catch (error) {
+      teardownNativeListeners();
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(message.includes("denied") ? "denied" : message.includes("unavailable") ? "unsupported" : "error");
+    }
+  }, [teardownNativeListeners]);
+
+  /* ── web start（#794 原樣） ── */
   const startMeter = useCallback(async () => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
     try {
@@ -123,7 +233,7 @@ export function useVoiceInput(): VoiceInputState {
     }
   }, [teardownMeter]);
 
-  const start = useCallback(() => {
+  const startWeb = useCallback(() => {
     const Ctor = recognitionCtor();
     if (!Ctor) {
       setStatus("unsupported");
@@ -131,7 +241,6 @@ export function useVoiceInput(): VoiceInputState {
     }
     // 連按兩次不該開兩條辨識：第二條會把第一條的結果吃掉。
     if (recognitionRef.current) return;
-
     transcriptRef.current = "";
     setTranscript("");
     const recognition = new Ctor();
@@ -165,7 +274,18 @@ export function useVoiceInput(): VoiceInputState {
     void startMeter();
   }, [startMeter]);
 
+  const start = useCallback(() => {
+    if (mode === "native") void startNative();
+    else startWeb();
+  }, [mode, startNative, startWeb]);
+
   const stop = useCallback((): string => {
+    if (mode === "native") {
+      const plugin = nativeSpeechPlugin();
+      void plugin?.stop?.().catch(() => undefined);
+      setStatus((prev) => (prev === "listening" ? "idle" : prev));
+      return transcriptRef.current.trim();
+    }
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     try {
@@ -176,9 +296,33 @@ export function useVoiceInput(): VoiceInputState {
     teardownMeter();
     setStatus((prev) => (prev === "listening" ? "idle" : prev));
     return transcriptRef.current.trim();
-  }, [teardownMeter]);
+  }, [mode, teardownMeter]);
 
-  // 卸載時一定要收乾淨：離開 Companion 之後麥克風還開著是最糟的 bug 之一。
+  const stopAsync = useCallback((): Promise<string> => {
+    if (mode !== "native" || !nativeActiveRef.current) return Promise.resolve(stop());
+    return new Promise<string>((resolve) => {
+      // 引擎把已收音訊辨識完的最終結果比最後一段 partial 準；等它 ≤800ms
+      const timer = setTimeout(() => {
+        pendingFinalRef.current = null;
+        resolve(transcriptRef.current.trim());
+      }, NATIVE_FINAL_RESULT_MS);
+      pendingFinalRef.current = (text) => {
+        clearTimeout(timer);
+        resolve(text);
+      };
+      const plugin = nativeSpeechPlugin();
+      void plugin?.stop?.().catch(() => {
+        clearTimeout(timer);
+        pendingFinalRef.current = null;
+        resolve(transcriptRef.current.trim());
+      });
+      setStatus((prev) => (prev === "listening" ? "idle" : prev));
+    }).finally(() => {
+      nativeActiveRef.current = false;
+    });
+  }, [mode, stop]);
+
+  // 卸載收乾淨：離開 Companion 之後麥克風還開著是最糟的 bug 之一。
   useEffect(() => () => {
     try {
       recognitionRef.current?.abort();
@@ -189,7 +333,17 @@ export function useVoiceInput(): VoiceInputState {
     clearInterval(meterTimer.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     void audioCtxRef.current?.close().catch(() => undefined);
+    const plugin = nativeSpeechPlugin();
+    void plugin?.stop?.().catch(() => undefined);
+    for (const handle of nativeHandlesRef.current) {
+      try {
+        void handle.remove();
+      } catch {
+        /* ignore */
+      }
+    }
+    nativeHandlesRef.current = [];
   }, []);
 
-  return { supported, status, transcript, amplitude, start, stop };
+  return { supported, status, transcript, amplitude, start, stop, stopAsync };
 }

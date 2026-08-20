@@ -175,6 +175,64 @@ export function companionCanAutoRun(capabilityId: string | undefined | null): bo
 }
 
 /**
+ * Companion Native Action Registry（任務書 §B7）。
+ *
+ * ## 這張表是什麼、不是什麼
+ *
+ * 是：Companion 介面上每一個「確定性動作」（按鈕、語音直達）的**型錄**——
+ * 每一項都指向一個既有端點或既有助手能力，帶風險層級與確認政策。
+ * UI 與測試都讀這張表，所以「手機上按得到但沒人審過風險」的動作不可能存在。
+ *
+ * 不是：第二套 Agent。`assistant` 路徑把話交給既有助手（意圖判定／能力路由／
+ * 確認卡全部沿用）；`trpc:` 路徑呼叫既有 procedure；`deeplink:` 走
+ * companionDeepLink 開 Web。這裡沒有任何新的執行機。
+ */
+export type CompanionNativeActionKind = "read" | "safe_write" | "navigation";
+
+export interface CompanionNativeAction {
+  id: string;
+  label: string;
+  kind: CompanionNativeActionKind;
+  tier: CompanionRiskTier;
+  confirm: CompanionConfirmMode;
+  /**
+   * 執行途徑：
+   * - `trpc:<router.procedure>`：直接呼叫既有端點（確定性）
+   * - `assistant`：交給既有助手——意圖判定與確認流程原樣沿用
+   * - `deeplink:<target>`：companionDeepLink 開 Web
+   */
+  route: string;
+}
+
+export const COMPANION_NATIVE_ACTIONS: readonly CompanionNativeAction[] = [
+  // ── Read（LOW：直接做，不打斷） ──
+  { id: "get_current_project", label: "目前專案", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.context" },
+  { id: "get_project_progress", label: "專案進度", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.digest" },
+  { id: "get_running_tasks", label: "進行中任務", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.digest" },
+  { id: "get_failed_tasks", label: "失敗任務", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.failedGenerations" },
+  { id: "get_recent_generations", label: "最近生成", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.context" },
+  { id: "get_pending_approvals", label: "待確認", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.digest" },
+  { id: "get_current_scene", label: "目前場景", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.context" },
+  { id: "get_current_shot", label: "目前鏡頭", kind: "read", tier: "low", confirm: "auto", route: "trpc:companion.context" },
+
+  // ── Safe write（MEDIUM：可執行；花點數的批次先出確認卡） ──
+  /** 重跑失敗生成：讀 companion.failedGenerations 列卡 → 確認 → 逐筆 generation.retry（既有端點，完整還原錨點） */
+  { id: "retry_generation", label: "重跑失敗生成", kind: "safe_write", tier: "medium", confirm: "confirm_card", route: "trpc:generation.retry" },
+  /** 以下走既有助手（能力路由／COSTFUL 提議卡原樣沿用），不是繞過 */
+  { id: "continue_next_shot", label: "繼續下一鏡", kind: "safe_write", tier: "medium", confirm: "auto_with_undo", route: "assistant" },
+  { id: "generate_image", label: "生成圖片", kind: "safe_write", tier: "medium", confirm: "confirm_card", route: "assistant" },
+  { id: "generate_video", label: "生成影片", kind: "safe_write", tier: "medium", confirm: "confirm_card", route: "assistant" },
+  { id: "run_existing_workflow", label: "執行既有工作流", kind: "safe_write", tier: "medium", confirm: "confirm_card", route: "assistant" },
+  { id: "create_note", label: "建立筆記", kind: "safe_write", tier: "medium", confirm: "auto_with_undo", route: "assistant" },
+
+  // ── Navigation（LOW：開 Web） ──
+  { id: "open_project_web", label: "開啟完整專案", kind: "navigation", tier: "low", confirm: "auto", route: "deeplink:project" },
+  { id: "open_storyboard_web", label: "開啟分鏡", kind: "navigation", tier: "low", confirm: "auto", route: "deeplink:storyboard" },
+  { id: "open_asset_web", label: "開啟素材", kind: "navigation", tier: "low", confirm: "auto", route: "deeplink:assets" },
+  { id: "open_generation_web", label: "開啟生成紀錄", kind: "navigation", tier: "low", confirm: "auto", route: "deeplink:production" },
+];
+
+/**
  * 確認卡要講什麼。
  *
  * 只講**這一次會發生什麼**與**會不會回不去**，不寫「此操作不可復原，請謹慎考慮」

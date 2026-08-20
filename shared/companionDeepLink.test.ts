@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   COMPANION_DEEP_LINK_TARGETS,
   companionAbsoluteUrl,
   companionDeepLink,
   companionHandoffReason,
+  parseAiosUri,
 } from "./companionDeepLink";
 
 const PID = "11111111-2222-4333-8444-555555555555";
@@ -77,6 +80,42 @@ describe("companionAbsoluteUrl", () => {
   it("origin 帶路徑時只取 origin，不會把路徑串進去", () => {
     expect(companionAbsoluteUrl("https://aios.example/some/where", "/dashboard"))
       .toBe("https://aios.example/dashboard");
+  });
+});
+
+describe("parseAiosUri", () => {
+  it("aios://project/:uuid → /p/:uuid", () => {
+    expect(parseAiosUri(`aios://project/${PID}`)).toBe(`/p/${PID}`);
+  });
+
+  it("aios://storyboard/:uuid → 專案頁錨點", () => {
+    expect(parseAiosUri(`aios://storyboard/${PID}`)).toBe(`/p/${PID}#stage-board`);
+  });
+
+  it("aios://voice 與 aios://tasks 對應 Widget 捷徑", () => {
+    expect(parseAiosUri("aios://voice")).toBe("/?voice=1");
+    expect(parseAiosUri("aios://tasks")).toBe("/?tab=tasks");
+    expect(parseAiosUri("aios://home")).toBe("/");
+  });
+
+  it("白名單解析：未知 host、壞 UUID、別的 scheme 一律 null", () => {
+    expect(parseAiosUri("aios://admin/../../x")).toBeNull();
+    expect(parseAiosUri("aios://project/not-a-uuid")).toBeNull();
+    expect(parseAiosUri("aios://project")).toBeNull();
+    expect(parseAiosUri("https://evil.example/p/x")).toBeNull();
+    expect(parseAiosUri("javascript:alert(1)")).toBeNull();
+  });
+
+  it("與 Java 端 AiosSchemeRouter 同一份對照表（兩邊要一起改）", () => {
+    // Java 檔在 App 冷啟動、WebView 還沒起來時做同一份轉譯。這條斷言保住
+    // 「有人只改一邊」時至少測試紅一次，逼人打開對面那份。
+    const java = readFileSync(
+      path.join(__dirname, "..", "android", "app", "src", "main", "java", "app", "aios", "mobile", "AiosSchemeRouter.java"),
+      "utf8",
+    );
+    for (const host of ["project", "storyboard", "studio", "generation", "voice", "tasks", "home"]) {
+      expect(java, `AiosSchemeRouter.java 缺 case "${host}"`).toContain(`case "${host}"`);
+    }
   });
 });
 

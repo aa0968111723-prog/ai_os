@@ -52,6 +52,12 @@ export interface CompanionCardAction {
   /** compose＝把這句話送給 Aios（走既有助手，不繞過確認流程） */
   kind: "compose" | "open_web" | "open_tab";
   label: string;
+  /**
+   * 語意完全確定的動作掛上 COMPANION_NATIVE_ACTIONS 的 id（如 retry_generation），
+   * 讓 UI 走確定性路徑（確認卡→既有端點）而不是把話丟給助手。
+   * 用 id 而不是比對 label——label 是 UI 文案，改一個字不該改變執行路徑。
+   */
+  actionId?: string;
   /** kind=compose 時要送的話 */
   prompt?: string;
   /** kind=open_web 時的深連結目標 */
@@ -171,7 +177,9 @@ function failureCard(list: readonly CompanionProjectSnapshot[]): CompanionCard {
     line: `${count} 個生成失敗了`,
     ...(single ? { projectId: single.id } : {}),
     actions: [
-      { kind: "compose", label: "全部重跑", prompt: "把失敗的生成全部重新跑一次" },
+      // 單一專案時 UI 走確定性重跑（確認卡→逐筆 generation.retry）；
+      // prompt 保留＝多專案聚合卡與舊版 UI 的後備路徑（丟給助手）。
+      { kind: "compose", label: "全部重跑", prompt: "把失敗的生成全部重新跑一次", actionId: "retry_generation" },
       { kind: "compose", label: "先看原因", prompt: "失敗的那幾筆是為什麼失敗？" },
     ],
   };
@@ -231,7 +239,8 @@ function stageLine(p: CompanionProjectSnapshot): string {
     case "visual":
       return `${p.shots} 鏡還沒有畫面`;
     case "generate":
-      return `畫面 ${p.shotsWithVisual}／${p.shots} 鏡`;
+      // 百分比讓「做到哪」一眼可讀（任務書 B9 Progress）；分母為 0 不出現這個分支
+      return `畫面 ${p.shotsWithVisual}／${p.shots} 鏡（${Math.round((100 * p.shotsWithVisual) / Math.max(1, p.shots))}%）`;
     case "deliver":
       return "可以收尾了";
     default:

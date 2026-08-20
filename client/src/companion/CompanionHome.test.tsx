@@ -2,6 +2,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const digestQuery = vi.fn();
+const failedQuery = vi.fn();
+const retryMutateAsync = vi.fn();
 const composed: string[] = [];
 const opened: string[] = [];
 const deepLinks: unknown[] = [];
@@ -10,7 +12,11 @@ const invalidate = vi.fn();
 vi.mock("../api", () => ({
   trpc: {
     useUtils: () => ({ companion: { digest: { invalidate } } }),
-    companion: { digest: { useQuery: (...args: unknown[]) => digestQuery(...args) } },
+    companion: {
+      digest: { useQuery: (...args: unknown[]) => digestQuery(...args) },
+      failedGenerations: { useQuery: (...args: unknown[]) => failedQuery(...args) },
+    },
+    generation: { retry: { useMutation: () => ({ mutateAsync: retryMutateAsync }) } },
   },
 }));
 vi.mock("../lib/assistantCompose", () => ({
@@ -40,6 +46,7 @@ const voice = {
   amplitude: 0,
   start: vi.fn(),
   stop: vi.fn(() => ""),
+  stopAsync: vi.fn(() => Promise.resolve("")),
 };
 vi.mock("./useVoiceInput", () => ({ useVoiceInput: () => voice }));
 vi.mock("../lib/phoneAssistantBridge", () => ({ usePhoneAssistantTurn: () => null }));
@@ -72,6 +79,14 @@ function mockDigest(projects: unknown[], over: Record<string, unknown> = {}) {
   });
 }
 
+function mockFailedList(items: Array<Record<string, unknown>>, totalPointsEst = 0) {
+  failedQuery.mockReturnValue({
+    data: { projectTitle: "淡江動畫", items, totalPointsEst },
+    isLoading: false,
+    isError: false,
+  });
+}
+
 beforeEach(() => {
   composed.length = 0;
   opened.length = 0;
@@ -79,8 +94,12 @@ beforeEach(() => {
   voice.status = "idle";
   voice.transcript = "";
   voice.stop.mockReturnValue("");
+  voice.stopAsync.mockResolvedValue("");
+  retryMutateAsync.mockReset();
+  retryMutateAsync.mockResolvedValue({});
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   mockDigest([project]);
+  mockFailedList([]);
 });
 
 describe("首屏", () => {
@@ -146,9 +165,63 @@ describe("對話", () => {
   it("卡片的 compose 按鈕會把專案名一起帶上——「這張」才有所指", () => {
     mockDigest([{ ...project, failedGenerations: 3 }]);
     render(<CompanionHome groupId="g1" />);
-    fireEvent.click(screen.getByRole("button", { name: "全部重跑" }));
+    fireEvent.click(screen.getByRole("button", { name: "先看原因" }));
     expect(composed[0]).toContain("淡江動畫");
-    expect(composed[0]).toContain("重新跑");
+    expect(composed[0]).toContain("為什麼失敗");
+  });
+});
+
+describe("失敗的重跑（確定性確認卡）", () => {
+  const failedItems = [
+    { id: "aaaa1111-2222-4333-8444-555555555555", kind: "image", modelId: "flux", pointsEst: 4, error: "boom" },
+    { id: "bbbb1111-2222-4333-8444-555555555555", kind: "video", modelId: "kling", pointsEst: 8, error: null },
+  ];
+
+  it("「全部重跑」不丟給助手——出確認卡，講清楚幾筆、預估幾點", () => {
+    mockDigest([{ ...project, failedGenerations: 2 }]);
+    mockFailedList(failedItems, 12);
+    render(<CompanionHome groupId="g1" />);
+    fireEvent.click(screen.getByRole("button", { name: "全部重跑" }));
+    // 沒有送話給助手
+    expect(composed).toEqual([]);
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("2 筆失敗生成");
+    expect(dialog.textContent).toContain("預估使用 12 點");
+  });
+
+  it("拍板後逐筆走既有 generation.retry，並誠實回報成功筆數", async () => {
+    mockDigest([{ ...project, failedGenerations: 2 }]);
+    mockFailedList(failedItems, 12);
+    render(<CompanionHome groupId="g1" />);
+    fireEvent.click(screen.getByRole("button", { name: "全部重跑" }));
+    fireEvent.click(screen.getByRole("button", { name: "就這樣做" }));
+    await waitFor(() => expect(screen.getByText(/已重新啟動 2 筆/)).toBeInTheDocument());
+    expect(retryMutateAsync.mock.calls.map(([input]) => (input as { id: string }).id))
+      .toEqual(failedItems.map((item) => item.id));
+    // 權威數字重抓
+    expect(invalidate).toHaveBeenCalled();
+  });
+
+  it("部分失敗就照實說 N 成功 M 失敗，不整批報成功", async () => {
+    mockDigest([{ ...project, failedGenerations: 2 }]);
+    mockFailedList(failedItems, 12);
+    retryMutateAsync
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("點數不足"));
+    render(<CompanionHome groupId="g1" />);
+    fireEvent.click(screen.getByRole("button", { name: "全部重跑" }));
+    fireEvent.click(screen.getByRole("button", { name: "就這樣做" }));
+    await waitFor(() => expect(screen.getByText(/1 筆已重啟、1 筆沒送出去（點數不足）/)).toBeInTheDocument());
+  });
+
+  it("「先不要」收起卡片，什麼都不執行", () => {
+    mockDigest([{ ...project, failedGenerations: 2 }]);
+    mockFailedList(failedItems, 12);
+    render(<CompanionHome groupId="g1" />);
+    fireEvent.click(screen.getByRole("button", { name: "全部重跑" }));
+    fireEvent.click(screen.getByRole("button", { name: "先不要" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(retryMutateAsync).not.toHaveBeenCalled();
   });
 });
 

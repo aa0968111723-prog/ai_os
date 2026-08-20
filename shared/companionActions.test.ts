@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ASSISTANT_CAPABILITIES } from "./assistantExecution";
 import {
   COMPANION_ACTION_POLICIES,
+  COMPANION_NATIVE_ACTIONS,
   companionCanAutoRun,
   companionConfirmCopy,
   companionPolicyFor,
@@ -75,6 +76,42 @@ describe("Companion Action Registry", () => {
   it("語音只在真的要擋人時開口", () => {
     expect(companionPolicyFor("read_tasks").speakConfirmation).toBe(false);
     expect(companionPolicyFor("send_dm").speakConfirmation).toBe(true);
+  });
+});
+
+describe("COMPANION_NATIVE_ACTIONS（任務書 §B7 registry）", () => {
+  it("B7 要求的動作一個不缺", () => {
+    const ids = COMPANION_NATIVE_ACTIONS.map((a) => a.id);
+    for (const required of [
+      "get_current_project", "get_project_progress", "get_running_tasks", "get_failed_tasks",
+      "get_recent_generations", "get_pending_approvals", "get_current_scene", "get_current_shot",
+      "retry_generation", "continue_next_shot", "generate_image", "generate_video",
+      "run_existing_workflow", "create_note",
+      "open_project_web", "open_storyboard_web", "open_asset_web", "open_generation_web",
+    ]) expect(ids, `registry 缺 ${required}`).toContain(required);
+  });
+
+  it("read 與 navigation 全部 low／auto；沒有任何動作缺 route", () => {
+    for (const a of COMPANION_NATIVE_ACTIONS) {
+      expect(a.route.length, `${a.id} 缺 route`).toBeGreaterThan(0);
+      if (a.kind === "read" || a.kind === "navigation") {
+        expect(a.tier, `${a.id} 應為 low`).toBe("low");
+        expect(a.confirm, `${a.id} 應為 auto`).toBe("auto");
+      }
+    }
+  });
+
+  it("重跑是 medium＋confirm_card（花點數批次），route 指向既有端點", () => {
+    const retry = COMPANION_NATIVE_ACTIONS.find((a) => a.id === "retry_generation")!;
+    expect(retry.tier).toBe("medium");
+    expect(retry.confirm).toBe("confirm_card");
+    expect(retry.route).toBe("trpc:generation.retry");
+  });
+
+  it("registry 沒有第二套 agent：route 只有 trpc／assistant／deeplink 三種", () => {
+    for (const a of COMPANION_NATIVE_ACTIONS) {
+      expect(/^(trpc:|assistant$|deeplink:)/.test(a.route), `${a.id} 的 route 不合法：${a.route}`).toBe(true);
+    }
   });
 });
 
