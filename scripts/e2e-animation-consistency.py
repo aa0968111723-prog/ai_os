@@ -743,7 +743,12 @@ ok("專案 B preview 鎖的是 B 的小華外觀", "紅旗袍" in pos_b and "藍
 ok("跨專案同名小華不會共用錨點文字", pos_a != pos_b)
 board_a = call("GET", admin, "creativeContext.animationBoard", {"projectId": pid})
 board_b = call("GET", admin, "creativeContext.animationBoard", {"projectId": proj_b["id"]})
-ok("A 看板鏡頭數不含 B 的空專案鏡頭", board_a.get("summary", {}).get("total") == 7)
+# 斷言隔離「性質」而不是寫死數字：A 看板必須恰等於 A 自己的分鏡數——B 的鏡漏進來
+# 會多、A 的鏡被吃掉會少。寫死 7 的舊斷言（#790 新加、從未綠過）在前面的硬化段落
+# 自己加鏡之後就永遠對不上，而且錯的是算術不是隔離。
+scenes_a_now = call("GET", admin, "scenes.listByProject", {"projectId": pid})
+ok("A 看板鏡頭數＝A 自己的分鏡數（不含 B 的鏡頭）",
+   board_a.get("summary", {}).get("total") == len(scenes_a_now))
 ok("B 空專案看板 total=0", board_b.get("summary", {}).get("total") == 0)
 cross = call("POST", admin, "generation.preview", {
     "projectId": pid,

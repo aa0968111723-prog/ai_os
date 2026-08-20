@@ -43,6 +43,28 @@ describe("小華 identity lock", () => {
     expect(extra.appearance).toBe("年輕男性");
   });
 
+  it("keeps a deliberate custom look with no gender markers（各專案的小華不共用一張臉）", () => {
+    // #790 的跨專案隔離 e2e 要求：「專案B小華、紅旗袍、盤髮」這種使用者刻意寫的
+    // 外觀沒有女性字眼，也絕不能被推平成全域的粉橘短髮——那是把 B 專案的臉換成 A 的。
+    // storedAppearance＝渲染路徑（continuity／cardAnchors）的真實呼叫方式：資料來自庫。
+    for (const appearance of ["專案B小華、紅旗袍、盤髮", "專案A小華、藍布棉襖、齊瀏海", "專案B的小華・藍外套黑框眼鏡"]) {
+      const locked = applyXiaohuaIdentityLock({ name: "小華", appearance, costume: "" }, "小華", { storedAppearance: true });
+      expect(locked.appearance).toBe(appearance);
+    }
+    // 入庫資料仍然擋男性標記——storedAppearance 不是全放行
+    const male = applyXiaohuaIdentityLock({ name: "小華", appearance: "年輕男性", costume: "" }, "小華", { storedAppearance: true });
+    expect(male.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
+  it("restores the female look the script states when EXTRACT drops it（150s fallback）", () => {
+    // 腳本明說粉橘短髮女孩、EXTRACT 產出「大二化工、白帽T、短髮」——腳本說了就補回。
+    const locked = applyXiaohuaIdentityLock(
+      { name: "小華", appearance: "大二化工、白帽T、短髮", costume: "" },
+      TKU_ZEN_SHOTLIST_FIRST_PARSE,
+    );
+    expect(locked.appearance).toBe(XIAOHUA_LOCKED_APPEARANCE);
+  });
+
   it("keeps an already-female 小華 look", () => {
     const keep = "大二化工、粉橘短髮女孩、白帽T、微笑";
     const locked = applyXiaohuaIdentityLock({ name: "小華", appearance: keep, costume: "白帽T" }, TKU_ZEN_SHOTLIST_AD_PARSE);

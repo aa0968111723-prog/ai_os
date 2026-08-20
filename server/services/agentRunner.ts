@@ -2491,19 +2491,29 @@ function describeCutosOutcome(toolId: string, value: Record<string, unknown> | n
 
 async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, step: AgentStep, gen: GenerationRow): Promise<void> {
   if (gen.status === "done") {
+    /**
+     * 候選已交付＝步驟完成。
+     *
+     * 代理自己送出的 scene-bound 視覺生成一律帶 preserveScenePointer（#753 起，
+     * 見 generationCommand 檔頭）——指標永遠不會自動指到它，「等指標指到我」
+     * 因此是**自我死鎖**：#790 曾在這裡把未採用的成品 park 成 waiting，結果任何
+     * 含 generate 的計畫都永遠到不了終局（e2e-agent「背景 Runner 完成完整代理計畫」
+     * 與 e2e-databases 的 record_to_database 這兩條 #721 契約一起斷，CI 又死在
+     * story 之前，沒人看見）。
+     *
+     * #790 真正要守的東西原樣保留：**現用畫面仍是人的**——preserve 在生成層擋著，
+     * 這裡完成步驟不會動指標；成品以候選身分躺在版本清單，detail 誠實寫明。
+     * 「人搶先在單格工作室生成、代理讓路」的 park 是另一條路
+     * （applyIndependentGenerateToSteps，防重複扣點），與此無關、未動。
+     */
     const visual = !gen.sceneRole || gen.sceneRole === "visual";
-    if (visual && gen.sceneId && !(await scenePointerIsGeneration(gen.sceneId, gen.id))) {
-      step.status = "waiting";
-      step.targetSceneId = step.targetSceneId || gen.sceneId;
-      if (!step.note.startsWith("待你採用 · ")) step.note = `待你採用 · ${step.note}`;
-      step.detail = "畫面已落地，等你採用後才會換成現用";
-      addOutputRef(step, "generation", gen.id, step.title ?? step.note);
-      await saveRun(run.id, { steps });
-      return;
-    }
+    const adopted = !visual || !gen.sceneId || (await scenePointerIsGeneration(gen.sceneId, gen.id));
+    if (gen.sceneId) step.targetSceneId = step.targetSceneId || gen.sceneId;
     step.status = "done";
     addOutputRef(step, "generation", gen.id, step.title ?? step.note);
-    step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";
+    step.detail = adopted
+      ? (gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "")
+      : "已存為候選（現用畫面未變）——到分鏡採用後才會換上";
     auditAgentStep(run, step, idx, true);
     if (run.status !== "running") {
       markRestStopped(steps, idx);
