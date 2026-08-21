@@ -21,6 +21,7 @@ import {
   sha256Hex,
   undoParseRun,
 } from "../services/storyParse";
+import { falStoryExtractComplete } from "../services/falStoryLlm";
 import { checkProjectContinuity } from "../services/continuityCheck";
 import { flushStoryDocNow } from "../services/collabDoc";
 import {
@@ -289,7 +290,7 @@ export const storyRouter = router({
       return { id: row.id, rev: row.rev, updatedAt: row.updatedAt };
     }),
 
-  /** AI 自動解析（EXTRACT→…→SAVE）：同步呼叫（假模式即時、真模式旗艦約 55s + 70B 約 55s，合計不超過約 120s） */
+  /** AI 自動解析（EXTRACT→…→SAVE）：fal.ai GPT-5.6 Sol 主模型，GPT-5.6 Luna 快速備援；兩次嘗試合計硬上限 55s。 */
   parse: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
@@ -297,6 +298,7 @@ export const storyRouter = router({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         force: input.force,
+        complete: falStoryExtractComplete,
         assertAccess: async (project) => {
           requireGroup(ctx.auth, project.groupId);
           await assertProjectEditable(ctx.auth, project);
