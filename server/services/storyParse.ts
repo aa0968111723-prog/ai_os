@@ -467,10 +467,16 @@ export async function runStoryParse(input: StoryParseCoreInput): Promise<StoryPa
       if (err instanceof TRPCError) throw err;
       if (trace) await updateAiTraceSession(trace.id, { status: "failed", summary: "provider 失敗" }).catch(() => undefined);
       if (isProviderTimeout(err)) {
+        // 供應商自己報的秒數才是使用者真的等了多久；strategy.budgetMs 只是本地上限，
+        // 拿它當文案會出現「等了 55 秒卻說超過 75 秒」這種對不上的說法。
         const seconds = Math.round(extractStrategy.budgetMs / 1000);
+        const detail =
+          err instanceof NimServiceError && err.message.trim()
+            ? err.message.trim()
+            : `AI 模型回應逾時（超過 ${seconds} 秒無回應）`;
         throw new TRPCError({
           code: "SERVICE_UNAVAILABLE",
-          message: `AI 模型回應逾時（超過 ${seconds} 秒無回應）——上游服務忙碌，請稍後重試或把稿子分段解析`,
+          message: `${detail}——上游服務忙碌，請稍後重試或把稿子分段解析`,
         });
       }
       if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
