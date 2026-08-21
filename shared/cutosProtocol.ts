@@ -820,6 +820,35 @@ export const PROTOCOL_CONTRACT = {
     health: "GET /api/cutos/health",
   },
   /**
+   * Scenarios the recorded contract fixture must contain to be usable.
+   *
+   * It lives here, in the mirrored file, because the completeness of that
+   * artifact is a property of the CONTRACT, not of either test. Previously the
+   * recorder wrote whatever a run happened to capture — an ffmpeg-less machine
+   * or a `-t`-filtered run produced a green suite and a fixture holding one
+   * scenario instead of 23 — while the required list lived only in the
+   * consuming repo, which discovered the loss a copy-paste later.
+   */
+  contractScenarios: [
+    "apply_plan",
+    "approval_required",
+    "cancel_job",
+    "capability_not_found",
+    "create_plan",
+    "health",
+    "idempotent_replay",
+    "job_polling",
+    "manifest",
+    "preview_plan",
+    "protocol_mismatch",
+    "read_capability",
+    "semantic_search",
+    "stale_revision",
+    "unauthorized",
+    "v1_compatibility",
+    "validation_failed",
+  ],
+  /**
    * Abstract capabilities AIOS orchestrates on CUTOS's behalf. An allow-list,
    * exactly like the CUTOS manifest: CUTOS states an intent, never a step list.
    */
@@ -852,7 +881,7 @@ export function protocolContractFingerprint(): string {
  * update this constant IN BOTH REPOSITORIES in the same change set.
  */
 export const PROTOCOL_CONTRACT_FINGERPRINT =
-  "2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f";
+  "63168dcf9a648776eda4e34f61a2028c7fc1041b738d3428120366a2259a3775";
 
 // ---------------------------------------------------------------------------
 // Helpers shared by both repos

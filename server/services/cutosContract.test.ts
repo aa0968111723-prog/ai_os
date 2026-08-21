@@ -156,13 +156,11 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
 
   it("covers every scenario the contract requires", () => {
     const recorded = new Set(FIXTURES.exchanges.map((exchange) => exchange.scenario));
-    for (const required of [
-      "health", "manifest", "read_capability", "semantic_search", "create_plan",
-      "preview_plan", "apply_plan", "stale_revision", "idempotent_replay",
-      "unauthorized", "job_polling", "cancel_job", "protocol_mismatch",
-      "approval_required", "capability_not_found", "validation_failed",
-      "v1_compatibility",
-    ]) {
+    // From the mirrored contract, not a hand-copied list: the recorder in CUTOS
+    // checks the SAME list before it is allowed to overwrite the artifact, so
+    // the two ends cannot disagree about what "complete" means.
+    expect(PROTOCOL_CONTRACT.contractScenarios.length).toBeGreaterThan(10);
+    for (const required of PROTOCOL_CONTRACT.contractScenarios) {
       expect(recorded.has(required), `fixture missing scenario: ${required}`).toBe(true);
     }
   });

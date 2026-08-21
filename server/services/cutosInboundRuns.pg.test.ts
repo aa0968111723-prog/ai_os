@@ -286,6 +286,71 @@ describe.skipIf(!RUN_PG).sequential("CUTOS → AIOS inbound API (real HTTP, real
     expect((body.error as { code: string }).code).toBe("UNAUTHORIZED");
   });
 
+  function oversizedContext(rangeCount: number, charsPerRange: number, claimedChars: number) {
+    return {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      projectId: cutosProjectA,
+      timelineRevision: 1,
+      query: "測試",
+      topics: [],
+      speakers: [],
+      ranges: Array.from({ length: rangeCount }, (_, index) => ({
+        startMs: index * 1_000,
+        endMs: index * 1_000 + 900,
+        text: "字".repeat(charsPerRange),
+        speaker: "S1",
+        score: 0.5,
+        sentenceIds: [`s${index}`],
+      })),
+      highlights: [],
+      provenance: {
+        capability: "build_semantic_context",
+        requestId: `ctx-${randomUUID()}`,
+        generatedAt: new Date().toISOString(),
+        analysisVersion: 1,
+        mediaChecksum: "sha256:test",
+        contextHash: "hash",
+      },
+      budget: {
+        maxRanges: 40,
+        maxChars: 20_000,
+        usedRanges: rangeCount,
+        usedChars: claimedChars,
+        truncated: false,
+      },
+    };
+  }
+
+  it("rejects a context with too many ranges", async () => {
+    const { status, body } = await call("context_too_many_ranges", "POST", "/api/cutos/runs", {
+      body: submitBody({ context: oversizedContext(200, 10, 2_000) }),
+    });
+    expect(status).toBe(400);
+    expect((body.error as { code: string }).code).toBe("VALIDATION_FAILED");
+  });
+
+  it("measures the context text rather than trusting the peer's own byte count", async () => {
+    // The regression this pins: the guard used to read a `totalChars` field that
+    // does not exist on the protocol type, so it was always undefined and the
+    // character ceiling never fired. A peer under-reporting its own size is the
+    // case that stayed open even after the field name was noticed.
+    const context = oversizedContext(30, 5_000, 10); // 150k real chars, claims 10
+    const { status, body } = await call("context_underreported_size", "POST", "/api/cutos/runs", {
+      body: submitBody({ context }),
+    });
+    expect(status).toBe(400);
+    expect((body.error as { code: string }).code).toBe("VALIDATION_FAILED");
+    const detail = (body.error as { detail?: string }).detail ?? "";
+    expect(detail).toContain("chars=150000");
+  });
+
+  it("accepts a context inside the budget", async () => {
+    const { status } = await call("context_within_budget", "POST", "/api/cutos/runs", {
+      body: submitBody({ context: oversizedContext(5, 100, 500) }),
+    });
+    expect(status).toBe(201);
+  });
+
   it("requires an idempotency key on a submit", async () => {
     const body0 = submitBody();
     delete (body0.correlation as Record<string, unknown>).idempotencyKey;

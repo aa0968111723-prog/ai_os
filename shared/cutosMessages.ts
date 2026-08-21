@@ -117,6 +117,8 @@ export const CUTOS_ACTIVITY_MESSAGES: Record<string, string> = {
   "activity.cancel.failed": "取消失敗",
 
   "activity.revision.stale": "時間軸已被更動，需要重新規劃",
+  // CUTOS 重啟後接手一個中斷的效果：時間軸沒動，所以重跑是安全的，但要看得見。
+  "activity.effect.recovered": "從中斷的作業接續處理",
 
   // CUTOS 端主動送往 AIOS 的協調事件
   "activity.aiosRun.submitting": "正在把工作交給 AI-OS",
@@ -181,6 +183,8 @@ export const CUTOS_STATUS_MESSAGES: Record<string, string> = {
   "cutos.status.connected": "CUTOS 已連線",
   "cutos.status.disconnected": "CUTOS 未連線",
   "cutos.status.notConfigured": "尚未設定 CUTOS",
+  // CUTOS 端沒設 CUTOS_API_KEY 時的回覆：那邊會拒絕所有能力呼叫（fail closed）。
+  "aios.error.bridgeKeyMissing": "CUTOS 尚未設定橋接金鑰，請管理員設定後再試",
   "aios.protocol.mismatch": "CUTOS 版本不相容",
   "aios.protocol.unknown": "無法辨識 CUTOS 版本",
   "aios.status.connected": "AI-OS 已連線",

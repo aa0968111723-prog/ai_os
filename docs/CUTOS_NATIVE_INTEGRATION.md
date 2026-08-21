@@ -47,7 +47,7 @@ CUTOS 提供三個端點：
 `PROTOCOL_CONTRACT_FINGERPRINT`，兩個 repo 的測試都斷言同一個值。任一邊改了協定
 卻沒有鏡像到另一邊，兩邊的測試都會紅——不會變成 runtime 才發現的 JSON 不合。
 
-目前 fingerprint：`2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f`
+目前 fingerprint：`63168dcf9a648776eda4e34f61a2028c7fc1041b738d3428120366a2259a3775`
 
 ### 版本協商
 
@@ -375,10 +375,21 @@ npx tsx scripts/e2e-cutos-crossrepo.ts
 
 ## 設定
 
+### `CUTOS_API_KEY` 是必要的
+
+CUTOS 端現在**沒有金鑰就拒絕所有能力呼叫**（fail closed）。這邊一直都有送
+`Authorization: Bearer $CUTOS_API_KEY`，只是對面從來沒讀——在補上之前，那個端點
+對任何人開放，而且 v1 形狀會自動視為已核准，等於一個免認證的破壞性剪輯／輸出入口。
+
+只設 `CUTOS_URL` 而沒設 `CUTOS_API_KEY` 時，`createConfiguredCutosClient` 會在啟動
+時警告一次，並且每一次工具呼叫都會拿到 `UNAUTHORIZED`（畫面顯示
+「CUTOS 尚未設定橋接金鑰，請管理員設定後再試」），不會被誤判成 CUTOS 掛了。
+
+
 | 變數 | 說明 | 預設 |
 | --- | --- | --- |
 | `CUTOS_URL` | CUTOS 伺服器位址 | —（未設定＝停用整合） |
-| `CUTOS_API_KEY` | CUTOS 保護金鑰 | — |
+| `CUTOS_API_KEY` | CUTOS 橋接金鑰（**必要**，見上） | — |
 | `CUTOS_TIMEOUT_MS` | 單次請求逾時 | `20000` |
 | `CUTOS_MAX_ATTEMPTS` | 暫時性失敗的重試次數（上限 5） | `3` |
 

@@ -64,6 +64,7 @@ import {
   type AiosRunStatus,
   type AiosRunStep,
   type CutosErrorCode,
+  type CutosSemanticContext,
   type RunCorrelation,
 } from "../../shared/cutosProtocol";
 
@@ -372,24 +373,43 @@ function toRunState(row: InboundRow, run: AgentRunRow): AiosRunState {
   };
 }
 
-/** Reject an oversized context before it can cost anything. */
-function assertContextWithinBudget(context: { totalChars?: number; ranges?: unknown[] } | undefined): void {
+/**
+ * Reject an oversized context before it can cost anything.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ *  - It does not read a `totalChars` field. The first version did, and no such
+ *    field exists on `CutosSemanticContext` — the value was always `undefined`,
+ *    so the character ceiling silently never fired. The real budget lives under
+ *    `budget.usedChars`.
+ *  - It does not trust `budget.usedChars` either. That number is the peer's own
+ *    account of itself; a buggy or hostile CUTOS can report 10 while sending
+ *    half a megabyte of transcript. The text is measured here, and the peer's
+ *    self-report is only used to catch the *inverse* case — a peer that admits
+ *    to exceeding a budget we would otherwise have accepted.
+ */
+function assertContextWithinBudget(context: CutosSemanticContext | undefined): void {
   if (!context) return;
-  const ranges = Array.isArray(context.ranges) ? context.ranges.length : 0;
+
+  const ranges = context.ranges?.length ?? 0;
   if (ranges > MAX_CONTEXT_RANGES) {
     throw new CutosInboundError(
       "VALIDATION_FAILED",
       "aios.error.validationFailed",
       "context exceeds range budget",
-      `ranges>${MAX_CONTEXT_RANGES}`,
+      `ranges=${ranges}>${MAX_CONTEXT_RANGES}`,
     );
   }
-  if (typeof context.totalChars === "number" && context.totalChars > MAX_CONTEXT_CHARS) {
+
+  const measured = (context.ranges ?? []).reduce((total, range) => total + (range.text?.length ?? 0), 0);
+  const claimed = context.budget?.usedChars ?? 0;
+  const chars = Math.max(measured, claimed);
+  if (chars > MAX_CONTEXT_CHARS) {
     throw new CutosInboundError(
       "VALIDATION_FAILED",
       "aios.error.validationFailed",
       "context exceeds char budget",
-      `chars>${MAX_CONTEXT_CHARS}`,
+      `chars=${chars}>${MAX_CONTEXT_CHARS}`,
     );
   }
 }
@@ -467,7 +487,7 @@ export async function handleCutosSubmitRun(req: Request, res: Response): Promise
         "idempotencyKey",
       );
     }
-    assertContextWithinBudget(request.context as { totalChars?: number; ranges?: unknown[] } | undefined);
+    assertContextWithinBudget(request.context);
 
     let binding: CutosBinding;
     try {
