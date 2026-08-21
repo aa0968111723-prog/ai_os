@@ -99,6 +99,7 @@ import { currentDeploymentIdentity, deploymentDrift } from "./services/deploymen
 import { buildCapabilityContractReport, getCapabilityHealthView } from "./services/agentCapabilityCertification";
 import { databaseReadyNote } from "./services/databaseRuntime";
 import { getCachedBackendRuntime } from "./services/backendDependencies";
+import { createRequestTiming, logRequestTiming, runWithRequestTiming } from "./services/requestTiming";
 
 const app = express();
 
@@ -2397,10 +2398,15 @@ app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext 
 function createAssistantLatencyTracker(startedAt: number) {
   let contextReadyMs: number | null = null;
   let modelStartedMs: number | null = null;
+  let firstTokenMs: number | null = null;
   let firstToolCallMs: number | null = null;
   let toolFinishedMs: number | null = null;
   const elapsed = () => Math.max(0, Date.now() - startedAt);
   return {
+    /** 供應商真的吐出第一塊答案時呼叫（只認第一次）。沒串流的供應商不會呼叫，數字就誠實留 null。 */
+    observeFirstToken() {
+      if (firstTokenMs == null) firstTokenMs = elapsed();
+    },
     /**
      * 統一 Agent 事件（帶 `type`）優先走型別判斷；舊事件才退回文字比對。
      * 文字比對本來就脆——「已取得」四個字改一次就整組延遲數字歸零——
@@ -2425,8 +2431,9 @@ function createAssistantLatencyTracker(startedAt: number) {
         requestReceivedMs: 0,
         contextReadyMs,
         modelStartedMs,
-        // completeText 目前是整段回傳，不捏造 token 級時間；未來換真串流時再填。
-        firstTokenMs: null,
+        // AI Hub 這條路是真串流，firstTokenMs 由 observeFirstToken 填；
+        // NIM／fal 整段回傳時沒人呼叫它，就誠實留 null，不捏造 token 級時間。
+        firstTokenMs,
         firstToolCallMs,
         toolFinishedMs,
         finalAnswerMs: totalMs,
@@ -2494,6 +2501,8 @@ app.post("/api/assistant/ask", async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
   const latency = createAssistantLatencyTracker(requestStartedAt);
+  // 分段計時：首 token／整段完成／DB／S3 各自記一段，靠 ALS 收集，呼叫端不必逐層傳計時器
+  const timing = createRequestTiming("assistant.ask", requestStartedAt);
   // runId 往下傳給核心：串流事件、最終結果與前端的跨頁續看都指向同一次執行
   const runId = nonce || randomUUID();
   sse("open", {
@@ -2504,7 +2513,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
-    const result = await runAssistantAsk(
+    const result = await runWithRequestTiming(timing, () => runAssistantAsk(
       {
         projectId,
         message,
@@ -2517,9 +2526,11 @@ app.post("/api/assistant/ask", async (req, res) => {
         onlyKnowledgeIds: onlyKnowledgeIds.length ? onlyKnowledgeIds : undefined,
         history: history.length ? history : undefined,
         pageContext,
+        // 逐塊把答案推給前端：收到即渲染，不等整包 done
+        onAnswerDelta: (text) => { latency.observeFirstToken(); sse("delta", { text }); },
       },
       (e) => { latency.observe(e); sse("step", e); },
-    );
+    ));
     sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
     // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）。
@@ -2530,6 +2541,7 @@ app.post("/api/assistant/ask", async (req, res) => {
     }
   } finally {
     clearInterval(heartbeat);
+    logRequestTiming(timing);
     if (!res.writableEnded) res.end();
   }
 });
@@ -2593,6 +2605,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
 
   const latency = createAssistantLatencyTracker(requestStartedAt);
+  const timing = createRequestTiming("assistant.site-ask", requestStartedAt);
   // runId 在這裡就定下來並往下傳：串流事件、最終結果與（前端的）跨頁續看都指向同一次執行。
   // 以前這顆 id 只活在 open 事件裡，事件本身沒有歸屬，換頁後就再也接不回來。
   const runId = randomUUID();
@@ -2608,7 +2621,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   try {
     const { runGlobalAskWithCheckpoint, sanitizeRecentActionResults } = await import("./routers/globalAssistant");
     const recentActionResults = sanitizeRecentActionResults(req.body?.recentActionResults);
-    const result = await runGlobalAskWithCheckpoint(
+    const result = await runWithRequestTiming(timing, () => runGlobalAskWithCheckpoint(
       {
         auth,
         groupId,
@@ -2622,9 +2635,11 @@ app.post("/api/assistant/site-ask", async (req, res) => {
         mode: siteMode,
         signal: clientAbort.signal,
         runId,
+        // 逐塊把答案推給前端：收到即渲染，不等整包 done
+        onAnswerDelta: (text) => { latency.observeFirstToken(); sse("delta", { text }); },
       },
       (e) => { latency.observe(e); sse("step", e); },
-    );
+    ));
     recordAudit(auth, "globalAssistant.ask", { groupId, message, projectId, via: "sse", requestId }, { ok: true });
     sse("done", { ...result, latency: latency.finish() });
   } catch (err) {
@@ -2639,6 +2654,7 @@ app.post("/api/assistant/site-ask", async (req, res) => {
   } finally {
     releaseAssistantRequest(auth.user.id, requestId);
     clearInterval(heartbeat);
+    logRequestTiming(timing);
     if (!res.writableEnded) res.end();
   }
 });

@@ -46,6 +46,19 @@
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | 首次啟動(空資料庫)建立的開發者帳號。未設會用程式內建預設值——**上線務必設定,換掉預設密碼**。忘記密碼自救:改這兩個變數 → Redeploy → 用新帳密登入。 |
 | `FAL_KEY` | fal.ai 金鑰(fal.ai/dashboard/keys)。**必填**——全站一律真實生成(示範模式已移除),未設則生成回明確錯誤並自動退點。 |
 
+### AI Hub（文字模型；設了就自動啟用）
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `OPENAI_BASE_URL` | (無) | Zeabur AI Hub 的 OpenAI 相容端點。**與 `OPENAI_API_KEY` 兩個都設好**才會啟用;少一個就安靜地維持既有 NIM／fal 路徑。 |
+| `OPENAI_API_KEY` | (無) | AI Hub 金鑰。⚠️ 這把金鑰同時被「OpenAI MCP 橋接」讀取,而那條路徑寫死打 `api.openai.com`——若你把它換成 Hub 金鑰,MCP 橋接會 401。兩者要並存的話,MCP 橋接需要另外改成也吃 `OPENAI_BASE_URL`。 |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | AI Hub 上要用的模型 id。 |
+| `LLM_PRIMARY_PROVIDER` | 設了 Hub 金鑰時為 `hub`,否則 `nim` | `hub`＝對話類請求先走 AI Hub(串流);`nim`＝完全維持改動前行為。**A/B 比較就切這一個變數**,不必動金鑰。 |
+
+**成本提醒**:AI Hub 是平台實付,與 NIM 免費層不同。切到 `hub` 等於把「免費檔位」的實際成本從 0 變成 Hub 用量——這是明示的選擇,程式不會偷偷幫你決定。使用者自己選定的 fal 付費檔位不受影響。
+
+**觀測**:每次助手問答會在伺服器 log 印一行 `[timing] assistant.ask total=… firstToken=… db=… s3=… llm=…`,首 token 與整段完成、DB 與 S3 存取分開記。上游沒串流時 `firstToken` 不會出現(不捏造數字)。
+
 ### 可選
 
 | 變數 | 預設 | 說明 |

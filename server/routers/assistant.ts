@@ -16,6 +16,7 @@ import {
 } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
+import { StreamingAnswerExtractor } from "../../shared/streamingAnswer";
 import {
   shotCameraSchema,
   shotPerformanceSchema,
@@ -818,7 +819,8 @@ async function callLlm(
   prompt: string,
   signal?: AbortSignal,
   mode: AgentPlannerMode = "nim",
-): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
+  onDelta?: (delta: string) => void,
+): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean; firstTokenMs: number | null }> {
   const isPaidMode = mode !== "nim";
   const result = await completeText({
     prompt,
@@ -827,8 +829,15 @@ async function callLlm(
     signal,
     // mode=nim is UI「只用免費」— never auto-switch to paid deepseek-v4-flash.
     allowPaidFallback: mode === "auto",
+    onDelta,
   });
-  return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
+  return {
+    text: result.text,
+    provider: result.provider,
+    model: result.model,
+    fellBack: !!result.fellBack,
+    firstTokenMs: result.firstTokenMs ?? null,
+  };
 }
 
 /** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
@@ -910,6 +919,14 @@ export interface AskCoreInput {
   traceSessionId?: string;
   /** SSE 端點在 open 事件已宣告的 runId；讓串流事件與最終結果指向同一次執行 */
   runId?: string;
+  /**
+   * 最終答案的逐塊回呼（只在供應商真的串流時才會分次觸發）。
+   *
+   * 模型回的是一整包 JSON，所以這裡吐出來的是 StreamingAnswerExtractor 從
+   * `"answer"` 欄位即時解出來的**純文字**——工具呼叫那幾輪一個字都不會吐。
+   * 權威結果仍是最後的 AskCoreResult.answer；這條只負責讓畫面先動起來。
+   */
+  onAnswerDelta?: (delta: string) => void;
 }
 /** 「本次依據」的一筆（P5）：使用者要看得出 AI 這次到底讀了什麼 */
 export interface AskSourceReport {
@@ -1624,7 +1641,20 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
               summary: `送出第 ${round + 1} 輪模型請求`,
               payload: { prompt, mode: input.mode ?? "nim", forceFinal },
             });
-            const completion = await callLlm(prompt, askSignal, input.mode);
+            // 每一輪一個新的抽取器：這一輪若是工具呼叫（沒有 answer 欄位）就整輪不吐字，
+            // 是最終回答時才把 answer 的內容逐塊交給 SSE。
+            const answerStream = input.onAnswerDelta ? new StreamingAnswerExtractor() : undefined;
+            const completion = await callLlm(
+              prompt,
+              askSignal,
+              input.mode,
+              answerStream
+                ? (delta) => {
+                    const text = answerStream.push(delta);
+                    if (text) input.onAnswerDelta?.(text);
+                  }
+                : undefined,
+            );
             await recordAiTraceEventSafely({
               sessionId: traceSession,
               eventType: "provider_response",
