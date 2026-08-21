@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   CUTOS_ACTIVITY_MESSAGES,
   CUTOS_APPROVAL_MESSAGES,
+  CUTOS_BRIDGE_STEP_MESSAGES,
   CUTOS_ERROR_MESSAGES,
   CUTOS_STATUS_MESSAGES,
   cutosMessage,
@@ -80,6 +81,15 @@ describe("繁中文案表與程式碼同步", () => {
     expect(keys.filter((key) => !hasCutosMessage(key))).toEqual([]);
   });
 
+  it("inbound run 每一步送出的 messageKey 都有繁中文案", () => {
+    // 掃真正會送出的檔案，而不是重抄一份清單：新增一個工具對應卻忘了翻譯，
+    // CUTOS 畫面就會出現 `bridge.activity.xxx`。
+    const emitted = extractKeys(read("server/services/cutosInboundRuns.ts"), "bridge.activity.");
+    expect(emitted.length, "沒掃到任何 bridge.activity key，掃描規則可能失效").toBeGreaterThan(5);
+    const missing = emitted.filter((key) => !hasCutosMessage(key));
+    expect(missing, `缺少繁中文案的步驟 key：${missing.join("、")}`).toEqual([]);
+  });
+
   it("核准原因與連線狀態的 key 都有繁中文案", () => {
     const approval = extractKeys(read("server/services/cutosStepRunner.ts"), "aios.approval.");
     const binding = extractKeys(read("server/services/cutosProjectBinding.ts"), "cutos.binding.");
@@ -98,6 +108,7 @@ describe("文案內容", () => {
       ...CUTOS_ERROR_MESSAGES,
       ...CUTOS_APPROVAL_MESSAGES,
       ...CUTOS_STATUS_MESSAGES,
+      ...CUTOS_BRIDGE_STEP_MESSAGES,
     })) {
       expect(value.length, `${key} 是空的`).toBeGreaterThan(0);
       // 允許 CUTOS / AI-OS 這兩個專有名詞，其餘不得出現整串英文單字。
@@ -116,6 +127,7 @@ describe("文案內容", () => {
       ...CUTOS_ERROR_MESSAGES,
       ...CUTOS_APPROVAL_MESSAGES,
       ...CUTOS_STATUS_MESSAGES,
+      ...CUTOS_BRIDGE_STEP_MESSAGES,
     };
     for (const [key, value] of Object.entries(all)) {
       expect(value, `${key} 疑似簡體：${value}`).not.toMatch(simplifiedOnly);

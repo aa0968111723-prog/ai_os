@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { agentToolRegistry } from "./agentToolRegistry";
 import { CUTOS_LONG_RUNNING_TOOLS, CutosToolError } from "./cutosToolRegistry";
-import { deriveCutosIdempotencyKey } from "./cutosClient";
+import { CutosClientError, deriveCutosIdempotencyKey } from "./cutosClient";
 import { effectFingerprint, type ToolContext, type ToolDefinition, type ToolResult } from "./practicalAutonomy";
 import { resolveCutosProject } from "./cutosProjectBinding";
 import type { ApprovalRequest } from "../../shared/cutosProtocol";
@@ -326,7 +326,14 @@ export async function pollCutosJob(input: {
       stage: job.stage ?? null,
     };
   } catch (error) {
-    if (error instanceof CutosToolError && error.code === "JOB_NOT_FOUND") {
+    // Accept either shape. The registry now wraps client errors into
+    // CutosToolError, but a terminal condition must not depend on which layer
+    // happened to construct the error — a missed JOB_NOT_FOUND parks the step
+    // forever, which is the worst failure mode available for a guess.
+    const code = error instanceof CutosToolError || error instanceof CutosClientError
+      ? error.code
+      : undefined;
+    if (code === "JOB_NOT_FOUND") {
       return { state: "failed", status: "missing", progress: 0, stage: null, reason: "CUTOS 找不到這個背景工作" };
     }
     // A transport blip must not fail the run: stay parked and poll again.

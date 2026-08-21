@@ -540,12 +540,26 @@ export function setCutosClient(client: CutosClient | null | undefined): void {
   clientOverride = client;
 }
 
+/** Warn once, not once per call: a hot loop must not become a log flood. */
+let warnedAboutMissingKey = false;
+
 export function createConfiguredCutosClient(
   env: NodeJS.ProcessEnv = process.env,
 ): CutosClient | null {
   if (clientOverride !== undefined) return clientOverride;
   const config = readCutosEnvironmentConfig(env);
   if (!config.configured || !config.baseUrl) return null;
+  // CUTOS now fails closed without a bridge key, so a URL with no key is a
+  // configuration that will produce UNAUTHORIZED on every call. Say so at
+  // startup rather than letting it look like an outage at the first tool call.
+  if (!config.apiKey && !warnedAboutMissingKey) {
+    warnedAboutMissingKey = true;
+    console.warn(
+      "[cutos] CUTOS_URL is set but CUTOS_API_KEY is not. CUTOS refuses capability calls "
+      + "without a bridge key, so every tool call will return UNAUTHORIZED. Set the same "
+      + "value on both sides.",
+    );
+  }
   return new CutosClient({
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,

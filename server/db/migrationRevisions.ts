@@ -382,4 +382,10 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0082_cutos_memory": [
     "6853defb118249996c6ac8319755f139decc6003a449801a38d411085b79292a",
   ],
+  "0083_cutos_inbound_runs": [
+    "a6568171416decde3fb9dc0f0c916952d7a1acb215247e6f51a0831e89e0e3c0",
+  ],
+  "0084_cutos_inbound_correlation": [
+    "8d2d4855a43c24702ad45b8a9e60d8ff5c5a3d6dc0968e08a8260e5e9da7fbdc",
+  ],
 };

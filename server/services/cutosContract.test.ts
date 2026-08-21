@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,6 +42,10 @@ interface Exchange {
 
 interface FixtureFile {
   protocolVersion: string;
+  /** SHA-256 of the CUTOS-side descriptor at recording time. */
+  contractFingerprint: string;
+  /** SHA-256 of CUTOS's protocol.ts, i.e. the bytes this repo must mirror. */
+  protocolSourceSha256: string;
   generator: string;
   exchanges: Exchange[];
 }
@@ -54,6 +59,47 @@ function scenario(name: string): Exchange {
   if (!found) throw new Error(`fixture scenario "${name}" is missing; regenerate from CUTOS`);
   return found;
 }
+
+/**
+ * The mirror check that `PROTOCOL_CONTRACT_FINGERPRINT` alone could not perform.
+ *
+ * Each repo's fingerprint assertion only ever compared its own constant against
+ * its own descriptor, so a contract change applied to CUTOS and not mirrored
+ * here left BOTH suites green and failed at runtime instead. The fixture
+ * carries the sha256 of CUTOS's protocol.ts, and this repo hashes its own copy:
+ * a half-mirrored change is now red on the side that did not receive it.
+ */
+describe("protocol mirror", () => {
+  it("shared/cutosProtocol.ts is byte-identical to the CUTOS file the fixture was recorded from", () => {
+    const mirrored = readFileSync(join(process.cwd(), "shared/cutosProtocol.ts"));
+    const localSha = createHash("sha256").update(mirrored).digest("hex");
+    expect(
+      localSha,
+      "shared/cutosProtocol.ts has drifted from CUTOS packages/protocol/src/protocol.ts — "
+      + "copy the CUTOS file over verbatim and regenerate the fixture",
+    ).toBe(FIXTURES.protocolSourceSha256);
+  });
+
+  it("the contract fingerprint recorded by CUTOS matches this repo's constant", () => {
+    expect(FIXTURES.contractFingerprint).toBe(PROTOCOL_CONTRACT_FINGERPRINT);
+  });
+
+  it("the fixture was recorded from the protocol version this repo speaks", () => {
+    expect(FIXTURES.protocolVersion).toBe(CUTOS_PROTOCOL_VERSION);
+  });
+
+  it("AIOS serves every endpoint the contract says it must", () => {
+    // The gap this catches for real: CUTOS shipped an orchestrator client for
+    // /api/cutos/* while ai_os served none of those paths, and nothing was red.
+    const mounted = readFileSync(join(process.cwd(), "server/index.ts"), "utf8");
+    const missing = Object.values(PROTOCOL_CONTRACT.aiosEndpoints).filter((endpoint) => {
+      const [method, path] = endpoint.split(" ");
+      const expressPath = path!.replace(/:(\w+)/g, ":$1");
+      return !mounted.includes(`app.${method!.toLowerCase()}("${expressPath}"`);
+    });
+    expect(missing, `AIOS does not mount: ${missing.join(", ")}`).toEqual([]);
+  });
+});
 
 describe("cross-repo contract: CUTOS recordings replayed through the real AIOS client", () => {
   let server: Server;
@@ -110,13 +156,11 @@ describe("cross-repo contract: CUTOS recordings replayed through the real AIOS c
 
   it("covers every scenario the contract requires", () => {
     const recorded = new Set(FIXTURES.exchanges.map((exchange) => exchange.scenario));
-    for (const required of [
-      "health", "manifest", "read_capability", "semantic_search", "create_plan",
-      "preview_plan", "apply_plan", "stale_revision", "idempotent_replay",
-      "unauthorized", "job_polling", "cancel_job", "protocol_mismatch",
-      "approval_required", "capability_not_found", "validation_failed",
-      "v1_compatibility",
-    ]) {
+    // From the mirrored contract, not a hand-copied list: the recorder in CUTOS
+    // checks the SAME list before it is allowed to overwrite the artifact, so
+    // the two ends cannot disagree about what "complete" means.
+    expect(PROTOCOL_CONTRACT.contractScenarios.length).toBeGreaterThan(10);
+    for (const required of PROTOCOL_CONTRACT.contractScenarios) {
       expect(recorded.has(required), `fixture missing scenario: ${required}`).toBe(true);
     }
   });

@@ -44,6 +44,13 @@ import {
   handleDatabaseIcs,
 } from "./services/restApi";
 import {
+  handleCutosInboundHealth,
+  handleCutosSubmitRun,
+  handleCutosGetRun,
+  handleCutosCancelRun,
+  handleCutosResumeRun,
+} from "./services/cutosInboundRuns";
+import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
   assessStoragePersistence, verifyVolumeIdentity, storageBackend, storageBackendNote, openStoredObject,
@@ -2103,6 +2110,17 @@ app.post("/api/v1/databases/:id/rows", handleV1AddRow);
 app.post("/api/v1/databases/:id/rows/batch", handleV1AddRowsBatch);
 app.get("/api/databases/:id/rows.csv", handleCsvExport);
 app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
+
+// CUTOS → AIOS 控制平面（影片剪輯資料平面回頭請 AIOS 協調長任務）。
+// 認證＝個人金鑰（Authorization: Bearer / x-api-key），授權沿用 aios_cutos_project_bindings：
+// CUTOS 只報自己的影片專案，AIOS 專案一律由綁定推出來，請求裡沒有任何欄位能指定 AIOS 專案。
+// health 刻意不驗證：它是版本握手，要求金鑰會讓「版本不相容」與「認證失敗」混成同一種
+// 不可達狀態，正是協定禁止的靜默失敗；它只回兩邊原始碼裡本來就公開的常數。
+app.get("/api/cutos/health", handleCutosInboundHealth);
+app.post("/api/cutos/runs", handleCutosSubmitRun);
+app.get("/api/cutos/runs/:runId", handleCutosGetRun);
+app.post("/api/cutos/runs/:runId/cancel", handleCutosCancelRun);
+app.post("/api/cutos/runs/:runId/resume", handleCutosResumeRun);
 
 // 素材全站備份（UI：團隊管理「立即下載素材備份」；排程：Bearer ADMIN_BACKUP_TOKEN）
 // 串流 tar.gz（內含 assets/），並寫 backup_runs → system.storageStatus.lastBackupAt

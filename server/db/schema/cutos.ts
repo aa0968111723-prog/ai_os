@@ -2,7 +2,7 @@
  * CUTOS bridge schema — the durable AIOS-side state for the cutos.agent.v2
  * integration.
  *
- * Three tables, each answering a question that must survive a restart of
+ * Four tables, each answering a question that must survive a restart of
  * either process:
  *
  *  - `aios_cutos_project_bindings`: which CUTOS project an AIOS project may
@@ -14,6 +14,9 @@
  *    CUTOS what happened rather than blindly re-applying an edit.
  *  - `cutos_activity_events`: the mirrored cross-system activity feed the
  *    agent UI renders in zh-TW, with the run/step/job correlation intact.
+ *  - `cutos_inbound_runs`: the mirror image of `cutos_tool_effects` for the
+ *    other direction — the run CUTOS asked AIOS to orchestrate, keyed by the
+ *    submit idempotency key so a retried submit never starts a second run.
  */
 import { index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -147,4 +150,62 @@ export const cutosMemoryItems = pgTable("cutos_memory_items", {
   projectIdx: index("cutos_memory_project_idx").on(t.projectId, t.updatedAt),
   runIdx: index("cutos_memory_run_idx").on(t.runId),
   expiryIdx: index("cutos_memory_expiry_idx").on(t.expiresAt),
+}));
+
+/**
+ * Runs CUTOS asked AIOS to orchestrate — the inbound half of the bridge.
+ *
+ * The outbound half (AIOS → CUTOS) is `cutos_tool_effects`. This is its mirror:
+ * CUTOS submits an `AiosRunRequest`, AIOS plans and governs the work, and CUTOS
+ * polls the run state. The row exists so three things survive a restart:
+ *
+ *  - `idempotencyKey` is unique, so a retried submit lands on the same AIOS run
+ *    instead of starting a second copy of the same editing job.
+ *  - the CUTOS-side correlation (`cutosAgentRunId`, `cutosProjectId`,
+ *    `requestId`, `traceId`) is echoed back on every poll, which is what makes
+ *    `aiosRunId ↔ cutosAgentRunId ↔ cutosJobId ↔ timelineRevision` traceable
+ *    from either end.
+ *  - the binding used at submit time is recorded, so a later poll cannot be
+ *    answered from a binding that has since been re-pointed at another video.
+ */
+export const cutosInboundRuns = pgTable("cutos_inbound_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** The AIOS agent run this submission created. */
+  runId: uuid("run_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  cutosProjectId: text("cutos_project_id").notNull(),
+  /** Abstract capability CUTOS asked for, e.g. `video.highlight.package`. */
+  capability: text("capability").notNull(),
+  qualityProfile: text("quality_profile").notNull(),
+  requestId: text("request_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  cutosAgentRunId: text("cutos_agent_run_id"),
+  /** CUTOS's own job id, when the submit came from one. Part of the trace chain. */
+  cutosJobId: text("cutos_job_id"),
+  traceId: text("trace_id"),
+  /**
+   * Revision the SUBMITTER believed was current. Kept separate from
+   * `timelineRevision` on purpose: echoing a submit-time belief back as the
+   * run's resulting revision would hand CUTOS a stale number to guard its next
+   * mutation with.
+   */
+  expectedRevision: integer("expected_revision"),
+  /** Revision produced by the run's own work. Null until something lands. */
+  timelineRevision: integer("timeline_revision"),
+  /**
+   * Stable hash of the logical request (capability, goal, quality profile,
+   * context identity) — everything except per-attempt fields like requestId.
+   * A retry that changes any of it is a different effect wearing the same key,
+   * and must be refused rather than answered with the earlier run.
+   */
+  requestFingerprint: text("request_fingerprint"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  idempotencyUq: uniqueIndex("cutos_inbound_runs_idempotency_uq").on(t.idempotencyKey),
+  runUq: uniqueIndex("cutos_inbound_runs_run_uq").on(t.runId),
+  projectIdx: index("cutos_inbound_runs_project_idx").on(t.projectId, t.updatedAt),
+  cutosProjectIdx: index("cutos_inbound_runs_cutos_project_idx").on(t.cutosProjectId, t.updatedAt),
 }));
