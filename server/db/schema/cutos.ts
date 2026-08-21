@@ -182,9 +182,25 @@ export const cutosInboundRuns = pgTable("cutos_inbound_runs", {
   requestId: text("request_id").notNull(),
   idempotencyKey: text("idempotency_key").notNull(),
   cutosAgentRunId: text("cutos_agent_run_id"),
+  /** CUTOS's own job id, when the submit came from one. Part of the trace chain. */
+  cutosJobId: text("cutos_job_id"),
   traceId: text("trace_id"),
-  /** Revision CUTOS reported when it submitted; used for the reply correlation. */
+  /**
+   * Revision the SUBMITTER believed was current. Kept separate from
+   * `timelineRevision` on purpose: echoing a submit-time belief back as the
+   * run's resulting revision would hand CUTOS a stale number to guard its next
+   * mutation with.
+   */
+  expectedRevision: integer("expected_revision"),
+  /** Revision produced by the run's own work. Null until something lands. */
   timelineRevision: integer("timeline_revision"),
+  /**
+   * Stable hash of the logical request (capability, goal, quality profile,
+   * context identity) — everything except per-attempt fields like requestId.
+   * A retry that changes any of it is a different effect wearing the same key,
+   * and must be refused rather than answered with the earlier run.
+   */
+  requestFingerprint: text("request_fingerprint"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({

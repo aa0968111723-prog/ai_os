@@ -33,7 +33,7 @@
  */
 import type { Request, Response } from "express";
 import { eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { resolveMcpIdentity } from "./mcpAuth";
@@ -60,6 +60,7 @@ import {
   checkProtocolCompatibility,
   CUTOS_PROTOCOL_VERSION,
   CUTOS_SUPPORTED_PROTOCOLS,
+  type AiosRunRequest,
   type AiosRunState,
   type AiosRunStatus,
   type AiosRunStep,
@@ -341,7 +342,12 @@ function correlationOf(row: InboundRow, run: AgentRunRow): RunCorrelation {
     aiosProjectId: run.projectId,
     cutosProjectId: row.cutosProjectId,
     ...(row.cutosAgentRunId ? { cutosAgentRunId: row.cutosAgentRunId } : {}),
+    ...(row.cutosJobId ? { cutosJobId: row.cutosJobId } : {}),
+    // `timelineRevision` is the revision the run PRODUCED; `expectedRevision`
+    // is what the submitter believed when it asked. Reporting the belief as the
+    // outcome would let CUTOS guard its next mutation with a stale number.
     ...(typeof row.timelineRevision === "number" ? { timelineRevision: row.timelineRevision } : {}),
+    ...(typeof row.expectedRevision === "number" ? { expectedRevision: row.expectedRevision } : {}),
     ...(row.traceId ? { traceId: row.traceId } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
@@ -412,6 +418,34 @@ function assertContextWithinBudget(context: CutosSemanticContext | undefined): v
       `chars=${chars}>${MAX_CONTEXT_CHARS}`,
     );
   }
+}
+
+/**
+ * Stable hash of the LOGICAL request.
+ *
+ * Deliberately excludes `requestId` and anything else that changes per attempt:
+ * a retry of the same submit must hash identically, while a different
+ * capability, goal, quality profile or context must not. The replay check
+ * compared only the CUTOS project before this, so the same key submitted with a
+ * different capability answered HTTP 200 with the unrelated earlier run — an
+ * export request could appear successfully attached to an edit-plan run.
+ *
+ * The context is identified by its provenance hash rather than its full text:
+ * that hash is already a deterministic function of the query, revision and
+ * retrieved set, and hashing megabytes of transcript on every submit would be
+ * a needless cost.
+ */
+function requestFingerprint(request: AiosRunRequest): string {
+  return createHash("sha256")
+    .update(JSON.stringify([
+      request.capability,
+      request.goal,
+      request.qualityProfile,
+      request.deadlineMs ?? null,
+      request.context?.provenance.contextHash ?? null,
+      request.correlation.cutosProjectId ?? null,
+    ]))
+    .digest("hex");
 }
 
 /* ── Handlers ─────────────────────────────────────── */
@@ -499,14 +533,24 @@ export async function handleCutosSubmitRun(req: Request, res: Response): Promise
       throw error;
     }
 
-    // Replay: an existing row for this key is the same logical submit.
+    const fingerprint = requestFingerprint(request);
+
+    // Replay: an existing row for this key is the same logical submit — but
+    // only if it really is the same request. A key bound to different arguments
+    // is a conflict, not a replay.
     const existing = await findInboundRun({ idempotencyKey });
     if (existing) {
-      if (existing.row.cutosProjectId !== cutosProjectId) {
+      const sameProject = existing.row.cutosProjectId === cutosProjectId;
+      // A row written before the fingerprint column existed cannot be compared;
+      // treat it as unverifiable rather than silently as a match.
+      const sameRequest = existing.row.requestFingerprint === null
+        ? sameProject
+        : existing.row.requestFingerprint === fingerprint;
+      if (!sameProject || !sameRequest) {
         throw new CutosInboundError(
           "IDEMPOTENCY_CONFLICT",
           "aios.error.idempotencyConflict",
-          "idempotency key reused for a different CUTOS project",
+          "this idempotency key is already bound to a different request",
         );
       }
       res.status(200).json(toRunState(existing.row, existing.run));
@@ -521,34 +565,66 @@ export async function handleCutosSubmitRun(req: Request, res: Response): Promise
     const steps = buildVideoEditingWorkflow(workflowInput);
 
     const runId = randomUUID();
-    // Insert the correlation row FIRST and let its unique index arbitrate: two
-    // concurrent retries race here, the loser reads the winner's run, and only
-    // one agent run is ever created. A read-then-write check would not do that.
+    // ONE transaction. The correlation row and the agent run must land together
+    // or not at all: a crash (or a failed second insert) between them left the
+    // idempotency key bound to a run that does not exist, and because
+    // `findInboundRun` needs both rows, every later retry missed the replay,
+    // collided on the unique index and answered INTERNAL — permanently. The
+    // unique index still arbitrates two concurrent submits; it just now commits
+    // the run alongside the claim rather than a moment later.
     let claimed: InboundRow;
+    let run: AgentRunRow;
     try {
-      const [row] = await db
-        .insert(schema.cutosInboundRuns)
-        .values({
-          runId,
-          groupId: binding.groupId,
-          userId: binding.userId,
-          projectId: binding.aiosProjectId,
-          cutosProjectId,
-          capability: request.capability,
-          qualityProfile: request.qualityProfile,
-          requestId,
-          idempotencyKey,
-          ...(request.correlation.cutosAgentRunId ? { cutosAgentRunId: request.correlation.cutosAgentRunId } : {}),
-          ...(request.correlation.traceId ? { traceId: request.correlation.traceId } : {}),
-          ...(typeof request.correlation.expectedRevision === "number"
-            ? { timelineRevision: request.correlation.expectedRevision }
-            : {}),
-        })
-        .returning();
-      claimed = row!;
+      const inserted = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(schema.cutosInboundRuns)
+          .values({
+            runId,
+            groupId: binding.groupId,
+            userId: binding.userId,
+            projectId: binding.aiosProjectId,
+            cutosProjectId,
+            capability: request.capability,
+            qualityProfile: request.qualityProfile,
+            requestId,
+            idempotencyKey,
+            requestFingerprint: fingerprint,
+            ...(request.correlation.cutosAgentRunId ? { cutosAgentRunId: request.correlation.cutosAgentRunId } : {}),
+            ...(request.correlation.cutosJobId ? { cutosJobId: request.correlation.cutosJobId } : {}),
+            ...(request.correlation.traceId ? { traceId: request.correlation.traceId } : {}),
+            // The submitter's BELIEF, kept out of `timelineRevision`: echoing it
+            // back as the run's resulting revision would give CUTOS a stale
+            // number to guard its next mutation with.
+            ...(typeof request.correlation.expectedRevision === "number"
+              ? { expectedRevision: request.correlation.expectedRevision }
+              : {}),
+          })
+          .returning();
+        const [created] = await tx
+          .insert(schema.agentRuns)
+          .values({
+            id: runId,
+            projectId: binding.aiosProjectId,
+            groupId: binding.groupId,
+            // The run belongs to the human who bound the video, not to CUTOS:
+            // the approval, the points and the audit trail land on a real
+            // account.
+            userId: binding.userId,
+            goal: request.goal,
+            summary: describeVideoWorkflow(workflowInput, steps),
+            steps,
+            estPoints: 0,
+            // `awaiting_approval` is the whole point — see the module docstring.
+            status: "awaiting_approval",
+          })
+          .returning();
+        return { row: row!, run: created! };
+      });
+      claimed = inserted.row;
+      run = inserted.run;
     } catch (error) {
-      // Unique violation = the concurrent retry won. Read its run and reply
-      // with the same state, so both retries observe one run.
+      // Unique violation = a concurrent retry won the race. Read its run and
+      // reply with the same state, so both retries observe exactly one run.
       const winner = await findInboundRun({ idempotencyKey });
       if (winner) {
         res.status(200).json(toRunState(winner.row, winner.run));
@@ -557,25 +633,7 @@ export async function handleCutosSubmitRun(req: Request, res: Response): Promise
       throw error;
     }
 
-    const [run] = await db
-      .insert(schema.agentRuns)
-      .values({
-        id: runId,
-        projectId: binding.aiosProjectId,
-        groupId: binding.groupId,
-        // The run belongs to the human who bound the video, not to CUTOS: the
-        // approval, the points and the audit trail all land on a real account.
-        userId: binding.userId,
-        goal: request.goal,
-        summary: describeVideoWorkflow(workflowInput, steps),
-        steps,
-        estPoints: 0,
-        // `awaiting_approval` is the whole point — see the module docstring.
-        status: "awaiting_approval",
-      })
-      .returning();
-
-    res.status(201).json(toRunState(claimed, run!));
+    res.status(201).json(toRunState(claimed, run));
   } catch (error) {
     respond(res, error);
   }

@@ -435,6 +435,81 @@ describe.skipIf(!RUN_PG).sequential("CUTOS → AIOS inbound API (real HTTP, real
     expect(rows).toHaveLength(1);
   });
 
+  it("refuses a key reused for a different request instead of replaying the wrong run", async () => {
+    // The bug: the replay check compared only the CUTOS project, so submitting
+    // an export under an edit-plan run's key answered 200 with that unrelated
+    // run — the caller would believe its export was already under way.
+    const key = `cutos-submit-${randomUUID()}`;
+    const first = submitBody({ capability: "video.edit.plan" });
+    (first.correlation as Record<string, unknown>).idempotencyKey = key;
+    const created = await call("conflict_first", "POST", "/api/cutos/runs", { body: first });
+    expect(created.status).toBe(201);
+    createdRunIds.push(created.body.aiosRunId as string);
+
+    const second = submitBody({ capability: "video.export" });
+    (second.correlation as Record<string, unknown>).idempotencyKey = key;
+    const { status, body } = await call("idempotency_conflict", "POST", "/api/cutos/runs", { body: second });
+    expect(status).toBe(409);
+    expect((body.error as { code: string }).code).toBe("IDEMPOTENCY_CONFLICT");
+
+    // And the same request under the same key is still a replay, not a conflict.
+    const repeat = submitBody({ capability: "video.edit.plan" });
+    (repeat.correlation as Record<string, unknown>).idempotencyKey = key;
+    (repeat.correlation as Record<string, unknown>).requestId = `cutos-req-${randomUUID()}`;
+    const replay = await call("conflict_replay_ok", "POST", "/api/cutos/runs", { body: repeat });
+    expect(replay.status).toBe(200);
+    expect(replay.body.aiosRunId).toBe(created.body.aiosRunId);
+  });
+
+  it("keeps the submitter's expected revision out of the resulting revision", async () => {
+    // Echoing a submit-time belief back as the run's OUTCOME would hand CUTOS a
+    // stale number to guard its next mutation with.
+    const payload = submitBody();
+    (payload.correlation as Record<string, unknown>).expectedRevision = 7;
+    const { status, body } = await call("revision_separated", "POST", "/api/cutos/runs", { body: payload });
+    expect(status).toBe(201);
+    createdRunIds.push(body.aiosRunId as string);
+    const correlation = body.correlation as Record<string, unknown>;
+    expect(correlation.expectedRevision).toBe(7);
+    // Nothing has run yet, so there is no resulting revision to report.
+    expect(correlation.timelineRevision).toBeUndefined();
+  });
+
+  it("carries the CUTOS job id through the whole trace chain", async () => {
+    const jobId = `job-${randomUUID()}`;
+    const payload = submitBody();
+    (payload.correlation as Record<string, unknown>).cutosJobId = jobId;
+    const created = await call("job_correlation", "POST", "/api/cutos/runs", { body: payload });
+    expect(created.status).toBe(201);
+    const runId = created.body.aiosRunId as string;
+    createdRunIds.push(runId);
+    expect((created.body.correlation as Record<string, unknown>).cutosJobId).toBe(jobId);
+
+    // And it survives a poll, which is where it disappeared before.
+    const polled = await call("job_correlation_poll", "GET", `/api/cutos/runs/${runId}`);
+    expect((polled.body.correlation as Record<string, unknown>).cutosJobId).toBe(jobId);
+  });
+
+  it("never leaves an idempotency key bound to a run that does not exist", async () => {
+    // The poisoning window: the claim committed, the agent run did not, and
+    // because a replay needs BOTH rows every later retry missed the replay,
+    // collided on the unique index and answered INTERNAL forever. One
+    // transaction closes it — so no claim row may exist without its run.
+    const payload = submitBody();
+    const created = await call("atomic_claim", "POST", "/api/cutos/runs", { body: payload });
+    expect(created.status).toBe(201);
+    createdRunIds.push(created.body.aiosRunId as string);
+
+    const claims = await db.select().from(schema.cutosInboundRuns)
+      .where(eq(schema.cutosInboundRuns.projectId, projectA));
+    expect(claims.length).toBeGreaterThan(0);
+    for (const claim of claims) {
+      const [run] = await db.select().from(schema.agentRuns)
+        .where(eq(schema.agentRuns.id, claim.runId));
+      expect(run, `claim ${claim.idempotencyKey} has no agent run`).toBeDefined();
+    }
+  });
+
   it("polls a run and returns the correlation intact", async () => {
     const { status, body } = await call("get_run", "GET", `/api/cutos/runs/${submittedRunId}`);
     expect(status).toBe(200);

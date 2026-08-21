@@ -391,8 +391,10 @@ describe("legacy migration adoption bridge", () => {
     // 0083 CUTOS inbound runs: 1 CREATE TABLE IF NOT EXISTS + 4 guarded indexes
     // — 5 additive statements. The inbound mirror of cutos_tool_effects; it
     // references agent_runs by id and touches no existing table.
+    // 0084 CUTOS inbound correlation: 3 ADD COLUMN IF NOT EXISTS on the table
+    // 0083 just created — 3 additive statements, no backfill, no rewrite.
     expect(result.alreadyPresent).toBe(
-      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4 + 1 + 13 + 6 + 5,
+      8 + 33 + 17 + 3 + 7 + 12 + 2 + 4 + 3 + 4 + 80 + 4 + 22 + 6 + 7 + 7 + 6 + 13 + 5 + 6 + 4 + 4 + 3 + 29 + 7 + 6 + 9 + 15 + 8 + 1 + 10 + 1 + 4 + 1 + 13 + 6 + 5 + 3,
     );
   });
 

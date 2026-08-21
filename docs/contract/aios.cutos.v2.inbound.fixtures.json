@@ -3263,6 +3263,1035 @@
       }
     },
     {
+      "scenario": "conflict_first",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.edit.plan",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000055",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000056",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000057",
+            "traceId": "trace-00000000-0000-4000-8000-000000000058"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000059",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000055",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000056",
+            "aiosRunId": "00000000-0000-4000-8000-000000000059",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000057",
+            "traceId": "trace-00000000-0000-4000-8000-000000000058",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario": "idempotency_conflict",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.export",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000060",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000056",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000061",
+            "traceId": "trace-00000000-0000-4000-8000-000000000062"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "error": {
+            "code": "IDEMPOTENCY_CONFLICT",
+            "messageKey": "aios.error.idempotencyConflict",
+            "retryable": false
+          }
+        }
+      }
+    },
+    {
+      "scenario": "conflict_replay_ok",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.edit.plan",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000063",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000056",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000064",
+            "traceId": "trace-00000000-0000-4000-8000-000000000065"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000059",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000055",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000056",
+            "aiosRunId": "00000000-0000-4000-8000-000000000059",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000057",
+            "traceId": "trace-00000000-0000-4000-8000-000000000058",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario": "revision_separated",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.highlight.package",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000066",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000067",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000068",
+            "traceId": "trace-00000000-0000-4000-8000-000000000069",
+            "expectedRevision": 7
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000070",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            },
+            {
+              "id": "export_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.export",
+              "dependsOn": [
+                "instant_preview",
+                "approval_gate"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000066",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000067",
+            "aiosRunId": "00000000-0000-4000-8000-000000000070",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000068",
+            "expectedRevision": 7,
+            "traceId": "trace-00000000-0000-4000-8000-000000000069",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario": "job_correlation",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.highlight.package",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000071",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000072",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000073",
+            "traceId": "trace-00000000-0000-4000-8000-000000000074",
+            "cutosJobId": "job-00000000-0000-4000-8000-000000000075"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000076",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            },
+            {
+              "id": "export_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.export",
+              "dependsOn": [
+                "instant_preview",
+                "approval_gate"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000071",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000072",
+            "aiosRunId": "00000000-0000-4000-8000-000000000076",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000073",
+            "cutosJobId": "job-00000000-0000-4000-8000-000000000075",
+            "traceId": "trace-00000000-0000-4000-8000-000000000074",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario": "job_correlation_poll",
+      "request": {
+        "method": "GET",
+        "path": "/api/cutos/runs/00000000-0000-4000-8000-000000000076"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000076",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            },
+            {
+              "id": "export_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.export",
+              "dependsOn": [
+                "instant_preview",
+                "approval_gate"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000071",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000072",
+            "aiosRunId": "00000000-0000-4000-8000-000000000076",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000073",
+            "cutosJobId": "job-00000000-0000-4000-8000-000000000075",
+            "traceId": "trace-00000000-0000-4000-8000-000000000074",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario": "atomic_claim",
+      "request": {
+        "method": "POST",
+        "path": "/api/cutos/runs",
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "goal": "把 45 分鐘訪談做成 8 分鐘精華",
+          "capability": "video.highlight.package",
+          "qualityProfile": "balanced",
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000077",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000078",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000079",
+            "traceId": "trace-00000000-0000-4000-8000-000000000080"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "protocolVersion": "cutos.agent.v2",
+          "aiosRunId": "00000000-0000-4000-8000-000000000081",
+          "status": "waiting_approval",
+          "steps": [
+            {
+              "id": "ensure_transcript",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.analyze",
+              "dependsOn": []
+            },
+            {
+              "id": "ensure_speakers",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_topics",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "ensure_semantic_index",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_transcript"
+              ]
+            },
+            {
+              "id": "semantic_analyst",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "ensure_speakers",
+                "ensure_topics",
+                "ensure_semantic_index"
+              ]
+            },
+            {
+              "id": "find_highlights",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "semantic_analyst"
+              ]
+            },
+            {
+              "id": "plan_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.plan",
+              "dependsOn": [
+                "find_highlights"
+              ]
+            },
+            {
+              "id": "verify_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.verify",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "plan_short_candidates",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.semanticSearch",
+              "dependsOn": [
+                "plan_long_cut"
+              ]
+            },
+            {
+              "id": "preview_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "approval_gate",
+              "kind": "request_approval",
+              "status": "pending",
+              "messageKey": "bridge.activity.approval",
+              "dependsOn": [
+                "preview_long_cut",
+                "plan_short_candidates"
+              ]
+            },
+            {
+              "id": "apply_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.apply",
+              "dependsOn": [
+                "approval_gate",
+                "verify_long_cut"
+              ]
+            },
+            {
+              "id": "instant_preview",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.preview",
+              "dependsOn": [
+                "apply_long_cut"
+              ]
+            },
+            {
+              "id": "export_long_cut",
+              "kind": "tool_call",
+              "status": "pending",
+              "messageKey": "bridge.activity.export",
+              "dependsOn": [
+                "instant_preview",
+                "approval_gate"
+              ]
+            }
+          ],
+          "correlation": {
+            "requestId": "cutos-req-00000000-0000-4000-8000-000000000077",
+            "idempotencyKey": "cutos-submit-00000000-0000-4000-8000-000000000078",
+            "aiosRunId": "00000000-0000-4000-8000-000000000081",
+            "aiosProjectId": "00000000-0000-4000-8000-000000000043",
+            "cutosProjectId": "cutos-inbound-00000000-0000-4000-8000-000000000003",
+            "cutosAgentRunId": "run_00000000-0000-4000-8000-000000000079",
+            "traceId": "trace-00000000-0000-4000-8000-000000000080",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
       "scenario": "get_run",
       "request": {
         "method": "GET",
@@ -3776,7 +4805,7 @@
       "scenario": "run_not_found",
       "request": {
         "method": "GET",
-        "path": "/api/cutos/runs/00000000-0000-4000-8000-000000000055"
+        "path": "/api/cutos/runs/00000000-0000-4000-8000-000000000082"
       },
       "response": {
         "status": 404,
