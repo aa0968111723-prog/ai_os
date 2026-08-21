@@ -10,11 +10,14 @@
  *   走出口代理反而連不上。
  *
  * ★ 本模組不 import 任何專案模組：storage.ts 引用它，它不反向引用 storage（避免循環相依）。
+ *   唯一例外是 requestTiming——它是零相依的葉節點（只用 node:async_hooks），不可能造成循環，
+ *   而 S3 耗時必須量在 sendRequest 這個唯一咽喉點，搬到 storage.ts 就會漏掉一半的呼叫路徑。
  */
 import { createHash, createHmac } from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import type { Readable } from "node:stream";
+import { measureTiming } from "./requestTiming";
 
 export interface ObjectStoreConfig {
   /** 例：http://minio.railway.internal:9000（不含 bucket） */
@@ -272,7 +275,16 @@ interface RawResponse {
   stream: http.IncomingMessage;
 }
 
+/**
+ * S3 存取的單一咽喉點——所有 put/get/head/delete 都經過這裡，
+ * 因此把計時掛在這一層就能把「等物件儲存」和「等 DB／等模型」分開記。
+ * 只量到「回應標頭到齊」為止；大檔的 body 讀取由呼叫端各自處理，不混進這個數字。
+ */
 function sendRequest(config: ObjectStoreConfig, req: RawRequest): Promise<RawResponse> {
+  return measureTiming("s3", () => sendRequestUntimed(config, req));
+}
+
+function sendRequestUntimed(config: ObjectStoreConfig, req: RawRequest): Promise<RawResponse> {
   const { url, canonicalUri } = endpointUrl(config, req.key, req.query);
   const now = new Date();
   const { amzDate: stamp } = amzDate(now);

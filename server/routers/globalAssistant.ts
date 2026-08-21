@@ -47,6 +47,7 @@ import { recordAiTraceEventSafely } from "../services/aiTrace";
 import { beginAssistantConversation, checkpointAssistantConversation, failAssistantConversation, loadAssistantConversation } from "../services/assistantConversationState";
 import { taskPrioritySchema, type GroupCommandLevel } from "../../shared/groupAgent";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
+import { StreamingAnswerExtractor } from "../../shared/streamingAnswer";
 import {
   assistantPageContextSchema,
   formatAssistantPageContext,
@@ -590,6 +591,11 @@ export interface GlobalAskInput {
   signal?: AbortSignal;
   /** SSE 端點在 open 事件已宣告的 runId；讓串流事件與最終結果指向同一次執行 */
   runId?: string;
+  /**
+   * 最終答案的逐塊回呼（與專案助手同語意）：只在供應商真的串流時分次觸發，
+   * 吐出來的是從模型 JSON 的 `"answer"` 欄位即時解出的純文字。權威結果仍是最後的 answer。
+   */
+  onAnswerDelta?: (delta: string) => void;
 }
 
 export interface GlobalAskResult {
@@ -1739,7 +1745,20 @@ ${historyBlock}${recentResultBlock ? `${recentResultBlock}\n` : ""}使用者的�
         const budget = parseGoalBudgetConstraints(goalFrame.constraints ?? []);
         const qualityMode: AgentPlannerMode = budget.freeOnly ? "nim" : (input.mode ?? "nim");
         const isPaidMode = qualityMode !== "nim";
-        const completion = await completeText({ prompt, mode: qualityMode, timeoutMs: isPaidMode ? 120_000 : 60_000, signal: askSignal });
+        // 每一輪一個新的抽取器：工具呼叫輪沒有 answer 欄位，自然一個字都不吐。
+        const answerStream = input.onAnswerDelta ? new StreamingAnswerExtractor() : undefined;
+        const completion = await completeText({
+          prompt,
+          mode: qualityMode,
+          timeoutMs: isPaidMode ? 120_000 : 60_000,
+          signal: askSignal,
+          onDelta: answerStream
+            ? (delta) => {
+                const text = answerStream.push(delta);
+                if (text) input.onAnswerDelta?.(text);
+              }
+            : undefined,
+        });
         usedProvider = completion.provider;
         usedModel = completion.model;
         return completion.text;

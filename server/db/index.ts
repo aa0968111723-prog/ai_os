@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { loadLocalEnv } from "../bootstrap/loadEnv";
 import { buildPoolConfig, parseDatabaseUrl } from "./connectionConfig";
+import { measureTiming } from "../services/requestTiming";
 import * as schema from "./schema";
 
 loadLocalEnv();
@@ -39,6 +40,41 @@ if (databaseTarget.configured) {
   }, 5_000);
   poolProbe.unref?.();
 }
+
+/**
+ * DB 存取計時：包住 Pool 的 query 與 connect，讓每一次助手問答的 log 能把
+ * 「等 DB」和「等模型」分開看。沒有進行中的計時脈絡時 measureTiming 是 no-op，
+ * 背景排程與啟動流程不會多出任何負擔。
+ *
+ * 只包 promise 形式的呼叫（drizzle 一律走這個形式）；callback 形式原樣放行，
+ * 不去改動 pg 的回呼語意。
+ */
+function instrumentPoolTiming(target: pg.Pool): void {
+  const originalQuery = target.query.bind(target);
+  const originalConnect = target.connect.bind(target);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pg 的 query 有多組多載，逐一標型別只會失真
+  (target as any).query = (...args: any[]) => {
+    const result: unknown = (originalQuery as (...a: unknown[]) => unknown)(...args);
+    if (!result || typeof (result as { then?: unknown }).then !== "function") return result;
+    return measureTiming("db", () => result as Promise<unknown>);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 同上：connect 亦有 callback／promise 兩種形式
+  (target as any).connect = (...args: any[]) => {
+    const result: unknown = (originalConnect as (...a: unknown[]) => unknown)(...args);
+    if (!result || typeof (result as { then?: unknown }).then !== "function") return result;
+    return (result as Promise<pg.PoolClient>).then((client) => {
+      const clientQuery = client.query.bind(client);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 同上
+      (client as any).query = (...inner: any[]) => {
+        const queried: unknown = (clientQuery as (...a: unknown[]) => unknown)(...inner);
+        if (!queried || typeof (queried as { then?: unknown }).then !== "function") return queried;
+        return measureTiming("db", () => queried as Promise<unknown>);
+      };
+      return client;
+    });
+  };
+}
+instrumentPoolTiming(pool);
 
 export const db = drizzle(pool, { schema });
 export { schema, databaseTarget };

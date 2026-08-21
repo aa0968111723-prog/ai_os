@@ -313,6 +313,11 @@ export function ProjectAssistant({
   const [liveTraceOpen, setLiveTraceOpen] = useState(true);
   // 思考過程串流狀態：active＝正在問答中，events＝已收到的思考步驟（逐筆追加即時顯示）
   const [thinking, setThinking] = useState<{ active: boolean; events: ThinkEvent[] }>({ active: false, events: [] });
+  /**
+   * 串流中的答案。上游供應商真的逐 token 回時才會長出東西——收到即渲染，不等整包 done。
+   * done 一到就清空並改由正式的 turn 呈現（權威版本永遠是伺服器的最終 answer）。
+   */
+  const [streamingAnswer, setStreamingAnswer] = useState("");
   const [fallbackPending, setFallbackPending] = useState(false);
   const [activePlan, setActivePlan] = useState<AssistantExecutionPlan | null>(null);
   /** 串流事件中結構化的那些（新協定）。舊伺服器只吐 {phase,text} 時是空陣列，畫面自動退回舊軌跡元件。 */
@@ -480,8 +485,14 @@ export function ProjectAssistant({
           setThinking((state) => ({ active: true, events: [...state.events, event] }));
           bumpScroll();
         },
+        onDelta: (text) => {
+          if (!requestIsCurrent(requestProjectId, epoch)) return;
+          setStreamingAnswer((prev) => prev + text);
+          bumpScroll();
+        },
         onDone: (result) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
+          setStreamingAnswer("");
           setTraceSessionId(result.traceSessionId ?? null);
           const plan = activePlan ?? classifyAssistantRequest(message);
           const actions = result.actions as Action[];
@@ -524,6 +535,7 @@ export function ProjectAssistant({
         },
         onError: (errorMessage) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
+          setStreamingAnswer("");
           push({
             role: "ai",
             text: errorMessage,
@@ -647,6 +659,7 @@ export function ProjectAssistant({
     abortRef.current?.abort();
     requestEpochRef.current += 1;
     setThinking({ active: false, events: [] });
+    setStreamingAnswer("");
     setFallbackPending(false);
     setActivePlan(null);
     setPendingKey(null);
@@ -1190,6 +1203,21 @@ export function ProjectAssistant({
                     onCancel={cancelCurrent}
                   />
                 )}
+                {streamingAnswer ? (
+                  <div
+                    data-testid="assistant-streaming-answer"
+                    aria-live="polite"
+                    style={{
+                      marginTop: 6,
+                      whiteSpace: "pre-wrap",
+                      fontSize: "var(--fs-13)",
+                      color: "var(--fg-primary)",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {streamingAnswer}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

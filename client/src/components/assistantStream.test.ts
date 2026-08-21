@@ -67,6 +67,76 @@ describe("AssistantSseDecoder", () => {
   });
 });
 
+describe("delta 事件（逐 token 渲染）", () => {
+  it("把每一塊答案交給 onDelta，並在 done 之前就先送達", async () => {
+    const deltas: string[] = [];
+    const order: string[] = [];
+    const wire = [
+      'event: step\ndata: {"phase":"thinking","text":"整理回答…"}\n\n',
+      'event: delta\ndata: {"text":"先"}\n\n',
+      'event: delta\ndata: {"text":"開口"}\n\n',
+      'event: done\ndata: {"answer":"先開口","actions":[],"steps":[],"mock":false,"fallback":false}\n\n',
+    ].join("");
+    const stream = readerResponse([encoder.encode(wire)]);
+
+    const handled = await requestAssistantStream({
+      projectId: "project-1",
+      message: "嗨",
+      nonce: "n",
+      signal: new AbortController().signal,
+      handlers: handlers({
+        onDelta: (text) => { deltas.push(text); order.push("delta"); },
+        onDone: () => order.push("done"),
+      }),
+      fetchImpl: vi.fn(async () => stream.response),
+    });
+
+    expect(handled).toBe(true);
+    expect(deltas).toEqual(["先", "開口"]);
+    expect(order).toEqual(["delta", "delta", "done"]);
+  });
+
+  it("壞形狀或空字串的 delta 一律忽略，不讓串流因為一顆壞封包中斷", async () => {
+    const onDelta = vi.fn();
+    const wire = [
+      'event: delta\ndata: {"text":""}\n\n',
+      'event: delta\ndata: {"nope":1}\n\n',
+      'event: delta\ndata: not-json\n\n',
+      'event: done\ndata: {"answer":"ok","actions":[],"steps":[],"mock":false,"fallback":false}\n\n',
+    ].join("");
+    const stream = readerResponse([encoder.encode(wire)]);
+
+    const handled = await requestAssistantStream({
+      projectId: "project-1",
+      message: "嗨",
+      nonce: "n",
+      signal: new AbortController().signal,
+      handlers: handlers({ onDelta }),
+      fetchImpl: vi.fn(async () => stream.response),
+    });
+
+    expect(handled).toBe(true);
+    expect(onDelta).not.toHaveBeenCalled();
+  });
+
+  it("收過 delta 後串流斷掉：算已接手，不再退回 tRPC 重跑（免得重複扣額度）", async () => {
+    const onError = vi.fn();
+    const stream = readerResponse([encoder.encode('event: delta\ndata: {"text":"半句"}\n\n')]);
+
+    const handled = await requestAssistantStream({
+      projectId: "project-1",
+      message: "嗨",
+      nonce: "n",
+      signal: new AbortController().signal,
+      handlers: handlers({ onError }),
+      fetchImpl: vi.fn(async () => stream.response),
+    });
+
+    expect(handled).toBe(true);
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("連線中斷"));
+  });
+});
+
 describe("requestAssistantStream", () => {
   it("retains received activity when the terminal answer arrives", async () => {
     const trace: AssistantActivityEvent[] = [];

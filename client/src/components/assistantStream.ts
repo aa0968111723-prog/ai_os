@@ -61,9 +61,22 @@ export type AssistantStreamDone = {
 export type AssistantStreamHandlers = {
   onOpen?: (run: AssistantRunOpen) => void;
   onStep: (event: AssistantActivityEvent) => void;
+  /**
+   * 答案的下一塊文字（伺服器逐 token 推來的增量，不是累積值）。
+   * 只有上游供應商真的串流時才會收到；沒收到不代表出錯，代表這次是整段回傳。
+   * 最終仍以 onDone 的 answer 為準——串流可能掉封包，權威版本永遠是 done。
+   */
+  onDelta?: (text: string) => void;
   onDone: (result: AssistantStreamDone) => void;
   onError: (message: string) => void;
 };
+
+/** delta 事件的酬載：`{ text }`，text 為這一塊新增的答案文字。 */
+export function parseDeltaText(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const text = (value as { text?: unknown }).text;
+  return typeof text === "string" && text.length > 0 ? text : null;
+}
 
 function isOpenEvent(value: unknown): value is AssistantRunOpen {
   if (!value || typeof value !== "object") return false;
@@ -180,6 +193,11 @@ function dispatchAssistantEvent(
     handlers.onStep(parsed.data);
     return false;
   }
+  if (parsed.event === "delta") {
+    const text = parseDeltaText(parsed.data);
+    if (text) handlers.onDelta?.(text);
+    return false;
+  }
   if (parsed.event === "done" && isDoneEvent(parsed.data)) {
     handlers.onDone(parsed.data);
     return true;
@@ -291,6 +309,8 @@ function isSiteDoneEvent(value: unknown): value is SiteAssistantStreamDone {
 export type SiteAssistantStreamHandlers = {
   onOpen?: (run: AssistantRunOpen) => void;
   onStep: (event: AssistantActivityEvent) => void;
+  /** 與專案助手同語意：答案的增量文字，權威版本仍是 onDone。 */
+  onDelta?: (text: string) => void;
   onDone: (result: SiteAssistantStreamDone) => void;
   onError: (message: string) => void;
 };
@@ -347,6 +367,11 @@ export async function requestSiteAssistantStream({
       handlers.onStep(parsed.data);
       return false;
     }
+    if (parsed.event === "delta") {
+      const text = parseDeltaText(parsed.data);
+      if (text) handlers.onDelta?.(text);
+      return false;
+    }
     if (parsed.event === "done" && isSiteDoneEvent(parsed.data)) {
       handlers.onDone(parsed.data);
       return true;
@@ -389,7 +414,7 @@ export async function requestSiteAssistantStream({
       const result = await readAssistantChunk(reader, signal, idleTimeoutMs);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
-        if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
+        if (event.event === "open" || event.event === "step" || event.event === "delta" || event.event === "done" || event.event === "error") {
           sawPayload = true;
         }
         if (dispatchSite(event)) return true;
@@ -487,7 +512,7 @@ export async function requestAssistantStream({
       const result = await readAssistantChunk(reader, signal, idleTimeoutMs);
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
-        if (event.event === "open" || event.event === "step" || event.event === "done" || event.event === "error") {
+        if (event.event === "open" || event.event === "step" || event.event === "delta" || event.event === "done" || event.event === "error") {
           sawPayload = true;
         }
         if (dispatchAssistantEvent(event, handlers)) return true;

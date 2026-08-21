@@ -3,6 +3,7 @@ import { AGENT_LLM_MODEL_IDS } from "../../shared/llmPricing";
 import { summarizeLogprobs, type LlmIntrospection } from "../../shared/llmIntrospection";
 import { chatCompletion, NIM_DEFAULT_MODEL, NimServiceError, nimErrorDegradable } from "./nvidia-nim";
 import { falStatus, falSubmit } from "./fal";
+import { AiHubError, hubComplete, isAiHubConfigured } from "./aiHub";
 
 /**
  * 共用 LLM 供應層。
@@ -43,7 +44,7 @@ export const FAL_AGENT_PROFILES = {
 
 export type FalAgentMode = keyof typeof FAL_AGENT_PROFILES;
 
-export type LlmProvider = "nvidia-nim" | "fal-openrouter";
+export type LlmProvider = "nvidia-nim" | "fal-openrouter" | "zeabur-ai-hub";
 
 export interface LlmCompletion {
   provider: LlmProvider;
@@ -52,6 +53,11 @@ export interface LlmCompletion {
   usage?: AgentPlannerUsage;
   /** auto 模式下 NIM 失敗轉 fal 時為 true，供 UI 誠實標示「已自動備援」 */
   fellBack?: boolean;
+  /**
+   * 首個 token 的到達時間（毫秒，相對於這次供應商呼叫開始）。
+   * 只有真的串流的供應商填得出來；整段回傳的 NIM／fal 一律是 null，不捏造。
+   */
+  firstTokenMs?: number | null;
   /**
    * 供應商主動揭露的推理摘要與逐 token 信心（見 shared/llmIntrospection）。
    * 供應商沒給就是沒有——站內不生成、不補寫、不改寫。
@@ -150,6 +156,29 @@ export function __resetFalCongestion(): void {
   falEconomyConsecutiveFailures = 0;
 }
 
+/* ── Zeabur AI Hub 主供應商切換（A/B 用） ────────────────────────────────────
+ * `LLM_PRIMARY_PROVIDER=hub|nim` 決定「免費檔位」那條路先打誰：
+ * - hub（設好 OPENAI_BASE_URL＋OPENAI_API_KEY 時的預設）：先走 AI Hub 串流；
+ *   可降級的失敗（逾時、5xx、連不上）自動退回既有 NIM／fal 鏈路，使用者照樣拿得到答案。
+ * - nim：完全維持改動前的行為，方便兩邊對照延遲數字。
+ * 明確選定的 fal 檔位不受影響——那是使用者自己選的付費模型，不該被悄悄換掉。
+ *
+ * 成本提醒：AI Hub 是平台實付，與 NIM 免費層不同。切到 hub 等於把「免費檔位」的
+ * 實際成本從 0 變成 Hub 用量，這是切換者的明示決定，不是這一層偷改的。
+ */
+export type LlmPrimaryProvider = "hub" | "nim";
+
+export function resolveLlmPrimaryProvider(): LlmPrimaryProvider {
+  const configured = process.env.LLM_PRIMARY_PROVIDER?.trim().toLowerCase();
+  if (configured === "hub" || configured === "nim") return configured;
+  return isAiHubConfigured() ? "hub" : "nim";
+}
+
+/** 這次請求該不該先打 AI Hub：選了 hub 且金鑰確實設好才算數。 */
+export function isAiHubPrimary(): boolean {
+  return resolveLlmPrimaryProvider() === "hub" && isAiHubConfigured();
+}
+
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new LlmServiceError("已取消"));
@@ -179,6 +208,10 @@ function sanitize(error: unknown, provider: LlmProvider): LlmServiceError {
     return new LlmServiceError(error.message, { cause: error });
   }
   const message = error instanceof Error ? error.message : String(error);
+  if (provider === "zeabur-ai-hub") {
+    // AiHubError 的訊息已經是人話（含 HTTP 狀態與該怎麼辦），原樣帶出去
+    return new LlmServiceError(error instanceof AiHubError ? error.message : `AI Hub 暫時沒有回應：${message}`, { cause: error });
+  }
   if (provider === "fal-openrouter") {
     if (message.includes("FAL_KEY 未設定")) {
       return new LlmServiceError("fal.ai 尚未設定金鑰，請管理員設定 FAL_KEY 後重新部署", { cause: error });
@@ -214,6 +247,14 @@ export interface CompleteTextParams {
    * 預設關：主線路徑（助手回答、規劃）不需要，開了只是多花 token 與風險。
    */
   introspect?: boolean;
+  /**
+   * 串流回呼：每收到一塊模型輸出就呼叫一次，傳入的是「新增的那一塊」而非累積值。
+   *
+   * 只有 AI Hub 這條路真的逐塊回呼；NIM／fal 是整段回傳，接上這個回呼也只會在最後
+   * 收到一整包——所以呼叫端要嘛能接受「一次到位」，要嘛用 firstTokenMs 判斷有沒有真串流。
+   * 這裡刻意不替非串流供應商假裝分塊：捏造的 token 時間比沒有數字更糟。
+   */
+  onDelta?: (delta: string) => void;
 }
 
 /** fal 必須帶 system_prompt；呼叫端沒給時用這句中性預設，不改變回答風格。 */
@@ -262,6 +303,37 @@ async function completeNim(params: CompleteTextParams): Promise<LlmCompletion> {
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
           totalTokens: response.usage.total_tokens,
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Zeabur AI Hub：OpenAI 相容、一律串流。
+ * onDelta 直接透傳，呼叫端（SSE 路由）收到第一塊就能推給前端。
+ */
+async function completeHub(params: CompleteTextParams): Promise<LlmCompletion> {
+  const completion = await hubComplete({
+    messages: [
+      ...(params.systemPrompt ? [{ role: "system" as const, content: params.systemPrompt }] : []),
+      { role: "user" as const, content: params.prompt },
+    ],
+    temperature: params.temperature ?? 0.1,
+    maxTokens: params.maxTokens ?? 5_000,
+    timeoutMs: params.timeoutMs ?? 60_000,
+    signal: params.signal,
+    onDelta: params.onDelta,
+  });
+  return {
+    provider: "zeabur-ai-hub",
+    model: completion.model,
+    text: completion.text,
+    firstTokenMs: completion.firstTokenMs,
+    usage: completion.usage
+      ? {
+          promptTokens: completion.usage.promptTokens,
+          completionTokens: completion.usage.completionTokens,
+          totalTokens: completion.usage.totalTokens,
         }
       : undefined,
   };
@@ -332,6 +404,21 @@ export async function completeText(params: CompleteTextParams): Promise<LlmCompl
   }
 
   if (mode === "nim" || mode === "auto") {
+    // AI Hub 當主供應商時先走它（同機房＋串流，首 token 通常在 1 秒內）。
+    // 可降級的失敗（逾時／5xx／連不上）直接落到下面既有的 NIM／fal 鏈路，
+    // 使用者不會因為換供應商就少一個答案；金鑰／設定錯誤則原樣拋出給管理員。
+    if (isAiHubPrimary()) {
+      try {
+        return await completeHub(params);
+      } catch (hubError) {
+        if (params.signal?.aborted) throw sanitize(hubError, "zeabur-ai-hub");
+        if (hubError instanceof AiHubError && !hubError.degradable) throw sanitize(hubError, "zeabur-ai-hub");
+        console.warn(
+          "[llm] AI Hub 失敗，改走既有 NIM／fal 鏈路：",
+          hubError instanceof Error ? hubError.message : hubError,
+        );
+      }
+    }
     const allowPaidFallback = params.allowPaidFallback ?? mode === "auto";
     // auto＝免費優先、同意備援：NIM 只給快速偵測，逾時降級 fal。
     // nim＝只用免費：走完整 timeoutMs，失敗就失敗，不偷偷切 deepseek-v4-flash。
