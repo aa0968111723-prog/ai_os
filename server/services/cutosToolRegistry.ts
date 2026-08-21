@@ -183,15 +183,28 @@ function readTool(spec: ReadToolSpec): ToolDefinition<Record<string, unknown>, u
     handler: async (input, context) => {
       const binding = await bindingFor(context);
       const requestId = randomUUID();
-      const outcome = await client().invokeRead(
-        spec.capability,
-        spec.args(input, binding),
-        {
-          correlation: correlationFor(context, binding, requestId),
-          signal: context.signal,
-          ...(spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs }),
-        },
-      );
+      let outcome;
+      try {
+        outcome = await client().invokeRead(
+          spec.capability,
+          spec.args(input, binding),
+          {
+            correlation: correlationFor(context, binding, requestId),
+            signal: context.signal,
+            ...(spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs }),
+          },
+        );
+      } catch (error) {
+        // Wrap, exactly as writeTool does. Without this a CUTOS read error
+        // reached callers as a raw CutosClientError while every caller checks
+        // for CutosToolError — so `pollCutosJob`'s JOB_NOT_FOUND branch could
+        // never match, and a job CUTOS had forgotten (restart, GC) left the
+        // AIOS step parked forever instead of failing it.
+        if (error instanceof CutosClientError) {
+          throw new CutosToolError(error.code, error.message);
+        }
+        throw error;
+      }
       await mirrorActivity(context, binding, outcome.activity);
       if (outcome.correlation.timelineRevision !== undefined) {
         await rememberTimelineRevision(context.projectId, outcome.correlation.timelineRevision);

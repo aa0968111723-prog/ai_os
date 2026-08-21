@@ -323,6 +323,25 @@ describe.skipIf(!RUN_PG).sequential("CUTOS workflow E2E (real PostgreSQL + HTTP)
     expect(applyCount).toBe(1);
   }, 60_000);
 
+  it("fails a step whose job CUTOS has forgotten, instead of parking it forever", async () => {
+    // The forever-park: `readTool` let CutosClientError propagate unwrapped
+    // while `pollCutosJob` only recognised CutosToolError, so a job CUTOS no
+    // longer knows about (restart, GC) fell through to `state: "running"` and
+    // the AIOS step waited for a result that could never arrive.
+    const poll = await pollCutosJob({
+      runId,
+      stepId: "forgotten_job",
+      userId,
+      groupId,
+      projectId,
+      jobId: "job-that-cutos-forgot",
+    });
+    expect(poll.state).toBe("failed");
+    expect(poll.status).toBe("missing");
+    // A zh-TW reason, not a raw error string.
+    expect(poll.reason).toBe("CUTOS 找不到這個背景工作");
+  });
+
   it("mirrored the CUTOS activity into AIOS with the run correlation", async () => {
     const activity = await listCutosActivity({ projectId, limit: 200 });
     expect(activity.length).toBeGreaterThan(5);
