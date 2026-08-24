@@ -1,11 +1,14 @@
 import type { ProjectStatusSummary, StatusItem } from "./projectStatusSummary";
 import type { ProjectNextStep } from "./projectNextSteps";
+import type { ProjectBlocker } from "./projectBlockers";
 import { Card, Meta } from "../../components/ui";
 
 export type ProjectStatusHeroProps = {
   summary: ProjectStatusSummary;
   /** 最多 3 個 deterministic 下一步（一句話 + 主按鈕） */
   nextSteps?: ProjectNextStep[];
+  /** 最多 5 個 blockers（發生什麼 / 影響 / 怎解） */
+  blockers?: ProjectBlocker[];
   /** 點擊進度／下一步／執行／待處理時呼叫（anchor 不含 #） */
   onNavigate?: (anchor: string) => void;
   className?: string;
@@ -47,15 +50,13 @@ function StatusRow({
 }
 
 /**
- * 專案頁首屏狀態摘要：目前階段、下一步（最多 3）、真實工作流進度、正在執行、需要處理。
- * 標題仍由既有 project-hero 負責，本元件不重複專案名。
- *
- * nextSteps 由 deriveProjectNextSteps 推導（deterministic）；
- * 若未傳入則退回 summary.nextLabel 單一按鈕。
+ * 專案頁首屏狀態摘要：目前階段、下一步、卡住了、真實工作流進度、正在執行、需要處理。
+ * blockers 由 deriveProjectBlockers 推導（deterministic，最多 5）。
  */
 export function ProjectStatusHero({
   summary,
   nextSteps,
+  blockers,
   onNavigate,
   className = "",
 }: ProjectStatusHeroProps) {
@@ -114,6 +115,37 @@ export function ProjectStatusHero({
                     </button>
                   ) : (
                     <span className="project-status-hero__next-btn is-static">{step.actionLabel}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      {blockers && blockers.length > 0 ? (
+        <div className="project-status-hero__blockers" data-fb="專案卡住了">
+          <span className="project-status-hero__block-label">卡住了</span>
+          <ul className="project-status-hero__blocker-list" aria-label="專案阻塞">
+            {blockers.slice(0, 5).map((b) => {
+              const clickable = Boolean(b.anchor && onNavigate);
+              return (
+                <li key={b.id} className={`project-status-hero__blocker is-${b.severity}`}>
+                  <div className="project-status-hero__blocker-body">
+                    <strong className="project-status-hero__blocker-what">{b.what}</strong>
+                    <span className="project-status-hero__blocker-impact">影響：{b.impact}</span>
+                    <span className="project-status-hero__blocker-fix">解決：{b.fix}</span>
+                  </div>
+                  {clickable ? (
+                    <button
+                      type="button"
+                      className="project-status-hero__next-btn"
+                      onClick={() => onNavigate!(b.anchor)}
+                    >
+                      {b.actionLabel}
+                    </button>
+                  ) : (
+                    <span className="project-status-hero__next-btn is-static">{b.actionLabel}</span>
                   )}
                 </li>
               );
@@ -286,6 +318,51 @@ export function ProjectStatusHero({
 }
 .project-status-hero__item.is-clickable:hover {
   filter: brightness(1.08);
+}
+.project-status-hero__blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.project-status-hero__blocker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-status-hero__blocker {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #2a2a2a);
+  background: transparent;
+}
+.project-status-hero__blocker.is-critical {
+  border-color: color-mix(in srgb, var(--danger, #f04438) 55%, transparent);
+}
+.project-status-hero__blocker.is-high {
+  border-color: color-mix(in srgb, var(--warn, #f5a524) 55%, transparent);
+}
+.project-status-hero__blocker-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.project-status-hero__blocker-what {
+  font-size: 13px;
+  font-weight: 600;
+}
+.project-status-hero__blocker-impact,
+.project-status-hero__blocker-fix {
+  font-size: 12px;
+  color: var(--muted, #8a8a8a);
+  line-height: 1.35;
 }
 @media (max-width: 720px) {
   .project-status-hero {
