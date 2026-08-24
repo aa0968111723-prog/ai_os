@@ -9,12 +9,17 @@ export interface StepItem {
   icon: "bulb" | "doc" | "grid" | "wave" | "upload";
 }
 
+/**
+ * 專案 5 階段進度燈號文案。
+ * 與手機 StageTrack / shared phoneStages 同一套語彙，避免桌機「靈感／腳本／發布」
+ * 與手機「故事／分鏡／交付」各講一套，使用者以為是兩套流程。
+ */
 export const DEFAULT_STEPS: StepItem[] = [
-  { id: 1, label: "靈感", subLabel: "Idea", icon: "bulb" },
-  { id: 2, label: "腳本", subLabel: "Script", icon: "doc" },
-  { id: 3, label: "分鏡", subLabel: "Storyboard", icon: "grid" },
+  { id: 1, label: "故事", subLabel: "Story", icon: "bulb" },
+  { id: 2, label: "分鏡", subLabel: "Board", icon: "doc" },
+  { id: 3, label: "視覺", subLabel: "Visual", icon: "grid" },
   { id: 4, label: "生成", subLabel: "Generate", icon: "wave" },
-  { id: 5, label: "發布", subLabel: "Publish", icon: "upload" },
+  { id: 5, label: "交付", subLabel: "Deliver", icon: "upload" },
 ];
 
 export const getStepState = (stepId: number, currentStep: number): StepState => {
@@ -30,7 +35,6 @@ function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }
 
   switch (type) {
     case "bulb":
-      // 💡 靈感燈泡
       return (
         <g transform="translate(0, -0.5)">
           <path
@@ -44,7 +48,6 @@ function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }
         </g>
       );
     case "doc":
-      // 📝 腳本文檔
       return (
         <g transform="translate(0, -0.2)">
           <rect
@@ -63,7 +66,6 @@ function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }
         </g>
       );
     case "grid":
-      // 🎨 分鏡網格
       return (
         <g transform="translate(0, 0)">
           <rect
@@ -81,7 +83,6 @@ function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }
         </g>
       );
     case "wave":
-      // 🔊 語音/生成聲波
       return (
         <g transform="translate(0, 0)">
           <line x1="-3" y1="-1.5" x2="-3" y2="1.5" stroke={strokeColor} strokeWidth="0.9" strokeLinecap="round" />
@@ -91,7 +92,6 @@ function StepGlyph({ type, state }: { type: StepItem["icon"]; state: StepState }
         </g>
       );
     case "upload":
-      // 🚀 發布/上傳
       return (
         <g transform="translate(0, 0)">
           <path
@@ -115,7 +115,7 @@ export interface ProgressStepperProps {
 
 /**
  * 專案 5 階段進度燈號（ProgressStepper）
- * 靈感 ➔ 腳本 ➔ 分鏡 ➔ 生成 ➔ 發布
+ * 故事 ➔ 分鏡 ➔ 視覺 ➔ 生成 ➔ 交付
  */
 export function ProgressStepper({
   currentStep = 3,
@@ -149,26 +149,22 @@ export function ProgressStepper({
         className="progress-stepper-svg"
       >
         <defs>
-          {/* 進行中橙色光暈 */}
           <radialGradient id="stepper-active-glow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#FF6B35" stopOpacity="0.45" />
             <stop offset="100%" stopColor="#FF6B35" stopOpacity="0" />
           </radialGradient>
 
-          {/* 已完成綠色漸層 */}
           <linearGradient id="stepper-done-grad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#66BB6A" />
             <stop offset="100%" stopColor="#2E7D32" />
           </linearGradient>
 
-          {/* 進行中橙色漸層 */}
           <linearGradient id="stepper-active-grad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#FFAB40" />
             <stop offset="100%" stopColor="#FF6B35" />
           </linearGradient>
         </defs>
 
-        {/* 連接線 */}
         {steps.map((step, idx) => {
           if (idx === total - 1) return null;
           const x1 = startX + idx * spacing + nodeRadius;
@@ -191,14 +187,12 @@ export function ProgressStepper({
           );
         })}
 
-        {/* 節點與圖標 */}
         {steps.map((step, idx) => {
           const cx = startX + idx * spacing;
           const state = getStepState(step.id, currentStep);
 
           return (
             <g key={step.id} className={`stepper-node stepper-node--${state}`}>
-              {/* 進行中外部呼吸發光光暈 */}
               {state === "active" && (
                 <circle
                   cx={cx}
@@ -209,7 +203,6 @@ export function ProgressStepper({
                 />
               )}
 
-              {/* 節點本體底圓 */}
               <circle
                 cx={cx}
                 cy={yCenter}
@@ -231,12 +224,10 @@ export function ProgressStepper({
                 strokeWidth={state === "active" ? 1.5 : 1}
               />
 
-              {/* 節點內微圖標 */}
               <g transform={`translate(${cx}, ${yCenter})`}>
                 <StepGlyph type={step.icon} state={state} />
               </g>
 
-              {/* 已完成的右下打勾小徽章 */}
               {state === "done" && (
                 <g transform={`translate(${cx + nodeRadius * 0.65}, ${yCenter + nodeRadius * 0.65})`}>
                   <circle cx="0" cy="0" r="3.2" fill="#2E7D32" stroke="#66BB6A" strokeWidth="0.6" />
@@ -251,7 +242,6 @@ export function ProgressStepper({
                 </g>
               )}
 
-              {/* 文字標籤 */}
               {showLabels && (
                 <text
                   x={cx}
@@ -279,16 +269,62 @@ export function ProgressStepper({
   );
 }
 
-/** 依專案狀態與待核資料自動推導階段 (1~5) */
+/** 進度推導可用的計數（有就用；Launchpad 列表可能暫時沒有） */
+export type ProjectStepCounts = {
+  /** 是否已有故事正文 */
+  hasStory?: boolean;
+  /** 分鏡數（scenes / shots） */
+  shots?: number;
+  /** 已有畫面的分鏡數 */
+  shotsWithVisual?: number;
+  /** 已完成生成數 */
+  generationsDone?: number;
+  /** 可播放成片數（組裝後的影片，不是單鏡靜圖） */
+  playableResultCount?: number;
+};
+
+/**
+ * 依專案狀態與計數推導階段 (1~5)。
+ *
+ * 對齊 `shared/phoneStages.inferPhoneStage` 的保守原則：
+ * 只有上一階段確實有東西才往前——沒有分鏡時不說「在生成」。
+ *
+ * 簽名相容：Launchpad 仍可 `inferProjectCurrentStep(p, pd)`；
+ * 有完整 counts 時（專案頁／未來列表 enrichment）才走細推導。
+ */
 export function inferProjectCurrentStep(
   project: { kind?: string; format?: string; status?: string; createdAt?: any; updatedAt?: any },
-  pending?: { awaitingGenerations?: number } | null
+  pending?: { awaitingGenerations?: number } | null,
+  counts?: ProjectStepCounts | null,
 ): number {
   if (project.status === "archived") return 5;
-  if (pending && (pending.awaitingGenerations ?? 0) > 0) {
-    return 3; // 生成待核准中
-  }
-  // 依據時間戳與專案活動狀態推導預設階段
-  return 2; // 預設腳本推進中
-}
 
+  const awaiting = pending?.awaitingGenerations ?? 0;
+  const hasCounts =
+    counts &&
+    (counts.hasStory != null ||
+      counts.shots != null ||
+      counts.shotsWithVisual != null ||
+      counts.generationsDone != null ||
+      counts.playableResultCount != null);
+
+  if (hasCounts) {
+    const hasStory = Boolean(counts!.hasStory);
+    const shots = counts!.shots ?? 0;
+    const shotsWithVisual = counts!.shotsWithVisual ?? 0;
+    const generationsDone = counts!.generationsDone ?? 0;
+    const playable = counts!.playableResultCount ?? 0;
+
+    if (playable > 0) return 5;
+    if (awaiting > 0) return 4;
+    if (!hasStory && shots === 0) return 1;
+    if (shots === 0) return 2;
+    if (shotsWithVisual === 0) return 3;
+    if (shotsWithVisual < shots) return 4;
+    return generationsDone > 0 ? 5 : 4;
+  }
+
+  // Launchpad 列表僅有 pending 摘要時的保守路徑
+  if (awaiting > 0) return 4; // 生成／待裁決（舊版誤標 3＝分鏡）
+  return 2;
+}
