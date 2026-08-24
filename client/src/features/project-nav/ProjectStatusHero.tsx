@@ -1,8 +1,11 @@
 import type { ProjectStatusSummary, StatusItem } from "./projectStatusSummary";
+import type { ProjectNextStep } from "./projectNextSteps";
 import { Card, Meta } from "../../components/ui";
 
 export type ProjectStatusHeroProps = {
   summary: ProjectStatusSummary;
+  /** 最多 3 個 deterministic 下一步（一句話 + 主按鈕） */
+  nextSteps?: ProjectNextStep[];
   /** 點擊進度／下一步／執行／待處理時呼叫（anchor 不含 #） */
   onNavigate?: (anchor: string) => void;
   className?: string;
@@ -44,18 +47,33 @@ function StatusRow({
 }
 
 /**
- * 專案頁首屏狀態摘要：目前階段、下一步、真實工作流進度、正在執行、需要處理。
+ * 專案頁首屏狀態摘要：目前階段、下一步（最多 3）、真實工作流進度、正在執行、需要處理。
  * 標題仍由既有 project-hero 負責，本元件不重複專案名。
  *
- * 進度節點來自 deriveProjectStatusSummary → buildProgressItems，
- * 對齊 shared/shotCompletion 與 story/character/scene 真實狀態。
+ * nextSteps 由 deriveProjectNextSteps 推導（deterministic）；
+ * 若未傳入則退回 summary.nextLabel 單一按鈕。
  */
 export function ProjectStatusHero({
   summary,
+  nextSteps,
   onNavigate,
   className = "",
 }: ProjectStatusHeroProps) {
-  const nextClickable = Boolean(summary.nextAnchor && onNavigate);
+  const steps =
+    nextSteps && nextSteps.length > 0
+      ? nextSteps.slice(0, 3)
+      : summary.nextLabel
+        ? [
+            {
+              id: "legacy-next",
+              kind: "generate_shot" as const,
+              label: summary.nextLabel,
+              actionLabel: "前往",
+              anchor: summary.nextAnchor,
+              priority: 0,
+            },
+          ]
+        : [];
 
   return (
     <Card
@@ -74,21 +92,35 @@ export function ProjectStatusHero({
         ) : null}
       </div>
 
-      {nextClickable ? (
-        <button
-          type="button"
-          className="project-status-hero__next"
-          onClick={() => onNavigate!(summary.nextAnchor)}
-        >
-          <span className="project-status-hero__next-kicker">下一步</span>
-          <span className="project-status-hero__next-label">{summary.nextLabel}</span>
-        </button>
-      ) : (
-        <div className="project-status-hero__next is-static">
-          <span className="project-status-hero__next-kicker">下一步</span>
-          <span className="project-status-hero__next-label">{summary.nextLabel}</span>
+      {steps.length > 0 ? (
+        <div className="project-status-hero__next-block" data-fb="專案下一步">
+          <span className="project-status-hero__block-label">下一步</span>
+          <ul className="project-status-hero__next-list" aria-label="建議下一步">
+            {steps.map((step, i) => {
+              const clickable = Boolean(step.anchor && onNavigate);
+              return (
+                <li key={step.id} className="project-status-hero__next-row">
+                  <span className="project-status-hero__next-index" aria-hidden>
+                    {i + 1}
+                  </span>
+                  <span className="project-status-hero__next-text">{step.label}</span>
+                  {clickable ? (
+                    <button
+                      type="button"
+                      className="project-status-hero__next-btn"
+                      onClick={() => onNavigate!(step.anchor)}
+                    >
+                      {step.actionLabel}
+                    </button>
+                  ) : (
+                    <span className="project-status-hero__next-btn is-static">{step.actionLabel}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
-      )}
+      ) : null}
 
       <div className="project-status-hero__block" data-fb="專案工作流進度">
         <span className="project-status-hero__block-label">進度</span>
@@ -144,34 +176,66 @@ export function ProjectStatusHero({
   font-size: 13px;
   color: var(--muted, #8a8a8a);
 }
-.project-status-hero__next {
+.project-status-hero__next-block {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 6px;
+}
+.project-status-hero__next-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.project-status-hero__next-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  width: 100%;
-  text-align: left;
+  padding: 8px 10px;
   border: 1px solid var(--border-strong, #333);
   border-radius: 10px;
-  background: var(--surface-2, rgba(255, 107, 53, 0.08));
-  color: inherit;
-  padding: 10px 12px;
-  cursor: pointer;
-  font: inherit;
+  background: var(--surface-2, rgba(255, 107, 53, 0.06));
 }
-.project-status-hero__next.is-static {
-  cursor: default;
-}
-.project-status-hero__next:hover:not(.is-static) {
-  border-color: var(--accent, #ff6b35);
-}
-.project-status-hero__next-kicker {
-  font-size: 12px;
-  color: var(--muted, #8a8a8a);
+.project-status-hero__next-index {
   flex-shrink: 0;
-}
-.project-status-hero__next-label {
+  width: 1.4em;
+  height: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 11px;
   font-weight: 600;
-  font-size: 14px;
+  background: var(--accent, #ff6b35);
+  color: #111;
+}
+.project-status-hero__next-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  min-width: 0;
+}
+.project-status-hero__next-btn {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent, #ff6b35);
+  background: var(--accent, #ff6b35);
+  color: #111;
+  cursor: pointer;
+}
+.project-status-hero__next-btn.is-static {
+  cursor: default;
+  opacity: 0.85;
+}
+.project-status-hero__next-btn:hover:not(.is-static) {
+  filter: brightness(1.08);
 }
 .project-status-hero__block {
   display: flex;
@@ -230,6 +294,12 @@ export function ProjectStatusHero({
   }
   .project-status-hero__block-label {
     min-width: 100%;
+  }
+  .project-status-hero__next-row {
+    flex-wrap: wrap;
+  }
+  .project-status-hero__next-btn {
+    margin-left: auto;
   }
 }
       `}</style>
