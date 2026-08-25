@@ -22,29 +22,14 @@ export function toWirePageContext(ctx: AssistantPageContext): AssistantWirePageC
   };
 }
 
-/**
- * 依頁面上下文決定的快捷動作（取代原本四顆寫死的 QUICK_PROMPTS）。
- *
- * 為什麼要換掉寫死的：那四顆（爆款短片主題／分鏡腳本規劃／全組專案進度／開場鉤子技巧）
- * 在任何頁面都一樣——人在分鏡頁盯著第 3 鏡時，「爆款短片主題」是最不相關的一件事。
- * 快捷鍵的價值是「省下打字」，前提是它剛好就是你現在想做的；不是的話它只是佔位。
- *
- * 規則：首頁 4 顆、明確頁面情境最多 3 顆（再多就變選項牆），
- * 選取狀態優先於作用中實體，作用中實體優先於頁面，頁面優先於全站。
- */
-
 export interface AssistantQuickAction {
-  /** 穩定 id（測試與遙測用；不顯示） */
   id: string;
-  /** 按鈕上的字（≤6 字，手機一行三顆放得下） */
   label: string;
-  /** 按下去實際送出的問題——寫成人話，因為它會出現在對話裡當作使用者說的那句 */
   prompt: string;
 }
 
-const MAX = 4;
+const MAX = 5;
 
-/** 中文數量詞：selection 多筆時的「這幾鏡／這幾張」 */
 function many(n: number, unit: string): string {
   return `這 ${n} ${unit}`;
 }
@@ -53,7 +38,6 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
   const sel = ctx.selectedEntityIds ?? [];
   const multi = sel.length > 1;
 
-  // ── 多選優先：使用者已經明確圈出對象，快捷就該是「對這幾個做什麼」 ──
   if (multi) {
     if (ctx.entityType === "shot" || ctx.pageType === "storyboard") {
       return [
@@ -78,7 +62,6 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
     }
   }
 
-  // ── 單一作用中實體 ──
   if (ctx.entityType === "shot" && ctx.entityId) {
     const which = ctx.entityLabel ?? "這一鏡";
     return [
@@ -110,14 +93,7 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
     ];
   }
 
-  // ── 頁面層級 ──
   switch (ctx.pageType) {
-    case "storyboard":
-      return [
-        { id: "board.progress", label: "看進度", prompt: "目前分鏡做到哪？哪幾鏡還沒有畫面或旁白？" },
-        { id: "board.next", label: "建立下一鏡", prompt: "依照目前的分鏡，建議下一鏡怎麼拍，並幫我建立草稿。" },
-        { id: "board.gaps", label: "找缺素材", prompt: "哪幾鏡缺素材？請列出還要準備什麼。" },
-      ];
     case "assets":
       return [
         { id: "assets.gaps", label: "找缺素材", prompt: "對照目前分鏡，還缺哪些素材沒有備齊？" },
@@ -158,10 +134,14 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
     case "production":
     case "final":
     case "studio":
+    case "storyboard":
+    case "settings":
       return [
-        { id: "project.progress", label: "看進度", prompt: "這個專案目前做到哪？還差什麼才能完成？" },
-        { id: "project.continue", label: "繼續製作", prompt: "依照目前進度，接下來最該做的是什麼？請直接幫我開始。" },
-        { id: "project.gaps", label: "找缺漏", prompt: "這個專案目前有哪些缺漏或風險？" },
+        { id: "project.next", label: "問下一步", prompt: "這個專案現在最該做的下一步是什麼？請依目前進度、待審核與失敗項目，給我最多 3 件可執行的事。" },
+        { id: "project.progress", label: "查看進度", prompt: "這個專案目前做到哪一階段？故事、角色、分鏡、圖片、影片、聲音、審核各完成多少？" },
+        { id: "project.blockers", label: "找問題", prompt: "這個專案現在卡在哪？請列出最重要的阻塞：發生什麼、影響哪裡、怎麼解決。" },
+        { id: "project.create", label: "幫我建立", prompt: "依照目前專案進度，幫我建立接下來最需要的內容（分鏡、角色、場景或生成任務）。" },
+        { id: "project.fix", label: "幫我修改", prompt: "依照目前焦點與最近操作，幫我修改需要調整的內容，並說明改了什麼。" },
       ];
     default:
       return [
@@ -173,7 +153,6 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
   }
 }
 
-/** 給提示詞用的 compact context 區塊（Context = pointer；真正資料交給工具查） */
 export function formatContextForPrompt(ctx: AssistantPageContext): string {
   const lines: string[] = [];
   const pageLabel = PAGE_LABEL[ctx.pageType];
@@ -189,7 +168,6 @@ export function formatContextForPrompt(ctx: AssistantPageContext): string {
   return lines.join("\n");
 }
 
-/** 頁面／實體的中文標籤（麵包屑與提示詞共用一份，畫面與模型看到的是同一個名字） */
 export const PAGE_LABEL: Partial<Record<AssistantPageContext["pageType"], string>> = {
   home: "今日工作台",
   project: "專案",
@@ -223,7 +201,6 @@ export const ENTITY_LABEL: Partial<Record<NonNullable<AssistantPageContext["enti
   script: "故事",
 };
 
-/** 麵包屑：專案 · 頁面 · 實體（不顯示任何 id） */
 export function formatContextBreadcrumb(ctx: AssistantPageContext): string {
   const parts: string[] = [];
   if (ctx.projectTitle) parts.push(ctx.projectTitle);
@@ -236,4 +213,41 @@ export function formatContextBreadcrumb(ctx: AssistantPageContext): string {
     parts.push(ctx.entityLabel);
   }
   return parts.join(" · ");
+}
+
+export type AssistantContextChip = {
+  key: string;
+  kind: string;
+  value: string;
+};
+
+/** 從 page context 組裝簡單 chips（專案 / 區段 / Shot / 選取 / 剛剛做了） */
+export function getAssistantContextChips(ctx: AssistantPageContext): AssistantContextChip[] {
+  const chips: AssistantContextChip[] = [];
+  if (ctx.projectTitle) {
+    chips.push({ key: "project", kind: "專案", value: ctx.projectTitle });
+  }
+  const page = PAGE_LABEL[ctx.pageType];
+  if (page && ctx.pageType !== "project" && ctx.pageType !== "other") {
+    chips.push({ key: "section", kind: "區段", value: page });
+  }
+  const sel = ctx.selectedEntityIds ?? [];
+  if (sel.length > 1) {
+    const unit = ctx.entityType ? ENTITY_LABEL[ctx.entityType] ?? "項" : "項";
+    chips.push({ key: "selection", kind: "已選", value: `${sel.length} ${unit}` });
+  } else if (ctx.entityLabel) {
+    const kind =
+      ctx.entityType === "shot"
+        ? "Shot"
+        : ctx.entityType === "scene"
+          ? "場景"
+          : ctx.entityType
+            ? ENTITY_LABEL[ctx.entityType] ?? "焦點"
+            : "焦點";
+    chips.push({ key: "entity", kind, value: ctx.entityLabel });
+  }
+  if (ctx.recentAction) {
+    chips.push({ key: "recent", kind: "剛剛", value: ctx.recentAction });
+  }
+  return chips;
 }
