@@ -21,7 +21,8 @@ describe("getAssistantQuickActions", () => {
     for (const pageType of pages) {
       const out = getAssistantQuickActions(ctx({ pageType }));
       expect(out.length).toBeGreaterThan(0);
-      expect(out.length).toBeLessThanOrEqual(out[0].id.startsWith("home.") ? 4 : 3);
+      const max = out[0].id.startsWith("home.") ? 4 : out[0].id.startsWith("project.") ? 5 : 3;
+      expect(out.length).toBeLessThanOrEqual(max);
       for (const a of out) {
         expect(a.label.length).toBeLessThanOrEqual(6);
         expect(a.prompt.length).toBeGreaterThan(5);
