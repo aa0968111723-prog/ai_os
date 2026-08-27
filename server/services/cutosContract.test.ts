@@ -70,8 +70,10 @@ function scenario(name: string): Exchange {
  * a half-mirrored change is now red on the side that did not receive it.
  */
 describe("protocol mirror", () => {
-  it("shared/cutosProtocol.ts is byte-identical to the CUTOS file the fixture was recorded from", () => {
-    const mirrored = readFileSync(join(process.cwd(), "shared/cutosProtocol.ts"));
+  it("shared/cutosProtocol.ts mirrors the recorded CUTOS source", () => {
+    // Git may materialize this tracked text file with CRLF on Windows; the
+    // contract hash is recorded from the repository's LF blob.
+    const mirrored = readFileSync(join(process.cwd(), "shared/cutosProtocol.ts"), "utf8").replace(/\r\n/g, "\n");
     const localSha = createHash("sha256").update(mirrored).digest("hex");
     expect(
       localSha,

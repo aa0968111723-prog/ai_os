@@ -100,6 +100,7 @@ import { buildCapabilityContractReport, getCapabilityHealthView } from "./servic
 import { databaseReadyNote } from "./services/databaseRuntime";
 import { getCachedBackendRuntime } from "./services/backendDependencies";
 import { createRequestTiming, logRequestTiming, runWithRequestTiming } from "./services/requestTiming";
+import { answerDuigaoRoomContext, duigaoContextSchema, verifyDuigaoSignature } from "./services/duigaoRoomContext";
 
 const app = express();
 
@@ -195,7 +196,38 @@ app.use((req, res, next) => {
   withRequestContext(requestId, next);
 });
 
-app.use(express.json({ limit: "2mb" }));
+type RawBodyRequest = express.Request & { rawBody?: string };
+
+// Keep the exact bytes for the HMAC-only duigao integration. Re-serializing a
+// parsed JSON object can change whitespace/order and would make a valid signed
+// request fail before the schema boundary is reached.
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, _res, buffer) => {
+    (req as RawBodyRequest).rawBody = buffer.toString("utf8");
+  },
+}));
+
+/**
+ * duigao's second approved Room Context provider.  This is intentionally a
+ * small HMAC-only route rather than a tRPC procedure: duigao already applied
+ * Supabase membership/RLS and sends a bounded metadata projection.  ai_os
+ * never receives a Supabase key, invite, Storage path, or binary asset.
+ */
+app.post("/api/integrations/duigao/room-context", async (req, res) => {
+  const rawBody = (req as RawBodyRequest).rawBody ?? JSON.stringify(req.body ?? {});
+  if (!verifyDuigaoSignature(rawBody, String(req.headers["x-duigao-timestamp"] ?? ""), String(req.headers["x-duigao-signature"] ?? ""))) {
+    return res.status(401).json({ error: "invalid integration signature" });
+  }
+  const parsed = duigaoContextSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid room context" });
+  try {
+    return res.status(200).json(await answerDuigaoRoomContext(parsed.data));
+  } catch {
+    // Do not return provider errors or prompts to an integration caller.
+    return res.status(503).json({ error: "AI provider unavailable" });
+  }
+});
 
 // 建置追溯（QA 版本漂移）：部署時由建置流程注入（Dockerfile ARG→ENV），
 // /api/health 露出非敏感的 build 資訊，讓正式環境可對應到唯一 Git commit。

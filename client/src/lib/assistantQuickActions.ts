@@ -94,6 +94,12 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
   }
 
   switch (ctx.pageType) {
+    case "storyboard":
+      return [
+        { id: "board.progress", label: "看進度", prompt: "目前分鏡做到哪？哪幾鏡還沒有畫面或旁白？" },
+        { id: "board.next", label: "建立下一鏡", prompt: "依照目前的分鏡，建議下一鏡怎麼拍，並幫我建立草稿。" },
+        { id: "board.gaps", label: "找缺素材", prompt: "哪幾鏡缺素材？請列出還要準備什麼。" },
+      ];
     case "assets":
       return [
         { id: "assets.gaps", label: "找缺素材", prompt: "對照目前分鏡，還缺哪些素材沒有備齊？" },
@@ -134,7 +140,6 @@ export function getAssistantQuickActions(ctx: AssistantPageContext): AssistantQu
     case "production":
     case "final":
     case "studio":
-    case "storyboard":
     case "settings":
       return [
         { id: "project.next", label: "問下一步", prompt: "這個專案現在最該做的下一步是什麼？請依目前進度、待審核與失敗項目，給我最多 3 件可執行的事。" },
