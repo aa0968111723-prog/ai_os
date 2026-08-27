@@ -15,6 +15,7 @@ vi.mock("./storage", async () => {
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   GeminiUnavailableError,
   geminiApiKeyConfigured,
@@ -31,7 +32,7 @@ const FAKE_KEY = "test-gemini-key-not-real";
 
 describe("secret leakage guards", () => {
   it("client source never mentions GEMINI_API_KEY", () => {
-    const clientDir = new URL("../../client", import.meta.url).pathname;
+    const clientDir = fileURLToPath(new URL("../../client", import.meta.url));
     expect(existsSync(clientDir)).toBe(true);
     const hits: string[] = [];
     const walk = (dir: string) => {
