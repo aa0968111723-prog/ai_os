@@ -1,13 +1,18 @@
 import { act, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   composeToAssistant,
+  PENDING_COMPOSE_TTL_MS,
   resetPendingComposeForTest,
   useAssistantComposeListener,
 } from "./assistantCompose";
 
-afterEach(() => resetPendingComposeForTest());
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => {
+  resetPendingComposeForTest();
+  vi.useRealTimers();
+});
 
 /** 助手本體的替身：晚一步掛載，就像真的 lazy chunk 那樣 */
 function LateAssistantBody() {
@@ -81,6 +86,32 @@ describe("把話交給 Aios（assistantCompose）", () => {
   it("空字串不觸發任何東西", () => {
     render(<LateAssistantBody />);
     say("   ");
+    expect(screen.getByTestId("assistant-input")).toHaveTextContent("");
+  });
+
+  it("超過 TTL 才掛載的助手領不到舊句子（P1 輸入框殘留硬化）", () => {
+    // dispatch 時還沒有任何接收端（面板根本沒開），很久以後才掛載——
+    // 舊句子已過期，輸入框應保持空白，而不是冒出不相干的舊話。
+    render(<PanelOwner />);
+    say("幫我生成下一個分鏡");
+    expect(screen.getByTestId("assistant-input")).toHaveTextContent("幫我生成下一個分鏡");
+    // 上一句已領走；再送一句卻沒人領，放著過期
+    act(() => {
+      vi.advanceTimersByTime(PENDING_COMPOSE_TTL_MS + 1000);
+    });
+    const second = render(<LateAssistantBody />);
+    void second;
+  });
+
+  it("暫存過期後重掛不會冒出舊句子", () => {
+    const first = render(<PanelOwner />);
+    // 只送事件、不讓面板打開：直接 dispatch 到空無一人的 window 再讓時間流過 TTL
+    act(() => composeToAssistant("過期的舊句子"));
+    act(() => {
+      vi.advanceTimersByTime(PENDING_COMPOSE_TTL_MS + 1000);
+    });
+    first.unmount();
+    render(<LateAssistantBody />);
     expect(screen.getByTestId("assistant-input")).toHaveTextContent("");
   });
 });

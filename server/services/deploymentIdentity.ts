@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { agentToolRegistry } from "./agentToolRegistry";
 
 export const AGENT_SCHEMA_VERSION = "0070_agent_live_certification";
@@ -8,6 +9,30 @@ export interface DeploymentIdentity {
   appVersion: string;
   schemaVersion: string;
   capabilityRegistryHash: string;
+}
+
+/**
+ * P2 SHA 缺口硬化（缺陷 53e839195f439836b92298e8 的追溯側）。
+ * Dockerfile 已在建置時把解析到的 SHA 寫進 /app/BUILD_SHA，但舊映像
+ * 是在那行加上去之前建的——env 全空時 health 就回 sha=null，前端
+ * 拿不到版本、QA 對不上線上是哪個 commit。
+ * 讀檔是唯讀 fallback：值仍以 env 為準，檔不存在／不可讀就回 null。
+ */
+let cachedFileSha: string | null | undefined;
+function deploymentShaFromFile(): string | null {
+  if (cachedFileSha !== undefined) return cachedFileSha;
+  try {
+    const sha = readFileSync("/app/BUILD_SHA", "utf8").trim();
+    cachedFileSha = sha || null;
+  } catch {
+    cachedFileSha = null;
+  }
+  return cachedFileSha;
+}
+
+/** 測試用：清掉 /app/BUILD_SHA 快取 */
+export function resetDeploymentShaFileCacheForTest(): void {
+  cachedFileSha = undefined;
 }
 
 export function deploymentShaFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -27,7 +52,7 @@ export function deploymentShaFromEnv(env: NodeJS.ProcessEnv = process.env): stri
     const sha = value?.trim();
     if (sha) return sha;
   }
-  return null;
+  return deploymentShaFromFile();
 }
 
 export function currentDeploymentIdentity(env: NodeJS.ProcessEnv = process.env): DeploymentIdentity {
