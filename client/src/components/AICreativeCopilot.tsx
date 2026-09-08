@@ -480,7 +480,9 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   const eventFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRecordedRef = useRef(false);
   const activeGoalRef = useRef("");
-  const queuedMessageRef = useRef<string | null>(null);
+  // 進行中連送的待發訊息（D9）：過去是單一槽，第二次 Enter 覆寫第一次，
+  // 中間訊息無聲丟失。改 FIFO 陣列：溢出（>3）只擋最新一則並保留輸入草稿。
+  const queuedMessagesRef = useRef<string[]>([]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   /* 自動捲到底部的守門員：使用者在 feed 上捲過（讀舊訊息）就停止自動捲動，
      不要在新訊息進場時把他硬拉回底部——那是最容易棄用助手的手感之一。 */
@@ -696,8 +698,10 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     if (pending) {
       // The completion bubble can render a fraction before the run finalizer
       // releases its exact attempt. Never silently drop an Enter in that
-      // window; keep one bounded next turn and send it after finalization.
-      queuedMessageRef.current = text.slice(0, 500);
+      // window; keep a bounded FIFO (D9) and send them after finalization.
+      // 溢出（>3）時只擋最新一則：保留輸入讓使用者自己決定，不靜默丟中間訊息。
+      if (queuedMessagesRef.current.length >= 3) return;
+      queuedMessagesRef.current = [...queuedMessagesRef.current, text.slice(0, 2000)];
       setInput("");
       return;
     }
@@ -1226,9 +1230,7 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
     abortRef.current = null;
     if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
     eventFlushTimerRef.current = null;
-    queuedMessageRef.current = null;
-    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
-    eventFlushTimerRef.current = null;
+    queuedMessagesRef.current = [];
     liveEventsRef.current = [];
     endAssistantRun(groupId, runId, attemptId);
     clearAssistantConversation(groupId);
@@ -1240,10 +1242,12 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
   };
 
   useEffect(() => {
-    if (pending || !groupId || !queuedMessageRef.current) return;
-    const queued = queuedMessageRef.current;
-    queuedMessageRef.current = null;
-    void handleSend(queued);
+    if (pending || !groupId || queuedMessagesRef.current.length === 0) return;
+    // FIFO 續送（D9）：一次取一則，下一輪 run 結束後 effect 再取下一則，
+    // 中間訊息不再被覆寫丟失。
+    const [queued, ...rest] = queuedMessagesRef.current;
+    queuedMessagesRef.current = rest;
+    if (queued) void handleSend(queued);
   }, [pending, groupId]);
 
   // 使用者手動捲動時更新「是否貼底」：距離底部小於 48px 視為仍貼底，
