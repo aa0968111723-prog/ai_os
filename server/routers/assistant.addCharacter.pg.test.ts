@@ -141,4 +141,39 @@ d("project assistant add_character (real PostgreSQL)", () => {
     expect(xiaohua?.appearance).toContain("粉橘短髮女孩");
     expect(xiaohua?.appearance).not.toContain("年輕男性");
   });
+
+  it("E3 併發同名 add_character：只建一張卡、第二寫沿用第一筆", async () => {
+    const userId = randomUUID();
+    const groupId = randomUUID();
+    leftovers.users.push(userId);
+    await db.insert(schema.users).values({
+      id: userId, name: "CharRace", email: `char-race-${userId}@t.test`, passwordHash: "x",
+    });
+    const [project] = await db.insert(schema.projects).values({
+      groupId, ownerId: userId, title: "overnight-add-character-race", kind: "video", platform: "test", format: "16:9",
+    }).returning();
+    leftovers.projects.push(project.id);
+
+    const assistant = assistantRouter.createCaller({ auth: authFor(userId, groupId) } as never);
+    const [a, b] = await Promise.all([
+      assistant.runAction({
+        projectId: project.id,
+        action: { type: "add_character", name: "小樺", appearance: "粉橘短髮女孩" },
+      }),
+      assistant.runAction({
+        projectId: project.id,
+        action: { type: "add_character", name: "小樺", appearance: "粉橘短髮女孩" },
+      }),
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (a.kind !== "add_character" || b.kind !== "add_character") return;
+    // 鎖＋交易序列化後：兩次都成功、指向同一張卡（一建一沿用），不寫重複卡、不留孤兒
+    expect(a.characterId).toBe(b.characterId);
+
+    const rows = await db.select().from(schema.characters).where(eq(schema.characters.projectId, project.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(a.characterId);
+    expect(rows[0]!.name).toBe("小樺");
+  });
 });
