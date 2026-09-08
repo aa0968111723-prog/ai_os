@@ -78,6 +78,49 @@ describe("把話交給 Aios（assistantCompose）", () => {
     expect(screen.getByTestId("assistant-input")).toHaveTextContent("幫我把第 3 鏡改成夜景");
   });
 
+  it("autoSend 隨事件一起傳遞（手機輸入列按送出＝直接送）", () => {
+    const received: Array<{ text: string; autoSend?: boolean }> = [];
+    function Receiver() {
+      useAssistantComposeListener(
+        (text, options) => received.push({ text, autoSend: options?.autoSend }),
+        true,
+      );
+      return null;
+    }
+    render(<Receiver />);
+    act(() => composeToAssistant("我目前這個專案進度如何", { autoSend: true }));
+    expect(received).toEqual([{ text: "我目前這個專案進度如何", autoSend: true }]);
+  });
+
+  it("autoSend 隨補領一起傳遞（晚掛載的助手仍直接送出）", () => {
+    // 先送出（面板還沒掛），再掛載接收端補領
+    act(() => composeToAssistant("第二輪追問", { autoSend: true }));
+    const received: Array<{ text: string; autoSend?: boolean }> = [];
+    function LateReceiver() {
+      useAssistantComposeListener(
+        (text, options) => received.push({ text, autoSend: options?.autoSend }),
+        true,
+      );
+      return null;
+    }
+    render(<LateReceiver />);
+    expect(received).toEqual([{ text: "第二輪追問", autoSend: true }]);
+  });
+
+  it("沒帶 autoSend 時 options 為空（創作台命令列只填框）", () => {
+    const received: Array<{ text: string; autoSend?: boolean }> = [];
+    function Receiver() {
+      useAssistantComposeListener(
+        (text, options) => received.push({ text, autoSend: options?.autoSend }),
+        true,
+      );
+      return null;
+    }
+    render(<Receiver />);
+    act(() => composeToAssistant("只填框"));
+    expect(received).toEqual([{ text: "只填框", autoSend: undefined }]);
+  });
+
   it("空字串不觸發任何東西", () => {
     render(<LateAssistantBody />);
     say("   ");

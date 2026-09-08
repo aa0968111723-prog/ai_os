@@ -225,7 +225,7 @@ export function CompanionHome({
       return;
     }
     setHandoff(null);
-    composeToAssistant(trimmed);
+    composeToAssistant(trimmed, { autoSend: true });
   }, [current?.id]);
 
   const onSubmit = (event: FormEvent) => {

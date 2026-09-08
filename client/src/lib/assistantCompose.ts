@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * 「把這句話交給 Aios」的單一接縫。
@@ -32,13 +32,20 @@ export const ASSISTANT_COMPOSE_EVENT = "aios:assistant-compose";
  * 所以文字要留一份在模組層，讓晚掛載的接收端能補領。留最後一句就夠了：
  * 使用者連按兩顆快捷時，想送的是第二句。
  */
-let pendingCompose: string | null = null;
+export interface AssistantComposePayload {
+  text: string;
+  /** true＝發話端已由使用者按送出：收到後直接送出（第二輪追問不斷流），不只是填進輸入框 */
+  autoSend?: boolean;
+}
 
-export function composeToAssistant(text: string): void {
+let pendingCompose: AssistantComposePayload | null = null;
+
+export function composeToAssistant(text: string, options?: { autoSend?: boolean }): void {
   const trimmed = text.trim();
   if (!trimmed) return;
-  pendingCompose = trimmed;
-  window.dispatchEvent(new CustomEvent(ASSISTANT_COMPOSE_EVENT, { detail: { text: trimmed } }));
+  const payload: AssistantComposePayload = options?.autoSend ? { text: trimmed, autoSend: true } : { text: trimmed };
+  pendingCompose = payload;
+  window.dispatchEvent(new CustomEvent(ASSISTANT_COMPOSE_EVENT, { detail: payload }));
 }
 
 /**
@@ -68,33 +75,40 @@ export function useAssistantOpenListener(onOpen: () => void): void {
 /**
  * 訂閱「有人要對 Aios 說話」。
  *
- * @param onCompose 收到文字時做什麼（面板擁有者＝打開面板；助手本體＝填進輸入框）
+ * @param onCompose 收到文字時做什麼（面板擁有者＝打開面板；助手本體＝填進輸入框，
+ *   若 payload 帶 autoSend 則直接送出——手機輸入列按送出走這條，不只填框）。
  * @param replayPending 掛載時補領「開面板之前就送出」的那句話。
  *   **只有真正會把文字放進輸入框的接收端該傳 true**：補領會清掉暫存，
  *   面板擁有者若也補領，等於在助手本體掛好之前就把那句話吃掉，bug 原封不動。
+ *   autoSend 旗標隨暫存一起補領，晚掛載的助手仍會直接送出。
  */
 export function useAssistantComposeListener(
-  onCompose: (text: string) => void,
+  onCompose: (text: string, options?: { autoSend?: boolean }) => void,
   replayPending = false,
 ): void {
+  // onCompose 換參照不重掛監聽器：重掛會讓同一個事件被舊監聽器先吃、或漏接補領視窗。
+  const onComposeRef = useRef(onCompose);
+  onComposeRef.current = onCompose;
   useEffect(() => {
     function handle(event: Event) {
-      const text = (event as CustomEvent<{ text?: unknown }>).detail?.text;
+      const detail = (event as CustomEvent<{ text?: unknown; autoSend?: unknown }>).detail;
+      const text = detail?.text;
       if (typeof text !== "string" || !text.trim()) return;
+      const autoSend = detail?.autoSend === true ? { autoSend: true as const } : undefined;
       // 已經掛好、直接收到事件的接收端也要清暫存，否則這句話會在下一次
       // 重掛（切視野、換專案）時再被補領一次，變成「輸入框自己冒出舊句子」。
       if (replayPending) pendingCompose = null;
-      onCompose(text.trim());
+      onComposeRef.current(text.trim(), autoSend);
     }
     window.addEventListener(ASSISTANT_COMPOSE_EVENT, handle);
     return () => window.removeEventListener(ASSISTANT_COMPOSE_EVENT, handle);
-  }, [onCompose, replayPending]);
+  }, [replayPending]);
 
   useEffect(() => {
     if (!replayPending || !pendingCompose) return;
-    const text = pendingCompose;
+    const pending = pendingCompose;
     pendingCompose = null;
-    onCompose(text);
+    onComposeRef.current(pending.text, pending.autoSend ? { autoSend: true } : undefined);
     // 只在掛載時補領一次；之後靠上面的事件監聽器。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replayPending]);

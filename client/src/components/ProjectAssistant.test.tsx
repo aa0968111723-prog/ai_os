@@ -266,6 +266,83 @@ describe("ProjectAssistant project-scoped async results", () => {
   });
 });
 
+describe("ProjectAssistant P1 第二次追問（compose autoSend）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+
+  it("compose autoSend 直接送出：第二輪送出即現載入態並追加新問答", async () => {
+    const { composeToAssistant } = await import("../lib/assistantCompose");
+    const requests: StreamRequest[] = [];
+    const completions: Array<ReturnType<typeof deferred<boolean>>> = [];
+    mocks.requestAssistantStream.mockImplementation((request: StreamRequest) => {
+      requests.push(request);
+      const completion = deferred<boolean>();
+      completions.push(completion);
+      return completion.promise;
+    });
+
+    // claimsPendingCompose＝全站助手面板裡那一張（GlobalAssistantSheet 專案視野）
+    render(<ProjectAssistant projectId="project-p1" embedded claimsPendingCompose />);
+
+    // 第一輪：直接在輸入框問
+    await submitQuestion("第一題");
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0].handlers.onDone({
+        answer: "第一題答案",
+        actions: [],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      completions[0].resolve(true);
+      await completions[0].promise;
+    });
+    expect(await screen.findByText("第一題答案")).toBeInTheDocument();
+
+    // 第二輪：手機輸入列按送出走 compose autoSend——必須直接送出，不只填框
+    await act(async () => {
+      composeToAssistant("我目前這個專案進度如何", { autoSend: true });
+    });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    // 載入態：thinking 區塊 role="status" 出現
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    await act(async () => {
+      requests[1].handlers.onDone({
+        answer: "第二題答案",
+        actions: [],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      completions[1].resolve(true);
+      await completions[1].promise;
+    });
+    expect(await screen.findByText("第二題答案")).toBeInTheDocument();
+    // 使用者那一句也要追加成新問答氣泡（多個同名命中時至少要有使用者氣泡那一個）
+    const userBubbles = screen.getAllByText("我目前這個專案進度如何");
+    expect(userBubbles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("沒有 autoSend 時只填框不送出（創作台命令列契約不變）", async () => {
+    const { composeToAssistant } = await import("../lib/assistantCompose");
+    mocks.requestAssistantStream.mockResolvedValue(true);
+    render(<ProjectAssistant projectId="project-p1" embedded claimsPendingCompose />);
+    await act(async () => {
+      composeToAssistant("只填框的一句");
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox")).toHaveValue("只填框的一句");
+    });
+    expect(mocks.requestAssistantStream).not.toHaveBeenCalled();
+  });
+});
+
 describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -291,17 +291,40 @@ export function ProjectAssistant({
   const pageContext = useAssistantContext();
   const [input, setInput] = useState("");
   /**
-   * 別的表面把話丟過來時填進輸入框，**不自動送出**——與 AICreativeCopilot 同一條契約。
-   * 在專案路徑（/p/:id、/studio/:id）下，全站助手渲染的是這張卡而不是 Copilot；
-   * 少了這行，手機專案頁 AI 輸入列送出的句子會在專案視野裡整句掉光。
+   * 別的表面把話丟過來時的契約（P1 第二次追問斷流修復）：
+   * - 沒有 autoSend（創作台命令列、桌面快捷）：只填進輸入框，由使用者按「問」才送出；
+   * - 帶 autoSend（手機輸入列按送出）：直接送出並出現載入態，不只填框。
+   *   在專案路徑（/p/:id、/studio/:id）下，全站助手渲染的是這張卡而不是 Copilot；
+   *   少了這行，手機專案頁 AI 輸入列送出的句子會在專案視野裡整句掉光。
    *
    * 補領（replayPending）只給**助手面板裡那一張**。這張卡有兩個渲染點：
    * 全站助手面板，以及創作台側欄常駐的那一張（CreationWorkbench）。側欄那張在
    * 桌面專案頁是「一直掛著」的，若它也補領，就會在面板還沒掛好之前先把暫存吃掉——
    * 使用者按下送出後面板照樣開一個空輸入框，等於這個 bug 沒修。
    * 所以由呼叫端明確宣告誰是主人，不用「反正我是那一張」去猜。
+   *
+   * 忙碌中收到的 autoSend 先排進 queuedComposeRef（只留最新一句），等 busy 解除
+   * 自動送出——上一輪還在跑時按 Enter 不再靜默丟失（Copilot 同款 queuedMessageRef 語義）。
    */
-  useAssistantComposeListener(setInput, claimsPendingCompose);
+  const queuedComposeRef = useRef<string | null>(null);
+  /** compose 事件帶 autoSend 時的待送句：listener 只寫 ref，nonce state 觸發下方 effect 送出 */
+  const pendingAutoSendRef = useRef<string | null>(null);
+  const [autoSendNonce, setAutoSendNonce] = useState(0);
+  useAssistantComposeListener(
+    (text, options) => {
+      if (!claimsPendingCompose) {
+        setInput(text);
+        return;
+      }
+      if (options?.autoSend) {
+        pendingAutoSendRef.current = text;
+        setAutoSendNonce((n) => n + 1);
+      } else {
+        setInput(text);
+      }
+    },
+    claimsPendingCompose,
+  );
   const [turns, setTurnsState] = useState<Turn[]>(() => projectConversationTurns.get(projectId) ?? []);
   const setTurns = (next: Turn[] | ((previous: Turn[]) => Turn[])) => {
     setTurnsState((previous) => {
@@ -653,6 +676,33 @@ export function ProjectAssistant({
       );
     }
   };
+
+  // compose autoSend 的實際送出點：listener 只寫 pendingAutoSendRef，這裡消費。
+  // - 有空直接送（出現載入態＋追加新問答）；忙碌中先排進 queuedComposeRef（只留最新一句），
+  //   等 busy 解除自動送出——上一輪還在跑時按 Enter 不再靜默丟失。
+  useEffect(() => {
+    if (!claimsPendingCompose || autoSendNonce === 0) return;
+    const pending = pendingAutoSendRef.current;
+    if (!pending) return;
+    pendingAutoSendRef.current = null;
+    if (busy) {
+      queuedComposeRef.current = pending;
+      return;
+    }
+    void send(pending);
+    // send/busy 故意不進依賴：靠 autoSendNonce 觸發一次，busy 變化由下一個 effect 接手排隊句。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSendNonce]);
+
+  // 忙碌中排隊的那一句：busy 一解除就送出（第二輪追問在第一輪尾巴按下 Enter 的情況）
+  useEffect(() => {
+    if (busy || !claimsPendingCompose) return;
+    const queued = queuedComposeRef.current;
+    if (!queued) return;
+    queuedComposeRef.current = null;
+    void send(queued);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
 
   const cancelCurrent = () => {
     if (!thinking.active && !pendingKey?.startsWith("auto:")) return;

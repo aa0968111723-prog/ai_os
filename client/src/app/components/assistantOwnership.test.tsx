@@ -55,7 +55,10 @@ describe("pendingCompose 的擁有權", () => {
 
   it("ProjectAssistant 預設不領，由呼叫端明確宣告", () => {
     expect(assistant).toContain("claimsPendingCompose = false");
-    expect(assistant).toContain("useAssistantComposeListener(setInput, claimsPendingCompose)");
+    // P1 第二次追問修復後 listener 帶 autoSend 分流（無 autoSend 仍只填框）；
+    // 擁有權語義不變：補領仍只給 claimsPendingCompose 那一張。
+    expect(assistant).toMatch(/useAssistantComposeListener\([\s\S]*?claimsPendingCompose,?\s*\)/);
+    expect(assistant).toContain("if (!claimsPendingCompose)");
   });
 
   it("只有助手面板那一張宣告自己是主人", () => {

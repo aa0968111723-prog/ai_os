@@ -140,7 +140,7 @@ export function VisibleCreativeWorkspace({
     if (!command.trim()) return;
     // 不在這裡另建 agent runtime：文字交給既有的全站助手，走完全同一條
     // 意圖判定與確認流程。聚焦中的 Shot 由 registerAssistantFocus 那一層負責傳達。
-    composeToAssistant(command);
+    composeToAssistant(command, { autoSend: true });
     setCommand("");
   }
 

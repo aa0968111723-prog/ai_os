@@ -131,7 +131,7 @@ function TotalTile({
     <button
       type="button"
       className={`companion-total companion-total--${tone}`}
-      onClick={() => composeToAssistant(prompt)}
+      onClick={() => composeToAssistant(prompt, { autoSend: true })}
       disabled={value === 0}
       aria-label={`${label} ${value} 件${value > 0 ? "，點擊請 Aios 處理" : ""}`}
     >

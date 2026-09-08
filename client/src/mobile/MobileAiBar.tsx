@@ -38,8 +38,10 @@ import { PhoneAssistantCardView, PhoneContextCapsuleView, PhoneTargetChooser } f
  * ## 這裡仍然沒有第二套助手
  *
  * 沒有對話狀態、沒有 model 呼叫、沒有工具執行、沒有任何 mutation。
- * 送出走的仍是 `composeToAssistant()` → 既有 sheet → 既有意圖判定／能力路由／
- * 確認卡／執行與驗證。卡片上的每一顆按鈕只會做三件事之一：送出另一句話、
+ * 送出走的仍是 `composeToAssistant(text, { autoSend: true })` → 既有 sheet →
+ * 既有意圖判定／能力路由／確認卡／執行與驗證：收到即直接送出並出現載入態，
+ * 不只填進輸入框（P1 第二次追問斷流修復：只填框＝輸入殘留 StaticText、無新問答）。
+ * 卡片上的每一顆按鈕只會做三件事之一：送出另一句話、
  * 打開既有面板、或導到一個唯讀畫面。**沒有一顆按鈕會自己寫入。**
  *
  * ## 為什麼這對手機的 initial load 仍然是安全的
@@ -146,7 +148,7 @@ export function MobileAiBar({
       setText("");
       return;
     }
-    composeToAssistant(composePhoneGoal(trimmed, capsule));
+    composeToAssistant(composePhoneGoal(trimmed, capsule), { autoSend: true });
     setText("");
   };
 
@@ -166,7 +168,7 @@ export function MobileAiBar({
     }
     if (action.kind === "compose" && action.prompt) {
       if (onInterceptSend?.(action.prompt)) return;
-      composeToAssistant(composePhoneGoal(action.prompt, capsule));
+      composeToAssistant(composePhoneGoal(action.prompt, capsule), { autoSend: true });
       return;
     }
     if (action.kind === "navigate" && action.href) {
@@ -200,7 +202,7 @@ export function MobileAiBar({
             setAmbiguous(null);
             setText("");
             // 指名之後才送出：句子裡帶著使用者自己選的那個名字，助手端仍會重新解析。
-            composeToAssistant(`${chosen}——我指的是「${candidate.label}」`);
+            composeToAssistant(`${chosen}——我指的是「${candidate.label}」`, { autoSend: true });
           }}
           onCancel={() => setAmbiguous(null)}
         />

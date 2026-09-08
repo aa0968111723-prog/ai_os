@@ -451,14 +451,23 @@ interface AICreativeCopilotProps {
 export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, onNavigate }: AICreativeCopilotProps) {
   const [input, setInput] = useState("");
   /**
-   * 別的表面（創作台的情境命令列）把話丟過來時填進輸入框，**不自動送出**：
-   * 使用者仍然看得到自己要送的是什麼、可以改字或放棄。命令列打的字與在這裡
-   * 自己打的字走完全同一條意圖判定與確認流程，沒有繞過任何一關。
+   * 別的表面把話丟過來時的契約（P1 第二次追問斷流修復，與 ProjectAssistant 同款）：
+   * - 沒有 autoSend（創作台命令列）：只填進輸入框，由使用者按送出才送；
+   * - 帶 autoSend（手機輸入列按送出）：直接送出並出現載入態，不只填框。
+   *   忙碌中收到的那一句走既有 queuedMessageRef，run 結束自動送出（handleSend 內建）。
    *
    * replayPending：這張卡是 lazy chunk，發話端 dispatch 事件時它還沒掛載——
    * 不補領的話「打開面板但輸入框是空的」是必現的（見 assistantCompose 檔頭）。
+   * autoSend 旗標隨暫存一起補領，晚掛載仍會直接送出。
    */
-  useAssistantComposeListener(setInput, true);
+  const composeHandlerRef = useRef<null | ((text: string, options?: { autoSend?: boolean }) => void)>(null);
+  const composeHandler = useRef((text: string, options?: { autoSend?: boolean }) => {
+    composeHandlerRef.current?.(text, options);
+  });
+  useAssistantComposeListener(
+    (text, options) => composeHandler.current(text, options),
+    true,
+  );
   const [intakeOpenRequest, setIntakeOpenRequest] = useState<ExternalIntakeOpenRequest>();
   const [intakeTargetProjectId, setIntakeTargetProjectId] = useState<string>();
   const [editingSheetOpen, setEditingSheetOpen] = useState(false);
@@ -1181,6 +1190,12 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
         setActivePlan(null);
       }
     }
+  };
+  // compose 事件的實際處理：晚綁定 handleSend，listener 閉包永遠拿到最新版。
+  // autoSend＝手機輸入列按送出：直接送（忙碌中則 handleSend 內建排隊）；否則只填框。
+  composeHandlerRef.current = (text, options) => {
+    if (options?.autoSend) void handleSend(text);
+    else setInput(text);
   };
 
   const stopCurrent = () => {

@@ -5,7 +5,7 @@ const composed: string[] = [];
 const opened: string[] = [];
 
 vi.mock("../lib/assistantCompose", () => ({
-  composeToAssistant: (text: string) => composed.push(text),
+  composeToAssistant: (text: string, options?: { autoSend?: boolean }) => composed.push(options?.autoSend ? `${text} [autoSend]` : text),
   useAssistantComposeListener: () => {},
   openAssistantSurface: () => opened.push("assistant"),
   useAssistantOpenListener: () => {},
@@ -63,7 +63,7 @@ describe("手機 AI 控制面：送出仍走既有接縫", () => {
   it("送出的是補完上下文的同一句話，而且只經由 composeToAssistant", () => {
     render(<MobileAiBar groupId="g1" projectId="p1" projectTitle="百日夢島" />);
     send("把第二幕改成晚上");
-    expect(composed).toEqual(["在「百日夢島」：把第二幕改成晚上"]);
+    expect(composed).toEqual(["在「百日夢島」：把第二幕改成晚上 [autoSend]"]);
     // 沒有任何 mutation、沒有直接執行：這個元件只會 compose
     expect(opened).toEqual([]);
   });
@@ -88,7 +88,7 @@ describe("手機 AI 控制面：送出仍走既有接縫", () => {
     expect(intercepted).toEqual(["這一幕還有什麼問題？"]);
     expect(composed).toEqual([]);
     send("把第二幕改成晚上");
-    expect(composed).toEqual(["在「百日夢島」：把第二幕改成晚上"]);
+    expect(composed).toEqual(["在「百日夢島」：把第二幕改成晚上 [autoSend]"]);
   });
 });
 
@@ -108,7 +108,7 @@ describe("手機 AI 控制面：模糊刪除目標不准猜（Flow F）", () => 
     render(<MobileAiBar groupId="g1" projectId="p1" projectTitle="百日夢島" />);
     send("刪掉這個");
     fireEvent.click(screen.getByRole("button", { name: "第 3 鏡" }));
-    expect(composed).toEqual(["刪掉這個——我指的是「第 3 鏡」"]);
+    expect(composed).toEqual(["刪掉這個——我指的是「第 3 鏡」 [autoSend]"]);
   });
 
   it("「先不要」之後站上沒有留下任何痕跡", () => {
