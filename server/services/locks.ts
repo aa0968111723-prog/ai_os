@@ -22,6 +22,9 @@
  *   併發上傳可同時讀到「還夠」而雙雙插入、突破每人配額(B9 TOCTOU)。
  * - 7:MCP token cap per-user(本檔 lockMcpTokenCap)——「count active→insert」check-then-insert,
  *   併發建立可突破 MCP_TOKEN_MAX_PER_USER。
+ * - 8:character per-project(本檔 lockCharacterWrite)——assistant runAction add_character 的
+ *   「查重名(nameKey)→無則建」check-then-insert,併發同名寫出兩張卡、一張成孤兒(E3 HIGH)。
+ *   上鎖後同專案角色卡寫入全序列化,第二寫沿用第一筆(比照 create_scene 的 lockSceneOrder 模式)。
  * 交易結束自動釋放,呼叫端必須在 db.transaction 內使用。
  */
 import { sql } from "drizzle-orm";
@@ -57,4 +60,9 @@ export async function lockFileQuota(tx: Executor, userId: string): Promise<void>
 /** 序列化同一使用者的 MCP 金鑰建立(count→insert):防併發突破 MCP_TOKEN_MAX_PER_USER */
 export async function lockMcpTokenCap(tx: Executor, userId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), 7)`);
+}
+
+/** 序列化同一專案的角色卡寫入(add_character 的查重名→無則建):防併發同名寫出兩張卡(E3) */
+export async function lockCharacterWrite(tx: Executor, projectId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${projectId}), 8)`);
 }
