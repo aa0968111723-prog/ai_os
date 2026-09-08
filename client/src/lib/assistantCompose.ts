@@ -32,12 +32,20 @@ export const ASSISTANT_COMPOSE_EVENT = "aios:assistant-compose";
  * 所以文字要留一份在模組層，讓晚掛載的接收端能補領。留最後一句就夠了：
  * 使用者連按兩顆快捷時，想送的是第二句。
  */
-let pendingCompose: string | null = null;
+let pendingCompose: { text: string; at: number } | null = null;
+
+/**
+ * 暫存有效期（P1 輸入框殘留硬化，缺陷 c4759369e3190d73a0d9991f）。
+ * dispatch 後面板若在 TTL 內掛好（lazy chunk 載入通常 1–2 秒），補領仍有效；
+ * 超過 TTL（例如使用者根本沒開面板、或許久後才切視野／換專案）就丟掉——
+ * 放著不管的話，舊句子會在下一次掛載時冒進輸入框，變成「非本次輸入文字殘留」。
+ */
+export const PENDING_COMPOSE_TTL_MS = 60_000;
 
 export function composeToAssistant(text: string): void {
   const trimmed = text.trim();
   if (!trimmed) return;
-  pendingCompose = trimmed;
+  pendingCompose = { text: trimmed, at: Date.now() };
   window.dispatchEvent(new CustomEvent(ASSISTANT_COMPOSE_EVENT, { detail: { text: trimmed } }));
 }
 
@@ -92,7 +100,13 @@ export function useAssistantComposeListener(
 
   useEffect(() => {
     if (!replayPending || !pendingCompose) return;
-    const text = pendingCompose;
+    // TTL 過期＝那句話的面板早就該開了卻沒人領（或殘留到很久以後的掛載），
+    // 補領只會把舊句子塞進無關的輸入框——丟掉。
+    if (Date.now() - pendingCompose.at > PENDING_COMPOSE_TTL_MS) {
+      pendingCompose = null;
+      return;
+    }
+    const text = pendingCompose.text;
     pendingCompose = null;
     onCompose(text);
     // 只在掛載時補領一次；之後靠上面的事件監聽器。
