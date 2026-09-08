@@ -129,8 +129,14 @@ export function evaluateAgentDag(steps: AgentDagStep[]): AgentDagProgress {
     };
   }
 
-  // A stopped run is handled by the caller; reaching here means no remaining
-  // work can be scheduled, so the persisted execution is terminal.
+  // 取消不是成功：剩餘步驟全是 stopped（無 runnable／pending／waiting）時，
+  // 若仍回 done，報表會把取消算成完成、與成功無法區分（D6）。
+  // status 維持既有聯集（不新增 cancelled，避免 DB／通知鏈 migration）：
+  // 以 failed＋取消原因終局，呼叫端照既有 failed 路徑持久化 error。
+  const stoppedIndex = steps.findIndex((step) => step.status === "stopped");
+  if (stoppedIndex >= 0) {
+    return { status: "failed", nextIndex: stoppedIndex, reason: "已取消：其餘步驟已停止" };
+  }
   return { status: "done", nextIndex: steps.length };
 }
 
