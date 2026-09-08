@@ -144,6 +144,11 @@ export function MobileNavigation({ dmUnread = 0, groupId = "" }: { dmUnread?: nu
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [moreOpen]);
 
+  // 桌機不掛底欄：.mobile-nav 只是 display:none，DOM 仍可被自動化工具點到——
+  // click 回成功但快照零變化（P2「更多」假成功）與零尺寸 box（P2 清空鈕）皆源於此。
+  // early return 放在全部 hook 之後，hook 順序不受影響。
+  if (!phone) return null;
+
   return (
     <>
       {moreOpen && (

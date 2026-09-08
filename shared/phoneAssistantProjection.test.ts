@@ -335,4 +335,21 @@ describe("derivePhoneCard", () => {
   it("什麼都沒有就不畫卡（空卡片比沒有卡片更糟）", () => {
     expect(derivePhoneCard({})).toBeNull();
   });
+
+  it("P4：不確定 fallback＋已有完成讀取時，標題取最後完成步驟而非不確定首行", () => {
+    const card = derivePhoneCard({
+      answer: "我不太確定，可以換個問法再問一次。",
+      events: [
+        event({ type: "tool.completed", status: "ok", title: "已讀取全組現況", stepId: "s1", resultCount: 17 }),
+        event({ type: "source.read", status: "ok", title: "已完成盤點 618", stepId: "s2", resultCount: 618 }),
+      ],
+    });
+    expect(card?.kind).toBe("answer");
+    expect(card?.title).toBe("已完成盤點 618");
+  });
+
+  it("P4：真不確定（無完成步驟）時維持不確定標題", () => {
+    const card = derivePhoneCard({ answer: "我不太確定，可以換個問法再問一次。" });
+    expect(card?.title).toContain("不太確定");
+  });
 });
