@@ -22,7 +22,7 @@ import { MOBILE_STAGES, continueAnchor, continueLabel, stageIndex, stageSentence
  * **我昨天做到哪、現在按哪裡繼續**。
  *
  * 其餘入口沒有消失，只是退到第二層：底欄的「更多」面板仍是全站頁面總表，
- * 下面那條「看全部專案」把人帶到桌面版的專案列表（同一個 `/dashboard#projects` 網址）。
+ * 下面那條「看全部專案」把同一支查詢換成大 limit 重打（原地展開，不跳頁）。
  *
  * ## 資料
  *
@@ -228,14 +228,19 @@ export function MobileHome({ groupId }: { groupId: string }) {
         </section>
       )}
 
-      {/* 次級入口：首屏不放整份專案總表，按了才去抓 */}
+      {/* 次級入口：首屏不放整份專案總表，按了才去抓。
+          原地展開（非導航）：status 行常駐，展開即有可見變化，滿足「按鈕皆有可見反應」。 */}
       {!showAll && projects.length > 0 && (
-        <button type="button" className="m-secondary-link" onClick={() => setShowAll(true)}>
+        <button type="button" className="m-secondary-link" onClick={() => setShowAll(true)} aria-describedby="m-all-status">
           看全部專案
           <Icon name="ChevronRight" size={15} />
         </button>
       )}
-      {showAll && home.isFetching && <Meta as="p" role="status">載入其餘專案…</Meta>}
+      {showAll ? (
+        <Meta as="p" id="m-all-status" role="status">{home.isFetching ? "載入其餘專案…" : `已展開全部專案（${projects.length}）`}</Meta>
+      ) : (
+        <Meta as="p" id="m-all-status" role="status" />
+      )}
 
       <button type="button" className="m-secondary-link" onClick={() => openCreate()}>
         <Icon name="Plus" size={15} />

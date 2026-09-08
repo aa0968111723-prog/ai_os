@@ -341,6 +341,19 @@ function firstLines(text: string | undefined, max: number): string[] {
 }
 
 /**
+ * P4 修復：answer 落到純文字 fallback（「我不太確定…」）但事件流已有完成讀取時，
+ * 卡片標題不得沿用那句不確定的首行——取最後一列已完成步驟的人話標籤。
+ * 只認白名單事件摺出的 steps（derivePhoneWorkSteps），不讀自由文字、不猜意圖。
+ */
+function answerFallbackTitle(answer: string | undefined, steps: readonly PhoneWorkStep[]): string | undefined {
+  if (!answer) return undefined;
+  const first = firstLines(answer, 1)[0] ?? "";
+  if (!/不太確定|換個問法/u.test(first)) return undefined;
+  const done = [...steps].reverse().find((s) => s.state === "done" && s.label && !/不太確定|換個問法/u.test(s.label));
+  return done?.label;
+}
+
+/**
  * 把一輪助手工作投影成一張手機卡。
  *
  * 判斷順序即優先序，而且**每一階都由權威狀態決定**，不是由文字猜的：
@@ -451,13 +464,14 @@ export function derivePhoneCard(input: PhoneProjectionInput): PhoneCard | null {
     };
   }
 
-  // 5) 純回答
+  // 5) 純回答（P4：不確定 fallback＋已有完成步驟時，標題取步驟，不沿用不確定首行）
   const lines = firstLines(input.answer, MAX_PHONE_CARD_LINES);
   if (!lines.length && !steps.length) return null;
+  const fallbackTitle = answerFallbackTitle(input.answer, steps);
   return {
     kind: "answer",
-    title: lines[0] ?? "已回覆",
-    lines: lines.slice(1),
+    title: fallbackTitle ?? lines[0] ?? "已回覆",
+    lines: fallbackTitle ? lines : lines.slice(1),
     steps,
     secondaryAction: {
       id: "phone.answer.open",
