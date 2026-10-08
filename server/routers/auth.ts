@@ -16,6 +16,7 @@ import {
   checkLoginRate,
   clearLoginRate,
   acceptInvite,
+  registerAccount,
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
@@ -132,6 +133,37 @@ export const authRouter = router({
       setSessionCookie(ctx.res, token);
       console.log(`[audit] changePassword：user=${user.id}`);
       return { ok: true };
+    }),
+
+  /** 公開註冊：姓名、email、密碼 → 建帳號＋自己的工作區 → 自動登入。既有帳號改走登入。 */
+  register: publicProcedure
+    .input(z.object({
+      name: z.string().trim().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"),
+      email: z.string().email("email 格式不對"),
+      password: z.string().min(8, "密碼至少 8 碼"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const email = input.email.toLowerCase().trim();
+      const ip = clientIp(ctx.req);
+      const rate = await guardedAuthRateLimit(() => checkLoginRate(email, ip));
+      if (!rate.ok) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
+      }
+      try {
+        const { userId } = await registerAccount(input.name, email, input.password);
+        await guardedAuthRateLimit(() => clearLoginRate(email, ip));
+        const token = await createSession(userId);
+        setSessionCookie(ctx.res, token);
+        return loadAuthState(userId);
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "這個 email 已經有帳號了，請直接用原本的密碼登入。") {
+          throw new TRPCError({ code: "CONFLICT", message: msg });
+        }
+        console.error("[auth] register unexpected error:", err instanceof Error ? err.message : err);
+        throw new TRPCError({ code: "BAD_REQUEST", message: "註冊失敗，請稍後再試" });
+      }
     }),
 
   /** 邀請連結落地：設定姓名密碼 → 建帳號＋入團隊/組 → 自動登入 */
