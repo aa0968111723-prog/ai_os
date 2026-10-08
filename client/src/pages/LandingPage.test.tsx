@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { LandingPage } from "./LandingPage";
 
 describe("LandingPage", () => {
-  it("explains the product and provides one clear login destination", () => {
+  it("explains the product and provides one clear registration destination", () => {
     render(<LandingPage />);
 
     expect(screen.getByRole("heading", { level: 1, name: /把想法，變成團隊真正能完成的計畫/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /從一句目標，到可追蹤的完整執行/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /登入|進入工作台/ }).every((link) => link.getAttribute("href") === "/login")).toBe(true);
+    expect(screen.getAllByRole("link", { name: /註冊/ }).every((link) => link.getAttribute("href") === "/login")).toBe(true);
   });
 
   it("makes trust and agent activity visible without claiming private reasoning", () => {

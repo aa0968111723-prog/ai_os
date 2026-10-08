@@ -46,6 +46,14 @@ vi.mock("../api", () => ({
           reset: vi.fn(),
         }),
       },
+      register: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          isPending: false,
+          error: null,
+          reset: vi.fn(),
+        }),
+      },
     },
   },
 }));
@@ -60,6 +68,7 @@ const CHALLENGE = {
 };
 
 async function signIn(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "已有帳號？登入" }));
   await user.type(screen.getByLabelText("Email"), "alice@example.com");
   await user.type(screen.getByLabelText("密碼"), "pw-correct-123");
   await user.click(screen.getByRole("button", { name: "登入" }));
@@ -74,6 +83,7 @@ describe("表單驗證與回饋", () => {
   it("未填 Email 點擊登入時顯示友善錯誤提示", async () => {
     const user = userEvent.setup();
     render(<LoginPage />);
+    await user.click(screen.getByRole("button", { name: "已有帳號？登入" }));
     await user.click(screen.getByRole("button", { name: "登入" }));
     expect(screen.getByRole("alert")).toHaveTextContent("請輸入 Email");
     expect(loginMutate).not.toHaveBeenCalled();
@@ -82,6 +92,7 @@ describe("表單驗證與回饋", () => {
   it("未填密碼點擊登入時顯示友善錯誤提示", async () => {
     const user = userEvent.setup();
     render(<LoginPage />);
+    await user.click(screen.getByRole("button", { name: "已有帳號？登入" }));
     await user.type(screen.getByLabelText("Email"), "alice@example.com");
     await user.click(screen.getByRole("button", { name: "登入" }));
     expect(screen.getByRole("alert")).toHaveTextContent("請輸入密碼");
@@ -91,6 +102,7 @@ describe("表單驗證與回饋", () => {
   it("Email 格式不正確時顯示提示", async () => {
     const user = userEvent.setup();
     render(<LoginPage />);
+    await user.click(screen.getByRole("button", { name: "已有帳號？登入" }));
     await user.type(screen.getByLabelText("Email"), "notanemail");
     await user.type(screen.getByLabelText("密碼"), "secret123");
     await user.click(screen.getByRole("button", { name: "登入" }));

@@ -19,7 +19,7 @@ export function LandingPage() {
         <nav aria-label="公開網站導覽">
           <a href="#how-it-works">運作方式</a>
           <a href="#trust">安全與掌控</a>
-          <Link href="/login" className="btn primary">登入工作台</Link>
+          <Link href="/login" className="btn primary">註冊使用</Link>
         </nav>
       </header>
 
@@ -34,7 +34,7 @@ export function LandingPage() {
             </p>
             <div className="landing-actions">
               <Link href="/login" className="btn primary landing-primary-cta">
-                進入工作台 <Icon name="ArrowRight" size={17} />
+                註冊使用 <Icon name="ArrowRight" size={17} />
               </Link>
               <a href="#how-it-works" className="btn">看看怎麼運作</a>
             </div>
@@ -90,7 +90,7 @@ export function LandingPage() {
 
       <footer className="public-footer">
         <BrandLogo variant="mark" size="xs" decorative />
-        <span>Aios</span><span className="spacer" /><Link href="/login">登入</Link>
+        <span>Aios</span><span className="spacer" /><Link href="/login">註冊</Link>
       </footer>
     </div>
   );

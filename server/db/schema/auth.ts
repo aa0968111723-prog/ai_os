@@ -106,7 +106,7 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-/** 邀請制（無公開註冊）：連結用 LINE 傳即可，72 小時過期、一次性 */
+/** 邀請加入既有團隊：連結用 LINE 傳即可，72 小時過期、一次性。新帳號走公開註冊，不經過這張表。 */
 export const invites = pgTable("invites", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull(),

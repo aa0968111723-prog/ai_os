@@ -1,5 +1,5 @@
 /**
- * 認證核心：bcrypt 密碼、session cookie、邀請制、登入防爆破。
+ * 認證核心：bcrypt 密碼、session cookie、公開註冊、邀請加入既有團隊、登入防爆破。
  * 設計依據：docs/auth-design.md（任務卡 #002）
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -557,6 +557,38 @@ export async function acceptInvite(token: string, name: string, password: string
       await tx.insert(schema.groupMembers).values({ groupId: invite.groupId, userId, role: invite.groupRole });
     }
     await tx.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
+    return { userId };
+  });
+}
+
+const REGISTERED_EMAIL_TAKEN = "這個 email 已經有帳號了，請直接登入。";
+
+/**
+ * 公開註冊：建帳號，並開一個只有自己的工作區（團隊管理員＋組長）。
+ * 不升開發者。邀請連結仍只用來加入別人的團隊，不走這條。
+ */
+export async function registerAccount(name: string, email: string, password: string): Promise<{ userId: string }> {
+  const normalized = email.toLowerCase().trim();
+  const displayName = name.trim();
+  const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, normalized));
+  if (existing) throw new Error(REGISTERED_EMAIL_TAKEN);
+  const passwordHash = await hashPassword(password);
+  return db.transaction(async (tx) => {
+    let user;
+    try {
+      [user] = await tx
+        .insert(schema.users)
+        .values({ name: displayName, email: normalized, passwordHash })
+        .returning();
+    } catch (err) {
+      if (isUniqueViolation(err)) throw new Error(REGISTERED_EMAIL_TAKEN);
+      throw err;
+    }
+    const userId = user.id;
+    const [team] = await tx.insert(schema.teams).values({ name: `${displayName}的工作區` }).returning();
+    const [group] = await tx.insert(schema.groups).values({ teamId: team.id, name: "我的組" }).returning();
+    await tx.insert(schema.teamMembers).values({ teamId: team.id, userId, role: "admin" });
+    await tx.insert(schema.groupMembers).values({ groupId: group.id, userId, role: "leader" });
     return { userId };
   });
 }
