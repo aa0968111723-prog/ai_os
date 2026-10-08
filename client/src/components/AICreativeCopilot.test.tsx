@@ -443,6 +443,8 @@ describe("toSiteActionInput（label 等顯示欄位不上送）", () => {
       .toEqual({ type: "save_decision", groupId: "g", projectId: "p", title: "角色穿米白外套" });
     expect(toSiteActionInput({ type: "create_watch", groupId: "g", projectId: "p", projectTitle: "PT", kind: "generation_failed", watchLabel: "失敗提醒", label: "L" }))
       .toEqual({ type: "create_watch", groupId: "g", projectId: "p", kind: "generation_failed", label: "失敗提醒" });
+    expect(toSiteActionInput({ type: "add_database_row", tableId: "tbl", tableName: "里程碑", data: { 目標: "30k" }, preview: "目標: 30k", label: "L" }))
+      .toEqual({ type: "add_database_row", tableId: "tbl", data: { 目標: "30k" } });
     expect(toSiteActionInput({ type: "import_url", groupId: "g", projectId: "p", projectTitle: "PT", url: "https://example.com/source", label: "L" }))
       .toEqual({ type: "import_url", groupId: "g", projectId: "p", url: "https://example.com/source" });
   });
@@ -614,4 +616,149 @@ describe("detectDirectIntakeRequest", () => {
     expect(detectDirectIntakeRequest("把我的 PDF 檔案放進專案")).toBe("files");
     expect(detectDirectIntakeRequest("什麼是 Google Drive？")).toBeNull();
   });
+});
+
+describe("輸入框與發送按鈕邊界", () => {
+  it("空輸入時發送鍵停用，按了不會送出", () => {
+    render(<AICreativeCopilot groupId="grp-123" />);
+    expect(screen.getByTitle("發送 (Enter)")).toBeDisabled();
+    expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it("超過 500 字的輸入在輸入框就被截斷，送出的是截斷後內容", async () => {
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    const textarea = screen.getByLabelText("向 AI 助手提問");
+    await user.type(textarea, "字".repeat(600));
+    // maxLength=500：textarea 自己截斷，handleSend 只會拿到 ≤500 的字
+    expect(textarea).toHaveValue("字".repeat(500));
+    await user.click(screen.getByTitle("發送 (Enter)"));
+    expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ message: "字".repeat(500) }));
+  });
+
+  it("特殊字元與 emoji 原樣送出，不被轉義或截斷", async () => {
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    const textarea = screen.getByLabelText("向 AI 助手提問");
+    const message = "！＠＃$%^&*()_+<tag> 🎬🚀 30%中文字";
+    await user.type(textarea, message);
+    await user.click(screen.getByTitle("發送 (Enter)"));
+    expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ message }));
+  });
+
+  it("Shift+Enter 是換行不是送出：值保留斷行、未按送出鍵不開串流", async () => {
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    const textarea = screen.getByLabelText("向 AI 助手提問");
+    await user.type(textarea, "第一行{Shift>}{Enter}{/Shift}第二行");
+    expect(textarea).toHaveValue("第一行\n第二行");
+    expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it("執行中快速連按：第二下是停止同一條串流，不會開啟第二條", async () => {
+    let sentSignal: AbortSignal | undefined;
+    streamMock.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+      sentSignal = signal;
+      return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(true), { once: true }));
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await user.type(screen.getByLabelText("向 AI 助手提問"), "幫我建立任務");
+    await user.click(screen.getByTitle("發送 (Enter)"));
+    await user.click(await screen.findByTitle("停止"));
+    expect(sentSignal?.aborted).toBe(true);
+    expect(streamMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("停止後恢復：發送鍵回到可送出狀態，下一條訊息照常送出", async () => {
+    let sentSignal: AbortSignal | undefined;
+    streamMock.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+      sentSignal = signal;
+      return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(true), { once: true }));
+    });
+    const user = userEvent.setup();
+    render(<AICreativeCopilot groupId="grp-123" />);
+    await user.type(screen.getByLabelText("向 AI 助手提問"), "第一次");
+    await user.click(screen.getByTitle("發送 (Enter)"));
+    await user.click(await screen.findByTitle("停止"));
+    // 停止後 title 回到「發送 (Enter)」；送出會清空輸入框，所以此刻鍵暫時停用
+    await waitFor(() => expect(screen.getByTitle("發送 (Enter)")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("向 AI 助手提問"), "第二次");
+    expect(screen.getByTitle("發送 (Enter)")).toBeEnabled();
+    await user.click(screen.getByTitle("發送 (Enter)"));
+    expect(streamMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("站級動作確認卡：九種 siteAction 全跑一輪", () => {
+  const cases = [
+    {
+      label: "create_project",
+      action: { type: "create_project", groupId: "g", title: "百日夢島", kind: "動畫", platform: "youtube", label: "建立「百日夢島」" },
+      input: { type: "create_project", groupId: "g", title: "百日夢島", kind: "動畫", platform: "youtube" },
+    },
+    {
+      label: "add_note",
+      action: { type: "add_note", groupId: "g", projectId: "p", projectTitle: "PT", title: "會議筆記", content: "決議保留原型", label: "新增筆記「會議筆記」" },
+      input: { type: "add_note", groupId: "g", projectId: "p", title: "會議筆記", content: "決議保留原型" },
+      fullText: "決議保留原型",
+    },
+    {
+      label: "add_schedule_item",
+      action: { type: "add_schedule_item", groupId: "g", title: "晨會", startsAt: "2026-08-09T02:00:00.000Z", label: "加入行程「晨會」" },
+      input: { type: "add_schedule_item", groupId: "g", projectId: undefined, title: "晨會", startsAt: "2026-08-09T02:00:00.000Z", endsAt: undefined, note: undefined },
+    },
+    {
+      label: "create_task",
+      action: { type: "create_task", groupId: "g", projectId: "p", projectTitle: "PT", title: "完成分鏡", assigneeId: "u", assigneeName: "N", label: "建立任務「完成分鏡」" },
+      input: { type: "create_task", groupId: "g", projectId: "p", title: "完成分鏡", description: undefined, assigneeId: "u", dueAt: undefined, priority: undefined },
+    },
+    {
+      label: "send_dm",
+      action: { type: "send_dm", peerId: "u2", peerName: "阿明", body: "明早十點對稿，帶腳本", label: "私訊 阿明" },
+      input: { type: "send_dm", peerId: "u2", body: "明早十點對稿，帶腳本" },
+      fullText: "明早十點對稿，帶腳本",
+    },
+    {
+      label: "add_database_row",
+      action: { type: "add_database_row", tableId: "tbl-1", tableName: "里程碑", data: { 目標: "30k" }, preview: "目標: 30k", label: "新增資料列" },
+      input: { type: "add_database_row", tableId: "tbl-1", data: { 目標: "30k" } },
+      fullText: "目標: 30k",
+    },
+    {
+      label: "import_url",
+      action: { type: "import_url", groupId: "g", projectId: "p", projectTitle: "PT", url: "https://example.com/source", label: "加入網址資料" },
+      input: { type: "import_url", groupId: "g", projectId: "p", url: "https://example.com/source" },
+    },
+    {
+      label: "save_decision",
+      action: { type: "save_decision", groupId: "g", projectId: "p", projectTitle: "PT", title: "角色穿米白外套", label: "記下決策「角色穿米白外套」" },
+      input: { type: "save_decision", groupId: "g", projectId: "p", title: "角色穿米白外套" },
+    },
+    {
+      label: "create_watch",
+      action: { type: "create_watch", groupId: "g", projectId: "p", projectTitle: "PT", kind: "overdue_task", watchLabel: "逾期提醒", label: "訂閱逾期提醒" },
+      input: { type: "create_watch", groupId: "g", projectId: "p", kind: "overdue_task", label: "逾期提醒" },
+    },
+  ];
+
+  it.each(cases)(
+    "$label：確認卡顯示全文（如有）→ 按「確認執行」才送對應 payload",
+    async ({ action, input, fullText }: { action: Record<string, unknown>; input: Record<string, unknown>; fullText?: string }) => {
+      streamMock.mockImplementationOnce(async ({ handlers }: { handlers: { onDone: (d: unknown) => void } }) => {
+        handlers.onDone({ ...DONE, siteActions: [action], dispatches: [], actions: [] });
+        return true;
+      });
+      const user = userEvent.setup();
+      render(<AICreativeCopilot groupId="grp-123" />);
+      await sendMessage(user, "請幫我完成");
+      await screen.findByText(String(action.label));
+      // 以本人名義送出的全文必須確認前就亮出來（私訊本文／筆記內容／資料列欄位）
+      if (fullText) expect(screen.getByText(fullText)).toBeInTheDocument();
+      expect(runSiteActionMutate).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "確認執行" }));
+      expect(runSiteActionMutate).toHaveBeenCalledTimes(1);
+      expect(runSiteActionMutate).toHaveBeenCalledWith(input);
+    },
+  );
 });
