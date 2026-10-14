@@ -17,16 +17,27 @@ import type { AuthState } from "./auth";
 const MAX_JSON_EXTRACT_CHARS = 200_000;
 
 /**
+ * JSON span 定位：extract 與 strip 共用同一語義（D3）。
+ *
  * String/escape-aware brace scanner: first complete JSON object, not greedy
  * first-`{` to last-`}` (#670). Nested objects, braces inside strings, and two
  * consecutive objects are handled; oversized input is bounded.
+ *
+ * 過去 extract 優先取 fenced 內首個物件、strip 卻在 raw 全文重掃，
+ * start 基準不同導致抽取與剝離分叉（圍欄外雜訊殘留或人話被誤殺）。
+ * 現在兩者都走這裡：同一段輸入一定對應同一個 span。
  */
-export function extractJsonObject(raw: string): unknown {
+function locateJsonSpan(raw: string): { start: number; end: number; parsed: unknown } | null {
   if (!raw || typeof raw !== "string") return null;
   const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
   // Prefer fenced ```json blocks when present.
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const haystack = fenced?.[1] ?? text;
+  let haystack = text;
+  let base = 0;
+  if (fenced?.[1] !== undefined && typeof fenced.index === "number") {
+    haystack = fenced[1];
+    base = fenced.index + fenced[0].indexOf(fenced[1]);
+  }
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -60,7 +71,7 @@ export function extractJsonObject(raw: string): unknown {
       if (depth === 0 && start >= 0) {
         const slice = haystack.slice(start, i + 1);
         try {
-          return JSON.parse(slice);
+          return { start: base + start, end: base + i + 1, parsed: JSON.parse(slice) };
         } catch {
           // Invalid first candidate — keep scanning for the next complete object.
           start = -1;
@@ -71,48 +82,20 @@ export function extractJsonObject(raw: string): unknown {
   return null;
 }
 
+export function extractJsonObject(raw: string): unknown {
+  return locateJsonSpan(raw)?.parsed ?? null;
+}
+
 /** 把 JSON 段落從原始輸出剝掉，留下人話（壞 JSON 回答的 fallback 顯示用） */
 export function stripJsonObject(raw: string): string {
   if (!raw) return "";
-  const extracted = extractJsonObject(raw);
-  if (extracted == null) return raw.trim();
-  // Remove the first balanced object span (same scanner semantics).
+  // 與 extract 同一語義：只剝 locateJsonSpan 定位到的那一段。
+  // 過去這裡用另一套基準重掃＋呼叫端再用 /\{[\s\S]*\}/g 貪婪全清，
+  // 含 JSON 示例的長回覆會整段人話被抹掉（D3）。
+  const span = locateJsonSpan(raw);
+  if (!span) return raw.trim();
   const text = raw.length > MAX_JSON_EXTRACT_CHARS ? raw.slice(0, MAX_JSON_EXTRACT_CHARS) : raw;
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escape = true;
-        continue;
-      }
-      if (ch === "\"") inString = false;
-      continue;
-    }
-    if (ch === "\"") {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth += 1;
-      continue;
-    }
-    if (ch === "}" && depth > 0) {
-      depth -= 1;
-      if (depth === 0 && start >= 0) {
-        return `${text.slice(0, start)}${text.slice(i + 1)}`.trim();
-      }
-    }
-  }
-  return raw.trim();
+  return `${text.slice(0, span.start)}${text.slice(span.end)}`.trim();
 }
 
 /** 一次工具執行的結果：step＝給使用者看的一行摘要；text＝回餵 LLM 的結果文字。

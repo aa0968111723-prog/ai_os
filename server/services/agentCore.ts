@@ -1364,11 +1364,13 @@ export function prepareAgentStepsForResume(steps: AgentStep[]): { steps: AgentSt
     const resumed: AgentStep = { ...step, status: "pending" };
     delete resumed.detail;
     delete resumed.retries;
-    // Known failed provider jobs need a fresh explicit submission. This function is only
-    // reached after the user presses the resume command; it is never a silent retry.
-    if ((resumed.kind === "generate" || resumed.kind === "voiceover") && step.status === "failed") {
-      delete resumed.generationId;
-    }
+    // 已失敗／已停止步驟的外部工作 id 一律清除重送（D5）：續跑是使用者明確指令，
+    // 沿用舊 id 會去輪詢一個已失效的工作（generation／CUTOS／Adobe 皆同）。
+    // effectId 保留——它是重播冪等鍵，清掉會重複寫入。
+    // 這裡只處理失敗續跑入口，從不是靜默重試。
+    delete resumed.generationId;
+    delete resumed.externalJobId;
+    delete (resumed as { adobeJobId?: string }).adobeJobId;
     return resumed;
   });
   const currentStep = Math.max(0, next.findIndex((step) => step.status !== "done"));

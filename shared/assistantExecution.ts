@@ -130,10 +130,16 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapability[] =
   ASSISTANT_CAPABILITY_DEFINITIONS.map((item) => capability(item));
 
 /**
- * 疑問句：這些詞本身就代表「在問」，即使句子裡有寫入動詞也是問句
- * （「如何建立任務？」是問，不是要你去建）。命中即走 ASK。
+ * 疑問詞（嗎／？／什麼…）：只在句中沒有寫入動詞時才算問句。
+ * 「幫我新增任務並列出目前任務嗎」是交辦不是提問，尾巴的嗎只是語氣（D8）。
  */
 const QUESTION_RE = /(?:為什麼|怎麼|如何|是否|能不能|可不可以|能否|哪些|哪一個|哪個|什麼|何時|哪裡|分析|評估|比較|解釋|告訴我|嗎|\?|？)/i;
+
+/**
+ * 求教／求准句式（D8 例外）：「如何建立任務？」即使含寫入動詞也是在問做法，
+ * 仍走 ASK，不進 DIRECT／AGENT。
+ */
+const HEDGE_RE = /(?:如何|怎麼|能不能|可不可以|能否|是否)/i;
 
 /**
  * 唯讀查詢動詞（#663）。與 QUESTION_RE 分開的理由：
@@ -201,7 +207,9 @@ export function classifyAssistantRequest(message: string): AssistantExecutionPla
   const asksAction = ACTION_RE.test(text);
   const actionVerbCount = new Set(text.match(ACTION_VERB_RE) ?? []).size;
   // 唯讀查詢只有在句中沒有任何寫入動詞時才算問句——見 READ_QUERY_RE 的說明。
-  const asksQuestion = QUESTION_RE.test(text) || (actionVerbCount === 0 && READ_QUERY_RE.test(text));
+  // 疑問詞亦同：有寫入動詞就是交辦（D8），除非是求教／求准句式（如何／能不能…）。
+  const asksQuestion = (actionVerbCount === 0 && (QUESTION_RE.test(text) || READ_QUERY_RE.test(text)))
+    || (actionVerbCount > 0 && HEDGE_RE.test(text));
   const matchedCapability = capabilityForAssistantGoal(text);
 
   if (asksQuestion) {
