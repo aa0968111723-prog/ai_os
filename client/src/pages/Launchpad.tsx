@@ -868,13 +868,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
           }
 
           return (
-            <Link
-              key={p.id}
-              href={`/p/${p.id}`}
-              className="launch-card"
-              style={{ textDecoration: "none", color: "inherit", opacity: isArchived ? 0.85 : undefined }}
-              onClick={() => recordRecent(p.id)}
-            >
+            <div key={p.id} className="launch-card" style={{ opacity: isArchived ? 0.85 : undefined }}>
+              {/* 整張卡可點的覆蓋連結：與卡內按鈕互為兄弟，不再把按鈕嵌進 <a>（巢狀互動元素，WCAG 4.1.2）。
+                  換圖／還原按鈕 z-index 2 壓在連結之上，各自獨立接收點擊與鍵盤焦點。 */}
+              <Link
+                href={`/p/${p.id}`}
+                className="launch-card__link"
+                aria-label={`開啟專案 ${p.title}`}
+                onClick={() => recordRecent(p.id)}
+              />
               <div className="launch-cover" style={{ background: coverOf(p.id) }}>
                 {/* 有綁封面圖就顯示圖，沒綁（或素材進了回收桶→coverUrl 為 null）退回首字色塊 */}
                 {p.coverUrl ? (
@@ -896,12 +898,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     size="sm"
                     className="launch-cover__swap"
                     title="換一張封面圖"
-                    onClick={(e) => {
-                      // 卡片本身是連結：不攔的話按「換圖」會直接跳進專案
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setCoverEditId(p.id);
-                    }}
+                    onClick={() => setCoverEditId(p.id)}
                   >
                     <Icon name="Image" size={13} />
                     {p.coverUrl ? "換圖" : "加圖"}
@@ -924,13 +921,10 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   {canRestore && (
                     <Button
                       size="sm"
+                      className="launch-card__restore"
                       disabled={restoreProject.isPending}
                       title="還原後會重新出現在作業台"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        restoreProject.mutate({ id: p.id, archived: false });
-                      }}
+                      onClick={() => restoreProject.mutate({ id: p.id, archived: false })}
                     >
                       {restoreProject.isPending ? "還原中…" : "還原"}
                     </Button>
@@ -942,7 +936,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   </div>
                 )}
               </div>
-            </Link>
+            </div>
           );
         })}
       </div>

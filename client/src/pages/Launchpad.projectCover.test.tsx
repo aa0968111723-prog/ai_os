@@ -141,7 +141,7 @@ describe("作業台專案卡：封面圖", () => {
     expect(document.querySelector(".launch-mono")?.textContent).toBe("挑");
   });
 
-  it("按「換圖」開對話框，而且不會順手把整張卡的連結一起觸發", async () => {
+  it("按「換圖」開對話框；換圖按鈕與卡片連結解耦（不再嵌進 <a>，WCAG 4.1.2）", async () => {
     const user = userEvent.setup();
     seed([project()]);
     render(<Launchpad groupId={GROUP} />);
@@ -149,16 +149,12 @@ describe("作業台專案卡：封面圖", () => {
     const swap = screen.getByTitle("換一張封面圖");
     expect(swap).toHaveTextContent("加圖");
 
-    // 「換圖」在卡片連結內部，靠 preventDefault + stopPropagation 才不會順手導頁。
-    // 監聽掛在 document（React 的 handler 綁在 render 容器上，比 document 早跑），
-    // 掛在 <a> 上會比 React 早觸發、永遠讀到還沒被 preventDefault 的事件。
-    expect(swap.closest("a")).toHaveAttribute("href", "/p/p1");
-    let navigated = false;
-    const spy = (e: MouseEvent) => { if (!e.defaultPrevented) navigated = true; };
-    document.addEventListener("click", spy);
+    // 修復：換圖是卡內獨立按鈕，不再包在卡片 <a> 裡（巢狀互動元素是無障礙缺陷）。
+    // 卡片本體仍是通往專案的覆蓋連結——那支 <a> 還在、只是不再包住按鈕，click 不導頁由結構保證。
+    expect(swap.closest("a")).toBeNull();
+    expect(screen.getByRole("link", { name: "開啟專案 挑戰營回顧影片" })).toHaveAttribute("href", "/p/p1");
+
     await user.click(swap);
-    document.removeEventListener("click", spy);
-    expect(navigated).toBe(false);
     const dialog = screen.getByRole("dialog", { name: "更換「挑戰營回顧影片」的封面圖" });
     expect(within(dialog).getByText(/自動配色封面/)).toBeInTheDocument();
   });

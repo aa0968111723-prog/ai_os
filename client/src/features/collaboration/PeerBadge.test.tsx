@@ -83,8 +83,8 @@ describe("PeerBadge", () => {
     const user = userEvent.setup();
     render(<PeerBadge peer={wei} isMe={false} view={view} sceneLabel={null} following={false} onToggleFollow={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: /韋澔/ }));
-    for (const name of ["跟隨畫面", "傳訊息"]) {
-      expect((screen.getByRole("button", { name }) as HTMLElement).style.minHeight).toBe("44px");
-    }
+    // 「跟隨畫面」是動作按鈕；「傳訊息」是通往聊天的連結——兩者 touch target 都要 ≥44px
+    expect((screen.getByRole("button", { name: "跟隨畫面" }) as HTMLElement).style.minHeight).toBe("44px");
+    expect((screen.getByRole("link", { name: "傳訊息" }) as HTMLElement).style.minHeight).toBe("44px");
   });
 });
