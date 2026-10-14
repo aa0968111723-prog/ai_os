@@ -137,13 +137,15 @@ export function setAssistantConversation<TMessage>(
   // from the durable server checkpoint if the tab has touched many groups.
   byGroup.delete(groupId);
   byGroup.set(groupId, bounded);
-  while (byGroup.size > MAX_ASSISTANT_CONVERSATIONS) {
-    const oldestInactive = [...byGroup.entries()].find(([key, state]) => (
-      key !== groupId && !state.run?.active && !activeAttemptByGroup.has(key)
-    ));
-    if (!oldestInactive) break;
-    byGroup.delete(oldestInactive[0]);
-    latestGeneration.delete(oldestInactive[0]);
+  // Map 本身照寫入序迭代 = 現成的 LRU-by-write。單次正向 pass 就會先碰到最舊的
+  // 候選，不需要每次淘汰都 [...entries()] 重建整張 Map 再 find（#679 U15）。
+  let toEvict = byGroup.size - MAX_ASSISTANT_CONVERSATIONS;
+  for (const [key, state] of byGroup) {
+    if (toEvict <= 0) break;
+    if (key === groupId || state.run?.active || activeAttemptByGroup.has(key)) continue;
+    byGroup.delete(key);
+    latestGeneration.delete(key);
+    toEvict -= 1;
   }
   notify();
 }
