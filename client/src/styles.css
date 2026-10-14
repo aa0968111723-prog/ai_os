@@ -1055,6 +1055,8 @@ button:focus-visible { border-radius: 999px; }
     min-height: var(--touch-min);
   }
   button { min-height: var(--touch-min); }
+  /* 手機摺疊篩選的 <summary> 觸發鈕：全域 button 規則涵蓋不到 <summary>，手動補 44px 下限 */
+  .map-filters > summary { min-height: var(--touch-min); align-items: center; }
   /* !important：多處控件用 inline style 壓 12–14px（特異性蓋過這條 media query），
      iPhone Safari 聚焦 <16px 的輸入框會自動放大整頁且不回彈——行動版一律 16px 防縮放 */
   input, textarea, select { min-height: var(--touch-min); font-size: 16px !important; }
@@ -1855,7 +1857,7 @@ mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); 
 /* 自訂短語小面板：沿用 mention-pop 外框，但改成表單式（輸入框＋表情盤＋提示） */
 .phrase-editor .phrase-input { flex: 1; min-width: 0; padding: 6px 8px; font-size: 13px;
   border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2); color: var(--fg); }
-.phrase-editor .phrase-input:focus { outline: none; border-color: var(--primary-border); background: var(--card); }
+.phrase-editor .phrase-input:focus { outline: 2px solid var(--primary); outline-offset: 2px; border-color: var(--primary); background: var(--card); }
 .phrase-editor > div { display: flex; }
 /* 面板落在 .mention-pop 內，其 button 規則會蓋掉 .primary 底色；在此還原「加入」鈕外觀 */
 .phrase-editor .primary { flex-shrink: 0; background: var(--primary-solid); color: var(--primary-fg);
@@ -2259,7 +2261,9 @@ body.map-immersive { overflow: hidden; }
 }
 .map-search input { flex: 1; min-width: 0; border: 0; background: none; padding: 6px 0; font: inherit; font-size: var(--fs-13); color: var(--fg); }
 .map-search input:focus { outline: none; }
-.map-search:focus-within { border-color: var(--primary-border); }
+@media (min-width: 821px) {
+  .map-search:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+}
 /* 搜尋框內建的清除叉叉在各家瀏覽器長相不一，站內用自己的「清除」鈕 */
 .map-search input::-webkit-search-cancel-button { display: none; }
 .map-bar .seg button { display: inline-flex; align-items: center; gap: 4px; }
@@ -5977,7 +5981,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--soft);
+  color: var(--fg-secondary);
   flex-shrink: 0;
 }
 @media (max-width: 900px) {
@@ -9451,6 +9455,9 @@ body.story-immersive { overflow: hidden; }
   padding: 9px 0;
 }
 .hub-search input:focus { outline: none; }
+@media (min-width: 821px) {
+  .hub-search:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+}
 .hub-overview__summary { margin: 0; flex: none; }
 .hub-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .smart-categories {
