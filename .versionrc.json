@@ -1,0 +1,20 @@
+{
+  "header": "# Changelog\n\n本檔案由 [standard-version](https://github.com/conventional-changelog/standard-version) 自動產生。\n請依 [Conventional Commits](https://www.conventionalcommits.org/) 規範撰寫 commit message。\n",
+  "types": [
+    { "type": "feat", "section": "✨ 新功能" },
+    { "type": "fix", "section": "🐛 Bug 修復" },
+    { "type": "perf", "section": "⚡ 效能優化" },
+    { "type": "refactor", "section": "🎨 程式碼重構" },
+    { "type": "style", "section": "💄 程式碼風格", "hidden": true },
+    { "type": "test", "section": "🧪 測試", "hidden": true },
+    { "type": "docs", "section": "📝 文件" },
+    { "type": "chore", "section": "🔧 維護", "hidden": true },
+    { "type": "ci", "section": "🔧 CI/CD" },
+    { "type": "security", "section": "🔒 安全修正" }
+  ],
+  "skip": {
+    "commit": true
+  },
+  "tagPrefix": "v",
+  "releaseCommitMessageFormat": "chore(release): v{{currentTag}}"
+}
