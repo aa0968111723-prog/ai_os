@@ -10,6 +10,11 @@ const BASE = process.env.E2E_UI_BASE || "http://127.0.0.1:5173";
 const DIR = process.env.E2E_UI_OUT || "./e2e-ui-out/databases";
 fs.mkdirSync(DIR, { recursive: true });
 const shot = (page, n) => page.screenshot({ path: `${DIR}/${n}.png`, fullPage: true });
+const EMAIL = process.env.TEST_EMAIL;
+const PASSWORD = process.env.TEST_PW;
+if (!EMAIL || !PASSWORD) {
+  throw new Error("verify-databases 需設 TEST_EMAIL / TEST_PW（對應 .env.example）；憑證不得寫死在腳本中。");
+}
 const results = [];
 const ok = (name, cond) => { results.push([!!cond, name]); console.log(cond ? "✅" : "❌", name); };
 
@@ -20,8 +25,8 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 // ── 1. 登入 ──
 await page.goto(BASE);
 await page.waitForSelector("#login-email", { timeout: 20000 });
-await page.fill("#login-email", "aa0968111723@gmail.com");
-await page.fill("#login-pw", "test12345");
+await page.fill("#login-email", EMAIL);
+await page.fill("#login-pw", PASSWORD);
 await shot(page, "01-login");
 await page.click("button[type=submit]");
 await page.waitForSelector(".topbar", { timeout: 20000 });

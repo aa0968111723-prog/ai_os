@@ -1,5 +1,11 @@
 // 自足驗證：登入→建可寫庫→對多種 SSRF payload 觸發 importUrl，確認 DNS 名稱繞過已被擋。
 const BASE = "http://localhost:3000";
+const EMAIL = process.env.TEST_EMAIL;
+const PASSWORD = process.env.TEST_PW;
+if (!EMAIL || !PASSWORD) {
+  console.error("verify-ssrf-fix 需設 TEST_EMAIL / TEST_PW（對應 .env.example）；憑證不得寫死在腳本中。");
+  process.exit(1);
+}
 const grab = (res) => { const m = (res.headers.get("set-cookie")||"").match(/aidos_session=([^;]+)/); return m?m[1]:null; };
 async function mut(proc, input, cookie) {
   const res = await fetch(`${BASE}/api/trpc/${proc}?batch=1`, { method:"POST",
@@ -9,7 +15,7 @@ async function mut(proc, input, cookie) {
   return { data: b?.[0]?.result?.data?.json, err: b?.[0]?.error?.json, cookie: c };
 }
 // 1. admin login
-const lg = await mut("auth.login", { email:"aa0968111723@gmail.com", password:"Audit2026x" });
+const lg = await mut("auth.login", { email: EMAIL, password: PASSWORD });
 const cookie = lg.cookie;
 if (!cookie) { console.log("LOGIN FAIL", JSON.stringify(lg.err)); process.exit(1); }
 const me = lg.data;
