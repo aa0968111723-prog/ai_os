@@ -1274,20 +1274,21 @@ export function AICreativeCopilot({ groupId, projectId, onUseIdeaForNewProject, 
       <Card className="ai-copilot-card" data-fb="AI 創作助理">
         {/* 標頭（名牌、待命點、一行說明、底部的免費宣告）整組移除：那些是說明文字，
             不是助手。畫面上只留「能按的東西」與四周的感知光，其餘交給光自己講。
-            清空對話留著但收成圖示鍵——它是功能，不是文案。 */}
-        {messages.length > 0 && (
-          <div className="ai-copilot-toolbar">
-            <button
-              type="button"
-              className="ai-copilot-clear"
-              onClick={clearConversation}
-              title="清空對話紀錄"
-              aria-label="清空對話紀錄"
-            >
-              <Icon name="Trash2" size={14} />
-            </button>
-          </div>
-        )}
+            清空對話常駐（無訊息時禁用＋說明原因）：按鈕從 DOM 消失再出現會讓
+            「清空對話紀錄」在自動化下變成零尺寸可點目標（P2 Could not compute box model）。
+            常駐＋disabled＝永遠可定位、永遠有可見說明。 */}
+        <div className="ai-copilot-toolbar">
+          <button
+            type="button"
+            className="ai-copilot-clear"
+            onClick={clearConversation}
+            disabled={messages.length === 0}
+            title={messages.length === 0 ? "還沒有對話可以清空" : "清空對話紀錄"}
+            aria-label={messages.length === 0 ? "清空對話紀錄（尚無對話）" : "清空對話紀錄"}
+          >
+            <Icon name="Trash2" size={14} />
+          </button>
+        </div>
 
         {/* 麵包屑：一行說清楚「我現在知道你在哪」。不顯示任何技術 id——
             使用者看不懂 uuid，而看得懂的那個名字（專案名、第 3 鏡）本來就都有。 */}
