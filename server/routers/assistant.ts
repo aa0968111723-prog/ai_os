@@ -44,7 +44,7 @@ import { formatStudioShotContext } from "../../shared/assistantStudioContext";
 import { addCharacterConfirmLabel, collectAddCharacterProposals, PENDING_CHARACTER_APPEARANCE, proposeAddCharacterActions } from "../../shared/assistantCharacterPropose";
 import { applyXiaohuaIdentityLock } from "../../shared/characterIdentityLock";
 import { reserveQuota, refund } from "../services/points";
-import { lockSceneOrder } from "../services/locks";
+import { lockCharacterWrite, lockSceneOrder } from "../services/locks";
 import { applyWithRevision, isRevisionConflictError, revisionConflictTrpcError } from "../services/revisionGuard";
 import {
   ASSISTANT_ASK_TIMEOUT_MESSAGE,
@@ -2368,31 +2368,36 @@ export const assistantRouter = router({
         const appearance = (locked.appearance ?? a.appearance).trim();
         const notes = a.notes?.trim() || null;
         if (!name || !appearance) throw new TRPCError({ code: "BAD_REQUEST", message: "請填角色名與外觀" });
-        const existing = await db
-          .select()
-          .from(schema.characters)
-          .where(eq(schema.characters.projectId, project.id));
-        const reused = existing.find((row) => nameKey(row.name) === nameKey(name));
-        let appearanceChanged = false;
-        if (reused) {
-          const requested = applyXiaohuaIdentityLock(
-            { name, appearance, costume: null },
-            storyRow?.content ?? "",
-          );
-          const nextAppearance = (requested.appearance ?? appearance).trim();
-          const keepPending = nextAppearance === PENDING_CHARACTER_APPEARANCE && reused.appearance.trim();
-          const writeAppearance = keepPending ? reused.appearance : nextAppearance;
-          if (writeAppearance && writeAppearance !== reused.appearance) {
-            await db
-              .update(schema.characters)
-              .set({ appearance: writeAppearance, rev: sql`${schema.characters.rev} + 1` })
-              .where(eq(schema.characters.id, reused.id));
-            reused.appearance = writeAppearance;
-            appearanceChanged = true;
+        // E3 併發重複建卡：查重名→無則建是 read-modify-write,READ COMMITTED 下併發
+        // 同名請求會同時讀到「無既有」而各插一筆(一張成孤兒)。比照 create_scene 的
+        // lockSceneOrder 模式:per-project advisory 鎖＋交易內查重＋建卡,第二寫沿用第一筆。
+        const { row, reused, appearanceChanged } = await db.transaction(async (tx) => {
+          await lockCharacterWrite(tx, project.id);
+          const existing = await tx
+            .select()
+            .from(schema.characters)
+            .where(eq(schema.characters.projectId, project.id));
+          const hit = existing.find((r) => nameKey(r.name) === nameKey(name));
+          let changed = false;
+          if (hit) {
+            const requested = applyXiaohuaIdentityLock(
+              { name, appearance, costume: null },
+              storyRow?.content ?? "",
+            );
+            const nextAppearance = (requested.appearance ?? appearance).trim();
+            const keepPending = nextAppearance === PENDING_CHARACTER_APPEARANCE && hit.appearance.trim();
+            const writeAppearance = keepPending ? hit.appearance : nextAppearance;
+            if (writeAppearance && writeAppearance !== hit.appearance) {
+              await tx
+                .update(schema.characters)
+                .set({ appearance: writeAppearance, rev: sql`${schema.characters.rev} + 1` })
+                .where(eq(schema.characters.id, hit.id));
+              hit.appearance = writeAppearance;
+              changed = true;
+            }
+            return { row: hit, reused: hit, appearanceChanged: changed };
           }
-        }
-        const row = reused ?? await (async () => {
-          const [{ n }] = await db
+          const [{ n }] = await tx
             .select({ n: count() })
             .from(schema.characters)
             .where(eq(schema.characters.projectId, project.id));
@@ -2402,7 +2407,7 @@ export const assistantRouter = router({
               message: `此專案角色定裝已達上限（${MAX_PROJECT_CHARACTERS} 張）——先刪不用的再新增`,
             });
           }
-          const [created] = await db.insert(schema.characters).values({
+          const [created] = await tx.insert(schema.characters).values({
             projectId: project.id,
             groupId: project.groupId,
             name,
@@ -2410,8 +2415,8 @@ export const assistantRouter = router({
             notes,
             createdBy: ctx.auth.user.id,
           }).returning();
-          return created;
-        })();
+          return { row: created, reused: null, appearanceChanged: false };
+        });
         let verification: AssistantWriteVerification;
         try {
           const [found] = await db
